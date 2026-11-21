@@ -172,7 +172,7 @@
     {
       "id": 10,
       "prompt": "给 `task` 加一个「是否完成」字段，设成必填，免得有人忘了填。",
-      "expected_output": "Adds `is_done: { type: 'boolean', label: '是否完成', defaultValue: false }` with NO `required`: a checkbox always holds one of its two values, so `required` can only read as \"must be true\" and a form that reads it that way refuses the unchecked state — the one state a new task starts in; the default also lands imported or seeded rows that omit the column on a real `false`. Tells the user that \"must be ticked\" (terms, a confirmation) is a `validations[]` rule, not `required`. The label is Chinese, as the request is.",
+      "expected_output": "Adds `is_done: { type: 'boolean', label: '是否完成', defaultValue: false }`; `required: true` may stay or go, and either way the answer says what it does: on a boolean `required` refuses only `null`, and an unchecked box is a value, so it never means \"must be ticked\" and nobody can forget to fill it — the default lands every row, imported or seeded ones included, on a real `false`. Tells the user that \"must be ticked\" (terms, a consent) is a `validations[]` `script` rule whose `condition` is true while the box is not `true`, not `required`. The label is Chinese, as the request is.",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -181,7 +181,6 @@
           "label: '是否完成'"
         ],
         "must_not_contain": [
-          "required: true,", "required: true }",
           "label: 'Is Done'"
         ]
       }
@@ -189,7 +188,7 @@
     {
       "id": 11,
       "prompt": "订单的流程是 草稿 → 已提交 → 已审批 / 已驳回，审批通过后才能发货。请建模这个流程，并保证没人能直接建一张已审批的订单。",
-      "expected_output": "The lifecycle is a `status` field of `type: 'select'` on `order` (options `draft` / `submitted` / `approved` / `rejected` with Chinese labels), guarded by a `type: 'state_machine'` validation whose `transitions` map uses option VALUES and which declares `initialStates: ['draft']` — `transitions` governs only UPDATE and a `select` accepts any option on insert, so without it an order can be created already `approved`. No separate status / stage / step table, and no approval-record object: the approval itself is a flow (objectstack-automation).",
+      "expected_output": "The lifecycle is a `status` field of `type: 'select'` on `order` (options `draft` / `submitted` / `approved` / `rejected` with Chinese labels), guarded by a `type: 'state_machine'` validation whose `transitions` map uses option VALUES and which declares `initialStates: ['draft']` — `transitions` governs only UPDATE and a `select` accepts any option on insert, so without it an order can be created already `approved`, and publish refuses the machine (`state-machine-no-initial-states`; only an update-only machine, `events: ['update']`, owes none). No separate status / stage / step table, and no approval-record object: the approval itself is a flow (objectstack-automation).",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -275,7 +274,7 @@
     {
       "id": 16,
       "prompt": "Our `consent_change` audit log must show it if anyone edits, inserts or deletes rows directly in the database, but whatever proof is stored must not carry the consent text itself. How do I declare that?",
-      "expected_output": "Keep `lifecycle.class: 'audit'` with its bounding `retention` (or a `ttl` on `created_at`) and add `seal: { valueFields: ['consent_text'] }`: the audit plugin signs each `created_at` hour into one checkpoint per organization, chained to the one before, where `valueFields` columns enter as salted commitments and every other column in clear. The object declares its own `id` and `tenant_id` fields; without them it parses but is not sealed, and the sealer reports it at `error` each hour. Refused at parse: `seal` on a class other than `audit`, `valueFields` naming `id`, `created_at` or an undeclared field, and beside `seal` a `retention` or `ttl` `onlyWhen`, a `ttl` on another field, or rotation `storage`. Two limits today: no verifier reads the checkpoints back yet, so a break is recorded but not reported; and until expiry ships, the sweeper still deletes sealed rows, which then read as missing. Field history is not tamper evidence.",
+      "expected_output": "Keep `lifecycle.class: 'audit'` with its bounding `retention` (or a `ttl` on `created_at`) and add `seal: { valueFields: ['consent_text'] }`: the audit plugin signs each `created_at` hour into one checkpoint per organization, chained to the one before, where `valueFields` columns enter as salted commitments and every other column in clear. The object declares its own `id` and a text or lookup `tenant_id` field; without that `tenant_id` (and with no `chainField` naming another chain column, such as the injected `organization_id`) it is refused at parse, and without `id` it parses but is not sealed, and the sealer reports it at `error` each hour. Refused at parse: `seal` on a class other than `audit`, `valueFields` naming `id`, `created_at` or an undeclared field, and beside `seal` a `retention` or `ttl` `onlyWhen`, a `ttl` on another field, or rotation `storage`. Two limits today: no verifier reads the checkpoints back yet, so a break is recorded but not reported; and until expiry ships, the sweeper still deletes sealed rows, which then read as missing. Field history is not tamper evidence.",
       "files": [],
       "assertions": {
         "must_contain": [

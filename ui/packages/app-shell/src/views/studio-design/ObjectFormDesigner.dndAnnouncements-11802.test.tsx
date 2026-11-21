@@ -43,6 +43,7 @@ vi.mock('@dnd-kit/core', async (importOriginal) => {
   return { ...actual, DndContext: GeometryDndContext };
 });
 
+import { readFieldGroupMembership } from '@objectstack/spec/data';
 import { ObjectFormDesigner } from './ObjectFormDesigner';
 
 // The designer rows this suite reads in zh live in `@object-ui/i18n`'s `studio`
@@ -82,18 +83,37 @@ const zh = () =>
     },
   });
 
-/** Every `fields` the designer committed, in order. */
+/** Every layout the designer committed, in order (see `resolvedLayout`). */
 let commits: Field[][] = [];
+/** The draft as the last commit left it. */
+let latest: Record<string, unknown> = {};
+
+/**
+ * objectstack#35900 — a move lands on the groups' `fields` lists, not on the
+ * fields array, so a commit is read as the layout the whole draft now
+ * resolves to: each field with the group it sits in, groups in order, then
+ * the ungrouped ones (no `group`).
+ */
+function resolvedLayout(d: Record<string, unknown>): Field[] {
+  const list = d.fields as Field[];
+  const { members, groupOf } = readFieldGroupMembership({ ...d, fields: Object.fromEntries(list.map((f) => [f.name, f])) });
+  const byName = new Map(list.map((f) => [f.name, f]));
+  const out: Field[] = [];
+  for (const [key, names] of members) for (const n of names) out.push({ ...byName.get(n)!, group: key });
+  for (const f of list) if (!groupOf.has(f.name)) out.push({ name: f.name, type: f.type, label: f.label });
+  return out;
+}
 
 function Host(): React.ReactElement {
-  const [draft, setDraft] = React.useState<Record<string, unknown>>(DRAFT);
+  const [draft, setDraft] = React.useState<Record<string, unknown>>(() => (latest = DRAFT));
   return (
     <ObjectFormDesigner
       draft={draft}
       systemFieldNames={new Set()}
       onChange={(patch) => {
-        if (patch.fields) commits.push(patch.fields as Field[]);
-        setDraft((d) => ({ ...d, ...patch }));
+        latest = { ...latest, ...patch };
+        commits.push(resolvedLayout(latest));
+        setDraft(latest);
       }}
       onSelectField={() => {}}
     />

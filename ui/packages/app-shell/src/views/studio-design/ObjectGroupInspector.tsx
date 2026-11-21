@@ -24,7 +24,7 @@ import {
   InspectorSelectField,
   InspectorEmptyState,
 } from '../metadata-admin/inspectors/_shared.js';
-import { readFields, readGroups, updateGroup } from '../metadata-admin/previews/object-fields-io.js';
+import { groupMembership, readFields, readGroups, updateGroup } from '../metadata-admin/previews/object-fields-io.js';
 import { t, tFormat } from '../metadata-admin/i18n.js';
 import {
   acceptRelatedListEntries,
@@ -67,8 +67,9 @@ export function ObjectGroupInspector({
   const parentName = objectName || (typeof draft.name === 'string' ? draft.name : '');
   const { relationships, ready } = useRelatedListCatalog(parentName, draft);
   const memberCount = React.useMemo(
-    () => readFields(draft.fields).entries.filter((e) => e.def.group === groupKey).length,
-    [draft.fields, groupKey],
+    // A group's own `fields` list, else the older `Field.group` (objectstack#35900).
+    () => groupMembership(readFields(draft.fields), draft.fieldGroups).members.get(groupKey)?.length ?? 0,
+    [draft.fields, draft.fieldGroups, groupKey],
   );
 
   if (!group) {
@@ -224,7 +225,10 @@ function RelatedTablePlacement({
     // table rule a group's entry answers to.
     if (blockedByFields || acceptRelatedListEntries([v], relationships).length === 0) return;
     if (!namesBodyTablesOnly(v)) return;
-    onPatch({ fieldGroups: updateGroup(groups, group.key, { relatedList: v }) });
+    // A group placing a table holds no fields, so a `fields` list naming none
+    // of the object's fields (the only kind left once the check above passed)
+    // goes with the change (objectstack#35900).
+    onPatch({ fieldGroups: updateGroup(groups, group.key, { relatedList: v, fields: undefined }) });
   };
   return (
     <div className="space-y-1" data-testid="group-related-table">

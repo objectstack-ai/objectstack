@@ -36,12 +36,14 @@ import type { UserDataAdapter, UserPreferenceFamily } from '@object-ui/data-obje
 // on that declaration (objectui#6349, batch 9).
 export type { UserDataAdapter };
 
-export type UserStateKind = 'favorites' | 'recent' | 'flowPaletteRecents';
+export type UserStateKind = 'favorites' | 'recent' | 'flowPaletteRecents' | 'lastApp';
 
 interface UserStateAdaptersValue {
   favorites: UserDataAdapter<any> | null;
   recent: UserDataAdapter<any> | null;
   flowPaletteRecents: UserDataAdapter<any> | null;
+  /** objectstack#35881 — the person's last app (`ui.app.last`, `LastAppProvider`). */
+  lastApp: UserDataAdapter<any> | null;
   /**
    * objectui#12418 — the per-object list state (`ui.list.<object>`), a key
    * FAMILY rather than one list: one row per object, loaded together by prefix
@@ -71,6 +73,7 @@ const ReadCtx = createContext<UserStateAdaptersValue>({
   favorites: null,
   recent: null,
   flowPaletteRecents: null,
+  lastApp: null,
   listState: null,
   recordState: null,
 });
@@ -85,6 +88,7 @@ export function UserStateAdaptersProvider({ children }: { children: ReactNode })
     favorites: null,
     recent: null,
     flowPaletteRecents: null,
+    lastApp: null,
     listState: null,
     recordState: null,
   });

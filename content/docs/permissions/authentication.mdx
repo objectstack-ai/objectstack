@@ -326,21 +326,98 @@ code still outstanding for that user: a completed reset, the user's own
 what one that was never issued answers (`400 INVALID_TOKEN` at
 `reset-password`); a link or code requested after the change works as usual.
 
-A change to a user's password also ends the following, issued before it. An
-email-change link minted before the change answers what a link that was never
-issued answers at `GET /api/v1/auth/verify-email` (`401 INVALID_TOKEN`, or the
-`error=INVALID_TOKEN` redirect to its callback), and a second-factor challenge
-opened by a password sign-in before the change answers what a challenge that
-was never opened answers; the person asks again. A door that ends the
-account's sessions — a completed reset, `change-password` with
-`revokeOtherSessions: true` (the session it installs is kept) and the one-step
-invitation acceptance — ends every session opened before its password write,
-and a password sign-in during which the password changes is refused with what
-a wrong password answers. The change's moment is the last time the account's
-local password was written over, so an administrator's `set-user-password`
-counts too, and an account's first password is not a change; an email-change
-link carries its issue time in whole seconds, so one minted in the same second
-as the change is refused as well.
+A change to a user's password also ends the following, issued before it:
+
+- an email-change link, and a verification link on a deployment that signs
+  its holder in when it verifies
+  (`emailVerification.autoSignInAfterVerification: true`), answer what a link
+  that was never issued answers at `GET /api/v1/auth/verify-email`
+  (`401 INVALID_TOKEN`, or the `error=INVALID_TOKEN` redirect to its
+  callback). With auto sign-in off, a verification link signs nobody in, and
+  it still verifies the address;
+- a magic link answers what a link that was never issued answers at
+  `GET /api/v1/auth/magic-link/verify` (the `error=INVALID_TOKEN` redirect)
+  and opens no session;
+- a sign-in code texted by `POST /api/v1/auth/phone-number/send-otp` answers
+  what a code that was never sent answers at
+  `POST /api/v1/auth/phone-number/verify` (`400 OTP_NOT_FOUND`) and opens no
+  session;
+- a second-factor challenge opened by a password sign-in answers what a
+  challenge that was never opened answers;
+- an MCP access token is refused at the MCP endpoint. Where the app's
+  authorization still stands — a password change, or an administrator's
+  `set-user-password` with `revokeSessionsAndKeys: false` — the app gets a new
+  token with its refresh token, as it does when a token expires; a reset ends
+  the authorization itself (below).
+
+The person asks for a new link, code or challenge, which works as usual. A
+door that ends the account's sessions — a completed reset, `change-password`
+with `revokeOtherSessions: true` (the session it installs is kept) and the
+one-step invitation acceptance — ends every session opened before its
+password write, and a password sign-in during which the password changes is
+refused with what a wrong password answers.
+
+The change's moment is the last time the account's local password was
+written, so an administrator's `set-user-password` counts too. An account's
+first password counts when it is set onto an account that was already there:
+through either reset door, an administrator's `set-user-password`, the one-step
+invitation acceptance of an existing account, or `set-initial-password`. It
+does not count when the password is created in the same request as its
+account, as at a sign-up with a password, an administrator's create-user or a
+one-step invitation acceptance that creates the account, however long the
+steps between the two take. A password created outside such a request (written
+straight to the store), or before this release, counts as a change at its
+creation. An email-change or verification link carries its issue time in whole
+seconds, so one minted in the same second as the change is refused as well;
+so does an MCP access token.
+
+#### What a password reset ends, and what a change keeps
+
+A completed password reset — the emailed link (`POST /api/v1/auth/reset-password`)
+or the texted code (`POST /api/v1/auth/phone-number/reset-password`) — ends,
+beside the account's sessions, what the account added before it:
+
+- **API keys.** Every API key the account owns that is not revoked — its
+  `revoked` flag false or unset — is revoked, and the next call with it is
+  refused as revoked (`403 API_KEY_REVOKED`). It is revoked as one its owner
+  revoked from the API Keys list, so the owner may restore it there.
+- **Linked sign-in accounts.** Every sign-in account linked to the account
+  other than its password — a social, OAuth or single sign-on link — is
+  unlinked. The provider may be linked again the way it was linked the first
+  time.
+- **Authorized apps.** Where the OAuth provider is enabled, every app
+  authorized to the account loses its authorization: the account's consents,
+  refresh tokens and stored access tokens are deleted, so the app asks the
+  person to authorize it again. An MCP access token, which is signed rather
+  than stored, is refused on its next request, because the MCP endpoint reads
+  on every request the authorization it was issued under and when the
+  account's password last changed.
+- **Device sign-ins.** Where device authorization is enabled, a device sign-in
+  approved for the account and not yet collected by its device is ended.
+- **Passkeys.** This build offers no passkey sign-in, so there are none to end.
+
+A reset that does not complete ends nothing; a key minted after the reset
+works as usual. A completed reset that cannot end one of these — a record that
+cannot be read or written, a linked account a host hook keeps, an account it
+cannot name — answers an error once the password is written. The new password
+stands, and its change time and password history are recorded all the same;
+resetting again ends what remains.
+
+A password change through `POST /api/v1/auth/change-password`, which proves
+the current password, ends none of these: an authorized app keeps its
+authorization and gets a new MCP access token with its refresh token, issued
+after the change. When the account still holds an API
+key that is neither revoked nor past its own expiry, a linked sign-in account
+or an authorized app after the change, the account's address is sent
+`auth.password_changed_notice`, naming each one, through the email service
+every auth mail goes through. The notice is best-effort: one that cannot be
+sent never fails the change. It is a built-in auth template, overridable like
+the others.
+
+An administrator's forced reset with `revokeSessionsAndKeys` on and the
+operator's `os user set-password` end the API keys, the linked sign-in
+accounts, the authorized apps and the device sign-ins, as
+[Set / Reset a Password](#set--reset-a-password) describes.
 
 #### Setting a first local password
 
@@ -1271,11 +1348,21 @@ same `mustChangePassword` flag. It also provisions a credential account for
 SSO-onboarded users who never had a local password.
 
 The forced reset also carries `revokeSessionsAndKeys`, **on by default**: it
-ends every session of the user and revokes every API key they own, so a
-suspected compromise leaves no live credential behind. Pass
-`revokeSessionsAndKeys: false` for a routine reset. The response reports what
-was revoked (`revoked: { sessions, apiKeys, failed, complete }`), and revoked
-keys stay revoked after the password change.
+ends every session of the user, revokes every API key they own that is not
+revoked (its `revoked` flag false or unset), unlinks
+every sign-in account linked to the user other than the password, and, where
+the OAuth provider is enabled, ends every app authorized to the user (its
+consents, refresh tokens and stored access tokens are deleted, so the app asks
+to be authorized again and an MCP access token is refused on its next request)
+and, where device authorization is enabled, every device sign-in approved for
+the user and not yet collected. A suspected compromise leaves no live
+credential behind. Pass `revokeSessionsAndKeys: false` for a routine reset,
+which ends none of these; as after any password change, an MCP access token
+issued before it is refused and the app gets a new one with its refresh token. The response reports what was ended
+(`revoked: { sessions, apiKeys, signInAccounts, authorizedApps, failed, complete }`),
+and revoked keys stay revoked after the password change. The operator's
+`os user set-password` ends the same, reading the authorized apps and device
+sign-ins the project database holds.
 
 #### Bulk Import Users
 

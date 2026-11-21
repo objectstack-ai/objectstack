@@ -7,3 +7,5 @@ export { NotificationPreference } from './notification-preference.object.js';
 export { NotificationTemplate } from './notification-template.object.js';
 export { HttpDelivery, SYS_HTTP_DELIVERY } from './http-delivery.object.js';
 export { UserDevice } from './user-device.object.js';
+export { ChannelAccount } from './channel-account.object.js';
+export { ChannelUserLink } from './channel-user-link.object.js';

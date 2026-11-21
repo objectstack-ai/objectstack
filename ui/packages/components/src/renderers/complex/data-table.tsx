@@ -14,6 +14,7 @@ import { hasDeclaredVisibilityGate } from '../action/visibility-gate';
 import { DisabledReasonMenuLabel, menuItemReasonAria, useDisabledReason } from '../action/disabled-reason';
 import { useGridFieldAuthoring } from '../../context/gridFieldAuthoring';
 import { useGridCellSelection } from '../../context/gridCellSelection';
+import { useGridHeaderMenu } from '../../context/gridHeaderMenu';
 import { caretToEnd, defaultTyping, defaultValueFromText, firstEditorControl, isCellWidgetTarget, isCommandLetter, isImeKey, isPrintableKey } from './dataTableCellSelection';
 import { useHorizontalOverflow, HOVER_SCROLLBAR_CLASSES } from '../../custom/use-horizontal-overflow';
 import { ActiveListRow, listRecordIdOf } from '../../custom/record-list-face';
@@ -1513,6 +1514,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   // saves at once (objectstack#35685). It needs the
   // arrow keys, so it turns the roving-cell navigation on.
   const cellSelection = useGridCellSelection();
+  // objectstack#35876 — a sortable header opens the column menu instead of
+  // sorting, when a host mounted `GridHeaderMenu`.
+  const headerOpensMenu = useGridHeaderMenu();
   const selectFirst = cellSelection !== null;
   // objectstack#35685 — the per-cell save needs a per-row save to call. A
   // select-first table wired with `onBatchSave` alone keeps the staged save
@@ -2045,12 +2049,26 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   const autosaveDueRef = useRef<Set<PendingRowKey>>(new Set());
   const [autosaveTick, setAutosaveTick] = useState(0);
   const savedTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  // A commit the host confirmed is written by the newest `commitCellValue`,
+  // and its answer re-renders so focus goes back to the selected cell.
+  const commitCellValueRef = useRef<(row: any, columnKey: string, value: unknown, confirmed?: boolean) => void>(() => {});
+  const [, bumpConfirmSettled] = React.useReducer((n: number) => n + 1, 0);
   useEffect(() => () => {
     for (const timer of savedTimersRef.current) clearTimeout(timer);
     savedTimersRef.current.clear();
   }, []);
   // Column header context menu state
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; columnKey: string } | null>(null);
+  // Where focus goes when the column menu closes on Esc or a chosen entry:
+  // the header (or the caret) it was opened from, never the invisible anchor.
+  const columnMenuReturnFocusRef = useRef<HTMLElement | null>(null);
+  // Set when the column menu closes because the pointer went elsewhere: focus
+  // then stays where that press put it.
+  const columnMenuClosedOutsideRef = useRef(false);
+  // Opened from the keyboard: the menu's first entry takes focus, so the
+  // arrows and Enter work at once.
+  const columnMenuByKeyboardRef = useRef(false);
+  const columnMenuContentRef = useRef<HTMLDivElement | null>(null);
   // objectstack#28434 — the row context menu: which row it is open on, where,
   // and the element focus goes back to when it closes (the focused cell for
   // the keyboard, the cell under the pointer for a right-click).
@@ -2463,8 +2481,36 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   // Column header context menu handler
   const handleColumnContextMenu = (e: React.MouseEvent, columnKey: string) => {
     e.preventDefault();
+    columnMenuReturnFocusRef.current = e.currentTarget as HTMLElement;
+    columnMenuByKeyboardRef.current = false;
     setContextMenu({ x: e.clientX, y: e.clientY, columnKey });
   };
+
+  // objectstack#35876 — under `GridHeaderMenu` every header opens the column
+  // menu below itself (a click, or Enter / Space / ArrowDown while it has
+  // focus) and never sorts; the sort is the entry chosen in the menu, which
+  // offers sort entries only where `isColumnSortable` does. A click on the
+  // header whose menu is open shuts it.
+  const headerMenuOn = (_col: TableColumn) => headerOpensMenu;
+  const openHeaderMenu = (header: HTMLElement, columnKey: string, byKeyboard: boolean) => {
+    columnMenuReturnFocusRef.current = header;
+    columnMenuByKeyboardRef.current = byKeyboard;
+    const r = header.getBoundingClientRect();
+    setContextMenu((open) =>
+      !byKeyboard && open?.columnKey === columnKey ? null : { x: r.left, y: r.bottom, columnKey },
+    );
+  };
+  // A menu opened from the keyboard starts on its first entry. Radix moves
+  // focus into a keyboard-opened menu only when it saw the key itself, and
+  // this one mounts after the header's keydown; so the first entry is focused
+  // once the content is in the document, after Radix's own mount focus.
+  useEffect(() => {
+    if (!contextMenu || !columnMenuByKeyboardRef.current) return;
+    const frame = requestAnimationFrame(() => {
+      columnMenuContentRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [contextMenu]);
 
   // The column the open context menu belongs to (objectui#10727). The menu
   // holds only a key, so it is resolved from `columns`, the list the header
@@ -2479,17 +2525,19 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     : undefined;
 
   const hideColumn = (columnKey: string) => {
+    // The header the menu came from is about to go: focus returns to the
+    // header beside it (the next one, else the previous), when that one is a
+    // tab stop.
+    const from = columnMenuReturnFocusRef.current?.closest('th');
+    if (from && from.getAttribute('data-column-key') === columnKey) {
+      const beside = [from.nextElementSibling, from.previousElementSibling].find(
+        (el): el is HTMLElement => el instanceof HTMLElement && el.hasAttribute('data-column-key') && el.tabIndex >= 0,
+      );
+      columnMenuReturnFocusRef.current = beside ?? null;
+    }
     setColumns(prev => prev.filter(c => c.accessorKey !== columnKey));
     setContextMenu(null);
   };
-
-  // Close context menu on outside click
-  useEffect(() => {
-    if (!contextMenu) return;
-    const close = () => setContextMenu(null);
-    document.addEventListener('click', close);
-    return () => document.removeEventListener('click', close);
-  }, [contextMenu]);
 
   const handleSelectAll = (checked: boolean) => {
     const newSelected = new Set<any>();
@@ -2773,6 +2821,20 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     // (objectui#12664) has not reached state yet either.
     const valueToStage = explicitValue !== undefined ? explicitValue : editValueRef.current;
 
+    // objectstack#35685 — a value the host asks to confirm first: the editor
+    // closes with nothing of this session staged, and the value is written
+    // only once the host says yes (a no leaves the cell as it was).
+    const asked = commitConfirmationOf(rowKey, row, columnKey, valueToStage);
+    if (asked) {
+      revertEditSession(editingCell, editRevertRef.current);
+      editRevertRef.current = null;
+      editingCellRef.current = null;
+      setEditingCell(null);
+      setEditValue('');
+      settleCommitConfirmation(asked, row, columnKey, valueToStage);
+      return;
+    }
+
     // Update pending changes — or drop this cell's entry when the committed
     // value is the one the row loaded with (objectui#11816). An updater, so a
     // save that settled since this render is not undone (objectui#12322).
@@ -2800,6 +2862,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   const saveEditRef = useRef(saveEdit);
   useEffect(() => {
     saveEditRef.current = saveEdit;
+    commitCellValueRef.current = commitCellValue;
   });
 
   // The injected-editor commit contract (objectui#12664): before the table
@@ -2830,6 +2893,60 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   // is what makes Escape/cancel discard an injected widget's staged changes. For
   // built-in editors (which don't stage until commit) the snapshot equals the
   // live pending value, so the revert is a no-op.
+  /** Roll the edit session's cell back to its snapshot (see `editRevertRef`). */
+  const revertEditSession = (active: EditingCell, snap: { had: boolean; value: any } | null) => {
+    if (!snap) return;
+    const { rowKey, columnKey } = active;
+    setPendingChanges((prev) => {
+      const cur = prev.get(rowKey);
+      const staged = !!cur && columnKey in cur.changes;
+      if (!staged && !snap.had) return prev; // nothing changed for this cell
+      const next = new Map(prev);
+      const rc = { ...(cur?.changes || {}) };
+      if (snap.had) rc[columnKey] = snap.value;
+      else delete rc[columnKey];
+      if (Object.keys(rc).length > 0) next.set(rowKey, { row: cur?.row ?? active.row, changes: rc });
+      else next.delete(rowKey);
+      return next;
+    });
+  };
+
+  /**
+   * objectstack#35685 — the host's confirmation of a value committed into a
+   * select-first cell (`GridCellSelection.confirmCommit`), or `null` when it
+   * asks none. Only a value that changes what the cell shows is asked about.
+   */
+  const commitConfirmationOf = (
+    rowKey: PendingRowKey,
+    row: any,
+    columnKey: string,
+    value: unknown,
+  ): Promise<boolean> | null => {
+    if (!autosaves || typeof cellSelection?.confirmCommit !== 'function') return null;
+    const staged = pendingChanges.get(rowKey)?.changes;
+    const shown = staged && columnKey in staged ? staged[columnKey] : row?.[columnKey];
+    if (isUnchangedCellValue(value, shown)) return null;
+    return cellSelection.confirmCommit(row, columnKey, value) ?? null;
+  };
+
+  /**
+   * Write a confirmed value once the host's answer comes, and hand focus back
+   * to the selected cell either way (the host's dialog had it meanwhile).
+   */
+  const settleCommitConfirmation = (asked: Promise<boolean>, row: any, columnKey: string, value: unknown) => {
+    void asked.then(
+      (confirmed) => {
+        if (confirmed) commitCellValueRef.current(row, columnKey, value, true);
+        focusSelectionRef.current = true;
+        bumpConfirmSettled();
+      },
+      () => {
+        focusSelectionRef.current = true;
+        bumpConfirmSettled();
+      },
+    );
+  };
+
   const exitEdit = (revert: boolean) => {
     const active = editingCellRef.current;
     const snap = editRevertRef.current;
@@ -2840,20 +2957,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       // wire it only takes back this edit (below), as Esc on the selected cell
       // leaves a sent value alone.
       discardCellChange(active.rowKey, active.columnKey);
-    } else if (revert && active && snap) {
-      const { rowKey, columnKey } = active;
-      setPendingChanges((prev) => {
-        const cur = prev.get(rowKey);
-        const staged = !!cur && columnKey in cur.changes;
-        if (!staged && !snap.had) return prev; // nothing changed for this cell
-        const next = new Map(prev);
-        const rc = { ...(cur?.changes || {}) };
-        if (snap.had) rc[columnKey] = snap.value;
-        else delete rc[columnKey];
-        if (Object.keys(rc).length > 0) next.set(rowKey, { row: cur?.row ?? active.row, changes: rc });
-        else next.delete(rowKey);
-        return next;
-      });
+    } else if (revert && active) {
+      revertEditSession(active, snap);
     }
     editingCellRef.current = null;
     setEditingCell(null);
@@ -3489,9 +3594,15 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   };
 
   /** Write a value into a cell without an editor: the commit `saveEdit` makes. */
-  const commitCellValue = (row: any, columnKey: string, value: unknown) => {
+  const commitCellValue = (row: any, columnKey: string, value: unknown, confirmed = false) => {
     const rowKey = pendingRowKeyOf(row);
     const held = heldRowOf(rowKey) ?? row;
+    // objectstack#35685 — a toggle or a paste is asked about as an editor's commit is.
+    const asked = confirmed ? null : commitConfirmationOf(rowKey, held, columnKey, value);
+    if (asked) {
+      settleCommitConfirmation(asked, held, columnKey, value);
+      return;
+    }
     const inFlight = inFlightRef.current.get(rowKey);
     setPendingChanges((prev) => stageCellChange(prev, rowKey, held, columnKey, value, inFlight));
     clearCellError(rowKey, columnKey);
@@ -4193,7 +4304,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                     data-column-key={col.accessorKey}
                     className={cn(
                       col.className,
-                      isColumnSortable(col) && 'cursor-pointer select-none',
+                      (isColumnSortable(col) || headerMenuOn(col)) && 'cursor-pointer select-none',
+                      // A header that opens the column menu is a tab stop (objectstack#35876).
+                      headerMenuOn(col) && 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
                       isDragging && 'opacity-50',
                       isDragOver && 'border-l-2 border-primary',
                       col.align === 'right' && 'text-right',
@@ -4221,7 +4334,23 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                     onDragOver={(e) => handleColumnDragOver(e, index)}
                     onDrop={(e) => handleColumnDrop(e, index)}
                     onDragEnd={handleColumnDragEnd}
-                    onClick={() => isColumnSortable(col) && handleSort(col.accessorKey)}
+                    {...(headerMenuOn(col)
+                      ? {
+                          tabIndex: 0,
+                          'aria-haspopup': 'menu' as const,
+                          'aria-expanded': contextMenu?.columnKey === col.accessorKey,
+                          onKeyDown: (e: React.KeyboardEvent<HTMLTableCellElement>) => {
+                            if (e.target !== e.currentTarget) return;
+                            if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'ArrowDown') return;
+                            e.preventDefault();
+                            openHeaderMenu(e.currentTarget, col.accessorKey, true);
+                          },
+                        }
+                      : {})}
+                    onClick={(e) => {
+                      if (headerMenuOn(col)) openHeaderMenu(e.currentTarget, col.accessorKey, false);
+                      else if (isColumnSortable(col)) handleSort(col.accessorKey);
+                    }}
                     onContextMenu={(e) => handleColumnContextMenu(e, col.accessorKey)}
                   >
                     <div className={cn(
@@ -4269,6 +4398,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                               // closes an open menu.
                               e.stopPropagation();
                               const r = e.currentTarget.getBoundingClientRect();
+                              columnMenuReturnFocusRef.current = e.currentTarget;
+                              columnMenuByKeyboardRef.current = false;
                               setContextMenu((open) =>
                                 open?.columnKey === col.accessorKey
                                   ? null
@@ -5380,54 +5511,71 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
         </DropdownMenu>
       )}
 
-      {/* Column header context menu */}
+      {/* Column header menu: a right-click, the design host's caret, or the
+          header itself under `GridHeaderMenu` (objectstack#35876) opens it.
+          Non-modal, like the row menu; mounted only while open. */}
       {contextMenu && (
-        <div
-          className="fixed z-50 min-w-[160px] rounded-md border bg-popover p-1 shadow-md"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-          data-testid="column-context-menu"
-          onClick={(e) => e.stopPropagation()}
+        <DropdownMenu
+          open
+          onOpenChange={(open) => { if (!open) setContextMenu(null); }}
+          modal={false}
         >
-          {/* Sort entries exactly where the header sorts: the header's one
-              predicate, `isColumnSortable`, over the same column. So a column
-              declared `sortable: false` offers none (objectui#10727), and
-              neither does a MASKED one (objectui#10657). */}
-          {contextMenuColumn && isColumnSortable(contextMenuColumn) && (
-            <>
-              <button
-                type="button"
-                className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground cursor-pointer"
-                onClick={() => {
-                  applySort(contextMenu.columnKey, 'asc');
-                  setContextMenu(null);
-                }}
-              >
-                <ChevronUp className="h-3.5 w-3.5" />
-                {t('table.sortAsc')}
-              </button>
-              <button
-                type="button"
-                className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground cursor-pointer"
-                onClick={() => {
-                  applySort(contextMenu.columnKey, 'desc');
-                  setContextMenu(null);
-                }}
-              >
-                <ChevronDown className="h-3.5 w-3.5" />
-                {t('table.sortDesc')}
-              </button>
-              <div className="my-1 h-px bg-border" />
-            </>
-          )}
-          <button
-            type="button"
-            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground cursor-pointer"
-            onClick={() => hideColumn(contextMenu.columnKey)}
+          <DropdownMenuTrigger asChild>
+            <span
+              aria-hidden
+              tabIndex={-1}
+              data-testid="column-context-menu-anchor"
+              className="pointer-events-none fixed h-px w-px"
+              style={{ left: contextMenu.x, top: contextMenu.y }}
+            />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            ref={columnMenuContentRef}
+            align="start"
+            className="min-w-[160px]"
+            data-testid="column-context-menu"
+            onClick={(e) => e.stopPropagation()}
+            onInteractOutside={(e) => {
+              // A press on the control the menu was opened from is that
+              // control's own toggle: its click shuts the menu.
+              const from = columnMenuReturnFocusRef.current;
+              if (from && e.target instanceof Node && from.contains(e.target)) {
+                e.preventDefault();
+                return;
+              }
+              columnMenuClosedOutsideRef.current = true;
+            }}
+            onCloseAutoFocus={(e) => {
+              // Esc or a chosen entry: focus goes back to the header (or the
+              // caret) it was opened from, never to the invisible anchor.
+              e.preventDefault();
+              if (!columnMenuClosedOutsideRef.current) columnMenuReturnFocusRef.current?.focus();
+              columnMenuClosedOutsideRef.current = false;
+            }}
           >
-            <X className="h-3.5 w-3.5" />
-            {t('table.hideColumn')}
-          </button>
-        </div>
+            {/* Sort entries exactly where the header sorts: the header's one
+                predicate, `isColumnSortable`, over the same column. So a column
+                declared `sortable: false` offers none (objectui#10727), and
+                neither does a MASKED one (objectui#10657). */}
+            {contextMenuColumn && isColumnSortable(contextMenuColumn) && (
+              <>
+                <DropdownMenuItem onSelect={() => applySort(contextMenu.columnKey, 'asc')}>
+                  <ChevronUp className="h-3.5 w-3.5" />
+                  {t('table.sortAsc')}
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => applySort(contextMenu.columnKey, 'desc')}>
+                  <ChevronDown className="h-3.5 w-3.5" />
+                  {t('table.sortDesc')}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </>
+            )}
+            <DropdownMenuItem onSelect={() => hideColumn(contextMenu.columnKey)}>
+              <X className="h-3.5 w-3.5" />
+              {t('table.hideColumn')}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
     </div>
   );

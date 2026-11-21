@@ -58,8 +58,9 @@ import {
   removeGroup,
   moveGroup,
   clearFieldGroup,
+  groupMembership,
+  writeGroupLayout,
   type FieldEntry,
-  type FieldsView,
 } from '../metadata-admin/previews/object-fields-io.js';
 import { useSafeFieldLabel } from '@object-ui/i18n';
 import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
@@ -885,13 +886,10 @@ export function ObjectFormDesigner({
     () => view.entries.filter((e) => !isKeptOffLayout(e, systemFieldNames)).map((e) => e.name),
     [view.entries, systemFieldNames],
   );
-  const groupOf = React.useCallback(
-    (name: string) => {
-      const g = entryByName.get(name)?.def.group;
-      return typeof g === 'string' ? g : undefined;
-    },
-    [entryByName],
-  );
+  // Membership as the record page resolves it: a group's own `fields` list,
+  // else the field's older `group` (objectstack#35900).
+  const membership = React.useMemo(() => groupMembership(view, fieldGroups), [view, fieldGroups]);
+  const groupOf = React.useCallback((name: string) => membership.groupOf.get(name), [membership]);
   const derived = React.useMemo(() => {
     const map: Record<string, string[]> = {};
     for (const c of containerOrder) map[c] = [];
@@ -906,14 +904,19 @@ export function ObjectFormDesigner({
       map[cid(UNGROUPED)] = shownFields.filter((n) => !placed.has(n)).map(fid);
       return map;
     }
-    for (const e of view.entries) {
-      if (isKeptOffLayout(e, systemFieldNames)) continue;
-      const g = typeof e.def.group === 'string' ? e.def.group : '';
-      const target = g && map[cid(g)] ? cid(g) : cid(UNGROUPED);
-      map[target].push(fid(e.name));
+    // Each group's members in display order (its `fields` list first), then
+    // the ungrouped bucket in field declaration order.
+    const shown = new Set(shownFields);
+    for (const [key, names] of membership.members) {
+      if (!map[cid(key)]) continue;
+      map[cid(key)] = names.filter((n) => shown.has(n)).map(fid);
     }
+    map[cid(UNGROUPED)] = shownFields.filter((n) => {
+      const g = membership.groupOf.get(n);
+      return g === undefined || !map[cid(g)];
+    }).map(fid);
     return settlePinned(map, pinRank);
-  }, [view.entries, containerOrder, systemFieldNames, pinRank, formSections, shownFields, groupOf]);
+  }, [containerOrder, pinRank, formSections, shownFields, groupOf, membership]);
 
   const [items, setItems] = React.useState<Record<string, string[]>>(derived);
   const [activeId, setActiveId] = React.useState<string | null>(null);
@@ -982,7 +985,12 @@ export function ObjectFormDesigner({
     [items],
   );
 
-  /** Flatten the container map back to `fields` (stamping group + order) and persist. */
+  /**
+   * Persist the container map. On the object's own groups the layout is
+   * written where `fieldGroups[].fields` keeps it: each changed group's list,
+   * never the object's field declaration order (objectstack#35900) —
+   * `writeGroupLayout` says exactly what moves.
+   */
   const commit = React.useCallback(
     (next: Record<string, string[]>) => {
       if (formSections && onSectionsChange) {
@@ -993,29 +1001,28 @@ export function ObjectFormDesigner({
         onSectionsChange(writeFormSectionLayout(formSections, layout, shownFields, fieldGroups, groupOf));
         return;
       }
-      const editable: FieldEntry[] = [];
+      // Every field the canvas does not show is absent from the layout and
+      // keeps its place — the same test that kept it off the containers
+      // (objectui#11780).
+      const layout = new Map<string | null, string[]>();
       for (const c of containerOrder) {
         const groupKey = unCid(c);
-        for (const id of next[c] ?? []) {
-          const e = entryByName.get(unFid(id));
-          if (!e) continue;
-          const def = { ...e.def };
-          if (groupKey === UNGROUPED) delete def.group;
-          else def.group = groupKey;
-          editable.push({ name: e.name, def });
-        }
+        layout.set(groupKey === UNGROUPED ? null : groupKey, (next[c] ?? []).map(unFid).filter((n) => entryByName.has(n)));
       }
-      // Every field the canvas does not show rides back unchanged — the same
-      // test that kept it off the containers (objectui#11780).
-      const system = view.entries.filter((e) => isKeptOffLayout(e, systemFieldNames));
-      const finalView: FieldsView = { shape: view.shape, entries: [...system, ...editable] };
-      onChange({ fields: writeFields(finalView) });
+      // The bucket is drawn pinned-first (`settlePinned`), not in declaration
+      // order: unless the drag changed it, its order is not the author's to write.
+      const bucket = cid(UNGROUPED);
+      const was = derived[bucket] ?? [];
+      const now = next[bucket] ?? [];
+      const reorderUngrouped = was.length !== now.length || was.some((id, i) => id !== now[i]);
+      const patch = writeGroupLayout(view, fieldGroups, layout, { reorderUngrouped });
+      if (patch.fields !== undefined || patch.fieldGroups !== undefined) onChange(patch);
     },
     [
       containerOrder,
       entryByName,
       view,
-      systemFieldNames,
+      derived,
       onChange,
       formSections,
       onSectionsChange,

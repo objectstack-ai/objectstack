@@ -26,6 +26,9 @@ import {
   resolveDcrEnabled,
   isOAuthEligibleBaseUrl,
 } from './auth-manager';
+// The SSO discovery egress guard the source loads with a dynamic import, paid
+// here, during collection (check-test-source-alias, "The source reach").
+import '@objectstack/core/egress';
 
 // Mock better-auth so plugin-registration tests can capture the config
 // without booting a real instance (same pattern as auth-manager.test.ts).
@@ -52,10 +55,17 @@ const savedEnv: Record<string, string | undefined> = {};
  * a disabled client, or one whose row is gone, admits nothing. So the default
  * store holds the one client every token below names, enabled, and a leg that
  * is about the client passes its own rows.
+ *
+ * The same read refuses a token issued before its subject's password last
+ * changed, on the clock better-auth's internal adapter answers
+ * (`findCredentialAccount`). So the double answers that too: by default the
+ * subject holds no password row, which has never changed; a leg about the
+ * clock passes its own rows.
  */
 function consentStore(
   consents: Array<{ clientId: string; userId: string; referenceId?: string | null; createdAt: Date }>,
   clients: Array<{ clientId: string; skipConsent?: boolean; disabled?: boolean }> = [{ clientId: 'client-abc' }],
+  credentials: Array<{ userId: string; id: string; createdAt: Date; updatedAt: Date }> = [],
 ) {
   const tables: Record<string, Array<Record<string, unknown>>> = { oauthConsent: consents, oauthClient: clients };
   const reads: string[] = [];
@@ -63,6 +73,13 @@ function consentStore(
     (tables[model] ?? []).filter((row) => where.every((w) => row[w.field] === w.value));
   return {
     reads,
+    internalAdapter: {
+      async findCredentialAccount(userId: string) {
+        reads.push('findCredentialAccount');
+        const row = credentials.find((c) => c.userId === userId);
+        return row ? { ...row } : null;
+      },
+    },
     adapter: {
       async findMany({ model, where }: { model: string; where: Array<{ field: string; value: unknown }> }) {
         reads.push(`findMany ${model}`);
@@ -368,11 +385,11 @@ describe('verifyMcpAccessToken (local JWKS verification, fail-closed)', () => {
       baseUrl: 'https://acme.example.com',
     });
     vi.spyOn(m, 'getApi').mockResolvedValue({ getJwks: async () => jwks } as any);
-    const { adapter } = consentStore([
+    const { adapter, internalAdapter } = consentStore([
       { clientId: 'client-abc', userId: 'user-1', referenceId: null, createdAt: CONSENTED },
       { clientId: 'client-abc', userId: 'user-1', referenceId: 'org-a', createdAt: CONSENTED },
     ]);
-    vi.spyOn(m, 'getAuthContext').mockResolvedValue({ adapter });
+    vi.spyOn(m, 'getAuthContext').mockResolvedValue({ adapter, internalAdapter });
     return m;
   }
 
@@ -578,7 +595,7 @@ describe('verifyMcpAccessToken reads the consent the token was minted under (rul
       .sign(privateKey);
   }
 
-  it('admits a token whose consent stands — at the cost of exactly TWO reads, the client and then the consent', async () => {
+  it('admits a token whose consent stands — at the cost of exactly THREE reads, the client, the password\'s clock and then the consent', async () => {
     const store = consentStore([{ clientId: 'client-abc', userId: 'user-1', referenceId: null, createdAt: HOUR_AGO }]);
     expect(await managerOver(store).verifyMcpAccessToken(await signToken())).toEqual({
       userId: 'user-1',
@@ -587,7 +604,7 @@ describe('verifyMcpAccessToken reads the consent the token was minted under (rul
     });
     // [objectstack-ai/cloud#3820, card 2] The client row is read first, so a
     // disabled client's token is refused before its consent is looked at.
-    expect(store.reads).toEqual(['findOne oauthClient', 'findMany oauthConsent']);
+    expect(store.reads).toEqual(['findOne oauthClient', 'findCredentialAccount', 'findMany oauthConsent']);
   });
 
   it('[objectstack-ai/cloud#3820, card 2] refuses the token of a disabled client, or of a client whose row is gone, though its consent stands', async () => {
@@ -650,10 +667,38 @@ describe('verifyMcpAccessToken reads the consent the token was minted under (rul
     const skip = consentStore([], [{ clientId: 'client-abc', skipConsent: true }]);
     expect(await managerOver(skip).verifyMcpAccessToken(await signToken())).not.toBeNull();
     // One client read answers both questions: enabled, and consent-less.
-    expect(skip.reads).toEqual(['findOne oauthClient', 'findMany oauthConsent']);
+    expect(skip.reads).toEqual(['findOne oauthClient', 'findCredentialAccount', 'findMany oauthConsent']);
     // The control: the same client without the flag is refused.
     const consenting = consentStore([], [{ clientId: 'client-abc', skipConsent: false }]);
     expect(await managerOver(consenting).verifyMcpAccessToken(await signToken())).toBeNull();
+  });
+
+  it('refuses a token issued before its subject\'s password last changed, whatever its grant; one from a later second admits', async () => {
+    const issuedAt = Math.floor(Date.now() / 1000) - 120;
+    // The password changed half a second into the second after the token's.
+    const changed = [{ userId: 'user-1', id: 'acc-1', createdAt: HOUR_AGO, updatedAt: new Date((issuedAt + 1) * 1000 + 500) }];
+    const consent = [{ clientId: 'client-abc', userId: 'user-1', referenceId: null, createdAt: HOUR_AGO }];
+    const consented = () => managerOver(consentStore(consent, undefined, changed));
+    const serverOnly = () => managerOver(consentStore([], [{ clientId: 'client-abc', skipConsent: true }], changed));
+    expect(await consented().verifyMcpAccessToken(await signToken({}, issuedAt))).toBeNull();
+    expect(await serverOnly().verifyMcpAccessToken(await signToken({}, issuedAt))).toBeNull();
+    // A token minted in the second of the change is refused too: `iat` is whole seconds.
+    expect(await consented().verifyMcpAccessToken(await signToken({}, issuedAt + 1))).toBeNull();
+    // The control: a token from the second after the change admits, under either grant.
+    expect(await consented().verifyMcpAccessToken(await signToken({}, issuedAt + 2))).not.toBeNull();
+    expect(await serverOnly().verifyMcpAccessToken(await signToken({}, issuedAt + 2))).not.toBeNull();
+  });
+
+  it('fails CLOSED when the password\'s clock cannot be read, and when there is no clock to read', async () => {
+    const consent = [{ clientId: 'client-abc', userId: 'user-1', referenceId: null, createdAt: HOUR_AGO }];
+    const unreadable = {
+      ...consentStore(consent),
+      internalAdapter: { findCredentialAccount: async () => { throw new Error('account store unreachable'); } },
+    };
+    expect(await managerOver(unreadable).verifyMcpAccessToken(await signToken())).toBeNull();
+    expect(await managerOver({ adapter: consentStore(consent).adapter }).verifyMcpAccessToken(await signToken())).toBeNull();
+    // The control: the same grant, its clock readable, admits.
+    expect(await managerOver(consentStore(consent)).verifyMcpAccessToken(await signToken())).not.toBeNull();
   });
 
   it('fails CLOSED when the consent store errors', async () => {
@@ -662,6 +707,8 @@ describe('verifyMcpAccessToken reads the consent the token was minted under (rul
         findMany: async () => { throw new Error('consent store unreachable'); },
         findOne: async () => { throw new Error('consent store unreachable'); },
       },
+      // The clock reads, so it is the consent store's error that refuses.
+      internalAdapter: { findCredentialAccount: async () => null },
     };
     expect(await managerOver(store).verifyMcpAccessToken(await signToken())).toBeNull();
   });

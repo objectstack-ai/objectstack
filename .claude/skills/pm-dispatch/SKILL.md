@@ -66,7 +66,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 | `repo:<owner/name>` | 扫哪个仓的 backlog(单 issue 的落地仓看它自己的 `repo:*` 标签) | `objectstack-ai/objectstack` |
 | `batch:<n>` | 运行中槽位的上限:一槽 = 一个在跑的子代理(`Agent`、`create_session`)或卡线程,报告落地即释放;等人批、入队、等 CI、等裁决不占槽;dev、L1/L2 审核、普查皆计,⛔ 只读不豁免;p0 见 `priority:p0` 行 | 现值(默认、天花板、一容器 dev 上限)住项目记忆 |
 | `rounds:<n>` | 跑 N 轮后停 | 队列清空为止 |
-| `mode:subagent` \| `mode:cloud` \| `mode:thread` | 派发后端 | 按卡分流:S+M ⇒ `subagent`,`cloud` 只留 L/XL 等保留面;席位是项目线程时 M 及以上、p1、`security` 一律 `thread`;大卡判据照 `dispatch-runbook.md` 卡线程节 |
+| `mode:subagent` \| `mode:cloud` \| `mode:thread` | 派发后端 | 按卡分流:S+M ⇒ `subagent`,`cloud` 只留 L/XL 等保留面;席位是项目线程时大卡与无合适区的 M 卡 `thread`,p1、`security` 只定先后;判据照 `dispatch-runbook.md` 卡线程节 |
 | `#12 #34 …` | 显式 issue 清单,整体覆盖标签查询 | — |
 
 - 无角色参数按执行姿态运行,车道由座位贴认定;角色参数令召唤词收敛为一行调用。
@@ -104,7 +104,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 - 写侧恒为 `objectstack-fleet[bot]`;`user.login` 记令牌不记席位,归属 = 文本里的 session ID。
 - 席位及其子代理 ⛔ 永不打印环境变量的值;判存在只用不印值的形式 `[ -n "${X+x}" ]`。
 - GitHub 上一切新内容用英文;中文只留三通道(维护者速读、轮报、裁决引文)。
-- 裁决引文照抄不译;四维分析写英文、归分析段,只管新记录;存量中文 ⛔ 不追溯改写。
+- 四维分析写英文、归分析段,只管新记录;存量中文 ⛔ 不追溯改写。
 
 ## 状态模型
 

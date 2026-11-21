@@ -7,7 +7,8 @@ import type {
   IJobService,
   IObjectQLEngine,
 } from '@objectstack/spec/contracts';
-import { OWNERSHIP_QUEUE_SERVICE } from '@objectstack/spec/contracts';
+import { OWNERSHIP_QUEUE_SERVICE, WORK_CALENDAR_SERVICE } from '@objectstack/spec/contracts';
+import type { IWorkCalendarService } from '@objectstack/spec/contracts';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
 import { SysApprovalAction } from './sys-approval-action.object.js';
 import { SysApprovalApprover } from './sys-approval-approver.object.js';
@@ -298,6 +299,17 @@ export class ApprovalsServicePlugin implements Plugin {
       ownershipQueues: () => {
         try {
           return ctx.getService<ApproverQueueSource>(OWNERSHIP_QUEUE_SERVICE);
+        } catch {
+          return undefined;
+        }
+      },
+      // [ADR-0157 D5] The working-calendar service a `clock: 'working_time'`
+      // escalation counts through. Resolved LAZILY for the reason the
+      // providers above are: objectql registers it and may start after this
+      // one. Absent, a working-time deadline is refused, never wall-clock.
+      workCalendar: () => {
+        try {
+          return ctx.getService<IWorkCalendarService>(WORK_CALENDAR_SERVICE);
         } catch {
           return undefined;
         }

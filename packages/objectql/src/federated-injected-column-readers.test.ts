@@ -182,6 +182,11 @@ const READERS: Record<string, Row> = {
     via: 'cascadeRelationBehavior',
     why: "counts a tenant column only once the cascade's own relation reading admits it, so a federated object's unprovisioned injected column is never counted",
   },
+  // [ruling 7035627429, option B] The organization delete removes its units.
+  'engine-cascade-planning.ts#removeOrganizationUnits :: resolveTenantFieldName()': {
+    disposition: 'not-a-read',
+    why: "keys an organization's sys_unit rows, a platform table platform-objects owns (ADR-0158 U3), never a federated object's column",
+  },
   'engine-cascade-planning.ts#keepsOrganizationReference :: organization_id': {
     disposition: 'not-a-read',
     why: "names the attribution column a tenancy-disabled object keeps through an organization delete; the walk reads its relation through cascadeRelationBehavior; it reads no row",

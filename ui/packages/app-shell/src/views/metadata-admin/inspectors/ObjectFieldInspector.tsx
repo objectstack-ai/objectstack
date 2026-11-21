@@ -122,6 +122,10 @@ import {
   toFieldNameLoose,
   toFieldNameOrEmpty,
   indexOfField,
+  readGroups,
+  groupMembership,
+  currentGroupLayout,
+  writeGroupLayout,
   type FieldsView,
   type FieldEntry,
 } from '../previews/object-fields-io.js';
@@ -1078,6 +1082,29 @@ export function ObjectFieldInspector({
 
   const writeView = (next: FieldsView) => {
     onPatch({ fields: writeFields(next) });
+  };
+
+  /**
+   * Move this field to another group (or out of every group). Where no list
+   * is involved — the field is listed nowhere and the target lists nothing —
+   * the older `group` key is all there is to write, as before. Otherwise the
+   * move goes through `writeGroupLayout`, which keeps a group's `fields` list
+   * and the field's own `group` from contradicting each other
+   * (objectstack#35900): the field joins the end of the target group.
+   */
+  const moveToGroup = (target: string | null) => {
+    const groups = readGroups(fieldGroups);
+    const listsIt = groups.some((g) => Array.isArray(g.fields) && g.fields.includes(entry.name));
+    const targetLists = target !== null && groups.some((g) => g.key === target && Array.isArray(g.fields));
+    if (!listsIt && !targetLists) {
+      patchDef({ group: target ?? undefined });
+      return;
+    }
+    const layout = currentGroupLayout(view, groups);
+    for (const [key, names] of layout) layout.set(key, names.filter((n) => n !== entry.name));
+    layout.set(target, [...(layout.get(target) ?? []), entry.name]);
+    const patch = writeGroupLayout(view, groups, layout);
+    if (patch.fields !== undefined || patch.fieldGroups !== undefined) onPatch(patch);
   };
 
   const patchDef = (patch: Record<string, unknown>) => {
@@ -2093,14 +2120,14 @@ export function ObjectFieldInspector({
           <DisplayPatchLock>
             <InspectorSelectField
               label={tr('designer.field.group')}
-              value={typeof def.group === 'string' ? (def.group as string) : ''}
+              value={groupMembership(view, fieldGroups).groupOf.get(entry.name) ?? ''}
               options={[
                 { value: '', label: tr('designer.field.noGroup') },
                 ...fieldGroups
                   .filter((g) => typeof g.key === 'string')
                   .map((g) => ({ value: g.key as string, label: String(g.label ?? g.key) })),
               ]}
-              onCommit={(v) => patchDef({ group: v || undefined })}
+              onCommit={(v) => moveToGroup(v || null)}
               disabled={locked}
             />
           </DisplayPatchLock>

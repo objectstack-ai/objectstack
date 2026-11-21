@@ -32,6 +32,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import { AuthManager } from './auth-manager';
+// The SSO discovery egress guard the source loads with a dynamic import, paid
+// here, during collection (check-test-source-alias, "The source reach").
+import '@objectstack/core/egress';
 import { buildJwtPluginSchema } from './auth-schema-config.js';
 import {
   INVALID_ACCESS_TOKEN_DESCRIPTION,
@@ -194,6 +197,11 @@ async function registerClient(server: Server): Promise<string> {
 async function signUp(server: Server, email: string): Promise<string> {
   const { res, body } = await post(server, '/sign-up/email', { email, password: 'password-12345', name: 'Mia' });
   expect(res.status, JSON.stringify(body)).toBe(200);
+  // This raw server's sign-up writes the password without the platform's
+  // first-password mark, so the MCP door's credential clock reads that write
+  // as a password change, and a token minted in its second is refused. A
+  // person's app is issued its token later: wait for the next second.
+  await new Promise<void>((resolve) => setTimeout(resolve, 1_005 - (Date.now() % 1_000)));
   return String(res.headers.get('set-cookie') ?? '')
     .split(',')
     .map((c: string) => c.split(';')[0]!.trim())

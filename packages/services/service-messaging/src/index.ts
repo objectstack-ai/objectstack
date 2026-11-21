@@ -80,6 +80,29 @@ export {
 export type { SmsChannelOptions, SmsSenderSurface } from './sms-channel.js';
 export { createPushChannel } from './push-channel.js';
 export type { PushChannelOptions, PushSenderSurface, PushDeviceSurface } from './push-channel.js';
+// [#34730 step 2] Slack DM delivery: the channel, the per-person link store
+// and its HTTP doors.
+export { createSlackChannel, slackDmText, absoluteLink, deploymentOrigin } from './slack-channel.js';
+export type { SlackChannelOptions } from './slack-channel.js';
+export {
+    SlackLinkStore,
+    SlackLinkError,
+    bindSlackLinkRemovalTriggers,
+    unbindSlackLinkRemovalTriggers,
+    CHANNEL_ACCOUNT_OBJECT,
+    CHANNEL_USER_LINK_OBJECT,
+    SLACK_CHANNEL_ID,
+    SLACK_LINK_REMOVED_TOPIC,
+} from './slack-links.js';
+export type { SlackAccount, SlackLink, SlackClientSurface, SlackLinkStoreOptions, SlackTriggerEngine } from './slack-links.js';
+export {
+    registerSlackLinkRoutes,
+    SLACK_LINK_ROUTE,
+    SLACK_ACCOUNT_ROUTE,
+    SLACK_LINKS_ROUTE,
+    SLACK_ADMIN_CAPABILITY,
+} from './slack-link-routes.js';
+export type { SlackLinkRoutesDeps } from './slack-link-routes.js';
 
 // [#24978] Keyed notification text — `EmitInput.keyedText`, rendered per
 // recipient at delivery from the `i18n` service's catalog.
@@ -131,6 +154,9 @@ export type {
     ChannelAvailability,
     ChannelAvailabilityQuery,
     ChannelUnavailableReason,
+    // [#34730 step 2] The optional per-recipient reach query: a recipient a
+    // channel cannot reach is skipped before any delivery row.
+    RecipientReachQuery,
 } from './channel.js';
 export { CHANNEL_UNAVAILABLE_REASONS } from './channel.js';
 
@@ -233,6 +259,8 @@ export {
     HttpDelivery,
     SYS_HTTP_DELIVERY,
     UserDevice,
+    ChannelAccount,
+    ChannelUserLink,
 } from './objects/index.js';
 
 // Push device registry (ADR-0012 §6) — `INotificationService`'s device members.

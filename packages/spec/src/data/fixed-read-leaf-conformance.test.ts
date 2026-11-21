@@ -271,7 +271,7 @@ describe('SHARED_RECORD_IDS_CASE_SET — each wrong reading of the leaf fails th
     expect(failing('inner-read-walled')).toEqual(
       set.cases.filter((c) => c.requiresUnwalledInnerRead === true).map((c) => c.name),
     );
-    expect(failing('inner-read-walled')).toHaveLength(1);
+    expect(failing('inner-read-walled')).toHaveLength(2);
   });
 
   it('a join in place of the semi-join fails: a record with two grant rows is answered twice', () => {

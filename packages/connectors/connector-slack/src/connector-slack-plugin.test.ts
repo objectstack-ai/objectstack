@@ -4,6 +4,7 @@ import { describe, it, expect } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
 import { AutomationServicePlugin, type AutomationEngine } from '@objectstack/service-automation';
 import { ConnectorSlackPlugin } from './connector-slack-plugin.js';
+import type { SlackClientService } from './slack-connector.js';
 
 /** A fetch stub mimicking the Slack Web API (HTTP 200 + ok in the body). */
 function stubSlack() {
@@ -72,6 +73,28 @@ describe('ConnectorSlackPlugin — end to end with the automation engine', () =>
         expect(calls[0].init.body).toBe('{"channel":"C42","text":"Deal closed 🎉"}');
         // Slack's logical `ok` propagated back into the flow output.
         expect(result.output).toEqual({ 'post.ok': true });
+
+        await kernel.shutdown();
+    });
+});
+
+describe('ConnectorSlackPlugin — the `slack` client service', () => {
+    it('hands out a client for the caller\'s own token, over the plugin\'s transport options', async () => {
+        const { impl, calls } = stubSlack();
+        const kernel = new LiteKernel();
+        kernel.use(new AutomationServicePlugin());
+        kernel.use(new ConnectorSlackPlugin({ token: 'xoxb-flow-token', fetchImpl: impl }));
+        await kernel.bootstrap();
+
+        const slack = kernel.getService<SlackClientService>('slack');
+        const out = await slack.client('xoxb-organization-token').call({ method: 'conversations.open', params: { users: 'U1' } });
+
+        expect(out.ok).toBe(true);
+        expect(calls).toHaveLength(1);
+        expect(calls[0].url).toBe('https://slack.com/api/conversations.open');
+        // The caller's token, never the plugin's static one.
+        expect((calls[0].init.headers as Record<string, string>).Authorization).toBe('Bearer xoxb-organization-token');
+        expect(calls[0].init.body).toBe('{"users":"U1"}');
 
         await kernel.shutdown();
     });

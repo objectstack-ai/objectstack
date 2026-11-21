@@ -311,12 +311,25 @@ const TENANT_PREDICATE_FLOOR = 3;
 /**
  * `'<file>::<method>::<binding>'` -> reason a reader can check.
  *
- * Empty by design. #6792 closed the last three unscoped read doors, so this
- * starts from zero rather than from a ratchet. A new entry needs a reason,
- * not a name — and "the layer above catches it" is not one: the chokepoint's
- * own contract is what this asserts.
+ * #6792 closed the last three unscoped read doors, so this started from zero
+ * rather than from a ratchet. A new entry needs a reason, not a name — and
+ * "the layer above catches it" is not one: the chokepoint's own contract is
+ * what this asserts. One entry, a decision recorded rather than a door left
+ * open:
+ *
+ *  - `fixedReadLeafSubquery`'s `inner` is the fixed inner read a
+ *    `SharedRecordIds` leaf compiles to, a SUBQUERY embedded as
+ *    `id IN (SELECT record_id FROM sys_record_share …)` in a statement whose
+ *    outer builder IS scoped; it never escapes as a read of its own. ADR-0155
+ *    D2 rules that it carries no tenant scope (① ruled A, ruling 6942854600 on
+ *    #33787) and that the driver card records that absence here.
  */
-const EXEMPT = Object.create(null);
+const EXEMPT = Object.assign(Object.create(null), {
+  'packages/drivers/driver-sql/src/sql-driver-internal-helpers.ts::fixedReadLeafSubquery::inner':
+    'ADR-0155 D2, ① ruled A (ruling 6942854600 on #33787): the fixed inner read of a SharedRecordIds leaf carries '
+    + 'no tenant scope, as today\'s read of sys_record_share carries none; it is a subquery of a statement whose '
+    + 'outer builder applyTenantScope walls, never a read door of its own',
+});
 
 const BUILDER_FACTORY = 'getBuilder';
 const SCOPE_CALL = 'applyTenantScope';
@@ -1324,7 +1337,8 @@ decision and needs a superseding ADR first.`);
 
   console.log(
     `✓ check:tenant-chokepoint: ${discovered} ${BUILDER_FACTORY}() binding(s) across ${scannedFiles} ` +
-    'file(s); every read builder routes through applyTenantScope(), every unscoped one is an insert; ' +
+    'file(s); every read builder routes through applyTenantScope(), every unscoped one is an insert or ' +
+    `one of ${Object.keys(EXEMPT).length} EXEMPT entr(ies) with its reason; ` +
     'no IS NULL arm on a tenant column (ADR-0131 D8).',
   );
 }

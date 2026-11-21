@@ -20,11 +20,13 @@ function makeDriver() {
   // Minimal FilterCondition matcher: implicit equality, a few operators, and the
   // logical `$and`/`$or`/`$not` the engine emits when a summary carries a filter
   // (`{ $and: [{ fk: parentId }, <filter> }] }`). Enough to exercise the merge.
-  const checkOp = (value: any, cond: any): boolean => {
+  const checkOp = (value: any, cond: any, row?: any): boolean => {
     if (cond === null || typeof cond !== 'object' || Array.isArray(cond) || cond instanceof Date) {
       return value === cond;
     }
-    return Object.entries(cond).every(([op, target]: [string, any]) => {
+    return Object.entries(cond).every(([op, raw]: [string, any]) => {
+      // [#34821] A `{ $field }` comparand reads the row's own column.
+      const target = raw && typeof raw === 'object' && typeof raw.$field === 'string' ? row?.[raw.$field] : raw;
       switch (op) {
         case '$eq': return value === target;
         case '$ne': return value !== target;
@@ -49,7 +51,7 @@ function makeDriver() {
       if (k === '$and') return (v as any[]).every((w) => matches(row, w));
       if (k === '$or') return (v as any[]).some((w) => matches(row, w));
       if (k === '$not') return !matches(row, v);
-      return checkOp(row?.[k], v);
+      return checkOp(row?.[k], v, row);
     });
   };
   let n = 0;
@@ -1779,9 +1781,10 @@ describe('[#34465] a predicate update judges each matched row against the parent
     expect(await engine.update('inv_line', { amount: 3 }, { where: { inv: p.id }, multi: true })).toBe(2);
     const write = log.findIndex((e, i) => i >= start && e.op === 'updateMany');
     const before = log.slice(start, write).filter((e) => e.object === 'aggregate:inv_line');
-    // primaries, line_count, total, low, mean: every roll-up of inv_line a rule or predicate reads
-    // (total twice over: directly, and through remaining and headroom).
-    expect(before).toHaveLength(5);
+    // total, low, mean: every roll-up of inv_line a rule or predicate reads (total twice over:
+    // directly, and through remaining and headroom) that the patch can move. [#34821] primaries
+    // (a count filtered on is_primary) and line_count (a count) cannot move under an amount patch.
+    expect(before).toHaveLength(3);
     expect(before.every((e) => Array.isArray(e.ast.groupBy) && e.ast.groupBy[0] === 'inv')).toBe(true);
   });
 });
@@ -1855,5 +1858,403 @@ describe('[#34465] a min / max roll-up whose filter reads through a reference in
     expect(mapDataError(err).status).toBe(400);
     expect((err as ValidationError).fields.map((f) => f.message).join(' | ')).toContain('order active low under 10');
     expect([...storeFor('ord_line').values()].map((r) => r.tag)).toEqual(['x', 'x', 'x']);
+  });
+});
+
+describe('[#34821] a multi-row insert judges a rule reading a parent field calculated from a roll-up as one by one judges it', () => {
+  let engine: ObjectQL;
+  let storeFor: ReturnType<typeof makeDriver>['storeFor'];
+  let log: ReturnType<typeof makeDriver>['log'];
+
+  beforeEach(async () => {
+    engine = new ObjectQL();
+    const d = makeDriver();
+    storeFor = d.storeFor;
+    log = d.log;
+    engine.registerDriver(d.driver, true);
+    await engine.init();
+    engine.registry.registerObject({
+      name: 'bud',
+      fields: {
+        name: { type: 'text' },
+        budget: { type: 'number' },
+        line_count: { type: 'summary', summaryOperations: { object: 'bud_line', field: 'amount', function: 'count' } },
+        total: { type: 'summary', summaryOperations: { object: 'bud_line', field: 'amount', function: 'sum' } },
+        // Calculated from the roll-up: on read (a formula) and on write (a stored computed field).
+        remaining: { type: 'formula', expression: 'record.budget - record.total', returnType: 'number' },
+        headroom: { type: 'number', expression: { dialect: 'cel', source: 'record.budget - record.total' } },
+        // A stored computed field reading its own stored value and the roll-up: a high-water mark.
+        peak: { type: 'number', expression: { dialect: 'cel', source: 'record.peak == null || record.total > record.peak ? record.total : record.peak' } },
+        // CONTROL: calculated from a roll-up of an object no rule of which reads this parent.
+        memo_total: { type: 'summary', summaryOperations: { object: 'bud_memo', field: 'amount', function: 'sum' } },
+        memo_left: { type: 'formula', expression: 'record.budget - record.memo_total', returnType: 'number' },
+      },
+    } as any);
+    engine.registry.registerObject({ name: 'bud_memo', fields: { amount: { type: 'number' }, bud: { type: 'lookup', reference: 'bud' } } } as any);
+    engine.registry.registerObject({
+      name: 'bud_line',
+      fields: {
+        amount: { type: 'number' },
+        tag: { type: 'text' },
+        bud: { type: 'master_detail', reference: 'bud' },
+        // A field-level parent. predicate reading the header's calculated field.
+        note: { type: 'text', requiredWhen: 'parent.headroom < 50' },
+        // Reads the header's formula on `parent`, guarded against a column the reader is not served (`null`).
+        memo: { type: 'text', requiredWhen: "record.tag == 'remg' && parent.remaining != null && parent.remaining < 50" },
+      },
+      validations: [
+        { name: 'remaining_cover', type: 'script', severity: 'error', message: 'line over the remaining budget', condition: "record.tag == 'rem' && record.amount > record.bud.remaining" },
+        { name: 'headroom_cover', type: 'script', severity: 'error', message: 'line over the budget headroom', condition: "record.tag == 'head' && record.amount > record.bud.headroom" },
+        { name: 'peak_cap', type: 'script', severity: 'error', message: 'budget peak at 50 or more', condition: "record.tag == 'peak' && record.bud.peak >= 50" },
+        // Reads the roll-up itself: what a predicate update whose patch cannot move it reads.
+        { name: 'total_cap', type: 'script', severity: 'error', message: 'budget total over 100', condition: "record.tag == 'cap' && record.bud.total > 100" },
+      ],
+    } as any);
+  });
+
+  const bud = (id: string) => storeFor('bud').get(id);
+  const lines = (budId: string) => [...storeFor('bud_line').values()].filter((r) => r.bud === budId);
+
+  async function refusalOf(write: Promise<unknown>): Promise<unknown> {
+    try { await write; } catch (err) { return err; }
+    throw new Error('expected the write to be refused');
+  }
+
+  function expectRuleRefusal(err: unknown, message: string): void {
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err).toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(mapDataError(err).status).toBe(400);
+    expect((err as ValidationError).fields.map((f) => f.message).join(' | ')).toContain(message);
+  }
+
+  for (const [tag, message] of [['rem', 'line over the remaining budget'], ['head', 'line over the budget headroom']] as const) {
+    it(`one by one (the reference answer), ${tag}: the third line reads the field over the total the first two moved, and is refused`, async () => {
+      const p = await engine.insert('bud', { name: 'B', budget: 100 });
+      await engine.insert('bud_line', { bud: p.id, amount: 40, tag, note: 'n' });
+      await engine.insert('bud_line', { bud: p.id, amount: 40, tag, note: 'n' });
+      expectRuleRefusal(await refusalOf(engine.insert('bud_line', { bud: p.id, amount: 40, tag, note: 'n' })), message);
+      expect(bud(p.id).total).toBe(80);
+    });
+
+    it(`multi-row insert, ${tag}: three lines in one call, the third is refused as one by one refuses it, and nothing is written`, async () => {
+      const p = await engine.insert('bud', { name: 'B', budget: 100 });
+      expectRuleRefusal(await refusalOf(engine.insert('bud_line', [1, 2, 3].map(() => ({ bud: p.id, amount: 40, tag, note: 'n' })))), message);
+      expect(lines(p.id)).toHaveLength(0);
+      expect(bud(p.id).total).toBe(0);
+    });
+  }
+
+  it('multi-row insert, under the line: three lines that fit the budget are all admitted, and the roll-up and its calculated fields land as one by one lands them', async () => {
+    const p = await engine.insert('bud', { name: 'B', budget: 100 });
+    const ids = await engine.insert('bud_line', [1, 2, 3].map((n) => ({ bud: p.id, amount: 30, tag: n === 3 ? 'head' : 'rem', note: 'n' })));
+    expect(ids).toHaveLength(3);
+    expect(bud(p.id)).toMatchObject({ total: 90, headroom: 10, peak: 90 });
+  });
+
+  it('multi-row insert preview: three lines of 40 under a budget of 100, the preview refuses the third as the write does', async () => {
+    const p = await engine.insert('bud', { name: 'B', budget: 100 });
+    const batch = [1, 2, 3].map(() => ({ bud: p.id, amount: 40, tag: 'rem', note: 'n' }));
+    const preview = await engine.validate('bud_line', batch, { mode: 'insert' });
+    expect(preview.valid).toBe(false);
+    expect(preview.results!.map((r) => r.valid)).toEqual([true, true, false]);
+    expect(preview.results![2]!.errors.map((e) => e.message).join(' | ')).toContain('line over the remaining budget');
+    expectRuleRefusal(await refusalOf(engine.insert('bud_line', batch)), 'line over the remaining budget');
+    expect(lines(p.id)).toHaveLength(0);
+  });
+
+  it('multi-row insert preview, under the line: three lines of 30 are all valid, and the write admits them', async () => {
+    const p = await engine.insert('bud', { name: 'B', budget: 100 });
+    const batch = [1, 2, 3].map(() => ({ bud: p.id, amount: 30, tag: 'rem', note: 'n' }));
+    const preview = await engine.validate('bud_line', batch, { mode: 'insert' });
+    expect(preview.results!.map((r) => r.valid)).toEqual([true, true, true]);
+    expect(await engine.insert('bud_line', batch)).toHaveLength(3);
+    expect(bud(p.id).total).toBe(90);
+  });
+
+  it('one by one (the reference answer): a field-level parent. predicate reading the header\'s calculated field requires the note on the third line', async () => {
+    const p = await engine.insert('bud', { name: 'B', budget: 100 });
+    await engine.insert('bud_line', { bud: p.id, amount: 40, tag: 'x' });
+    await engine.insert('bud_line', { bud: p.id, amount: 40, tag: 'x' });
+    const err = await refusalOf(engine.insert('bud_line', { bud: p.id, amount: 1, tag: 'x' }));
+    expect(err).toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(mapDataError(err).status).toBe(400);
+    expect((err as ValidationError).fields.map((f) => f.field)).toContain('note');
+  });
+
+  it('multi-row insert: the header the parent. predicate reads carries the calculated field over the moved total, so the third line needs the note too', async () => {
+    const p = await engine.insert('bud', { name: 'B', budget: 100 });
+    const err = await refusalOf(engine.insert('bud_line', [{ bud: p.id, amount: 40, tag: 'x' }, { bud: p.id, amount: 40, tag: 'x' }, { bud: p.id, amount: 1, tag: 'x' }]));
+    expect(err).toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(mapDataError(err).status).toBe(400);
+    expect((err as ValidationError).fields.map((f) => f.field)).toContain('note');
+    expect(lines(p.id)).toHaveLength(0);
+  });
+
+  it('one by one (the reference answer): a high-water mark reads every total so far, so the third line reads 80 and is refused', async () => {
+    const p = await engine.insert('bud', { name: 'B', budget: 100 });
+    await engine.insert('bud_line', { bud: p.id, amount: 80, tag: 'x', note: 'n' });
+    await engine.insert('bud_line', { bud: p.id, amount: -60, tag: 'x', note: 'n' });
+    expect(bud(p.id)).toMatchObject({ total: 20, peak: 80 });
+    expectRuleRefusal(await refusalOf(engine.insert('bud_line', { bud: p.id, amount: 1, tag: 'peak', note: 'n' })), 'budget peak at 50 or more');
+  });
+
+  it('multi-row insert: the parent\'s stored image is carried from row to row as each recompute stores it, so the third line reads the peak 80 and is refused', async () => {
+    const p = await engine.insert('bud', { name: 'B', budget: 100 });
+    // Computed once over the stored row with the moved total (20), the peak would read 20 and the rule admit the line.
+    expectRuleRefusal(await refusalOf(engine.insert('bud_line', [
+      { bud: p.id, amount: 80, tag: 'x', note: 'n' }, { bud: p.id, amount: -60, tag: 'x', note: 'n' }, { bud: p.id, amount: 1, tag: 'peak', note: 'n' },
+    ])), 'budget peak at 50 or more');
+    expect(lines(p.id)).toHaveLength(0);
+  });
+
+  /**
+   * A field-level read rule on the header, shaped like the security
+   * middleware's result mask (`hide` deletes the key): `userId` is not served
+   * `columns`. A system read is not masked.
+   */
+  function withholdBudColumns(userId: string, columns: string[]) {
+    engine.registerMiddleware(async (ctx: any, next: () => Promise<void>) => {
+      await next();
+      if (ctx.object !== 'bud' || ctx.context?.isSystem || ctx.context?.userId !== userId) return;
+      if (!['find', 'findOne'].includes(ctx.operation)) return;
+      const hide = (r: any) => { if (r && typeof r === 'object') for (const c of columns) delete r[c]; };
+      if (Array.isArray(ctx.result)) ctx.result.forEach(hide); else hide(ctx.result);
+    });
+  }
+
+  const noteless = (budId: string) => [{ bud: budId, amount: 40, tag: 'x' }, { bud: budId, amount: 40, tag: 'x' }, { bud: budId, amount: 1, tag: 'x' }];
+
+  const guarded = (budId: string, amounts: number[]) => amounts.map((amount) => ({ bud: budId, amount, tag: 'remg', note: 'n' }));
+  const validOf = async (batch: Record<string, unknown>[], context?: Record<string, unknown>) =>
+    (await engine.validate('bud_line', batch, { mode: 'insert', ...(context ? { context: context as any } : {}) })).results!.map((r) => r.valid);
+
+  it('multi-row insert preview, a caller not served the calculated header field: every row judges it as empty, as the first row does, whatever the header holds', async () => {
+    withholdBudColumns('carol', ['remaining']);
+    const carol = { userId: 'carol' };
+    const verdicts: boolean[][] = [];
+    for (const budget of [100, 1000]) {
+      const p = await engine.insert('bud', { name: 'B', budget });
+      // Precondition: the read door serves carol the header and its inputs, without the withheld column.
+      const served = await engine.findOne('bud', { where: { id: p.id }, context: carol });
+      expect(served).toMatchObject({ id: p.id, budget, total: 0 });
+      expect(served).not.toHaveProperty('remaining');
+      verdicts.push(await validOf(guarded(p.id, [40, 40, 1]), carol));
+    }
+    // CONTROL: a reader served the column needs the memo on the third line (remaining 20), as the write does.
+    const p = await engine.insert('bud', { name: 'B', budget: 100 });
+    expect(await validOf(guarded(p.id, [40, 40, 1]))).toEqual([true, true, false]);
+    expect((await refusalOf(engine.insert('bud_line', guarded(p.id, [40, 40, 1]))) as ValidationError).fields.map((f) => f.field)).toContain('memo');
+    // No row reads a value the first row could not, whatever the withheld column holds:
+    // the earlier rows' amounts steer no withheld column.
+    expect(verdicts).toEqual([[true, true, true], [true, true, true]]);
+  });
+
+  it('multi-row insert preview, a caller not served the roll-up itself: it moves from the stored value, not from the empty column, so the served calculated field reads as one by one serves it', async () => {
+    withholdBudColumns('erin', ['total']);
+    const p = await engine.insert('bud', { name: 'B', budget: 100 });
+    await engine.insert('bud_line', { bud: p.id, amount: 40, tag: 'x', note: 'n' });
+    // One by one: the first line reads remaining 60, the second 40 and needs the memo.
+    // Moved from the empty column instead, the second would read 80.
+    const erin = await engine.validate('bud_line', guarded(p.id, [20, 1]), { mode: 'insert', context: { userId: 'erin' } as any });
+    expect(erin.results!.map((r) => r.valid)).toEqual([true, false]);
+    expect(erin.results![1]!.errors.map((e) => e.field)).toContain('memo');
+    expect(await validOf(guarded(p.id, [20, 1]))).toEqual([true, false]);
+  });
+
+  it('multi-row insert preview, a caller served the calculated field but not its input: the served field moves as one by one serves it, and the third line needs the note', async () => {
+    withholdBudColumns('dave', ['budget']);
+    const p = await engine.insert('bud', { name: 'B', budget: 100 });
+    const preview = await engine.validate('bud_line', noteless(p.id), { mode: 'insert', context: { userId: 'dave' } as any });
+    expect(preview.results!.map((r) => r.valid)).toEqual([true, true, false]);
+    expect(preview.results![2]!.errors.map((e) => e.field)).toContain('note');
+  });
+
+  it('CONTROL: a system preview of the same batch needs the note on the third line, as the write does', async () => {
+    const p = await engine.insert('bud', { name: 'B', budget: 100 });
+    const preview = await engine.validate('bud_line', noteless(p.id), { mode: 'insert' });
+    expect(preview.results!.map((r) => r.valid)).toEqual([true, true, false]);
+    expect((await refusalOf(engine.insert('bud_line', noteless(p.id))) as ValidationError).fields.map((f) => f.field)).toContain('note');
+  });
+
+  it('CONTROL: a multi-row insert no rule of which reads the parent reads no parent row for the calculated fields over its roll-up', async () => {
+    const p = await engine.insert('bud', { name: 'B', budget: 100 });
+    const parentReads = (from: number) => log.slice(from).filter((e) => e.op === 'find' && e.object === 'bud' && e.ast?.where?.id?.$in);
+    let start = log.length;
+    await engine.insert('bud_memo', [{ bud: p.id, amount: 1 }, { bud: p.id, amount: 2 }]);
+    expect(parentReads(start)).toEqual([]);
+    // The probe sees such a read: an insert whose rules read the parent makes them.
+    start = log.length;
+    await engine.insert('bud_line', [{ bud: p.id, amount: 1, tag: 'x', note: 'n' }, { bud: p.id, amount: 2, tag: 'x', note: 'n' }]);
+    expect(parentReads(start).length).toBeGreaterThan(0);
+  });
+});
+
+describe('[#34821] a predicate update whose patch cannot move a roll-up its rules read reads the stored value, as the by-id update does, and leaves a trace where it stands one down', () => {
+  let engine: ObjectQL;
+  let storeFor: ReturnType<typeof makeDriver>['storeFor'];
+  let log: ReturnType<typeof makeDriver>['log'];
+
+  beforeEach(async () => {
+    engine = new ObjectQL();
+    const d = makeDriver();
+    storeFor = d.storeFor;
+    log = d.log;
+    engine.registerDriver(d.driver, true);
+    await engine.init();
+    engine.registry.registerObject({
+      name: 'cap_head',
+      fields: {
+        name: { type: 'text' },
+        total: { type: 'summary', summaryOperations: { object: 'cap_line', field: 'amount', function: 'sum' } },
+        first_day: { type: 'summary', summaryOperations: { object: 'cap_line', field: 'day', function: 'min' } },
+      },
+    } as any);
+    engine.registry.registerObject({
+      name: 'cap_line',
+      fields: {
+        amount: { type: 'number' },
+        day: { type: 'date' },
+        tag: { type: 'text' },
+        head: { type: 'master_detail', reference: 'cap_head' },
+      },
+      validations: [
+        { name: 'total_cap', type: 'script', severity: 'error', message: 'head total over 100', condition: "record.tag == 'cap' && record.head.total > 100" },
+        { name: 'day_set', type: 'script', severity: 'error', message: 'head first day is set', condition: "record.tag == 'day' && record.head.first_day == null" },
+      ],
+    } as any);
+  });
+
+  const head = (id: string) => storeFor('cap_head').get(id);
+
+  async function refusalOf(write: Promise<unknown>): Promise<unknown> {
+    try { await write; } catch (err) { return err; }
+    throw new Error('expected the write to be refused');
+  }
+
+  /** Two lines of 40 under one head, the stored total then left stale at 150 (the children sum to 80). */
+  async function seedStale() {
+    const p = await engine.insert('cap_head', { name: 'H' });
+    const [a] = await engine.insert('cap_line', [{ head: p.id, amount: 40, tag: 'x' }, { head: p.id, amount: 40, tag: 'x' }]);
+    storeFor('cap_head').set(p.id, { ...head(p.id), total: 150 });
+    return { p, a };
+  }
+
+  it('the by-id form (the reference answer): a patch that cannot move the total reads the stored 150, and is refused', async () => {
+    const { a } = await seedStale();
+    const err = await refusalOf(engine.update('cap_line', { id: a.id, tag: 'cap' }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err).toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(mapDataError(err).status).toBe(400);
+  });
+
+  it('predicate update: its first row reads the stored 150 as the by-id form does, not a base aggregated from the children, and nothing is aggregated before the write', async () => {
+    const { p } = await seedStale();
+    const real = engine.aggregate.bind(engine);
+    (engine as any).aggregate = async (object: string, query: any, options?: any) => { log.push({ op: 'find', object: `aggregate:${object}`, ast: query }); return real(object, query, options); };
+    const start = log.length;
+    // Folded over the base (80), both rows would be admitted.
+    const err = await refusalOf(engine.update('cap_line', { tag: 'cap' }, { where: { head: p.id }, multi: true }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err).toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(mapDataError(err).status).toBe(400);
+    expect((err as ValidationError).fields.map((f) => f.message).join(' | ')).toContain('head total over 100');
+    expect(log.slice(start).filter((e) => e.object.startsWith('aggregate:'))).toEqual([]);
+    expect([...storeFor('cap_line').values()].map((r) => r.tag)).toEqual(['x', 'x']);
+  });
+
+  it('CONTROL: a patch that can move the total is still folded', async () => {
+    const { p } = await seedStale();
+    // Over the base: the first row reads 80 (admitted, total then 90), the second 90.
+    expect(await engine.update('cap_line', { tag: 'cap', amount: 45 }, { where: { head: p.id }, multi: true })).toBe(2);
+    expect(head(p.id).total).toBe(90);
+  });
+
+  it('a roll-up the fold stands down leaves one debug line naming it and why', async () => {
+    const p = await engine.insert('cap_head', { name: 'H' });
+    await engine.insert('cap_line', [{ head: p.id, amount: 1, day: '2026-01-02', tag: 'x' }, { head: p.id, amount: 2, day: '2026-01-03', tag: 'x' }]);
+    const debug: unknown[][] = [];
+    const logger = (engine as any).logger;
+    const realDebug = logger.debug.bind(logger);
+    logger.debug = (...args: unknown[]) => { debug.push(args); return realDebug(...args); };
+    expect(await engine.update('cap_line', { tag: 'day', day: '2026-01-01' }, { where: { head: p.id }, multi: true })).toBe(2);
+    const traces = debug.filter(([message]) => String(message).startsWith('Roll-up left unfolded'));
+    expect(traces).toEqual([[expect.any(String), { object: 'cap_line', parentObject: 'cap_head', field: 'first_day', reason: 'not_a_number' }]]);
+  });
+});
+
+describe('[#34821] a predicate update whose patch writes only a { $field } comparand of a roll-up\'s filter moves that roll-up, as the by-id update does', () => {
+  let engine: ObjectQL;
+  let storeFor: ReturnType<typeof makeDriver>['storeFor'];
+
+  beforeEach(async () => {
+    engine = new ObjectQL();
+    const d = makeDriver();
+    storeFor = d.storeFor;
+    engine.registerDriver(d.driver, true);
+    await engine.init();
+    engine.registry.registerObject({
+      name: 'late_head',
+      fields: {
+        name: { type: 'text' },
+        // Counts the lines closed after their due day: the patched due day is a comparand, never a key.
+        late_count: { type: 'summary', summaryOperations: { object: 'late_line', field: 'id', function: 'count', filter: { closed_day: { $gt: { $field: 'due_day' } } } } },
+      },
+    } as any);
+    engine.registry.registerObject({
+      name: 'late_line',
+      fields: {
+        closed_day: { type: 'number' },
+        due_day: { type: 'number' },
+        tag: { type: 'text' },
+        head: { type: 'master_detail', reference: 'late_head' },
+      },
+      validations: [
+        { name: 'one_late', type: 'script', severity: 'error', message: 'head already has a late line', condition: "record.tag == 'late' && record.head.late_count > 0" },
+      ],
+    } as any);
+  });
+
+  const head = (id: string) => storeFor('late_head').get(id);
+
+  async function refusalOf(write: Promise<unknown>): Promise<unknown> {
+    try { await write; } catch (err) { return err; }
+    throw new Error('expected the write to be refused');
+  }
+
+  function expectRuleRefusal(err: unknown): void {
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err).toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(mapDataError(err).status).toBe(400);
+    expect((err as ValidationError).fields.map((f) => f.message).join(' | ')).toContain('head already has a late line');
+  }
+
+  /** Two lines closed on day 5, due on day 10: neither is late. */
+  async function seed() {
+    const p = await engine.insert('late_head', { name: 'H' });
+    const [a, b] = await engine.insert('late_line', [{ head: p.id, closed_day: 5, due_day: 10, tag: 'x' }, { head: p.id, closed_day: 5, due_day: 10, tag: 'x' }]);
+    expect(head(p.id).late_count).toBe(0);
+    return { p, a, b };
+  }
+
+  it('one by one (the reference answer): the first line made late moves the count, so the second reads 1 and is refused', async () => {
+    const { p, a, b } = await seed();
+    await engine.update('late_line', { id: a.id, due_day: 1, tag: 'late' });
+    expect(head(p.id).late_count).toBe(1);
+    expectRuleRefusal(await refusalOf(engine.update('late_line', { id: b.id, due_day: 1, tag: 'late' })));
+  });
+
+  it('predicate update: the second matched row reads the count the first moved, and the update is refused', async () => {
+    const { p } = await seed();
+    // Read as stored (0) at every row, both rows would be admitted.
+    expectRuleRefusal(await refusalOf(engine.update('late_line', { due_day: 1, tag: 'late' }, { where: { head: p.id }, multi: true })));
+    expect([...storeFor('late_line').values()].map((r) => r.tag)).toEqual(['x', 'x']);
+    expect(head(p.id).late_count).toBe(0);
+  });
+
+  it('CONTROL: a patch writing no field the filter reads, as key or comparand, still reads the stored count', async () => {
+    const { p } = await seed();
+    // Stale at 1 (the children count 0): the by-id update reads it, and so must the predicate update.
+    storeFor('late_head').set(p.id, { ...head(p.id), late_count: 1 });
+    expectRuleRefusal(await refusalOf(engine.update('late_line', { tag: 'late' }, { where: { head: p.id }, multi: true })));
   });
 });

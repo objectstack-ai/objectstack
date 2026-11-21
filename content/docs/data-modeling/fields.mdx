@@ -469,10 +469,19 @@ refuse is not counted. A detail object's `requiredWhen` that reads the summary
 on `parent` (the master-detail header, for example
 `requiredWhen: 'parent.line_count >= 2'`) reads it the same way, so the third
 of three bare lines in one batch is refused as the third single insert is.
+A rule that reads a formula or a stored computed field of the parent calculated
+from the summary (`record.budget.remaining`, `parent.headroom < 50`) reads it
+calculated over the summary as the earlier rows moved it, so a row is refused,
+or admitted, as the same row inserted on its own after them would be.
 This holds for `count`, and for `sum`, `min` and `max`
 over number values. An `avg` summary, a `sum`/`min`/`max` meeting a value that
-is not a number, and a summary whose `filter` reads a dotted path through
-another reference keep reading the stored value, as they did before.
+is not a number, and a summary whose `filter` reads through another reference,
+as a dotted path or in the nested form `{ account: { status: 'x' } }`, keep
+reading the stored value, as they did before; a field calculated from one of
+them and from a summary that moves reads the first as stored. A preview of the
+batch (`validate` in insert mode) judges each row the same way, except that a
+column of the master-detail header the caller is not served reads as empty at
+every row.
 An import's **dry run** previews its create rows in the batches the import
 writes them in (200 rows each) and refuses the rows the import refuses, with
 the same message. It writes nothing, so a row in a later batch reads the
@@ -506,8 +515,11 @@ reference, a detail object's `requiredWhen` reading it on `parent`, and a rule
 reading a formula or stored computed field of the parent calculated from it,
 read it as the matched rows judged before leave it, for every summary function,
 `avg` included, and a row that moves to another parent leaves the old one and
-joins the new one. If any row is refused, none is written. Three cases keep
-reading the stored value for every parent the update reads that summary for: a
+joins the new one. If any row is refused, none is written. Four cases keep
+reading the stored value for every parent the update reads that summary for,
+as a by-id update reads it: a summary the patch cannot move (it writes neither
+the reference to the parent, nor the summed field, nor a field the summary's
+`filter` reads, as a key or as a `{ $field }` comparand), a
 summary whose `filter` reads through another reference, as a dotted path or in
 the nested form `{ account: { status: 'x' } }` (or one the in-memory filter
 cannot evaluate), a summary meeting a value that is not a number, and a `min` / `max`

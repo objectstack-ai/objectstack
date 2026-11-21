@@ -27,7 +27,8 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { cleanup, render, waitFor } from '@testing-library/react';
+import { useEffect } from 'react';
+import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { AdapterCtx } from '@object-ui/react';
 import { MetadataProvider, useMetadata } from '../../providers/MetadataProvider';
@@ -497,5 +498,122 @@ describe('objectstack#34244 — a packaged app asks an off-package lookup target
     // objectstack#35306 — the presence read served it, so no by-name read follows.
     expect(calls).not.toContain('object/sys_user');
     expect(calls).toContain(`object?package=${CRM}`);
+  });
+});
+
+describe('objectstack#35455 — round trips until an app route can render, counted in waves', () => {
+  /**
+   * A wave transport: every metadata read is held until the test releases the
+   * whole pending set at once, which is one round trip. What leaves in each
+   * wave, and how many waves pass before `readAppObjectScope` says the route
+   * can render, is the route's metadata hop count after the shell. The app
+   * bundle is entered from the app list too and so rides wave 2 beside these
+   * (`useAppObjectScopePrefetch`); it is not modelled here, so the scope's
+   * views come from the `/meta/view` list, which rides the package list's wave.
+   *
+   * The page list starts once the app is known, as `AppContent` starts it.
+   */
+  const label = (type: string, options?: { packageId?: string; names?: readonly string[] }) =>
+    options?.names ? `${type}?names=${options.names.join(',')}` : options?.packageId ? `${type}?package=${options.packageId}` : type;
+
+  function makeWaveAdapter(apps: unknown[]) {
+    const base = makeAdapter([], apps) as any;
+    const held: Array<{ label: string; go: () => void }> = [];
+    const hold = <T,>(name: string, answer: () => Promise<T>) =>
+      new Promise<T>((resolve, reject) => held.push({ label: name, go: () => void answer().then(resolve, reject) }));
+    const adapter = {
+      ...base,
+      getClient: () => {
+        const client = base.getClient();
+        return {
+          meta: {
+            getItems: (type: string, options?: { packageId?: string; names?: readonly string[] }) =>
+              hold(label(type, options), () => client.meta.getItems(type, options)),
+            getItem: (type: string, name: string) => hold(`${type}/${name}`, () => client.meta.getItem(type, name)),
+          },
+        };
+      },
+    } as unknown as Parameters<typeof MetadataProvider>[0]['adapter'];
+    return { adapter, pending: () => held.map((h) => h.label).sort(), release: () => held.splice(0).forEach((h) => h.go()) };
+  }
+
+  type Referencing = { state: 'hit'; value: readonly string[] } | { state: 'pending' } | { state: 'miss' };
+
+  function WaveProbe({ subPath, referencing }: { subPath: string; referencing: Referencing }) {
+    const metadata = useMetadata() as any;
+    const { apps, readObjectScope, ensureType, getTypeStatus } = metadata;
+    const app = apps.find((a: any) => a?.name === 'crm');
+    const isRecord = subPath.includes('/record/');
+    useEffect(() => {
+      if (app && isRecord) void ensureType?.('page');
+    }, [app, isRecord, ensureType]);
+    const read =
+      app && readObjectScope
+        ? readAppObjectScope(
+            readObjectScope,
+            app,
+            subPath,
+            '',
+            [],
+            undefined,
+            () => {
+              const status = getTypeStatus?.('page');
+              return { pages: Array.isArray(metadata.pages) ? metadata.pages : [], settled: status === 'ready' || status === 'error' };
+            },
+            undefined,
+            () => referencing as never,
+          )
+        : undefined;
+    return <div data-testid="ready">{String(!!read?.ready)}</div>;
+  }
+
+  const settle = async () => {
+    for (let i = 0; i < 6; i++) await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  };
+
+  /** The reads of each wave until the route can render (at most `limit` waves). */
+  async function waves(subPath: string, referencing: Referencing, apps: unknown[] = APPS, limit = 6) {
+    sessionStorage.clear();
+    const transport = makeWaveAdapter(apps);
+    const view = render(
+      <MetadataProvider adapter={transport.adapter}>
+        <MemoryRouter initialEntries={['/']}>
+          <WaveProbe subPath={subPath} referencing={referencing} />
+        </MemoryRouter>
+      </MetadataProvider>,
+    );
+    const seen: string[][] = [];
+    await settle();
+    while (view.getByTestId('ready').textContent !== 'true' && seen.length < limit) {
+      seen.push(transport.pending());
+      transport.release();
+      await settle();
+    }
+    return seen;
+  }
+
+  const SYNTHESIZED: Referencing = { state: 'hit', value: [] };
+
+  it('a record route renders after two waves: the app list, then the page list and the package list together', async () => {
+    expect(await waves('crm_account/record/r1', SYNTHESIZED)).toEqual([['app'], ['object?package=' + CRM, 'page', 'view'].sort()]);
+  });
+
+  it('with the bundle still on the wire, the package list still leaves beside the page list', async () => {
+    const seen = await waves('crm_account/record/r1', { state: 'pending' }, APPS, 2);
+    expect(seen).toEqual([['app'], ['object?package=' + CRM, 'page', 'view'].sort()]);
+  });
+
+  it("CONTROL: the object's list route renders after the same two waves: the app list, then the package list", async () => {
+    expect(await waves('crm_account', SYNTHESIZED)).toEqual([['app'], ['object?package=' + CRM, 'view']]);
+  });
+
+  it('CONTROL: a bundle that cannot name the related objects (no bundle, draft preview) starts no package list beside the page list', async () => {
+    const seen = await waves('crm_account/record/r1', { state: 'miss' }, APPS, 2);
+    expect(seen).toEqual([['app'], ['page']]);
+  });
+
+  it('CONTROL: an app without a package starts no package list beside the page list', async () => {
+    const seen = await waves('crm_account/record/r1', SYNTHESIZED, [{ name: 'crm', navigation: [] }], 2);
+    expect(seen).toEqual([['app'], ['page']]);
   });
 });

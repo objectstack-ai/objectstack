@@ -61,7 +61,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 import { RecordPageColumns } from '../RecordPageColumns';
 import { buildDefaultPageColumns } from '../synth/recordPageColumns';
-import { buildDefaultPageSchema } from '../synth/buildDefaultPageSchema';
+import { buildDefaultHighlights, buildDefaultPageSchema } from '../synth/buildDefaultPageSchema';
 import { DetailView } from '../DetailView';
 import { InlineEditProvider } from '@object-ui/react';
 
@@ -133,6 +133,21 @@ describe('RecordPageColumns — details | the right column (objectstack#27524, T
     expect(column(container, 'right')).toBeNull();
     expect(grid(container).getAttribute('data-record-columns-shown')).toBe('details');
     expect(within(column(container, 'details')!).getByTestId('meta-footer')).toBeTruthy();
+  });
+});
+
+describe('RecordPageColumns — the tab row follows the header (objectstack#35745)', () => {
+  // Measured in the browser (1280, Expense Report): the header's bottom at 92,
+  // the tab row at 140 — the host scroller's 24px top padding and this root's
+  // 24px stacked. The host's scroller pads no top now (RecordDetailView), and
+  // this root's top is 12px at every width; the sides and foot keep the page's.
+  it("the root's top padding is 12px at every width, its sides and foot the page's", () => {
+    const { container } = render(<RecordPageColumns tier="wide" columns={columns} />);
+    const root = container.querySelector('[data-page-type="record"]')!;
+    const classes = root.className.split(/\s+/);
+    expect(classes).toContain('pt-3');
+    expect(classes.filter((c) => /^(?:\w+:)?(?:p|pt|py)-/.test(c) && c !== 'pt-3')).toEqual([]);
+    expect(classes).toEqual(expect.arrayContaining(['px-3', 'md:px-4', 'lg:px-6', 'pb-3', 'md:pb-4', 'lg:pb-6']));
   });
 });
 
@@ -313,16 +328,20 @@ describe('RecordPageColumns — the rail: 审批, 附件, 最近动态, 其他�
   });
 
   it('the rail is the 概览 tab\'s: another tab open draws none, and the strip leaves with it', async () => {
+    // A slotted page placing the strip: the default page draws none since
+    // objectstack#35891, and the columns still draw a placed one on 概览.
+    const lead = { name: 'lead', fields: { name: { type: 'text' }, email: { type: 'email' }, rating: { type: 'select' } } } as any;
     const cols = buildDefaultPageColumns(
-      buildDefaultPageSchema(
-        { name: 'lead', fields: { name: { type: 'text' }, email: { type: 'email' }, rating: { type: 'select' } } } as any,
-        {
-          related: relatedLists,
-          highlightFields: ['email'],
-          statusField: 'rating',
-          stages: [{ value: 'hot', label: 'Hot' }],
+      buildDefaultPageSchema(lead, {
+        related: relatedLists,
+        slots: {
+          highlights: buildDefaultHighlights(lead, {
+            highlightFields: ['email'],
+            statusField: 'rating',
+            stages: [{ value: 'hot', label: 'Hot' }],
+          }),
         },
-      ),
+      }),
     )!;
     expect(cols.strip.length).toBeGreaterThan(0);
     const overview = drawPage('wide', cols, { onEnlargeRelated: vi.fn() });

@@ -684,6 +684,20 @@ type GridFieldProps = FieldWidgetComponentProps<Row[]> & {
    *  so the master-detail host that holds the header and the child schema
    *  hands it over. A column it does not name is in the tenant currency. */
   columnCurrencies?: ColumnCurrencies;
+  /** The values a new line starts with (objectstack#35816): the child
+   *  object's static field defaults, by field name. A grid column carries no
+   *  default (the spec's inline column refuses `defaultValue`), so the host
+   *  that holds the child schema hands them over. Every new line takes them:
+   *  the trailing entry line, "Add", and a line typed into the entry line. A
+   *  line already in the value keeps what it holds. Absent: a new line starts
+   *  blank, as before. */
+  newRowValues?: Row;
+  /** When the host sets it, an empty required cell on a NEW line (one with
+   *  no id) is flagged only while it is `true` (objectstack#35816): a line
+   *  the user just added does not read red before the host has tried to save
+   *  it, and does once a save was refused. A stored line is flagged as
+   *  before. Absent: every line is flagged at once, as before. */
+  newRowRequiredShown?: boolean;
 };
 
 /**
@@ -750,6 +764,35 @@ function RetiredGridFieldKeys({ message, keys }: { message: string; keys: readon
 }
 
 /**
+ * objectstack#35816 — marks a line that `Add` started on the host's
+ * `newRowValues` and that nobody has edited since. Such a line holds only its
+ * defaults, and a host may skip it at save like a blank one; any edit to the
+ * line takes the mark off, so a value the user typed counts as input even when
+ * it equals the default. A symbol key: `Object.keys`/`Object.entries` and
+ * `JSON.stringify` (so every write payload) skip it, while the spread copies a
+ * host or a renumbering makes keep it. Set only when the host passes
+ * `newRowValues`, so a host that passes none sees rows exactly as before.
+ */
+export const UNTOUCHED_NEW_ROW: unique symbol = Symbol.for('@object-ui/fields.untouchedNewRow');
+
+/** True for a line `Add` started on its defaults and nobody has edited ({@link UNTOUCHED_NEW_ROW}). */
+export function isUntouchedNewRow(row: unknown): boolean {
+  return row != null && typeof row === 'object' && (row as Record<symbol, unknown>)[UNTOUCHED_NEW_ROW] === true;
+}
+
+/** The row without its {@link UNTOUCHED_NEW_ROW} mark: an edit makes it input. */
+function touched(row: Row): Row {
+  if (!isUntouchedNewRow(row)) return row;
+  const { [UNTOUCHED_NEW_ROW]: _untouched, ...rest } = row as Row & { [UNTOUCHED_NEW_ROW]?: true };
+  return rest;
+}
+
+/** A line the server already stores carries its id (`id`, `_id` or `recordId`). */
+function rowHasId(row: Row): boolean {
+  return [row.id, row._id, row.recordId].some((v) => v != null && v !== '');
+}
+
+/**
  * The `grid` field widget. A field whose metadata carries one of the retired
  * snake_case keys is refused by name ({@link RetiredGridFieldKeys}); any other
  * field draws the grid.
@@ -776,6 +819,8 @@ function GridFieldBody({
   onAdd,
   lookupAutofill,
   columnCurrencies,
+  newRowValues,
+  newRowRequiredShown,
   ...props
 }: GridFieldProps) {
   // The field-level keys, read as `GridFieldMetadata` declares them and as
@@ -931,8 +976,10 @@ function GridFieldBody({
   const blankRow = useCallback((): Row => {
     const blank: Row = {};
     for (const c of columns) blank[c.name] = null;
-    return blank;
-  }, [columns]);
+    // objectstack#35816 — a new line starts on the defaults the host knows,
+    // so a required column with a default is filled, not flagged empty.
+    return newRowValues ? { ...blank, ...newRowValues } : blank;
+  }, [columns, newRowValues]);
 
   /**
    * Merge a field patch into a row. `rowIdx === rows.length` targets the
@@ -948,7 +995,7 @@ function GridFieldBody({
         emit([...rows, computeRow(columns, { ...blankRow(), ...patch }, tenantCurrency, columnCurrencies)]);
         return;
       }
-      emit(rows.map((r, i) => (i === rowIdx ? computeRow(columns, { ...r, ...patch }, tenantCurrency, columnCurrencies) : r)), false);
+      emit(rows.map((r, i) => (i === rowIdx ? computeRow(columns, { ...touched(r), ...patch }, tenantCurrency, columnCurrencies) : r)), false);
     },
     [rows, columns, maxRows, blankRow, emit, tenantCurrency, columnCurrencies],
   );
@@ -1003,8 +1050,10 @@ function GridFieldBody({
 
   const addRow = useCallback(() => {
     if (maxRows != null && rows.length >= maxRows) return;
-    emit([...rows, blankRow()]);
-  }, [rows, blankRow, maxRows, emit]);
+    // objectstack#35816 — a line Add starts on the host's defaults is marked
+    // untouched until its first edit (`UNTOUCHED_NEW_ROW`).
+    emit([...rows, newRowValues ? { ...blankRow(), [UNTOUCHED_NEW_ROW]: true } : blankRow()]);
+  }, [rows, blankRow, maxRows, emit, newRowValues]);
 
   // Keyboard navigation across cells (spreadsheet-style): the table is a focus
   // grid. Enter / ArrowUp / ArrowDown move between rows in the same column;
@@ -1049,7 +1098,8 @@ function GridFieldBody({
       if (!src) return;
       const { id: _i, _id: _i2, recordId: _i3, ...copy } = src as any;
       const next = [...rows];
-      next.splice(rowIdx + 1, 0, { ...copy });
+      // A copy is a line the user made, so it is not an untouched one.
+      next.splice(rowIdx + 1, 0, touched({ ...copy }));
       emit(next);
     },
     [rows, maxRows, emit],
@@ -1523,8 +1573,13 @@ function GridFieldBody({
                       // grid failed while empty (objectui#3318) — see
                       // `hostFailedEmpty`.
                       const required = cellRules(c, row).required;
+                      // objectstack#35816 — a new line waits for the host's
+                      // word before it reads red; a stored line does not.
+                      const newRowWaits =
+                        newRowRequiredShown === false && !isGhost && !rowHasId(row);
                       const invalid =
                         (!isGhost || hostFailedEmpty) &&
+                        !newRowWaits &&
                         !isList &&
                         required &&
                         !c.computed &&
