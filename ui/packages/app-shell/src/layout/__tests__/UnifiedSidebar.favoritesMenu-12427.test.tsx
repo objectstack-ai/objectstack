@@ -58,7 +58,7 @@ vi.mock('@object-ui/permissions', async (importOriginal) => ({
   usePermissions: () => ({ can: () => true, hasCapabilities: () => viewer.canAuthorMetadata }),
 }));
 
-let metadataState: { apps: unknown[]; objects: unknown[] };
+let metadataState: { apps: unknown[]; objects: unknown[]; readObjectScope?: unknown; getTypeStatus?: unknown };
 vi.mock('../../providers/MetadataProvider', () => ({
   useMetadata: () => metadataState,
 }));
@@ -155,7 +155,7 @@ function Where() {
   return <output data-testid="where">{`${location.pathname}${location.search}`}</output>;
 }
 
-function renderSidebar() {
+function renderSidebar(scope: Partial<Pick<typeof metadataState, 'readObjectScope' | 'getTypeStatus'>> = {}) {
   // Each app is owned by a package, so Design has a Studio surface to open
   // (objectui#12520); `sales` is the app another favorite was starred in. Both
   // packages are served writable (`beforeEach`), so the gate's package half
@@ -166,6 +166,7 @@ function renderSidebar() {
       { name: 'sales', label: 'Sales', active: true, _packageId: 'com.acme.sales', navigation: [] },
     ],
     objects: [],
+    ...scope,
   };
   return render(
     <MemoryRouter initialEntries={['/apps/crm']}>
@@ -182,8 +183,8 @@ function renderSidebar() {
 const tick = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 
 /**
- * A stored favorite's row reads its type icon, then its stored label: `📋Acme`
- * for a record or an object, as the group after Recent drew it.
+ * A stored favorite's row reads its stored label alone (`Acme`): its icon is a
+ * tile, which carries no text (objectstack#36141).
  */
 
 /** Every sidebar group's label text, top to bottom. */
@@ -294,7 +295,7 @@ describe('UnifiedSidebar: the Favorites section sits at the top (objectui#12427)
     renderSidebar();
     await tick();
 
-    expect(favoriteLabels()).toEqual(['📋Deals', '📋Acme']);
+    expect(favoriteLabels()).toEqual(['Deals', 'Acme']);
     expect(within(favoritesSection()!).getByRole('link', { name: /Acme/ })).toHaveAttribute('href', RECORD_FAVORITE.href);
     expect(localStorage.getItem(STORE_KEY)).toBe(before);
   });
@@ -319,7 +320,7 @@ describe('UnifiedSidebar: the Favorites section sits at the top (objectui#12427)
     renderSidebar();
     await tick();
     expect(screen.getAllByText('Favorites')).toHaveLength(1);
-    expect(favoriteLabels()).toEqual(['Accounts', '📋Acme']);
+    expect(favoriteLabels()).toEqual(['Accounts', 'Acme']);
   });
 
   it('a stored favorite\'s menu removes it; Design shows for an object favorite and not for a record', async () => {
@@ -333,7 +334,7 @@ describe('UnifiedSidebar: the Favorites section sits at the top (objectui#12427)
 
     expect(await openMenu('Acme')).toEqual(['Remove from favorites', 'Open in new tab', 'Copy link']);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Remove from favorites' }));
-    await waitFor(() => expect(favoriteLabels()).toEqual(['📋Deals']));
+    await waitFor(() => expect(favoriteLabels()).toEqual(['Deals']));
   });
 });
 
@@ -356,5 +357,67 @@ describe('UnifiedSidebar: Design opens the Studio surface the app bar opens (obj
     await waitFor(() =>
       expect(screen.getByTestId('where')).toHaveTextContent('/studio/com.acme.sales/data?surface=object:sales_quote'),
     );
+  });
+});
+
+describe('objectstack#36141 — Favorites, Recent and the menu draw one tile per row', () => {
+  const DASHBOARD_FAVORITE: FavoriteItem = {
+    id: 'dashboard:pipeline',
+    label: 'Pipeline',
+    href: '/apps/crm/dashboard/pipeline',
+    type: 'dashboard',
+    favoritedAt: '2026-10-03T00:00:00.000Z',
+  };
+  const tileKind = (row: Element) =>
+    row.querySelector('[data-object-icon-tile]') ? 'object' : row.querySelector('[data-neutral-icon-tile]') ? 'neutral' : 'none';
+
+  it('an object or record favorite is its object’s tile, a dashboard favorite the neutral tile; no emoji', async () => {
+    seed([OBJECT_FAVORITE, RECORD_FAVORITE, DASHBOARD_FAVORITE]);
+    renderSidebar();
+    await waitFor(() => expect(favoriteLabels()).toEqual(['Deals', 'Acme', 'Pipeline']));
+    const links = within(favoritesSection()!).getAllByRole('link');
+    expect(links.map(tileKind)).toEqual(['object', 'object', 'neutral']);
+    expect(favoritesSection()!.textContent).not.toMatch(/[📊📈📄📋]/u);
+  });
+
+  it('a menu link that is not an object is the neutral tile beside the object rows', async () => {
+    renderSidebar();
+    await tick();
+    expect(menuRows().map((row) => tileKind(within(row).getByRole('link')))).toEqual(['object', 'object', 'neutral']);
+  });
+
+  it('a Recent record is its object’s tile, a Recent metadata item the neutral tile', async () => {
+    recent.items = [
+      { id: 'record:account:1', type: 'record', label: 'Acme', href: '/apps/crm/account/record/1', visitedAt: '2026-10-08T10:00:00.000Z' },
+      RECENT,
+    ];
+    renderSidebar();
+    await tick();
+    fireEvent.click(screen.getByText('Recent'));
+    const group = screen.getByText('Recent').closest('[data-sidebar="group"]')!;
+    expect(within(group as HTMLElement).getAllByRole('link').map(tileKind)).toEqual(['object', 'neutral']);
+  });
+
+  it('asks the objects its rows name in ONE presence read, and never asks a missing one by name (objectstack#34692)', async () => {
+    seed([OBJECT_FAVORITE, RECORD_FAVORITE]);
+    const calls: Array<{ names?: string[]; batch?: boolean }> = [];
+    const readObjectScope = vi.fn((args: { names?: string[]; batch?: boolean }) => {
+      calls.push(args);
+      if (args.batch) {
+        const asked = args.names ?? [];
+        return { objects: asked.filter((n) => n === 'account').map((name) => ({ name, icon: 'building', color: 'teal' })), missing: asked.filter((n) => n !== 'account'), settled: true };
+      }
+      return { objects: (args.names ?? []).filter((n) => n === 'account').map((name) => ({ name, icon: 'building', color: 'teal' })) };
+    });
+    renderSidebar({ readObjectScope, getTypeStatus: () => 'idle' });
+    await waitFor(() => expect(favoriteLabels()).toEqual(['Deals', 'Acme']));
+    const presence = calls.filter((c) => c.batch);
+    expect(presence.length).toBeGreaterThan(0);
+    expect(presence.every((c) => [...(c.names ?? [])].sort().join() === 'account,crm_deal')).toBe(true);
+    // `crm_deal` is missing: no by-name read names it, and its row is the neutral-coloured object tile.
+    expect(calls.filter((c) => !c.batch && (c.names ?? []).includes('crm_deal'))).toEqual([]);
+    const [deals, acme] = within(favoritesSection()!).getAllByRole('link');
+    expect(deals.querySelector('[data-object-icon-tile]')?.getAttribute('data-object-icon-tile')).toBe('gray');
+    expect(acme.querySelector('[data-object-icon-tile]')?.getAttribute('data-object-icon-tile')).toBe('teal');
   });
 });
