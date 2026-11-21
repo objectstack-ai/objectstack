@@ -164,8 +164,7 @@ in neither). So:
   is not in hand, which fails closed rather than reading an update as an
   insert. The `before*` dispatch of a predicate (`multi: true`) write is
   **not** such a case: `beforeUpdate` / `beforeDelete` dispatch once per
-  matched row, each on a single-record-shaped context whose `previous` is that
-  row's pre-image and whose `input.id` (`handler`; a `body`: `ctx.previous.id`) names the row (ADR-0058 Addendum II,
+  matched row, each with that row's pre-image as `previous` (ADR-0058 Addendum II,
   D1/D2), so a transition condition evaluates there exactly as on a
   single-record write, and `record` is that row's state, stored ⊕ payload. Only
   the *payload* stays batch-scoped (D3):
@@ -246,17 +245,11 @@ The sandbox is handed a **JSON snapshot** of these (built by
 | `ctx.text` | `(key, params?) => Promise<string>` | A declared sentence in the organization's language — [`texts`](#declared-texts-texts). |
 | `ctx.title` | `(field?) => Promise<string \| null>` | **Name the record, not its id.** `ctx.title()` resolves this object's `nameField`, a **formula** included (no extra read); `ctx.title('account_id')` resolves a lookup's title (needs `api.read`). `null` when there is no title, never the id. **Per door:** `body` has it; a deprecated `handler` gets it at runtime, undeclared on `HookContext` (TS2339 when annotated) — use `body`; `ql.registerHook` and a bare `ObjectQL` `bindHooks` lack it. |
 
-Action bodies additionally receive `ctx.recordId` and `ctx.record`, and their
+(Action bodies additionally receive `ctx.recordId` and `ctx.record`, and their
 wrap is `(async (input, ctx) => { … })(input, ctx)` — the action params arrive as
-the first arg, so `input` and `ctx` are **already bound** in an action body.
-
-- **Refused when it declares them again:** `const input = ctx.input || {};` (or
-  `let ctx = …`) is `action-body-does-not-compile`: an **error** from
-  `os validate`, `os build`, `os lint` and a runtime action or object save
-  (`422 INVALID_METADATA`), naming the action, the `SyntaxError` and its line.
-  Fix: read the params as `input` (they are also `ctx.input`), or rename the
-  local (`const params = ctx.input || {};`). `os explain
-  action-body-does-not-compile` prints the rule.
+`input`. Both are already bound: `const input = ctx.input || {};` or `let ctx`
+is `action-body-does-not-compile`, refused
+[like a hook body's](#sandbox-restrictions).)
 
 ### `ctx.api.object(name)` — the cross-object repo
 
@@ -346,12 +339,12 @@ The body runs in an isolated QuickJS VM, **not** Node:
   the hook. A `body` must be **self-contained**: inline the helper, or keep that
   hook as a bundled (deprecated) `handler`.
 - **Refused when it does not compile:** a `js` source is compiled, unrun, inside
-  its `(async (ctx) => { … })` wrapper, where `ctx` is already declared. So
+  its wrapper, where `ctx` is already declared. So
   `const ctx = ctx.input || {};` (or `let ctx`, one name declared twice, any
   syntax error) is `hook-body-does-not-compile`: an **error** from `os validate`,
-  `os build`, `os lint` and a runtime hook save (`422 INVALID_METADATA`), naming
+  `os build`, `os lint` and a runtime save (`422 INVALID_METADATA`), naming
   the hook, the `SyntaxError` and its line. Fix: use `ctx` as it is, or rename
-  the local (`const input = ctx.input || {};`). A job's `js` body runs in the
+  the local (`const data = ctx.input || {};`). A job's `js` body runs in the
   same wrapper: `job-body-does-not-compile`, from the three commands. A regex
   pattern the checking engine refuses is a warning: the runtime may accept it.
 
