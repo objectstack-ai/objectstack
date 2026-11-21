@@ -14,6 +14,7 @@
 //   Datasources                  `@objectstack/service-datasource`
 //   Connector Credentials        `@objectstack/service-automation`
 //   Connector Connections        `@objectstack/service-automation` (same contribution)
+//   Slack                        `@objectstack/service-messaging` (with connector-slack composed)
 //   Cloud Connection             `@objectstack/cloud-connection`
 //
 // Each contributor states the group's other priorities in its own header so
@@ -35,16 +36,18 @@
 // Why it lives in `packages/cli/test/`
 // ---------------------------------------------------------------------------
 // The same reason as `connect-agent-both-halves-wire.pin.test.ts` beside it:
-// this is a COMPOSED fact across five packages and the registry fold, and
+// this is a COMPOSED fact across six packages and the registry fold, and
 // `packages/cli` is the only workspace package that depends on all of them.
 //
-// Two of the five register their contribution from inside `init()` through
+// Two of the six register their contribution from inside `init()` through
 // the `manifest` service rather than exporting it, so they are booted here on
 // a context that serves exactly that service — the shape
 // `packages/cli/scripts/check-app-nav-i18n.mjs` boots the same two with.
 // `@objectstack/service-automation` registers its bundle at `kernel:ready`,
 // which this context never fires, so its exported bundle is read directly, as
-// that gate does too.
+// that gate does too. `@objectstack/service-messaging` registers its Slack
+// bundle at `kernel:ready` too, and only with connector-slack composed; it is
+// read the same way.
 
 import { describe, expect, it } from 'vitest';
 import { CLOUD_CONNECTION_UI_BUNDLE } from '@objectstack/cloud-connection';
@@ -54,6 +57,7 @@ import { SETUP_APP, SETUP_NAV_CONTRIBUTIONS } from '@objectstack/platform-object
 import { WebhookOutboxPlugin } from '@objectstack/plugin-webhooks';
 import { CONNECTOR_CREDENTIALS_UI_BUNDLE } from '@objectstack/service-automation';
 import { DatasourceAdminServicePlugin } from '@objectstack/service-datasource';
+import { SLACK_SETUP_UI_BUNDLE } from '@objectstack/service-messaging';
 
 type AnyRec = Record<string, any>;
 
@@ -67,6 +71,7 @@ const EXPECTED_TIERS: readonly (readonly string[])[] = [
     ['nav_webhooks', 'nav_http_deliveries', 'nav_datasources'],
     // One contribution carries both, in this order (ADR-0143 D5 added the second).
     ['nav_connector_credentials', 'nav_connector_connections'],
+    ['nav_slack'],
     ['nav_cloud_connection'],
 ];
 
@@ -105,6 +110,7 @@ async function setupContributions(): Promise<Array<{ packageId: string; contribu
         // reds if it moves back.
         ['@objectstack/mcp', [CONNECT_AGENT_UI_BUNDLE as AnyRec]],
         ['@objectstack/service-automation', [CONNECTOR_CREDENTIALS_UI_BUNDLE as AnyRec]],
+        ['@objectstack/service-messaging', [SLACK_SETUP_UI_BUNDLE as AnyRec]],
         ['@objectstack/cloud-connection', [CLOUD_CONNECTION_UI_BUNDLE as AnyRec]],
     ];
     const out: Array<{ packageId: string; contribution: AnyRec }> = SETUP_NAV_CONTRIBUTIONS.map((contribution) => ({

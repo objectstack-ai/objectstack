@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { selectOption } from './helpers';
+import { addLineItem, selectOption } from './helpers';
 
 /**
  * B2 follow-up (#1581): parent-scoped conditional rules in inline grids —
@@ -22,7 +22,10 @@ test('a line locks when the header status becomes "paid" and unlocks when it cha
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByTestId('md-form-submit')).toBeVisible();
 
+  // The grid draws no blank entry row (objectstack#35507): "Add line" appends
+  // the row whose lock this case observes.
   const grid = dialog.getByTestId('line-items');
+  await addLineItem(page);
   const qty = grid.locator('input[aria-label="Qty"]').first();
   const unitPrice = grid.locator('input[aria-label="Unit Price"]').first();
   await expect(qty).toBeVisible();
