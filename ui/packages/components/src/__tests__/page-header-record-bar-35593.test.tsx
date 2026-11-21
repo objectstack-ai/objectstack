@@ -165,37 +165,6 @@ describe('page:header in the host bar (objectstack#35593)', () => {
   });
 });
 
-describe('the record state\'s ONE group (objectstack#35593)', () => {
-  it('hands the group the record\'s row and the record\'s actions as ⋯ items, and draws what it returns', async () => {
-    const seen: RecordHeaderGroupParts[] = [];
-    const group = (parts: RecordHeaderGroupParts) => {
-      seen.push(parts);
-      return <button type="button" data-testid="state-lead">通过</button>;
-    };
-    renderHeader({ bar: vi.fn(), state: { group } });
-    const actionSlot = screen.getByTestId('action-slot');
-    await waitFor(() => expect(actionSlot.querySelector('[data-testid="state-lead"]')).toBeTruthy());
-
-    const last = seen[seen.length - 1];
-    expect(last.face).toBe('row');
-    expect(last.recordRow).toBeTruthy();
-    expect(last.recordMenuItems).toBeTruthy();
-    // The group took the row: the record's own inline buttons are not drawn.
-    expect(inlineButtons(actionSlot)).not.toContain('Convert');
-  });
-
-  it('a group that returns the record\'s row draws the record\'s row unchanged', async () => {
-    renderHeader({ bar: vi.fn(), state: { group: (parts) => parts.recordRow } });
-    const actionSlot = screen.getByTestId('action-slot');
-    await waitFor(() => expect(inlineButtons(actionSlot)).toContain('Convert'));
-  });
-
-  it('without a host bar the state\'s tags sit under the record\'s name', async () => {
-    renderHeader({ state: { tags: <span data-testid="state-tag">审批中</span> } });
-    await waitFor(() => expect(document.querySelector('[data-record-header-tags] [data-testid="state-tag"]')).toBeTruthy());
-  });
-});
-
 // objectstack#35415 — the host's name for the record (`RecordHeaderState.title`)
 // is the heading in both faces, its node drawn inside the H1; absent or empty,
 // the header's own title stands.
@@ -224,5 +193,36 @@ describe('the record state\'s title (objectstack#35415)', () => {
   it('CONTROL — an empty host title leaves the record\'s own name', async () => {
     renderHeader({ state: { title: { text: '  ', node: <span>ignored</span> } } });
     await waitFor(() => expect(document.querySelector('header h1')?.textContent).toBe('Mira Costa'));
+  });
+});
+
+describe('the record state\'s ONE group (objectstack#35593)', () => {
+  it('hands the group the record\'s row and the record\'s actions as ⋯ items, and draws what it returns', async () => {
+    const seen: RecordHeaderGroupParts[] = [];
+    const group = (parts: RecordHeaderGroupParts) => {
+      seen.push(parts);
+      return <button type="button" data-testid="state-lead">通过</button>;
+    };
+    renderHeader({ bar: vi.fn(), state: { group } });
+    const actionSlot = screen.getByTestId('action-slot');
+    await waitFor(() => expect(actionSlot.querySelector('[data-testid="state-lead"]')).toBeTruthy());
+
+    const last = seen[seen.length - 1];
+    expect(last.face).toBe('row');
+    expect(last.recordRow).toBeTruthy();
+    expect(last.recordMenuItems).toBeTruthy();
+    // The group took the row: the record's own inline buttons are not drawn.
+    expect(inlineButtons(actionSlot)).not.toContain('Convert');
+  });
+
+  it('a group that returns the record\'s row draws the record\'s row unchanged', async () => {
+    renderHeader({ bar: vi.fn(), state: { group: (parts) => parts.recordRow } });
+    const actionSlot = screen.getByTestId('action-slot');
+    await waitFor(() => expect(inlineButtons(actionSlot)).toContain('Convert'));
+  });
+
+  it('without a host bar the state\'s tags sit under the record\'s name', async () => {
+    renderHeader({ state: { tags: <span data-testid="state-tag">审批中</span> } });
+    await waitFor(() => expect(document.querySelector('[data-record-header-tags] [data-testid="state-tag"]')).toBeTruthy());
   });
 });
