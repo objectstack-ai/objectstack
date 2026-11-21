@@ -320,8 +320,10 @@ describe('objectstack#35955 — the layout and the row colour the reader picks a
     mount(SHARED.name);
     await settle();
     await waitFor(() => expect(listProps.current).not.toBeNull());
-    expect(listProps.current?.schema.viewType).toBe('kanban');
-    expect(listProps.current?.schema.rowColor).toEqual({ field: 'status', colors: {} });
+    // Read through a cast: the assignment above narrows `current` to `null` for the checker.
+    const remounted = listProps.current as Record<string, any> | null;
+    expect(remounted?.schema.viewType).toBe('kanban');
+    expect(remounted?.schema.rowColor).toEqual({ field: 'status', colors: {} });
   });
 
   it('picking the view\'s own layout and colour again drops those parts', async () => {
