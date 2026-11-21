@@ -1374,6 +1374,7 @@ const zhHant = {
     deleteCommentConfirm: '確定要刪除這條評論嗎？',
     commentEditFailed: '您的修改未儲存，評論保留原有內容。',
     commentDeleteFailed: '評論未刪除，請重試。',
+    commentDeleted: '評論已刪除',
     mentionsWithheld: '{{names}} 不會收到這條評論的通知。',
     linkCopyFailed: '複製連結失敗',
     claim: '認領',

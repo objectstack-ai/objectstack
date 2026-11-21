@@ -1550,6 +1550,7 @@ const pt = {
     deleteCommentConfirm: "Tem certeza de que deseja excluir este comentário?",
     commentEditFailed: "Sua edição não foi salva. O comentário mantém o texto anterior.",
     commentDeleteFailed: "O comentário não foi excluído. Tente novamente.",
+    commentDeleted: "Comentário excluído",
     mentionsWithheld: "Nenhuma notificação deste comentário será enviada para {{names}}.",
     linkCopyFailed: "Falha ao copiar o link",
     claim: "Assumir",

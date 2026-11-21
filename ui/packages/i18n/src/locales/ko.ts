@@ -1507,6 +1507,7 @@ const ko = {
     deleteCommentConfirm: "이 댓글을 삭제하시겠습니까?",
     commentEditFailed: "수정 내용이 저장되지 않았습니다. 댓글은 이전 내용을 유지합니다.",
     commentDeleteFailed: "댓글이 삭제되지 않았습니다. 다시 시도해 주세요.",
+    commentDeleted: "댓글이 삭제되었습니다",
     mentionsWithheld: "{{names}}에게는 이 댓글의 알림이 전송되지 않습니다.",
     linkCopyFailed: "링크 복사 실패",
     claim: "담당하기",

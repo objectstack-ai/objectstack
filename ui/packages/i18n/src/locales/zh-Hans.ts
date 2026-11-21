@@ -1374,6 +1374,7 @@ const zh = {
     deleteCommentConfirm: '确定要删除这条评论吗？',
     commentEditFailed: '您的修改未保存，评论保留原有内容。',
     commentDeleteFailed: '评论未删除，请重试。',
+    commentDeleted: '评论已删除',
     mentionsWithheld: '{{names}} 不会收到这条评论的通知。',
     linkCopyFailed: '复制链接失败',
     claim: '认领',
