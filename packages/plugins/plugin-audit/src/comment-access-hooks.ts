@@ -1166,10 +1166,7 @@ export function installCommentAccessHooks(
       if (ctx?.session?.isSystem) return;
       if (!ctx?.session) return;
       const rows = await resolveTargetRows(ctx, 'update');
-      // [#36071] A thread is resolved on its top-level comment, never on a
-      // reply — refused for every non-system caller, the reply's author too.
       const data: unknown = ctx?.input?.data;
-      if (namesResolution(data)) refuseResolutionOnReply(rows);
       if (rows.length) {
         // [#36071, ruling record 7063285032] Resolving or reopening a thread,
         // and nothing else, is collaboration: the rule that admits a new
@@ -1177,6 +1174,12 @@ export function installCommentAccessHooks(
         if (isResolutionOnlyUpdate(data)) await authorizeResolution(ctx, rows);
         else await authorizeRows(ctx, rows, 'update');
       }
+      // [#36071] A thread is resolved on its top-level comment, never on a
+      // reply — refused for every non-system caller, the reply's author too.
+      // AFTER the access gate: `rows` were read in system context, so a caller
+      // who cannot see the record must meet the not-visible refusal above
+      // (#21755), never a 400 that confirms the reply exists.
+      if (namesResolution(data)) refuseResolutionOnReply(rows);
 
       // Moving a comment to another thread is an insert into that thread: the
       // NEW parent must be readable, or an authorized edit of your own comment

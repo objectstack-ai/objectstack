@@ -1483,7 +1483,10 @@ describe('#36071 — resolving a thread: who may, and only on a thread (ruling r
 
   it('is_resolved on a reply is refused 400 — its author and a parent editor included', async () => {
     const { beforeUpdate } = install({ comments: [root, reply], sharing: { canEdit: async () => true } });
-    for (const caller of [{ userId: 'rep1' }, { userId: 'manager' }, READER]) {
+    // A record editor reads the record too: the refusal now runs after the
+    // access gate, so the editor's session must see the parent.
+    const EDITOR = { userId: 'manager', visible: ['crm_opportunity/opp1'] };
+    for (const caller of [{ userId: 'rep1' }, EDITOR, READER]) {
       for (const data of [{ is_resolved: true }, { is_resolved: false, body: 'b' }]) {
         await expect(beforeUpdate(writeCtx('beforeUpdate', { id: 'c2', data }, caller))).rejects.toMatchObject({
           code: 'VALIDATION_ERROR',
@@ -1496,6 +1499,15 @@ describe('#36071 — resolving a thread: who may, and only on a thread (ruling r
     await expect(
       beforeUpdate(writeCtx('beforeUpdate', { id: 'c2', data: { body: 'edited' } }, { userId: 'rep1' })),
     ).resolves.toBeUndefined();
+  });
+
+  it('is_resolved on a reply from a caller who cannot read the record meets the not-visible refusal, not the 400', async () => {
+    const { beforeUpdate } = install({ comments: [root, reply], sharing: { canEdit: async () => false } });
+    for (const data of [{ is_resolved: true }, { is_resolved: true, body: 'b' }]) {
+      await expect(
+        beforeUpdate(writeCtx('beforeUpdate', { id: 'c2', data }, { userId: 'rep2', visible: [] })),
+      ).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    }
   });
 
   it('a new comment is unresolved whatever the client sent', async () => {
