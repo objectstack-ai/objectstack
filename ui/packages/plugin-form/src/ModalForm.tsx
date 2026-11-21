@@ -1360,6 +1360,10 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
   const dialogTitle = schema.title ? (
     <DialogTitle className="flex items-center gap-2 text-base">
       {ObjectIconGlyph && (
+        // `resolveIcon` returns a STABLE component out of lucide's static
+        // record; it does not create one during render (the annotation the
+        // other seam call sites carry).
+        // eslint-disable-next-line react-hooks/static-components
         <ObjectIconGlyph
           className="h-4 w-4 shrink-0 text-muted-foreground"
           aria-hidden="true"
