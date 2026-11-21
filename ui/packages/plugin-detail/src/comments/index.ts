@@ -9,7 +9,18 @@
 // objectstack#36075 — the record's comment surfaces: the parts every surface
 // shares (the desktop panel, the phone's comment page) and the desktop's own.
 export { useRecordComments, type RecordCommentsData } from './useRecordComments';
-export { buildCommentThreads, latestRepliers, type CommentThreadData } from './commentThreads';
+export {
+  buildCommentThreads,
+  latestRepliers,
+  threadResolvable,
+  threadResolved,
+  threadInvolvesViewer,
+  filterCommentThreads,
+  unresolvedThreadCount,
+  DEFAULT_COMMENT_THREAD_FILTER,
+  type CommentThreadData,
+  type CommentThreadFilter,
+} from './commentThreads';
 export { CommentItem, type CommentItemProps } from './CommentItem';
 export { CommentThread, type RecordCommentThreadProps, type CommentItemActions } from './CommentThread';
 export { CommentComposer, type CommentComposerProps } from './CommentComposer';

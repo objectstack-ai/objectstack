@@ -934,9 +934,30 @@ record rather than inside 动态 (objectstack#36075). `CommentsPanel` draws 「�
 and ✕ at its top, the threads oldest first (a thread's replies fold to
 「N 条回复」 and open in place, with a reply box under them), and the comment box
 docked at its foot. Each comment's actions sit in one row at its top right while
-the pointer is over it (`CommentHoverActions`): Reply, an emoji, and More with
-Edit and Delete on the viewer's own comments. `CommentsButton` is the header's
-switch: the comments icon with the number of top-level comments.
+the pointer is over it (`CommentHoverActions`): Reply, an emoji, ✓ (resolve, on
+a thread's first comment) and More with Edit and Delete. Edit and Delete are
+offered on the viewer's own comments. On other people's, Delete needs
+`moderatesComments` on the `DiscussionContext` (the console sets it on the
+explain engine's definite allow of a by-id update of the record, the server's
+rule for moderating another member's comment), and Edit needs it together with
+`updatesOthersComments` (the console sets that on the explain engine's definite
+allow of an `update` of one comment the viewer did not write: the platform's
+row floor lets most members update only their own rows). Read both three-state
+with `useRecordVerdict`. `CommentsButton` is the header's switch: the comments icon
+with the number of unresolved threads.
+
+Resolved threads (objectstack#36071 stores them): where the rows carry a
+`resolved` (`FeedItem.resolved`, set by the host from `is_resolved`), ✓ hands
+`onResolveComment(id, true)`, and a resolved thread leaves the list. ✓ is on a
+thread the viewer started (`authoredByViewer` on its first comment), and on
+anyone's only where the host sets `updatesOthersComments`. The filter
+menu at the panel's top right holds 「显示已解决」 (a resolved thread then shows
+「已由 X 解决」, and its ✓ reopens it) and 「只看我参与的」 (threads the viewer
+started, replied in or is mentioned in, from `authoredByViewer` and
+`mentionsViewer`). The filter is held while the panel is open and not stored.
+Where the rows carry no `resolved`, there is no ✓ and no menu, and the count is
+every thread. `filterCommentThreads`, `unresolvedThreadCount` and
+`threadInvolvesViewer` are the rules, exported.
 
 Every part reads the record's discussion off the host's `DiscussionContext`
 (`useRecordComments`) and offers each write exactly where the host hands it, so
