@@ -53,8 +53,9 @@ function fakeEngine(opts: { refuse?: (id: string) => unknown; hiddenUsers?: stri
       calls.push({ op: 'find', object, where: q?.where, context: q?.context });
       // Equality on plain fields only; a combinator this double does not implement is refused, never read as a field.
       // A user the caller's read door does not return; an elevated read still finds it.
-      const visible = (r: Row) => object !== 'sys_user' || (q?.context as any)?.isSystem || !opts.hiddenUsers?.includes(String(r.id));
-      return (tables[object] ?? []).filter((r) => visible(r) && Object.entries(q?.where ?? {}).every(([k, v]) => {
+      const hidden = object === 'sys_user' && !(q?.context as any)?.isSystem ? (opts.hiddenUsers ?? []) : [];
+      const reachable = (tables[object] ?? []).filter((r) => !hidden.includes(String(r.id)));
+      return reachable.filter((r) => Object.entries(q?.where ?? {}).every(([k, v]) => {
         if (k.startsWith('$')) throw new Error(`mock find: the ${k} combinator is not implemented`);
         return r[k] === v;
       })).slice(0, q?.limit ?? Infinity);
