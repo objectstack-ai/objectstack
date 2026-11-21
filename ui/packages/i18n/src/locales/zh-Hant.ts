@@ -237,6 +237,7 @@ const zhHant = {
       noChildObject: '此面板未配置子物件：請將 {{property}} 設為其所列行所屬的物件。',
     },
     keepEditing: '繼續編輯',
+    createMore: '連續建立',
     discard: '放棄',
     conflictTitle: '儲存衝突',
     conflictMessage: '您編輯期間，這條記錄已被其他人修改。覆蓋儲存將用您的內容替換對方的修改。',
@@ -1254,6 +1255,7 @@ const zhHant = {
   },
   view: {
     editViewConfig: '編輯檢視配置',
+    showViewConfig: '查閱檢視配置',
     rename: '重新命名',
     duplicateView: '複製檢視',
     shareView: '共享檢視',
@@ -2874,6 +2876,7 @@ const zhHant = {
     },
     localeSwitcher: {
       label: '語言',
+      appContentDefault: '應用內容顯示為預設語言',
     },
     system: {
       aiApprovals: {

@@ -243,6 +243,7 @@ const ar = {
       noChildObject: "لم يُكوَّن كائن فرعي لهذه اللوحة: عيّن {{property}} إلى الكائن الذي تسرد صفوفه.",
     },
     keepEditing: "متابعة التحرير",
+    createMore: "إنشاء المزيد",
     discard: "تجاهل",
     conflictTitle: "تعارض في الحفظ",
     conflictMessage: "قام شخص آخر بتغيير هذا السجل أثناء تحريرك. الكتابة فوقه ستستبدل تغييراته بتغييراتك.",
@@ -1364,6 +1365,7 @@ const ar = {
   },
   view: {
     editViewConfig: "تعديل إعدادات العرض",
+    showViewConfig: "عرض إعدادات العرض",
     rename: "إعادة تسمية",
     duplicateView: "تكرار العرض",
     shareView: "مشاركة العرض",
@@ -3074,6 +3076,7 @@ const ar = {
     },
     localeSwitcher: {
       label: "اللغة",
+      appContentDefault: "يظهر محتوى التطبيق باللغة الافتراضية",
     },
     system: {
       aiApprovals: {

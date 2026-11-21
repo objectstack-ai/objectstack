@@ -118,6 +118,13 @@ export interface ConsolePageHeaderProps {
    */
   icon?: React.ReactNode;
   /**
+   * A leading icon that draws its own square — an object's `ObjectIconTile`
+   * (objectstack#35985), so the page names its object in the colour the menu
+   * draws it in. Drawn as given, in every posture, in place of `icon`: no
+   * accent chip around it and no forced glyph size inside it.
+   */
+  iconTile?: React.ReactNode;
+  /**
    * The page's kind chip, drawn right after the title (objectui#12606) — the
    * `ManagedByBadge` of a `sys_*` list, a metadata type's writability badge.
    * A rendered node, so the chip keeps its own words and its own gate.
@@ -208,6 +215,7 @@ export function PageHeader({
   title,
   subtitle,
   icon,
+  iconTile,
   badge,
   breadcrumb,
   refresh,
@@ -297,14 +305,14 @@ export function PageHeader({
 
       {list ? (
         <div className="flex h-full items-center justify-between gap-3 px-4">
-          {/* One line at 13px: the object's icon in one colour (the object
-              model carries no colour, objectstack#35547), its name, its kind. */}
+          {/* One line at 13px: the object's icon (its tile, objectstack#35985),
+              its name, its kind. */}
           <div ref={textRef} className="flex min-w-0 flex-1 items-center gap-2">
-            {icon && (
+            {iconTile ?? (icon && (
               <span className="flex shrink-0 text-muted-foreground [&_svg]:h-4 [&_svg]:w-4" data-testid="page-header-icon">
                 {icon}
               </span>
-            )}
+            ))}
             <h1 className="min-w-0 max-w-full shrink-0 truncate text-[13px] font-semibold leading-5 text-foreground">
               {title}
             </h1>
@@ -315,7 +323,7 @@ export function PageHeader({
       ) : setup ? (
         <div className="flex justify-between items-center gap-3 py-3 px-4 sm:px-6">
           <div className="flex items-center gap-3 min-w-0 flex-1">
-            {icon && <IconTile size="setup">{icon}</IconTile>}
+            {iconTile ?? (icon && <IconTile size="setup">{icon}</IconTile>)}
             <div ref={textRef} className="min-w-0 flex-1">
               <div className="flex items-center gap-2 min-w-0">
                 <h1 className="min-w-0 truncate text-lg font-semibold leading-6 tracking-tight text-foreground">
@@ -347,7 +355,7 @@ export function PageHeader({
               (objectui#12553). It sits here, not on the padded row above: under
               `border-box` a min-height there would count that row's padding. */}
           <div ref={textRef} className="flex items-center gap-2.5 min-w-0 flex-1 min-h-9">
-            {icon && <IconTile size="row">{icon}</IconTile>}
+            {iconTile ?? (icon && <IconTile size="row">{icon}</IconTile>)}
             {/* The 60 % cap keeps room for the description beside the title;
                 the compact form draws none, so its title takes the whole row
                 (objectstack#35446). */}

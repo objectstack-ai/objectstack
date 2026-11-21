@@ -58,6 +58,7 @@ import {
   Check,
   X,
   Lock,
+  Eye,
 } from 'lucide-react';
 import { cn } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/react';
@@ -170,6 +171,11 @@ const SortableRow: React.FC<RowProps> = ({
   // default, pin, edit configuration, delete). Duplicate is preserved
   // because it produces a fresh override that *is* mutable.
   const isReadonly = !!view.readonly;
+  // A row whose definition is read-only but whose row state is not
+  // (`ViewTabItem.definitionReadonly`): no Delete, and its configuration is
+  // offered to look at. `readonly` wins without a check here: it already
+  // drops both entries this flag changes.
+  const definitionReadonly = !!view.definitionReadonly;
 
   /**
    * The overflow menu's entries, each resolved ONCE to the handler it will
@@ -187,7 +193,7 @@ const SortableRow: React.FC<RowProps> = ({
   const configAction = isReadonly ? undefined : onConfigView;
   const setDefaultAction = isReadonly || view.isDefault ? undefined : onSetDefault;
   const pinAction = isReadonly ? undefined : onSetPinned;
-  const deleteAction = isReadonly ? undefined : onDelete;
+  const deleteAction = isReadonly || definitionReadonly ? undefined : onDelete;
   const hasEntryAboveDelete =
     !!(renameAction || duplicateAction || configAction || setDefaultAction || pinAction);
   const hasMenuEntry = hasEntryAboveDelete || !!deleteAction;
@@ -380,7 +386,9 @@ const SortableRow: React.FC<RowProps> = ({
                 data-testid={`manage-views-action-config-${view.id}`}
                 onClick={() => configAction(view.id)}
               >
-                <Pencil className="h-4 w-4 mr-2" /> {vt('view.editViewConfig', 'Edit view config')}
+                {definitionReadonly
+                  ? <><Eye className="h-4 w-4 mr-2" /> {vt('view.showViewConfig', 'View config')}</>
+                  : <><Pencil className="h-4 w-4 mr-2" /> {vt('view.editViewConfig', 'Edit view config')}</>}
               </DropdownMenuItem>
             )}
             {setDefaultAction && (

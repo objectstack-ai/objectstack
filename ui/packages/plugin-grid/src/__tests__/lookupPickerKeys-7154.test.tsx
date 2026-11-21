@@ -192,14 +192,32 @@ function cellAt(container: HTMLElement, index: number): HTMLElement {
   return tds[index];
 }
 
-/** Single-click into a cell and hand back the widget's own trigger button. */
-async function openEditor(cell: HTMLElement): Promise<HTMLButtonElement> {
+/**
+ * Single-click into a cell and hand back the lookup's in-cell face. Since
+ * objectstack#35688 S3 the cell's editor IS the candidate list (no trigger
+ * button to press first): the list is open, the gate shows as a hint in its
+ * place, and "Browse all" sits under it.
+ */
+async function openEditor(cell: HTMLElement): Promise<HTMLElement> {
   fireEvent.click(cell);
   return await waitFor(() => {
-    const btn = cell.querySelector('button');
-    expect(btn).toBeTruthy();
-    return btn as HTMLButtonElement;
+    const panel = cell.querySelector('[data-testid="lookup-in-cell"]');
+    expect(panel).toBeTruthy();
+    return panel as HTMLElement;
   });
+}
+
+/**
+ * Esc where the user presses it: on whatever holds focus inside the cell's
+ * editor (the list's search box), so it reaches the grid's own key handling.
+ */
+function pressEscape(): void {
+  fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+}
+
+/** The in-cell face's gate hint, or null when the list is usable. */
+function gateOf(panel: HTMLElement): HTMLElement | null {
+  return panel.querySelector('[data-testid="lookup-in-cell-gated"]');
 }
 
 describe('objectui#7154 — the four picker keys reach the grid’s inline picker off the field def', () => {
@@ -234,20 +252,23 @@ describe('objectui#7154 — the four picker keys reach the grid’s inline picke
 
     // Declared `multiple: true` — both picks land, the popover stays open.
     const multiCell = cellAt(container, 1);
-    fireEvent.click(await openEditor(multiCell));
-    fireEvent.click(await waitFor(() => screen.getByText('Person 01')));
-    fireEvent.click(await waitFor(() => screen.getByText('Person 02')));
+    const multiPanel = await openEditor(multiCell);
+    fireEvent.click(await waitFor(() => within(multiPanel).getByText('Person 01')));
+    fireEvent.click(await waitFor(() => within(multiPanel).getByText('Person 02')));
     await waitFor(() => {
-      expect(multiCell.textContent).toMatch(/2 selected/);
+      const picked = Array.from(multiPanel.querySelectorAll('[role="option"][aria-selected="true"]')).map((o) => o.getAttribute('title'));
+      expect(picked).toEqual(['Person 01', 'Person 02']);
     });
 
     // CONTROL — same reference, same records, no `multiple`: the second pick
     // REPLACES the first and the compact trigger shows that one record.
     const singleCell = cellAt(container, 2);
-    fireEvent.click(await openEditor(singleCell));
-    fireEvent.click(await waitFor(() => screen.getByText('Person 01')));
-    fireEvent.click(await openEditor(singleCell));
-    fireEvent.click(await waitFor(() => screen.getByText('Person 02')));
+    const firstPanel = await openEditor(singleCell);
+    fireEvent.click(await waitFor(() => within(firstPanel).getByText('Person 01')));
+    await waitFor(() => expect(singleCell.querySelector('[data-testid="lookup-in-cell"]')).toBeNull());
+    const secondPanel = await openEditor(singleCell);
+    fireEvent.click(await waitFor(() => within(secondPanel).getByText('Person 02')));
+    await waitFor(() => expect(singleCell.querySelector('[data-testid="lookup-in-cell"]')).toBeNull());
     await waitFor(() => {
       expect(within(singleCell).getByText('Person 02')).toBeInTheDocument();
     });
@@ -273,15 +294,15 @@ describe('objectui#7154 — the four picker keys reach the grid’s inline picke
     // CONTROL — nothing declared. `os_7154_person` is a user-facing reference,
     // so inline quick-create is on by default and the entry renders.
     const defaultCell = cellAt(container, 1);
-    fireEvent.click(await openEditor(defaultCell));
+    await openEditor(defaultCell);
     await waitFor(() => expect(screen.getByText('Person 01')).toBeInTheDocument());
     expect(screen.getByText('Create new')).toBeInTheDocument();
-    fireEvent.keyDown(document.body, { key: 'Escape' });
+    pressEscape();
     await waitFor(() => expect(screen.queryByText('Create new')).not.toBeInTheDocument());
 
     // Declared `allowCreate: false` — the author's opt-out is honoured.
     const optedOutCell = cellAt(container, 2);
-    fireEvent.click(await openEditor(optedOutCell));
+    await openEditor(optedOutCell);
     await waitFor(() => expect(screen.getByText('Person 01')).toBeInTheDocument());
     expect(screen.queryByText('Create new')).not.toBeInTheDocument();
   });
@@ -347,9 +368,9 @@ describe('objectui#7154 — the four picker keys reach the grid’s inline picke
     await waitFor(() => expect(screen.getByText('Task one')).toBeInTheDocument());
 
     // CONTROL — no `dependsOn`: an ordinary, usable trigger.
-    const plainTrigger = await openEditor(cellAt(container, 2));
-    expect(plainTrigger.getAttribute('data-testid')).toBe('lookup-trigger-owner');
-    expect(plainTrigger.disabled).toBe(false);
+    const plainPanel = await openEditor(cellAt(container, 2));
+    expect(gateOf(plainPanel)).toBeNull();
+    pressEscape();
 
     // Declared `dependsOn: ['region']`. ⭐ UPDATED BY objectui#7165 — this used
     // to assert `lookup-trigger-gated` / `disabled === true`, which pinned the
@@ -362,16 +383,14 @@ describe('objectui#7154 — the four picker keys reach the grid’s inline picke
     // The key still ARRIVES off the field def — which is this file's whole
     // claim — and the proof is no longer the gate but the SCOPING asserted
     // below: an unscoped picker would list all twelve people.
-    const dependentTrigger = await openEditor(cellAt(container, 3));
-    expect(dependentTrigger.getAttribute('data-testid')).toBe('lookup-trigger-regional_owner');
-    expect(dependentTrigger.disabled).toBe(false);
+    const dependentPanel = await openEditor(cellAt(container, 3));
+    expect(gateOf(dependentPanel)).toBeNull();
     // The browse-all button next to it is live too (it shared the gate before).
     expect(within(cellAt(container, 3)).getByTestId('browse-all-records')).not.toBeDisabled();
 
     // The `dependsOn` chain reaches the query as a hard `$filter` (PR
     // objectui#2216's half 2, which was always live here — it just never had
     // an input). `region: 'north'` → only the six north people are offered.
-    fireEvent.click(dependentTrigger);
     await waitFor(() => expect(screen.getByText('Person 01')).toBeInTheDocument());
     expect(screen.queryByText('Person 07')).not.toBeInTheDocument();
     expect(ds.refQueries.some((q: any) => q?.$filter?.region === 'north')).toBe(true);

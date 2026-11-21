@@ -766,7 +766,7 @@ const DeclaredActionButton: React.FC<{
       // the record header's spelling (`PageHeaderActions`).
       // Below `sm` a 44 px touch target (objectstack#29071).
       className={cn(
-        headerTone ? 'h-11 sm:h-8' : 'h-11 sm:h-9',
+        headerTone ? 'h-11 sm:h-7' : 'h-11 sm:h-9',
         fill && (disabledReason ? 'w-full sm:w-auto' : 'flex-1 sm:flex-none'),
         secondaryDanger && !isOverride
           && 'text-destructive hover:text-destructive',
@@ -1120,7 +1120,7 @@ const DeclaredActionsToolbar: React.FC<
                 size="sm"
                 className={cn(
                   'gap-1 px-2 border-amber-500/60 text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:text-amber-400 dark:hover:bg-amber-500/10 dark:hover:text-amber-300',
-                  barFace ? 'h-11 shrink-0' : 'h-8',
+                  barFace ? 'h-11 shrink-0' : 'h-8 sm:h-7',
                 )}
                 aria-label={overrideMenuLabel}
                 title={overrideMenuLabel}
@@ -1176,7 +1176,7 @@ const DeclaredActionsToolbar: React.FC<
                 type="button"
                 variant="outline"
                 size="sm"
-                className={barFace ? 'h-11 w-11 shrink-0 px-0' : 'h-8 gap-1 px-2'}
+                className={barFace ? 'h-11 w-11 shrink-0 px-0' : 'h-8 gap-1 px-2 sm:h-7'}
                 aria-label={moreLabel}
                 data-testid="declared-actions-header-menu"
               >

@@ -225,6 +225,7 @@ const ja = {
       noChildObject: "このパネルには子オブジェクトが設定されていません。{{property}} に、行を一覧表示するオブジェクトを設定してください。",
     },
     keepEditing: "編集を続ける",
+    createMore: "続けて作成",
     discard: "破棄",
     conflictTitle: "保存の競合",
     conflictMessage: "編集中にこのレコードが他のユーザーによって変更されました。上書きすると、相手の変更はあなたの内容で置き換えられます。",
@@ -1227,6 +1228,7 @@ const ja = {
   },
   view: {
     editViewConfig: "ビュー設定を編集",
+    showViewConfig: "ビュー設定を表示",
     rename: "名前を変更",
     duplicateView: "ビューを複製",
     shareView: "ビューを共有",
@@ -2773,6 +2775,7 @@ const ja = {
     },
     localeSwitcher: {
       label: "言語",
+      appContentDefault: "アプリの内容は既定の言語で表示されます",
     },
     system: {
       aiApprovals: {

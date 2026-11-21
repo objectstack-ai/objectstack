@@ -228,6 +228,7 @@ const fr = {
       noChildObject: "Aucun objet enfant n'est configuré pour ce panneau : définissez {{property}} sur l'objet dont il liste les lignes.",
     },
     keepEditing: "Continuer l'édition",
+    createMore: "Créer d'autres",
     discard: "Abandonner",
     conflictTitle: "Conflit d'enregistrement",
     conflictMessage: "Cet enregistrement a été modifié par quelqu'un d'autre pendant votre édition. L'écrasement remplacera ses modifications par les vôtres.",
@@ -1259,6 +1260,7 @@ const fr = {
   },
   view: {
     editViewConfig: "Modifier la configuration de la vue",
+    showViewConfig: "Voir la configuration de la vue",
     rename: "Renommer",
     duplicateView: "Dupliquer la vue",
     shareView: "Partager la vue",
@@ -2844,6 +2846,7 @@ const fr = {
     },
     localeSwitcher: {
       label: "Langue",
+      appContentDefault: "Le contenu de l'app s'affiche dans la langue par défaut",
     },
     system: {
       aiApprovals: {

@@ -23,6 +23,7 @@ import { X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { CloseSrLabel } from '../lib/close-label';
 import { DialogOverlay, DialogPortal } from '../ui/dialog';
+import { DIALOG_CONTENT_SURFACE } from '../lib/dialog-surface';
 
 /**
  * Radix Select / Popover / DropdownMenu render their flyout into a portal at
@@ -142,6 +143,9 @@ export const MobileDialogContent = React.forwardRef<
         'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
         'data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%]',
         'data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%]',
+        // The look every modal dialog shares (objectstack#35980): white card,
+        // hairline edge, outer ring, compact controls from `sm` up.
+        DIALOG_CONTENT_SURFACE,
         className,
       )}
       {...props}

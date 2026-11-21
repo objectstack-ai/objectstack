@@ -237,6 +237,7 @@ const zh = {
       noChildObject: '此面板未配置子对象：请将 {{property}} 设为其所列行所属的对象。',
     },
     keepEditing: '继续编辑',
+    createMore: '连续创建',
     discard: '放弃',
     conflictTitle: '保存冲突',
     conflictMessage: '您编辑期间，这条记录已被其他人修改。覆盖保存将用您的内容替换对方的修改。',
@@ -1254,6 +1255,7 @@ const zh = {
   },
   view: {
     editViewConfig: '编辑视图配置',
+    showViewConfig: '查阅视图配置',
     rename: '重命名',
     duplicateView: '复制视图',
     shareView: '共享视图',
@@ -2874,6 +2876,7 @@ const zh = {
     },
     localeSwitcher: {
       label: '语言',
+      appContentDefault: '应用内容显示为默认语言',
     },
     system: {
       aiApprovals: {

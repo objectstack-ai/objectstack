@@ -233,6 +233,7 @@ const es = {
       noChildObject: "Este panel no tiene configurado ningún objeto secundario: establezca {{property}} en el objeto cuyas filas enumera.",
     },
     keepEditing: "Seguir editando",
+    createMore: "Crear más",
     discard: "Descartar",
     conflictTitle: "Conflicto al guardar",
     conflictMessage: "Otra persona modificó este registro mientras lo editaba. Sobrescribir reemplazará sus cambios por los suyos.",
@@ -1264,6 +1265,7 @@ const es = {
   },
   view: {
     editViewConfig: "Editar configuración de vista",
+    showViewConfig: "Ver configuración de vista",
     rename: "Renombrar",
     duplicateView: "Duplicar vista",
     shareView: "Compartir vista",
@@ -2848,6 +2850,7 @@ const es = {
     },
     localeSwitcher: {
       label: "Idioma",
+      appContentDefault: "El contenido de la app se muestra en el idioma predeterminado",
     },
     system: {
       aiApprovals: {

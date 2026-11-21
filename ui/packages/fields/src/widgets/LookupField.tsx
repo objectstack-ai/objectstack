@@ -356,8 +356,9 @@ function OptionPreviewLine({ children }: { children: React.ReactNode }) {
  * from the referenced object using `DataSource.find()`.
  * Falls back to static `options` when no DataSource is available.
  */
-export function LookupField({ value, onChange, field, readonly, error: fieldError, ...props }: FieldWidgetComponentProps<any>) {
-  const [isOpen, setIsOpen] = useState(false);
+export function LookupField({ value, onChange, field, readonly, error: fieldError, inCell, onCommit, ...props }: FieldWidgetComponentProps<any>) {
+  // objectstack#35688 — in a list cell the candidate list is open from the start.
+  const [isOpen, setIsOpen] = useState(!!inCell);
   const { t } = useFieldTranslation();
   const scanOffered = useFieldScanOffered();
   // Same two i18n channels RecordPickerDialog reads, so the inline dropdown
@@ -1280,20 +1281,22 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         if (isSelected) {
           onChange(currentValues.filter((v: any) => v !== option.value));
         } else {
-          if (referenceTo) pushRecentLookupId(referenceTo, option.value);
+          if (referenceTo) pushRecentLookupId(referenceTo, option.value, perms.userId);
           onChange([...currentValues, option.value]);
         }
       } else {
-        if (referenceTo) pushRecentLookupId(referenceTo, option.value);
+        if (referenceTo) pushRecentLookupId(referenceTo, option.value, perms.userId);
         if (onSelectRecord) onSelectRecord(option);
         else {
           onChange(option.value);
           fillDeclaredTargets(row);
+          // objectstack#35688 — in a list cell a pick is the whole edit.
+          if (inCell) onCommit?.();
         }
         setIsOpen(false);
       }
     },
-    [multiple, value, onChange, onSelectRecord, referenceTo, normalizeId, idField, fillDeclaredTargets],
+    [multiple, value, onChange, onSelectRecord, referenceTo, normalizeId, idField, fillDeclaredTargets, inCell, onCommit, perms.userId],
   );
 
   const handleRemove = (optionValue: any) => {
@@ -1312,7 +1315,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
   const handlePickerSelectRecords = useCallback(
     (records: Record<string, unknown>[]) => {
       if (referenceTo) {
-        records.forEach((r) => pushRecentLookupId(referenceTo, recordValue(r, idField) as string | number | undefined));
+        records.forEach((r) => pushRecentLookupId(referenceTo, recordValue(r, idField) as string | number | undefined, perms.userId));
       }
       // A single pick from a Level-2 picker commits its id through `onSelect`
       // (`onChange`) just before this, so the declared targets fill here, from
@@ -1320,7 +1323,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       if (!multiple && records.length === 1) fillDeclaredTargets(records[0]);
       setPickedRecords(records);
     },
-    [idField, referenceTo, multiple, fillDeclaredTargets],
+    [idField, referenceTo, multiple, fillDeclaredTargets, perms.userId],
   );
 
   /**
@@ -1339,16 +1342,23 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
   );
   const handleDialogSelectRecords = useCallback(
     (records: Record<string, unknown>[]) => {
+      // In a list cell a single pick from Browse all is the whole edit, as a
+      // pick from the in-cell list is (objectstack#35688): the dialog hands
+      // the id to `onSelect` first, the row here, and the cell commits last,
+      // after the declared targets filled. A multiple pick stays staged.
+      const commitsCell = inCell && !multiple && records.length === 1;
       if (multiple || !onSelectRecord || records.length !== 1) {
         handlePickerSelectRecords(records);
+        if (commitsCell) onCommit?.();
         return;
       }
       const row = records[0];
-      if (referenceTo) pushRecentLookupId(referenceTo, recordValue(row, idField) as string | number | undefined);
+      if (referenceTo) pushRecentLookupId(referenceTo, recordValue(row, idField) as string | number | undefined, perms.userId);
       setPickedRecords(records);
       onSelectRecord(recordToOption(row, declaredDisplayField, idField, effectiveDescriptionField, refObjectSchema, perms, referenceTo));
+      if (commitsCell) onCommit?.();
     },
-    [multiple, onSelectRecord, handlePickerSelectRecords, referenceTo, idField, declaredDisplayField, effectiveDescriptionField, refObjectSchema, perms],
+    [multiple, onSelectRecord, handlePickerSelectRecords, referenceTo, idField, declaredDisplayField, effectiveDescriptionField, refObjectSchema, perms, inCell, onCommit],
   );
 
   // ── Recently-used, quick-create, combined option list ────────────────────
@@ -1392,7 +1402,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
     if (!isOpen || !hasDataSource || !dataSource || !referenceTo || searchQuery) return;
     if (dependenciesMissing) { setRecentRows([]); return; }
     if (recordReadsPending) return;
-    const ids = getRecentLookupIds(referenceTo);
+    const ids = getRecentLookupIds(referenceTo, perms.userId);
     if (!ids.length) { setRecentRows([]); return; }
     let cancelled = false;
     (async () => {
@@ -1422,7 +1432,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, hasDataSource, referenceTo, searchQuery, dependenciesMissing, recordReadsPending, popoverFilter, idField, candidateExpandKey]);
+  }, [isOpen, hasDataSource, referenceTo, searchQuery, dependenciesMissing, recordReadsPending, popoverFilter, idField, candidateExpandKey, perms.userId]);
   const recentOptions = useMemo(
     () =>
       recentRows.map((r) =>
@@ -1685,11 +1695,14 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       } else if (e.key === 'Enter') {
         e.preventDefault();
         if (activeIndex >= 0 && activeIndex < visibleOptions.length) {
+          // In a list cell the grid's editor would otherwise commit again
+          // with the value it held before this pick (objectstack#35688).
+          if (inCell) e.stopPropagation();
           handleSelectCandidate(visibleOptions[activeIndex]);
         }
       }
     },
-    [visibleOptions, activeIndex, handleSelectCandidate],
+    [visibleOptions, activeIndex, handleSelectCandidate, inCell],
   );
 
   // Scroll active item into view
@@ -1904,125 +1917,9 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       <ScanFieldButton onScan={handleScanned} />
     ) : null;
 
-  return (
-    <div className={compact ? '' : 'space-y-2'}>
-      {/* Selected values display — a multi-select field's chips (full mode
-          only; compact and single-select show the value in the trigger) */}
-      {multiple && selectedOptions.length > 0 && !compact && (
-        <div className="flex flex-wrap gap-1">
-          {selectedOptions.map((opt, idx) => {
-            const chipLabel = opt?.label || opt?.[displayField];
-            // Search-first (people) fields show avatar chips; classic lookups
-            // keep the plain text Badge.
-            if (pickerVariant === 'search') {
-              const avatarUrl = chipAvatarUrl(opt);
-              return (
-                <span
-                  key={idx}
-                  data-testid="people-field-chip"
-                  className="inline-flex items-center gap-1.5 rounded-full border bg-background py-0.5 pl-0.5 pr-1.5 text-sm"
-                >
-                  <Avatar className="size-6 shrink-0">
-                    {avatarUrl && <AvatarImage src={avatarUrl} alt={String(chipLabel || '')} />}
-                    <AvatarFallback className="text-[10px]">
-                      {getPersonInitials(String(chipLabel || ''))}
-                    </AvatarFallback>
-                  </Avatar>
-                  <span className="max-w-[10rem] truncate">{chipLabel}</span>
-                  {chipsRemovable && (
-                    <button
-                      onClick={() => handleRemove(opt?.value)}
-                      className="rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                      type="button"
-                      aria-label={t('lookup.remove', { label: chipLabel })}
-                    >
-                      <X className="size-3" />
-                    </button>
-                  )}
-                </span>
-              );
-            }
-            return (
-              <Badge key={idx} variant="outline" className="gap-1">
-                {chipLabel}
-                {chipsRemovable && (
-                  <button
-                    onClick={() => handleRemove(opt?.value)}
-                    className="ml-1 hover:text-destructive"
-                    type="button"
-                    aria-label={t('lookup.remove', { label: chipLabel })}
-                  >
-                    <X className="size-3" />
-                  </button>
-                )}
-              </Badge>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Field control: search-first inline combobox (anchored dropdown / mobile
-          sheet), else the classic quick-select popover. */}
-      {searchVariant && dataSource && referenceTo ? (
-        // A single-select field's row holds the trigger and its clear control,
-        // as the classic row below does; a multi-select field is unchanged.
-        <div className={multiple ? 'contents' : 'flex items-center gap-1.5'}>
-        <PeoplePicker
-          inline
-          trigger={triggerButton}
-          // Held shut while a `{ $record }` hop is read, so its first query carries the value.
-          open={isPickerOpen && !recordReadsPending}
-          onOpenChange={(o) => {
-            setIsPickerOpen(o);
-            if (!o) setPickerInitialSearch(undefined);
-          }}
-          initialSearch={pickerInitialSearch}
-          title={lookupField?.label || t('common.select')}
-          multiple={multiple}
-          dataSource={dataSource}
-          objectName={referenceTo}
-          displayField={displayField}
-          idField={idField}
-          subtitleFields={subtitleFields}
-          avatarField={avatarField}
-          pageSize={lookupPageSize}
-          value={pickerValue}
-          onSelect={onChange}
-          onSelectRecords={handlePickerSelectRecords}
-          lookupFilters={queryLookupFilters}
-          baseFilter={dependentFilter}
-        />
-        {lookupScan}
-        {singleClear}
-        </div>
-      ) : (
-      <div className="flex items-center gap-1.5">
-      <Popover
-        open={isOpen}
-        onOpenChange={(o) => {
-          if (!dependenciesMissing) setIsOpen(o);
-        }}
-      >
-        <PopoverTrigger asChild>
-          {triggerButton}
-        </PopoverTrigger>
-        {/* The popover never runs past the room Radix reports on the side it
-            opens to, and goes to the side with more room when its whole list
-            does not fit (Radix's default flip, kept): the search row keeps its
-            height and the list takes what is left (objectstack#34362).
-            Across, it is as wide as its trigger but never narrower than 18rem,
-            so an option name stays readable when the trigger is a narrow
-            line-item grid cell; and never wider than the room Radix reports,
-            so on a narrow screen it stays inside the viewport. The floor is
-            itself capped by that room (`min()`), because a min-width larger
-            than the max-width would win over it. Radix's default shift keeps
-            a widened panel on screen when the trigger sits at the right edge
-            (objectstack#34601). */}
-        <PopoverContent
-          className="flex max-h-(--radix-popover-content-available-height) w-[var(--radix-popover-trigger-width)] min-w-[min(18rem,var(--radix-popover-content-available-width,100vw))] max-w-(--radix-popover-content-available-width) flex-col p-0"
-          align="start"
-          data-testid="lookup-popover"
-        >
+  // The candidate panel: the popover's body, or the list cell's editor itself.
+  const lookupPanelBody = (
+    <>
           {/* Search input — not offered on a target whose search resolves to
               no field (objectui#12966, see `searchOffered`); the options below
               are buttons, so the list stays reachable without it. */}
@@ -2215,6 +2112,236 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
             )}
             </div>
           )}
+    </>
+  );
+
+  // Level 2: classic table picker — search fields use the inline combobox above.
+  const recordPickerDialog = (
+    hasDataSource && dataSource && referenceTo && pickerVariant !== 'search' && (
+        <RecordPickerDialog
+          // Held shut while a `{ $record }` hop is read, so its first query carries the value.
+          open={isPickerOpen && !recordReadsPending}
+          onOpenChange={setIsPickerOpen}
+          title={lookupField?.label || t('common.select')}
+          multiple={multiple}
+          dataSource={dataSource}
+          objectName={referenceTo}
+          columns={pickerColumns}
+          // The declared display field, never the `name` default, and the whole
+          // schema, never a template cut out of it: the picker's display column
+          // then makes `recordToOption`'s exact resolver call (objectui#10486).
+          displayField={declaredDisplayField}
+          objectSchema={refObjectSchema}
+          idField={idField}
+          pageSize={lookupPageSize}
+          value={pickerValue}
+          onSelect={handleDialogSelect}
+          onSelectRecords={handleDialogSelectRecords}
+          lookupFilters={queryLookupFilters}
+          baseFilter={dependentFilter}
+          cellRenderer={getCellRendererResolver()}
+          fieldsMeta={refObjectSchema?.fields}
+          filterColumns={filterColumns}
+        />
+      )
+  );
+
+  // objectstack#35688 — the list cell's editor is the candidate list itself
+  // (recently used first, then results; a pick is the whole edit), with Clear
+  // while the cell holds a value.
+  if (inCell && !props.disabled) {
+    const holdsValue = multiple ? Array.isArray(value) && value.length > 0 : value != null && value !== '';
+    const clear = holdsValue ? (
+      <button
+        type="button"
+        className="flex w-full shrink-0 items-center gap-1.5 border-t px-3 py-2 text-left text-sm text-muted-foreground hover:bg-accent"
+        // The search box keeps the caret until the click lands.
+        onPointerDown={(e) => e.preventDefault()}
+        onClick={() => {
+          onChange(multiple ? [] : null);
+          onCommit?.();
+        }}
+        data-testid="lookup-in-cell-clear"
+      >
+        <X className="size-3.5" />
+        {t('lookup.clear')}
+      </button>
+    ) : null;
+    // The full record picker, as the "Browse All" button beside the form's
+    // trigger opens it — classic lookups only, gated like the list (#2215).
+    const browseAll = hasDataSource && pickerVariant !== 'search' ? (
+      <button
+        type="button"
+        className="flex w-full shrink-0 items-center gap-1.5 border-t px-3 py-2 text-left text-sm text-muted-foreground hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+        onPointerDown={(e) => e.preventDefault()}
+        disabled={dependenciesMissing}
+        onClick={() => setIsPickerOpen(true)}
+        data-testid="browse-all-records"
+      >
+        <TableProperties className="size-3.5" />
+        {t('lookup.browseAll')}
+      </button>
+    ) : null;
+    return (
+      <div data-in-cell-face="panel" className="flex max-h-80 w-full flex-col" data-testid="lookup-in-cell">
+        {dependenciesMissing ? (
+          <p className="px-3 py-2 text-sm text-muted-foreground" data-testid="lookup-in-cell-gated">
+            {t('lookup.selectFirst', { fields: dependsOnFieldsText })}
+          </p>
+        ) : searchVariant ? (
+          <PeoplePicker
+            inline
+            embedded
+            open
+            onOpenChange={() => {}}
+            title={lookupField?.label || t('common.select')}
+            multiple={multiple}
+            dataSource={dataSource!}
+            objectName={referenceTo!}
+            displayField={displayField}
+            idField={idField}
+            subtitleFields={subtitleFields}
+            avatarField={avatarField}
+            pageSize={lookupPageSize}
+            value={pickerValue}
+            onSelect={(next: any) => {
+              onChange(next);
+              if (!multiple) onCommit?.();
+            }}
+            onSelectRecords={handlePickerSelectRecords}
+            lookupFilters={queryLookupFilters}
+            baseFilter={dependentFilter}
+          />
+        ) : (
+          lookupPanelBody
+        )}
+        {browseAll}
+        {clear}
+        {recordPickerDialog}
+      </div>
+    );
+  }
+
+  return (
+    <div className={compact ? '' : 'space-y-2'}>
+      {/* Selected values display — a multi-select field's chips (full mode
+          only; compact and single-select show the value in the trigger) */}
+      {multiple && selectedOptions.length > 0 && !compact && (
+        <div className="flex flex-wrap gap-1">
+          {selectedOptions.map((opt, idx) => {
+            const chipLabel = opt?.label || opt?.[displayField];
+            // Search-first (people) fields show avatar chips; classic lookups
+            // keep the plain text Badge.
+            if (pickerVariant === 'search') {
+              const avatarUrl = chipAvatarUrl(opt);
+              return (
+                <span
+                  key={idx}
+                  data-testid="people-field-chip"
+                  className="inline-flex items-center gap-1.5 rounded-full border bg-background py-0.5 pl-0.5 pr-1.5 text-sm"
+                >
+                  <Avatar className="size-6 shrink-0">
+                    {avatarUrl && <AvatarImage src={avatarUrl} alt={String(chipLabel || '')} />}
+                    <AvatarFallback className="text-[10px]">
+                      {getPersonInitials(String(chipLabel || ''))}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span className="max-w-[10rem] truncate">{chipLabel}</span>
+                  {chipsRemovable && (
+                    <button
+                      onClick={() => handleRemove(opt?.value)}
+                      className="rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                      type="button"
+                      aria-label={t('lookup.remove', { label: chipLabel })}
+                    >
+                      <X className="size-3" />
+                    </button>
+                  )}
+                </span>
+              );
+            }
+            return (
+              <Badge key={idx} variant="outline" className="gap-1">
+                {chipLabel}
+                {chipsRemovable && (
+                  <button
+                    onClick={() => handleRemove(opt?.value)}
+                    className="ml-1 hover:text-destructive"
+                    type="button"
+                    aria-label={t('lookup.remove', { label: chipLabel })}
+                  >
+                    <X className="size-3" />
+                  </button>
+                )}
+              </Badge>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Field control: search-first inline combobox (anchored dropdown / mobile
+          sheet), else the classic quick-select popover. */}
+      {searchVariant && dataSource && referenceTo ? (
+        // A single-select field's row holds the trigger and its clear control,
+        // as the classic row below does; a multi-select field is unchanged.
+        <div className={multiple ? 'contents' : 'flex items-center gap-1.5'}>
+        <PeoplePicker
+          inline
+          trigger={triggerButton}
+          // Held shut while a `{ $record }` hop is read, so its first query carries the value.
+          open={isPickerOpen && !recordReadsPending}
+          onOpenChange={(o) => {
+            setIsPickerOpen(o);
+            if (!o) setPickerInitialSearch(undefined);
+          }}
+          initialSearch={pickerInitialSearch}
+          title={lookupField?.label || t('common.select')}
+          multiple={multiple}
+          dataSource={dataSource}
+          objectName={referenceTo}
+          displayField={displayField}
+          idField={idField}
+          subtitleFields={subtitleFields}
+          avatarField={avatarField}
+          pageSize={lookupPageSize}
+          value={pickerValue}
+          onSelect={onChange}
+          onSelectRecords={handlePickerSelectRecords}
+          lookupFilters={queryLookupFilters}
+          baseFilter={dependentFilter}
+        />
+        {lookupScan}
+        {singleClear}
+        </div>
+      ) : (
+      <div className="flex items-center gap-1.5">
+      <Popover
+        open={isOpen}
+        onOpenChange={(o) => {
+          if (!dependenciesMissing) setIsOpen(o);
+        }}
+      >
+        <PopoverTrigger asChild>
+          {triggerButton}
+        </PopoverTrigger>
+        {/* The popover never runs past the room Radix reports on the side it
+            opens to, and goes to the side with more room when its whole list
+            does not fit (Radix's default flip, kept): the search row keeps its
+            height and the list takes what is left (objectstack#34362).
+            Across, it is as wide as its trigger but never narrower than 18rem,
+            so an option name stays readable when the trigger is a narrow
+            line-item grid cell; and never wider than the room Radix reports,
+            so on a narrow screen it stays inside the viewport. The floor is
+            itself capped by that room (`min()`), because a min-width larger
+            than the max-width would win over it. Radix's default shift keeps
+            a widened panel on screen when the trigger sits at the right edge
+            (objectstack#34601). */}
+        <PopoverContent
+          className="flex max-h-(--radix-popover-content-available-height) w-[var(--radix-popover-trigger-width)] min-w-[min(18rem,var(--radix-popover-content-available-width,100vw))] max-w-(--radix-popover-content-available-width) flex-col p-0"
+          align="start"
+          data-testid="lookup-popover"
+        >
+          {lookupPanelBody}
         </PopoverContent>
       </Popover>
 
@@ -2245,34 +2372,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       </div>
       )}
 
-      {/* Level 2: classic table picker — search fields use the inline combobox above. */}
-      {hasDataSource && dataSource && referenceTo && pickerVariant !== 'search' && (
-        <RecordPickerDialog
-          // Held shut while a `{ $record }` hop is read, so its first query carries the value.
-          open={isPickerOpen && !recordReadsPending}
-          onOpenChange={setIsPickerOpen}
-          title={lookupField?.label || t('common.select')}
-          multiple={multiple}
-          dataSource={dataSource}
-          objectName={referenceTo}
-          columns={pickerColumns}
-          // The declared display field, never the `name` default, and the whole
-          // schema, never a template cut out of it: the picker's display column
-          // then makes `recordToOption`'s exact resolver call (objectui#10486).
-          displayField={declaredDisplayField}
-          objectSchema={refObjectSchema}
-          idField={idField}
-          pageSize={lookupPageSize}
-          value={pickerValue}
-          onSelect={handleDialogSelect}
-          onSelectRecords={handleDialogSelectRecords}
-          lookupFilters={queryLookupFilters}
-          baseFilter={dependentFilter}
-          cellRenderer={getCellRendererResolver()}
-          fieldsMeta={refObjectSchema?.fields}
-          filterColumns={filterColumns}
-        />
-      )}
+      {recordPickerDialog}
     </div>
   );
 }

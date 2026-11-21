@@ -360,6 +360,9 @@ const en = {
       noChildObject: 'This panel has no child object configured: set {{property}} to the object whose rows it lists.',
     },
     keepEditing: 'Keep editing',
+    // The create dialog's 「Create more」 switch (objectstack#35980): on, a save
+    // keeps the dialog open on an empty form for the next record.
+    createMore: 'Create more',
     discard: 'Discard',
     conflictTitle: 'Save conflict',
     conflictMessage: 'This record was changed by someone else while you were editing. Overwriting will replace their changes with yours.',
@@ -1526,6 +1529,7 @@ const en = {
   },
   view: {
     editViewConfig: 'Edit view config',
+    showViewConfig: 'View config',
     rename: 'Rename',
     duplicateView: 'Duplicate View',
     shareView: 'Share View',
@@ -3378,6 +3382,7 @@ const en = {
     },
     localeSwitcher: {
       label: 'Language',
+      appContentDefault: 'App content shows in the default language',
     },
     system: {
       aiApprovals: {

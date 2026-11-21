@@ -21,7 +21,7 @@ import { armArgs, placeCaseFiles, prepareArmWorkdir } from './arms.js';
 import { loadSkillEvalCatalog, notUserInvocable, parseEvalFile, selectBundles, type SkillEvalCase } from './cases.js';
 import { parseSkillEvalArgs } from './cli.js';
 import { type Grader, gradeAnswer } from './grade.js';
-import { judgeTurn, planRound, preflight, regradeRecords, type SkillEvalRunRecord } from './run.js';
+import { installedFor, judgeTurn, planRound, preflight, regradeRecords, type SkillEvalRunRecord } from './run.js';
 import { summariseRound } from './summary.js';
 
 /** Row label → minimum cases registered. A row is a battery; deleting one must red. */
@@ -58,10 +58,12 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   'summary: trigger cases are tallied apart from the behaviour pass rates': 1,
   'select: --triggers-only keeps the trigger cases on the with-skill arm and drops the behaviour cases': 1,
   'flags: --triggers-only beside --regrade or --self-test, or on a bundle with no trigger case → REFUSED': 1,
+  'judge: a should-load case where a neighbour bundle loaded instead of its own → FAIL, the neighbour named': 1,
+  'arms: a trigger turn installs the round\'s selection beside its bundle; --trigger-field own, its bundle alone': 1,
 });
 
 /** The roster's own size, pinned: a deleted row takes its floor with it otherwise. */
-export const SELF_TEST_BATTERY_FLOOR = 32;
+export const SELF_TEST_BATTERY_FLOOR = 34;
 
 let selfTestReachedVerdict = false;
 /** Whether the last {@link runSelfTest} reached its verdict line. */
@@ -426,6 +428,44 @@ export function runSelfTest(deps: SelfTestDeps): SelfTestResult {
           refusal(() => selectBundles(selectCatalog, ['other-skill'], true), /`other-skill`, a bundle with no trigger case/),
         ];
         return kept && r.every(Boolean) ? true : `accepted beside --skills-from: ${kept}; refused (--regrade, --self-test, no trigger case): ${r.join(', ')}`;
+      },
+    },
+    {
+      label: 'judge: a should-load case where a neighbour bundle loaded instead of its own → FAIL, the neighbour named',
+      run: () => {
+        const c = fixtureCase({ shouldTrigger: true, mustContain: [], mustNotContain: [] });
+        const field = ['demo-skill', 'other-skill'];
+        const at = (o: Parameters<typeof stream>[0]) => judgeTurn(c, 'with-skill', 1, exited(stream(o)), { bundles: field, unlisted: [] }, 'fixture', grade, field);
+        const lost = at({ skills: field, invoked: 'other-skill', answer: 'x' });
+        const both = at({ skills: field, invoked: 'demo-skill', read: '/t/project/.claude/skills/other-skill/SKILL.md', answer: 'x' });
+        const unlisted = at({ skills: ['demo-skill'], invoked: 'demo-skill', answer: 'x' });
+        const ok = lost.verdict === 'fail' && lost.trigger?.othersLoaded?.join() === 'other-skill' && lost.installed?.join() === field.join() && both.verdict === 'pass' && both.trigger?.othersLoaded?.join() === 'other-skill' && unlisted.verdict === 'invalid';
+        return ok ? true : `expected fail [other-skill] / pass [other-skill] / invalid, got ${lost.verdict} [${lost.trigger?.othersLoaded?.join() ?? ''}] / ${both.verdict} [${both.trigger?.othersLoaded?.join() ?? ''}] / ${unlisted.verdict}`;
+      },
+    },
+    {
+      label: 'arms: a trigger turn installs the round\'s selection beside its bundle; --trigger-field own, its bundle alone',
+      run: () => {
+        mkdirSync(join(fixtureRoot, 'other-skill'), { recursive: true });
+        writeFileSync(join(fixtureRoot, 'other-skill', 'SKILL.md'), '---\nname: other-skill\n---\n');
+        const trig = fixtureCase({ shouldTrigger: true, mustContain: [] });
+        const sets = [installedFor(trig, ['other-skill', 'demo-skill']), installedFor(trig, undefined), installedFor(fixtureCase(), ['other-skill'])].map((s) => s.join()).join(' | ');
+        const d = prepareArmWorkdir('with-skill', installedFor(trig, ['other-skill']), fixtureRoot);
+        const held = ['demo-skill', 'other-skill'].every((b) => existsSync(join(d.cwd, '.claude', 'skills', b, 'SKILL.md'))) && !existsSync(join(d.cwd, '.claude', 'skills', 'demo-skill', 'evals'));
+        rmSync(d.root, { recursive: true, force: true });
+        const parsed = parseSkillEvalArgs(['--trigger-field', 'own']).triggerField;
+        const refused = [() => parseSkillEvalArgs(['--trigger-field', 'all']), () => parseSkillEvalArgs(['--trigger-field', 'own', '--regrade', 'DIR']), () => selectBundles(selectCatalog, ['demo-skill', 'other-skill'], true)].every((f) => {
+          try {
+            f();
+          } catch {
+            return true;
+          }
+          return false;
+        });
+        // A named bundle with no trigger case competes when the turns install the selection; installing its bundle alone, it is refused.
+        const competes = selectBundles(selectCatalog, ['demo-skill', 'other-skill'], true, true).length === 2;
+        const ok = sets === 'demo-skill,other-skill | demo-skill | demo-skill' && held && parsed === 'own' && refused && competes;
+        return ok ? true : `installed sets [${sets}], both bundles held: ${held}, --trigger-field own parsed: ${String(parsed)}, refusals: ${refused}, a caseless competitor kept: ${competes}`;
       },
     },
   ];
