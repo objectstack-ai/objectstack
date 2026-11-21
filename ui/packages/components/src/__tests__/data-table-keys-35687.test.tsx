@@ -14,9 +14,10 @@
  *      clears it; typing opens the editor with the typed text in place of the
  *      value (a number column gets the number); Ctrl/Cmd+V converts and
  *      commits; Ctrl/Cmd+C copies. (Backspace: section 4.)
- *   2. While editing: Enter commits and moves down, Tab / Shift+Tab commit and
- *      move right / left, Escape cancels and keeps the selection. In a
- *      multi-line editor Enter is the editor's and Ctrl/Cmd+Enter commits.
+ *   2. While editing: Enter commits and stays on the cell (objectstack#36023;
+ *      it moved down before), Tab / Shift+Tab commit and move right / left,
+ *      Escape cancels and keeps the selection. In a multi-line editor Enter
+ *      is the editor's and Ctrl/Cmd+Enter commits.
  *   3. An input method: the keys pressed while it composes, and the 229
  *      Enter a browser raises after `compositionend`, never commit; a
  *      composition started on the selected cell opens the editor with the
@@ -182,21 +183,22 @@ describe('data-table select-first keys — on the selected cell (objectstack#356
 });
 
 describe('data-table select-first keys — while editing', () => {
-  it('Enter commits and moves down; Tab commits and moves right; Shift+Tab left', () => {
+  it('Enter commits and stays on the cell, focus on it; Tab commits and moves right; Shift+Tab left (objectstack#36023)', () => {
     const t = renderTable();
     t.select(0, 0);
     fireEvent.change(t.catcher(), { target: { value: 'A' } });
     fireEvent.keyDown(t.editor()!, { key: 'Enter' });
     expect(t.onCellChange).toHaveBeenLastCalledWith(0, 'name', 'A', ROWS[0]);
     expect(t.editor()).toBeNull();
-    expect(t.selected()).toBe('1:0');
+    expect(t.selected()).toBe('0:0');
+    expect(document.activeElement).toBe(t.catcher());
     fireEvent.keyDown(t.catcher(), { key: 'Enter' });
     fireEvent.keyDown(t.editor()!, { key: 'Tab' });
-    expect(t.selected()).toBe('1:1');
+    expect(t.selected()).toBe('0:1');
     expect(t.editor()).toBeNull();
     fireEvent.keyDown(t.catcher(), { key: 'F2' });
     fireEvent.keyDown(t.editor()!, { key: 'Tab', shiftKey: true });
-    expect(t.selected()).toBe('1:0');
+    expect(t.selected()).toBe('0:0');
     expect(t.onCellChange).toHaveBeenCalledTimes(3);
   });
 
@@ -225,7 +227,7 @@ describe('data-table select-first keys — while editing', () => {
     fireEvent.keyDown(area, { key: 'Enter', metaKey: true });
     expect(t.container.querySelector('textarea')).toBeNull();
     expect(t.onCellChange).toHaveBeenCalledTimes(1);
-    expect(t.selected()).toBe('1:2');
+    expect(t.selected()).toBe('0:2');
   });
 });
 
@@ -333,12 +335,12 @@ describe('data-table select-first — clearing, the panel under the cell, a refu
     fireEvent.keyDown(t.editor()!, { key: 'Tab' });
     expect(t.selected()).toBe('0:1');
     expect(t.onCellChange).not.toHaveBeenCalled();
-    // Correcting the value takes the reason away, and Enter commits and moves on.
+    // Correcting the value takes the reason away, and Tab commits and moves on.
     fireEvent.change(t.editor()!, { target: { value: '50' } });
     expect(t.cell(0, 1).querySelector('[data-testid="cell-edit-refusal"]')).toBeNull();
-    fireEvent.keyDown(t.editor()!, { key: 'Enter' });
+    fireEvent.keyDown(t.editor()!, { key: 'Tab' });
     expect(t.onCellChange).toHaveBeenCalledWith(0, 'amount', '50', ROWS[0]);
-    expect(t.selected()).toBe('1:1');
+    expect(t.selected()).toBe('0:2');
   });
 
   it('Escape after a refusal discards the edit', () => {

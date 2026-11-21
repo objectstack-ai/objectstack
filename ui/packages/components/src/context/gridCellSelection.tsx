@@ -14,8 +14,8 @@
  * single click, never edited by it and never opening the record. An editor
  * opens on double-click, Enter, F2 or typing (Space included; a two-state
  * cell flips instead); the title link or a touch tap opens the record; Esc
- * cancels; Enter and Tab commit and move (in a multi-line editor Enter is a
- * newline and Ctrl/Cmd+Enter commits). A cell that opens no editor says why
+ * cancels; Enter commits and stays on the cell, Tab commits and moves (in a
+ * multi-line editor Enter is a newline and Ctrl/Cmd+Enter commits). A cell that opens no editor says why
  * in place. Outside a provider (`null`, the default) the table keeps its
  * click-to-edit / click-to-open behaviour byte for byte, so every host that
  * does not mount this keeps what it had.

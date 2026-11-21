@@ -3747,12 +3747,19 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     attemptEdit(rowIndex, colIndex, { value: converted !== undefined ? converted : text });
   };
 
-  /** After Enter or Tab committed the selected cell's edit: the cell it moves to. */
-  const moveSelection = (direction: 'down' | 'right' | 'left') => {
+  /**
+   * After Enter or Tab committed the selected cell's edit (objectstack#36023):
+   * Enter stays on the cell, with the focus back on it; Tab moves right and
+   * Shift+Tab left.
+   */
+  const commitMoves = (e: React.KeyboardEvent) => {
     if (!selectedPos) return;
     const { rowIndex, colIndex } = selectedPos;
-    if (direction === 'down') selectCell(Math.min(paginatedData.length - 1, rowIndex + 1), colIndex);
-    else selectCell(rowIndex, Math.max(0, Math.min(columns.length - 1, colIndex + (direction === 'right' ? 1 : -1))));
+    if (e.key !== 'Tab') {
+      focusSelectionRef.current = true;
+      return;
+    }
+    selectCell(rowIndex, Math.max(0, Math.min(columns.length - 1, colIndex + (e.shiftKey ? -1 : 1))));
   };
 
   /** The selected cell's keys, while no editor is open (an open editor owns every key). */
@@ -3902,8 +3909,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       const committed = saveEdit(true);
       // A refused value keeps the editor, whose next blur saves as before.
       if (!committed) skipBlurSaveRef.current = false;
-      // The select-first model: Enter saves and moves down, Tab right, Shift+Tab left.
-      if (committed && selectFirst) moveSelection(e.key === 'Enter' ? 'down' : e.shiftKey ? 'left' : 'right');
+      // The select-first model (objectstack#36023): Enter saves and stays on
+      // the cell, Tab moves right, Shift+Tab left.
+      if (committed && selectFirst) commitMoves(e);
     } else if (e.key === 'Escape') {
       e.preventDefault();
       focusSelectionRef.current = selectFirst;
@@ -5284,7 +5292,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                             // A commit-on-blur widget stages
                                             // on this blur (objectui#12664).
                                             flushInjectedEditor();
-                                            if (saveEdit(true) && selectFirst) moveSelection(e.key === 'Enter' ? 'down' : e.shiftKey ? 'left' : 'right');
+                                            if (saveEdit(true) && selectFirst) commitMoves(e);
                                           } else if (e.key === 'Escape') {
                                             e.preventDefault();
                                             focusSelectionRef.current = selectFirst;
