@@ -18,7 +18,7 @@ import {
   FileText, Database, LayoutDashboard, File, List, CircleAlert, Rocket, Lock,
 } from 'lucide-react';
 import { useDisplayLocale } from '@object-ui/i18n';
-import { Button, cn } from '@object-ui/components';
+import { Button, cn, ObjectIconTile } from '@object-ui/components';
 import type { ActivityFeedReading } from '../../hooks/sharedUserFeeds.js';
 import type { HomeInboxStatus, HomeNotification, PendingApprovalRequest } from '../../hooks/useHomeInbox.js';
 import type { RecentItem } from '../../hooks/useRecentItems.js';
@@ -484,6 +484,11 @@ export interface RecentItemContext {
   app?: string;
   /** A record's object icon (a Lucide name), or `undefined` to draw the kind's icon. */
   icon?: string;
+  /**
+   * A record's object palette colour (`ObjectSchema.color`): with `icon`, the
+   * row draws the object's tile in that colour (objectstack#35985).
+   */
+  color?: string;
 }
 
 /**
@@ -524,7 +529,7 @@ export function HomeContinue({
       ) : (
         <ul className="overflow-hidden rounded-lg border border-border bg-card">
           {items.map((it) => {
-            const { context, app, icon } = describe(it);
+            const { context, app, icon, color } = describe(it);
             const Icon = icon ? getIcon(icon) : RECENT_ICON[it.type] || FileText;
             const trail = [context, app, timeAgo(it.visitedAt, displayLocale)].filter(Boolean).join(' · ');
             return (
@@ -536,13 +541,19 @@ export function HomeContinue({
                   data-recent-type={it.type}
                   className="flex h-10 w-full items-center gap-2.5 px-3 text-left text-[13px] transition-colors hover:bg-muted/60 max-sm:h-11"
                 >
-                  <span
-                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"
-                    data-testid="home-recent-icon"
-                    data-icon={icon ?? it.type}
-                  >
-                    <Icon className="h-[13px] w-[13px]" />
-                  </span>
+                  {icon ? (
+                    <span className="inline-flex shrink-0" data-testid="home-recent-icon" data-icon={icon}>
+                      <ObjectIconTile glyph={Icon} color={color} size="md" />
+                    </span>
+                  ) : (
+                    <span
+                      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"
+                      data-testid="home-recent-icon"
+                      data-icon={it.type}
+                    >
+                      <Icon className="h-[13px] w-[13px]" />
+                    </span>
+                  )}
                   <span className="min-w-0 flex-1 truncate">{labelOf(it)}</span>
                   <span className="shrink-0 text-xs text-muted-foreground" data-testid="home-recent-trail">
                     {trail}

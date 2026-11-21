@@ -30,6 +30,7 @@ import {
   Skeleton,
   useIsMobile,
   RelatedCountStore,
+  ObjectIconTile,
 } from '@object-ui/components';
 import { SchemaRenderer, ActionCtxReact, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, answeredLoadFailure, declaredUserMessage, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
 import {
@@ -3610,7 +3611,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   const headerClassName = isCollapsible ? 'cursor-pointer select-none' : undefined;
   const handleHeaderClick = isCollapsible ? () => setCollapsed((c) => !c) : undefined;
 
-  const SectionIcon = resolveIconComponent(icon);
+  // The section names the related object by its tile (objectstack#35985): the
+  // glyph is the list's own `icon`, else the object's; the colour is always
+  // the object's, so the list looks as the object does in the menu.
+  const SectionIcon = resolveIconComponent(icon ?? (typeof objectSchema?.icon === 'string' ? objectSchema.icon : undefined));
+  const sectionColor = typeof objectSchema?.color === 'string' ? objectSchema.color : undefined;
   // Badge shows the COLLECTION size: the server total in windowed mode (only
   // one page is in memory), the loaded row count otherwise.
   // objectstack#27056 — a compact card counted up front answers from that
@@ -3732,8 +3737,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       <Card className={cn('shadow-none border-border/60 bg-transparent', className)}>
         <CardHeader className="py-3 px-4 sm:py-3 min-h-12 sm:min-h-0">
           <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-            {/* eslint-disable-next-line react-hooks/static-components -- resolveIconComponent returns a stable icon component from a static registry, not a component created during render */}
-            <SectionIcon className="h-4 w-4 text-muted-foreground shrink-0" aria-hidden />
+            <ObjectIconTile glyph={SectionIcon} color={sectionColor} />
             <span className="truncate">{title}</span>
           </CardTitle>
         </CardHeader>
@@ -4154,8 +4158,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 ? (<ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />)
                 : (<ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />)
             )}
-            {/* eslint-disable-next-line react-hooks/static-components -- resolveIconComponent returns a stable icon component from a static registry, not a component created during render */}
-            <SectionIcon className="h-4 w-4 text-muted-foreground shrink-0" aria-hidden />
+            <ObjectIconTile glyph={SectionIcon} color={sectionColor} />
             <span className={cn('truncate', isEmpty && 'text-muted-foreground font-medium')}>
               {title}
             </span>

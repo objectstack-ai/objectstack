@@ -8,11 +8,10 @@
  * (`buildDefaultPageSchema`).
  */
 
-import { createElement, useState, useEffect, useLayoutEffect, useCallback, useContext, useMemo, useRef, type ReactElement } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useContext, useMemo, useRef, type ReactElement } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
 import { activityRowToFeedItem, composeImpersonatedActor, IMPERSONATED_ACTOR_FALLBACK, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RECORD_PAGE_TIMELINE_PANEL, RECORD_TIMELINE_PANEL_MAX_ENTRIES, RecordFieldChangesContext, RecordFieldHistoryContext, RecordTimelineTotalContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageTierHasRightColumn, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
-import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderPhoneContext, PageHeaderTrailingContext, PanelToggles, RecordHeaderBarContext, RecordHeaderStateContext, RecordTopBar, RecordTopBarButton, cn, useRecordStepKeys, type PanelToggleItem, type RecordHeaderBar, type RecordHeaderGroupParts, type RecordHeaderState, type RecordTopBarStepper } from '@object-ui/components';
-import { getIcon } from '../utils/getIcon.js';
+import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderPhoneContext, PageHeaderTrailingContext, PanelToggles, ObjectIconTile, RecordHeaderBarContext, RecordHeaderStateContext, RecordTopBar, RecordTopBarButton, cn, useRecordStepKeys, type PanelToggleItem, type RecordHeaderBar, type RecordHeaderGroupParts, type RecordHeaderState, type RecordTopBarStepper } from '@object-ui/components';
 import { isActingApprover } from '../utils/approvalDecisionFold.js';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
@@ -4877,10 +4876,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // same `icon` key the app's actions use, so every row draws one kind
         // of entry. `page:header` keeps this CTA a labelled button in the row
         // at every width: it takes none of the app's `maxVisible` slots and
-        // never folds into the `⋯` (objectui#12617). It is the filled primary
-        // button only when the record has no app action ahead of it; next to
-        // app actions it is an outline button, which `page:header` decides —
-        // no `variant` is declared here for it to read.
+        // never folds into the `⋯` (objectui#12617). It is an outline button
+        // in the header row whether or not the record has app actions
+        // (objectstack#36049; before, it drew filled when it had none);
+        // `page:header` decides that — no `variant` is declared here for it
+        // to read. The phone's bottom bar still draws it filled.
         icon: 'pencil',
         type: 'script',
         locations: ['record_header'],
@@ -5278,10 +5278,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       data-record-bar-title=""
     />
   );
+  // objectstack#35985 — the record row leads with the object's tile: white
+  // glyph on the object's colour, gray without one.
   const objectIconName = typeof (objectDef as any)?.icon === 'string' ? ((objectDef as any).icon as string) : undefined;
-  const objectIcon = objectIconName
-    ? createElement(getIcon(objectIconName), { className: 'h-4 w-4 shrink-0 text-muted-foreground', 'aria-hidden': true })
-    : null;
+  const objectColor = typeof (objectDef as any)?.color === 'string' ? ((objectDef as any).color as string) : undefined;
+  const objectIcon = objectIconName ? <ObjectIconTile icon={objectIconName} color={objectColor} /> : null;
   const pageLeading = embedded ? null : pageTrail.length > 0 ? (
     <>
       {originFrom?.pathname && (

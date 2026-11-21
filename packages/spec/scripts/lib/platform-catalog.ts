@@ -118,6 +118,7 @@ export const APP_FACING_OBJECT_GROUPS: readonly { readonly title: string; readon
     title: 'Money, imports and approvals',
     rows: [
       { name: 'sys_exchange_rate', builds: 'an exchange-rate table', reach: '`currencyConfig.homeAmount` converts at write; Setup edits rates; data API' },
+      { name: 'sys_unit', builds: 'a unit table or picklist', reach: '`unitConfig` on a `number` field (`unitMode: \'fixed\'` with `unit`, `\'record\'` with `unitField`) or a `text` field (`\'code\'`); a stored code is standard (UN/ECE Rec 20: `KGM`, `H87`) or a row added here in Setup; data API, no delete' },
       { name: 'sys_work_calendar', builds: 'a business-hours calendar', reach: 'kept per organization in Setup; an approval\'s `escalation.clock: \'working_time\'` reads it; data API' },
       { name: 'sys_work_calendar_exception', builds: 'a holiday table', reach: 'a calendar\'s holidays and make-up workdays, kept in Setup; data API' },
       { name: 'sys_import_job', builds: 'a bulk-import job table', reach: '`POST /api/v1/data/OBJECT/import/jobs`; data API read' },
@@ -184,10 +185,10 @@ export const CAPABILITY_ROWS: Readonly<Record<string, string>> = Object.freeze({
   settings: 'the settings store',
   webhooks: 'outbound webhooks',
   'hierarchy-security': 'hierarchy-relative permission scopes',
-  'ai-seat': 'the cloud AI-seat tier',
-  governance: 'the cloud governance tier',
-  'audit-compliance': 'the cloud audit-compliance tier',
-  'access-policy-console': 'the cloud access-policy console',
+  'ai-seat': 'the AI-seat tier',
+  governance: 'the governance tier',
+  'audit-compliance': 'the audit-compliance tier',
+  'access-policy-console': 'the access-policy console',
 });
 
 /** Master data each suite keeps, matched across suites by key contract. */
@@ -199,8 +200,8 @@ export const NOT_PLATFORM_ROWS: readonly { readonly concept: string; readonly ru
 /** Carded, not shipped. Each row is **not available**; the shipping PR moves it into the main table. Capped at a few rows. */
 export const PLANNED_ROWS: readonly { readonly concept: string; readonly state: string; readonly link: string }[] = [
   {
-    concept: 'Units of measure (a standard unit table, organization units, a quantity field with its unit)',
-    state: 'contract accepted, nothing shipped',
+    concept: 'Unit display, totals and conversion',
+    state: 'contract accepted; a quantity shows and sums as a bare number',
     link: 'https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0158-units-of-measure-standard-unit-table-org-units-quantity-unit-declaration-base-quantity.md',
   },
   {
@@ -223,8 +224,8 @@ export const PROSE = Object.freeze({
     '> (not runnable in an installed app). Names come from `@objectstack/spec`.',
   ],
   intro: [
-    'Read this before adding an object, a field or a flow (objectstack-project §0,',
-    'question 3). `list_objects` over MCP hides system objects, so look here.',
+    'Read this before adding an object, a field or a flow. `list_objects` over MCP',
+    'hides system objects, so look here.',
   ],
   objects: [
     '"Data API" means the generic `/api/v1/data/OBJECT` routes, as the object',
@@ -249,10 +250,8 @@ export const PROSE = Object.freeze({
     'platform" here.',
   ],
   planned: [
-    'Each row is **not available**: nothing below can be declared or installed.',
-    'The app may build its own meanwhile, marked `// PLATFORM-CANDIDATE:` with',
-    'the link; an interim unit field stores the contract\'s UN/ECE Rec 20 codes',
-    '(`H87`, `KGM`) as option values, the business\'s spellings as labels.',
+    'Nothing below can be declared or installed. The app may build its own',
+    'meanwhile, marked `// PLATFORM-CANDIDATE:` with the link.',
   ],
 });
 

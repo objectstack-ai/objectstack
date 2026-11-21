@@ -392,13 +392,15 @@ export function agentSetOf(op: CardOperation, turn: Pick<ParsedTurn, 'toolCalls'
 
 /**
  * The agent's applied write on a `pending_confirmation` operation, for the
- * grader's temporary rule (`AGENT_CONFIRMATION_MEETS_PENDING`, until
- * objectstack-ai/cloud#3826 item 6): each `run_action` the door applied on
+ * grader's temporary rule (`AGENT_CONFIRMATION_MEETS_PENDING`, off since
+ * #33691): each `run_action` the door applied on
  * the operation's object (the action its answer names, whether the call
  * carried the confirmation member, and the build's `ai.requiresConfirmation`
  * for it from `actionGates`), each raw data door that applied a write there,
  * the ids of the rows the turn changed, and the target row after the turn.
  * An applied `run_action` whose answer names another object is not counted.
+ *
+ * @deprecated Read only by the temporary rule, which is off; deleted in the next major (#36057).
  */
 function agentConfirmedOf(
   op: CardOperation,
