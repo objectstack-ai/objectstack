@@ -98,6 +98,29 @@ async function invalidate() {
   });
 }
 
+/** The shape the ObjectStack adapter throws: status + code decorated on the Error. */
+function refusal(): Error {
+  const err = new Error(
+    'ApiDataSource: HTTP 403 Forbidden — {"error":"PERMISSION_DENIED: no read access to deal"}',
+  ) as Error & { httpStatus?: number; code?: string };
+  err.httpStatus = 403;
+  err.code = 'PERMISSION_DENIED';
+  return err;
+}
+
+function serverError(): Error {
+  const err = new Error('ApiDataSource: HTTP 500 Internal Server Error') as Error & { httpStatus?: number };
+  err.httpStatus = 500;
+  return err;
+}
+
+async function failWith(d: Deferred<any>, err: Error) {
+  await act(async () => {
+    d.reject(err);
+    await Promise.resolve();
+  });
+}
+
 const BLOCK = { type: 'object-kanban', objectName: 'deal', groupBy: 'status', columns: [{ id: 'open', title: 'Open' }] };
 
 function mount(dataSource: ReturnType<typeof makeDeferredDataSource>['dataSource']) {
@@ -189,5 +212,43 @@ describe('object-kanban clears its error when a later load commits cards (object
     await answer(finds[0], 'Superseded cards');
 
     expect(errorShown('current run failed'), 'a superseded answer cleared the current error').toBe(true);
+  });
+});
+
+/**
+ * A refused read draws the calm no-access state, not the raw error.
+ *
+ * A reader who may open the page but not read the kanban's object used to see
+ * the transport's own string ("ApiDataSource: HTTP 403 Forbidden — ..."). The
+ * kanban now classifies a failed load with the shared `classifyLoadError` and,
+ * for a `forbidden` read, draws the shared `list.loadErrorForbidden*` sentence
+ * as a neutral `role="status"` panel. Every other failure keeps the existing
+ * error screen (CONTROL).
+ */
+describe('object-kanban: a refused read draws the no-access state', () => {
+  it('a 403 read draws the no-access state, with none of the server text', async () => {
+    const { dataSource, finds } = makeDeferredDataSource();
+    const { container } = mount(dataSource);
+    await waitFor(() => expect(finds).toHaveLength(1));
+    await failWith(finds[0], refusal());
+
+    const panel = await screen.findByTestId('kanban-no-access');
+    expect(panel.getAttribute('role')).toBe('status');
+    expect(panel.textContent).toContain('You don\u2019t have access');
+    expect(panel.textContent).toContain('You don\u2019t have permission to view these records.');
+    const text = container.textContent ?? '';
+    expect(text).not.toContain('Error');
+    expect(text).not.toContain('PERMISSION_DENIED');
+    expect(text).not.toContain('HTTP 403');
+  });
+
+  it('CONTROL: a 500 keeps the existing error screen', async () => {
+    const { dataSource, finds } = makeDeferredDataSource();
+    mount(dataSource);
+    await waitFor(() => expect(finds).toHaveLength(1));
+    await failWith(finds[0], serverError());
+
+    expect(errorShown('ApiDataSource: HTTP 500 Internal Server Error')).toBe(true);
+    expect(screen.queryByTestId('kanban-no-access')).toBeNull();
   });
 });
