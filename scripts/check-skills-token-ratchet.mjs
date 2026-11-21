@@ -1640,15 +1640,7 @@ export const CEILINGS = new Map([
   // labels it (Activity) in place of the Chinese word, and step 5's "(one page at two
   // widths)" aside — step 1 already says layout follows the surface's width — is gone; the
   // ceiling follows the file down to the measurement (3961 bytes).
-  // 991 -> 989 (#36179, the #36150 skills follow-up): LOWERED. Step 4 says a `kind: 'full'`
-  // page is drawn on the desktop full page only (phone and drawer draw the standard page)
-  // and that a `record_section` action also lists `record_more` to show there; step 5 says
-  // the drawer is always the standard page. Paid for in the same file: the inline
-  // `relatedListFilter` example (the snippet below shows it), "(no deep merge)" beside
-  // "each whole", step 6's restated "the default" / "the split … is retired" and its
-  // keyboard shortcuts, and the preference-store sentence that restates step 6's title;
-  // the ceiling follows the file down to the measurement (3954 bytes).
-  ['skills/objectstack-ui/rules/record-page.md', 989],
+  ['skills/objectstack-ui/rules/record-page.md', 991],
 
   // ── 2026-09-22 the #19715 split — decision batch #213 item 1 ─────────────
   // The maintainer ruled the four over-500-line published SKILL.md files split
