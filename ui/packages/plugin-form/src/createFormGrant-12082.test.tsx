@@ -287,7 +287,8 @@ describe('MasterDetailForm under a create-only grant on the child (objectui#1208
 
   it('CONTROL — an edit form\'s line cells stay locked under the same grant', async () => {
     mountMD('edit');
-    await waitFor(async () => expect((await cells('Instalment No.')).length).toBeGreaterThan(1));
+    // The one stored line (the grid draws no trailing entry row, objectstack#35507).
+    await waitFor(async () => expect((await cells('Instalment No.')).length).toBe(1));
     for (const el of [...(await cells('Instalment No.')), ...(await cells('Instalment notes'))]) {
       expect(el.disabled).toBe(true);
     }

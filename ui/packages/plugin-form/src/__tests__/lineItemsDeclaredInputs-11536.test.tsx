@@ -160,7 +160,12 @@ describe('record:line_items: each of the ten declared keys moves the panel (obje
     const adapter = makeAdapter([]);
     mount(adapter, node({ parentId: 'p1' }));
     // The grid draws no trailing entry row (objectstack#35507): Add the line.
-    fireEvent.click(await waitFor(() => screen.getByTestId('line-items-add')));
+    const add = await waitFor(() => {
+      const el = document.body.querySelector('[data-testid="line-items-add"]') as HTMLButtonElement | null;
+      if (!el) throw new Error('grid not drawn yet');
+      return el;
+    });
+    fireEvent.click(add);
     const ops = await editAndSave(adapter);
     expect(ops).toEqual([{ object: 'po_line', action: 'create', data: { label: 'edited', amount: null, po: 'p1' } }]);
   });

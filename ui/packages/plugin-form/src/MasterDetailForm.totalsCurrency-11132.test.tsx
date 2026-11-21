@@ -111,7 +111,7 @@ async function renderStack(opts: {
     </I18nProvider>,
   );
   // The grid draws no trailing entry row (objectstack#35507): Add the line first.
-  fireEvent.click(await waitFor(() => screen.getByTestId('line-items-add')));
+  fireEvent.click(await waitFor(() => screen.getAllByTestId('line-items-add')[0]));
   const cell = await waitFor(() => screen.getAllByLabelText('Line Total')[0] as HTMLInputElement);
   fireEvent.change(cell, { target: { value: '1234.5' } });
   const rate = await waitFor(() => {
