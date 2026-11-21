@@ -16,10 +16,10 @@
  *   covers nearly the whole screen; a round 「×」 at the top left, the title in
  *   the middle, a round 「✓」 at the top right. A swipe down, the overlay or
  *   Escape close it as 「×」 does.
- * - `PhoneSortSheet`: `SortBuilder`'s `stacked` layout (the desktop's every-level
- *   sort panel, objectstack#35876) for the levels, `SortPanel` (the desktop's
- *   field list with the direction on top) to add one and `FieldList` to change
- *   a level's field.
+ * - `PhoneSortSheet`: the list's sort levels on two lines each
+ *   (`PhoneSortLevels`, the same `SortItem`s the desktop `SortBuilder` edits),
+ *   `SortPanel` (the desktop's field list with the direction on top) to add
+ *   one and `FieldList` to change a level's field.
  * - `PhoneFilterSheet`: one item per filter, then `FilterPanel` (the desktop's
  *   field list → values steps) to add or change one.
  * - `PhoneViewSettingsSheet`: `ViewSettingsContent`, the desktop's 视图设置.
@@ -44,13 +44,11 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-  SortBuilder,
-  type SortBuilderLevel,
   type FilterBuilderRowGroup,
   type SortItem,
 } from '@object-ui/components';
 import type { DataSource } from '@object-ui/types';
-import { ArrowUpDown, Check, ChevronLeft, Info, ListFilter, MoreHorizontal, Plus, X } from 'lucide-react';
+import { ArrowUpDown, Check, ChevronLeft, GripVertical, Info, ListFilter, MoreHorizontal, Plus, X } from 'lucide-react';
 import { FieldList } from '../conditions/FieldList';
 import { isQuickRowApplied } from '../conditions/FilterValuePanel';
 import { FilterPanel, SortPanel, describeConditionValue, useLookupValueNames } from '../conditions/ListConditionControls';
@@ -317,51 +315,139 @@ function useStaged<T, S>(open: boolean, value: T, firstStep: S): [T, React.Dispa
 // Sort
 // ---------------------------------------------------------------------------
 
+const DATE_SORT_TYPES = new Set(['date', 'datetime']);
+
 /**
- * A level of the phone sort sheet, drawn inside `SortBuilder` (`renderLevel`):
- * the builder's handle, the field over its direction, and a 「⋯」 that changes
- * the field, the direction or removes the level. The writes are the builder's.
+ * The phone sort sheet's levels (objectstack#35884): each level on two lines,
+ * the field over its direction, with a handle a finger drags (pointer events:
+ * HTML5 drag does not fire on touch) or ArrowUp / ArrowDown moves, and a 「⋯」
+ * that changes the field, the direction or removes the level. The levels are
+ * the list's own `SortItem`s, the ones the desktop `SortBuilder` edits; this
+ * is their phone face, drawn here rather than in `@object-ui/components` so
+ * that package's eager chunk carries no phone-only bytes.
  */
-function PhoneSortLevel({ level, label, onChangeField }: { level: SortBuilderLevel; label: string; onChangeField: () => void }) {
+function PhoneSortLevels({ fields, value, onChange, onChangeField }: {
+  fields: ReadonlyArray<ConditionField>;
+  value: SortItem[];
+  onChange: (next: SortItem[]) => void;
+  onChangeField: (id: string) => void;
+}) {
   const { t } = useListConditionTranslation();
-  const { item, direction } = level;
+  const listRef = React.useRef<HTMLDivElement | null>(null);
+  const [drag, setDrag] = React.useState<{ from: number; over: number } | null>(null);
+  const move = (from: number, to: number) => {
+    if (from === to || to < 0 || to >= value.length) return;
+    const next = value.slice();
+    next.splice(to, 0, ...next.splice(from, 1));
+    onChange(next);
+  };
+  // The level under the finger: the first whose middle is below it.
+  const indexAt = (clientY: number) => {
+    const rows = Array.from(listRef.current?.children ?? []);
+    const i = rows.findIndex((row) => {
+      const rect = row.getBoundingClientRect();
+      return clientY < rect.top + rect.height / 2;
+    });
+    return i < 0 ? rows.length - 1 : i;
+  };
   return (
-    <div className="flex min-h-14 items-center gap-2 px-2 py-1.5">
-      {level.handle}
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium" data-testid="sort-builder-row-field">{label}</div>
-        <div className="truncate text-xs text-muted-foreground" data-testid="sort-builder-row-direction">
-          {direction[item.order]}
-        </div>
-      </div>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-11 w-11 shrink-0"
-            aria-label={t('sortBuilder.levelOptions', { label })}
-            data-testid="sort-builder-row-menu"
+    <div ref={listRef} className="divide-y rounded-lg border" data-testid="sort-builder-levels">
+      {value.map((item, index) => {
+        const field = fields.find((f) => f.value === item.field);
+        const label = field?.label ?? item.field;
+        const direction = DATE_SORT_TYPES.has(field?.type ?? '')
+          ? { asc: t('sortBuilder.oldestFirst'), desc: t('sortBuilder.newestFirst') }
+          : { asc: t('sortBuilder.ascending'), desc: t('sortBuilder.descending') };
+        return (
+          <div
+            key={item.id}
+            className={cn('flex min-h-14 items-center gap-2 px-2 py-1.5', drag && drag.over === index && drag.from !== index && 'bg-accent')}
+            data-testid="sort-builder-row"
           >
-            <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-48">
-          <DropdownMenuItem onSelect={onChangeField} data-testid="sort-builder-row-change-field">
-            {t('sortBuilder.changeField')}
-          </DropdownMenuItem>
-          {(['asc', 'desc'] as const).map((order) => (
-            <DropdownMenuItem key={order} onSelect={() => level.setOrder(order)} data-testid={`sort-builder-row-order-${order}`}>
-              <Check className={cn('h-4 w-4', item.order === order ? 'opacity-100' : 'opacity-0')} aria-hidden="true" />
-              {direction[order]}
-            </DropdownMenuItem>
-          ))}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={level.remove} data-testid="sort-builder-row-remove">
-            {t('sortBuilder.removeSort')}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+            <span
+              role="button"
+              tabIndex={value.length > 1 ? 0 : -1}
+              aria-disabled={value.length < 2 || undefined}
+              aria-label={t('sortBuilder.reorder')}
+              // A bottom sheet that closes on a downward swipe leaves this drag alone.
+              data-vaul-no-drag=""
+              className="inline-flex h-11 w-8 shrink-0 cursor-grab touch-none items-center justify-center rounded text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring aria-disabled:opacity-40"
+              // The sheet's own swipe never sees this drag either.
+              onPointerDown={(event) => {
+                event.stopPropagation();
+                if (value.length < 2) return;
+                event.preventDefault();
+                event.currentTarget.setPointerCapture?.(event.pointerId);
+                setDrag({ from: index, over: index });
+              }}
+              onPointerMove={(event) => {
+                event.stopPropagation();
+                if (!drag) return;
+                const over = indexAt(event.clientY);
+                if (over !== drag.over) setDrag({ from: drag.from, over });
+              }}
+              onPointerUp={(event) => {
+                event.stopPropagation();
+                if (!drag) return;
+                move(drag.from, drag.over);
+                setDrag(null);
+              }}
+              onPointerCancel={() => setDrag(null)}
+              onKeyDown={(event) => {
+                const to = event.key === 'ArrowUp' ? index - 1 : event.key === 'ArrowDown' ? index + 1 : null;
+                if (to === null) return;
+                event.preventDefault();
+                move(index, to);
+              }}
+              data-testid="sort-builder-handle"
+            >
+              <GripVertical className="h-4 w-4" aria-hidden="true" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-medium" data-testid="sort-builder-row-field">{label}</div>
+              <div className="truncate text-xs text-muted-foreground" data-testid="sort-builder-row-direction">
+                {direction[item.order]}
+              </div>
+            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-11 w-11 shrink-0"
+                  aria-label={t('sortBuilder.levelOptions', { label })}
+                  data-testid="sort-builder-row-menu"
+                >
+                  <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuItem onSelect={() => onChangeField(item.id)} data-testid="sort-builder-row-change-field">
+                  {t('sortBuilder.changeField')}
+                </DropdownMenuItem>
+                {(['asc', 'desc'] as const).map((order) => (
+                  <DropdownMenuItem
+                    key={order}
+                    onSelect={() => onChange(value.map((level) => (level.id === item.id ? { ...level, order } : level)))}
+                    data-testid={`sort-builder-row-order-${order}`}
+                  >
+                    <Check className={cn('h-4 w-4', item.order === order ? 'opacity-100' : 'opacity-0')} aria-hidden="true" />
+                    {direction[order]}
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="text-destructive focus:text-destructive"
+                  onSelect={() => onChange(value.filter((level) => level.id !== item.id))}
+                  data-testid="sort-builder-row-remove"
+                >
+                  {t('sortBuilder.removeSort')}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -378,8 +464,6 @@ export interface PhoneSortSheetProps {
   /** The host's note under the field list (fields it cannot sort by). */
   note?: React.ReactNode;
 }
-
-type SortBuilderFields = React.ComponentProps<typeof SortBuilder>['fields'];
 
 type SortStep = { kind: 'levels' } | { kind: 'add' } | { kind: 'field'; id: string };
 
@@ -422,17 +506,11 @@ export function PhoneSortSheet({ open, onOpenChange, fields, shownFields, value,
     const held = new Set(staged.map((level) => level.field));
     body = (
       <div className="space-y-3">
-        <SortBuilder
-          fields={fields as SortBuilderFields}
+        <PhoneSortLevels
+          fields={fields}
           value={staged}
           onChange={setStaged}
-          renderLevel={(level) => (
-            <PhoneSortLevel
-              level={level}
-              label={fields.find((field) => field.value === level.item.field)?.label ?? level.item.field}
-              onChangeField={() => setStep({ kind: 'field', id: level.item.id })}
-            />
-          )}
+          onChangeField={(id) => setStep({ kind: 'field', id })}
         />
         <button
           type="button"

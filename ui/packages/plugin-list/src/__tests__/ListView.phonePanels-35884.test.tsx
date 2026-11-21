@@ -32,7 +32,6 @@ import '@testing-library/jest-dom';
 import React from 'react';
 import { ComponentRegistry } from '@object-ui/core';
 import { SchemaRendererProvider } from '@object-ui/react';
-import { SortBuilder } from '@object-ui/components';
 import type { ListViewSchema } from '@object-ui/types';
 import { ListView } from '../ListView';
 
@@ -265,11 +264,7 @@ describe('phone panels and the on-screen keyboard (objectstack#35884)', () => {
   });
 });
 
-describe('the phone sort level, drawn in SortBuilder (objectstack#35884)', () => {
-  const FIELDS = [
-    { value: 'name', label: 'Name' },
-    { value: 'amount', label: 'Amount' },
-  ];
+describe('the phone sort levels (objectstack#35884)', () => {
 
   it('each level is two lines, the field over its direction, with the builder\'s handle', async () => {
     mount();
@@ -282,16 +277,14 @@ describe('the phone sort level, drawn in SortBuilder (objectstack#35884)', () =>
     expect(within(row).getByTestId('sort-builder-row-menu')).toHaveAccessibleName('Options for Name');
   });
 
-  it('a finger on the handle moves a level: dropped over the first, the second leads', () => {
-    const onChange = vi.fn();
-    render(
-      <SortBuilder
-        renderLevel={(level) => <div>{level.handle}</div>}
-        fields={FIELDS}
-        value={[{ id: 'a', field: 'name', order: 'asc' }, { id: 'b', field: 'amount', order: 'desc' }]}
-        onChange={onChange}
-      />,
-    );
+  it('a finger on the handle moves a level: dropped over the first, the second leads, and 「✓」 writes that order', async () => {
+    const onSortChange = vi.fn();
+    mount({}, { onSortChange });
+    await screen.findByTestId('grid-stub');
+    await addSortLevel('name');
+    fireEvent.click(screen.getByTestId('sort-builder-add'));
+    fireEvent.click(await screen.findByTestId('phone-sort-add-fields-item-stage'));
+    await waitFor(() => expect(screen.getAllByTestId('sort-builder-row')).toHaveLength(2));
     const rows = screen.getAllByTestId('sort-builder-row');
     rows.forEach((row, i) => {
       row.getBoundingClientRect = () => ({ top: i * 56, height: 56, bottom: i * 56 + 56, left: 0, right: 300, width: 300, x: 0, y: i * 56, toJSON: () => ({}) });
@@ -300,7 +293,10 @@ describe('the phone sort level, drawn in SortBuilder (objectstack#35884)', () =>
     fireEvent.pointerDown(handle, { pointerType: 'touch', pointerId: 1, clientY: 84 });
     fireEvent.pointerMove(handle, { pointerType: 'touch', pointerId: 1, clientY: 10 });
     fireEvent.pointerUp(handle, { pointerType: 'touch', pointerId: 1, clientY: 10 });
-    expect(onChange).toHaveBeenCalledTimes(1);
-    expect(onChange.mock.calls[0][0].map((level: { field: string }) => level.field)).toEqual(['amount', 'name']);
+    expect(screen.getAllByTestId('sort-builder-row-field').map((el) => el.textContent)).toEqual(['Stage', 'Name']);
+    expect(onSortChange, 'staged: nothing written yet').not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('phone-sort-panel-apply'));
+    await waitFor(() => expect(onSortChange).toHaveBeenCalledTimes(1));
+    expect(onSortChange.mock.calls[0][0].map((level: { field: string }) => level.field)).toEqual(['stage', 'name']);
   });
 });

@@ -72,23 +72,6 @@ export interface SortBuilderProps {
   value?: SortItem[];
   onChange?: (value: SortItem[]) => void;
   className?: string;
-  /**
-   * The host draws each level's face itself (objectstack#35884: the phone
-   * sheet's two-line level) and 「Add sort」 (none is drawn). The levels, their
-   * order, the handle (mouse, touch, keys) and every write stay the builder's.
-   */
-  renderLevel?: (level: SortBuilderLevel) => React.ReactNode;
-}
-
-/** One level, as {@link SortBuilderProps.renderLevel} receives it. */
-export interface SortBuilderLevel {
-  item: SortItem;
-  /** The builder's reorder handle for this level. */
-  handle: React.ReactNode;
-  /** The words for this field's two directions. */
-  direction: { asc: string; desc: string };
-  setOrder: (order: 'asc' | 'desc') => void;
-  remove: () => void;
 }
 
 export function SortBuilder({
@@ -96,7 +79,6 @@ export function SortBuilder({
   value = [],
   onChange,
   className,
-  renderLevel,
 }: SortBuilderProps) {
   const { t } = useSafeSortTranslation()
   // Normalize incoming items: ensure every row has an `id` (React key) and
@@ -180,133 +162,69 @@ export function SortBuilder({
     return moved.id;
   };
 
-  // objectstack#35884 — a touch has no HTML5 drag: a finger on the handle
-  // moves its level by pointer events instead. The level under the finger is
-  // where it lands; lifting the finger moves it there.
-  const rowsRef = React.useRef<HTMLDivElement | null>(null);
-  const [touchDrag, setTouchDrag] = React.useState<{ from: number; over: number } | null>(null);
-  const indexAt = (clientY: number): number => {
-    // The levels are the list's own children, one per level.
-    const rows = Array.from(rowsRef.current?.children ?? []);
-    for (let i = 0; i < rows.length; i += 1) {
-      const rect = rows[i].getBoundingClientRect();
-      if (clientY < rect.top + rect.height / 2) return i;
-    }
-    return Math.max(0, rows.length - 1);
-  };
-  const touchHandlers = (index: number) => ({
-    onPointerDown: (event: React.PointerEvent<HTMLElement>) => {
-      if (event.pointerType === 'mouse' || items.length < 2) return;
-      event.preventDefault();
-      event.currentTarget.setPointerCapture?.(event.pointerId);
-      setTouchDrag({ from: index, over: index });
-    },
-    onPointerMove: (event: React.PointerEvent<HTMLElement>) => {
-      if (!touchDrag) return;
-      const over = indexAt(event.clientY);
-      if (over !== touchDrag.over) setTouchDrag({ from: touchDrag.from, over });
-    },
-    onPointerUp: () => {
-      if (!touchDrag) return;
-      moveItem(touchDrag.from, touchDrag.over);
-      setTouchDrag(null);
-    },
-    onPointerCancel: () => setTouchDrag(null),
-  });
-
-  // The handle, one control for every level face: mouse drag (HTML5), touch drag
-  // (pointer events), and ArrowUp / ArrowDown when focused.
-  const renderHandle = (item: SortItem, index: number, className?: string) => (
-    // A `span`, not a `<button>`: Firefox starts no HTML5 drag from a
-    // button. It is a keyboard control all the same (role, tab stop, arrows).
-    <span
-      role="button"
-      tabIndex={items.length > 1 ? 0 : -1}
-      aria-disabled={items.length < 2 || undefined}
-      ref={(node) => {
-        if (node) handleRefs.current.set(item.id, node);
-        else handleRefs.current.delete(item.id);
-      }}
-      draggable={items.length > 1}
-      onDragStart={(event) => {
-        event.stopPropagation();
-        dragFrom.current = index;
-        event.dataTransfer?.setData('text/plain', String(index));
-      }}
-      onDragEnd={(event) => {
-        event.stopPropagation();
-        dragFrom.current = null;
-      }}
-      onKeyDown={(event) => {
-        const to = event.key === 'ArrowUp' ? index - 1 : event.key === 'ArrowDown' ? index + 1 : null;
-        if (to === null) return;
-        event.preventDefault();
-        const moved = moveItem(index, to);
-        // The handle keeps focus at the row's new place.
-        if (moved) requestAnimationFrame(() => handleRefs.current.get(moved)?.focus());
-      }}
-      {...touchHandlers(index)}
-      // A bottom sheet that closes on a downward swipe leaves this drag alone.
-      data-vaul-no-drag=""
-      aria-label={t('sortBuilder.reorder')}
-      title={t('sortBuilder.reorder')}
-      className={cn(
-        "inline-flex h-9 w-5 shrink-0 cursor-grab touch-none items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring aria-disabled:cursor-default aria-disabled:opacity-40",
-        className,
-      )}
-      data-testid="sort-builder-handle"
-    >
-      <GripVertical className="h-4 w-4" aria-hidden="true" />
-    </span>
-  );
-
-  const rowDropHandlers = (index: number) => ({
-    // The drag is this list's own: a host that draws the builder inside
-    // its own drag target (a reorderable chip) never sees it.
-    onDragOver: (event: React.DragEvent) => {
-      if (dragFrom.current === null) return;
-      event.preventDefault();
-      event.stopPropagation();
-    },
-    onDrop: (event: React.DragEvent) => {
-      if (dragFrom.current === null) return;
-      event.preventDefault();
-      event.stopPropagation();
-      moveItem(dragFrom.current, index);
-      dragFrom.current = null;
-    },
-  });
-
   return (
     <div className={cn("space-y-3", className)}>
-      <div ref={rowsRef} className={renderLevel ? "divide-y rounded-lg border" : "space-y-2"}>
+      <div className="space-y-2">
         {items.map((item, index) => {
           const direction = directionLabels(item.field);
-          const over = touchDrag && touchDrag.over === index && touchDrag.from !== index;
-          if (renderLevel) return (
-            <div key={item.id} className={cn(over && "bg-accent")} data-testid="sort-builder-row" {...rowDropHandlers(index)}>
-              {renderLevel({
-                item,
-                handle: renderHandle(item, index, "h-11 w-8"),
-                direction,
-                setOrder: (order) => updateItem(item.id, { order }),
-                remove: () => removeItem(item.id),
-              })}
-            </div>
-          );
           return (
           // Below `sm` a level takes three lines so no select cuts its label:
           // the words, then the field beside Remove, then the direction.
           <div
             key={item.id}
-            className={cn(
-              "flex items-center gap-2 max-sm:grid max-sm:grid-cols-[auto_minmax(0,1fr)_auto]",
-              over && "rounded bg-accent",
-            )}
+            className="flex items-center gap-2 max-sm:grid max-sm:grid-cols-[auto_minmax(0,1fr)_auto]"
             data-testid="sort-builder-row"
-            {...rowDropHandlers(index)}
+            // The drag is this list's own: a host that draws the builder inside
+            // its own drag target (a reorderable chip) never sees it.
+            onDragOver={(event) => {
+              if (dragFrom.current === null) return;
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onDrop={(event) => {
+              if (dragFrom.current === null) return;
+              event.preventDefault();
+              event.stopPropagation();
+              moveItem(dragFrom.current, index);
+              dragFrom.current = null;
+            }}
           >
-             {renderHandle(item, index, "max-sm:col-start-1 max-sm:row-start-1 max-sm:row-span-3 max-sm:h-auto")}
+             {/* A `span`, not a `<button>`: Firefox starts no HTML5 drag from a
+                 button. It is a keyboard control all the same (role, tab stop,
+                 arrows). */}
+             <span
+               role="button"
+               tabIndex={items.length > 1 ? 0 : -1}
+               aria-disabled={items.length < 2 || undefined}
+               ref={(node) => {
+                 if (node) handleRefs.current.set(item.id, node);
+                 else handleRefs.current.delete(item.id);
+               }}
+               draggable={items.length > 1}
+               onDragStart={(event) => {
+                 event.stopPropagation();
+                 dragFrom.current = index;
+                 event.dataTransfer?.setData('text/plain', String(index));
+               }}
+               onDragEnd={(event) => {
+                 event.stopPropagation();
+                 dragFrom.current = null;
+               }}
+               onKeyDown={(event) => {
+                 const to = event.key === 'ArrowUp' ? index - 1 : event.key === 'ArrowDown' ? index + 1 : null;
+                 if (to === null) return;
+                 event.preventDefault();
+                 const moved = moveItem(index, to);
+                 // The handle keeps focus at the row's new place.
+                 if (moved) requestAnimationFrame(() => handleRefs.current.get(moved)?.focus());
+               }}
+               aria-label={t('sortBuilder.reorder')}
+               title={t('sortBuilder.reorder')}
+               className="inline-flex h-9 w-5 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring aria-disabled:cursor-default aria-disabled:opacity-40 max-sm:col-start-1 max-sm:row-start-1 max-sm:row-span-3 max-sm:h-auto"
+               data-testid="sort-builder-handle"
+             >
+               <GripVertical className="h-4 w-4" aria-hidden="true" />
+             </span>
              <span className="text-sm font-medium w-16 text-muted-foreground max-sm:col-start-2 max-sm:col-span-2 max-sm:w-auto">
                {index === 0 ? t('sortBuilder.sortBy') : t('sortBuilder.thenBy')}
              </span>
@@ -358,7 +276,7 @@ export function SortBuilder({
           );
         })}
       </div>
-      {!renderLevel && <Button
+       <Button
         variant="outline"
         size="sm"
         onClick={addItem}
@@ -367,7 +285,7 @@ export function SortBuilder({
       >
         <Plus className="h-3 w-3 mr-2" />
         {t('sortBuilder.addSort')}
-      </Button>}
+      </Button>
     </div>
   );
 }
