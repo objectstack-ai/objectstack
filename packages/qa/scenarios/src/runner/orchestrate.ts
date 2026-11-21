@@ -98,7 +98,7 @@ import type { AppHarness, HttpAnswer, PersonaAccount } from './app.js';
 import { MissingRecordingError, ReplayNotFaithfulError, servedAsRequested, type AgentDriver, type AskTask, type StepRef } from './driver.js';
 import { DOOR_COLLECTIONS, DOOR_TOKEN_SCOPE } from './door.js';
 import { citationLabels, namespaceOfArtifact, namespacedScenario, permissionSetName, templateHostName } from './namespace.js';
-import { agentSetOf, clockDates, countWrites, fingerprint, metNoConfirmationService, observedAnswer, observeOperation, observeProbe, probeCall, relationObjects, touchedRowId, writeCallsOn, type CardOperation, type Row } from './observe.js';
+import { agentSetOf, clockDates, countWrites, fingerprint, handedOff, metNoConfirmationService, observedAnswer, observeOperation, observeProbe, probeCall, relationObjects, touchedRowId, writeCallsOn, type CardOperation, type Row } from './observe.js';
 import type { CommandResult } from './project.js';
 import {
   buildPrompt,
@@ -1056,7 +1056,7 @@ export function observeConfirmedWrite(op: CardOperation, turn: ParsedTurn, befor
   const now = new Map(after.map((r) => [String(r.id), fingerprint(r)]));
   const changed = [...new Set([...was.keys(), ...now.keys()])].filter((id) => was.get(id) !== now.get(id)).sort();
   const applied = writeCallsOn(turn, op.object).filter(
-    (c) => c.output !== undefined && c.isError !== true && refusalCodeOf(c.output) === undefined && flowRefusalOf(c.output) === undefined,
+    (c) => c.output !== undefined && c.isError !== true && refusalCodeOf(c.output) === undefined && flowRefusalOf(c.output) === undefined && !handedOff(c),
   );
   const via = applied.map((c) => {
     if (c.name !== 'run_action') return c.name;

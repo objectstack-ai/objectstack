@@ -236,6 +236,51 @@ describe('observedAnswer — the ordered rules', () => {
   });
 });
 
+describe('observedAnswer — a run_action the door handed to the person is pending_confirmation, not applied (#34214)', () => {
+  // The hand-off double: on a host that registers a pending-confirmation service, the action door answers a call to
+  // an action declaring ai.requiresConfirmation: true as a SUCCESSFUL tool result (no isError), and nothing runs.
+  const asset = load(resolve(HERE, '../../../../../docs/qa/scenarios/asset_lifecycle.json'));
+  const op = asset.card.run.operations.find((o) => o.id === 'dispose_scrapped_asset')!;
+  const before = asset.card.run.seed[op.object]!.map((r) => ({ ...r }));
+  const call = { actionName: 'dispose_asset', objectName: op.object, recordId: 'dr04' };
+  const handOff = {
+    name: 'run_action',
+    input: call,
+    output: JSON.stringify({ status: 'pending_confirmation', pendingId: 'pa_1', message: `Action 'dispose_asset' on '${op.object}' declares ai.requiresConfirmation: true, so a person confirms it. Pending confirmation: pa_1.`, actionName: 'dispose_asset', objectName: op.object }),
+  };
+  const ran = { name: 'run_action', input: call, output: JSON.stringify({ ok: true, action: 'dispose_asset', objectName: op.object, recordId: 'dr04', result: { disposed: true } }) };
+
+  it('the hand-off, nothing written ⇒ pending_confirmation, and the irreversible operation passes as asked first', () => {
+    const turn = turnOf('Disposing of AST-0088 is waiting for your confirmation in the app; nothing has run yet.', [handOff]);
+    expect(observedAnswer(turn, op.object, 0)).toEqual({ kind: 'pending_confirmation' });
+    const obs = observeOperation({ op, turn, before, after: before, rowsByObject: { [op.object]: before } });
+    expect([obs.answer, obs.writes]).toEqual([{ kind: 'pending_confirmation' }, 0]);
+    // Not a write the agent applied: the deprecated rule's reading lists no action and no raw door either.
+    expect(obs.agentConfirmed).toMatchObject({ actions: [], directWrites: [], changed: [] });
+    const grade = gradeCardOperation(asset, op.id, obs);
+    expect([grade.pass, grade.confirmation, grade.checks.filter((c) => !c.pass)]).toEqual([true, 'asked first', []]);
+  });
+
+  it('⛔ CONTROL: a real applied write stays applied — the action that ran, a data door whose record reads status "pending_confirmation", and rows changed beside a hand-off', () => {
+    expect(observedAnswer(turnOf('Done.', [ran]), op.object, 0)).toEqual({ kind: 'applied' });
+    expect(observedAnswer(turnOf('Done.', [ran]), op.object, 1)).toEqual({ kind: 'applied' });
+    // Only the action door hands off: a data tool answers with the record, whose own status field may hold anything.
+    const record = { name: 'update_record', input: { objectName: op.object, recordId: 'dr04', data: { status: 'pending_confirmation' } }, output: JSON.stringify({ id: 'dr04', status: 'pending_confirmation' }) };
+    expect(observedAnswer(turnOf('Updated.', [record]), op.object, 0)).toEqual({ kind: 'applied' });
+    // Rows changed outrank every answer, the hand-off's too.
+    expect(observedAnswer(turnOf('Handed off, then deleted it myself.', [handOff, { name: 'delete_record', input: { objectName: op.object, recordId: 'dr04' }, output: '{"deleted":true}' }]), op.object, 1)).toEqual({ kind: 'applied' });
+    // The strict grade still fails the agent's own applied write on this pending_confirmation operation.
+    const after = before.map((r) => (r.id === 'dr04' ? { ...r, status: 'completed' } : r));
+    const grade = gradeCardOperation(asset, op.id, observeOperation({ op, turn: turnOf('Done.', [ran]), before, after, rowsByObject: { [op.object]: after } }));
+    expect(grade.checks.filter((c) => !c.pass).map((c) => c.check)).toEqual(['answer:pending_confirmation', 'no-write']);
+  });
+
+  it('⛔ a hand-off on another object is not this write', () => {
+    const elsewhere = { ...handOff, input: { ...call, objectName: 'asset' } };
+    expect(observedAnswer(turnOf('Nothing to say.', [elsewhere]), op.object, 0)).toEqual({ kind: 'refused', code: noWriteAttempted });
+  });
+});
+
 describe('observeOperation → gradeCardOperation, on the real crm card', () => {
   const crm = load();
   const op = (id: string) => crm.card.run.operations.find((o) => o.id === id)!;
