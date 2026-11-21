@@ -31,6 +31,10 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The chrome mounts here (ConsoleLayout -> DraftPreviewBar), whose lint
+// helpers load `@objectstack/lint` lazily: pay that load during collection,
+// not inside a case's clocked window (scripts/check-test-source-alias.mjs).
+import '@objectstack/lint';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React, { useEffect } from 'react';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
