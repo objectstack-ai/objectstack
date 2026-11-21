@@ -71,8 +71,8 @@ export interface ObjectViewPageBarProps {
 
 /**
  * objectstack#36113 — how the page's acts sit at the view bar's end: the
- * list's export door (`ListView`'s `exportAtBarEnd`), and whether the bar is
- * too narrow for 「Import / Export」, which then folds into ⋮ More.
+ * list's export door (`ListView`'s `toolbarTrailing` state), and whether the
+ * bar is too narrow for 「Import / Export」, which then folds into ⋮ More.
  */
 export interface ObjectViewBarEnd {
     exportDoor?: ListExportDoor;
@@ -244,8 +244,8 @@ export function ObjectViewMoreMenu({
 
 /**
  * The list's export entries, one per format, then the last export's failure —
- * what the 视图设置 footer offered before objectstack#36113, through the same
- * door (`ListExportDoor`).
+ * what the 视图设置 footer offers too, through the same door
+ * (`ListExportDoor`).
  */
 function ExportMenuItems({ exportDoor, t }: { exportDoor: ListExportDoor; t: ObjectViewPageBarProps['t'] }) {
     return (

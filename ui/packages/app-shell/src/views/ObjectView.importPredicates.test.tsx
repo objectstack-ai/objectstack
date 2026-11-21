@@ -183,13 +183,13 @@ function renderList(objects: any[]) {
 }
 
 /**
- * Import is an entry of the page bar's ⋮ menu since objectstack#35548 (beside
- * the description and the favorites entry): opens the menu, then reads the
+ * Import is an entry of the view bar's 「Import / Export」 menu since
+ * objectstack#36113 (of the ⋮ menu before it): opens the menu, then reads the
  * entry. A greyed entry is Radix's `data-disabled`, read here as `disabled`.
  */
 const importButton = () => {
-  const more = document.querySelector('[data-testid="object-view-more-actions"]');
-  if (more && more.getAttribute('aria-expanded') !== 'true') fireEvent.keyDown(more, { key: 'Enter' });
+  const menu = document.querySelector('[data-testid="object-view-import-export"]');
+  if (menu && menu.getAttribute('aria-expanded') !== 'true') fireEvent.keyDown(menu, { key: 'Enter' });
   const item = document.querySelector('[data-testid="object-view-import-button"]');
   return item ? { disabled: item.hasAttribute('data-disabled') } : null;
 };

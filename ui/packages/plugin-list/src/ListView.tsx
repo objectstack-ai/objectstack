@@ -489,19 +489,12 @@ export interface ListViewProps {
    *
    * objectstack#36113 — the second argument carries the list's export door
    * (`ListToolbarTrailingState`), for a host that draws it at the bar's end
-   * (`exportAtBarEnd`). The phone's row passes none.
+   * too; the 视图设置 footer keeps its own export entries. The phone's row
+   * passes none.
    *
    * A HOST prop, never a schema key.
    */
   toolbarTrailing?: (tools: React.ReactNode, state: ListToolbarTrailingState) => React.ReactNode;
-  /**
-   * objectstack#36113 — the host draws the list's export door at the view
-   * bar's end, from `toolbarTrailing`'s `state.export`, so the desktop
-   * 视图设置 panel draws no export entries of its own. The phone's settings
-   * sheet keeps them: a phone draws no such end. Absent ⇒ the panel's footer
-   * carries export, as before. A HOST prop, never a schema key.
-   */
-  exportAtBarEnd?: boolean;
   /**
    * objectstack#35878 — the right end of the condition row under the view
    * bar, drawn by the host: the console's 「Personalized · Reset」. Given, it
@@ -2177,7 +2170,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   initialSearchTerm,
   toolbarLeading,
   toolbarTrailing,
-  exportAtBarEnd,
   conditionRowEnd,
   rowAdornment,
   recordLinkAdornment,
@@ -7172,7 +7164,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     />
   );
   // objectstack#36113 — the same door, for a host that draws it at the view
-  // bar's end (`exportAtBarEnd`).
+  // bar's end too (`toolbarTrailing`'s state).
   const exportDoor: ListExportDoor | undefined = resolvedExportOptions && exportPermitted && exportableFormats.length > 0
     ? {
         formats: exportableFormats,
@@ -7338,10 +7330,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               columns, then Group, Row height and the rest. Every control
               writes through the same door as its wide-form button; the panel
               adds no storage of its own. */}
-          {/* objectstack#36113 — the host draws export at the bar's end. */}
-          {displayOffered && (exportAtBarEnd
-            ? <ViewSettingsPopover {...viewSettingsElement.props} exportFormats={undefined} />
-            : viewSettingsElement)}
+          {displayOffered && viewSettingsElement}
           {/* User Filters — filter elements (dropdown chips / preset tabs /
               toggles). Mutually exclusive with view tabs above, so at most
               one filter element group ever renders here. On mobile we keep

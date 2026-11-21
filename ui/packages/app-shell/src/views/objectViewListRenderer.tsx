@@ -1199,8 +1199,6 @@ export function useObjectViewListRenderer({
                 // objectstack#35878 — the bar's right end: the search, then
                 // the page's acts; and the condition row's right end.
                 toolbarTrailing={hasViewBarTrailing ? (tools, state) => <ViewBarTrailing store={trailStore} tools={tools} state={state} /> : undefined}
-                // objectstack#36113 — export is the end's 「Import / Export」.
-                exportAtBarEnd={hasViewBarTrailing}
                 conditionRowEnd={hasPhoneTitle ? <ViewBarLead store={rowEndStore} /> : undefined}
                 dataSource={ds}
             />

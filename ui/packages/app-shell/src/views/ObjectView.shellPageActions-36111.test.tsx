@@ -2,12 +2,17 @@
 
 /**
  * objectstack#36111 — the list page's top row ends with the shell's top-right
- * button group. Since objectstack#35878 that row is the list's view bar (the
- * object's name, the view switcher, the search, the page's acts and ⋮), not
- * the console `PageHeader`, so the bar's right end draws the group itself:
- * after ⋮, behind a hairline. Turned off (the default while the top bar
- * stands) the bar is what it was. The group's own parts are pinned in
- * `layout/__tests__/ShellPageActions-36111`; here only where it goes.
+ * button group. Since objectstack#36113 that row is the console `PageHeader`
+ * again, the object's icon and name alone, and the group ends it as it ends
+ * every console page; the list's view bar under it ends with the page's acts.
+ * Turned off (the default while the top bar stands) no group is drawn. The
+ * group's own parts are pinned in `layout/__tests__/ShellPageActions-36111`;
+ * here only where it goes.
+ *
+ * objectstack#36113 — the list page's top, three rows: the object's row, the
+ * view bar (switcher and 视图设置; search, 「Import / Export」, 「New Lead」 and
+ * ⋮ at its end) and the condition row. 「Import / Export」 folds into ⋮ More on
+ * a list narrower than `VIEW_BAR_IO_FOLD_WIDTH`.
  *
  * The real chain, as `ObjectView.objectListTitle-27950`: the real `ObjectView`,
  * the real plugin `ObjectView` and the real `ListView`.
@@ -15,7 +20,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { render, cleanup, screen, waitFor, within } from '@testing-library/react';
+import { render, cleanup, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
 import { SidebarProvider, useSidebar } from '@object-ui/components';
@@ -63,6 +68,7 @@ import '@objectstack/lint';
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 import { ShellPageActionsScope } from '../layout/ShellPageActions';
+import { VIEW_BAR_IO_FOLD_WIDTH } from './objectViewPageHeader';
 
 // The page's own reads (the security `explain` probe among them) are relative
 // fetches, which happy-dom would send to a real socket. One double, installed
@@ -81,7 +87,7 @@ const LEAD = {
   },
   listViews: {
     all: { name: 'all', label: 'All Leads', type: 'grid', columns: ['name'] },
-    mine: { name: 'mine', label: 'My Leads', type: 'grid', columns: ['name'] },
+    mine: { name: 'mine', label: 'My Leads', type: 'grid', columns: ['name'], exportOptions: ['csv'] },
   },
 };
 
@@ -151,22 +157,106 @@ afterEach(() => {
   cleanup();
 });
 
-describe('objectstack#36111 — the list view bar ends with the shell\'s group', () => {
-  it('turned on: after the page\'s acts, behind a hairline, at the bar\'s right end', async () => {
+describe('objectstack#36111, as moved by objectstack#36113 — the list page\'s first row ends with the shell\'s group', () => {
+  it('turned on: the object\'s row ends with it; the view bar under it ends with the page\'s acts', async () => {
     mount('/apps/crm/crm_lead/view/mine', { shell: true });
     await listToolbar();
-    const end = await screen.findByTestId('list-view-bar-end');
-    const ids = Array.from(end.children).map((c) => c.getAttribute('data-testid'));
-    expect(ids).toEqual(['list-view-bar-tools', 'list-view-bar-shell-divider', 'shell-page-actions']);
+    const header = screen.getAllByTestId('page-header').find((h) => h.dataset.posture === 'list')!;
+    expect(within(header).getByTestId('shell-page-actions')).toBeInTheDocument();
+    expect(within(header).getByTestId('shell-page-actions-help')).toBeInTheDocument();
     expect(screen.getAllByTestId('shell-page-actions')).toHaveLength(1);
-    expect(within(screen.getByTestId('shell-page-actions')).getByTestId('shell-page-actions-help')).toBeInTheDocument();
+    const end = await screen.findByTestId('list-view-bar-end');
+    expect(Array.from(end.children).map((c) => c.getAttribute('data-testid'))).toEqual(['list-view-bar-tools']);
+    expect(within(end).queryByTestId('shell-page-actions')).toBeNull();
   });
 
-  it('turned off: the bar is what it was, no group and no hairline', async () => {
+  it('turned off: no group on either row', async () => {
     mount('/apps/crm/crm_lead/view/mine', { shell: false });
     await listToolbar();
     const end = await screen.findByTestId('list-view-bar-end');
     expect(Array.from(end.children).map((c) => c.getAttribute('data-testid'))).toEqual(['list-view-bar-tools']);
     expect(screen.queryByTestId('shell-page-actions')).toBeNull();
+  });
+});
+
+/** The list page's object row: the `PageHeader` in its list posture. */
+const objectRow = () => screen.getAllByTestId('page-header').find((h) => h.dataset.posture === 'list')!;
+
+/** Opens a Radix menu trigger the way a keyboard does. */
+const openMenu = (trigger: HTMLElement) => {
+  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.keyDown(trigger, { key: 'Enter' });
+};
+
+describe('objectstack#36113 — the list page\'s top: object row, view bar, condition row', () => {
+  it('the object\'s row names the page and draws none of its acts; the view bar and the condition row follow', async () => {
+    mount('/apps/crm/crm_lead/view/mine', { shell: true });
+    await listToolbar();
+    const row = objectRow();
+    expect(within(row).getByRole('heading', { level: 1 })).toHaveTextContent(/^Leads$/);
+    expect(within(row).queryByTestId('object-view-new-button')).toBeNull();
+    expect(within(row).queryByTestId('object-view-more-actions')).toBeNull();
+    expect(within(row).queryByTestId('page-header-actions')).toBeNull();
+    const lead = screen.getByTestId('list-toolbar-leading');
+    const conditions = screen.getByTestId('list-condition-row');
+    expect(row.compareDocumentPosition(lead) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(lead.compareDocumentPosition(conditions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The view bar no longer leads with the object's name (objectstack#35878 did).
+    expect(screen.queryByTestId('list-view-bar-object')).toBeNull();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+  });
+
+  it('the view bar ends search · Import / Export · New Lead · ⋮', async () => {
+    mount('/apps/crm/crm_lead/view/mine');
+    await listToolbar();
+    const tools = await screen.findByTestId('list-view-bar-tools');
+    const order = ['search-icon-button', 'object-view-import-export', 'object-view-new-button', 'object-view-more-actions']
+      .map((id) => within(tools).getByTestId(id));
+    for (let i = 1; i < order.length; i++) {
+      expect(order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+    expect(within(tools).getByTestId('object-view-new-button')).toHaveTextContent('New Lead');
+    expect(within(tools).getByTestId('object-view-import-export')).toHaveTextContent('Import / Export');
+  });
+
+  it('「Import / Export」 holds Import and each export format; ⋮ More holds neither', async () => {
+    mount('/apps/crm/crm_lead/view/mine');
+    await listToolbar();
+    openMenu(await screen.findByTestId('object-view-import-export'));
+    expect(await screen.findByTestId('object-view-import-button')).toBeInTheDocument();
+    expect(screen.getByTestId('object-view-export-csv')).toHaveTextContent('Export as CSV');
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('object-view-export-csv')).toBeNull());
+    openMenu(screen.getByTestId('object-view-more-actions'));
+    await screen.findByTestId('object-view-favorite');
+    expect(screen.queryByTestId('object-view-import-button')).toBeNull();
+    expect(screen.queryByTestId('object-view-export-csv')).toBeNull();
+  });
+
+  it(`a list narrower than ${VIEW_BAR_IO_FOLD_WIDTH}px folds 「Import / Export」 into ⋮ More`, async () => {
+    const real = HTMLElement.prototype.getBoundingClientRect;
+    const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('@container/list')
+        ? ({ width: VIEW_BAR_IO_FOLD_WIDTH - 1, height: 600, top: 0, left: 0, right: VIEW_BAR_IO_FOLD_WIDTH - 1, bottom: 600, x: 0, y: 0, toJSON: () => ({}) } as DOMRect)
+        : real.call(this);
+    });
+    try {
+      mount('/apps/crm/crm_lead/view/mine');
+      await listToolbar();
+      const tools = await screen.findByTestId('list-view-bar-tools');
+      await waitFor(() => expect(within(tools).queryByTestId('object-view-import-export')).toBeNull());
+      openMenu(within(tools).getByTestId('object-view-more-actions'));
+      expect(await screen.findByTestId('object-view-import-button')).toBeInTheDocument();
+      expect(screen.getByTestId('object-view-export-csv')).toBeInTheDocument();
+      expect(screen.getByTestId('object-view-favorite')).toBeInTheDocument();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('the 视图设置 footer keeps its own export entries', async () => {
+    mount('/apps/crm/crm_lead/view/mine');
+    await listToolbar();
+    fireEvent.click(await screen.findByTestId('toolbar-display-trigger'));
+    expect(await screen.findByTestId('display-export-csv')).toBeInTheDocument();
   });
 });
