@@ -41,7 +41,6 @@ export const SCHEMAS: Record<string, SchemaInfo> = {
       { name: 'ownership', type: "'user' | 'business_unit' | 'org' | 'none'", description: 'Record-ownership model: user (default, injects a reassignable owner_id plus owning_business_unit_id) | business_unit (owned by an org unit, not a person: owning_business_unit_id only, no owner_id) | org | none (no per-record owner). Distinct from the package own/extend contribution kind.' },
       { name: 'enable', type: 'ObjectCapabilities', description: 'Feature flags (trackHistory, apiEnabled, etc.)' },
       { name: 'icon', type: 'string', description: 'Icon identifier for UI display' },
-      { name: 'color', type: "'gray' | 'blue' | 'teal' | 'green' | 'amber' | 'orange' | 'red' | 'pink' | 'purple'", description: "Tile colour: the console draws the icon as a white glyph on a square of this colour (no hex; omit for gray). Give every object one, avoid repeats in one app" },
     ],
     example: `{
   name: 'project_task',
