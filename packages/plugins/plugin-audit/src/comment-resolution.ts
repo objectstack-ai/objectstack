@@ -62,6 +62,9 @@ const COMMENT_OBJECT = 'sys_comment';
 
 const SYSTEM_CTX = { isSystem: true } as const;
 
+/** The catalog member for an update that names `is_resolved` on a reply (ADR-0112): the request's shape is refused. */
+const RESOLUTION_ON_REPLY_CODE: StandardErrorCode = 'VALIDATION_ERROR';
+
 /** How many `parent_id` hops a reply is followed up to find its thread's top-level comment. */
 const THREAD_ROOT_MAX_HOPS = 16;
 
@@ -111,12 +114,11 @@ export function isReplyRow(row: Record<string, unknown>): boolean {
 export function refuseResolutionOnReply(rows: ReadonlyArray<Record<string, unknown>>): void {
   const reply = rows.find(isReplyRow);
   if (!reply) return;
-  const code: StandardErrorCode = 'VALIDATION_ERROR';
   const err = new Error(
     `Cannot change is_resolved on comment ${String(reply.id)}: it is a reply. A thread is resolved or reopened ` +
       'on its top-level comment (the one with no parent_id), which resolves every reply under it.',
   ) as Error & { code: string; statusCode: number; status: number; field: string };
-  err.code = code;
+  err.code = RESOLUTION_ON_REPLY_CODE;
   err.statusCode = 400;
   err.status = 400;
   err.field = COMMENT_RESOLVED_FIELD;
