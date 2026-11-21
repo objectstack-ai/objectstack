@@ -74,8 +74,11 @@ async function verdict(res: Response): Promise<{ status: number; code?: string }
 
 interface Deployment {
   allowedIpRanges?: string[];
-  trustProxy?: boolean;
+  trustProxy?: boolean | { networks: string[]; header?: 'x-forwarded-for' | 'x-real-ip' };
 }
+
+/** The trusted-network form, naming the proxy network {@link PROXY_HOP} sits in. */
+const PROXY_NETWORKS = { networks: ['10.0.0.0/8'], header: 'x-forwarded-for' as const };
 
 /** One deployment, served through the REAL mount chain. */
 async function serve(deployment: Deployment) {
@@ -238,5 +241,43 @@ describe('ADR-0069 D7 — the login audit records the address the allow-list jud
     // The stamp ran (last_login_at), and it carried no address.
     expect(d.userRow()?.last_login_at instanceof Date).toBe(true);
     expect(d.userRow()?.last_login_ip).toBeUndefined();
+  });
+});
+
+describe('ADR-0069 D5/D7 — under the trusted-network form the client is read from the right, past the declared proxies', () => {
+  it('the allow-list judges the entry the declared proxy appended, not an entry to its left', async () => {
+    const { probe } = await serve({ allowedIpRanges: [RANGE], trustProxy: PROXY_NETWORKS });
+
+    // Control: the declared proxy reports an admitted client.
+    expect(await verdict(await probe(PROXY_HOP, { 'x-forwarded-for': `${OUTSIDE}, ${INSIDE}` })))
+      .toEqual(ADMITTED);
+    // The declared proxy reports a refused client; an admitted address to its left decides nothing.
+    expect(await verdict(await probe(PROXY_HOP, { 'x-forwarded-for': `${INSIDE}, ${OUTSIDE}` })))
+      .toEqual(REFUSED);
+  });
+
+  it('a peer outside the declared networks is judged itself, whatever it forwards', async () => {
+    const { probe } = await serve({ allowedIpRanges: [RANGE], trustProxy: PROXY_NETWORKS });
+
+    expect(await verdict(await probe(OUTSIDE, { 'x-forwarded-for': INSIDE, 'x-real-ip': INSIDE })))
+      .toEqual(REFUSED);
+  });
+
+  it('the login audit records the entry the declared proxy appended', async () => {
+    const d = await serve({ trustProxy: PROXY_NETWORKS });
+    await d.signUp();
+
+    const res = await d.signIn(PROXY_HOP, { 'x-forwarded-for': `${INSIDE}, ${OUTSIDE}` });
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(d.userRow()?.last_login_ip).toBe(OUTSIDE);
+  });
+
+  it('the auth manager reads the form as a declared trust and refuses a malformed one at construction', () => {
+    const managerWith = (trustProxy: unknown) =>
+      new AuthManager({ secret: SECRET, baseUrl: ORIGIN, trustProxy } as any);
+    expect(managerWith(PROXY_NETWORKS).trustsForwardedHeaders()).toBe(true);
+    expect(managerWith(true).trustsForwardedHeaders()).toBe(true);
+    expect(managerWith(undefined).trustsForwardedHeaders()).toBe(false);
+    expect(() => managerWith({ networks: ['proxy.internal'] })).toThrow(/"proxy\.internal"/);
   });
 });
