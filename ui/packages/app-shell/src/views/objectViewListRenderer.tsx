@@ -417,7 +417,7 @@ export function useObjectViewListRenderer({
                         <div className="border-b px-2 py-1.5 sm:h-10 sm:pl-2.5 sm:pr-2 sm:py-0 flex items-center justify-between gap-2 min-w-0 bg-background">
                             <ViewBarLead store={leadStore} />
                             {/* objectstack#35878 — the page's acts end this bar too. */}
-                            {hasViewBarTrailing && <ViewBarTrailing store={trailStore} tools={null} />}
+                            {hasViewBarTrailing && <ViewBarTrailing store={trailStore} tools={null} state={NO_LIST_TOOLS} />}
                         </div>
                     )}
                     {chartFace}
@@ -1238,6 +1238,9 @@ function ViewBarLead({ store }: { store: LeadStore }) {
 }
 
 /** Draws the view bar's right end from the store, around the list's own `tools`. */
+/** A chart heads its page with the view bar but draws no list: no export door. */
+const NO_LIST_TOOLS: ListToolbarTrailingState = {};
+
 function ViewBarTrailing({ store, tools, state }: { store: LeadStore<((tools: ReactNode, state: ListToolbarTrailingState) => ReactNode) | null>; tools: ReactNode; state: ListToolbarTrailingState }) {
     const render = useSyncExternalStore(store.subscribe, store.get, store.get);
     return <>{render ? render(tools, state) : tools}</>;
