@@ -3,12 +3,15 @@
 '@objectstack/rest': patch
 '@objectstack/runtime': patch
 '@objectstack/cli': patch
+'@objectstack/spec': patch
 ---
 
 fix(rest): every data door judges environment membership
 
 Clause-②: no (narrowing)
 Metadata-protocol: none
+
+<!-- adr-0087: not-required (no-migration-prescription) nothing an author writes is retired or renamed; a request the host already refuses at its other door is now refused at this one too -->
 
 On a host that places requests in environments, every door now applies the same environment-membership rule: a signed-in caller who is not a member of the environment the request resolved to is answered `403 PROJECT_MEMBERSHIP_REQUIRED`, in the envelope the runtime dispatcher already answers with. The rule is one function in `@objectstack/core` (`judgeEnvironmentMembership`), asked by the runtime dispatcher and the REST server alike, so the two doors of one host cannot answer the same caller differently; the dispatcher's own answers are unchanged.
 
