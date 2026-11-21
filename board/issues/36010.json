@@ -1,0 +1,37 @@
+{
+  "number": 36010,
+  "kind": "issue",
+  "title": "Kanban, Calendar, Timeline and Map show a refused read's raw error instead of the no-access state",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-21T06:18:53Z",
+  "updated_at": "2026-11-21T07:57:50Z",
+  "closed_at": "2026-11-21T07:56:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36010",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CZrgaiMgTJCnswR6jQ\n\nFamily close-out of #35317 (PR #36006, Gantt). The #35317 dev found this out of scope. It was read in code only on `origin/main` `98b3f87e`, and no live 403 was measured.\n\n## What happens\nWhen a view's data load fails, four more views print the raw error message:\n- `ui/packages/plugin-kanban/src/ObjectKanban.tsx` ~1959: \"Error loading kanban data: {error.message}\"\n- `ui/packages/plugin-calendar/src/ObjectCalendar.tsx` ~1521: `calendar.loadError` with `message: error.message`\n- `ui/packages/plugin-timeline/src/ObjectTimeline.tsx` ~1013: \"Error loading timeline: {error.message}\"\n- `ui/packages/plugin-map/src/ObjectMap.tsx` ~1393: \"Error: {error.message}\"\n\nA reader who can open the page but not read the view's object would therefore see the raw transport string, as the Gantt did before #36006.\n\n## Expected\nEach view classifies a failed load with the shared `classifyLoadError` (`@object-ui/react`). A forbidden result draws the shared `DataEmptyState` no-access panel with the existing `list.loadErrorForbiddenTitle` / `list.loadErrorForbiddenMessage` keys, the same pattern as #36006, `ListView` and `RelatedList`. Other failures keep their current error screen.\n\n## Done when\nFor each of the four views, a pin shows that a 403 draws the no-access state with no raw text, and that a 500 is unchanged (CONTROL). The fix is one PR.\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 36020,
+  "kind": "pull_request",
+  "title": "fix(studio): the key-fields editor no longer previews a record-page strip",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-21T07:22:13Z",
+  "updated_at": "2026-11-21T08:07:22Z",
+  "closed_at": "2026-11-21T08:07:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-21T08:07:19Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36020",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuVwX4pUdM1qvNLSqRZNSvv3)_\n\nrepo:objectstack#1 · os-sales · session_01L6bhgW85kwjGaz7HqsmEuv\n\nFixes #35978\n\nClause-②: no — measured: `@object-ui/i18n` built before (base catalogue, key present) and after (key removed); all 73 emitted `.d.ts` files under `dist/` are byte-identical (`diff -r` exit 0). The studio catalogues are declared `Record<string, string>`, so no key is part of a typed literal or union on any published entry; the key lived only in the emitted `namespaces/studio/en.js` / `zh.js` values.\nMetadata-protocol: none\nSkills-docs: none — no skill text names the Studio key-fields editor's preview or the removed catalogue key; what `highlightFields` drives on the record page is the record-page rule follow-up #35942 already carries.\n\n## 维护者速读\n- 在 Studio 编辑对象的「重点字段」时，列表下方不再画那条「要点条预览」；字段的上下顺序照旧可拖动和调整。\n- 属于「记录详情页重做」专题：详情页已经不画关键字段条，设计器里的预览因此是误导，这里把它拿掉。\n- 出错时只影响设计器里这一块的显示，不改存储的元数据；改动可直接撤回。\n- 无。\n\n## What changes\n\n- `HighlightFieldsEditor` (app-shell, Studio object settings): the \"Highlight strip preview\" block (`highlight-preview` / `highlight-preview-cell`) is removed. The ordered row list stays — order still decides which fields each surface takes. The file header and the `HIGHLIGHT_FIELDS_MAX` comment now say what `highlightFields` drives, quoting the spec describe #35977 landed (\"Ordered most-important fields; first entry wins where only one fits. Drives default list and related-list columns, cards, hover cards, previews and the record picker; the default record page draws no strip from it.\").\n- `ObjectSettingsPanel.tsx` header comment: \"an ordered list with a strip preview\" becomes \"an ordered list\", and \"title/stepper/columns\" becomes \"title/stage/columns\" (the default page draws no stepper). The `engine.studio.settings.highlightFields` help text #35977 rewrote still reads right and is untouched; `RelatedListsEditor.tsx` has no strip wording and is untouched.\n- `engine.studio.settings.highlightPreview` leaves the studio namespace (`en.ts`, `zh.ts` — the namespace's only two catalogues). Repo-wide grep for the key and both test ids: no reader left outside historical CHANGELOG entries.\n- Changeset: patch for `@object-ui/app-shell`, `@object-ui/console` (app-shell is private and ships inside the Console, as earlier app-shell changesets declare) and `@object-ui/i18n`.\n\n## Tests\n\n- `ObjectSettingsPanel.highlightOrder-27054.test.tsx`: the order is pinned on the ROW order (`highlight-row-*`) instead of the preview; the first case asserts the editor is drawn and the preview absent (`highlight-preview` null, zero `highlight-preview-cell`); the move case reads the rows after the move; the remove case asserts no rows left.\n\n## Acceptance notes\n\n- The `examples/app-showcase/e2e/detail-shapes.spec.ts` rider moved to #36007 by claim amendment; this PR leaves that file as on `main` (a WIP edit was reverted in its own commit).\n- Overlap: #35923 edits the adjacent lines of the studio `en.ts` / `zh.ts` (the related-list keys right after the removed line), so a textual conflict arises whichever lands second; resolution is mechanical — drop the `highlightPreview` line and keep #35923's lines. #36012 shares the same files and merges cleanly.\n\n## Verification\n\n<details><summary>Local runs (head c3bf8d3c)</summary>\n\n- `pnpm --dir ui exec vitest run packages/app-shell/src/views/studio-design/ObjectSettingsPanel.highlightOrder-27054.test.tsx` — Test Files 1 passed (1), Tests 6 passed (6).\n- `pnpm --dir ui exec vitest run packages/app-shell/src/views/studio-design/` — Test Files 352 passed (352), Tests 2739 passed (2739).\n- `pnpm --dir ui exec vitest run packages/i18n/` — Test Files 105 passed (105), Tests 1957 passed, 13 skipped.\n- `pnpm --filter @object-ui/i18n --filter @object-ui/app-shell run type-check` — both Done, lock VERDICT command-exit 0.\n- Ablation (one-shot, fix committed first): `git checkout ec243639 -- HighlightFieldsEditor.tsx` restored the preview (`data-testid=\"highlight-preview\"` count 1 on disk); the file went red on exactly the new assertion — \"shows the stored order in the rows, and draws no strip preview\": `expected <div …(2)>…(3)</div> to be null`, Tests 1 failed, 5 passed. Restored with `git checkout HEAD --`; `git diff HEAD` empty and the blob hash equals `HEAD:` (92b4e34c).\n- Clause-② measurement: see the `Clause-②:` line above.\n- `dispatch-gates --ran`: 38 derived families accounted for — 37 run (exit 0), 1 NOT MEASURED: `pnpm check:type-check-debt` exit 3 (PREREQUISITE NOT MET, needs a full build) — CI's run is the verdict.\n- `node scripts/pm/overlap-check.mjs --branch=HEAD`: origin/main merges cleanly; #36012 merges cleanly; #35923 conflicts in studio `en.ts` / `zh.ts` (see Acceptance notes).\n\n</details>\n\nRead first: `HighlightFieldsEditor.tsx` (the removed block and header), then the test file.\nTwo-minute check: run the single test file above; expect 6 passed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgW85kwjGaz7HqsmEuv"
+}

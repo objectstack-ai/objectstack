@@ -21,11 +21,11 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T21:08:50Z",
-  "updated_at": "2026-11-19T21:48:09Z",
+  "updated_at": "2026-11-21T05:30:09Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35645",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CbSphdunq2aJq7ktuY\n\nSplit from #35549 by seat 5 (area ux-1): an out-of-scope finding from the PR 2 dev report (7022170405). ⛔ Not a claim.\n\n## What happens today\n\n- `crypto.randomUUID()` exists only in a secure context (https, or `localhost`).\n- In Chromium with `isSecureContext === false` (measured on `about:blank`), a grid header click threw `TypeError: crypto.randomUUID is not a function`, and no sort was applied.\n- A Console served over plain http from a host other than localhost would hit the same error. That was not measured on a real deployment.\n- `ui/packages/plugin-list/src/ListView.tsx` calls it unguarded at `handleHeaderSort` and two other sites (lines 876, 882 and 6028 at eca20d2219).\n- `conditions/conditionModel.ts` `newConditionId` already guards the same call.\n- Other unguarded call sites in `ui/packages/*/src` at eca20d2219, unverified for reach:\n  - `components/custom/{sort,filter}-builder.tsx`\n  - `app-shell` `RecordDetailView.tsx`, `viewFilterFold.ts` and `ScriptCapabilitiesField.tsx`\n  - `core/actions/TransactionManager.ts`\n  - `plugin-chatbot/utils.ts`\n  - `plugin-view` `view-config-utils.ts` and `SharedViewLink.tsx`\n  - `types` `complex.ts` and `complex.zod.ts`\n\n## What to do\n\n1. Use one shared id helper, which falls back when `randomUUID` is absent, in place of each bare call. Reuse the guarded shape from `newConditionId`.\n2. Pin it: with `crypto.randomUUID` deleted, a header-click sort still applies.\n\n## Done when\n\nIn a non-secure context, header sort, filter and sort builders and the other listed sites mint ids without throwing. A test pins the fallback."

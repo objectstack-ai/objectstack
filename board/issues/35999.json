@@ -1,0 +1,32 @@
+{
+  "number": 35999,
+  "kind": "issue",
+  "title": "ObjectGrid.autosave-35685 \"an earlier save's Undo is guarded by the newest version\" fails intermittently in Test UI on unrelated PRs",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-21T05:18:49Z",
+  "updated_at": "2026-11-21T05:51:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35999",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nSeen by the seat on two unrelated PRs within ten minutes on 2026-11-21. Comes from the #35685 autosave/undo work (PRs #35898, #35972) under epic #35683.\n\n## What fails\n\n`ui/packages/plugin-grid/src/__tests__/ObjectGrid.autosave-35685.test.tsx:322`, \"an earlier save's Undo is guarded by the newest version of its record\": `getByText('A2')` (near :334) does not find the cell text.\n\n- PR #35918 (head `7b4adb10`), run 44868291518, job Test UI (13/16). The PR touches only `SelectionPageBar` in plugin-grid. The seat re-ran the failed jobs once.\n- PR #35989 (head `c8171460`), Test UI. That PR does not touch plugin-grid. Its card thread ran the file 3/3 green on the branch and 3/3 green on the merge-base source.\n- The #35918 card thread ran the file 5 times locally, 18/18 each time.\n\n## Why it matters\n\nEvery Test UI run on any PR can go red on this test, which costs a re-run and a seat judgment each time, and hides a real failure behind \"it's the flaky one\".\n\n## To do\n\n1. Find the race: the test likely reads `A2` synchronously after an async save/undo settles (a `getByText` where a `findByText` / `waitFor` belongs, or a fake-timer step that depends on scheduling). Read it against the CI shard's load, not only locally.\n2. Fix the test's wait, or the component if it renders the newest version late for a real reason (then that is a bug, say so).\n3. Run the file many times under load (for example `--repeat` or a loop with `--pool=threads` and CPU throttled) and show it holds.\n\n## Not doing\n\n- No skip or quarantine of the test.\n\nReader: area:ux (ui/packages/plugin-grid), the seat's b1-DB area."
+}

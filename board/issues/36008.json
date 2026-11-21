@@ -1,0 +1,36 @@
+{
+  "number": 36008,
+  "kind": "pull_request",
+  "title": "fix(fields): the auto-number read display uses the theme foreground, not a fixed grey",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-21T06:06:47Z",
+  "updated_at": "2026-11-21T06:52:56Z",
+  "closed_at": "2026-11-21T06:52:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-21T06:52:54Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36008",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgRuogP8Tp8XyFXLc92Bxvo6)_\n\nrepo:objectstack#5 · os-bill · session_01Utp6CZiaBg6rk7dpy1s9Me\n\nFixes #35278\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：暗色模式下，自动编号字段的只读文字不再发暗，和其他字段一样清楚。\n- 为什么做：它把文字颜色写死成浅色主题的灰色，汇总字段之前已按同样方式修过。\n- 出错会怎样：最坏是这段文字颜色不对，不影响数据，撤回即可。\n- 要你做什么：无。\n\n## What changes\n\n`@object-ui/fields` `AutoNumberField`: the read display's `text-gray-700` (no `dark:` partner) becomes `text-foreground`, the theme token `SummaryField` moved to in #34182 / PR #35269.\n\n## Tests\n\n- New pin `autoNumberFace.darkColour-35278.test.tsx`, same shape as the summary face's: a formatted and a bare value each read in `text-foreground` and carry no fixed `text-(gray|slate|zinc|neutral|stone)-N`. Ablation on `origin/main` `56fa31bca2`: red; with the fix: green.\n- Also run with the fix: `summaryFaces.numberFace-11752` and the four fields e2e suites that render `AutoNumberField` (display-grid host channels, DOM leak, readonly host plumbing, aria-invalid registry): 6 files, all green.\n\nSelf-land: 48 added / 1 removed lines, under the area's 50-line bar.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CZiaBg6rk7dpy1s9Me\n\n<!-- signed: repo:objectstack#5 · os-bill · session_01Utp6CZiaBg6rk7dpy1s9Me -->\n"
+}

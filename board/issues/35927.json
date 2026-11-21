@@ -2,8 +2,8 @@
   "number": 35927,
   "kind": "issue",
   "title": "Non-English metadata-forms translations still carry the old `inlineEdit` help text after #35889",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-20T19:10:45Z",
-  "updated_at": "2026-11-20T19:53:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T06:52:56Z",
+  "closed_at": "2026-11-21T06:52:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35927",
   "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFiled from #35889 slice S1 (PR #35921), which names it as a follow-up. Part of epic #35590 (record page redo).\n\n## What a user sees\n#35889 changes what decides whether a master-detail child table appears on the parent's form: a parent field group, not `inlineEdit` (ruling record 7046311205). PR #35921 updates the English and Simplified Chinese help text in the metadata forms. Every other locale's `metadata-forms` translation still describes the old rule, so an admin reading Studio in those languages is told `inlineEdit` puts the rows on the form.\n\n## To do\nBring the other locales' `metadata-forms` strings for the changed keys in line with the new English text (through the project's translation flow, not by hand where a bundle is generated), and make sure the translation gates count them.\n\n## Acceptance\n- No locale's help text for these keys says `inlineEdit` alone puts child rows on the form; the translation gates are green.\n\nReader: `domain:ui` / i18n. Blocked by #35921 merging."

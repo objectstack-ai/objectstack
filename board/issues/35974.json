@@ -1,0 +1,32 @@
+{
+  "number": 35974,
+  "kind": "issue",
+  "title": "Read-only package views still offer view-settings save and the Manage Views pin / set default / delete actions, which the server refuses",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-21T02:55:53Z",
+  "updated_at": "2026-11-21T06:31:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35974",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nSplit from #35933 while area b1-DB built it. Part of epic #35547 (list page redo).\n\n## What a user sees\nOn a list view that ships inside a read-only package, the admin can open the view settings panel and press save, and the Manage Views dialog still offers pin, set as default and delete. The server refuses each of them (403, \"save to the custom package\") and a toast explains it. Each works, but the admin is offered something that cannot succeed.\n\n#35933's PR closes the same gap for the footer calculation menu and for rename in the options menu. It carries `_packageId` on list-view rows and reads the writable verdict from the existing package posture (`usePackagePosture` / `fetchSessionPackages`, the `GET /api/v1/packages` the app bar's Studio entry already sends). This card reuses that verdict and adds no new read.\n\n## Fork for the maintainer, before building\nHow the view settings panel should look on such a view:\n- **A. Read-only panel.** The panel opens, shows the configuration, and has no save. The admin can still see how the view is set up. (Recommended.)\n- **B. Hide the entry.** No \"configure view\" entry on such views. The admin then has nowhere in the list page to see the configuration.\n\nPin, set as default and delete in Manage Views are hidden or disabled on such views in either case.\n\n## To do\n1. Get the maintainer's pick on the fork above.\n2. Apply the writable verdict from #35933 to the view settings save and to the three Manage Views actions.\n3. When the verdict cannot be read, keep today's behaviour (offer it; the server refuses), as #35933 does.\n\n## Acceptance\n- On a package-shipped read-only view, the settings panel follows the maintainer's pick, and Manage Views offers no pin, set as default or delete.\n- A custom shared view and a personal view are unchanged.\n\nBlocked-by: #35933's PR.\nReader: area:ux (ui/apps / app-shell ObjectView, plugin-list)."
+}

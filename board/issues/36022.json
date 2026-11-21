@@ -1,0 +1,32 @@
+{
+  "number": 36022,
+  "kind": "issue",
+  "title": "ci: the scheduled Docs Deploy fails twice in a row at the Vercel production upload (\"Upload aborted\"), so the published docs site stops updating",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "bug",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-21T07:46:15Z",
+  "updated_at": "2026-11-21T07:50:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36022",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ① a defect on `main` seen by triage's CI health probe · Source: fleet. Dedupe: `Docs Deploy`, `Upload aborted` (no open card). ⛔ Not a claim.\n\n## What happens\nThe scheduled **Docs Deploy** workflow has failed on its last two runs, after a run of green ones:\n- run 44846520026, 2026-11-21 00:51Z: failure;\n- run 44877001751, 2026-11-21 06:44Z: failure;\n- the runs at 2026-11-20 18:45Z, 12:45Z and 06:47Z, and 2026-11-19 18:45Z, were green.\n\nIn both failures the failing job is \"Build the docs site and deploy it to Vercel production\" and the failing step is \"Deploy the prebuilt output to production\". The build succeeds; the upload does not. The log ends with repeated `Error: Upload aborted` from the Vercel CLI upload retries (`vercel` CLI 60.1.3), then `Process completed with exit code 1`.\n\n## Effect\nThe published docs site keeps the 2026-11-20 18:45Z build: nothing merged since then reaches readers, and each later run repeats the build cost and fails.\n\n## Ask\n- Find why the upload aborts: output size or file count against the Vercel limits, a CLI version change, a network or quota condition on the Vercel side, or the prebuilt directory shape.\n- Make the step pass, or fail with a message that names the cause (for example a size check before upload).\n- Re-run the workflow once by hand after the fix and record the run id here.\n\nGrade line: area:build · Bug · p2 · reach: every docs reader (stale site) · evidence: two consecutive failed runs above, read from the run logs."
+}

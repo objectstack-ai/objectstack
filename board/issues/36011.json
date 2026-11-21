@@ -1,0 +1,31 @@
+{
+  "number": 36011,
+  "kind": "issue",
+  "title": "Manage views: after pinning, renaming or re-defaulting a factory view of a read-only package, the admin can restore the factory version from the list page",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-21T06:32:10Z",
+  "updated_at": "2026-11-21T06:48:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36011",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nSplit from #35974 by the seat, after the maintainer's amended ruling 7058654416 (Manage views keeps pin, set default and rename on views a read-only package ships). Under epic #35547.\n\n## What a user sees\n\nAn admin pins, renames or makes another view the default on a list whose views come from a read-only package (for example an installed app). Each of those writes the whole view into the package's customization pair (`<package>.custom`, PR #33173). From then on the list shows the customized copy. To go back to the factory version the admin has to find the customization in Studio; the list page offers nothing.\n\n## Why it matters\n\n- The customized copy is frozen at the package version it was copied from. When the vendor ships a newer version of that view, the list keeps showing the old copy until someone re-bases it; the upgrade plan only reports this as advice.\n- Toggling a pin on and back off still leaves the copy in place.\n- The first such click creates the `.custom` package, and the app cannot be uninstalled until it is removed (ADR-0146 D3).\n\n## To do\n\n1. Read how a view override in `<package>.custom` is stored and removed today (`ui/packages/data-objectstack/src/index.ts` `updateView` / `viewCustomizationHome`, ADR-0146 D2/D3/D11) and what Studio offers.\n2. In Manage views, on a view that has a customization, offer \"restore factory version\": it removes that view's override, after one confirm that says every user of the view will see the factory version again.\n3. Show which views are customized (a small mark) so the admin knows the option exists.\n\n## Acceptance\n\n- Pin a factory view, then restore it: the override is gone and the list shows the package's own view.\n- A view without a customization offers no restore.\n\nBlocked-by: #35974.\nReader: area:ux (ui/packages/app-shell, ui/packages/plugin-view, ui/packages/data-objectstack), `domain:ui`."
+}

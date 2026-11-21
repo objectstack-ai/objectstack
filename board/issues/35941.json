@@ -2,8 +2,8 @@
   "number": 35941,
   "kind": "issue",
   "title": "Record page: the owner shows twice when a field group draws owner_id (header meta line plus the group's field)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -21,11 +21,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-20T20:54:31Z",
-  "updated_at": "2026-11-20T23:44:39Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T06:38:05Z",
+  "closed_at": "2026-11-21T06:38:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35941",
   "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFound while building PR #35938 (#35891 + #35849). Part of epic #35590 (record page redo).\n\n## What a user sees\nOn a record page, the header's meta line always shows the record's owner. When the object's declared field groups also place `owner_id` in the body, the reader sees the owner twice: once in the meta line and once as a field in the group. #28868 (\"owner once\") asked for the owner to appear once.\n\nThis happens on `main` today and isn't caused by #35938. That PR was asked for neither part, so it leaves both as they are.\n\n## To decide / do\nChoose the single place the owner appears when the body draws `owner_id`. One option is for the meta line to skip the owner whenever a field group renders `owner_id`. Then build that choice, with a test that renders a record whose group holds `owner_id` and counts the owner exactly once.\n\n## Acceptance\n- A record page whose field groups include `owner_id` shows the owner once.\n- A record page whose groups leave `owner_id` out still shows the owner in the meta line.\n\nReader: `domain:ui` (plugin-detail / record page)."

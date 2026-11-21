@@ -2,8 +2,8 @@
   "number": 35417,
   "kind": "issue",
   "title": "首页「完成初始设置」：进度写 6/7 而已完成项写 8；文案里有英文 Setup；只剩一项仍占首屏三分之一",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -21,11 +21,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T08:34:51Z",
-  "updated_at": "2026-11-19T08:57:58Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T07:33:10Z",
+  "closed_at": "2026-11-21T07:33:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35417",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派）。⛔ 不是认领。\n维护者 2026-11-19 原话：「用浏览器看一下右侧最新的界面，重新测试核心界面，提出界面优化和用户体验改进建议，和我沟通」；看过意见后：「你提的意见都同意，立卡」。\n\n## 现状（界面实测：托管环境 `os-4e4qa4.objectos.app`（预览版，控制台资源 `index-BLjIlyDm.js`，比 `origin/main` 旧），zh-CN，1280×800，2026-11-19，首页 `/_console/home`）\n\n- 卡片右上角「已完成 6/7」，卡片底部折叠行却是「显示已完成的项（8）」，两个数对不上。\n- 说明文案：「每一项之后都可以在 Setup 中修改。」中文界面里出现英文 Setup（产品里叫「系统设置」）。\n- 只剩一项（默认语言和国家/地区）没做，卡片仍占首屏约三分之一高度，把问候语和「我的应用」挤到下面。\n\n## 要做的\n\n1. 进度分母与清单项数一致（要么都按 7 项算，要么说明哪些不计入）。\n2. 「Setup」改成「系统设置」。\n3. 剩余不超过 2 项时收成一行（项名 + 「设置」按钮 + 关闭），不再整块展开。\n\n## 不做的\n\n- 不改清单有哪些项。\n\n## 验收\n\n- 上述环境首页：两个数字一致；文案无英文 Setup；剩 1 项时卡片高度不超过一行。\n\nReader: `domain:ui` 车道，首页初始设置清单组件。\n\nDedupe: `初始设置 已完成 数量`（objectstack / cloud，open）→ 0。"

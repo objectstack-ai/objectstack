@@ -1,0 +1,36 @@
+{
+  "number": 36006,
+  "kind": "pull_request",
+  "title": "fix(plugin-gantt): a refused task read draws the no-access state, not the raw error",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-21T06:02:30Z",
+  "updated_at": "2026-11-21T06:43:08Z",
+  "closed_at": "2026-11-21T06:43:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-21T06:43:06Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36006",
+  "body": "Fixes #35317\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：能打开项目但无权查看其任务的用户，在甘特图位置看到一块平静的\"无权访问\"提示（按用户语言显示），不再看到原始的报错文字。\n- 为什么做：HotCRM 销售经理打开项目页时看到英文原始权限报错，替该业务方解决这一体验缺口。\n- 出错会怎样：只影响甘特图读取被拒时的显示；其他失败（服务器错误、断网）照旧显示原错误画面，可直接撤回。\n- 要你做什么：无。\n\n## What changes\n\n`ObjectGantt` rendered every failed task load the same way, as `Error: <error.message>` in destructive red. For a permission refusal that message is the transport string (`ApiDataSource: HTTP 403 Forbidden — {...}`), untranslated, shown to a reader who may open the hosting record but is not granted its tasks.\n\nNow a failed load is classified with the shared `classifyLoadError` from `@object-ui/react` (the verdict `ListView` and `RelatedList` use). For the `forbidden` kind (a 403, or a `PERMISSION_DENIED` / `FORBIDDEN` code, or `HTTP 403` in the message) the chart draws the shared `DataEmptyState` from `@object-ui/components` as a neutral `role=\"status\"` panel with a lock glyph and the existing `list.loadErrorForbiddenTitle` / `list.loadErrorForbiddenMessage` keys, which every locale pack already carries. No server text is shown, matching `RelatedList`'s rule that a refused read keeps its fixed no-access sentence. No new i18n key was added. `GANTT_DEFAULT_TRANSLATIONS` gets the two rows as the provider-less fallback, value-equal to the `en` pack (`check-i18n-call-site-keys` compares them).\n\nEvery other failure (500, network) keeps the existing error screen unchanged.\n\nWhere the fix sits: the load error is caught inside `ObjectGantt`'s `reload` and drawn by its own early return. No block-level error boundary is involved (nothing throws to one), so `ObjectGantt` is the lowest layer that covers the project page and every other host.\n\n## Tests\n\nNew top-level `describe('ObjectGantt.refusedRead-35317')` in the shared harness `ObjectGantt.harness.test.tsx`:\n\n- a decorated 403 (`httpStatus: 403`, `code: PERMISSION_DENIED`) draws `gantt-no-access` (`role=\"status\"`, the en sentence), with no `Error:`, no `PERMISSION_DENIED` and no `HTTP 403` text in the container\n- under a `zh` `I18nProvider` the panel says `无权访问`\n- a 403 carried only in the message string is the same refusal\n- CONTROL: a 500 keeps `Error: ApiDataSource: HTTP 500 Internal Server Error`\n- CONTROL: rows that load render the chart\n\n<details><summary>Red on main, green after, ablation</summary>\n\n- Before the fix (pins only, commit 1): `Tests 2 failed | 2 passed | 58 skipped (62)`. The two 403 cases fail with `Unable to find an element by: [data-testid=\"gantt-no-access\"]`, and both controls pass.\n- After the fix: harness file `Tests 63 passed (63)`.\n- Ablation (`scripts/ablation-replace.mjs`, anchor `=== 'forbidden') {` → `=== ('ABLATED' as string)) {`, blob `24cf7bda` → `77e0df58`): `Tests 3 failed | 2 passed`. The three refusal cases go red and both controls stay green. The tool restored the file (blob == HEAD, `git diff HEAD` empty).\n</details>\n\n## Acceptance notes\n\n- Not measured in the browser: there is no cheap showcase fixture with a Gantt view and a role that can read the parent but not its tasks. The pins drive the real `ObjectGantt` over a refusing data source.\n- Same family, outside this card's file surface (other views' error paths are fenced): the Kanban (`Error loading kanban data: ...`), Calendar (`calendar.loadError` with the raw message), Timeline (`Error loading timeline: ...`) and Map (`Error: ...`) views draw a failed load's raw message the same way. This is from reading the code only, not measured at a public entry point.\n- The `Loading Gantt chart...` placeholder is an untranslated literal. Left alone (polish, not this card).\n\n## Verification\n\nTwo-minute check, from `ui/`: `pnpm exec vitest run packages/plugin-gantt/src/ObjectGantt.harness.test.tsx -t refusedRead`. Expect 5 passed.\n\nRead first: `ui/packages/plugin-gantt/src/ObjectGantt.tsx`, the new `forbidden` early return just above the existing `if (error)` screen. That is the only behaviour change.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CZrgaiMgTJCnswR6jQ\n"
+}

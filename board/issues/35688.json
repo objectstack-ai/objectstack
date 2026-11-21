@@ -14,18 +14,20 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-19T23:07:37Z",
-  "updated_at": "2026-11-19T23:50:26Z",
+  "updated_at": "2026-11-21T06:25:37Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35688",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单（专题：列表行内编辑重做，维护者直派，见本卡挂靠的父卡）。⛔ 不是认领。优先级 p2。\n\n维护者 2026-11-20 原话：「对于长文本，这个选中显示全文的效果很好」；「你每种字段类型都测试并对着了吗」（之后协调席逐类型补测）；「以上都同意」。\n\n## 现状（主干 `d96c878e33`，本机实测，视口 1600 宽，正常行高 32）\n\n编辑框渲染在单元格里，受列宽限制（`data-table.tsx:4161-4171, 4225` 起），所以会撑高行、截断内容。逐类型：\n\n| 字段类型 | 进入编辑后看到的 | 行高 |\n|---|---|---|\n| 多行文本 | 格内文本框 376×98 | 32 → 107 |\n| 数字 | 格内输入框 56 宽 | → 49 |\n| 金额 | 输入框 73 宽，34,500.50 只显示「3450」 | → 49 |\n| 百分比 | 输入框加一条滑块 | → 65 |\n| 日期 | 只剩「×」和日历图标，看不到值，日历不自动打开 | → 49 |\n| 日期时间 | 值被截成「2026/11/2」 | → 49 |\n| 时间 | 输入框 56 宽 | → 49 |\n| 布尔 | 点一下变成复选框，要再点才能勾 | 32 |\n| 单选 | 下拉触发器 56 宽，选项名截成「甲」；下拉不自动展开 | → 49 |\n| 多选 | 选项在格内竖排 | → 111 |\n| 邮箱、电话 | 格内输入框 | → 49 |\n| 网址 | 输入框里地址被截断 | → 49 |\n| 关联 | 「选择…」加一个打开对话框的按钮 | → 49 |\n| 人员 | 「选择…」 | → 41 |\n| 评分 | 星星变大 | → 69 |\n| 标签 | 标签竖排加输入框 | → 107 |\n| 地址 | 整张地址表单塞进 80 宽的格，标签每行一个字 | → 269 |\n| 颜色 | 色块加被截断的色值「#3」；按 Esc 不退出 | → 49 |\n| 富文本、公式、自动编号 | 不能行内编辑（源码），没有提示 | 32 |\n\n![现状：地址](https://github.com/objectstack-ai/objectstack/blob/4dc4e48bf650ee6be709ad55c6996372d76c22c7/inline-edit/ours-address.jpg?raw=true)\n\n![现状：多选](https://github.com/objectstack-ai/objectstack/blob/4dc4e48bf650ee6be709ad55c6996372d76c22c7/inline-edit/ours-multiselect.jpg?raw=true)\n\n![现状：日期进入编辑后看不到值](https://github.com/objectstack-ai/objectstack/blob/4dc4e48bf650ee6be709ad55c6996372d76c22c7/inline-edit/ours-date.jpg?raw=true)\n\n## 参照\n\n- Attio：选中长文本，原地展开成浮层显示全文；回车后日期是日历加快捷项，国家是可搜索的下拉。\n- Twenty（源码核对加实测）：编辑框是锚在单元格上的浮层，可以比单元格大；单选、多选、一对多关联用下拉；布尔和评分在格内直接改；电话是「国家码 + 号码 + 确认」；链接、邮箱、电话是多值列表加「添加」。\n\n![参照：Attio 选中长文本展开全文](https://github.com/objectstack-ai/objectstack/blob/4dc4e48bf650ee6be709ad55c6996372d76c22c7/inline-edit/attio-longtext.jpg?raw=true)\n\n![参照：Twenty 电话编辑浮层](https://github.com/objectstack-ai/objectstack/blob/4dc4e48bf650ee6be709ad55c6996372d76c22c7/inline-edit/twenty-phone.png?raw=true)\n\n![参照：Twenty 链接编辑浮层](https://github.com/objectstack-ai/objectstack/blob/4dc4e48bf650ee6be709ad55c6996372d76c22c7/inline-edit/twenty-links.png?raw=true)\n\n## 要做的\n\n**选中时展开**\n\n- 选中内容被截断的格（多行文本、长的单行文本、多选、标签、地址），原地出现浮层显示全部内容。左上角对齐单元格，宽度不小于列宽，高度随内容，超过一定行数后内部滚动。没被截断的格只出选中框。\n- 双击或回车，浮层原地变成编辑框，位置和大小不跳。\n- Esc、点别处、方向键移走时收起。\n\n**编辑框是浮层**\n\n- 所有类型的编辑框都盖在单元格上，表格行高和列宽不变。宽度不小于列宽，可以更宽更高。\n- 靠近表格右边、底边、冻结列和表头时自动避让；表格滚动时跟随或收起。\n- 进入编辑时光标在编辑框里。\n\n**各类型的目标**\n\n| 字段类型 | 目标 |\n|---|---|\n| 单行文本、邮箱、电话、网址 | 浮层输入框，完整显示值 |\n| 多行文本 | 浮层文本框，初始大小等于展开的全文 |\n| 数字、金额、百分比 | 浮层输入框，完整显示值；金额带币种；百分比不要滑块 |\n| 日期、日期时间、时间 | 进入编辑直接打开日历，值可见、可键入；带「今天、明天、下周、清空」 |\n| 布尔 | 不进浮层，选中后点一下或空格直接切换 |\n| 评分 | 不进浮层，原地点星，大小不变 |\n| 单选、状态 | 进入编辑直接展开可搜索的选项列表，选了即提交 |\n| 多选、标签 | 浮层选项列表，可搜索，勾选；点别处提交 |\n| 关联、主从、人员 | 浮层记录选择器：搜索、最近、清空 |\n| 地址 | 浮层表单：街道、城市、省、邮编、国家，正常宽度 |\n| 颜色 | 浮层取色，Esc 能退出 |\n| 富文本 | 选中时展开预览；不行内编辑，提示去记录页改 |\n| 公式、汇总、自动编号、附件图片 | 只读，按只读格处理 |\n\n**做法建议**\n\n- 这是本专题里改动最大的一张：失焦提交、点外部判断、行点击判断都假定编辑框在单元格的 DOM 里（`data-table.tsx` 约 3150-3192、3950、4225 起）。先出原型，确认在冻结列、粘性表头、横向滚动下的层叠和裁切，再铺开。\n\n## 不做的\n\n- 不改各字段控件在表单里的样子。\n- 保存方式和键盘在各自的子卡。\n\n## 验收\n\n- 上表每一种类型：进入编辑前后，这一行的高度都是 32，其他列不移动。\n- 金额 34,500.50、网址、日期时间的值在编辑框里完整可见。\n- 选中一格被截断的长文本：出现全文浮层；回车后同一位置变成可编辑；Esc 收起。\n- 单选进入编辑后不用再点就能看到选项，打字可以筛选。\n- 地址的各个输入框正常宽度，标签不竖排。\n- 最右一列、最后一行、冻结列里的格：浮层完整可见，不被裁掉。\n- 窄屏（视口 768 宽）下浮层不超出屏幕。\n- PR 正文列出迁移和作废的测试。\n\nReader: `domain:ui` 车道。`ui/packages/components/src/renderers/complex/data-table.tsx`（编辑框渲染约 4161-4407）、`ui/packages/plugin-grid/src/ObjectGrid.tsx:2961-3014`（`renderCellEditor`）、`ui/packages/fields/src/FieldEditWidget.tsx`（`EDIT_WIDGETS`）。\n\nDedupe: `单元格 编辑 浮层`、`长文本 展开 选中`、`行内编辑 行高`（objectstack，open）→ 0。"

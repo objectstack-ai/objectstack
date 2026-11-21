@@ -1,0 +1,31 @@
+{
+  "number": 35995,
+  "kind": "issue",
+  "title": "The record drawer's per-field save asks for the fields a change makes required, like the record page does",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-21T05:00:13Z",
+  "updated_at": "2026-11-21T05:50:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35995",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nSplit from #35956 by the seat (PR #35994, PR 1 of that card, leaves it out on purpose). Part of epic #34571.\n\n## What a user sees\nIn the record drawer opened from a list, a user changes a field (for example status to \"completed\") and saves it. If that change makes another field required (`requiredWhen`) and the field is empty, the save is refused with the server's message. After #35994 the same change on the list cell, on the record page's inline Save and on the kanban opens a small fill-in dialog instead. The drawer is the one place left that refuses.\n\n## Why\nThe drawer saves field by field through the `onFieldSave` callback mode of `InlineEditSaveBar` (`@object-ui/plugin-detail`). #35994 wires the shared prompt (`requiredWhenPrompt` + `RequiredFieldsDialog`, now in `@object-ui/fields`) into the atomic mode only, and its tests pin that the callback mode never asks.\n\n## To do\n1. Before the drawer's per-field save writes, collect the fields the change makes required against the object schema and the record, with the same `fillable` test the record page uses.\n2. When fields come back, write nothing and open the shared dialog. Its Save sends the changed field plus the filled values in one guarded update (`If-Match` the version the edit began on). A 409 re-reads and keeps the dialog open with the reason. Cancel closes the dialog and keeps the field's edit.\n3. Turn the #35994 pin \"the callback mode never asks\" into a pin that it asks.\n\n## Not doing\n- No change to the list cell, the record page or the kanban (that is #35956).\n- No change to what counts as fillable.\n\n## Acceptance\n- In the drawer, a change that makes an empty field required opens the dialog; Save writes once; Cancel writes nothing.\n- A change that makes nothing required saves at once, as today.\n- Light and dark, desktop and 375 px wide.\n\nBlocked-by: #35994.\nReader: area:ux (ui/packages/plugin-detail, ui/packages/fields)."
+}

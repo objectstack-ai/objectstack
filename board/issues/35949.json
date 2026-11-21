@@ -2,8 +2,8 @@
   "number": 35949,
   "kind": "issue",
   "title": "ci: Check Changeset re-runs on a merged PR's label event and goes red against the main that already holds its changeset",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,9 +22,13 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-20T22:21:10Z",
-  "updated_at": "2026-11-20T23:03:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T03:34:43Z",
+  "closed_at": "2026-11-21T03:34:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

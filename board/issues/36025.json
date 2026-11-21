@@ -1,0 +1,31 @@
+{
+  "number": 36025,
+  "kind": "issue",
+  "title": "List inline edit: skip the fill-in pre-read when the edited column is not in any askable field's requiredWhen",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-21T07:57:09Z",
+  "updated_at": "2026-11-21T07:57:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36025",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFollow-up from PR #35994 (#35956 PR 1, under epic #35683), filed by the seat from L1-a's N3 and the L2 delta record's F4 (both nits, the same finding).\n\n## What happens\n\nOn an object that has a `requiredWhen` field the list does not draw, every cell commit first waits for one `findOne` to read the keys the row lacks, whichever column was edited (`ui/packages/plugin-grid/src/objectGridRequiredPrompt.tsx`). The list decides which keys are missing per object, not per change. But the fill-in dialog can only open when the edited column is an operand of some askable field's `requiredWhen` predicate. So for every other column, the read costs one request and an extra wait on save, and it changes nothing.\n\n## To do\n\n1. Read the pre-read only when the edited `columnKey` is an operand of an askable field's `requiredWhen`. Predicates that read the clock or the current user keep the read.\n2. Pin it: committing a column that no predicate reads sends no `findOne`. Committing a predicate operand still reads, and the dialog behaves as it does today.\n\n## Acceptance\n\n- The result for the user is unchanged, and the request count drops for unrelated columns. Both are pinned."
+}

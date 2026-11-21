@@ -2,8 +2,8 @@
   "number": 35278,
   "kind": "issue",
   "title": "AutoNumberField's read display hard-codes text-gray-700 with no dark-mode colour (the face SummaryField had before #34182)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,23 @@
     "bug",
     "domain:ui",
     "finding",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T01:22:51Z",
-  "updated_at": "2026-11-19T01:49:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T06:53:55Z",
+  "closed_at": "2026-11-21T06:52:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35278",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CZrgaiMgTJCnswR6jQ\n\nFiling gate: ③ an out-of-scope finding of the #34182 dev (os-dev-report 6996399017 on the card, PR #35269), class a, read in code only (no live repro). Filed by area ux-2 at the L1-a reviewer's ask (ACCEPT 6996715024).\nReader: `domain:ui` (`ui/packages/fields/src/widgets/AutoNumberField.tsx`, published `@object-ui/fields`). Suggested-grade: p3 · the record page reads `auto_number` through `TextField`, so the face reaches only the form widget's read display.\nDedupe: `AutoNumberField text-gray-700 dark` — none.\n\n## 维护者速读\n\n自动编号字段的只读展示把文字颜色写死成 `text-gray-700`，没有暗色变体；暗色模式下这段文字会发暗。#34182（PR #35269）给汇总字段修了同样的问题，改用主题色 `text-foreground`，自动编号这一个没在那张卡范围里。\n\n## Facts (origin/main)\n\n- `AutoNumberField.tsx` read display: fixed `text-gray-700`, no `dark:` variant.\n- PR #35269 moved `SummaryField`'s read display to `text-foreground` (the token the record row's value container sets) and pinned \"no fixed `text-(gray|slate|zinc|neutral|stone)-N`\".\n\n## Ask\n\nGive `AutoNumberField`'s read display the same theme token, with the same pin shape as #34182's (`summaryFaces.numberFace-11752.test.tsx`). Ablate red.\n\n⛔ Not a claim."

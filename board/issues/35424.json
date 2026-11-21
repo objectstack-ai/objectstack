@@ -21,11 +21,11 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-19T08:47:46Z",
-  "updated_at": "2026-11-19T10:00:01Z",
+  "updated_at": "2026-11-21T07:27:10Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35424",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派）。⛔ 不是认领。\n维护者 2026-11-19 原话：「右侧文档页改如何优化，提出建议」；「文档页还有导航的问题不对，或者根部不需要，你画一个效果图。」；「右上角帮助图标，点全部文档，跳转之后回不来了。」；看图后：「其他应用的文档是不是很奇怪，不如叫全部文档。」；「同意，三件事都立卡」。\n\n## 效果图\n\n图 25 文档阅读页：\n\n![25 文档阅读页](https://github.com/objectstack-ai/objectstack/blob/4bed84cf502d3c7c9c4976365b6e193f3153058a/25-docs-page.png?raw=true)\n\n图 26 文档首页（全部文档）：\n\n![26 文档首页](https://github.com/objectstack-ai/objectstack/blob/4bed84cf502d3c7c9c4976365b6e193f3153058a/26-docs-home.png?raw=true)\n\n## 现状（界面实测：托管环境 `os-4e4qa4.objectos.app`（预览版，控制台比 `origin/main` 旧；源码位置按 `origin/main` 7ece0204a6 核对），zh-CN，2026-11-19）\n\n应用内的文档页（`/_console/apps/app.objectstack.hotcrm/docs/crm_revenue_manual/crm_revenue_quotes`）：\n\n- 同一屏三套导航并排：应用图标栏（销售应用的 30 多个菜单项）、手册目录、右侧「本页目录」。\n- 顶栏下面另起一条「文档 / 报价单——生成与过期」栏，路径里没有手册名。\n- 手册目录只列当前这一本的 3 篇，长标题被截断（「产品与价格表——每一行明细背…」）；同一应用的另外两本手册要回应用菜单才能找到。\n- 「本页目录」不随滚动高亮；页尾没有上一篇 / 下一篇；文档内没有搜索。\n- 正文约 590px 宽、14px 字，两侧大片空白；流程图不能放大；文中提到的功能（生成报价单）没有直达入口。\n- 滚到底后还有近一屏空白。\n\n全部文档页（顶栏帮助图标 →「全部文档」，`/_console/docs`，路由在 `ui/apps/console/src/App.tsx:365`，页面 `ui/apps/console/src/pages/DocsIndex.tsx`）：\n\n- 没有顶栏：没有应用切换、搜索、头像，也没有返回入口，只能用浏览器后退。\n- 英文：副标题「Books and guides from your installed packages.」（`DocsIndex.tsx:57` 写死）、「9 articles」。\n- 手册名都带「HotCRM」前缀；有一张卡显示「Setup / com.objectstack.setup」。\n\n## 要做的\n\n阅读页（图 25）：\n1. 看文档时不显示应用菜单；左边只留一栏文档导航，顶部「← 返回〈应用名〉」。\n2. 顶栏照常保留，写成「〈应用名〉 / 文档」；去掉另起的「文档 / 标题」栏；标题上方的路径带手册名（文档 › 收入手册）。\n3. 左栏列出本应用的全部手册（可折叠），当前篇高亮，长标题换行不截断；顶部「搜索文档」；底部「全部文档 →」。\n4. 「本页目录」随滚动高亮当前小节；页尾加上一篇 / 下一篇。\n5. 正文加宽到约 720px、15px 字；流程图可点开放大；页尾不留整屏空白。\n\n全部文档页（图 26）：\n6. 带上与其他页面相同的顶栏。\n7. 按应用分组，用启动器里的应用名；副标题与数量用当前语言（「9 篇」）。\n8. 系统包显示名称不显示包 ID，且只给管理员看。\n9. 加「搜索全部文档」。\n\n## 不做的\n\n- 不改文档内容本身（手册正文里的管理员向内容、手册名的「HotCRM」前缀属 hotcrm 内容，另议）。\n- 「文中功能的直达入口」需要文档内容提供链接，本卡只保证应用内链接能正常跳转。\n\n## 验收\n\n- 在销售应用里打开任一手册篇目：页面上只有一栏文档导航加右侧本页目录，顶栏在，能一步回到销售应用。\n- 从帮助图标进「全部文档」：顶栏在，能回到任意应用；zh-CN 下页面无英文句子、无包 ID。\n\nReader: `domain:ui` 车道，`ui/apps/console/src/pages/` 下 `DocShell.tsx`、`DocPage.tsx`、`BookPage.tsx`、`DocsIndex.tsx`、`AppDocsIndex.tsx`。\n\nDedupe: `文档页 导航`、`docs page navigation`、`全部文档 返回`（objectstack / cloud / hotcrm，open）→ 0。"

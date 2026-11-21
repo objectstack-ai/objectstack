@@ -1,0 +1,37 @@
+{
+  "number": 36003,
+  "kind": "pull_request",
+  "title": "fix(platform-objects): every locale's field-group and inline-columns help states the field-group rule",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-21T05:59:36Z",
+  "updated_at": "2026-11-21T06:52:56Z",
+  "closed_at": "2026-11-21T06:52:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-21T06:52:54Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36003",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuVwX4pUdM1qvNLSqRZNSvv3)_\n\nrepo:objectstack#1 · os-sales · session_01L6bhgW85kwjGaz7HqsmEuv\n\nFixes #35927\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none — translation leaves of the Studio metadata forms only; no metadata an author can write changes\n\n## 维护者速读\n\n- 用阿拉伯语、德语、西班牙语、法语、日语、韩语、葡萄牙语、俄语、繁体中文看 Studio 的管理员，字段分组和内嵌表格列的帮助说明，从旧规则改成了与英文、简体中文一致的新规则。\n- 属于记录页重做专题：上一步改了主从子表进表单的规则，只更新了英文和简体中文的说明，这里补齐其余九种语言。\n- 只改帮助文字，不影响数据和页面行为；译文有误时管理员只会看到不准确的提示，可以直接撤回。\n- 无\n\n## What changes\n\n#35921 rewrote two help texts in the en and zh-CN metadata-forms bundles: a master-detail child reaches the parent's forms because a parent field group names it (`fieldGroups[].relatedList`), not because the FK sets `inlineEdit`. The other nine bundles kept the old text, and `os i18n extract --merge` never overwrites a present leaf, so they are re-translated by hand here (leaf strings only, structure untouched):\n\n- `metadataForms.object.fields['fieldGroups.relatedList'].helpText`: the closing sentence \"The record page does not draw this placement yet.\" is replaced by \"The parent's create and edit forms inline the table too, and the record page's Edit saves the record and its rows together.\"\n- `metadataForms.field.fields.inlineColumns.helpText`: \"used only when this field sets inlineEdit, which is written in source\" becomes \"used only when a field group of the parent names this child (fieldGroups[].relatedList)\".\n\nLocales: ar, de, es-ES, fr, ja-JP, ko, pt-BR, ru, zh-Hant. Each rendering reuses the words the bundle already uses for the same things: the parent (the inline-columns leaf's own word), the field group (the `fieldGroups` label), the child object (the relatedList leaf's own word), and the console's own label for the Edit button (`ui/packages/i18n` locales: Bearbeiten, Editar, Modifier, Редактировать, تعديل, 編集, 편집, 編輯), each in that bundle's own quotation marks.\n\n**Staleness mechanism, checked:** these leaves have no recorded source hash. `<locale>.source-hashes.ts` holds hand-maintained digests for `en.ts` paths only (0 `metadataForms` entries in all ten files). `<locale>.source-hashes.generated.ts` holds an entry only while a leaf is still a byte copy of its source, and neither path has one in any locale. So both leaves are legacy-trusted and nothing marks them stale. `os i18n check` measures coverage (whether a leaf is present), not staleness, and `pnpm check:i18n` checks that a re-extract leaves the bundles as committed. Neither would catch a stale leaf here, so there is nothing to update for this change, and a cheap pin was added.\n\n**Pin:** a new top-level `describe` in the existing cross-locale guard `metadata-forms-vocabulary.test.ts`. For every one of the 11 locales: the inline-columns help contains `fieldGroups[].relatedList` and does not contain `inlineEdit`; the field-group help does not contain that locale's retired \"not drawn yet\" sentence. A further case holds the retired-sentence table equal to the locale list.\n\nChangeset: `'@objectstack/platform-objects': patch` (published, in the changeset `fixed` group; its `files[]` ships `dist`, which carries the bundles).\n\n## Tests\n\n<details><summary>platform-objects: the pinned file, the package suite and typecheck at 40af8003</summary>\n\n- `pnpm --filter @objectstack/platform-objects exec vitest run --maxWorkers=2 src/apps/translations/metadata-forms-vocabulary.test.ts`: `Test Files 1 passed (1)`, `Tests 35 passed (35)`.\n- `pnpm --filter @objectstack/platform-objects build && … test && … typecheck`: `Test Files 125 passed (125)`, `Tests 2117 passed (2117)`; typecheck `check:test-typecheck: OK`. Lock verdict `command-exit 0`.\n- The first package run, before this package's own `dist/` was built, had 2 suites red with `Cannot find package '@objectstack/platform-objects/system'`. They import plugins that resolve this package's `dist/`, so this was a missing build prerequisite and not a finding. After the build they are green.\n\n</details>\n\n<details><summary>Ablation: each pin reds on its own leaf, restored by blob hash</summary>\n\nCommitted first, then mutated with `scripts/ablation-replace.mjs` (anchor 1 → 0 on disk, blob changed, and after the run the blob equals HEAD and `git diff HEAD` is empty):\n\n- de inline-columns leaf set back to the old `inlineEdit` clause: `× de: inlineColumns names the parent field group, not inlineEdit`, `Tests 1 failed | 34 passed (35)`.\n- ru field-group leaf set back to the old closing sentence: `× ru: fieldGroups.relatedList no longer says the record page does not draw it`, `Tests 1 failed | 34 passed (35)`.\n\n</details>\n\n## Acceptance notes\n\n- `node scripts/pm/overlap-check.mjs --branch=HEAD`: `VERDICT clean exit 0`. #35977 touches the same nine bundles (other leaves) and merges cleanly.\n- #35915 (view-form navigation help, same mechanism) is not folded.\n\n## Verification\n\n<details><summary>Local gate subset (derived by dispatch-gates --commands at 40af8003)</summary>\n\n- `pnpm check:i18n`: `check-i18n-bundles: OK (10 package(s) — all bundles in sync, no undeclared authoring keys)`, after building its stated prerequisite closure.\n- Every other derived command exit 0, except these NOT MEASURED locally, declared to CI: `check-plugin-teardown-shape --self-test` (prerequisite: shallow clone cannot reach its pinned positive-control commit; script untouched) and `check:dual-build-cjs-loads` (prerequisite: reads every package's `dist/`, needs a full `pnpm build`) and `check:type-check-debt` (a workspace-wide tsc ledger; stopped while its closure build was under way, after about 10 minutes, because the diff adds no TypeScript beyond one test file that `check:test-typecheck` already compiles). `--ran` reconciliation: `63 derived, 60 run, 3 UNRUN`, and these three are the UNRUN ones.\n- The CI-only, workflow-valued, artifact-roster and wide-population families, and the type-check lanes: CI.\n\n</details>\n\n**Read first:** `metadata-forms-vocabulary.test.ts` (the new `describe`), then any one bundle's two changed lines.\n\n**Two-minute check:** `pnpm --filter @objectstack/platform-objects exec vitest run src/apps/translations/metadata-forms-vocabulary.test.ts` should give 35 passed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgW85kwjGaz7HqsmEuv"
+}
