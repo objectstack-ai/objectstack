@@ -5,6 +5,7 @@
 '@object-ui/components': patch
 '@object-ui/core': patch
 '@object-ui/cli': patch
+'@object-ui/console': patch
 ---
 
 fix(ui): danger colours render red in both themes, and light danger text clears 4.5:1
