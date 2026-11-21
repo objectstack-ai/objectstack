@@ -52,6 +52,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "アイコン",
         helpText: "Lucide アイコン名（例: \"building\", \"users\"）"
       },
+      color: {
+        label: "色",
+        helpText: "アイコンを描く角丸四角の色。固定パレットから選びます。未設定の場合はグレーになります。"
+      },
       description: {
         label: "説明",
         helpText: "開発者向けドキュメント"

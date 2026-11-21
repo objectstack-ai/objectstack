@@ -40,7 +40,12 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  ObjectIconTile,
+  OBJECT_COLOR_TILE_CLASS,
+  objectColorOrDefault,
+  cn,
 } from '@object-ui/components';
+import { OBJECT_COLORS, type ObjectColor } from '@objectstack/spec/data';
 import type { RegistryComponentMeta } from '@object-ui/core';
 import { builderRulesOfSpecFilter } from '@object-ui/core';
 import { AlertTriangle, ChevronDown, ChevronsUpDown, ChevronUp, Eye, EyeOff, Plus, Search, Trash2 } from 'lucide-react';
@@ -2226,7 +2231,21 @@ const ICON_RESULT_LIMIT = 120;
  * Built inline (no Radix portal) so the search + grid render eagerly — the same
  * jsdom-friendly choice the other pickers' tests rely on.
  */
-export function IconPickerWidget({ id, ariaLabelledBy, required, value, onChange, readOnly }: WidgetProps) {
+/**
+ * The object-colour half of the picker (objectstack#35985). A host that edits
+ * an OBJECT's icon passes both: the dialog then shows the nine palette
+ * swatches, and the trigger and every grid cell draw the icon as the tile it
+ * will be, in the chosen colour. Without them (a page, app or navigation icon)
+ * the picker stays the line-icon picker it was: only objects carry a colour.
+ */
+export interface IconPickerTileColor {
+  tileColor?: string;
+  onTileColorChange?: (color: ObjectColor) => void;
+}
+
+export function IconPickerWidget({ id, ariaLabelledBy, required, value, onChange, readOnly, tileColor, onTileColorChange }: WidgetProps & IconPickerTileColor) {
+  const tiles = typeof onTileColorChange === 'function';
+  const color = objectColorOrDefault(tileColor);
   const locale = useMetadataLocale();
   const current = value == null ? '' : String(value);
   const [open, setOpen] = React.useState(false);
@@ -2263,7 +2282,11 @@ export function IconPickerWidget({ id, ariaLabelledBy, required, value, onChange
         onClick={() => !readOnly && setOpen(true)}
         className="flex w-full items-center gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm text-left disabled:cursor-not-allowed disabled:opacity-60"
       >
-        <LazyIcon name={inCatalog ? current : undefined} className="h-4 w-4 shrink-0 text-muted-foreground" />
+        {tiles ? (
+          <ObjectIconTile icon={inCatalog ? current : undefined} color={color} size="sm" />
+        ) : (
+          <LazyIcon name={inCatalog ? current : undefined} className="h-4 w-4 shrink-0 text-muted-foreground" />
+        )}
         <span className={'flex-1 truncate ' + (current ? 'font-mono' : 'text-muted-foreground')}>
           {current || t('engine.form.selectEllipsis', locale)}
         </span>
@@ -2286,7 +2309,8 @@ export function IconPickerWidget({ id, ariaLabelledBy, required, value, onChange
             <DialogTitle>{t('engine.form.chooseIcon', locale)}</DialogTitle>
           </DialogHeader>
 
-          <div className="flex items-center gap-2 rounded-md border border-input bg-background px-3 py-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+          <div className="flex flex-1 items-center gap-2 rounded-md border border-input bg-background px-3 py-2">
             <Search aria-hidden className="h-4 w-4 shrink-0 text-muted-foreground" />
             <input
               type="text"
@@ -2297,6 +2321,37 @@ export function IconPickerWidget({ id, ariaLabelledBy, required, value, onChange
               onChange={(e) => setQuery(e.target.value)}
               className="w-full bg-transparent text-sm outline-none"
             />
+          </div>
+          {tiles && (
+            <div
+              role="radiogroup"
+              aria-label={t('engine.form.iconColor', locale)}
+              data-testid="icon-picker-colors"
+              className="grid shrink-0 grid-cols-9 gap-1 sm:grid-cols-3"
+            >
+              {OBJECT_COLORS.map((c) => {
+                const label = t(`engine.form.objectColor.${c}`, locale);
+                const checked = c === color;
+                return (
+                  <button
+                    key={c}
+                    type="button"
+                    role="radio"
+                    aria-checked={checked}
+                    aria-label={label}
+                    title={label}
+                    data-color={c}
+                    onClick={() => onTileColorChange?.(c)}
+                    className={cn(
+                      'h-6 w-6 rounded-md ring-offset-2 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      OBJECT_COLOR_TILE_CLASS[c],
+                      checked && 'ring-2 ring-foreground',
+                    )}
+                  />
+                );
+              })}
+            </div>
+          )}
           </div>
 
           <div
@@ -2345,7 +2400,7 @@ export function IconPickerWidget({ id, ariaLabelledBy, required, value, onChange
                     (selected ? 'bg-accent text-accent-foreground ring-1 ring-primary' : '')
                   }
                 >
-                  <LazyIcon name={name} className="h-5 w-5" />
+                  {tiles ? <ObjectIconTile icon={name} color={color} size="md" /> : <LazyIcon name={name} className="h-5 w-5" />}
                   <span className="w-full truncate text-center text-[9px] leading-tight">{name}</span>
                 </button>
               );

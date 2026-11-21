@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { addLineItem } from './helpers';
 
 /**
  * Tier 0 live e2e: a `file` field on a master-detail child renders a real
@@ -54,13 +55,17 @@ test('inline line-item grid uploads a per-row file and persists it in the batch'
   await li.locator('th', { hasText: 'Product' }).first().waitFor();
   await expect(li.locator('th', { hasText: 'Receipt' })).toHaveCount(1);
 
+  // The grid draws no blank entry row (objectstack#35507): "Add line" appends
+  // the row whose Receipt cell this case uploads into.
+  await addLineItem(page);
+
   // The Receipt cell is a genuine upload control, NOT a text input (#2360 core).
   const fileInput = li.locator('input[type="file"]').first();
   await expect(fileInput).toHaveCount(1);
   await expect(li.locator('input[type="text"][aria-label="Receipt"]')).toHaveCount(0);
 
-  // Materialise the ghost row via a product pick (auto-fills description/price),
-  // then give the line a quantity so it's a valid billable line.
+  // Pick a product on the added line (auto-fills description/price), then
+  // give the line a quantity so it's a valid billable line.
   await li.getByTestId('lookup-trigger').first().click();
   const option = page.getByRole('option', { name: /Widget A/i }).first();
   await option.waitFor({ state: 'visible' });

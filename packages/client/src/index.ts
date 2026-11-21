@@ -236,6 +236,19 @@ export type { QualifiedAddressOptions } from './package-address';
 export type ApiRouteType = keyof ApiRoutes;
 
 /**
+ * The options of `meta.getItems` (`GET /meta/:type`). `packageId` scopes the
+ * list to one package (`?package=`); `names` narrows it to those items in one
+ * request (`?names=a,b,c`); `include` asks for what the list omits by default
+ * (`?include=`): `'content'` keeps each `doc`'s body (ADR-0046), `'grants'`
+ * adds each `position`'s grants.
+ */
+export interface MetaItemsListOptions {
+  packageId?: string;
+  names?: readonly string[];
+  include?: 'content' | 'grants';
+}
+
+/**
  * [#30205] `security.assignedWork.count`'s answer: per object and user field,
  * how many records hold the user, as the caller can read them.
  */
@@ -2083,12 +2096,16 @@ export class ObjectStackClient {
      *   (sent as `?names=a,b,c`). A name that matches no item is simply absent
      *   from the answer. An empty `names` array is sent as an empty filter,
      *   which the server refuses with `400`; leave `names` out to list every item.
+     *   `include` asks for what the list leaves out by default (`?include=`):
+     *   `'content'` keeps each `doc`'s body (ADR-0046), `'grants'` adds each
+     *   `position`'s grants.
      */
-    getItems: async (type: string, options?: { packageId?: string; names?: readonly string[] }): Promise<GetMetaItemsResponse> => {
+    getItems: async (type: string, options?: MetaItemsListOptions): Promise<GetMetaItemsResponse> => {
         const route = this.getRoute('metadata');
         const params = new URLSearchParams();
         if (options?.packageId) params.set('package', options.packageId);
         if (options?.names !== undefined) params.set('names', options.names.join(','));
+        if (options?.include) params.set('include', options.include);
         const qs = params.toString();
         const url = `${this.baseUrl}${route}/${type}${qs ? `?${qs}` : ''}`;
         const res = await this.fetch(url);
@@ -8696,11 +8713,12 @@ export class ScopedEnvironmentClient {
       const res = await this.parent._fetch(this.metaUrl(''));
       return this.parent._unwrap<GetMetaTypesResponse>(res);
     },
-    /** The unscoped surface's `getItems`, `names` included (one `?names=a,b,c` request). */
-    getItems: async (type: string, options?: { packageId?: string; names?: readonly string[] }): Promise<GetMetaItemsResponse> => {
+    /** The unscoped surface's `getItems`, `names` and `include` included (one `?names=a,b,c` request). */
+    getItems: async (type: string, options?: MetaItemsListOptions): Promise<GetMetaItemsResponse> => {
       const params = new URLSearchParams();
       if (options?.packageId) params.set('package', options.packageId);
       if (options?.names !== undefined) params.set('names', options.names.join(','));
+      if (options?.include) params.set('include', options.include);
       const qs = params.toString();
       const res = await this.parent._fetch(this.metaUrl(`/${type}${qs ? `?${qs}` : ''}`));
       return this.parent._unwrap<GetMetaItemsResponse>(res);

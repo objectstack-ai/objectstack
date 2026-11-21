@@ -558,6 +558,12 @@ export const DataTableSchema = BaseSchema.extend({
   // its supplier is `ObjectGrid` (`@object-ui/plugin-grid`). A React node is
   // not JSON, so authored data is refused by name.
   summaryRow: handlerKeyRefusal('summaryRow', 'runtime-slot', 'Host-built per-column summary row'),
+  // RUNTIME SLOT (objectstack#35678): `data-table` reads `schema.floatingBar`
+  // and floats it at the bottom of its scroll box, keeping room after the last
+  // row; its supplier is `ObjectGrid` (`@object-ui/plugin-grid`), whose
+  // selection bar it is. A React node is not JSON, so authored data is refused
+  // by name.
+  floatingBar: handlerKeyRefusal('floatingBar', 'runtime-slot', 'Host-built selection bar floated over the table'),
   // RUNTIME SLOT (objectstack#27365): `data-table` reads `schema.isRowEditable`
   // and calls it per row before opening a cell editor; its supplier is
   // `ObjectGrid` (`@object-ui/plugin-grid`), answering from the server's

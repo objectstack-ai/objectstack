@@ -22,7 +22,6 @@
  */
 
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { createPortal } from 'react-dom';
 import type { ObjectGridSchema, DataSource, ViewData, TableSortItem, DataTableSchema, ListViewExportFormat, RecordNavigateAction } from '@object-ui/types';
 import { isSystemManagedField, detectStatusField } from '@object-ui/types';
 import { SchemaRenderer, isPermissionError, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, useRelatedRecordActions, notifyDataChanged, useMetadata, claimAnswerWarnings, toastRecordSave, useOwnWrites, createOwnWrites, type AnswerWarningClaim, type RecordSaveFeedback } from '@object-ui/react';
@@ -93,7 +92,7 @@ import { resolveBulkActions, resolvePromotedBulkParams } from './resolveBulkActi
 import { useUndeclaredActionNamesWarning } from './undeclaredActionNames';
 import { partitionBulkRows } from './bulkEligibility';
 import { RowActionMenu, formatActionLabel } from './components/RowActionMenu';
-import { BulkActionBar } from './components/BulkActionBar';
+import { BulkActionBar, FloatingSelectionBarAnchor } from './components/SelectionBar';
 import { RowContextMenuItems, SelectionContextMenuItems } from './components/RowContextMenu';
 import { BulkActionDialog } from './components/BulkActionDialog';
 import type { BulkResult } from './hooks/useBulkExecutor';
@@ -127,8 +126,7 @@ import { resolveObjectGridPersistedColumns } from './objectGridPersistedColumns'
 import { resolveObjectGridActionsColumn } from './objectGridActionsColumn';
 import { useInlineRowActionFold } from './objectGridInlineActionFold';
 import { BULK_SELECT_ALL_MATCHING_CAP } from './bulkSelectAllMatchingCap';
-import { useListPageBarSlot, useListPageBarState } from './listPageBarSlot';
-import { SelectionPageBar } from './components/SelectionPageBar';
+import { useIsListPageGrid } from './listPageScope';
 import { useInfiniteRowLoad } from './objectGridInfiniteLoad';
 export type { RetiredListColumnKey, ObjectGridColumnHolds, ObjectGridColumnDraft, ObjectGridColumn } from './objectGridColumns';
 export type { ObjectGridColumnState, ObjectGridFooterSummary, ObjectGridExternalPaginationProps, ObjectGridRowGroup } from './objectGridProps';
@@ -782,6 +780,8 @@ function cellEditorWidthClass(type: string): string {
     case 'tags':
     case 'checkboxes':
       return 'w-full min-w-64';
+    case 'select':
+    case 'status':
     case 'date':
     case 'datetime':
     case 'phone':
@@ -943,17 +943,16 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     schema, dataSource, setRefreshKey, setUseCardView,
   });
 
-  // objectstack#35554 — the list page bar's selection slot
-  // (`./listPageBarSlot`). A grid inside a list page's page column fills the
-  // page bar's slot: it draws no row-end control and no bulk bar, and its
-  // selection swaps the page bar's content instead. Any other host (a related
-  // list, a page block, the record drawer) finds no slot and keeps both.
+  // objectstack#35554 — a grid inside a list page's page column (`./listPageScope`)
+  // draws no row-end control; any other host (a related list, a page block, the
+  // record drawer) keeps it. Every grid draws the same selection bar
+  // (objectstack#35678).
   const [gridRoot, setGridRoot] = useState<HTMLDivElement | null>(null);
   const setRootRef = useCallback((el: HTMLDivElement | null) => {
     setGridRoot(el);
     (pullRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
   }, [pullRef]);
-  const pageBarSlot = useListPageBarSlot(gridRoot);
+  const listPageGrid = useIsListPageGrid(gridRoot);
 
   // `passedData` — data handed down directly (from ListView) — is destructured
   // from props above.
@@ -1759,10 +1758,6 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     onResidentSummaryRowChange?.(residentRowDrawn);
   }, [onResidentSummaryRowChange, residentRowDrawn]);
 
-  // objectstack#35554 — tell the page bar whether a selection is open and how
-  // many rows the list's query matches (the count beside the view name).
-  useListPageBarState(pageBarSlot, { selecting: selectedRows.length > 0 });
-
   // objectstack#35554 — a host that loads its rows window by window
   // (`onLoadMore`) is asked for the next window as the table's scroll box
   // nears its end, and the box's position is kept across a return to the list
@@ -2109,7 +2104,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     wantEditAction, wantDeleteAction, mayInvokeRowAction, rowOperations, canEdit, canDelete,
     recordVerdict, predicateScope, onEdit, onDelete, editPredicates, deletePredicates, executeAction,
     setRefreshKey, t, foldInlineRowActions: inlineActionFold.folded,
-    drawRowControls: !pageBarSlot,
+    drawRowControls: !listPageGrid,
   });
 
   // Density-driven cell padding/font (applied to every column so it actually reaches <td>).
@@ -2340,7 +2335,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // rather than merely currently-wired-right: a host that forgets `findParams`
   // loses the affordance, it does not silently get the whole object.
   //
-  // ONE condition, consumed by both `BulkActionBar` sites below. Do NOT re-spell
+  // ONE condition, consumed by the selection bar below. Do NOT re-spell
   // it at a consumption site — a second copy is how one of them gets missed
   // (objectui#4138, #4464).
   const canOfferSelectAllMatching = !singleSelection && bulkFanoutParams !== null;
@@ -2391,7 +2386,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // below already guards.
   //
   // [#4140] So this is the ONE reset — dispatch, delete, dialog-close AND the
-  // bulk bar's own `onClearSelection`. Both `BulkActionBar` sites previously
+  // selection bar's own `onClearSelection`. The bulk bar sites previously
   // hand-wrote `setSelectedRows([]); setSelectAllMatching(false);`, which is
   // this function minus the key bump: Clear emptied the toolbar and left every
   // checkbox ticked. Never re-implement the reset inline — call this.
@@ -3309,6 +3304,34 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     );
   };
 
+  // objectstack#35678 — the selection bar: one bar for every face of every
+  // grid, floated at the bottom centre of the face's scroller. The flat table
+  // floats it itself (`floatingBar`), above its summary row and with room after
+  // its last row; every other face floats it in `FloatingSelectionBarAnchor`.
+  // On the list page, where rows draw no actions of their own (#35554), one
+  // selected record offers that record's actions; elsewhere the row keeps its
+  // own menu and the bar offers the bulk actions at any count.
+  const selecting = selectedRows.length > 0;
+  const selectionBar = selecting ? (
+    <BulkActionBar
+      selectedRows={selectedRows}
+      singleRowMenu={listPageGrid && selectedRows.length === 1 ? rowActionMenuProps(selectedRows[0]) : undefined}
+      actions={effectiveBulkActions ?? []}
+      actionDefs={bulkActionDefs}
+      objectFields={objectSchema?.fields}
+      onAction={dispatchBulkAction}
+      onActionDef={dispatchBulkActionDef}
+      onClearSelection={resetSelection}
+      pageSize={data.length}
+      totalMatching={canOfferSelectAllMatching ? resolvedTotalMatching : undefined}
+      allMatchingSelected={selectAllMatching}
+      onSelectAllMatching={canOfferSelectAllMatching ? () => setSelectAllMatching(true) : undefined}
+    />
+  ) : null;
+  // The room a face that is not the table keeps at its scroller's end while
+  // the bar floats there, so its last row scrolls clear of the bar.
+  const selectionBarClearance = selecting ? 'pb-16' : undefined;
+
   // objectstack#35548 — the column summaries as the table's own last row, each
   // under its column, led by the count of the records they summarise. A host
   // that draws them itself (`onColumnSummaryChange`) gets no row here.
@@ -3372,6 +3395,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     columns: tableColumns,
     data: patchedRows(data),
     summaryRow,
+    floatingBar: selectionBar ?? undefined,
     // objectstack#35554 — a host that loads window by window draws no pager.
     pagination: paginationEnabled && !onLoadMore,
     pageSize: manualPaginationOn ? manualPageSize : pageSize,
@@ -3395,8 +3419,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     search: manualSearchOn ? manualSearch : undefined,
     onSearchChange: manualSearchOn ? manualOnSearchChange : undefined,
     selectable: selectionMode,
-    // ObjectGrid surfaces the selection via its own bottom BulkActionBar
-    // (count + Clear + bulk actions). Suppress the data-table's built-in
+    // ObjectGrid surfaces the selection via its own selection bar
+    // (count + Clear + actions). Suppress the data-table's built-in
     // "N selected" toolbar so it doesn't render a duplicate, orphaned row
     // above the table when search/export are handled by the outer toolbar.
     showSelectionCount: false,
@@ -3452,7 +3476,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       ? (ctx: { column: any; row: any; pendingRow: any; value: any; stage: (v: any) => void; commit: (v?: any) => void }) => {
           const fieldDef = (objectSchema as any)?.fields?.[ctx.column?.accessorKey];
           if (!fieldDef || !hasFieldEditWidget(fieldDef.type)) return null;
-          const discrete = DISCRETE_EDIT_TYPES.has(fieldDef.type);
+          // objectstack#35688 — a `select` declared `multiple` draws the multi-select
+          // check list (`SelectField` hands it to `MultiSelectField`): each check
+          // stages, and the edit is saved when the user moves on.
+          const discrete = DISCRETE_EDIT_TYPES.has(fieldDef.type) && !fieldDef.multiple;
           let field: any = { name: ctx.column.accessorKey, ...fieldDef };
           // State-machine-aware: a field bound to a `state_machine` validation
           // only offers transitions valid from the current value, so the editor
@@ -3502,6 +3529,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
               // saved-row scoping rather than to `{}` — gated forever — and it
               // is the spelling objectui#7188's ruling chose.
               dependentValues={ctx.pendingRow ?? ctx.row}
+              // objectstack#35688 — the cell editor's face: pickers open at once,
+              // and a calendar day or a swatch ends the edit.
+              inCell
+              onCommit={() => ctx.commit()}
             />
             </div>
           );
@@ -3653,6 +3684,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     rowGroups,
     // A grouped grid draws no summary row (its summaries are withheld).
     summaryRow: undefined,
+    // The grouped scroller floats the selection bar (see grouped `gridContent`).
+    floatingBar: undefined,
     // Pages are the grid's: whole groups (`groupedPager`), and on a
     // server-grouped grid each open group's own rows (its band footer).
     pagination: false,
@@ -4130,7 +4163,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     return (
       <>
         <div
-          className="h-full overflow-y-auto overflow-x-hidden"
+          className={cn('h-full overflow-y-auto overflow-x-hidden', selectionBarClearance)}
           data-fab-clearance=""
           data-testid="object-grid-card-scroller"
         >
@@ -4141,6 +4174,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         </div>
         {cardPager}
         </div>
+        {selectionBar && <FloatingSelectionBarAnchor>{selectionBar}</FloatingSelectionBarAnchor>}
         {navigation.isOverlay && (
           <NavigationOverlay
             {...navigation}
@@ -4492,10 +4526,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     </div>
   ) : null;
 
-  // Every branch fills the remaining height (flex-1 + min-h-0) so the
-  // BulkActionBar rendered *after* gridContent stays inside the flex column
-  // and remains visible; otherwise an h-full table pushes the bar past the
-  // bottom of an overflow-hidden ancestor and clips it.
+  // Every branch fills the remaining height (flex-1 + min-h-0), so its
+  // scroller is bounded and the selection bar floated at its end stays in view
+  // (objectstack#35678).
   //
   // objectstack#26896 — on a phone (`useCardView`, the plain list's card
   // breakpoint) a grouped list draws the same bands in the same order, each
@@ -4506,7 +4539,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const gridContent = isGrouped && cardFace ? (
     <div className="flex flex-col flex-1 min-h-0">
       <div
-        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden"
+        className={cn('flex-1 min-h-0 overflow-y-auto overflow-x-hidden', selectionBarClearance)}
         data-fab-clearance=""
         data-testid="grouped-grid-card-scroller"
       >
@@ -4523,6 +4556,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
           ));
         })()}
       </div>
+      {selectionBar && <FloatingSelectionBarAnchor>{selectionBar}</FloatingSelectionBarAnchor>}
       {groupedPager}
     </div>
   ) : isGrouped ? (
@@ -4535,13 +4569,14 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       <HorizontalOverflowBox
         seam={pinnedRightCols.length > 0 ? 'pinned' : 'edge'}
         outerClassName="flex flex-col flex-1 min-h-0"
-        className="flex-1 min-h-0 overflow-auto [-webkit-overflow-scrolling:touch]"
+        className={cn('flex-1 min-h-0 overflow-auto [-webkit-overflow-scrolling:touch]', selectionBarClearance)}
         data-testid="grouped-grid-scroller"
       >
         <div className="min-w-max">
           <SchemaRenderer schema={buildGroupedTableSchema(groupBandsOf(pagedGroups))} />
         </div>
       </HorizontalOverflowBox>
+      {selectionBar && <FloatingSelectionBarAnchor>{selectionBar}</FloatingSelectionBarAnchor>}
       {groupedPager}
     </div>
   ) : (
@@ -4763,42 +4798,6 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       </GridHeaderMenuProvider>
       {isGrouped && onRowGroupsChange && (
         <RowGroupsReport groups={shownRowGroups} onChange={onRowGroupsChange} />
-      )}
-      {pageBarSlot ? (
-        // objectstack#35554 — on a list page the selection is the page bar's:
-        // its content is drawn into the bar's slot, and no bar floats over
-        // the rows.
-        selectedRows.length > 0 && createPortal(
-          <SelectionPageBar
-            selectedRows={selectedRows}
-            singleRowMenu={selectedRows.length === 1 ? rowActionMenuProps(selectedRows[0]) : undefined}
-            actions={effectiveBulkActions ?? []}
-            actionDefs={bulkActionDefs}
-            objectFields={objectSchema?.fields}
-            onAction={dispatchBulkAction}
-            onActionDef={dispatchBulkActionDef}
-            onClearSelection={resetSelection}
-            loadedCount={data.length}
-            totalMatching={canOfferSelectAllMatching ? resolvedTotalMatching : undefined}
-            allMatchingSelected={selectAllMatching}
-            onSelectAllMatching={canOfferSelectAllMatching ? () => setSelectAllMatching(true) : undefined}
-          />,
-          pageBarSlot,
-        )
-      ) : (
-        <BulkActionBar
-          selectedRows={selectedRows}
-          actions={effectiveBulkActions ?? []}
-          actionDefs={bulkActionDefs}
-          objectFields={objectSchema?.fields}
-          onAction={dispatchBulkAction}
-          onActionDef={dispatchBulkActionDef}
-          onClearSelection={resetSelection}
-          pageSize={data.length}
-          totalMatching={canOfferSelectAllMatching ? resolvedTotalMatching : undefined}
-          allMatchingSelected={selectAllMatching}
-          onSelectAllMatching={canOfferSelectAllMatching ? () => setSelectAllMatching(true) : undefined}
-        />
       )}
       {navigation.isOverlay && (
         <NavigationOverlay

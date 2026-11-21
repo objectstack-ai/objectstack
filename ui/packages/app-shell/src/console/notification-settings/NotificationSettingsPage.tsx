@@ -21,7 +21,9 @@
  *
  * Channels are columns as the door lists them, so a channel the deployment
  * adds later (Slack, …) appears without a change here; a channel the
- * deployment cannot send on yet says so in its header.
+ * deployment cannot send on yet says so in its header. Where the door lists
+ * `slack` (connector-slack is composed), the page also draws the person's own
+ * Slack link (`SlackLinkSection`): Slack delivers only to a confirmed link.
  *
  * A caller who holds neither a create nor an edit grant on
  * `sys_notification_preference` (an external member: `external_default`
@@ -75,6 +77,7 @@ import {
   type PreferenceWrite,
   type QuietHoursWindow,
 } from './myPreferences.js';
+import { SlackLinkSection } from './SlackLinkSection.js';
 
 type Load = { readonly state: 'loading' } | { readonly state: 'failed' } | { readonly state: 'read'; readonly prefs: MyPreferences };
 
@@ -93,6 +96,9 @@ const SOURCE_KEY: Record<PreferenceSource, string> = {
   builtin: 'notificationSettings.sourceBuiltin',
   mandatory: 'notificationSettings.sourceMandatory',
 };
+
+/** The channel the Slack section belongs to, as the preference door lists it. */
+const SLACK_CHANNEL = 'slack';
 
 function errorText(err: unknown): string {
   return err instanceof Error && err.message ? err.message : String(err);
@@ -336,6 +342,8 @@ export function NotificationSettingsPage() {
             </div>
           </CardContent>
         </Card>
+
+        {apiFetch && prefs.channels.some((c) => c.channel === SLACK_CHANNEL) && <SlackLinkSection apiFetch={apiFetch} />}
       </div>
     </div>
   );

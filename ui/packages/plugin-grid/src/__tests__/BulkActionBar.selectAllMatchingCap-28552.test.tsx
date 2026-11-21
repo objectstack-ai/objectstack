@@ -13,9 +13,11 @@
  * `resolveBulkRows` hands a bulk action at most BULK_SELECT_ALL_MATCHING_CAP
  * records. The bar used to count the whole match set ("All 7200 matching
  * records are selected."), so a bulk delete over 7200 matches reported every
- * match and processed the first 5000. Over the cap, the banner, the
- * select-all button, the count chip and the selection's context-menu label now
- * name the cap and the total; at or under it they read as before. Strings are
+ * match and processed the first 5000. Over the cap, the select-all button,
+ * the count chip (its text and its title, the whole sentence) and the
+ * selection's context-menu label name the cap and the total; at or under it
+ * they read as before. The selection bar (objectstack#35678) offers
+ * 「选择全部 N 条」 under the cap. Strings are
  * read from the packs, never from literals; the cap is read from the one
  * constant `resolveBulkRows` reads too.
  */
@@ -26,7 +28,7 @@ import { render, screen, cleanup, within } from '@testing-library/react';
 import { I18nProvider } from '@object-ui/react';
 import { DropdownMenu, DropdownMenuContent } from '@object-ui/components';
 import { en, zh } from '@object-ui/i18n/locales';
-import { BulkActionBar } from '../components/BulkActionBar';
+import { BulkActionBar } from '../components/SelectionBar';
 import { SelectionContextMenuItems } from '../components/RowContextMenu';
 import { BULK_SELECT_ALL_MATCHING_CAP } from '../bulkSelectAllMatchingCap';
 
@@ -66,25 +68,23 @@ describe('the bulk bar names the select-all-matching cap (objectstack#28552)', (
       renderBar('en', total, false);
       const button = await screen.findByTestId('bulk-select-all-matching');
       expect(button).toHaveTextContent(fill(en.grid.bulkSelectAllMatchingCapped, { cap: CAP, total }));
-      expect(button).not.toHaveTextContent(fill(en.grid.bulkSelectAllMatching, { count: total }));
+      expect(button).not.toHaveTextContent(fill(en.grid.selectAllTotal, { total }));
     });
 
-    it('once selected, the banner says only the first CAP will be processed, and the chip counts CAP', async () => {
+    it('once selected, the chip counts CAP and its title says only the first CAP will be processed', async () => {
       renderBar('en', total, true);
-      const banner = await screen.findByTestId('bulk-cross-page-banner');
-      expect(banner).toHaveTextContent(fill(en.grid.bulkAllMatchingSelectedCapped, { cap: CAP, total }));
-      expect(banner).toHaveTextContent(String(CAP));
-      expect(banner).not.toHaveTextContent(fill(en.grid.bulkAllMatchingSelected, { count: total }));
-      const bar = screen.getByTestId('bulk-actions-bar');
-      expect(bar).toHaveTextContent(fill(en.grid.bulkSelectedAllMatchesCapped, { cap: CAP, total }));
-      expect(bar).not.toHaveTextContent(fill(en.grid.bulkSelectedAllMatches, { count: total }));
+      const chip = await screen.findByTestId('bulk-selection-count');
+      expect(chip).toHaveAttribute('title', fill(en.grid.bulkAllMatchingSelectedCapped, { cap: CAP, total }));
+      expect(chip).toHaveTextContent(fill(en.grid.bulkSelectedAllMatchesCapped, { cap: CAP, total }));
+      expect(chip).not.toHaveTextContent(fill(en.grid.bulkSelectedAllMatches, { count: total }));
     });
 
-    it('under zh, the banner reads the zh pack', async () => {
+    it('under zh, the chip reads the zh pack', async () => {
       expect(zh.grid.bulkAllMatchingSelectedCapped).not.toBe(en.grid.bulkAllMatchingSelectedCapped);
       renderBar('zh', total, true);
-      const banner = await screen.findByTestId('bulk-cross-page-banner');
-      expect(banner).toHaveTextContent(fill(zh.grid.bulkAllMatchingSelectedCapped, { cap: CAP, total }));
+      const chip = await screen.findByTestId('bulk-selection-count');
+      expect(chip).toHaveAttribute('title', fill(zh.grid.bulkAllMatchingSelectedCapped, { cap: CAP, total }));
+      expect(chip).toHaveTextContent(fill(zh.grid.bulkSelectedAllMatchesCapped, { cap: CAP, total }));
     });
 
     it("the selection's context menu counts CAP of the total", async () => {
@@ -106,16 +106,16 @@ describe('the bulk bar names the select-all-matching cap (objectstack#28552)', (
     ['exactly at the cap', CAP],
     ['under the cap', CAP - 3800],
   ])('%s', (_name, total) => {
-    it("the select-all button reads today's text", async () => {
+    it('the select-all button offers all of them', async () => {
       renderBar('en', total, false);
       const button = await screen.findByTestId('bulk-select-all-matching');
-      expect(button).toHaveTextContent(fill(en.grid.bulkSelectAllMatching, { count: total }));
+      expect(button).toHaveTextContent(fill(en.grid.selectAllTotal, { total }));
     });
 
-    it("once selected, the banner and the chip read today's text", async () => {
+    it('once selected, the chip counts every match and its title says so', async () => {
       renderBar('en', total, true);
-      const banner = await screen.findByTestId('bulk-cross-page-banner');
-      expect(banner).toHaveTextContent(fill(en.grid.bulkAllMatchingSelected, { count: total }));
+      const chip = await screen.findByTestId('bulk-selection-count');
+      expect(chip).toHaveAttribute('title', fill(en.grid.bulkAllMatchingSelected, { count: total }));
       expect(within(screen.getByTestId('bulk-actions-bar')).getByText(fill(en.grid.bulkSelectedAllMatches, { count: total }))).toBeInTheDocument();
     });
   });

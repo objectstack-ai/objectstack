@@ -132,16 +132,23 @@ export function ObjectDefaultInspector({
             ships (preview, search, an inline warning on a name that matches no
             icon) rather than typed blind. Clearing it patches `icon: undefined`,
             as the text field this replaced did. */}
+        {/* objectstack#35985 — the icon and the colour are picked together:
+            the picker shows the nine palette swatches and previews every icon
+            as the tile it becomes. A colour is written only when picked; an
+            object without one is drawn in the neutral gray. */}
         <div className="space-y-1">
-          <Label htmlFor={iconFieldId} className="text-xs text-muted-foreground">{tr('designer.object.icon')}</Label>
+          <Label htmlFor={iconFieldId} className="text-xs text-muted-foreground">{tr('designer.object.iconAndColor')}</Label>
           <IconPickerWidget
             id={iconFieldId}
             schema={{ type: 'string' }}
             value={str('icon')}
             onChange={(v) => onPatch({ icon: typeof v === 'string' && v !== '' ? v : undefined })}
+            tileColor={str('color') || undefined}
+            onTileColorChange={(c) => onPatch({ color: c })}
             readOnly={readOnly}
           />
           {issueLines('icon', tr('designer.object.icon'))}
+          {issueLines('color', tr('engine.form.iconColor'))}
         </div>
         <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">{tr('designer.object.description')}</Label>

@@ -30,7 +30,8 @@
  * `lookup`) FK on the child object.
  */
 
-import React, { startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 import type { BatchTransactionOperation, DataSource, GridFieldMetadata, I18nLabel } from '@object-ui/types';
 import { resolveAffordance, runBatchTransaction } from '@object-ui/core';
 import { isUntouchedNewRow, LineItemsField, lookupAutofillByField, columnHelpByField, UNTOUCHED_NEW_ROW, useBooleanValueLabel, type BooleanValueLabel, type ColumnHelp, type GridColumn, type LookupAutofillByField } from '@object-ui/fields';
@@ -51,6 +52,7 @@ import { useUploadGate, UploadGateProvider, UploadInFlightNotice } from './uploa
 import { FormDirtyReportContext } from './formDirtyReport';
 import { MasterDetailFrameContext } from './masterDetailFrame';
 import { useFormChromeTranslation } from './formChrome';
+import { FormSlotStore, type FormSlotHandoff, type FormSlotRequest } from './formSlots';
 import {
   buildMasterDetailBatch,
   buildMasterDetailEditBatch,
@@ -785,6 +787,9 @@ function scrapeHeaderRecord(host: HTMLElement | null): Record<string, unknown> {
   els.forEach((el) => {
     const name = el.getAttribute('name');
     if (!name) return;
+    // A collection the header form places at its field group is drawn inside
+    // the header's element (objectstack#35889): its cells are not header fields.
+    if (el.closest('[data-form-slot]')) return;
     if (el.tagName === 'INPUT') {
       const input = el as HTMLInputElement;
       if (input.type === 'checkbox') { out[name] = input.checked; return; }
@@ -878,6 +883,8 @@ interface MasterDetailLinesProps {
    * Remove asks the child's delete grant: a create form's lines are drafts.
    */
   formMode: 'create' | 'edit';
+  /** Where the header form placed each collection (objectstack#35889, `formSlots.ts`). */
+  slotStore: FormSlotStore;
   /**
    * The values a new line starts with, by CHILD object name (objectstack#35940):
    * the child's static defaults, seeded as a create form seeds them. A child
@@ -892,6 +899,40 @@ interface MasterDetailLinesProps {
    */
   newRowRequiredShown: boolean;
 }
+
+/**
+ * Draws `children` where the header form placed collection `id`: in its slot
+ * element through a portal, in place when no drawn layout claims it, and
+ * nowhere while a claimed slot's element is not mounted (objectstack#35889).
+ * Its own component, so a slot landing re-renders only what it moves.
+ *
+ * The slot element sits inside the header's `<form>`, so a portaled collection
+ * is wrapped in a form of its own: its controls then belong to that form, not
+ * the header's, exactly as they belonged to none below the form. The header's
+ * `requestSubmit()` validates only its own fields (a line cell's bad input
+ * never blocks Save with a browser bubble), a line button without a `type`
+ * submits only the wrapper, which does nothing, and Enter in a cell finds the
+ * wrapper's disabled default button and submits nothing.
+ */
+const preventSubmit = (event: React.FormEvent) => event.preventDefault();
+
+const FormSlotPlacement: React.FC<{ store: FormSlotStore; id: string; children: React.ReactNode }> = ({
+  store,
+  id,
+  children,
+}) => {
+  useSyncExternalStore(store.subscribe, store.getVersion, store.getVersion);
+  const at = store.placement(id);
+  if (at === 'inline') return <>{children}</>;
+  if (!at) return null;
+  return createPortal(
+    <form noValidate onSubmit={preventSubmit} data-form-slot-owner="">
+      <button type="submit" disabled hidden aria-hidden="true" tabIndex={-1} />
+      {children}
+    </form>,
+    at,
+  );
+};
 
 /**
  * The line-item grids + document totals, isolated from the header form.
@@ -920,6 +961,7 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
   onAddViaForm,
   parentObjectName,
   formMode,
+  slotStore,
   newRowValuesByChild,
   newRowRequiredShown,
 }) => {
@@ -1064,7 +1106,8 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
         // ahead of the index, which left such a section with no identity beyond
         // its position, so a sibling moving above it re-associated the section
         // and its rows with a different collection (objectui#6371).
-        <section key={entry.id} className="space-y-2">
+        <FormSlotPlacement key={entry.id} store={slotStore} id={entry.id}>
+        <section className="space-y-2" data-testid="md-collection" data-md-collection={d.childObject}>
           <h3 className="text-sm font-medium text-foreground">{d.title || t('form.lineItems.title')}</h3>
           {/* A detail whose child object never resolved gets its OWN branch,
               ahead of the columns/loading one (objectui#6360) — the render half
@@ -1206,6 +1249,7 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
             />
           )}
         </section>
+        </FormSlotPlacement>
         );
       })}
 
@@ -1289,6 +1333,32 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [schema.details],
   );
+
+  /**
+   * objectstack#35889 — the collections the header form may place at the
+   * field group that names them (`formSlots.ts`), from the AUTHORED entries so
+   * the header's schema does not change when the child schemas resolve. A
+   * derived entry already carries its FK (`attachInlineSubforms`); one with no
+   * FK is placed only by a group naming its bare child object.
+   */
+  const slotRequests = useMemo<FormSlotRequest[]>(
+    () =>
+      rawDetails.flatMap((d, i) =>
+        typeof d?.childObject === 'string' && d.childObject
+          ? [{
+              id: detailIds[i],
+              childObject: d.childObject,
+              ...(typeof d.relationshipField === 'string' ? { relationshipField: d.relationshipField } : {}),
+            }]
+          : [],
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [schema.details, detailIds],
+  );
+  // One store per form instance, in a ref (never a memo, AGENTS.md #10).
+  const slotStoreRef = useRef<FormSlotStore | null>(null);
+  if (!slotStoreRef.current) slotStoreRef.current = new FormSlotStore();
+  const slotStore = slotStoreRef.current;
 
   /** The unresolved entries — what renders until (or unless) the fetch lands. */
   const baseEntries = useMemo<DetailEntry[]>(
@@ -2171,8 +2241,10 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
       submitHandler: submitViaBatch,
       onSuccess: handleSaved,
       onError: handleError,
-    }),
-    [schema, titleText, submitViaBatch, handleSaved, handleError],
+      // objectstack#35889 — each collection at its field group in the header.
+      formSlots: { requests: slotRequests, host: slotStore },
+    } satisfies FormSlotHandoff & Record<string, unknown>),
+    [schema, titleText, submitViaBatch, handleSaved, handleError, slotRequests, slotStore],
   );
 
   const formHostRef = useRef<HTMLDivElement>(null);
@@ -2297,6 +2369,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
         onAddViaForm={addRowViaForm}
         parentObjectName={schema.objectName}
         formMode={isEdit ? 'edit' : 'create'}
+        slotStore={slotStore}
         newRowValuesByChild={newRowValuesByChild}
         newRowRequiredShown={saveTried}
       />
@@ -2310,6 +2383,8 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
           the values back into the in-memory row; the atomic batch persists
           everything on the parent Save. */}
       {expanded && expandedDetail && (
+        // Beside its collection: where the header placed that collection, there.
+        <FormSlotPlacement store={slotStore} id={expanded.entryId}>
         <Card className="border-primary/40 shadow-none ring-1 ring-primary/10" data-testid="md-row-form">
           <CardHeader className="pb-2 flex flex-row items-center justify-between gap-2 space-y-0">
             <CardTitle className="text-sm font-medium">
@@ -2362,6 +2437,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
             </fieldset>
           </CardContent>
         </Card>
+        </FormSlotPlacement>
       )}
     </>
   );

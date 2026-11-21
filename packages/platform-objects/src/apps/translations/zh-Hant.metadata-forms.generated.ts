@@ -52,6 +52,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "圖示",
         helpText: "Lucide 圖示名稱（如：\"building\"、\"users\"）"
       },
+      color: {
+        label: "顏色",
+        helpText: "圖示所在圓角方塊的顏色，從固定色板中選擇。未設定時為灰色。"
+      },
       description: {
         label: "描述",
         helpText: "開發文件說明"

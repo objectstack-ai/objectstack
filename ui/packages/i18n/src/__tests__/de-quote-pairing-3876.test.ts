@@ -449,7 +449,10 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // `approvalsInbox.slaCalendarNotFound`, the inbox naming the calendar an
     // escalation deadline cannot be counted on („{{calendar}}“) — one
     // interpolated span, runtime data.
-    expect(okSpans, 'correctly paired spans').toBe(119);
+    // 120 once objectstack-ai/objectstack#35688 added `fields.tags.add`, the
+    // grid cell editor's row adding the typed tag („{{value}}“) — one
+    // interpolated span, user input.
+    expect(okSpans, 'correctly paired spans').toBe(120);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -564,8 +567,10 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // after objectstack-ai/objectstack#34740 retired
     // `empty.objectNotFoundDescription`, one matched pair fewer. 119 / 119 / 0
     // after objectstack-ai/objectstack#35357 added
-    // `approvalsInbox.slaCalendarNotFound`, one more matched pair.
-    expect({ open, close, rdq }).toEqual({ open: 119, close: 119, rdq: 0 });
+    // `approvalsInbox.slaCalendarNotFound`, one more matched pair. 120 / 120 / 0
+    // after objectstack-ai/objectstack#35688 added `fields.tags.add`, one more
+    // matched pair.
+    expect({ open, close, rdq }).toEqual({ open: 120, close: 120, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);
