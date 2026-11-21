@@ -242,7 +242,7 @@ export function ObjectViewTitleSwitcher({
                             // Below `sm` the trigger is a 44 px touch target.
                             // One trigger, 28px tall and 13px like every control of the
                             // view bar (objectstack#35548): type icon, label, count, caret.
-                            'inline-flex h-7 min-w-0 max-w-full items-center gap-1.5 rounded-md px-1.5 text-left text-[13px] font-medium leading-none max-sm:min-h-11 max-sm:min-w-11',
+                            'inline-flex h-7 min-w-0 max-w-full items-center gap-1.5 rounded-md px-1.5 text-left text-sm font-medium leading-none max-sm:min-h-11 max-sm:min-w-11',
                             // Inset: the title clips what overflows it (`truncate`), an outer ring included.
                             'hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
                             open && 'bg-muted',

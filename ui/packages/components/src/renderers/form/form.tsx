@@ -182,7 +182,7 @@ function SectionDivider({ sectionKey, anchorId, label, description, collapsible,
               ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
               : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
           )}
-          <span className="text-sm font-semibold text-foreground">{label}</span>
+          <span className="text-sm font-medium text-foreground">{label}</span>
         </div>
       )}
       {/* A section's authored blurb. Carried on the divider because a sectioned

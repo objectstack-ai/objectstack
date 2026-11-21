@@ -481,7 +481,7 @@ export const HeaderHighlight: React.FC<HeaderHighlightProps> = ({
                               : undefined)
                           }
                           className={cn(
-                            'block min-w-0 truncate text-sm font-semibold',
+                            'block min-w-0 truncate text-sm font-medium',
                             isKpi && 'tabular-nums tracking-tight',
                           )}
                         >

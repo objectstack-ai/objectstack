@@ -134,7 +134,7 @@ describe.each([
     const card = await screen.findByTestId(testId);
     const titleEl = within(card).getByText(title);
     expect(titleEl.textContent).toBe(title);
-    expect(titleEl).toHaveClass('line-clamp-2', 'text-[13px]');
+    expect(titleEl).toHaveClass('line-clamp-2', 'text-sm');
     expect(titleEl).not.toHaveClass('truncate');
   });
 
@@ -166,7 +166,7 @@ describe.each([
     expect(code.textContent).toBe(manifestId);
     expect(code).toHaveAttribute('title', manifestId);
     expect(code).toHaveClass('flex', 'font-mono');
-    expect(code.parentElement).toHaveClass('text-[11px]');
+    expect(code.parentElement).toHaveClass('text-xs');
 
     const runs = Array.from(code.children) as HTMLElement[];
     expect(runs.map((run) => run.textContent)).toEqual([head, suffix]);

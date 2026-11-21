@@ -153,7 +153,7 @@ export const CommentsPanel: React.FC<CommentsPanelProps> = ({ onClose, className
       data-owns-escape=""
     >
       <header className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
-        <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+        <h2 className="text-sm font-medium text-foreground">{title}</h2>
         <div className="flex items-center gap-0.5">
         {resolvable && !denied && (
           <DropdownMenu>

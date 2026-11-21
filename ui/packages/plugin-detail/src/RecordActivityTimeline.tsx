@@ -196,7 +196,7 @@ export interface RecordActivityTimelineProps {
 /** A comment's avatar cell: the author's 20 px avatar, centred on its first line. */
 const COMMENT_AVATAR_CELL = 'shrink-0 flex h-[30px] w-5 items-center justify-center';
 /** A comment's header line: who, then when, 30 px tall, wrapping between pieces. */
-const STREAM_COMMENT_HEADER = 'flex min-h-[30px] flex-wrap items-center gap-x-2 text-[13px]';
+const STREAM_COMMENT_HEADER = 'flex min-h-[30px] flex-wrap items-center gap-x-2 text-sm';
 /**
  * A comment's actions, drawn on hover or keyboard focus within its row, and
  * always on a touch screen, which has no hover.
@@ -754,7 +754,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
     return (
       <div
         key={item.id}
-        className="flex min-h-[30px] items-center gap-2 text-[13px] leading-[18px]"
+        className="flex min-h-[30px] items-center gap-2 text-sm leading-[18px]"
         title={`${item.actor} · ${whatTitle} · ${when}`}
         data-stream-row=""
         {...rowProps}
@@ -872,12 +872,12 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
             <CommentAuthorAvatar name={item.actor} avatarUrl={item.actorAvatarUrl} />
           </div>
           {/* Content: 13 px on a 20 px line, so the comment is one line under the row */}
-          <div className="flex-1 min-w-0 text-[13px] leading-5">
+          <div className="flex-1 min-w-0 text-sm leading-5">
             {/* The row wraps between its pieces and the time is one
                 unbreakable piece (objectstack#34614): in a narrow drawer the
                 time moves to the next line instead of breaking per word. */}
             <div className={STREAM_COMMENT_HEADER}>
-              <span className="text-[13px] font-medium">{item.actor}</span>
+              <span className="text-sm font-medium">{item.actor}</span>
               {item.source && (
                 <span className="text-xs text-muted-foreground">
                   {t('detail.via', { source: item.source })}
@@ -928,7 +928,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
               item={item}
               onEditComment={onEditComment}
               onDeleteComment={onDeleteComment}
-              bodyClassName="inline text-[13px] leading-5 whitespace-pre-wrap break-words text-foreground"
+              bodyClassName="inline text-sm leading-5 whitespace-pre-wrap break-words text-foreground"
               controlsClassName={cn('ml-1 inline-flex h-5 items-center gap-0.5 align-top [&_button]:h-5 [&_button]:w-5', ROW_ACTIONS_REVEAL)}
             />
 
@@ -1064,7 +1064,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
     ) : (
       <button
         type="button"
-        className="flex h-11 sm:h-8 w-full items-center rounded-md border border-input bg-background px-2.5 text-left text-[12.5px] text-muted-foreground transition-colors hover:border-ring/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex h-11 sm:h-8 w-full items-center rounded-md border border-input bg-background px-2.5 text-left text-sm text-muted-foreground transition-colors hover:border-ring/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         onClick={() => setComposerOpen(true)}
         data-record-timeline-composer=""
       >
@@ -1128,17 +1128,17 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
       return (
         <div
           key={item.id}
-          className="flex h-8 items-center gap-2 border-t border-border px-3 text-[12.5px]"
+          className="flex h-8 items-center gap-2 border-t border-border px-3 text-sm"
           title={`${what} · ${item.actor} · ${when}`}
           data-record-timeline-peek-row=""
         >
           <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
           <span className="min-w-0 flex-1 truncate">{what}</span>
           {/* Every row says who (objectstack#30122). */}
-          <span className="max-w-[40%] shrink-0 truncate text-[11.5px] text-muted-foreground" data-record-timeline-peek-actor="">
+          <span className="max-w-[40%] shrink-0 truncate text-xs text-muted-foreground" data-record-timeline-peek-actor="">
             {item.actor}
           </span>
-          <span className="shrink-0 text-[11.5px] text-muted-foreground tabular-nums">{when}</span>
+          <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{when}</span>
         </div>
       );
     };
@@ -1172,7 +1172,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
         {onViewAll && total > rootItems.length && (
           <button
             type="button"
-            className="flex h-8 w-full items-center border-t border-border px-3 text-left text-[12.5px] text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+            className="flex h-8 w-full items-center border-t border-border px-3 text-left text-sm text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
             onClick={onViewAll}
             data-record-timeline-view-all=""
           >
@@ -1215,7 +1215,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
         {/* Wraps: in a 320 px foot card the stream's chips go under the title
             rather than past the card's edge (objectstack#27055). */}
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="flex items-center gap-2 text-sm font-semibold leading-none tracking-tight">
+          <h2 className="flex items-center gap-2 text-sm font-medium leading-none tracking-tight">
             <Activity className="h-4 w-4" />
             {title}
             {/* A refused read leaves the count unknown, not zero: the rows

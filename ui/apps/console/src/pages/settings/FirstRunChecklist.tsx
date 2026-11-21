@@ -273,14 +273,14 @@ function ChecklistRow({
           {title}
           {optional ? (
             <span
-              className="ml-2 rounded-full border border-border px-1.5 py-px align-middle text-[11px] font-normal text-muted-foreground"
+              className="ml-2 rounded-full border border-border px-1.5 py-px align-middle text-xs font-normal text-muted-foreground"
               data-testid={`first-run-checklist-optional-${id}`}
             >
               {t('console.firstRunChecklist.optional')}
             </span>
           ) : null}
         </p>
-        {detail ? <p className="mt-0.5 text-[13px] text-muted-foreground">{detail}</p> : null}
+        {detail ? <p className="mt-0.5 text-xs text-muted-foreground">{detail}</p> : null}
         {children}
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}
@@ -942,7 +942,7 @@ export function FirstRunChecklist({ placement = 'top' }: { placement?: FirstRunC
           aria-labelledby="first-run-checklist-title"
         >
           <p className="flex min-w-0 items-baseline gap-2">
-            <span id="first-run-checklist-title" className="text-[13px] font-semibold tracking-tight">
+            <span id="first-run-checklist-title" className="text-sm font-medium tracking-tight">
               {t('console.firstRunChecklist.title')}
             </span>
             <span className="shrink-0 text-xs text-muted-foreground" data-testid="first-run-checklist-progress">
@@ -961,10 +961,10 @@ export function FirstRunChecklist({ placement = 'top' }: { placement?: FirstRunC
                   data-optional={optionalRow(id) ? 'true' : undefined}
                 >
                   <Circle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                  <span className="min-w-0 text-[13px]">{title}</span>
+                  <span className="min-w-0 text-sm">{title}</span>
                   {optionalRow(id) ? (
                     <span
-                      className="shrink-0 rounded-full border border-border px-1.5 py-px text-[11px] text-muted-foreground"
+                      className="shrink-0 rounded-full border border-border px-1.5 py-px text-xs text-muted-foreground"
                       data-testid={`first-run-checklist-optional-${id}`}
                     >
                       {t('console.firstRunChecklist.optional')}
@@ -1005,7 +1005,7 @@ export function FirstRunChecklist({ placement = 'top' }: { placement?: FirstRunC
         aria-labelledby="first-run-checklist-title"
       >
         <p className="flex min-w-0 items-baseline gap-2">
-          <span id="first-run-checklist-title" className="truncate text-[13px] font-semibold tracking-tight">
+          <span id="first-run-checklist-title" className="truncate text-sm font-medium tracking-tight">
             {t('console.firstRunChecklist.title')}
           </span>
           <span className="shrink-0 text-xs text-muted-foreground" data-testid="first-run-checklist-progress">
@@ -1039,10 +1039,10 @@ export function FirstRunChecklist({ placement = 'top' }: { placement?: FirstRunC
     >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <h2 id="first-run-checklist-title" className="text-base font-semibold tracking-tight">
+          <h2 id="first-run-checklist-title" className="text-base font-medium tracking-tight">
             {t('console.firstRunChecklist.title')}
           </h2>
-          <p className="mt-1 text-[13px] text-muted-foreground">{t('console.firstRunChecklist.description')}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{t('console.firstRunChecklist.description')}</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <span className="text-xs text-muted-foreground" data-testid="first-run-checklist-progress">

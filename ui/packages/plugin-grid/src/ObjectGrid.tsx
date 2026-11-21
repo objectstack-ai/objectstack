@@ -639,7 +639,7 @@ function getDataConfig(schema: ObjectGridSchema): ViewData | null {
  * own and composes with the last frozen column's scroll shadow.
  */
 export const OBJECT_GRID_TABLE_DENSITY = [
-  '[&_thead_th]:h-9 [&_thead_th]:py-0 [&_thead_th]:text-[13px] [&_tbody_tr]:border-border/50',
+  '[&_thead_th]:h-9 [&_thead_th]:py-0 [&_thead_th]:text-xs [&_tbody_tr]:border-border/50',
   '[&_th:not(:last-child)]:inset-shadow-[-1px_0_0_0] [&_th:not(:last-child)]:inset-shadow-border/50 [&_td:not(:last-child)]:inset-shadow-[-1px_0_0_0] [&_td:not(:last-child)]:inset-shadow-border/50',
   // A referenced record (a lookup's link) is a small chip led by its name's
   // first letter; an option label keeps its colour, less saturated.
@@ -2052,7 +2052,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         {/* Separately addressable: this is the half that has to NAME the
             operator, and the technical line below repeats the token
             incidentally. */}
-        <h3 className="text-amber-800 font-semibold" data-testid="grid-malformed-filter-subject">
+        <h3 className="text-amber-800 font-medium" data-testid="grid-malformed-filter-subject">
           {t('view.malformedFilter', { subject: filterRefusalSubject(filterRefusal) ?? '' })}
         </h3>
         <p className="text-amber-700 text-sm mt-1">{filterRefusal.message}</p>
@@ -2071,7 +2071,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         className="p-3 sm:p-4 border border-red-300 bg-red-50 rounded-md"
         data-testid="grid-grouping-needs-whole-rows"
       >
-        <h3 className="text-red-800 font-semibold">{t('grid.errorLoading')}</h3>
+        <h3 className="text-red-800 font-medium">{t('grid.errorLoading')}</h3>
         <p className="text-red-600 text-sm mt-1">{t('grid.grouping.needsWholeRows')}</p>
       </div>
     );
@@ -2084,7 +2084,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   if (loadError) {
     return (
       <div className="p-3 sm:p-4 border border-red-300 bg-red-50 rounded-md">
-        <h3 className="text-red-800 font-semibold">{t('grid.errorLoading')}</h3>
+        <h3 className="text-red-800 font-medium">{t('grid.errorLoading')}</h3>
         <p className="text-red-600 text-sm mt-1">{loadError.message}</p>
       </div>
     );
@@ -2132,7 +2132,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         className="p-3 sm:p-4 border border-red-300 bg-red-50 rounded-md"
         data-testid="grid-grouping-needs-header-query"
       >
-        <h3 className="text-red-800 font-semibold">{t('grid.errorLoading')}</h3>
+        <h3 className="text-red-800 font-medium">{t('grid.errorLoading')}</h3>
         <p className="text-red-600 text-sm mt-1">{t('grid.grouping.needsHeaderQuery')}</p>
       </div>
     );
@@ -2189,14 +2189,14 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // measured heights are pinned by `e2e/list-frame-geometry-35548.spec.ts`.
   const rowHeightCellClass =
     rowHeightMode === 'compact'
-      ? 'px-3 py-1 h-9 text-[13px] leading-tight'
+      ? 'px-3 py-1 h-9 text-sm leading-tight'
       : rowHeightMode === 'short'
-        ? 'px-3 py-1 h-9 text-[13px] leading-normal'
+        ? 'px-3 py-1 h-9 text-sm leading-normal'
         : rowHeightMode === 'tall'
           ? 'px-3 py-2.5 h-14 text-sm'
           : rowHeightMode === 'extra_tall'
             ? 'px-3 py-3.5 h-16 text-sm leading-relaxed'
-            : 'px-3 py-1.5 h-11 text-[13px] leading-normal';
+            : 'px-3 py-1.5 h-11 text-sm leading-normal';
 
   // Body cells get `px-3` from rowHeightCellClass; give the header the same
   // horizontal padding so header labels line up exactly with the cell content
@@ -3658,14 +3658,14 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // objectstack#35548 / #36048 — a 36px header at 13px over faint row and column lines.
     className: ['[&>[data-slot=table-toolbar]]:px-3 [&>[data-slot=table-toolbar]]:pt-2', OBJECT_GRID_TABLE_DENSITY, schema.className].filter(Boolean).join(' '),
     cellClassName: rowHeightMode === 'compact'
-      ? 'px-3 py-1 text-[13px] leading-tight'
+      ? 'px-3 py-1 text-sm leading-tight'
       : rowHeightMode === 'short'
-        ? 'px-3 py-1 text-[13px] leading-normal'
+        ? 'px-3 py-1 text-sm leading-normal'
         : rowHeightMode === 'tall'
           ? 'px-3 py-2.5 text-sm'
           : rowHeightMode === 'extra_tall'
             ? 'px-3 py-3.5 text-sm leading-relaxed'
-            : 'px-3 py-1.5 text-[13px] leading-normal',
+            : 'px-3 py-1.5 text-sm leading-normal',
     // objectui#12423 — row numbers only where a host opts in (objectstack#35663).
     showRowNumbers: hostShowRowNumbers ?? false,
     // [#5148] The authored request ∧ the principal's verdict — the conjunction

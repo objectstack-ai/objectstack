@@ -603,9 +603,13 @@ test.describe('the record page\'s tabs and pinned details, zh-CN (objectstack#35
     expect(dragged.details!.width).toBeGreaterThan(400);
     expect(dragged.tabs!.width).toBe(400);
     expect(dragged.details!.width + 24 + 400).toBe(at.details!.width + 24 + at.tabs!.width);
-    // CONTROL: another tab opens in the right column, the details stay.
-    await page.locator('[data-record-tab="quote.account_id"]').click();
-    await expect(page.locator('[data-record-column="tabs"] [data-related-enlarged="quote.account_id"]')).toHaveCount(1);
+    // CONTROL: another tab opens in the right column, the details stay. The last
+    // tab still on the 400 px row (the rest are in 「更多」; how many fit follows
+    // the tab text size, 14 px since objectstack#36047).
+    const other = dragged.tabIds.at(-1)!;
+    expect(other).not.toBe(dragged.active);
+    await page.locator(`[data-record-tab-row] [role="tab"][data-record-tab="${other}"]`).click();
+    await expect(page.locator(`[data-record-column="tabs"] [data-related-enlarged="${other}"]`)).toHaveCount(1);
     await expect(page.locator('[data-record-column="details"]')).toHaveCount(1);
   });
 });

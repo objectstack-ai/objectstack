@@ -336,8 +336,8 @@ export function TileGridBlock({ schema, className }: BlockRendererProps) {
             >
               <Icon className="size-[26px]" />
             </span>
-            <span className="w-full truncate text-[13px] font-medium">{label}</span>
-            {caption && <span className="-mt-1 w-full truncate text-[11px] text-muted-foreground">{caption}</span>}
+            <span className="w-full truncate text-sm font-medium">{label}</span>
+            {caption && <span className="-mt-1 w-full truncate text-xs text-muted-foreground">{caption}</span>}
           </Link>
         );
       })}
@@ -351,7 +351,7 @@ export function TileGridBlock({ schema, className }: BlockRendererProps) {
           >
             <Plus className="size-[22px]" aria-hidden />
           </span>
-          <span className="w-full truncate text-[13px] font-medium">{pickLocalized(addTile.label, language)}</span>
+          <span className="w-full truncate text-sm font-medium">{pickLocalized(addTile.label, language)}</span>
         </Link>
       )}
     </div>

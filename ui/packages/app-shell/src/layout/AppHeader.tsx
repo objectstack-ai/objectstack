@@ -838,7 +838,7 @@ export function AppHeader({
       <span className="flex-1 truncate text-left text-xs">
         {searchLabel}
       </span>
-      <kbd className="pointer-events-none inline-flex h-5 items-center gap-0.5 rounded border bg-background px-1.5 text-[10px] font-medium text-muted-foreground">
+      <kbd className="pointer-events-none inline-flex h-5 items-center gap-0.5 rounded border bg-background px-1.5 text-xs font-medium text-muted-foreground">
         <span className="text-xs">⌘</span>K
       </kbd>
     </button>
@@ -902,7 +902,7 @@ export function AppHeader({
         )}
 
         {(resolvedVariant === 'home' || resolvedVariant === 'docs') && (
-          <span className="hidden sm:inline ml-2 text-sm font-semibold tracking-tight">
+          <span className="hidden sm:inline ml-2 text-sm font-medium tracking-tight">
             {getProductName()}
           </span>
         )}
@@ -1208,7 +1208,7 @@ export function AppHeader({
                   </AvatarFallback>
                 </Avatar>
                 <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-semibold">{user?.name ?? 'User'}</span>
+                  <span className="truncate font-medium">{user?.name ?? 'User'}</span>
                   <span className="truncate text-xs text-muted-foreground">{user?.email ?? ''}</span>
                 </div>
               </div>
@@ -1335,7 +1335,7 @@ export function AppHeader({
              * control so the dropdown handles outside-click / esc cleanly.
              */}
             <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground uppercase tracking-wide px-2">
+            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground uppercase tracking-wide px-2">
               {t('user.preferences', { defaultValue: 'Preferences' })}
             </DropdownMenuLabel>
             <div className="flex items-center justify-between px-2 py-1.5 text-sm">
