@@ -119,6 +119,12 @@ const GRID_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'grid.readOnlyReason.noPermission': 'You don\'t have permission to edit these records.',
   'grid.readOnlyReason.approvalLocked': 'This record is locked while it\'s in approval.',
   'grid.readOnlyReason.noRecordPermission': 'You don\'t have permission to edit this record.',
+  // objectstack#35685 — the confirm before a list cell moves a state-machine
+  // field (`objectGridStateConfirm`). Byte-identical to the `en` pack.
+  'grid.stateChange.title': 'Change {{field}}?',
+  'grid.stateChange.description': '{{field}} changes from {{from}} to {{to}}. Saving may trigger related automation.',
+  'grid.stateChange.confirm': 'Change',
+  'grid.stateChange.cancel': 'Cancel',
 };
 
 /**

@@ -794,6 +794,13 @@ const en = {
       approvalLocked: 'This record is locked while it\'s in approval.',
       noRecordPermission: 'You don\'t have permission to edit this record.',
     },
+    // objectstack#35685 — the confirm before a list cell moves a state-machine field.
+    stateChange: {
+      title: 'Change {{field}}?',
+      description: '{{field}} changes from {{from}} to {{to}}. Saving may trigger related automation.',
+      confirm: 'Change',
+      cancel: 'Cancel',
+    },
     actions: 'Actions',
     edit: 'Edit',
     delete: 'Delete',
@@ -1611,6 +1618,7 @@ const en = {
     pathStageChangeConflict: 'Someone else changed this record, and the latest version is now shown. Press the stage again if the move still applies.',
     pathStageChangeDenied: "You don't have permission to change this record's stage.",
     pathStageChangeFailed: 'The stage could not be changed.',
+    inlineEditRecordChanged: 'This record was changed elsewhere while you were editing. Your unsaved changes are kept, and Save writes them over the latest version.',
     stageMenuTrigger: 'Stage: {{stage}}. Change stage',
     stageMenuCurrent: 'current stage',
     stageMenuNotReachable: "Can't move here from {{stage}}",
