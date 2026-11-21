@@ -39,6 +39,8 @@
  */
 
 import { describe, it, expect, afterEach, vi, beforeAll } from 'vitest';
+// The egress guard the SSO discovery reaches is loaded at module top, never inside a clocked case.
+import '@objectstack/core/egress';
 import { generateKeyPairSync, sign, X509Certificate, type KeyObject } from 'node:crypto';
 import { Hono } from 'hono';
 import { ObjectQL } from '@objectstack/objectql';

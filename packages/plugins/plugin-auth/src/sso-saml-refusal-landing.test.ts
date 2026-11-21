@@ -36,6 +36,8 @@ import 'better-auth';
 import 'better-auth/plugins';
 import 'better-auth/plugins/organization';
 import '@better-auth/sso';
+// The egress guard the SSO discovery reaches is loaded at module top, never inside a clocked case.
+import '@objectstack/core/egress';
 
 // The IdP side uses the `samlify` the installed `@better-auth/sso` resolves,
 // so the Response is built by the same library version that parses it.

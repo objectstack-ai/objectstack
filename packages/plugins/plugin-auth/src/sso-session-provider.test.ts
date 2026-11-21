@@ -9,6 +9,8 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+// The egress guard the SSO discovery reaches is loaded at module top, never inside a clocked case.
+import '@objectstack/core/egress';
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import {
   SESSION_SSO_PROVIDER_FIELD,
