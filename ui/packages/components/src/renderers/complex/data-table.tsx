@@ -102,9 +102,18 @@ import {
  * objectstack#35688 — how wide a built-in editor's layer starts (a host's
  * injected editor sizes its own). Never narrower than the cell.
  */
-function builtInEditorWidthClass(type: TableColumnType | undefined): string {
-  return type === 'date' || type === 'datetime' ? 'min-w-56' : 'min-w-40';
+function builtInEditorWidthClass(type: TableColumnType | undefined): string | undefined {
+  // A typed value (text, numbers) starts as wide as its cell (objectstack#36023).
+  return type === 'date' || type === 'datetime' ? 'min-w-56' : undefined;
 }
+
+/**
+ * The built-in typed editor at the cell's own size (objectstack#36023): one row
+ * tall inside the layer's 2px frame, square, with no border, fill or ring of
+ * its own. `data-in-cell-face="input"` on its box flattens the layer.
+ */
+const BUILT_IN_FLAT_INPUT_CLASS =
+  'h-[calc(var(--radix-popper-anchor-height,2rem)-4px)] rounded-none border-0 bg-transparent px-2.5 py-0 text-[13px] md:text-[13px] shadow-none focus-visible:ring-0 focus-visible:ring-offset-0';
 
 const NUMERIC_EDIT_TYPES = new Set<TableColumnType>(['number', 'currency', 'percent']);
 
@@ -3615,6 +3624,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       setCellNotice({ rowIndex, colIndex, text: reason });
       return;
     }
+    // A rating is set in place (digits, a click on a star); it opens no editor.
+    if (starsOf(row, col) !== null) return;
     setCellNotice(null);
     const preview = previewKey === `${rowIndex}:${colIndex}`
       ? tableRef.current?.querySelector<HTMLElement>('[data-slot="cell-preview-overlay"]')
@@ -3657,6 +3668,13 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   };
 
   const togglesCell = (row: any, col: TableColumn) => factsOf(row, col)?.toggles ?? col.type === 'boolean';
+  /** The star count of a rating cell set in place (objectstack#36023), or `null`. */
+  const starsOf = (row: any, col: TableColumn): number | null => {
+    const stars = factsOf(row, col)?.stars;
+    return typeof stars === 'number' && stars > 0 ? Math.floor(stars) : null;
+  };
+  const setStars = (rowIndex: number, colIndex: number, count: number) =>
+    writeCell(rowIndex, colIndex, () => (count > 0 ? count : null));
   const toggleCell = (rowIndex: number, colIndex: number) => writeCell(rowIndex, colIndex, (row, col) => {
     const staged = pendingChanges.get(pendingRowKeyOf(row))?.changes;
     const current = staged && col.accessorKey in staged ? staged[col.accessorKey] : row[col.accessorKey];
@@ -3752,10 +3770,16 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       // and opens the editor (the catcher reads it).
       e.preventDefault();
       toggleCell(rowIndex, colIndex);
-    } else if ((e.key === 'Backspace' || e.key === 'Delete') && bare) {
-      // An empty editor; nothing is written until it commits.
+    } else if (bare && /^[0-9]$/.test(e.key) && starsOf(row, col) !== null) {
+      // objectstack#36023 — a digit on a rating sets that many stars, at most its scale.
       e.preventDefault();
-      attemptEdit(rowIndex, colIndex, { value: '' });
+      setStars(rowIndex, colIndex, Math.min(Number(e.key), starsOf(row, col)!));
+    } else if ((e.key === 'Backspace' || e.key === 'Delete') && bare) {
+      e.preventDefault();
+      // A rating clears in place; anywhere else, an empty editor, and nothing
+      // is written until it commits.
+      if (starsOf(row, col) !== null) setStars(rowIndex, colIndex, 0);
+      else attemptEdit(rowIndex, colIndex, { value: '' });
     }
     // A printable key lands in the catcher, which reads it (`typeIntoCell`).
   };
@@ -4980,6 +5004,12 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                 const wasSelected = isSelectedCell;
                                 selectCell(rowIndex, colIndex);
                                 if (wasSelected && togglesCell(row, col)) toggleCell(rowIndex, colIndex);
+                                // objectstack#36023 — on a rating already selected, the star
+                                // clicked is the rating; the first click only selected it.
+                                const star = wasSelected && starsOf(row, col) !== null
+                                  ? (e.target as Element).closest?.('[data-rating-star]')
+                                  : null;
+                                if (star) setStars(rowIndex, colIndex, Number(star.getAttribute('data-rating-star')));
                                 return;
                               }
                               // objectstack#35688 — a click inside the open editor (an
@@ -5270,15 +5300,18 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
 
                                 if (editType && NUMERIC_EDIT_TYPES.has(editType)) {
                                   return (
-                                    <Input
-                                      ref={editInputRef}
-                                      type="number"
-                                      value={editValue ?? ''}
-                                      onChange={(e) => setEditValue(e.target.value)}
-                                      onKeyDown={handleEditKeyDown}
-                                      onBlur={handleEditBlur}
-                                      className="h-8 px-2 py-1"
-                                    />
+                                    <div data-in-cell-face="input">
+                                      <Input
+                                        ref={editInputRef}
+                                        type="number"
+                                        value={editValue ?? ''}
+                                        onChange={(e) => setEditValue(e.target.value)}
+                                        onKeyDown={handleEditKeyDown}
+                                        onBlur={handleEditBlur}
+                                        data-in-cell-input=""
+                                        className={cn(BUILT_IN_FLAT_INPUT_CLASS, 'text-right tabular-nums')}
+                                      />
+                                    </div>
                                   );
                                 }
 
@@ -5311,14 +5344,17 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                 // Fallback: plain text input (when no host editor matched and
                                 // the type isn't date/datetime/number).
                                 return (
-                                  <Input
-                                    ref={editInputRef}
-                                    value={editValue}
-                                    onChange={(e) => setEditValue(e.target.value)}
-                                    onKeyDown={handleEditKeyDown}
-                                    onBlur={handleEditBlur}
-                                    className="h-8 px-2 py-1"
-                                  />
+                                  <div data-in-cell-face="input">
+                                    <Input
+                                      ref={editInputRef}
+                                      value={editValue}
+                                      onChange={(e) => setEditValue(e.target.value)}
+                                      onKeyDown={handleEditKeyDown}
+                                      onBlur={handleEditBlur}
+                                      data-in-cell-input=""
+                                      className={BUILT_IN_FLAT_INPUT_CLASS}
+                                    />
+                                  </div>
                                 );
                               })()}</div>
                               </CellOverlay>

@@ -138,7 +138,7 @@ export function CellOverlay({
               'rounded-md border border-primary bg-popover text-popover-foreground shadow-lg outline-none',
               kind === 'preview'
                 ? [PREVIEW_UNCLIP_CLASS, 'px-3 py-1.5 text-[13px] leading-normal whitespace-pre-wrap break-words']
-                : EDITOR_DENSITY_CLASS,
+                : [EDITOR_DENSITY_CLASS, IN_CELL_INPUT_LAYER_CLASS],
               className,
             )}
           >
@@ -169,8 +169,19 @@ const PREVIEW_UNCLIP_CLASS =
  */
 const EDITOR_DENSITY_CLASS = cn(
   'p-1',
-  '[&_input:not([type=checkbox]):not([type=radio]):not([type=range])]:h-8 [&_[role=combobox]]:h-8',
+  '[&_input:not([type=checkbox]):not([type=radio]):not([type=range]):not([data-in-cell-input])]:h-8 [&_[role=combobox]]:h-8',
   '[&_input]:text-[13px] [&_textarea]:text-[13px]',
   '[&_textarea]:min-h-[max(5rem,calc(var(--cell-overlay-min-h,0px)-0.625rem))]',
 );
 
+/**
+ * A typed-input editor (`data-in-cell-face="input"`, objectstack#36023) turns
+ * the layer into the cell itself: one row tall, square, no padding or shadow,
+ * on the page's own background, framed by the 2px line the selected cell draws.
+ */
+// Spelled out in full: Tailwind finds classes by scanning for whole literals.
+const IN_CELL_INPUT_LAYER_CLASS = cn(
+  'has-[[data-in-cell-face=input]]:p-0 has-[[data-in-cell-face=input]]:rounded-none has-[[data-in-cell-face=input]]:shadow-none',
+  'has-[[data-in-cell-face=input]]:border-2 has-[[data-in-cell-face=input]]:bg-background has-[[data-in-cell-face=input]]:text-foreground',
+  'has-[[data-in-cell-face=input]]:min-h-(--radix-popper-anchor-height)',
+);

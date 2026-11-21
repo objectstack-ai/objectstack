@@ -44,6 +44,13 @@ export interface GridCellFacts {
   /** A two-state value: a click on the selected cell, or Space, flips it and commits. */
   toggles?: boolean;
   /**
+   * A rating out of this many stars, set in place and never in an editor: on
+   * the selected cell a digit key sets that many stars (0 clears), a click on
+   * a star the cell draws (`data-rating-star`) sets it, and Backspace or
+   * Delete clears it; each commits.
+   */
+  stars?: number;
+  /**
    * The value pasted text stands for in this cell, or `undefined` when the
    * text is not one (Ctrl/Cmd+V on the selected cell then writes nothing).
    */
