@@ -19,4 +19,4 @@ On the desktop record page and in the record drawer, the record header gains a c
 - Esc in the panel closes it and returns the focus to the comments icon, in a drawer too: the drawer neither closes nor steps back on it. Esc in the panel's @ list closes the list only and keeps the draft.
 - While the panel holds the comments, the 动态 tab and panel hold the system entries only: activity and field changes, with no comment box and no All / Activity / Discussion chips; the Changes chip stays where the record shows its field history, and pressed again it goes back to every entry. Their count leaves the comments out.
 
-Unchanged: a record page authored in full keeps the feed blocks it places (`record:discussion`, `record:activity`) as they were and shows no icon; an object with `enable.feeds: false` shows no icon; on a phone the comments open as a page of their own, described in its own entry.
+Unchanged: a record page authored in full keeps the feed blocks it places (`record:discussion`, `record:activity`) as they were and shows no icon; an object with `enable.feeds: false` shows no icon; the phone keeps the comments in its 动态 tab.

@@ -16,7 +16,7 @@ On a phone the record page's top bar gains the comments icon, with the number of
 - The comment box is docked at the foot of the screen and stands on the keyboard while it is up. One line until tapped; then a row under the text holds mention, bold, italic, list and code, and send at the right end. In the list it writes a comment, in a thread a reply. No 「Ctrl+Enter」 hint.
 - A long press on a comment (or its context menu) raises a sheet from the bottom: six reactions, 「标记已解决」 on a thread's first comment, 「编辑」 and 「删除」 (red, confirmed first), each offered exactly where the desktop's hover row offers it.
 - The filter at the top right is the desktop's: 「显示已解决」 and 「只看我参与的」.
-- The 动态 tab holds the system entries alone, as on the desktop.
+- The 动态 tab holds the system entries alone, as on the desktop. On a phone the comments live on this page: this replaces the line of the record comment panel's entry (objectstack#36075) that said the phone keeps them in its 动态 tab.
 - The page is in the URL (`?comments=` for the list, `?comments=<id>` for a thread), so a link or a reload opens it where it was.
 
 Unchanged: the desktop; who may write, resolve, edit or delete a comment (the phone offers each exactly where the desktop does); a record page authored in full and an object with `enable.feeds: false` show no icon.
