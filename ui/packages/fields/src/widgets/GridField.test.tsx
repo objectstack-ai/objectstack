@@ -102,7 +102,7 @@ describe('GridField / LineItemsField — editable line items', () => {
   it('editing a text cell emits the raw string', () => {
     const onChange = vi.fn();
     render(<GridField value={[{ description: '', amount: null }]} onChange={onChange} field={field} />);
-    // [0] = the data row ([1] would be the always-present trailing ghost row).
+    // [0] = the data row.
     fireEvent.change(screen.getAllByLabelText('Description')[0], { target: { value: 'Taxi' } });
     expect(onChange).toHaveBeenCalledWith([{ description: 'Taxi', amount: null }]);
   });
@@ -369,24 +369,23 @@ describe('GridField / LineItemsField — editable line items', () => {
     });
   });
 
-  describe('trailing ghost row (start-with-one + auto-append)', () => {
-    it('renders a trailing empty row so an empty grid still has one input line', () => {
-      render(<GridField value={[]} onChange={() => {}} field={field} />);
-      // No "No items" empty-state in grid mode — the ghost row IS the first line.
-      expect(screen.getByText('Description')).toBeTruthy();
-      expect(screen.getAllByLabelText('Description')).toHaveLength(1); // just the ghost
+  // objectstack#35507 — the always-present trailing entry line is gone (see
+  // the top-level `no trailing entry row beside Add` pins). It is drawn only
+  // for an empty grid the form refused (objectui#3318), and there typing
+  // into it still materialises the line.
+  describe('the entry line of an empty grid the form refused', () => {
+    it('is drawn only once the form reports the failure', () => {
+      const { rerender } = render(<GridField value={[]} onChange={() => {}} field={field} />);
+      expect(screen.queryAllByLabelText('Description')).toHaveLength(0);
+      rerender(<GridField value={[]} onChange={() => {}} field={field} error="Lines is required" />);
+      expect(screen.getAllByLabelText('Description')).toHaveLength(1);
     });
 
-    it('typing in the ghost row materialises a new row (no Add click needed)', () => {
+    it('typing into it materialises a new line', () => {
       const onChange = vi.fn();
-      render(<GridField value={[{ description: 'A', amount: 1 }]} onChange={onChange} field={field} />);
-      const inputs = screen.getAllByLabelText('Description');
-      expect(inputs).toHaveLength(2); // data row + ghost
-      fireEvent.change(inputs[1], { target: { value: 'B' } }); // type in the ghost
-      expect(onChange).toHaveBeenCalledWith([
-        { description: 'A', amount: 1 },
-        { description: 'B', amount: null },
-      ]);
+      render(<GridField value={[]} onChange={onChange} field={field} error="Lines is required" />);
+      fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'B' } });
+      expect(onChange).toHaveBeenCalledWith([{ description: 'B', amount: null }]);
     });
   });
 
@@ -508,12 +507,12 @@ describe('GridField / LineItemsField — editable line items', () => {
       ]);
     });
 
-    it('flags a required, empty cell on a real row (not the ghost row)', () => {
+    it('flags a required, empty cell on a real row', () => {
       const reqField = { columns: [{ name: 'description', label: 'Description', type: 'text' as const, required: true }] } as any;
       render(<GridField value={[{ description: '' }]} onChange={() => {}} field={reqField} />);
       // The data row's required-empty cell is flagged...
       expect(screen.getByTestId('line-items-invalid-0-description')).toBeTruthy();
-      // ...but the trailing ghost row (index 1) is not.
+      // ...and no line below it is drawn to flag (objectstack#35507).
       expect(screen.queryByTestId('line-items-invalid-1-description')).toBeNull();
     });
   });
@@ -528,7 +527,7 @@ describe('GridField / LineItemsField — editable line items', () => {
 
     it('renders a real upload control in the cell, not a text input', () => {
       render(<GridField value={[{ description: 'Taxi', receipt: null }]} onChange={() => {}} field={fileField} />);
-      // One upload button per row (data row + ghost), backed by a native file input.
+      // One upload button per row, backed by a native file input.
       expect(screen.getAllByRole('button', { name: 'Receipt' }).length).toBeGreaterThan(0);
       expect(document.querySelector('input[type="file"]')).toBeTruthy();
       expect(screen.queryByRole('textbox', { name: 'Receipt' })).toBeNull();
@@ -591,14 +590,14 @@ describe('GridField / LineItemsField — editable line items', () => {
       expect(cell.getAttribute('aria-invalid')).toBeNull();
     });
 
-    it('does not announce invalid on an optional empty file cell or on the ghost row', () => {
+    it('does not announce invalid on an optional empty file cell', () => {
       const optFileField = {
         columns: [{ name: 'receipt', label: 'Receipt', type: 'file' as const }],
       } as any;
       const { container } = render(
         <GridField value={[{ receipt: null }]} onChange={() => {}} field={optFileField} />,
       );
-      // Data row and ghost row each render a picker; none may announce invalid.
+      // The data row renders a picker; it may not announce invalid.
       expect(container.querySelector('[aria-invalid="true"]')).toBeNull();
     });
 
@@ -621,7 +620,7 @@ describe('GridField / LineItemsField — editable line items', () => {
       const withAccept = {
         columns: [{ name: 'receipt', label: 'Receipt', type: 'file' as const, accept: ['image/*', '.pdf'] }],
       } as any;
-      render(<GridField value={[]} onChange={() => {}} field={withAccept} />);
+      render(<GridField value={[{ receipt: null }]} onChange={() => {}} field={withAccept} />);
       const input = document.querySelector('input[type="file"]') as HTMLInputElement;
       expect(input.getAttribute('accept')).toBe('image/*,.pdf');
     });
@@ -791,8 +790,10 @@ describe('GridField — a new line starts on its defaults and waits to read red 
 
   it('Add and the entry line both start a line on the host\'s values', () => {
     const onChange = vi.fn();
+    // The entry line is drawn for an empty grid the form refused
+    // (objectstack#35507), so the failure is handed in.
     const { container } = render(
-      <GridField value={[]} onChange={onChange} field={taskColumns} newRowValues={{ status: 'pending' }} />,
+      <GridField value={[]} onChange={onChange} field={taskColumns} newRowValues={{ status: 'pending' }} error="Tasks is required" />,
     );
     fireEvent.click(screen.getByRole('button', { name: /Add line/i }));
     expect(onChange).toHaveBeenLastCalledWith([{ name: null, status: 'pending', [UNTOUCHED_NEW_ROW]: true }]);
@@ -883,7 +884,8 @@ describe('no trailing entry row beside Add (objectstack#35507)', () => {
   it('CONTROL: an edit emits exactly the lines, with no blank line appended, as before', () => {
     const onChange = vi.fn();
     render(<GridField value={[{ description: 'A', amount: 1 }]} onChange={onChange} field={field} />);
-    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'B' } });
+    // `[0]`: the data line's cell, whatever else the grid draws below it.
+    fireEvent.change(screen.getAllByLabelText('Description')[0], { target: { value: 'B' } });
     expect(onChange).toHaveBeenLastCalledWith([{ description: 'B', amount: 1 }]);
   });
 
