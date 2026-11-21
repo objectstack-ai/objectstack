@@ -105,7 +105,9 @@ const SWITCHER_TRIGGER = carrying(
 );
 /** The trigger's children in source order, read off their test ids. */
 const SWITCHER_PARTS = ['type-icon', 'label', 'count', 'caret'] as const;
-const switcherBody = SRC.switcher.slice(SRC.switcher.indexOf('data-testid="list-view-switcher"'), SRC.switcher.indexOf('</PopoverTrigger>'));
+// The desktop trigger, inside its popover's trigger: the phone toolbar's pill
+// (objectstack#35883) comes first in the file and draws no type icon.
+const switcherBody = SRC.switcher.slice(SRC.switcher.indexOf('<PopoverTrigger'), SRC.switcher.indexOf('</PopoverTrigger>'));
 
 // ── grid ────────────────────────────────────────────────────────────────────
 const DENSITY = (() => {

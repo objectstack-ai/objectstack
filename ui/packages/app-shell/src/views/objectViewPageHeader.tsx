@@ -110,12 +110,52 @@ export function ObjectViewPageBarActions({
             {createButton}
 
             {moreShown && (
+              <ObjectViewMoreMenu
+                description={description}
+                importShown={importShown}
+                setShowImport={setShowImport}
+                importDisabled={importDisabled}
+                listFavorite={listFavorite}
+                t={t}
+              />
+            )}
+
+        </>
+    );
+}
+
+export interface ObjectViewMoreMenuProps extends Pick<ObjectViewPageBarProps, 'importShown' | 'setShowImport' | 'importDisabled' | 'listFavorite' | 't'> {
+    /** The object's description, the menu's first line; absent ⇒ none. */
+    description?: string;
+    /** Items before the rest (the phone's 「Select」, objectstack#35883). */
+    leading?: ReactNode;
+    /** The trigger's class: the page bar's 28 px, or the phone top row's 44 px. */
+    triggerClassName?: string;
+}
+
+/**
+ * The page's ⋮ More: the object's description, Import and the favorites
+ * entry (objectui#12427), at the right edge of the view bar from `sm` up and of
+ * the phone's top row below it (objectstack#35883), where 「Select」 leads it.
+ */
+export function ObjectViewMoreMenu({
+    description,
+    importShown,
+    setShowImport,
+    importDisabled,
+    listFavorite,
+    leading,
+    triggerClassName = 'shadow-none h-7 w-7 px-0',
+    t,
+}: ObjectViewMoreMenuProps) {
+    const rest = !!description || importShown || !!listFavorite;
+    return (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="shadow-none h-7 w-7 px-0"
+                    className={triggerClassName}
                     aria-label={t('detail.moreActions', { defaultValue: 'More actions' })}
                     data-testid="object-view-more-actions"
                   >
@@ -123,6 +163,8 @@ export function ObjectViewPageBarActions({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-64">
+                  {leading}
+                  {leading && rest && <DropdownMenuSeparator />}
                   {description && (
                     <>
                       <DropdownMenuLabel
@@ -157,9 +199,6 @@ export function ObjectViewPageBarActions({
                   )}
                 </DropdownMenuContent>
               </DropdownMenu>
-            )}
-
-        </>
     );
 }
 

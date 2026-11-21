@@ -12,7 +12,7 @@
 import type { ColumnSummary } from '@objectstack/spec/ui';
 import type { ListColumn } from '@object-ui/types';
 import { columnsWithSummary, declaredColumnFields } from './columnSummaryWrite.js';
-import { useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense, type ReactNode } from 'react';
+import { createElement, useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense, type ReactNode } from 'react';
 import { useParams, useSearchParams, useNavigate, useLocation, useHref, createSearchParams } from 'react-router-dom';
 import { resolveAffordance, type FilterTokenScope, type SchemaLike } from '@object-ui/core';
 import { useObjectListPreferences } from '../context/ListPreferencesProvider.js';
@@ -23,7 +23,11 @@ import { ObjectView as PluginObjectView, ManageViewsDialog } from '@object-ui/pl
 // Plugin registration is handled by the host app (e.g. apps/console/src/main.tsx
 // uses ComponentRegistry.registerLazy so heavy plugins stay code-split).
 // Do NOT add eager `import '@object-ui/plugin-*'` side-effect imports here.
-import { Plus } from 'lucide-react';
+import { CheckSquare, Plus } from 'lucide-react';
+import { DropdownMenuItem } from '@object-ui/components';
+import { requestListSelection, useListPageSelectable, useListPageSelecting } from '@object-ui/plugin-grid';
+import { getIcon } from '../utils/getIcon.js';
+import { usePublishPhonePageBar } from '../layout/PhonePageBar.js';
 import { useObjectListFavorite } from '../layout/SidebarItemMenu.js';
 import { useMetaItemRefusal } from '../hooks/useMetaItemRefusal.js';
 import { useTenancyPosture } from '../hooks/useTenancyPosture.js';
@@ -91,6 +95,7 @@ import {
     OBJECT_VIEW_PAGE_COLUMN_ATTR,
     ObjectViewBarObjectName,
     ObjectViewBarTrailing,
+    ObjectViewMoreMenu,
     ObjectViewPageHeader,
     type ObjectViewPageBarProps,
 } from './objectViewPageHeader.js';
@@ -1109,7 +1114,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         // 「Object / View ▾」: the page draws no page bar of its own above the
         // list. The 「Personalized · Reset」 marker ends the condition row.
         phoneTitle: titleSwitcher ? (
-            <span className="flex min-w-0 max-w-full items-center gap-1.5 max-sm:text-base max-sm:font-semibold" data-testid="list-phone-title">
+            <span className="flex min-w-0 max-w-full items-center gap-1.5" data-testid="list-phone-title">
                 <ObjectViewBarObjectName objectDef={objectDef} objectPluralLabel={listTitleOf} />
                 <span className="flex min-w-0">{titleSwitcher}</span>
             </span>
@@ -1234,6 +1239,38 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     };
     pageBarPropsRef.current = pageBarProps;
 
+    // objectstack#35883 — on a phone the page's top row is its own: 「‹」 (the
+    // app bar's), the object's icon and name, then ⋮ More with 「Select」 first.
+    // The app bar draws it in place of its pill, search, bell and avatar.
+    const [pageColumnEl, setPageColumnEl] = useState<HTMLDivElement | null>(null);
+    const listSelecting = useListPageSelecting(pageColumnEl);
+    // 「Select」 is offered only where the list would open a selection: cards
+    // whose rows take more than one tick (not a kanban, a calendar, or a list
+    // with no or single selection).
+    const listSelectable = useListPageSelectable(pageColumnEl);
+    const phoneDescription = objectDef.description ? objectDesc(objectDef) : undefined;
+    usePublishPhonePageBar(phone ? {
+        icon: createElement(getIcon((objectDef as any)?.icon), { className: 'h-5 w-5' }),
+        title: listTitleOf(objectDef),
+        end: (
+            <ObjectViewMoreMenu
+                description={phoneDescription}
+                importShown={importShown}
+                setShowImport={setShowImport}
+                importDisabled={importDisabled}
+                listFavorite={listFavorite}
+                triggerClassName="h-11 w-11 px-0 shadow-none"
+                leading={listSelectable ? (
+                    <DropdownMenuItem onSelect={() => requestListSelection(pageColumnEl)} data-testid="object-view-select">
+                        <CheckSquare className="h-4 w-4" />
+                        <span>{t('console.objectView.select', { defaultValue: 'Select' })}</span>
+                    </DropdownMenuItem>
+                ) : undefined}
+                t={t}
+            />
+        ),
+    } : null);
+
     // The list itself: one element whether or not a record is open
     // (objectstack#27545), so a `?recordId=` change — a row click, a step —
     // hands React the same element and re-renders none of the list. Memoised
@@ -1269,7 +1306,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // over (objectstack#27545); it keeps its full width (objectstack#28915).
     const pageColumn = (
         <ListViewBarHostContext.Provider value={setListBarHosted}>
-        <div className="h-full flex flex-col bg-background min-w-0 overflow-hidden" {...{ [OBJECT_VIEW_PAGE_COLUMN_ATTR]: '' }}>
+        <div ref={setPageColumnEl} className="h-full flex flex-col bg-background min-w-0 overflow-hidden" {...{ [OBJECT_VIEW_PAGE_COLUMN_ATTR]: '' }}>
              {/* 1. Header with breadcrumb + description.
                  The managed-by badge sits inline with the title so the
                  lifecycle bucket (system / config / append-only /
@@ -1319,7 +1356,8 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                  objectui#13134 — the list it floats over leaves room at its
                  end while it is drawn (`listFabClearance`), and only then: the
                  same `showCreate` decides both. */}
-             {showCreate && (
+             {/* objectstack#35883 — not while cards are being selected. */}
+             {showCreate && !listSelecting && (
                <button
                  type="button"
                  onClick={actions.create}
