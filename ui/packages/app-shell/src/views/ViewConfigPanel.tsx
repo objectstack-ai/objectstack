@@ -116,6 +116,13 @@ export interface ViewConfigPanelProps {
     dataSource?: any;
     /** Called after a publish / discard so the host can refresh its read. */
     onAfterChange?: () => void;
+    /**
+     * objectstack#35974 — the view is one the server refuses to save (a view
+     * a read-only package ships): the panel shows its configuration with
+     * every control disabled, relays no edit to the host, and offers no Save
+     * and no draft publish or discard, only Close.
+     */
+    readOnly?: boolean;
 }
 
 /**
@@ -147,7 +154,7 @@ function mapObjectFields(objectDef: ViewConfigPanelProps['objectDef']): ObjectFi
     });
 }
 
-export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, objectDef, onViewUpdate, onSave, onCreate, metadataClient, dataSource, onAfterChange }: ViewConfigPanelProps) {
+export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, objectDef, onViewUpdate, onSave, onCreate, metadataClient, dataSource, onAfterChange, readOnly = false }: ViewConfigPanelProps) {
     const { t } = useObjectTranslation();
     const panelRef = useRef<HTMLDivElement>(null);
     const locale = useMetadataLocale();
@@ -293,6 +300,8 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
     // that declares none (objectui#10694 judges a draft's `columns` against
     // those). Relaying an untouched stored field would present it as an edit.
     const handlePatch = useCallback((patch: Record<string, unknown>) => {
+        // A read-only view takes no edit, whichever control would have sent one.
+        if (readOnly) return;
         const next: InspectorViewDraft = { ...draftRef.current, ...(patch as Partial<InspectorViewDraft>) };
         draftRef.current = next;
         setDraft(next);
@@ -307,7 +316,7 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
                 onViewUpdate(field, value);
             }
         }
-    }, [onViewUpdate]);
+    }, [onViewUpdate, readOnly]);
 
     const handleSave = useCallback(async () => {
         const flat = inspectorDraftToRuntimeView(draft);
@@ -342,24 +351,37 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
     // reach the list only through `onViewUpdate` (see `handlePatch`), so we
     // replay the panel's opening values — and clear any keys the edits
     // introduced — through the same seam, then reset the local draft.
-    const handleDiscard = useCallback(() => {
-        if (mode === 'edit') {
-            if (onViewUpdate) {
-                const original = inspectorDraftToRuntimeView(openingDraft);
-                const edited = inspectorDraftToRuntimeView(draftRef.current);
-                const fields = new Set([...Object.keys(edited), ...Object.keys(original)]);
-                for (const field of fields) {
-                    if (field === 'id') continue;
-                    onViewUpdate(field, original[field]);
-                }
+    const revertEdits = useCallback(() => {
+        if (onViewUpdate) {
+            const original = inspectorDraftToRuntimeView(openingDraft);
+            const edited = inspectorDraftToRuntimeView(draftRef.current);
+            const fields = new Set([...Object.keys(edited), ...Object.keys(original)]);
+            for (const field of fields) {
+                if (field === 'id') continue;
+                onViewUpdate(field, original[field]);
             }
-            draftRef.current = initialDraft;
-            relayedRef.current = new Set();
-            setDraft(initialDraft);
-            setIsDirty(false);
         }
+        draftRef.current = initialDraft;
+        relayedRef.current = new Set();
+        setDraft(initialDraft);
+        setIsDirty(false);
+    }, [initialDraft, openingDraft, onViewUpdate]);
+    const handleDiscard = useCallback(() => {
+        if (mode === 'edit') revertEdits();
         onClose();
-    }, [initialDraft, openingDraft, mode, onClose, onViewUpdate]);
+    }, [mode, onClose, revertEdits]);
+
+    // objectstack#35974 — the host's read-only verdict can land after the
+    // panel opened editable (the package list was still being read) and after
+    // an edit. A read-only panel offers no Discard, so the edit would be
+    // stranded on the host's list and shown here in place of the stored view.
+    // It is discarded instead, the panel staying open.
+    const wasReadOnlyRef = useRef(readOnly);
+    useEffect(() => {
+        const turnedReadOnly = readOnly && !wasReadOnlyRef.current;
+        wasReadOnlyRef.current = readOnly;
+        if (turnedReadOnly && mode === 'edit' && (isDirty || relayedRef.current.size > 0)) revertEdits();
+    }, [readOnly, mode, isDirty, revertEdits]);
 
     // A publish or a discard from the draft bar changes what is stored: the
     // buffer is read again (objectstack#35054), then the host refreshes.
@@ -406,7 +428,7 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
                     variantKey="config"
                     familyKey={familyKey}
                     isHome
-                    readOnly={false}
+                    readOnly={readOnly}
                     locale={locale}
                     objectFieldsOverride={objectFields}
                     onPatch={handlePatch}
@@ -417,7 +439,7 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
                 data-testid="view-config-footer"
                 className="flex items-center justify-end gap-2 border-t px-4 py-2.5"
             >
-                {mode === 'edit' && (
+                {mode === 'edit' && !readOnly && (
                     <RuntimeDraftBar
                         type="view"
                         name={activeView.id}
@@ -429,22 +451,35 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
                         onAfterChange={handleAfterChange}
                     />
                 )}
-                <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleDiscard}
-                    data-testid="view-config-discard"
-                >
-                    {t('console.objectView.discard')}
-                </Button>
-                <Button
-                    size="sm"
-                    onClick={handleSave}
-                    disabled={saving || awaitingAuthored || (mode === 'edit' && !isDirty)}
-                    data-testid="view-config-save"
-                >
-                    {t('console.objectView.save')}
-                </Button>
+                {readOnly ? (
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={onClose}
+                        data-testid="view-config-close"
+                    >
+                        {t('common.close')}
+                    </Button>
+                ) : (
+                    <>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleDiscard}
+                            data-testid="view-config-discard"
+                        >
+                            {t('console.objectView.discard')}
+                        </Button>
+                        <Button
+                            size="sm"
+                            onClick={handleSave}
+                            disabled={saving || awaitingAuthored || (mode === 'edit' && !isDirty)}
+                            data-testid="view-config-save"
+                        >
+                            {t('console.objectView.save')}
+                        </Button>
+                    </>
+                )}
             </div>
         </div>
     );

@@ -15,7 +15,7 @@
     },
     {
       "id": 3,
-      "prompt": "I'm connected to an ObjectStack environment over MCP. In one call, how many deals were won per sales region this quarter, and what is the average amount per region?",
+      "prompt": "In our ObjectStack app's server code, write one ObjectQL aggregation that returns, per sales region, the number of deals won this quarter and their average amount.",
       "should_trigger": true,
       "files": []
     },

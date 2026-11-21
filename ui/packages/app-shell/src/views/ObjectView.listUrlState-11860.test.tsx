@@ -101,6 +101,7 @@ import { ExpressionProvider } from '../providers/ExpressionProvider';
 import { buildListFilterKey } from './listFilterStorage';
 import { LIST_FILTER_PARAM, LIST_GROUP_PARAM, LIST_SEARCH_PARAM, LIST_SORT_PARAM, withoutListStateParams } from './userFilterUrlState';
 import { localListStateKey } from '../context/ListPreferencesProvider';
+import { listDraftScope, patchListDraft, resetListDraftStoreForTests, type ListDraftPatch } from './listDraftStore';
 import { acceptStoredFilters, acceptStoredSort } from './objectViewListUrlState';
 import { toast } from 'sonner';
 
@@ -233,13 +234,19 @@ function link(path: string, state: { filter?: unknown; search?: string; sort?: u
 
 const URGENT = { logic: 'and', conditions: [{ field: 'priority', operator: 'equals', value: 'urgent' }] };
 
+/**
+ * The list's draft for one view (objectstack#35955, `./listDraftStore.ts`):
+ * what the reader changed and left there when they opened a record — the
+ * state a bare URL opens on. (It used to be the per-browser cache.)
+ */
 function storeListState(viewId: string, state: { filters?: unknown; search?: string }) {
-  localStorage.setItem(buildListFilterKey('u1', OBJ, viewId)!, JSON.stringify(state));
+  patchListDraft(listDraftScope('u1', OBJ, viewId), state as ListDraftPatch);
 }
 
 beforeEach(() => {
   cleanup();
   localStorage.clear();
+  resetListDraftStoreForTests();
   listQueries = [];
   groupQueries = [];
   rows = [];
@@ -273,7 +280,7 @@ describe('a list is a link (objectui#11860)', () => {
     expect(screen.getByTestId('search-active-keyword').textContent).toBe('acme');
   });
 
-  it('a link wins over the per-user cache WHOLE — nothing of the cache is merged in', async () => {
+  it('a link wins over the list\'s draft WHOLE — nothing of the draft is merged in', async () => {
     storeListState('all', {
       filters: { id: 'root', logic: 'and', conditions: [{ id: 'r', field: 'status', operator: 'equals', value: 'open' }] },
       search: 'mine',
@@ -286,7 +293,7 @@ describe('a list is a link (objectui#11860)', () => {
     expect(q.$search).toBeUndefined();
   });
 
-  it('a bare URL restores the per-user cache, and the address bar then shows it — replaced, not pushed', async () => {
+  it('a bare URL restores the list\'s draft (a record opened and closed), and the address bar then shows it — replaced, not pushed', async () => {
     storeListState('all', {
       filters: { id: 'root', logic: 'and', conditions: [{ id: 'r', field: 'status', operator: 'equals', value: 'open' }] },
       search: 'mine',
@@ -346,6 +353,48 @@ describe('a list is a link (objectui#11860)', () => {
     await settle();
     expect(host.search()).toBe(before);
     expect(host.navigations().length).toBe(navigationsBefore);
+  });
+});
+
+describe('objectstack#35955 — a reload drops a list\'s address state only when the reload was of that list', () => {
+  /** The document's navigation entry, as `performance` reports it. */
+  function stubNavigation(type: string, name: string) {
+    vi.spyOn(performance, 'getEntriesByType').mockImplementation(((kind: string) =>
+      kind === 'navigation' ? [{ type, name } as unknown as PerformanceEntry] : []) as typeof performance.getEntriesByType);
+  }
+  afterEach(() => {
+    window.history.replaceState(null, '', '/');
+  });
+
+  it('a reload of the list itself opens the view\'s own state and strips the `uf_*` params', async () => {
+    const address = link(`${VIEW}/all`, { filter: URGENT, search: 'acme' });
+    window.history.replaceState(null, '', address);
+    stubNavigation('reload', new URL(address, window.location.origin).href);
+    const host = await mountHost([address]);
+    const q = lastQuery();
+    expect(filterOf(q)).not.toContain('urgent');
+    expect(q.$search).toBeUndefined();
+    expect(new URLSearchParams(host.search()).has(LIST_FILTER_PARAM)).toBe(false);
+  });
+
+  it('a reload of ANOTHER page, then an in-app link to a list with a filter: the link\'s filter applies', async () => {
+    // The reader reloaded the AI chat page; the answer's list link then navigates in-app.
+    window.history.replaceState(null, '', '/apps/crm/ai-chat');
+    stubNavigation('reload', new URL('/apps/crm/ai-chat', window.location.origin).href);
+    const address = link(`${VIEW}/all`, { filter: URGENT });
+    const host = await mountHost(['/elsewhere']);
+    window.history.replaceState(null, '', address);
+    await host.go(address);
+    expect(filterOf(lastQuery())).toContain('"priority","=","urgent"');
+    expect(new URLSearchParams(host.search()).has(LIST_FILTER_PARAM)).toBe(true);
+  });
+
+  it('CONTROL: a first load (not a reload) of a list link applies its filter', async () => {
+    const address = link(`${VIEW}/all`, { filter: URGENT });
+    window.history.replaceState(null, '', address);
+    stubNavigation('navigate', new URL(address, window.location.origin).href);
+    await mountHost([address]);
+    expect(filterOf(lastQuery())).toContain('"priority","=","urgent"');
   });
 });
 
@@ -429,10 +478,27 @@ describe('a malformed or stale param is dropped — the list opens and nothing t
   });
 });
 
-/** This user's stored state for one view (objectui#12418's per-browser cache, the shape the server row has). */
+/** The list's draft for one view (objectstack#35955; it was objectui#12418's stored state, the same shape). */
 function storeViewPreference(viewId: string, pref: { sort?: unknown; filters?: unknown }) {
-  localStorage.setItem(localListStateKey('u1', OBJ), JSON.stringify({ perView: { [viewId]: pref } }));
+  patchListDraft(listDraftScope('u1', OBJ, viewId), pref as ListDraftPatch);
 }
+
+describe('objectstack#35955 — state an earlier console stored for the reader no longer opens the list', () => {
+  it('a stored sort and filter, in the server row\'s cache or the older per-browser key, are not applied', async () => {
+    localStorage.setItem(localListStateKey('u1', OBJ), JSON.stringify({
+      perView: { all: { sort: [{ field: 'due_date', order: 'desc' }], filters: { id: 'root', logic: 'and', conditions: [{ id: 'p', field: 'priority', operator: 'equals', value: 'urgent' }] } } },
+    }));
+    localStorage.setItem(buildListFilterKey('u1', OBJ, 'all')!, JSON.stringify({ search: 'mine' }));
+    const host = await mountHost([`${VIEW}/all`]);
+    const q = lastQuery();
+    expect(filterOf(q)).not.toContain('urgent');
+    expect(q.$search).toBeUndefined();
+    expect(q.$orderby).not.toEqual([{ field: 'due_date', order: 'desc' }]);
+    const params = new URLSearchParams(host.search());
+    expect(params.has(LIST_FILTER_PARAM)).toBe(false);
+    expect(params.has(LIST_SEARCH_PARAM)).toBe(false);
+  });
+});
 
 describe('a link\'s filter is judged whole (objectstack#31869)', () => {
   it('CONTROL: a link whose every condition passes applies them all, with no notice', async () => {
@@ -821,7 +887,7 @@ describe('the link a sign-in hands over opens the next user\'s list on their own
     expect(host.search()).not.toContain('urgent');
   });
 
-  it('the next user\'s own stored state applies there, and nothing of A\'s is merged in', async () => {
+  it('the next user\'s own draft applies there, and nothing of A\'s is merged in', async () => {
     storeListState('sorted', {
       filters: { id: 'root', logic: 'and', conditions: [{ id: 'r', field: 'status', operator: 'equals', value: 'open' }] },
       search: 'mine',

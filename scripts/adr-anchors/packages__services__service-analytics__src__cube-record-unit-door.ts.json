@@ -1,0 +1,8 @@
+{
+  "file": "packages/services/service-analytics/src/cube-record-unit-door.ts",
+  "adrs": [
+    "ADR-0158",
+    "ADR-0144"
+  ],
+  "invariant": "ADR-0158 U7 R1 (mirroring ADR-0144 D6, whose cube door stands beside this one): a dataset or cube measure of type `sum`, `avg`, `min` or `max` over a `unitMode: 'record'` quantity is refused INVALID_FIELD / 400 before either strategy reads anything, unless the query has a dimension whose column is that quantity's `unitField` on the same object. A time dimension or a `where` pinning one unit does not count: the rule is the grouping. `count` and `count_distinct` are not judged. It is asked on every `ensureCube` path and in the draft preview, after the record-currency door."
+}

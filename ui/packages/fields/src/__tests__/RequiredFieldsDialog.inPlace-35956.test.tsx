@@ -138,3 +138,30 @@ describe('RequiredFieldsDialog in place (objectstack#35956)', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 });
+
+describe('RequiredFieldsDialog with nothing to fill (objectstack#35956 PR 2, the stage menu)', () => {
+  it('is the change confirmation: Save takes the focus, and Save submits at once', async () => {
+    const onSubmit = vi.fn();
+    render(
+      <RequiredFieldsDialog
+        open
+        fields={[]}
+        recordName="Acme deal"
+        changes={[{ name: 'stage', label: 'Stage', value: 'Negotiation' }]}
+        submitLabel="Move"
+        onCancel={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+    const dialog = screen.getByTestId('required-fields-dialog');
+    expect(dialog.querySelector('[data-required-fields-field]')).toBeNull();
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Move' })).toHaveFocus());
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({}));
+  });
+
+  it('control: with a field to fill, that field takes the focus, not Save', async () => {
+    const dialog = renderDialog(vi.fn());
+    await waitFor(() => expect(textboxOf(dialog, 'win_reason')).toHaveFocus());
+  });
+});

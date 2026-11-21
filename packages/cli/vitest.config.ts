@@ -1008,6 +1008,14 @@ export default defineConfig({
         find: /^@objectstack\/service-push$/,
         replacement: path.resolve(__dirname, '../services/service-push/src/index.ts'),
       },
+      // `setup-integrations-order.pin.test.ts` reads `SLACK_SETUP_UI_BUNDLE`,
+      // the Setup › Integrations › Slack contribution. Resolved to source for
+      // the reason its neighbours give. `check:test-source-alias` names this
+      // import and fails without it.
+      {
+        find: /^@objectstack\/service-messaging$/,
+        replacement: path.resolve(__dirname, '../services/service-messaging/src/index.ts'),
+      },
     ],
   },
   test: {

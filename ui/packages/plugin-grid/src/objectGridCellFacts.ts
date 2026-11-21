@@ -12,6 +12,7 @@
  * on it does, and what pasted text stands for. The table asks when the reader
  * acts on a cell, never while it draws.
  */
+import { buildValidationRules } from '@object-ui/fields';
 import { fieldInlineReadOnlyKind } from './inline-edit-options';
 
 /** Why a cell opens no editor, in the order a cell names them. */
@@ -123,5 +124,80 @@ export function choiceFromText(
   }
   // A record reference holds an id, which pasted text is not.
   if (type === 'lookup' || type === 'master_detail' || type === 'user' || type === 'owner') return () => undefined;
+  return null;
+}
+
+/**
+ * Field types whose cell editor is a panel opened under the cell, which keeps
+ * showing its value (objectstack#36023): a list to pick from, a calendar, a
+ * clock, a palette. Typed input, long text and an address edit in place.
+ */
+const PANEL_EDITOR_FIELD_TYPES: ReadonlySet<string> = new Set([
+  'select', 'status', 'radio', 'multiselect', 'checkboxes', 'tags',
+  'date', 'datetime', 'time', 'color',
+  'lookup', 'master_detail', 'user', 'owner',
+]);
+
+/** Where the cell editor of this field type draws; `undefined` leaves it to the table. */
+export function inlineEditorPlacement(fieldType: unknown): 'below' | undefined {
+  return typeof fieldType === 'string' && PANEL_EDITOR_FIELD_TYPES.has(fieldType) ? 'below' : undefined;
+}
+
+type Translate = (key: string, options?: Record<string, unknown>) => string;
+
+/** A value the cell holds nothing in: what Backspace writes and `required` refuses. */
+export function isEmptyCellValue(value: unknown): boolean {
+  return value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0);
+}
+
+/** What a field's name reads as in a sentence about it. */
+function fieldLabelOf(fieldDef: { label?: unknown; name?: unknown }, columnKey: string): string {
+  return typeof fieldDef.label === 'string' && fieldDef.label !== '' ? fieldDef.label : columnKey;
+}
+
+/**
+ * Why Backspace leaves this cell as it is: a required field is never cleared
+ * (objectstack#36023). `null` when the cell may be cleared.
+ */
+export function clearRefusalText(
+  fieldDef: Record<string, any> | null | undefined,
+  columnKey: string,
+  t: Translate,
+): string | null {
+  if (!fieldDef?.required) return null;
+  return typeof fieldDef.required_message === 'string'
+    ? fieldDef.required_message
+    : t('validation.required', { field: fieldLabelOf(fieldDef, columnKey) });
+}
+
+/**
+ * Why a value committed into a cell is refused before it is saved, by the
+ * field's declared rules, or `null` (objectstack#36023). The rules are the
+ * record form's own (`buildValidationRules`): required, length, range and
+ * the email / URL shape, each said with the form's sentence. A rule other
+ * than `required` does not judge an empty value.
+ */
+export function cellValueRefusal(
+  fieldDef: Record<string, any> | null | undefined,
+  columnKey: string,
+  value: unknown,
+  t: Translate,
+): string | null {
+  if (!fieldDef) return null;
+  const rules = buildValidationRules(fieldDef);
+  if (!rules) return null;
+  const field = fieldLabelOf(fieldDef, columnKey);
+  const said = (rule: any, interp: Record<string, unknown> = {}) =>
+    typeof rule?.message === 'string' ? rule.message : t(rule?.messageKey ?? 'validation.pattern', { field, ...interp });
+  if (isEmptyCellValue(value)) return clearRefusalText(fieldDef, columnKey, t);
+  if (typeof value === 'string') {
+    if (rules.minLength && value.length < rules.minLength.value) return said(rules.minLength, { min: rules.minLength.value });
+    if (rules.maxLength && value.length > rules.maxLength.value) return said(rules.maxLength, { max: rules.maxLength.value });
+    if (rules.pattern?.value instanceof RegExp && !rules.pattern.value.test(value)) return said(rules.pattern);
+  }
+  if (typeof value === 'number') {
+    if (rules.min && value < rules.min.value) return said(rules.min, { min: rules.min.value });
+    if (rules.max && value > rules.max.value) return said(rules.max, { max: rules.max.value });
+  }
   return null;
 }

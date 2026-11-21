@@ -14,7 +14,7 @@
   "source": "built-tree",
   "generator": "scripts/gen-sdui-manifest-node.mjs",
   "generatedAt": "2026-11-21",
-  "sha256": "3711e7efc78c869ee5c1d8e1b16c8cf718ac87a7c9db3bdb602483684e6065f9",
+  "sha256": "16ff838b7448ca0e59019fe61016e0c4d3ab9654239fc4beded2238b801ee2cf",
   "components": 106,
   "inTree": {
     "modulesRoot": "ui/apps/console",

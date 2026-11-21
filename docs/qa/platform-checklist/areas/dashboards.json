@@ -1455,10 +1455,10 @@
     },
     {
       "id": "dashboards.cross-object-where-engine-path",
-      "title": "An analytics where with a one-hop dotted leaf ('order.status') is served on the engine path: it equals the /data nested-relation filter, never selects an orphan detail, answers no rows on an empty parent match, refuses more than 1000 matching parents 400 INVALID_FILTER rather than truncate, keeps two hops, $not and $field refused, reads the parent as the caller, and answers a related field the caller cannot read 403",
+      "title": "An analytics where with a one-hop dotted leaf ('order.status') is served on the engine path: it equals the /data nested-relation filter, never selects an orphan detail, answers no rows on an empty parent match, serves more than 1,000 matching parents with the hand count rather than refuse or truncate, keeps four relationships, $not and $field refused, reads the parent as the caller, and answers a related field the caller cannot read 403",
       "since": "v18.5",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1473,15 +1473,15 @@
           "the engine path: the detail's inferred object cube queried with a time bucket (timeDimensions with granularity 'month'), which the ObjectQL strategy serves (its answer carries no `sql`). Without a bucket an admin query is served natively, its answer carrying `sql`, which this item does not score (knownGaps[0])"
         ],
         "knownGaps": [
-          "the native SQL path selects the orphan line under $ne where the engine path and /data do not (#33792, open), so adding a time bucket changes a widget's total. This item scores the engine path; a native-path $ne reading is that card's evidence, never a verdict here"
+          "the native SQL path and the engine path now agree on the orphan under $ne: #33792 is closed, and QA run #35539 measured 5/500 on both paths. This item still scores the engine path only; a native-path reading is evidence beside it, never a verdict here"
         ]
       },
       "steps": [
         "POST /api/v1/analytics/query {cube: the detail's cube, measures: [count, the amount sum], timeDimensions: [a month bucket], where: {'order.status': 'cancelled'}}, then the same with the nested form {order: {status: 'cancelled'}}; as the same persona GET /api/v1/data/DETAIL?filter={\"order\":{\"status\":\"cancelled\"}}",
         "where {'order.status': {$ne: 'open'}}, then {$or: [that, {order: {$null: true}}]}",
         "where {$or: [{'order.region': 'APAC'}, {name: ONE_LINE_NAME}]}, then {'order.region': 'APAC', 'order.status': 'open'}",
-        "where {'order.status': 'nope'}; {'order.status': 'open'} (1,003 matching parents); {'order.region': 'NA'} (exactly 1,000)",
-        "where 'order.owner_id.name' (two hops); {$not: {'order.status': 'cancelled'}}; {'order.status': {$eq: {$field: 'name'}}}",
+        "where {'order.status': 'nope'}; {'order.status': 'open'} (1,003 matching parents); {'order.region': 'NA'} (exactly 1,000); then seed 20,000 more open parents with no lines through createMany and repeat {'order.status': 'open'} (21,003 matching parents)",
+        "where a leaf through four declared relationships ('order.R2.R3.R4.name', each R a lookup on the object before it; the scratch copy may add the chain); {$not: {'order.status': 'cancelled'}}; {'order.status': {$eq: {$field: 'name'}}}",
         "as the reader: {'order.secret_note': 'TOPSECRET'} and {'order.secret_note': 'NOPE'}; then the controlled_by_parent detail's cube with {'order.status': 'cancelled'}, beside the admin's answer",
         "POST /api/v1/analytics/sql with a bucketed {'order.status': 'cancelled'}"
       ],
@@ -1511,15 +1511,15 @@
           "evidence": "the two answers and the hand count"
         },
         {
-          "clause": "an empty parent match answers no rows, and more than 1,000 matching parents is refused, never truncated",
+          "clause": "an empty parent match answers no rows, and more than 1,000 matching parents is served with the hand count, never refused or truncated",
           "oracle": "api",
-          "verify": "'nope' answers rows []; 1,003 parents answers 400 INVALID_FILTER saying the filter matched more than 1000 records of the parent and was not applied; exactly 1,000 is served",
-          "evidence": "the three answers"
+          "verify": "'nope' answers rows []; 1,003 and 21,003 matching parents each answer 200 with a count and amount sum equal to the hand count for that seed; exactly 1,000 is served. On a SQL datasource the single-valued relation reaches the driver as one in-database semi-join, no id list and no 1,000-id cap (#33626; packages/objectql/src/relation-semi-join.ts, pinned in packages/rest/src/analytics-nested-relation-filter.test.ts '...a single-valued match past the id cap is served'). QA run #35539 measured 1,003 parents at count 13, sum 40, and 21,003 parents served in 24 ms on PostgreSQL 16, at 92121196; those are that run's readings, re-measure at the run subject sha",
+          "evidence": "the four answers, each beside its hand count"
         },
         {
-          "clause": "two hops, a leaf under $not and a $field comparand stay refused",
+          "clause": "four relationships, a leaf under $not and a $field comparand stay refused",
           "oracle": "api",
-          "verify": "each answers 400 INVALID_FIELD naming its reason (two relationships, under a $not, a $field comparand)",
+          "verify": "each answers 400 INVALID_FIELD naming its reason (traverses 4 relationships, up to 3 relationships deep; under a $not; a $field comparand). Up to three relationships are served (#33626; CROSS_OBJECT_WHERE_MAX_HOPS in packages/services/service-analytics/src/strategies/cross-object-where.ts, the four-relationship refusal pinned in crossobject-conjunct-refusal.test.ts)",
           "evidence": "the three bodies"
         },
         {
@@ -1558,6 +1558,12 @@
           "date": "2026-11-15",
           "change": "initial — new coverage for #33512's one-hop cross-object analytics where (ledger 6896511848 of #33761, row 15): no item cited cross-object-where.ts, objectql-strategy.ts or dashboards.mdx, and dashboards.cube-query scores the showcase_delivery cube's reconciliation, not this filter. Steps and answers follow QA run #33785's live run at a557fa38 (comment 6893199839); its native-path observation is #33792 (knownGaps[0]). Sources re-read at main 159757ab. Card #33969",
           "ref": "#34068"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-21",
+          "change": "re-point to the post-#33626 contract (checklist-test section 5, stale spec found by QA run #35539): acceptance[4] now serves 1,003 and 21,003 matching parents with the hand count instead of refusing past 1,000 (the single-valued relation is an in-database semi-join on a SQL datasource); acceptance[5] moves the hop refusal from two relationships to four (the hop limit is three); the $not and $field refusals are kept; title and steps 4-5 follow; knownGaps[0] updated, #33792 is closed. Sources re-read at main 8145424b. Card #35542",
+          "ref": "claude/issue-35542-repoint-cross-object-where"
         }
       ]
     }

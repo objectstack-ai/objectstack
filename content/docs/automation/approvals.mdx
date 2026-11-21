@@ -575,7 +575,11 @@ organization's capability, such as its owner, is on the slate for that.
 
 The request says why. Its timeline carries a note, for example *Routed to this
 organization's administrators because the approver slate named no one: position
-'sales_manager' has no holder.*, and its node-config snapshot keeps the abandoned
+'sales_manager' has no holder.* That English, with the position's name, is what
+the row stores; a reader is served the note in their own language, and it names
+the position by its label (the language pack's translation, else the position's
+declared label), for example *岗位「销售经理」无人任职*. The timeline shows the
+note as a system note, by the system. Its node-config snapshot keeps the abandoned
 slate and the same reason under `__resolvedFrom` (`admin_rescue:abandoned`,
 `admin_rescue:reason`). The abandoned slate is replaced, not kept beside them: a
 holder staffed into the position after the request opened does not receive it,

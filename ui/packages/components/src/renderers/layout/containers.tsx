@@ -1944,7 +1944,7 @@ export interface PageHeaderActionsProps {
    * live, in place of an `actions` list. Only the boolean `true` opts in.
    */
   placedActions?: unknown;
-  /** The inline-button budget on desktop, as `page:header`'s `maxVisible`; an out-of-contract value falls back to the unset default: 1 in a record page's one-row header (`defaultMaxVisible`), 3 on any other header. */
+  /** The inline-button budget on desktop, as `page:header`'s `maxVisible`; an out-of-contract value falls back to the unset default, 3 on every header. In a record page's header bar (`fitWidth`) the number is an upper bound: what does not fit the bar's width folds as well. */
   maxVisible?: unknown;
   /** The inline-button budget on mobile, as `page:header`'s `mobileMaxVisible`; an out-of-contract value falls back to the unset default: 2 in a record page's phone bottom bar (`face: 'bar'`, the host's Edit included), 1 on any other header. */
   mobileMaxVisible?: unknown;
@@ -1974,12 +1974,21 @@ export interface PageHeaderActionsProps {
    */
   face?: 'row' | 'bar';
   /**
-   * The desktop inline budget when the page declares no `maxVisible`
-   * (objectstack#35593): the record's one-row header passes 1, so a record
-   * draws Edit, ONE primary action and the `⋯`. An authored `maxVisible`
-   * still wins. Absent: 3, as before.
+   * The desktop inline budget when the page declares no `maxVisible`. An
+   * authored `maxVisible` still wins. Absent: 3. (objectstack#35593 had the
+   * record's header bar pass 1; objectstack#35853 gave the bar 3 back, folded
+   * by width instead — see {@link fitWidth}.)
    */
   defaultMaxVisible?: number;
+  /**
+   * Fold by width as well as by count (objectstack#35853): while the row's
+   * buttons wrap past one line in the room the host gives it, the page's own
+   * actions fold into the `⋯` one at a time, down to the primary. The record
+   * header's bar passes it, so a narrow drawer shows fewer than 3. The budget
+   * comes back when the host's bar (`[data-record-top-bar]`, else the row's
+   * parent) changes width. The host's buttons (Edit) still never fold.
+   */
+  fitWidth?: boolean;
 }
 
 /** The refresh entry of the header's `⋯` menu — see {@link PageHeaderActionsProps.refresh}. */
@@ -2013,8 +2022,37 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
   trailing,
   face = 'row',
   defaultMaxVisible,
+  fitWidth = false,
 }) => {
   const ctx = useRecordContext();
+  // objectstack#35853 — the width fold ({@link PageHeaderActionsProps.fitWidth}):
+  // the cap the row's wrapping has lowered the budget to, the row itself, and
+  // the budget the last render drew (read after it lays out).
+  const [widthCap, setWidthCap] = React.useState<number | null>(null);
+  const [fitRow, setFitRow] = React.useState<HTMLDivElement | null>(null);
+  const fitDrawn = React.useRef({ inline: 0, floor: 0 });
+  React.useLayoutEffect(() => {
+    if (!fitWidth || !fitRow) return;
+    const items = Array.from(fitRow.children) as HTMLElement[];
+    if (items.length < 2) return;
+    const wrapped = items[items.length - 1].offsetTop > items[0].offsetTop + 1;
+    const { inline, floor } = fitDrawn.current;
+    if (wrapped && inline > floor) setWidthCap(inline - 1);
+  });
+  React.useEffect(() => {
+    if (!fitWidth || !fitRow || typeof ResizeObserver === 'undefined') return;
+    const host = (fitRow.closest('[data-record-top-bar]') as HTMLElement | null) ?? fitRow.parentElement;
+    if (!host) return;
+    let width = host.getBoundingClientRect().width;
+    const observer = new ResizeObserver(() => {
+      const next = host.getBoundingClientRect().width;
+      if (Math.abs(next - width) < 1) return;
+      width = next;
+      setWidthCap(null);
+    });
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, [fitWidth, fitRow]);
   // The record's state (objectstack#35593): when the host hands a `group`,
   // the row is what that group draws — the record's row unchanged, or the
   // state's own levers with the record's actions in their `⋯`.
@@ -2572,10 +2610,9 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     //   4. a host button (the record page's Edit) is not one of the page's
     //      actions: it takes no slot and never folds (objectui#12617).
     // `maxVisible` / `mobileMaxVisible` are overridable on the page:header
-    // schema. Unset, `maxVisible` is 1 in a record page's one-row header and 3
-    // on any other header; `mobileMaxVisible` is 2 in a phone's record bottom
-    // bar (the host's Edit included) and 1 on any other header. This keeps the
-    // header from drowning in 4–5 buttons on every record page.
+    // schema and default to 3 / 1 (2 in a phone's bottom bar). This keeps the
+    // header from drowning in 4–5 buttons on every record page. In the record
+    // header's bar the row also folds by width (`fitWidth`, objectstack#35853).
     //
     // `readMax` enforces the SPEC's value domain rather than a laxer renderer
     // tolerance (objectui#5006). Measured on `ComponentPropsMap['page:header']`
@@ -2684,7 +2721,13 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       ? [...ranked.filter(isHostButton), ...(primaryAction ? [primaryAction] : []), ...authoredButtons]
           .filter((a, i, all) => all.indexOf(a) === i)
       : [];
-    const inlineAuthored = new Set<unknown>(authoredButtons.slice(0, maxVisible));
+    // The width fold lowers the desktop row's budget, never below the primary.
+    const fitsWidth = fitWidth && !barFace && !isMobile;
+    const rowBudget = fitsWidth && widthCap != null ? Math.min(maxVisible, widthCap) : maxVisible;
+    if (fitsWidth) {
+      fitDrawn.current = { inline: Math.min(rowBudget, authoredButtons.length), floor: authoredButtons.length > 0 ? 1 : 0 };
+    }
+    const inlineAuthored = new Set<unknown>(authoredButtons.slice(0, rowBudget));
     const inlineActions = barFace
       ? barQueue.slice(0, maxVisible)
       : ranked.filter((a) => isHostButton(a) || inlineAuthored.has(a));
@@ -2694,7 +2737,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
           ...ranked.filter((a) => isHostAction(a) && !isHostButton(a)),
         ]
       : [
-          ...authoredButtons.slice(maxVisible),
+          ...authoredButtons.slice(rowBudget),
           ...ranked.filter((a) => isHostAction(a) && !isHostButton(a)),
         ];
     // The overflow reads as one list in three bands (objectui#12529): the
@@ -2797,9 +2840,28 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       // Shadcn's `default`; a destructive action shown inline is Shadcn's
       // `destructive` (objectui#12764); every other inline button is an
       // outline button (objectui#12617).
+      //
+      // objectstack#36049 — the host's Edit is never filled in the header
+      // row. On a record whose object declares no header action, Edit was
+      // the pick and drew as the page's one solid button, louder than the
+      // record's name, though the record's fields edit in place. It now
+      // draws outline there too; the page's own actions keep their pick and
+      // their faces, and a host button DECLARING `variant: 'primary'` (the
+      // edit state's Save, objectstack#35816) stays filled. The phone's
+      // bottom bar keeps its filled Edit: there it is the bar's one big
+      // target.
+      const hostEditPick =
+        action === primaryAction && !barFace && isHostAction(action) && action?.variant !== 'primary';
       const variant =
-        action === primaryAction ? 'default' : isDestructiveAction(action) ? 'destructive' : 'outline';
+        action === primaryAction && !hostEditPick
+          ? 'default'
+          : isDestructiveAction(action) ? 'destructive' : 'outline';
       const size = action.size || 'sm';
+      // objectstack#36049 — the desktop header row is one height, 28 (`h-7`):
+      // its buttons, the `⋯`, the trailing panel toggles. An action that
+      // declares its own `size` keeps it; the phone's rows keep `sm`'s 36,
+      // and its bottom bar its 44.
+      const rowHeight = !barFace && !action.size ? 'sm:h-7' : undefined;
       const actionKey = action.name || action.id || `header-action-${idx}`;
       const pending = pendingActionKeys.has(actionKey);
       const disabled = isActionDisabled(action);
@@ -2822,6 +2884,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
           // same spelling as `PanelToggles` and `DeclaredActionsBar`).
           className={cn(
             'gap-2',
+            rowHeight,
             barFace && 'h-11 min-w-0 flex-1',
             pending && 'cursor-progress opacity-50',
             pressed !== undefined && 'aria-pressed:bg-accent aria-pressed:text-accent-foreground hover:aria-pressed:bg-accent',
@@ -2934,7 +2997,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
               <Button
                 variant="outline"
                 size="sm"
-                className={barFace ? 'h-11 w-11 shrink-0 px-0' : 'gap-1 px-2'}
+                className={barFace ? 'h-11 w-11 shrink-0 px-0' : 'gap-1 px-2 sm:h-7'}
                 aria-label={tt('detail.moreActions', 'More actions')}
               >
                 <MoreHorizontal className="h-4 w-4" />
@@ -2993,6 +3056,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     if (!barFace) {
       return (
         <div
+          ref={fitsWidth ? setFitRow : undefined}
           className="flex flex-wrap items-center gap-2 shrink-0 max-w-full"
           role="toolbar"
           aria-label={toolbarLabel}
@@ -3171,7 +3235,9 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
         // In the host's bar the bar draws its own panel switches.
         trailing={phoneFace || inBar ? undefined : headerTrailing}
         face={phoneFace ? 'bar' : 'row'}
-        defaultMaxVisible={inBar ? 1 : undefined}
+        // objectstack#35853 — the bar's budget is 3, as anywhere else, and
+        // what does not fit the bar's width folds into the `⋯`.
+        fitWidth={inBar}
       />
     );
     if (!phoneFace) return row;
@@ -3481,8 +3547,10 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
     // `e2e/record-header-title-width.spec.ts`.
     // objectstack#35593 — in the host's bar: the record's name, its stage and
     // the state's tags in the title slot, the button group in the action
-    // slot. The object's label is the bar's own crumb, so the chip does not
-    // repeat it. Nothing is drawn until the host's slots exist.
+    // slot. Since objectstack#35853 both slots are the bar's second row, the
+    // record row, under its navigation row, and the name is one size up
+    // (`text-base`). The navigation row names the object or the list, so the
+    // chip does not repeat it. Nothing is drawn until the host's slots exist.
     if (drawsInBar && headerBar) {
       const title = headerBar.titleSlot ? createPortal(
         <span className="flex min-w-0 items-center gap-2" data-record-header-title="" {...headerAria}>
@@ -3503,7 +3571,7 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
                 ? () => ctx.onToggleFavorite?.()
                 : undefined
             }
-            className="text-foreground [&_h1]:text-sm [&_h1]:font-semibold [&_h1]:sm:text-sm [&>div]:flex-nowrap [&>div]:items-center"
+            className="text-foreground [&_h1]:text-base [&_h1]:font-semibold [&_h1]:sm:text-base [&>div]:flex-nowrap [&>div]:items-center"
           />
           {stageTag}
           {headerStateTags}
@@ -3652,8 +3720,8 @@ ComponentRegistry.register('header', PageHeaderRenderer, {
     // express the domain: `ComponentInput.type` has no integer/min/max slot, so
     // `description` stays the only authoring-time expression of it, and spec
     // stays the sole judge of values.)
-    { name: 'maxVisible', type: 'number', description: 'How many header actions render as inline buttons on desktop before the rest fold into the overflow menu. A positive integer — the contract rejects 0 and fractional values. Two kinds of action are routed to the overflow menu regardless of this budget and never occupy an inline slot: an action whose locations declare record_more without record_header, and any action with component action:menu. The host\'s own buttons (the record page\'s Edit) take no slot and never fold. The first inline action, or the one declaring variant primary, is the one filled primary button; the others are outline buttons. An action declaring variant danger is never the primary: inline it is a destructive button, and in the overflow menu it is a red row below a separator.' },
-    { name: 'mobileMaxVisible', type: 'number', description: 'The same inline-button budget on mobile viewports, where horizontal room is scarce. A positive integer; when unset it is 2 in a record page\'s bottom action bar on a phone (counting the host\'s Edit) and 1 on any other header. The desktop half is Max Inline Actions, and the overflow routing rules stated there apply unchanged.' },
+    { name: 'maxVisible', type: 'number', description: 'How many header actions render as inline buttons on desktop before the rest fold into the overflow menu. A positive integer, defaulting to 3 — the contract rejects 0 and fractional values. In a record page\'s header bar, actions that do not fit its width fold too, so a narrow drawer shows fewer. Two kinds of action are routed to the overflow menu regardless of this budget and never occupy an inline slot: an action whose locations declare record_more without record_header, and any action with component action:menu. The host\'s own buttons (the record page\'s Edit) take no slot and never fold. The first inline action, or the one declaring variant primary, is the one filled primary button; the others are outline buttons. The host\'s Edit is always an outline button: on a record with no header action of its own the row has no filled button. An action declaring variant danger is never the primary: inline it is a destructive button, and in the overflow menu it is a red row below a separator.' },
+    { name: 'mobileMaxVisible', type: 'number', description: 'The same inline-button budget on mobile viewports, where horizontal room is scarce. A positive integer, defaulting to 1, or 2 in a record page\'s bottom action bar on a phone, where the host\'s Edit counts as one; the desktop half is Max Inline Actions, and the overflow routing rules stated there apply unchanged.' },
   ],
 });
 

@@ -195,6 +195,7 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
+  ObjectIconTile,
 } from '@object-ui/components';
 import { ObjectView as PluginObjectView } from '@object-ui/plugin-view';
 import { ListView } from '@object-ui/plugin-list';
@@ -2589,11 +2590,16 @@ export function InterfacesPillar({
   const openContributor = useOpenContributor();
   // Objects in THIS package (published ∪ draft) — the nav item inspector's
   // object picker, so nav can be wired to sibling objects before publishing.
-  const [pkgObjects, setPkgObjects] = React.useState<Array<{ name: string; label: string; icon?: string; pair?: true }>>(
+  const [pkgObjects, setPkgObjects] = React.useState<Array<{ name: string; label: string; icon?: string; color?: string; pair?: true }>>(
     [],
   );
   const objectIconMap = React.useMemo(
     () => Object.fromEntries(pkgObjects.map((o) => [o.name, o.icon])),
+    [pkgObjects],
+  );
+  // objectstack#35985 — an object's palette colour, for its tile.
+  const objectColorMap = React.useMemo(
+    () => Object.fromEntries(pkgObjects.map((o) => [o.name, o.color])),
     [pkgObjects],
   );
   // objectui#12508 — the package's draft-only objects (a pending draft, no
@@ -2628,13 +2634,18 @@ export function InterfacesPillar({
           railPairId ? client.listDrafts({ packageId: railPairId, type: 'object' }).catch(noRows) : noRows(),
         ]);
         if (cancelled) return;
-        const byName = new Map<string, { name: string; label: string; icon?: string; pair?: true }>();
+        const byName = new Map<string, { name: string; label: string; icon?: string; color?: string; pair?: true }>();
         const baseRows = [...(pub || []), ...(drafts || [])];
         for (const raw of [...baseRows, ...(pairPub || []), ...(pairDrafts || [])]) {
           const o = raw as Record<string, unknown>;
           const name = String(o.name ?? '');
           if (!name || byName.has(name)) continue;
-          const row = { name, label: String(o.label ?? o.name ?? name), icon: o.icon ? String(o.icon) : undefined };
+          const row = {
+            name,
+            label: String(o.label ?? o.name ?? name),
+            icon: o.icon ? String(o.icon) : undefined,
+            color: typeof o.color === 'string' ? o.color : undefined,
+          };
           // Held by the pair only: the entry bound to it gates on it (`requiresObject`).
           byName.set(name, baseRows.includes(raw) ? row : { ...row, pair: true });
         }
@@ -4443,6 +4454,7 @@ export function InterfacesPillar({
         </button>
       }
       icon={ifHeaderIcon}
+      objectTile={current?.type === 'object' ? { color: objectColorMap[current.name] } : undefined}
       title={
         current ? (
           <>
@@ -5401,7 +5413,7 @@ export function InterfacesPillar({
               </p>
             ) : (
               <>
-                <NavTree nodes={railTree} active={current} objectIcons={objectIconMap} onPick={pickSurface} />
+                <NavTree nodes={railTree} active={current} objectIcons={objectIconMap} objectColors={objectColorMap} onPick={pickSurface} />
                 {/* objectstack#29786 — contributed entries the app's top level
                     holds: those naming no group, and those naming a group the
                     app does not declare (the served navigation appends both). */}
@@ -6099,7 +6111,13 @@ export function DataPillar({
             client.listDrafts({ packageId: railPairId, type: 'object' }).catch(() => []),
           ]);
           const rows: Surface[] = (pairList || [])
-            .map((o) => ({ type: 'object', name: String(o.name ?? ''), label: String(o.label ?? o.name ?? ''), icon: o.icon ? String(o.icon) : undefined }))
+            .map((o) => ({
+              type: 'object',
+              name: String(o.name ?? ''),
+              label: String(o.label ?? o.name ?? ''),
+              icon: o.icon ? String(o.icon) : undefined,
+              color: typeof o.color === 'string' ? o.color : undefined,
+            }))
             .filter((o) => o.name);
           const seen = new Set(rows.map((o) => o.name));
           for (const d of pairDrafts as Array<{ name?: string | null; label?: I18nLabel | null }>) {
@@ -6118,7 +6136,13 @@ export function DataPillar({
         ]);
         if (cancelled) return;
         const baseItems: Surface[] = (list || [])
-          .map((o) => ({ type: 'object', name: String(o.name ?? ''), label: String(o.label ?? o.name ?? ''), icon: o.icon ? String(o.icon) : undefined }))
+          .map((o) => ({
+            type: 'object',
+            name: String(o.name ?? ''),
+            label: String(o.label ?? o.name ?? ''),
+            icon: o.icon ? String(o.icon) : undefined,
+            color: typeof o.color === 'string' ? o.color : undefined,
+          }))
           .filter((o) => o.name);
         const known = new Set(baseItems.map((o) => o.name));
         for (const d of draftHeaders) {
@@ -7331,6 +7355,9 @@ export function DataPillar({
   const HeaderIcon = getIcon(
     objLoaded && typeof objDraft.icon === 'string' ? (objDraft.icon as string) : current?.icon,
   );
+  // objectstack#35985 — and its palette colour, so the header draws the tile
+  // the console's menu draws for it; the draft's, as it is being edited.
+  const headerColor = objLoaded && typeof objDraft.color === 'string' ? (objDraft.color as string) : current?.color;
 
   // objectui#12459 — the object's tab row lives in the item header (the
   // skeleton's scaffold). objectui#12450 — seven flat tabs at a content column
@@ -7478,7 +7505,7 @@ export function DataPillar({
                   // sent first, or the author is asked (`openObject`).
                   if (openObject(o) && isMobile) setRailOpen(false);
                 }}
-                icon={<Icon className="h-4 w-4 shrink-0" />}
+                icon={<ObjectIconTile glyph={Icon} color={o.color} />}
                 trailing={<RailCustomizationMark row={o} marks={railMarks} locale={locale} />}
               >
                 {o.label}
@@ -7520,6 +7547,7 @@ export function DataPillar({
               </button>
             }
             icon={current ? HeaderIcon : undefined}
+            objectTile={current ? { color: headerColor } : undefined}
             title={current ? current.label : t('engine.studio.data.objects', locale)}
             // objectstack#34794 — the object's machine name is the title's
             // tooltip, not a chip beside it: the header reads as the label

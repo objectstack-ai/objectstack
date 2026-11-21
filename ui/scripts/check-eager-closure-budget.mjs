@@ -2395,7 +2395,49 @@ export const PER_CHUNK_GZIP_CEILINGS = Object.freeze({
   //
   // ⚠️ RAISED ×1.20 by objectui#12653 (2026-10-16), the maintainer's 20%
   // ruling, from 289,000 (the entry on MAX_EAGER_CLOSURE_GZIP_BYTES).
-  'ui-components': 347_000,
+  //
+  // ⚠️ RAISED (2026-11-21), from 347,000 by 8,000 bytes, ON EXPLICIT
+  // MAINTAINER RULING: objectstack#36023, comment 7063116595, option B on the
+  // seat's decision card, chosen 2026-11-21T13:12Z — 「放宽 8 KB 留余量」 (raise
+  // it by about 8 KB, with headroom). Its baseline below moved by the same
+  // amount in the same commit, which keeps the ceiling-minus-baseline gap this
+  // key carried (81,063), as objectstack#28124 did for `i18n-locale-en`.
+  // `main` sat 104 bytes under the old line, so S5 (objectstack#36039, the
+  // form's line-item grid) was ejected from the queue on it.
+  //
+  // WHAT THE BYTES ARE — one container, one instrument: `CI=true pnpm exec
+  // turbo run build --filter=@object-ui/console...`, reading
+  // `apps/console/dist/eager-closure.json`, twice on one tree: `main` at
+  // `78f7160e` alone, then the same `main` with objectstack#36039's head
+  // `fbbaaa99` merged in (`a31a993e`, local, not pushed). Gzipped bytes:
+  //
+  //   | chunk                 | `78f7160e` | `a31a993e` | delta |
+  //   |-----------------------|-----------:|-----------:|------:|
+  //   | `vendor-objectstack`  |    671,638 |    671,638 |     0 |
+  //   | `i18n-locale-en`      |     65,749 |     65,749 |     0 |
+  //   | `framework`           |     88,339 |     88,339 |     0 |
+  //   | `ui-components`       |    346,896 |    349,448 | +2,552 |
+  //   | ⇒ aggregate           |  2,028,610 |  2,031,144 | +2,534 |
+  //
+  // The same 104 eager chunks by name in both builds; besides this one, only
+  // `src` moved by more than 4 bytes (+19). Raw minified bytes of this chunk:
+  // 1,292,123 -> 1,299,070 (+6,947).
+  //
+  // WHAT THEY BUY: the +2,552 are the line-item grid's in-cell option and date
+  // panels (`GridSelectCell`, `GridDateCell`) and its pop-out text input
+  // (`GrowingCellInput`), so a form's line items edit in the cell the way a
+  // list grid does (objectstack#36023 S5). The other ~5.4 KB are SHARED
+  // headroom (355,000 − 349,448 = 5,552 once S5 lands) so the next form-field
+  // PR does not bounce at once, ⛔ not a budget for a new component group. They
+  // come back down when the follow-up card the ruling names takes GridField
+  // out of the eager chunk (it is `import()`ed but also statically exported,
+  // `packages/fields/src/index.tsx`): re-measure then and lower both numbers
+  // together. ⛔ Not moved: MAX_EAGER_CLOSURE_GZIP_BYTES (it passes on both
+  // builds), BASELINE, REGRESSION_THIS_GATE_MUST_CATCH_BYTES and the other
+  // per-chunk rows. No exemption was added and no import was made lazy. The
+  // headroom `pnpm check:eager-closure` prints on YOUR build is the figure in
+  // force, ⛔ not this one.
+  'ui-components': 355_000,
 });
 
 /**
@@ -2606,7 +2648,12 @@ export const PER_CHUNK_BASELINE = Object.freeze({
   // objectui#10996 re-pinned the aggregate onto `main` — comparable with that
   // retired reading, ⛔ not with the one above — and the same instrument and
   // container as the control build it is subtracted from (objectui#9251).
-  'ui-components': 265_937,
+  //
+  // Moved with its ceiling (2026-11-21, ruling 7063116595 on objectstack#36023),
+  // from 265,937 by the same +8,000 bytes (the entry on that key of
+  // PER_CHUNK_GZIP_CEILINGS), which keeps the ceiling-minus-baseline gap this
+  // key carried. ⚠️ So this is no longer one build's reading.
+  'ui-components': 273_937,
 });
 
 /**
