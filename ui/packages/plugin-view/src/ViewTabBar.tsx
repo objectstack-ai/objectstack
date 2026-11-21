@@ -197,16 +197,19 @@ export interface ViewTabItem {
   /** Optional tooltip shown alongside the lock icon when `readonly` is true. */
   readonlyReason?: string;
   /**
-   * On a `readonly` row only: the view's configuration may still be LOOKED
-   * AT. `ManageViewsDialog` then keeps the row's configuration entry, labelled
-   * as viewing ("View config", not "Edit view config"), and the host's
-   * `onConfigView` opens it with nothing to save; every other mutation stays
-   * hidden. Use it for a view the user may read but the server refuses to
-   * save (e.g. a view a read-only package ships). Ignored when `readonly` is
-   * not set, and absent ⇒ a read-only row offers no configuration entry, as
-   * before. `ViewTabBar` does not read it.
+   * The view's DEFINITION is read-only while its row state is not: e.g. a
+   * view a read-only package ships, whose label, pin and default the host
+   * still writes (into that package's customization), but whose definition
+   * cannot be saved and which cannot be deleted.
+   *
+   * When `true`, `ManageViewsDialog` hides Delete and labels the
+   * configuration entry as viewing ("View config", not "Edit view config"):
+   * the host's `onConfigView` opens the configuration with nothing to save.
+   * Rename, pin and set as default stay offered, and no lock icon is drawn
+   * (the row is not read-only). `readonly` wins when both are set. Absent ⇒
+   * the row behaves as before. `ViewTabBar` does not read it.
    */
-  readonlyConfigViewable?: boolean;
+  definitionReadonly?: boolean;
   /**
    * The view's description, already resolved to the viewer's language and
    * already gated by the host on the view's `appearance.showDescription`
