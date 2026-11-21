@@ -328,6 +328,11 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      remove_user_manager: {
+        label: "Remover gestor",
+        confirmText: "Remover o gestor deste usuário? Ele não se reportará a ninguém até que um gestor seja definido novamente; o roteamento de aprovações e o escopo de registros own_and_reports acompanham a mudança.",
+        successMessage: "Gestor removido"
+      },
       list_platform_admins: {
         label: "Administradores da plataforma",
         resultDialog: {
