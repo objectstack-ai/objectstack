@@ -17,7 +17,7 @@
  * guessed (objectstack#28868).
  */
 
-/** The highlights a phone's header strip shows after its subtitle. */
+/** The highlights after the subtitle's, at most; the default page draws no strip, so nothing reads them there. */
 export const PHONE_HIGHLIGHTS_MAX = 4;
 
 /** The declared text highlights the subtitle reads, at most. */

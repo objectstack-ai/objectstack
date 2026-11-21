@@ -833,9 +833,9 @@ export const BODY_TABLE_PAGE_SIZE = 10;
  *    `isBodyTableRelationship` the host computes `isBody` with);
  *  - every other body table goes AFTER the field sections the record page
  *    draws open (objectstack#35742: the record's own fields first, then its
- *    master-detail tables — 「主记录的字段分组 → 主从子表」; the header strip's
- *    stage bar and key fields sit above both, objectstack#35597's
- *    「关键字段下面」), stacked in the order given — the parent's
+ *    master-detail tables — 「主记录的字段分组 → 主从子表」; on the default
+ *    page both sit directly under the header, which draws no stage bar and
+ *    no key fields), stacked in the order given — the parent's
  *    `relatedLists`, then the derived order. The sections drawn CLOSED that
  *    trail the last open one (a group whose collapse is `collapsed`, an
  *    enumerated section that is `collapsible` and `defaultCollapsed`) follow
