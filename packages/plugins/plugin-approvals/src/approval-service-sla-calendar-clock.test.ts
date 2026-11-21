@@ -418,7 +418,7 @@ function erroringCalendarServiceAt(iso: string, failing: Set<string>) {
     clock: { now: () => new Date(nowMs) },
     workCalendar: () => ({
       async addWorkingHours(scope, start, hours) {
-        if (scope.calendar !== undefined && failing.has(scope.calendar)) {
+        if (typeof scope.calendar === 'string' && failing.has(scope.calendar)) {
           throw new Error('sys_work_calendar read failed: connection reset');
         }
         return real.addWorkingHours(scope, start, hours);
