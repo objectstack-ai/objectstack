@@ -159,14 +159,32 @@ function cellAt(container: HTMLElement, index: number): HTMLElement {
   return tds[index];
 }
 
-/** Single-click into a cell and hand back the widget's own trigger button. */
-async function openEditor(cell: HTMLElement): Promise<HTMLButtonElement> {
+/**
+ * Single-click into a cell and hand back the lookup's in-cell face. Since
+ * objectstack#35688 S3 the cell's editor IS the candidate list (no trigger
+ * button to press first): the list is open, the gate shows as a hint in its
+ * place, and "Browse all" sits under it.
+ */
+async function openEditor(cell: HTMLElement): Promise<HTMLElement> {
   fireEvent.click(cell);
   return await waitFor(() => {
-    const btn = cell.querySelector('button');
-    expect(btn).toBeTruthy();
-    return btn as HTMLButtonElement;
+    const panel = cell.querySelector('[data-testid="lookup-in-cell"]');
+    expect(panel).toBeTruthy();
+    return panel as HTMLElement;
   });
+}
+
+/**
+ * Esc where the user presses it: on whatever holds focus inside the cell's
+ * editor (the list's search box), so it reaches the grid's own key handling.
+ */
+function pressEscape(): void {
+  fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+}
+
+/** The in-cell face's gate hint, or null when the list is usable. */
+function gateOf(panel: HTMLElement): HTMLElement | null {
+  return panel.querySelector('[data-testid="lookup-in-cell-gated"]');
 }
 
 describe('objectui#7166 — the three retired keys were never delivered by this bag', () => {
@@ -252,19 +270,19 @@ describe('objectui#7166 — the three retired keys were never delivered by this 
     // Declared: the author's `email` is previewed under each option, with the
     // key off the copy set — it arrived through the editor's schema spread.
     const declared = cellAt(container, 1);
-    fireEvent.click(await openEditor(declared));
+    await openEditor(declared);
     await waitFor(() => expect(screen.getByText('Person 01')).toBeInTheDocument());
     await waitFor(() => {
       expect(document.querySelectorAll('[data-lookup-preview="email"]').length).toBeGreaterThan(0);
     });
     expect(screen.getByText('p1@north.example')).toBeInTheDocument();
-    fireEvent.keyDown(document.body, { key: 'Escape' });
+    pressEscape();
     await waitFor(() => expect(document.querySelectorAll('[data-lookup-preview="email"]').length).toBe(0));
 
     // CONTROL — same reference, same records, nothing declared: the two-field
     // referenced schema derives no extra column, so there is no preview line.
     const control = cellAt(container, 2);
-    fireEvent.click(await openEditor(control));
+    await openEditor(control);
     await waitFor(() => expect(screen.getByText('Person 01')).toBeInTheDocument());
     expect(document.querySelectorAll('[data-lookup-preview]').length).toBe(0);
   });
@@ -287,17 +305,17 @@ describe('objectui#7166 — the three retired keys were never delivered by this 
 
     // Declared: `region` is a picker column, so it previews under each option.
     const declared = cellAt(container, 1);
-    fireEvent.click(await openEditor(declared));
+    await openEditor(declared);
     await waitFor(() => expect(screen.getByText('Person 01')).toBeInTheDocument());
     await waitFor(() => {
       expect(document.querySelectorAll('[data-lookup-preview="region"]').length).toBeGreaterThan(0);
     });
-    fireEvent.keyDown(document.body, { key: 'Escape' });
+    pressEscape();
     await waitFor(() => expect(document.querySelectorAll('[data-lookup-preview="region"]').length).toBe(0));
 
     // CONTROL — nothing declared, nothing derived, no preview.
     const control = cellAt(container, 2);
-    fireEvent.click(await openEditor(control));
+    await openEditor(control);
     await waitFor(() => expect(screen.getByText('Person 01')).toBeInTheDocument());
     expect(document.querySelectorAll('[data-lookup-preview]').length).toBe(0);
   });
@@ -326,17 +344,17 @@ describe('objectui#7166 — the three retired keys were never delivered by this 
     // Declared: only the `south` half is offered — the author's hard scope
     // reached the picker with the key off the copy set.
     const declared = cellAt(container, 1);
-    fireEvent.click(await openEditor(declared));
+    await openEditor(declared);
     await waitFor(() => expect(screen.getByText('Person 04')).toBeInTheDocument());
     expect(screen.queryByText('Person 01')).not.toBeInTheDocument();
     expect(ds.refQueries.some((q: any) => q?.$filter?.region === 'south')).toBe(true);
-    fireEvent.keyDown(document.body, { key: 'Escape' });
+    pressEscape();
     await waitFor(() => expect(screen.queryByText('Person 04')).not.toBeInTheDocument());
 
     // CONTROL — the same six records, unscoped: the north half is offered too,
     // which is what makes the absence above a filter and not an empty fixture.
     const control = cellAt(container, 2);
-    fireEvent.click(await openEditor(control));
+    await openEditor(control);
     await waitFor(() => expect(screen.getByText('Person 01')).toBeInTheDocument());
     expect(screen.getByText('Person 04')).toBeInTheDocument();
   });

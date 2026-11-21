@@ -119,16 +119,35 @@ const { ADAPTER, WORLD, GATED_REASON } = vi.hoisted(() => {
     }
     return { item: { name, content: holders.length ? CONFLICT_CONTENT[holders[0]][name] : undefined } };
   };
-  const WORLD = { authored: false, conflict: false, exact: false, reads: [] as Array<string | undefined> };
+  // objectstack#35424 — the "All documentation" page's world: the apps the
+  // caller's `/meta/app` lists, a platform package's doc switched on by
+  // `platform`, and every `?include=content` list read the page asks.
+  const PLATFORM_DOCS = [{ name: 'setup_overview', label: 'Setup overview', _packageId: 'com.objectstack.setup' }];
+  const PLATFORM_CONTENT: Record<string, string> = { setup_overview: 'ADMIN BODY about permission sets' };
+  const WORLD = {
+    authored: false,
+    conflict: false,
+    exact: false,
+    platform: false,
+    reads: [] as Array<string | undefined>,
+    apps: [] as Array<Record<string, unknown>>,
+    contentReads: 0,
+  };
   const ADAPTER = {
     getClient: () => ({
       meta: {
-        getItems: async (type: string) =>
-          WORLD.conflict
+        getItems: async (type: string, options?: { include?: string }) => {
+          const list = WORLD.conflict
             ? (type === 'doc' ? CONFLICT_DOCS : []) // implicit books only
             : WORLD.authored
-            ? (type === 'doc' ? AUTHORED_DOCS : type === 'book' ? AUTHORED_BOOKS : [])
-            : (type === 'doc' ? DOCS : []), // no authored books
+            ? (type === 'doc' ? [...AUTHORED_DOCS, ...(WORLD.platform ? PLATFORM_DOCS : [])] : type === 'book' ? AUTHORED_BOOKS : [])
+            : (type === 'doc' ? DOCS : []); // no authored books
+          if (type !== 'doc' || options?.include !== 'content') return list;
+          // The list with every body, as `GET /meta/doc?include=content` serves it.
+          WORLD.contentReads += 1;
+          const bodies: Record<string, string> = { ...CONTENT, ...AUTHORED_CONTENT, ...PLATFORM_CONTENT };
+          return list.map((d) => ({ ...d, content: bodies[d.name] }));
+        },
         getItem: async (_type: string, name: string, options?: { packageId?: string }) =>
           WORLD.conflict
             ? conflictRead(name, options?.packageId)
@@ -142,6 +161,8 @@ const { ADAPTER, WORLD, GATED_REASON } = vi.hoisted(() => {
 vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useAdapter: () => ADAPTER,
+  // The apps `/meta/app` serves this caller (objectstack#35424); none by default.
+  useMetadata: () => ({ apps: WORLD.apps }),
 }));
 
 // A `{#id}` marker in a doc body stands for a heading with that anchor id. Like
@@ -176,7 +197,11 @@ vi.mock('@object-ui/plugin-markdown', async (importOriginal) => {
 
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  useObjectTranslation: () => ({ t: (_k: string, o?: { defaultValue?: string }) => o?.defaultValue ?? _k }),
+  // Interpolates `{{name}}` from the options, as i18next does.
+  useObjectTranslation: () => ({
+    t: (_k: string, o?: { defaultValue?: string } & Record<string, unknown>) =>
+      (o?.defaultValue ?? _k).replace(/\{\{(\w+)\}\}/g, (_m, name: string) => String(o?.[name] ?? '')),
+  }),
 }));
 
 // Imported AFTER the mocks so the pages pick up the mocked modules.
@@ -360,8 +385,14 @@ describe('objectui#11197 — a book NAME reaches the book, and nothing that reso
       expect(await landsOn('/docs/handbook')).toEqual({ where: '/docs/handbook/alpha_welcome', content: 'ALPHA BODY' });
     });
 
-    it('…and as a reader segment it stays the slug\'s book: no redirect', async () => {
-      expect(await landsOn('/docs/handbook/beta_start')).toEqual({ where: '/docs/handbook/beta_start', content: 'BETA BODY' });
+    it('…and as a reader segment it is the slug\'s book: a doc of that book stays, with no redirect', async () => {
+      expect(await landsOn('/docs/handbook/alpha_welcome')).toEqual({ where: '/docs/handbook/alpha_welcome', content: 'ALPHA BODY' });
+    });
+
+    it('…while a doc the slug\'s book does not hold reads in its own book (objectstack#35424), never in the book NAMED like the slug', async () => {
+      // `beta_start` is in the book whose slug is `beta` (and whose name is
+      // `handbook`); `handbook` the slug is alpha's book, which does not hold it.
+      expect(await landsOn('/docs/handbook/beta_start')).toEqual({ where: '/docs/beta/beta_start', content: 'BETA BODY' });
     });
 
     it('a segment that is both an installed DOC\'s name and a BOOK\'s name stays the doc permalink', async () => {
@@ -775,5 +806,152 @@ describe('objectstack#35424 — the in-app reader has one docs column and a path
       const bar = screen.getByTestId('docs-back-bar');
       expect(within(bar).getByTestId('docs-nav-back')).toHaveAttribute('href', '/apps/com.example.showcase');
     });
+  });
+});
+
+describe('objectstack#35424 — 「All documentation」 groups its books by app and searches every article', () => {
+  function Where() {
+    const loc = useLocation();
+    return <div data-testid="where">{`${loc.pathname}${loc.search}`}</div>;
+  }
+  function Portal({ entry }: { entry: string }) {
+    return (
+      <MemoryRouter initialEntries={[entry]}>
+        <Where />
+        <Routes>
+          <Route path="/docs" element={<DocsLayout />}>
+            <Route index element={<DocsIndex />} />
+            <Route path=":slug" element={<DocsSlug />} />
+            <Route path=":slug/:name" element={<DocPage />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>
+    );
+  }
+  const SETUP_APP = { name: 'setup', label: 'Setup', _packageId: 'com.objectstack.setup', navigation: [] };
+  /** The cards of the group headed `label`, by their titles. */
+  const groupCards = (label: string) => {
+    const heading = screen.getByRole('heading', { level: 2, name: label });
+    const section = heading.closest('section')!;
+    return within(section).getAllByRole('link').map((l) => l.firstElementChild?.textContent);
+  };
+
+  beforeEach(() => {
+    WORLD.authored = true;
+    WORLD.contentReads = 0;
+    WORLD.apps = [
+      { name: 'showcase_app', label: 'Showcase', _packageId: 'com.example.showcase', navigation: [] },
+      // Beta's handbook is linked from Alpha's navigation, in a group.
+      {
+        name: 'alpha_app',
+        label: 'Alpha',
+        _packageId: 'com.example.alpha',
+        navigation: [{ id: 'help', type: 'group', children: [{ id: 'nav_beta', type: 'doc', book: 'handbook' }] }],
+      },
+    ];
+  });
+  afterEach(() => {
+    WORLD.authored = false;
+    WORLD.platform = false;
+    WORLD.apps = [];
+  });
+
+  it('a book goes under the app whose navigation links it, else its package\'s app; the rest under 「Other documentation」', async () => {
+    render(<Portal entry="/docs" />);
+    await screen.findByRole('heading', { level: 2, name: 'Showcase' });
+    expect(groupCards('Showcase')).toEqual(['Showcase Manual', 'Leads Book']);
+    expect(groupCards('Alpha')).toEqual(['Alpha Manual', 'Beta Handbook']);
+    expect(groupCards('Other documentation')).toEqual(['Acme Manual', 'Ops']);
+    // The groups follow the apps' order, the ungrouped last.
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
+      'Showcase',
+      'Alpha',
+      'Other documentation',
+    ]);
+    // The page names no package id, and counts in words.
+    expect(screen.queryByText(/com\.example/)).toBeNull();
+    expect(screen.getAllByText('1 article').length).toBeGreaterThan(0);
+  });
+
+  it('a platform package\'s book is listed under its app, and not listed where the caller\'s app list has no such app', async () => {
+    WORLD.platform = true;
+    render(<Portal entry="/docs" />);
+    await screen.findByRole('heading', { level: 2, name: 'Showcase' });
+    expect(screen.queryByText('Setup')).toBeNull();
+    cleanup();
+
+    // An administrator's app list carries the Setup app: its docs are listed
+    // under it, named by the app, after the business apps.
+    WORLD.apps = [...WORLD.apps, SETUP_APP];
+    render(<Portal entry="/docs" />);
+    await screen.findByRole('heading', { level: 2, name: 'Setup' });
+    expect(groupCards('Setup')).toEqual(['Setup']);
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
+      'Showcase',
+      'Alpha',
+      'Setup',
+      'Other documentation',
+    ]);
+    expect(screen.queryByText('com.objectstack.setup')).toBeNull();
+  });
+
+  it('「Search all documentation」 finds an article by a word of its body, asks for the bodies once, and keeps the query in the URL', async () => {
+    render(<Portal entry="/docs" />);
+    await screen.findByRole('heading', { level: 2, name: 'Showcase' });
+    expect(WORLD.contentReads).toBe(0); // nothing asked before a search
+    const search = screen.getByRole('searchbox', { name: 'Search all documentation' });
+    fireEvent.change(search, { target: { value: 'alpha body' } });
+    const results = await screen.findByTestId('docs-search-results');
+    const hit = within(results).getByRole('link', { name: /Alpha Welcome/ });
+    expect(hit).toHaveAttribute('href', '/docs/handbook/alpha_welcome');
+    expect(within(hit).getByText('Alpha Manual')).toBeInTheDocument();
+    // The words are marked in the snippet.
+    expect(within(hit).getAllByText(/alpha|body/i, { selector: 'mark' }).length).toBeGreaterThan(0);
+    expect(screen.getByTestId('where')).toHaveTextContent('/docs?q=alpha+body');
+    // The groups give way to the results while searching.
+    expect(screen.queryByRole('heading', { level: 2 })).toBeNull();
+
+    fireEvent.change(search, { target: { value: 'zzz' } });
+    expect(await screen.findByText('No articles match.')).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: '' } });
+    await screen.findByRole('heading', { level: 2, name: 'Showcase' });
+    fireEvent.change(search, { target: { value: 'lead' } });
+    await screen.findByTestId('docs-search-results');
+    expect(WORLD.contentReads).toBe(1);
+  });
+
+  it('the search offers no article the page does not list (a platform doc with no app in the caller\'s list)', async () => {
+    WORLD.platform = true;
+    render(<Portal entry="/docs?q=permission" />);
+    expect(await screen.findByText('No articles match.')).toBeInTheDocument();
+    cleanup();
+    WORLD.apps = [...WORLD.apps, SETUP_APP];
+    render(<Portal entry="/docs?q=permission" />);
+    const results = await screen.findByTestId('docs-search-results');
+    expect(within(results).getByRole('link', { name: /Setup overview/ })).toHaveAttribute(
+      'href',
+      '/docs/com.objectstack.setup/setup_overview',
+    );
+  });
+
+  it('the label is not the docs column\'s 「Search docs」', async () => {
+    render(<Portal entry="/docs" />);
+    await screen.findByRole('heading', { level: 2, name: 'Showcase' });
+    expect(screen.queryByRole('searchbox', { name: 'Search docs' })).toBeNull();
+  });
+
+  it('a hand-typed reader URL whose book does not hold the doc reads in the doc\'s own book', async () => {
+    render(<Portal entry="/docs/manual/alpha_welcome" />);
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/docs/handbook/alpha_welcome'));
+    expect(await screen.findByTestId('doc-content')).toHaveTextContent('ALPHA BODY');
+    // The pager is the doc's own book's: one article, so both ends say so.
+    expect(screen.getByTestId('doc-pager-first')).toBeInTheDocument();
+    expect(screen.getByTestId('doc-pager-last')).toBeInTheDocument();
+  });
+
+  it('CONTROL: a reader URL whose book holds the doc stays where it is', async () => {
+    render(<Portal entry="/docs/manual/showcase_index" />);
+    expect(await screen.findByTestId('doc-content')).toHaveTextContent('INDEX BODY');
+    expect(screen.getByTestId('where')).toHaveTextContent('/docs/manual/showcase_index');
   });
 });

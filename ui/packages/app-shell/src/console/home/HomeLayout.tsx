@@ -133,9 +133,15 @@ interface HomeLayoutProps {
    * reads the session user itself.
    */
   userId?: string;
+  /**
+   * The bar's variant: `home` (the default), or `docs` for the documentation
+   * portal (`/docs/*`, objectstack#35424), which is the home bar with a
+   * 「/ Documentation」 crumb.
+   */
+  variant?: 'home' | 'docs';
 }
 
-export function HomeLayout({ children }: HomeLayoutProps) {
+export function HomeLayout({ children, variant = 'home' }: HomeLayoutProps) {
   const { setContext, currentAppName } = useNavigationContext();
   const { user } = useAuth();
   // The shared `current_user` normaliser, keyed on the session user (objectui#6515).
@@ -162,7 +168,7 @@ export function HomeLayout({ children }: HomeLayoutProps) {
 
   const header = (
     <header className={CONSOLE_TOP_BAR}>
-      <AppHeader variant="home" />
+      <AppHeader variant={variant} />
     </header>
   );
 

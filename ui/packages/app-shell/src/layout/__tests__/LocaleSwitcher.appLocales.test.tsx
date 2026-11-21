@@ -1,23 +1,18 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * LocaleSwitcher — the menu is the app's locale list, not a constant
- * (objectui#4039, migrated from objectstack#5418).
+ * LocaleSwitcher — one language list on the sign-in page and in the app
+ * (objectstack#35425, maintainer ruling option A).
  *
- * The switcher used to build its items from a module-level `LANGUAGES` array:
- * exactly the ten codes `@object-ui/i18n` ships packs for, never asking the app
- * which locales it actually has. That failed in both directions at once —
- * an app shipping `th` could not offer it from the console at all, and an app
- * shipping only `en`+`zh` still listed all ten, so picking 日本語 handed the
- * user a half-translated UI its author never opted into.
- *
- * The ruling on the card is INTERSECTION, narrowed by ruling F of
- * objectstack#29349 (objectstack#30514): (the platform locale table) ∩ (the
- * app's `/api/v1/i18n/locales` response, read through the table's read
- * aliases). Each entry is a table tag with the table's own label, two
- * spellings of one language are one entry, and a code the table does not
- * name (`th`) is not offered. The table's tags survive alone as the
- * offline/no-backend fallback.
+ * The menu used to be (the platform locale table) ∩ (the app's
+ * `/api/v1/i18n/locales` answer), per ruling F of objectstack#29349
+ * (objectstack#30514). The sign-in page has no session to ask the app with,
+ * so it listed the whole table, and a language picked there (German, Korean)
+ * was missing from the menu after sign-in. Now both list every table
+ * language. The app's own list decides only which rows carry the hint that
+ * the app's content shows in the default language. Each entry is a table
+ * tag with the table's own label, and a code the table does not name (`th`)
+ * is still not offered.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -33,7 +28,7 @@ vi.mock('@object-ui/components', async (importOriginal) => ({
   DropdownMenu: (p: any) => <div>{p.children}</div>,
   DropdownMenuTrigger: (p: any) => <div>{p.children}</div>,
   DropdownMenuContent: (p: any) => <div>{p.children}</div>,
-  DropdownMenuItem: ({ onClick, children }: any) => <div onClick={onClick}>{children}</div>,
+  DropdownMenuItem: ({ onClick, children }: any) => <div data-row onClick={onClick}>{children}</div>,
 }));
 vi.mock('lucide-react', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -44,11 +39,10 @@ import { PLATFORM_LOCALES, PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system
 import { LocaleSwitcher, localeLabel } from '../LocaleSwitcher';
 
 /**
- * The eight built-in native names an app shipping only `en`+`zh-Hans` must NOT
- * show: every platform locale table language but English and Chinese, named as
- * the menu names them (from the table's own labels).
+ * Every platform locale table language but English and Chinese, named as the
+ * menu names them (from the table's own labels).
  */
-const PHANTOM_LABELS = PLATFORM_LOCALE_TAGS
+const NOT_EN_OR_ZH_LABELS = PLATFORM_LOCALE_TAGS
   .filter((tag) => tag !== 'en' && !tag.startsWith('zh-'))
   .map(localeLabel);
 
@@ -76,15 +70,94 @@ beforeEach(() => {
   window.localStorage.clear();
 });
 
-describe('LocaleSwitcher — menu composed from the app locale list', () => {
+/** The hint a row carries when the app's content is not translated into it. */
+const HINT = 'App content shows in the default language';
+
+/** The menu row (the item) a language label sits in. */
+function rowOf(label: string): HTMLElement {
+  const item = screen.getByText(label).closest('[data-row]');
+  if (!(item instanceof HTMLElement)) throw new Error(`no menu row for ${label}`);
+  return item;
+}
+
+describe('LocaleSwitcher — every table language, the app list marks the hint', () => {
+  it('lists all eleven table languages for an app that ships four', async () => {
+    mountConsole({ locales: async () => ['en', 'zh-CN', 'ja-JP', 'es-ES'] });
+
+    // HotCRM's declaration. Before objectstack#35425 the menu stopped at
+    // these four; the sign-in page listed eleven.
+    await waitFor(() => expect(screen.getAllByText(HINT)).toHaveLength(7));
+    for (const label of BUILT_IN_PACK_LABELS) expect(screen.getAllByText(label)).toHaveLength(1);
+  });
+
+  it('marks exactly the languages the app ships no translation for', async () => {
+    mountConsole({ locales: async () => ['en', 'zh-CN', 'ja-JP', 'es-ES'] });
+
+    await waitFor(() => expect(screen.getAllByText(HINT)).toHaveLength(7));
+    for (const shipped of ['English', '简体中文', '日本語', 'Español']) {
+      expect(rowOf(shipped).textContent, shipped).not.toContain(HINT);
+    }
+    for (const label of NOT_EN_OR_ZH_LABELS.filter((l) => !['日本語', 'Español'].includes(l))) {
+      expect(rowOf(label).textContent, label).toContain(HINT);
+    }
+  });
+
+  it('keeps a language picked on the sign-in page selectable and ticked after sign-in', async () => {
+    // Picked signed out (no app list), then the signed-in page load asks the
+    // app, which does not ship German.
+    window.localStorage.setItem(LOCALE_STORAGE_KEY, 'de');
+    mountConsole({ locales: async () => ['en', 'zh-CN'] });
+
+    // The hint reads in the interface language: German here.
+    await waitFor(() =>
+      expect(rowOf('Deutsch').textContent).toContain('App-Inhalte erscheinen in der Standardsprache'),
+    );
+    expect(rowOf('Deutsch').textContent).toContain('✓');
+    expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('de');
+  });
+
+  it('marks nothing while the app list is not known: signed out, in flight, failed or empty', async () => {
+    let answer: (codes: string[]) => void = () => {};
+    const pending = new Promise<string[]>((resolve) => { answer = resolve; });
+    mountConsole({ locales: () => pending });
+
+    // In flight: the whole list at once (nothing to wait for), no hint yet.
+    for (const label of BUILT_IN_PACK_LABELS) expect(screen.getByText(label)).toBeInTheDocument();
+    expect(screen.queryByText(HINT)).not.toBeInTheDocument();
+
+    // Signed out, the console's loader answers `[]` without a request.
+    answer([]);
+    await Promise.resolve();
+    expect(screen.queryByText(HINT)).not.toBeInTheDocument();
+    for (const label of BUILT_IN_PACK_LABELS) expect(screen.getByText(label)).toBeInTheDocument();
+  });
+
+  it('marks nothing when the endpoint fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mountConsole({ locales: async () => { throw new Error('ECONNREFUSED'); } });
+
+    await waitFor(() => expect(warn).toHaveBeenCalled());
+    for (const label of BUILT_IN_PACK_LABELS) expect(screen.getByText(label)).toBeInTheDocument();
+    expect(screen.queryByText(HINT)).not.toBeInTheDocument();
+    warn.mockRestore();
+  });
+
+  it('marks nothing for an app answer that names no table language', async () => {
+    mountConsole({ locales: async () => ['th'] });
+
+    // "I don't know", as an empty answer: a hint on all eleven would claim
+    // the app is translated into none of them.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByText(HINT)).not.toBeInTheDocument();
+    expect(screen.queryByText('ไทย')).not.toBeInTheDocument();
+  });
+
   it('does not offer an app locale the platform locale table does not name', async () => {
     mountConsole({ locales: async () => ['en', 'zh-Hans', 'th'] });
 
     // `th` has no Console pack, no Studio catalogue, no platform bundle and no
-    // built-in email: offering it would offer an incomplete language, which
-    // ruling F rules out. The app's other entries stay.
-    await waitFor(() => expect(screen.getByText('English')).toBeInTheDocument());
-    expect(screen.getByText('简体中文')).toBeInTheDocument();
+    // built-in email: offering it would offer an incomplete language.
+    await waitFor(() => expect(screen.getAllByText(HINT)).toHaveLength(9));
     expect(screen.queryByText('ไทย')).not.toBeInTheDocument();
   });
 
@@ -95,33 +168,20 @@ describe('LocaleSwitcher — menu composed from the app locale list', () => {
       loader: false,
     });
 
-    await waitFor(() => expect(screen.getByText('English')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText(HINT)).toHaveLength(10));
     expect(screen.queryByText('ไทย')).not.toBeInTheDocument();
   });
 
-  it.each([
-    ['app-crm / app-showcase', ['en', 'zh-CN'], ['English', '简体中文']],
-    ['app-todo', ['en', 'zh-CN', 'ja-JP'], ['English', '简体中文', '日本語']],
-    ['HotCRM sales', ['en', 'zh-CN', 'ja-JP', 'es-ES'], ['English', '简体中文', '日本語', 'Español']],
-  ])('reads a %s declaration in stored spellings as table entries, with table labels', async (_app, declared, labels) => {
-    mountConsole({ locales: async () => declared });
+  it('reads stored spellings as table entries: one row each, table labels, not marked', async () => {
+    mountConsole({ locales: async () => ['en', 'zh-CN', 'zh-Hans', 'ja-JP'] });
 
-    await waitFor(() => expect(screen.getByText('English')).toBeInTheDocument());
-    // Each table row once, never the CLDR name of the stored spelling
-    // (中文（中国）, 日本語 (日本), Español de España).
-    for (const label of labels) expect(screen.getAllByText(label)).toHaveLength(1);
+    await waitFor(() => expect(screen.getAllByText(HINT)).toHaveLength(8));
+    for (const label of ['English', '简体中文', '日本語']) {
+      expect(screen.getAllByText(label)).toHaveLength(1);
+      expect(rowOf(label).textContent, label).not.toContain(HINT);
+    }
     expect(screen.queryByText('中文（中国）')).not.toBeInTheDocument();
     expect(screen.queryByText('日本語 (日本)')).not.toBeInTheDocument();
-    expect(screen.queryByText('Español de España')).not.toBeInTheDocument();
-  });
-
-  it('lists a stored spelling beside its own table tag as ONE entry', async () => {
-    mountConsole({ locales: async () => ['en', 'zh-CN', 'zh-Hans'] });
-
-    await waitFor(() => expect(screen.getByText('English')).toBeInTheDocument());
-    // One pack, one entry.
-    expect(screen.getAllByText('简体中文')).toHaveLength(1);
-    expect(screen.queryByText('中文（中国）')).not.toBeInTheDocument();
   });
 
   it('ticks the table entry for a session running in a stored spelling', async () => {
@@ -130,47 +190,8 @@ describe('LocaleSwitcher — menu composed from the app locale list', () => {
     mountConsole({ locales: async () => ['en', 'zh-CN'] });
 
     await waitFor(() => expect(screen.getByText('简体中文')).toBeInTheDocument());
-    expect(screen.getByText('简体中文').textContent).toContain('✓');
-    expect(screen.getByText('English').textContent).not.toContain('✓');
-  });
-
-  it('names a regional app locale, capitalized like the built-in labels', async () => {
-    mountConsole({ locales: async () => ['en', 'pt-BR'] });
-
-    // The exact CLDR string moves with ICU versions; what this pins is that a
-    // regional tag gets a real display name (not the bare code) and that it
-    // does not arrive lowercase next to `English`.
-    await waitFor(() => expect(screen.queryByText('English')).toBeInTheDocument());
-    const item = screen.getByText((text) => text.startsWith('Portugu'));
-    expect(item.textContent).not.toBe('pt-BR');
-  });
-
-  it('shows ONLY what the app ships — the phantom eight are gone', async () => {
-    mountConsole({ locales: async () => ['en', 'zh-Hans'] });
-
-    await waitFor(() => expect(screen.getByText('English')).toBeInTheDocument());
-    expect(screen.getByText('简体中文')).toBeInTheDocument();
-    for (const phantom of PHANTOM_LABELS) {
-      expect(screen.queryByText(phantom)).not.toBeInTheDocument();
-    }
-  });
-
-  it('falls back to the built-in packs when the endpoint fails', async () => {
-    mountConsole({ locales: async () => { throw new Error('ECONNREFUSED'); } });
-
-    // No backend is not "this app ships nothing" — the switcher must stay
-    // usable, offering everything this renderer can produce on its own.
-    await waitFor(() => expect(screen.getByText('English')).toBeInTheDocument());
-    for (const label of BUILT_IN_PACK_LABELS) {
-      expect(screen.getByText(label)).toBeInTheDocument();
-    }
-  });
-
-  it('falls back to the built-in packs when the app answers with nothing usable', async () => {
-    mountConsole({ locales: async () => [] });
-
-    await waitFor(() => expect(screen.getByText('English')).toBeInTheDocument());
-    expect(screen.getByText('日本語')).toBeInTheDocument();
+    expect(rowOf('简体中文').textContent).toContain('✓');
+    expect(rowOf('English').textContent).not.toContain('✓');
   });
 
   it('keeps the built-in native names rather than re-deriving them', async () => {
@@ -183,36 +204,17 @@ describe('LocaleSwitcher — menu composed from the app locale list', () => {
     expect(screen.getByText('Русский')).toBeInTheDocument();
   });
 
-  it('renders nothing until the app has answered — no flash of the fallback ten', async () => {
-    let answer: (codes: string[]) => void = () => {};
-    const pending = new Promise<string[]>((resolve) => { answer = resolve; });
-    const { container } = mountConsole({ locales: () => pending });
-
-    // In flight: not the ten, not two, nothing at all. The sibling menus in
-    // this folder (AppSwitcher, WorkspaceSwitcher) do the same with data they
-    // do not have yet.
-    expect(container.firstChild).toBeNull();
-    expect(screen.queryByText('English')).not.toBeInTheDocument();
-
-    answer(['en', 'zh-Hans']);
-
-    await waitFor(() => expect(screen.getByText('English')).toBeInTheDocument());
-    expect(screen.queryByText('日本語')).not.toBeInTheDocument();
-  });
-
-  it('offers the built-in packs when no locale endpoint is wired at all', async () => {
+  it('offers the table languages, unmarked, when no locale endpoint is wired at all', () => {
     render(
       <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}>
         <LocaleSwitcher />
       </I18nProvider>,
     );
 
-    // An app that never wires `loadLocales` keeps exactly today's menu, with
-    // no blank frame in front of it.
-    expect(screen.getByText('English')).toBeInTheDocument();
     for (const label of BUILT_IN_PACK_LABELS) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
+    expect(screen.queryByText(HINT)).not.toBeInTheDocument();
   });
 });
 

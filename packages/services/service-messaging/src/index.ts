@@ -103,6 +103,7 @@ export {
     SLACK_ADMIN_CAPABILITY,
 } from './slack-link-routes.js';
 export type { SlackLinkRoutesDeps } from './slack-link-routes.js';
+export { SLACK_SETUP_UI_BUNDLE, SLACK_SETUP_COMPONENT_REF } from './slack-setup-ui.js';
 
 // [#24978] Keyed notification text — `EmitInput.keyedText`, rendered per
 // recipient at delivery from the `i18n` service's catalog.
