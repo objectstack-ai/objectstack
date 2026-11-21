@@ -120,6 +120,26 @@ describe('card list selection on a phone (objectstack#35883)', () => {
     expect(onRowClick).not.toHaveBeenCalled();
   });
 
+  it('a long press the browser ends with no click does not swallow the next tap', async () => {
+    const { onRowSelect } = renderCards();
+    const acme = await cardOf('Acme');
+    fireEvent.pointerDown(acme, { clientX: 10, clientY: 10 });
+    await hold(600);
+    fireEvent.pointerUp(acme);
+    // No click follows the press (Android after its context menu, a finger that slid off).
+    expect(acme).toHaveAttribute('aria-pressed', 'true');
+
+    const globex = await cardOf('Globex');
+    fireEvent.pointerDown(globex, { clientX: 10, clientY: 60 });
+    fireEvent.pointerUp(globex);
+    fireEvent.click(globex);
+    expect(globex, 'one tap ticks it').toHaveAttribute('aria-pressed', 'true');
+    expect(onRowSelect).toHaveBeenLastCalledWith([
+      expect.objectContaining({ id: 'a1' }),
+      expect.objectContaining({ id: 'a2' }),
+    ]);
+  });
+
   it('a press that moves (a scroll) starts nothing; a plain tap opens the record', async () => {
     const { onRowClick } = renderCards();
     const acme = await cardOf('Acme');

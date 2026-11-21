@@ -4129,9 +4129,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
             cardSelected && 'border-primary bg-primary/5',
           )}
           onPointerDown={(event) => {
-            if (!cardsSelectable || cardSelecting) return;
             const press = longPress.current;
+            // A fresh press never inherits the last one's flag: a long press
+            // the browser ended with no click (a finger that slid off, Android
+            // after its context menu) would otherwise swallow this tap.
             press.fired = false;
+            if (!cardsSelectable || cardSelecting) return;
             press.x = event.clientX;
             press.y = event.clientY;
             if (press.timer) clearTimeout(press.timer);

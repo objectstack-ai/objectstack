@@ -89,6 +89,8 @@ const selectRequests = new Map<HTMLElement, number>();
  */
 export function requestListSelection(scope: HTMLElement | null): void {
   if (!scope) return;
+  // A page column that has left the document asks nothing any more.
+  for (const held of selectRequests.keys()) if (!held.isConnected) selectRequests.delete(held);
   selectRequests.set(scope, (selectRequests.get(scope) ?? 0) + 1);
   emit();
 }
