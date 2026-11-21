@@ -102,7 +102,7 @@ describe('--schema-masking: the flag, and the variable the shell carries', () =>
 describe('the round record', () => {
   it('stamps a masking-off round, and leaves a default round’s record as it was', async () => {
     const fx = await runCrm({ modes: ['scratch'] });
-    const meta = { run: 'r', date: '2026-11-21', framework: 'abc1234', packages: { source: 'published' as const, versions: ['18.6.0'] }, driver: { driver: 'claude' }, runner: 'scenario-runner', evidenceDir: fx.work };
+    const meta = { run: 'r', date: '2026-11-21', framework: 'abc1234', packages: { source: 'published' as const, versions: ['18.6.0'] }, driver: { driver: 'claude', apiBilled: false as const }, runner: 'scenario-runner', evidenceDir: fx.work };
     const plain = runRecord(meta, fx.cardRun);
     const off = runRecord({ ...meta, schemaMasking: 'off' }, fx.cardRun);
 
