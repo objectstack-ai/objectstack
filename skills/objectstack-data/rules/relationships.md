@@ -408,13 +408,11 @@ export default ObjectSchema.create({
 
 ## Record owner, and other people on a record
 
-The owner is the platform's `owner_id` (`ownership: 'user'`, the default), never a
-hand-added owner field (SKILL.md § Relationship Patterns). A handler the request
-names apart from the owner is a `user` field that grants no access, with a label
+Beyond `SKILL.md` § Relationship Patterns: a handler the request names apart
+from the owner is a `user` field that grants no access, with a label
 no other visible field carries, injected ones included: `owner_id` (Owner, 负责人),
 `created_by` (创建人), `updated_by` (更新人), `created_at` (创建时间), `updated_at`
 (更新时间). `ownership: 'none'` only for a shared catalog or a pure junction table.
 
-A multi-value `lookup` (`multiple: true`) is stored and read as an **array of
-ids** on the record, not a junction object: reference elements positionally
-(`record.tags[0]` in a flow's CEL).
+A multi-value `lookup` is read as that array: reference its elements
+positionally (`record.tags[0]` in a flow's CEL).

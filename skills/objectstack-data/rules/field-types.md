@@ -3,7 +3,7 @@
 - [Two spellings: `Field.*` factory or object literal](#two-spellings-field-factory-or-object-literal)
 - [Text & Content](#text--content) · [Numbers](#numbers) · [Date & Time](#date--time) · [Logic](#logic) · [Selection](#selection)
 - [Relational](#relational) · [Media](#media) · [Embedded](#embedded-json-sub-objects) · [Calculated](#calculated) · [Enhanced Types](#enhanced-types)
-- [Common Field Configurations](#common-field-configurations) · [Choosing a type](#choosing-a-type) · [Changing a field that has data](#changing-a-field-that-has-data)
+- [Common Field Configurations](#common-field-configurations)
 
 ## Two spellings: `Field.*` factory or object literal
 
@@ -268,23 +268,19 @@ The `format` is literal text interleaved with `{...}` tokens:
 
 ## Choosing a type
 
-Credentials are `secret` (**encrypted-at-rest**, ADR-0100), never `password`,
-which on a generic object is **plaintext at rest**; `user` is the person picker.
+Beyond `SKILL.md` § Field Type Selection (`secret` is encrypted at rest per
+ADR-0100):
 
-- A yes/no flag (`is_*`, `has_*`, "done?", "active?") is `{ type: 'boolean', defaultValue: false }`.
-  `required` on it refuses only `null`: an unchecked box is a value, so it
-  never means "must be checked". A box that must be checked (terms, consent)
-  is a `validations[]` rule: `{ name: 'terms', type: 'script',
+- A yes/no flag is any `is_*`, `has_*`, "done?" or "active?". An unchecked box is
+  a value. A box that must be checked (terms, consent) is the rule
+  `{ name: 'terms', type: 'script',
   condition: { dialect: 'cel', source: 'record.accepted != true' }, message: 'Accept the terms.' }`.
-  The default also lands seeded or imported rows that omit the column on
+  The `false` default also lands seeded or imported rows that omit the column on
   `false`, not a null that only looks unchecked.
-- A person on the record (approver, reviewer) is `type: 'user'` with
-  no `reference`, and optional unless the request says otherwise — the platform
-  already stamps the owner and `created_by`.
-- A dynamic default (`defaultValue: 'current_user'`, `'NOW()'`, a CEL envelope)
-  resolves when the record is SAVED with the field empty. Describe it as
-  save-time; whether a create form pre-displays it is a client capability you
-  cannot promise.
+- A person (approver, reviewer) stays optional because the platform already
+  stamps the owner and `created_by`.
+- A dynamic default may also be `'NOW()'` or a CEL envelope. Whether a create
+  form pre-displays it is a client capability you cannot promise.
 
 ## Changing a field that has data
 

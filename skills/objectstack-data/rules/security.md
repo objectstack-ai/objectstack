@@ -1,9 +1,5 @@
 # Security & Access Control
 
-Per-object access control is authored in **permission sets**, not on the object
-schema. There is no object-level `permissions` key (and no `hooks` key either):
-`ObjectSchema.create()` **rejects** both as unknown keys.
-
 ## Object-level permissions (RBAC)
 
 Grant CRUD access per object with boolean bits on a permission set:

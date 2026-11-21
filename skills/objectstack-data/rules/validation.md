@@ -4,7 +4,7 @@
 - [Uniqueness — Use Unique Indexes](#uniqueness--use-unique-indexes) · [State Machine Validation](#state-machine-validation)
 - [Format](#format-validation) · [Cross-Field](#cross-field-validation) · [JSON Schema](#json-schema-validation) · [Conditional](#conditional-validation)
 - [External / Custom Validation → Lifecycle Hooks](#external--custom-validation--lifecycle-hooks) · [Validation Properties](#validation-properties)
-- [Incorrect vs Correct](#incorrect-vs-correct) · [Conditional Field Rules](#conditional-field-rules)
+- [Incorrect vs Correct](#incorrect-vs-correct)
 
 Unmarked blocks are fragments; `check:skill-examples` skips them.
 
@@ -48,8 +48,7 @@ exemption, so a row that already violates the rule is refused on any edit until
 a repairing write lands (frozen, not bricked). A condition that must hold only
 from a transition onward is not this tool: use `requiredWhen` or a field bound
 (`min` / `max` / `minLength` / `maxLength`), which judge the write, not the
-stored row (see **Choose by intent — invariant or transition gate** under
-[Conditional Field Rules](#conditional-field-rules)).
+stored row (`SKILL.md` § Conditional Field Rules).
 
 <!-- os:check -->
 ```typescript
@@ -363,27 +362,20 @@ export const Invoice = ObjectSchema.create({
 });
 ```
 
-- Use `visibleWhen` to hide irrelevant fields in ObjectUI forms.
 - Use `readonlyWhen` for state-locked fields; the ObjectQL write path ignores
   incoming changes when the predicate is `TRUE` (for everyone; per permission
   set → field permission `when`, rules/security.md).
 - **`readonly: true` governs the end-user surface, not trusted system writers.**
-  A non-system write (REST/UI, and any `runAs:'user'` flow) has
-  the field **stripped**; the write reports
-  success but the value never lands. System-context writes —
-  `runAs:'system'` flows, system hooks, seeds, imports, migrations — are exempt
-  and DO write it. Keep the field `readonly` when automation maintains it; the
-  flow side: [objectstack-automation → Failure routing & `runAs`](../../objectstack-automation/SKILL.md#failure-routing--runas).
+  A stripped write reports success. Imports and migrations are system-context
+  writes too. Keep the field `readonly` when automation maintains it; the flow
+  side: [objectstack-automation → Failure routing & `runAs`](../../objectstack-automation/SKILL.md#failure-routing--runas).
 - Use `requiredWhen` for conditional requiredness; the ObjectQL validator
   enforces it on submit. The `conditionalRequired` alias was REMOVED in
   protocol 17 — emitting it is a parse error.
-- **Choose by intent — invariant or transition gate.** A fact true of *every
-  stored record* is an invariant: a `validations[]` `script` rule. A row that
-  violates it is refused on any edit until repaired. A *transition* condition
-  ("required once the record reaches `paid`") is `requiredWhen` / field bounds,
-  which judge the write, not the stored row. "Required when X" reads like an
-  invariant and is not one; an invariant written as a gate never enforces
-  itself.
+- **Choose by intent — invariant or transition gate**
+  ([Script Validation](#script-validation), Tool choice). "Required when X"
+  reads like an invariant and is not one; an invariant written as a gate never
+  enforces itself.
 - For inline `master_detail` grids, predicates are evaluated row-by-row against
   the child row's `record`, so line-item rules should live on child fields.
 - For complex predicates, load **objectstack-formula** and emit CEL via

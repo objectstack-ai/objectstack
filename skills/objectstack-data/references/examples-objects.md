@@ -1,37 +1,24 @@
 # Data — object authoring: keys, examples, search, extensions
 
-- [Object keys](#object-keys) · [Field Groups](#field-groups-mvp) · [Quick-Start Template](#quick-start-template)
-- [Metadata Protection](#metadata-protection-protection) · [Search Fields](#search-fields-searchablefields) · [Object Extension Model](#object-extension-model)
-
 ## Object keys
 
-The minimum is `name`, `fields` and an authored `sharingModel`
-([SKILL.md § Object Definition](../SKILL.md#object-definition)). Exact keys and
-defaults: `data/object.zod.ts`, through [_index.md](./_index.md). The ones to get
-right:
+Beyond [SKILL.md § Object Definition](../SKILL.md#object-definition). Every key,
+each `enable` flag (`ObjectCapabilities`) and its default: `data/object.zod.ts`,
+through [_index.md](./_index.md). The ones to get right:
 
 | Property | Default | Description |
 |:---------|:--------|:------------|
-| `pluralLabel` | — | Plural form (e.g., "Accounts") — on 31/31 objects in the reference apps; author it alongside `label` |
-| `icon` | — | Icon name for nav, list headers and lookup pickers — on 31/31 objects in the reference apps |
 | `highlightFields` | derived | Ordered field keys used as a record's compact face: the columns a **related list** renders on the parent's detail page, and what a lookup picker shows. Declare it on the CHILD object (see [Relationships](../rules/relationships.md)) |
-| `namespace` | — | **Not a schema key** — an unknown key is refused, so authoring it is a build error. Embed the prefix directly in `name` instead |
 | `nameField` | derived (e.g. `'name'`/`'title'`) | **Canonical** record-title field — the stored field used as the record's display name. Use a single text/email field; a composite title to import, sort or search by is a stored computed field (a non-`formula` field with an `expression`); a text formula is display-only |
-| `titleFormat` | — | **Refused (ADR-0079)**: a save and `os validate` refuse it (`title-format-retired`). Move it to `nameField`; a composite title follows the `nameField` row |
-| `ownership` | `'user'` | Whether `owner_id` exists at all, a different axis from `sharingModel`. `'none'` only for a shared catalog or a pure junction table |
+| `ownership` | `'user'` | Whether `owner_id` exists at all, a different axis from `sharingModel` |
 
 ### Object Capabilities (`enable`)
 
 | Flag | Default | Purpose |
 |:-----|:--------|:--------|
-| `trackHistory` | `false` | Field-level audit trail |
-| `searchable` | `true` | Index records for global search |
-| `apiEnabled` | `true` | Expose via automatic REST + MCP APIs |
 | `apiMethods` | all | Whitelist over the six primitives (`get`, `list`, `create`, `update`, `delete`, `bulk`); derived verbs (search/export/upsert/…) follow automatically |
-| `files` | `false` | Attachments & document management |
 | `feeds` | `true` | Social feed, comments, mentions — **opt-out**: explicit `false` hides the feed UI and rejects new comments |
 | `activities` | `true` | Activity timeline (`sys_activity` mirror of CRUD) — **opt-out**: explicit `false` stops mirroring and hides the timeline |
-| `clone` | `true` | Record deep cloning |
 | `aiReadable` | — | Platform `sys_*` objects only (not `sys_metadata`, `sys_metadata_history`): read-only AI access (query, get, aggregate, describe, list; no write). App objects never declare it, `false` included: refused at parse |
 
 ## Field Groups (MVP)
