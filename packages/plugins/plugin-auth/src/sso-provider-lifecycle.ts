@@ -513,7 +513,7 @@ async function revokeSessions(engine: IDataEngine, sessions: Record<string, unkn
       expires_at: new Date(now - 1000),
       revoked_at: new Date(now),
       revoke_reason: SSO_PROVIDER_DELETED_REVOKE_REASON,
-    });
+    }, { context: { isSystem: true } });
     revoked++;
   }
   return revoked;

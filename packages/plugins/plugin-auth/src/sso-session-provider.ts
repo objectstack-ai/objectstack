@@ -40,8 +40,9 @@
  */
 
 import type { IDataEngine } from '@objectstack/core';
-import { SystemObjectName } from '@objectstack/spec/system';
 import { withSystemContext } from './objectql-adapter.js';
+
+const SESSION_OBJECT = 'sys_session';
 
 /** The `sys_session` column naming the SSO provider a session was signed in through. */
 export const SESSION_SSO_PROVIDER_FIELD = 'sso_provider_id';
@@ -89,7 +90,11 @@ export async function settleSsoSignInProvider(
   if (typeof sessionId !== 'string' || !sessionId) return;
   try {
     if (!engine) throw new Error('no data engine to write the session through');
-    await withSystemContext(engine).update(SystemObjectName.SESSION, { id: sessionId, [SESSION_SSO_PROVIDER_FIELD]: providerId });
+    await withSystemContext(engine).update(
+      SESSION_OBJECT,
+      { id: sessionId, [SESSION_SSO_PROVIDER_FIELD]: providerId },
+      { context: { isSystem: true } },
+    );
   } catch (error) {
     logError(
       `[auth] SSO sign-in through provider '${providerId}' SUCCEEDED, but recording on session ${sessionId} that it was `
