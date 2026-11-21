@@ -111,6 +111,7 @@ import { ExternalLink, Paperclip } from 'lucide-react';
 import { deriveRecordDetailSections } from '../recordDetailSections.js';
 import { deriveRelatedLists } from '../../utils/deriveRelatedLists.js';
 import { servedObjectLabel, servedObjectPluralLabel } from '../../hooks/servedObjectLabel.js';
+import { useReportRecordRead } from './recordReadReport.js';
 import {
   distinctLabels,
   planSubmittedRecord,
@@ -184,9 +185,17 @@ function useCurrentRecord(objectName: string | null, recordId: string | null): C
     };
   }, [key, objectName, recordId, canRead, dataSource, invalidation]);
 
-  if (key === null || !canRead) return { status: 'unreadable' };
-  if (!answer || answer.key !== key) return { status: 'loading' };
-  return answer.row ? { status: 'readable', row: answer.row } : { status: 'unreadable' };
+  const state: CurrentRecordState =
+    key === null || !canRead
+      ? { status: 'unreadable' }
+      : !answer || answer.key !== key
+        ? { status: 'loading' }
+        : answer.row
+          ? { status: 'readable', row: answer.row }
+          : { status: 'unreadable' };
+  // What this read learned, for the page's title link (objectstack#35415).
+  useReportRecordRead(objectName, recordId, state.status);
+  return state;
 }
 
 /**

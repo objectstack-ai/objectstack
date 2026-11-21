@@ -541,14 +541,26 @@ names the remedy: declare a date dimension named after the date-range field.
 A date field of a related record — a dotted `relationship.field` such as
 `account.signed_at`, which a dashboard filter may otherwise name (see
 [Filtering on a Related Record's Field](#filtering-on-a-related-records-field)) —
-has no such remedy. A dimension name is a snake_case identifier with no dot, so
-no dimension can carry that key, and the dataset query refuses the comparison
-with `400 INVALID_FIELD`; the message offers no declaration for that key and
-says the comparison needs a date field of the dataset's own object that a
-declared date dimension names. Declaring a
-dimension over the path under another name does not help, because the widget
-still sends the window under the dotted field's name. A compare widget's date
-window must therefore be a field of the dataset's own object.
+cannot be a dimension name, because a dimension name is a snake_case identifier
+with no dot. Declare a date dimension **over** the path instead, under any name
+(the relationship is listed in the dataset's `include`, as for any dimension over
+a path):
+
+```typescript
+dimensions: [
+  // The dashboard's dateRange filters `account.signed_at`; the compare widget
+  // reads the dataset and sends its window as the dimension "account_signed".
+  { name: 'account_signed', label: 'Account signed', field: 'account.signed_at', type: 'date' },
+],
+```
+
+When the window's key is such a path, the widget reads the dataset definition
+and sends the window under the one declared dimension with `type: 'date'` and
+`field` equal to the path. A widget `compareTo.dimension` may name it by either
+spelling, the path or the declared name. When no declared date dimension covers
+the path, or two or more do, the widget sends the dotted key as it is, and the
+dataset query refuses the comparison with `400 INVALID_FIELD`. A key that can be
+a dimension name, such as `close_date`, is always sent as it is.
 
 No author-time rule checks a compare widget's date key yet.
 

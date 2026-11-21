@@ -65,6 +65,7 @@ import { actionContextOrg } from '../utils/actionContextOrg.js';
 import { editFormLockedByState } from '../utils/editFormLockedByState.js';
 import { matchAppBySegment, resolveHostAppSegment } from '../utils/appRoute.js';
 import { hostInConsolePath } from '../utils/hostInConsolePath.js';
+import { useShellPageActionsSlot } from '../layout/shellPageActionsSlot.js';
 import { recycleBinRefusalLabelsOf, recycleBinRestoreOf } from '../utils/recycleBinRestore.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
 import type { TranslateFn } from '@object-ui/i18n';
@@ -91,6 +92,8 @@ import {
   RECORD_APPROVAL_EXCLUDED_ACTIONS,
 } from './recordApprovalActions.js';
 import { useApprovalQueueAdvance } from './approval-decision/approvalQueueAdvance.js';
+import { approvalSubjectTitle } from './approval-decision/approvalSubjectTitle.js';
+import { RecordReadReportContext, recordReadKey, type RecordReadReport } from './approval-decision/recordReadReport.js';
 // Side-effect registration of `record:approvals` — synthesized record pages
 // reference the node whenever the record has approval requests (#3461), so
 // the type must resolve wherever this view renders, not only under hosts
@@ -967,6 +970,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     [pageReturn.stepper, pageReturn.toList, originFromState?.label],
   );
   useRecordStepKeys(!embedded && !!pageStepper, pageStepper, { arrows: false });
+  // objectstack#36111 — whether the shell draws its top-right button group on
+  // this page (off while the top bar stands); the page face draws it in its
+  // navigation row, before ✕. A pane or drawer never does: the page under it
+  // has the group already.
+  const renderShellGroup = useShellPageActionsSlot();
+  const shellActions = renderShellGroup !== null && !embedded;
   // `language` is also the language a flow launch reads a refused write's
   // permission line in.
   const { t, language } = useObjectTranslation();
@@ -1584,6 +1593,18 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // the served row (`readableRow`), NOT on a `useMemo` (AGENTS.md #10), so a
   // re-render never republishes an equal row as a new object to the page.
   const readablePageRecord = readableRow(pageRecord, perms, objectName);
+
+  // objectstack#35415 — on an approval request's page, what the page's own
+  // reads of a record learned (`recordReadReport.ts`): the title links to the
+  // record the request is about only where one of them read it. Keyed by
+  // `object::id`; collected only on that page, so no other page re-renders on
+  // its cards' reads.
+  const [readRecords, setReadRecords] = useState<Readonly<Record<string, boolean>>>({});
+  const reportRecordRead = useCallback<RecordReadReport>((target, id, readable) => {
+    const key = recordReadKey(target, id);
+    setReadRecords((prev) => (prev[key] === readable ? prev : { ...prev, [key]: readable }));
+  }, []);
+  const isRecordRead = (target: string, id: string) => readRecords[recordReadKey(target, id)] === true;
 
   // Derive a human-readable record title from the loaded record so
   // favourites (record:*) and the breadcrumb show e.g. "Acme Corporation"
@@ -3964,8 +3985,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
    * It asks first, through the console's ordinary destructive-action confirm:
    * this page's own `confirmHandler`, the `ActionConfirmDialog` the record's
    * Delete opens, painted destructive. A cancel settles `false` and nothing is
-   * sent. The row leaves the panel only once the server has deleted it; a
-   * refused delete raises a localized error and leaves the row where it was.
+   * sent. The row leaves the panel only once the server has deleted it, with a
+   * "Comment deleted" toast (objectstack#36070); a refused delete raises a localized error and leaves the row where it was.
    * A deleted reply takes one off its parent's `replyCount`, the count
    * `handleAddReply` adds one to.
    */
@@ -4009,6 +4030,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
               : item,
           ),
       }));
+      // The row is gone; say so, so the reader knows the delete went through
+      // and the comment did not just scroll away (objectstack#36070).
+      toast.success(t('detail.commentDeleted', { defaultValue: 'Comment deleted' }));
     },
     [dataSource, feedRecordKey, feedItemsByRecord, confirmHandler, t],
   );
@@ -5379,10 +5403,15 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // desktop face: back to the list the page came from as it was left
   // (objectstack#35854), else the object's default list.
   const closePage = pageReturn.toList ?? (objectListPath ? () => navigate(objectListPath) : undefined);
-  const pageFrame = closePage ? (
-    <RecordTopBarButton label={t('common.close', { defaultValue: 'Close' })} onClick={closePage} data-testid="record-page-close">
-      <X className="h-3.5 w-3.5" />
-    </RecordTopBarButton>
+  const pageFrame = closePage || shellActions ? (
+    <>
+      {shellActions && renderShellGroup?.({})}
+      {closePage && (
+        <RecordTopBarButton label={t('common.close', { defaultValue: 'Close' })} onClick={closePage} data-testid="record-page-close">
+          <X className="h-3.5 w-3.5" />
+        </RecordTopBarButton>
+      )}
+    </>
   ) : undefined;
   // objectstack#27058, Target 8 — the path row of a page one level down
   // (「线索 Mira Costa › 任务」): the `?from=` trail, each ancestor a link, the
@@ -5564,6 +5593,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // objectstack#35891 — the stage tag is the stage's menu: the default
     // page draws no stage bar, so the header is where the stage moves.
     stage: (parts) => <RecordStageMenu {...parts} />,
+    // objectstack#35415 — an approval request's page is named by the record
+    // it asks a decision on, linked to it; else by the request's own title.
+    title: objectName === SYS_APPROVAL_REQUEST_OBJECT ? approvalSubjectTitle(readablePageRecord, isRecordRead) : undefined,
   };
   const sharedChrome = (
     <>
@@ -5585,6 +5617,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const pageTree = (
     <RecordHeaderBarContext.Provider value={headerBarForRecord}>
     <RecordHeaderStateContext.Provider value={recordHeaderState}>
+    <RecordReadReportContext.Provider value={objectName === SYS_APPROVAL_REQUEST_OBJECT ? reportRecordRead : null}>
     <div ref={setPageRootEl} className="h-full bg-background overflow-hidden flex flex-col relative" data-record-page-root="">
       {pageBar}
       {/* In a pane, the record's ⊟ goes into the pane's own top bar. */}
@@ -6079,6 +6112,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         onClose={() => setFlowRefusal(s => ({ ...s, open: false }))}
       />
     </div>
+    </RecordReadReportContext.Provider>
     </RecordHeaderStateContext.Provider>
     </RecordHeaderBarContext.Provider>
   );

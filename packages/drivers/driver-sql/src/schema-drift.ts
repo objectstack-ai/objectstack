@@ -508,6 +508,21 @@ const DESTRUCTIVE_COLUMN_REMEDY = {
 } as const satisfies Partial<Record<DriftOp['type'], string>>;
 
 /**
+ * The remedy sentence each `safe` COLUMN entry of a declared field
+ * (`widen_date_to_datetime`, `widen_varchar`, `drop_column_default`) ends
+ * with, naming the act per object kind as the `relax_not_null` message does.
+ * A publish applies these entries (`applyPublishedColumnChanges`) only for an
+ * object authored in this environment: a publish of a package object is
+ * refused (`NOT_OVERRIDABLE`), and a managed install of the package has no
+ * door for them (`relaxDeclaredNotNull` applies the declared NOT NULL relax
+ * only). So for a package object the sentence names `os migrate apply` alone.
+ * Spelled once, here, so the three messages cannot drift apart.
+ */
+const SAFE_COLUMN_REMEDY =
+  'For an object authored in this environment, publishing the object applies it; for an object a package ' +
+  'provides (sealed, so it cannot be published here), run "os migrate apply", which applies it for either kind.';
+
+/**
  * [#23925] A drift entry's finding without the `os migrate apply
  * --allow-destructive` remedy sentence {@link diffManagedTable} ends a
  * destructive column entry with ({@link DESTRUCTIVE_COLUMN_REMEDY}); any other
@@ -1334,7 +1349,7 @@ export function diffManagedTable(args: {
           `${table}.${fieldName}: the column carries DEFAULT '${field.defaultValue}', but ` +
           `'${field.defaultValue}' is a runtime token the engine resolves per write — the database ` +
           `has been stamping the literal token into every insert that omitted the field. ` +
-          `Dropping the default is non-destructive: run "os migrate apply". Rows already holding ` +
+          `Dropping the default is non-destructive. ${SAFE_COLUMN_REMEDY} Rows already holding ` +
           `'${field.defaultValue}' are NOT rewritten — the dangling-reference audit reports them.`,
       });
     }
@@ -1543,8 +1558,8 @@ export function diffManagedTable(args: {
         message:
           `${table}.${fieldName}: metadata declares \`datetime\` but the column is \`${col.type}\`, so the ` +
           `database keeps only the calendar day of every value written to it and drops its time of day. ` +
-          `Widening the column to \`${widened}\` keeps every stored day (as midnight UTC) and refuses no value: ` +
-          `publishing the object applies it, or run "os migrate apply".`,
+          `Widening the column to \`${widened}\` keeps every stored day (as midnight UTC) and refuses no value. ` +
+          SAFE_COLUMN_REMEDY,
       });
     }
 
@@ -1630,7 +1645,9 @@ export function diffManagedTable(args: {
           severity: 'warning',
           category: 'safe',
           op: { type: 'widen_varchar', table, column: fieldName, to: declaredMaxLength, from: col.maxLength },
-          message: `${table}.${fieldName}: metadata allows ${declaredMaxLength} chars but the column caps at ${col.maxLength} — widen via "os migrate".`,
+          message:
+            `${table}.${fieldName}: metadata allows ${declaredMaxLength} chars but the column caps at ${col.maxLength}. ` +
+            `Widening the column cannot lose data. ${SAFE_COLUMN_REMEDY}`,
         });
       } else {
         out.push({

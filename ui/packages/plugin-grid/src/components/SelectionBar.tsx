@@ -376,6 +376,12 @@ export interface BulkActionBarProps {
   allMatchingSelected?: boolean;
   /** Invoked when the user clicks "Select all N". */
   onSelectAllMatching?: () => void;
+  /**
+   * objectstack#35883 — the host's selection is open with nothing ticked yet
+   * (a phone card list after 「Select」): the bar shows 「0 selected」 and its
+   * 「×」, so the user can end it. Without it the bar draws nothing at 0.
+   */
+  open?: boolean;
 }
 
 /**
@@ -405,6 +411,7 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({
   totalMatching,
   allMatchingSelected,
   onSelectAllMatching,
+  open = false,
 }) => {
   const { t } = useObjectTranslation();
   const barRef = React.useRef<HTMLDivElement | null>(null);
@@ -414,7 +421,7 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({
   const fit = useFittedCount(barRef, chosen, `${single ? 'one' : 'many'}:${count}`);
 
   React.useEffect(() => {
-    if (!onClearSelection || count === 0) return undefined;
+    if (!onClearSelection || (count === 0 && !open)) return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
       if (isEditableTarget(event.target) || anotherLayerIsOpen(barRef.current)) return;
@@ -422,9 +429,9 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [onClearSelection, count]);
+  }, [onClearSelection, count, open]);
 
-  if (count === 0) return null;
+  if (count === 0 && !open) return null;
 
   const overCap = exceedsBulkSelectAllMatchingCap(totalMatching);
   const offerAll =
@@ -495,7 +502,8 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({
             : t('grid.selectAllTotal', { total: totalMatching, defaultValue: 'Select all {{total}}' })}
         </button>
       )}
-      {single ? (
+      {/* Nothing ticked yet (`open`): no action has rows to act on. */}
+      {count === 0 ? null : single ? (
         <SingleRecordActions menu={singleRowMenu!} fit={fit} onCount={setChosen} />
       ) : (
         <BulkActions

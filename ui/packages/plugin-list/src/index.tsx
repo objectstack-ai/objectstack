@@ -20,6 +20,11 @@ export { ListView, ListViewBlock, ViewSwitcher, ObjectGallery };
 export { TabBar } from './components/TabBar';
 export type { TabBarProps, ViewTab } from './components/TabBar';
 export { UserFilters } from './UserFilters';
+// objectstack#35883 / #35884 — the phone toolbar's panel container and the
+// context its view switcher reads, for the console's switcher to draw its
+// phone face with the list's own sheet.
+export { PhonePanelSheet, useListPhonePanels, PHONE_CHIP, PHONE_CHIP_ACTIVE } from './phone/PhoneListPanels';
+export type { PhonePanelSheetProps, ListPhonePanels } from './phone/PhoneListPanels';
 export type { UserFiltersProps, UserFiltersHandle } from './UserFilters';
 export { normalizeFilterCondition, normalizeFilters } from './ListView';
 // The provider-less fallback table, exported so objectui#4401's mirror gate can

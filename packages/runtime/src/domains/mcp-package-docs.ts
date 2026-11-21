@@ -17,14 +17,18 @@
  * A page the caller may not read is neither found nor read, and reads as not
  * found.
  *
- * The caller is the request's execution context as the door received it. On
- * an OAuth grant that is the agent envelope (ADR-0090 D10): the security
- * service resolves its permission sets from the token's grant, the
- * scope-derived ceiling, and not from the person's own sets, so a manual whose
- * audience is a permission set the person holds stays hidden on that
- * connection unless the grant carries the set. That fails closed, and it is
- * stricter than the `/meta` doors a signed-in person reads through the
- * Console, which judge the person's own sets.
+ * The caller is the request's execution context as the door received it. Its
+ * permission-set holdings, which a `{ permissionSet }` audience reads, are its
+ * own, with one exception ({@link packageDocsReadGate}): on a delegated agent
+ * envelope (an OAuth grant: `principalKind: 'agent'` acting `onBehalfOf` a
+ * person) they are the delegating person's own sets, resolved by grant
+ * resolution in the organization the request runs in (ADR-0090 D10: the
+ * token's ceiling decides whether the docs tools are reached at all, and the
+ * person's holdings decide which manuals open). Never the envelope's
+ * scope-derived ceiling sets, and never a union with them. A person who does
+ * not exist, who holds no membership in that organization, or whose grants
+ * cannot be read holds no set here: permission-set audiences stay closed. An
+ * AI service account (an agent acting for nobody) keeps its own sets.
  *
  * ## The search
  *
@@ -66,6 +70,7 @@ import {
     type ResolverDoc,
 } from '@objectstack/spec/system';
 import type { ErrorCode } from '@objectstack/spec/api';
+import { resolveUserAuthzGrants, vetOrganizationClaim } from '@objectstack/core';
 
 /** The protocol read these members take: the merged `/meta` list read. */
 export interface PackageDocsProtocol {
@@ -398,19 +403,89 @@ export function createPackageDocMembers(getSources: () => Promise<PackageDocsSou
     };
 }
 
-/** The `/meta` read gates' ports over `protocol`, with `caller` as the caller: I/O only. */
+/**
+ * The `/meta` read gates' ports over `protocol`, with `caller` as the caller:
+ * I/O only. On a delegated agent envelope ({@link delegatingPersonOf}) the
+ * holdings the audience reads are the person's ({@link delegatorHoldingsCaller}),
+ * resolved once per gate and only when a `{ permissionSet }` audience is in
+ * play; `resolveEngine` is the data engine their grants are read through.
+ */
 export function packageDocsReadGate(
     protocol: PackageDocsProtocol,
     caller: MetaReadGateCaller | undefined,
     resolveService: (name: string) => Promise<unknown>,
+    resolveEngine: () => Promise<unknown> = async () => undefined,
 ): MetaItemReadGateSources {
+    type Security = Awaited<ReturnType<MetaItemReadGateSources['resolveSecurityService']>>;
+    const security = async () => (await resolveService('security')) as Security;
+    const personId = delegatingPersonOf(caller);
+    let holdings: Promise<MetaReadGateCaller> | undefined;
     return {
         resolveCaller: async () => caller,
-        resolveSecurityService: async () => (await resolveService('security')) as Awaited<ReturnType<MetaItemReadGateSources['resolveSecurityService']>>,
+        resolveSecurityService: personId === undefined
+            ? security
+            : async () => {
+                const svc = await security();
+                const names = svc?.resolvePermissionSetNames?.bind(svc);
+                if (!names) return undefined;
+                // A throw here (no such person, no membership, an unreadable
+                // grant) is read by the gate as unresolved holdings: closed.
+                return {
+                    resolvePermissionSetNames: async () =>
+                        names(await (holdings ??= delegatorHoldingsCaller(resolveEngine, personId, caller?.tenantId))),
+                };
+            },
         listMetaItems: (type) => protocol.getMetaItems({ type }),
         // Only the `app` and `dashboard` arms probe services or log nav prunes;
         // the `doc` and `book` arms these members read do neither.
         serviceProbe: () => null,
         navPruneLogged: new Set<string>(),
+    };
+}
+
+/**
+ * The person a delegated agent envelope acts for (ADR-0090 D10): its
+ * `onBehalfOf.userId` when the caller is an agent principal, else `undefined`.
+ * An AI service account is an agent acting for nobody, so it keeps its own sets.
+ */
+export function delegatingPersonOf(caller: MetaReadGateCaller | undefined): string | undefined {
+    if (caller?.principalKind !== 'agent') return undefined;
+    const id = (caller.onBehalfOf as { userId?: unknown } | undefined)?.userId;
+    return typeof id === 'string' && id.length > 0 ? id : undefined;
+}
+
+/**
+ * The delegating person as the audience reads a caller: their own grants
+ * (`resolveUserAuthzGrants`, as the open draft door's reader resolves them,
+ * with no capability asked of them) in the organization the request runs in.
+ * Fails closed as the security plugin's delegator resolution does: it throws
+ * when no `sys_user` row has the id (the resolver synthesises a baseline for
+ * any id), and when the person holds no current membership in that
+ * organization (`vetOrganizationClaim`, the one membership rule).
+ */
+async function delegatorHoldingsCaller(
+    resolveEngine: () => Promise<unknown>,
+    userId: string,
+    organization: unknown,
+): Promise<MetaReadGateCaller> {
+    const ql = (await resolveEngine()) as { findOne(object: string, query: unknown): Promise<unknown> } | undefined;
+    if (!ql) throw new Error('no data engine to resolve the delegating person\'s grants from');
+    const tenantId = typeof organization === 'string' && organization.length > 0 ? organization : undefined;
+    if (!(await ql.findOne('sys_user', { where: { id: userId }, context: { isSystem: true } }))) {
+        throw new Error('the delegating person does not exist');
+    }
+    const grants = await resolveUserAuthzGrants(ql as never, userId, tenantId ? { tenantId } : {});
+    if (tenantId && vetOrganizationClaim(tenantId, grants.accessible_org_ids) === undefined) {
+        throw new Error('the delegating person holds no membership in the request\'s organization');
+    }
+    return {
+        userId,
+        ...(tenantId ? { tenantId } : {}),
+        positions: grants.positions,
+        permissions: grants.permissions,
+        ...(grants.permissionSetAddresses ? { permissionSetAddresses: grants.permissionSetAddresses } : {}),
+        systemPermissions: grants.systemPermissions,
+        principalKind: grants.principalKind ?? 'human',
+        isSystem: false,
     };
 }

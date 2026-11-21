@@ -205,3 +205,25 @@ describe('[ADR-0150 D3/D7] the organization boundary judges a position\'s set as
     expect(await organizationBoundaryFailure(catalog, 'q_reader', { position })).toBeNull();
   });
 });
+
+describe('[field-axis split, ruling 6912661484] condition (a) reads viewAllFields on the wildcard like the superuser bits', () => {
+  const catalogWith = (objects: Record<string, unknown>) => {
+    const registry = new SchemaRegistry();
+    registry.logLevel = 'silent';
+    registry.registerItem('permission', { name: 'probe', objects }, 'name' as never);
+    return createSecurityCatalogReader({ registry: registry as never, metadata: { get: () => undefined, list: () => [] } });
+  };
+
+  it('a set whose wildcard carries viewAllFields is outside the organization boundary, named by the bit', async () => {
+    const reason = await organizationBoundaryFailure(catalogWith({ '*': { allowRead: true, viewAllFields: true } }), 'probe');
+    expect(reason).toContain('fails condition (a) of the organization boundary');
+    expect(reason).toContain("'viewAllFields'");
+  });
+
+  it('the superuser bits keep their own wording, and a per-object viewAllFields stays inside (condition (a) is the wildcard)', async () => {
+    const vama = await organizationBoundaryFailure(catalogWith({ '*': { allowRead: true, viewAllRecords: true } }), 'probe');
+    expect(vama).toContain("the superuser bit 'viewAllRecords'");
+    expect(await organizationBoundaryFailure(catalogWith({ crm_lead: { allowRead: true, viewAllFields: true } }), 'probe')).toBeNull();
+    expect(await organizationBoundaryFailure(catalogWith({ '*': { allowRead: true } }), 'probe')).toBeNull();
+  });
+});

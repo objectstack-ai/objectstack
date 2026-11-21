@@ -62,6 +62,14 @@ export interface ObjectViewSwitcherMenuProps {
     create?: SwitcherCreateOptions;
     /** 「Add view」 for a host with no card to offer: the dropdown closes and this runs (the Create View dialog). */
     onAddView?: () => void;
+    /**
+     * objectstack#35884 — the phone's view panel: the views take the sheet's
+     * height, the search box comes last and does not take focus (no keyboard
+     * rises over the views), and `footerEnd` follows 「Add view」.
+     */
+    phone?: boolean;
+    /** A last footer row (the phone's 「View settings」, objectstack#35883). */
+    footerEnd?: ReactNode;
     t: TFn;
 }
 
@@ -83,7 +91,7 @@ function GroupLabel({ children, icon }: { children: ReactNode; icon?: ReactNode 
     );
 }
 
-const FOOTER_ITEM = 'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:min-h-11';
+export const FOOTER_ITEM = 'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:min-h-11';
 
 export function ObjectViewSwitcherMenu({
     views,
@@ -100,6 +108,8 @@ export function ObjectViewSwitcherMenu({
     onDeletePersonalView,
     create,
     onAddView,
+    phone = false,
+    footerEnd,
     t,
 }: ObjectViewSwitcherMenuProps) {
     const [mode, setMode] = useState<'list' | 'create'>('list');
@@ -241,20 +251,24 @@ export function ObjectViewSwitcherMenu({
         );
     };
 
+    const searchBox = (
+    <div className={phone ? 'border-t p-2' : 'border-b p-2'}>
+        <Input
+            autoFocus={!phone}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t('view.searchViews', { defaultValue: 'Search views' })}
+            aria-label={t('view.searchViews', { defaultValue: 'Search views' })}
+            data-testid="list-view-switcher-search"
+            className="h-8 text-sm max-sm:h-11"
+        />
+    </div>
+    );
+
     return (
         <div data-testid="list-view-switcher-body">
-            <div className="border-b p-2">
-                <Input
-                    autoFocus
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder={t('view.searchViews', { defaultValue: 'Search views' })}
-                    aria-label={t('view.searchViews', { defaultValue: 'Search views' })}
-                    data-testid="list-view-switcher-search"
-                    className="h-8 text-sm max-sm:h-11"
-                />
-            </div>
-            <div className="max-h-80 overflow-y-auto p-1">
+            {!phone && searchBox}
+            <div className={phone ? 'p-1' : 'max-h-80 overflow-y-auto p-1'}>
                 {needle ? (
                     matches.length > 0
                         ? matches.map((v) => row(v, 'match'))
@@ -294,7 +308,7 @@ export function ObjectViewSwitcherMenu({
                     </>
                 )}
             </div>
-            {(create || onAddView || onManageViews) && (
+            {(create || onAddView || onManageViews || footerEnd) && (
                 <div className="border-t p-1">
                     {(create || onAddView) && (
                         <button
@@ -321,8 +335,10 @@ export function ObjectViewSwitcherMenu({
                             {t('view.manageViews', { defaultValue: 'Manage views' })}
                         </button>
                     )}
+                    {footerEnd}
                 </div>
             )}
+            {phone && searchBox}
         </div>
     );
 }

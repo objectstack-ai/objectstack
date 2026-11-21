@@ -70,7 +70,7 @@ const CLS = {
   metaDot: grab(META, /data-record-meta-when="">\s*\{user \? <span className="([^"]+)">·<\/span>/, ['text-muted-foreground/40']),
   metaTime: grab(META, /<time\s+dateTime=\{[^}]+\}\s+className="([^"]+)"/, ['cursor-default']),
   feedRow: grab(FEED, /<div key=\{item\.id\} className="group" data-stream-comment-row="">\s*<div className="([^"]+)">/, ['flex', 'gap-2']),
-  feedIcon: grab(FEED, /const STREAM_ICON_CELL =\s*'([^']+)'/, ['shrink-0', 'w-3.5']),
+  feedIcon: grab(FEED, /const COMMENT_AVATAR_CELL =\s*'([^']+)'/, ['shrink-0', 'w-5']),
   feedContent: grab(FEED, /\{\/\* Content[^*]*\*\/\}\s*<div className="([^"]+)">/, ['flex-1', 'min-w-0']),
   feedHeader: grab(FEED, /const STREAM_COMMENT_HEADER =\s*'([^']+)'/, ['flex', 'flex-wrap', 'items-center']),
   feedActor: grab(FEED, /<span className="([^"]+)">\{item\.actor\}<\/span>\s*\{item\.source/, ['font-medium']),

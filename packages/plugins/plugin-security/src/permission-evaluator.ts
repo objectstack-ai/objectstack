@@ -546,6 +546,13 @@ export class PermissionEvaluator {
    * row declares `readable: false`, so that row binds the set's holders.
    * Another set's View All or Modify All still reads the field, and a Modify
    * All set votes on every field as before, its own rows included.
+   *
+   * [Field-axis split, ruling of record 6912661484, letter A] A set carrying
+   * `viewAllFields` on the object casts the same read vote, under the same
+   * own-row rule, and never an edit vote (ruled read-only). The vote is the
+   * shared `superuserFieldVote` above, so this merge and the row-blind one
+   * cannot disagree about it. It is a field vote only:
+   * {@link superuserBypassSets} does not read it.
    */
   getFieldPermissions(
     objectName: string,

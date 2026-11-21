@@ -735,6 +735,7 @@
       {
         "id": "open_receivables",
         "ask": {"zh": "目前应收账款还有多少没收回来?", "en": "How much is still outstanding on open and partially paid invoices?"},
+        "askKind": "count",
         "object": "invoice",
         "truth": {
           "kind": "sum",
@@ -746,6 +747,7 @@
       {
         "id": "receivables_aging",
         "ask": {"zh": "未收余额按账龄分段各有多少?", "en": "How does the outstanding balance break down by aging bucket?"},
+        "askKind": "group_sum",
         "object": "invoice",
         "truth": {
           "kind": "sum",
@@ -758,6 +760,7 @@
       {
         "id": "orders_by_status",
         "ask": {"zh": "各个状态的销售订单各有多少张?", "en": "How many sales orders are in each status?"},
+        "askKind": "group_sum",
         "object": "sales_order",
         "truth": {"kind": "count", "groupBy": "status"},
         "personas": ["sales_rep"]
@@ -765,6 +768,7 @@
       {
         "id": "top_accounts_billed",
         "ask": {"zh": "开票金额最多的三个客户是哪几个?", "en": "Which three accounts have been invoiced the most?"},
+        "askKind": "top_n",
         "object": "invoice",
         "truth": {
           "kind": "topN",
@@ -781,6 +785,7 @@
           "zh": "最近 30 天的回款按客户负责人所在的销售团队各是多少?",
           "en": "How much has been collected in the last 30 days, per sales team of the account owner?"
         },
+        "askKind": "time_range",
         "object": "payment",
         "truth": {
           "kind": "sum",
@@ -796,6 +801,7 @@
           "zh": "已确认和已履约订单的明细金额按产品类别各是多少?",
           "en": "On confirmed and fulfilled orders, how much has been booked per product category?"
         },
+        "askKind": "join",
         "object": "order_line",
         "truth": {
           "kind": "sum",
@@ -810,6 +816,7 @@
           "zh": "逾期未收的余额分别在哪位销售代表的客户名下,各多少?",
           "en": "Whose accounts hold the overdue balance, and how much each?"
         },
+        "askKind": "join",
         "object": "invoice",
         "truth": {
           "kind": "sum",
@@ -826,6 +833,7 @@
       {
         "id": "so_0120_waiting_on",
         "ask": {"zh": "订单 SO-0120 现在在等谁审批?", "en": "Who is order SO-0120 waiting on for approval?"},
+        "askKind": "owner_latest",
         "object": "sales_order",
         "truth": {
           "kind": "count",
@@ -842,6 +850,7 @@
           "zh": "最近两周谁跟进过 Harbor Foods,各跟进了几次?",
           "en": "Who has followed up with Harbor Foods in the last two weeks, and how many times each?"
         },
+        "askKind": "owner_latest",
         "object": "activity",
         "truth": {
           "kind": "count",
@@ -855,6 +864,7 @@
       {
         "id": "september_commission",
         "ask": {"zh": "九月份的订单销售代表一共能拿多少提成?", "en": "How much commission do the reps earn on September's orders?"},
+        "askKind": "unanswerable",
         "object": "sales_order",
         "truth": {
           "kind": "unanswerable",
@@ -1068,11 +1078,11 @@
       }
     ],
     "datasetQuestions": [
-      {"id": "dq_bookings", "ask": {"zh": "我们的订单金额合计是多少?", "en": "What do our bookings add up to?"}, "words": ["bookings", "订单金额"], "expect": {"kind": "metric_selected", "dataset": "order_book", "measure": "booked_amount"}},
-      {"id": "dq_receivables", "ask": {"zh": "我们的应收账款还有多少?", "en": "How much do we have in receivables?"}, "words": ["receivables", "应收账款"], "expect": {"kind": "metric_selected", "dataset": "billing", "measure": "open_balance"}},
-      {"id": "dq_revenue", "ask": {"zh": "我们的总营收是多少?", "en": "What is our total revenue?"}, "words": ["revenue", "营收"], "expect": {"kind": "asked_back", "reason": "ambiguous", "candidates": [{"dataset": "order_book", "measure": "booked_amount"}, {"dataset": "billing", "measure": "billed_amount"}]}},
-      {"id": "dq_booking_total", "ask": {"zh": "我们的成交合计是多少?", "en": "What is our booking total?"}, "words": ["booking", "成交"], "expect": {"kind": "asked_back", "reason": "near_miss", "candidates": [{"dataset": "order_book", "measure": "booked_amount"}]}},
-      {"id": "dq_payment_count", "ask": {"zh": "我们一共收到了多少笔付款?", "en": "How many payments have we received?"}, "words": ["payments", "付款"], "expect": {"kind": "fallback_labelled", "object": "payment"}}
+      {"id": "dq_bookings", "ask": {"zh": "我们的订单金额合计是多少?", "en": "What do our bookings add up to?"}, "askKind": "business_term", "words": ["bookings", "订单金额"], "expect": {"kind": "metric_selected", "dataset": "order_book", "measure": "booked_amount"}},
+      {"id": "dq_receivables", "ask": {"zh": "我们的应收账款还有多少?", "en": "How much do we have in receivables?"}, "askKind": "business_term", "words": ["receivables", "应收账款"], "expect": {"kind": "metric_selected", "dataset": "billing", "measure": "open_balance"}},
+      {"id": "dq_revenue", "ask": {"zh": "我们的总营收是多少?", "en": "What is our total revenue?"}, "askKind": "ambiguous", "words": ["revenue", "营收"], "expect": {"kind": "asked_back", "reason": "ambiguous", "candidates": [{"dataset": "order_book", "measure": "booked_amount"}, {"dataset": "billing", "measure": "billed_amount"}]}},
+      {"id": "dq_booking_total", "ask": {"zh": "我们的成交合计是多少?", "en": "What is our booking total?"}, "askKind": "ambiguous", "words": ["booking", "成交"], "expect": {"kind": "asked_back", "reason": "near_miss", "candidates": [{"dataset": "order_book", "measure": "booked_amount"}]}},
+      {"id": "dq_payment_count", "ask": {"zh": "我们一共收到了多少笔付款?", "en": "How many payments have we received?"}, "askKind": "count", "words": ["payments", "付款"], "expect": {"kind": "fallback_labelled", "object": "payment"}}
     ]
   },
   "iterate": {

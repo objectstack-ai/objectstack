@@ -23,6 +23,7 @@ The Feed & Chatter system provides Airtable-style record-level collaboration. It
 | `FieldChangeItem` | Field change history display (old → new values) |
 | `ReactionPicker` | Emoji reaction selector |
 | `ThreadedReplies` | Collapsible reply threading |
+| `CommentAuthorAvatar` | 20 px author avatar in front of a comment or reply: the image, or the person chips' initials disc |
 | `SubscriptionToggle` | Bell notification toggle |
 
 ## Usage
@@ -569,10 +570,21 @@ decision as a defect is how a warning channel gets ignored:
 | `parentItem` | `FeedItem` | required | Parent comment item |
 | `replies` | `FeedItem[]` | required | Reply items |
 | `onAddReply` | `(parentId, text) => void` | — | Add reply callback |
-| `showReplyInput` | `boolean` | `false` | Show reply input |
+| `showReplyInput` | `boolean` | `true` | Show reply input |
+| `focusReplyOnOpen` | `boolean` | `false` | Each time the input opens, expand the replies and put the caret in the input. Pass it when the input opens behind your own Reply button; leave it off when the input always shows, or every thread takes focus on mount |
 | `onEditComment` | `(itemId, text) => void \| Promise<void>` | — | Edit on a reply whose `authoredByViewer` is `true` |
 | `onDeleteComment` | `(itemId) => void \| Promise<void>` | — | Delete on the same replies |
 | `className` | `string` | `''` | Additional CSS classes |
+
+### CommentAuthorAvatar
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `name` | `string` | required | Author display name; the initials come from it (`getPersonInitials` of `@object-ui/fields`) |
+| `avatarUrl` | `string` | — | Author image; without one, or when it fails to load, the initials disc shows |
+| `className` | `string` | — | Additional CSS classes |
+
+`RecordActivityTimeline` draws it in front of every comment and every reply. In `RichTextCommentInput`, typing `@` opens the mention menu under the caret, or above it when the window has no room below.
 
 ### SubscriptionToggle
 
