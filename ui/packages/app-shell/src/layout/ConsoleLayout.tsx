@@ -32,6 +32,7 @@ import { AppHeader } from './AppHeader.js';
 import { useResponsiveSidebar } from '../hooks/useResponsiveSidebar.js';
 import { usePhoneNavDrawerHistory } from './usePhoneNavDrawerHistory.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
+import { isAppDocsPath, isRecordPagePath } from './consoleRoutePaths.js';
 import { primeConsoleSidebarOpen } from './consoleSidebarRail.js';
 import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
 import { servedObjectLabel } from '../hooks/servedObjectLabel.js';
@@ -126,23 +127,8 @@ function SkipToContentLink({ targetRef }: { targetRef: React.RefObject<HTMLDivEl
   );
 }
 
-/**
- * Is `pathname` a record page, the console route `RecordDetailView` draws:
- * `/apps/APP/OBJECT/record/ID`, or the same record on a named record page
- * (`.../page/PAGE`)? The record's edit form (`.../edit`) is not one.
- */
-export function isRecordPagePath(pathname: string): boolean {
-  return /^\/apps\/[^/]+\/[^/]+\/record\/[^/]+(?:\/page\/[^/]+)?\/?$/.test(pathname);
-}
-
-/**
- * Is `pathname` one of an app's documentation pages, `/apps/APP/docs` and
- * everything under it (objectstack#35424)? A reader there has one navigation,
- * the docs' own, so the app's menu is not drawn beside it.
- */
-export function isAppDocsPath(pathname: string): boolean {
-  return /^\/apps\/[^/]+\/docs(?:\/|$)/.test(pathname);
-}
+// objectstack#35981 — shared with the boot frame, which draws the same shape.
+export { isAppDocsPath, isRecordPagePath } from './consoleRoutePaths.js';
 
 /** Inner component that can access SidebarProvider context */
 function ConsoleLayoutInner({ children }: { children: React.ReactNode }) {

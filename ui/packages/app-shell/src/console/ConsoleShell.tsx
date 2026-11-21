@@ -54,8 +54,8 @@ import {
   RecordPreferencesProvider,
 } from '../context/RecordPreferencesProvider.js';
 import { ThemeProvider } from '../chrome/ThemeProvider.js';
-import { LoadingScreen } from '../chrome/LoadingScreen.js';
 import { RedirectWithSplash } from '../chrome/RedirectWithSplash.js';
+import { ConsoleBootFallback } from './ConsoleBootShell.js';
 import { RemediationOverlay } from './RemediationOverlay.js';
 import { HostNavigationBridge } from './HostNavigationBridge.js';
 import { ConsoleElementApiOpen } from './ConsoleElementApiOpen.js';
@@ -70,8 +70,13 @@ import { getRuntimeConfig } from '../runtime-config.js';
 // /_console load (framework#2615 P3). Delegate to the branded, boot-safe
 // splash (logo + product name + step list) that the rest of the shell already
 // uses, so the cold load looks like the product from the first frame.
+//
+// objectstack#35981 — on an app route, once the session has answered with a
+// user, the console chrome's empty frame instead (`ConsoleBootShell`): the
+// gates after the session read (the adapter, the organization list, the
+// permission answer) decide nothing the frame shows.
 export function LoadingFallback() {
-  return <LoadingScreen />;
+  return <ConsoleBootFallback />;
 }
 
 /**
@@ -486,7 +491,7 @@ export function RequireOrganization({ children }: { children: ReactNode }) {
   // looking at is dropped and nothing replaces it until `/organizations`
   // renders at transition priority. Measured on the three sibling gates #6506
   // fixed: 41-147 ms of empty `#root`, a white flash on 67/87 boots. The
-  // replacement paints the SAME `LoadingScreen` this gate was already showing,
+  // replacement paints the SAME fallback this gate was already showing,
   // so the handoff changes no pixels.
   if (orgFeatureEnabled && !activeOrganization)
     return <RedirectWithSplash to="/organizations" replace />;
