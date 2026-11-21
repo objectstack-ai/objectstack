@@ -232,10 +232,15 @@ describe('objectui#13330 — Setup → Users on a managed environment', () => {
   it('does not offer the identity import', async () => {
     mountUsers({ admin: true, cloudManaged: true });
     await rowOf('Ada Baseline');
-    // objectstack#35548 — Import is an entry of the page bar's ⋮.
-    const more = screen.queryByTestId('object-view-more-actions');
-    if (more) fireEvent.keyDown(more, { key: 'Enter' });
-    expect(screen.queryByRole('menuitem', { name: 'Import' })).toBeNull();
+    // objectstack#36113 — Import is an entry of the view bar's
+    // 「Import / Export」, ⋮ More's only on a narrow bar: read both.
+    for (const id of ['object-view-import-export', 'object-view-more-actions']) {
+      const menu = screen.queryByTestId(id);
+      if (!menu) continue;
+      fireEvent.keyDown(menu, { key: 'Enter' });
+      expect(screen.queryByRole('menuitem', { name: 'Import' })).toBeNull();
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    }
   });
 });
 
@@ -254,8 +259,8 @@ describe.each([
 
   it('offers the identity import to an admin', async () => {
     mountUsers(features);
-    // objectstack#35548 — Import is an entry of the page bar's ⋮.
-    fireEvent.keyDown(await screen.findByTestId('object-view-more-actions', {}, { timeout: 5000 }), { key: 'Enter' });
+    // objectstack#36113 — Import is an entry of the view bar's 「Import / Export」.
+    fireEvent.keyDown(await screen.findByTestId('object-view-import-export', {}, { timeout: 5000 }), { key: 'Enter' });
     expect(await screen.findByRole('menuitem', { name: 'Import' })).toBeInTheDocument();
   });
 });

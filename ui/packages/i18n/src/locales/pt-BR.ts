@@ -2804,6 +2804,8 @@ const pt = {
       endDateField: "Campo de data de término",
       import: "Importar",
       importTitle: "Importar do CSV",
+      newObject: 'Novo {{object}}',
+      importExport: 'Importar / Exportar',
       select: 'Selecionar',
       importedToast: "{{count}} linha(s) importada(s).",
       importedToast_one: "{{count}} linha importada.",

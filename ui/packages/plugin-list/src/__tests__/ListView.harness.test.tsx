@@ -61,6 +61,7 @@ import {
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import type { ListViewSchema } from '@object-ui/types';
 import { ListView, LIST_DEFAULT_TRANSLATIONS, viewFilterRequiresOwner } from '../ListView';
+import type { ListToolbarTrailingState } from '../ListView';
 import { filterNamesCurrentUser } from '../ListEmptyState';
 import { openAdvancedSort } from './conditionPanels';
 
@@ -2535,6 +2536,100 @@ describe('ListView.exportCsvGate-35619', () => {
       'display-export-csv',
       'display-export-json',
     ]);
+  });
+});
+
+// ── ListView.toolbarTrailingExportDoor-36113 ────────────────────────────────────
+
+/**
+ * objectstack#36113 — `toolbarTrailing` is handed the list's export door with
+ * its tools, so a host draws 「Import / Export」 at the view bar's end. The door
+ * is the export verdict the 视图设置 footer reads: absent where that footer
+ * offers no export, and its `run` is the footer's export. The footer keeps its
+ * entries.
+ */
+describe('ListView.toolbarTrailingExportDoor-36113', () => {
+  restoreAfterBlock();
+
+  function makeDataSource(userActions?: Record<string, unknown>) {
+    return {
+      find: vi.fn().mockResolvedValue({ data: [{ id: '1', name: 'Acme' }], total: 1 }),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      exportDownload: vi.fn().mockResolvedValue(new Blob(['name\nAcme'])),
+      getObjectSchema: vi.fn().mockResolvedValue({
+        name: 'account',
+        fields: { name: { type: 'text', label: 'Name' } },
+        ...(userActions ? { userActions } : {}),
+      }),
+    } as any;
+  }
+
+  async function renderList(userActions?: Record<string, unknown>) {
+    const ds = makeDataSource(userActions);
+    const seen: Array<ListToolbarTrailingState> = [];
+    render(
+      <SchemaRendererProvider dataSource={ds}>
+        <ListView
+          schema={{
+            type: 'list-view',
+            objectName: 'account',
+            viewType: 'grid',
+            fields: ['name'],
+            exportOptions: { formats: ['csv', 'json'] },
+          } as ListViewSchema}
+          dataSource={ds}
+          toolbarTrailing={(tools, state) => {
+            seen.push(state);
+            return <span data-testid="host-end">{tools}{state.export ? <button type="button" data-testid="host-export" onClick={() => state.export!.run('csv')}>{state.export.formats.join(',')}</button> : null}</span>;
+          }}
+        />
+      </SchemaRendererProvider>,
+    );
+    await waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalledWith('account'));
+    await waitFor(() => expect(ds.find).toHaveBeenCalled());
+    return { ds, seen };
+  }
+
+  it('the host is handed the formats the footer offers, and the footer keeps them', async () => {
+    await renderList();
+    expect(await screen.findByTestId('host-export')).toHaveTextContent('csv,json');
+    fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
+    const panel = screen.getByTestId('view-settings-content');
+    expect(within(panel).queryAllByTestId(/^display-export-(csv|json)$/)).toHaveLength(2);
+  });
+
+  it('the door runs the list\'s export', async () => {
+    const { ds } = await renderList();
+    fireEvent.click(await screen.findByTestId('host-export'));
+    await waitFor(() => expect(ds.exportDownload).toHaveBeenCalledWith('account', expect.objectContaining({ format: 'csv' })));
+  });
+
+  it('the door refuses a format it does not offer', async () => {
+    const { ds, seen } = await renderList();
+    await screen.findByTestId('host-export');
+    const door = seen.at(-1)!.export!;
+    expect(door.formats).not.toContain('xlsx');
+    await act(async () => {
+      door.run('xlsx');
+      door.run('pdf');
+    });
+    expect(ds.exportDownload).not.toHaveBeenCalled();
+    // The control: an offered format through the same handle does export.
+    await act(async () => {
+      door.run('json');
+    });
+    await waitFor(() => expect(ds.exportDownload).toHaveBeenCalledWith('account', expect.objectContaining({ format: 'json' })));
+    expect(ds.exportDownload).toHaveBeenCalledTimes(1);
+  });
+
+  it('exportCsv false: no door, as the footer draws no entry', async () => {
+    const { seen } = await renderList({ exportCsv: false });
+    await screen.findByTestId('host-end');
+    expect(screen.queryByTestId('host-export')).toBeNull();
+    expect(seen.at(-1)?.export).toBeUndefined();
   });
 });
 
