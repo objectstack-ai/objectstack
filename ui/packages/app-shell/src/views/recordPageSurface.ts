@@ -37,8 +37,9 @@
 
 /**
  * Platform objects whose own record page is kept on the phone and in the
- * drawer (the seat's reading on objectstack#36150, recommended option of the
- * maintainer's decision card, built until the answer):
+ * drawer (maintainer ruling 7066490078 on objectstack#36150). The key is the
+ * object's name, as the ruling words it ("the user page"): ANY assigned full
+ * page of these objects is kept everywhere, an app-scoped one included.
  *
  * - `sys_approval_request` — the page IS the decision (maintainer 2026-11-17,
  *   #34588: the request shows the submitted record whole): its approve,
@@ -70,7 +71,9 @@ export interface RecordPageSurface {
  * True when the object's assigned (authored, `kind: 'full'`) record page is
  * drawn on this surface; false when the standard page is drawn instead.
  * Slotted pages are not concerned: they already are the standard page with
- * their slots filled, on every surface.
+ * their slots filled, on every surface. The record view and the record
+ * route's object scope (`console/appObjectScope.ts`) both read it, so the
+ * route reads the objects of the page the view draws.
  */
 export function authoredRecordPageApplies(surface: RecordPageSurface): boolean {
   if (surface.requestedPageName) return true;

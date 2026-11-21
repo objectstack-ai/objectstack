@@ -225,7 +225,9 @@ function tree(dataSource: any, recordId: string, pages: any[] = []) {
           onEdit={() => {}}
           objectNameOverride={OBJECT_NAME}
           recordIdOverride={recordId}
-          /* objectstack#36150 — not `embedded`: an authored page draws on the full page only. */
+          // objectstack#36150 — an authored page draws on the full page only,
+          // so its cases mount the full page; the synthesized page's, the drawer.
+          embedded={pages.length === 0}
         />
       </MetadataCtx.Provider>
     </MemoryRouter>

@@ -102,7 +102,7 @@ describe('showcase_task record action locations have a stock host (#22030)', () 
       expect(result.data?.actions).toEqual(ids);
     });
 
-    it('lists the task\'s whole record_header / record_more set — what the synthesized header carries — but the section bar\'s', () => {
+    it('lists the task\'s whole record_header / record_more set — what the synthesized header carries — less the actions its section bar draws', () => {
       expect(ids.every((id) => typeof id === 'string')).toBe(true);
       expect(new Set(ids).size, 'no id is listed twice').toBe(ids.length);
       // An action placed at record_section AND record_more is drawn on this

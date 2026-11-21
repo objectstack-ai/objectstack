@@ -16,6 +16,8 @@
  *     authored page drew on all three).
  *   - CONTROL: an object with no authored page draws the standard page on all
  *     three, as before.
+ *   - A media-query change that leaves the window wide (printing fires one)
+ *     keeps the authored page on the desktop full page.
  *   - The host's exceptions, each on the drawer and the phone: a slotted
  *     page's slot is kept (it IS the standard page); the approval request and
  *     user pages keep their own page; a page named in the URL is drawn on the
@@ -25,7 +27,7 @@
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { MockInstance } from 'vitest';
-import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
+import { act, render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 
@@ -227,6 +229,35 @@ describe('#36150 an authored full page', () => {
     await recordDrawn();
     await waitFor(() => expect(screen.getByText(AUTHORED_MARK)).toBeInTheDocument());
     expect(standardTabs()).toBe(false);
+  });
+
+  it('a media-query change that leaves the window wide (printing fires one) keeps the authored page (N4)', async () => {
+    const listeners = new Set<() => void>();
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      media: query,
+      matches: false,
+      onchange: null,
+      addEventListener: (_t: string, l: () => void) => listeners.add(l),
+      removeEventListener: (_t: string, l: () => void) => listeners.delete(l),
+      addListener: (l: () => void) => listeners.add(l),
+      removeListener: (l: () => void) => listeners.delete(l),
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+    try {
+      mount('qa_project', [fullPage('qa_project')], 'desktop');
+      await recordDrawn();
+      await waitFor(() => expect(screen.getByText(AUTHORED_MARK)).toBeInTheDocument());
+      expect(listeners.size).toBeGreaterThan(0);
+      act(() => {
+        window.dispatchEvent(new Event('beforeprint'));
+        for (const l of [...listeners]) l();
+      });
+      expect(screen.getByText(AUTHORED_MARK)).toBeInTheDocument();
+      expect(standardTabs()).toBe(false);
+    } finally {
+      window.matchMedia = original;
+    }
   });
 
   it.each<Face>(['phone', 'drawer'])('draws the standard page on the %s', async (face) => {

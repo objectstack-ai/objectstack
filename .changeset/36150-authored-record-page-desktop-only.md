@@ -6,6 +6,7 @@ feat(app-shell): an authored record page is drawn on the desktop full page only;
 
 Clause-②: no
 Metadata-protocol: semantic
+Skills-docs: follow-up #36179 — skills/objectstack-ui/rules/record-page.md rules 4 and 5 (the `record_more` advice); skills edits ride a domain:skills PR
 
 What a `kind: 'full'` record page means changes: it is drawn on the desktop full page only. On a phone, and in every embedded record view (the side drawer a list opens, the split pane, an interface page's preview), the record draws the platform's standard page for its object, whether or not the object has an authored page. **Open full page** from the drawer still lands on the authored page.
 
