@@ -17,6 +17,10 @@
  *   `onFilterChange`); 「×」 drops the copy.
  * - An advanced filter (an 「or」 group) is not edited on a phone: the panel
  *   says so.
+ * - 「✓」 on an untouched copy writes nothing.
+ * - With the on-screen keyboard up (the visual viewport shorter than the
+ *   layout one), the sheet stands on the keyboard: its bottom is the
+ *   keyboard's top and its height the visible area's, less the top strip.
  *
  * "Below `sm`" is `matchMedia('(max-width: 639.98px)')` answering a match, the
  * one query `useBelowSm` asks. Provider-less, so `t()` reads the English
@@ -183,6 +187,81 @@ describe('phone filter panel (objectstack#35884)', () => {
     expect(await screen.findByTestId('phone-filter-advanced-notice')).toHaveTextContent(
       'This view uses an advanced filter. Change it on a computer.',
     );
+  });
+});
+
+describe('phone panels: an untouched 「✓」 writes nothing (objectstack#35884)', () => {
+  it('sort: 「✓」 with no change does not call onSortChange', async () => {
+    const onSortChange = vi.fn();
+    mount({}, { onSortChange });
+    await screen.findByTestId('grid-stub');
+    fireEvent.click(screen.getByTestId('phone-sort-chip'));
+    await screen.findByTestId('phone-sort-panel');
+    fireEvent.click(screen.getByTestId('phone-sort-panel-apply'));
+    await waitFor(() => {
+      const panel = screen.queryByTestId('phone-sort-panel');
+      expect(panel === null || panel.getAttribute('data-state') === 'closed').toBe(true);
+    });
+    expect(onSortChange).not.toHaveBeenCalled();
+  });
+
+  it('filter: 「✓」 on the advanced-filter notice does not call onFilterChange', async () => {
+    const onFilterChange = vi.fn();
+    mount({}, {
+      onFilterChange,
+      initialFilters: {
+        id: 'root',
+        logic: 'or',
+        conditions: [
+          { id: 'a', field: 'name', operator: 'contains', value: 'Ac' },
+          { id: 'b', field: 'stage', operator: 'contains', value: 'wo' },
+        ],
+      },
+    });
+    await screen.findByTestId('grid-stub');
+    onFilterChange.mockClear();
+    fireEvent.click(screen.getByTestId('phone-filter-chip'));
+    await screen.findByTestId('phone-filter-advanced-notice');
+    fireEvent.click(screen.getByTestId('phone-filter-panel-apply'));
+    await waitFor(() => {
+      const panel = screen.queryByTestId('phone-filter-panel');
+      expect(panel === null || panel.getAttribute('data-state') === 'closed').toBe(true);
+    });
+    expect(onFilterChange).not.toHaveBeenCalled();
+  });
+});
+
+describe('phone panels and the on-screen keyboard (objectstack#35884)', () => {
+  /** A `visualViewport` whose height the test moves, as a keyboard would. */
+  function stubVisualViewport(height: number) {
+    const viewport = Object.assign(new EventTarget(), { height, offsetTop: 0, width: 390, offsetLeft: 0, pageTop: 0, pageLeft: 0, scale: 1 });
+    vi.stubGlobal('visualViewport', viewport);
+    return viewport;
+  }
+
+  it('stands on the keyboard while it is up, and fills the screen again once it goes', async () => {
+    const full = window.innerHeight;
+    const viewport = stubVisualViewport(full);
+    mount();
+    await screen.findByTestId('grid-stub');
+    fireEvent.click(screen.getByTestId('phone-filter-chip'));
+    const panel = await screen.findByTestId('phone-filter-panel');
+    expect(panel, 'CONTROL: no keyboard, no inset').not.toHaveAttribute('data-keyboard-inset');
+
+    // The keyboard comes up: 300 px of the layout viewport are covered.
+    viewport.height = full - 300;
+    viewport.dispatchEvent(new Event('resize'));
+    await waitFor(() => expect(panel).toHaveAttribute('data-keyboard-inset', '300'));
+    expect(panel.style.bottom).toBe('300px');
+    expect(panel.style.height).toBe(`${full - 300 - 40}px`);
+    expect(panel.style.maxHeight).toBe(`${full - 300 - 40}px`);
+
+    // It goes down: the sheet's own height again.
+    viewport.height = full;
+    viewport.dispatchEvent(new Event('resize'));
+    await waitFor(() => expect(panel).not.toHaveAttribute('data-keyboard-inset'));
+    expect(panel.style.bottom).toBe('');
+    expect(panel.style.height).toBe('');
   });
 });
 

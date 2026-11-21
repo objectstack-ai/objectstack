@@ -25,7 +25,7 @@ import { ObjectView as PluginObjectView, ManageViewsDialog } from '@object-ui/pl
 // Do NOT add eager `import '@object-ui/plugin-*'` side-effect imports here.
 import { CheckSquare, Plus } from 'lucide-react';
 import { DropdownMenuItem } from '@object-ui/components';
-import { requestListSelection, useListPageSelecting } from '@object-ui/plugin-grid';
+import { requestListSelection, useListPageSelectable, useListPageSelecting } from '@object-ui/plugin-grid';
 import { getIcon } from '../utils/getIcon.js';
 import { usePublishPhonePageBar } from '../layout/PhonePageBar.js';
 import { useObjectListFavorite } from '../layout/SidebarItemMenu.js';
@@ -1244,6 +1244,10 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // The app bar draws it in place of its pill, search, bell and avatar.
     const [pageColumnEl, setPageColumnEl] = useState<HTMLDivElement | null>(null);
     const listSelecting = useListPageSelecting(pageColumnEl);
+    // 「Select」 is offered only where the list would open a selection: cards
+    // whose rows take more than one tick (not a kanban, a calendar, or a list
+    // with no or single selection).
+    const listSelectable = useListPageSelectable(pageColumnEl);
     const phoneDescription = objectDef.description ? objectDesc(objectDef) : undefined;
     usePublishPhonePageBar(phone ? {
         icon: createElement(getIcon((objectDef as any)?.icon), { className: 'h-5 w-5' }),
@@ -1256,7 +1260,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 importDisabled={importDisabled}
                 listFavorite={listFavorite}
                 triggerClassName="h-11 w-11 px-0 shadow-none"
-                leading={titleSwitcher ? (
+                leading={listSelectable ? (
                     <DropdownMenuItem onSelect={() => requestListSelection(pageColumnEl)} data-testid="object-view-select">
                         <CheckSquare className="h-4 w-4" />
                         <span>{t('console.objectView.select', { defaultValue: 'Select' })}</span>

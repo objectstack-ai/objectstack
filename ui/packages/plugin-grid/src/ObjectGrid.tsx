@@ -126,7 +126,7 @@ import { resolveObjectGridPersistedColumns } from './objectGridPersistedColumns'
 import { resolveObjectGridActionsColumn } from './objectGridActionsColumn';
 import { useInlineRowActionFold } from './objectGridInlineActionFold';
 import { BULK_SELECT_ALL_MATCHING_CAP } from './bulkSelectAllMatchingCap';
-import { useIsListPageGrid, useListSelectionRequest, usePublishListSelecting } from './listPageScope';
+import { useIsListPageGrid, useListSelectionRequest, usePublishListSelectable, usePublishListSelecting } from './listPageScope';
 import { useInfiniteRowLoad } from './objectGridInfiniteLoad';
 export type { RetiredListColumnKey, ObjectGridColumnHolds, ObjectGridColumnDraft, ObjectGridColumn } from './objectGridColumns';
 export type { ObjectGridColumnState, ObjectGridFooterSummary, ObjectGridExternalPaginationProps, ObjectGridRowGroup } from './objectGridProps';
@@ -1675,13 +1675,17 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // objectstack#35883 — the page's 「Select」 (`requestListSelection`) opens a
   // card selection with nothing ticked yet. Only a request made after this
   // grid mounted counts.
+  // The page draws 「Select」 only where it would open one: on cards whose rows
+  // take more than one tick.
+  const cardsSelectRequestable = useCardView && rowsSelectable && !singleSelection;
+  usePublishListSelectable(gridRoot, cardsSelectRequestable);
   const selectionRequest = useListSelectionRequest(gridRoot);
   const seenSelectionRequest = React.useRef(selectionRequest);
   useEffect(() => {
     if (selectionRequest === seenSelectionRequest.current) return;
     seenSelectionRequest.current = selectionRequest;
-    if (rowsSelectable && !singleSelection) setCardSelecting(true);
-  }, [selectionRequest, rowsSelectable, singleSelection]);
+    if (cardsSelectRequestable) setCardSelecting(true);
+  }, [selectionRequest, cardsSelectRequestable]);
   // A long press on a card: held 500 ms without moving starts the selection
   // with that card ticked; the click that follows the press is swallowed.
   const longPress = React.useRef<{ timer: ReturnType<typeof setTimeout> | null; x: number; y: number; fired: boolean }>({

@@ -16,6 +16,9 @@
  * - The page's 「Select」 (`requestListSelection` on the page column) starts
  *   the selection with nothing ticked.
  *
+ * - The page offers 「Select」 only where it would open a selection
+ *   (`useListPageSelectable`): cards whose rows take more than one tick.
+ *
  * Pinned at 390 px, the card layout (see `phoneCardRow-28484.test.tsx`).
  */
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
@@ -24,7 +27,7 @@ import '@testing-library/jest-dom';
 import React from 'react';
 
 import { ObjectGrid } from '../ObjectGrid';
-import { requestListSelection } from '../listPageScope';
+import { requestListSelection, useListPageSelectable } from '../listPageScope';
 import { ActionProvider, SchemaRendererProvider } from '@object-ui/react';
 import { registerAllFields } from '@object-ui/fields';
 
@@ -181,4 +184,23 @@ describe('card list selection on a phone (objectstack#35883)', () => {
     fireEvent.click(acme);
     expect(onRowClick).toHaveBeenCalledTimes(1);
   });
+
+  it('the page offers 「Select」 only on cards whose rows take more than one tick', async () => {
+    for (const [selection, offered] of [
+      [{ type: 'multiple' }, true],
+      [{ type: 'single' }, false],
+      [{ type: 'none' }, false],
+    ] as const) {
+      renderCards(selection);
+      await cardOf('Acme');
+      const scope = screen.getByTestId('page-column');
+      const { getByTestId } = render(<SelectableProbe scope={scope} />);
+      expect(getByTestId('selectable-probe').dataset.selectable, `selection ${selection.type}`).toBe(String(offered));
+      cleanup();
+    }
+  });
 });
+
+function SelectableProbe({ scope }: { scope: HTMLElement }) {
+  return <span data-testid="selectable-probe" data-selectable={String(useListPageSelectable(scope))} />;
+}

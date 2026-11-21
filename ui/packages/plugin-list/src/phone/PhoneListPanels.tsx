@@ -200,13 +200,53 @@ export interface PhonePanelSheetProps {
   testId?: string;
 }
 
+/** The strip of the page left in view above an open sheet, in px (`2.5rem`). */
+const SHEET_TOP_GAP = 40;
+
+/**
+ * The on-screen keyboard while `active`: how far the visible area's bottom
+ * (`visualViewport`) sits above the layout viewport's, and the visible
+ * height. `null` with no keyboard up (or no `visualViewport`).
+ *
+ * `100dvh` does not shrink for the keyboard (iOS Safari, and Chrome on
+ * Android's default `resizes-visual`): only the visual viewport does. So the
+ * sheet reads it and stands on the keyboard, its 「✓」 and the focused field
+ * in view.
+ */
+function useKeyboardInset(active: boolean): { bottom: number; visibleHeight: number } | null {
+  const [inset, setInset] = React.useState<{ bottom: number; visibleHeight: number } | null>(null);
+  React.useEffect(() => {
+    const viewport = typeof window === 'undefined' ? null : window.visualViewport;
+    if (!active || !viewport) return undefined;
+    const read = () => {
+      const bottom = Math.max(0, Math.round(window.innerHeight - viewport.height - viewport.offsetTop));
+      // Below this the gap is the browser's own chrome moving, not a keyboard.
+      setInset(bottom < 80 ? null : { bottom, visibleHeight: Math.round(viewport.height) });
+    };
+    read();
+    viewport.addEventListener('resize', read);
+    viewport.addEventListener('scroll', read);
+    return () => {
+      viewport.removeEventListener('resize', read);
+      viewport.removeEventListener('scroll', read);
+    };
+  }, [active]);
+  return active ? inset : null;
+}
+
 export function PhonePanelSheet({ open, onOpenChange, title, onApply, onBack, children, testId = 'phone-panel' }: PhonePanelSheetProps) {
   const { t } = useListConditionTranslation();
+  const keyboard = useKeyboardInset(open);
+  const keyboardHeight = keyboard ? `${Math.max(0, keyboard.visibleHeight - SHEET_TOP_GAP)}px` : undefined;
   return (
-    <Drawer open={open} onOpenChange={onOpenChange} shouldScaleBackground={false}>
+    // The sheet follows the keyboard itself (`useKeyboardInset`), so vaul's
+    // own input repositioning, which would also write its height, is off.
+    <Drawer open={open} onOpenChange={onOpenChange} shouldScaleBackground={false} repositionInputs={false}>
       <DrawerContent
         // Nearly the whole screen: a strip of the page stays in view above it.
         className="mt-0 h-[calc(100dvh-2.5rem)] max-h-[calc(100dvh-2.5rem)] outline-none"
+        style={keyboard ? { bottom: keyboard.bottom, height: keyboardHeight, maxHeight: keyboardHeight } : undefined}
+        data-keyboard-inset={keyboard ? keyboard.bottom : undefined}
         data-testid={testId}
       >
         <div className="grid shrink-0 grid-cols-[44px_minmax(0,1fr)_44px] items-center gap-2 px-3 pb-2 pt-2">
@@ -346,7 +386,8 @@ export function PhoneSortSheet({ open, onOpenChange, fields, shownFields, value,
       onOpenChange={onOpenChange}
       title={t('listConditions.chips.sort')}
       onApply={() => {
-        onApply(staged.filter((level) => level.field));
+        // An untouched copy is still the list's own value: nothing to write.
+        if (staged !== value) onApply(staged.filter((level) => level.field));
         onOpenChange(false);
       }}
       onBack={step.kind === 'levels' ? undefined : () => setStep(levels)}
@@ -483,7 +524,9 @@ export function PhoneFilterSheet({ open, onOpenChange, fields, shownFields, valu
       onOpenChange={onOpenChange}
       title={t('listConditions.chips.filter')}
       onApply={() => {
-        onApply(staged);
+        // An untouched copy (and the advanced-filter notice, which edits
+        // nothing) is still the list's own value: nothing to write.
+        if (staged !== value) onApply(staged);
         onOpenChange(false);
       }}
       onBack={step.kind === 'list' || !independent ? undefined : toList}

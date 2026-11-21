@@ -137,3 +137,40 @@ export function useListPageSelecting(scope: HTMLElement | null): boolean {
     () => false,
   );
 }
+
+/** The grid roots where a 「Select」 request would open a selection now. */
+const selectableRoots = new Set<HTMLElement>();
+
+/**
+ * The grid's side: publish whether a 「Select」 request (`requestListSelection`)
+ * would open a selection in the grid rooted at `root`: its cards are on screen
+ * and its rows take more than one tick.
+ */
+export function usePublishListSelectable(root: HTMLElement | null, selectable: boolean): void {
+  React.useLayoutEffect(() => {
+    if (!root || !selectable) return undefined;
+    selectableRoots.add(root);
+    emit();
+    return () => {
+      selectableRoots.delete(root);
+      emit();
+    };
+  }, [root, selectable]);
+}
+
+/**
+ * The page's side: would 「Select」 open a selection in a list inside `scope`?
+ * `false` for a kanban, a calendar, a list whose rows cannot be selected or
+ * take a single tick, and while no grid is mounted.
+ */
+export function useListPageSelectable(scope: HTMLElement | null): boolean {
+  return React.useSyncExternalStore(
+    subscribe,
+    () => {
+      if (!scope) return false;
+      for (const root of selectableRoots) if (scope.contains(root)) return true;
+      return false;
+    },
+    () => false,
+  );
+}

@@ -17,6 +17,11 @@
  * `listPageScope.ts`, the same module the page reads through the vitest
  * alias). What the real grid publishes is plugin-grid's pin
  * (`cardSelection-35883.test.tsx`).
+ *
+ * The same stand-in pins the phone's 「⋮ More」 → 「Select」: it is offered only
+ * while the list says a request would open a selection
+ * (`usePublishListSelectable`), so a kanban, a calendar or a list with no or
+ * single selection never shows an item that does nothing.
  */
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -48,6 +53,13 @@ vi.mock('@object-ui/permissions', async (importOriginal) => {
     useFieldPermissions: () => ({ canRead: () => true, canWrite: () => true, permissions: [] }),
   };
 });
+
+/** The page's phone verdict; the 「+」 case runs at the default (desktop) width. */
+let phoneViewport = false;
+vi.mock('../hooks/usePhoneViewport.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  usePhoneViewport: () => phoneViewport,
+}));
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -93,6 +105,7 @@ vi.mock('./MetadataInspector', () => ({
 vi.mock('./RecordDetailView', () => ({ RecordDetailView: () => null }));
 
 import { ObjectView } from './ObjectView';
+import { PhonePageBarProvider, PhonePageBarEnd } from '../layout/PhonePageBar';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 
 const OBJECT_NAME = 'showcase_project';
@@ -125,29 +138,35 @@ function makeDataSource() {
 async function renderList(objects: any[]) {
   render(
     <ExpressionProvider user={USER}>
-      <MemoryRouter initialEntries={[`/apps/demo/${OBJECT_NAME}`]}>
-        <Routes>
-          <Route
-            path="/apps/:appName/:objectName"
-            element={<ObjectView dataSource={makeDataSource()} objects={objects} onEdit={() => {}} />}
-          />
-        </Routes>
-      </MemoryRouter>
+      <PhonePageBarProvider>
+        <PhonePageBarEnd />
+        <MemoryRouter initialEntries={[`/apps/demo/${OBJECT_NAME}`]}>
+          <Routes>
+            <Route
+              path="/apps/:appName/:objectName"
+              element={<ObjectView dataSource={makeDataSource()} objects={objects} onEdit={() => {}} />}
+            />
+          </Routes>
+        </MemoryRouter>
+      </PhonePageBarProvider>
     </ExpressionProvider>,
   );
   return screen.findByTestId('card-scroller-stand-in');
 }
 
 
-import { usePublishListSelecting } from '../../../plugin-grid/src/listPageScope';
+import { usePublishListSelectable, usePublishListSelecting } from '../../../plugin-grid/src/listPageScope';
 
 function CardListStandIn() {
   const [root, setRoot] = React.useState<HTMLDivElement | null>(null);
   const [selecting, setSelecting] = React.useState(false);
+  const [selectable, setSelectable] = React.useState(false);
   usePublishListSelecting(root, selecting);
+  usePublishListSelectable(root, selectable);
   return (
     <div ref={setRoot} data-fab-clearance="" data-testid="card-scroller-stand-in">
       <button type="button" data-testid="toggle-selecting" onClick={() => setSelecting((s) => !s)} />
+      <button type="button" data-testid="toggle-selectable" onClick={() => setSelectable((s) => !s)} />
     </div>
   );
 }
@@ -156,6 +175,7 @@ const fab = () => document.querySelector('[data-testid="mobile-fab-create"]');
 
 beforeEach(() => {
   principal = {};
+  phoneViewport = false;
 });
 
 afterEach(() => cleanup());
@@ -170,5 +190,30 @@ describe('the phone 「+」 while cards are selected (objectstack#35883)', () =>
 
     fireEvent.click(screen.getByTestId('toggle-selecting'));
     expect(fab(), 'back once the selection ends').toBeTruthy();
+  });
+});
+
+describe('the phone 「⋮ More」 → 「Select」 (objectstack#35883)', () => {
+  const openMore = async () => {
+    const trigger = (await screen.findByTestId('phone-page-bar-end')).querySelector('button');
+    expect(trigger, 'the ⋮ More trigger').toBeTruthy();
+    fireEvent.keyDown(trigger!, { key: 'Enter' });
+    await screen.findByRole('menu');
+  };
+  const selectItem = () => document.querySelector('[data-testid="object-view-select"]');
+
+  it('is not offered while the list says no selection would open', async () => {
+    phoneViewport = true;
+    await renderList(objectsWith(undefined));
+    await openMore();
+    expect(selectItem(), 'no 「Select」 on a list that would not open one').toBeNull();
+  });
+
+  it('is offered once the list says a selection would open', async () => {
+    phoneViewport = true;
+    await renderList(objectsWith(undefined));
+    fireEvent.click(screen.getByTestId('toggle-selectable'));
+    await openMore();
+    expect(selectItem(), 'CONTROL: 「Select」 on a list that would open one').toBeTruthy();
   });
 });
