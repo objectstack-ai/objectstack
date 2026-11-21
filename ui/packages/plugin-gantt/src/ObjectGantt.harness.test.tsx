@@ -2162,3 +2162,110 @@ describe('ObjectGantt.lookupParent-34395', () => {
     expect(byId(tasks, 'c2').parent).toBeNull();
   });
 });
+
+// ── ObjectGantt.refusedRead-35317 ───────────────────────────────────────────────
+
+/**
+ * objectstack#35317 — a refused task read draws the calm no-access state, not
+ * the raw error.
+ *
+ * A reader who may open a project but not read its tasks used to see the
+ * transport's own string where the chart would be ("Error: ApiDataSource:
+ * HTTP 403 Forbidden — {…}"), untranslated. The gantt now classifies a failed
+ * load with the shared `classifyLoadError` and, for a `forbidden` read, draws
+ * the related list's no-access sentence (`list.loadErrorForbidden*`) as a
+ * neutral `role="status"` panel, never the server's text. Every other failure
+ * keeps the existing error screen (CONTROL below).
+ */
+describe('ObjectGantt.refusedRead-35317', () => {
+  beforeEach(() => {
+    standIns.ganttView = ({ tasks }: any) => (
+      <div data-testid="gantt-view" data-task-count={String(tasks.length)} />
+    );
+  });
+
+  const OBJECT_SCHEMA = {
+    fields: {
+      name: { type: 'text' },
+      start_date: { type: 'date' },
+      end_date: { type: 'date' },
+    },
+  };
+
+  const SCHEMA: any = {
+    type: 'object-gantt',
+    objectName: 'project_task',
+    gantt: { titleField: 'name', startDateField: 'start_date', endDateField: 'end_date' },
+  };
+
+  function adapter(find: () => Promise<unknown>) {
+    return {
+      find: vi.fn(find),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async () => OBJECT_SCHEMA),
+    } as unknown as DataSource;
+  }
+
+  /** The shape the ObjectStack adapter throws: status + code decorated on the Error. */
+  function refusal(): Error {
+    const err = new Error(
+      'ApiDataSource: HTTP 403 Forbidden — {"error":"PERMISSION_DENIED: no read access to project_task"}',
+    ) as Error & { httpStatus?: number; code?: string };
+    err.httpStatus = 403;
+    err.code = 'PERMISSION_DENIED';
+    return err;
+  }
+
+  let consoleError: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    consoleError.mockRestore();
+  });
+
+  it('a 403 task read draws the no-access state, with none of the server text', async () => {
+    const { container } = render(
+      <ObjectGantt schema={SCHEMA} dataSource={adapter(async () => { throw refusal(); })} />,
+    );
+    const panel = await screen.findByTestId('gantt-no-access');
+    expect(panel.getAttribute('role')).toBe('status');
+    expect(panel.textContent).toContain('You don’t have access');
+    expect(panel.textContent).toContain('You don’t have permission to view these records.');
+    const text = container.textContent ?? '';
+    expect(text).not.toContain('Error:');
+    expect(text).not.toContain('PERMISSION_DENIED');
+    expect(text).not.toContain('HTTP 403');
+    expect(screen.queryByTestId('gantt-view')).toBeNull();
+  });
+
+  it('a 403 with only the status in the message (no decorated fields) is the same refusal', async () => {
+    render(
+      <ObjectGantt
+        schema={SCHEMA}
+        dataSource={adapter(async () => { throw new Error('ApiDataSource: HTTP 403 Forbidden — {"error":"denied"}'); })}
+      />,
+    );
+    expect(await screen.findByTestId('gantt-no-access')).toBeTruthy();
+    expect(screen.queryByText(/Error:/)).toBeNull();
+  });
+
+  it('CONTROL: a 500 keeps the existing error screen', async () => {
+    const err = new Error('ApiDataSource: HTTP 500 Internal Server Error') as Error & { httpStatus?: number };
+    err.httpStatus = 500;
+    render(<ObjectGantt schema={SCHEMA} dataSource={adapter(async () => { throw err; })} />);
+    expect(await screen.findByText('Error: ApiDataSource: HTTP 500 Internal Server Error')).toBeTruthy();
+    expect(screen.queryByTestId('gantt-no-access')).toBeNull();
+  });
+
+  it('CONTROL: rows that load render the chart', async () => {
+    const rows = [{ id: '1', name: 'Design', start_date: '2026-01-01', end_date: '2026-01-05' }];
+    render(<ObjectGantt schema={SCHEMA} dataSource={adapter(async () => ({ data: rows, total: 1 }))} />);
+    const view = await screen.findByTestId('gantt-view');
+    expect(view.getAttribute('data-task-count')).toBe('1');
+    expect(screen.queryByTestId('gantt-no-access')).toBeNull();
+  });
+});
