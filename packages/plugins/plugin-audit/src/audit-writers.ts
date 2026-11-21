@@ -3119,7 +3119,7 @@ export function installAuditWriters(
 
     let thread: CommentThreadParticipants | null;
     try {
-      thread = await readThreadParticipants(engine, parentId);
+      thread = await readThreadParticipants(engine, parentId, String(row.thread_id ?? ''));
     } catch (err) {
       try { (engine as any).logger?.warn?.('Reply participants read failed; no reply notifications emitted', { commentId, err: String((err as any)?.message ?? err) }); } catch {}
       return;
@@ -3230,11 +3230,14 @@ const THREAD_READ_CONTEXT = { isSystem: true } as const;
  * `parent_id` chain to the top-level comment (bounded, cycle-safe; the
  * Console replies to a top-level comment only, so this is one read), each
  * comment's author on the way, then every distinct author of a reply to the
- * top-level comment in ONE grouped read. System context: these are the
+ * top-level comment in ONE grouped read. Every read is held to the reply's
+ * own `threadId` (its record): a parent, or a sibling reply, on another
+ * record's thread is not this thread. System context: these are the
  * candidates, and each is judged by the recipient gate after. `null` when the
- * parent cannot be found — no thread, no notice.
+ * parent cannot be found on this thread — no thread, no notice.
  */
-async function readThreadParticipants(engine: any, parentId: string): Promise<CommentThreadParticipants | null> {
+async function readThreadParticipants(engine: any, parentId: string, threadId: string): Promise<CommentThreadParticipants | null> {
+  if (!threadId) return null;
   const ancestors: string[] = [];
   const seen = new Set<string>();
   let rootId: string | null = null;
@@ -3243,12 +3246,15 @@ async function readThreadParticipants(engine: any, parentId: string): Promise<Co
     seen.add(cursor);
     const rows: any[] = await engine.find('sys_comment', {
       where: { id: cursor },
-      fields: ['id', 'author_id', 'parent_id'],
+      fields: ['id', 'thread_id', 'author_id', 'parent_id'],
       limit: 1,
       context: THREAD_READ_CONTEXT,
     });
     const comment = Array.isArray(rows) ? rows[0] : undefined;
-    if (!comment) break;
+    // A parent on another record's thread is not this thread: the walk stops
+    // there, so a `parent_id` written across records draws no candidate from
+    // the other thread.
+    if (!comment || String(comment.thread_id ?? '') !== threadId) break;
     rootId = String(comment.id);
     if (comment.author_id != null && String(comment.author_id)) ancestors.unshift(String(comment.author_id));
     cursor = comment.parent_id != null && String(comment.parent_id) ? String(comment.parent_id) : null;
@@ -3257,7 +3263,7 @@ async function readThreadParticipants(engine: any, parentId: string): Promise<Co
   const replyAuthors: any[] = await engine.aggregate(
     'sys_comment',
     {
-      where: { parent_id: rootId },
+      where: { parent_id: rootId, thread_id: threadId },
       groupBy: ['author_id'],
       aggregations: [{ function: 'count', field: 'id', alias: 'replies' }],
     },

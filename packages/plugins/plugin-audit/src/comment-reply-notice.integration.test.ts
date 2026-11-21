@@ -145,6 +145,7 @@ async function boot(): Promise<Rig> {
     await engine.insert('sys_user', { id, name, email: `${id}@example.com`, locale: LOCALES[id] }, { context: SYSTEM });
   }
   await engine.insert(TASK, { id: 't1', title: 'Launch plan' }, { context: SYSTEM });
+  await engine.insert(TASK, { id: 't2', title: 'Budget' }, { context: SYSTEM });
 
   return {
     engine,
@@ -159,10 +160,10 @@ let seq = 0;
 async function say(
   engine: ObjectQL,
   author: string,
-  opts: { parentId?: string; mentions?: string[]; body?: string } = {},
+  opts: { parentId?: string; mentions?: string[]; body?: string; record?: string } = {},
 ): Promise<string> {
   const row: any = await engine.insert('sys_comment', {
-    thread_id: `${TASK}:t1`,
+    thread_id: `${TASK}:${opts.record ?? 't1'}`,
     body: opts.body ?? `note ${++seq}`,
     author_id: author,
     author_name: author.slice(2, 3).toUpperCase() + author.slice(3),
@@ -323,5 +324,20 @@ describe('a reply notifies the thread\'s starter and earlier repliers', () => {
       [`${DAVE}@example.com`, 'Carol replied in a comment thread you are in'],
     ]);
     expect(byChannel((await drained(rig.engine)).reply, CAROL)).toEqual([]);
+  });
+
+  it('a parent on another record\'s thread is not this thread: nobody from that thread is a participant', async () => {
+    rig = await boot();
+    const root = await say(rig.engine, ALICE, { record: 't2' });
+    await say(rig.engine, DAVE, { record: 't2', parentId: root });
+    await drained(rig.engine);
+    rig.sent.length = 0;
+    const before = (await deliveries(rig.engine, 'collab.reply')).length;
+
+    // A reply on t1 whose parent_id names a comment on t2 (written through the API).
+    await say(rig.engine, BOB, { parentId: root });
+    const { reply } = await drained(rig.engine);
+    expect(reply).toHaveLength(before);
+    expect(rig.sent).toEqual([]);
   });
 });
