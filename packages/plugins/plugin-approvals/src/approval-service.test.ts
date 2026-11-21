@@ -1937,7 +1937,7 @@ describe('ApprovalService (node era)', () => {
     const openUnanimous = async () => {
       const req = await svc.openNodeRequest(openInput(['u9', 'u2'], {}, { behavior: 'unanimous' }), CTX);
       staffDirectory(engine, 'u7');
-      return req.id as string;
+      return (req as { id: string }).id;
     };
     const slate = (id: string) => (engine._tables['sys_approval_request'] ?? []).find(r => r.id === id)?.pending_approvers;
     const moves = (id: string) =>
