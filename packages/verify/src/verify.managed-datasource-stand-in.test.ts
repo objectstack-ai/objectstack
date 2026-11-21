@@ -35,7 +35,10 @@
  * called; its CONTROL is the same plugin driver behind an external datasource
  * in the boot above, which a REST write reaches. A third pins the same refusal
  * keyed on the NAME: a plugin that registers a driver under a managed
- * `mongodb` datasource's name refuses the boot before its driver is called.
+ * `mongodb` datasource's name refuses the boot before its driver is called,
+ * whether the plugin registers it as `driver.NAME`, as a service under another
+ * key holding a driver named after the datasource, or straight into the engine
+ * from an `objectql:drivers-ready` handler.
  * The last two pin the factory and the refusal reader without a boot.
  *
  * ⚠️ This suite resolves `@objectstack/runtime` and the service packages
@@ -63,6 +66,7 @@ import { runReferenceShapeProofs, formatReferenceShapeReport } from './reference
 import { runDeleteBehaviorProofs, formatDeleteBehaviorReport } from './delete-behavior.js';
 import { runUniqueScopeProofs, formatUniqueScopeReport } from './unique-scope.js';
 import {
+  createManagedStandInLedger,
   createVerifyDatasourceDriverFactory,
   unstandableManagedDatasources,
   unstandableManagedDatasourceRefusal,
@@ -496,6 +500,18 @@ describe('createVerifyDatasourceDriverFactory — which declarations get a stand
     ).toThrow(/datasource "plug" \(driver "acme-plugin-driver"\)/);
     expect(built).toEqual([]);
   });
+
+  it("records each stand-in's engine driver for its datasource, and never a real driver", async () => {
+    const standIns = createManagedStandInLedger();
+    const recording = createVerifyDatasourceDriverFactory({ real, defaultStore: 'sqlite-wasm', standIns });
+    const standIn = await recording.create({ name: 'docs', driver: 'mongodb', schemaMode: 'managed', config: {} });
+    const external = await recording.create({ name: 'ext', driver: 'postgres', schemaMode: 'external', config: {} });
+    expect(standIns.isStandIn('docs', standIn.driver)).toBe(true);
+    // The proof is per datasource and per instance.
+    expect(standIns.isStandIn('other', standIn.driver)).toBe(false);
+    expect(standIns.isStandIn('docs', {})).toBe(false);
+    expect(standIns.isStandIn('ext', external.driver)).toBe(false);
+  });
 });
 
 describe("os verify refuses to boot while a managed datasource on a plugin's driver id is declared", () => {
@@ -590,8 +606,12 @@ describe("os verify refuses to boot when a plugin registers a driver under a man
     const { datasource, stack } = shadowedStack('vmd', calls);
     const refusal = await refusalOf(stack);
     expect(refusal).toBeInstanceOf(Error);
+    // The guard's own sentence, not the kernel's rollback message around it.
+    expect(refusal?.message.startsWith('verify: refusing to boot: ')).toBe(true);
     expect(refusal?.message).toContain(`datasource "${datasource}" (driver "mongodb")`);
     expect(refusal?.message).toContain('a driver of its own');
+    // Refused at the guard's start(), before any other plugin starts.
+    expect(String((refusal?.cause as Error | undefined)?.message)).toContain('com.objectstack.verify.managed-datasource-driver-guard');
     // The plugin did register its driver (init ran); the driver itself was never called: no
     // connect, no schema sync, no seed write.
     expect(calls).toEqual([{ method: 'plugin.init' }]);
@@ -603,8 +623,12 @@ describe("os verify refuses to boot when a plugin registers a driver under a man
     const { datasource, stack } = shadowedStack('vmk', calls, { via: 'service', serviceKey: 'driver.vmk_elsewhere' });
     const refusal = await refusalOf(stack);
     expect(refusal).toBeInstanceOf(Error);
+    // The guard's own sentence, not the kernel's rollback message around it.
+    expect(refusal?.message.startsWith('verify: refusing to boot: ')).toBe(true);
     expect(refusal?.message).toContain(`datasource "${datasource}" (driver "mongodb")`);
     expect(refusal?.message).toContain('a driver of its own');
+    // Read from the driver's own name at the guard's start(), before ObjectQL adopts it.
+    expect(String((refusal?.cause as Error | undefined)?.message)).toContain('com.objectstack.verify.managed-datasource-driver-guard');
     expect(calls).toEqual([{ method: 'plugin.init' }]);
   }, BOOT_TIMEOUT);
 
@@ -615,6 +639,8 @@ describe("os verify refuses to boot when a plugin registers a driver under a man
     const { datasource, stack } = shadowedStack('vmh', calls, { via: 'drivers-ready' });
     const refusal = await refusalOf(stack);
     expect(refusal).toBeInstanceOf(Error);
+    // The guard's own sentence, not the kernel's rollback message around it.
+    expect(refusal?.message.startsWith('verify: refusing to boot: ')).toBe(true);
     expect(refusal?.message).toContain(`datasource "${datasource}" (driver "mongodb")`);
     expect(refusal?.message).toContain('a driver of its own');
     expect(calls).toEqual([{ method: 'plugin.init' }, { method: 'drivers-ready' }]);

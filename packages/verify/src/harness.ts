@@ -46,8 +46,10 @@
 // the driver id, before it composes anything. The same holds by NAME: a
 // plugin that registers a driver under a managed datasource's name would be
 // kept by the connection service whatever driver id the datasource declares,
-// so a guard started before every other plugin refuses that boot too. There
-// is no switch around either refusal. Only the local flow run refuses a write to any object routed away
+// so a guard started before every other plugin refuses that boot too, and,
+// for a driver registered after that, the engine's `registerDriver` refuses
+// any driver under that name verify's factory did not build. There is no
+// switch around either refusal. Only the local flow run refuses a write to any object routed away
 // from the default store (`flow-run.ts`).
 // `verify.external-datasource-no-writes.test.ts` pins the external half and
 // `verify.managed-datasource-stand-in.test.ts` the managed one.
@@ -80,6 +82,7 @@ import { materializeStackPlugin, resolveCapabilityArgument } from '@objectstack/
 import { createHandle, type VerifyHandle } from './handle.js';
 import {
   createManagedDatasourceDriverGuard,
+  createManagedStandInLedger,
   createVerifyDatasourceDriverFactory,
   unstandableManagedDatasourceRefusal,
   unstandableManagedDatasources,
@@ -1088,8 +1091,11 @@ async function bootClaimed(
   // Mounted FIRST so its start() runs before any other plugin's: it refuses
   // the boot when a plugin registered a driver under a declared managed
   // datasource's name, which the connection service would keep in place of
-  // verify's stand-in (`./managed-datasource-stand-in.ts`). No switch.
-  const managedDriverGuard = createManagedDatasourceDriverGuard(config);
+  // verify's stand-in, and from then on refuses any registration under such a
+  // name of a driver verify's factory did not build — the ledger below, shared
+  // with that factory (`./managed-datasource-stand-in.ts`). No switch.
+  const managedStandIns = createManagedStandInLedger();
+  const managedDriverGuard = createManagedDatasourceDriverGuard(config, managedStandIns);
   if (managedDriverGuard) await kernel.use(managedDriverGuard as never);
   await kernel.use(new ObjectQLPlugin());
   const databaseDriver = opts.databaseDriver ?? 'sqlite-wasm';
@@ -1211,6 +1217,7 @@ async function bootClaimed(
         driverFactory: createVerifyDatasourceDriverFactory({
           real: createDefaultDatasourceDriverFactory(),
           defaultStore: databaseDriver,
+          standIns: managedStandIns,
         }),
       }));
     }
@@ -1435,6 +1442,12 @@ async function bootClaimed(
   const restoreRegistryLogLevel = scopeRegistryLogLevel(registryLevelFor(bootLogLevel));
   try {
     await kernel.bootstrap();
+  } catch (e) {
+    // The kernel wraps a failed start() in its rollback message, and names the
+    // plugin whose code made the call: ObjectQL's, for a registration the guard
+    // refused inside its start(). The guard's own sentence is the answer.
+    if (managedDriverGuard?.refusal !== undefined) throw Object.assign(new Error(managedDriverGuard.refusal), { cause: e });
+    throw e;
   } finally {
     restoreRegistryLogLevel();
   }
