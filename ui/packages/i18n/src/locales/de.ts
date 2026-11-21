@@ -655,7 +655,7 @@ const de = {
       earliest: "Frühestes",
       latest: "Spätestes",
       pageName: "{{label}} (diese Seite)",
-      calculate: "Berechnen",
+      calculate: "Berechnung hinzufügen",
       none: "Keine",
       menuPercentEmpty: "Anteil leer",
       menuPercentFilled: "Anteil gefüllt",

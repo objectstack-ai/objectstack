@@ -11,11 +11,14 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  *
  *   view bar 40 (the object's name as the page's heading, the switcher and
  *   View settings on the left; search, New and ⋮ on the right) · condition
- *   row 40, resident · header 32 · row 33, 13px on the heading, the header,
+ *   row 40, resident · header 36 · row 36, its line included
+ *   (objectstack#36048; 32 and 33 before it), 13px on the heading, the header,
  *   the cells and the bar buttons, the view switcher as one trigger (type
  *   icon → name → count → caret), and each column total under its own
  *   column, right edge on the column's right edge. No page bar is drawn
- *   above the view bar.
+ *   above the view bar. A line of the row lines' colour and weight runs
+ *   between columns in the header, the rows and the footer row, and none
+ *   after the last cell (objectstack#36048).
  *
  * ⚠️ A Playwright spec, not a vitest test: jsdom has no layout engine, so a
  * height read there is 0 and a class-shape assertion would pass against
@@ -112,7 +115,7 @@ const DENSITY = (() => {
   const block = pick('grid', /export const OBJECT_GRID_TABLE_DENSITY = \[([\s\S]*?)\]\.join/, 'OBJECT_GRID_TABLE_DENSITY');
   return [...block.matchAll(/'([^']+)'/g)].map((m) => m[1]).join(' ');
 })();
-const ROW_CELL = carrying(pick('grid', /rowHeightMode === 'compact'\s*\?\s*'([^']+)'/, 'the default (compact) row arm'), ['h-8', 'text-[13px]'], 'row arm');
+const ROW_CELL = carrying(pick('grid', /rowHeightMode === 'compact'\s*\?\s*'([^']+)'/, 'the default (compact) row arm'), ['h-9', 'text-[13px]'], 'row arm');
 const ROW_ACTION = (() => {
   const at = SRC.rowAction.indexOf('data-testid="row-action-trigger"');
   const cls = [...SRC.rowAction.slice(0, at).matchAll(/className="([^"]+)"/g)].pop()?.[1];
@@ -255,6 +258,24 @@ async function measure(page: Page, locale: 'zh' | 'en' = 'zh') {
       switcherOrder: ['type-icon', 'label', 'count', 'caret'].map((p) => rect($(`#sw-${p}`))!.left),
       cols,
       footText: ($('#tfoot') as HTMLElement).innerText,
+      // objectstack#36048 — the column lines, read off one cell per part.
+      lines: (() => {
+        const border = (el: Element | null) => {
+          const cs = el ? getComputedStyle(el) : null;
+          return cs ? { width: cs.borderRightWidth, style: cs.borderRightStyle, color: cs.borderRightColor } : null;
+        };
+        const rowLine = getComputedStyle(document.querySelector('tbody tr')!);
+        return {
+          rowLine: { width: rowLine.borderBottomWidth, color: rowLine.borderBottomColor },
+          header: border($('thead th[data-col="account"]')),
+          headerLast: border($('thead th:last-child')),
+          body: border($('tbody tr td[data-col="account"]')),
+          bodyLead: border($('tbody tr td:first-child')),
+          bodyLast: border($('tbody tr td:last-child')),
+          foot: border($('#tfoot td[data-col="account"]')),
+          footLast: border($('#tfoot td:last-child')),
+        };
+      })(),
       overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
     };
   });
@@ -272,15 +293,15 @@ test.describe('the list page frame (objectstack#35548)', () => {
     expect([...at].sort((a, b) => a - b)).toEqual(at);
   });
 
-  test('1280×800: no page bar, view bar 40, condition row 40, header 32, rows 33, first row top ≤ 168', async ({ page }) => {
+  test('1280×800: no page bar, view bar 40, condition row 40, header 36, rows 36, first row top ≤ 168', async ({ page }) => {
     const r = await measure(page);
     expect(r.page, 'a page bar is drawn above the view bar').toBeNull();
     expect(r.viewbar.top).toBeCloseTo(48, 0);
     expect(r.viewbar.height).toBeCloseTo(40, 0);
     expect(r.condition.height, 'the resident condition row').toBeCloseTo(40, 0);
     expect(r.thead.top, 'the header under the two rows').toBeCloseTo(128, 0);
-    expect(r.thead.height).toBeCloseTo(32, 0);
-    for (const h of r.rowHeights) expect(h, 'a data row is not 33px').toBeCloseTo(33, 0);
+    expect(r.thead.height).toBeCloseTo(36, 0);
+    for (const h of r.rowHeights) expect(h, 'a data row is not 36px').toBeCloseTo(36, 0);
     expect(r.firstRow.top).toBeLessThanOrEqual(168);
     expect(r.newButton.height).toBeGreaterThanOrEqual(24);
     expect(r.newButton.height).toBeLessThanOrEqual(28);
@@ -298,6 +319,20 @@ test.describe('the list page frame (objectstack#35548)', () => {
     expect(fonts.cell).toBe('13px');
     expect(fonts.bar.length).toBe(3);
     for (const f of fonts.bar) expect(f).toBe('13px');
+  });
+
+  test('a line between columns in the header, the rows and the footer, the row lines\' colour and weight, none after the last cell (objectstack#36048)', async ({ page }) => {
+    const { lines } = await measure(page);
+    expect(lines.rowLine.width).toBe('1px');
+    for (const [part, b] of Object.entries({ header: lines.header, body: lines.body, bodyLead: lines.bodyLead, foot: lines.foot })) {
+      expect(b, part).not.toBeNull();
+      expect(b!.width, `${part}: column line width`).toBe(lines.rowLine.width);
+      expect(b!.style, `${part}: column line style`).toBe('solid');
+      expect(b!.color, `${part}: column line colour`).toBe(lines.rowLine.color);
+    }
+    for (const [part, b] of Object.entries({ headerLast: lines.headerLast, bodyLast: lines.bodyLast, footLast: lines.footLast })) {
+      expect(b!.width, `${part}: a line after the last cell`).toBe('0px');
+    }
   });
 
   test('the switcher reads type icon → name → count → caret, left to right', async ({ page }) => {
