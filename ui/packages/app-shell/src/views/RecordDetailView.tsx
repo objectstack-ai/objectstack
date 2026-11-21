@@ -92,6 +92,8 @@ import {
   RECORD_APPROVAL_EXCLUDED_ACTIONS,
 } from './recordApprovalActions.js';
 import { useApprovalQueueAdvance } from './approval-decision/approvalQueueAdvance.js';
+import { approvalSubjectTitle } from './approval-decision/approvalSubjectTitle.js';
+import { RecordReadReportContext, recordReadKey, type RecordReadReport } from './approval-decision/recordReadReport.js';
 // Side-effect registration of `record:approvals` — synthesized record pages
 // reference the node whenever the record has approval requests (#3461), so
 // the type must resolve wherever this view renders, not only under hosts
@@ -1590,6 +1592,18 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // the served row (`readableRow`), NOT on a `useMemo` (AGENTS.md #10), so a
   // re-render never republishes an equal row as a new object to the page.
   const readablePageRecord = readableRow(pageRecord, perms, objectName);
+
+  // objectstack#35415 — on an approval request's page, what the page's own
+  // reads of a record learned (`recordReadReport.ts`): the title links to the
+  // record the request is about only where one of them read it. Keyed by
+  // `object::id`; collected only on that page, so no other page re-renders on
+  // its cards' reads.
+  const [readRecords, setReadRecords] = useState<Readonly<Record<string, boolean>>>({});
+  const reportRecordRead = useCallback<RecordReadReport>((target, id, readable) => {
+    const key = recordReadKey(target, id);
+    setReadRecords((prev) => (prev[key] === readable ? prev : { ...prev, [key]: readable }));
+  }, []);
+  const isRecordRead = (target: string, id: string) => readRecords[recordReadKey(target, id)] === true;
 
   // Derive a human-readable record title from the loaded record so
   // favourites (record:*) and the breadcrumb show e.g. "Acme Corporation"
@@ -5575,6 +5589,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // objectstack#35891 — the stage tag is the stage's menu: the default
     // page draws no stage bar, so the header is where the stage moves.
     stage: (parts) => <RecordStageMenu {...parts} />,
+    // objectstack#35415 — an approval request's page is named by the record
+    // it asks a decision on, linked to it; else by the request's own title.
+    title: objectName === SYS_APPROVAL_REQUEST_OBJECT ? approvalSubjectTitle(readablePageRecord, isRecordRead) : undefined,
   };
   const sharedChrome = (
     <>
@@ -5596,6 +5613,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const pageTree = (
     <RecordHeaderBarContext.Provider value={headerBarForRecord}>
     <RecordHeaderStateContext.Provider value={recordHeaderState}>
+    <RecordReadReportContext.Provider value={objectName === SYS_APPROVAL_REQUEST_OBJECT ? reportRecordRead : null}>
     <div ref={setPageRootEl} className="h-full bg-background overflow-hidden flex flex-col relative" data-record-page-root="">
       {pageBar}
       {/* In a pane, the record's ⊟ goes into the pane's own top bar. */}
@@ -6090,6 +6108,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         onClose={() => setFlowRefusal(s => ({ ...s, open: false }))}
       />
     </div>
+    </RecordReadReportContext.Provider>
     </RecordHeaderStateContext.Provider>
     </RecordHeaderBarContext.Provider>
   );

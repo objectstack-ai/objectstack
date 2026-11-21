@@ -128,7 +128,7 @@ export type { PageHeaderPhoneFace } from './renderers/layout/page-header-phone-c
 // The record's one-row header (objectstack#35593): the host bar's two slots the
 // record header draws into, and the record state's tags and button group.
 export { RecordHeaderBarContext, RecordHeaderStateContext } from './renderers/layout/record-header-bar-context';
-export type { RecordHeaderBar, RecordHeaderGroupParts, RecordHeaderStageParts, RecordHeaderState } from './renderers/layout/record-header-bar-context';
+export type { RecordHeaderBar, RecordHeaderGroupParts, RecordHeaderStageParts, RecordHeaderState, RecordHeaderTitle } from './renderers/layout/record-header-bar-context';
 export type { PageHeaderActionsProps } from './renderers/layout/containers';
 // The form's host slots (objectstack#28104, objectstack#28106): the console's
 // create page names the fields an AI chat draft filled, and the form marks them
