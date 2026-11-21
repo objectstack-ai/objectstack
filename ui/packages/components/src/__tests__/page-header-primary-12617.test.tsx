@@ -154,11 +154,14 @@ describe('page:header draws one primary action, the rest secondary (objectui#126
     expect(isFilled(convert)).toBe(true);
   });
 
-  it('with no app action, the host Edit is the primary button', () => {
+  // objectstack#36049 — was "the host Edit is the primary button": with no
+  // app action the row now has no filled button; Edit is outline.
+  it('with no app action, the host Edit is an outline button and nothing is filled', () => {
     renderRecordHeader([]);
     const buttons = toolbarButtons().filter((b) => nameOf(b) !== 'More actions');
     expect(buttons.map(nameOf)).toEqual(['Edit']);
-    expect(isFilled(buttons[0])).toBe(true);
+    expect(isFilled(buttons[0])).toBe(false);
+    expect(isOutline(buttons[0])).toBe(true);
   });
 });
 
