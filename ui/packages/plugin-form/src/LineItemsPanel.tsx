@@ -26,7 +26,7 @@ import {
   CardTitle,
   cn,
 } from '@object-ui/components';
-import { LineItemsField, lookupAutofillByField, useBooleanValueLabel, type GridColumn } from '@object-ui/fields';
+import { LineItemsField, lookupAutofillByField, columnHelpByField, useBooleanValueLabel, type GridColumn } from '@object-ui/fields';
 import type { GridFieldMetadata } from '@object-ui/types';
 import { createSafeTranslation, useLocalization } from '@object-ui/i18n';
 import { useSchemaContext, useRecordContext, useFilterScope, useResolvedFilter, useDataInvalidation, usePrintPage, NonGridRowCeilingNote } from '@object-ui/react';
@@ -765,6 +765,12 @@ export const LineItemsPanel: React.FC<{ schema: LineItemsPanelSchema }> = ({ sch
     () => lookupAutofillByField(childSchema?.fields as Record<string, unknown> | undefined),
     [childSchema],
   );
+  // Each child field's help, on its column header (objectstack#35804), read
+  // from the same served definition the record form reads.
+  const lineColumnHelp = useMemo(
+    () => columnHelpByField(childSchema?.fields as Record<string, unknown> | undefined),
+    [childSchema],
+  );
 
   const gridField = useMemo(
     () =>
@@ -912,6 +918,7 @@ export const LineItemsPanel: React.FC<{ schema: LineItemsPanelSchema }> = ({ sch
               // targets in the row. Empty until that schema arrives.
               lookupAutofill={lineLookupAutofill}
               columnCurrencies={lineColumnCurrencies}
+              columnHelp={lineColumnHelp}
               readonly={schema.readonly}
               // No input while the save is in flight (objectui#10631): `save`
               // reloads the rows once the batch lands, so a line edited in the

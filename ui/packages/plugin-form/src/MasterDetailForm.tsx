@@ -33,7 +33,7 @@
 import React, { startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { BatchTransactionOperation, DataSource, GridFieldMetadata, I18nLabel } from '@object-ui/types';
 import { resolveAffordance, runBatchTransaction } from '@object-ui/core';
-import { LineItemsField, lookupAutofillByField, useBooleanValueLabel, type BooleanValueLabel, type GridColumn, type LookupAutofillByField } from '@object-ui/fields';
+import { LineItemsField, lookupAutofillByField, columnHelpByField, useBooleanValueLabel, type BooleanValueLabel, type ColumnHelp, type GridColumn, type LookupAutofillByField } from '@object-ui/fields';
 import { Button, Card, CardContent, CardHeader, CardTitle, cn, toast } from '@object-ui/components';
 import {
   formatDisplayNumber,
@@ -436,6 +436,14 @@ interface DetailEntry {
    * configured entry skips the fetch). Internal state, never authored.
    */
   lookupAutofill?: LookupAutofillByField;
+  /**
+   * The child fields' help text, by field name (`columnHelpByField`), read
+   * from the schema the resolve effect loaded, the definition the record form
+   * reads too, and handed to the line grid's column headers (`GridField`'s
+   * `columnHelp`, objectstack#35804). Absent when no schema was loaded for
+   * this entry. Internal state, never authored.
+   */
+  columnHelp?: ColumnHelp;
   /**
    * The child fields whose currency follows the header through this entry's
    * relationship (ADR-0144 D2 as amended), by name, read from the schema the
@@ -1109,7 +1117,7 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
             <LineItemsField
               value={rowState[entry.id]?.rows ?? []}
               onChange={(rows) => setRows(entry.id, rows)}
-              // The grid's own `disabled`: cells locked, and no ghost row, add,
+              // The grid's own `disabled`: cells locked, and no add,
               // duplicate, remove or reorder while the save is in flight
               // (objectui#10631). Its row "expand" control stays; the editor it
               // opens is held by the same state in <MasterDetailForm>.
@@ -1121,6 +1129,8 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
               // The child fields' declared `lookupAutofill` pairs: a lookup
               // cell's pick fills their targets in the row.
               lookupAutofill={entry.lookupAutofill}
+              // Each child field's help, on its column header (objectstack#35804).
+              columnHelp={entry.columnHelp}
               // The columns whose amount follows this header's currency
               // (ADR-0144 D2 as amended), in the header's live code.
               columnCurrencies={followedColumnCurrencies(entry.parentCurrencyFields, parentRecord, tenantCurrency)}
@@ -1152,8 +1162,8 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
                   sortField: entry.sortField,
                   minRows: d.minRows,
                   maxRows: d.maxRows,
-                  // The map rows above: the grid's Add, entry row and Duplicate
-                  // follow `allowAdd`, its per-row Remove `allowDelete`.
+                  // The map rows above: the grid's Add and Duplicate follow
+                  // `allowAdd`, its per-row Remove `allowDelete`.
                   allowAdd: lineAddGranted,
                   allowDelete: lineRemoveGranted,
                   addLabel: d.inlineMode === 'form' ? (d.addLabel || t('detail.add')) : d.addLabel,
@@ -1393,6 +1403,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
                 amountFieldDef: childFieldDef(childSchema, amountField),
                 columnsWith,
                 lookupAutofill: lookupAutofillByField(childSchema?.fields as Record<string, unknown> | undefined),
+                columnHelp: columnHelpByField(childSchema?.fields as Record<string, unknown> | undefined),
                 parentCurrencyFields: parentCurrencyFieldsOf(childSchema?.fields as Record<string, unknown> | undefined, d.relationshipField),
               };
             }
@@ -1411,6 +1422,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
               amountFieldDef: childFieldDef(childSchema, amountField),
               columnsWith,
               lookupAutofill: lookupAutofillByField(childSchema?.fields as Record<string, unknown> | undefined),
+              columnHelp: columnHelpByField(childSchema?.fields as Record<string, unknown> | undefined),
               parentCurrencyFields: parentCurrencyFieldsOf(childSchema?.fields as Record<string, unknown> | undefined, derived.relationshipField),
             };
           } catch (err) {
