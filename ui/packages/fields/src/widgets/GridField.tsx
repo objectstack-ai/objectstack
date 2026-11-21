@@ -696,7 +696,9 @@ type GridFieldProps = FieldWidgetComponentProps<Row[]> & {
    *  no id) is flagged only while it is `true` (objectstack#35816): a line
    *  the user just added does not read red before the host has tried to save
    *  it, and does once a save was refused. A stored line is flagged as
-   *  before. Absent: every line is flagged at once, as before. */
+   *  before. Absent: every line is flagged at once, as before. A line still
+   *  marked {@link UNTOUCHED_NEW_ROW} is never flagged (objectstack#35940):
+   *  the host skips it at save. */
   newRowRequiredShown?: boolean;
 };
 
@@ -1575,8 +1577,12 @@ function GridFieldBody({
                       const required = cellRules(c, row).required;
                       // objectstack#35816 — a new line waits for the host's
                       // word before it reads red; a stored line does not.
+                      // objectstack#35940 — a line Add started on its defaults
+                      // and nobody edited never reads red: the save skips it
+                      // and says so, so there is nothing in it to fix.
                       const newRowWaits =
-                        newRowRequiredShown === false && !isGhost && !rowHasId(row);
+                        (newRowRequiredShown === false && !isGhost && !rowHasId(row)) ||
+                        isUntouchedNewRow(row);
                       const invalid =
                         (!isGhost || hostFailedEmpty) &&
                         !newRowWaits &&

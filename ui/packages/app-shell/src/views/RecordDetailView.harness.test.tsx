@@ -48,6 +48,7 @@ import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
 import { render, waitFor, cleanup, screen, act, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, BrowserRouter } from 'react-router-dom';
+import { toast } from 'sonner';
 import { RelatedCountStore } from '@object-ui/components';
 import { ComponentRegistry } from '@object-ui/core';
 import { I18nProvider, LocalizationProvider, createI18n } from '@object-ui/i18n';
@@ -3160,6 +3161,35 @@ describe('RecordDetailView.recordEditState-35599', () => {
     expect(cells(again, 'Product').map((i) => i.value)).toEqual(expect.arrayContaining(['Anvil', 'Bolt']));
     expect(cells(again, 'Product').map((i) => i.value)).not.toContain('Crate');
     expect(summaryInput(view.container)).not.toBeNull();
+  });
+
+  it('objectstack#35940 (ruling 7056413638): a line Add started and nobody edited is not written, and the save says so', async () => {
+    const view = renderPage(objectsWith());
+    await enterEditState(view);
+    vi.mocked(toast.info).mockClear();
+    fireEvent.change(summaryInput(view.container)!, { target: { value: 'Second' } });
+    const lines = editor(view.container, 'showcase_line.quote')!;
+    fireEvent.click(lines.querySelector('[data-testid="line-items-add"]') as HTMLElement);
+    await waitFor(() => expect(cells(lines, 'Product').length).toBeGreaterThanOrEqual(4), { timeout: 5000 });
+    await act(async () => { fireEvent.click(headerButton('Save')!); });
+    await waitFor(() => expect(view.dataSource.batchTransaction).toHaveBeenCalledTimes(1), { timeout: 5000 });
+    // The record's update alone: the untouched line is not created.
+    const ops = view.dataSource.batchTransaction.mock.calls[0][0] as Array<Record<string, any>>;
+    expect(ops.map((o) => [o.object, o.action])).toEqual([[PARENT, 'update']]);
+    await waitFor(() => expect(headerButton('Edit')).not.toBeNull(), { timeout: 5000 });
+    expect(toast.info).toHaveBeenCalledTimes(1);
+    expect(toast.info).toHaveBeenCalledWith('1 blank line was not saved');
+  });
+
+  it('CONTROL — a save that skips no untouched line says nothing more', async () => {
+    const view = renderPage(objectsWith());
+    await enterEditState(view);
+    vi.mocked(toast.info).mockClear();
+    editEverything(view.container);
+    await act(async () => { fireEvent.click(headerButton('Save')!); });
+    await waitFor(() => expect(view.dataSource.batchTransaction).toHaveBeenCalledTimes(1), { timeout: 5000 });
+    await waitFor(() => expect(headerButton('Edit')).not.toBeNull(), { timeout: 5000 });
+    expect(toast.info).not.toHaveBeenCalled();
   });
 
   it('item 5: a child without bulk keeps its table read-only in the edit state, with the notice', async () => {

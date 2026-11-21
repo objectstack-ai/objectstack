@@ -18,14 +18,14 @@ import { MasterDetailForm } from './MasterDetailForm';
 // single surviving raiser, and only the deep-module mock can see it — the
 // same reason `MasterDetailForm.outcomeToastSupersede.test.tsx` (#7345)
 // already mocks this exact path.
-const { toastSuccess, toastError } = vi.hoisted(() => ({ toastSuccess: vi.fn(), toastError: vi.fn() }));
+const { toastSuccess, toastError, toastInfo } = vi.hoisted(() => ({ toastSuccess: vi.fn(), toastError: vi.fn(), toastInfo: vi.fn() }));
 vi.mock('@object-ui/components/ui/sonner', async (orig) => {
   const actual = await (orig as any)();
   // Inherit the real toast surface and override only what this file asserts:
   // a hand-listed double freezes sonner's methods at whatever was typed that
   // day, and the next one the form calls (`dismiss`, objectui#7345) resolves
   // to undefined — the `check:vi-mock-inherit` defect, one level down.
-  return { ...actual, toast: { ...actual.toast, success: toastSuccess, error: toastError } };
+  return { ...actual, toast: { ...actual.toast, success: toastSuccess, error: toastError, info: toastInfo } };
 });
 
 registerAllFields();
@@ -478,5 +478,54 @@ describe('MasterDetailForm — a new line starts on the child\'s defaults and wa
     expect(createOps(batchTransaction)).toEqual([
       expect.objectContaining({ data: expect.objectContaining({ name: 'Washers', note: 'Pending' }) }),
     ]);
+  });
+  describe('ruling 7056413638: a line Add started and nobody edited is skipped, said so, and never red', () => {
+    beforeEach(() => toastInfo.mockClear());
+
+    it('create: the line is not written, the save says so, and a host onSuccess still hears the rest', async () => {
+      const batchTransaction = vi.fn().mockResolvedValue({ results: [{ id: 'po1' }] });
+      const onSuccess = vi.fn();
+      const { container } = render(
+        <MasterDetailForm schema={schemaWith({}, { onSuccess })} dataSource={lineDataSource({ batchTransaction })} />,
+      );
+      await addSeededLine(container);
+      fireEvent.click(screen.getByTestId('md-form-submit'));
+      await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+      expect(createOps(batchTransaction)).toEqual([]);
+      expect(toastInfo).toHaveBeenCalledTimes(1);
+      expect(toastInfo.mock.calls[0][0]).toBe('1 blank line was not saved');
+    });
+
+    it('a refused save flags the edited new line and leaves the untouched one unflagged', async () => {
+      const batchTransaction = vi.fn().mockRejectedValue(new Error('Name is required'));
+      const { container } = render(<MasterDetailForm schema={schemaWith()} dataSource={lineDataSource({ batchTransaction })} />);
+      await addSeededLine(container);
+      fireEvent.click(screen.getByTestId('line-items-add'));
+      await waitFor(() => expect(container.querySelectorAll('[data-testid="line-items"] tbody tr').length).toBe(3));
+      fireEvent.change(cell(container, 1, 1)!, { target: { value: 'Later' } });
+      fireEvent.click(screen.getByTestId('md-form-submit'));
+      await waitFor(() => expect(screen.getByTestId('line-items-invalid-1-name')).toBeInTheDocument());
+      expect(screen.queryByTestId('line-items-invalid-0-name')).toBeNull();
+      expect(toastInfo).not.toHaveBeenCalled();
+    });
+
+    it('edit: the skipped line leaves with the save, as on the record page', async () => {
+      const batchTransaction = vi.fn().mockResolvedValue({ results: [{ id: 'p1' }] });
+      const ds = lineDataSource({
+        batchTransaction,
+        find: vi.fn().mockResolvedValue({ data: [{ id: 'l1', po: 'p1', name: 'Nuts', note: 'x' }] }),
+        findOne: vi.fn().mockResolvedValue({ id: 'p1', ref: 'PO-1' }),
+      });
+      const { container } = render(<MasterDetailForm schema={schemaWith({}, { mode: 'edit', recordId: 'p1' })} dataSource={ds} />);
+      await waitFor(() => expect(cell(container, 0, 0)?.value).toBe('Nuts'));
+      await waitFor(() => expect(cell(container, 1, 1)?.value).toBe('Pending')); // the entry line
+      fireEvent.click(screen.getByTestId('line-items-add'));
+      await waitFor(() => expect(container.querySelectorAll('[data-testid="line-items"] tbody tr').length).toBe(3));
+      fireEvent.click(screen.getByTestId('md-form-submit'));
+      await waitFor(() => expect(toastInfo).toHaveBeenCalledTimes(1));
+      expect(createOps(batchTransaction)).toEqual([]);
+      await waitFor(() => expect(container.querySelectorAll('[data-testid="line-items"] tbody tr').length).toBe(2));
+      expect(cell(container, 0, 0)!.value).toBe('Nuts');
+    });
   });
 });

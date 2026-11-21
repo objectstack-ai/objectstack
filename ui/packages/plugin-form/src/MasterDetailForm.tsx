@@ -33,7 +33,7 @@
 import React, { startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { BatchTransactionOperation, DataSource, GridFieldMetadata, I18nLabel } from '@object-ui/types';
 import { resolveAffordance, runBatchTransaction } from '@object-ui/core';
-import { LineItemsField, lookupAutofillByField, UNTOUCHED_NEW_ROW, useBooleanValueLabel, type BooleanValueLabel, type GridColumn, type LookupAutofillByField } from '@object-ui/fields';
+import { isUntouchedNewRow, LineItemsField, lookupAutofillByField, UNTOUCHED_NEW_ROW, useBooleanValueLabel, type BooleanValueLabel, type GridColumn, type LookupAutofillByField } from '@object-ui/fields';
 import { Button, Card, CardContent, CardHeader, CardTitle, cn, toast } from '@object-ui/components';
 import {
   formatDisplayNumber,
@@ -1551,6 +1551,10 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
   // objectstack#35940 — set when a save is tried, cleared when one lands: a
   // new line's empty required cell reads red from the try on.
   const [saveTried, setSaveTried] = useState(false);
+  // objectstack#35940 (ruling 7056413638) — how many lines the batch in flight
+  // skips because Add started them on their defaults and nobody edited them.
+  // A save that lands says so; such a line is never written.
+  const untouchedSkippedRef = useRef(0);
 
   // Bumped after a successful CREATE to remount the parent <ObjectForm> (which
   // owns react-hook-form state) so its fields clear for the next entry.
@@ -1941,6 +1945,13 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
           { id: outcomeToastId },
         );
       }
+      // Said whoever owns the confirmation: a host's own toast cannot know
+      // that lines were left out.
+      const skipped = untouchedSkippedRef.current;
+      untouchedSkippedRef.current = 0;
+      if (skipped > 0) {
+        toast.info(t('form.lineItems.untouchedNotSaved', { count: skipped }), { id: `form-untouched:${formInstanceId}` });
+      }
       // An edit keeps its rows: `submitViaBatch` has already advanced their
       // baseline to what this save wrote (objectui#10564).
       if (!isEdit) {
@@ -1953,7 +1964,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
       await schema.onSuccess?.(parent);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isEdit, schema.onSuccess, titleText, entries.length, releaseSave, outcomeToastId, t],
+    [isEdit, schema.onSuccess, titleText, entries.length, releaseSave, outcomeToastId, formInstanceId, t],
   );
 
   /**
@@ -2002,6 +2013,9 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
     async (parentValues: Record<string, any>) => {
       if (!dataSource) throw new Error('MasterDetailForm: dataSource is required');
       const parentData: Record<string, any> = { ...parentValues };
+      untouchedSkippedRef.current = entries
+        .filter((e) => e.config.relationshipField)
+        .reduce((n, e) => n + (rowStateRef.current[e.id]?.rows ?? []).filter(isUntouchedNewRow).length, 0);
       // Client-side rollups merged into the parent payload (hooks can't do
       // nested writes — see ADR-0001).
       entries.forEach((e) => {
@@ -2074,12 +2088,15 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
             // flight (objectui#10631), so every such row is still that object.
             // Were one replaced anyway, it keeps no id: the next save then
             // deletes the created record and creates the row as it now stands.
-            const rows = s.createdIds.size === 0
+            // A line the save skipped untouched (objectstack#35940) leaves
+            // with the save, as it does on the record page: it was never
+            // written, and the notice above says so.
+            const rows = (s.createdIds.size === 0
               ? cur.rows
               : cur.rows.map((r) => {
                   const id = s.createdIds.get(r);
                   return id === undefined ? r : { ...r, id };
-                });
+                })).filter((r) => !isUntouchedNewRow(r));
             next = { ...next, [s.entryId]: { rows, original: s.original } };
           }
           return next;
