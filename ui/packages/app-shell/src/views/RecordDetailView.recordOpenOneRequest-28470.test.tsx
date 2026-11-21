@@ -232,11 +232,15 @@ describe('objectstack#28470 — one record open is one request', () => {
     });
     expect(page.body.related).toEqual([expect.objectContaining({ object: CHILD, field: 'contact', expand: ['owner'] })]);
 
-    // Every part is drawn from the payload: the comment, the attachment row
-    // and its badge's count.
-    expect(view.container.textContent).toContain('hello from the payload');
-    expect(view.container.textContent).toContain('contract.pdf');
+    // Every part is drawn from the payload: the attachment badge's count at
+    // open, and the comment on the 动态 tab (objectstack#35890: no rail card
+    // draws it on 「详情」).
     expect(RelatedCountStore.get('sys_attachment', recordAttachmentsCountField(OBJECT), 'c1')).toBe(3);
+    expect(view.container.querySelector('[data-record-summary-card]')).toBeNull();
+    const tab = view.container.querySelector('[role="tab"][data-record-tab="timeline"]') as HTMLElement;
+    await act(async () => { fireEvent.click(tab); });
+    await settle(held);
+    expect(view.container.querySelector('[data-related-enlarged="timeline"]')?.textContent).toContain('hello from the payload');
   });
 
   it('reads the mention list on the composer\'s first focus, once', async () => {
@@ -245,9 +249,7 @@ describe('objectstack#28470 — one record open is one request', () => {
     await settle(held);
     expect(mentionReads(held)).toEqual([]);
 
-    // objectstack#35595 / #35596 — the 概览 rail's 动态 card is read-only; the
-    // composer is the 动态 tab's.
-    expect(view.container.querySelector('[data-record-summary-card="timeline"] textarea')).toBeNull();
+    // The composer is the 动态 tab's (objectstack#35890 retired the rail card).
     const tab = view.container.querySelector('[role="tab"][data-record-tab="timeline"]') as HTMLElement;
     await act(async () => { fireEvent.click(tab); });
     await settle(held);
@@ -267,9 +269,16 @@ describe('objectstack#28470 — one record open is one request', () => {
     const { held, open } = await boot({ activity: { error: { code: 'PERMISSION_DENIED', status: 403, message: 'No.' } } });
     const view = open();
     await settle(held);
-    expect(view.container.querySelector('[data-denied-source="activity"]')).not.toBeNull();
-    expect(view.container.textContent).toContain('hello from the payload');
     expect(streamReads(held)).toEqual([]);
+    // Drawn on the 动态 tab (objectstack#35890: no rail card on 「详情」).
+    const tab = view.container.querySelector('[role="tab"][data-record-tab="timeline"]') as HTMLElement;
+    await act(async () => { fireEvent.click(tab); });
+    await settle(held);
+    const face = view.container.querySelector('[data-related-enlarged="timeline"]') as HTMLElement;
+    expect(face.querySelector('[data-denied-source="activity"]')).not.toBeNull();
+    expect(face.textContent).toContain('hello from the payload');
+    // The refused part is not asked again when its tab opens.
+    expect(streamReads(held).filter((o) => o === 'sys_activity')).toEqual([]);
   });
 
   // ── Ablations: the detectors above see each retired read ──────────────
@@ -283,7 +292,7 @@ describe('objectstack#28470 — one record open is one request', () => {
     expect([...new Set(streamReads(held))].sort()).toEqual(['sys_activity', 'sys_attachment', 'sys_comment']);
   });
 
-  // objectstack#35596 retired the bare-id ablation: the 概览 rail draws a
-  // related row's name and key value only, never its lookups, so no surface
-  // on the page's open resolves a related row's owner to probe for.
+  // objectstack#35596 retired the bare-id ablation, and objectstack#35890 the
+  // rail itself: no surface on the page's open resolves a related row's owner
+  // to probe for.
 });

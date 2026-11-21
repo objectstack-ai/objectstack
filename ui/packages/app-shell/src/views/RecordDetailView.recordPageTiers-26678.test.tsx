@@ -17,18 +17,16 @@
  * varied here: every other element measures as the test environment measures
  * it.
  *
- *  - ≥ 1120 px: details | the right column at 380 px, the details grid at
- *    three columns.
- *  - ≥ 760 px: details | the right column at 320 px, the details grid at two.
- *  - < 760 px (the split pane at 720, a phone at 390): ONE column, the details
- *    then the right column's panels in their order. No rail, and no tab
- *    strip but the record's own tab row under the header (Target 8), the
- *    same on every tier: 「概览」, 动态, then the related panels. On a phone
- *    (objectstack#27058: a 390 px window, not only a 390 px root) the stack
- *    is the same, and the header's actions sit in the bottom bar after it.
- *  - The embedded record (drawer / split pane) follows the same rule.
- *  - The right column opens with the 动态 panel, so History is read at open in
- *    every tier. `?tab=` addresses no strip (「概览」 stays the active tab);
+ *  - objectstack#35890 (ruling 7064066204): a full page whose content fits
+ *    320 + 24 + 400 px pins the details in a left column (400 px, narrowing
+ *    to 320) and draws the other tabs beside them, opening on the first.
+ *    No page draws the retired right rail (objectstack#35596) at any width.
+ *  - Narrower (the split pane at 720, a phone at 390): ONE column, the
+ *    details as the first tab, 「详情」, of the record's tab row (Target 8).
+ *    On a phone (objectstack#27058: a 390 px window, not only a 390 px root)
+ *    the header's actions sit in the bottom bar after it.
+ *  - The embedded record (drawer / split pane) never pins.
+ *  - History is read at open in every tier. `?tab=` addresses no strip;
  *    `?related=timeline` is the 动态 tab, the full stream.
  */
 
@@ -234,6 +232,9 @@ beforeEach(() => {
     if (!this.hasAttribute('data-record-page-root')) return measure.call(this);
     return { x: 0, y: 0, top: 0, left: 0, right: rootWidth, bottom: 800, width: rootWidth, height: 800, toJSON: () => ({}) } as DOMRect;
   });
+  // objectstack#35890 — pinning reads the page content's own width
+  // (`clientWidth`): every element measures the root's width here.
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => rootWidth);
 });
 
 afterEach(() => {
@@ -244,28 +245,23 @@ afterEach(() => {
 
 const shown = (container: HTMLElement) =>
   container.querySelector('[data-record-columns-shown]')?.getAttribute('data-record-columns-shown') ?? null;
-const columnsGrid = (container: HTMLElement) =>
-  container.querySelector('[data-record-columns]')?.getAttribute('class') ?? '';
+const columnsStyle = (container: HTMLElement) =>
+  (container.querySelector('[data-record-columns]') as HTMLElement | null)?.style.gridTemplateColumns ?? '';
 /** The details' field grid, by the classes it draws (container queries). */
 const detailsGrid = (container: HTMLElement) =>
   column(container, 'details')?.querySelector('[data-detail-section-face="frameless"] .grid')?.getAttribute('class') ?? '';
-/**
- * The right rail's cards on screen, in order (objectstack#35596): 审批, 附件,
- * 最近动态 (`timeline`), then each related list with records. A card with
- * nothing to show is not drawn (the 动态 card waits `hidden` for its count).
- */
-const rightPanels = (container: HTMLElement) =>
-  Array.from(column(container, 'right')?.querySelectorAll('[data-record-summary-card]:not([hidden])') ?? []).map((el) =>
-    el.getAttribute('data-record-summary-card'),
-  );
-/** objectstack#35596 — this record's stream is empty, so the rail holds its two lists with records. */
-const RAIL = ['showcase_task.project', 'showcase_note.project'];
+/** objectstack#35890 — no page draws the retired right rail (its summary cards), at any width. */
+const expectNoRail = (container: HTMLElement) => {
+  expect(column(container, 'right')).toBeNull();
+  expect(container.querySelector('[data-record-summary-card]')).toBeNull();
+};
 
 /**
- * The page's only tablist is its tab row (objectstack#27524, Target 8): the
- * same tabs on every tier, the active one as `active`.
+ * The page's only tablist is its tab row (objectstack#27524, Target 8), the
+ * active one as `active`. Pinned (objectstack#35890) the details are the left
+ * column, so the row starts at the first related list and has no 「详情」.
  */
-const expectTabRowOnly = async (active = 'overview') => {
+const expectTabRowOnly = async (active = 'overview', { pinned = false }: { pinned?: boolean } = {}) => {
   // The panels' tabs join the row once their counts land (objectstack#28469).
   await waitFor(() => expect(document.querySelector('[role="tab"][data-record-tab="showcase_note.project"]')).not.toBeNull());
   const lists = screen.getAllByRole('tablist');
@@ -274,7 +270,7 @@ const expectTabRowOnly = async (active = 'overview') => {
   const tabs = Array.from(lists[0].querySelectorAll('[role="tab"]'));
   // objectstack#34590, ruling 6937542160 — 动态 last (supersedes objectstack#27524 Targets 5 and 8's 动态-first).
   expect(tabs.map((tab) => tab.getAttribute('data-record-tab'))).toEqual([
-    'overview',
+    ...(pinned ? [] : ['overview']),
     'showcase_task.project',
     'showcase_note.project',
     'timeline',
@@ -282,66 +278,54 @@ const expectTabRowOnly = async (active = 'overview') => {
   expect(lists[0].querySelector('[aria-selected="true"]')?.getAttribute('data-record-tab')).toBe(active);
 };
 
-describe('RecordDetailView — one record page, laid out by its width (objectstack#26678, objectstack#27524)', () => {
-  it('1440 px: details beside the right rail at 380 px, the details grid at three columns; 动态 the last tab (objectstack#34590); History is read at open', async () => {
+describe('RecordDetailView — one record page, laid out by its width (objectstack#26678, objectstack#27524, objectstack#35890)', () => {
+  it('1440 px: the details pinned left at 400 px, one field column; the tabs beside them open on the first list; no rail; History is read at open', async () => {
     const { container } = renderPage({ width: 1440 });
     await screen.findAllByText('Tasks', undefined, { timeout: 5000 });
     expect(tierOf(container)).toBe('wide');
-    expect(shown(container)).toBe('details right');
-    expect(columnsGrid(container)).toContain('23.75rem');
-    // Container breakpoints of the dense label-left rows (objectstack#35602).
-    expect(detailsGrid(container)).toContain('@4xl:grid-cols-3');
-    await expectTabRowOnly();
-    // objectstack#35596 — the rail's order: 审批, 附件, 最近动态, then the lists
-    // with records (supersedes objectstack#34590's 动态-last right column).
-    await waitFor(() => expect(rightPanels(container)).toEqual(RAIL));
-    // No resident timeline column and no rail: the two columns are all.
+    await waitFor(() => expect(shown(container)).toBe('details tabs'));
+    expect(columnsStyle(container)).toBe('400px 24px minmax(0,1fr)');
+    expect(detailsGrid(container)).toContain('grid-cols-1');
+    expect(detailsGrid(container)).not.toContain('@xl:grid-cols-2');
+    await expectTabRowOnly('showcase_task.project', { pinned: true });
+    // The tabs column holds the first list's face; nothing is written to the address.
+    const tabs = column(container, 'tabs')!;
+    expect(tabs.querySelector('[data-related-enlarged="showcase_task.project"]')).not.toBeNull();
+    expectNoRail(container);
     expect(column(container, 'timeline')).toBeNull();
-    expect(column(container, 'related')).toBeNull();
-    expect(screen.queryByTestId('record-related-rail-toggle')).toBeNull();
     // The header is drawn once.
     expect(container.querySelectorAll('h1')).toHaveLength(1);
     await waitFor(() => expect(auditReads()).toBeGreaterThan(0));
   });
 
-  it('1200 px is wide too (the floor is 1120 px); 1100 px: the right column at 320 px, the details grid at two columns', async () => {
-    const wide = renderPage({ width: 1200 });
+  it('1100 px and 800 px pin too (ruling 7064066204: fits 320 + 400), the left column narrowing to leave the tabs 400 px', async () => {
+    const at1100 = renderPage({ width: 1100 });
     await screen.findAllByText('Tasks', undefined, { timeout: 5000 });
-    expect(tierOf(wide.container)).toBe('wide');
-    wide.unmount();
+    expect(tierOf(at1100.container)).toBe('two-column');
+    await waitFor(() => expect(shown(at1100.container)).toBe('details tabs'));
+    expect(columnsStyle(at1100.container)).toBe('400px 24px minmax(0,1fr)');
+    at1100.unmount();
 
-    const { container } = renderPage({ width: 1100 });
+    const { container } = renderPage({ width: 800 });
     await screen.findAllByText('Tasks', undefined, { timeout: 5000 });
-    expect(tierOf(container)).toBe('two-column');
-    expect(shown(container)).toBe('details right');
-    expect(columnsGrid(container)).toContain('20rem');
-    expect(detailsGrid(container)).toContain('@xl:grid-cols-2');
-    expect(detailsGrid(container)).not.toContain('@4xl:grid-cols-3');
-    // The same panels as the wide tier — no rail to open first.
-    // objectstack#35596 — the rail's order: 审批, 附件, 最近动态, then the lists
-    // with records (supersedes objectstack#34590's 动态-last right column).
-    await waitFor(() => expect(rightPanels(container)).toEqual(RAIL));
-    expect(screen.queryByTestId('record-related-rail-toggle')).toBeNull();
-    await expectTabRowOnly();
+    await waitFor(() => expect(shown(container)).toBe('details tabs'));
+    expect(columnsStyle(container)).toBe('376px 24px minmax(0,1fr)');
+    expectNoRail(container);
+    await expectTabRowOnly('showcase_task.project', { pinned: true });
   });
 
   it.each([
     ['the split pane', 720, 1440],
     ['a phone', 390, 390],
-  ])('%s (%i px): one column — the details, then the right rail; the tab row; History is read at open', async (name, width, windowWidth) => {
+  ])('%s (%i px): one column — the details as the first tab, 「详情」; no rail; History is read at open', async (name, width, windowWidth) => {
     const { container } = renderPage({ width, windowWidth });
     await screen.findAllByText('Tasks', undefined, { timeout: 5000 });
     expect(tierOf(container)).toBe('stack');
     expect(shown(container)).toBe('details');
-    expect(columnsGrid(container)).toContain('grid-cols-1');
+    expect(container.querySelector('[data-record-page-pinned]')).toBeNull();
     await expectTabRowOnly();
-    // The panels follow the details, in the right column's order.
-    const details = column(container, 'details')!;
-    const right = column(container, 'right')!;
-    expect(details.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // objectstack#35596 — the rail's order: 审批, 附件, 最近动态, then the lists
-    // with records (supersedes objectstack#34590's 动态-last right column).
-    await waitFor(() => expect(rightPanels(container)).toEqual(RAIL));
+    expect(screen.getByRole('tab', { name: /^Details/ }).getAttribute('data-record-tab')).toBe('overview');
+    expectNoRail(container);
     await waitFor(() => expect(auditReads()).toBeGreaterThan(0));
     // objectstack#27058 — on a phone the stack ends where the bottom action
     // bar starts: the header's actions are drawn there, after the body, and
@@ -351,7 +335,8 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     const header = container.querySelector('[data-record-page-root] header') as HTMLElement;
     if (name === 'a phone') {
       await waitFor(() => expect(bar?.querySelector('[role="toolbar"]')).toBeTruthy());
-      expect(right.compareDocumentPosition(bar!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      const details = column(container, 'details')!;
+      expect(details.compareDocumentPosition(bar!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(header.querySelector('[role="toolbar"]')).toBeNull();
     } else {
       expect(bar).toBeNull();
@@ -359,12 +344,14 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     }
   });
 
-  it('embedded (drawer / split pane): the same tiers, and no right rail (objectstack#35596)', async () => {
+  it('embedded (drawer / split pane): never pinned, whatever its width, and no rail', async () => {
     const wide = renderPage({ width: 1440, embedded: true });
     await screen.findAllByText('Tasks', undefined, { timeout: 5000 });
     expect(tierOf(wide.container)).toBe('wide');
     expect(shown(wide.container)).toBe('details');
-    expect(column(wide.container, 'right')).toBeNull();
+    expect(wide.container.querySelector('[data-record-page-pinned]')).toBeNull();
+    expectNoRail(wide.container);
+    await expectTabRowOnly();
     wide.unmount();
 
     const { container } = renderPage({ width: 720, embedded: true });
@@ -381,6 +368,15 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     expect(column(tabbed.container, 'details')).not.toBeNull();
     tabbed.unmount();
 
+    // Not pinned (720 px): the face takes the page, no columns under it.
+    const stacked = renderPage({ width: 720, search: '?related=timeline' });
+    await waitFor(() => expect(stacked.container.querySelector('[data-related-enlarged="timeline"]')).not.toBeNull(), {
+      timeout: 5000,
+    });
+    expect(stacked.container.querySelector('[data-record-columns]')).toBeNull();
+    stacked.unmount();
+
+    // Pinned (1440 px): the 动态 face is the tabs column, beside the details.
     const { container } = renderPage({ width: 1440, search: '?related=timeline' });
     const face = await waitFor(
       () => {
@@ -393,9 +389,9 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     expect(face.getAttribute('aria-label')).toBe('Activity');
     expect(face.querySelector('[data-stream-filters]')).not.toBeNull();
     expect(face.querySelector('[data-record-timeline-peek]')).toBeNull();
-    await expectTabRowOnly('timeline');
-    // The face takes the page: no columns under it.
-    expect(container.querySelector('[data-record-columns]')).toBeNull();
+    expect(face.closest('[data-record-column="tabs"]')).not.toBeNull();
+    expect(column(container, 'details')).not.toBeNull();
+    await expectTabRowOnly('timeline', { pinned: true });
     await waitFor(() => expect(auditReads()).toBeGreaterThan(0));
   });
 });

@@ -350,8 +350,9 @@ describe('objectstack#30035 — the 动态 stream is read again after a save', (
     it(`${surface}: the count and the rows hold the save's activity row without a reload`, async () => {
       const { view, after } = await saveAndRead(embedded);
       expect(chipOf(view.container)).toBe('3');
-      // A drawer draws no right rail (objectstack#35596): its rows are the 动态 tab's.
-      if (embedded) await act(async () => { fireEvent.click(timelineTab(view.container)); });
+      // No page draws the right rail any more (objectstack#35596 for the
+      // drawer, objectstack#35890 for the page): the rows are the 动态 tab's.
+      await act(async () => { fireEvent.click(timelineTab(view.container)); });
       expect(view.container.textContent).toContain('changed the amount');
       // One ask of the streams the open asked, and only those: no related
       // list, verdict, projection or approval rides it.

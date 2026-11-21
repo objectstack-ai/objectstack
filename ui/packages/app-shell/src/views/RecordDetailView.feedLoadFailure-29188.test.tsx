@@ -197,7 +197,9 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-async function boot(answers: Answers = {}, search = '') {
+// objectstack#35890 — no rail draws a 最近动态 card any more: the stream is on
+// screen in its 动态 tab, so a page opens there unless a test says otherwise.
+async function boot(answers: Answers = {}, search = '?related=timeline') {
   const { fetch, held } = heldTransport(answers);
   vi.stubGlobal('fetch', fetch);
   const ds = new ObjectStackAdapter({ baseUrl: BASE, fetch, autoReconnect: false });
@@ -229,7 +231,8 @@ const ACTIVITY_FAILED = "We couldn't load the activity for this record.";
 const NO_COMMENTS = { comments: [], reactions: { records: [] } };
 const NO_ACTIVITY = { total: 0, records: [] };
 
-const peekOf = (c: HTMLElement) => c.querySelector('[data-record-timeline-peek]') as HTMLElement;
+/** The stream as drawn: its 动态 tab (the rail's peek card retired, objectstack#35890). */
+const peekOf = (c: HTMLElement) => c.querySelector('[data-related-enlarged="timeline"]') as HTMLElement;
 /**
  * objectstack#35595 / #35596 — the stream's whole face is the 动态 tab
  * (`?related=timeline`). An empty stream draws no card on the 概览 rail, so
@@ -244,7 +247,7 @@ const retryButton = (c: HTMLElement) => c.querySelector('[data-feed-retry]') as 
 const timelineTab = (c: HTMLElement) =>
   Array.from(c.querySelectorAll('[role="tab"]')).find((t) => /^Activity/.test(t.textContent ?? ''))?.textContent;
 /** Open the record over an adapter that reads every stream on its own. */
-async function bootDirect(answers: Answers, search = '') {
+async function bootDirect(answers: Answers, search = '?related=timeline') {
   const booted = await boot(answers, search);
   Object.assign(booted.ds, { getRecordPage: undefined, prefetchRecordPage: undefined });
   return booted;
