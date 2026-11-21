@@ -50,6 +50,12 @@ export interface RecordCommentsData {
    * definite verdict; objectstack#36075 item 6). Their own, always.
    */
   moderates?: boolean;
+  /**
+   * The server admits the viewer's update of a comment they did not write
+   * (the host's definite verdict; objectstack#36075). ✓ on another person's
+   * thread and Edit on another person's comment need it.
+   */
+  updatesOthers?: boolean;
   mentionSuggestions?: DiscussionMentionSuggestion[];
   onMentionSuggestionsWanted?: () => void;
 }
@@ -87,6 +93,7 @@ export function useRecordComments(): RecordCommentsData {
     onDeleteComment: discussion?.onDeleteComment,
     onResolveComment: discussion?.onResolveComment,
     moderates: discussion?.moderatesComments === true,
+    updatesOthers: discussion?.updatesOthersComments === true,
     mentionSuggestions: discussion?.mentionSuggestions,
     onMentionSuggestionsWanted: discussion?.onMentionSuggestionsWanted,
   };

@@ -113,13 +113,21 @@ const PLACEMENT_CLASS: Record<CommentsPanelPlacement, string> = {
   cover: 'absolute inset-0 z-30',
 };
 
-/** The record's comment panel, in its place beside or over the record. */
+/**
+ * The record's comment panel, in its place beside or over the record.
+ * `onEngage` is called when the pointer first enters the panel or focus first
+ * moves into it: the reader is reaching for a comment, so the host may ask
+ * what that takes without opening the record or the panel asking anything
+ * (objectstack#28470).
+ */
 export function RecordCommentsAside({
   placement,
   onClose,
+  onEngage,
 }: {
   placement: CommentsPanelPlacement;
   onClose: () => void;
+  onEngage?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   // Closed from inside (✕, Esc), the focus goes back to the record: to the
@@ -136,7 +144,13 @@ export function RecordCommentsAside({
     if (hadFocus) button?.focus();
   }, [onClose]);
   return (
-    <div ref={ref} className={cn('min-h-0', PLACEMENT_CLASS[placement])} data-comments-placement={placement}>
+    <div
+      ref={ref}
+      className={cn('min-h-0', PLACEMENT_CLASS[placement])}
+      data-comments-placement={placement}
+      onPointerEnter={onEngage}
+      onFocusCapture={onEngage}
+    >
       <CommentsPanel onClose={close} />
     </div>
   );

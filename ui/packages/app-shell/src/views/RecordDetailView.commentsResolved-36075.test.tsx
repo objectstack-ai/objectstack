@@ -120,10 +120,11 @@ const AUTHORED_PAGE = {
   ],
 };
 
-function makeDataSource() {
+function makeDataSource(rows: ReadonlyArray<Record<string, unknown>> = ROWS, users: ReadonlyArray<Record<string, unknown>> = []) {
   return {
     find: vi.fn(async (objectName: string) => {
-      if (objectName === 'sys_comment') return { data: ROWS.map((r) => ({ ...r })) };
+      if (objectName === 'sys_comment') return { data: rows.map((r) => ({ ...r })) };
+      if (objectName === 'sys_user') return { data: users.map((u) => ({ ...u })) };
       return { data: [] };
     }),
     findOne: vi.fn(async (_o: string, id: string) => ({ id, subject: `Case ${id}` })),
@@ -170,10 +171,12 @@ interface MountOptions {
   objectName?: string;
   pages?: unknown[];
   embedded?: boolean;
+  rows?: ReadonlyArray<Record<string, unknown>>;
+  users?: ReadonlyArray<Record<string, unknown>>;
 }
 
-async function mount({ objectName = OBJECT_NAME, pages = [], embedded = false }: MountOptions = {}) {
-  const dataSource = makeDataSource();
+async function mount({ objectName = OBJECT_NAME, pages = [], embedded = false, rows, users }: MountOptions = {}) {
+  const dataSource = makeDataSource(rows, users);
   const rendered = render(
     <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }} persistLanguage={false}>
       <MePermissionsProvider initialPermissions={PERMS}>
@@ -202,19 +205,30 @@ const panel = (root: HTMLElement) => root.querySelector('[data-comments-panel]')
 const placement = (root: HTMLElement) =>
   root.querySelector('[data-comments-placement]')?.getAttribute('data-comments-placement') ?? null;
 
-/** The explain engine's answer to every `POST /security/explain`: `verdict` true, false, or none. */
-function stubExplain(verdict: boolean | null) {
+/**
+ * The explain engine's answer to every `POST /security/explain`: true, false,
+ * or none (`null`): `verdict` for the record, `commentVerdict` for a
+ * `sys_comment` row (the row floor on a comment the viewer did not write).
+ */
+function stubExplain(verdict: boolean | null, commentVerdict: boolean | null = verdict) {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (url: unknown) => {
+    vi.fn(async (url: unknown, init?: { body?: unknown }) => {
+      let asked: { object?: string; recordId?: string } = {};
+      try { asked = JSON.parse(String(init?.body ?? '{}')); } catch { /* not a JSON body */ }
+      const answer = asked.object === 'sys_comment' ? commentVerdict : verdict;
       const body =
-        String(url).includes('/security/explain') && verdict !== null
-          ? { allowed: true, record: { recordId: RECORD_ID, visible: verdict } }
+        String(url).includes('/security/explain') && answer !== null
+          ? { allowed: true, record: { recordId: asked.recordId ?? RECORD_ID, visible: answer } }
           : { data: [] };
       return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
     }),
   );
 }
+const explainAsked = () =>
+  ((globalThis.fetch as any).mock.calls as Array<[unknown, { body?: unknown }?]>)
+    .filter(([url]) => String(url).includes('/security/explain'))
+    .map(([, init]) => JSON.parse(String(init?.body ?? '{}')));
 
 function setWindowWidth(width: number) {
   Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width });
@@ -242,11 +256,15 @@ const commentIn = (root: HTMLElement, text: string) =>
     el.querySelector(':scope > .pl-7 [data-comment-body]')?.textContent?.includes(text),
   ) as HTMLElement | undefined;
 
+/** The reader reaches into the open panel: the pointer enters it. */
+const engage = (root: HTMLElement) => fireEvent.pointerEnter(root.querySelector('[data-comments-placement]')!);
+
 async function openPanel() {
   const mounted = await mount();
   await waitFor(() => expect(button(mounted.container)).not.toBeNull());
   fireEvent.click(button(mounted.container)!);
   await within(panel(mounted.container)!).findByText(ADA_BODY);
+  engage(mounted.container);
   return mounted;
 }
 
@@ -266,6 +284,27 @@ describe('resolved threads in the record comment panel (objectstack#36075)', () 
     await showResolved();
     expect(await p.findByText(GRACE_BODY)).toBeInTheDocument();
     expect(p.getByText('Resolved by Linus')).toBeInTheDocument();
+  });
+
+  it('a resolver the page cannot name is read by id, once, and named', async () => {
+    const rows = ROWS.map((r) => (r.id === 'c-grace' ? { ...r, resolved_by: 'u-zoe' } : r));
+    const { container, dataSource } = await mount({ rows, users: [{ id: 'u-zoe', name: 'Zoe' }] });
+    await waitFor(() => expect(button(container)).not.toBeNull());
+    fireEvent.click(button(container)!);
+    await within(panel(container)!).findByText(ADA_BODY);
+    await showResolved();
+    expect(await within(panel(container)!).findByText('Resolved by Zoe')).toBeInTheDocument();
+    const userReads = dataSource.find.mock.calls.filter(([o]: [string]) => o === 'sys_user');
+    expect(userReads).toEqual([
+      ['sys_user', { $filter: { id: { $in: ['u-zoe'] } }, $top: 1, $select: ['id', 'name'] }],
+    ]);
+  });
+
+  it('reads no user when every resolver is named on the page', async () => {
+    const { container, dataSource } = await openPanel();
+    await showResolved();
+    expect(await within(panel(container)!).findByText('Resolved by Linus')).toBeInTheDocument();
+    expect(dataSource.find.mock.calls.some(([o]: [string]) => o === 'sys_user')).toBe(false);
   });
 
   it('✓ writes is_resolved alone on the top-level comment; the thread leaves and the count drops', async () => {
@@ -296,9 +335,14 @@ describe('resolved threads in the record comment panel (objectstack#36075)', () 
   });
 
   it('the reopen ✓ writes is_resolved false and the thread counts again', async () => {
+    stubExplain(null, true);
     const { container, dataSource } = await openPanel();
     await showResolved();
-    const grace = await waitFor(() => commentIn(container, GRACE_BODY)!);
+    const grace = await waitFor(() => {
+      const el = commentIn(container, GRACE_BODY)!;
+      expect(el.querySelector('[data-comment-action="reopen"]')).not.toBeNull();
+      return el;
+    });
     await act(async () => {
       fireEvent.click(grace.querySelector('[data-comment-action="reopen"]')!);
     });
@@ -347,6 +391,72 @@ describe("Edit and Delete on another member's comment (objectstack#36075 item 6)
     await act(async () => {});
     expect(moreOn(container, GRACE_BODY)).toBeNull();
     expect(moreOn(container, ADA_BODY)).not.toBeNull();
+  });
+
+  it('the resolve control rides its own gate: ✓ on another member\'s thread beside a moderation refusal', async () => {
+    stubExplain(false, true);
+    const { container } = await openPanel();
+    await showResolved();
+    await waitFor(() =>
+      expect(commentIn(container, GRACE_BODY)!.querySelector('[data-comment-action="reopen"]')).not.toBeNull(),
+    );
+    expect(moreOn(container, GRACE_BODY)).toBeNull();
+  });
+});
+
+describe("the row floor on another member's comment (objectstack#36075)", () => {
+  const moreOn = (root: HTMLElement, text: string) => commentIn(root, text)?.querySelector(':scope > [data-comment-actions] [data-comment-action="more"]') ?? null;
+  const reopenOn = (root: HTMLElement, text: string) => commentIn(root, text)?.querySelector('[data-comment-action="reopen"]') ?? null;
+
+  it('asks ONE explain of a top-level comment the viewer did not write, once the reader reaches into the open panel', async () => {
+    stubExplain(true);
+    const mounted = await mount();
+    await waitFor(() => expect(button(mounted.container)).not.toBeNull());
+    expect(explainAsked().filter((q) => q.object === 'sys_comment')).toEqual([]);
+    fireEvent.click(button(mounted.container)!);
+    await within(panel(mounted.container)!).findByText(ADA_BODY);
+    // Opening the panel asks nothing (objectstack#28470).
+    await act(async () => {});
+    expect(explainAsked().filter((q) => q.object === 'sys_comment')).toEqual([]);
+    engage(mounted.container);
+    // Twice in, still one question.
+    engage(mounted.container);
+    await waitFor(() =>
+      expect(explainAsked().filter((q) => q.object === 'sys_comment')).toEqual([
+        expect.objectContaining({ object: 'sys_comment', operation: 'update', recordId: 'c-grace' }),
+      ]),
+    );
+  });
+
+  it('refused: no ✓ and no Edit on another member\'s rows, Delete still where the viewer moderates, own rows unchanged', async () => {
+    stubExplain(true, false);
+    const { container } = await openPanel();
+    await showResolved();
+    await waitFor(() => expect(moreOn(container, GRACE_BODY)).not.toBeNull());
+    expect(reopenOn(container, GRACE_BODY)).toBeNull();
+    fireEvent.pointerDown(moreOn(container, GRACE_BODY)!, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    expect(await within(document.body).findByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
+    expect(within(document.body).queryByRole('menuitem', { name: 'Edit' })).toBeNull();
+    expect(commentIn(container, ADA_BODY)!.querySelector('[data-comment-action="resolve"]')).not.toBeNull();
+  });
+
+  it('admitted: ✓ and Edit on another member\'s rows', async () => {
+    stubExplain(true, true);
+    const { container } = await openPanel();
+    await showResolved();
+    await waitFor(() => expect(reopenOn(container, GRACE_BODY)).not.toBeNull());
+    fireEvent.pointerDown(moreOn(container, GRACE_BODY)!, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    expect(await within(document.body).findByRole('menuitem', { name: 'Edit' })).toBeInTheDocument();
+  });
+
+  it('not on a guess: no answer offers ✓ on the viewer\'s own threads alone', async () => {
+    stubExplain(null);
+    const { container } = await openPanel();
+    await showResolved();
+    await waitFor(() => expect(commentIn(container, GRACE_BODY)).toBeDefined());
+    await act(async () => {});
+    expect(reopenOn(container, GRACE_BODY)).toBeNull();
+    expect(commentIn(container, ADA_BODY)!.querySelector('[data-comment-action="resolve"]')).not.toBeNull();
   });
 
   it('not offered on a guess: an explain answer with no record verdict offers the own comments alone', async () => {

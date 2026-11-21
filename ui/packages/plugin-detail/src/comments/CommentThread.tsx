@@ -51,6 +51,7 @@ export interface RecordCommentThreadProps {
     | 'onDeleteComment'
     | 'onResolveComment'
     | 'moderates'
+    | 'updatesOthers'
     | 'mentionSuggestions'
     | 'onMentionSuggestionsWanted'
   >;
@@ -67,19 +68,29 @@ export interface RecordCommentThreadProps {
   className?: string;
 }
 
-/**
- * Whether the viewer may edit and delete this comment (objectstack#36075 item
- * 6): their own (`authoredByViewer`, the host's verdict, never re-derived
- * here), or anyone's where the host says the viewer may moderate this
- * record's comments (the server admits a parent record editor).
- */
-function editableComment(item: FeedItem, moderates: boolean | undefined): boolean {
-  return item.type === 'comment' && (item.authoredByViewer === true || moderates === true);
+/** The viewer wrote this comment (`authoredByViewer`, the host's verdict, never re-derived here). */
+function ownComment(item: FeedItem): boolean {
+  return item.type === 'comment' && item.authoredByViewer === true;
 }
 
 /**
- * The resolver's name: the host's, else the mention list's entry for their id
- * (the people of this workspace), else none — the mark then says 「已解决」.
+ * Whether the viewer may edit this comment (objectstack#36075 item 6): their
+ * own, or anyone's where the host says both that the viewer may moderate this
+ * record's comments (the server admits a parent record editor) and that the
+ * server admits their update of a row they did not write (the row floor).
+ */
+function editableComment(item: FeedItem, moderates: boolean | undefined, updatesOthers: boolean | undefined): boolean {
+  return ownComment(item) || (item.type === 'comment' && moderates === true && updatesOthers === true);
+}
+
+/** Whether the viewer may delete this comment: their own, or anyone's where they moderate. */
+function deletableComment(item: FeedItem, moderates: boolean | undefined): boolean {
+  return ownComment(item) || (item.type === 'comment' && moderates === true);
+}
+
+/**
+ * The resolver's name: the host's, else the entry for their id in a mention
+ * list the composer already loaded, else none — the mark then says 「已解决」.
  */
 function resolverName(
   root: FeedItem,
@@ -112,17 +123,13 @@ export const CommentThread: React.FC<RecordCommentThreadProps> = ({
   // on an open thread still lands it there.
   const [replyFocus, setReplyFocus] = React.useState(0);
   const [editingId, setEditingId] = React.useState<string | number | null>(null);
-  const { onAddReply, onToggleReaction, onEditComment, onDeleteComment, onResolveComment, moderates } = comments;
+  const { onAddReply, onToggleReaction, onEditComment, onDeleteComment, onResolveComment, moderates, updatesOthers } =
+    comments;
   const resolvable = threadResolvable(thread);
   const resolved = threadResolved(thread);
+  // The host names the resolver (a by-id read of the ids it could not name);
+  // a mention list the composer already loaded is used too, never read for it.
   const resolvedBy = resolved ? resolverName(root, comments.mentionSuggestions) : undefined;
-  // A resolver the host could not name is looked up in the mention list,
-  // which the host reads once, on demand (objectstack#28470).
-  const wantNames = comments.onMentionSuggestionsWanted;
-  const nameMissing = resolved && !resolvedBy && root.resolvedById != null;
-  React.useEffect(() => {
-    if (nameMissing) wantNames?.();
-  }, [nameMissing, wantNames]);
 
   const openReply = React.useCallback(() => {
     if (mode === 'summary') {
@@ -138,16 +145,18 @@ export const CommentThread: React.FC<RecordCommentThreadProps> = ({
     isRoot,
     onReply: onAddReply ? openReply : undefined,
     onReact: onToggleReaction ? (emoji: string) => void onToggleReaction(item.id, emoji) : undefined,
+    // ✓ writes the top-level row: on a thread the viewer started, or anyone's
+    // where the server admits their update of a row they did not write.
     onResolve:
-      isRoot && resolvable && onResolveComment
+      isRoot && resolvable && onResolveComment && (ownComment(item) || updatesOthers === true)
         ? () => {
             // A refused write changed nothing, and the host has said so.
             void Promise.resolve(onResolveComment(item.id, !resolved)).catch(() => undefined);
           }
         : undefined,
     resolved: isRoot && resolved,
-    onEdit: onEditComment && editableComment(item, moderates) ? () => setEditingId(item.id) : undefined,
-    onDelete: onDeleteComment && editableComment(item, moderates) ? () => void onDeleteComment(item.id) : undefined,
+    onEdit: onEditComment && editableComment(item, moderates, updatesOthers) ? () => setEditingId(item.id) : undefined,
+    onDelete: onDeleteComment && deletableComment(item, moderates) ? () => void onDeleteComment(item.id) : undefined,
   });
 
   const itemOf = (item: FeedItem, isRoot: boolean, footer?: React.ReactNode, itemClassName?: string) => (

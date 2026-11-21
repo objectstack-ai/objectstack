@@ -1069,6 +1069,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // The discussion feed, stored PER RECORD (objectui#3268). See the
   // `feedRecordKey` block below for why this is a map and not a `FeedItem[]`.
   const [feedItemsByRecord, setFeedItemsByRecord] = useState<Record<string, FeedItem[]>>({});
+  // objectstack#36075 — resolver names this page read by id (`sys_user`),
+  // and the ids it asked for, so a re-read of the discussion asks no user twice.
+  const resolverNamesRef = useRef<Map<string, string>>(new Map());
+  const resolverIdsAskedRef = useRef<Set<string>>(new Set());
   // How each feed read ended (refused, objectui#11195; failed,
   // objectstack#29188), stored under the same per-record key as the rows, so a
   // refusal or a failure on record A never reaches record B's panel.
@@ -3655,6 +3659,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           }
         }
         if (currentUser.id && currentUser.name) namesById.set(String(currentUser.id), currentUser.name);
+        for (const [id, name] of resolverNamesRef.current) if (!namesById.has(id)) namesById.set(id, name);
         const mapped: FeedItem[] = res.data.map((c: any) => ({
           id: c.id,
           type: 'comment' as const,
@@ -3690,6 +3695,48 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           ...prev,
           [threadId]: mergeFeedRows(prev[threadId] ?? EMPTY_FEED, mapped),
         }));
+        // objectstack#36075 — a resolver the page cannot name (neither the
+        // viewer nor an author here) is read by id: ONE `sys_user` read of
+        // exactly those ids, after the discussion is drawn, so it never waits
+        // on it. A refused or failed read leaves the mark at 「已解决」.
+        const unnamedResolvers = Array.from(new Set(
+          mapped
+            .filter((item) => item.resolved === true && !item.resolvedByName && item.resolvedById != null)
+            .map((item) => String(item.resolvedById))
+            .filter((id) => !resolverIdsAskedRef.current.has(id)),
+        ));
+        if (unnamedResolvers.length > 0) {
+          for (const id of unnamedResolvers) resolverIdsAskedRef.current.add(id);
+          void Promise.resolve(dataSource.find('sys_user', {
+            $filter: { id: { $in: unnamedResolvers } },
+            $top: unnamedResolvers.length,
+            $select: ['id', 'name'],
+          }))
+            .then((usersRes: any) => {
+              const users: any[] = Array.isArray(usersRes) ? usersRes : usersRes?.data || [];
+              const names = new Map<string, string>();
+              for (const u of users) {
+                if (u?.id != null && typeof u.name === 'string' && u.name !== '') names.set(String(u.id), u.name);
+              }
+              for (const [id, name] of names) resolverNamesRef.current.set(id, name);
+              if (names.size === 0) return;
+              setFeedItemsByRecord(prev => {
+                const held = prev[threadId];
+                if (!held) return prev;
+                let named = false;
+                const next = held.map((item) => {
+                  const name = item.resolved === true && !item.resolvedByName && item.resolvedById != null
+                    ? names.get(String(item.resolvedById))
+                    : undefined;
+                  if (!name) return item;
+                  named = true;
+                  return { ...item, resolvedByName: name };
+                });
+                return named ? { ...prev, [threadId]: next } : prev;
+              });
+            })
+            .catch(() => undefined);
+        }
       })
       // A refused comment read is the same panel's other half (objectui#11195):
       // the panel says the member may not see the comments, instead of "No
@@ -4252,6 +4299,37 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     pureRecordId,
     'update',
     commentsOpen,
+  ) === true;
+
+  // objectstack#36075 — may the viewer update a comment they did NOT write?
+  // The platform's row floor (`owner_only_writes`) lets a rank-and-file member
+  // update only the rows they created, and it runs before the comment rules
+  // (the resolve rule of #36104 and the parent-editor rule above), so today a
+  // member's ✓ on a colleague's thread and Edit of a colleague's comment are
+  // refused. The explain engine answers the floor: ONE probe, `update` of the
+  // first top-level comment here the viewer did not write; the floor answers
+  // the same for every such row. ✓ and Edit on others' rows are offered only
+  // on its definite allow (pending, a refusal, an error, no explain service,
+  // or a stale answer offer them on the viewer's own rows alone). Asked when
+  // the reader first reaches into the open panel (pointer or focus), so
+  // opening the record, and opening the panel, still read nothing more
+  // (objectstack#28470, objectui#13045).
+  const [commentsEngagedFor, setCommentsEngagedFor] = useState<string | null>(null);
+  const engageComments = useCallback(() => {
+    if (feedRecordKey) setCommentsEngagedFor((prev) => (prev === feedRecordKey ? prev : feedRecordKey));
+  }, [feedRecordKey]);
+  const commentsEngaged = feedRecordKey != null && commentsEngagedFor === feedRecordKey;
+  const foreignRootCommentId = useMemo(() => {
+    const root = feedItems.find(
+      (item) => item.type === 'comment' && item.parentId == null && item.authoredByViewer !== true,
+    );
+    return root ? String(root.id) : undefined;
+  }, [feedItems]);
+  const updatesOthersComments = useRecordVerdict(
+    COMMENT_OBJECT,
+    foreignRootCommentId,
+    'update',
+    commentsOpen && commentsEngaged && foreignRootCommentId != null,
   ) === true;
 
   /**
@@ -5972,12 +6050,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           // `authoredByViewer`.
           onEditComment={feedGates.commentEdit ? handleEditComment : undefined}
           onDeleteComment={feedGates.commentDelete ? handleDeleteComment : undefined}
-          // objectstack#36071 / #36075 — resolve and reopen ride the comment
-          // grant: whoever may comment on the record may resolve its threads
-          // (ruling 7063285032). The panel offers it where the rows say the
-          // deployment stores resolution.
+          // objectstack#36071 / #36075 — resolve and reopen are an update of
+          // the top-level `sys_comment` row, under the same grant as Edit. The
+          // server's rule is any reader of the record (ruling 7063285032), but
+          // its row floor admits a member's update of their own rows alone, so
+          // the panel offers ✓ on a thread the viewer started, and on others'
+          // only where `updatesOthersComments` holds; and only where the rows
+          // say the deployment stores resolution.
           onResolveComment={feedsEnabled && feedGates.commentEdit ? handleResolveComment : undefined}
           moderatesComments={moderatesComments}
+          updatesOthersComments={updatesOthersComments}
           onToggleReaction={
             (reactionStore === 'records'
               ? feedGates.reactionAdd
@@ -6269,7 +6351,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             {/* objectstack#36075 — the record's comment panel: beside the
                 record (which gives it the width), or over it. */}
             {commentsOpen && (
-              <RecordCommentsAside placement={commentsPlacement} onClose={() => setCommentsOpen(false)} />
+              <RecordCommentsAside
+                placement={commentsPlacement}
+                onClose={() => setCommentsOpen(false)}
+                onEngage={engageComments}
+              />
             )}
             <MetadataPanel
               open={showDebug}

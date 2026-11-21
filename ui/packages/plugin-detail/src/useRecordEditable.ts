@@ -308,9 +308,18 @@ function startVerdict(
   inFlight.add(probe);
   const answer = (async (): Promise<boolean | undefined> => {
     try {
-      const decision = (await readDecision()) as { record?: { visible?: unknown } } | undefined;
-      const verdict = decision?.record?.visible;
-      if (typeof verdict !== 'boolean') return undefined; // no record verdict → fail open
+      const decision = (await readDecision()) as
+        | { allowed?: unknown; record?: { visible?: unknown } }
+        | undefined;
+      const visible = decision?.record?.visible;
+      const allowed = decision?.allowed;
+      if (typeof visible !== 'boolean') return undefined; // no record verdict → fail open
+      // The server admits a by-id write only when `allowed` holds too: it also
+      // folds in session-level refusals (an on-behalf-of session whose
+      // delegator is gone) that `record.visible` does not. So a definite allow
+      // is the conjunction, and `visible` with no `allowed` is no answer.
+      if (visible && typeof allowed !== 'boolean') return undefined;
+      const verdict = visible && allowed === true;
       if (probe.staled.size > 0) return undefined; // asked before the record changed → not an answer
       verdictCache.set(key, verdict);
       return verdict;

@@ -57,6 +57,20 @@ describe('useRecordVerdict (objectstack#36075)', () => {
     expect(noRecordVerdict.result.current).toBeUndefined();
   });
 
+  it('is a definite allow only when `allowed` holds beside `record.visible`, as the server admits', async () => {
+    // An on-behalf-of session whose delegator is gone: the record reads
+    // visible, the decision is still a refusal.
+    vi.stubGlobal('fetch', mockExplain({ allowed: false, record: { recordId: 'r1', visible: true } }));
+    const refused = renderHook(() => useRecordVerdict('note', 'r1'));
+    await waitFor(() => expect(refused.result.current).toBe(false));
+
+    __clearRecordEditableCache();
+    vi.stubGlobal('fetch', mockExplain({ record: { recordId: 'r2', visible: true } }));
+    const noAllowed = renderHook(() => useRecordVerdict('note', 'r2'));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(noAllowed.result.current).toBeUndefined();
+  });
+
   it('asks nothing and reads undefined when not enabled', () => {
     const fetchMock = mockExplain({ allowed: true, record: { recordId: 'r1', visible: true } });
     vi.stubGlobal('fetch', fetchMock);

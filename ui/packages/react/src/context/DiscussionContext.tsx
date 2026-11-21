@@ -62,9 +62,10 @@ export interface DiscussionContextValue {
   onDeleteComment?: (itemId: string | number) => void | Promise<void>;
   /**
    * Resolve (`true`) or reopen (`false`) the thread of a top-level comment
-   * (objectstack#36071, #36075). Offered to whoever may comment on the record
-   * (maintainer ruling record 7063285032); the comment panel draws it on the
-   * rows whose `resolved` the host set. A rejection means nothing changed.
+   * (objectstack#36071, #36075). Offered under the viewer's `update` grant on
+   * `sys_comment`; the comment panel draws it on the rows whose `resolved` the
+   * host set, on a thread the viewer started, and on anyone's only where
+   * {@link updatesOthersComments} holds. A rejection means nothing changed.
    */
   onResolveComment?: (itemId: string | number, resolved: boolean) => void | Promise<void>;
   /**
@@ -76,6 +77,15 @@ export interface DiscussionContextValue {
    * `onDeleteComment`.
    */
   moderatesComments?: boolean;
+  /**
+   * The server admits the viewer's update of a comment they did NOT write
+   * (objectstack#36075): the platform's row floor lets most members update
+   * only the rows they created, before any comment rule is asked. `true` only
+   * on a definite allow; absent or `false`, the panel offers ✓ and Edit on the
+   * viewer's own rows alone. Edit on others' comments also needs
+   * {@link moderatesComments}; Delete does not read this.
+   */
+  updatesOthersComments?: boolean;
   /** Optional list of users (or any mentionable entities) the comment
    *  input can suggest after the user types `@`. When omitted the input
    *  falls back to free-text @-mentions without autocompletion. */
@@ -142,6 +152,7 @@ export const DiscussionContextProvider: React.FC<DiscussionContextProviderProps>
     value.onDeleteComment,
     value.onResolveComment,
     value.moderatesComments,
+    value.updatesOthersComments,
     value.mentionSuggestions,
     value.onMentionSuggestionsWanted,
     value.onUploadAttachments,

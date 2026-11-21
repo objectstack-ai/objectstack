@@ -18,6 +18,8 @@
  *   replied in or is mentioned in.
  * - Edit and Delete on OTHER people's comments only where the host says the
  *   viewer may moderate this record's comments.
+ * - ✓ and Edit on a row the viewer did not write only where the host says the
+ *   server admits their update of such a row (the platform's row floor).
  */
 
 import * as React from 'react';
@@ -91,7 +93,7 @@ describe('CommentsPanel — resolved threads (objectstack#36075)', () => {
   });
 
   it('✓ on a top-level comment resolves its thread; a reply has none', () => {
-    const { onResolveComment } = renderPanel();
+    const { onResolveComment } = renderPanel({ updatesOthersComments: true });
     fireEvent.click(screen.getByRole('button', { name: /1 reply/ }));
     expect(actionIn('r3', 'resolve')).toBeNull();
     fireEvent.click(actionIn('t5', 'resolve')!);
@@ -99,7 +101,7 @@ describe('CommentsPanel — resolved threads (objectstack#36075)', () => {
   });
 
   it('「显示已解决」 shows a resolved thread with its resolver, and its ✓ reopens it', async () => {
-    const { onResolveComment } = renderPanel();
+    const { onResolveComment } = renderPanel({ updatesOthersComments: true });
     await toggleFilter('Show resolved');
     expect(shownRoots()).toEqual(['t1', 't2', 't3', 't4', 't5']);
     const thread = commentEl('t2').closest('[data-comment-thread]') as HTMLElement;
@@ -119,7 +121,7 @@ describe('CommentsPanel — resolved threads (objectstack#36075)', () => {
     expect(shownRoots()).toEqual(['t1', 't3', 't4']);
   });
 
-  it('names a resolver the host could not from the mention list, asking for it once', async () => {
+  it('names a resolver the host could not from a mention list already loaded, and never reads one for it', async () => {
     const onMentionSuggestionsWanted = vi.fn();
     const items = ITEMS.map((item) =>
       item.id === 't2' ? { ...item, resolvedByName: undefined, resolvedById: 'u-zoe' } : item,
@@ -132,7 +134,9 @@ describe('CommentsPanel — resolved threads (objectstack#36075)', () => {
     await toggleFilter('Show resolved');
     const thread = () => commentEl('t2').closest('[data-comment-thread]') as HTMLElement;
     expect(within(thread()).getByText('Resolved')).toBeInTheDocument();
-    expect(onMentionSuggestionsWanted).toHaveBeenCalled();
+    // The host names resolvers by id (objectstack#36075 L2 S2): the 50-user
+    // mention roster is not read for a resolver's name.
+    expect(onMentionSuggestionsWanted).not.toHaveBeenCalled();
     rerender(
       <DiscussionContextProvider
         items={items as any[]}
@@ -161,6 +165,17 @@ describe('CommentsPanel — resolved threads (objectstack#36075)', () => {
     expect(shownRoots()).toEqual(['t1', 't2', 't3', 't4', 't5']);
   });
 
+  it('without the host’s word that others’ rows take the viewer’s update, ✓ only on the viewer’s own threads', async () => {
+    const { onResolveComment } = renderPanel();
+    expect(actionIn('t1', 'resolve')).not.toBeNull();
+    expect(actionIn('t3', 'resolve')).toBeNull();
+    expect(actionIn('t5', 'resolve')).toBeNull();
+    await toggleFilter('Show resolved');
+    expect(actionIn('t2', 'reopen')).toBeNull();
+    fireEvent.click(actionIn('t1', 'resolve')!);
+    expect(onResolveComment).toHaveBeenCalledWith('t1', true);
+  });
+
   it('offers no ✓ where the host hands no resolve write', () => {
     renderPanel({ onResolveComment: undefined });
     expect(document.querySelector('[data-comment-action="resolve"]')).toBeNull();
@@ -171,7 +186,7 @@ describe('CommentsPanel — resolved threads (objectstack#36075)', () => {
 
 describe('CommentsPanel — Edit and Delete for people with permission (objectstack#36075 item 6)', () => {
   it('a moderator gets Edit and Delete on other people’s comments', async () => {
-    const { onDeleteComment } = renderPanel({ moderatesComments: true });
+    const { onDeleteComment } = renderPanel({ moderatesComments: true, updatesOthersComments: true });
     fireEvent.pointerDown(actionIn('t5', 'more')!, { button: 0, ctrlKey: false, pointerType: 'mouse' });
     expect(await screen.findByRole('menuitem', { name: 'Edit' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
@@ -184,8 +199,24 @@ describe('CommentsPanel — Edit and Delete for people with permission (objectst
     expect(actionIn('t5', 'more')).toBeNull();
   });
 
+  it('a moderator whose update of others’ rows the server refuses gets Delete there, not Edit', async () => {
+    const { onDeleteComment } = renderPanel({ moderatesComments: true, updatesOthersComments: false });
+    fireEvent.pointerDown(actionIn('t5', 'more')!, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }));
+    expect(onDeleteComment).toHaveBeenCalledWith('t5');
+    fireEvent.pointerDown(actionIn('t5', 'more')!, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    await screen.findByRole('menuitem', { name: 'Delete' });
+    expect(screen.queryByRole('menuitem', { name: 'Edit' })).toBeNull();
+  });
+
+  it('others’ rows taking the update is not moderating: no More on others’ comments without it', () => {
+    renderPanel({ moderatesComments: false, updatesOthersComments: true });
+    expect(actionIn('t5', 'more')).toBeNull();
+    expect(actionIn('t5', 'resolve')).not.toBeNull();
+  });
+
   it('moderating needs the host’s write too', () => {
-    renderPanel({ moderatesComments: true, onEditComment: undefined, onDeleteComment: undefined });
+    renderPanel({ moderatesComments: true, updatesOthersComments: true, onEditComment: undefined, onDeleteComment: undefined });
     expect(actionIn('t5', 'more')).toBeNull();
   });
 });
