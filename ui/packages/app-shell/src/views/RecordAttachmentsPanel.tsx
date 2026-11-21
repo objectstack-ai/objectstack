@@ -757,7 +757,7 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
             return (
               // One 33 px row: type mark, name, size, uploader, date, ⋮. Size
               // and uploader step aside in a narrow container (a drawer).
-              <li key={row.id} className="flex h-[33px] items-center gap-2 px-1 text-[13px]" data-attachment-row="">
+              <li key={row.id} className="flex h-[33px] items-center gap-2 px-1 text-sm" data-attachment-row="">
                 <TypeIcon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
                 <span className="min-w-0 flex-1 truncate" title={name}>{name}</span>
                 <span className="hidden w-16 shrink-0 text-right text-xs text-muted-foreground tabular-nums @md:inline">

@@ -191,11 +191,11 @@ export function HomeAppsStrip({
   return (
     <section>
       <div className="mb-2 flex items-center gap-2">
-        <h2 className="text-[15px] font-semibold tracking-tight">
+        <h2 className="text-sm font-medium tracking-tight">
           {t('home.yourApps', { defaultValue: 'Your apps' })}
         </h2>
         <span
-          className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-muted px-1.5 text-[11px] font-semibold tabular-nums text-muted-foreground"
+          className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-muted px-1.5 text-xs font-medium tabular-nums text-muted-foreground"
           data-testid="home-apps-count"
         >
           {ordered.length}
@@ -248,10 +248,10 @@ export function HomeAppsStrip({
                   </span>
                 )}
               </LauncherAppIcon>
-              <span className="w-full truncate text-[13px] font-medium">{label}</span>
+              <span className="w-full truncate text-sm font-medium">{label}</span>
               {openedAgo && (
                 <span
-                  className="-mt-1 w-full truncate text-[11px] text-muted-foreground"
+                  className="-mt-1 w-full truncate text-xs text-muted-foreground"
                   data-testid={`app-tile-opened-${app.name}`}
                 >
                   {t('home.appOpened', { time: openedAgo, defaultValue: '{{time}}' })}
@@ -276,7 +276,7 @@ export function HomeAppsStrip({
             >
               +{overflow}
             </span>
-            <span className="w-full truncate text-[13px] text-muted-foreground">
+            <span className="w-full truncate text-xs text-muted-foreground">
               {t('home.showMoreApps', { defaultValue: 'More' })}
             </span>
           </button>
@@ -300,7 +300,7 @@ export function HomeAppsStrip({
             >
               <Plus className="size-[22px]" aria-hidden />
             </span>
-            <span className="w-full truncate text-[13px] font-medium">
+            <span className="w-full truncate text-sm font-medium">
               {t('home.addApp', { defaultValue: 'Add app' })}
             </span>
           </button>

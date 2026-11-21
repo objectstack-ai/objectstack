@@ -469,7 +469,7 @@ export default function DocPage() {
             {toc.length >= 3 ? (
               <aside className="hidden w-56 shrink-0 xl:block">
                 <nav aria-label={tocLabel} className="sticky top-6 max-h-[calc(100svh-6rem)] overflow-auto">
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     {tocLabel}
                   </div>
                   <ul className="border-l border-border text-sm">

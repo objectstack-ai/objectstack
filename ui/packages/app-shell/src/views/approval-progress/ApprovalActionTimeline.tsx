@@ -157,7 +157,7 @@ export function ApprovalActionTimeline({ actions, loading = false, stepText }: A
             {isViaOverrideRow(a) && (
               <Badge
                 variant="outline"
-                className="gap-1 border-amber-500/60 px-1.5 py-0 text-[10px] font-medium text-amber-700 dark:text-amber-400"
+                className="gap-1 border-amber-500/60 px-1.5 py-0 text-xs font-medium text-amber-700 dark:text-amber-400"
                 title={tr('viaOverrideHint', 'The actor held no approver slot on this step — admitted by the admin-override path.')}
                 data-testid="via-override-chip"
               >
@@ -170,7 +170,7 @@ export function ApprovalActionTimeline({ actions, loading = false, stepText }: A
                 · {actionStepText(a)}
               </span>
             )}
-            <span className="ml-auto text-muted-foreground text-[10px]">
+            <span className="ml-auto text-muted-foreground text-xs">
               {formatDate(a.created_at, displayLocale)}
             </span>
           </div>
@@ -192,7 +192,7 @@ export function ApprovalActionTimeline({ actions, loading = false, stepText }: A
                   key={att.id || i}
                   type="button"
                   onClick={() => void openAttachment(att)}
-                  className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                  className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
                   title={att.name || att.id}
                 >
                   <Paperclip className="h-3 w-3" />

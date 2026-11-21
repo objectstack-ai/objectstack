@@ -564,7 +564,7 @@ export function RecordStackDrawer({
     <>
       {rootIcon}
       {!headerClaimed && (
-        <span className="min-w-0 truncate text-base font-semibold text-foreground" data-record-drawer-title="">
+        <span className="min-w-0 truncate text-base font-medium text-foreground" data-record-drawer-title="">
           {titleOf(current)}
         </span>
       )}

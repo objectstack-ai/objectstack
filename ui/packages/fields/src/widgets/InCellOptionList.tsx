@@ -117,7 +117,7 @@ export function InCellOptionList({
         }}
         onKeyDown={onKeyDown}
         className={cn(
-          'h-8 w-full rounded-sm border border-input bg-background px-2 text-[13px] outline-none',
+          'h-8 w-full rounded-sm border border-input bg-background px-2 text-sm outline-none',
           'focus-visible:ring-1 focus-visible:ring-ring',
         )}
       />
@@ -139,7 +139,7 @@ export function InCellOptionList({
             onClick={() => pickRow(0)}
             onPointerMove={() => setActive(0)}
             className={cn(
-              'flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1 text-[13px]',
+              'flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1 text-sm',
               active === 0 && 'bg-accent text-accent-foreground',
             )}
           >
@@ -167,7 +167,7 @@ export function InCellOptionList({
               }}
               onPointerMove={() => setActive(i)}
               className={cn(
-                'flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1 text-[13px]',
+                'flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1 text-sm',
                 i === active && 'bg-accent text-accent-foreground',
               )}
             >
@@ -177,7 +177,7 @@ export function InCellOptionList({
           );
         })}
         {rowCount === 0 ? (
-          <li role="presentation" className="px-2 py-1 text-[13px] text-muted-foreground">
+          <li role="presentation" className="px-2 py-1 text-xs text-muted-foreground">
             {t('fields.options.noMatches')}
           </li>
         ) : null}

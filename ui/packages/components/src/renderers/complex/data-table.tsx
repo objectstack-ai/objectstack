@@ -113,7 +113,7 @@ function builtInEditorWidthClass(type: TableColumnType | undefined): string | un
  * its own. `data-in-cell-face="input"` on its box flattens the layer.
  */
 const BUILT_IN_FLAT_INPUT_CLASS =
-  'h-[calc(var(--radix-popper-anchor-height,2rem)-4px)] rounded-none border-0 bg-transparent px-2.5 py-0 text-[13px] md:text-[13px] shadow-none focus-visible:ring-0 focus-visible:ring-offset-0';
+  'h-[calc(var(--radix-popper-anchor-height,2rem)-4px)] rounded-none border-0 bg-transparent px-2.5 py-0 text-sm shadow-none focus-visible:ring-0 focus-visible:ring-offset-0';
 
 const NUMERIC_EDIT_TYPES = new Set<TableColumnType>(['number', 'currency', 'percent']);
 
@@ -2678,7 +2678,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       <span className="inline-flex items-center shrink-0">
         <Arrow className="h-3 w-3 ml-0.5 text-primary" />
         {activeSort.length > 1 && (
-          <span className="text-[10px] font-medium text-primary tabular-nums leading-none">
+          <span className="text-xs font-medium text-primary tabular-nums leading-none">
             {index + 1}
           </span>
         )}
@@ -4529,7 +4529,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         )}
                         {/* The full label on hover wherever the cell is too narrow
                             for it and the ellipsis cuts it (objectstack#29945). */}
-                        <span className="text-[13px] font-medium text-muted-foreground whitespace-nowrap truncate" title={col.header || undefined}>{col.header}</span>
+                        <span className="text-xs font-medium text-muted-foreground whitespace-nowrap truncate" title={col.header || undefined}>{col.header}</span>
                         {fieldAuthoring?.columnMarks?.[col.accessorKey]}
                         {isColumnSortable(col) && getSortIcon(col.accessorKey)}
                         {editColumnEnabled && (
@@ -4599,7 +4599,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                 </TableHead>
               ) : (
                 <TableHead className="w-24 text-right bg-background">
-                  <span className="text-[13px] font-medium text-muted-foreground whitespace-nowrap">{t('common.actions')}</span>
+                  <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">{t('common.actions')}</span>
                 </TableHead>
               ))}
               {addColumnEnabled && (
@@ -5044,7 +5044,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                               // reader deselected with Esc keeps the focus with no ring.
                               selectFirst && "outline-none",
                               selectFirst && !isFrozen && "relative",
-                              !autosaves && hasPendingChange && "font-semibold text-amber-700 dark:text-amber-400",
+                              !autosaves && hasPendingChange && "font-medium text-amber-700 dark:text-amber-400",
                               cellError !== undefined && "ring-2 ring-inset ring-destructive",
                               isFrozen && ['sticky z-10 bg-background', STICKY_ROW_TINT],
                               isFrozen && colIndex === frozenColumns - 1 && scrolledX && FROZEN_EDGE_SHADOW,
@@ -5602,7 +5602,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                       data-column-key={col.accessorKey}
                       data-testid={figure != null ? `data-table-summary-${col.accessorKey}` : undefined}
                       className={cn(
-                        "h-8 px-3 py-0 whitespace-nowrap text-[13px] font-medium text-muted-foreground tabular-nums bg-background",
+                        "h-8 px-3 py-0 whitespace-nowrap text-xs font-medium text-muted-foreground tabular-nums bg-background",
                         col.align === 'right' && 'text-right',
                         col.align === 'center' && 'text-center',
                         isFrozen && 'sticky z-20',

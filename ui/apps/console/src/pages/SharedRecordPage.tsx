@@ -298,14 +298,14 @@ export default function SharedRecordPage() {
         <header className="sticky top-0 z-10 flex items-center gap-2 border-b bg-background px-4 py-3">
           <MessageSquare className="h-5 w-5 text-muted-foreground" />
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-sm font-semibold">
+            <h1 className="truncate text-sm font-medium">
               {conv.title ?? t('sharedRecord.sharedConversation', { defaultValue: 'Shared conversation' })}
             </h1>
-            <p className="truncate text-[11px] text-muted-foreground">
+            <p className="truncate text-xs text-muted-foreground">
               Read-only · Shared via ObjectStack
             </p>
           </div>
-          <Badge variant="outline" className="text-[10px] capitalize">
+          <Badge variant="outline" className="text-xs capitalize">
             {data.link.permission}
           </Badge>
         </header>
@@ -330,7 +330,7 @@ export default function SharedRecordPage() {
             />
           )}
         </main>
-        <footer className="border-t bg-muted/30 px-4 py-2 text-center text-[11px] text-muted-foreground">
+        <footer className="border-t bg-muted/30 px-4 py-2 text-center text-xs text-muted-foreground">
           Powered by ObjectStack
         </footer>
       </div>
@@ -341,14 +341,14 @@ export default function SharedRecordPage() {
   return (
     <div className="mx-auto flex h-svh max-w-3xl flex-col bg-background">
       <header className="border-b px-4 py-3">
-        <h1 className="text-sm font-semibold">
+        <h1 className="text-sm font-medium">
           {t('sharedRecord.sharedObject', { defaultValue: 'Shared {{object}}', object: data.link.object_name })}
         </h1>
       </header>
       <main className="flex-1 overflow-y-auto p-4">
         <SharedRecordFields record={data.record} fields={data.fields} />
         {data.redactedFields && data.redactedFields.length > 0 && (
-          <p className="mt-2 text-[11px] text-muted-foreground">
+          <p className="mt-2 text-xs text-muted-foreground">
             {t('sharedRecord.redactedFields', {
               defaultValue: 'Some fields are hidden by the owner: {{fields}}',
               fields: data.redactedFields.join(', '),

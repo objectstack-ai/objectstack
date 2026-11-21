@@ -1235,7 +1235,7 @@ function GridFieldBody({
           <SlidersHorizontal className="h-3.5 w-3.5" />
           {t('table.columns', { defaultValue: 'Columns' })}
           {extraShown.size > 0 && (
-            <span className="rounded-full bg-primary/10 px-1.5 text-[10px] font-medium text-primary">
+            <span className="rounded-full bg-primary/10 px-1.5 text-xs font-medium text-primary">
               +{extraShown.size}
             </span>
           )}
@@ -1350,7 +1350,7 @@ function GridFieldBody({
                 >
                   {totalLabel}
                 </td>
-                <td className="px-3 py-2 text-right font-semibold text-foreground tabular-nums">
+                <td className="px-3 py-2 text-right font-medium text-foreground tabular-nums">
                   {total.toLocaleString(displayLocale)}
                 </td>
                 {columns.length - totalColIndex - 1 > 0 && (
@@ -1803,7 +1803,7 @@ function GridFieldBody({
                 >
                   {totalLabel}
                 </td>
-                <td className="px-3 py-2 text-right font-semibold text-foreground tabular-nums" data-testid="line-items-total">
+                <td className="px-3 py-2 text-right font-medium text-foreground tabular-nums" data-testid="line-items-total">
                   {total.toLocaleString(displayLocale)}
                 </td>
                 {(columns.length - totalColIndex - 1 + (hasRowActions ? 1 : 0)) > 0 && (

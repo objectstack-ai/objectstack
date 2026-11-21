@@ -119,7 +119,7 @@ describe('the rail\'s 最近动态 card holding a record:chatter block (objectst
     // The newest three (the rail's row cap), each padding itself.
     expect(rows).toHaveLength(3);
     for (const row of rows) {
-      expect(row.getAttribute('class')).toBe('flex h-8 items-center gap-2 border-t border-border px-3 text-[12.5px]');
+      expect(row.getAttribute('class')).toBe('flex h-8 items-center gap-2 border-t border-border px-3 text-sm');
     }
     // Read-only: the peek's composer is not offered in the rail.
     expect(panel.querySelector('[data-record-timeline-composer]')).toBeNull();

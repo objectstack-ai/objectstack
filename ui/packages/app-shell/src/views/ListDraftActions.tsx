@@ -118,7 +118,7 @@ export function ListDraftActions({
         size="sm"
         title={discardTitle}
         data-testid="list-draft-discard"
-        className="hidden h-6 shrink-0 gap-1 px-1.5 text-[13px] font-normal text-muted-foreground shadow-none @[40rem]/list:inline-flex"
+        className="hidden h-6 shrink-0 gap-1 px-1.5 text-sm font-normal text-muted-foreground shadow-none @[40rem]/list:inline-flex"
         onClick={onDiscard}
       >
         <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
@@ -132,7 +132,7 @@ export function ListDraftActions({
               variant="default"
               size="sm"
               data-testid="list-draft-save"
-              className="hidden h-6 shrink-0 gap-1 px-2 text-[13px] @[40rem]/list:inline-flex"
+              className="hidden h-6 shrink-0 gap-1 px-2 text-sm @[40rem]/list:inline-flex"
             >
               {saveLabel}
               <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
@@ -153,7 +153,7 @@ export function ListDraftActions({
               variant="default"
               size="sm"
               data-testid="list-draft-compact"
-              className="inline-flex h-6 shrink-0 gap-1 px-2 text-[13px] @[40rem]/list:hidden"
+              className="inline-flex h-6 shrink-0 gap-1 px-2 text-sm @[40rem]/list:hidden"
             >
               {saveLabel}
               <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
@@ -175,7 +175,7 @@ export function ListDraftActions({
           size="sm"
           title={discardTitle}
           data-testid="list-draft-compact-discard"
-          className="inline-flex h-6 shrink-0 gap-1 px-1.5 text-[13px] font-normal text-muted-foreground shadow-none @[40rem]/list:hidden"
+          className="inline-flex h-6 shrink-0 gap-1 px-1.5 text-sm font-normal text-muted-foreground shadow-none @[40rem]/list:hidden"
           onClick={onDiscard}
         >
           <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />

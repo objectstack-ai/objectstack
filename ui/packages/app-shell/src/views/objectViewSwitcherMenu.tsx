@@ -76,14 +76,14 @@ function authoredFirst(views: readonly TitleSwitcherView[]): TitleSwitcherView[]
 
 function GroupLabel({ children, icon }: { children: ReactNode; icon?: ReactNode }) {
     return (
-        <div className="flex items-center gap-1.5 px-2 pt-2 pb-1 text-[11px] font-medium text-muted-foreground">
+        <div className="flex items-center gap-1.5 px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground">
             {icon}
             {children}
         </div>
     );
 }
 
-const FOOTER_ITEM = 'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-[13px] hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:min-h-11';
+const FOOTER_ITEM = 'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:min-h-11';
 
 export function ObjectViewSwitcherMenu({
     views,
@@ -169,7 +169,7 @@ export function ObjectViewSwitcherMenu({
                     aria-current={active ? 'true' : undefined}
                     title={view.label}
                     className={cn(
-                        'flex min-w-0 flex-1 items-start gap-2 rounded-sm px-2 py-1.5 text-left text-[13px] max-sm:min-h-11',
+                        'flex min-w-0 flex-1 items-start gap-2 rounded-sm px-2 py-1.5 text-left text-sm max-sm:min-h-11',
                         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                         active ? 'font-medium text-foreground' : 'text-foreground/90',
                     )}
@@ -251,7 +251,7 @@ export function ObjectViewSwitcherMenu({
                     placeholder={t('view.searchViews', { defaultValue: 'Search views' })}
                     aria-label={t('view.searchViews', { defaultValue: 'Search views' })}
                     data-testid="list-view-switcher-search"
-                    className="h-8 text-[13px] max-sm:h-11"
+                    className="h-8 text-sm max-sm:h-11"
                 />
             </div>
             <div className="max-h-80 overflow-y-auto p-1">
@@ -259,7 +259,7 @@ export function ObjectViewSwitcherMenu({
                     matches.length > 0
                         ? matches.map((v) => row(v, 'match'))
                         : (
-                            <p className="px-2 py-3 text-center text-[13px] text-muted-foreground" data-testid="list-view-switcher-empty">
+                            <p className="px-2 py-3 text-center text-xs text-muted-foreground" data-testid="list-view-switcher-empty">
                                 {t('view.noViewsFound', { defaultValue: 'No views match your search.' })}
                             </p>
                         )

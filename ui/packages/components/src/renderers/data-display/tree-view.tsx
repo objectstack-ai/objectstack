@@ -139,7 +139,7 @@ ComponentRegistry.register('tree-view',
       >
         {schema.title && (
           <div className="flex items-center gap-2 mb-3 pb-2 border-b">
-            <h3 className="text-sm font-semibold">{schema.title}</h3>
+            <h3 className="text-sm font-medium">{schema.title}</h3>
           </div>
         )}
         <div className="space-y-1">

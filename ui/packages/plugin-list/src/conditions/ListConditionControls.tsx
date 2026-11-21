@@ -343,7 +343,7 @@ export function FilterPanel({
         <button
           type="button"
           onClick={() => setStep({ kind: 'advanced' })}
-          className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
           data-testid={`${testId}-open-advanced`}
         >
           <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
@@ -405,7 +405,7 @@ export function SortPanel({
           aria-checked={order === dir}
           onClick={() => setOrder(dir)}
           className={cn(
-            'flex h-7 flex-1 items-center justify-center gap-1 rounded-sm text-[13px] text-muted-foreground hover:bg-accent',
+            'flex h-7 flex-1 items-center justify-center gap-1 rounded-sm text-sm text-muted-foreground hover:bg-accent',
             order === dir && 'bg-accent font-medium text-foreground',
           )}
           data-testid={`${testId}-order-${dir}`}
@@ -429,7 +429,7 @@ export function SortPanel({
               <button
                 type="button"
                 onClick={() => setAdvanced(true)}
-                className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
                 data-testid={`${testId}-open-advanced`}
               >
                 <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
@@ -506,7 +506,7 @@ export interface ConditionChipRowProps {
 }
 
 const CHIP_CLASS =
-  'inline-flex h-6 max-w-[280px] shrink-0 items-center gap-1 rounded-md border px-2 text-[13px] leading-none';
+  'inline-flex h-6 max-w-[280px] shrink-0 items-center gap-1 rounded-md border px-2 text-sm leading-none';
 
 /**
  * A control of the condition row below `sm`: 44 px on both sides (WCAG 2.5.5),
@@ -517,7 +517,7 @@ const ROW_TOUCH_TARGET = 'max-sm:h-11 max-sm:min-w-11';
 
 /** 「Sort」, 「Filter」 and 「+」 before anything is set: dashed, so they do not read as a condition in force. */
 const EMPTY_BUTTON_CLASS =
-  'max-sm:h-11 max-sm:min-w-11 inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-dashed px-2 text-[13px] leading-none text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+  'max-sm:h-11 max-sm:min-w-11 inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-dashed px-2 text-sm leading-none text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
 export function ConditionChipRow({
   sort,
@@ -610,7 +610,7 @@ export function ConditionChipRow({
                   })}
                 </span>
                 {sort.length > 1 && (
-                  <span className="rounded bg-muted px-1 text-[11px] tabular-nums text-muted-foreground" data-testid="sort-chip-more">
+                  <span className="rounded bg-muted px-1 text-xs tabular-nums text-muted-foreground" data-testid="sort-chip-more">
                     +{sort.length - 1}
                   </span>
                 )}
@@ -736,7 +736,7 @@ export function ConditionChipRow({
           type="button"
           variant="ghost"
           size="sm"
-          className="ml-auto h-6 shrink-0 gap-1 px-1.5 text-[13px] text-muted-foreground"
+          className="ml-auto h-6 shrink-0 gap-1 px-1.5 text-sm text-muted-foreground"
           onClick={onReset}
           title={t('listConditions.chips.resetHint')}
           data-testid="condition-reset"

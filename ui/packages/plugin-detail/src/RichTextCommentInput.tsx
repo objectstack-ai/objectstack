@@ -379,7 +379,7 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
               ref={textareaRef}
               className={cn(
                 'w-full px-3 text-sm bg-transparent resize-none focus:outline-none placeholder:text-muted-foreground',
-                collapsed ? 'block h-8 min-h-0 py-1.5 text-[13px] leading-5' : 'min-h-[80px] py-2',
+                collapsed ? 'block h-8 min-h-0 py-1.5 text-sm leading-5' : 'min-h-[80px] py-2',
               )}
               rows={collapsed ? 1 : undefined}
               placeholder={placeholder ?? t('detail.writeComment')}

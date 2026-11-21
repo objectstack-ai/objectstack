@@ -290,7 +290,7 @@ function ReportSectionView({
           aria-expanded={!collapsed}
           aria-controls={listId}
           onClick={onToggle}
-          className="flex w-full items-center gap-2 bg-muted/40 px-4 sm:px-6 py-2 text-left text-sm font-semibold hover:bg-muted focus-visible:outline-none focus-visible:bg-muted"
+          className="flex w-full items-center gap-2 bg-muted/40 px-4 sm:px-6 py-2 text-left text-sm font-medium hover:bg-muted focus-visible:outline-none focus-visible:bg-muted"
         >
           <Chevron className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
           <span className="min-w-0 truncate">{label}</span>

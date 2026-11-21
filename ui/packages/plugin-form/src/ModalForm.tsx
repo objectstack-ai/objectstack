@@ -1062,7 +1062,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
     if (error) {
       return (
         <div className="p-4 border border-red-300 bg-red-50 rounded-md">
-          <h3 className="text-red-800 font-semibold">{t('form.errorLoading')}</h3>
+          <h3 className="text-red-800 font-medium">{t('form.errorLoading')}</h3>
           <p className="text-red-600 text-sm mt-1">{error.message}</p>
         </div>
       );
@@ -1313,7 +1313,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
       <div className="@container rounded-md border bg-card p-4">
         {(schema.title || schema.description) && (
           <div className="mb-3 space-y-0.5">
-            {schema.title && <div className="text-sm font-semibold">{schema.title}</div>}
+            {schema.title && <div className="text-sm font-medium">{schema.title}</div>}
             {schema.description && <p className="text-xs text-muted-foreground">{schema.description}</p>}
           </div>
         )}
@@ -1606,7 +1606,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
                   <kbd
                     aria-hidden="true"
                     data-testid="modal-form-submit-shortcut"
-                    className="ml-2 hidden rounded border border-current/25 px-1 font-sans text-[11px] leading-4 opacity-75 sm:inline"
+                    className="ml-2 hidden rounded border border-current/25 px-1 font-sans text-xs leading-4 opacity-75 sm:inline"
                   >
                     {submitShortcutLabel()}
                   </kbd>

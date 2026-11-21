@@ -334,7 +334,7 @@ const PageLayoutRefusal: React.FC<{ kind: string; title: string; items: string[]
     className="rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive"
     data-page-refusal={kind}
   >
-    <div className="font-semibold">{title}</div>
+    <div className="font-medium">{title}</div>
     <ul className="mt-1 list-disc space-y-0.5 pl-5">
       {items.map((item, i) => (
         <li key={i}>{item}</li>
@@ -871,7 +871,7 @@ export const PageRenderer: React.FC<{
       if (errors.length) {
         return (
           <div className="m-4 rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
-            <div className="font-semibold">HTML page failed to compile ({errors.length})</div>
+            <div className="font-medium">HTML page failed to compile ({errors.length})</div>
             <ul className="mt-1 list-disc space-y-0.5 pl-5">
               {errors.slice(0, 8).map((e, i) => (
                 <li key={i}>{e.message}</li>

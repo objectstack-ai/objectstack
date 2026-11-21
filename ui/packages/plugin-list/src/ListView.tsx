@@ -7194,7 +7194,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 <EyeOff className="h-3.5 w-3.5 mr-1.5" />
                 <span className="hidden sm:inline">{t('list.hideFields')}</span>
                 {offeredHiddenFields.size > 0 && (
-                  <span className="ml-1 flex h-4 min-w-[16px] items-center justify-center text-[10px] font-medium text-muted-foreground tabular-nums">
+                  <span className="ml-1 flex h-4 min-w-[16px] items-center justify-center text-xs font-medium text-muted-foreground tabular-nums">
                     {offeredHiddenFields.size}
                   </span>
                 )}
@@ -7276,7 +7276,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 <Group className="h-3.5 w-3.5 mr-1.5" />
                 <span className="hidden sm:inline">{t('list.group')}</span>
                 {chosenGroupingConfig && chosenGroupingConfig.fields?.length > 0 && (
-                  <span className="ml-1 flex h-4 min-w-[16px] items-center justify-center text-[10px] font-medium text-muted-foreground tabular-nums">
+                  <span className="ml-1 flex h-4 min-w-[16px] items-center justify-center text-xs font-medium text-muted-foreground tabular-nums">
                     {chosenGroupingConfig.fields.length}
                   </span>
                 )}
@@ -7593,7 +7593,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                     variant="ghost"
                     size="sm"
                     className={cn(
-                      "hidden sm:inline-flex h-7 text-muted-foreground hover:text-foreground text-[13px] transition-colors duration-150",
+                      "hidden sm:inline-flex h-7 text-muted-foreground hover:text-foreground text-sm transition-colors duration-150",
                       searchTerm ? "px-2 text-foreground font-medium" : "w-7 p-0"
                     )}
                     data-testid="search-icon-button"
@@ -7609,7 +7609,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                         trigger so the active search is visible without opening it. */}
                     {searchTerm && (
                       <span
-                        className="ml-1.5 max-w-[8rem] truncate text-[11px]"
+                        className="ml-1.5 max-w-[8rem] truncate text-xs"
                         data-testid="search-active-keyword"
                       >
                         {searchTerm}

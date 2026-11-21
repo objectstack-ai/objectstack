@@ -163,7 +163,7 @@ function BuilderChip({
       onClick={disabled ? undefined : onClick}
       data-testid={testId}
       className={cn(
-        'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-3 text-[13px] font-medium transition-colors max-sm:h-11',
+        'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-3 text-sm font-medium transition-colors max-sm:h-11',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
         'disabled:pointer-events-none disabled:opacity-60',
         tone === 'outline'
@@ -238,7 +238,7 @@ function HomeAiActions({
       : 'flex shrink-0 items-center gap-2';
   // In the greeting row the buttons take the builder chips' 32 px height;
   // below `sm` both layouts take the 44 px touch target.
-  const buttonClass = layout === 'stack' ? 'max-sm:h-11' : 'h-8 px-3 text-[13px] max-sm:h-11';
+  const buttonClass = layout === 'stack' ? 'max-sm:h-11' : 'h-8 px-3 text-sm max-sm:h-11';
   return (
     <div className={container}>
       {showBuild && (
@@ -832,7 +832,7 @@ export function HomePage({ checklist }: HomePageProps = {}) {
                 {displayName && <span className="text-primary">{displayName}</span>}
                 <span className="text-foreground/40">{t('home.greetingEnd', { defaultValue: '.' })}</span>
               </h1>
-              <p className="mt-1 min-h-5 text-[13px] text-muted-foreground" data-testid="home-work-summary">
+              <p className="mt-1 min-h-5 text-xs text-muted-foreground" data-testid="home-work-summary">
                 {workSummary}
               </p>
             </div>

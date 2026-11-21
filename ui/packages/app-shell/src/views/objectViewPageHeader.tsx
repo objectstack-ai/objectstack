@@ -126,7 +126,7 @@ export function ObjectViewPageBarActions({
                   {description && (
                     <>
                       <DropdownMenuLabel
-                        className="text-[13px] font-normal leading-5 text-muted-foreground whitespace-normal"
+                        className="text-xs font-normal leading-5 text-muted-foreground whitespace-normal"
                         data-testid="object-view-description"
                       >
                         {description}
@@ -235,11 +235,11 @@ export function ObjectViewBarObjectName({
         <span className={VIEW_BAR_OBJECT_NAME} data-testid="list-view-bar-object">
             <ObjectIconTile icon={(objectDef as any)?.icon} color={(objectDef as any)?.color} />
             {/* The page's heading: the page bar that held the `h1` is not drawn. */}
-            <h1 className="min-w-0 truncate text-[13px] font-medium leading-5 text-muted-foreground" data-testid="list-view-bar-object-name">
+            <h1 className="min-w-0 truncate text-sm font-medium leading-5 text-muted-foreground" data-testid="list-view-bar-object-name">
                 {objectPluralLabel(objectDef)}
             </h1>
             <ManagedByBadge managedBy={(objectDef as any)?.managedBy} />
-            <span aria-hidden="true" className="shrink-0 text-muted-foreground/60">/</span>
+            <span aria-hidden="true" className="shrink-0 text-sm text-muted-foreground/60">/</span>
         </span>
     );
 }
