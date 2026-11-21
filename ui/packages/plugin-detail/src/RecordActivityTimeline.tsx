@@ -193,8 +193,6 @@ export interface RecordActivityTimelineProps {
 }
 
 /** The stream chips' copy (objectstack#27055): 全部 / 活动 / 讨论 / 变更. */
-/** A comment's icon cell: the row's 14 px icon, centred on its first line. */
-const STREAM_ICON_CELL = 'shrink-0 flex h-[30px] w-3.5 items-center justify-center text-muted-foreground';
 /** A comment's avatar cell: the author's 20 px avatar, centred on its first line. */
 const COMMENT_AVATAR_CELL = 'shrink-0 flex h-[30px] w-5 items-center justify-center';
 /** A comment's header line: who, then when, 30 px tall, wrapping between pieces. */
