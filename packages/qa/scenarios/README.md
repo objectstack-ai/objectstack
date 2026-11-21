@@ -105,7 +105,13 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   `write_validation` probe that meets it leaves its platform half not measured (the agent
   half too when the agent's own write met it). Each is a Build finding naming persona,
   object and verb (`buildDenialFindings`). A declared 403 and `pending_confirmation` grade as
-  before.
+  before. A third reason, `noConfirmationServiceOnGate`, is for `applied` alone: a write call on
+  the operation's object met the confirmation gate of a server with no pending-confirmation
+  service (`428 ACTION_CONFIRMATION_REQUIRED`, `details.reason: 'no_confirmation_service'`,
+  `OperationObservation.metNoConfirmationService`). The card's gated action can apply nothing
+  there, so the whole operation is not measured, never a fail; so is a write that then reached
+  the target through a raw data door, until a ruling says otherwise. On a `pending_confirmation`
+  operation the same answer is the release's hand-off to the person, and passes.
   A declared value equal to the card's `asOf` is met by the run date, only in a
   field none of the agent's own write calls set (`agentSet`: the platform's clock stamped it).
   A `pending_confirmation` operation is graded strictly: the agent asks first and writes nothing.
@@ -657,7 +663,10 @@ npx @objectstack/scenarios help                                      # the comma
 - **Observation** (`observe.ts`): the write grader is fed what the runner reads itself: the agent's write calls and
   the door's answer (a coded refusal), the object's rows before and after the turn, and the audit trail's actor. A turn
   that wrote nothing because the object refused the read it needed first (a persona that may not read it) grades as
-  that refusal's code; `(no write attempted)` is left for a turn whose object never refused it. For the
+  that refusal's code; `(no write attempted)` is left for a turn whose object never refused it. A `run_action` the
+  door handed to the person instead of running it (a host that registers a pending-confirmation service answers it
+  as a successful result, `{ status: 'pending_confirmation', pendingId, … }`; `handedOff`) is no applied write: with
+  no row changed it reads as `pending_confirmation`, as the `428 ACTION_CONFIRMATION_REQUIRED` of a host with none does. For the
   operation the card's `write_validation` guardrail names, the runner then sends the declared write itself
   (`values`, on `target`) as the same persona through the same MCP door (`POST /api/v1/mcp`, its own API key) and
   reads that answer as the **probe**: the app's validation is measured on every run, whether or not the agent sent

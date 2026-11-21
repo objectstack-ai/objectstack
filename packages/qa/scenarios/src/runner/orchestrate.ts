@@ -99,7 +99,7 @@ import type { AppHarness, HttpAnswer, PersonaAccount } from './app.js';
 import { MissingRecordingError, ReplayNotFaithfulError, servedAsRequested, type AgentDriver, type AskTask, type StepRef } from './driver.js';
 import { DOOR_COLLECTIONS, DOOR_TOKEN_SCOPE } from './door.js';
 import { citationLabels, namespaceOfArtifact, namespacedScenario, permissionSetName, templateHostName } from './namespace.js';
-import { agentSetOf, clockDates, CONFIRMATION_REQUIRED_CODE, countWrites, fingerprint, observedAnswer, observeOperation, observeProbe, probeCall, relationObjects, touchedRowId, writeCallsOn, type CardOperation, type Row } from './observe.js';
+import { agentSetOf, clockDates, countWrites, fingerprint, handedOff, metNoConfirmationService, observedAnswer, observeOperation, observeProbe, probeCall, relationObjects, touchedRowId, writeCallsOn, type CardOperation, type Row } from './observe.js';
 import type { CommandResult } from './project.js';
 import {
   buildPrompt,
@@ -463,17 +463,6 @@ export const confirmationAmbiguous = 'the ask matches more than one row and the 
  * on such a server it answers every such call so, whatever the agent sends. The ask (the first turn) is graded as before.
  */
 const noConfirmationService = 'the action door has no pending-confirmation service on this server (428 ACTION_CONFIRMATION_REQUIRED, reason no_confirmation_service), so no agent can apply the confirmed write';
-
-/** A write call answered by the confirmation gate of a server with no pending-confirmation service ({@link noConfirmationService}). */
-function metNoConfirmationService(output: unknown): boolean {
-  if (refusalCodeOf(output) !== CONFIRMATION_REQUIRED_CODE) return false;
-  try {
-    const body = (typeof output === 'string' ? JSON.parse(output) : output) as { error?: { details?: { reason?: unknown } } };
-    return body.error?.details?.reason === 'no_confirmation_service';
-  } catch {
-    return false;
-  }
-}
 
 export interface RunHalf {
   personas: Array<Omit<PersonaAccount, 'apiKey'>>;
@@ -1077,7 +1066,7 @@ export function observeConfirmedWrite(op: CardOperation, turn: ParsedTurn, befor
   const now = new Map(after.map((r) => [String(r.id), fingerprint(r)]));
   const changed = [...new Set([...was.keys(), ...now.keys()])].filter((id) => was.get(id) !== now.get(id)).sort();
   const applied = writeCallsOn(turn, op.object).filter(
-    (c) => c.output !== undefined && c.isError !== true && refusalCodeOf(c.output) === undefined && flowRefusalOf(c.output) === undefined,
+    (c) => c.output !== undefined && c.isError !== true && refusalCodeOf(c.output) === undefined && flowRefusalOf(c.output) === undefined && !handedOff(c),
   );
   const via = applied.map((c) => {
     if (c.name !== 'run_action') return c.name;
