@@ -106,4 +106,51 @@ describe('publish lint — list-equality at a CEL site', () => {
     ).filter((i) => i.severity === 'error' && i.message.includes('holds a list'));
     expect(issues.map((i) => i.source).sort()).toEqual(["record.labels != 'frontend'", "record.watchers == 'u1'"]);
   });
+
+  // A record-triggered flow's condition reads the trigger record flattened:
+  // a bare `labels` is `record.labels`, as the type pass reads it.
+  function flowErrors(condition: string, variables?: Array<Record<string, unknown>>) {
+    return validateStackExpressions(
+      specValid({
+        objects: [ticket],
+        flows: [
+          {
+            name: 'ticket_flow',
+            label: 'Ticket flow',
+            type: 'autolaunched',
+            ...(variables ? { variables } : {}),
+            nodes: [
+              { id: 'start', type: 'start', label: 'Start', config: { objectName: 'ticket_probe', triggerType: 'record-after-update', condition } },
+              { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [{ id: 'e1', source: 'start', target: 'end' }],
+          },
+        ],
+      }),
+    ).filter((i) => i.severity === 'error' && i.message.includes('holds a list'));
+  }
+
+  it.each([
+    ["labels == 'frontend'", 'labels'],
+    ["'u1' != watchers", 'watchers'],
+    ["record.labels == 'frontend'", 'record.labels'],
+  ])('refuses the flow start condition %s, naming %s', (condition, reference) => {
+    const errors = flowErrors(condition);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain(`\`${reference}\` holds a list`);
+    expect(errors[0].message).toContain(` in ${reference}`);
+  });
+
+  it.each(["stage == 'frontend'", "owner == 'u1'", "'frontend' in labels", 'watchers != null'])(
+    'CONTROL — accepts the flow start condition %s',
+    (condition) => {
+      expect(flowErrors(condition)).toEqual([]);
+    },
+  );
+
+  it('CONTROL — a bare name a declared flow variable holds is not the field', () => {
+    const variables = [{ name: 'labels', type: 'text', isInput: true, isOutput: false }];
+    expect(flowErrors("labels == 'frontend'", variables)).toEqual([]);
+    expect(flowErrors("record.labels == 'frontend'", variables)).toHaveLength(1);
+  });
 });

@@ -164,3 +164,50 @@ describe('list-equality — accepted shapes', () => {
     expect(validateExpression('predicate', "record.f == 'a'", { scope: 'record' }).ok).toBe(true);
   });
 });
+
+describe('list-equality — a bare name at a flattened (flow) site is the trigger record field', () => {
+  const listEquality = (source: string, hint: ExprSchemaHint) =>
+    refusalsOf(source, hint).filter((e) => e.code === 'list-equality');
+
+  for (const [type, multi] of [['tags', false], ['multiselect', false], ['user', true], ['select', true]] as const) {
+    for (const source of ["f == 'a'", "'a' != f", 'f == 3', "name == 'x' && f != 'a'"]) {
+      it(`${type}${multi ? ' (multiple)' : ''}: refuses \`${source}\`, naming the bare field and the \`in\` rewrite`, () => {
+        const errors = listEquality(source, hintFor(type, multi, 'flattened'));
+        expect(errors).toHaveLength(1);
+        expect(errors[0].params).toMatchObject({ reference: 'f' });
+        expect(errors[0].message).toContain('`f` holds a list');
+        expect(errors[0].message).toMatch(/ in f\b/);
+      });
+    }
+  }
+
+  // The premise for a bare name is measured on the flow engine's own
+  // `evaluateCondition`, which flattens the record into the run's scope:
+  // `service-automation`'s `list-equality-advisory-36167.test.ts`.
+
+  it('CONTROL — a bare name at a record-scoped site is no field: no list-equality', () => {
+    expect(listEquality("f == 'a'", hintFor('tags'))).toEqual([]);
+  });
+
+  it('CONTROL — a bare name a flow variable holds is not the field: no list-equality; record.f still is', () => {
+    const hint = { ...hintFor('tags', false, 'flattened'), flowVariables: ['f'] };
+    expect(listEquality("f == 'a'", hint)).toEqual([]);
+    expect(listEquality("record.f == 'a'", hint).map((e) => e.params.reference)).toEqual(['record.f']);
+  });
+
+  it('CONTROL — where nodes can bind names no reader sees, a bare name gets no verdict; record.f still does', () => {
+    const hint = { ...hintFor('tags', false, 'flattened'), bareNamesUnproven: true };
+    expect(listEquality("f == 'a'", hint)).toEqual([]);
+    expect(listEquality("record.f == 'a'", hint).map((e) => e.params.reference)).toEqual(['record.f']);
+  });
+
+  for (const source of ['f == null', 'null != f', "'a' in f", "f != null && 'a' in f", "f == ['a']", "name == 'a'"]) {
+    it(`CONTROL — accepts \`${source}\``, () => {
+      expect(listEquality(source, hintFor('tags', false, 'flattened'))).toEqual([]);
+    });
+  }
+
+  it('CONTROL — a select / user not declared multiple is not judged bare either', () => {
+    for (const type of ['select', 'user']) expect(listEquality("f == 'a'", hintFor(type, false, 'flattened'))).toEqual([]);
+  });
+});

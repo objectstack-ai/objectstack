@@ -72,10 +72,40 @@ describe('registerFlow — a list compared with a scalar is reported (advisory)'
         expect(w[0]).toContain(` in ${reference}`);
     });
 
-    it.each(["record.stage == 'won'", "record.owner == 'u1'", 'record.watchers != null', "'u1' in record.watchers"])(
+    // A bare name at a flow condition is the flattened trigger record's field.
+    it.each([
+        ["labels == 'frontend'", 'labels'],
+        ["'u1' != watchers", 'watchers'],
+    ])('reports the bare %s, naming the field and `in`', (condition, reference) => {
+        const w = warningsFor(condition);
+        expect(w).toHaveLength(1);
+        expect(w[0]).toContain(`\`${reference}\` holds a list`);
+        expect(w[0]).toContain(` in ${reference}`);
+    });
+
+    it.each([
+        "record.stage == 'won'", "record.owner == 'u1'", 'record.watchers != null', "'u1' in record.watchers",
+        "stage == 'won'", "owner == 'u1'", 'labels != null', "'frontend' in labels",
+    ])(
         'CONTROL — %s is not reported',
         (condition) => {
             expect(warningsFor(condition)).toEqual([]);
         },
     );
+});
+
+describe('the premise at a flow condition — the run flattens the record, and a bare list compared with a scalar is a constant', () => {
+    const engine = new AutomationEngine({ info: () => {}, warn: () => {}, error: () => {}, debug: () => {} } as any);
+    const run = (source: string, labels: unknown) =>
+        engine.evaluateCondition(source, new Map<string, unknown>([['labels', labels], ['record', { labels }]]));
+    it.each([[['frontend', 'qa']], [['frontend']], [[]], [null]])('labels = %j', (labels) => {
+        expect(run("labels == 'frontend'", labels)).toBe(false);
+        expect(run("record.labels == 'frontend'", labels)).toBe(false);
+        expect(run("labels != 'frontend'", labels)).toBe(true);
+    });
+    it('CONTROL — the membership rewrite answers per row', () => {
+        expect(run("labels != null && 'frontend' in labels", ['frontend', 'qa'])).toBe(true);
+        expect(run("labels != null && 'frontend' in labels", ['qa'])).toBe(false);
+        expect(run("labels != null && 'frontend' in labels", null)).toBe(false);
+    });
 });

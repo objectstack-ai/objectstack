@@ -1487,7 +1487,12 @@ function scalarLiteralOf(node: unknown): string | undefined {
  *
  * The operand is read through `rootMemberOf`, the field-existence pass's own
  * member reader, so `record.f`, `record.?f`, `record['f']` and `record[?'f']`
- * are judged alike; the refusal renders the read as `<root>.<field>`.
+ * are judged alike; the refusal renders the read as `<root>.<field>`. At a
+ * `'flattened'` (flow) site a bare `f` is the trigger record's field too, as
+ * the type pass reads it, and is rendered bare — except a name a flow
+ * variable holds ({@link ExprSchemaHint.flowVariables}) or any bare name in a
+ * flow whose nodes can bind names no reader sees
+ * ({@link ExprSchemaHint.bareNamesUnproven}).
  */
 function checkListEquality(
   ast: () => CelAstNode | null,
@@ -1501,9 +1506,19 @@ function checkListEquality(
   if (!source.includes('==') && !source.includes('!=')) return;
   const tree = ast();
   if (tree == null) return;
-  const subjectOf = (node: unknown): { root: string; field: string } | undefined => {
+  // At a flattened (flow) site a bare name is the trigger record's field, as
+  // the type pass reads it — unless a flow variable holds the name
+  // (`flowVariables`), or a node can bind names no reader sees
+  // (`bareNamesUnproven`): then it is not proven to hold the list, and gets
+  // no verdict.
+  const bareSubjects = schema?.scope === 'flattened' && !schema.bareNamesUnproven
+    ? new Set([...subjects].filter((name) => !(schema.flowVariables ?? []).includes(name)))
+    : undefined;
+  const subjectOf = (node: unknown): { reference: string } | undefined => {
     const read = rootMemberOf(node, FIELD_EXISTENCE_ROOTS);
-    return read && subjects.has(read.field) ? read : undefined;
+    if (read) return subjects.has(read.field) ? { reference: `${read.root}.${read.field}` } : undefined;
+    const { op, args } = (node ?? {}) as { op?: unknown; args?: unknown };
+    return op === 'id' && typeof args === 'string' && bareSubjects?.has(args) ? { reference: args } : undefined;
   };
   const visited = new Set<object>();
   const walk = (node: unknown): void => {
@@ -1519,7 +1534,7 @@ function checkListEquality(
         const read = subjectOf(args[side]);
         const operand = read ? scalarLiteralOf(args[1 - side]) : undefined;
         if (!read || operand === undefined) continue;
-        errors.push(listEqualityRefusal(source, `${read.root}.${read.field}`, op, operand));
+        errors.push(listEqualityRefusal(source, read.reference, op, operand));
         break;
       }
     }

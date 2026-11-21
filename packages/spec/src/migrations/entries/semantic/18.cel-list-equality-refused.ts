@@ -13,14 +13,15 @@ export const entry: SemanticMigration = {
     'Any CEL predicate or formula the shared validator types against an object (a validation rule, a field rule, a '
     + 'formula, an action\'s visible / disabled, a hook or flow condition): `==` or `!=` '
     + 'between a read of a list-valued field (`multiselect`, `checkboxes`, `tags`, or a `select` / `radio` / '
-    + '`lookup` / `user` / `file` / `image` field declared `multiple: true`) on `record` / `previous` and a non-null '
+    + '`lookup` / `user` / `file` / `image` field declared `multiple: true`) on `record` / `previous` — or, at a '
+    + 'flow condition, its bare name, which the run binds to the trigger record\'s field — and a non-null '
     + 'string, number or boolean literal, in either operand order',
   replacement:
     'Test membership with `in`, null-guarded because `\'a\' in null` faults: `record.labels != null && '
     + '\'frontend\' in record.labels` for `==`, and `record.labels == null || !(\'frontend\' in record.labels)` for '
     + '`!=`. Compare the list with `null` to test whether it is set, and with a list literal for a whole-list match. '
-    + '`os validate`, `os build` and the Studio object editor\'s draft check refuse the shape as `list-equality`, an '
-    + 'error; the flow registration pass logs it.',
+    + '`os validate`, `os build`, the MCP `validate_expression` tool and the Studio object editor\'s draft check '
+    + 'refuse the shape as `list-equality`, an error; the flow registration pass logs it.',
   reason:
     'CEL compares the whole list with the scalar, so `[\'frontend\', \'qa\'] == \'frontend\'` is `false`, and so '
     + 'is `null == \'frontend\'`: the expression answers `false` (`true` for `!=`) on every row whatever the list '
