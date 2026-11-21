@@ -37,7 +37,7 @@ const SCHEMAS: Record<string, unknown> = Object.fromEntries(
 const CALLER = { userId: 'u_manager', tenantId: 'org_1' };
 
 /** An in-memory engine: by-id updates, a per-row write refusal the way the owner guard throws it. */
-function fakeEngine(opts: { refuse?: (id: string) => unknown } = {}) {
+function fakeEngine(opts: { refuse?: (id: string) => unknown; hiddenUsers?: string[] } = {}) {
   const tables: Record<string, Row[]> = {
     sys_user: [{ id: 'u_next', banned: false }, { id: 'u_gone', banned: true }, { id: 'u_manager', banned: false }],
     lead: [{ id: 'l1', owner_id: 'u_a' }, { id: 'l2', owner_id: 'u_b' }, { id: 'l3', owner_id: 'u_a' }],
@@ -52,7 +52,9 @@ function fakeEngine(opts: { refuse?: (id: string) => unknown } = {}) {
     async find(object, q) {
       calls.push({ op: 'find', object, where: q?.where, context: q?.context });
       // Equality on plain fields only; a combinator this double does not implement is refused, never read as a field.
-      return (tables[object] ?? []).filter((r) => Object.entries(q?.where ?? {}).every(([k, v]) => {
+      // A user the caller's read door does not return; an elevated read still finds it.
+      const visible = (r: Row) => object !== 'sys_user' || (q?.context as any)?.isSystem || !opts.hiddenUsers?.includes(String(r.id));
+      return (tables[object] ?? []).filter((r) => visible(r) && Object.entries(q?.where ?? {}).every(([k, v]) => {
         if (k.startsWith('$')) throw new Error(`mock find: the ${k} combinator is not implemented`);
         return r[k] === v;
       })).slice(0, q?.limit ?? Infinity);
@@ -160,6 +162,22 @@ describe('[#35402] changeRecordOwner — one record', () => {
       expect(err.status).toBe(status);
       expect(err.field).toEqual({ field: 'ownerId', code });
       expect(engine.calls.some((c) => c.op === 'update')).toBe(false);
+    }
+  });
+
+  it('[#29029] a person the caller cannot read answers as unknown, active or banned, single and bulk, and the ban is not read', async () => {
+    for (const ownerId of ['u_next', 'u_gone']) {
+      for (const run of [
+        (e: ReturnType<typeof fakeEngine>) => changeRecordOwner(e, 'lead', 'l1', { ownerId }, CALLER),
+        (e: ReturnType<typeof fakeEngine>) => changeRecordsOwner(e, 'lead', ['l1', 'l2'], { ownerId }, CALLER),
+      ]) {
+        const engine = fakeEngine({ hiddenUsers: ['u_next', 'u_gone'] });
+        const err = await refusalOf(run(engine));
+        expect(err).toBeInstanceOf(UserWorkTransferRefusal);
+        expect({ status: err.status, field: err.field }).toEqual({ status: 404, field: { field: 'ownerId', code: 'reference_not_found' } });
+        expect(engine.calls.some((c) => c.object === 'sys_user' && (c.context as any)?.isSystem)).toBe(false);
+        expect(engine.calls.some((c) => c.op === 'update')).toBe(false);
+      }
     }
   });
 });

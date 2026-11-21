@@ -284,15 +284,34 @@ export function failureOf(id: unknown, err: unknown, object: string, describe?: 
 }
 
 /**
+ * Whether the caller's own read of `sys_user` returns `userId`. A read the
+ * caller is refused outright (no read on users at all) answers `false`, as the
+ * write path's caller read does; any other fault is the caller's to answer.
+ */
+async function callerReadsUser(engine: Pick<UserWorkEngine, 'find'>, userId: string, context: unknown): Promise<boolean> {
+  try {
+    const rows = await engine.find(USER_OBJECT, { where: { id: userId }, fields: ['id'], limit: 1, context });
+    return rows.length > 0;
+  } catch (err) {
+    const e = err as { code?: unknown; status?: unknown; statusCode?: unknown } | null;
+    if (e?.code === 'PERMISSION_DENIED' || e?.status === 403 || e?.statusCode === 403) return false;
+    throw err;
+  }
+}
+
+/**
  * Refuse, before any write, a hand-over target that names no user or a user
  * whose ban is in force ({@link UserWorkTransferRefusal}, naming `field` — the
  * request member that carried the id). Shared by this module's transfer and the
  * Change Owner endpoint (`change-record-owner.ts`), so a bulk hand-over refuses
  * once instead of failing every row the same way.
  *
- * The target's existence and ban state are facts about the user, read the way
- * the write path's reference check reads them: past the caller's row
- * visibility, inside the caller's tenant.
+ * The target is read the way the write path's reference check reads a user
+ * (#29029): through the caller's own read door first. A user the caller cannot
+ * read answers exactly as a user that exists nowhere (`404`,
+ * `reference_not_found`), and its ban is never read. Only a user the caller
+ * can read has its ban state read, elevated past the ban fields' own
+ * visibility and inside the caller's tenant.
  */
 export async function assertAssignableUser(
   engine: Pick<UserWorkEngine, 'find'>,
@@ -300,6 +319,9 @@ export async function assertAssignableUser(
   context: unknown,
   field: string,
 ): Promise<void> {
+  const unknown = () =>
+    new UserWorkTransferRefusal(404, 'RESOURCE_NOT_FOUND', `No user has id "${userId}"`, { field, code: 'reference_not_found' });
+  if (!(await callerReadsUser(engine, userId, context))) throw unknown();
   const elevated = { ...((context as object | undefined) ?? {}), isSystem: true };
   const [target] = await engine.find(USER_OBJECT, {
     where: { id: userId },
@@ -307,9 +329,7 @@ export async function assertAssignableUser(
     limit: 1,
     context: elevated,
   });
-  if (!target) {
-    throw new UserWorkTransferRefusal(404, 'RESOURCE_NOT_FOUND', `No user has id "${userId}"`, { field, code: 'reference_not_found' });
-  }
+  if (!target) throw unknown();
   if (isUserBanInForce(target)) {
     throw new UserWorkTransferRefusal(400, 'VALIDATION_ERROR', `User "${userId}" is banned and cannot be assigned new records; pick an active user`, { field, code: 'reference_user_banned' });
   }
