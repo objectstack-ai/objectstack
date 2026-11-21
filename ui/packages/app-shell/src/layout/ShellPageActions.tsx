@@ -14,10 +14,14 @@
  * actions (reports and every custom page draw that header too), the record
  * page's navigation row before its ✕.
  *
- * While the top bar still draws the same three buttons the group is OFF, so
- * nothing doubles: `SHELL_PAGE_ACTIONS_DEFAULT` is `false`, and the one way to
- * turn it on outside a test is the browser switch below. The card that removes
- * the top bar turns the default on and deletes the switch.
+ * From 768 px up the app shell draws no top bar (objectstack#36112), so the
+ * group is the page's only home for these buttons; the scope is on unless a
+ * caller turns it off.
+ *
+ * The scope also hands the headers the sidebar's 「Expand」 button for their
+ * left edge, drawn while the sidebar is collapsed; a route with none of those
+ * headers gets the same button at the content's top-left corner
+ * (`ShellSidebarExpandFallback`).
  *
  * Outside a scope (Home, the organization pages, Studio, the docs frame, a
  * test that mounts a page bare) the group is never drawn, and on a phone
@@ -31,7 +35,7 @@
 import * as React from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { Blocks, Eye } from 'lucide-react';
-import { Button } from '@object-ui/components';
+import { Button, cn, useSidebar } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
@@ -41,43 +45,124 @@ import { useServedAppLabel } from '../hooks/useServedAppLabel.js';
 import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
 import {
   ShellPageActionsSlotContext,
+  ShellSidebarExpandSlotContext,
   useShellPageActionsSlot,
   type ShellPageActionsSlotProps,
 } from './shellPageActionsSlot.js';
+import { LocalizedSidebarTrigger } from './LocalizedSidebarTrigger.js';
 import { AssistantTopBarButton } from './AssistantTopBarButton.js';
 import { HelpMenu } from './HelpMenu.js';
 
-/** Whether the group is drawn while the top bar still stands: off. */
-export const SHELL_PAGE_ACTIONS_DEFAULT = false;
+/**
+ * Counts the headers under a scope that place the expand button, so the
+ * fallback corner button is drawn only where no header does.
+ */
+interface ExpandHeaderRegistry {
+  add: () => () => void;
+  subscribe: (listener: () => void) => () => void;
+  count: () => number;
+}
+
+function createExpandHeaderRegistry(): ExpandHeaderRegistry {
+  let count = 0;
+  const listeners = new Set<() => void>();
+  const emit = () => listeners.forEach((listener) => listener());
+  return {
+    add: () => {
+      count += 1;
+      emit();
+      return () => {
+        count -= 1;
+        emit();
+      };
+    },
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    count: () => count,
+  };
+}
+
+const ExpandHeaderRegistryContext = React.createContext<ExpandHeaderRegistry | null>(null);
 
 /**
- * The browser switch that turns the group on before the top bar goes:
- * `localStorage['os:shell:page-actions'] = 'on'`. For checking the group in a
- * running console; every access is guarded, so a blocked storage reads off.
+ * The shell's decision for the pages under it: the group, on unless `on` is
+ * `false`; and, with `sidebarExpand` (only inside the sidebar provider), the
+ * expand button for the headers' left edge. Both reach the headers through
+ * the slots in `shellPageActionsSlot.ts`, so a header never imports them.
  */
-export const SHELL_PAGE_ACTIONS_SWITCH_KEY = 'os:shell:page-actions';
+export function ShellPageActionsScope({
+  on = true,
+  sidebarExpand = false,
+  children,
+}: {
+  on?: boolean;
+  sidebarExpand?: boolean;
+  children: React.ReactNode;
+}) {
+  const [registry] = React.useState(createExpandHeaderRegistry);
+  return (
+    <ExpandHeaderRegistryContext.Provider value={sidebarExpand ? registry : null}>
+      <ShellSidebarExpandSlotContext.Provider value={sidebarExpand ? renderShellSidebarExpand : null}>
+        <ShellPageActionsSlotContext.Provider value={on ? renderShellPageActionsGroup : null}>
+          {children}
+        </ShellPageActionsSlotContext.Provider>
+      </ShellSidebarExpandSlotContext.Provider>
+    </ExpandHeaderRegistryContext.Provider>
+  );
+}
 
-/** The shell's answer: the default, unless the browser switch says `on`. */
-export function readShellPageActionsSwitch(): boolean {
-  try {
-    if (typeof window === 'undefined') return SHELL_PAGE_ACTIONS_DEFAULT;
-    return window.localStorage?.getItem(SHELL_PAGE_ACTIONS_SWITCH_KEY) === 'on' || SHELL_PAGE_ACTIONS_DEFAULT;
-  } catch {
-    return SHELL_PAGE_ACTIONS_DEFAULT;
-  }
+/** The expand slot's value: one stable function, never remade. */
+function renderShellSidebarExpand(): React.ReactNode {
+  return <ShellSidebarExpandButton />;
+}
+
+/** The trigger, named for what it does here: the sidebar is collapsed. */
+function SidebarExpandTrigger({ className }: { className?: string }) {
+  const { t } = useObjectTranslation();
+  return (
+    <LocalizedSidebarTrigger
+      className={cn('shrink-0', className)}
+      aria-label={t('sidebar.expand', { defaultValue: 'Expand sidebar' })}
+      data-testid="shell-sidebar-expand"
+    />
+  );
 }
 
 /**
- * The shell's decision for the pages under it. `on` absent: the switch's
- * answer. On, it hands the group to the headers through the slot
- * (`shellPageActionsSlot.ts`), so a header never imports the group itself.
+ * A header's expand button: drawn while the desktop sidebar is collapsed. A
+ * header that places it counts as one for the fallback, drawn or not.
  */
-export function ShellPageActionsScope({ on, children }: { on?: boolean; children: React.ReactNode }) {
-  const [switched] = React.useState(readShellPageActionsSwitch);
+function ShellSidebarExpandButton() {
+  const registry = React.useContext(ExpandHeaderRegistryContext);
+  React.useLayoutEffect(() => registry?.add(), [registry]);
+  const { open, isMobile } = useSidebar();
+  if (isMobile || open) return null;
+  return <SidebarExpandTrigger />;
+}
+
+const noHeaders = () => 0;
+const noSubscription = () => () => {};
+
+/**
+ * The expand button for a route whose page draws none of the shell's headers
+ * (search results, a component page, the app editor): pinned at the content's
+ * top-left corner while the sidebar is collapsed. It takes no room of its own.
+ */
+export function ShellSidebarExpandFallback() {
+  const registry = React.useContext(ExpandHeaderRegistryContext);
+  const headers = React.useSyncExternalStore(
+    registry?.subscribe ?? noSubscription,
+    registry?.count ?? noHeaders,
+    noHeaders,
+  );
+  const { open, isMobile } = useSidebar();
+  if (!registry || headers > 0 || isMobile || open) return null;
   return (
-    <ShellPageActionsSlotContext.Provider value={(on ?? switched) ? renderShellPageActionsGroup : null}>
-      {children}
-    </ShellPageActionsSlotContext.Provider>
+    <div className="sticky top-0 z-20 h-0" data-testid="shell-sidebar-expand-fallback">
+      <SidebarExpandTrigger className="absolute left-2 top-2 bg-background/80 backdrop-blur" />
+    </div>
   );
 }
 

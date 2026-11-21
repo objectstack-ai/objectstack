@@ -3568,6 +3568,8 @@ const ru = {
     removeFromFavorites: "Убрать {{name}} из избранного",
     allReports: "Все отчёты",
     keepOpen: "Не сворачивать боковую панель",
+    collapse: 'Свернуть боковую панель',
+    expand: 'Развернуть боковую панель',
   },
   topbar: {
     openAssistant: "Открыть ассистента {{name}}",
@@ -3740,6 +3742,7 @@ const ru = {
       backToHome: "Вернуться на главную",
       settings: "Настройки",
       productHome: "Главная {{product}}",
+      addApp: 'Добавить приложение',
     },
     activityFeed: {
       title: "Последние действия",
