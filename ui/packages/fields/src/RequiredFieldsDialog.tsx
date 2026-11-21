@@ -55,6 +55,13 @@
  * the preview gallery) reads English instead of a raw key. The host may pass
  * its own `title`, `description` and `submitLabel` (the board keeps its
  * 「移动卡片」).
+ *
+ * ## Nothing to fill
+ *
+ * A host may open it with no fields (the record header's stage menu, whose
+ * every move goes through this dialog): it is then the change's confirmation,
+ * the record and the change above Cancel and Save, and Save takes the focus.
+ * A refusal naming a field the reader can fill still adds that field.
  */
 
 import React from 'react';
@@ -164,6 +171,7 @@ export function RequiredFieldsDialog({
   const [footLines, setFootLines] = React.useState<string[]>([]);
   const [sending, setSending] = React.useState(false);
   const busy = !!submitting || sending;
+  const submitRef = React.useRef<HTMLButtonElement>(null);
 
   const shown: RequiredFieldsDialogField[] = [];
   const seen = new Set<string>();
@@ -226,6 +234,15 @@ export function RequiredFieldsDialog({
       <DialogContent
         className="sm:max-w-md max-h-[90dvh] overflow-y-auto"
         data-testid="required-fields-dialog"
+        onOpenAutoFocus={(event) => {
+          // With fields to fill the first one takes focus (the default). With
+          // none — a host using the dialog as the change's confirmation, the
+          // record header's stage menu — Save does, so Enter confirms the
+          // change the reader just picked rather than Cancel (objectstack#35891).
+          if (shown.length > 0 || !submitRef.current) return;
+          event.preventDefault();
+          submitRef.current.focus();
+        }}
       >
         <DialogHeader>
           <DialogTitle>
@@ -318,7 +335,7 @@ export function RequiredFieldsDialog({
           <Button variant="outline" onClick={onCancel} disabled={busy}>
             {tt('common.cancel', 'Cancel')}
           </Button>
-          <Button onClick={() => { void handleSubmit(); }} disabled={busy}>
+          <Button ref={submitRef} onClick={() => { void handleSubmit(); }} disabled={busy}>
             {submitLabel ?? tt('common.save', 'Save')}
           </Button>
         </DialogFooter>
