@@ -20,6 +20,8 @@
 // that index and throws in SQLite's own words. That is what makes the ablation
 // (revert the fix → these tests go red) mean anything.
 
+// Pays the first load of the egress module at collection, not inside a clocked test.
+import '@objectstack/core/egress';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { AuthManager } from './auth-manager';

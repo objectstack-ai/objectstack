@@ -24,6 +24,8 @@
 // that is literally what `runtime/src/security/resolve-session-principal.ts`
 // calls.
 
+// Pays the first load of the egress module at collection, not inside a clocked test.
+import '@objectstack/core/egress';
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';

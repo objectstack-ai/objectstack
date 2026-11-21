@@ -24,6 +24,8 @@
 // it as B's (it strengthens the own-email pin) and excludes it only where an
 // exact id set is compared.
 
+// Pays the first load of the egress module at collection, not inside a clocked test.
+import '@objectstack/core/egress';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
 import { createRequire } from 'node:module';

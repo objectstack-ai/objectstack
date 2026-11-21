@@ -32,6 +32,8 @@
 // (`assertEngineDeleteDispatch` / `assertEngineUpdateDispatch`, #4550/#5480) so
 // the double cannot accept a call ObjectQL refuses.
 
+// Pays the first load of the egress module at collection, not inside a clocked test.
+import '@objectstack/core/egress';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { SysMember } from '@objectstack/platform-objects';

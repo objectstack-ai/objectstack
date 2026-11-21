@@ -54,6 +54,8 @@
 // Real better-auth pipeline throughout (the #3585 EdDSA / #4785 session-of-record
 // precedent: patch the real thing, never stub our own code).
 
+// Pays the first load of the egress module at collection, not inside a clocked test.
+import '@objectstack/core/egress';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { AuthManager } from './auth-manager';
