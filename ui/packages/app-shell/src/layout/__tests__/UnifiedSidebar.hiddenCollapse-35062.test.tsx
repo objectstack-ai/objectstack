@@ -317,10 +317,11 @@ describe('a collapsed console sidebar is hidden, with no icon column (objectstac
     expectHidden();
   });
 
-  it('the edge is a strip at the window’s left edge, below the top bar', () => {
+  it('the edge is a strip at the window’s left edge, its full height (no top bar above it, objectstack#36112)', () => {
     renderShell(1280);
     for (const token of SIDEBAR_EDGE_ZONE.split(' ')) expect(tokens(edge()!)).toContain(token);
-    expect(tokens(edge()!)).toContain('!top-12');
+    expect(tokens(edge()!)).toEqual(expect.arrayContaining(['top-0', 'h-svh']));
+    expect(tokens(edge()!)).not.toContain('!top-12');
     expect(edge()).toHaveAttribute('aria-hidden', 'true');
   });
 

@@ -3407,6 +3407,8 @@ const de = {
     removeFromFavorites: "{{name}} aus Favoriten entfernen",
     allReports: "Alle Berichte",
     keepOpen: "Seitenleiste geöffnet lassen",
+    collapse: 'Seitenleiste einklappen',
+    expand: 'Seitenleiste ausklappen',
   },
   topbar: {
     openAssistant: "Assistent {{name}} öffnen",
@@ -3574,6 +3576,7 @@ const de = {
       backToHome: "Zurück zur Startseite",
       settings: "Einstellungen",
       productHome: "{{product}} Startseite",
+      addApp: 'App hinzufügen',
     },
     activityFeed: {
       title: "Letzte Aktivitäten",

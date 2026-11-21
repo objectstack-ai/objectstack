@@ -69,7 +69,7 @@ import { actionContextOrg } from '../utils/actionContextOrg.js';
 import { editFormLockedByState } from '../utils/editFormLockedByState.js';
 import { matchAppBySegment, resolveHostAppSegment } from '../utils/appRoute.js';
 import { hostInConsolePath } from '../utils/hostInConsolePath.js';
-import { useShellPageActionsSlot } from '../layout/shellPageActionsSlot.js';
+import { useShellPageActionsSlot, useShellSidebarExpandSlot } from '../layout/shellPageActionsSlot.js';
 import { recycleBinRefusalLabelsOf, recycleBinRestoreOf } from '../utils/recycleBinRestore.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
 import type { TranslateFn } from '@object-ui/i18n';
@@ -1051,6 +1051,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // has the group already.
   const renderShellGroup = useShellPageActionsSlot();
   const shellActions = renderShellGroup !== null && !embedded;
+  // objectstack#36112 — the sidebar's expand button opens the page's
+  // navigation row while the sidebar is collapsed.
+  const renderSidebarExpand = useShellSidebarExpandSlot();
   // `language` is also the language a flow launch reads a refused write's
   // permission line in.
   const { t, language } = useObjectTranslation();
@@ -5760,7 +5763,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const closePage = pageReturn.toList ?? (objectListPath ? () => navigate(objectListPath) : undefined);
   const pageFrame = closePage || shellActions ? (
     <>
-      {shellActions && renderShellGroup?.({})}
+      {/* objectstack#36112 — the comments icon is the group's first button. */}
+      {shellActions && renderShellGroup?.({ comments: commentsButton })}
       {closePage && (
         <RecordTopBarButton label={t('common.close', { defaultValue: 'Close' })} onClick={closePage} data-testid="record-page-close">
           <X className="h-3.5 w-3.5" />
@@ -5816,11 +5820,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   ) : (
     <RecordTopBar
       leadingTestId="record-page-leading"
-      leading={pageLeading}
+      leading={renderSidebarExpand ? <>{renderSidebarExpand()}{pageLeading}</> : pageLeading}
       stepper={pageStepper}
       actionSlotRef={setBarActionSlot}
       toggles={approvalQueueSwitch || panelToggles ? <>{approvalQueueSwitch}{panelToggles}</> : undefined}
-      comments={commentsButton}
+      comments={shellActions ? undefined : commentsButton}
       frame={pageFrame}
       record={pageRecordRow}
     />

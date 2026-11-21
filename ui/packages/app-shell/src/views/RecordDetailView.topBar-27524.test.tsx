@@ -422,8 +422,8 @@ describe('the shell\'s top-right button group on the record page (objectstack#36
     expect(within(record).queryByTestId('shell-page-actions')).toBeNull();
   });
 
-  it('while the top bar stands (the default, and with no shell above): no group, ✕ alone', async () => {
-    for (const on of [undefined, false] as const) {
+  it('turned off (a shell that draws its own buttons elsewhere): no group, ✕ alone', async () => {
+    for (const on of [false] as const) {
       mountUnderShell(on);
       await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
       const frame = pageBar()!.querySelector('[data-record-top-bar-frame]') as HTMLElement;

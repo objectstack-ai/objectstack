@@ -59,7 +59,7 @@ import * as React from 'react';
 import { RefreshCw } from 'lucide-react';
 import { Button, cn } from '@object-ui/components';
 import { useInSetupApp } from '../console/setupApp.js';
-import { useShellPageActionsSlot } from './shellPageActionsSlot.js';
+import { useShellPageActionsSlot, useShellSidebarExpandSlot } from './shellPageActionsSlot.js';
 
 /**
  * Props of the app-shell `<PageHeader>` React component.
@@ -272,6 +272,10 @@ export function PageHeader({
   // own actions, where the shell turned it on (`ShellPageActions`); a hairline
   // sets it apart from them.
   const renderShellGroup = useShellPageActionsSlot();
+  // objectstack#36112 — the sidebar's expand button, at the left edge while
+  // the sidebar is collapsed (it draws nothing otherwise).
+  const renderSidebarExpand = useShellSidebarExpandSlot();
+  const leading = renderSidebarExpand?.();
   const pageActions = refreshButton || drawnActions;
   const trailing = (pageActions || renderShellGroup) && (
     <div
@@ -320,6 +324,7 @@ export function PageHeader({
 
       {list ? (
         <div className="flex h-full items-center justify-between gap-3 px-4">
+          {leading}
           {/* One line at 13px: the object's icon (its tile, objectstack#35985),
               its name, its kind. */}
           <div ref={textRef} className="flex min-w-0 flex-1 items-center gap-2">
@@ -337,6 +342,7 @@ export function PageHeader({
         </div>
       ) : setup ? (
         <div className="flex justify-between items-center gap-3 py-3 px-4 sm:px-6">
+          {leading}
           <div className="flex items-center gap-3 min-w-0 flex-1">
             {iconTile ?? (icon && <IconTile size="setup">{icon}</IconTile>)}
             <div ref={textRef} className="min-w-0 flex-1">
@@ -363,6 +369,7 @@ export function PageHeader({
         </div>
       ) : (
         <div className="flex justify-between items-center gap-3 py-2.5 sm:py-2 px-4 sm:px-6">
+          {leading}
           {/* One row: icon, title, then the subtitle behind a hairline — all
               siblings of this flex row, so nothing wraps beneath the title
               (objectui#12423). `min-h-9` floors the row at the chip's `h-9`, so
