@@ -157,7 +157,7 @@ Three things were the maintainer's, put with a recommendation each, and the main
   organization. The security middleware passes a system context through, and
   `packages/objectql/src/engine-driver-options.ts#driverReadScope` projects no driver tenant scope for such a
   context. So the read runs outside the tenant wall, and it returns the user's rows for the object whatever
-  organization each row carries. `packages/plugins/plugin-sharing/src/sharing-service.ts#grantedRecordIds` drops a
+  organization each row carries. `grantedRecordIds` drops a
   nullish `record_id`, stringifies the rest and drops the empty string.
 - **The approval arm.** `packages/plugins/plugin-sharing/src/sharing-service.ts#pendingApproverReadGrants` asks the
   approvals service for the records a pending step waits on the caller for. They grant read only, none to a delegated
@@ -193,6 +193,15 @@ Three things were the maintainer's, put with a recommendation each, and the main
   it: the object has an owner field, the caller is below `org` depth, and the object is not open to the caller on
   that side (a `private` model for a read; a `private` or `public_read` model for a predicate update; for an external
   principal, whatever the external floor leaves closed).
+
+> **Note (2026-11-21, #33787) — `grantedRecordIds` is gone; its filter is the leaf's blank-id guard.** Plan step 6
+> removed the grant read above, and `grantedRecordIds` with it, from
+> `packages/plugins/plugin-sharing/src/sharing-service.ts`: the sharing scopes carry the share arm as the
+> `SharedRecordIds` leaf, and no grant is read into a list. What `grantedRecordIds` did to a grant row, dropping a
+> nullish or empty `record_id`, is now the blank-id guard every evaluator owes the leaf's inner read, declared with
+> `packages/spec/src/data/fixed-read-leaf.ts#FixedInnerRead` (D2's blank-id guard bullet). The grant-read bullet
+> above anchored the removed symbol; it now names the symbol bare, as D2 does, and this note carries the live
+> anchor. The bullet otherwise stands as written, a reading of `b8ac0e24`.
 
 ### Why no existing form serves
 
