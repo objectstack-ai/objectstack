@@ -261,6 +261,27 @@ function drawDetailsNodes(nodes: any[]): React.ReactNode {
   });
 }
 
+const LINE_BUTTON =
+  'rounded-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+
+/**
+ * 「默认顺序已更新 · 恢复默认」 — the reader's order was laid over an older
+ * default (rule 5). Under the tab row since the rail it closed went
+ * (objectstack#35890); the hidden lists and the reset live in 「更多」.
+ */
+const RelatedDefaultChangedHint: React.FC<{ onRestore: () => void }> = ({ onRestore }) => {
+  const { t } = useDetailTranslation();
+  return (
+    <p className="text-xs text-muted-foreground" data-related-default-changed="">
+      {t('detail.relatedDefaultChanged', { defaultValue: 'Default order updated' })}
+      {' · '}
+      <button type="button" className={LINE_BUTTON} onClick={onRestore}>
+        {t('detail.relatedRestoreDefault', { defaultValue: 'Restore default' })}
+      </button>
+    </p>
+  );
+};
+
 /**
  * A column stacks its blocks 16 px apart. A related list folded into its
  * stack's empty line stays MOUNTED with its content `hidden`
@@ -633,6 +654,9 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
         }
       />
     ) : null;
+  const defaultChangedHint = tabRow && resolved.defaultChanged ? (
+    <RelatedDefaultChangedHint onRestore={() => editArrangement({ kind: 'restore-default-order' })} />
+  ) : null;
   // A face without the 动态 tab open still names the stream's count on its
   // tab (objectstack#27524): counted from the feed the host holds.
   const probesTimelineCount = hasTimeline && !!tabRow && activeTab !== RECORD_PAGE_TIMELINE_PANEL;
@@ -688,6 +712,7 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
           data-record-column="tabs"
         >
           {tabRow}
+          {defaultChangedHint}
           {probesTimelineCount && <RecordTimelineCountProbe nodes={columns.timeline} onCount={reportTimelineCount} />}
           {face}
         </div>
@@ -697,6 +722,7 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
     body = (
       <>
         {tabRow}
+        {defaultChangedHint}
         {probesTimelineCount && <RecordTimelineCountProbe nodes={columns.timeline} onCount={reportTimelineCount} />}
         {face ?? (
           <div className="grid grid-cols-1 items-start gap-6" data-record-columns="" data-record-columns-shown="details">
