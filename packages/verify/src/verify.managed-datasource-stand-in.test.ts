@@ -497,7 +497,7 @@ describe("os verify refuses to boot while a managed datasource on a plugin's dri
         fields: { name: { type: 'text', label: 'Name' } },
       },
     ],
-    data: [{ object: 'vmr_item', mode: 'insert', records: [{ name: 'SEED' }] }],
+    data: [{ object: 'vmr_item', mode: 'upsert', externalId: 'name', records: [{ name: 'SEED' }] }],
     plugins: [recordingDriverPlugin(PLUG_DS, refusedCalls)],
   } as never);
 
