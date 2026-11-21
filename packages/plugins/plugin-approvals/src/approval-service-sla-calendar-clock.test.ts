@@ -471,7 +471,7 @@ describe("ApprovalEscalation.clock 'working_time': a calendar read that errors c
     const failing = new Set<string>();
     const { svc } = erroringCalendarServiceAt(created, failing);
     const good = await openPending(svc, workingTimeInput('wt_good', 4, { calendar: 'cn_standard' }));
-    const bad = await openPending(svc, workingTimeInput('wt_bad', 4, { calendar: 'cn_backup' }));
+    const bad = await openPending(svc, { ...workingTimeInput('wt_bad', 4, { calendar: 'cn_backup' }), recordId: 'opp2', record: { id: 'opp2', amount: 100 } });
     failing.add('cn_backup');
 
     const list = await svc.listRequests({ status: 'pending' }, SYS);
@@ -490,7 +490,7 @@ describe("ApprovalEscalation.clock 'working_time': a calendar read that errors c
     const failing = new Set<string>();
     const { svc, setNow } = erroringCalendarServiceAt(created, failing);
     const good = await openPending(svc, workingTimeInput('wt_sweep_good', 4, { calendar: 'cn_standard' }));
-    const bad = await openPending(svc, workingTimeInput('wt_sweep_bad', 4, { calendar: 'cn_backup' }));
+    const bad = await openPending(svc, { ...workingTimeInput('wt_sweep_bad', 4, { calendar: 'cn_backup' }), recordId: 'opp2', record: { id: 'opp2', amount: 100 } });
     failing.add('cn_backup');
 
     setNow(sh('2026-04-20', '12:00'));
