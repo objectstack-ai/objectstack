@@ -545,9 +545,9 @@ const zhHant = {
       noRecordPermission: '您沒有編輯此記錄的權限。',
     },
     stateChange: {
-      title: '變更{{field}}？',
+      title: '更改{{field}}？',
       description: '{{field}}從 {{from}} 改為 {{to}}，儲存後可能觸發相關自動化。',
-      confirm: '確認變更',
+      confirm: '確認更改',
       cancel: '取消',
     },
     actions: '操作',
