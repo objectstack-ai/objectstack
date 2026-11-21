@@ -25,7 +25,9 @@ import { t } from '../i18n';
 
 afterEach(cleanup);
 
-const ICON_LABEL = t('designer.object.icon', 'en-US');
+// objectstack#35985: the row picks the icon and the colour together, and is
+// labelled for both.
+const ICON_LABEL = t('designer.object.iconAndColor', 'en-US');
 
 function mount(draft: Record<string, unknown>, readOnly = false) {
   const onPatch = vi.fn();

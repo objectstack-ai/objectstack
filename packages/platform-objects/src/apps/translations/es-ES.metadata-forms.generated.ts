@@ -52,6 +52,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Icono",
         helpText: "Nombre de icono Lucide (p. ej. \"building\", \"users\")"
       },
+      color: {
+        label: "Color del icono",
+        helpText: "Color del cuadrado sobre el que se dibuja el icono, de la paleta fija. Si no se define, se usa gris."
+      },
       description: {
         label: "Descripción",
         helpText: "Documentación para desarrolladores"

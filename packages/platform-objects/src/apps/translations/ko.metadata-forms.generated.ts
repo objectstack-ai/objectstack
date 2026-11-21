@@ -52,6 +52,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "아이콘",
         helpText: "Lucide 아이콘 이름(예: \"building\", \"users\")"
       },
+      color: {
+        label: "색상",
+        helpText: "아이콘이 그려지는 사각형의 색상으로, 고정 팔레트에서 선택합니다. 설정하지 않으면 회색으로 표시됩니다."
+      },
       description: {
         label: "설명",
         helpText: "개발자 문서"

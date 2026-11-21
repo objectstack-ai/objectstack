@@ -31,7 +31,7 @@ import { FIELD_GROUP_KEY_PATTERN } from './field-group-layout';
 // blueprint object (`ai/solution-blueprint.zod.ts`) runs this same refinement.
 import { refuseStageFieldWithoutKinds } from './stage-field-kinds';
 // [#32763] The `icon` leaf, shared with the AI blueprint object.
-import { OBJECT_ICON_SCHEMA } from './object-icon';
+import { OBJECT_COLOR_SCHEMA, OBJECT_ICON_SCHEMA } from './object-icon';
 // The masked-on-read declaration (#20141); `warnGenericPasswordFields` reads its
 // `password` exemption rather than restating it. No runtime cycle: that module's
 // only imports are type-only.
@@ -3931,6 +3931,8 @@ const ObjectSchemaBase = strictObject(
   pluralLabel: z.string().optional().describe('Human readable plural label (e.g. "Accounts")'),
   description: z.string().optional().describe('Developer documentation / description'),
   icon: OBJECT_ICON_SCHEMA,
+  // [#35985] The colour of the square the icon is drawn on, from a closed palette.
+  color: OBJECT_COLOR_SCHEMA,
 
   /**
    * Taxonomy & Organization

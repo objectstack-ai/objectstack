@@ -52,6 +52,10 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Значок",
         helpText: "Имя значка Lucide (например, \"building\", \"users\")"
       },
+      color: {
+        label: "Цвет",
+        helpText: "Цвет квадрата, на котором рисуется значок, из фиксированной палитры. Если не задан, используется серый."
+      },
       description: {
         label: "Описание",
         helpText: "Документация для разработчиков"

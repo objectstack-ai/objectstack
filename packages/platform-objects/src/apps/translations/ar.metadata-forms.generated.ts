@@ -52,6 +52,10 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "الأيقونة",
         helpText: "اسم أيقونة Lucide (مثل \"building\"، \"users\")"
       },
+      color: {
+        label: "اللون",
+        helpText: "لون المربع الذي تُرسم عليه الأيقونة، من لوحة الألوان الثابتة. إذا لم يُحدَّد يُرسم باللون الرمادي."
+      },
       description: {
         label: "الوصف",
         helpText: "توثيق للمطوّرين"
