@@ -100,7 +100,7 @@ const createMemoryEngine = (vetoUserDelete?: () => Error | undefined) => {
     a instanceof Date || b instanceof Date
       ? new Date(a as any).getTime() === new Date(b as any).getTime()
       : a === b;
-  const matches = (row: any, where: Record<string, any> = {}) =>
+  const matches = (row: any, where: Record<string, any> = {}): boolean =>
     Object.entries(where).every(([k, v]) => {
       // A conjunction of conditions, as the engine's predicate path takes one.
       if (k === '$and' && Array.isArray(v)) return v.every((w) => matches(row, w));
