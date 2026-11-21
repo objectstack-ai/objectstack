@@ -54,16 +54,18 @@ function shippedSources(): string[] {
 
 /** `hsl(var(--destructive…))`, optionally with a nested var fallback or an alpha. */
 const VALID_HSL = /hsl\(\s*var\(--destructive[\w-]*(?:\s*,\s*var\(--destructive[\w-]*\))?\)(?:\s*\/\s*[^)]+)?\s*\)/g;
+/** A custom property that holds a triplet may read another triplet: `--destructive-text: var(--destructive-text-light, …)`. */
+const TRIPLET_DECLARATION = /--destructive[\w-]*\s*:\s*var\(--destructive[\w-]*\s*,/g;
 const BARE_VAR = /var\(--destructive[\w-]*/g;
 const FILL_OR_STROKE = /\b(?:fill|stroke)-destructive\b/g;
 
-function offences(re: RegExp, strip?: RegExp): string[] {
+function offences(re: RegExp, strip?: RegExp[]): string[] {
   const hits: string[] = [];
   for (const file of shippedSources()) {
     const text = fs.readFileSync(file, 'utf8');
     const lines = text.split('\n');
     lines.forEach((line, i) => {
-      const rest = strip ? line.replace(strip, '') : line;
+      const rest = (strip ?? []).reduce((acc, re) => acc.replace(re, ''), line);
       if (rest.match(re)) hits.push(`${path.relative(uiRoot, file)}:${i + 1}: ${line.trim()}`);
     });
   }
@@ -80,7 +82,7 @@ describe('danger colour spelling (#35911)', () => {
   });
 
   it('no shipped source uses a bare var(--destructive…) as a colour value', () => {
-    expect(offences(BARE_VAR, VALID_HSL)).toEqual([]);
+    expect(offences(BARE_VAR, [VALID_HSL, TRIPLET_DECLARATION])).toEqual([]);
   });
 
   it('no shipped source paints a danger fill or stroke from the dark button-fill red', () => {
