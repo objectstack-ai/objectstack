@@ -120,7 +120,13 @@ export class AggregationFacet {
     // the remote catalog before a comparand or a written value is bound.
     if (this.isOracle) await this.primeOracleRawUuidColumns(object);
     // [ADR-0155 O2] PostgreSQL: the key type a fixed-read leaf's inner read is cast to.
-    await primeFixedReadLeafKeyTypes(this, object, query.where);
+    // The measure filters compile with the same where compiler, so they are
+    // walked too, folded as the SQL Server prime folds them.
+    await primeFixedReadLeafKeyTypes(
+      this,
+      object,
+      measureFilters.length > 0 ? { $and: [...(query.where ? [query.where] : []), ...measureFilters] } : query.where,
+    );
     // …and the same primes for each joined related object, whose scope
     // compiles against its own table.
     for (const join of relationJoins ?? []) {

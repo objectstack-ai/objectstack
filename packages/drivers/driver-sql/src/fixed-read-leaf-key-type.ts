@@ -36,24 +36,26 @@
  *   compares as the list's members do.
  * - **No cast without a reading.** A table the catalog has not answered for
  *   (no door primed it, the read failed, the relation is not visible yet) is
- *   compiled as before, and a non-text key then fails loudly (42883), never
- *   silently. A failed or empty read records nothing, so the next door asks
- *   again.
+ *   compiled as before: an integer or uuid key fails loudly (42883), but a
+ *   `character(n)` key compares as text and misses a padded grant silently,
+ *   which is why every door primes. A failed or empty read records nothing,
+ *   so the next door asks again.
  *
  * ## When the catalog is read
  *
  * The filter compiler is synchronous, so the read happens before it: every
  * door that compiles a `where` calls {@link primeFixedReadLeafKeyTypes} beside
  * its other catalog primes (`primeMssqlGuidColumns`). It walks the `where`
- * for a leaf in a field's `$in`; a statement with none costs a walk and no
- * read. For each object a leaf compares against (the door's own, and the
+ * for a leaf in a field's `$in` (in `aggregate`, its measure filters too); a
+ * statement with none costs a walk and no read. For each object a leaf compares against (the door's own, and the
  * object of every composed `ReadableIds` leaf it sits under) it reads the
  * column types of that object's table, once per table for the life of the
  * driver's knex client. The key is the PHYSICAL table, as `getBuilder`
  * addresses it, so a re-bound external object meets its new table's entry.
  * Nothing invalidates an entry: the driver never changes a key column's type,
  * and DDL made elsewhere is not observable here (as with the Oracle and SQL
- * Server catalog primes). A key retyped elsewhere fails loudly until restart.
+ * Server catalog primes). A key retyped elsewhere fails or compares as its
+ * old type until restart.
  *
  * Every other dialect is untouched: SQLite compares by column affinity (the
  * same rows, measured on step 3), and MySQL, SQL Server and Oracle are named

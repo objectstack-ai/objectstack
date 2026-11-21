@@ -46,6 +46,8 @@ import {
 } from '@objectstack/spec/data';
 import { SqlDriver, type SqlDriverConfig } from './sql-driver.js';
 import { DIALECT_CELLS, PG_CELL, currentLiveSchema, declareDialectCell, type DialectCell } from './live-dialect-matrix.testkit.js';
+import { RELATION_GROUP_JOINS, type RelationGroupJoin } from './sql-driver-aggregation.js';
+import type { DriverQuery } from '@objectstack/spec/contracts';
 
 const set = SHARED_RECORD_IDS_CASE_SET;
 const seamed = (where: unknown): any => lowerFilterCondition(where, { isDatetimeColumn: () => false });
@@ -358,6 +360,9 @@ interface PgKeyCase {
 
 const PG_KEY_CASES: readonly PgKeyCase[] = [
   { name: 'integer', ddl: 'integer', ids: ['7', '42', '43'], grants: ['42', '07', ' 7'], expected: ['42', '7'], cast: '"pg_catalog"."int4"' },
+  { name: 'smallint', ddl: 'smallint', ids: ['7', '42', '43'], grants: ['07', '42'], expected: ['42', '7'], cast: '"pg_catalog"."int2"' },
+  // Scale is the column's typmod, which the cast leaves off: `42.0` names 42.00, as a bound member does.
+  { name: 'numeric(10,2)', ddl: 'numeric(10,2)', ids: ['7', '42', '8.5'], grants: ['7', '07', '42.0'], expected: ['42.00', '7.00'], cast: '"pg_catalog"."numeric"' },
   { name: 'bigint', ddl: 'bigint', ids: ['7', '9007199254740993', '9007199254740994'], grants: ['07', '9007199254740993'], expected: ['7', '9007199254740993'], cast: '"pg_catalog"."int8"' },
   {
     name: 'uuid',
@@ -381,6 +386,7 @@ function declarePgKeyTypePins(driverOf: () => SqlDriver, knexOf: () => Knex): vo
   describe('O2 on PostgreSQL: record_id is cast to the outer key\'s base type (ruled A)', () => {
     const EXT = (c: PgKeyCase) => `srid_pk_${c.name.replace(/[^a-z0-9]+/g, '_')}`;
     const CHILD = 'srid_pk_child';
+    const CHAR_CHILD = 'srid_pk_char_child';
     const grantRows = (c: PgKeyCase) => [
       ...c.grants.map((g, i) => ({ id: `${EXT(c)}_g${i}`, object_name: EXT(c), recipient_type: 'user', recipient_id: 'u9', record_id: g, access_level: 'lvl_edit', organization_id: 'org_a' })),
       // N4's witness on a typed key: a blank grant the cast must never see as a value.
@@ -404,6 +410,9 @@ function declarePgKeyTypePins(driverOf: () => SqlDriver, knexOf: () => Knex): vo
           ...(c.qualified ? { external: { remoteName: EXT(c), remoteSchema: schema } } : {}),
         } as any);
       }
+      await driver.execute(`drop table if exists ${CHAR_CHILD}`);
+      await driver.execute(`create table ${CHAR_CHILD} (id text primary key, parent character(4), label text)`);
+      await knex(CHAR_CHILD).insert([{ id: 'cc1', parent: 'k1' }, { id: 'cc2', parent: 'k2' }, { id: 'cc3', parent: 'k3' }]);
       await driver.execute(`drop table if exists ${CHILD}`);
       await driver.execute(`create table ${CHILD} (id text primary key, parent integer, label text)`);
       await knex(CHILD).insert([{ id: 'c7', parent: 7 }, { id: 'c42', parent: 42 }, { id: 'c43', parent: 43 }]);
@@ -417,6 +426,7 @@ function declarePgKeyTypePins(driverOf: () => SqlDriver, knexOf: () => Knex): vo
         await knex(GRANTS).where('object_name', EXT(c)).del().catch(() => {});
         await driver.execute(`drop table if exists ${EXT(c)}`).catch(() => {});
       }
+      await driver.execute(`drop table if exists ${CHAR_CHILD}`).catch(() => {});
       await driver.execute(`drop table if exists ${CHILD}`).catch(() => {});
       await driver.execute('drop domain if exists srid_pk_dom cascade').catch(() => {});
     });
@@ -510,6 +520,125 @@ function declarePgKeyTypePins(driverOf: () => SqlDriver, knexOf: () => Knex): vo
       } finally {
         await knex(GRANTS).where('id', 'srid_pk_bad').del();
       }
+    });
+
+    /**
+     * Every door primes for itself. Each pin below makes its door the FIRST
+     * statement a fresh driver (a fresh knex client, so an empty cache) runs,
+     * on the `character(4)` key, where a missed prime is a silent miss rather
+     * than an error: the answer must be the list's and the statement must
+     * carry the cast. `find` opens every per-key describe above.
+     */
+    describe('each door primes the key type itself: its first statement on a fresh driver', () => {
+      const charCase = () => PG_KEY_CASES.find((c) => c.ddl === 'character(4)')!;
+      const leafOf = (c: PgKeyCase) => seamed({ id: { $in: SharedRecordIds.read(EXT(c), 'u9') } });
+      const CAST = `CAST(NULLIF("record_id", '') AS "pg_catalog"."bpchar")`;
+
+      /** Run `door` as the first statement of a fresh driver; answer its result and every statement reading the grants. */
+      async function firstOnFresh<T>(door: (fresh: SqlDriver) => Promise<T>): Promise<{ out: T; statements: string[] }> {
+        const fresh = new SqlDriver(PG_CELL.config());
+        const knex: Knex = (fresh as any).knex;
+        for (const c of PG_KEY_CASES) fresh.registerExternalObject({ name: EXT(c), fields: { label: { type: 'text' } } } as any);
+        fresh.registerExternalObject({ name: CHAR_CHILD, fields: { parent: { type: 'text' }, label: { type: 'text' } } } as any);
+        const statements: string[] = [];
+        const onQuery = (q: { sql: string }) => { if (q.sql.includes(GRANTS)) statements.push(q.sql); };
+        knex.on('query', onQuery);
+        try {
+          return { out: await door(fresh), statements };
+        } finally {
+          knex.removeListener('query', onQuery);
+          await fresh.disconnect?.();
+        }
+      }
+      const castIn = (statements: string[]) => {
+        expect(statements.length).toBeGreaterThanOrEqual(1);
+        for (const sql of statements) expect(sql).toContain(CAST);
+      };
+
+      it('count', async () => {
+        const c = charCase();
+        const { out, statements } = await firstOnFresh((d) => d.count(EXT(c), { where: leafOf(c) }));
+        expect(out).toBe(c.expected.length);
+        castIn(statements);
+      });
+
+      it('updateMany (the predicate update\'s write)', async () => {
+        const c = charCase();
+        const knex = knexOf();
+        try {
+          const where = seamed({ id: { $in: SharedRecordIds.write(EXT(c), 'u9', ['lvl_edit', 'lvl_full']) } });
+          const { out, statements } = await firstOnFresh((d) => d.updateMany(EXT(c), { where }, { label: 'touched' }));
+          expect(out).toBe(c.expected.length);
+          expect(sortedIds(await knex(EXT(c)).where('label', 'touched').select('id'))).toEqual([...c.expected]);
+          castIn(statements);
+        } finally {
+          await knex(EXT(c)).update({ label: 'x' });
+        }
+      });
+
+      it('deleteMany', async () => {
+        const c = charCase();
+        const knex = knexOf();
+        try {
+          const { out, statements } = await firstOnFresh((d) => d.deleteMany(EXT(c), { where: leafOf(c) }));
+          expect(out).toBe(c.expected.length);
+          expect(sortedIds(await knex(EXT(c)).select('id'))).toEqual(['k3  ']);
+          castIn(statements);
+        } finally {
+          await knex(EXT(c)).del();
+          await knex(EXT(c)).insert(c.ids.map((id) => ({ id, label: 'x' })));
+        }
+      });
+
+      it('distinct', async () => {
+        const c = charCase();
+        const { out, statements } = await firstOnFresh((d) => d.distinct(EXT(c), 'id', leafOf(c)));
+        expect(out.map(String).sort()).toEqual([...c.expected]);
+        castIn(statements);
+      });
+
+      it('aggregate', async () => {
+        const c = charCase();
+        const { out, statements } = await firstOnFresh((d) =>
+          d.aggregate(EXT(c), { where: leafOf(c), aggregations: [{ function: 'count', alias: 'n' }] }));
+        expect(Number((out[0] as any).n)).toBe(c.expected.length);
+        castIn(statements);
+      });
+
+      it('aggregate\'s joined parent (a relation group join whose composed scope holds the leaf)', async () => {
+        const c = charCase();
+        const join: RelationGroupJoin = {
+          field: 'parent',
+          parent: ReadableIds.compose(ReadableIds.of(EXT(c)), leafOf(c) as FilterCondition),
+          attrs: [{ attr: 'label', alias: 'rg_label' }],
+          resolvedAlias: 'rg_resolved',
+        };
+        // No leaf in the aggregated object's own where: only the joined parent's prime can type it.
+        const query = { aggregations: [{ function: 'count', alias: 'n' }], [RELATION_GROUP_JOINS]: [join] } as unknown as DriverQuery;
+        const { out, statements } = await firstOnFresh((d) => d.aggregate(CHAR_CHILD, query));
+        const byResolved = Object.fromEntries(out.map((r: any) => [Number(r.rg_resolved), Number(r.n)]));
+        // cc1 (parent k1, granted padded) and cc2 (parent k2) join a readable parent; cc3 (k3) does not.
+        expect(byResolved).toEqual({ 1: 2, 0: 1 });
+        castIn(statements);
+      });
+
+      it('analyzeQuery (the plan is of the statement find runs)', async () => {
+        const c = charCase();
+        const { out, statements } = await firstOnFresh((d) => d.analyzeQuery(EXT(c), { where: leafOf(c) }));
+        expect(out.error).toBeUndefined();
+        expect(out.sql).toContain(CAST);
+        // EXPLAIN ANALYZE ran it: the top node's actual rows are the list's count.
+        expect(out.plan.rows[0]['QUERY PLAN'][0].Plan['Actual Rows']).toBe(c.expected.length);
+        castIn(statements);
+      });
+
+      it('findWithWindowFunctions', async () => {
+        const c = charCase();
+        const { out, statements } = await firstOnFresh((d) =>
+          d.findWithWindowFunctions(EXT(c), { where: leafOf(c), windowFunctions: [{ function: 'row_number', alias: 'rn' }] }));
+        expect(sortedIds(out)).toEqual([...c.expected]);
+        castIn(statements);
+      });
     });
 
     it('reads the catalog once per table: a second statement and another verb ask it nothing', async () => {
