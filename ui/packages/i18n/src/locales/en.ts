@@ -1610,6 +1610,7 @@ const en = {
     approvalPendingEditable: 'In approval · editable',
     approvalPendingTooltip: 'This record has a pending approval request; this step still allows editing',
     approvalPending: 'In approval',
+    approvalPendingStep: 'In approval · {{step}}',
     approvalPendingNotEditableTooltip: 'This record has a pending approval request',
     approvalProgress: 'Approvals — {{got}} of {{need}}',
     approvalProgressGroups: 'Sign-off — {{got}} of {{need}} groups',
@@ -1750,7 +1751,6 @@ const en = {
     // panel, its tab and the strip's label; the right column's ⊟, and the
     // 动态 panel's one-line composer.
     timeline: 'Activity',
-    relatedColumn: 'Right column',
     timelineComposer: 'Write a note… @ to mention',
     // The record page's dense activity and attachments: day headers,
     // an approval entry's link, the empty drop line and a file row's ⋮.
@@ -1785,12 +1785,9 @@ const en = {
     relatedDefaultChanged: 'Default order updated',
     relatedRestoreDefault: 'Restore default',
     relatedRestoreDefaultOrder: 'Restore default order',
-    relatedHiddenCount: '{{count}} hidden',
-    relatedHiddenCount_one: '{{count}} hidden',
-    relatedHiddenCount_other: '{{count}} hidden',
-    relatedShowHidden: 'Show',
     recordTabs: 'Record tabs',
-    recordTabOverview: 'Overview',
+    recordTabOverview: 'Details',
+    detailsColumnResize: 'Resize details column',
     // objectstack#35783 — a related tab's menu: one place before / after it in the row.
     recordTabMoveBefore: 'Move left',
     recordTabMoveAfter: 'Move right',
@@ -1801,13 +1798,6 @@ const en = {
     recordTabsMoreTrigger: 'More {{count}}',
     recordTabsMoreTrigger_one: 'More {{count}}',
     recordTabsMoreTrigger_other: 'More {{count}}',
-    // objectstack#35596 — the 概览 tab's summary rail.
-    summaryApprovalDone: 'Approved',
-    summaryApprovalMine: 'Awaiting you',
-    summaryApprovalWaitingOn: 'Waiting on {{name}}',
-    summaryApprovalWaiting: 'Waiting',
-    summaryRecentActivity: 'Recent activity',
-    summaryOtherRelated: 'Other related',
     recordTabsHidden: 'Hidden',
     bodyTableTotals: 'Totals (this page)',
     streamAll: 'All',
@@ -2717,7 +2707,6 @@ const en = {
       newChat: 'New chat',
       toggleChatsList: 'Toggle conversations list',
       goHome: 'Back to home',
-      toggleRelated: 'Show / hide the right column',
     },
     reportIndex: {
       title: 'Reports',

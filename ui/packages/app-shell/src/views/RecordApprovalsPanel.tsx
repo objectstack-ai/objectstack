@@ -176,9 +176,10 @@ export function approverChips(
  * The step a request or a timeline row names, as a reader should see it: the
  * authored step label when there is one, else the node's machine name
  * prettified, else nothing. The headline and every timeline row draw their
- * step through this one rule, so the two cannot drift (objectui#13248).
+ * step through this one rule, so the two cannot drift (objectui#13248); so
+ * does the record header's 「审批中 · 当前步骤」 tag (objectstack#35890).
  */
-function stepDisplayText(
+export function stepDisplayText(
   label: string | null | undefined,
   machineName: string | null | undefined,
 ): string | null {
