@@ -28,6 +28,7 @@ import { PhoneAppHomeSlotProvider } from './PhoneAppHome.js';
 import { useLastApp } from '../context/LastAppProvider.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { appAddressSegment } from '../utils/appRoute.js';
+import { ShellPageActionsScope } from './ShellPageActions.js';
 import { AppHeader } from './AppHeader.js';
 import { useResponsiveSidebar } from '../hooks/useResponsiveSidebar.js';
 import { usePhoneNavDrawerHistory } from './usePhoneNavDrawerHistory.js';
@@ -313,6 +314,10 @@ export function ConsoleLayout({
       }
     >
       <ConsoleLayoutInner>
+        {/* objectstack#36111 — the shell decides whether the pages under it
+            draw the top-right button group: off while this layout draws the
+            top bar, which carries the same buttons. */}
+        <ShellPageActionsScope>
         {/* ADR-0037: unmistakable watermark while rendering the draft overlay
             (?preview=draft) — with one-click exit and one-click Publish. */}
         {/* objectui#12463 — the banners sit in one non-shrinking box, so in
@@ -348,6 +353,7 @@ export function ConsoleLayout({
         >
         {children}
         </div>
+        </ShellPageActionsScope>
       </ConsoleLayoutInner>
 
       {/* objectstack#35882 — the phone's bottom bar, after the page in reading order. */}

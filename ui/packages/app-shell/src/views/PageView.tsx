@@ -10,6 +10,14 @@
  * heavyweight page canvas in the runtime. It is the path the app bar's pencil,
  * the app switcher's Studio row and the sidebar's Design open for the same
  * page, built by the same `appStudioRoutePath` (objectui#12540).
+ *
+ * objectstack#36111 — from the phone breakpoint up the page draws the console
+ * page header every list, dashboard and report draws: the page's name and
+ * description on the left, the shell's top-right button group on the right,
+ * whose 「Edit app」 opens the same surface. The page renderer's own title and
+ * description move into that header (`PageTitleHostContext`); what the author
+ * composed is drawn as written. The floating pencil is the phone's alone: the
+ * phone keeps the face it had.
  */
 
 import { lazy, Suspense, useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react';
@@ -34,7 +42,7 @@ import {
 } from '@object-ui/react';
 import { isElementDataSourceConfig } from '@object-ui/core';
 import type { DataSource, QueryParams } from '@object-ui/types';
-import { Button, DataErrorState, Empty, EmptyTitle, EmptyDescription, Spinner } from '@object-ui/components';
+import { Button, DataErrorState, Empty, EmptyTitle, EmptyDescription, PageTitleHostContext, Spinner } from '@object-ui/components';
 import { FileText, Pencil, RotateCw } from 'lucide-react';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
@@ -49,6 +57,9 @@ import { pageRecordActionsValue } from './pageRecordActions.js';
 import { RelatedRecordActionsBridge } from './RelatedRecordActionsBridge.js';
 import { pageKindNode } from './pageKindNode.js';
 import { readPageObjectScope } from '../console/appObjectScope.js';
+import { PageHeader } from '../layout/PageHeader.js';
+import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
+import { metadataText } from '../hooks/useNavTargetLabel.js';
 
 /**
  * Only an interface page (ADR-0047, `interfaceConfig.source`) draws
@@ -328,7 +339,7 @@ function AppPageRecordRead({
 }
 
 export function PageView() {
-  const { t } = useObjectTranslation();
+  const { t, language } = useObjectTranslation();
   const { pageName } = useParams<{ pageName: string }>();
   const [searchParams] = useSearchParams();
   const { showDebug } = useMetadataInspector();
@@ -384,6 +395,11 @@ export function PageView() {
   const studioPath = useStudioDesignGate(
     page ? appStudioRoutePath(activeApp, true, { type: 'page', name: pageName }) : null,
   );
+  // objectstack#36111 — on a phone the page keeps the face it had (the
+  // phone's own bar names it, and the pencil below opens Studio); from the
+  // phone breakpoint up it draws the console page header, whose right end
+  // holds the shell's button group, and its 「Edit app」 replaces the pencil.
+  const phone = usePhoneViewport();
 
   if (!page) {
     // `page` metadata is lazy-loaded: on the very first access `pages` is an
@@ -437,7 +453,22 @@ export function PageView() {
   // Resolve the app slug from the path (`/apps/:app/page/:name`) so the record
   // navigator's links survive whatever Router basename the host mounts under.
   const appName = location.pathname.match(/\/apps\/([^/]+)/)?.[1];
-  const canEditInStudio = studioPath !== null;
+  // The floating pencil is the phone's: from the phone breakpoint up, the
+  // top bar's 「Edit app」 opens the same surface, and so does the button
+  // group's once the shell turns it on.
+  const canEditInStudio = phone && studioPath !== null;
+  const interfacePage = !!(page as any).interfaceConfig?.source;
+  // The page's name and description, as the page renderer reads them
+  // (`label`, the spec's key, before objectui's `title`).
+  const pageLabel =
+    metadataText((page as any).label, language) ?? metadataText((page as any).title, language) ?? (page as any).name ?? pageName;
+  const pageDescription = metadataText((page as any).description, language);
+  // The console header — on every page from the phone breakpoint up, whatever
+  // the author composed (an interface page draws it itself, below). The page
+  // renderer's own title and description move into it (`PageTitleHostContext`),
+  // as a dashboard's do into its header; an authored `page:header` stays as
+  // written, its title one heading level down.
+  const consoleHeader = !phone && !interfacePage;
   const openInStudio = () => {
     if (studioPath === null) return;
     navigate(studioPath);
@@ -494,7 +525,17 @@ export function PageView() {
           (see `declarePageDataChanged`). */}
       <ElementApiRereadScope reread={pageRefresh.reread}>
         <div className="flex flex-row h-full w-full overflow-hidden relative">
-          <div className="flex-1 overflow-auto h-full relative">
+          {/* objectstack#36111 — the header sits above the page's scroller,
+              as the dashboard's does, so it stays put while the page scrolls. */}
+          <div className="flex-1 min-w-0 h-full flex flex-col">
+          {consoleHeader && (
+            <PageHeader
+              title={pageLabel}
+              subtitle={pageDescription || undefined}
+              icon={<FileText className="h-4 w-4" />}
+            />
+          )}
+          <div className="flex-1 min-h-0 overflow-auto relative">
             {canEditInStudio && (
               <button
                 type="button"
@@ -517,12 +558,13 @@ export function PageView() {
                   </div>
                 }
               >
-                <InterfaceListPage page={page} reserveEditAffordance={canEditInStudio} />
+                <InterfaceListPage page={page} reserveEditAffordance={canEditInStudio} consoleHeader={!phone} />
               </Suspense>
             ) : (
               // The record page's bridge, mounted inside this page's action
               // runtime so its executor dispatches through the page's runner;
               // `serve` publishes the page's own value over it (objectui#12870).
+              <PageTitleHostContext.Provider value={consoleHeader}>
               <RelatedRecordActionsBridge
                 appName={appName}
                 objects={objects}
@@ -578,7 +620,9 @@ export function PageView() {
                   />
                 </AppPageRecord>
               </RelatedRecordActionsBridge>
+              </PageTitleHostContext.Provider>
             )}
+          </div>
           </div>
           <MetadataPanel
             open={showDebug}
