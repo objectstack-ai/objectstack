@@ -345,7 +345,7 @@ describe('the comment doors — a member resolves any thread they can read, and 
       expect((await resolve(id, undefined)).status).toBe(401);
       expect((await resolve(id, ALICE, { resolved: true }, { force: 'true' })).status).toBe(400);
       for (const body of [undefined, {}, { resolved: 'yes' }, { resolved: true, body: 'x' }, { is_resolved: true }, [true]]) {
-        const answer = await resolve(id, ALICE, body);
+        const answer = await callDoor('PUT', RESOLUTION_ROUTE, id, ALICE, { body });
         expect(answer.status, JSON.stringify(body)).toBe(400);
         expect(answer.body?.error?.code).toBe('VALIDATION_ERROR');
       }
@@ -404,13 +404,15 @@ describe('the comment doors — a member resolves any thread they can read, and 
   });
 
   describe('an administrator is unchanged', () => {
-    it("the data door: an administrator resolves, edits and removes a member's comment as before", async () => {
+    it("the data door: an administrator resolves a member's thread as before (the row floor does not bind them), and the comment rule still decides edits and deletes", async () => {
       const id = await commentAs(BOB, boardThread, "Bob's words");
       expect(await viaDataDoor(() => ql.update(COMMENT, { is_resolved: true }, { where: { id }, context: as[CAROL] }))).toBe(200);
       expect(await rowById(id)).toMatchObject({ is_resolved: true, resolved_by: CAROL });
-      expect(await viaDataDoor(() => ql.update(COMMENT, { body: 'moderated' }, { where: { id }, context: as[CAROL] }))).toBe(200);
-      expect(await viaDataDoor(() => ql.delete(COMMENT, { where: { id }, context: as[CAROL] }))).toBe(200);
-      expect(await rowById(id)).toBeNull();
+      // This fixture's administrator cannot edit the board, so the comment
+      // rule (author or record editor) refuses them, as it did before.
+      expect(await viaDataDoor(() => ql.update(COMMENT, { body: 'moderated' }, { where: { id }, context: as[CAROL] }))).toBe(403);
+      expect(await viaDataDoor(() => ql.delete(COMMENT, { where: { id }, context: as[CAROL] }))).toBe(403);
+      expect(await rowById(id)).toMatchObject({ body: "Bob's words" });
     });
 
     it("the doors: an administrator's own-comment door still refuses a member's comment (the moderator's delete is the data door's)", async () => {
