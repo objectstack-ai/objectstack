@@ -29,7 +29,7 @@ import type { RowActionMenuPlan } from '../components/RowActionMenu';
 afterEach(cleanup);
 
 const rows = (n: number) => Array.from({ length: n }, (_, i) => ({ id: String(i + 1) }));
-const def = (name: string, extra: Partial<BulkActionDef> = {}): BulkActionDef => ({ name, label: name, ...extra });
+const def = (name: string, extra: Partial<BulkActionDef> = {}): BulkActionDef => ({ name, label: name, ...extra }) as BulkActionDef;
 
 // The bar surfaces its strings via useObjectTranslation, so tests wrap in an
 // English i18n provider — otherwise `{{count}}` interpolation never runs and
