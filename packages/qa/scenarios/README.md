@@ -116,8 +116,9 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   `confirmedByAgent`, `AgentConfirmedObservation`, `AgentConfirmationRule`,
   `OperationObservation.agentConfirmed`, `GradeOperationOptions.agentConfirmation` and
   `acceptAgentConfirmation`, `actionGatesOf`, `ConfirmationTally.confirmedByAgent`) are deprecated
-  and deleted in the next major; until then a grade opts back in with `acceptAgentConfirmation:
-  true`, and its `confirmed by the agent` count reads 0 otherwise. `askNamesTarget` and
+  and deleted in the next major; until then a direct `gradeOperation` call opts back in with
+  `acceptAgentConfirmation: true` (`gradeCardOperation`, and so the runner, takes no options),
+  and the `confirmed by the agent` count reads 0 otherwise. `askNamesTarget` and
   `asked first` stay: the confirmation turn below reads them.
   **The confirmed write** (`gradeConfirmedWrite`): a `pending_confirmation` operation the agent
   met by asking first gets a second turn in which the person confirms, and that turn is graded on
