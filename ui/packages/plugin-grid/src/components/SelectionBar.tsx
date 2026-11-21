@@ -294,10 +294,13 @@ function anotherLayerIsOpen(el: HTMLElement | null): boolean {
 /**
  * objectstack#35678 — the selection bar's width holds this many exposed
  * actions: starts at `chosen`, gives one back to More while the bar's content
- * is wider than the bar, and starts over when the host's width changes.
+ * is wider than the bar, and starts over when the host's width changes. The
+ * bar's own box is watched too, so a late change to what it measures (a font
+ * or a stylesheet that arrives after it drew) is measured again.
  */
 function useFittedCount(barRef: React.RefObject<HTMLDivElement | null>, chosen: number, key: string): number {
   const [fit, setFit] = React.useState(chosen);
+  const [, remeasure] = React.useReducer((n: number) => n + 1, 0);
   React.useLayoutEffect(() => {
     setFit(chosen);
   }, [chosen, key]);
@@ -307,16 +310,20 @@ function useFittedCount(barRef: React.RefObject<HTMLDivElement | null>, chosen: 
     if (bar.scrollWidth > bar.clientWidth + 1) setFit((n) => Math.max(0, n - 1));
   });
   React.useEffect(() => {
-    const host = barRef.current?.parentElement;
-    if (!host || typeof ResizeObserver === 'undefined') return undefined;
+    const bar = barRef.current;
+    const host = bar?.parentElement;
+    if (!bar || !host || typeof ResizeObserver === 'undefined') return undefined;
     let width = host.clientWidth;
     const observer = new ResizeObserver(() => {
       if (host.clientWidth !== width) {
         width = host.clientWidth;
         setFit(chosen);
+      } else {
+        remeasure();
       }
     });
     observer.observe(host);
+    observer.observe(bar);
     return () => observer.disconnect();
   }, [barRef, chosen]);
   return fit;
@@ -504,14 +511,17 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({
 };
 
 /**
- * Where a grid face that is not the table floats the bar: a zero-height box as
- * the LAST child of the face's own scroller, held at the scroller's visible
- * bottom (and left edge, so it stays centred while the face scrolls sideways),
- * the bar centred 12px above it. The scroller keeps room at its end
- * (`pb-16`) so its last row scrolls clear of the bar.
+ * Where a grid face that is not the table floats the bar: a zero-height box
+ * drawn right AFTER the face's own scroller, the bar centred 12px above it.
+ * Outside the scroller it sits at the scroller's bottom when the scroller is
+ * bounded, and holds to the bottom of the page's own scroller when the face
+ * grows with its rows (a child-table tab, the side record), as the table's
+ * `floatingBar` does. Inside it, a scroller that does not scroll would hold
+ * it at the end of its rows. The scroller keeps room at its end (`pb-16`) so
+ * its last row scrolls clear of the bar.
  */
 export const FloatingSelectionBarAnchor: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div className="pointer-events-none sticky bottom-0 left-0 z-30 h-0" data-testid="floating-selection-bar">
+  <div className="pointer-events-none sticky bottom-0 z-30 h-0" data-testid="floating-selection-bar">
     <div className="absolute inset-x-0 bottom-3 flex justify-center px-4">{children}</div>
   </div>
 );

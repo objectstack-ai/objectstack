@@ -4084,8 +4084,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
           {data.map(renderMobileCard)}
         </div>
         {cardPager}
-        {selectionBar && <FloatingSelectionBarAnchor>{selectionBar}</FloatingSelectionBarAnchor>}
         </div>
+        {selectionBar && <FloatingSelectionBarAnchor>{selectionBar}</FloatingSelectionBarAnchor>}
         {navigation.isOverlay && (
           <NavigationOverlay
             {...navigation}
@@ -4466,8 +4466,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
             </div>
           ));
         })()}
-        {selectionBar && <FloatingSelectionBarAnchor>{selectionBar}</FloatingSelectionBarAnchor>}
       </div>
+      {selectionBar && <FloatingSelectionBarAnchor>{selectionBar}</FloatingSelectionBarAnchor>}
       {groupedPager}
     </div>
   ) : isGrouped ? (
@@ -4486,8 +4486,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         <div className="min-w-max">
           <SchemaRenderer schema={buildGroupedTableSchema(groupBandsOf(pagedGroups))} />
         </div>
-        {selectionBar && <FloatingSelectionBarAnchor>{selectionBar}</FloatingSelectionBarAnchor>}
       </HorizontalOverflowBox>
+      {selectionBar && <FloatingSelectionBarAnchor>{selectionBar}</FloatingSelectionBarAnchor>}
       {groupedPager}
     </div>
   ) : (

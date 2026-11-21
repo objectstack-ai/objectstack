@@ -3826,7 +3826,7 @@
       "title": "Select-all-matching covers every matching id across pages (server total, not the rendered page); clear resets both selection sources",
       "since": "v16",
       "status": "active",
-      "revision": 11,
+      "revision": 12,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3845,20 +3845,20 @@
       },
       "steps": [
         "open the showcase_task 'Bulk Actions' view (…/showcase_task/view/bulk_actions) with the scratch tasks in place and quick-search their shared prefix so the match set exceeds one page (e.g. 'QA bulk' → 55 rows); screenshot; note the list shows its first N loaded rows and the count beside the view name shows the server total M (M > N); the view declares no `pagination`, so it loads as it scrolls (#35554) — leave it at its first window",
-        "tick the header checkbox (every loaded row); the view bar's right end swaps to 「已选 N 条」 and offers 「已选当前加载的 N 条。」 with 「选择全部 M 条」 (en 'All N loaded records are selected.' / 'Select all M')",
-        "click 「选择全部 M 条」; the selection face's count reads the whole match set ('M selected (all matches)')",
+        "tick the header checkbox (every loaded row); the selection bar floats at the bottom centre of the list reading 「已选 N 条」 and offers 「选择全部 M 条」 (en 'N selected' / 'Select all M'); the view bar does not change",
+        "click 「选择全部 M 条」; the selection bar's count reads the whole match set ('M selected (all matches)')",
         "dispatch a bulk action; capture the requests — resolveBulkRows fans out a paged find (dropping $top/$skip, paging 500) collecting every matching id ACROSS pages",
         "cross-check the collected id count against a direct API count for the same search: GET /api/v1/data/showcase_task?$search=…&$top=0 (or the response total)",
         "confirm the AGGREGATE action (showcase_recalc_selection) carries every matching id in `_selectedIds` — it is an api-type action, so the ONE request is the action door, POST /api/v1/actions/showcase_task/showcase_recalc_selection with body {params:{_selectedIds:[…]}} (the grid hands them to the action runner as params._selectedIds, ui/packages/plugin-grid/src/ObjectGrid.tsx; since #27611 the console sends a declared same-origin api action through the door, and the server forwards the params flat to /api/v1/apps/showcase/recalc in-process, buildApiActionRequest in packages/runtime/src/action-execution.ts); the run dialog then reads 'N / 55 processed' for ~15 s (QA run #24616); a per-record action (showcase_mark_done) fans out one dispatch per matching id",
         "click clear; confirm both selection sources reset (the toolbar empties AND the row checkboxes clear)",
-        "cap leg (acceptance[5]): provision more than 5000 matching scratch tasks — POST /api/v1/data/showcase_task/createMany with a bare JSON array of at most 200 records per call (the batch doors' default maxBatchSize; a 201-record call answers 400 BATCH_TOO_LARGE), e.g. 26 calls of 200 sharing one prefix — then repeat steps[1] and steps[2] and screenshot the banner and the selected count before and after Select all; delete the rows afterwards (POST /api/v1/data/showcase_task/deleteMany with {\"ids\": [...]}, at most 200 ids per call; a bare array answers 400)"
+        "cap leg (acceptance[5]): provision more than 5000 matching scratch tasks — POST /api/v1/data/showcase_task/createMany with a bare JSON array of at most 200 records per call (the batch doors' default maxBatchSize; a 201-record call answers 400 BATCH_TOO_LARGE), e.g. 26 calls of 200 sharing one prefix — then repeat steps[1] and steps[2] and screenshot the selection bar and its count (with its title) before and after Select all; delete the rows afterwards (POST /api/v1/data/showcase_task/deleteMany with {\"ids\": [...]}, at most 200 ids per call; a bare array answers 400)"
       ],
       "acceptance": [
         {
-          "clause": "the select-all offer in the view bar's selection face reports the SERVER total (totalMatching from the find result.total), not the loaded row count — and only appears when every loaded row is selected and more matching rows exist past them",
+          "clause": "the select-all offer in the floating selection bar reports the SERVER total (totalMatching from the find result.total), not the loaded row count — and only appears when every loaded row is selected and more matching rows exist past them",
           "oracle": "network",
-          "verify": "the offer's count equals the data request's response total (SelectionPageBar totalMatching; ListView hands result.total down as rowCount, read by ObjectGrid as resolvedTotalMatching)",
-          "evidence": "banner screenshot + the find response total"
+          "verify": "the offer's count equals the data request's response total (BulkActionBar totalMatching; ListView hands result.total down as rowCount, read by ObjectGrid as resolvedTotalMatching)",
+          "evidence": "selection bar screenshot + the find response total"
         },
         {
           "clause": "select-all-matching resolves EVERY matching id across pages: the dispatched set equals a direct filtered API count, not just the visible page (paged fan-out with $top/$skip dropped, capped at 5000)",
@@ -3885,15 +3885,15 @@
           "evidence": "the collected-set size vs the server total"
         },
         {
-          "clause": "past the cap the banner names it: when the server total exceeds HARD_CAP 5000, the cross-page offer, the all-selected line and the selected count say the action covers the first 5000 (e.g. 「将处理前 5000 条」, 'the first 5000 will be processed'), never the uncapped total alone — a banner claiming all M matching while the dispatch stops at 5000 is a silent partial execution",
+          "clause": "past the cap the selection bar names it: when the server total exceeds HARD_CAP 5000, the cross-page offer, the all-selected line and the selected count say the action covers the first 5000 (e.g. 「将处理前 5000 条」, 'the first 5000 will be processed'), never the uncapped total alone — a bar claiming all M matching while the dispatch stops at 5000 is a silent partial execution",
           "oracle": "dom",
-          "verify": "with more than 5000 matching rows (steps[7]), after a screenshot confirms the bar rendered: read the bulk-cross-page-banner text and the selected count before and after Select all; PASS when each names the 5000 cap, FAIL when any presents the uncapped total M as the set the action will process. The fan-out itself is acceptance[4]'s; this clause scores only what the banner tells the user",
-          "evidence": "the banner screenshot and its DOM text before and after Select all, the find response total, the collected-set size"
+          "verify": "with more than 5000 matching rows (steps[7]), after a screenshot confirms the bar rendered: read the bulk-select-all-matching offer text and the bulk-selection-count chip (its text and its title) before and after Select all; PASS when each names the 5000 cap, FAIL when any presents the uncapped total M as the set the action will process. The fan-out itself is acceptance[4]'s; this clause scores only what the bar tells the user",
+          "evidence": "the selection bar screenshot and its DOM text before and after Select all, the find response total, the collected-set size"
         }
       ],
       "negative": [
         "a 'select all matching' that only acts on the RENDERED page (ids = page rows, not the server match set) is THE FAIL this item extends list-view-capabilities (page-local bulk) to catch",
-        "a banner total that disagrees with the filtered API count is a FAIL",
+        "a selection bar total that disagrees with the filtered API count is a FAIL",
         "a clear that leaves the row checkboxes ticked while the toolbar empties (or vice versa) is a FAIL (#3056 drift)"
       ],
       "traps": [
@@ -3905,7 +3905,7 @@
         "ref": "objectui: packages/plugin-grid/src/__tests__/{objectBulkActionDispatch,BulkActionBar,bulkActionRefresh}.test.tsx — component layer, jsdom, over a mocked data source. None of the three exercises resolveBulkRows' paged fan-out or its HARD_CAP, so acceptance[1], acceptance[4] and negative[0] are not pinned by them. packages/plugin-grid/src/__tests__/bulkFanoutHostParams.test.tsx, outside this list, does drive that fan-out at the same component layer (500-record pages that replay the host's query, and 'still honours HARD_CAP over a match set larger than the cap'): it is evidence beside those clauses, never their pass, because their oracle is the dispatched set against a live filtered count (RUNNER rule 6). bulkActionRefresh.test.tsx's 'bulk bar Clear resets both selection sources' case asserts acceptance[3] and negative[2] in jsdom; their dom oracle wants the rendered page, screenshot first"
       },
       "source": [
-        "objectui: packages/plugin-grid/src/ObjectGrid.tsx (selectAllMatching, resolveBulkRows paged fan-out + HARD_CAP, resetSelection #3056, totalMatching), packages/plugin-grid/src/components/BulkActionBar.tsx (cross-page banner)",
+        "objectui: packages/plugin-grid/src/ObjectGrid.tsx (selectAllMatching, resolveBulkRows paged fan-out + HARD_CAP, resetSelection #3056, totalMatching), packages/plugin-grid/src/components/SelectionBar.tsx (the selection bar: count chip, select-all-matching offer)",
         "examples/app-showcase/src/ui/views/task.view.ts#bulk_actions (the 'Bulk Actions' view: bulkActions + the aggregate bulkActionDefs entry — this item's fixture since #23169; the stock 10 tasks need the scratch rows to exceed a page) — not examples/app-showcase/src/data/seed/index.ts's Northwind 26, which page the Account → Contacts related list (objectui#2711)",
         "PENDING-GAPS §C bulk-select-all-matching; cross-ref records-forms.list-view-capabilities (bulk-actions, page-local)"
       ],
@@ -3970,7 +3970,8 @@
           "change": "steps[0]–[2] and acceptance[0] follow #35554: the bottom bulk bar is retired on the list page and the selection is shown in the page bar (「已选 N 条」, the cross-window offer 「已选当前加载的 N 条。」 + 「选择全部 M 条」); a list with no declared `pagination` loads as it scrolls, so 'the whole page' is now 'every loaded row'. The cap strings of acceptance[5] are unchanged and the page bar names the cap with the same keys. Read at base 93fa4f97",
           "ref": "#35554"
         },
-        { "revision": 11, "date": "2026-11-20", "change": "steps[1], steps[2] and the clause acceptance[0] follow #35878: the list page has no page bar, so the selection face (「已选 N 条」, the cross-window offer) is the view bar's right end, with ⋮ still last. What it reports is unchanged", "ref": "#35878" }
+        { "revision": 11, "date": "2026-11-20", "change": "steps[1], steps[2] and the clause acceptance[0] follow #35878: the list page has no page bar, so the selection face (「已选 N 条」, the cross-window offer) is the view bar's right end, with ⋮ still last. What it reports is unchanged", "ref": "#35878" },
+        { "revision": 12, "date": "2026-11-21", "change": "steps[1]–[3], acceptance[0], acceptance[5], the negative and the source ref follow #35678: the selection is shown in one bar floating at the bottom centre of the list (「已选 N 条」, ×, 「选择全部 M 条」) and the view bar no longer changes; the cross-window sentence is gone, and past the cap the count chip's text and title carry the cap strings acceptance[5] reads. What it reports is unchanged", "ref": "#35678" }
       ]
     },
     {
