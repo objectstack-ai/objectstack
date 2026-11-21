@@ -655,7 +655,7 @@ const ko = {
       earliest: "가장 이른",
       latest: "가장 늦은",
       pageName: "{{label}} (이 페이지)",
-      calculate: "계산",
+      calculate: "계산 추가",
       none: "없음",
       menuPercentEmpty: "빈 값 비율",
       menuPercentFilled: "입력된 값 비율",

@@ -655,7 +655,7 @@ const ja = {
       earliest: "最も早い",
       latest: "最も遅い",
       pageName: "{{label}}（このページ）",
-      calculate: "計算",
+      calculate: "集計を追加",
       none: "なし",
       menuPercentEmpty: "空の割合",
       menuPercentFilled: "入力済みの割合",
