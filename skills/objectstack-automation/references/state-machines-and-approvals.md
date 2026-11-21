@@ -1,8 +1,8 @@
 ## State Machines & Approvals
 
 A record's **state machine** locks the legal transitions of its status field
-so that automation — increasingly AI-generated — cannot drive a record into an
-illegal state. Unmarked blocks are fragments.
+so that automation cannot drive a record into an illegal state. Unmarked
+blocks are fragments.
 
 ### State Machine — a `state_machine` validation rule (ADR-0020)
 
@@ -36,10 +36,11 @@ const rule: StateMachineValidation = {
 Notes:
 - **One rule per field.** Parallel lifecycles (e.g. `status` + `payment_status`)
   are N separate `state_machine` rules.
-- **`initialStates`** (optional) gates INSERT: a record created with its
-  state field outside this list is rejected. `transitions` only governs
-  updates, so without it a record can be born mid-flow (e.g. created already
-  `resolved`). Omit to keep the legacy no-check-on-insert behavior.
+- **`initialStates`** gates INSERT: a record created with its state field
+  outside this list is rejected. `transitions` only governs updates, so a
+  machine that runs on insert without it is refused at publish
+  (`state-machine-no-initial-states`); an update-only machine
+  (`events: ['update']`) needs none.
 - **Conditional transitions / side effects are NOT part of the machine.** A
   guard is expressed as a sibling `script` / `conditional` validation rule;
   "do something when the state changes" is a **record-triggered Flow**
@@ -63,8 +64,7 @@ Since **ADR-0019** there is no standalone approval-process type. An approval is
 authored as an **Approval node** (`type: 'approval'`) on an ordinary flow — the
 run **suspends** when it reaches the node and **resumes** down the node's
 `approve` / `reject` out-edge once a decision is recorded. Multi-step review is
-just successive Approval nodes wired together on the canvas, so the whole review
-is one diagram a reviewer (or AI) can read end-to-end.
+successive Approval nodes.
 
 > There is no `approvals: [...]` stack collection. The approval *state* (`sys_approval_request` /
 > `sys_approval_action`, the record lock, the status mirror, approver
@@ -142,7 +142,7 @@ Three pieces author it:
    the approval node MUST be typed `'back'`. This is the *only* thing that
    legalizes the cycle: `registerFlow` validates the graph **minus `back` edges**
    as a DAG, so an **unmarked** cycle is rejected. At
-   run time a back-edge traverses normally (it just re-enters the node).
+   run time a back-edge traverses normally.
 3. **`maxRevisions`** on the approval `config` (default `3`) — the budget of
    send-backs per run; exceeding it **auto-rejects** (resumes down the `reject`
    edge). `maxRevisions: 0` disables send-back, so never pair `0` with a `revise`
@@ -164,9 +164,7 @@ Three pieces author it:
 > so the branch cannot run; `flow-approval-revise-target-not-service-owned`), a
 > `revise` edge whose window never loops back (a dead end `registerFlow` accepts
 > but that leaves the submitter nowhere to resubmit), and a resubmit edge left
-> **without** `type: 'back'`. Resubmit is never a
-> record-save. See the `showcase_budget_approval` flow in the showcase app in
-> the framework repo for the canonical shape.
+> **without** `type: 'back'`. Resubmit is never a record-save.
 
 ### Recording a decision
 
@@ -180,8 +178,8 @@ matching branch — you never resume the flow by hand, and you *cannot*: the
 parked on one (including via a `subflow` pause) and changes nothing.
 
 A decision may also carry **structured outputs** (`{ outputs: { … } }` in the
-decide body) when the node declares the keys in `decisionOutputs` — the author
-declares keys, approvers only fill values. Accepted outputs resume the run as
+decide body) when the node declares the keys in `decisionOutputs`. Accepted
+outputs resume the run as
 `<nodeId>.<key>` flow variables, so a LATER node reads them as
 `vars.<nodeId>.<key>` (Dynamic approvers ② below). A decision carrying an
 undeclared key is rejected; `decision` / `requestId` are reserved. A declaration marked
@@ -244,16 +242,14 @@ environment-wide (`ambiguous-in-environment`).
 An `expression` approver computes WHO approves at the moment the node is
 entered. Its CEL source sees exactly **three roots** — nothing else:
 
-| Root | Meaning | Analog |
-|:-----|:--------|:-------|
-| `current.*` | The record's **live** state at node entry — fields written by earlier steps/approvers are visible | ServiceNow `current` |
-| `trigger.*` | The **submit-time snapshot** (what flow conditions call `record`) | ServiceNow Flow Designer `trigger.record`, Power Automate `triggerBody()` |
-| `vars.*` | Flow variables — node outputs (`vars.<nodeId>.<key>`), `get_record` results, `vars.previous` (the pre-update row) | BPMN process variables |
+| Root | Meaning |
+|:-----|:--------|
+| `current.*` | The record's **live** state at node entry — fields written by earlier steps/approvers are visible |
+| `trigger.*` | The **submit-time snapshot** (what flow conditions call `record`) |
+| `vars.*` | Flow variables — node outputs (`vars.<nodeId>.<key>`), `get_record` results, `vars.previous` (the pre-update row) |
 
-**`record` and bare field names are NOT available and fail the node loudly.**
-Everywhere else on this platform `record` means "the record at event time" — at an
-approval node that phrase is ambiguous between two different times, so you must
-say which one: `current.x` or `trigger.x`.
+**`record` and bare field names are NOT available and fail the node loudly:**
+say which time you mean, `current.x` or `trigger.x`.
 
 Result contract: a user-id string, a CSV string, or an array of ids. An **empty**
 result (present-but-empty field/variable) triggers `onEmptyApprovers`. A
@@ -325,7 +321,7 @@ export const DynamicApprovalFlow = defineFlow({
 });
 ```
 
-Time-word cheat sheet across surfaces (do not mix them up):
+Time-word cheat sheet across surfaces:
 
 | Surface | Event-time record | Pre-event record | Live record |
 |:--------|:------------------|:-----------------|:------------|
@@ -347,7 +343,7 @@ Object-hook `ctx` is a different vocabulary — see **objectstack-data**
 | `onEmptyApprovers` | What an EMPTY resolved slate does: `admin_rescue` (default — request opens on the organization's administrators; never waves through, never kills the run), `fail` (node fails — treat an empty slate as a config bug), `auto_approve` (skip the request, continue down `approve` with `output.autoApproved = true` — opt-in because it silently waves the record through), `fallback` (request opens on the sibling `fallbackApprovers` instead — same shape as `approvers`, required by this policy and refused under any other; a fallback that itself resolves to nobody degrades to `admin_rescue`). Declare it explicitly on any node with an `expression` approver (linted) |
 | `excludeSubmitter` | `true` drops the run's submitter (`submitter_id`) from the resolved slate, whatever approver type produced them — segregation of duties; a slate it empties takes the `onEmptyApprovers` route, never a silent pass. `onEmptyApprovers: 'auto_approve'` is **refused** beside it (it would approve exactly the request this exists to stop): use `admin_rescue`, `fail` or `fallback`. Default `false` |
 | `decisionOutputs` | Decision outputs a decision may carry: bare keys (free text) **or typed declarations** `{ key, label?, type: 'text'\|'user'\|'department'\|'position'\|'team', multiple?, required? }`, enforced at the decision — see *Recording a decision* |
-| `escalation` | Optional per-node SLA — `{ enabled, timeoutHours, action: reassign\|auto_approve\|auto_reject\|notify, escalateTo?, notifySubmitter }`. `timeoutHours` is **calendar (wall-clock) hours** — nights, weekends and holidays count; the platform ships no business-hours calendar. `escalateTo` is a **position machine name** (expanded to its holders via `sys_user_position`, ADR-0090 D3) or a specific user id — never a membership tier. `reassign` without `escalateTo` degrades to notify (linted) |
+| `escalation` | Optional per-node SLA — `{ enabled, timeoutHours, clock, calendar?, action: reassign\|auto_approve\|auto_reject\|notify, escalateTo?, notifySubmitter }`. `clock` sets how `timeoutHours` counts: `'wall_clock'` (default) counts nights, weekends and holidays; `'working_time'` counts working hours on a working calendar (`sys_work_calendar`, maintained per organization in Setup): the `calendar` code, else the organization's default, else refused — never wall-clock. While the calendar cannot count the deadline (none resolves, or not maintained that far) the request does not escalate: its row carries `sla_due_refusal` instead of `sla_due_at`, the inbox shows why, and each sweep retries. `calendar` without `clock: 'working_time'` is lint error `approval-escalation-calendar-without-working-time`. `escalateTo` is a **position machine name** (resolved like a `position` approver) or a specific user id — never a membership tier. `reassign` without `escalateTo` degrades to notify (linted) |
 | `maxRevisions` | Send-backs per run before auto-reject (ADR-0044) |
 
 ### Branching, side-effects & rejection
@@ -355,7 +351,9 @@ Object-hook `ctx` is a different vocabulary — see **objectstack-data**
 These are wired on the **graph**, not in node config:
 
 - **On approve / on reject** — wire downstream nodes (`update_record`,
-  `http`, a `notify` node, …) to the `approve` / `reject` out-edge.
+  `http`, a `notify` node, …) to out-edges labelled exactly `approve` and
+  `reject`. With only one, or another spelling (`Approved`), publish refuses
+  the flow (`flow-approval-decision-unrouted`): both branches would run.
 - **A write on that branch that may be refused** (a record hook, a validation
   rule, a permission) — draw a `fault` edge from that step to a handler
   (SKILL.md § Failure routing): the refusal takes it and the decision answers

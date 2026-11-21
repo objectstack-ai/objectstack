@@ -141,6 +141,8 @@ interface Row {
   owner: string;
   /** Nullable on purpose — the field the derived `count_filled` pin reads. */
   notes: string | null;
+  /** A nullable boolean — the field the derived `count_true` / `count_false` pin reads. */
+  approved: boolean | null;
 }
 
 function makeRow(unit: string | null, ordinal: number): Row {
@@ -154,6 +156,8 @@ function makeRow(unit: string | null, ordinal: number): Row {
     owner: `owner_${ordinal % 4}`,
     // Every fifth row has no note — the server's "empty" (null), never ''.
     notes: ordinal % 5 === 0 ? null : `note ${ordinal}`,
+    // Every fourth row unset, the rest true / false alternating.
+    approved: ordinal % 4 === 0 ? null : ordinal % 2 === 0,
   };
 }
 
@@ -283,6 +287,7 @@ function objectSchema(name: string) {
       amount: { name: 'amount', type: 'number' as const, label: 'Amount' },
       owner: { name: 'owner', type: 'text' as const, label: 'Owner' },
       notes: { name: 'notes', type: 'text' as const, label: 'Notes' },
+      approved: { name: 'approved', type: 'boolean' as const, label: 'Approved' },
       seq: { name: 'seq', type: 'number' as const, label: 'Stored Order' },
     },
   };
@@ -803,6 +808,48 @@ describe('§7 `count_filled` is derived on the header row, and the view filter r
     });
     expect(headers).toHaveLength(4);
     expect(countsByUnit(headers)).not.toEqual(EXPECTED_COUNTS);
+  });
+});
+
+// ─── §7b The boolean yes / no counts (#35702) ─────────────────────────────────
+
+describe('§7b `count_true` / `count_false` are SUM(field) and COUNT(field) over a boolean, on both faces', () => {
+  const FLAG_VIEW: ListViewGroupQuerySource = {
+    grouping: { fields: [{ field: 'business_unit' }] },
+    columns: [
+      { field: 'approved', summary: 'count_true' },
+      { field: 'id', summary: { type: 'count_false', field: 'approved' } },
+      { field: 'business_unit', summary: { type: 'count_empty', field: 'approved' } },
+    ],
+  };
+  const tally = (rows: readonly Row[], value: boolean | null) => rows.filter((r) => r.approved === value).length;
+
+  it.each(TIERS)('%s: per group and over the whole set, a null cell counts as neither', async (tier) => {
+    const query = compileListViewGroupQuery(FLAG_VIEW);
+    expect(query.aggregations).toEqual([
+      { function: 'count', alias: LIST_VIEW_GROUP_COUNT_ALIAS },
+      { function: 'sum', field: 'approved', alias: 'sum_approved' },
+      { function: 'count', field: 'approved', alias: 'count_approved' },
+    ]);
+    const headers = await onTier(tier, () => records(OBJECT_CONTIGUOUS, query));
+    for (const [unit] of UNITS) {
+      const row = headers.find((h) => h.business_unit === unit) as ListViewGroupHeaderRow;
+      const rows = CONTIGUOUS.filter((r) => r.business_unit === unit);
+      expect(deriveColumnSummary(row, 'count_true', 'approved'), `${tier}/${unit} true`).toBe(tally(rows, true));
+      expect(deriveColumnSummary(row, { type: 'count_false', field: 'approved' }, 'id'), `${tier}/${unit} false`).toBe(tally(rows, false));
+      expect(deriveColumnSummary(row, { type: 'count_empty', field: 'approved' }, 'business_unit')).toBe(tally(rows, null));
+    }
+    // `harbour_office` is one row, ordinal 1: false. Its true count is 0, not blank.
+    const harbour = headers.find((h) => h.business_unit === 'harbour_office') as ListViewGroupHeaderRow;
+    expect(deriveColumnSummary(harbour, 'count_true', 'approved')).toBe(0);
+
+    // The footer's whole-set question: the same nodes with no `groupBy`.
+    const whole = await onTier(tier, () => records(OBJECT_CONTIGUOUS, { aggregations: query.aggregations }));
+    expect(whole).toHaveLength(1);
+    const [set] = whole as ListViewGroupHeaderRow[];
+    expect(deriveColumnSummary(set, 'count_true', 'approved')).toBe(tally(CONTIGUOUS, true));
+    expect(deriveColumnSummary(set, 'count_false', 'approved')).toBe(tally(CONTIGUOUS, false));
+    expect(tally(CONTIGUOUS, true) + tally(CONTIGUOUS, false) + tally(CONTIGUOUS, null)).toBe(TOTAL_ROWS);
   });
 });
 

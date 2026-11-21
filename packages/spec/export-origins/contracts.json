@@ -124,6 +124,7 @@
     "EngineDatasourceDef": "src/contracts/data-engine.ts#EngineDatasourceDef (interface)",
     "EngineFilterJudgement": "src/contracts/objectql-engine.ts#EngineFilterJudgement (type)",
     "EngineFilterJudgementOptions": "src/contracts/objectql-engine.ts#EngineFilterJudgementOptions (interface)",
+    "EngineFixedReadLeafClass": "src/contracts/objectql-engine.ts#EngineFixedReadLeafClass (type)",
     "EngineSchemaRegistryView": "src/contracts/objectql-engine.ts#EngineSchemaRegistryView (interface)",
     "EngineTransactionInfo": "src/contracts/objectql-engine.ts#EngineTransactionInfo (interface)",
     "EngineTransactionOptions": "src/contracts/objectql-engine.ts#EngineTransactionOptions (interface)",

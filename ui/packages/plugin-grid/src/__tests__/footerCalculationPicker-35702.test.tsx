@@ -53,9 +53,16 @@ describe('offeredColumnSummaries (objectstack#35702)', () => {
     expect(isTemporalSummaryField({ type: 'date' })).toBe(true);
     expect(isTemporalSummaryField({ type: 'number' })).toBe(false);
   });
-  it.each(['boolean', 'toggle'])('offers a %s no sum, average or extremes', (type) => {
+  it.each(['boolean', 'toggle'])('offers a %s its yes / no counts first, and no sum, average or extremes', (type) => {
     expect(offeredColumnSummaries({ type }).filter((s) => ['sum', 'avg', 'min', 'max'].includes(s))).toEqual([]);
-    expect(offeredColumnSummaries({ type })).toContain('count_filled');
+    expect(offeredColumnSummaries({ type })).toEqual([
+      'count_true', 'count_false', 'count_unique', 'count_filled', 'count_empty', 'percent_filled', 'percent_empty',
+    ]);
+  });
+  it.each(['number', 'currency', 'text', 'select', 'date', 'lookup'])('never offers the yes / no counts on a %s', (type) => {
+    const offered = offeredColumnSummaries({ type });
+    expect(offered).not.toContain('count_true');
+    expect(offered).not.toContain('count_false');
   });
   it('offers an unknown field the counts it can draw, never count_unique', () => {
     expect(offeredColumnSummaries(undefined)).toEqual(['count_filled', 'count_empty', 'percent_filled', 'percent_empty']);
@@ -64,14 +71,15 @@ describe('offeredColumnSummaries (objectstack#35702)', () => {
 
 const OBJECT = 'plan_line';
 const ROWS = [
-  { id: 'r1', name: 'Line 1', amount: 100, due: '2026-01-05' },
-  { id: 'r2', name: 'Line 2', amount: 250, due: '2026-03-09' },
+  { id: 'r1', name: 'Line 1', amount: 100, due: '2026-01-05', approved: true },
+  { id: 'r2', name: 'Line 2', amount: 250, due: '2026-03-09', approved: false },
 ];
 const FIELDS = {
   id: { type: 'text', label: 'Id' },
   name: { type: 'text', label: 'Name' },
   amount: { type: 'number', label: 'Amount' },
   due: { type: 'date', label: 'Due' },
+  approved: { type: 'boolean', label: 'Approved' },
 };
 
 const dataSource = () => ({
@@ -146,6 +154,31 @@ describe('the resident footer row (objectstack#35702)', () => {
     await user.click(within(again).getByTestId('summary-option-none'));
     expect(onPick).toHaveBeenLastCalledWith('amount', null);
     await waitFor(() => expect(screen.getByTestId('summary-picker-amount')).not.toHaveTextContent('Sum'));
+  });
+
+  it('objectstack#35702 — a boolean column offers Count of Yes / Count of No first, and draws each', async () => {
+    const user = userEvent.setup();
+    const onPick = vi.fn();
+    renderGrid({ residentSummaryRow: true, onColumnSummaryPick: onPick }, [
+      { field: 'name', label: 'Name' },
+      { field: 'approved', label: 'Approved' },
+    ]);
+    await screen.findByTestId('data-table-summary-row');
+    await user.click(screen.getByTestId('summary-picker-approved'));
+    const menu = await screen.findByTestId('summary-menu-approved');
+    const options = within(menu).getAllByTestId(/^summary-option-/).map((o) => o.getAttribute('data-testid'));
+    expect(options.slice(0, 2)).toEqual(['summary-option-count_true', 'summary-option-count_false']);
+    expect(within(menu).getByTestId('summary-option-count_true')).toHaveTextContent('Count of Yes');
+    expect(within(menu).getByTestId('summary-option-count_false')).toHaveTextContent('Count of No');
+    expect(within(menu).queryByTestId('summary-option-sum')).toBeNull();
+    await user.click(within(menu).getByTestId('summary-option-count_true'));
+    expect(onPick).toHaveBeenLastCalledWith('approved', 'count_true');
+    await waitFor(() => expect(screen.getByTestId('summary-picker-approved')).toHaveTextContent('Yes 1'));
+
+    await user.click(screen.getByTestId('summary-picker-approved'));
+    await user.click(within(await screen.findByTestId('summary-menu-approved')).getByTestId('summary-option-count_false'));
+    expect(onPick).toHaveBeenLastCalledWith('approved', 'count_false');
+    await waitFor(() => expect(screen.getByTestId('summary-picker-approved')).toHaveTextContent('No 1'));
   });
 
   it('names a date column\'s extremes Earliest and Latest', async () => {

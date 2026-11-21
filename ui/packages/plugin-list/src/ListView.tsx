@@ -19,7 +19,6 @@ import {
   ViewSettingsPopover,
   groupFieldOptions,
   type ViewSettingsField,
-  type ViewSettingsRecordOpen,
   PHONE_TOUCH_TARGET,
 } from './components/ViewSettingsPopover';
 import { UserFilters, type UserFiltersHandle } from './UserFilters';
@@ -686,19 +685,6 @@ export interface ListViewProps {
     rows: ReadonlyArray<Record<string, unknown>>,
     groups?: ReadonlyArray<ListViewRowGroup>,
   ) => void;
-  /**
-   * The Display control's Open records section (objectstack#26681): how a row
-   * opens its record — the mode the host resolved for this object and view,
-   * the reader's own drawer | page preference and its setter. See
-   * `ViewSettingsRecordOpen`.
-   *
-   * A HOST prop, never a schema key: the preference is the reader's, kept by
-   * the host, and the setter is a function value no document can carry.
-   * Absent ⇒ the panel draws no such section, exactly as before. Drawn last
-   * on the 视图设置 panel's first level since objectstack#35878 retired the
-   * More level; objectstack#35854 retires the preference and this prop.
-   */
-  recordOpen?: ViewSettingsRecordOpen;
   /**
    * The page a paged grid shows, 1-based, for a host that keeps it
    * (objectstack#30850): the console keeps it in the address, so Back from a
@@ -1537,10 +1523,6 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'list.options': 'Options',
   'list.layout': 'Layout',
   'list.resetToViewDefault': 'Reset to view default',
-  // The Display control's Open records section (objectstack#26681).
-  'list.recordOpen': 'Open records',
-  'list.recordOpenDrawer': 'Drawer',
-  'list.recordOpenPage': 'Full page',
   // The draft preview's note on a sort or filter it left out (objectstack#34807).
   'list.draftOnlyQueryDropped': 'Not filtered or sorted by {{fields}}: it exists only in the draft until you publish.',
   // The note on view fields a disabled package withholds (objectstack#34901).
@@ -2165,7 +2147,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   onRenameView,
   onSaveView,
   onResetView,
-  recordOpen,
   page,
   onPageChange,
   hostDrawnConditionFields,
@@ -7086,7 +7067,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                   }}
                 />
               ) : undefined}
-              recordOpen={recordOpen}
               showGroup={toolbarFlags.showGroup}
               groupingConfig={chosenGroupingConfig}
               setGroupingConfig={changeGrouping}
@@ -7509,8 +7489,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                   ))}
                   {exportError && (
                     <div
-                      className="px-2 py-1 text-xs"
-                      style={{ color: 'var(--destructive, #ef4444)' }}
+                      className="px-2 py-1 text-xs text-destructive"
                       role="alert"
                     >
                       {exportError}

@@ -297,17 +297,14 @@ describe('Options menu — words', () => {
     named(screen.getByTestId('view-settings-content'));
   });
 
-
-  it('speaks no developer wording in the Open records section', () => {
-    openMenu({ recordOpen: { resolvedMode: 'drawer', preference: 'drawer', setPreference: () => {} } }, 'zh');
+  it('the panel holds no Open records section: how a record opens is no setting (objectstack#35854)', () => {
+    openMenu({}, 'zh');
+    expect(screen.queryByTestId('display-record-open')).toBeNull();
+    expect(screen.queryByTestId('display-record-open-declared')).toBeNull();
     const text = screen.getByTestId('view-settings-content').textContent ?? '';
-    // The note the menu dropped (its key is gone from every pack).
-    expect(text).not.toContain('个人偏好');
-    expect(text).not.toContain('对象声明');
-    cleanup();
-    openMenu({ recordOpen: { resolvedMode: 'page', preference: 'drawer', setPreference: () => {} } }, 'zh');
-    expect(screen.getByTestId('display-record-open-declared').textContent).toBe(zhPack.list.optionsMenu.recordOpenAlwaysPage);
-    expect(screen.getByTestId('view-settings-content').textContent).not.toContain('对象声明');
+    expect(text).not.toContain('打开记录');
+    expect('recordOpenAlwaysPage' in zhPack.list.optionsMenu).toBe(false);
+    expect('recordOpen' in zhPack.list).toBe(false);
   });
 
   it('every new key is in the en pack', () => {

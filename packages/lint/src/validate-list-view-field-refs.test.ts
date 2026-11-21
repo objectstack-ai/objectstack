@@ -1593,6 +1593,34 @@ describe('[#32449] a column summary whose function the aggregate door refuses', 
     }
   });
 
+  it('[#35702] refuses the boolean yes / no counts over anything but a boolean — the door would answer a total', () => {
+    expect(refused(withColumns(
+      { field: 'is_locked', summary: 'count_true' },
+      { field: 'title', summary: { type: 'count_false', field: 'is_all_day' } },
+    ))).toEqual([]);
+    for (const [column, words] of [
+      [{ field: 'estimate', summary: 'count_true' }, '"count_true" over "estimate" (`number`)'],
+      [{ field: 'is_locked', summary: { type: 'count_false', field: 'title' } }, '"count_false" over "title" (`text`)'],
+    ] as const) {
+      const findings = withColumns(column);
+      expect(findings.map((f) => [f.rule, f.path, f.severity])).toEqual([
+        [LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED, 'views[0].list.columns[1].summary', 'error'],
+      ]);
+      expect(findings[0].message).toContain(`summary ${words} is a true / false count`);
+      expect(findings[0].hint).toMatch(/^Point "count_(true|false)" at a boolean or toggle field/);
+    }
+    // Every declared `FieldType`: refused exactly where the spec's member table refuses.
+    for (const member of ['count_true', 'count_false']) {
+      for (const type of FieldType.options) {
+        const objects = [{ name: 'duly_task', label: 'Task', fields: [{ name: 'probe', type, label: 'Probe' }] }];
+        const findings = refused(validateListViewFieldRefsUnrecorded(stackWith({ data: { provider: 'object', object: 'duly_task' }, columns: [{ field: 'probe', summary: member }] }, objects)));
+        expect(findings.length, `${member} over ${type}`).toBe(type === 'boolean' || type === 'toggle' ? 0 : 1);
+      }
+    }
+    // Unjudgeable stays unjudged: an unknown field is the existence rule's, a dotted path is skipped.
+    expect(refused(withColumns({ field: 'title', summary: { type: 'count_true', field: 'owner.name' } }))).toEqual([]);
+  });
+
   it('skips what it cannot judge: an unknown field (the existence rule\'s), a dotted path, no declared type, a type outside `FieldType`', () => {
     expect(withColumns({ field: 'title', summary: { type: 'sum', field: 'nope_field' } }).map((f) => [f.rule, f.path])).toEqual([
       [LIST_VIEW_FIELD_UNKNOWN, 'views[0].list.columns[1].summary.field'],

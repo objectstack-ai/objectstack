@@ -86,11 +86,15 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.key": {
         label: "المفتاح",
-        helpText: "مفتاح برمجي بصيغة snake_case، فريد داخل هذا الكائن — ويرفض المخطط أي شيء غير ذلك. تنضم الحقول إلى المجموعة بذكر هذا المفتاح، لذا فإن إعادة تسميته تتركها بلا مجموعة."
+        helpText: "مفتاح برمجي بصيغة snake_case، فريد داخل هذا الكائن — ويرفض المخطط أي شيء غير ذلك. الحقول التي تذكرها المجموعة في «الحقول» تبقى معها عند إعادة تسمية المفتاح؛ أما الحقل الذي ينضم بذكر هذا المفتاح في إعداد المجموعة الخاص به فيصبح بلا مجموعة."
       },
       "fieldGroups.label": {
         label: "التسمية",
         helpText: "نص ترويسة قسم المجموعة."
+      },
+      "fieldGroups.fields": {
+        label: "الحقول",
+        helpText: "الحقول التي تعرضها هذه المجموعة، بترتيب العرض (أسماء الحقول). عند تعبئتها تحدد الترتيب داخل المجموعة دون نقل أي حقل. لا يجوز للحقل المذكور هنا أن يشير إلى مجموعة أخرى في إعداد المجموعة الخاص به، ولا يُذكر الحقل إلا في مجموعة واحدة. غير مسموح مع القائمة المرتبطة."
       },
       "fieldGroups.icon": {
         label: "الأيقونة",
@@ -1350,7 +1354,8 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "تهيئة التنقل عند النقر على عنصر (درج جانبي افتراضيًا، أو page، أو new_window، أو none)"
       },
       "navigation.mode": {
-        label: "الوضع"
+        label: "الوضع",
+        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
       },
       "navigation.preventNavigation": {
         label: "منع التنقل",

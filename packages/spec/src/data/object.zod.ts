@@ -1141,7 +1141,9 @@ export const LifecycleSchema = lazySchema(() => strictObject({
       'whose value is empty seals into the deployment chain. It must name a declared field or a column the ' +
       'platform injects, such as the tenant column `organization_id`, whose value is one text on every store ' +
       '(not a number, boolean, date, datetime, JSON or multi-value column); not `id` or `created_at`, which ' +
-      'order the leaves; and not a `valueFields` member. Fixed once the object has checkpoints.',
+      'order the leaves; and not a `valueFields` member. Absent, the default `tenant_id` is held to the same ' +
+      'rules, and the registry does not inject it: a seal that names no chain column needs a declared text or ' +
+      'lookup `tenant_id` field. Fixed once the object has checkpoints.',
     ),
   }).optional().describe(
     'Seals the rows into signed, chained checkpoints (ADR-0154), so a change, insert or delete made outside ' +
@@ -1274,24 +1276,32 @@ const RELATED_LIST_ENTRY_PATTERN = /^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)?$/;
  * related fields together for presentation in forms, detail pages, and
  * editors (e.g., "Contact Info", "Billing", "System").
  * 
- * Design rules (MVP):
+ * Design rules:
  * - Group **order** is the declaration order of this array — no `order` property.
- * - Field → group mapping is derived automatically from `Field.group`
- *   matching `ObjectFieldGroup.key`; the **in-group display order** equals
- *   the traversal order of `ObjectSchema.fields`.
- * - Fields whose `group` is unset (or references an undeclared key) are
- *   considered ungrouped and must be rendered by consumers in a default
- *   bucket after the declared groups, preserving their field declaration order.
- * - Extension packages and runtime code use `Field.group` to assign fields
- *   to an existing group — no per-field order property is introduced at this
- *   layer.
- * 
- * Migration operations supported by this MVP:
+ * - A group lists its own members, in display order, in `fields`. A group that
+ *   writes no `fields` keeps the older rule: its members are the fields whose
+ *   `Field.group` names its `key`, in the traversal order of
+ *   `ObjectSchema.fields`. So an object written before `fields` existed
+ *   renders exactly as it did.
+ * - A field whose `group` names a group that lists `fields`, but that the list
+ *   does not name (a field another package added later, say), follows the
+ *   listed members in field declaration order: it is never dropped.
+ * - Fields no group lists and whose `group` is unset (or references an
+ *   undeclared key) are ungrouped and render in a default bucket after the
+ *   declared groups, preserving their field declaration order.
+ * - Two spellings of one membership must agree: the object parse refuses a
+ *   field one group lists while its own `group` names another, a field two
+ *   groups list, a name one list repeats, and `fields` on a group that places
+ *   a related list. A listed name the object does not declare is skipped (the
+ *   layout places only declared fields), so removing a field never makes the
+ *   object unparseable.
+ *
+ * Migration operations supported:
  *   - add / rename / delete / reorder groups (via the array)
- *   - assign an existing field to a group (via `Field.group`)
- * 
- * Deferred (not part of MVP):
- *   - explicit per-field in-group ordering
+ *   - assign a field to a group and order it inside the group (via `fields`;
+ *     `Field.group` is the older spelling, still read)
+ *
+ * Deferred:
  *   - nested groups / sub-groups
  *
  * Group-level visibility (`visibleWhen`) closed the ADR-0049 enforce-or-remove
@@ -1309,8 +1319,8 @@ const RELATED_LIST_ENTRY_PATTERN = /^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)?$/;
  * @example
  * ```ts
  * fieldGroups: [
- *   { key: 'contact_info', label: 'Contact Information', icon: 'user' },
- *   { key: 'billing',      label: 'Billing',             collapse: 'collapsed' },
+ *   { key: 'contact_info', label: 'Contact Information', icon: 'user', fields: ['email', 'phone'] },
+ *   { key: 'billing',      label: 'Billing',             collapse: 'collapsed', fields: ['billing_address'] },
  *   { key: 'system',       label: 'System' },
  * ]
  * ```
@@ -1329,14 +1339,6 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
     helpText: 'description',
   },
   guidance: {
-    // Membership is declared the OTHER WAY ROUND, and this is the single most
-    // likely thing an author reaches for here — a group that lists its fields
-    // is what every other layout system in this space looks like.
-    fields:
-      '`fields` does not live on a group — membership is declared on the FIELD, pointing ' +
-      "back: `fields: { email: { type: 'email', group: 'contact_info' } }`. The group " +
-      'declares only its `key`, `label` and presentation; `deriveFieldGroupLayout` ' +
-      '(ADR-0085 §5) does the assembly.',
     order:
       '`order` is not a group key — ARRAY ORDER is display order. `fieldGroups: [...]` ' +
       'renders top to bottom, so move the entry rather than numbering it.',
@@ -1364,6 +1366,30 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
   /** Human-readable label displayed as the group header. */
   label: z.string().describe('Group display label').meta({ title: 'Label' }),
 
+  /**
+   * The group's members, in display order: field names of this object. Written,
+   * it decides which fields the group shows and in what order, on every surface
+   * that renders the group (record page, create and edit forms, drawer); the
+   * object's `fields` declaration order then no longer decides the order inside
+   * the group, so the group can be reordered without moving any field.
+   *
+   * Absent, the group keeps the older rule: its members are the fields whose
+   * `Field.group` names this group's `key`, in field declaration order. That
+   * spelling is still read; new metadata lists members here.
+   *
+   * A field whose `group` names this group but that this list does not name is
+   * appended after the listed members, in field declaration order, never
+   * dropped. The object parse refuses a field this list names while its own
+   * `group` names another group, a field two groups list, and a name this list
+   * repeats. A name the object declares no field for is skipped. A group that
+   * places a related list (`relatedList`) holds no fields, so it may not write
+   * `fields`. Derivation: `deriveFieldGroupLayout` (field-group-layout.ts,
+   * ADR-0085 §5).
+   */
+  fields: z.array(z.string().regex(/^[a-z_][a-z0-9_]*$/, {
+    message: 'A field group\'s fields entry is a field name of this object, in snake_case (e.g. "account")',
+  })).optional().describe('The group\'s members in display order (field names of this object). Written, it decides which fields the group shows and their order on the record page and the forms, without changing the order of the object\'s fields. Absent, members are the fields whose `group` names this group, in field declaration order (the older spelling, still read). A field whose `group` names this group but that the list does not name follows the listed ones. Refused: a listed field whose own `group` names another group, a field two groups list, a repeated name, and `fields` on a group with `relatedList`. A name the object does not declare is skipped.').meta({ title: 'Fields' }),
+
   /** Optional Lucide/Material icon name for the group header. */
   icon: z.string().optional().describe('Icon name (Lucide/Material) for the group header').meta({ title: 'Icon' }),
 
@@ -1378,7 +1404,7 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
    * items can sit under its basic information with its terms after them.
    *
    * Such a group carries no fields: a field whose `group` names it is refused
-   * at parse. Its name is judged exactly as a `relatedLists` entry's is (see
+   * at parse, and so is a `fields` list on it. Its name is judged exactly as a `relatedLists` entry's is (see
    * there): a child in the stack with no inbound relationship is refused
    * everywhere; a child that exists nowhere is refused at `defineStack` (save a
    * platform-prefixed name, left to the runtime) and by a metadata write that
@@ -1396,7 +1422,7 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
    */
   relatedList: z.string().regex(RELATED_LIST_ENTRY_PATTERN, {
     message: 'A field group\'s relatedList is a child object name (e.g. "task") or object.field (e.g. "event.related_to"), in snake_case',
-  }).optional().describe('Places a related list\'s body table at this position in the record\'s details column instead of a section of fields: names one inbound relationship, as a relatedLists entry does (child object, or object.field when that child has more than one relationship to this object). A group with relatedList holds no fields: a field that names it as its group is refused. The name is judged as a relatedLists entry is: refused when its child is in the stack with no inbound lookup / master_detail field, or exists nowhere (by os validate / os build, which leave a sys_ / cloud_ / ai_ name to the runtime, and by a metadata write that names no package); a write into a package stores it, and the record page places nothing for it. It names a body table only (a FK declaring relatedList: \'primary\', or a master_detail FK that declares no relatedList): a group naming a side card or a list hidden by relatedList: false draws nothing, so it is refused where the child\'s fields are known (os validate / os build and the metadata write door), naming the FK and the remedy (set relatedList: \'primary\' on it, name only the body table as object.field when a bare child name also names a side card, or remove the group\'s relatedList).').meta({ title: 'Related List' }),
+  }).optional().describe('Places a related list\'s body table at this position in the record\'s details column instead of a section of fields: names one inbound relationship, as a relatedLists entry does (child object, or object.field when that child has more than one relationship to this object). A group with relatedList holds no fields: a field that names it as its group is refused, and so is a fields list on it. The name is judged as a relatedLists entry is: refused when its child is in the stack with no inbound lookup / master_detail field, or exists nowhere (by os validate / os build, which leave a sys_ / cloud_ / ai_ name to the runtime, and by a metadata write that names no package); a write into a package stores it, and the record page places nothing for it. It names a body table only (a FK declaring relatedList: \'primary\', or a master_detail FK that declares no relatedList): a group naming a side card or a list hidden by relatedList: false draws nothing, so it is refused where the child\'s fields are known (os validate / os build and the metadata write door), naming the FK and the remedy (set relatedList: \'primary\' on it, name only the body table as object.field when a bare child name also names a side card, or remove the group\'s relatedList).').meta({ title: 'Related List' }),
 
   /**
    * [ADR-0085 §5] Section visibility predicate — CEL, the ADR-0089 canonical
@@ -3207,6 +3233,108 @@ function refuseUndeclaredSealValueFields(lifecycle: unknown, fields: unknown, ct
 }
 
 /**
+ * [ADR-0154 D10, note on `chainField`] The chain column a seal that names no
+ * `chainField` reads: the sealer's default (`AUDIT_SEAL_DEFAULT_CHAIN_FIELD`
+ * in `@objectstack/plugin-audit`).
+ */
+const SEAL_DEFAULT_CHAIN_FIELD = 'tenant_id';
+
+/** Why a column cannot be a sealed object's chain column ({@link sealChainColumnFaults}). */
+type SealChainColumnFault =
+  | { kind: 'not-a-field' }
+  | { kind: 'leaf-order' }
+  | { kind: 'value-field' }
+  | { kind: 'non-text'; type: string };
+
+/**
+ * The faults that keep `name` from being this sealed object's chain column, in
+ * the order they are judged; empty when it can be. One judgement for a named
+ * `chainField` and for the default `tenant_id`
+ * ({@link refuseUnknownSealChainField}): a column the object does not have
+ * stops the judgement, and so does a leaf-order column; a `valueFields` member
+ * and a column whose value is not one text on every store are each a fault.
+ *
+ * "Has" means the AUTHORED field map plus the injected plan, as the
+ * `valueFields` check reads it. A column contributed only by an
+ * `objectExtensions` entry is not counted, so a sealed object whose chain
+ * column (named, or the default `tenant_id`) reaches it only that way is
+ * refused here, although the sealer, which reads the registry's folded field
+ * map, would seal it. That false refusal is accepted: the fix is to declare
+ * the column on the object itself.
+ */
+function sealChainColumnFaults(
+  object: { fields?: unknown },
+  seal: { valueFields?: unknown },
+  name: string,
+): SealChainColumnFault[] {
+  const declared = (object.fields !== null && typeof object.fields === 'object' ? object.fields : {}) as Record<string, unknown>;
+  const isDeclared = Object.prototype.hasOwnProperty.call(declared, name);
+  if (!isDeclared && !resolveInjectedSystemColumns(object).names.has(name)) return [{ kind: 'not-a-field' }];
+  if (isSealLeafOrderColumn(name)) return [{ kind: 'leaf-order' }];
+  const faults: SealChainColumnFault[] = [];
+  if (Array.isArray(seal.valueFields) && seal.valueFields.includes(name)) faults.push({ kind: 'value-field' });
+  const nonText = nonTextChainColumnType(isDeclared ? declared[name] : injectedSystemColumnDefs(object)[name]);
+  if (nonText !== null) faults.push({ kind: 'non-text', type: nonText });
+  return faults;
+}
+
+/** The message of a refused NAMED `chainField`. */
+function namedSealChainFieldMessage(name: string, fault: SealChainColumnFault): string {
+  switch (fault.kind) {
+    case 'not-a-field':
+      return `\`lifecycle.seal.chainField\` names \`${name}\`, which is not a field of this object. `
+        + 'The sealer chains each row by that column\'s value, one chain per organization, so it must name a '
+        + 'declared field or a column the platform injects (the tenant column is `organization_id`); declare '
+        + 'the field, name another, or remove the key to chain by `tenant_id` (ADR-0154 D10).';
+    case 'leaf-order':
+      return `\`lifecycle.seal.chainField\` cannot name \`${name}\`: it orders each sealed leaf, and it names no `
+        + 'organization. Name the column that holds the organization id of each row, such as `organization_id` '
+        + '(ADR-0154 D10).';
+    case 'value-field':
+      return `\`lifecycle.seal.chainField\` names \`${name}\`, which \`lifecycle.seal.valueFields\` also lists. `
+        + 'A value field enters each sealed leaf as a salted commitment so a checkpoint never carries it, but '
+        + 'the chain value travels in clear in every checkpoint and proof bundle of its chain; remove it from '
+        + '`valueFields`, or name another chain column (ADR-0154 D1, D9, D10).';
+    case 'non-text':
+      return `\`lifecycle.seal.chainField\` names \`${name}\`, a \`${fault.type}\` column, whose value is not one text on `
+        + 'every store. The sealer reads a row\'s chain as a non-empty text only, so the rows would seal into '
+        + 'the deployment chain with no report; name a text or lookup column that holds the organization id, '
+        + 'such as `organization_id` (ADR-0154 D10).';
+  }
+}
+
+/**
+ * The message of a refused DEFAULT chain column. `fix` names the chain column
+ * to name instead: the injected tenant column where the registry injects it,
+ * otherwise a declared column — on an object that opts out of the tenant
+ * column, `organization_id` would itself be refused.
+ */
+function defaultSealChainColumnMessage(fault: SealChainColumnFault, injectsTenantColumn: boolean): string {
+  const name = SEAL_DEFAULT_CHAIN_FIELD;
+  const lead = `\`lifecycle.seal\` names no \`chainField\`, so the sealer chains each row by the default chain column \`${name}\``;
+  const other = injectsTenantColumn
+    ? 'name the chain column with `chainField`, such as `organization_id`, the tenant column the platform injects'
+    : 'name a declared text or lookup column that holds it with `chainField`';
+  switch (fault.kind) {
+    case 'not-a-field':
+    case 'leaf-order': // never for `tenant_id`; judged alike so the switch stays total
+      return `${lead}, which is not a field of this object. The sealer cannot chain the rows per organization `
+        + 'without that column, so it would seal none of them and only report the object at run time; '
+        + `declare a \`${name}\` text or lookup field that holds each row's organization id, or ${other} `
+        + '(ADR-0154 D10).';
+    case 'value-field':
+      return `${lead}, which \`lifecycle.seal.valueFields\` also lists. A value field enters each sealed leaf as a `
+        + 'salted commitment so a checkpoint never carries it, but the chain value travels in clear in every '
+        + `checkpoint and proof bundle of its chain; remove \`${name}\` from \`valueFields\`, or ${other} `
+        + '(ADR-0154 D1, D9, D10).';
+    case 'non-text':
+      return `${lead}, a \`${fault.type}\` column, whose value is not one text on every store. The sealer reads a `
+        + 'row\'s chain as a non-empty text only, so the rows would seal into the deployment chain with no report; '
+        + `declare \`${name}\` as a text or lookup field that holds the organization id, or ${other} (ADR-0154 D10).`;
+  }
+}
+
+/**
  * [ADR-0154 D10, note on `chainField`] A `lifecycle.seal.chainField` the
  * author names is a field the object has: one it declares, or a column the
  * registry injects into it ({@link resolveInjectedSystemColumns} — above all
@@ -3221,15 +3349,21 @@ function refuseUndeclaredSealValueFields(lifecycle: unknown, fields: unknown, ct
  * one text on every store ({@link nonTextChainColumnType}), judged by the
  * declared field or, for an injected column, by the definition the registry
  * injects ({@link injectedSystemColumnDefs}). Each is one located issue at
- * `['lifecycle', 'seal', 'chainField']`. Every refusal here needs the key, which
- * did not exist before it, so none refuses a declaration that parsed before.
+ * `['lifecycle', 'seal', 'chainField']`.
  *
- * Only a NAMED chain column is judged here. An object that names none chains
- * by `tenant_id`, as before the key existed, and one without that column is
- * reported by the sealer at `error`, as before. The injected plan is read with
- * no deployment, as every author-time caller reads it; a deployment that
- * declares the object platform-global withholds the tenant column, and the
- * sealer reports that object the same way.
+ * An object that names NO chain column chains by its default, `tenant_id`, and
+ * that column is held to the same rules ({@link sealChainColumnFaults}, one
+ * judgement for both): it must be a field of the object, its value one text on
+ * every store, and not a `valueFields` member. The registry injects no
+ * `tenant_id` (its tenant column is `organization_id`), so in practice the
+ * default must be declared. Each refusal of the default is one located issue at
+ * `['lifecycle', 'seal']`, the block the author wrote: there is no
+ * `chainField` to point at, and naming one is half of every fix. Before this
+ * rule such an object parsed and the sealer reported it at `error` and sealed
+ * none of its rows, which it still does for a definition that skips the parse.
+ * The injected plan is read with no deployment, as every author-time caller
+ * reads it; a deployment that declares the object platform-global withholds
+ * the tenant column, and the sealer reports that object the same way.
  *
  * `injected-system-columns` imports this module (for `isTenancyDisabled`), so
  * the two form an import cycle. Each side calls the other only from inside a
@@ -3239,59 +3373,22 @@ function refuseUndeclaredSealValueFields(lifecycle: unknown, fields: unknown, ct
 function refuseUnknownSealChainField(object: { lifecycle?: unknown; fields?: unknown }, ctx: z.RefinementCtx): void {
   const lifecycle = object.lifecycle;
   if (lifecycle === null || typeof lifecycle !== 'object') return;
-  const seal = (lifecycle as { seal?: { chainField?: unknown } }).seal;
-  if (!seal || typeof seal.chainField !== 'string') return;
-  const name = seal.chainField;
-  const path = ['lifecycle', 'seal', 'chainField'];
-  const declared = (object.fields !== null && typeof object.fields === 'object' ? object.fields : {}) as Record<string, unknown>;
-  const isDeclared = Object.prototype.hasOwnProperty.call(declared, name);
-  if (!isDeclared && !resolveInjectedSystemColumns(object).names.has(name)) {
-    ctx.addIssue({
-      code: 'custom',
-      path,
-      message:
-        `\`lifecycle.seal.chainField\` names \`${name}\`, which is not a field of this object. `
-        + 'The sealer chains each row by that column\'s value, one chain per organization, so it must name a '
-        + 'declared field or a column the platform injects (the tenant column is `organization_id`); declare '
-        + 'the field, name another, or remove the key to chain by `tenant_id` (ADR-0154 D10).',
-    });
+  const seal = (lifecycle as { seal?: { chainField?: unknown; valueFields?: unknown } }).seal;
+  if (!seal || typeof seal !== 'object') return;
+  if (typeof seal.chainField === 'string') {
+    const name = seal.chainField;
+    for (const fault of sealChainColumnFaults(object, seal, name)) {
+      ctx.addIssue({ code: 'custom', path: ['lifecycle', 'seal', 'chainField'], message: namedSealChainFieldMessage(name, fault) });
+    }
     return;
   }
-  if (isSealLeafOrderColumn(name)) {
-    ctx.addIssue({
-      code: 'custom',
-      path,
-      message:
-        `\`lifecycle.seal.chainField\` cannot name \`${name}\`: it orders each sealed leaf, and it names no `
-        + 'organization. Name the column that holds the organization id of each row, such as `organization_id` '
-        + '(ADR-0154 D10).',
-    });
-    return;
-  }
-  const valueFields = (seal as { valueFields?: unknown }).valueFields;
-  if (Array.isArray(valueFields) && valueFields.includes(name)) {
-    ctx.addIssue({
-      code: 'custom',
-      path,
-      message:
-        `\`lifecycle.seal.chainField\` names \`${name}\`, which \`lifecycle.seal.valueFields\` also lists. `
-        + 'A value field enters each sealed leaf as a salted commitment so a checkpoint never carries it, but '
-        + 'the chain value travels in clear in every checkpoint and proof bundle of its chain; remove it from '
-        + '`valueFields`, or name another chain column (ADR-0154 D1, D9, D10).',
-    });
-  }
-  const def = isDeclared ? declared[name] : injectedSystemColumnDefs(object)[name];
-  const nonText = nonTextChainColumnType(def);
-  if (nonText !== null) {
-    ctx.addIssue({
-      code: 'custom',
-      path,
-      message:
-        `\`lifecycle.seal.chainField\` names \`${name}\`, a \`${nonText}\` column, whose value is not one text on `
-        + 'every store. The sealer reads a row\'s chain as a non-empty text only, so the rows would seal into '
-        + 'the deployment chain with no report; name a text or lookup column that holds the organization id, '
-        + 'such as `organization_id` (ADR-0154 D10).',
-    });
+  // A `chainField` of another type is the key's own type refusal; only an absent one reads the default.
+  if (seal.chainField !== undefined) return;
+  const faults = sealChainColumnFaults(object, seal, SEAL_DEFAULT_CHAIN_FIELD);
+  if (faults.length === 0) return;
+  const injectsTenantColumn = resolveInjectedSystemColumns(object).tenant;
+  for (const fault of faults) {
+    ctx.addIssue({ code: 'custom', path: ['lifecycle', 'seal'], message: defaultSealChainColumnMessage(fault, injectsTenantColumn) });
   }
 }
 
@@ -3328,6 +3425,92 @@ function refuseFieldsInRelatedListGroups(fieldGroups: unknown, fields: unknown, 
         + 'group, or declare a group of fields beside the table and name that one.',
     });
   }
+}
+
+/**
+ * A field group's `fields` list and a field's own `group` are two spellings of
+ * one membership (`ObjectFieldGroupSchema.fields`), so where both speak they
+ * must agree. One located issue per disagreement:
+ *
+ * - `fields` on a group that places a related list (`relatedList`): such a
+ *   group holds no fields — at `['fieldGroups', i, 'fields']`;
+ * - a name one list repeats — at the repeat;
+ * - a field two groups list — at the second listing, naming the first group;
+ * - a listed field whose own `group` names a different DECLARED group — at
+ *   the listing AND at `['fields', <name>, 'group']`, each naming the other,
+ *   so the author sees both places to fix. A `group` naming no declared key
+ *   is not another group (it means ungrouped, and lint reports it as
+ *   `field-group-undeclared`), so the list wins and nothing is refused —
+ *   renaming a group's key never makes its listed members unparseable.
+ *
+ * A listed name the object declares no field for is NOT judged: the layout
+ * skips it, and refusing it would make the object unparseable the moment any
+ * door removes a field without editing every list. A field whose `group` names
+ * a listing group the list leaves out is not a conflict either: it is placed
+ * after the listed members (`deriveFieldGroupLayout`).
+ *
+ * Judged in the object's `superRefine` for the reason
+ * {@link refuseFieldsInRelatedListGroups} gives: only the object holds both the
+ * groups and the field map.
+ */
+function refuseFieldGroupMembershipConflicts(fieldGroups: unknown, fields: unknown, ctx: z.RefinementCtx): void {
+  if (!Array.isArray(fieldGroups)) return;
+  const fieldMap = fields !== null && typeof fields === 'object' ? (fields as Record<string, unknown>) : {};
+  const listedIn = new Map<string, string>();
+  // Only a `group` naming ANOTHER DECLARED group disagrees with a list: one
+  // naming no declared key means ungrouped (lint reports it as
+  // `field-group-undeclared`), so the list simply wins.
+  const declaredKeys = new Set(
+    fieldGroups
+      .map((g: unknown) => (g !== null && typeof g === 'object' ? (g as { key?: unknown }).key : undefined))
+      .filter((k): k is string => typeof k === 'string'),
+  );
+  fieldGroups.forEach((group: unknown, index: number) => {
+    if (group === null || typeof group !== 'object') return;
+    const { key, relatedList, fields: members } = group as { key?: unknown; relatedList?: unknown; fields?: unknown };
+    if (!Array.isArray(members) || typeof key !== 'string') return;
+    if (typeof relatedList === 'string') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['fieldGroups', index, 'fields'],
+        message:
+          `Field group '${key}' places the related list '${relatedList}' (its \`relatedList\`), so it holds no `
+          + 'fields and may not list any. Move these fields into a group of fields beside the table.',
+      });
+      return;
+    }
+    const seen = new Set<string>();
+    members.forEach((name: unknown, at: number) => {
+      if (typeof name !== 'string') return;
+      const path = ['fieldGroups', index, 'fields', at];
+      if (seen.has(name)) {
+        ctx.addIssue({ code: 'custom', path, message: `Field group '${key}' lists the field '${name}' twice. List each field once.` });
+        return;
+      }
+      seen.add(name);
+      const first = listedIn.get(name);
+      if (first !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path,
+          message:
+            `Field '${name}' is listed by two field groups, '${first}' and '${key}'. A field belongs to one group: `
+            + 'remove it from one of the two lists.',
+        });
+        return;
+      }
+      listedIn.set(name, key);
+      const field = fieldMap[name];
+      const own = field !== null && typeof field === 'object' ? (field as { group?: unknown }).group : undefined;
+      if (typeof own !== 'string' || own === key || !declaredKeys.has(own)) return;
+      const message =
+        `Field '${name}' is listed by the field group '${key}' (its \`fields\`), but its own \`group\` names `
+        + `'${own}'. The two say different things: keep the field in '${key}'s list and drop its \`group\` `
+        + `(the list is the current spelling), or remove it from the list.`;
+      ctx.addIssue({ code: 'custom', path, message });
+      ctx.addIssue({ code: 'custom', path: ['fields', name, 'group'], message });
+    });
+  });
 }
 
 /**
@@ -4956,6 +5139,9 @@ const ObjectSchemaBase = strictObject(
   // [#27069] A field group carrying `relatedList` is a body table: no field
   // joins it. See the helper's docblock.
   refuseFieldsInRelatedListGroups(object.fieldGroups, object.fields, ctx);
+  // A group's `fields` list and a field's own `group` agree where both speak.
+  // See the helper's docblock.
+  refuseFieldGroupMembershipConflicts(object.fieldGroups, object.fields, ctx);
   // [ADR-0055 §1 · #23100 ruling B, as amended by #30905 ruling A] Exactly one
   // master `master_detail` under `controlled_by_parent` (the required one, or
   // the only one declared `required: false`) — the one master relation the

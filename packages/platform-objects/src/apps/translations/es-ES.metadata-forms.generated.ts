@@ -86,11 +86,15 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.key": {
         label: "Clave",
-        helpText: "Clave de máquina en snake_case, única dentro de este objeto: el esquema rechaza cualquier otra cosa. Los campos se unen al grupo indicando esta clave, así que renombrarla los deja sin grupo."
+        helpText: "Clave de máquina en snake_case, única dentro de este objeto: el esquema rechaza cualquier otra cosa. Los campos que el grupo lista en Campos siguen en él al renombrar la clave; un campo que se une indicando esta clave en su propio ajuste de grupo queda sin grupo."
       },
       "fieldGroups.label": {
         label: "Etiqueta",
         helpText: "Texto del encabezado de la sección del grupo."
+      },
+      "fieldGroups.fields": {
+        label: "Campos",
+        helpText: "Los campos que muestra este grupo, en orden de visualización (nombres de campo). Si se rellena, fija el orden dentro del grupo sin mover ningún campo. Un campo que esta lista nombra no puede indicar otro grupo en su propio ajuste de grupo, y un campo solo puede figurar en un grupo. No se permite junto con Lista relacionada."
       },
       "fieldGroups.icon": {
         label: "Icono",
@@ -1347,10 +1351,11 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       navigation: {
         label: "Navegación",
-        helpText: "Configuración de la navegación al hacer clic en un elemento (panel lateral por defecto; también page, new_window o none)"
+        helpText: "Configuración de la navegación al hacer clic en un elemento: el tamaño del panel lateral y `preventNavigation` para una lista cuyas filas no abren nada (`mode` está obsoleto: el nombre del registro abre la página completa; el icono al pasar el cursor, el panel lateral)"
       },
       "navigation.mode": {
-        label: "Modo"
+        label: "Modo",
+        helpText: "[OBSOLETO] En la lista de un objeto (una vista de lista, los `listViews` de un objeto) ya no decide cómo se abre un registro: en la consola, para todos los lectores, el nombre del registro abre la página completa y el icono que aparece junto a él al pasar el cursor abre el panel lateral. Ahí `drawer`, `page` y `new_window` se siguen analizando y no cambian nada, así que omite la clave; `none` sigue significando que las filas no abren nada (es preferible `preventNavigation: true`). Un bloque de página que lleva `navigation` (un bloque de lista, la línea de tiempo, una vista incrustada) sigue respetando todos los valores."
       },
       "navigation.preventNavigation": {
         label: "Impedir navegación",
@@ -1358,7 +1363,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "navigation.openNewTab": {
         label: "Abrir en pestaña nueva",
-        helpText: "Fuerza la apertura en una pestaña nueva (se aplica al modo page)"
+        helpText: "Abre la página completa del registro en una pestaña nueva del navegador al hacer clic en él; las filas que no abren nada siguen así, y en un teléfono la página se abre en la misma pestaña"
       },
       "navigation.size": {
         label: "Tamaño",

@@ -42,7 +42,7 @@ import { RecordEditStateController, bodyTablesSaveTogether, isMasterDetailChild,
 import { isRecordPagePushed, useRecordPageScrollMemory } from './recordPagePush.js';
 import { phoneRecordHeader } from './recordPhoneHeader.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
-import { PrefetchUpcomingRelatedCounts, RecordDrawerReturnLink, RecordDrawerUpcomingContext, RecordPageDrawerHost, RecordPaneBarToggles, useRecordPane, useRecordPaneBar, useRecordPageReturn } from './recordDrawerStack.js';
+import { PrefetchUpcomingRelatedCounts, RecordDrawerUpcomingContext, RecordPageDrawerHost, RecordPaneBarToggles, useRecordPane, useRecordPaneBar, useRecordPageReturn } from './recordDrawerStack.js';
 import {
   RECORD_PAGE_ACTIVITY_ROWS,
   RECORD_PAGE_ATTACHMENT_ROWS,
@@ -84,7 +84,7 @@ import type { ConsoleActionDispatch } from '../consoleActionDispatch.js';
 import { useRecordApprovals, openApprovalOf, isSubmitterOf } from '../hooks/useRecordApprovals.js';
 import { RecordAttachmentsPanel } from './RecordAttachmentsPanel.js';
 import { RecordApprovalsPanel } from './RecordApprovalsPanel.js';
-import { ApprovalBandOnceScope } from '@object-ui/plugin-detail';
+import { ApprovalBandOnceScope, RecordStageMenu } from '@object-ui/plugin-detail';
 import { DeclaredActionsBar } from './DeclaredActionsBar.js';
 import {
   SYS_APPROVAL_REQUEST_OBJECT,
@@ -4845,6 +4845,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         icon: 'check',
         type: 'script',
         locations: ['record_header'],
+        // objectstack#35816 — Save is the edit state's one filled button, and
+        // keeps its place after Cancel, as a form's footer orders them.
+        variant: 'primary',
         order: 100,
         disabled: recordEditSaving,
         onClick: () => { void recordEditControlRef.current?.save(); },
@@ -5325,13 +5328,6 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       {(() => {
         const plural = objectDef ? servedObjectPluralLabel(objectDef, language, objectPluralLabel) : objectName;
         const objectCrumbClass = cn(crumbClass, 'shrink-0');
-        if (pageReturn.toList) {
-          return (
-            <button type="button" onClick={pageReturn.toList} className={objectCrumbClass} title={originFromState?.label} data-record-crumb-object="">
-              {plural}
-            </button>
-          );
-        }
         if (originFromState?.pathname && originFromState?.label) {
           return (
             <Link
@@ -5417,7 +5413,6 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       stepper={pageStepper}
       actionSlotRef={setBarActionSlot}
       toggles={approvalQueueSwitch || panelToggles ? <>{approvalQueueSwitch}{panelToggles}</> : undefined}
-      frame={pageReturn.collapse ? <RecordDrawerReturnLink collapse={pageReturn.collapse} /> : undefined}
     />
   );
 
@@ -5542,6 +5537,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         </>
       )
       : undefined,
+    // objectstack#35891 — the stage tag is the stage's menu: the default
+    // page draws no stage bar, so the header is where the stage moves.
+    stage: (parts) => <RecordStageMenu {...parts} />,
   };
   const sharedChrome = (
     <>
@@ -5751,7 +5749,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           handlers={{ api: apiActionHandler, flow: flowHandler, script: serverActionHandler, modal: modalActionHandler }}
         >
           <div className="flex-1 overflow-hidden flex flex-row">
-            <div ref={setPageScrollerEl} className="flex-1 overflow-auto p-3 sm:p-4 lg:p-6 scroll-pb-48">
+            {/* objectstack#35745 — no top padding here: the record page under
+                it pads its own top (`RecordPageColumns`, the `page` root), so
+                the tab row sits 12px under the header instead of under a 48px
+                band of two paddings stacked. */}
+            <div ref={setPageScrollerEl} className="flex-1 overflow-auto px-3 pb-3 sm:px-4 sm:pb-4 lg:px-6 lg:pb-6 scroll-pb-48">
               {/* objectui#12906 — the print page's screen-only chrome. A page
                   that declares `print` holds only the printable component
                   types, and `page:header` is not one of them, so the record's
@@ -5768,7 +5770,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   `print` draws none of it and keeps its own `page:header`. */}
               {pageDeclaresPrint && (
                 <div
-                  className="mb-4 flex flex-wrap items-center justify-end gap-2"
+                  className="mb-4 mt-3 flex flex-wrap items-center justify-end gap-2"
                   data-record-print-chrome=""
                 >
                   {sharedChrome}
@@ -5804,7 +5806,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   its layout effect, before the page paints. */}
               {approvalBarMounted && approvalGroupHosts === 0 && (
                 <DeclaredActionsBar
-                  className="mb-4"
+                  className="mb-4 mt-3"
                   objectName={SYS_APPROVAL_REQUEST_OBJECT}
                   record={approvals.pendingRequest}
                   location={RECORD_APPROVAL_ACTION_LOCATION}

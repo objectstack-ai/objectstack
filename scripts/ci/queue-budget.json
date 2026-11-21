@@ -1,0 +1,21 @@
+{
+  "note": "The merge queue's speed budget. Changing a number here is the maintainer's call, never a seat's: a slower queue is answered by a speed-up, not a looser budget. Read weekly by scripts/ci/queue-duration.mjs (.github/workflows/queue-duration-budget.yml); over budget files one speed-up card.",
+  "repo": "objectstack-ai/objectstack",
+  "budgetMedianMinutes": 22,
+  "alarmP90Minutes": 32,
+  "minSample": 20,
+  "queueWorkflows": [
+    "CI",
+    "Governed Surface Guard",
+    "Lint & Type Check",
+    "PR-Body Guards",
+    "Spec Liveness Check"
+  ],
+  "baseline": {
+    "window": "merge_group runs 2026-11-17..19",
+    "p50Minutes": 21.7,
+    "p90Minutes": 31.9,
+    "maxMinutes": 34.5,
+    "sample": 176
+  }
+}

@@ -86,11 +86,15 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.key": {
         label: "键",
-        helpText: "snake_case 格式的机器键，在本对象内唯一——其他写法会被 schema 拒绝。字段通过填写此键加入分组，因此重命名它会使这些字段变为未分组。"
+        helpText: "snake_case 格式的机器键，在本对象内唯一——其他写法会被 schema 拒绝。分组在「字段」中列出的字段，重命名此键后仍留在分组里；通过自身分组设置填写此键加入的字段会变为未分组。"
       },
       "fieldGroups.label": {
         label: "显示名称",
         helpText: "该分组所在分区的标题文字。"
+      },
+      "fieldGroups.fields": {
+        label: "字段",
+        helpText: "该分组显示的字段及其顺序（字段名）。填写后，它决定分组内的顺序，不移动任何字段。这里列出的字段，其自身的分组设置不能指向别的分组；一个字段只能被一个分组列出。不能与关联列表同时使用。"
       },
       "fieldGroups.icon": {
         label: "图标",
@@ -1347,10 +1351,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       navigation: {
         label: "导航",
-        helpText: "点击条目时的导航配置（默认为抽屉，也可为 page、new_window 或 none）"
+        helpText: "点击条目时的导航配置：抽屉尺寸，以及让列表行不打开任何内容的 `preventNavigation`（`mode` 已弃用——点记录名称进入整页，点悬停图标从侧边打开）"
       },
       "navigation.mode": {
-        label: "模式"
+        label: "模式",
+        helpText: "[已弃用] 在对象列表（列表视图、对象的 `listViews`）上不再决定记录如何打开：在控制台中，对所有用户而言，点记录名称进入整页，点名称旁的悬停图标从侧边面板打开。这里 `drawer`、`page`、`new_window` 仍可解析，但不再起作用，请省略此键；`none` 仍表示列表行不打开任何内容——建议改用 `preventNavigation: true`。带 `navigation` 的页面区块（列表区块、时间线、嵌入视图）仍按所有取值生效。"
       },
       "navigation.preventNavigation": {
         label: "禁止导航",
@@ -1358,7 +1363,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "navigation.openNewTab": {
         label: "在新标签页打开",
-        helpText: "强制在新标签页打开（适用于 page 模式）"
+        helpText: "点击记录时在新的浏览器标签页中打开其整页；设为不打开的行保持不打开，手机上仍在当前页打开"
       },
       "navigation.size": {
         label: "尺寸",

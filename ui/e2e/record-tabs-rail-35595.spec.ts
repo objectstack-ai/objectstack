@@ -18,7 +18,9 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  *     at the 1184 px a 1440 window leaves draws every tab.
  *   - On 概览 the stage path and the key fields are at the top across the
  *     whole width — both columns; CONTROL, the details column beside the rail
- *     is narrower than they are.
+ *     is narrower than they are. Since objectstack#35891 the default page
+ *     draws no strip, so the fixture places one in the `highlights` slot, as
+ *     an authored page does.
  *   - The rail is the 概览 tab's: another tab open draws no rail and no
  *     strip; CONTROL, back on 概览 both are drawn again.
  *   - A rail card's title opens its tab; CONTROL, the 概览 tab returns.
@@ -168,7 +170,7 @@ import { I18nProvider } from ${JSON.stringify(I18N)};
 import { RelatedCountStore } from ${JSON.stringify(COUNT_STORE)};
 import { RecordPageColumns } from ${JSON.stringify(PAGE_COLUMNS)};
 import { buildDefaultPageColumns, recordPageTierFor } from ${JSON.stringify(SYNTH_COLUMNS)};
-import { buildDefaultPageSchema } from ${JSON.stringify(SYNTH_PAGE)};
+import { buildDefaultHighlights, buildDefaultPageSchema } from ${JSON.stringify(SYNTH_PAGE)};
 
 const h = React.createElement;
 const c = window.__case;
@@ -196,16 +198,21 @@ const approvals = {
   requests: [{ id: 'req-1' }],
   pendingRequest: { id: 'req-1', step_label: '经理审批', pending_approvers: ['u2'], pending_approver_names: { u2: '王经理' } },
 };
-const page = buildDefaultPageSchema(
-  { name: 'account', label: '客户', enable: { files: true }, fields: { name: { type: 'text' }, phone: { type: 'phone' }, rating: { type: 'select' } } },
-  {
-    related: RELATED.map(([objectName, relationshipField, title]) => ({ objectName, relationshipField, title })),
-    highlightFields: ['phone'],
-    statusField: 'rating',
-    stages: [{ value: 'cold', label: '冷' }, { value: 'warm', label: '温' }, { value: 'hot', label: '热' }],
-    approvals: { count: 1, node: { approvals, currentUserId: 'u1' } },
-  },
-);
+const ACCOUNT = { name: 'account', label: '客户', enable: { files: true }, fields: { name: { type: 'text' }, phone: { type: 'phone' }, rating: { type: 'select' } } };
+const STRIP = {
+  highlightFields: ['phone'],
+  statusField: 'rating',
+  stages: [{ value: 'cold', label: '冷' }, { value: 'warm', label: '温' }, { value: 'hot', label: '热' }],
+};
+// Since objectstack#35891 the default page draws no strip; the stage path and
+// the key fields are placed the way an author places them, in the highlights
+// slot, and the columns lay that strip out as before.
+const page = buildDefaultPageSchema(ACCOUNT, {
+  related: RELATED.map(([objectName, relationshipField, title]) => ({ objectName, relationshipField, title })),
+  ...STRIP,
+  approvals: { count: 1, node: { approvals, currentUserId: 'u1' } },
+  slots: { highlights: buildDefaultHighlights(ACCOUNT, STRIP) },
+});
 const columns = buildDefaultPageColumns(page);
 
 function Host() {

@@ -66,7 +66,6 @@ function hookInputs(navigate: ReturnType<typeof useNavigate>, phone: boolean, se
     viewLabel: (_object: string, _view: string, fallback: string) => fallback,
     unlabelledViewText: 'Untitled view',
     language: 'en',
-    recordOpenPreference: 'object' as never,
     phone,
   };
 }

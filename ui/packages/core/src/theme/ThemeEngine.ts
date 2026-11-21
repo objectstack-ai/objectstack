@@ -95,6 +95,8 @@ const COLOR_TO_CSS_MAP: Record<keyof ColorPalette, string | string[]> = {
   accent: '--accent',
   success: '--success',
   warning: '--warning',
+  // Fill only. The danger TEXT token is derived per mode from the same colour
+  // in generateColorVars (see deriveDangerTextVars).
   error: '--destructive',
   info: '--info',
   background: '--background',
@@ -129,7 +131,95 @@ export function generateColorVars(colors: ColorPalette): Record<string, string> 
     }
   }
 
+  if (colors.error) Object.assign(vars, deriveDangerTextVars(colors.error));
+
   return vars;
+}
+
+// ============================================================================
+// Danger text derived from the error colour (objectstack#35911)
+// ============================================================================
+
+/** WCAG AA floor for normal text. */
+const DANGER_TEXT_MIN_CONTRAST = 4.5;
+
+/**
+ * The extreme surfaces the shipped stylesheets paint danger text on: for light,
+ * white and the darkest light surface (`240 18% 94%`, the console's muted and
+ * accent); for dark, the darkest and the lightest dark surfaces
+ * (`222.2 84% 4.9%` and `240 5% 16%`). Clearing the floor on these clears it on
+ * every surface in between; the stylesheet pin re-checks every surface.
+ */
+const LIGHT_SURFACES: ReadonlyArray<[number, number, number]> = [[0, 0, 100], [240, 18, 94]];
+const DARK_SURFACES: ReadonlyArray<[number, number, number]> = [[222.2, 84, 4.9], [217.2, 32.6, 17.5], [240, 5, 16]];
+
+function hslToRGB(h: number, s: number, l: number): [number, number, number] {
+  const sat = s / 100;
+  const lig = l / 100;
+  const k = (n: number) => (n + h / 30) % 12;
+  const a = sat * Math.min(lig, 1 - lig);
+  const f = (n: number) => Math.round(255 * (lig - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1))));
+  return [f(0), f(8), f(4)];
+}
+
+function hexToHSLParts(hex: string): [number, number, number] | null {
+  const rgb = hexToRGB(hex);
+  if (!rgb) return null;
+  const [r, g, b] = rgb.map((c) => c / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  let h = 0;
+  let s = 0;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+    else if (max === g) h = ((b - r) / d + 2) / 6;
+    else h = ((r - g) / d + 4) / 6;
+  }
+  return [h * 360, s * 100, l * 100];
+}
+
+function minContrast(rgb: [number, number, number], surfaces: ReadonlyArray<[number, number, number]>): number {
+  const lum = relativeLuminance(...rgb);
+  return Math.min(
+    ...surfaces.map((surface) => {
+      const other = relativeLuminance(...hslToRGB(...surface));
+      return (Math.max(lum, other) + 0.05) / (Math.min(lum, other) + 0.05);
+    }),
+  );
+}
+
+const round1 = (n: number) => Math.round(n * 10) / 10;
+
+/** Move the lightness toward `step`'s direction until the text clears the floor on every surface. */
+function clearFloor(h: number, s: number, l: number, step: number, surfaces: ReadonlyArray<[number, number, number]>): string {
+  let lig = round1(l);
+  while (minContrast(hslToRGB(h, s, lig), surfaces) < DANGER_TEXT_MIN_CONTRAST && lig > 0 && lig < 100) {
+    lig = round1(Math.min(100, Math.max(0, lig + step)));
+  }
+  return `${round1(h)} ${round1(s)}% ${lig}%`;
+}
+
+/**
+ * Derive the danger TEXT colour for each mode from a theme's error colour, so a
+ * custom red drives red text while the text keeps 4.5:1 in both modes: hue and
+ * saturation are the error colour's, lightness moves down (light) or up (dark)
+ * only as far as the floor needs. The stylesheets' `:root` / `.dark` blocks
+ * read `--destructive-text-light` / `--destructive-text-dark` into
+ * `--destructive-text`, which keeps the choice per mode in CSS even though the
+ * variables are applied once, whatever the mode. A non-hex error colour derives
+ * nothing, and the stylesheets' own danger text applies.
+ */
+function deriveDangerTextVars(error: string): Record<string, string> {
+  const hsl = isHex(error) ? hexToHSLParts(error) : null;
+  if (!hsl) return {};
+  const [h, s, l] = hsl;
+  return {
+    '--destructive-text-light': clearFloor(h, s, l, -0.5, LIGHT_SURFACES),
+    '--destructive-text-dark': clearFloor(h, s, l, 0.5, DARK_SURFACES),
+  };
 }
 
 /**

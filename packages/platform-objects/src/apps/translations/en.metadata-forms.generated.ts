@@ -82,15 +82,19 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       fieldGroups: {
         label: "Field Groups",
-        helpText: "Ordered sections that group this object's fields on the entry form and the record detail page (ADR-0085); array order is display order. A field joins a group by naming its key in the field's own group setting. Fields in no group follow the groups, and a group no field joins is not drawn."
+        helpText: "Ordered sections that group this object's fields on the entry form and the record detail page (ADR-0085); array order is display order. A group lists its fields, in order, in its Fields setting; a group without that list holds the fields that name its key in their own group setting. Fields in no group follow the groups, and a group no field joins is not drawn."
       },
       "fieldGroups.key": {
         label: "Key",
-        helpText: "Machine key in snake_case, unique within this object — the schema refuses anything else. Fields join the group by naming this key, so renaming it leaves them ungrouped."
+        helpText: "Machine key in snake_case, unique within this object — the schema refuses anything else. Fields the group lists in its Fields stay with it when the key is renamed; a field that joins by naming this key in its own group setting is left ungrouped."
       },
       "fieldGroups.label": {
         label: "Label",
         helpText: "Header text of the group's section."
+      },
+      "fieldGroups.fields": {
+        label: "Fields",
+        helpText: "The fields this group shows, in display order (field names). Written, it sets the order inside the group without moving any field. A field this list names may not name another group in its own group setting, and a field may be listed by one group only. Not allowed with Related List."
       },
       "fieldGroups.icon": {
         label: "Icon",
@@ -1347,10 +1351,11 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       navigation: {
         label: "Navigation",
-        helpText: "Configuration for item click navigation (drawer by default, page, new_window or none)"
+        helpText: "Configuration for item click navigation: the drawer size, and `preventNavigation` for a list whose rows open nothing (`mode` is deprecated — the record name opens the page, the hover icon the side panel)"
       },
       "navigation.mode": {
-        label: "Mode"
+        label: "Mode",
+        helpText: "[DEPRECATED] On an object's list (a list view, an object's `listViews`) no longer picks how a record opens: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing, so omit the key; `none` still means rows open nothing — prefer `preventNavigation: true`. A page block that carries `navigation` (a list block, the timeline, an embedded view) still honours every value."
       },
       "navigation.preventNavigation": {
         label: "Prevent Navigation",
@@ -1358,7 +1363,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "navigation.openNewTab": {
         label: "Open New Tab",
-        helpText: "Force open in new tab (applies to page mode)"
+        helpText: "Open the record's full page in a new browser tab when it is clicked; rows that open nothing stay that way, and a phone opens the page in place"
       },
       "navigation.size": {
         label: "Size",

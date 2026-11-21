@@ -63,7 +63,7 @@ import { resolveFieldReadFace } from '../../lib/field-face';
 import { PageDescriptionContext } from './page-description-context';
 import { PageHeaderTrailingContext } from './page-header-trailing-context';
 import { PageHeaderPhoneContext } from './page-header-phone-context';
-import { RecordHeaderBarContext, RecordHeaderStateContext } from './record-header-bar-context';
+import { RecordHeaderBarContext, RecordHeaderStateContext, type RecordHeaderState } from './record-header-bar-context';
 import { renderBlockChildren } from './page-block-grid';
 import { isFileIdToken } from '@objectstack/spec/data';
 import { readActionEntryParamValues } from '../action/static-params';
@@ -1944,9 +1944,9 @@ export interface PageHeaderActionsProps {
    * live, in place of an `actions` list. Only the boolean `true` opts in.
    */
   placedActions?: unknown;
-  /** The inline-button budget on desktop, as `page:header`'s `maxVisible`; an out-of-contract value falls back to 3. */
+  /** The inline-button budget on desktop, as `page:header`'s `maxVisible`; an out-of-contract value falls back to the unset default: 1 in a record page's one-row header (`defaultMaxVisible`), 3 on any other header. */
   maxVisible?: unknown;
-  /** The inline-button budget on mobile, as `page:header`'s `mobileMaxVisible`; an out-of-contract value falls back to 1. */
+  /** The inline-button budget on mobile, as `page:header`'s `mobileMaxVisible`; an out-of-contract value falls back to the unset default: 2 in a record page's phone bottom bar (`face: 'bar'`, the host's Edit included), 1 on any other header. */
   mobileMaxVisible?: unknown;
   /** Drawn in place of the action row when no action survives the gates. */
   emptySlot?: React.ReactNode;
@@ -2572,8 +2572,10 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     //   4. a host button (the record page's Edit) is not one of the page's
     //      actions: it takes no slot and never folds (objectui#12617).
     // `maxVisible` / `mobileMaxVisible` are overridable on the page:header
-    // schema and default to 3 / 1. This keeps the header from drowning in 4–5
-    // buttons on every record page.
+    // schema. Unset, `maxVisible` is 1 in a record page's one-row header and 3
+    // on any other header; `mobileMaxVisible` is 2 in a phone's record bottom
+    // bar (the host's Edit included) and 1 on any other header. This keeps the
+    // header from drowning in 4–5 buttons on every record page.
     //
     // `readMax` enforces the SPEC's value domain rather than a laxer renderer
     // tolerance (objectui#5006). Measured on `ComponentPropsMap['page:header']`
@@ -2647,9 +2649,17 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     const isHostButton = (a: unknown): boolean => isHostAction(a) && !isDestructiveAction(a);
     const rowEligible = buttonable.filter((a) => !isHostAction(a) || isHostButton(a));
     const primaryCandidates = rowEligible.filter((a) => !isDestructiveAction(a));
+    // A HOST button declaring `variant: 'primary'` is the primary whatever the
+    // page declares, and keeps the place the host gave it (objectstack#35816):
+    // the record page's edit state draws Cancel then Save, as a form's footer
+    // does, and Save is the one filled button. Before this the edit state's
+    // Cancel came first in `order` and drew as the primary, so the hand fell
+    // on the button that throws the edit away. No other host button declares
+    // a variant of `primary`, so every other row is unchanged.
+    const hostPrimary = primaryCandidates.find((a) => isHostButton(a) && a?.variant === 'primary');
     const primaryIdx = primaryCandidates.findIndex((a) => a?.variant === 'primary');
-    const primaryAction: unknown = primaryCandidates[primaryIdx >= 0 ? primaryIdx : 0];
-    const ranked = primaryAction
+    const primaryAction: unknown = hostPrimary ?? primaryCandidates[primaryIdx >= 0 ? primaryIdx : 0];
+    const ranked = primaryAction && !hostPrimary
       ? [primaryAction, ...buttonable.filter((a) => a !== primaryAction)]
       : buttonable;
     // The page's own actions share the `maxVisible` budget; what does not fit
@@ -3015,10 +3025,19 @@ function disableRecordChromeOf(schema: any): boolean {
 /**
  * The record's current stage as a short tag (objectstack#35593): the option
  * label of the object's stage field (`detectStatusField`, the field
- * `record:path` steps through) on this record. A field with no options, or no
- * value on the record, draws nothing.
+ * `record:path` steps through, or a plain status field) on this record. A
+ * field with no options, or no value on the record, draws nothing.
+ *
+ * The tag is where the stage is read and moved (objectstack#35891: the default
+ * record page draws no stage bar). A host that can move the stage hands
+ * `RecordHeaderState.stage`, which draws the tag as its menu; without one the
+ * tag is a readout.
  */
-function recordStageTag(objSchema: any, labelledData: any): React.ReactNode {
+function recordStageTag(
+  objSchema: any,
+  labelledData: any,
+  stage: RecordHeaderState['stage'],
+): React.ReactNode {
   const stageField = detectStatusField(objSchema);
   if (!stageField) return null;
   const options = (declaredFieldDef(objSchema, stageField) as any)?.options;
@@ -3026,7 +3045,7 @@ function recordStageTag(objSchema: any, labelledData: any): React.ReactNode {
   const raw = labelledData?.[stageField];
   const text = typeof raw === 'string' ? raw.trim() : typeof raw === 'number' ? String(raw) : '';
   if (!text) return null;
-  return (
+  const tag = (
     <span
       className="inline-flex h-5 shrink-0 items-center rounded-md border bg-muted px-1.5 text-xs font-medium text-foreground"
       data-record-stage-tag={stageField}
@@ -3034,6 +3053,7 @@ function recordStageTag(objSchema: any, labelledData: any): React.ReactNode {
       {text}
     </span>
   );
+  return stage ? stage({ field: stageField, label: text, tag }) : tag;
 }
 
 const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
@@ -3080,7 +3100,8 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
   const phoneFace = React.useContext(PageHeaderPhoneContext);
   // The host's one-row bar (objectstack#35593) and the record state's tags.
   const headerBar = React.useContext(RecordHeaderBarContext);
-  const headerStateTags = React.useContext(RecordHeaderStateContext)?.tags;
+  const headerState = React.useContext(RecordHeaderStateContext);
+  const headerStateTags = headerState?.tags;
   const headerObjectSchema: any = (ctx as any)?.objectSchema;
   const headerObjectName: string | undefined = ctx?.objectName || headerObjectSchema?.name;
   const explicitTitle = interpolate(
@@ -3248,6 +3269,7 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
     // (objectui#13103): a select `nameField` heads the page with its option
     // label, exactly as the same field does through the template.
     const labelledData = withOptionLabels(data, objSchema, fieldOptionLabel, rawObjectName);
+    const stageTag = recordStageTag(objSchema, labelledData, headerState?.stage);
     const interpolatedTitleFormat = formatTitleTemplate(objSchema?.titleFormat, labelledData);
     // Unified resolver (ADR-0079): honours the object's declared
     // `nameField`/`displayNameField` and falls back to type-aware field
@@ -3483,7 +3505,7 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
             }
             className="text-foreground [&_h1]:text-sm [&_h1]:font-semibold [&_h1]:sm:text-sm [&>div]:flex-nowrap [&>div]:items-center"
           />
-          {recordStageTag(objSchema, labelledData)}
+          {stageTag}
           {headerStateTags}
         </span>,
         headerBar.titleSlot,
@@ -3526,9 +3548,12 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
             }
           />
           {/* objectstack#35593 — the record state's tags (an approval's
-              status) where no host bar takes the record's header. */}
-          {headerStateTags && (
+              status) where no host bar takes the record's header; with them
+              the stage tag (objectstack#35891), which a phone otherwise never
+              showed once the default page stopped drawing the stage bar. */}
+          {(stageTag || headerStateTags) && (
             <div className="mt-1 flex flex-wrap items-center gap-2" data-record-header-tags="">
+              {stageTag}
               {headerStateTags}
             </div>
           )}
@@ -3628,7 +3653,7 @@ ComponentRegistry.register('header', PageHeaderRenderer, {
     // `description` stays the only authoring-time expression of it, and spec
     // stays the sole judge of values.)
     { name: 'maxVisible', type: 'number', description: 'How many header actions render as inline buttons on desktop before the rest fold into the overflow menu. A positive integer — the contract rejects 0 and fractional values. Two kinds of action are routed to the overflow menu regardless of this budget and never occupy an inline slot: an action whose locations declare record_more without record_header, and any action with component action:menu. The host\'s own buttons (the record page\'s Edit) take no slot and never fold. The first inline action, or the one declaring variant primary, is the one filled primary button; the others are outline buttons. An action declaring variant danger is never the primary: inline it is a destructive button, and in the overflow menu it is a red row below a separator.' },
-    { name: 'mobileMaxVisible', type: 'number', description: 'The same inline-button budget on mobile viewports, where horizontal room is scarce. A positive integer, defaulting to 1; the desktop half is Max Inline Actions, and the overflow routing rules stated there apply unchanged.' },
+    { name: 'mobileMaxVisible', type: 'number', description: 'The same inline-button budget on mobile viewports, where horizontal room is scarce. A positive integer; when unset it is 2 in a record page\'s bottom action bar on a phone (counting the host\'s Edit) and 1 on any other header. The desktop half is Max Inline Actions, and the overflow routing rules stated there apply unchanged.' },
   ],
 });
 

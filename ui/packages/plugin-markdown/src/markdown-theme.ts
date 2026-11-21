@@ -25,7 +25,7 @@ const STYLE_ID = "os-markdown-styles"
 const CSS = `
 .os-markdown .md-anchor {
   margin-left: 0.4ch;
-  color: var(--muted-foreground);
+  color: hsl(var(--muted-foreground));
   text-decoration: none;
   opacity: 0;
   transition: opacity 0.12s ease-in-out;
@@ -35,7 +35,7 @@ const CSS = `
 
 /* highlight.js tokens — light */
 .os-markdown .hljs-comment,
-.os-markdown .hljs-quote { color: var(--muted-foreground); font-style: italic; }
+.os-markdown .hljs-quote { color: hsl(var(--muted-foreground)); font-style: italic; }
 .os-markdown .hljs-keyword,
 .os-markdown .hljs-selector-tag,
 .os-markdown .hljs-literal,
@@ -56,7 +56,7 @@ const CSS = `
 .os-markdown .hljs-template-variable { color: #953800; }
 .os-markdown .hljs-type,
 .os-markdown .hljs-class .hljs-title { color: #0550ae; }
-.os-markdown .hljs-meta { color: var(--muted-foreground); }
+.os-markdown .hljs-meta { color: hsl(var(--muted-foreground)); }
 .os-markdown .hljs-deletion { color: #b35900; }
 .os-markdown .hljs-emphasis { font-style: italic; }
 .os-markdown .hljs-strong { font-weight: 600; }
@@ -88,9 +88,9 @@ const CSS = `
 .os-markdown .markdown-alert {
   margin: 1em 0;
   padding: 0.6em 1em;
-  border-left: 0.25em solid var(--border);
+  border-left: 0.25em solid hsl(var(--border));
   border-radius: 0.375rem;
-  background: color-mix(in srgb, var(--muted) 40%, transparent);
+  background: color-mix(in srgb, hsl(var(--muted)) 40%, transparent);
 }
 .os-markdown .markdown-alert > :first-child { margin-top: 0; }
 .os-markdown .markdown-alert > :last-child { margin-bottom: 0; }
@@ -117,8 +117,8 @@ const CSS = `
 .os-markdown .markdown-alert-warning { border-left-color: #9a6700; }
 .os-markdown .markdown-alert-warning .markdown-alert-title { color: #9a6700; }
 .os-markdown .markdown-alert-warning .markdown-alert-title::before { content: "⚠"; }
-.os-markdown .markdown-alert-caution { border-left-color: var(--destructive); }
-.os-markdown .markdown-alert-caution .markdown-alert-title { color: var(--destructive); }
+.os-markdown .markdown-alert-caution { border-left-color: hsl(var(--destructive-text, var(--destructive))); }
+.os-markdown .markdown-alert-caution .markdown-alert-title { color: hsl(var(--destructive-text, var(--destructive))); }
 .os-markdown .markdown-alert-caution .markdown-alert-title::before { content: "⛔"; }
 .dark .os-markdown .markdown-alert-note { border-left-color: #4493f8; }
 .dark .os-markdown .markdown-alert-note .markdown-alert-title { color: #4493f8; }

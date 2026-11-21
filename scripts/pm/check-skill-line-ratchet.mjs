@@ -73,7 +73,8 @@ const REPO_ROOT = new URL('../../', import.meta.url);
 // output against this map. Of the four rows marked below, three were then
 // lowered to the size that PR's own edits landed (lowering is always
 // legitimate); the fourth, `triage-duties.md`, was edited byte-neutral and
-// equals the output. No number
+// equals the output. Three rows were later raised by an ordinary ruled raise,
+// each to its file's landed size and each named at its row. No other number
 // here is a raise and none is slack. The line-era row comments are not carried
 // forward: they are in another unit, and they stay readable in git history
 // (`git show 74d3d831d:scripts/pm/check-skill-line-ratchet.mjs`). A PR that
@@ -100,12 +101,12 @@ export const CEILINGS = new Map([
   ['.claude/skills/pm-dispatch/references/review-checklist.md', 79],
   ['.claude/skills/pm-dispatch/references/landing-operations.md', 10717],
   ['.claude/skills/pm-dispatch/references/release-aftercare.md', 3526],
-  ['.claude/skills/pm-dispatch/references/seat-post-protocol.md', 7722],
+  ['.claude/skills/pm-dispatch/references/seat-post-protocol.md', 7720],
   ['.claude/skills/pm-dispatch/references/true-green.md', 2068],
   ['.claude/skills/pm-dispatch/references/compile-surfaces.md', 2488],
-  ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 9071],
-  ['.claude/skills/pm-dispatch/references/area-lease.md', 6401],
-  ['.claude/skills/pm-dispatch/references/coordinator.md', 3781],
+  ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 9070],
+  ['.claude/skills/pm-dispatch/references/area-lease.md', 6586], // raised 6401 → 6586 by the ruled text (one seat per lane by default; a new `area:*` is a partition of that seat), ruling record 7030459053
+  ['.claude/skills/pm-dispatch/references/coordinator.md', 4265], // raised 3781 → 4265 by the ruled text (one seat per lane by default; a new `area:*` is a partition of that seat), ruling record 7030459053
   ['.claude/skills/pm-dispatch/references/untrusted-text.md', 3280],
   ['.claude/skills/pm-dispatch/references/security-findings.md', 3934],
   ['.claude/skills/pm-dispatch/references/external-contributions.md', 2006],
@@ -132,13 +133,13 @@ export const CEILINGS = new Map([
   ['.claude/skills/pm-dispatch/references/lanes/eval.md', 2694],
   ['.claude/skills/pm-dispatch/references/lanes/queue.md', 2003],
   ['.claude/skills/pm-dispatch/references/lanes/cloud.md', 1232],
-  ['.claude/skills/pm-dispatch/references/lanes/objectstack.md', 2270],
+  ['.claude/skills/pm-dispatch/references/lanes/objectstack.md', 2540], // raised 2270 → 2540 by the ruled text (one seat per lane by default; a new `area:*` is a partition of that seat), ruling record 7030459053
   ['.claude/agents/os-dev.md', 38848], // lowered 39008 → 38848 by the re-basing PR's own edit
   ['.claude/skills/checklist-test/SKILL.md', 19560],
   ['.claude/skills/checklist-author/SKILL.md', 3574],
   ['.claude/skills/dogfood-verification/SKILL.md', 9526],
   ['.claude/skills/spec-property-retirement/SKILL.md', 26922],
-  ['AGENTS.md', 78106],
+  ['AGENTS.md', 78401], // raised 78106 → 78401 (+295 B, the merge-queue speed-budget sentence; 1050 → 1053 lines) by ruling record 7044162186 「抬到 1053,整句写进去」 under ruling record 6184799323, letter B
   ['CLAUDE.md', 273],
 ]);
 
