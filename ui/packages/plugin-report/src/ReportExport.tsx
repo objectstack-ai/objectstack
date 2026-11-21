@@ -21,8 +21,8 @@
  * Formats are `csv` / `xlsx`, on by default: absent means both, `formats: []`
  * means no control. Who may export is not a report key: the control is offered
  * only when the dataset's BASE object (the query answer's `object`) resolves
- * an open export verdict — `resolveEffectiveCrudAffordances(...).exportCsv`
- * from `@object-ui/core`, the predicate the list toolbar and the grid apply.
+ * an open export verdict — `isObjectExportOffered` from `@object-ui/core`,
+ * the predicate the list toolbar and the grid apply.
  * That is the object's `userActions.exportCsv` over its `managedBy` default
  * (`exportCsv: false` hides the control, every format), ANDed with the
  * viewer's effective API operations on the object including `export`
@@ -40,7 +40,7 @@
 import * as React from 'react';
 import { Download, Loader2 } from 'lucide-react';
 import { Button, Popover, PopoverContent, PopoverTrigger } from '@object-ui/components';
-import { buildExportFileName, resolveEffectiveCrudAffordances, type SchemaLike } from '@object-ui/core';
+import { buildExportFileName, isObjectExportOffered, type SchemaLike } from '@object-ui/core';
 import { pickLocalized, useObjectTranslation } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
 import { useSettledSchema } from '@object-ui/react';
@@ -203,7 +203,7 @@ export function ReportExportControl({ exportOptions, label, name, snapshot, data
   if (formats.length === 0 || !snapshot) return null;
   // The list toolbar's predicate, on the dataset's base object.
   const ops = snapshot.object ? getObjectApiOperations(snapshot.object) : undefined;
-  if (!resolveEffectiveCrudAffordances(baseObject, ops).exportCsv) return null;
+  if (!isObjectExportOffered(baseObject, ops)) return null;
 
   const options = (exportOptions ?? {}) as ReportExportOptionsLike;
   const includeHeaders = options.includeHeaders !== false;

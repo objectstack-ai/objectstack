@@ -1132,8 +1132,8 @@ const persistence = (
 The toolbar's Export menu (offered when the schema declares `exportOptions`) and
 the table's own CSV button (`operations.export: true`) are both offered only
 while the object's resolved export verdict is open:
-`resolveEffectiveCrudAffordances(objectSchema, effectiveApiOperations).exportCsv`
-from `@object-ui/core`, which is the object's `userActions.exportCsv` over its
+`isObjectExportOffered(objectSchema, effectiveApiOperations)` from
+`@object-ui/core`, which is the object's `userActions.exportCsv` over its
 `managedBy` default, ANDed with the caller's effective `export` API operation.
 An object that sets `userActions.exportCsv: false` gets neither entry, in any
 format; one that does not set it keeps them, since every `managedBy` bucket

@@ -71,7 +71,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@object-ui/components';
-import { captureUpdateUndoData, resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, resolveAffordanceGrant, resolveFieldAffordance, resolveEffectiveCrudAffordances, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob, readActionPayload } from '@object-ui/core';
+import { captureUpdateUndoData, resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, resolveAffordanceGrant, resolveFieldAffordance, isObjectExportOffered, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob, readActionPayload } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import {
   RECORD_OVERLAY_DEFAULT_WIDTH,
@@ -1084,17 +1084,17 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
 
   // [objectstack#35619] The object's export verdict, read by every export entry
   // this grid draws — the toolbar's Export menu, its handler and the table's own
-  // CSV button. `resolveEffectiveCrudAffordances` folds the object's
+  // CSV button. `isObjectExportOffered` (`@object-ui/core`) folds the object's
   // `userActions.exportCsv` over its `managedBy` default (`false` hides every
   // format) with the server's effective `export` operation, so neither half is
   // spelled here. It describes the OBJECT, from `objectSchema` alone, and is not
   // a grant: who may export is the permission set's `allowExport`, which reaches
   // this grid through the effective operation set. With no object definition in
   // hand the bucket default applies, which offers export in every bucket.
-  const objectExportOffered = resolveEffectiveCrudAffordances(
+  const objectExportOffered = isObjectExportOffered(
     objectSchema as SchemaLike | null | undefined,
     effectiveApiOps,
-  ).exportCsv;
+  );
 
   // [#5143] Whether THIS principal may edit THIS object's rows in place — the
   // single verdict behind every inline-edit affordance this grid renders

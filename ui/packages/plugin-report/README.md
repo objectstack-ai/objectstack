@@ -276,8 +276,8 @@ offering the formats `exportOptions.formats` names (`csv` and `xlsx` by
 default, none for `[]`). The control writes the table as drawn. It is offered
 only while the dataset's base object (the query answer's `object`) resolves an
 open export verdict, the one the list toolbar and the grid read:
-`resolveEffectiveCrudAffordances(objectDef, effectiveApiOperations).exportCsv`
-from `@object-ui/core`. So a base object that sets `userActions.exportCsv:
+`isObjectExportOffered(objectDef, effectiveApiOperations)` from
+`@object-ui/core`. So a base object that sets `userActions.exportCsv:
 false` gets no Export control on its reports, and neither does a caller whose
 effective API operations on it leave out `export`. The base object's definition
 is read through the report's data source (`getObjectSchema`); a source that

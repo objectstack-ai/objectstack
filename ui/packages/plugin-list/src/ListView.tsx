@@ -49,7 +49,7 @@ import { useDensityMode, resolveInlineAriaProps } from '@object-ui/react';
 import type { DataTableSchema, DependsOnInput, ListViewSchema, ObjectMapConfig } from '@object-ui/types';
 import { detectStatusField, isSystemManagedField } from '@object-ui/types';
 import { usePullToRefresh } from '@object-ui/mobile';
-import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, resolveEffectiveCrudAffordances, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, toFilterNodeSafely, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING, kanbanDeclaredLanes, csvBlob, readWithheldFieldNames, refersToWithheldField } from '@object-ui/core';
+import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, isObjectExportOffered, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, toFilterNodeSafely, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING, kanbanDeclaredLanes, csvBlob, readWithheldFieldNames, refersToWithheldField } from '@object-ui/core';
 import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLocale, pickLocalized, recordCurrencyField, recordCurrencyReadField } from '@object-ui/i18n';
 // Two resolvers, two vocabularies — the repo spells the distinction into the
 // NAMES (objectui#4167). `resolveInlineI18nLabel` is the spec's own
@@ -3061,7 +3061,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // Object-level export permission gate. Default-allow: export stays enabled
   // unless `allowExport === false` or `operations.export === false`, AND unless
   // the object's resolved export verdict closes it. That verdict is
-  // `resolveEffectiveCrudAffordances(...).exportCsv` from `@object-ui/core`:
+  // `isObjectExportOffered` from `@object-ui/core`:
   // the object's `userActions.exportCsv` over its `managedBy` default
   // (objectstack#35619 — `exportCsv: false` hides the whole entry, every
   // format) ANDed with the server's effective API operation set
@@ -3078,7 +3078,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   const exportPermitted =
     schema.allowExport !== false &&
     schema.operations?.export !== false &&
-    resolveEffectiveCrudAffordances(objectDef as SchemaLike | null, effectiveApiOps).exportCsv;
+    isObjectExportOffered(objectDef as SchemaLike | null, effectiveApiOps);
 
   // [objectstack#3720] Bulk-action gate for the NON-grid views (kanban / calendar /
   // gallery / …), whose bulk bar this component renders itself — the grid path

@@ -687,8 +687,8 @@ The Export entry (the wide toolbar's button and the Display panel's footer) is
 offered when the view declares `exportOptions` and three things allow it: the
 view's `allowExport` and `operations.export` are not `false`, and the object's
 resolved export verdict is open. That verdict is
-`resolveEffectiveCrudAffordances(objectDef, effectiveApiOperations).exportCsv`
-from `@object-ui/core`: the object's `userActions.exportCsv` over its
+`isObjectExportOffered(objectDef, effectiveApiOperations)` from
+`@object-ui/core`: the object's `userActions.exportCsv` over its
 `managedBy` default, ANDed with the caller's effective `export` API operation.
 An object that sets `userActions.exportCsv: false` therefore gets no Export
 entry in any format; one that does not set it keeps the entry, since every

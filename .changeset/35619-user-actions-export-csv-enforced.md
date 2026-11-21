@@ -1,5 +1,6 @@
 ---
 '@objectstack/spec': minor
+'@object-ui/core': minor
 '@object-ui/plugin-grid': minor
 '@object-ui/plugin-list': minor
 '@object-ui/plugin-report': minor
@@ -8,7 +9,7 @@
 
 feat: an object's `userActions.exportCsv: false` hides the console's Export entry
 
-Clause-②: no
+Clause-②: yes
 Metadata-protocol: semantic
 
 `userActions.exportCsv` on an object now does what the Studio object form says it does. Set to `false`, the console offers no Export entry for that object's records, in any format:
@@ -17,7 +18,7 @@ Metadata-protocol: semantic
 - the list view hides Export in both toolbar forms, the wide toolbar's button and the Display panel's export footer;
 - a dataset report hides its Export control when the dataset's base object sets it.
 
-Every surface reads one verdict, `resolveEffectiveCrudAffordances(objectSchema, effectiveApiOperations).exportCsv` from `@object-ui/core`: the authored `exportCsv` over the object's `managedBy` default, ANDed with the caller's effective `export` API operation. Before this change the surfaces read only the effective operation, so `exportCsv: false` changed nothing.
+Every surface reads one verdict, the new `isObjectExportOffered(objectSchema, effectiveApiOperations)` from `@object-ui/core`: the authored `exportCsv` over the object's `managedBy` default, ANDed with the caller's effective `export` API operation. Before this change the surfaces read only the effective operation, so `exportCsv: false` changed nothing. Export is a read, so the verdict is not a row of `AFFORDANCE_GRANTS` and asks no `can(object, verb)`: the caller's export grant reaches the console through the effective `export` operation, which the server derives from `list` and `allowExport`.
 
 Nothing changes for an object that does not author the key: every `managedBy` bucket still defaults `exportCsv` to `true` (ADR-0103), so its Export entry stays. The setting hides the entry and is not a permission: no export request is refused because of it, and who may export is still the permission set's `allowExport`. The report reads the base object's definition through the report's data source, and a report whose source cannot serve one keeps its Export control.
 
