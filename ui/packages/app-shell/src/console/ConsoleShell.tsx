@@ -54,7 +54,6 @@ import {
   RecordPreferencesProvider,
 } from '../context/RecordPreferencesProvider.js';
 import { ThemeProvider } from '../chrome/ThemeProvider.js';
-import { LoadingScreen } from '../chrome/LoadingScreen.js';
 import { RedirectWithSplash } from '../chrome/RedirectWithSplash.js';
 import { ConsoleBootFallback } from './ConsoleBootShell.js';
 import { RemediationOverlay } from './RemediationOverlay.js';
@@ -492,7 +491,7 @@ export function RequireOrganization({ children }: { children: ReactNode }) {
   // looking at is dropped and nothing replaces it until `/organizations`
   // renders at transition priority. Measured on the three sibling gates #6506
   // fixed: 41-147 ms of empty `#root`, a white flash on 67/87 boots. The
-  // replacement paints the SAME `LoadingScreen` this gate was already showing,
+  // replacement paints the SAME fallback this gate was already showing,
   // so the handoff changes no pixels.
   if (orgFeatureEnabled && !activeOrganization)
     return <RedirectWithSplash to="/organizations" replace />;

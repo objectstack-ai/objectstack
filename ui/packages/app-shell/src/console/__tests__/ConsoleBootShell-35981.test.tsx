@@ -18,7 +18,7 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import React from 'react';
 import { cleanup, render } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const authState = vi.hoisted(() => ({
   isLoading: false,
@@ -31,6 +31,7 @@ vi.mock('@object-ui/auth', async (importOriginal) => {
 
 import { ConsoleBootFallback, ConsoleBootShell } from '../ConsoleBootShell';
 import { LoadingFallback } from '../ConsoleShell';
+import { RedirectWithSplash } from '../../chrome/RedirectWithSplash';
 
 const RECORD = '/apps/crm/account/record/acc_1';
 
@@ -61,6 +62,37 @@ describe('the console boot fallback (objectstack#35981)', () => {
   it('is what the shared LoadingFallback draws', () => {
     at(RECORD, <LoadingFallback />);
     expect(shell()).not.toBeNull();
+  });
+
+  it('is what a boot redirect paints during its hand-off, so the hand-off changes no pixels', () => {
+    // The redirect fires from inside a gate that was drawing the frame
+    // (`RequireOrganization` -> `/organizations`, `AppContent` -> home): it
+    // paints the same frame until the destination renders.
+    render(
+      <MemoryRouter initialEntries={[RECORD]}>
+        <Routes>
+          <Route path="/apps/*" element={<RedirectWithSplash to="/organizations" replace />} />
+          <Route path="/organizations" element={<div data-testid="organizations" />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(document.querySelector('[data-testid="organizations"]')).not.toBeNull();
+    cleanup();
+    // Measured at its first commit, before its navigation runs.
+    let frameAtCommit: Element | null = null;
+    function Probe() {
+      React.useLayoutEffect(() => {
+        frameAtCommit = shell();
+      });
+      return null;
+    }
+    render(
+      <MemoryRouter initialEntries={[RECORD]}>
+        <RedirectWithSplash to="/organizations" replace />
+        <Probe />
+      </MemoryRouter>,
+    );
+    expect(frameAtCommit).not.toBeNull();
   });
 
   it('draws no app, no navigation entry and nothing to press', () => {
