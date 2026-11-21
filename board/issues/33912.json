@@ -14,20 +14,18 @@
     "area:data",
     "bug",
     "domain:server",
-    "pm:dispatched",
+    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [
-    "os-tesla"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-15T14:04:58Z",
-  "updated_at": "2026-11-21T12:30:48Z",
+  "updated_at": "2026-11-21T15:28:43Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33912",
   "body": "qa#3 · os-tesla · session_01L9qibzj9DrVWXkq7joYHGB\n\nReproduction (b914e724, showcase, stock single posture, admin@objectos.ai):\n1. POST /api/v1/auth/sign-in/email (Origin: http://localhost:PORT) as admin.\n2. GET /api/v1/data/showcase_inquiry → pick any id, e.g. the seeded status='new' inquiry.\n3. POST /api/v1/data/showcase_inquiry/&lt;id>/shares  body {\"recipientType\":\"user\",\"recipientId\":\"nobody_xyz\",\"accessLevel\":\"read\"}\n\nExpected: a 400/404 refusal naming the unknown recipient (the grant names no principal, so no gate will ever match it — the same \"share row that looks granted and enforces nothing\" class #3865 closed for typo'd access levels and ADR-0111 D7 closed for non-user recipient types).\nActual: 201 with {\"id\":\"shr_…\",\"recipient_type\":\"user\",\"recipient_id\":\"nobody_xyz\",\"access_level\":\"read\",\"source\":\"manual\",…}; the row persists in sys_record_share and is listed by GET /api/v1/data/showcase_inquiry/&lt;id>/shares.\n\nContrast at the same door: recipientId \"\" → 400 VALIDATION_FAILED \"recipientId is required\"; unknown record id → 404 NOT_FOUND.\n\nMechanism: packages/plugins/plugin-sharing/src/sharing-service.ts grant() (~line 1913-1950) validates presence of recipientId, the recipient type and the access level, but never resolves the recipient against sys_user (or its organization membership).\n\nReproduced twice on fresh boots (share.db and share2.db, :41162; recipientId 'nobody_xyz' read, 'ghost_user_qa' edit — both 201, both listed by GET …/shares).\n\nRegression: not new since 18.4.0 — `git log 181ad7d4..HEAD -- packages/plugins/plugin-sharing/src/sharing-service.ts` is empty; the same presence-only check sits at line 1919 at 181ad7d4.\n\nDuplicate search (read-only, none found): `repo:objectstack-ai/objectstack is:issue is:open share recipient nonexistent user`; `… is:issue is:open record share unknown recipientId`; `… is:issue share recipient validated user exists`.\n\nSeverity: low (admin/owner-only door; no access is widened). Data-integrity / inert-grant class.\n\nQA-source: #33910 · access-security.sharing-rules-widen · observed beside the clauses"

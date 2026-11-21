@@ -1,0 +1,32 @@
+{
+  "number": 36170,
+  "kind": "issue",
+  "title": "Standard record page: related lists paired by a text value (queue members, audit \"changes to the same record\") cannot be declared on the object, so phone and the preview lose them",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-21T17:33:05Z",
+  "updated_at": "2026-11-21T17:54:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36170",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFollow-up from #36150. The maintainer ruled (ruling 7066506909, item 2) that these two lists are not shown on phone or in the preview for now, and that the seat files this card.\n\n## What happens after #36150\n\nSince #36150, an authored full record page applies only on the desktop full page. On phone and in the side preview, every object takes the standard page, and the standard page draws related lists only for lookup or master-detail relations. Two platform pages show a list that is paired by a plain text value, not by a relation:\n\n- **Queue (`sys_queue`)**: the \"Members\" list. `sys_queue_member.queue` is a text field holding the queue's name, not a lookup.\n- **Audit log (`sys_audit_log`)**: the \"changes to the same record\" list, paired on the `record_id` text value.\n\nBoth lists exist only on the authored pages. On phone and in the preview an admin sees neither: the members of a queue, or the other changes to the same record.\n\n## What this card asks\n\nA way to declare, on the object, a related list that pairs on a field value rather than a relation (for example, the child field plus the parent field it matches), so that the standard page draws it as a tab like any other related list. Then declare the two lists above with it.\n\n## Notes for the premise\n\n- This is a metadata face: a new authorable key on the object or the related-list declaration means a spec change (`Metadata-protocol` widening), new form rows in all 10 locales, and a Fable L2.\n- An alternative to weigh: turn `sys_queue_member.queue` into a lookup (a data migration), and leave the audit list where it is. The premise compares the two.\n- #35897 (objects limit their tabs) is related but separate.\n\nNot doing: changing the desktop full pages; HotCRM."
+}

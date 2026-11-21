@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T15:05:03Z",
-  "updated_at": "2026-11-16T12:57:46Z",
+  "updated_at": "2026-11-21T15:07:44Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33258",
   "body": "review#2 · os-project-manager · session_01FEkQ5mjfxPu5HKjUtuveBR\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/l2-review.md` and `references/contract-review.md` (⛔ not copied here). This is **`review` seat 2** (old spelling kept while seated, per `lanes/l2-review.md`).\n\n## Current PM — 🟢 os-project-manager\n\n- **Account / project:** `os-project-manager` · project thread session `session_01FEkQ5mjfxPu5HKjUtuveBR` · seated 2026-11-16T11:28Z on the maintainer's word in the project thread: 「再开一个审核席，你可以自主决定」.\n- **Successor-of:** `session_01L9qibxTeW8xHnxoHxWNHWW` (os-tesla, signed off; brief 6910356389). Records that seat left on open PRs stay with review#1 (os-mickey) per the brief; this seat takes new TAKE rows and deltas on its own records.\n- **Mailbox:** PR #34385. **Patrol:** `trig_01UuLZujQ2U5virsFQbLy9WB` · hourly (`28 * * * *`).\n- **Hot-file serial queue:** none (a review seat writes only records).\n- **Posture ledger:** lives in the project.\n\n## Scope\n\n- Takes `check-owed-reviews.mjs` TAKE rows that have no live `Contract-review-claim:`; review#1 (mailbox #34329) and this seat split by claim (first claim line on a head holds it).\n- Main load: PRs of seat `repo:objectstack#1` (#34366, mailbox #34367) and its areas.\n- Every `CONTRACT_REVIEW_TIER` record is served by a Fable review agent and posted with `--tier-evidence`.\n- ⛔ Never the Version Packages PR #33097, #33849 or any release PR. ⛔ No merge, ready, dispatch or grading.\n\n## Notes\n\n- Write path: the relay. ⛔ No GitHub MCP writes.\n- Tier H PRs still need the maintainer's own approval; a review seat only records.\n"

@@ -1,0 +1,31 @@
+{
+  "number": 36120,
+  "kind": "issue",
+  "title": "ci: run plugin-sharing's share-grant switch test against live PostgreSQL (OS_TEST_POSTGRES_URL) in CI",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-21T15:05:43Z",
+  "updated_at": "2026-11-21T15:48:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36120",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibyXo4gSy8DJPNz4ANz\n\nFiling gate: ③ a gap the contract review named · Source: fleet (L2 record 7064569198 on #36116, S2; seat 7's call, 2026-11-21 15:04 UTC). Part of #33787.\n\n## 维护者速读\n- 问题：第 6 步（#33787）的 PostgreSQL 一致性测试（`shared-record-ids-switch.test.ts`）只有在设置了 `OS_TEST_POSTGRES_URL` 时才跑，CI 里没有任何任务给 plugin-sharing 设这个变量，所以 PR 和 main 上它都被跳过。\n- 这一步做什么：让 CI 里已有的 live PG 环境（Temporal Conformance 那一格用的同一个服务）也跑这个测试文件。\n- 不做会怎样：以后改到共享读取的 PR，PG 上结果是否和 SQLite 一致，只能靠人手动跑。\n- 要你做的：无。\n\n## What is known\n- The test file's PG cell is gated on `OS_TEST_POSTGRES_URL` and gets its own schema, dropped afterwards. On #36116 it was run by hand at the landing head (the reading is posted on that PR).\n- `Temporal Conformance (live PG + MySQL)` already starts a PG service, on push only. Whether to add this file to that job or to a new one is this card's call, weighed against the CI time budget.\n\n## Scope\n- One CI wiring change that runs this file with the PG URL set, plus a reading of its added time.\n- ⛔ No test change. Add no new gate family unless the maintainer names one (SKILL.md: new gates default to no).\n\n## Dedupe\n`repo:objectstack-ai/objectstack is:issue OS_TEST_POSTGRES_URL plugin-sharing` → none.\n\nGrade: p3. Type: Task."
+}

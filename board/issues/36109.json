@@ -1,0 +1,35 @@
+{
+  "number": 36109,
+  "kind": "pull_request",
+  "title": "chore(ui): raise the eager ui-components ceiling x1.30 to 451,100 on maintainer ruling",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-21T14:38:41Z",
+  "updated_at": "2026-11-21T15:15:40Z",
+  "closed_at": "2026-11-21T15:15:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-21T15:15:38Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36109",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuWrubarDyy1TAMVqK1ZWbAY)_\n\nrepo:objectstack#1 · os-sales · session_01L6bhgWSAwkSz6F3eit2Y9u\n\nRefs #36023\n\nArea: b1-L · budget-only, follow-up to #36100. **Authorisation: maintainer ruling 7063869131 on #36023** (amends point 2 of 7063116595). At 2026-11-21T14:01Z the maintainer widened the raise on #36100's thread, verbatim: 「这个可以大幅放宽」 (this can be raised by a lot), then picked \"raise 30%, to 451,100\" on the decision card that followed. #36100 was already in the merge queue at +8,000 and landed as it was so S5 #36039 was not held up; this PR carries the rest.\n\n## What changes\n\nOne file, `ui/scripts/check-eager-closure-budget.mjs`, constants and their comments only:\n\n| constant | before (#36100) | after |\n|---|---:|---:|\n| `PER_CHUNK_GZIP_CEILINGS['ui-components']` | 355,000 | 451,100 |\n| `PER_CHUNK_BASELINE['ui-components']` | 273,937 | 265,937 |\n\n- Ceiling: 347,000 (the value ruling 7063116595 started from) × 1.30 = 451,100 exactly, rounded nowhere.\n- Baseline: back to its measurement (`bbf6b02d9`'s 265,937). #36100's +8,000 only kept the ceiling-minus-baseline gap; a ruled raise widens the gap instead, as the 2026-11-17 30% ruling on `i18n-locale-en` and the 20% ruling (objectui#12653) left their baseline rows alone. Both checked constraints hold: 451,100 > 265,937, and the gap 185,163 < `REGRESSION_THIS_GATE_MUST_CATCH_BYTES` (711,680).\n- A dated \"⚠️ RAISED ×1.30 ... ON EXPLICIT MAINTAINER RULING\" entry on the key, with the rows below and a \"⭐ PAYBACK: objectstack#36102\" line (L1-b's N1 on #36100). #36100's entry stays as the history it is.\n- Not moved: `MAX_EAGER_CLOSURE_GZIP_BYTES`, `BASELINE`, `REGRESSION_THIS_GATE_MUST_CATCH_BYTES`, the other three per-chunk rows. No code change, no exemption, no import made lazy.\n\n## Why\n\nThe maintainer wants this line to stop ejecting form and field PRs one at a time. With +8,000 the chunk keeps about 4.8 KB once S5 lands; with ×1.30 about 98.6 KB.\n\n### The rows (one container, one instrument)\n\n`CI=true pnpm exec turbo run build --filter=@object-ui/console...`, reading `apps/console/dist/eager-closure.json`, twice on one tree: `main` at `1586ddec` (#36100 landed) alone, then that `main` with #36039's head `fbbaaa99` merged in (`034f0628`, local, not pushed). This file is not a console build input, so the branch builds the same bytes as `main`. Gzipped bytes:\n\n| chunk | `1586ddec` | `034f0628` | delta |\n|---|---:|---:|---:|\n| `vendor-objectstack` | 671,638 | 671,638 | 0 |\n| `i18n-locale-en` | 65,900 | 65,900 | 0 |\n| `framework` | 88,341 | 88,341 | 0 |\n| `ui-components` | 347,621 | 350,177 | +2,556 |\n| aggregate | 2,030,013 | 2,032,544 | +2,531 |\n\nSame 104 eager chunks by name in both builds; besides `ui-components` none moved by more than 21 bytes. Headroom of `ui-components`:\n\n| ceiling | on `1586ddec` | with S5 |\n|---|---:|---:|\n| 355,000 (now) | 7,379 | 4,823 |\n| 451,100 (this PR) | 103,479 | 100,923 (0.14x the 695 KiB regression) |\n\n### What the bytes buy\n\nShared headroom only, so form and field PRs are not ejected on this line one at a time. Not a budget for a new component group; a whole group still belongs behind a lazy boundary. Payback: #36102 takes GridField out of the eager chunk; re-measure when it lands.\n\n## Verification\n\nClause-②: no\nMetadata-protocol: none\n\n- `pnpm --dir ui run check:eager-closure` on the `034f0628` build (S5 merged) with this branch's constants: exit 0; `ui-components` 342.0 KB / 440.5 KB, headroom 98.6 KB; aggregate, membership and sensitivity halves all ✅.\n- `pnpm --dir ui exec vitest run scripts/`: 172 files passed, 2 skipped (5,121 tests passed), including `check-eager-closure-budget.test.ts`.\n- `eslint ui/scripts/check-eager-closure-budget.mjs`: exit 0.\n- `node scripts/pm/check-governed-merges.mjs --branch HEAD`: NOT governed.\n- Same one-file list as #36100, whose 16 `dispatch-gates.mjs --commands` all exited 0 on that head; of those, only the `vitest run scripts/` family reads this file's values, and it was re-run above.\n- `skip-changeset`: `ui/scripts/` belongs to the private root package `object-ui-monorepo`, so nothing publishes.\n\nBranch is the harness-assigned `claude/project-thread-usk9vf`, restarted from `main` after #36100 merged.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no names added)\n- [x] 3. No formatter ran; `pnpm lint` passes. (`eslint` on the one file: exit 0)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (publishes nothing: `skip-changeset`)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgWSAwkSz6F3eit2Y9u\n"
+}

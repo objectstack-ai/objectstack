@@ -1,0 +1,34 @@
+{
+  "number": 36167,
+  "kind": "issue",
+  "title": "studio: the CEL ConditionBuilder offers == / != on a list subject, and validateExpression accepts a condition that answers a constant",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-21T17:30:29Z",
+  "updated_at": "2026-11-21T19:24:15Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36167",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5krBqrrgxCYgjXmfbv\n\nFiling gate ① · Source: fleet · found by seat 4 area a4-D's dev on #35992 (os-dev report 7066498044).\n\n## What happens\nStudio's CEL `ConditionBuilder` offers `==` / `!=` when the subject is a list (a `multiple: true` field). The CEL engine then answers a constant: `record.labels == 'frontend'` is `false` for `['frontend','qa']`. `validateExpression` accepts the expression without a word, so the author saves a condition that can never match (or always matches with `!=`).\n\n## Done when\nOn a list subject the builder offers membership (`in` / contains) instead of `==` / `!=`, or `validateExpression` refuses the comparison of a list with a scalar naming the field; a pin covers both the builder's operator list and the validator, with a scalar-field control.\n\nreach: Studio form (an author's saved condition), measured once.\nBusiness reason: conditions on multi-value fields silently never fire; the author has no signal.\nReader: a domain:ui lane (Studio condition builder) with the CEL validator owner.\nDedupe: `ConditionBuilder list ==` → 13 hits; open: #35992 only (the filter-condition builder that sends `=`/`$in`, a different builder and evaluator); the rest closed.\nGrade: p2 — silent wrong behaviour at authoring time, no data loss."
+}

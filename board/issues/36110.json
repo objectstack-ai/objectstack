@@ -1,0 +1,32 @@
+{
+  "number": 36110,
+  "kind": "issue",
+  "title": "Console sign-out keeps the list layout (column widths, row height, tab order) for the same person; a change of user still clears it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-21T14:39:56Z",
+  "updated_at": "2026-11-21T14:52:14Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36110",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFollow-up owed by the maintainer's ruling 7064241116 on #35955 (point 1, option A on the seat's decision card, reviewed by fable first: `build-seat1/35955/pr3/fable-decisions.md` P3-1 in the project folder). Build after #35955 PR3 merges (it defines the browser-only layout keys).\n\n## What happens\n\n#35955 PR3 makes column widths, row height and tab order browser-only (ruling D1). The console's sign-out purge (`ui/packages/auth/src/ActiveOrganizationStorage.ts`, `purgeSignedOutUserClientState`, from #29174 and generalised by #32048) clears every browser key the person wrote, keeping only an exact-match allowlist. #32048 justified that with \"server preferences are untouched, re-login gets them back\"; after PR3 there is no server copy, so every sign-out or ended session resets everyone's list layout. Filters, sorts and search terms are in-memory drafts since #36026, so what remains under these keys is object names, field names, widths and view ids, no record data.\n\n## To do\n\n1. The sign-out tier of the purge keeps the list layout keys PR3 introduces (a prefix exception, the first one), and the grid's own width copies (`grid-columns-…`, `ui/packages/plugin-grid/src/objectGridColumnState.ts`) so a related tab's widths (browser-only by ruling 7064246280 on #35892) behave the same. The change-of-user tier (`purgePreviousUserClientState`) does NOT keep them.\n2. A test pins what may live under the kept keys (widths, row height, tab order only), so nothing else can hide from the purge later. No `anon` key spelling.\n3. Update the P1 checklist item `identity-auth.console-sign-out-and-ended-session` and `ui/packages/auth/README.md` (the sign-out section). `@object-ui/auth` is published: changeset.\n\n## Acceptance\n\n- Adjust a list's column widths and row height, sign out, sign back in as the same person on the same browser: they are still there.\n- Sign out, sign in as a different person on that browser: the list opens at the view's defaults; none of the first person's keys remain.\n- A session that ends on its own behaves like a sign-out."
+}

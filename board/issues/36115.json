@@ -1,0 +1,31 @@
+{
+  "number": 36115,
+  "kind": "issue",
+  "title": "cloud: the O8 census of objectstack-ai/cloud for ADR-0155 step 6 (the 5,000-grant cap retirement)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:cloud",
+    "domain:cloud",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-21T14:45:14Z",
+  "updated_at": "2026-11-21T15:48:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36115",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibyXo4gSy8DJPNz4ANz\n\nFiling gate: ④ an execution reading an accepted ADR requires (ADR-0155 O8) · Source: fleet (the #33787 card thread). Routing: the maintainer, 2026-11-21 14:43 UTC, verbatim: 「需要 cloud 仓库的任务，分配到 area:cloud」. Part of #33787.\n\n## 维护者速读\n- 问题：平台 ADR-0155 第 6 步（#33787）把共享读取从「最多 5000 条的 id 名单」换成数据库子查询。ADR 要求在切换前普查所有可能受影响的读者和注册，其中 cloud 仓库这一半平台线程读不到。\n- 这一步做什么：有 cloud 仓库权限的人按下面三点读一遍 cloud，把结论（读了哪个提交、找到什么）记到这张卡上。\n- 不做会怎样：如果 cloud 里有下面第 2 类的注册，cloud 升级到含此切换的平台版本后会启动失败（这是 ADR 裁定的响亮拒绝）。第 1、3 类则可能在升级后读到与今天不同的行。\n- 要你做的：无（分配到 area:cloud）。\n\n## What to read in objectstack-ai/cloud (ADR-0155 O8, three kinds)\nName the commit you read, and give each site as `path:line` with a verdict.\n1. **Readers** of `SharingService#buildReadFilter` / `#buildWriteFilter` (`@objectstack/plugin-sharing`), and of the security service's read filter (`getReadFilter` and the delegated variant), outside plugin-sharing itself. For each one, name the context it reads under (system / user / delegated) and whether it inspects the filter's shape. After the switch, the share arm is `{ id: { $in: SharedRecordIds.read(object, user) } }`, an engine-internal branded leaf, where it used to be a plain id list. A reader that serialises, walks or matches the filter in process would see a different shape.\n2. **Registrations naming `sys_record_share` by name**: an object-scoped middleware (`registerMiddleware(fn, { object: 'sys_record_share' })`), a `beforeFind` / `afterFind` hook on that object, or an opt-in of that table into plugin-audit's record-view auditing (`readAudit.objects`). Under ruling 6942854600 (② R1 at boot), from the switch on such a host **refuses to boot** with `INTERNAL_ERROR`/500, and the class is kept whole, with no exemption for a hook that skips system reads.\n3. **Registrations naming no object (or `'*'`)** that change a **system read** of `sys_record_share`. Today the grant read runs through the engine and so runs them. From the switch on, the subquery does not. That is D4's boundary: the host is told, and nothing is refused, so a hit means same rows are no longer guaranteed (ADR-0155 D-0).\n\n## What the platform half found\nThe platform half was read on #33787 at objectstack `8c8ff0f25d` and hotcrm `e7fe77f0`. The census is in #33787's body. No site changes a system read of `sys_record_share`.\n\n## What a hit means for cloud\ncloud pins objectstack by version, so nothing changes in cloud until it bumps to a platform release that contains the switch. A hit of kind 2 must be removed in the bump PR (or before it), or the host will not boot. A hit of kind 1 or 3 is reported back on #33787's thread for the seat: it is a D-0 question.\n\nLinks: #33787 (the switch card), ADR-0155 (`docs/adr/0155-sharing-scope-share-grants-lower-to-an-engine-internal-semi-join-leaf.md`, O8 and D4). The switch PR will be linked here when it opens."
+}

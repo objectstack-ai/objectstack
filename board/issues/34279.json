@@ -2,8 +2,8 @@
   "number": 34279,
   "kind": "issue",
   "title": "skills/objectstack-automation: the inbound hook section does not say that a disabled package's flow answers 401 at the hook door (after #33906)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -17,16 +17,20 @@
     "priority:p3"
   ],
   "assignees": [
-    "os-elon-musk"
+    "os-project-manager"
   ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-16T03:36:31Z",
-  "updated_at": "2026-11-21T12:58:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T16:29:24Z",
+  "closed_at": "2026-11-21T16:29:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34279",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jUZKdq3PK2Sab53cT3\n\nSkills-docs follow-up owed by PR #34278 (#33906), declared there as `Skills-docs: follow-up owed — skills/objectstack-automation/SKILL.md:383-395`. Filed by area S6.\n\n**What changes once #34278 lands.** The anonymous inbound hook (`POST /api/v1/automation/hooks/...`) refuses a post whose resolved slot belongs to a registry-held package that is disabled, with the door's existing one `401 INVALID_SIGNATURE` (cause in the server log only), nothing enqueued, on both the bare address (a name one package holds) and the qualified `/:namespace/:flowName/:hookId` address. Re-enabling the package answers `202` again with no re-arm.\n\n**The gap.** `skills/objectstack-automation/SKILL.md` ~L383-395 (the hook endpoint table and bullets) says the endpoint ACKs `202` and enqueues, and names the `401` only for a flow name two packages hold. An agent following the skill would read a `401` from a disabled package's hook as a signature fault.\n\n**Ask.** Add one bullet beside the two-holder bullet: a flow whose package is disabled answers the same `401 INVALID_SIGNATURE` (cause logged, never sent) until the package is enabled; senders that retry on a non-2xx keep the event and can redeliver after a re-enable. Run the skills gates (`check-skill-*`).\n\nDedupe words: skills automation inbound hook disabled package 401; SKILL.md hook disabled holder."

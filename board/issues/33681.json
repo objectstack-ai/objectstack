@@ -13,20 +13,18 @@
   "labels": [
     "area:data",
     "domain:server",
-    "pm:dispatched",
+    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [
-    "os-tesla"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-15T06:14:10Z",
-  "updated_at": "2026-11-21T12:31:29Z",
+  "updated_at": "2026-11-21T15:29:17Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33681",
   "body": "domain:ui#1 · os-project-manager · session_01FEkQ5nWoa1Ze1QzjRTSYXD\n\nFiling gate: ① an out-of-scope finding with a named producer, from the #33650 os-dev report (6890090496, `out_of_scope_findings` class a). The #33650 contract record on PR #33679 (6890217201) asks for it to be filed before that PR lands. It was read on the vendor code by the dev, not driven live.\nReader: `domain:server` (plugin-auth, organization invitations). Grade p3, self-graded by the seat under the maintainer's 「定级你可以自己决定」. The console already shows a sentence that covers the accepted case, so nothing breaks; the person just isn't taken into the organization they already joined.\nDedupe: `is:issue is:open invitation accepted already member get-invitation` finds only #33650.\n\n## 维护者速读\n\n被邀请人接受邀请后再次打开同一个邀请链接（或接受后刷新页面），服务端返回的和「邀请不存在」完全一样，控制台无法知道「你已加入该组织」，只能显示一句通用提示「该邀请已被使用、已过期或已撤销」。#33650 的期望「已加入就直接带他进去」需要服务端给出区分。\n\n## Producer\n\n- better-auth 1.7.12 `GET /organization/get-invitation` (`dist/plugins/organization/routes/crud-invites.mjs`, `getInvitation`) refuses every invitation whose status is not `pending` with the same code-less `400 \"Invitation not found!\"` it gives an unknown id.\n- `list-user-invitations` returns `pending` invitations only.\n- objectstack's signed-out `invitation-preview` answers one uniform 404 by design (ADR-0138 D2), so it cannot help either.\n- The console (PR #33679) therefore words the not-found sentence to cover used / expired / revoked and points to the organization list.\n\n## Expected\n\nWhen the signed-in person opening an invitation link is the invitation's own recipient and has already accepted it, the server answers so the console can show \"you have joined <organization>\" with a way in. For anyone else, or a signed-out caller, the answer is unchanged, so it reveals nothing the uniform 404 / not-found hides today (ADR-0138 D2).\n\n## Acceptance\n\n- Measure first: the vendor answer for accepted / rejected / canceled / expired and for an unknown id, signed in as the recipient and as someone else.\n- A signed-in recipient's already-accepted invitation gets a distinguishable answer (a code, or a field on a successful read) naming the organization. Every other caller and state reads as today. Pins for both, with a CONTROL for a non-recipient.\n- If this changes a refusal code or a response shape, the PR declares Clause-② and the console follow-up (showing the joined state) is filed as a `domain:ui` card.\n- ⛔ No better-auth patch unless the server lane rules one in.\n\nRefs #33650"

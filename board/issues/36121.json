@@ -1,0 +1,33 @@
+{
+  "number": 36121,
+  "kind": "issue",
+  "title": "spec/objectql: the SharedRecordIds and seam docblocks still describe the share-grant list in the present tense after the switch",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-21T15:06:15Z",
+  "updated_at": "2026-11-21T15:48:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36121",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibyXo4gSy8DJPNz4ANz\n\nFiling gate: ③ stale prose the contract review named · Source: fleet (L2 record 7064569198 on #36116, N3; seat 7's call, 2026-11-21 15:04 UTC). Part of #33787.\n\n## 维护者速读\n- 问题：第 6 步切换后，`packages/spec/src/data/shared-record-ids.ts` 和 `packages/objectql/src/fixed-read-leaf-seam.ts` 的注释仍用现在时描述「最多 5000 条的 id 名单」。\n- 这一步做什么：把这两处注释改成切换后的说法（名单已退役，读取走子查询）。纯注释。\n- 不做会怎样：读注释的人（和 AI）会以为上限还在。\n- 要你做的：无。\n\n## Scope\n- Docblock prose only, in the two files named and any other docblock that `git grep -n \"5,000\\|5000\" -- packages/spec/src/data packages/objectql/src` finds about the grant list. A comment-only `zod.ts` edit still ships bytes, so it needs a patch changeset (the standing note in project memory).\n- After #36116 merges.\n\n## Dedupe\n`repo:objectstack-ai/objectstack is:issue SharedRecordIds docblock present tense` → none.\n\nGrade: p3. Type: Task."
+}

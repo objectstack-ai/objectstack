@@ -2,8 +2,8 @@
   "number": 35883,
   "kind": "issue",
   "title": "手机端列表页：顶部一行返回加对象名，工具行一行胶囊（视图、排序、筛选、视图设置、搜索），列表保持卡片",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-20T16:36:27Z",
-  "updated_at": "2026-11-21T10:43:02Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T16:31:07Z",
+  "closed_at": "2026-11-21T16:31:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 5,
   "locked": false,

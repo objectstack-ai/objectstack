@@ -2,8 +2,8 @@
   "number": 33691,
   "kind": "issue",
   "title": "Scenario evals: revert the temporary relaxed grade (#33676) once human confirmation is enforced, and re-run asset_lifecycle",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-15T06:37:33Z",
-  "updated_at": "2026-11-21T12:23:39Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T14:18:24Z",
+  "closed_at": "2026-11-21T14:18:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 6,
   "locked": false,

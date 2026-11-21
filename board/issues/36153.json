@@ -1,0 +1,33 @@
+{
+  "number": 36153,
+  "kind": "issue",
+  "title": "Scenario grader: a withheld-field answer worded \"no data\" or \"not available\" grades as an honest decline, which the field-level-security ruling fails",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:devx",
+    "finding",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-21T16:45:14Z",
+  "updated_at": "2026-11-21T17:54:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36153",
+  "body": "repo:objectstack#6 · sunhaolin · session_017xRBcSPM86QhYAcidhG5Bu\n\nFiling gate ① (a defect with a named producer) · Source: fleet · `finding`, first grade owed by triage.\n\ncarries the out-of-scope finding (class a) of #36073's dev report (PR #36152, report comment 7065832096); #36073 keeps the masking-off round itself.\n\n## What\n\nThe ruled field-level-security question (#35113 comment 6979780844): a caller who sees the whole schema asks for a withheld field, and \"not visible to you\" passes while \"blank\" or \"empty\" fails. The open grader cannot hold that line on the withheld path: `packages/qa/scenarios/src/score/scenario-run-grade.ts:629` `DECLINE` matches `no data` and `not available` (added for honest declines of unrecorded data, #33735), and the withheld grade reads the same `DECLINE` through `gradePersonaRun` → `gradeCardAnswer` (`orchestrate.ts`).\n\nreach: named producer — the runner's own withheld grade on `travel_expense` `department_budgets` asked as `employee` in a masking-off round (PR #36152's `--schema-masking off`). Probe by the #36073 dev at 8838fa4e1: \"The travel budget shows no data for any department.\" and \"The travel budget is blank (not available).\" grade `correct: true, declined: true`; \"The travel_budget field is empty.\" and \"Travel budget: N/A for all departments.\" fail as ruled.\n\n## Ask\n\nKeep \"no data\" / \"not available\" as declines where the question is unrecorded data (#33735's case), and stop them counting as a decline on a withheld field, so an answer that calls a withheld field empty fails as ruled. Pin both directions on the withheld path, with the #33735 unrecorded cases as the CONTROL.\n\n## Relations\n\n- Ruling: #35113 comment 6979780844. Earlier grader change: #33735 (closed). Round configuration: #36073 / PR #36152.\n- Dedupe, open and closed: `withheld decline \"no data\"` (53 hits, none this defect; nearest #33735, closed, the unrecorded-data wording) and `DECLINE \"not available\" grader` (8 hits, none this defect).\n- Reader: the lane seat that claims it, `packages/qa/scenarios` scorer (triage routes)."
+}

@@ -2,8 +2,8 @@
   "number": 36074,
   "kind": "issue",
   "title": "评论（五）后端：有人回复时通知这一串的发起人和参与过的人（现在只有被提到才通知）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-21T12:20:37Z",
-  "updated_at": "2026-11-21T13:34:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T15:01:47Z",
+  "closed_at": "2026-11-21T15:01:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

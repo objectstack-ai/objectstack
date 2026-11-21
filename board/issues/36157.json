@@ -1,0 +1,38 @@
+{
+  "number": 36157,
+  "kind": "issue",
+  "title": "应用图标各处一个样：没声明颜色的应用自动分配一个纯色，首页不再用渐变，下拉菜单不再是灰色块",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-21T16:54:08Z",
+  "updated_at": "2026-11-21T19:08:49Z",
+  "closed_at": "2026-11-21T19:08:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36157",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（专题：控制台核心页面体验，维护者直派）。⛔ 不是认领。优先级 p2（协调席定的，维护者未指定）。\n\n## 维护者说过的（2026-11-22）\n\n- 「应用下拉菜单中，应用图标的颜色那里来的」\n- 「你的建议呢？右侧首页的颜色为什么不一样」\n- 协调席建议「没声明颜色的应用自动分配纯色、各处统一、去掉首页的渐变」「应用和对象的颜色撞色不处理」，维护者：「同意」\n\n## 现状（界面 `db9e34ad32`、服务端 18.6.0，本机环境浏览器实测加读代码）\n\n应用的图标按它声明的品牌设置取（`ui/packages/app-shell/src/layout/AppMark.tsx`）：声明了图标图片（`branding.logo`）就用图片；没有图片就把应用的线条图标画在一个色块上，色块是应用声明的主色（`branding.primaryColor`）。这部分各处一致。\n\n**图片和主色都没声明时，两处用了两套规则：**\n\n- **首页的应用图标**（`console/home/launcherTile.ts`）：从 10 组渐变色里按应用名算出一组。\n- **下拉菜单、顶栏、手机首页左上角**（`layout/AppMark.tsx`、`layout/appTileColors.ts`）：一律中性灰色块。\n\n所以 AI 搭建的「会议纪要」「CRM客户管理」在首页是橙黄渐变，在下拉菜单里是灰色。\n\n![现状：首页，两个没声明颜色的应用是渐变色](https://github.com/objectstack-ai/objectstack/blob/43b2a07b7001b122bd2b25b0bfc40ec8baaa0d6d/shell/appicon-home.png?raw=true)\n\n![现状：应用下拉菜单，同样两个应用是灰色块](https://github.com/objectstack-ai/objectstack/blob/43b2a07b7001b122bd2b25b0bfc40ec8baaa0d6d/shell/appicon-switcher.png?raw=true)\n\n## 要做的\n\n规则一句话：**同一个应用在任何地方都是同一个图标、同一个颜色。**\n\n1. **取应用图标和颜色的逻辑只留一套**，首页、下拉菜单、顶栏的应用名（「去掉顶栏」后是侧栏第一行）、手机首页左上角、搜索和最近访问里的应用，都用它。\n2. **没声明图片也没声明主色的应用，自动分配一个颜色**，不再是灰色块：从对象用的那组固定色板里（`OBJECT_COLORS`，去掉灰色）按应用的接口名算出一个。同一个应用永远同一个颜色，刷新、换人看、换环境都不变。只在显示时计算，不写回数据。\n3. **用纯色，不用渐变**。首页的应用图标去掉渐变，改成和别处一样的纯色块加白色图标；大小可以保持现在的大图标。\n4. **声明了主色的以声明为准；声明了图片的用图片**。这两种现在是对的，不改。\n5. 应用自动分配的颜色和它里面对象的颜色可能相同，不做错开处理。\n6. 自动分配的颜色**只用在图标色块上**，不改这个应用里主要按钮的颜色（没声明主色的应用，按钮仍用平台默认主色）。\n\n## 不做的\n\n- 不改应用声明图片、主色的方式，不改 Studio 里的设置界面。\n- 不给共用一张图标图片的多个应用做区分（HotCRM 一个包里六个应用都是同一个 H，是包那边的事）。\n- 不改对象的颜色规则（objectstack-ai/objectstack#36141）。\n- 不改首页的排版。\n\n## 验收\n\n- 一个没声明图片也没声明主色的应用（本机的「会议纪要」「CRM客户管理」）：在首页、应用下拉菜单、手机首页左上角是同一个颜色的纯色块加白色图标；不是灰色，也不是渐变。\n- 两个这样的应用颜色可以不同；各自刷新后不变；换一个账号登录看到的相同。\n- 声明了主色的应用：各处都是它声明的颜色，和改动前一样。\n- 声明了图标图片的应用（HotCRM）：各处都是那张图，和改动前一样。\n- 没声明主色的应用里，「新建」这类主要按钮的颜色和改动前一样。\n- 深色主题下色块和图标看得清。\n- PR 正文附首页和下拉菜单改动前后的截图，并说明颜色是怎么从应用名算出来的；`launcherTile.ts` 里的渐变表删掉或说明为什么留着。\n\n## 协调席自己加的（不是维护者原话）\n\n维护者同意的是三点：没声明颜色的应用自动分配纯色、各处统一、去掉首页的渐变；以及撞色不处理。下面是协调席补的：\n\n- 第 2 项用对象那组色板、按接口名算、不写回数据。\n- 第 6 项自动颜色只用在图标上、不改按钮颜色。\n- 第 1 项列出的各处位置。\n- 「不做的」各条。\n\n## 没有核对的\n\n- 搜索结果、最近访问里应用的图标现在走的是哪套逻辑，没有逐处看；第 1 项里列的位置请开发搜一遍。\n- 「去掉顶栏」专题的 objectstack-ai/objectstack#36112 会把应用名从顶栏搬到侧栏第一行，和本卡都动应用图标出现的位置；谁先谁后请席位自己排。\n- HotCRM 声明的主色是紫色（`#7C3AED`），界面上它的按钮是橙色。原因没有查，和本卡无关，记在这里备查。\n\nReader: `domain:ui` 车道。`ui/packages/app-shell/src/layout/AppMark.tsx`、`layout/appTileColors.ts`、`console/home/launcherTile.ts`、`console/home/HomeAppsStrip.tsx`、`console/home/AppCard.tsx`、`layout/AppSwitcher.tsx`、`layout/PhoneAppHome.tsx`；色板在 `packages/spec/src/data/object-icon.ts`。\n\nDedupe: `应用 图标 颜色 首页`、`应用 主色 自动`、`app tile colour launcher`（objectstack，open）→ 都是 0。相关：objectstack-ai/objectstack#36141（对象菜单图标，同一类问题）、objectui#12201（应用只有一个图标，2026-10-12 的裁定）。"
+}

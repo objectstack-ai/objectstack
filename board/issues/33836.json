@@ -2,8 +2,8 @@
   "number": 33836,
   "kind": "issue",
   "title": "schema drift: the safe column entries tell a sealed package object to \"publish the object\", which cannot apply them",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:data",
     "area:package",
     "domain:server",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-15T11:51:26Z",
-  "updated_at": "2026-11-21T13:55:14Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T14:53:54Z",
+  "closed_at": "2026-11-21T14:53:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33836",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jRmmALkM1ftZxdVatQ\n\nFiling gate: ④ loose end of PR #33769 (Part of #33724), named in its os-dev-report 6892684526 `loose_ends` item 1. Not filed earlier because the card covered NOT NULL only.\n\n## What happens today\n\nPR #33769 made the `relax_not_null` remedy text name the act per object kind. For an environment-authored object, the publish applies it. For a package object, a managed install or upgrade of the package applies it, through the new `relaxDeclaredNotNull` door. Either kind can use `os migrate apply`.\n\nThe other column entries the drift plan reports for a declared field still carry the environment-only sentence: `widen_date_to_datetime`, `widen_varchar` and `drop_column_default`. On origin/main see `packages/drivers/driver-sql/src/schema-drift.ts:1540`: \"… publishing the object applies it, or run \\\"os migrate apply\\\".\"\n\nOn a sealed package object, the author cannot publish the object. A managed install has no door for these three ops either, because `relaxDeclaredNotNull` applies only the NOT NULL relax. So the sentence points the reader at an act that does nothing for them.\n\n## Expected\n\nPick one, measured first:\n- make the text name the act per object kind, the same way #33769 did for NOT NULL, with only `os migrate apply` named for a package object while no install door exists; or\n- give the managed install a door for these safe ops as well, then name it.\n\nThe first option is text only. The second widens what an install does, so it needs a ruling before anyone builds it.\n\n## Serial constraints\n\n`schema-drift.ts` is also edited by #32883 (os-elon-musk) and queued for #33695. Serial behind both."

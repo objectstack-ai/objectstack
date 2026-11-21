@@ -1,0 +1,31 @@
+{
+  "number": 36160,
+  "kind": "issue",
+  "title": "deps: move the minimatch ^10 parents that accept 11 and measure api-extractor and the exceljs chain, so the GHSA-g3hv-75wg-m249 exemption can go before 2026-12-21",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-21T17:00:08Z",
+  "updated_at": "2026-11-21T17:54:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36160",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5kt9AD1TPLy7Y9oa9D\n\nFiling gate: ② follow-up owed by a landing PR (PR #36155, card #35828, L1-b REWORK 7066121001 asked for a card to hold it). Source: fleet. ⛔ Not a claim.\n\n## Why\n\nPR #36155 renews the `osv-scanner.toml` exemption for minimatch GHSA-g3hv-75wg-m249 until 2026-12-21 and closes #35828, the only card tracking it. The ledger's steady state is zero exemptions, and the renewal lapses on that date. Without this card nothing holds the work that removes it.\n\n## What holds a minimatch 10.x copy today (read at PR #36155's head, `pnpm-lock.yaml` + npm registry)\n\n| Holder in the lockfile | Newest release | Accepts minimatch 11? |\n|:--|:--|:--|\n| eslint 10.13.0 | 10.15.0 | yes (`^11.0.5`) |\n| @eslint/config-array 0.23.5 | 0.23.6 | yes (`^11.0.5`) |\n| @typescript-eslint/typescript-estree 8.72.1 | 8.73.0 | yes (`^11.0.1`) |\n| @oclif/core 5.1.2 | 5.1.12 | yes (`^11.0.1`) |\n| @ts-morph/common 0.29.0 | 0.29.1 | yes (`^11.0.1`) |\n| @microsoft/api-extractor 7.58.2 | 7.60.1 | no (`10.2.3` exact) |\n| glob 7.2.3, readdir-glob 1.1.3 (via exceljs 4.4.0 → archiver 5 / unzipper 0.10) | exceljs 4.4.0 | no (archiver `^5`, unzipper `^0.10`) |\n\nThe workspace override `'minimatch@<11.0.0': '^10.2.3'` holds every 10.x copy on 10.2.6.\n\n## Work\n\n1. A dependency PR that moves the five parents that accept 11 (it may not carry an exemption change, per the ledger's convention 3; removing the exemption may ride along only once no 10.x copy is left).\n2. Measure the two remaining holders: whether a newer `@microsoft/api-extractor` accepts 11 by then, and whether the exceljs chain can be lifted (an override retarget of archiver/unzipper's glob, or another route) without breaking its zip read/write paths.\n3. If no 10.x copy is left in `pnpm-lock.yaml`, delete the exemption; otherwise the next renewal (its own `osv-exemption` PR) names only what still holds one.\n\n## Done when\n\nThe exemption is deleted, or renewed before 2026-12-21 naming only the holders measured in step 2, and the next scheduled Validate Package Dependencies run after that date is green.\n\nSuggested-grade: p2 · a dated scan exemption with a fresh 30-day window; it turns into the #35828 shape (p1) if not handled before 2026-12-21.\nDedupe words: minimatch 11 bump, GHSA-g3hv-75wg-m249, eslint 10.15, oclif core 5.1.12, exceljs archiver glob 7, api-extractor minimatch."
+}

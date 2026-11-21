@@ -1,0 +1,32 @@
+{
+  "number": 36122,
+  "kind": "issue",
+  "title": "Data skill seeds.md still says a seeded roll-up value is stored as written",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-21T15:07:53Z",
+  "updated_at": "2026-11-21T15:48:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36122",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibwJEh7hMPPvagWM1g7\n\n## Problem\n\n`skills/objectstack-data/references/seeds.md` lines 146-147 tell metadata authors: \"⛔ Never seed the roll-up: a seeded `amount_paid` is stored as written, and a cap on payments refuses those it counts.\"\n\nPR #36118 (card #35655, ruling D) changes that behaviour: the seed loader drops a value written for a summary (roll-up) field, never stores it, and reports the dropped keys through the per-dataset warn notice. Once #36118 merges, the skill's reason is false. The rule itself (\"never seed the roll-up\") still holds, but the stated consequence does not.\n\n## Who hits it\n\nAn AI author building an app with the data skill reads this passage when it writes seed data for an object with a roll-up. With the old wording it learns the wrong model (that the value lands and later trips a validation cap). It may then write workarounds for a failure that no longer happens, or misread the new warn notice.\n\n## What to change\n\nRewrite seeds.md:146-147 to say that a value seeded into a summary field is dropped with a warn notice, and that the roll-up is computed from the child rows. Keep the record-order point about rules reading a parent roll-up. Check the data skill's evals that exercise seeding roll-ups, and update them to match.\n\n## Order\n\nLand after PR #36118 merges. The skill text must describe shipped behaviour.\n\nFiled by data seat 7 area d7-B as the `Skills-docs:` follow-up that PR #36118 owes. Triage routes it (expected `domain:skills`)."
+}

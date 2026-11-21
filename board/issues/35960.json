@@ -2,8 +2,8 @@
   "number": 35960,
   "kind": "issue",
   "title": "driver-sql (Oracle): a read scoped by a parent with a RAW(16) uuid key misses every row until something has read the parent",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:data",
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-20T23:48:14Z",
-  "updated_at": "2026-11-21T12:49:36Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T14:19:24Z",
+  "closed_at": "2026-11-21T14:18:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35960",
   "body": "repo:objectstack#7 · os-tesla · session_01L9qibvMi1U7R2kBd3JbTPu\n\nFiling gate: ① a product defect, measured live · Source: fleet (os-dev report on #35952, out_of_scope_findings[0]; seat 7's word to file, 2026-11-20 23:47 UTC)\n\n## 维护者速读\n- 问题：在 Oracle 上，如果父对象的主键是十六字节二进制（RAW(16)）存的 uuid，那么按父记录可见性限定的子记录读取（`controlled_by_parent`）会**静默**返回空，取反时反而返回全部行。只有在同一个驱动上先读过一次父对象后才恢复正常。\n- 影响：用 Oracle 外部表、主键是 RAW(16) uuid 的部署，用户看不到本该能看到的子记录，没有任何报错。\n- 这一步做什么：Oracle 的 RAW 列预读也要覆盖组合可见性范围里的父对象，像 PostgreSQL 那边 #35906 做的一样。\n- 要你做的：无。\n\n## What happens (measured)\nMeasured live on Oracle Free 23ai (testkit `ORACLE_CELL`, gvenzl/oracle-free) with a fresh `SqlDriver`, reading the child object first:\n- A child read whose composed ReadableIds scope compares a RAW(16) parent's `id` answers `[]`. The expected rows are `[c1, c2]`. This happens with today's LIST form, `{ id: { $in: [U1 upper-case, U2] } }`, not only with the share-grant leaf.\n- Its negation answers every row.\n- Once anything has read the parent object on that driver, the same read answers `[c1, c2]`.\n\n## Why\nThe Oracle doors prime `primeOracleRawUuidColumns` (`packages/drivers/driver-sql/src/sql-driver-field-mapping.ts`) for the door's own object, and for aggregate's joined parents, but never for the parent named inside a composed ReadableIds scope. So the parent's comparands bind as plain text instead of through `HEXTORAW` (`sql-driver-oracle-dialect.ts#oracleUuidRawBinding`). Oracle then compares the RAW column as upper-case hex text, and nothing matches. The PostgreSQL prime that #35906 adds does walk composed scopes for the parent; the Oracle prime does not.\n\nreach: a named producer. plugin-security's `controlled_by_parent` read derivation answers `{ masterFK: { $in: ReadableIds.of(master) } }`, and the engine composes it with the master's `getReadFilter` (ADR-0139 D6). Measured at the driver door; not yet driven through HTTP.\n\n## Fix direction\nPrime the RAW(16) columns of every object a composed scope names, at the same doors that prime the door object, mirroring #35906's PG walk. Pin it live on the Oracle cell: a fresh driver, child read first, both the list and the leaf forms, and the negation.\n\n## Order\nIndependent of #35952 (that card converts the leaf's grants and does not touch the prime). Its live nested pin primes the parent explicitly, and says so in a comment.\n\nGrading: area:data · Bug · a silent wrong answer on a supported dialect, measured live.\nSuggested grade: p2 (silent loss of visible child rows on Oracle deployments with RAW(16) uuid keys; no error, so no one notices).\n\nDedupe: `repo:objectstack-ai/objectstack is:issue oracle RAW(16) ReadableIds`, `primeOracleRawUuidColumns`, `controlled_by_parent oracle uuid` → only #33787, #35872 and QA run records; none about the Oracle prime."

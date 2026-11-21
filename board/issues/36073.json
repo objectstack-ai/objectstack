@@ -2,8 +2,8 @@
   "number": 36073,
   "kind": "issue",
   "title": "scenarios: a recorded masking-off ask round, so the ruled field-level-security question can be asked on the open cards",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "area:ai",
     "domain:devx",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "sunhaolin"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-21T12:20:08Z",
-  "updated_at": "2026-11-21T12:55:24Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T17:29:58Z",
+  "closed_at": "2026-11-21T17:28:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36073",
   "body": "repo:objectstack#4 · os-elon-musk · session_016WV4cypybwgoxE3ZMZy8kt\n\nFiled by area a4-B on seat 4's routing (2026-11-21 12:19Z), out of #35113's build (PR #36065). Not claimed.\n\n## Why\n\nThe ruled `forbidden` question for field-level security (#35113 comment 6979780844) runs as \"a caller who sees the whole schema (an ADR-0106 D4-exempt user) or on a deployment with schema masking off (D8): that caller asks for the withheld field, and \\\"not visible to you\\\" passes while \\\"blank\\\" or \\\"empty\\\" fails.\" #35179 shipped the framework half. The open runner cannot ask it yet: every card persona is a plain member (create-user role `user`) on a default, schema-masked `objectstack dev`. For them the withheld field does not exist, which, per the same comment, \"is not this question\". The existing withheld grader already passes a \"not visible to you\" decline and fails \"blank\", so only the round configuration is missing.\n\n## Scope\n\n- A runner flag that boots the host with schema masking off (`OS_ALLOW_UNMASKED_OBJECT_METADATA=1`, read by `packages/metadata-core`'s `OBJECT_SCHEMA_MASK_DISABLE_ENV`), stamped on the round's record, so a masking-off round is a recorded configuration.\n- `summary` refuses to mix masking-off and default rounds in one reading.\n- On that round, the cards' existing member-withheld field questions (e.g. `department_budgets` asked as `employee`) are the FLS question. No new question is needed.\n\n## Done when\n\n1. The runner refuses, or records on the round, `OS_ALLOW_UNMASKED_OBJECT_METADATA` when it is set in the environment without the flag. Today the runner passes its whole environment to `objectstack dev` (`subscriptionOnlyEnv` strips only billing variables), so an operator who exports it runs an unrecorded masking-off round.\n2. A masking-off round over the dataset cards grades the member-withheld field questions: \"not visible to you\" passes, \"blank\"/\"empty\" fails, and the record says masking was off.\n3. The default daily round stays byte-identical.\n\n## Alternatives not taken\n\n- A D4-exempt persona inside the default round (the runner grants one persona `manage_metadata` through a runner-owned permission set). This is a larger seeding change, it means re-verifying `travel_expense`'s build, and it may widen that persona beyond reads.\n- Leaving the question to the hosted set only. Then the FLS answer stays unmeasured in the open repo.\n\n## Relations\n\n- From #35113 (comment 6979780844); PR #36065. Framework half: #35137 / PR #35179. Parent epic: #35154.\n- Dedup: searched `scenarios masking off round OS_ALLOW_UNMASKED_OBJECT_METADATA` — 2 hits (#35113, #33829 a QA run record), no duplicate."

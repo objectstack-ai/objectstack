@@ -2,8 +2,8 @@
   "number": 35584,
   "kind": "issue",
   "title": "mcp: on an OAuth grant, read the docs audience against the delegating person's own permission sets, not the token's ceiling",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,23 @@
     "area:ai",
     "domain:server",
     "finding",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
-    "os-elon-musk"
+    "os-project-manager"
   ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T16:24:42Z",
-  "updated_at": "2026-11-21T13:16:52Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T16:51:38Z",
+  "closed_at": "2026-11-21T16:50:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 9,
+  "comments": 13,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35584",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CY9JfbUzkuca2gUyu6\n\n④ child of #35442 (maintainer-directed p1) · Source: topic #35442 · follow-up of PR #35564 (L2 contract review 7014988834, finding S2; seat 5 ruling: keep the fail-closed behaviour in that PR, file the visibility change as its own card)\n\n## 维护者速读\n- **问题：** 用户用自己的 AI 助手通过授权登录连上平台后，只给特定权限集看的应用手册，即使本人有这个权限集，也搜不到、读不到。\n- **要做：** 判断手册能不能看时，按授权本人的权限集来算，而不是只按这次授权给助手的范围来算；同时加测试锁住。\n- **不做会怎样：** 这部分人在外部助手里拿不到本该能看的手册，助手只能说手册里没有；不会多看到不该看的内容。\n- **你要做的：** 无，席位接卡时先查有没有现成的可见性裁决；没有就呈你裁。\n\n## What\n- PR #35564 adds `search_package_docs` / `read_package_doc` to the MCP door. `packages/runtime/src/domains/mcp.ts` passes the request's `executionContext` to `packageDocsReadGate`. On an OAuth token that context is the agent envelope (`principalKind: 'agent'`, `permissions` replaced by the scope ceiling, the person kept as `onBehalfOf`; `assemble-execution-context.ts`). The docs-audience gate asks `resolvePermissionSetNames` of that envelope and gets the ceiling set only.\n- Result: a page that only a `{ permissionSet }` manual claims is neither found nor read on a `data:read` token, whether or not the person holds the set. It fails closed. Default-audience manuals are unaffected.\n- The open draft door already asks about the person's own grants (`mcp-authoring.ts`, `resolveHumanReader`: \"never the agent envelope's\"), so on one connection `get_metadata_item` can serve a page that `read_package_doc` answers as not found.\n\n## Done when\n- On an agent envelope, the docs-audience caller is the delegator's own holdings (the same reader the draft door uses), or a recorded ruling keeps the envelope.\n- A pin drives an agent envelope through the bridge: the holder of the set finds and reads the page; a non-holder does not (CONTROL).\n- PR #35564's stated limit (descriptions, changeset, helper header) is removed or kept to match.\n\n## Reader\nThe area:ai seat that takes over from ai-1 (seat 5 hands it over). `packages/runtime/src/domains/mcp*.ts`, `domain:server`. Check prior visibility rulings first (ADR-0046 §6.7, the OAuth agent-envelope rulings); if none covers \"whose holdings a docs audience reads on a delegated token\", it goes to the maintainer before code.\n\n## Dedupe\n`package docs audience OAuth delegator` (is:issue, objectstack) → 10 hits, none on this (top: #17022 closed, audit attribution of agent writes). `search_package_docs` → 3: #35442 (parent), #27002 (closed, registry), #27076 (closed, CI).\n\nGrade: `area:ai · Feature · fleet-sourced follow-up of a maintainer p1 · reach: OAuth MCP clients reading permission-set-gated manuals (none measured in production yet; the door ships in PR #35564) · evidence: read` → p3."

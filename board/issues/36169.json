@@ -1,0 +1,34 @@
+{
+  "number": 36169,
+  "kind": "issue",
+  "title": "studio: the view / page-block FilterBuilderField builds fields without multiple, so a multi-value field offers = / $in",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-21T17:31:48Z",
+  "updated_at": "2026-11-21T20:12:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36169",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5krBqrrgxCYgjXmfbv\n\nFiling gate ① · Source: fleet · same family as #35992 (found by area a4-D's dev, os-dev report 7066498044), outside that card's surface.\n\n## What happens\nStudio's view and page-block filter editor (`FilterBuilderField`, `ui/packages/app-shell/src/views/metadata-admin/widgets.tsx`) builds its field list without each field's `multiple`, so on a `multiple: true` field it offers and saves `=` / `$in`, which the data door refuses (400 `INVALID_FILTER`, #35559) and the dataset door answers wrongly. PR #36165 passes `multiple` to the shared builder for the other editors; this one is not covered.\n\n## Done when\n`FilterBuilderField` passes the field's `multiple` to the shared builder like the editors #36165 fixed, so a multi-value field offers the JSON-column operators; a pin on a `multiple: true` field with a scalar control.\n\nreach: Studio form (a saved view / page-block filter), by code reading against the shared builder's contract fixed in #36165; to be measured once by the claimant.\nBusiness reason: list views and page blocks authored in Studio on a multi-value field fail or show wrong rows.\nReader: a domain:ui lane (Studio metadata-admin widgets).\nDedupe: `FilterBuilderField multiple` → 0 hits.\nGrade: p2 — same class as #35992's condition editors."
+}

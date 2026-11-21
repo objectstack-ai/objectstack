@@ -1,0 +1,38 @@
+{
+  "number": 36113,
+  "kind": "issue",
+  "title": "外壳（三）列表页顶部改成两行：对象名一行（右边是页面按钮组），视图一行（视图名、视图设置、搜索、导入导出、新建）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-21T14:43:06Z",
+  "updated_at": "2026-11-21T19:45:29Z",
+  "closed_at": "2026-11-21T19:45:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36113",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#36107（专题：去掉顶栏和平台首页那一层，维护者直派）。第一阶段。⛔ 不是认领。优先级 p2（协调席定的，维护者未指定）。\n\n## 维护者说过的（2026-11-21）\n\n- 看过十二项清单后：「按清单立卡」\n- 看过 Studio 的效果图后：「可以，拆第一阶段」\n- 方向上的原话全文在父单 objectstack-ai/objectstack#36107 的「维护者说过的」一节，本卡只引和本卡有关的。\n- 「改成左右栏后，右侧列表页顶部应该和attio一样分两行」\n- 「按照这个效果图」\n\n本卡是父单清单的第 5 项。依赖「外壳（一）」（右上角按钮组）。\n\n## 现状\n\n列表页重做专题 objectstack-ai/objectstack#35547（设计板图 42）定的是「对象名并进视图行」：列表上方两行，第一行是「对象名 / 视图名、视图设置、搜索、新建、更多」，第二行是排序和筛选的标签。相关代码在 `ui/packages/app-shell/src/views/objectViewPageHeader.tsx`、`objectViewHeaderChrome.tsx`、`objectViewTitleSwitcher.tsx`、`objectViewHeaderToolbar.ts`。这部分已经合并。\n\n## 参照（Attio，实测）\n\n列表页顶部：第一行是对象名，右边是和这一页有关的按钮；第二行是视图名、视图设置，右边是导入导出和新建；第三行是排序和筛选的标签；下面是表格。\n\n## 效果图\n\n![列表页顶部：对象一行、视图一行、排序筛选一行](https://github.com/objectstack-ai/objectstack/blob/eb43e9c9b374b06d5d237b651eec01c07711b038/shell/shell-1-list.png?raw=true)\n\n## 要做的\n\n1. **第一行（页面头部）**：左边是对象图标和对象名；右边是「外壳（一）」的按钮组（评论、编辑应用、AI、帮助）。\n2. **第二行（视图行）**：左边是视图名（点了切换视图，带记录数）、视图设置；右边是搜索、导入导出、「新建某对象」。\n3. **第三行**：排序和筛选的标签行，和现在一样，不动。\n4. 「更多」菜单里原来的导入、导出，提到第二行成为「导入 / 导出」一个按钮；「更多」里如果没有别的东西了就去掉。\n5. 列表有临时改动时出现的「放弃、保存」（objectstack-ai/objectstack#35955）位置不变，仍在第三行右边。\n6. 窄的时候（电脑宽度里偏窄的窗口）：第二行右边的「导入 / 导出」先收进「更多」，再窄搜索收成图标。\n7. 手机宽度下的列表头部不动。\n\n## 不做的\n\n- 不改排序、筛选、视图设置的内容和行为。\n- 不改表格本身。\n- 不改记录页头部。\n\n## 验收\n\n- 电脑宽度下打开「客户」列表：最上面一行是对象图标和「客户」，右边是按钮组；第二行左边是视图名和视图设置，右边是搜索、导入导出、「新建客户」；第三行是排序和筛选标签。\n- 点视图名：出现视图切换菜单，和改动前一样。\n- 点「导入 / 导出」：出现导入和导出两项，行为和原来「更多」里的一样。\n- 改一个筛选：第三行右边出现「放弃、保存」。\n- 把窗口缩窄：第二行不换行、不重叠，右边的按钮按第 6 项依次收起。\n- 手机宽度下：和改动前一样。\n- PR 正文附改动前后截图，并说明 objectstack-ai/objectstack#35547 下哪些已合并的改动被这次调整了。\n\n## 协调席自己加的（不是维护者原话）\n\n- 第 4 项把导入导出从「更多」提到第二行（效果图里是这样画的，维护者看过图）。\n- 第 5、6、7 项。\n\n## 没有核对的\n\n- 改回两行要动多少已经合并的代码，没有评估。\n- 「更多」菜单里除了导入、导出还有没有别的项，没有逐项看。\n- 对象名一行在只有一个视图、没有任何页面按钮的时候会显得空，没有画这种情况。\n\nReader: `domain:ui` 车道。`ui/packages/app-shell/src/views/objectViewPageHeader.tsx`、`objectViewHeaderChrome.tsx`、`objectViewTitleSwitcher.tsx`、`objectViewHeaderToolbar.ts`、`objectViewToolbarAffordances.ts`。\n\nDedupe: `列表 顶部 两行 对象名`（objectstack，open）→ 0 张单卡；专题 objectstack-ai/objectstack#35547 已留言说明这次调整。"
+}

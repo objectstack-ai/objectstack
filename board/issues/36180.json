@@ -1,0 +1,33 @@
+{
+  "number": 36180,
+  "kind": "issue",
+  "title": "spec page.zod.ts describes: state that an authored kind full record page applies on the desktop full page only (#36150), and the record_more remedy; regenerate artifacts",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "documentation",
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-21T18:42:53Z",
+  "updated_at": "2026-11-21T18:48:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36180",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nCompanion to #36150 (PR #36174, `Metadata-protocol: semantic`). It was raised as S1 (should-fix) by the seat's contract review on PR #36174. That PR changes behaviour in the console only, and spec text is a governed surface with its own schema-face review, so the published contract's wording is this card.\n\n## The gap\n\nSince #36150, an authored `kind: 'full'` record page assigned to an object applies only on the desktop full page. On phone and in the side preview, the standard record page is drawn. Named-page routes and slotted pages are unchanged, and the approval request page and the user page keep their own page everywhere (rulings 7066490078 and 7066506909). The spec on `main` still reads as if the page applies wherever the record opens:\n- `packages/spec/src/ui/page.zod.ts` says `isDefault` is \"the page the record view opens\", and says `apps` names the route that \"opens this page\".\n- The `slots.tabs` tombstone prescribes `kind: 'full'`, \"drawn as authored\", with no surface rule.\n- The `record_section` action location says nothing about the standard page not drawing it. `record_more` is the remedy.\n\n## What to do\n\n1. Reword the describes of `kind`, `isDefault` and `apps`, and the tombstone remedy, to state the surface rule and the `record_more` remedy.\n2. Regenerate the generated schema and docs artifacts.\n3. Make no shape change. This is a describe-text change, so `Metadata-protocol: semantic`, a spec `patch` or `minor` per ruling A, and a Fable L2 on the schema face.\n\nRelated: #36179, the skills wording for the same rule (a `domain:skills` PR). The two can be read together, but land them separately. Start after PR #36174 merges."
+}

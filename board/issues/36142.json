@@ -1,0 +1,35 @@
+{
+  "number": 36142,
+  "kind": "pull_request",
+  "title": "fix(pm): judge the --land dogfood gate only in repositories that carry the battery",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-21T16:11:18Z",
+  "updated_at": "2026-11-21T16:52:03Z",
+  "closed_at": "2026-11-21T16:52:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-21T16:52:01Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36142",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1X1qGnTYLQs3EtmtCmjrcfCe)_\nFixes #35959\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感:这是车队内部的落地工具,只改变云仓库带收窄声明的拉取请求能否由席位正常落地。\n- 属于车队落地工具链:替云仓库的席位解决「安全收窄类拉取请求被狗粮门禁永久拒绝、只能等人手合并」的问题。\n- 出错时最坏是某个没有狗粮测试的仓库被放行;主仓库仍按原规则拒绝,改动可直接撤回。\n- 无。\n\n## What changes\n\n`scripts/pm/label-write.mjs --land` judged its dogfood battery gate on every pull with a `!` title or a `(narrowing)` arm, whatever the repository. Only objectstack-ai/objectstack carries the `@objectstack/dogfood` battery and the queue's dogfood shards, so a cloud pull's os-dev report can only say `n/a`, and the gate refused it for good (measured on objectstack-ai/cloud#4405 by the card).\n\n- New `LAND_DOGFOOD_BATTERY_REPOS` (today `objectstack-ai/objectstack` only), next to the gate's other constants, and a pure `repoCarriesDogfoodBattery(repo)`.\n- `landDogfoodGate` returns `{ judged: false, noBattery: true }` with zero reads for an `owner/name` outside that list; the fold prints `② dogfood gate ✓ — not judged: REPO has no dogfood battery (only objectstack-ai/objectstack carries one)`.\n- Fail-closed for objectstack is kept: a listed repo (any case) is judged exactly as before, and a `--repo` value that does not read as `owner/name` is judged too.\n- The gate's header gains a `repo` row saying the above.\n\nWhich repos carry a battery (read at the time of this PR, via the contents API on default branches): objectstack — 10 of 33 workflows name dogfood (ci.yml 96 hits); hotcrm — 0 of 14; gallery — 0 of 1; cloud, objectui, objectos, mobile — NOT MEASURED (this session has no read access to them; the card's own measurement covers cloud).\n\n## Tests\n\n`node scripts/pm/label-write.mjs --self-test`: 339 cases pass across 18 batteries (was 334). The `--land` dogfood battery's pin goes 65 → 70 with five cases:\n\n1. the pure predicate over objectstack (two spellings), cloud, hotcrm, gallery, and six non-`owner/name` values (judged);\n2. the gate on a cloud pull with both markers: not judged, `noBattery`, zero `doCall` reads;\n3. a cloud pull with a `(narrowing)` arm over an `n/a` report lands end to end (comment, pr_ready, automerge_enable; exit 0; no gate read; the ✓ line names the repo);\n4. the same in cloud with a `!` title;\n5. the same `(narrowing)` pull over an `n/a` report in objectstack still refuses: exit 2, zero sends, nothing written.\n\nAblation (committed first, via `scripts/ablation-replace.mjs`, restore proven by blob equal to HEAD and an empty `git diff HEAD`): deleting the one guard line in `landDogfoodGate` reds exactly 3 of 339 cases (2, 3, 4 above), each cloud end-to-end case refusing with `why: the battery was not run`.\n\n## Acceptance notes\n\n- A repository that gains a dogfood battery has to join `LAND_DOGFOOD_BATTERY_REPOS` in the same pull that adds it; nothing reads its workflows to find out on its own.\n\n## Verification\n\nRead first: `landDogfoodGate`'s first line (the repo guard) and `repoCarriesDogfoodBattery` (the fail-closed answer for an unreadable repo); then the fold's ✓ line branch.\n\nTwo-minute check: `node scripts/pm/label-write.mjs --self-test` prints `✓ label-write self-test: 339 cases pass across 18 batteries`.\n\n<details><summary>Local gates</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands` derived 64 families for this diff; all run locally, 63 exit 0, `pnpm check:i18n-coverage` exit 3 (PREREQUISITE NOT MET: needs a built package closure; it does not read `scripts/pm/`), left to CI. `--ran` reconciliation: 64 derived, 63 run, 1 NOT-MEASURED, 0 UNRUN. `check:pm-dispatch-gates` fast tier: 2252 cases pass.\n\n</details>\n\n`scripts/pm/**` is not published: `skip-changeset`.\n\nSession: https://claude.ai/code/session_01FEkQ5kt9AD1TPLy7Y9oa9D\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

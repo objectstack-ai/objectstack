@@ -17,16 +17,16 @@
     "priority:p3"
   ],
   "assignees": [
-    "os-elon-musk"
+    "os-project-manager"
   ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-15T05:11:22Z",
-  "updated_at": "2026-11-21T12:30:12Z",
+  "updated_at": "2026-11-21T15:25:09Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33665",
   "body": "domain:server#5 · os-elon-musk · session_016WV4cwhJBt274G7zk78A5a\n\nFollow-up owed by PR #33614 (Fixes #33553, merged; review#2 record 6889245825). Since #33614, a `connector_action` input key that the action's input schema does not declare is refused at run time (unresolved `$ref` params and `$ref`/schemaless bodies read as open). Two surfaces outside the server packages still describe or offer the old behaviour. p3.\n\n- **Skills text (governed surface).** `skills/objectstack-automation/SKILL.md` (connector_action row) and `skills/objectstack-automation/references/integration-recipes.md` (~l.62) are partly stale: they should say undeclared keys are refused and that a `$ref` parameter or body reads as open input. Governed: needs the approver landing path.\n- **Studio.** `ui/packages/app-shell/src/views/metadata-admin/inspectors/connector-input-fields.ts` still offers an extras repeater for keys the run now refuses. UI lane owns this part.\n\nNot leased to an area (cross-lane); the server seat routes it."

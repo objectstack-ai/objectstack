@@ -1,7 +1,7 @@
 {
   "number": 35381,
   "kind": "issue",
-  "title": "[PM seat] repo:objectstack · seat 6 — 🟢 hotlong · 由 hotlong 账户的会话负责 · area:cloud",
+  "title": "[PM seat] repo:objectstack · seat 6 — 🟢 sunhaolin · 由 sunhaolin 账户的项目负责 · area:ai p1+p2",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,17 +14,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "hotlong"
+    "sunhaolin"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-19T07:26:18Z",
-  "updated_at": "2026-11-19T21:47:40Z",
+  "updated_at": "2026-11-21T15:40:20Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35381",
-  "body": "repo:objectstack#6 · hotlong · session_01Q4EjjNq58cmHeqckjZkTFE\n\n⚠️ **Project-seat stub.** This post is the seat, **`repo:objectstack` seat 6** (the whole-repo lane). Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/objectstack.md` and `references/area-lease.md` (⛔ not copied here).\n- New seat: seats 1–5 are #34366 (os-sales), #34478 (os-steve), #34584 (os-support-ai), #34830 (os-lizheng), #35217 (os-bill); none is vacant and no seat-6 post existed, so this is seat 6.\n\n## Current PM — 🟢 hotlong\n\n- **Holder:** `hotlong` · `session_01Q4EjjNq58cmHeqckjZkTFE`, seated on the maintainer's summons in this session, verbatim: 「开一个 objectstack 座位，处理 area:cloud」.\n- **Intake:** open cards labelled `area:cloud` in objectstack-ai/objectstack whose fix lands in this repository (`domain:server`, `domain:ui`, `domain:devx`, …), `priority:p1` first, then p2, then p3.\n  - Excluded: cards that read or change cloud code (`domain:cloud` / `repo:cloud`: the `repo:cloud` seats), security advisories (`security` seats), other repositories, `needs-user-decision` / `pm:retriage` cards, and cards another seat holds (another seat's `Claim:`, `Area:` line or assignee).\n  - A card that turns out to need a cloud half goes back through `Release:` + `pm:retriage` (cross-repo-coordination.md); a missing cloud fact goes to the `repo:cloud` seats as `Request: cloud-confirm`.\n- **Mailbox:** PR #35382 (subscribed). **Patrol:** none yet — this session's permission classifier refused the self-bound patrol (`create_trigger`) at seating; it waits on the maintainer's grant. Until then the seat wakes on mailbox and PR events only.\n- **Seated:** 2026-11-19T07:30Z.\n- **Posture ledger lives in the session:** the labels, the assignee, the `Claim:` comments carrying `Seat: repo:objectstack#6`, and the `head:claude/` PRs.\n\n## Leases\n\nAreas carry the `c6-` prefix; an area is named only in this table and in the claims' `Area:` line. Rewritten 2026-11-19T21:47Z: no area open.\n\n| Area | Path roots | State |\n|---|---|---|\n| `c6-A` | `packages/mcp/src/**` | closed — #35138 merged (PR #35408); roots released to seat 4's `a4-C` (split note on mailbox #35555) |\n| `c6-B` | `packages/qa/scenarios/src/export/**` | closed — #35132 merged (PR #35430) |\n| card `#35157` | PR #35261's files | code merged (PR #35261); card `pm:blocked` on the ADR note #35503 |\n\nNot opened: #35143 (`packages/lint`, `packages/spec/src/kernel`) meets seat 1's `b1-A` roots — waits on a mailbox note to seat 1.\n\n## Hot-file serial queue\n\n- None held by this seat.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Contract (L2) reviews: TIER_DEFAULT records in-seat; CONTRACT_REVIEW_TIER by this seat's own isolated at-tier subagent, posted with `--tier-evidence` (`references/contract-review.md`). The L2 seat is asked only when this seat cannot reach that tier (corrected 2026-11-19T09:45Z on the maintainer's word in this session: 「L2 发信给在线的审核席，这个规则应该错了」).\n- Publication: objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n\n\n"
+  "body": "repo:objectstack#6 · sunhaolin · session_017xRBcSPM86QhYAcidhG5Bu\n\n⚠️ **Project-seat stub.** This post is the seat, **`repo:objectstack` seat 6** (the whole-repo lane). Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/objectstack.md` and `references/area-lease.md` (⛔ not copied here). Posture and ledger live in the project.\n\n## Current PM — 🟢 sunhaolin\n\n- **Account:** `sunhaolin` · **Session:** `session_017xRBcSPM86QhYAcidhG5Bu` · **Seated:** 2026-11-21T15:38Z, on the maintainer's summons in this session: `/pm-dispatch objectstack`, then 「你处理 area:ai 所有的 p2 任务」 and 「area:ai p1 p2  你都可以派」.\n- **Intake:** open `area:ai` cards at `priority:p1` and `priority:p2` that land in objectstack-ai/objectstack. Cards held by another seat's claim are not touched; `domain:cloud` cards stay with the `repo:cloud` seats; eval runs stay with the eval seat.\n- **Mailbox:** PR #36130 (subscribed). **Patrol:** `trig_01RaWLcZXFQpRP3DZAhpBZZx` · `17 */1 * * *` (hourly during in-flight work).\n- **Successor-of:** seat 6's previous holder `hotlong` · `session_01Q4EjjNq58cmHeqckjZkTFE` (clocked out; this is a new holder, not a continued shift).\n\n## Leases\n\nNone. Fewer than 15 claimable cards on this intake, so no areas (`area-lease.md` threshold); cards are claimed one by one.\n\n## Hot-file serial queue\n\n- `packages/qa/scenarios/src/runner/observe.ts` + `orchestrate.ts` grading: #35907 (p1, chain head) folded with #34214 in one PR; any later grading card waits behind it.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`, `mailbox-open.mjs`). ⛔ No GitHub MCP writes.\n- Publication: objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n"
 }

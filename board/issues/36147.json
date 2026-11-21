@@ -1,0 +1,34 @@
+{
+  "number": 36147,
+  "kind": "issue",
+  "title": "记录的字段区统一成一列：右侧预览、手机记录页、宽屏左栏共用一个组件，不管多宽都只排一列；分组箭头在右",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-21T16:36:38Z",
+  "updated_at": "2026-11-21T17:29:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36147",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35590（专题：记录详情页重做，维护者直派）。⛔ 不是认领。优先级 p2（协调席定的，维护者未指定）。\n\n## 维护者说过的（2026-11-22）\n\n- 看着 Twenty 的窄屏记录页：「手机记录页是不是应该和，电脑端右侧drawer预览的效果，和宽屏左侧记录预览效果一致，只显示一列，」「而且可以切换子表」\n- 「字段区统一成一列、三处共用一个组件，我同意」\n- 「手机上那块两列的「重点字段」去掉，好像本来就不应该有」\n- 「现有的右侧界面也要看看如何进一步优化」\n- 看过效果图（设计板图 48）和协调席加的五条后：「可以，立卡」\n- 「自定义记录页在手机和右侧预览里不生效、统一用标准页」\n- 「字段分组下拉的位置，我觉得放在右边比较好看，你看右侧浏览器」\n\n## 现状（界面 `db9e34ad32`、服务端 18.6.0，本机环境浏览器实测）\n\n平台默认的记录页按容器宽度排字段（`ui/packages/app-shell/src/views/RecordDetailView.recordPageTiers-26678.test.tsx` 里写的规则）：宽度 ≥1120 三列，≥760 两列，小于 760 一列。\n\n- **电脑右侧预览**（1440 宽的窗口里预览大约 700 多宽）：字段两列。负责人和所属客户并排，「深圳星河电子商务有限…」被截断。\n- **手机**（390 宽）：字段已经是一列。\n- **宽屏整页左栏**：objectstack-ai/objectstack#35890 正在做，写的是「字段单列」。\n\n三处宽度都在三四百到七百之间，却不是同一个样子；预览拉宽一点就会从一列变两列。\n\n![现状：右侧预览里字段两列，值被截断](https://github.com/objectstack-ai/objectstack/blob/130c6fcefb308e22a11bc98546e58c1ba76386cc/record-redo/onecol-now-drawer.png?raw=true)\n\n![现状：平台默认的手机记录页，已经是一列](https://github.com/objectstack-ai/objectstack/blob/130c6fcefb308e22a11bc98546e58c1ba76386cc/record-redo/onecol-now-phone.png?raw=true)\n\n## 参照（Twenty 窄屏记录页、Attio 侧边记录面板，只参照行为）\n\n字段一列，一行一个：左边图标加字段名，右边是值；按分组显示，分组标题在左、折叠箭头在最右。\n\n## 效果图（设计板图 48，维护者已同意）\n\n![右侧预览：字段一列](https://github.com/objectstack-ai/objectstack/blob/d050e50d22ed60e98ae745596f88287c8a453fc5/record-redo/onecol-1-drawer.png?raw=true)\n\n![手机记录页和宽屏左栏：同一个字段区](https://github.com/objectstack-ai/objectstack/blob/d050e50d22ed60e98ae745596f88287c8a453fc5/record-redo/onecol-3-phone-wide.png?raw=true)\n\n## 要做的\n\n1. **一个字段区组件，三处共用**：电脑右侧预览（抽屉）、手机记录页的「详情」页签、宽屏整页的左栏（objectstack-ai/objectstack#35890）。\n2. **不管容器多宽，这个字段区都只排一列**。一行一个字段：字段名在左（固定宽度，灰色小字），值在右，值可以换行、完整显示，不截断。\n   - 记录页整页在没有左栏的情况下（没有其他页签、字段撑满整页，见 #35890 第 4 项）仍按宽度排多列，不在本卡范围。\n3. **分组**：分组标题在左，折叠箭头在最右；点整行折叠或展开。没有分组的字段排在最前，不画分组标题。\n4. **关联记录**的值显示成带对象色块的小块，不是蓝色文字；点小块打开那条记录。\n5. **空字段默认收起**：这一列最后一行「显示 N 个空字段」，点了展开。\n6. **系统信息**：创建人、创建时间、修改人、修改时间、记录编号，收进最下面一个叫「系统信息」的分组，默认收起。现在它们在页面底部一行小字里。\n7. **点值直接改**：字段旁边不放铅笔图标；能改的字段点值进入编辑，不能改的点了没反应。（就地编辑的行为沿用现有的，本卡只管入口的样子。）\n8. 手机记录页上不出现两列的重点字段块（平台默认页现在已经没有；本卡保证换成新组件后也没有）。\n\n## 不做的\n\n- 不改记录页的页签规则（每张子表一个页签，已定）。\n- 不改整页没有左栏时的多列排法。\n- 不改预览的宽度、头部按钮（另卡）。\n- 不改编辑、保存的逻辑。\n- 不处理自定义记录页（另卡）。\n\n## 验收\n\n- 电脑上从列表在侧边打开一条记录：字段一列。把预览拖宽到 900：仍然一列。\n- 「所属客户」的值完整显示，是带色块的小块；点它打开那个客户。\n- 手机宽度下打开同一条记录：「详情」页签里的字段排法和预览里相同（同样的行、同样的分组、同样的顺序）。\n- 宽屏整页（#35890 合并后）：左栏的字段排法和上面两处相同。\n- 有分组的对象：分组标题在左、箭头在最右；点了折叠，再点展开。\n- 有空字段的记录：最后一行「显示 N 个空字段」，点了出现。\n- 「系统信息」分组默认收起，展开后有创建人、创建时间、编号。\n- 字段旁边没有铅笔图标；点可编辑字段的值能改。\n- PR 正文附预览、手机两处的改动前后截图。\n\n## 协调席自己加的（不是维护者原话）\n\n维护者定的是：一列、三处共用、分组箭头在右、去掉两列重点字段。下面是协调席补的，维护者看过效果图说了「可以，立卡」：\n\n- 第 4 项关联记录显示成小块。\n- 第 5 项空字段收起。\n- 第 6 项系统信息分组。\n- 第 7 项去掉铅笔、点值直接改。\n- 第 2 项里「没有左栏时仍按宽度排多列」不在范围内。\n\n## 没有核对的\n\n- 现在预览里字段两列是在约 700 宽的预览里看到的；更窄的预览会不会已经是一列，没有试。\n- 就地编辑现在在预览和手机上各自是什么样，没有逐个字段类型试。\n- 和 objectstack-ai/objectstack#35890 的先后：那张在做左栏，两张都动字段区。请两边席位对一下谁出这个共用组件，在卡上说一声。\n\nReader: `domain:ui` 车道。`ui/packages/app-shell/src/views/RecordDetailView.tsx`（按宽度分档的逻辑）、`recordDetailSections.ts`、`ui/packages/plugin-detail`（字段区的画法）、`record-detail-system-fields.ts`、`RecordMetaFooter`。\n\nDedupe: `抽屉 字段 一列`、`记录 抽屉 两列`、`手机 记录页 字段`（objectstack，open）→ 都是 0。相关：objectstack-ai/objectstack#35890（宽屏左栏，进行中）、objectstack-ai/objectstack#35602（字段密排，已关闭）。"
+}

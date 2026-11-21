@@ -1,0 +1,35 @@
+{
+  "number": 36125,
+  "kind": "issue",
+  "title": "plugin-auth: an MCP token minted in the same second after a password change is refused 401 (iat in whole seconds vs credential updated_at in ms) since #35822",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:auth",
+    "bug",
+    "domain:server",
+    "finding",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-21T15:14:53Z",
+  "updated_at": "2026-11-21T18:46:20Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36125",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\n**Defect.** Since PR #35822 (`75925e1c234`, \"a password reset ends what the account added before it\"), `mcpConsentAdmits` refuses an MCP OAuth access token issued AFTER a password change whenever it falls in the same wall-clock second. The MCP door then answers `401 UNAUTHENTICATED` (\"a valid OAuth access token or API key is required\") where it should serve the request.\n\n**Cause, read on `origin/main`:**\n- `packages/plugins/plugin-auth/src/mcp-token-revocation.ts`, around line 275, calls `issuedBeforeCredentialChange(issuedAt * 1000, readCredentialChangedAt(...))`.\n- `issuedAt` is the JWT `iat`, which is in whole seconds. The credential's `updatedAt` is in milliseconds.\n- So a token minted at 12:00:00.900, after a change at 12:00:00.400, compares 12:00:00.000 < 12:00:00.400 and is judged \"issued before the change\".\n- `credential-change-ends-prior-access.ts`, around line 173, is a strict `<` on the two values.\n- The module's own rule is that access issued after the change is untouched. It carves out a same-second refusal only for `/verify-email` tokens.\n\n**Measured on cloud.** In cloud pin round cloud#4920 (draft PR cloud#4921, pin `493ad095d40e`), `apps/objectos-ee/test/scim-leaver-lifecycle.e2e.test.ts` fails its PREMISE. The test changes a password, then grants an MCP agent through DCR + PKCE + authorize/consent/token/refresh and calls `tools/list`. The call answers 401, deterministically when the file runs alone. A diagnostic 1100 ms pause after the change, since reverted, turns the file 42/42 green. The same test passed at pin `dea68e93c68d`, which predates #35822.\n\n**Reach.** Any scripted or agent flow that connects over MCP right after a password change or reset, on any deployment. The behaviour fails closed: it refuses a valid token and never admits an old one. It is not a security finding.\n\n**Fix shape: a security-boundary choice the platform lane must make.** One rule must stay true: a token issued before the change is never admitted. Options:\n- (a) carry a sub-second issue time for MCP tokens and compare it in ms;\n- (b) compare at second resolution and treat the change second as \"after\" only for tokens provably minted after it;\n- (c) rule the same-second refusal deliberate, as for `/verify-email`, and document it in the module, so that clients retry after one second.\n\nWhichever is chosen needs a test pinning it: a token minted after the change in the same second, and a token minted before the change in the same second.\n\n**Why it matters to cloud.** Cloud's pin round cloud#4920 cannot land past `75925e1c234` while this test is red. #35822 is an ancestor of the #35939 fix that the round needs, so the round cannot pin around it. Cloud#4920 blocks cloud#4918 (p1). Under the standing rule 「平台问题在平台修」, cloud does not add a wait to its security-list test unless the platform rules (c).\n\nRe-check: `git grep -n \"issuedBeforeCredentialChange(issuedAt \\* 1000\" -- packages/plugins/plugin-auth/src/mcp-token-revocation.ts` still hits ⇒ the defect is present."
+}

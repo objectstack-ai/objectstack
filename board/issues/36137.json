@@ -1,0 +1,32 @@
+{
+  "number": 36137,
+  "kind": "issue",
+  "title": "Save to this view: a view-settings draft saved between the pinned draft write and the publish gets published with it (publish takes no draft-version pin)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-21T16:00:11Z",
+  "updated_at": "2026-11-21T16:50:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36137",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFound by the seat's declaration-face L2 on PR #36123 (#35955 PR 2, record 7065286873). The PR's own body names it as its \"known edge\". It does not block that PR.\n\n## What happens\n\n\"Save to this view\" on a shared view does two writes:\n1. A draft write pinned with `If-None-Match: *` (`mode: 'draft'`). The door refuses it with `409 METADATA_CONFLICT` when the view already has a pending draft.\n2. A publish of that draft.\n\nBetween the two, a save from the view settings panel can land. That save writes its draft unpinned, so it overwrites the draft from step 1, and step 2 then publishes the settings panel's unreviewed change for everyone.\n\nRuling 7058616478 on #35955 says an existing unpublished draft is never published on someone else's behalf, so this breaks it. The window is the time between two requests, so it is narrow, but it is a real window.\n\n## Why #36123 cannot close it\n\n`MetadataClient.publish` takes no precondition on the draft's version, so the publish cannot say \"only the draft I just wrote\".\n\n## Directions (the card thread picks one in its premise; a protocol change goes to Fable L2)\n\n- **A.** Give publish a draft-version precondition, for example `If-Match` on the draft's version. Then \"Save to this view\" passes the version its draft write returned. This touches the `/meta` publish door and the client, so it is a protocol face.\n- **B.** Pin the view settings panel's draft writes (`If-Match` on the draft it loaded, or `If-None-Match: *` when it starts a new one). Then the settings save that would cross step 1 is refused instead of overwriting it. The change is client-only, but it covers only the writers that are pinned.\n\n## Acceptance\n\n- A test interleaves a settings-panel save between the draft write and the publish. The publish refuses, or the settings save refuses, and nothing unreviewed is published.\n- The \"known edge\" note is removed from the docs or changeset text that carries it.\n\nWait for: #36123 merged."
+}

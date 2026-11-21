@@ -2,8 +2,8 @@
   "number": 36048,
   "kind": "issue",
   "title": "列表观感：列之间加竖线，默认行高 32 改 36，底部每列的「添加统计」入口常显",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-21T11:17:30Z",
-  "updated_at": "2026-11-21T12:19:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T14:18:24Z",
+  "closed_at": "2026-11-21T14:18:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

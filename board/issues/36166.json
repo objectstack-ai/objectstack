@@ -1,0 +1,32 @@
+{
+  "number": 36166,
+  "kind": "issue",
+  "title": "Unmanaged rename: a copy still double-prefixes when a single object, one stray object, or a declared namespace contradicts the object names",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-21T17:26:17Z",
+  "updated_at": "2026-11-21T17:54:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36166",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5nwb5fUkxg7Q9NVxvR\n\nFiling gate: ① · Source: fleet · follow-up of #35823 (PR #36138, contract review record 7066464020, boundary flag ③ carried here by the seat)\n\n## Finding\n\nPR #36138 refuses an unmanaged install renamed into a `targetNamespace` when the package declares no `namespace` and its object names share ONE first segment other than the namespace derived from the id (two or more objects, none carrying the derived prefix). That set-level signal leaves three silent double-prefix cases on the same rename path (`planUnmanagedImport`, `packages/metadata-protocol/src/package-unmanaged-install.ts`, `derivedNamespaceContradiction`):\n\n1. **A single-object package with a foreign prefix.** `demoasset_asset` alone, no `namespace`, id deriving `asset_lifecycle_b`, `targetNamespace: 'trialdemoasset'` copies as `trialdemoasset_demoasset_asset`. Pinned as a CONTROL in PR #36138 (`a single-object package is not refused`).\n2. **One stray object beside the prefixed ones.** `demoasset_asset`, `demoasset_site` and `site` (or `purchase_order`) share no first segment, so the signal does not fire: the two `demoasset_*` objects copy as `trialdemoasset_demoasset_*`.\n3. **A declared `namespace` the object names contradict.** `namespace: 'other'` with `demoasset_*` objects copies as `trialdemoasset_demoasset_*`. Pinned as a CONTROL in PR #36138 (the declared path was kept unchanged by #35823's Done-when).\n\nreach: the public door `POST /api/v1/marketplace/install-local` with `installMode: 'unmanaged'` and `targetNamespace`, and `importUnmanagedPackage`; each case measured as a planner answer in `package-unmanaged-install.test.ts` at PR #36138 head b2e82158.\n\nAlso owed here: a dated note on ADR-0048 §3.5 (2026-11-07 amendment, \"a name that lacks the package's prefix takes it in front\") recording the narrowing #36138 made: in a namespace-less package, two or more objects sharing a first word that is not the derived namespace (`purchase_order` + `purchase_item`) are refused, not renamed in front.\n\n## Done when\n\nEach of the three cases either refuses loudly (naming the names and the namespace in play) or is decided to stay as the ADR rename, with the decision recorded on the ADR; a test pins each answer; ADR-0048 §3.5 carries the dated note for the #36138 narrowing.\n\nDedupe words: `derivedNamespaceContradiction`, `unmanaged double prefix`, `targetNamespace foreign prefix`."
+}

@@ -1,0 +1,39 @@
+{
+  "number": 36146,
+  "kind": "issue",
+  "title": "fleet-write advisory_list fails the whole listing once one state holds more than 100 advisories (next-page link refused)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "bug",
+    "domain:skills",
+    "finding",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-21T16:22:07Z",
+  "updated_at": "2026-11-21T18:19:36Z",
+  "closed_at": "2026-11-21T18:18:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36146",
+  "body": "security#2 · sunhaolin · session_017xRBcW9L8Noz9BxEwjwiov\n\n**Defect (tooling).** The relay op `advisory_list` (scripts/pm/fleet-write) refuses the whole stroke as soon as any one state has a second page. The security seats' intake probe is therefore dead once a repository holds more than 100 advisories in one state.\n\n**Measured.**\n- 2026-11-21T14:32Z: run 44914435895 succeeded. Total 182, and the largest state held 99.\n- That state then grew past 100.\n- 2026-11-21T16:19Z and 16:20Z: runs 44923946055 and 44924005513 both fail with exit 5. Job log:\n\n> `✗ action 1 advisory_list: GET /repos/objectstack-ai/objectstack/security-advisories?state={triage,draft,closed}&per_page=100 -> a full page's Link header names a next page the relay does not follow — not exactly one rel=\"next\" link, or one off this API's collection or this state, or a cursor that is not exactly one value in its declared shape — so nothing was sealed or emitted`\n\n**Where.** `advisoryListNextCursor` in `scripts/pm/fleet-write/ops.mjs`. It follows a next link only when:\n- there is exactly one,\n- its origin and path equal `/repos/{repo}/security-advisories`,\n- it has exactly one `state` equal to the walked state,\n- and it has exactly one `after` matching `ADVISORY_LIST_CURSOR_SHAPE`.\n\n**Not measured.** Which of these conditions GitHub's real next link breaks. The seat cannot see the header: the relay prints nothing on refusal, by design. Candidates:\n- the link addresses the collection by repository id (`/repositories/{id}/…`);\n- it paginates with `page=` and no `after`;\n- the cursor has characters outside the shape.\n\nThe fix PR measures the real header first. Prefer a runner-side diagnostic that prints only the link's parameter NAMES and the path's shape: never a cursor value, never an advisory field.\n\n**Acceptance.** `advisory_list` walks every page of each of the three states when a state holds more than 100, and seals and emits as today. The self-test gains a fixture using the real next-link shape. Still refused: a link off the collection, off the state, or with an unbounded cursor.\n\n**Impact.** No intake probe for either security seat until fixed. Reading and writing a single advisory is unaffected.\n\nRe-check: `node scripts/pm/fleet-write/dispatch.mjs --repo objectstack-ai/objectstack --actions-file <file holding [{\"op\":\"advisory_list\"}]> --reveal` from a security seat exits non-zero with the job log line above."
+}

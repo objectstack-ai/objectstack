@@ -1,0 +1,37 @@
+{
+  "number": 36143,
+  "kind": "pull_request",
+  "title": "docs(skills): data-hooks says an action body's input and ctx are already bound and names the refused redeclaration",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-21T16:11:26Z",
+  "updated_at": "2026-11-21T18:06:16Z",
+  "closed_at": "2026-11-21T18:06:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-21T18:06:14Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36143",
+  "body": "Fixes #34988\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:让 AI 写「动作脚本」的客户,技能手册现在会先说明脚本里已有两个现成的参数,不能再声明同名变量;以前手册没提,AI 照常见写法写出的脚本在校验和保存时被拒。\n- 为什么做:属于「教 AI 正确编写元数据的技能手册」这条线,补上平台已经拒收、手册却没教的一处。\n- 出错会怎样:只改说明文字,不改平台行为;最坏是措辞误导作者,撤回这次合并即可恢复原文。\n- 要你做什么:这是对外发布的技能手册,需要你审阅并合并。\n\n## What changes\n\n`skills/objectstack-data/references/data-hooks.md`, and its eval case 33:\n\n- **The action wrapper paragraph** (under the sandbox `ctx` table) now reads: the action params arrive as `input`; both names are already bound; `const input = ctx.input || {};` or `let ctx` is `action-body-does-not-compile`, refused like a hook body's, with a link to the hook compile paragraph in § Sandbox restrictions, which carries the commands (`os validate`, `os build`, `os lint`), the runtime save (`422 INVALID_METADATA`) and the fix.\n- **The hook compile paragraph** it links to: the suggested local is now `const data = ctx.input || {};` (was `const input = …`, the exact line an action body is refused for, now one click away from the action warning); `a runtime hook save` became `a runtime save`, so the sentence holds for the action and object saves too.\n- **Paid for inside the file.** The file sat 2 tokens under its shrink-only ceiling on `origin/main` (`check-skills-token-ratchet`: 10120 of 10122), so the new text is paid for by two deletions of restatement: the hook paragraph no longer re-prints the `(async (ctx) => { … })` wrapper that § The `body` shape shows, and the `condition` paragraph no longer repeats the `input.id` / single-record-context clause that the \"Why so few?\" note states with the same ADR-0058 citation.\n\nThe rule id and the refusal are quoted from the code on `origin/main`: `ACTION_BODY_DOES_NOT_COMPILE = 'action-body-does-not-compile'` in `packages/lint/src/validate-action-body-compiles.ts`, and the ADR-0087 entry `action-body-does-not-compile-refused` (\"Refused at error as `action-body-does-not-compile` (422 INVALID_METADATA at the doors)\", loaded by `os validate` / `os build` / `os lint`).\n\n- **Eval case 33** (`skills/objectstack-data/evals/hooks-security-seeds-datasources.json`, rework round 1 on the L2 should-fix S1): `must_contain` is now `hook-body-does-not-compile` and `ctx.input` (a token both printed fixes carry; the old `input.status` failed the `const data = …` rename the paragraph now prints), and `expected_output` spells that rename.\n\nChangeset: `.changeset/34988-action-wrapper-redeclare.md`, `@objectstack/skills` patch (the catalog ships in that package).\n\n## Tests\n\nText only; no tested behaviour changes, so no ablation.\n\nSkills size readings (head `7613457f`; `data-hooks.md` unchanged since `54a18393`):\n\n| Reading | Before | After |\n|:--|:--|:--|\n| `data-hooks.md`, lines | 884 | 885 |\n| `data-hooks.md`, tokens (`ceil(utf8 bytes / 4)`) | 10120 | 10121 (ceiling 10122) |\n| All `skills/*/SKILL.md`, lines | 4945 | 4945 |\n| Whole shipped tree, tokens | 288733 | 288734 |\n\n## Acceptance notes\n\n- Card Done-when, each clause: parameters named as already bound (yes); the refused redeclaration shown (`const input = ctx.input || {};`, `let ctx`); the lint rule linked (rule id `action-body-does-not-compile` plus the link to the paragraph listing the commands that report it).\n- The claim's file surface was the action wrapper paragraph only. Three more spots in the same file were touched, all forced by the token ceiling or by the link: the two restatement deletions and the hook paragraph's two wording changes above. No ceiling row was moved.\n- `os explain action-body-does-not-compile` (the rule carries an explanation in `packages/lint/src/rule-explanations.ts`) did not fit the ceiling and is not mentioned.\n\n## Verification\n\n- First file to read: `skills/objectstack-data/references/data-hooks.md`, the hunk under the `ctx` table (the new teaching), then the `condition` hunk (the riskiest one: a deletion in text this card did not own).\n- Two-minute check: `node scripts/check-skills-token-ratchet.mjs` prints `skills/objectstack-data/references/data-hooks.md is 10121 tokens (ceiling 10122; headroom 1)` and exits 0.\n\nLocal gates at `54a18393`: the 48 commands `dispatch-gates --commands` derives; 43 exited 0 (among them `check:skill-links`, `check:skill-refs`, `check:skill-identifier-liveness`, `check:doc-authoring`, `check:nul-bytes`, `check-skills-token-ratchet`, `check-empty-changeset`); 5 exited 3, NOT MEASURED, reason: they need a full workspace build this text change does not warrant, left to CI (`check:doc-formula-expressions` in `@objectstack/lint`, `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`, `check:sourcemap-no-sources-content`). `overlap-check` against `origin/main` and open pulls 36089, 36087, 36067, 36104: merges cleanly.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017xRBcSPM86QhYAcidhG5Bu)_\n\n<!-- signed: repo:objectstack#6 · sunhaolin · session_017xRBcSPM86QhYAcidhG5Bu -->\n"
+}

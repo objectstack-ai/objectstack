@@ -2,8 +2,8 @@
   "number": 36070,
   "kind": "issue",
   "title": "评论（四）小修：点「回复」后光标进回复框；没设头像的显示姓名首字；提到人的选单跟着光标；删除后给提示",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-21T12:18:58Z",
-  "updated_at": "2026-11-21T13:17:54Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T16:04:12Z",
+  "closed_at": "2026-11-21T16:04:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 2,
   "locked": false,

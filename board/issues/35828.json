@@ -2,8 +2,8 @@
   "number": 35828,
   "kind": "issue",
   "title": "deps: the minimatch OSV exemption (GHSA-g3hv-75wg-m249) expires 2026-11-30 — renew it or move the last ^10 parents before the daily scan reds again",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,19 +13,24 @@
   "labels": [
     "area:build",
     "domain:devx",
-    "pm:queue",
     "priority:p1",
     "security"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-20T10:18:47Z",
-  "updated_at": "2026-11-21T13:12:13Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T17:22:12Z",
+  "closed_at": "2026-11-21T17:21:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35828",
   "body": "repo:objectstack#1 · os-sales · session_01L6bhgTWPccNTuCwS1djJ86\n\nFound-in #35108 (card thread, while measuring the daily Validate Dependencies scan for PR #35825). Filed at the seat's request; not dispatched.\n\n## What happens on 2026-11-30\n\n`osv-scanner.toml` carries one exemption, GHSA-g3hv-75wg-m249 (minimatch, the only patched version is the breaking 11.0.1), with `ignoreUntil = 2026-11-30`. The scanner still matches it on `main`: on merge base `cbc50a5a` the scan prints `GHSA-g3hv-75wg-m249 and 1 alias have been filtered out` (scanner v2.5.0, the workflow's pin). When the date passes, the scanner stops filtering it and the scheduled Validate Dependencies run goes red on `main` again, the same shape as #35108.\n\n## Where the parents stand today (npm registry, newest versions)\n\nThe exemption's reason names seven parents that declared `^10`. Five of them now accept 11.x in their newest release:\n\n| Parent | Newest | Declares minimatch |\n|:--|:--|:--|\n| eslint | 10.15.0 | ^11.0.5 |\n| @eslint/config-array | 0.23.6 | ^11.0.5 |\n| @typescript-eslint/typescript-estree | 8.73.0 | ^11.0.1 |\n| @oclif/core | 5.1.12 | ^11.0.1 |\n| readdir-glob | 4.0.0 (a major) | ^11.0.1 |\n| @microsoft/api-extractor | 7.60.1 | 10.2.3 (exact) |\n| typedoc | 0.28.20 | ^10.2.5 |\n\nSo the exemption cannot simply be deleted yet: api-extractor and typedoc still hold a 10.x copy.\n\n## Done when\n\nOne of these lands before 2026-11-30, each in its own PR per the `osv-scanner.toml` header:\n\n1. Renew: a new `ignoreUntil` (30-day default, 90 ceiling) with the `reason` rewritten to name only the parents that still block (today api-extractor and typedoc), labelled `osv-exemption`. Renewing accepts a known advisory again, so it is the same review as the original decision.\n2. Remove: move the parents that allow it, check whether api-extractor and typedoc have a release accepting 11.x by then, and delete the exemption once no 10.x copy is left in `pnpm-lock.yaml` (`osv-scanner --lockfile=pnpm-lock.yaml` exits 0 with no filter line).\n\nEither way the next scheduled Validate Dependencies run after 2026-11-30 is green.\n\nGrade proposal: p2 (the seat's call), domain:devx. A red daily scan on `main` was graded p1 by precedent (#32386, #33211), so if this is not done before the date it becomes that.\n\nDedupe words: minimatch exemption, GHSA-g3hv-75wg-m249, ignoreUntil, osv-scanner.toml renewal."

@@ -1,0 +1,32 @@
+{
+  "number": 36119,
+  "kind": "issue",
+  "title": "e2e list-no-actions-column-35554: the side-record cases fail when the drawer is the worker's first mount (getByText matches the side record's h1 too)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-21T15:04:54Z",
+  "updated_at": "2026-11-21T15:48:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36119",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFound by the #36024 card thread (phone list toolbar) on a local `e2e list-*` run of head `74cf9d88`: 49 of 51 pass; the two failures are in `ui/e2e/list-no-actions-column-35554.spec.ts`, the \"side record\" cases from #35678, which #36024 does not touch.\n\n## What happens\n\nWhen the record drawer is the first thing a Playwright worker mounts, the spec's first-mount wait `getByText('商机 1')` matches two elements, the list cell and the side record's `h1`, and strict mode throws. When an earlier test in the same worker has already mounted the drawer, the wait resolves before the side record renders and the case passes, so the failure depends on test order.\n\n## To do\n\nScope the wait to the list (the grid cell's role or a `data-*` hook) or to the side record's heading, whichever the case means to wait for, so it matches exactly one element regardless of order. Run the spec alone and inside the full `list-*` set, both green.\n\n## Acceptance\n\n- `ui/e2e/list-no-actions-column-35554.spec.ts` passes run alone (`--workers=1`, first in its worker) and as part of the `list-*` set."
+}
