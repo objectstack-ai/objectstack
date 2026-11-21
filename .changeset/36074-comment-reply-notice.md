@@ -4,7 +4,7 @@
 
 feat(plugin-audit): a reply in a comment thread notifies the thread's starter and the people who replied in it before
 
-Clause-②: no
+Clause-②: yes (widening) — `@objectstack/plugin-audit` emits a new notification topic, `collab.reply` (inbox and e-mail), and loads three new `messages.*` keys (`repliedToYourComment`, `repliedInYourThread`, `repliedAnonymous`) in all eleven locales into the host i18n service; nothing removed or refused
 Metadata-protocol: none
 
 Before, only an `@mention` notified anyone about a comment. Someone who started a thread, or replied in it, heard nothing when another person answered.
