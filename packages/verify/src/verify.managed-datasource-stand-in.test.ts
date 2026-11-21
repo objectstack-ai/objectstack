@@ -120,8 +120,22 @@ const docsDatasource = {
 
 type Call = { method: string; object?: string };
 
-/** A driver this suite owns, registered by a plugin as `driver.NAME`. Every call is recorded. */
-function recordingDriverPlugin(datasource: string, calls: Call[]): Plugin {
+/**
+ * How the recording plugin hands its driver to the boot: as the `driver.NAME`
+ * service `DriverPlugin` and `driver-odata` register (the default), as a
+ * service under a key other than the driver's own name, or straight into the
+ * engine from an `objectql:drivers-ready` handler.
+ */
+type RecordingRegistration =
+  | { via: 'service'; serviceKey?: string }
+  | { via: 'drivers-ready' };
+
+/** A driver this suite owns, named `datasource` and registered by a plugin. Every call is recorded. */
+function recordingDriverPlugin(
+  datasource: string,
+  calls: Call[],
+  registration: RecordingRegistration = { via: 'service' },
+): Plugin {
   const record = (method: string, answer: (n: number) => unknown = () => null) => async (object?: string) => {
     calls.push({ method, object });
     return answer(calls.length);
@@ -157,7 +171,14 @@ function recordingDriverPlugin(datasource: string, calls: Call[]): Plugin {
     version: '1.0.0',
     init: async (ctx: PluginContext) => {
       calls.push({ method: 'plugin.init' });
-      ctx.registerService(`driver.${datasource}`, driver);
+      if (registration.via === 'drivers-ready') {
+        ctx.hook('objectql:drivers-ready', async (engine: { registerDriver(d: IDataDriver): void }) => {
+          calls.push({ method: 'drivers-ready' });
+          engine.registerDriver(driver);
+        });
+        return;
+      }
+      ctx.registerService(registration.serviceKey ?? `driver.${datasource}`, driver);
     },
   };
 }
@@ -521,50 +542,83 @@ describe("os verify refuses to boot while a managed datasource on a plugin's dri
 describe("os verify refuses to boot when a plugin registers a driver under a managed datasource's name", () => {
   // A SHIPPED driver id (`mongodb`), so the declaration alone passes; the
   // connection service would keep the plugin's driver registered under the
-  // datasource's name instead of asking verify's factory.
-  const SHADOWED_DS = 'vmd_docs_ds';
-  const shadowedCalls: Call[] = [];
-  const shadowedStack = defineStack({
-    manifest: {
-      id: 'com.objectstack.verify.managed-stand-in-shadowed',
-      namespace: 'vmd',
-      version: '0.0.0',
-      type: 'app',
-      name: 'Managed Name Shadowed Fixture',
-      description: "An app whose plugin registers a driver under a managed mongodb datasource's name.",
-    },
-    datasources: [
-      { name: SHADOWED_DS, label: 'Docs (managed mongodb)', driver: 'mongodb', schemaMode: 'managed', config: { url: 'mongodb://127.0.0.1:1/vmd' } },
-    ],
-    objects: [
-      {
-        name: 'vmd_doc',
-        label: 'Doc',
-        pluralLabel: 'Docs',
-        datasource: SHADOWED_DS,
-        sharingModel: 'public_read_write',
-        fields: { name: { type: 'text', label: 'Name' } },
+  // datasource's name instead of asking verify's factory. The object is bound
+  // to the datasource, so the boot's schema sync and the app's seed reach
+  // whatever driver holds that name.
+  /** An app on one managed mongodb datasource, `NS_docs_ds`, whose plugin registers a driver under its name. */
+  const shadowedStack = (ns: string, calls: Call[], registration?: RecordingRegistration) => {
+    const datasource = `${ns}_docs_ds`;
+    const stack = defineStack({
+      manifest: {
+        id: `com.objectstack.verify.managed-stand-in-shadowed.${ns}`,
+        namespace: ns,
+        version: '0.0.0',
+        type: 'app',
+        name: 'Managed Name Shadowed Fixture',
+        description: "An app whose plugin registers a driver under a managed mongodb datasource's name.",
       },
-    ],
-    data: [{ object: 'vmd_doc', mode: 'upsert', externalId: 'name', records: [{ name: 'SEED' }] }],
-    plugins: [recordingDriverPlugin(SHADOWED_DS, shadowedCalls)],
-  } as never);
+      datasources: [
+        { name: datasource, label: 'Docs (managed mongodb)', driver: 'mongodb', schemaMode: 'managed', config: { url: `mongodb://127.0.0.1:1/${ns}` } },
+      ],
+      objects: [
+        {
+          name: `${ns}_doc`,
+          label: 'Doc',
+          pluralLabel: 'Docs',
+          datasource,
+          sharingModel: 'public_read_write',
+          fields: { name: { type: 'text', label: 'Name' } },
+        },
+      ],
+      data: [{ object: `${ns}_doc`, mode: 'upsert', externalId: 'name', records: [{ name: 'SEED' }] }],
+      plugins: [recordingDriverPlugin(datasource, calls, registration)],
+    } as never);
+    return { datasource, stack };
+  };
 
-  it('the boot is refused, naming the datasource and its declared driver id, and the plugin driver receives no call', async () => {
-    const refusal = await bootStack(shadowedStack as never, {}).then(
-      async (stack) => {
-        await stack.stop();
+  const refusalOf = (stack: unknown) =>
+    bootStack(stack as never, {}).then(
+      async (booted) => {
+        await booted.stop();
         return undefined;
       },
       (e: unknown) => e as Error,
     );
+
+  it('as the `driver.NAME` service: the boot is refused, naming the datasource and its declared driver id, and the plugin driver receives no call', async () => {
+    const calls: Call[] = [];
+    const { datasource, stack } = shadowedStack('vmd', calls);
+    const refusal = await refusalOf(stack);
     expect(refusal).toBeInstanceOf(Error);
-    expect(refusal?.message).toContain(`datasource "${SHADOWED_DS}" (driver "mongodb")`);
-    expect(refusal?.message).toContain('registered a driver of its own');
+    expect(refusal?.message).toContain(`datasource "${datasource}" (driver "mongodb")`);
+    expect(refusal?.message).toContain('a driver of its own');
     // The plugin did register its driver (init ran); the driver itself was never called: no
     // connect, no schema sync, no seed write.
-    expect(shadowedCalls).toEqual([{ method: 'plugin.init' }]);
-  });
+    expect(calls).toEqual([{ method: 'plugin.init' }]);
+  }, BOOT_TIMEOUT);
+
+  it('as a service under another key, holding a driver named after the datasource: refused the same way, and the driver receives no call', async () => {
+    // The engine keys an adopted driver on the instance's own `name`, not on the service key.
+    const calls: Call[] = [];
+    const { datasource, stack } = shadowedStack('vmk', calls, { via: 'service', serviceKey: 'driver.vmk_elsewhere' });
+    const refusal = await refusalOf(stack);
+    expect(refusal).toBeInstanceOf(Error);
+    expect(refusal?.message).toContain(`datasource "${datasource}" (driver "mongodb")`);
+    expect(refusal?.message).toContain('a driver of its own');
+    expect(calls).toEqual([{ method: 'plugin.init' }]);
+  }, BOOT_TIMEOUT);
+
+  it('straight into the engine from an `objectql:drivers-ready` handler: refused the same way, and the driver receives no call', async () => {
+    // The hook fires after the guard's start and before the boot's schema sync,
+    // so the handler did run (it is recorded) and its driver never got a call.
+    const calls: Call[] = [];
+    const { datasource, stack } = shadowedStack('vmh', calls, { via: 'drivers-ready' });
+    const refusal = await refusalOf(stack);
+    expect(refusal).toBeInstanceOf(Error);
+    expect(refusal?.message).toContain(`datasource "${datasource}" (driver "mongodb")`);
+    expect(refusal?.message).toContain('a driver of its own');
+    expect(calls).toEqual([{ method: 'plugin.init' }, { method: 'drivers-ready' }]);
+  }, BOOT_TIMEOUT);
 });
 
 describe('unstandableManagedDatasources — which declarations refuse the boot', () => {
