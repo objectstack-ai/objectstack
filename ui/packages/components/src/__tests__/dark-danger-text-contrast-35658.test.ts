@@ -63,6 +63,9 @@ function vars(css: string, selector: RegExp): Record<string, string> {
   return out;
 }
 
+/** A token's stylesheet value: `var(--per-mode, FALLBACK)` reads as its fallback. */
+const fallbackOf = (value: string | undefined) => value?.replace(/^var\(--[\w-]+,\s*(.+)\)$/, '$1');
+
 function hslToRgb(triple: string): [number, number, number] {
   const [h, s, l] = triple.split(/\s+/).map((p) => parseFloat(p));
   const sat = s / 100, lig = l / 100;
@@ -115,17 +118,18 @@ describe.each(SHEETS)('danger text colour in %s (objectstack#35658)', (sheet) =>
   });
 
   it('light danger text is red-700 and clears 4.5:1 on every light surface; the fill keeps the brand red', () => {
-    expect(root['--destructive-text']).toBe('0 73.7% 41.8%');
+    expect(root['--destructive-text']).toBe('var(--destructive-text-light, 0 73.7% 41.8%)');
+    const text = fallbackOf(root['--destructive-text'])!;
     for (const surface of ['--background', '--card', '--popover', '--muted', '--accent', '--secondary']) {
       expect(root[surface], `:root defines ${surface}`).toBeTruthy();
-      expect(contrast(root['--destructive-text'], root[surface]), `${surface} ${root[surface]}`).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(text, root[surface]), `${surface} ${root[surface]}`).toBeGreaterThanOrEqual(4.5);
     }
     expect(root['--destructive']).toBe('0 84.2% 60.2%');
   });
 
   it('dark danger text clears 4.5:1 on every dark surface', () => {
-    const text = dark['--destructive-text'];
-    expect(text, '.dark defines --destructive-text').toBeTruthy();
+    expect(dark['--destructive-text']).toBe('var(--destructive-text-dark, 0 91% 71%)');
+    const text = fallbackOf(dark['--destructive-text'])!;
     for (const surface of ['--background', '--card', '--popover', '--muted', '--accent', '--secondary']) {
       expect(dark[surface], `.dark defines ${surface}`).toBeTruthy();
       expect(contrast(text, dark[surface]), `${surface} ${dark[surface]}`).toBeGreaterThanOrEqual(4.5);
@@ -142,7 +146,7 @@ describe('new-app template (objectstack#35658)', () => {
   it('generated apps carry the same split', () => {
     const tpl = read('packages/cli/src/utils/app-generator.ts');
     expect(tpl).toContain('--text-color-destructive: hsl(var(--destructive-text, var(--destructive)));');
-    expect(tpl).toContain('--destructive-text: 0 91% 71%;');
-    expect(tpl).toContain('--destructive-text: 0 73.7% 41.8%;');
+    expect(tpl).toContain('--destructive-text: var(--destructive-text-dark, 0 91% 71%);');
+    expect(tpl).toContain('--destructive-text: var(--destructive-text-light, 0 73.7% 41.8%);');
   });
 });
