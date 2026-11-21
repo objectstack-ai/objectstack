@@ -66,8 +66,8 @@ describe('MasterDetailForm — a group-placed collection sits at its group (obje
       if (!el) throw new Error('collection not placed');
     });
     const placed = await collection(container);
-    const header = container.querySelector('[data-form-section="header"]')!;
-    const totals = container.querySelector('[data-form-section="totals"]')!;
+    const header = container.querySelector('[data-form-section="__section_header"]')!;
+    const totals = container.querySelector('[data-form-section="__section_totals"]')!;
     expect(header).toBeTruthy();
     expect(totals).toBeTruthy();
     expect(placed.closest('form')).toBe(header.closest('form'));
@@ -82,12 +82,12 @@ describe('MasterDetailForm — a group-placed collection sits at its group (obje
       <MasterDetailForm schema={{ objectName: 'po', mode: 'create', details } as any} dataSource={ds} />,
     );
     await waitFor(() => {
-      if (!container.querySelector('[data-form-section="totals"]')) throw new Error('header not ready');
+      if (!container.querySelector('[data-form-section="__section_totals"]')) throw new Error('header not ready');
     });
     const below = await collection(container);
     expect(below.closest('form')).toBeNull();
     expect(container.querySelector('[data-form-slot]')).toBeNull();
-    expect(before(container.querySelector('[data-form-section="totals"]')!, below)).toBe(true);
+    expect(before(container.querySelector('[data-form-section="__section_totals"]')!, below)).toBe(true);
   });
 
   it('a group placed last: after every declared group', async () => {
@@ -99,7 +99,7 @@ describe('MasterDetailForm — a group-placed collection sits at its group (obje
       if (!container.querySelector('[data-form-slot] [data-testid="md-collection"]')) throw new Error('not placed');
     });
     const placed = await collection(container);
-    expect(before(container.querySelector('[data-form-section="totals"]')!, placed)).toBe(true);
+    expect(before(container.querySelector('[data-form-section="__section_totals"]')!, placed)).toBe(true);
   });
 
   it('saves the record and its lines in one batch from the placed table', async () => {

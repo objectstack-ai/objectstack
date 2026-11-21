@@ -61,7 +61,7 @@ describe('FormSlotStore (objectstack#35889)', () => {
     store.subscribe(listener);
     expect(store.placement('d0')).toBe('inline');
 
-    const el = document.createElement('div');
+    const el = { tagName: 'DIV' } as unknown as HTMLElement;
     store.refFor('d0')(el);
     // Mounted but not claimed: still in place.
     expect(store.placement('d0')).toBe('inline');
