@@ -72,6 +72,7 @@ import {
 } from 'lucide-react';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 import { isPhoneTabRoute } from './PhoneAppNavBar.js';
+import { PhonePageBarEnd, PhonePageBarTitle, useHasPhonePageBar } from './PhonePageBar.js';
 
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, type RefObject } from 'react';
 import { useOffline } from '@object-ui/react';
@@ -458,6 +459,11 @@ export function AppHeader({
   // leftmost control is 「‹」 back to the app's home.
   const phone = usePhoneViewport();
   const phoneTab = isApp && phone && isPhoneTabRoute(location.pathname);
+  // objectstack#35883 — a page with its own phone top row (the object list:
+  // its icon and name, then its 「⋮ More」) takes the bar's middle and right:
+  // no app pill, search, bell, assistant or avatar there.
+  const hasPhonePageBar = useHasPhonePageBar();
+  const phonePageBar = isApp && phone && !phoneTab && hasPhonePageBar;
   const phoneAppHome = `/apps/${params.appName ?? activeAppName ?? ''}`;
   const { isOnline } = useOffline();
   // Idempotent, direct open of the ⌘K command palette (ADR-0054 C1). Replaces a
@@ -984,7 +990,8 @@ export function AppHeader({
           </>
         )}
 
-        {isApp && (
+        {phonePageBar && <PhonePageBarTitle />}
+        {isApp && !phonePageBar && (
           <>
             {/* App pill — the app's glyph and name, and its switcher, after
                 the product mark's `/` rule. At every width: below `sm` it is
@@ -1080,7 +1087,8 @@ export function AppHeader({
 
         {/* Group 1: Search */}
         {/* Only where a palette is mounted (objectui#11912) — see `hasCommandPalette`. */}
-        {hasCommandPalette && !phoneTab && (
+        {phonePageBar && <PhonePageBarEnd />}
+        {hasCommandPalette && !phoneTab && !phonePageBar && (
           <div
             data-topbar-group
             data-topbar-search
@@ -1104,7 +1112,7 @@ export function AppHeader({
         )}
 
         {/* Group 2: Edit app, Inbox (notifications + approvals + activity) & Help */}
-        <div data-topbar-group className="flex items-center gap-0.5 shrink-0">
+        <div data-topbar-group className={cn('flex items-center gap-0.5 shrink-0', phonePageBar && 'hidden')}>
           {/* Edit app — the app → builder reverse bridge (ADR-0080), at the
               left edge of this utility cluster (objectui#12201 item 6).
               Admins jump from the running app to its owning package's design
@@ -1262,7 +1270,7 @@ export function AppHeader({
         </div>
 
         {/* Group 3: Account (theme + lang moved into avatar dropdown) */}
-        <div data-topbar-group className="flex items-center gap-0.5 shrink-0">        {/* User Profile + Organization switcher */}
+        <div data-topbar-group className={cn('flex items-center gap-0.5 shrink-0', phonePageBar && 'hidden')}>        {/* User Profile + Organization switcher */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button

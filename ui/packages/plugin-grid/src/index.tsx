@@ -39,7 +39,7 @@ export { RowActionMenu, formatActionLabel } from './components/RowActionMenu';
 export { BulkActionBar } from './components/BulkActionBar';
 // objectstack#35554 — the list page bar's selection slot, read by the Console
 // page header, and the kept scroll position a list host loads back to.
-export { useListPageBarHost } from './listPageBarSlot';
+export { useListPageBarHost, requestListSelection, useListPageSelecting } from './listPageBarSlot';
 export type { ListPageBarState } from './listPageBarSlot';
 export { readListScrollState } from './objectGridInfiniteLoad';
 export type { ListScrollState } from './objectGridInfiniteLoad';

@@ -25,6 +25,7 @@ import { ConsoleNotificationBanners } from './ConsoleNotificationBanners.js';
 import { UnifiedSidebar } from './UnifiedSidebar.js';
 import { PhoneAppNavBar, isPhoneTabRoute } from './PhoneAppNavBar.js';
 import { PhoneAppHomeSlotProvider } from './PhoneAppHome.js';
+import { PhonePageBarProvider } from './PhonePageBar.js';
 import { useLastApp } from '../context/LastAppProvider.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { appAddressSegment } from '../utils/appRoute.js';
@@ -246,6 +247,8 @@ export function ConsoleLayout({
     {/* objectstack#35881 — the phone app home's slot, shared by the sidebar
         (which draws the menu into it) and the route (which holds it). */}
     <PhoneAppHomeSlotProvider>
+    {/* objectstack#35883 — a page's own phone top row, drawn by the app bar. */}
+    <PhonePageBarProvider>
     <AppShell
       sidebar={
          <UnifiedSidebar
@@ -342,6 +345,7 @@ export function ConsoleLayout({
       {/* Under `md` the drawer is a bottom sheet (no room for a rail on a phone). */}
       {chatDock.sheet}
     </AppShell>
+    </PhonePageBarProvider>
     </PhoneAppHomeSlotProvider>
     </CommandPaletteProvider>
     </ChatDockControlProvider>

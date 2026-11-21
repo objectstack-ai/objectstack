@@ -125,3 +125,54 @@ export function useListPageBarState(slot: HTMLElement | null, state: ListPageBar
     };
   }, [slot, selecting]);
 }
+
+// ---------------------------------------------------------------------------
+// objectstack#35883 — the phone's 「Select」: the page asks its list to open a
+// selection, and reads whether one is open.
+// ---------------------------------------------------------------------------
+
+/** How many times each page column has asked its list to start selecting. */
+const selectRequests = new Map<HTMLElement, number>();
+
+/**
+ * The page's side: ask the list inside `scope` (the page column) to start
+ * selecting, as a long press on a card does. The phone's 「⋮ More」 →
+ * 「Select」 calls it. A no-op when no list in `scope` hosts a page bar.
+ */
+export function requestListSelection(scope: HTMLElement | null): void {
+  if (!scope) return;
+  selectRequests.set(scope, (selectRequests.get(scope) ?? 0) + 1);
+  emit();
+}
+
+/**
+ * The grid's side: a number that grows each time the page column holding
+ * `root` asks for a selection (`requestListSelection`); `0` before any.
+ */
+export function useListSelectionRequest(root: HTMLElement | null): number {
+  return React.useSyncExternalStore(
+    subscribe,
+    () => {
+      if (!root) return 0;
+      for (const [scope, count] of selectRequests) if (scope.contains(root)) return count;
+      return 0;
+    },
+    () => 0,
+  );
+}
+
+/**
+ * The page's side: is a selection open in the list inside `scope`? The page
+ * hides its floating create button while it is (objectstack#35883).
+ */
+export function useListPageSelecting(scope: HTMLElement | null): boolean {
+  return React.useSyncExternalStore(
+    subscribe,
+    () => {
+      if (!scope) return false;
+      for (const host of hosts) if (host.scope === scope && host.state.selecting) return true;
+      return false;
+    },
+    () => false,
+  );
+}

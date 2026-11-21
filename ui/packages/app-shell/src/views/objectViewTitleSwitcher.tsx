@@ -35,13 +35,14 @@
  * a view dropdown of its own.
  */
 
-import { createContext, createElement, useContext, useMemo, useState, type ComponentType, type Dispatch, type SetStateAction } from 'react';
+import { createContext, createElement, useContext, useMemo, useState, type ComponentType, type Dispatch, type ReactNode, type SetStateAction } from 'react';
 import { cn, Popover, PopoverContent, PopoverTrigger } from '@object-ui/components';
 import type { ViewTabItem } from '@object-ui/plugin-view';
 import { resolveViewId } from '@object-ui/core';
 import { useDisplayLocale, pickLocalized } from '@object-ui/i18n';
 import type { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Settings2 } from 'lucide-react';
+import { PhonePanelSheet, useListPhonePanels, PHONE_CHIP } from '@object-ui/plugin-list';
 import { viewRowId } from '../utils/viewIdentity.js';
 import { useRecentItems } from '../hooks/useRecentItems.js';
 import { useListViewFavorites, type ListViewFavorites } from '../layout/listViewFavorites.js';
@@ -51,7 +52,7 @@ import { VIEW_TYPE_ICONS } from './objectViewHelpers.js';
 import { viewTabLabel } from './viewTabLabel.js';
 import type { buildViewTabs } from './objectViewTabs.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
-import { ObjectViewSwitcherMenu, type SwitcherCreateOptions } from './objectViewSwitcherMenu.js';
+import { FOOTER_ITEM, ObjectViewSwitcherMenu, type SwitcherCreateOptions } from './objectViewSwitcherMenu.js';
 import { useCreateViewInPlace } from './objectViewViewCrud.js';
 
 type TFn = ReturnType<typeof useObjectTranslation>['t'];
@@ -152,6 +153,82 @@ export function ObjectViewTitleSwitcher({
         if (viewId !== activeViewId) onViewChange(viewId);
     };
 
+    const menu = (phone: boolean, footerEnd?: ReactNode) => (
+        <ObjectViewSwitcherMenu
+            views={views}
+            activeViewId={activeViewId}
+            onChoose={choose}
+            onClose={() => setOpen(false)}
+            pinnedViewId={pinnedViewId}
+            onPinnedViewChange={onPinnedViewChange}
+            recentViewIds={recentViewIds}
+            favorites={favorites}
+            viewTypeIcons={viewTypeIcons}
+            onManageViews={onManageViews}
+            onRenamePersonalView={onRenamePersonalView}
+            onDeletePersonalView={onDeletePersonalView}
+            create={create}
+            onAddView={onAddView}
+            phone={phone}
+            footerEnd={footerEnd}
+            t={t}
+        />
+    );
+
+    // objectstack#35883 / #35884 — in the list's phone toolbar the switcher is
+    // its first pill (the view's name, its count, the caret) and opens the
+    // same menu in the list's bottom sheet; a view chosen there opens at once
+    // and the sheet closes, so it has no 「✓」. 视图设置 is its last row.
+    const phonePanels = useListPhonePanels();
+    if (phonePanels) {
+        const openSettings = phonePanels.openViewSettings;
+        return (
+            <>
+                <button
+                    type="button"
+                    data-testid="list-view-switcher"
+                    title={description}
+                    onClick={() => setOpen(true)}
+                    className={cn(PHONE_CHIP, 'max-w-full justify-start text-foreground', open && 'bg-muted')}
+                >
+                    {ActiveIcon && (
+                        <span className="flex shrink-0 text-muted-foreground" data-testid="list-view-switcher-type-icon" aria-hidden="true">
+                            {createElement(ActiveIcon, { className: 'h-4 w-4' })}
+                        </span>
+                    )}
+                    <span className="min-w-0 truncate" data-testid="list-view-switcher-label">{activeLabel}</span>
+                    {count !== null && (
+                        <span className="shrink-0 font-normal tabular-nums text-muted-foreground" data-testid="list-view-switcher-count">
+                            {count.toLocaleString(displayLocale)}
+                        </span>
+                    )}
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" data-testid="list-view-switcher-caret" aria-hidden="true" />
+                </button>
+                <PhonePanelSheet
+                    open={open}
+                    onOpenChange={setOpen}
+                    title={t('view.switcher.label', { defaultValue: 'Views' })}
+                    testId="list-view-switcher-menu"
+                >
+                    {menu(true, openSettings ? (
+                        <button
+                            type="button"
+                            data-testid="list-view-switcher-settings"
+                            onClick={() => {
+                                setOpen(false);
+                                openSettings();
+                            }}
+                            className={FOOTER_ITEM}
+                        >
+                            <Settings2 className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                            {t('list.viewSettings', { defaultValue: 'View settings' })}
+                        </button>
+                    ) : undefined)}
+                </PhonePanelSheet>
+            </>
+        );
+    }
+
     return (
         <span className="inline-flex min-w-0 max-w-full items-baseline gap-1.5">
             <Popover open={open} onOpenChange={setOpen}>
@@ -194,23 +271,7 @@ export function ObjectViewTitleSwitcher({
                     data-testid="list-view-switcher-menu"
                     aria-label={t('view.switcher.label', { defaultValue: 'Views' })}
                 >
-                    <ObjectViewSwitcherMenu
-                        views={views}
-                        activeViewId={activeViewId}
-                        onChoose={choose}
-                        onClose={() => setOpen(false)}
-                        pinnedViewId={pinnedViewId}
-                        onPinnedViewChange={onPinnedViewChange}
-                        recentViewIds={recentViewIds}
-                        favorites={favorites}
-                        viewTypeIcons={viewTypeIcons}
-                        onManageViews={onManageViews}
-                        onRenamePersonalView={onRenamePersonalView}
-                        onDeletePersonalView={onDeletePersonalView}
-                        create={create}
-                        onAddView={onAddView}
-                        t={t}
-                    />
+                    {menu(false)}
                 </PopoverContent>
             </Popover>
         </span>

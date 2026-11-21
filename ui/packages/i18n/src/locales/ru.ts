@@ -2837,6 +2837,7 @@ const ru = {
       endDateField: "Поле даты окончания",
       import: "Импорт",
       importTitle: "Импорт из CSV",
+      select: 'Выбрать',
       importedToast: "{{count}} строк импортировано.",
       importedToast_one: "Импортирована {{count}} строка.",
       importedToast_few: "Импортировано {{count}} строки.",
@@ -5247,6 +5248,20 @@ const ru = {
     },
   },
   listConditions: {
+    phone: {
+      toolbar: 'Инструменты списка',
+      sortCount: 'Сортировка, уровней: {{count}}',
+      filterCount: 'Фильтр, активно: {{count}}',
+      back: 'Назад',
+      discard: 'Отменить изменения',
+      close: 'Закрыть',
+      apply: 'Применить',
+      advancedNotice: 'В этом представлении используется расширенный фильтр. Измените его на компьютере.',
+      filterEmpty: 'Фильтров пока нет. Добавьте фильтр, чтобы показать только подходящие записи.',
+      itemOptions: 'Параметры: {{label}}',
+      edit: 'Изменить',
+      remove: 'Удалить',
+    },
     fieldList: {
       search: 'Поиск полей',
       shown: 'В этом представлении',
@@ -5329,6 +5344,8 @@ const ru = {
     addSort: "Добавить сортировку",
     removeSort: "Удалить сортировку",
     reorder: 'Перетащите, чтобы изменить порядок',
+    levelOptions: 'Параметры: {{label}}',
+    changeField: 'Изменить поле',
   },
   collaboration: {
     commentCount: "Комментариев: {{count}}",

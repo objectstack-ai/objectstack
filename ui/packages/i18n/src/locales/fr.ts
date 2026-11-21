@@ -2755,6 +2755,7 @@ const fr = {
       endDateField: "Champ de date de fin",
       import: "Importer",
       importTitle: "Importer depuis CSV",
+      select: 'Sélectionner',
       importedToast: "{{count}} ligne(s) importée(s).",
       importedToast_one: "{{count}} ligne importée.",
       importedToast_many: "{{count}} de lignes importées.",
@@ -5087,6 +5088,20 @@ const fr = {
     },
   },
   listConditions: {
+    phone: {
+      toolbar: 'Outils de la liste',
+      sortCount: 'Tri, {{count}} niveaux',
+      filterCount: 'Filtre, {{count}} actifs',
+      back: 'Retour',
+      discard: 'Annuler les modifications',
+      close: 'Fermer',
+      apply: 'Appliquer',
+      advancedNotice: 'Cette vue utilise un filtre avancé. Modifiez-le sur un ordinateur.',
+      filterEmpty: 'Aucun filtre pour l’instant. Ajoutez-en un pour n’afficher que les enregistrements correspondants.',
+      itemOptions: 'Options pour {{label}}',
+      edit: 'Modifier',
+      remove: 'Supprimer',
+    },
     fieldList: {
       search: 'Rechercher des champs',
       shown: 'Dans cette vue',
@@ -5169,6 +5184,8 @@ const fr = {
     addSort: "Ajouter un tri",
     removeSort: "Supprimer le tri",
     reorder: 'Faire glisser pour réorganiser',
+    levelOptions: 'Options pour {{label}}',
+    changeField: 'Changer de champ',
   },
   collaboration: {
     commentCount: "{{count}} commentaires",

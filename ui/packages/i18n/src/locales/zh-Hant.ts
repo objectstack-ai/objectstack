@@ -2753,6 +2753,7 @@ const zhHant = {
       new: '新建',
       import: '匯入',
       importTitle: '從 CSV 檔案匯入',
+      select: '選擇',
       importedToast: '成功匯入 {{count}} 行。',
       importedToast_one: '成功匯入 {{count}} 行。',
       importedToast_other: '成功匯入 {{count}} 行。',
@@ -5003,6 +5004,20 @@ const zhHant = {
     },
   },
   listConditions: {
+    phone: {
+      toolbar: '列表工具',
+      sortCount: '排序，{{count}} 級',
+      filterCount: '篩選，{{count}} 個',
+      back: '返回',
+      discard: '放棄改動',
+      close: '關閉',
+      apply: '應用',
+      advancedNotice: '這個檢視用了高階篩選，請在電腦上修改。',
+      filterEmpty: '還沒有篩選。新增一個，只顯示符合條件的記錄。',
+      itemOptions: '{{label}} 的選項',
+      edit: '修改',
+      remove: '刪除',
+    },
     fieldList: {
       search: '搜尋欄位',
       shown: '檢視中顯示',
@@ -5085,6 +5100,8 @@ const zhHant = {
     addSort: '新增排序',
     removeSort: '刪除排序',
     reorder: '拖動以調整先後',
+    levelOptions: '{{label}} 的選項',
+    changeField: '改欄位',
   },
   collaboration: {
     commentCount: '{{count}} 條評論',

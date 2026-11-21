@@ -81,7 +81,7 @@ import {
   useDetailTranslation,
   type ConcurrentUpdateConflict,
 } from '@object-ui/plugin-detail';
-import { ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight, Download, Rows2, Rows3, Rows4, AlignJustify, Loader2 } from 'lucide-react';
+import { ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight, Download, Rows2, Rows3, Rows4, AlignJustify, Loader2, Check } from 'lucide-react';
 import { useRowColor } from './useRowColor';
 import { GroupRow } from './GroupRow';
 import { resolveRowCrudAffordances, resolveRowRecordCrudAffordance } from './rowCrudAffordances';
@@ -126,7 +126,7 @@ import { resolveObjectGridPersistedColumns } from './objectGridPersistedColumns'
 import { resolveObjectGridActionsColumn } from './objectGridActionsColumn';
 import { useInlineRowActionFold } from './objectGridInlineActionFold';
 import { BULK_SELECT_ALL_MATCHING_CAP } from './bulkSelectAllMatchingCap';
-import { useListPageBarSlot, useListPageBarState } from './listPageBarSlot';
+import { useListPageBarSlot, useListPageBarState, useListSelectionRequest } from './listPageBarSlot';
 import { SelectionPageBar } from './components/SelectionPageBar';
 import { useInfiniteRowLoad } from './objectGridInfiniteLoad';
 export type { RetiredListColumnKey, ObjectGridColumnHolds, ObjectGridColumnDraft, ObjectGridColumn } from './objectGridColumns';
@@ -869,6 +869,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const [exportError, setExportError] = useState<string | null>(null);
   const [rowHeightMode, setRowHeightMode] = useState<RowHeightMode>(resolveRowHeightMode(schema.rowHeight));
   const [selectedRows, setSelectedRows] = useState<any[]>([]);
+  // objectstack#35883 — a phone's cards select by a long press (or the page's
+  // 「⋮ More」 → 「Select」): while this is on, a tap on a card adds or removes
+  // it instead of opening the record, and each card shows a tick.
+  const [cardSelecting, setCardSelecting] = useState(false);
   const [selectAllMatching, setSelectAllMatching] = useState(false);
   // Bumped to tell the underlying table to drop its internal checkbox selection.
   // The table owns that state, so clearing our `selectedRows` alone would leave
@@ -1593,6 +1597,25 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     return () => { updateActionContext({ selectionAvailable: undefined }); };
   }, [rowsSelectable, updateActionContext]);
 
+  // objectstack#35883 — the page's 「Select」 (`requestListSelection`) opens a
+  // card selection with nothing ticked yet. Only a request made after this
+  // grid mounted counts.
+  const selectionRequest = useListSelectionRequest(gridRoot);
+  const seenSelectionRequest = React.useRef(selectionRequest);
+  useEffect(() => {
+    if (selectionRequest === seenSelectionRequest.current) return;
+    seenSelectionRequest.current = selectionRequest;
+    if (rowsSelectable && !singleSelection) setCardSelecting(true);
+  }, [selectionRequest, rowsSelectable, singleSelection]);
+  // A long press on a card: held 500 ms without moving starts the selection
+  // with that card ticked; the click that follows the press is swallowed.
+  const longPress = React.useRef<{ timer: ReturnType<typeof setTimeout> | null; x: number; y: number; fired: boolean }>({
+    timer: null, x: 0, y: 0, fired: false,
+  });
+  useEffect(() => () => {
+    if (longPress.current.timer) clearTimeout(longPress.current.timer);
+  }, []);
+
   // --- Row color support ---
   const getRowClassName = useRowColor(schema.rowColor);
 
@@ -1685,7 +1708,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
 
   // objectstack#35554 — tell the page bar whether a selection is open and how
   // many rows the list's query matches (the count beside the view name).
-  useListPageBarState(pageBarSlot, { selecting: selectedRows.length > 0 });
+  useListPageBarState(pageBarSlot, { selecting: selectedRows.length > 0 || cardSelecting });
 
   // objectstack#35554 — a host that loads its rows window by window
   // (`onLoadMore`) is asked for the next window as the table's scroll box
@@ -2323,6 +2346,26 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     setSelectedRows([]);
     setSelectAllMatching(false);
     setSelectionResetKey(k => k + 1);
+    setCardSelecting(false);
+  };
+
+  // objectstack#35883 — the cards' selection. A row is the same row object
+  // the table selects, keyed by its id; the selection is the grid's one
+  // `selectedRows`, so the page bar's selection face and its actions read it
+  // as they read the table's.
+  const cardRowKey = (row: any) => row?.id ?? row?._id;
+  const toggleCardRow = (row: any) => {
+    const key = cardRowKey(row);
+    const held = selectedRows.some((r) => cardRowKey(r) === key);
+    const next = held ? selectedRows.filter((r) => cardRowKey(r) !== key) : [...selectedRows, row];
+    setSelectedRows(next);
+    onRowSelect?.(next);
+    // Unticking the last card ends the selection.
+    if (next.length === 0) setCardSelecting(false);
+  };
+  const startCardSelection = (row?: any) => {
+    setCardSelecting(true);
+    if (row && !selectedRows.some((r) => cardRowKey(r) === cardRowKey(row))) toggleCardRow(row);
   };
 
   /**
@@ -3917,7 +3960,18 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       return col.cell ? col.cell(value, row) : String(coerceToSafeValue(value) ?? '');
     };
 
+    const selectedKeys = new Set(selectedRows.map(cardRowKey));
+    const cardsSelectable = rowsSelectable && !singleSelection;
+    const cancelLongPress = () => {
+      const press = longPress.current;
+      if (press.timer) {
+        clearTimeout(press.timer);
+        press.timer = null;
+      }
+    };
+
     return (row: any, idx: number) => {
+      const cardSelected = cardSelecting && selectedKeys.has(cardRowKey(row));
       const subtitle = subtitleColumns.filter(
         (col) => !isMaskedCardColumn(col.accessorKey) && !isEmptyCardValue(row[col.accessorKey]),
       );
@@ -3936,14 +3990,63 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         <div
           key={row.id || row._id || idx}
           data-testid="grid-mobile-card"
+          data-selected={cardSelected || undefined}
+          aria-selected={cardSelecting ? cardSelected : undefined}
           // A row the host says opens nothing (`rowOpensRecord: false`) draws
           // no pointer and no hover wash on its card either (objectstack#33548).
           className={cn(
-            'flex min-w-0 items-center gap-3 rounded-lg border bg-card px-3 py-2 transition-colors touch-manipulation',
-            rowOpensRecord !== false && 'cursor-pointer hover:bg-accent/50',
+            'flex min-w-0 items-center gap-3 rounded-lg border bg-card px-3 py-2 transition-colors touch-manipulation select-none',
+            (rowOpensRecord !== false || cardSelecting) && 'cursor-pointer hover:bg-accent/50',
+            cardSelected && 'border-primary bg-primary/5',
           )}
-          onClick={() => navigation.handleClick(row)}
+          onPointerDown={(event) => {
+            if (!cardsSelectable || cardSelecting) return;
+            const press = longPress.current;
+            press.fired = false;
+            press.x = event.clientX;
+            press.y = event.clientY;
+            if (press.timer) clearTimeout(press.timer);
+            press.timer = setTimeout(() => {
+              press.timer = null;
+              press.fired = true;
+              startCardSelection(row);
+            }, 500);
+          }}
+          onPointerMove={(event) => {
+            const press = longPress.current;
+            if (press.timer && Math.hypot(event.clientX - press.x, event.clientY - press.y) > 10) {
+              clearTimeout(press.timer);
+              press.timer = null;
+            }
+          }}
+          onPointerUp={cancelLongPress}
+          onPointerCancel={cancelLongPress}
+          onPointerLeave={cancelLongPress}
+          // A phone's long press also asks for the browser's own menu.
+          onContextMenu={(event) => {
+            if (cardsSelectable) event.preventDefault();
+          }}
+          onClick={() => {
+            if (longPress.current.fired) {
+              longPress.current.fired = false;
+              return;
+            }
+            if (cardSelecting) toggleCardRow(row);
+            else navigation.handleClick(row);
+          }}
         >
+          {cardSelecting && (
+            <span
+              aria-hidden="true"
+              data-testid="grid-card-check"
+              className={cn(
+                'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2',
+                cardSelected ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/40',
+              )}
+            >
+              {cardSelected && <Check className="h-3 w-3" strokeWidth={3} />}
+            </span>
+          )}
           <div className="min-w-0 flex-1">
             {titleKey !== undefined && (
               <div data-testid="grid-card-title" className="truncate text-sm font-semibold">
@@ -4050,6 +4153,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     return (
       <>
         <div
+          // objectstack#35883 — the cards' root for the page bar's slot and
+          // the page's 「Select」, as the table's root is below.
+          ref={setGridRoot}
           className="h-full overflow-y-auto overflow-x-hidden"
           data-fab-clearance=""
           data-testid="object-grid-card-scroller"
@@ -4061,6 +4167,26 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         </div>
         {cardPager}
         </div>
+        {/* objectstack#35883 — the cards' selection goes to the page bar's slot
+            as the table's does; while selecting, the face shows even before
+            the first card is ticked, so its 「×」 ends it. */}
+        {pageBarSlot && (selectedRows.length > 0 || cardSelecting) && createPortal(
+          <SelectionPageBar
+            selectedRows={selectedRows}
+            singleRowMenu={selectedRows.length === 1 ? rowActionMenuProps(selectedRows[0]) : undefined}
+            actions={effectiveBulkActions ?? []}
+            actionDefs={bulkActionDefs}
+            objectFields={objectSchema?.fields}
+            onAction={dispatchBulkAction}
+            onActionDef={dispatchBulkActionDef}
+            onClearSelection={resetSelection}
+            loadedCount={data.length}
+            totalMatching={canOfferSelectAllMatching ? resolvedTotalMatching : undefined}
+            allMatchingSelected={selectAllMatching}
+            onSelectAllMatching={canOfferSelectAllMatching ? () => setSelectAllMatching(true) : undefined}
+          />,
+          pageBarSlot,
+        )}
         {navigation.isOverlay && (
           <NavigationOverlay
             {...navigation}

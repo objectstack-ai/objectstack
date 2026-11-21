@@ -2688,6 +2688,7 @@ const ja = {
       endDateField: "終了日フィールド",
       import: "インポート",
       importTitle: "CSVからインポート",
+      select: '選択',
       importedToast: "{{count}} 行をインポートしました。",
       importedToast_one: "{{count}} 行をインポートしました。",
       importedToast_other: "{{count}} 行をインポートしました。",
@@ -4946,6 +4947,20 @@ const ja = {
     },
   },
   listConditions: {
+    phone: {
+      toolbar: 'リストツール',
+      sortCount: '並べ替え（{{count}} 段階）',
+      filterCount: '絞り込み（{{count}} 件）',
+      back: '戻る',
+      discard: '変更を破棄',
+      close: '閉じる',
+      apply: '適用',
+      advancedNotice: 'このビューは高度な絞り込みを使っています。パソコンで変更してください。',
+      filterEmpty: 'まだ絞り込みはありません。追加すると条件に合うレコードだけを表示します。',
+      itemOptions: '{{label}} のオプション',
+      edit: '編集',
+      remove: '削除',
+    },
     fieldList: {
       search: 'フィールドを検索',
       shown: 'ビューに表示',
@@ -5028,6 +5043,8 @@ const ja = {
     addSort: "並べ替えを追加",
     removeSort: "並べ替えを削除",
     reorder: 'ドラッグして並べ替え',
+    levelOptions: '{{label}} のオプション',
+    changeField: 'フィールドを変更',
   },
   collaboration: {
     commentCount: "コメント {{count}} 件",

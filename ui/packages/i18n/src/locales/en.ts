@@ -3252,6 +3252,7 @@ const en = {
       new: 'New',
       import: 'Import',
       importTitle: 'Import from CSV',
+      select: 'Select',
       importedToast: 'Imported {{count}} row(s).',
       importedToast_one: 'Imported {{count}} row.',
       importedToast_other: 'Imported {{count}} rows.',
@@ -5699,6 +5700,20 @@ const en = {
     },
   },
   listConditions: {
+    phone: {
+      toolbar: 'List tools',
+      sortCount: 'Sort, {{count}} levels',
+      filterCount: 'Filter, {{count}} in use',
+      back: 'Back',
+      discard: 'Discard changes',
+      close: 'Close',
+      apply: 'Apply',
+      advancedNotice: 'This view uses an advanced filter. Change it on a computer.',
+      filterEmpty: 'No filter yet. Add one to show only the records that match.',
+      itemOptions: 'Options for {{label}}',
+      edit: 'Edit',
+      remove: 'Remove',
+    },
     fieldList: {
       search: 'Search fields',
       shown: 'In this view',
@@ -5781,6 +5796,8 @@ const en = {
     addSort: 'Add sort',
     removeSort: 'Remove sort',
     reorder: 'Drag to reorder',
+    levelOptions: 'Options for {{label}}',
+    changeField: 'Change field',
   },
   // `@object-ui/collaboration` — the comment thread's copy (objectstack#5506,
   // objectui#3424). The package used to carry every one of these as an English

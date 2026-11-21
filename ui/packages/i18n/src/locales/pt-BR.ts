@@ -2754,6 +2754,7 @@ const pt = {
       endDateField: "Campo de data de término",
       import: "Importar",
       importTitle: "Importar do CSV",
+      select: 'Selecionar',
       importedToast: "{{count}} linha(s) importada(s).",
       importedToast_one: "{{count}} linha importada.",
       importedToast_many: "{{count}} de linhas importadas.",
@@ -5086,6 +5087,20 @@ const pt = {
     },
   },
   listConditions: {
+    phone: {
+      toolbar: 'Ferramentas da lista',
+      sortCount: 'Ordenação, {{count}} níveis',
+      filterCount: 'Filtro, {{count}} ativos',
+      back: 'Voltar',
+      discard: 'Descartar alterações',
+      close: 'Fechar',
+      apply: 'Aplicar',
+      advancedNotice: 'Esta visualização usa um filtro avançado. Altere-o em um computador.',
+      filterEmpty: 'Nenhum filtro ainda. Adicione um para mostrar só os registros que correspondem.',
+      itemOptions: 'Opções de {{label}}',
+      edit: 'Editar',
+      remove: 'Remover',
+    },
     fieldList: {
       search: 'Pesquisar campos',
       shown: 'Nesta visualização',
@@ -5168,6 +5183,8 @@ const pt = {
     addSort: "Adicionar ordenação",
     removeSort: "Remover ordenação",
     reorder: 'Arraste para reordenar',
+    levelOptions: 'Opções de {{label}}',
+    changeField: 'Alterar campo',
   },
   collaboration: {
     commentCount: "{{count}} comentários",

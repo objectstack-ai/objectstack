@@ -2686,6 +2686,7 @@ const de = {
       endDateField: "Enddatumsfeld",
       import: "Importieren",
       importTitle: "Aus CSV importieren",
+      select: 'Auswählen',
       importedToast: "{{count}} Zeile(n) importiert.",
       importedToast_one: "{{count}} Zeile importiert.",
       importedToast_other: "{{count}} Zeilen importiert.",
@@ -4944,6 +4945,20 @@ const de = {
     },
   },
   listConditions: {
+    phone: {
+      toolbar: 'Listenwerkzeuge',
+      sortCount: 'Sortierung, {{count}} Ebenen',
+      filterCount: 'Filter, {{count}} aktiv',
+      back: 'Zurück',
+      discard: 'Änderungen verwerfen',
+      close: 'Schließen',
+      apply: 'Anwenden',
+      advancedNotice: 'Diese Ansicht verwendet einen erweiterten Filter. Ändern Sie ihn am Computer.',
+      filterEmpty: 'Noch kein Filter. Fügen Sie einen hinzu, um nur passende Datensätze zu zeigen.',
+      itemOptions: 'Optionen für {{label}}',
+      edit: 'Bearbeiten',
+      remove: 'Entfernen',
+    },
     fieldList: {
       search: 'Felder suchen',
       shown: 'In dieser Ansicht',
@@ -5026,6 +5041,8 @@ const de = {
     addSort: "Sortierung hinzufügen",
     removeSort: "Sortierung entfernen",
     reorder: 'Zum Neuordnen ziehen',
+    levelOptions: 'Optionen für {{label}}',
+    changeField: 'Feld ändern',
   },
   collaboration: {
     commentCount: "{{count}} Kommentare",

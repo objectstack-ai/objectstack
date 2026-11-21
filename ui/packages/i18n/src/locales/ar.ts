@@ -2973,6 +2973,7 @@ const ar = {
       endDateField: "حقل تاريخ الانتهاء",
       import: "استيراد",
       importTitle: "استيراد من CSV",
+      select: 'تحديد',
       importedToast: "تم استيراد {{count}} صف(صفوف).",
       importedToast_zero: "تم استيراد {{count}} صف.",
       importedToast_one: "تم استيراد {{count}} صف.",
@@ -5530,6 +5531,20 @@ const ar = {
     },
   },
   listConditions: {
+    phone: {
+      toolbar: 'أدوات القائمة',
+      sortCount: 'الفرز، {{count}} مستويات',
+      filterCount: 'التصفية، {{count}} قيد الاستخدام',
+      back: 'رجوع',
+      discard: 'تجاهل التغييرات',
+      close: 'إغلاق',
+      apply: 'تطبيق',
+      advancedNotice: 'يستخدم هذا العرض عامل تصفية متقدمًا. غيّره من جهاز كمبيوتر.',
+      filterEmpty: 'لا توجد عوامل تصفية بعد. أضف واحدًا لعرض السجلات المطابقة فقط.',
+      itemOptions: 'خيارات {{label}}',
+      edit: 'تعديل',
+      remove: 'إزالة',
+    },
     fieldList: {
       search: 'البحث في الحقول',
       shown: 'في طريقة العرض هذه',
@@ -5612,6 +5627,8 @@ const ar = {
     addSort: "إضافة ترتيب",
     removeSort: "إزالة الترتيب",
     reorder: 'اسحب لإعادة الترتيب',
+    levelOptions: 'خيارات {{label}}',
+    changeField: 'تغيير الحقل',
   },
   collaboration: {
     // objectui#11445 — `commentCount` and `reactionCount` below are count
