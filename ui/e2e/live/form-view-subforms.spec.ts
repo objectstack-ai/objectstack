@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { selectOption, fillLookup } from './helpers';
+import { addLineItem, selectOption, fillLookup } from './helpers';
 
 /**
  * Tier 0 live e2e: an object's standard New/Edit modal renders inline child
@@ -10,7 +10,8 @@ import { selectOption, fillLookup } from './helpers';
  * lines in one atomic /api/v1/batch.
  *
  * This exercises the full modern grid:
- *   • the trailing "ghost" row — type straight into it, no "Add line" click;
+ *   • "Add line" appends an editable row (the grid draws no blank entry row,
+ *     objectstack#35507), and only the line that carries data is submitted;
  *   • a Product catalog typeahead whose selection auto-fills the line's
  *     description + unit_price (matching field names);
  *   • the computed read-only `amount = quantity × unit_price`, recomputed live
@@ -39,9 +40,10 @@ test('New <object> modal renders relationship-derived subforms and submits an at
   await selectOption(page, 'status', 'draft');
   await expect(dialog.getByText('Northwind', { exact: false }).first()).toBeVisible();
 
-  // Pick a catalog product in the ghost row — its description + unit_price
-  // auto-fill, and the row materialises (no "Add line" click).
+  // "Add line", then pick a catalog product on the new row — its description
+  // + unit_price auto-fill.
   const li = dialog.getByTestId('line-items');
+  await addLineItem(page);
   await li.getByTestId('lookup-trigger').first().click();
   const option = page.getByRole('option', { name: /Widget A/i }).first();
   await option.waitFor({ state: 'visible' });
@@ -79,6 +81,6 @@ test('New <object> modal renders relationship-derived subforms and submits an at
   expect(Number(child?.data?.unit_price)).toBe(29.99);       // auto-filled
   expect(Number(child?.data?.amount)).toBe(59.98);           // computed (2 × 29.99)
   expect(Number(child?.data?.position)).toBe(0);             // sort position stamped from row order
-  // The empty ghost line must NOT have been persisted as a blank child.
+  // Exactly the one line that was added and filled is persisted.
   expect(ops.filter((o: any) => o.object === 'showcase_invoice_line')).toHaveLength(1);
 });
