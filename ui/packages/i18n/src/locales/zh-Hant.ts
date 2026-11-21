@@ -3389,7 +3389,7 @@ const zhHant = {
     firstInBook: '這是本手冊第一篇',
     lastInBook: '這是本手冊最後一篇',
     enlargeDiagram: '放大',
-    diagram: '流程圖',
+    diagram: '圖示',
     about: '關於',
     aboutTitle: '關於此控制台',
     aboutDescription: '此控制台編譯所用的構建。',

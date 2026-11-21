@@ -19,7 +19,11 @@ import * as React from 'react';
 vi.mock('mermaid', () => ({
   default: {
     initialize: () => undefined,
-    render: async () => ({ svg: '<svg data-testid="diagram-svg"><g></g></svg>' }),
+    // Like mermaid: the render id prefixes the root id, the markers and the
+    // references to them. (jsdom drops an svg <style>'s text, so none here.)
+    render: async (id: string) => ({
+      svg: `<svg id="${id}" data-testid="diagram-svg"><defs><marker id="${id}_arrow"></marker></defs><path marker-end="url(#${id}_arrow)"></path></svg>`,
+    }),
   },
 }));
 
@@ -41,7 +45,14 @@ describe('Mermaid — the enlarge control (objectstack#35424)', () => {
     expect(screen.getAllByTestId('diagram-svg')).toHaveLength(1);
     fireEvent.click(button);
     const dialog = await screen.findByRole('dialog', { name: 'Diagram' });
-    expect(dialog.querySelector('[data-mermaid-enlarged] svg')).not.toBeNull();
+    const enlarged = dialog.querySelector('[data-mermaid-enlarged] svg');
+    expect(enlarged).not.toBeNull();
+    // The dialog's copy has ids of its own: no id appears twice while it is open.
+    expect(enlarged?.id).toMatch(/^os-mermaid-\d+-enlarged$/);
+    expect(enlarged?.querySelector('marker')?.id).toBe(`${enlarged?.id}_arrow`);
+    expect(enlarged?.querySelector('path')?.getAttribute('marker-end')).toBe(`url(#${enlarged?.id}_arrow)`);
+    const ids = [...document.querySelectorAll('[id]')].map((el) => el.id).filter((v) => v.startsWith('os-mermaid-'));
+    expect(new Set(ids).size).toBe(ids.length);
   });
 
   it('without a provider the diagram draws no control, as before', async () => {

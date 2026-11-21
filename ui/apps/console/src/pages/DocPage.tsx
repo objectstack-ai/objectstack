@@ -9,12 +9,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useHref, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { AlertCircle, ChevronDown, ChevronRight, FileQuestion, Layers, Loader2, Menu } from 'lucide-react';
-import { matchAppBySegment, useAdapter, useMetadata, useServedAppLabel } from '@object-ui/app-shell';
+import { useAdapter } from '@object-ui/app-shell';
 import { MarkdownRenderer, MermaidEnlargeContext, extractToc } from '@object-ui/plugin-markdown';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { rewriteDocLinks } from './doc-links';
 import { conflictCandidates, readsByNameAfter } from './doc-address';
 import { DocShell } from './DocShell';
+import { useAppDocsBackTo } from './useAppDocsBackTo';
 import { DocsNav, type DocsNavBook } from './DocsNav';
 import { DocRefusal } from './BookPage';
 import { useBookData } from './use-book-data';
@@ -264,15 +265,8 @@ export default function DocPage() {
     [resolvedBook, name],
   );
   const bookDocHref = useCallback((bookSegment: string, docName: string) => `${base}/${bookSegment}/${docName}`, [base]);
-  // The app the reader returns to: the one the route's segment addresses, by
-  // the label the app bar shows.
-  const { apps } = useMetadata();
-  const { appLabel } = useServedAppLabel();
-  const backTo = useMemo(() => {
-    if (!appName) return undefined;
-    const app = matchAppBySegment(apps as Array<{ name: string; _packageId?: string; label?: unknown } & Record<string, unknown>> | undefined, appName);
-    return { to: `/apps/${appName}`, label: app ? appLabel(app) : appName };
-  }, [apps, appName, appLabel]);
+  // The app the reader returns to (its docs column's back link).
+  const backTo = useAppDocsBackTo();
   const tocIds = useMemo(() => toc.map((item) => item.id), [toc]);
   const activeHeading = useActiveHeading(state === 'ready' ? tocIds : []);
   const enlargeText = useMemo(
@@ -387,7 +381,7 @@ export default function DocPage() {
   const docsLabel = t('help.documentation', { defaultValue: 'Documentation' });
 
   return (
-    <DocShell breadcrumb={doc?.label ?? name}>
+    <DocShell breadcrumb={doc?.label ?? name} backLink={false}>
       {/* objectstack#35424 — the docs column is the page's one navigation.
         * Inside an app it sits where the app menu would, full height beside
         * the article; on narrow screens it folds into a disclosure above it. */}

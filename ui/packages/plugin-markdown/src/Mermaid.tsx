@@ -112,10 +112,22 @@ export function Mermaid({ chart }: { chart: string }) {
   return <EnlargeableDiagram svg={svg}>{diagram}</EnlargeableDiagram>
 }
 
+/**
+ * The dialog's copy of a rendered diagram, under its own ids. Mermaid prefixes
+ * the svg's root id, its scoped style selectors and its marker ids with the
+ * render id, so renaming that one prefix keeps the inline copy and the
+ * enlarged copy from sharing ids while the dialog is open.
+ */
+function enlargedSvg(svg: string): string {
+  const match = /\bid="(os-mermaid-\d+)"/.exec(svg)
+  return match ? svg.split(match[1]).join(`${match[1]}-enlarged`) : svg
+}
+
 /** The diagram, plus an enlarge control and dialog when the host asks for one. */
 function EnlargeableDiagram({ svg, children }: { svg: string; children: React.ReactElement }) {
   const text = React.useContext(MermaidEnlargeContext)
   const [open, setOpen] = React.useState(false)
+  const dialogSvg = React.useMemo(() => enlargedSvg(svg), [svg])
   if (!text) return children
   return (
     <div className="relative">
@@ -135,8 +147,8 @@ function EnlargeableDiagram({ svg, children }: { svg: string; children: React.Re
             data-mermaid-enlarged
             role="img"
             className="flex justify-center [&_svg]:h-auto [&_svg]:w-full [&_svg]:max-w-none"
-            // the same trusted strict-mode SVG as the inline diagram
-            dangerouslySetInnerHTML={{ __html: svg }}
+            // the same trusted strict-mode SVG as the inline diagram, under its own ids
+            dangerouslySetInnerHTML={{ __html: dialogSvg }}
           />
         </DialogContent>
       </Dialog>

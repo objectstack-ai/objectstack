@@ -8,8 +8,10 @@
 
 import { useId, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, ChevronDown, ChevronRight, Search } from 'lucide-react';
+import { ArrowRight, ChevronDown, ChevronRight, Search } from 'lucide-react';
 import { useObjectTranslation } from '@object-ui/i18n';
+import { AppDocsBackLink } from './AppDocsBackLink';
+import type { AppDocsBackTo } from './useAppDocsBackTo';
 import { BookSidebar } from './BookSidebar';
 import { bookArticles, filterBookArticles } from './docs-reading';
 import type { ResolvedBook } from './book-nav';
@@ -40,7 +42,7 @@ export function DocsNav({
   activeDoc?: string;
   docHref: (slug: string, doc: string) => string;
   /** The app to return to; absent outside an app. */
-  backTo?: { to: string; label: string };
+  backTo?: AppDocsBackTo;
   allDocsHref: string;
 }) {
   const { t } = useObjectTranslation();
@@ -57,16 +59,7 @@ export function DocsNav({
 
   return (
     <div className="flex flex-col gap-4 text-sm" data-testid="docs-nav">
-      {backTo ? (
-        <Link
-          to={backTo.to}
-          data-testid="docs-nav-back"
-          className="inline-flex items-center gap-1.5 self-start rounded px-2 py-1 font-medium text-primary hover:bg-muted/50"
-        >
-          <ArrowLeft className="h-4 w-4 shrink-0" aria-hidden />
-          <span>{t('help.backToApp', { defaultValue: 'Back to {{app}}', app: backTo.label })}</span>
-        </Link>
-      ) : null}
+      {backTo ? <AppDocsBackLink backTo={backTo} /> : null}
       <div className="relative">
         <label htmlFor={searchId} className="sr-only">
           {searchLabel}

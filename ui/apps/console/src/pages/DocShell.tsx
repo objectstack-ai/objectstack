@@ -10,6 +10,8 @@ import type { ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { BookOpen } from 'lucide-react';
 import { useObjectTranslation } from '@object-ui/i18n';
+import { AppDocsBackLink } from './AppDocsBackLink';
+import { useAppDocsBackTo } from './useAppDocsBackTo';
 
 /**
  * Lightweight chrome for the package-documentation routes (ADR-0046).
@@ -23,12 +25,36 @@ import { useObjectTranslation } from '@object-ui/i18n';
  * Under an app (`/apps/:appName/docs/...`, ADR-0048) it draws no bar of its
  * own (objectstack#35424): the app bar above already reads 「APP /
  * Documentation」, and the reader names its book and article above the
- * article. The label reads the session language (`help.documentation`).
+ * article. An app's docs routes draw no app menu either, so the bar's place
+ * holds 「← Back to APP」 (`AppDocsBackLink`) on every page but the reader,
+ * which carries it in its docs column and passes `backLink={false}`. The
+ * label reads the session language (`help.documentation`).
  */
-export function DocShell({ breadcrumb, children }: { breadcrumb?: string; children: ReactNode }) {
+export function DocShell({
+  breadcrumb,
+  backLink = true,
+  children,
+}: {
+  breadcrumb?: string;
+  /** Inside an app: draw 「← Back to APP」 above the page. The reader turns it off (its column has it). */
+  backLink?: boolean;
+  children: ReactNode;
+}) {
   const { appName } = useParams<{ appName?: string }>();
   const { t } = useObjectTranslation();
-  if (appName) return <div className="min-h-full">{children}</div>;
+  const backTo = useAppDocsBackTo();
+  if (appName) {
+    return (
+      <div className="min-h-full">
+        {backLink && backTo ? (
+          <div className="mx-auto flex max-w-3xl px-4 pt-4 sm:px-6" data-testid="docs-back-bar">
+            <AppDocsBackLink backTo={backTo} />
+          </div>
+        ) : null}
+        {children}
+      </div>
+    );
+  }
   const home = '/docs';
   return (
     <div className="min-h-full">

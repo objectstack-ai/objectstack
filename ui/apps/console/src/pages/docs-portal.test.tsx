@@ -184,6 +184,7 @@ import DocsLayout from './DocsLayout';
 import DocsIndex from './DocsIndex';
 import DocsSlug from './DocsSlug';
 import DocPage from './DocPage';
+import AppDocsIndex from './AppDocsIndex';
 
 // Mirrors the real route table: the layout fetches once and shares the data.
 function Harness({ entry }: { entry: string }) {
@@ -672,6 +673,7 @@ describe('objectstack#35424 — the in-app reader has one docs column and a path
         <Where />
         <Routes>
           <Route path="/apps/:appName/docs" element={<DocsLayout />}>
+            <Route index element={<AppDocsIndex />} />
             <Route path=":slug" element={<DocsSlug />} />
             <Route path=":slug/:name" element={<DocPage />} />
           </Route>
@@ -695,6 +697,16 @@ describe('objectstack#35424 — the in-app reader has one docs column and a path
     // This harness's `t` returns the default text uninterpolated.
     expect(within(column()).getByTestId('docs-nav-back')).toHaveTextContent('Back to');
     expect(within(column()).getByTestId('docs-nav-all-docs')).toHaveAttribute('href', '/docs');
+    // The reader carries the link once, in its column: no second one above the page.
+    expect(screen.queryByTestId('docs-back-bar')).toBeNull();
+  });
+
+  // The app menu is off on every docs route, so every docs page keeps a way back.
+  it('a book or doc that is not found still leads back to the app', async () => {
+    render(<InApp entry="/apps/crm/docs/nonesuch" />);
+    await screen.findByText(/not found/i);
+    const bar = screen.getByTestId('docs-back-bar');
+    expect(within(bar).getByTestId('docs-nav-back')).toHaveAttribute('href', '/apps/crm');
   });
 
   it('the path above the article names the book', async () => {
@@ -754,6 +766,14 @@ describe('objectstack#35424 — the in-app reader has one docs column and a path
         .getAllByRole('link', { name: 'Lead Guide' })
         .map((l) => l.getAttribute('href'));
       expect(lead).toContain('/apps/com.example.showcase/docs/leads/showcase_lead_guide');
+    });
+
+    it('the app\'s docs index (the path\'s 「Documentation」 link) leads back to the app', async () => {
+      render(<InApp entry="/apps/com.example.showcase/docs" />);
+      await screen.findByText('Leads Book');
+      expect(screen.getByTestId('where')).toHaveTextContent('/apps/com.example.showcase/docs');
+      const bar = screen.getByTestId('docs-back-bar');
+      expect(within(bar).getByTestId('docs-nav-back')).toHaveAttribute('href', '/apps/com.example.showcase');
     });
   });
 });
