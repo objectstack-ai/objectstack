@@ -109,7 +109,7 @@ The child grid of a master-detail form (and of `record:line_items`) is typed int
 - a **date** or **date-time** cell keeps its typed control and shows a calendar under the cell, with Today, Tomorrow, Next week and Clear;
 - a **text** cell whose text is longer than the column floats right over its neighbours while you type.
 
-Esc in a cell takes back what you changed in that cell and goes no further: a form open in a dialog stays open, with its other lines.
+Esc in a cell puts its line back as it was when you entered the cell (a lookup pick's filled-in fields included) and goes no further: a form open in a dialog stays open, with its other lines. Adding, removing, duplicating or moving a line ends that: after it, Esc in a cell takes back only what was changed since you came back to it.
 
 ## Field Types
 

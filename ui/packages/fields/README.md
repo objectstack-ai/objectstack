@@ -370,7 +370,9 @@ opens it under the cell, over the table, and the row keeps its height:
 - **Esc in a cell** takes back what this visit to the cell changed (the whole
   line returns to what it held when the cell was entered) and stops there: a
   form open in a dialog keeps its dialog. A cell whose panel is open hands Esc
-  to the panel.
+  to the panel. Adding, removing, duplicating or moving a line ends the visit,
+  so Esc never writes a removed or shifted line over the one now at that
+  position.
 
 ### Registry-name pickers (`position-ref`, `permission-ref`)
 

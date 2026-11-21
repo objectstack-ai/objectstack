@@ -1147,9 +1147,13 @@ function GridFieldBody({
     }
   }, [rows.length, focusCell]);
 
+  /** The Esc snapshot of the cell being visited; see the Esc block below. */
+  const cellVisit = useRef<{ key: string; rowIdx: number; row: Row; count: number } | null>(null);
+
   const addRow = useCallback((focusColIdx: number | null = null) => {
     if (maxRows != null && rows.length >= maxRows) return;
     pendingFocus.current = { rowIdx: rows.length, colIdx: focusColIdx };
+    cellVisit.current = null;
     // objectstack#35816 — a line Add starts on the host's defaults is marked
     // untouched until its first edit (`UNTOUCHED_NEW_ROW`).
     emit([...rows, newRowValues ? { ...blankRow(), [UNTOUCHED_NEW_ROW]: true } : blankRow()]);
@@ -1183,8 +1187,14 @@ function GridFieldBody({
    * Read on the window's capture phase, ahead of the dialog's own document
    * listener, which would close the dialog before any handler in the table
    * ran.
+   *
+   * The snapshot is held by line index, so a change to the lines themselves
+   * (add, remove, duplicate, move) ends the visit: after it the same index
+   * can draw another line, and putting the snapshot back would overwrite
+   * that line with a removed or moved one. The line count is kept with the
+   * snapshot as a second guard, for a host that replaces the lines itself.
+   * (`cellVisit` is declared above `addRow`, which ends the visit too.)
    */
-  const cellVisit = useRef<{ key: string; rowIdx: number; row: Row } | null>(null);
   const rowsRef = useRef(rows);
   const emitRef = useRef(emit);
   React.useLayoutEffect(() => {
@@ -1201,7 +1211,7 @@ function GridFieldBody({
     const at = cellKeyOf(e.target);
     if (!at || cellVisit.current?.key === at.key) return;
     const row = rowsRef.current[at.rowIdx];
-    cellVisit.current = row ? { key: at.key, rowIdx: at.rowIdx, row } : null;
+    cellVisit.current = row ? { key: at.key, rowIdx: at.rowIdx, row, count: rowsRef.current.length } : null;
   };
   const onGridBlur = (e: React.FocusEvent) => {
     const to = e.relatedTarget as Element | null;
@@ -1222,7 +1232,7 @@ function GridFieldBody({
       e.preventDefault();
       const visit = cellVisit.current;
       const current = rowsRef.current;
-      if (!visit || visit.key !== at.key || current[visit.rowIdx] === visit.row) return;
+      if (!visit || visit.key !== at.key || visit.count !== current.length || current[visit.rowIdx] === visit.row) return;
       emitRef.current(current.map((r, i) => (i === visit.rowIdx ? visit.row : r)), false);
     };
     window.addEventListener('keydown', onKey, true);
@@ -1232,6 +1242,7 @@ function GridFieldBody({
   const removeRow = useCallback(
     (rowIdx: number) => {
       if (rows.length <= minRows) return;
+      cellVisit.current = null;
       emit(rows.filter((_, i) => i !== rowIdx));
     },
     [rows, minRows, emit],
@@ -1248,6 +1259,7 @@ function GridFieldBody({
       const next = [...rows];
       // A copy is a line the user made, so it is not an untouched one.
       next.splice(rowIdx + 1, 0, touched({ ...copy }));
+      cellVisit.current = null;
       emit(next);
     },
     [rows, maxRows, emit],
@@ -1260,6 +1272,7 @@ function GridFieldBody({
       const next = [...rows];
       const [moved] = next.splice(from, 1);
       next.splice(to, 0, moved);
+      cellVisit.current = null;
       emit(next);
     },
     [rows, emit],

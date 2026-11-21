@@ -2,7 +2,7 @@
 '@object-ui/fields': patch
 ---
 
-feat(fields): the line-item grid's select and date cells open their panel under the cell, and Esc in a cell takes back only that cell
+feat(fields): the line-item grid's select and date cells open their panel under the cell, and Esc in a cell puts its line back as it was when the cell was entered
 
 Clause-②: no
 Metadata-protocol: none

@@ -1182,6 +1182,72 @@ describe('cell faces that open under the cell (objectstack#36023)', () => {
       expect(isUntouchedNewRow(onChange.mock.calls.at(-1)![0][0])).toBe(true);
     });
 
+    /**
+     * The snapshot is held by line index. A change to the lines during the
+     * visit (the row's own Delete / Duplicate buttons are inside the table, so
+     * focus going to them keeps the visit) makes the same index draw another
+     * line; Esc there must not write the removed or shifted line back.
+     */
+    const lines = () => [
+      { description: 'A', qty: 1 },
+      { description: 'B', qty: 2 },
+      { description: 'C', qty: 3 },
+    ];
+    const descriptions = () =>
+      (screen.getAllByLabelText('Description') as HTMLInputElement[]).map((el) => el.value);
+    const viaButton = (label: string, index: number) => {
+      const button = screen.getAllByLabelText(label)[index] as HTMLButtonElement;
+      button.focus();
+      fireEvent.click(button);
+    };
+
+    it.each([
+      ['the visited line removed by its own button', 'Remove row', 1, ['A', 'C']],
+      ['a line above removed', 'Remove row', 0, ['B', 'C']],
+      ['a line above duplicated', 'Duplicate row', 0, ['A', 'A', 'B', 'C']],
+    ] as const)('writes no stale line after %s, then back to the same cell', (_name, label, index, after) => {
+      const onChange = vi.fn();
+      render(<Stateful initial={lines()} onChange={onChange} />);
+      const input = screen.getAllByLabelText('Description')[1] as HTMLInputElement;
+      input.focus();
+      viaButton(label, index);
+      expect(descriptions()).toEqual(after);
+      const calls = onChange.mock.calls.length;
+      const again = screen.getAllByLabelText('Description')[1] as HTMLInputElement;
+      again.focus();
+      fireEvent.keyDown(again, { key: 'Escape' });
+      expect(onChange.mock.calls.length).toBe(calls);
+      expect(descriptions()).toEqual(after);
+    });
+
+    it('still takes back a change made after the lines changed, from that new visit', () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={lines()} onChange={onChange} />);
+      (screen.getAllByLabelText('Description')[1] as HTMLInputElement).focus();
+      viaButton('Remove row', 0);
+      const input = screen.getAllByLabelText('Description')[1] as HTMLInputElement;
+      input.focus();
+      fireEvent.change(input, { target: { value: 'Cx' } });
+      fireEvent.keyDown(input, { key: 'Escape' });
+      expect(descriptions()).toEqual(['B', 'C']);
+    });
+
+    it('in a date cell, the first Esc closes the calendar and the second takes back the typed day', async () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ description: 'A', due_on: '2026-06-17' }]} onChange={onChange} />);
+      const date = screen.getAllByLabelText('Due On')[0] as HTMLInputElement;
+      date.focus();
+      await screen.findByTestId('line-items-date-panel');
+      fireEvent.change(date, { target: { value: '2026-06-20' } });
+      expect(onChange.mock.calls.at(-1)![0][0].due_on).toBe('2026-06-20');
+      fireEvent.keyDown(date, { key: 'Escape' });
+      await waitFor(() => expect(screen.queryByTestId('line-items-date-panel')).toBeNull());
+      expect((screen.getAllByLabelText('Due On')[0] as HTMLInputElement).value).toBe('2026-06-20');
+      fireEvent.keyDown(date, { key: 'Escape' });
+      expect(onChange.mock.calls.at(-1)![0][0].due_on).toBe('2026-06-17');
+      expect((screen.getAllByLabelText('Due On')[0] as HTMLInputElement).value).toBe('2026-06-17');
+    });
+
     it('does not reach a dialog the form is open in: the dialog and every line stay', async () => {
       const onOpenChange = vi.fn();
       render(
