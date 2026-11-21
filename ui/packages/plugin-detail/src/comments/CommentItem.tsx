@@ -11,7 +11,7 @@ import { Button, Textarea, cn } from '@object-ui/components';
 import { useDisplayLocale } from '@object-ui/i18n';
 import type { FeedItem } from '@object-ui/types';
 import { useDetailTranslation } from '../useDetailTranslation';
-import { CommentAvatar } from './CommentAvatar';
+import { CommentAuthorAvatar } from '../CommentAuthorAvatar';
 import { formatCommentTime } from './commentTime';
 
 export interface CommentItemProps {
@@ -59,7 +59,7 @@ export const CommentItem: React.FC<CommentItemProps> = ({
   return (
     <div className={cn('group/comment relative', className)} data-comment-item="" data-comment-id={String(item.id)}>
       <div className="flex min-h-5 items-center gap-2 pr-1">
-        <CommentAvatar item={item} />
+        <CommentAuthorAvatar name={item.actor} avatarUrl={item.actorAvatarUrl} />
         <span className="truncate text-[13px] font-medium text-foreground">{item.actor}</span>
         <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground" data-comment-when="">
           {formatCommentTime(item.createdAt, t, locale)}

@@ -56,6 +56,7 @@ vi.mock('./MetadataInspector', () => ({
 import { I18nProvider } from '@object-ui/i18n';
 import { MetadataCtx } from '@object-ui/react';
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
+import { toast } from 'sonner';
 import { RecordDetailView } from './RecordDetailView';
 
 const OBJECT_NAME = 'crm_case';
@@ -257,6 +258,23 @@ describe('the record comment panel (objectstack#36075)', () => {
     expect(await within(panel(container)!).findByText(ADA_BODY)).toBeInTheDocument();
     // Exactly once on the page: in the panel.
     expect(within(container).getAllByText(ADA_BODY)).toHaveLength(1);
+  });
+
+  it("Delete in the panel goes through the page's confirm and says it went through (#36070's toast)", async () => {
+    const { container } = await mount();
+    await waitFor(() => expect(button(container)).not.toBeNull());
+    fireEvent.click(button(container)!);
+    const p = panel(container)!;
+    await within(p).findByText(ADA_BODY);
+    const own = Array.from(p.querySelectorAll('[data-comment-item]')).find((el) => el.textContent?.includes(ADA_BODY)) as HTMLElement;
+    fireEvent.pointerDown(own.querySelector('[data-comment-action="more"]')!, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    fireEvent.click(await within(document.body).findByRole('menuitem', { name: 'Delete' }));
+    const dialog = await within(document.body).findByRole('alertdialog');
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    });
+    await waitFor(() => expect(within(panel(container)!).queryByText(ADA_BODY)).toBeNull());
+    expect(toast.success).toHaveBeenCalledWith('Comment deleted');
   });
 
   it('no icon on an object with feeds off', async () => {

@@ -10,7 +10,6 @@
 // shares (the desktop panel, the phone's comment page) and the desktop's own.
 export { useRecordComments, type RecordCommentsData } from './useRecordComments';
 export { buildCommentThreads, latestRepliers, type CommentThreadData } from './commentThreads';
-export { CommentAvatar, type CommentAvatarProps } from './CommentAvatar';
 export { CommentItem, type CommentItemProps } from './CommentItem';
 export { CommentThread, type RecordCommentThreadProps, type CommentItemActions } from './CommentThread';
 export { CommentComposer, type CommentComposerProps } from './CommentComposer';

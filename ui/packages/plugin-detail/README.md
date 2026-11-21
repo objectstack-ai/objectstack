@@ -929,7 +929,7 @@ stream draws the system entries alone: no comment rows, no chips, no comment
 box, and its count leaves the comments out.
 
 The pieces are exported one by one (`CommentThread`, `CommentItem`,
-`CommentComposer`, `CommentAvatar`, `buildCommentThreads`) for a surface that
+`CommentComposer`, `buildCommentThreads`, and #36070's `CommentAuthorAvatar`) for a surface that
 lays them out another way, such as a phone's comment page.
 
 ```tsx

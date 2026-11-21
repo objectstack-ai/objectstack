@@ -266,7 +266,6 @@ export {
   useRecordComments,
   buildCommentThreads,
   latestRepliers,
-  CommentAvatar,
   CommentItem,
   CommentThread,
   CommentComposer,
@@ -277,7 +276,6 @@ export {
 export type {
   RecordCommentsData,
   CommentThreadData,
-  CommentAvatarProps,
   CommentItemProps,
   RecordCommentThreadProps,
   CommentItemActions,

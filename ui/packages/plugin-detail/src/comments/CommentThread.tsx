@@ -10,7 +10,7 @@ import * as React from 'react';
 import { cn } from '@object-ui/components';
 import type { FeedItem } from '@object-ui/types';
 import { useDetailTranslation } from '../useDetailTranslation';
-import { CommentAvatar } from './CommentAvatar';
+import { CommentAuthorAvatar } from '../CommentAuthorAvatar';
 import { CommentComposer } from './CommentComposer';
 import { CommentItem } from './CommentItem';
 import { latestRepliers, type CommentThreadData } from './commentThreads';
@@ -129,7 +129,12 @@ export const CommentThread: React.FC<RecordCommentThreadProps> = ({
     >
       <span className="flex -space-x-1">
         {latestRepliers(replies).map((reply) => (
-          <CommentAvatar key={String(reply.id)} item={reply} size="sm" className="ring-1 ring-background" />
+          <CommentAuthorAvatar
+            key={String(reply.id)}
+            name={reply.actor}
+            avatarUrl={reply.actorAvatarUrl}
+            className="size-4 ring-1 ring-background"
+          />
         ))}
       </span>
       {t('detail.replyCount', { count: replies.length })}
