@@ -13,7 +13,7 @@ import { columnIdentity, composeParentScopeFilter, mergeFilterNodes, type FieldC
 import { formatCurrency } from '@object-ui/fields';
 import { resolveFieldCurrency, useDisplayLocale, useLocalization, withFollowedParent } from '@object-ui/i18n';
 import { SchemaRenderer, toRenderableSchema, useRecordContext } from '@object-ui/react';
-import { RecordTimelinePanelContext, type RecordTimelinePanel } from './recordTimelineStream';
+import { RecordCommentsInPanelContext, RecordTimelinePanelContext, type RecordTimelinePanel } from './recordTimelineStream';
 import { resolveTitleField } from './synth/buildDefaultPageSchema';
 import type { RelatedCardId } from './synth/relatedArrangement';
 import { useDetailTranslation } from './useDetailTranslation';
@@ -342,19 +342,30 @@ const TimelineSummary: React.FC<{
   timelineId: string;
 }> = ({ nodes, count, onCount, onOpen, timelineId }) => {
   const { t } = useDetailTranslation();
-  const panel = React.useMemo<RecordTimelinePanel>(
-    () => ({ entries: RECORD_SUMMARY_ROWS, onCount }),
-    [onCount],
+  const commentsInPanel = React.useContext(RecordCommentsInPanelContext);
+  const peekNodes = React.useMemo(
+    () => railStreamNodes(nodes, commentsInPanel).map(readOnlyStreamNode),
+    [nodes, commentsInPanel],
   );
-  const peekNodes = React.useMemo(() => nodes.map(readOnlyStreamNode), [nodes]);
-  const counted = nodes.some((node) => node && typeof node === 'object' && node.type === 'record:activity');
+  // A chatter stream drawn as the system history (objectstack#36193) keeps its
+  // count to this card: the 动态 tab still draws that chatter, comments and
+  // all, so the tab row is not handed a count of the system entries alone.
+  const ownCount = peekNodes.some((node, index) => node !== nodes[index] && node?.type === 'record:activity' && nodes[index]?.type !== 'record:activity');
+  const [cardCount, setCardCount] = React.useState<number | null>(null);
+  const reportCount = ownCount ? setCardCount : onCount;
+  const shownCount = ownCount ? cardCount : count;
+  const panel = React.useMemo<RecordTimelinePanel>(
+    () => ({ entries: RECORD_SUMMARY_ROWS, onCount: reportCount }),
+    [reportCount],
+  );
+  const counted = peekNodes.some((node) => node && typeof node === 'object' && node.type === 'record:activity');
   return (
     <RecordSummaryCard
       id={timelineId}
       title={t('detail.summaryRecentActivity', { defaultValue: 'Recent activity' })}
-      count={count}
+      count={shownCount}
       onOpen={onOpen}
-      hidden={counted && !(typeof count === 'number' && count > 0)}
+      hidden={counted && !(typeof shownCount === 'number' && shownCount > 0)}
     >
       {/* Edge to edge: the peek rows pad themselves, and a chatter stream
           insets itself in a timeline card (objectstack#34676). */}
@@ -368,6 +379,28 @@ const TimelineSummary: React.FC<{
     </RecordSummaryCard>
   );
 };
+
+/**
+ * objectstack#36193 — the stream blocks the 最近动态 card draws. While the
+ * comment panel holds the comments (`RecordCommentsInPanelContext`), the card
+ * lists the system history alone, as the 动态 stream does (objectstack#36075):
+ * a slotted page's `record:chatter` / `record:discussion` stream is drawn
+ * there as the `record:activity` block its `feed` configures (the spec's
+ * `feed` IS `RecordActivityProps`), whose peek drops the comments and their
+ * replies, has no 「讨论」 heading, and counts the system entries only — so a
+ * card with no system history is not drawn. Without the panel the nodes are
+ * the page's own, unchanged.
+ */
+export function railStreamNodes(nodes: readonly any[], commentsInPanel: boolean): any[] {
+  if (!commentsInPanel) return nodes as any[];
+  return nodes.map((node) => {
+    if (!node || typeof node !== 'object') return node;
+    if (node.type !== 'record:chatter' && node.type !== 'record:discussion') return node;
+    const props = node.properties ?? {};
+    const feed = { ...(node.feed ?? {}), ...(props.feed ?? {}) };
+    return { type: 'record:activity', ...(node.id ? { id: node.id } : {}), properties: feed };
+  });
+}
 
 /** A stream block as the rail draws it: read-only, the newest few. */
 function readOnlyStreamNode(node: any): any {
