@@ -97,7 +97,16 @@ const FLOW_ACTION = {
     target: FLOW_NAME,
     ai: { exposed: true, description: 'Escalate a case.' },
 };
-const OBJECT_DEF = { name: OBJECT, actions: [SCRIPT_ACTION, FLOW_ACTION] };
+/** A script action whose author asks for a person's confirmation at the AI door: the MCP bridge hands it off. */
+const GATED_SCRIPT_ACTION = {
+    name: 'purge_case',
+    label: 'Purge',
+    objectName: OBJECT,
+    type: 'script',
+    target: 'purge_case',
+    ai: { exposed: true, description: 'Purge a case.', requiresConfirmation: true },
+};
+const OBJECT_DEF = { name: OBJECT, actions: [SCRIPT_ACTION, FLOW_ACTION, GATED_SCRIPT_ACTION] };
 
 /**
  * The record-LESS pair: standalone action items with no `objectName`, so both
@@ -523,6 +532,19 @@ describe('a selection is read in the caller\'s scope, on the flow arm and the sc
         const viaMcp = await mcp(OWNER, GLOBAL_SCRIPT_ACTION.name, selection);
         await expect(viaMcp.run()).rejects.toMatchObject({ status: 400 });
         expect(viaMcp.ql.executeAction).not.toHaveBeenCalled();
+    });
+
+    it('MCP hand-off: a gated call\'s selection is judged before the person is asked, and nothing is handed off', async () => {
+        const denied = await mcp(STRANGER, GATED_SCRIPT_ACTION.name, selection);
+        await expect(denied.run()).rejects.toMatchObject({ code: 'RECORD_NOT_FOUND', status: 404 });
+        expect(denied.ql.executeAction).not.toHaveBeenCalled();
+
+        // The control: the owner's readable selection reaches the hand-off step
+        // (this rig registers no confirmation service, so the step answers that).
+        const owner = await mcp(OWNER, GATED_SCRIPT_ACTION.name, selection);
+        const answer = await owner.run().then((ok: unknown) => ({ ok }), (err: any) => ({ code: err?.code, status: err?.status }));
+        expect(answer).not.toMatchObject({ code: 'RECORD_NOT_FOUND' });
+        expect(owner.ql.executeAction).not.toHaveBeenCalled();
     });
 
     it('an empty selection reads nothing and refuses nothing', async () => {
