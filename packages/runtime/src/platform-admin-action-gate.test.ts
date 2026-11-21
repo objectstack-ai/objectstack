@@ -191,6 +191,8 @@ describe('sys_user.remove_user_manager: the clear reaches the endpoint as `manag
         const { dispatcher, request } = boot();
         const refused = await dispatcher.handleActions(`/${OBJECT}/remove_user_manager`, 'POST', { recordId: 'u_target', params: {} }, MEMBER());
         expect(refused?.response?.status).toBe(403);
+        // The ADR-0112 envelope code, the one the MCP twin above pins for this gate.
+        expect(refused?.response?.body?.error?.code).toBe('PERMISSION_DENIED');
         expect(String(refused?.response?.body?.error?.message)).toContain('requires capability [manage_users]');
         expect(request).not.toHaveBeenCalled();
     });
