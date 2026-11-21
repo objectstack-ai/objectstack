@@ -41,7 +41,6 @@
 import {
   Fragment,
   createContext,
-  createElement,
   useCallback,
   useContext,
   useEffect,
@@ -56,13 +55,13 @@ import {
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { ChevronRight } from 'lucide-react';
-import { getIcon } from '../utils/getIcon.js';
 import {
   NavigationOverlay,
   type NavigationOverlayMode,
   type RecordTopBarStepper,
   RecordHeaderBarContext,
   type RecordHeaderBar,
+  ObjectIconTile,
 } from '@object-ui/components';
 import { overlayWidthFor } from '@object-ui/plugin-view/core';
 import type { FieldContainerLike } from '@object-ui/core';
@@ -552,10 +551,11 @@ export function RecordStackDrawer({
   const titleOf = (level: RecordDrawerLevel) => titles[levelKey(level)!] || level.title || shortId(level.recordId);
   const crumbClass =
     'min-w-0 truncate rounded px-1 hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
-  // The record row's icon: the object's, as the full page draws it.
-  const rootIconName = current ? (defOf(current.objectName) as { icon?: unknown } | undefined)?.icon : undefined;
-  const rootIcon = typeof rootIconName === 'string'
-    ? createElement(getIcon(rootIconName), { className: 'h-4 w-4 shrink-0 text-muted-foreground', 'aria-hidden': true })
+  // The record row's icon: the object's tile, as the full page draws it
+  // (objectstack#35985 — white glyph on the object's colour, gray without one).
+  const rootDef = current ? (defOf(current.objectName) as { icon?: unknown; color?: unknown } | undefined) : undefined;
+  const rootIcon = typeof rootDef?.icon === 'string'
+    ? <ObjectIconTile icon={rootDef.icon} color={typeof rootDef.color === 'string' ? rootDef.color : undefined} />
     : null;
   // objectstack#35853 — the bar's record row: the icon, then the record's
   // name and tags as the record header draws them into the slot; until it

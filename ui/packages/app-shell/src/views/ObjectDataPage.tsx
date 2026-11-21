@@ -41,6 +41,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  ObjectIconTile,
 } from '@object-ui/components';
 import { Database, Lock, MoreHorizontal, Plus, RotateCcw, Save, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -68,7 +69,6 @@ import {
 } from './InterfaceListPage.js';
 import { RecordDetailView } from './RecordDetailView.js';
 import { PageHeader } from '../layout/PageHeader.js';
-import { getIcon } from '../utils/getIcon.js';
 import { useMetadataClient } from './metadata-admin/useMetadata.js';
 import { createRuntimeMetadata, viewEnvelope } from './runtime-metadata-persistence.js';
 import { useRuntimeCreateApp } from './objectViewViewCrud.js';
@@ -729,7 +729,8 @@ export function ObjectDataPage({ dataSource, objects }: any) {
           subtitle={t('console.objectData.description', {
             defaultValue: 'URL-defined data slice — not bound to any saved view.',
           })}
-          icon={React.createElement(getIcon((objectDef as any)?.icon), { className: 'h-4 w-4' })}
+          // The object's tile, in the colour the menu draws it in (objectstack#35985).
+          iconTile={<ObjectIconTile size="lg" icon={(objectDef as any)?.icon} color={(objectDef as any)?.color} />}
           actions={
             <>
               {newButton}
