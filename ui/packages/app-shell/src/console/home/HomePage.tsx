@@ -615,12 +615,13 @@ export function HomePage({ checklist }: HomePageProps = {}) {
         icon: undefined,
       };
     }
-    const objectIcon =
+    const objectDef =
       item.type === 'record' && objectName
-        ? (readObjectsByName(metadata, [objectName]) as Array<{ name?: unknown; icon?: unknown } | null | undefined>).find(
+        ? (readObjectsByName(metadata, [objectName]) as Array<{ name?: unknown; icon?: unknown; color?: unknown } | null | undefined>).find(
             (o) => o?.name === objectName,
-          )?.icon
+          )
         : undefined;
+    const objectIcon = objectDef?.icon;
     return {
       context:
         item.type === 'record' && objectName
@@ -628,6 +629,7 @@ export function HomePage({ checklist }: HomePageProps = {}) {
           : recentItemTypeLabel(t, item.type),
       app: app ? appLabel(app) : undefined,
       icon: typeof objectIcon === 'string' && objectIcon !== '' ? objectIcon : undefined,
+      color: typeof objectDef?.color === 'string' ? objectDef.color : undefined,
     };
   };
 

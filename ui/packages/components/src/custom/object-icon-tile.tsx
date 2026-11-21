@@ -59,16 +59,19 @@ export function objectColorOrDefault(color: unknown): ObjectColor {
 /**
  * Square edge, glyph edge and corner per size. The corners are pixel values,
  * not the theme's `rounded-*` steps: those follow `--radius`, which a theme
- * may set large enough to turn the square into a circle.
+ * may set large enough to turn the square into a circle. The glyph edge is
+ * important (`!`): a host row that sizes every nested `svg` (a command item's
+ * `[&_svg]:size-4`, a header's icon slot) would otherwise grow the glyph to
+ * the tile's own edge.
  */
 /** The four tile sizes: 16, 20, 24 and 32px squares. */
 export type ObjectIconTileSize = 'xs' | 'sm' | 'md' | 'lg';
 
 const SIZE_CLASS: Readonly<Record<ObjectIconTileSize, { tile: string; glyph: string }>> = {
-  xs: { tile: 'h-4 w-4 rounded-[4px]', glyph: 'h-2.5 w-2.5' },
-  sm: { tile: 'h-5 w-5 rounded-[5px]', glyph: 'h-3 w-3' },
-  md: { tile: 'h-6 w-6 rounded-[6px]', glyph: 'h-3.5 w-3.5' },
-  lg: { tile: 'h-8 w-8 rounded-[8px]', glyph: 'h-5 w-5' },
+  xs: { tile: 'h-4 w-4 rounded-[4px]', glyph: 'h-2.5! w-2.5!' },
+  sm: { tile: 'h-5 w-5 rounded-[5px]', glyph: 'h-3! w-3!' },
+  md: { tile: 'h-6 w-6 rounded-[6px]', glyph: 'h-3.5! w-3.5!' },
+  lg: { tile: 'h-8 w-8 rounded-[8px]', glyph: 'h-5! w-5!' },
 };
 
 export interface ObjectIconTileProps {
