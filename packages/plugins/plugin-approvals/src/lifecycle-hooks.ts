@@ -819,6 +819,35 @@ function masterEdgesOf(engine: Pick<MinimalEngine, 'getSchema'>, objectName: str
   return edges;
 }
 
+/**
+ * The one relation through which the engine's cascade can delete a row of
+ * `objectName`, when it is one of `edges` — else `undefined`.
+ *
+ * Cascade-capable as the engine's cascade planning resolves it: a
+ * `master_detail` field unless it declares `deleteBehavior: 'restrict'`, and
+ * any other field that declares `deleteBehavior: 'cascade'`. Counted wide on
+ * purpose: a field miscounted as cascade-capable only withholds the
+ * cascade-leg yield ({@link bindDetailRowLockHook}), so the error direction is
+ * a refusal, never a held line removed by another record's delete.
+ */
+function soleCascadeEdgeOf(
+  engine: Pick<MinimalEngine, 'getSchema'>,
+  objectName: string,
+  edges: ReadonlyArray<MasterEdge>,
+): MasterEdge | undefined {
+  let schema: any;
+  try { schema = engine.getSchema?.(objectName); } catch { return undefined; }
+  const fields = schema?.fields;
+  if (!fields || typeof fields !== 'object') return undefined;
+  const cascading = Object.entries(fields as Record<string, any>)
+    .filter(([, def]) => !!def && (def.type === 'master_detail'
+      ? def.deleteBehavior !== 'restrict'
+      : def.deleteBehavior === 'cascade'))
+    .map(([name, def]) => String(def.name ?? name));
+  if (cascading.length !== 1) return undefined;
+  return edges.find((e) => e.fk === cascading[0]);
+}
+
 /** A scalar foreign-key value, or `null` for an empty or non-scalar one. */
 function scalarFk(value: unknown): string | null {
   if (typeof value === 'string') return value ? value : null;
@@ -874,6 +903,22 @@ function unscalarFk(value: unknown): boolean {
  * The status-mirror exemption has no analogue: it is about a field of the
  * master itself.
  *
+ * ## Deleting the locked master itself — the cascade leg yields
+ *
+ * Deleting a record while its approval is pending is not refused: the delete
+ * lands and its pending request is cancelled ({@link bindRecordDeleteCancelHook},
+ * #13568, whose ruling vetoed "forbid delete while pending"). A `master_detail`
+ * cascades, so that delete removes the lines too, as the CALLER, through this
+ * hook; refusing those legs would make a locked record with lines undeletable.
+ * So a delete the engine's cascade issued (`ctx.referentialCascadeDelete`, the
+ * declared marker) yields on the edge it can only have come through: when the
+ * detail object's ONE cascade-capable relation ({@link soleCascadeEdgeOf}) is
+ * the `master_detail` edge to the held master, the record being deleted is
+ * that master. Any other shape — a junction under two cascading masters, a
+ * `lookup` that also declares `cascade` — cannot name its cascade's source, so
+ * the leg is judged as a hand delete and refused: deleting a DIFFERENT record
+ * never takes a held record's line with it.
+ *
  * ## The refusal
  *
  * The END-USER sentence of the record lock ({@link recordLockRefusal}), naming
@@ -924,9 +969,15 @@ export function bindDetailRowLockHook(
         }
       }
       if (!previous) unresolved = true;
+      // A cascade leg of the held master's OWN delete yields on that one edge
+      // (see "Deleting the locked master itself" above); every other edge of the
+      // row is still judged.
+      const cascadeSource = event === 'delete' && ctx?.referentialCascadeDelete === true
+        ? soleCascadeEdgeOf(engine, object, edges)
+        : undefined;
       for (const e of edges) {
         const before = previous ? scalarFk(previous[e.fk]) : null;
-        if (before) touched.push({ master: e.master, id: before });
+        if (before && e !== cascadeSource) touched.push({ master: e.master, id: before });
         if (event === 'update' && Object.prototype.hasOwnProperty.call(data, e.fk)) {
           const after = scalarFk(data[e.fk]);
           if (after && after !== before) touched.push({ master: e.master, id: after });
