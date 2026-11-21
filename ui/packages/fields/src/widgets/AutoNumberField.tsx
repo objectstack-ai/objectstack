@@ -11,7 +11,7 @@ export function AutoNumberField({ value, field, ...props }: FieldWidgetComponent
     return <EmptyValue className={props.className} />;
   }
   return (
-    <span className={`text-sm font-mono text-gray-700 ${props.className || ''}`}>
+    <span className={`text-sm font-mono text-foreground ${props.className || ''}`}>
       {String(value)}
     </span>
   );
