@@ -16,7 +16,9 @@
  * - The comments are the panel's: the page's 动态 stream no longer draws them.
  * - No icon where the panel is not offered: an object with feeds off, and a
  *   page authored by hand (option C, seat 13:24Z): that page keeps its own
- *   discussion block as it was.
+ *   discussion block as it was. It is drawn on the desktop full page only
+ *   (objectstack#36150): the same object's drawer draws the standard page,
+ *   which offers the icon.
  */
 
 import * as React from 'react';
@@ -284,9 +286,18 @@ describe('the record comment panel (objectstack#36075)', () => {
   });
 
   it('no icon on a hand-written page, which keeps its own discussion block', async () => {
-    const { container } = await mount({ pages: [AUTHORED_PAGE], embedded: true });
+    // objectstack#36150 — the full page: an authored page is drawn there only.
+    const { container } = await mount({ pages: [AUTHORED_PAGE] });
     expect(await within(container).findByText(ADA_BODY)).toBeInTheDocument();
     expect(button(container)).toBeNull();
     expect(panel(container)).toBeNull();
+  });
+
+  it('the drawer of an object with a hand-written page draws the standard page, so it offers the icon (objectstack#36150)', async () => {
+    const { container } = await mount({ pages: [AUTHORED_PAGE], embedded: true });
+    await waitFor(() => expect(button(container)).not.toBeNull());
+    expect(panel(container)).toBeNull();
+    fireEvent.click(button(container)!);
+    expect(await within(panel(container)!).findByText(ADA_BODY)).toBeInTheDocument();
   });
 });
