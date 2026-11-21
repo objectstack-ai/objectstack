@@ -384,7 +384,7 @@ at the question's `askKind`:
 | `top_n` | a ranking: the first N rows or groups by a measure | a `topN` truth |
 | `time_range` | a figure over a time window | a filter with `in_window` |
 | `join` | a figure that reads across a lookup | a filter or `groupBy` on a relation path (`order.status`) |
-| `owner_latest` | who holds a row or acted on it: an owner, an approver, a follow-up | a `groupBy` on the person field |
+| `owner_latest` | who holds a row or acted on it: an owner, an approver, a follow-up | a `groupBy` ending on a person field: a declared lookup to an object a persona's `record` names, or a declared user-handle field |
 | `business_term` | a business word that names exactly one governed metric | a `metric_selected` dataset question |
 | `ambiguous` | a word that names more than one metric, or none exactly | an `asked_back` dataset question |
 | `forbidden` | asked as a persona who may not see what it reads | declared only when every persona it lists is withheld from it; any withheld turn counts |

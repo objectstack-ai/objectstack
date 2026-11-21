@@ -232,7 +232,9 @@ const KIND_REFUSALS: Array<[string, (typeof DATASET_CARDS)[number], (c: RawCard)
   ['`group_sum` on a ranking', 'order_to_cash', (c) => (question(c, 'top_accounts_billed').askKind = 'group_sum'), 'run.questions[3].askKind', /with a `groupBy`/],
   ['`time_range` with no window', 'order_to_cash', (c) => (question(c, 'receivables_aging').askKind = 'time_range'), 'run.questions[1].askKind', /filters with `in_window`/],
   ['`join` with no relation path', 'order_to_cash', (c) => (question(c, 'receivables_aging').askKind = 'join'), 'run.questions[1].askKind', /relation path/],
-  ['`owner_latest` that groups by nobody', 'order_to_cash', (c) => (question(c, 'open_receivables').askKind = 'owner_latest'), 'run.questions[0].askKind', /groups by the person field/],
+  ['`owner_latest` that groups by nobody', 'order_to_cash', (c) => (question(c, 'open_receivables').askKind = 'owner_latest'), 'run.questions[0].askKind', /groups by a person field/],
+  ['`owner_latest` that groups by a field that names no person (a status)', 'order_to_cash', (c) => (question(c, 'orders_by_status').askKind = 'owner_latest'), 'run.questions[2].askKind', /groups by a person field/],
+  ['`owner_latest` across a lookup that ends on no person (a product category)', 'order_to_cash', (c) => (question(c, 'booked_by_category').askKind = 'owner_latest'), 'run.questions[5].askKind', /groups by a person field/],
   ['`unanswerable` on a question the seed answers', 'order_to_cash', (c) => (question(c, 'open_receivables').askKind = 'unanswerable'), 'run.questions[0].askKind', /only a question whose truth is `unanswerable`/],
   ['an unanswerable truth named another kind', 'order_to_cash', (c) => (question(c, 'september_commission').askKind = 'count'), 'run.questions[9].askKind', /its kind is `unanswerable`/],
   ['`business_term` on a question with a truth', 'order_to_cash', (c) => (question(c, 'open_receivables').askKind = 'business_term'), 'run.questions[0].askKind', /ask it as a dataset question/],
@@ -248,6 +250,11 @@ describe('the loader refuses an ask kind that does not fit its question, at `ask
     expect(card).toBeUndefined();
     const hit = refusals.filter((r) => r.path === path);
     expect(hit.map((r) => r.message).join(' | ')).toMatch(message);
+  });
+
+  it('`owner_latest` across a lookup that ends on a person loads: the overdue balance grouped by the account owner', () => {
+    const { refusals } = load('order_to_cash', (c) => (question(c, 'overdue_by_owner').askKind = 'owner_latest'));
+    expect(refusals).toEqual([]);
   });
 
   it('`forbidden` declared on a question asked only as a persona it is withheld from loads', () => {

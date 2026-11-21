@@ -305,7 +305,7 @@ export type TruthSpec = z.infer<typeof TruthSpecSchema>;
 // question names its kind (`askKind`), so a round reports what it asked kind
 // by kind, and the open cards can show that every kind is asked. The loader
 // holds each declaration to what the card states (`checkAskKinds` in
-// `loader.ts`); `forbidden` is also read per turn: a question asked as a
+// `ask-kinds.ts`, called from `loader.ts`); `forbidden` is also read per turn: a question asked as a
 // persona whose truth is `withheld` is a `forbidden` ask, whatever kind it
 // declares (`questionTurnKind` in `ask-kinds.ts`).
 //
@@ -314,7 +314,7 @@ export type TruthSpec = z.infer<typeof TruthSpecSchema>;
 //   top_n          a ranking: the first N rows or groups by a measure
 //   time_range     a figure over a time window (`in_window`)
 //   join           a figure that reads across a lookup (a relation path)
-//   owner_latest   who holds a row or acted on it: an owner, an approver, a follow-up
+//   owner_latest   who holds a row or acted on it, grouped by a person field: an owner, an approver
 //   business_term  a business word that names exactly one governed metric (`metric_selected`)
 //   ambiguous      a word that names more than one metric, or none exactly (`asked_back`)
 //   forbidden      asked as a persona who may not see what the question reads

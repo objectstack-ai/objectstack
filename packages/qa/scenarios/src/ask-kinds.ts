@@ -51,8 +51,30 @@ function datasetKindProblem(q: DatasetQuestion): string | undefined {
     : `a \`fallback_labelled\` question is answered by an object query: its kind is what it asks for (${FIGURE_KINDS.map((x) => `\`${x}\``).join(', ')}), never \`${k}\``;
 }
 
+/**
+ * Does `groupBy`, read from `object`, end on a person field: a declared lookup to an object a
+ * persona's `record` names (the card's people, `employee`), or a declared user-handle field
+ * (`run.userHandleFields`). Every hop but the last walks a declared lookup, as the loader resolves
+ * a relation path; a hop no lookup declares answers no.
+ */
+export function groupsByPerson(card: ScenarioCard, object: string, groupBy: string): boolean {
+  const people = new Set(card.run.personas.flatMap((p) => (p.record ? [p.record.object] : [])));
+  const lookups = card.expect.lookups ?? [];
+  const hops = groupBy.split('.');
+  let at = object;
+  for (const hop of hops.slice(0, -1)) {
+    const l = lookups.find((x) => x.object === at && x.field === hop);
+    if (!l) return false;
+    at = l.to;
+  }
+  const last = hops[hops.length - 1]!;
+  const lookup = lookups.find((x) => x.object === at && x.field === last);
+  if (lookup) return people.has(lookup.to);
+  return (card.run.userHandleFields ?? []).some((h) => h.object === at && h.field === last);
+}
+
 /** Why a question's declared kind contradicts its truth, or `undefined` when it does not. */
-function questionKindProblem(q: Question, personaTruths: Readonly<Record<string, Truth>> | undefined): string | undefined {
+function questionKindProblem(card: ScenarioCard, q: Question, personaTruths: Readonly<Record<string, Truth>> | undefined): string | undefined {
   const k = q.askKind;
   if (k === undefined) return undefined;
   const t = q.truth;
@@ -82,7 +104,9 @@ function questionKindProblem(q: Question, personaTruths: Readonly<Record<string,
     case 'join':
       return paths.some((p) => p.includes('.')) ? undefined : 'a `join` question reads across a lookup: its truth filters or groups on a relation path (`order.status`)';
     case 'owner_latest':
-      return t.groupBy !== undefined ? undefined : 'an `owner_latest` question asks who: its truth groups by the person field it names (`groupBy`)';
+      return t.groupBy !== undefined && groupsByPerson(card, q.object, t.groupBy)
+        ? undefined
+        : 'an `owner_latest` question asks who: its truth groups by a person field (`groupBy` ending on a declared lookup to an object a persona `record` names, or on a declared user-handle field)';
   }
 }
 
@@ -101,7 +125,7 @@ export function checkAskKinds(card: ScenarioCard, personaTruths: Readonly<Record
       if (required) refuse(at, missing);
       return;
     }
-    const problem = questionKindProblem(q, personaTruths[q.id]);
+    const problem = questionKindProblem(card, q, personaTruths[q.id]);
     if (problem) refuse(at, `\`${q.askKind}\` does not fit this question: ${problem}`);
   });
   (card.run.datasetQuestions ?? []).forEach((q, i) => {
