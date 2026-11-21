@@ -47,6 +47,7 @@ import {
   ValueDataSource,
 } from '@object-ui/core';
 import { SchemaRendererProvider, SchemaRenderer, notifyDataChanged } from '@object-ui/react';
+import { I18nProvider } from '@object-ui/i18n';
 import type { DataSource, DeclaredNode, ObjectGanttBlockNode } from '@object-ui/types';
 import { safeValidateSchema } from '@object-ui/types/zod';
 import { ObjectGantt } from './ObjectGantt';
@@ -2240,6 +2241,19 @@ describe('ObjectGantt.refusedRead-35317', () => {
     expect(text).not.toContain('PERMISSION_DENIED');
     expect(text).not.toContain('HTTP 403');
     expect(screen.queryByTestId('gantt-view')).toBeNull();
+  });
+
+  it('the no-access state speaks the reader\'s language under a zh provider', async () => {
+    window.localStorage.clear();
+    render(
+      <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }}>
+        <ObjectGantt schema={SCHEMA} dataSource={adapter(async () => { throw refusal(); })} />
+      </I18nProvider>,
+    );
+    const panel = await screen.findByTestId('gantt-no-access');
+    expect(panel.textContent).toContain('无权访问');
+    expect(panel.textContent).not.toContain('You don’t have access');
+    window.localStorage.clear();
   });
 
   it('a 403 with only the status in the message (no decorated fields) is the same refusal', async () => {
