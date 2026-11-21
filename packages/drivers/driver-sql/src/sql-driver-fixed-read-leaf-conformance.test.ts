@@ -944,6 +944,22 @@ async function oracleAnswer(p: Promise<unknown[]>): Promise<{ rows: string[] } |
   }
 }
 
+/** Bind the key-type suite's remote tables on `d`: the RAW(16) and NUMBER parents, and the child whose `parent` is a RAW(16) lookup. */
+function registerOracleKeyTypeObjects(d: SqlDriver): void {
+  for (const fx of [ORA_RAW, ORA_NUM]) {
+    (d as any).registerExternalObject({
+      name: fx.object,
+      external: { remoteName: fx.table, columnMap: { ID: 'id', LABEL: 'label' } },
+      fields: { label: { type: 'text' } },
+    });
+  }
+  (d as any).registerExternalObject({
+    name: ORA_CHILD.object,
+    external: { remoteName: ORA_CHILD.table, columnMap: { ID: 'id', PARENT: 'parent', LABEL: 'label' } },
+    fields: { parent: { type: 'lookup', reference: ORA_RAW.object }, label: { type: 'text' } },
+  });
+}
+
 function declareOracleKeyTypePins(cell: FederationDialectCell): void {
   describe(`[ADR-0155 O2] driver-sql — SharedRecordIds on Oracle key types (${cell.label})`, () => {
     let driver: SqlDriver;
@@ -975,18 +991,7 @@ function declareOracleKeyTypePins(cell: FederationDialectCell): void {
       for (const [id, parent] of [['c1', ORA_U1], ['c2', ORA_U2], ['c4', ORA_U4]] as const) {
         await knex.raw(`INSERT INTO "${ORA_CHILD.table}" ("ID", "PARENT", "LABEL") VALUES (?, HEXTORAW(?), 'x')`, [id, hex(parent)]);
       }
-      for (const fx of [ORA_RAW, ORA_NUM]) {
-        (driver as any).registerExternalObject({
-          name: fx.object,
-          external: { remoteName: fx.table, columnMap: { ID: 'id', LABEL: 'label' } },
-          fields: { label: { type: 'text' } },
-        });
-      }
-      (driver as any).registerExternalObject({
-        name: ORA_CHILD.object,
-        external: { remoteName: ORA_CHILD.table, columnMap: { ID: 'id', PARENT: 'parent', LABEL: 'label' } },
-        fields: { parent: { type: 'lookup', reference: ORA_RAW.object }, label: { type: 'text' } },
-      });
+      registerOracleKeyTypeObjects(driver);
       for (const c of ORACLE_KEY_CASES) await knex(ORA_GRANTS).insert(grantRows(c));
     }, 120_000);
 
@@ -1044,15 +1049,108 @@ function declareOracleKeyTypePins(cell: FederationDialectCell): void {
     }
 
     it('nested under a composed ReadableIds scope: the RAW parent\'s grants are converted as its list is', async () => {
-      // The child's door primes the child alone; a read of the parent primes its
-      // RAW(16) columns, for the list and the leaf alike.
-      await driver.find(ORA_RAW.object, { where: { label: 'none' } as any }, ORA_BYPASS);
+      // The child's door primes the parent's RAW(16) columns, for the list and
+      // the leaf alike (a fresh driver per door: the describe below).
       const raw = ORACLE_KEY_CASES[0];
       const scoped = (scope: unknown) => seamed({ parent: { $in: ReadableIds.compose(ReadableIds.of(ORA_RAW.object), scope as FilterCondition) } });
       const viaList = sortedIds(await driver.find(ORA_CHILD.object, { where: scoped({ id: { $in: [...raw.grants] } }) }, ORA_BYPASS));
       expect(viaList).toEqual(['c1', 'c2']);
       expect(sortedIds(await driver.find(ORA_CHILD.object, { where: scoped({ id: { $in: SharedRecordIds.read(ORA_RAW.object, 'u9') } }) }, ORA_BYPASS))).toEqual(viaList);
       expect(await driver.count(ORA_CHILD.object, { where: scoped({ id: { $in: SharedRecordIds.read(ORA_RAW.object, 'u9') } }) }, ORA_BYPASS)).toBe(2);
+    });
+
+    /**
+     * A composed `ReadableIds` scope compiles against its parent's table, so
+     * the parent's RAW(16) columns must be known before it binds. The child's
+     * own door primes them, on a fresh driver whose first statement is the
+     * child read: nothing has read the parent on it. Before, the door primed
+     * the child alone, so the parent's comparands bound as text and Oracle
+     * compared the RAW column as its upper-case hex text: the read answered no
+     * row and its negation every row, with no error (measured on Oracle Free
+     * 23ai), until something had read the parent on that driver.
+     */
+    describe('a composed scope\'s RAW(16) parent is primed by the child\'s own door: a fresh driver, the child read first', () => {
+      const FORMS: readonly { name: string; scope: () => unknown }[] = [
+        { name: 'the list (U1 upper-case, U2)', scope: () => ({ id: { $in: [ORA_U1.toUpperCase(), ORA_U2] } }) },
+        { name: 'the share-grant leaf', scope: () => ({ id: { $in: SharedRecordIds.read(ORA_RAW.object, 'u9') } }) },
+      ];
+      /** `door` as the first statement of a fresh driver: nothing has read the parent on it. */
+      async function firstOnFresh<T>(door: (d: SqlDriver) => Promise<T>): Promise<T> {
+        const fresh = new SqlDriver(cell.config());
+        await fresh.connect();
+        registerOracleKeyTypeObjects(fresh);
+        try {
+          return await door(fresh);
+        } finally {
+          await fresh.disconnect?.();
+        }
+      }
+      const countOf = (out: unknown[]) => Number((out[0] as any).n ?? (out[0] as any).N);
+
+      for (const f of FORMS) {
+        describe(f.name, () => {
+          const scopedRaw = () => ({ parent: { $in: ReadableIds.compose(ReadableIds.of(ORA_RAW.object), f.scope() as FilterCondition) } });
+          const where = () => seamed(scopedRaw());
+          const negated = () => seamed({ $not: scopedRaw() });
+
+          it('find answers [c1, c2]', async () => {
+            expect(sortedIds(await firstOnFresh((d) => d.find(ORA_CHILD.object, { where: where() }, ORA_BYPASS)))).toEqual(['c1', 'c2']);
+          });
+
+          it('the negation answers [c4], never every row', async () => {
+            expect(sortedIds(await firstOnFresh((d) => d.find(ORA_CHILD.object, { where: negated() }, ORA_BYPASS)))).toEqual(['c4']);
+          });
+
+          it('count answers 2', async () => {
+            expect(await firstOnFresh((d) => d.count(ORA_CHILD.object, { where: where() }, ORA_BYPASS))).toBe(2);
+          });
+
+          it('count of the negation answers 1', async () => {
+            expect(await firstOnFresh((d) => d.count(ORA_CHILD.object, { where: negated() }, ORA_BYPASS))).toBe(1);
+          });
+
+          it('distinct answers [c1, c2]', async () => {
+            const out = await firstOnFresh((d) => d.distinct(ORA_CHILD.object, 'id', where(), ORA_BYPASS));
+            expect(out.map(String).sort()).toEqual(['c1', 'c2']);
+          });
+
+          it('aggregate answers 2, in its where and in a measure filter', async () => {
+            expect(countOf(await firstOnFresh((d) => d.aggregate(ORA_CHILD.object, { where: where(), aggregations: [{ function: 'count', alias: 'n' }] }, ORA_BYPASS)))).toBe(2);
+            expect(countOf(await firstOnFresh((d) => d.aggregate(ORA_CHILD.object, { aggregations: [{ function: 'count', alias: 'n', filter: where() }] } as any, ORA_BYPASS)))).toBe(2);
+          });
+
+          it('findWithWindowFunctions answers [c1, c2]', async () => {
+            const out = await firstOnFresh((d) => d.findWithWindowFunctions(ORA_CHILD.object, { where: where(), windowFunctions: [{ function: 'row_number', alias: 'rn' }] } as any, ORA_BYPASS));
+            expect(sortedIds(out)).toEqual(['c1', 'c2']);
+          });
+
+          it('analyzeQuery plans the statement find runs: the parent\'s key is compared through HEXTORAW', async () => {
+            const out = await firstOnFresh((d) => d.analyzeQuery(ORA_CHILD.object, { where: where() }, ORA_BYPASS));
+            expect(String(out.sql)).toContain('HEXTORAW(');
+          });
+
+          it('updateMany touches [c1, c2]', async () => {
+            try {
+              expect(await firstOnFresh((d) => d.updateMany(ORA_CHILD.object, { where: where() }, { label: 'touched' }, ORA_BYPASS))).toBe(2);
+              expect(sortedIds(await knex(ORA_CHILD.table).where('LABEL', 'touched').select({ id: 'ID' }))).toEqual(['c1', 'c2']);
+            } finally {
+              await knex(ORA_CHILD.table).update({ LABEL: 'x' });
+            }
+          });
+
+          it('deleteMany removes [c1, c2] and leaves [c4]', async () => {
+            try {
+              expect(await firstOnFresh((d) => d.deleteMany(ORA_CHILD.object, { where: where() }, ORA_BYPASS))).toBe(2);
+              expect(sortedIds(await knex(ORA_CHILD.table).select({ id: 'ID' }))).toEqual(['c4']);
+            } finally {
+              await knex(ORA_CHILD.table).del();
+              for (const [id, parent] of [['c1', ORA_U1], ['c2', ORA_U2], ['c4', ORA_U4]] as const) {
+                await knex.raw(`INSERT INTO "${ORA_CHILD.table}" ("ID", "PARENT", "LABEL") VALUES (?, HEXTORAW(?), 'x')`, [id, hex(parent)]);
+              }
+            }
+          });
+        });
+      }
     });
 
     it('aggregate agrees with find on a RAW(16) key', async () => {
