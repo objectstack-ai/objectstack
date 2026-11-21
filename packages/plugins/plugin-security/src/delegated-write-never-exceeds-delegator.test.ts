@@ -13,6 +13,14 @@
  * - the row an `update` would store;
  * - a `controlled_by_parent` detail's write, judged through its master.
  *
+ * [#35917, ruled A] On an ordinary object the delegator's own composition now
+ * keeps the floor beside an authored policy, so it narrows nothing the
+ * floor-standing delegator filter does not. It still narrows on a
+ * `controlled_by_parent` object, where the delegator's direct write lets the
+ * floor yield to the master gate: the `d_note_held`, `g_under_mid_held` and
+ * detail store cells pin that, one per gate (the by-id pre-image, the master
+ * gate on a middle master, the stored row).
+ *
  * Every refusal stands beside the delegator's own request as its control, and
  * every row-level verdict beside explain's record verdict for the same caller,
  * under a walled (`isolated`) and a wall-less (`single`) posture.
@@ -88,6 +96,8 @@ async function boot(posture: TenancyPosture) {
   const OBJ = 'qa_bounded_record';
   const MASTER = 'qa_bounded_master';
   const DETAIL = 'qa_bounded_detail';
+  /** A detail of DETAIL: DETAIL is then a `controlled_by_parent` MIDDLE master. */
+  const GRAND = 'qa_bounded_grand_detail';
   const engine = new ObjectQL();
   engine.registerDriver(
     new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }) as never,
@@ -123,6 +133,17 @@ async function boot(posture: TenancyPosture) {
           master: { name: 'master', type: 'master_detail', required: true, reference: MASTER },
         },
       },
+      {
+        name: GRAND,
+        label: 'Grand detail',
+        sharingModel: 'controlled_by_parent',
+        fields: {
+          id: { name: 'id', type: 'text', primaryKey: true },
+          note: { name: 'note', type: 'text' },
+          created_by: { name: 'created_by', type: 'text' },
+          master: { name: 'master', type: 'master_detail', required: true, reference: DETAIL },
+        },
+      },
     ],
   } as never);
   await engine.syncSchemas();
@@ -145,11 +166,21 @@ async function boot(posture: TenancyPosture) {
     ...defaultPermissionSets,
     PermissionSetSchema.parse({
       name: 'qa_bounded_writer',
-      objects: { [OBJ]: org, [MASTER]: org, [DETAIL]: { allowRead: true, allowEdit: true, allowDelete: true } },
+      objects: {
+        [OBJ]: org, [MASTER]: org,
+        [DETAIL]: { allowRead: true, allowEdit: true, allowDelete: true },
+        [GRAND]: { allowRead: true, allowEdit: true, allowDelete: true },
+      },
       rowLevelSecurity: [
         { name: 'qa_bounded_updates', object: OBJ, operation: 'update', using: "name != 'held'" },
         { name: 'qa_bounded_deletes', object: OBJ, operation: 'delete', using: "name != 'held'" },
         { name: 'qa_bounded_master_updates', object: MASTER, operation: 'update', using: "name != 'held'" },
+        // [#24792] The one region where the delegator's own composition still
+        // narrows under ruling A: a `controlled_by_parent` object, where the
+        // delegator's direct write carries the master-gate vouch and the
+        // floor yields to the master, so this policy decides alone, while the
+        // delegated path's floor-standing filter keeps the floor beside it.
+        { name: 'qa_bounded_detail_updates', object: DETAIL, operation: 'update', using: "note != 'held'" },
       ],
     }),
     PermissionSetSchema.parse({ name: 'qa_plain_writer', objects: { [OBJ]: org } }),
@@ -192,11 +223,21 @@ async function boot(posture: TenancyPosture) {
   ]) await e.insert(OBJ, r, SYS);
   await e.insert(MASTER, row('m_held', 'held', BOUNDED, OTHER), SYS);
   await e.insert(MASTER, row('m_free', 'free', BOUNDED, BOUNDED), SYS);
-  for (const [id, master] of [
-    ['d_held', 'm_held'], ['d_free', 'm_free'], ['d_held_del_direct', 'm_held'], ['d_held_del_agent', 'm_held'],
+  // [#35917, ruled A] A held master the delegator CREATED: the floor stays
+  // beside the master's authored policy, so the master gate admits its details.
+  await e.insert(MASTER, row('m_held_created', 'held', BOUNDED, BOUNDED), SYS);
+  for (const [id, master, note] of [
+    ['d_held', 'm_held', ''], ['d_free', 'm_free', ''], ['d_held_del_direct', 'm_held', ''], ['d_held_del_agent', 'm_held', ''],
+    ['d_under_held_created', 'm_held_created', ''],
+    ['d_under_held_created_del_direct', 'm_held_created', ''], ['d_under_held_created_del_agent', 'm_held_created', ''],
+    // [#24792] Details the delegator created that its own detail policy refuses
+    // (or, for the store rows, would refuse once written), under a master it may edit.
+    ['d_note_held', 'm_free', 'held'], ['d_store_direct', 'm_free', ''], ['d_store_agent', 'm_free', ''],
+    ['d_mid_held', 'm_free', 'held'],
   ] as const) {
-    await e.insert(DETAIL, { id, note: '', created_by: BOUNDED, master, organization_id: ALPHA }, SYS);
+    await e.insert(DETAIL, { id, note, created_by: BOUNDED, master, organization_id: ALPHA }, SYS);
   }
+  await e.insert(GRAND, { id: 'g_under_mid_held', note: '', created_by: BOUNDED, master: 'd_mid_held', organization_id: ALPHA }, SYS);
 
   let security: { explain: (input: unknown, ctx: unknown) => Promise<ExplainDecision> } | undefined;
   let sharing: SharingService | undefined;
@@ -256,7 +297,7 @@ async function boot(posture: TenancyPosture) {
       accessToken: undefined,
     } as never)!;
   };
-  const objects = { OBJ, DETAIL } as const;
+  const objects = { OBJ, DETAIL, GRAND } as const;
   type Obj = keyof typeof objects;
   let n = 0;
 
@@ -272,6 +313,11 @@ async function boot(posture: TenancyPosture) {
     /** A by-id update whose stored row carries a value the delegator's own update may not store. */
     storeHeld: async (userId: string, onBehalf: boolean, id: string) =>
       outcomeOf(engine.update(OBJ, { name: 'held' }, {
+        where: { id }, context: { ...(await contextOf(userId, onBehalf)) },
+      } as never)),
+    /** A by-id detail update whose stored row carries a note the delegator's own detail policy may not store. */
+    storeHeldDetail: async (userId: string, onBehalf: boolean, id: string) =>
+      outcomeOf(engine.update(DETAIL, { note: 'held' }, {
         where: { id }, context: { ...(await contextOf(userId, onBehalf)) },
       } as never)),
     remove: async (userId: string, onBehalf: boolean, object: Obj, id: string) =>
@@ -307,7 +353,7 @@ const word = (o: Outcome): string => (o.kind === 'admitted' ? 'admitted' : `refu
 interface Cell {
   delegator: string;
   verb: 'update' | 'delete';
-  object: 'OBJ' | 'DETAIL';
+  object: 'OBJ' | 'DETAIL' | 'GRAND';
   rows: { direct: string; agent: string };
   shape: string;
   direct: Outcome;
@@ -357,6 +403,30 @@ const CELLS: Cell[] = [
     delegator: BOUNDED, verb: 'update', object: 'DETAIL', rows: { direct: 'd_free', agent: 'd_free' },
     shape: 'the control: a detail whose master admits the delegator\'s own detail update', direct: ADMITTED, agent: ADMITTED,
   },
+  // [#35917, ruled A] The master check: a held master the delegator CREATED
+  // admits its details, for the delegator and on its behalf.
+  {
+    delegator: BOUNDED, verb: 'update', object: 'DETAIL', rows: { direct: 'd_under_held_created', agent: 'd_under_held_created' },
+    shape: 'a detail under a held master the delegator created (the floor admits the master beside its authored policy)', direct: ADMITTED, agent: ADMITTED,
+  },
+  {
+    delegator: BOUNDED, verb: 'delete', object: 'DETAIL', rows: { direct: 'd_under_held_created_del_direct', agent: 'd_under_held_created_del_agent' },
+    shape: 'a detail under a held master the delegator created, delete', direct: ADMITTED, agent: ADMITTED,
+  },
+  // [#24792] Where the delegator's own composition still narrows: on a
+  // `controlled_by_parent` object the delegator's direct write lets the floor
+  // yield to the master gate, so its authored detail policy decides alone,
+  // while every floor-standing filter on the delegated path admits a row the
+  // delegator created. Only the delegator's own composition, ANDed beside
+  // them, refuses on its behalf.
+  {
+    delegator: BOUNDED, verb: 'update', object: 'DETAIL', rows: { direct: 'd_note_held', agent: 'd_note_held' },
+    shape: 'a detail the delegator created that its own detail policy refuses (the step 2.7 bound)', direct: DENIED, agent: DENIED,
+  },
+  {
+    delegator: BOUNDED, verb: 'update', object: 'GRAND', rows: { direct: 'g_under_mid_held', agent: 'g_under_mid_held' },
+    shape: 'a detail under a middle master the delegator created that its own middle-master policy refuses (the master-gate bound)', direct: DENIED, agent: DENIED,
+  },
   // The bound only narrows: rows the delegator's own write admits and the
   // delegated write has always refused stay refused.
   {
@@ -393,6 +463,14 @@ describe('an on-behalf-of by-id write never admits a row its delegator\'s own by
       const rig = await rigFor(posture);
       expect(await rig.storeHeld(BOUNDED, false, 'store_direct'), 'the delegator\'s own write').toStrictEqual(DENIED);
       expect(await rig.storeHeld(BOUNDED, true, 'store_agent'), 'the write on its behalf').toStrictEqual(DENIED);
+    }, 60_000);
+
+    // [#24792] The post-image bound on a `controlled_by_parent` detail the
+    // delegator created: its own detail policy refuses the stored note.
+    it(`\`${posture}\` · update · a detail the delegator created, whose stored row its own detail policy refuses → refused on its behalf as for the delegator`, async () => {
+      const rig = await rigFor(posture);
+      expect(await rig.storeHeldDetail(BOUNDED, false, 'd_store_direct'), 'the delegator\'s own write').toStrictEqual(DENIED);
+      expect(await rig.storeHeldDetail(BOUNDED, true, 'd_store_agent'), 'the write on its behalf').toStrictEqual(DENIED);
     }, 60_000);
   }
 });

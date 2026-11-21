@@ -767,6 +767,20 @@ describe('[#35917] beside an authored widener, the by-id write keeps the floor a
         ...ALL_CLOSED, r2: { stage: 'open' },
       });
     });
+    // The verb boundary beside the floor term: an `edit` share earns `allow`
+    // on an update, so the floor stays beside the widener and admits the
+    // closed row the share holder created; on a delete the share earns no
+    // `allow`, and the sharing gate refuses it (ADR-0111 D3).
+    it('the edit-share target who created the closed shared r2: the update is admitted by the floor', async () => {
+      await expectPredicateMatchesById('update', memberOf(DAVE, WIDENER_SET.name), ['r2'], {
+        ...ALL_CLOSED, r2: { stage: 'closed', created_by: DAVE },
+      });
+    });
+    it('the edit-share target who created the closed shared r2: the delete is still refused', async () => {
+      await expectPredicateMatchesById('delete', memberOf(DAVE, WIDENER_SET.name), [], {
+        ...ALL_CLOSED, r2: { stage: 'closed', created_by: DAVE },
+      });
+    });
   });
 
   describe('CONTROLS', () => {
