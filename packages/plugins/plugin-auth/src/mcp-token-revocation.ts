@@ -227,7 +227,13 @@ async function isSkipConsentClient(store: OAuthGrantStore, clientId: string): Pr
  * ({@link issuedAtMsAccessTokenClaim}) into the JWT it signs, so a client
  * cannot set or alter it, and it is read only off a token whose signature has
  * verified (`verifyMcpAccessTokenClaims`), one spelling for both ends. It is
- * not in the provider's reserved access-token claim set.
+ * not in the provider's reserved access-token claim set. It has the lowest
+ * precedence in the provider's claim merge: extension contributors are merged
+ * first, and the per-issuance claims, `customAccessTokenClaims` and a
+ * resource's `customClaims` override them.
+ *
+ * It is read only for a token admitted on a consent row
+ * ({@link mcpConsentAdmits}); every other token is compared in whole seconds.
  */
 export const MCP_ISSUED_AT_MS_CLAIM = 'iat_ms';
 
@@ -252,10 +258,11 @@ export function issuedAtMsAccessTokenClaim(
 
 /**
  * A verified MCP access token's issue time in milliseconds, for the
- * credential-change rule: the {@link MCP_ISSUED_AT_MS_CLAIM} the token was
- * signed with, when it is an integer number of milliseconds inside the second
- * the token's own `iat` names; otherwise `iat * 1000`, the start of that
- * second.
+ * credential-change rule on a token admitted on a consent row (a token
+ * admitted without one is compared on `iat * 1000`, {@link mcpConsentAdmits}):
+ * the {@link MCP_ISSUED_AT_MS_CLAIM} the token was signed with, when it is an
+ * integer number of milliseconds inside the second the token's own `iat`
+ * names; otherwise `iat * 1000`, the start of that second.
  *
  * ⛔ The fallback is the whole-second rule, never an admit: a token minted
  * before the claim shipped carries none, and a claim of another shape or
@@ -296,15 +303,18 @@ export function mcpTokenIssuedAtMs(issuedAt: number, issuedAtMsClaim: unknown): 
  * password change, and an administrator's routine set, keep the grant, so the
  * app gets a new token with its refresh token, issued after the change. The
  * comparison is that module's (`issuedBeforeCredentialChange`, strict `<`), in
- * milliseconds, on the token's issue time as {@link mcpTokenIssuedAtMs} reads
- * it: the server-written {@link MCP_ISSUED_AT_MS_CLAIM} inside the signed
- * token, so a token minted in the second of the change, after it, is
- * admitted, and one minted in that second before it is refused. A token whose
- * claim is absent (minted before the claim shipped) or unreadable keeps the
- * whole-second rule on its `iat`, which refuses every token minted in the
- * second of the change: an issue time that cannot be placed is never read as
- * after the change. A clock that cannot be read refuses, and so does no clock
- * reader at all.
+ * milliseconds. For a token admitted on a consent row, the issue time is the
+ * one {@link mcpTokenIssuedAtMs} reads: the server-written
+ * {@link MCP_ISSUED_AT_MS_CLAIM} inside the signed token, so a token minted in
+ * the second of the change, after it, is admitted, and one minted in that
+ * second before it is refused. A token whose claim is absent (minted before
+ * the claim shipped) or unreadable keeps the whole-second rule on its `iat`,
+ * which refuses every token minted in the second of the change: an issue time
+ * that cannot be placed is never read as after the change. A token admitted
+ * without a consent row (a server-only `skip_consent` client, below) is
+ * compared on its `iat` in whole seconds, whatever claim it carries, so every
+ * such token minted in the second of the change is refused. A clock that
+ * cannot be read refuses, and so does no clock reader at all.
  *
  * Then the consent: admits when the consent for (`azp`, `sub`,
  * organization) exists and was created no later than the token was issued
@@ -318,7 +328,8 @@ export function mcpTokenIssuedAtMs(issuedAt: number, issuedAtMsClaim: unknown): 
  *
  * Three indexed reads per call: the client by its unique `client_id`, the
  * subject's password row (better-auth's `findCredentialAccount`), and the
- * consent by (`client_id`, `user_id`).
+ * consent by (`client_id`, `user_id`). The consent is read before the
+ * password comparison, because the comparison's unit depends on it.
  */
 export async function mcpConsentAdmits(
   store: OAuthGrantStore | undefined,
@@ -331,9 +342,12 @@ export async function mcpConsentAdmits(
   const client = await clientOf(store, grant.clientId);
   if (!client || client.disabled) return false;
   if (typeof issuedAt !== 'number' || !Number.isFinite(issuedAt)) return false;
-  const issuedAtMs = mcpTokenIssuedAtMs(issuedAt, issuedAtMsClaim);
-  if (issuedBeforeCredentialChange(issuedAtMs, await readCredentialChangedAt(clock, grant.userId))) return false;
+  const changedAtMs = await readCredentialChangedAt(clock, grant.userId);
   const [consent] = await consentsOf(store, grant);
+  // The millisecond placement only for a token admitted on a consent row;
+  // every other token is compared on `iat` in whole seconds.
+  const issuedAtMs = consent ? mcpTokenIssuedAtMs(issuedAt, issuedAtMsClaim) : issuedAt * 1000;
+  if (issuedBeforeCredentialChange(issuedAtMs, changedAtMs)) return false;
   if (!consent) return client.skipConsent === true;
   const createdAtMs =
     consent.createdAt instanceof Date || typeof consent.createdAt === 'string' || typeof consent.createdAt === 'number'

@@ -540,6 +540,35 @@ describe("the password-change rule reads an MCP token's issue time in millisecon
     }
   }, 60_000);
 
+  it('a token admitted without a consent row keeps the whole-second rule', async () => {
+    const r = await rig();
+    const { cookie } = await r.connect();
+    const serverOnly = await r.registerClient();
+    const [app] = (await r.rowsAtRest('sys_oauth_application')).filter((row) => row.client_id === serverOnly);
+    await (r.engine as any).update('sys_oauth_application', { id: app!.id, skip_consent: true }, SYS);
+    const { code } = await r.authorize(serverOnly, cookie);
+    const { refresh_token } = await r.exchange(serverOnly, code);
+    expect((await r.rowsAtRest('sys_oauth_consent')).some((row) => row.client_id === serverOnly), 'no consent row').toBe(false);
+
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const second = (Math.floor(Date.now() / 1000) + 3) * 1000;
+    vi.setSystemTime(second + 400);
+    const changed = await r.postJson('/change-password', { currentPassword: PASSWORD, newPassword: `${PASSWORD}-changed` }, cookie);
+    expect(changed.status, await changed.clone().text()).toBe(200);
+
+    vi.setSystemTime(second + 900);
+    const sameSecondAfter = await r.refresh(serverOnly, refresh_token);
+    expect(sameSecondAfter.status, JSON.stringify(sameSecondAfter.body)).toBe(200);
+    expect(decodeJwt(sameSecondAfter.body.access_token)).toMatchObject({ iat: second / 1000, [MCP_ISSUED_AT_MS_CLAIM]: second + 900 });
+    expect(await r.manager.verifyMcpAccessToken(sameSecondAfter.body.access_token), 'minted after the change, in its second').toBeNull();
+
+    // Control: the same grant's token from the next second is admitted.
+    vi.setSystemTime(second + 1_100);
+    const nextSecond = await r.refresh(serverOnly, sameSecondAfter.body.refresh_token);
+    expect(nextSecond.status, JSON.stringify(nextSecond.body)).toBe(200);
+    expect(await r.manager.verifyMcpAccessToken(nextSecond.body.access_token)).toMatchObject({ clientId: serverOnly });
+  }, 60_000);
+
   it('the claim is contributed at a mint only, never at an opaque token\'s introspection', () => {
     expect(issuedAtMsAccessTokenClaim({ grantType: 'refresh_token' }, () => 1_700_000_000_123)).toEqual({ [MCP_ISSUED_AT_MS_CLAIM]: 1_700_000_000_123 });
     expect(issuedAtMsAccessTokenClaim({ grantType: undefined }, () => 1_700_000_000_123)).toEqual({});

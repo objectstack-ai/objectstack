@@ -114,9 +114,10 @@
  *    after-hook, so a refused sign-in opens no second-factor challenge.
  *  - The one-step invitation door: in the door, before the session it opens.
  *  - The MCP door: the grant read it makes on every request
- *    (`mcp-token-revocation.ts` `mcpConsentAdmits`), on the token's issue
- *    time in milliseconds, which its authorization server signs into it
- *    (`mcpTokenIssuedAtMs`); a token without that claim keeps its `iat`.
+ *    (`mcp-token-revocation.ts` `mcpConsentAdmits`). A token admitted on a
+ *    consent row is compared on its issue time in milliseconds, which its
+ *    authorization server signs into it (`mcpTokenIssuedAtMs`); a token
+ *    without that claim, or admitted without a consent row, on its `iat`.
  *
  * Each session ended here is ended through better-auth's internal adapter, so
  * every session-delete hook runs, and a reset door's records the reason a
