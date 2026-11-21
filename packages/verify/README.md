@@ -80,15 +80,18 @@ don't exercise, silently breaks at runtime." Point this at *your* app.
 > itself makes to an external object (its seed, or a hook or flow that one of
 > verify's writes fires) goes where the app sends it, as under
 > `objectstack dev`. A declared MANAGED datasource (or one that declares no
-> `schemaMode`) is never connected to the database it names: verify builds it
-> as a fresh in-memory store of the same kind as its own default store, so its
-> objects are still exercised and every write to them, the app's included,
-> stays in memory. A managed datasource whose engine has no faithful in-memory
-> stand-in (`mongodb`, or a driver a plugin supplies) keeps its real driver,
-> and every derived write family leaves its objects out as `managed datasource
-> "<name>" (driver "<driver>"): not exercised`; the app's own seed, hooks and
-> flows still write to that real database during the run. Only the `--flow` run refuses
-> every write routed away from the in-memory default database.
+> `schemaMode`) is never connected to the database it names, on any engine
+> the platform ships (`mongodb` included): verify builds it as a fresh
+> in-memory store of the same kind as its own default store (a `memory`
+> datasource gets a fresh memory store), so its objects are exercised by every
+> derived family and every write to them, the app's seed, hooks and flows
+> included, stays in memory. A managed datasource on a driver id the platform
+> does not ship (one a plugin supplies) cannot be stood in, because the plugin
+> registers its own driver and the boot would write through it: `objectstack
+> verify` refuses to boot while one is declared, naming the datasource and the
+> driver id, and exits non-zero. There is no switch around that refusal. Only
+> the `--flow` run refuses every write routed away from the in-memory default
+> database.
 
 ## CLI (zero-config)
 
