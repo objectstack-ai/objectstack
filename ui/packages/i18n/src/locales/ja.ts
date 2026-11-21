@@ -2699,6 +2699,11 @@ const ja = {
         saveAsMyView: "マイビューとして保存",
         copyName: "{{name}} のコピー",
         saved: "保存しました",
+        saveToViewConfirmTitle: "このビューに保存しますか？",
+        saveToViewConfirm: "「{{name}}」を使うすべての人にこの変更が表示されます。",
+        saveToViewConfirmButton: "全員に保存",
+        savedForEveryone: "保存しました。全員に表示されます",
+        pendingDraft: "このビューには未公開の変更があります。先にビューの設定で公開するか破棄してください。",
       },
       linkFilterRefused: 'このリンクのフィルターは適用されませんでした。ここでは絞り込めないフィールドが含まれているため、ビュー本来の内容を表示しています。',
       personalizedParts: {

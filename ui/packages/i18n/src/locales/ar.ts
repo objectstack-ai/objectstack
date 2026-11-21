@@ -2985,6 +2985,11 @@ const ar = {
         saveAsMyView: "حفظ كعرض خاص بي",
         copyName: "نسخة من {{name}}",
         saved: "تم الحفظ",
+        saveToViewConfirmTitle: "حفظ في هذا العرض؟",
+        saveToViewConfirm: "سيرى كل من يستخدم \"{{name}}\" هذه التغييرات.",
+        saveToViewConfirmButton: "حفظ للجميع",
+        savedForEveryone: "تم الحفظ، مرئي للجميع",
+        pendingDraft: "يحتوي هذا العرض على تغييرات غير منشورة. انشرها أو تجاهلها أولاً في إعدادات العرض.",
       },
       linkFilterRefused: 'لم يُطبَّق عامل التصفية في هذا الرابط، لأنه يذكر حقلًا لا يمكنك التصفية حسبه هنا، لذا تعرض القائمة طريقة العرض دونه.',
       personalizedParts: {

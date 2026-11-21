@@ -789,4 +789,48 @@ describe('objectstack#30073 — a personal view\'s conditions are Filter panel r
     await waitFor(() => expect(screen.queryByTestId('list-draft')).toBeNull());
     expect(draftOf('v1')).toEqual({});
   });
+
+  it.each([
+    ['no label', undefined, 'Leads copy'],
+    ['a label given as a locale map', { en: 'Hot list', 'zh-CN': '热门' }, 'Hot list copy'],
+  ])('objectstack#35955 L1-b S1 — 「Save as my view」 names the copy by the view\'s tab label when it has %s', async (_case, label, expected) => {
+    const v1 = LEAD.listViews.v1 as Record<string, unknown>;
+    const authored = v1.label;
+    if (label === undefined) delete v1.label;
+    else v1.label = label;
+    try {
+      mountLeads(romeLink('/apps/crm/crm_lead/view/v1'));
+      await listToolbar();
+      fireEvent.pointerDown(await screen.findByTestId('list-draft-save'), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+      fireEvent.click(await screen.findByTestId('list-draft-save-as'));
+      // Never 「 copy」 or 「[object Object] copy」: the name the tab draws.
+      expect(await screen.findByDisplayValue(expected)).toBeInTheDocument();
+    } finally {
+      v1.label = authored;
+    }
+  });
+
+  it('objectstack#35955 — the draft\'s row colour is saved too: into the reader\'s own view, and into a view of their own', async () => {
+    const RED = { field: 'status', colors: { open: 'red' } };
+    storeListState({ perView: { pv_mine: { sort: [{ field: 'name', order: 'desc' }], rowColor: RED } } });
+    const { dataSource } = mountLeads('/apps/crm/crm_lead/view/pv_mine');
+    await listToolbar();
+    await saveToThisView();
+    await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(1));
+    const patch = dataSource.update.mock.calls[0][2];
+    expect(patch.config.rowColor).toEqual(RED);
+    expect(patch.config.sort).toEqual([{ field: 'name', order: 'desc' }]);
+    expect(ListViewSchema.safeParse(patch.config).success).toBe(true);
+    cleanup();
+
+    storeListState({ perView: { v1: { sort: [{ field: 'name', order: 'desc' }], rowColor: RED } } });
+    const second = mountLeads('/apps/crm/crm_lead/view/v1');
+    await listToolbar();
+    fireEvent.pointerDown(await screen.findByTestId('list-draft-save'), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    fireEvent.click(await screen.findByTestId('list-draft-save-as'));
+    await screen.findByDisplayValue('View 1 copy');
+    fireEvent.click(screen.getByTestId('personal-view-name-submit'));
+    await waitFor(() => expect(second.dataSource.create).toHaveBeenCalledTimes(1));
+    expect(second.dataSource.create.mock.calls[0][1].config.rowColor).toEqual(RED);
+  });
 });
