@@ -2,6 +2,11 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+// The panel's source reaches dynamic `import('@objectstack/formula')` and
+// `import('@objectstack/lint')`: pay their load at collection, never inside a
+// case's clocked window (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 
 /**
  * ViewConfigPanel discard/close behavior (objectui#2320).
