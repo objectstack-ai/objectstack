@@ -210,6 +210,7 @@ import {
   getOtpSendGuard,
   renderPhoneSmsBody,
   sendChangeEmailNotice,
+  sendPasswordChangeReminder,
   sendPhoneInviteSms,
   storedRecipientLocale,
   type EmailSmsDeliveryHost,
@@ -2269,6 +2270,7 @@ export class AuthManager {
       resolvePasswordHasher: (...a) => this.resolvePasswordHasher(...a),
       roleChangeGrantDeps: (...a) => this.roleChangeGrantDeps(...a),
       sendChangeEmailNotice: (...a) => this.sendChangeEmailNotice(...a),
+      sendPasswordChangeReminder: (...a) => this.sendPasswordChangeReminder(...a),
       sendExistingAccountSignUpNotice: (...a) => this.sendExistingAccountSignUpNotice(...a),
       settleSignInAttempt: (...a) => this.settleSignInAttempt(...a),
       settleSsoProviderDelete: (...a) => this.settleSsoProviderDelete(...a),
@@ -3957,6 +3959,35 @@ export class AuthManager {
   }
 
   /**
+   * Mail the account whose password just changed what the change left active:
+   * its API keys, its linked sign-in accounts and the apps it authorized
+   * (`password-reset-ends-added-access.ts`). A password change, unlike a
+   * reset, ends none of them, so the account's owner is reminded of each. Sent
+   * only when there is something to list, to the account's own address, in
+   * its own stored language first (the ladder `sendChangeEmailNotice`
+   * follows).
+   *
+   * ⛔ Never throws: like the change-email notice, a reminder that cannot be
+   * sent — no transport, no template, a failed delivery — is logged at warn
+   * and never fails the change.
+   */
+  private sendPasswordChangeReminder(
+    to: { email: string; name?: string; id?: string },
+    kept: { apiKeys: readonly string[]; signInAccounts: readonly string[]; authorizedApps: readonly string[] },
+    requestSource?: unknown,
+  ): Promise<void> {
+    const readConfig = () => this.config;
+    const host: Pick<EmailSmsDeliveryHost, 'config' | 'emailLocaleArg' | 'getAppName' | 'getEmailService' | 'storedRecipientLocale'> = {
+      get config() { return readConfig(); },
+      emailLocaleArg: (...a) => this.emailLocaleArg(...a),
+      getAppName: (...a) => this.getAppName(...a),
+      getEmailService: (...a) => this.getEmailService(...a),
+      storedRecipientLocale: (...a) => this.storedRecipientLocale(...a),
+    };
+    return sendPasswordChangeReminder.call(host, to, kept, requestSource);
+  }
+
+  /**
    * Inject (or replace) the outbound SMS service used by the phone-number
    * OTP callbacks and the SMS invite path (#2780). Mirrors
    * {@link setEmailService}: resolved lazily per send, so it is safe to set
@@ -5519,7 +5550,9 @@ export class AuthManager {
    * (`mcp-token-revocation.ts` `mcpConsentAdmits`). A token is refused when
    * its consent is gone, when the consent was created after the token was
    * issued (revoked, then granted again), when it carries no `azp` to key the
-   * read, and when the read fails (fail closed). So revocation takes effect
+   * read, when it was issued before its subject's password last changed (the
+   * credential clock, `credential-change-ends-prior-access.ts`), and when the
+   * read fails (fail closed). So revocation takes effect
    * on the next request: `/oauth2/revoke` deletes the consent and the
    * client's refresh family for that user (`answerOAuthTokenRevocation`), and
    * the Console's withdraw (`authorized-clients-withdraw.ts`) revokes the same

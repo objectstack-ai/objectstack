@@ -815,5 +815,18 @@ Step 2 also says where the open tier keeps an organization's supplied token at r
 `credentials_ref` into `service-secrets` is Draft and the vault stays enterprise; ADR-0143 and
 ADR-0100 give the open connector credential path.
 
-**Open — not ruled:** what a person's email that matches more than one Slack user proposes (§8
-risk 4 is Draft); and a manual connect for a person whose email matches no Slack user.
+**Step 2 chose** (the change that builds it, under #34730): the administrator doors check
+`setup.write` held in the caller's current organization (`ExecutionContext.systemPermissions`, the
+capability the in-app message door already asks of an organization administrator), not
+`isPlatformAdmin`. The token is `sys_channel_account.bot_token`, a `secret` field (ADR-0100), the
+channel `sys_connector_credential` uses (ADR-0143): encrypted on write by the host's
+`ICryptoProvider` with the organization in its context, held in `sys_secret`, masked on every read,
+and dereferenced only server side through `resolveSecretField()`; the object is engine-owned with
+its data API closed. A Slack link is proposed only for a verified email and names no one before it
+is confirmed.
+
+**Open — not ruled:** what a person's email that matches more than one Slack user proposes (Risks &
+open questions, item 4, is Draft, and it describes the converse — two `sys_user`s sharing one email —
+so neither multi-match case is ruled; step 2 links one Slack user to at most one person per install,
+and proposes nothing to a second person whose email resolves to an already linked Slack user); and a
+manual connect for a person whose email matches no Slack user.

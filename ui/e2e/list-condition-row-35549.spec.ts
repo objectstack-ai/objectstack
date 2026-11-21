@@ -37,7 +37,7 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  *
  *   - The data source is in memory: one object definition and twelve records.
  *     It records every `find` it is asked, and answers the stage filter
- *     (`in`) and the sort the list sends, so the count bar and the row order
+ *     (`in`) and the sort the list sends, so the footer row's count and the row order
  *     move as they do against a server.
  *   - The translator is the English defaults table (no provider).
  *   - Animations are off, so a closed popover leaves the page at once rather
@@ -256,7 +256,7 @@ async function mount(page: Page): Promise<void> {
   await page.goto('http://localhost/list-condition-row');
   await page.addScriptTag({ content: bundle, type: 'module' });
   await page.getByTestId('toolbar-filter-trigger').waitFor({ state: 'attached', timeout: 30_000 });
-  await page.getByTestId('record-count-bar').waitFor({ state: 'attached', timeout: 30_000 });
+  await page.getByTestId('data-table-summary-lead').waitFor({ state: 'attached', timeout: 30_000 });
   await style(page);
 }
 
@@ -268,8 +268,8 @@ async function click(page: Page, testId: string): Promise<void> {
 
 const slot = (page: Page) => page.getByTestId('list-condition-row');
 const slotHeight = (page: Page) => slot(page).evaluate((el) => el.getBoundingClientRect().height);
-/** The number the count bar reads, once the list has answered. */
-const count = async (page: Page) => (await page.getByTestId('record-count-bar').textContent())?.match(/\d+/)?.[0];
+/** The number the grid's footer row leads with (objectstack#35702), once the list has answered. */
+const count = async (page: Page) => (await page.getByTestId('data-table-summary-lead').textContent())?.match(/\d+/)?.[0];
 const sortNow = (page: Page) =>
   page.evaluate(() => (window as unknown as { __sort: Array<{ field: string; order: string }> }).__sort.map((s) => `${s.field}:${s.order}`));
 

@@ -18,7 +18,8 @@
  *    called by `verifyMcpAccessToken`). A token whose consent is gone, or
  *    whose consent was created after the token was issued (revoked, then
  *    granted again), verifies as no principal, and so does a token whose
- *    client is disabled (objectstack-ai/cloud#3820, card 2). A store error
+ *    client is disabled (objectstack-ai/cloud#3820, card 2), and a token
+ *    issued before its subject's password last changed. A store error
  *    refuses too. `@objectstack/spec` `IAuthService.verifyMcpAccessToken`
  *    already says this: a falsy value when the token is revoked, and callers
  *    fail CLOSED.
@@ -81,6 +82,11 @@
  */
 
 import { decodeJwt } from 'jose';
+import {
+  issuedBeforeCredentialChange,
+  readCredentialChangedAt,
+  type CredentialClockReader,
+} from './credential-change-ends-prior-access.js';
 import {
   CLIENT_ASSERTION_TYPE,
   decodeBasicCredentials,
@@ -231,6 +237,17 @@ async function isSkipConsentClient(store: OAuthGrantStore, clientId: string): Pr
  * again the same token and its refresh are served again. Ending the grant is
  * the withdraw (`authorized-clients-withdraw.ts`) or `/oauth2/revoke`.
  *
+ * Then the account's password (`credential-change-ends-prior-access.ts`, the
+ * one clock every credential rule reads): a token issued before the last
+ * change of its subject's password is refused, whatever grant it was minted
+ * under. A password reset ends the grant and every token minted under it; a
+ * password change, and an administrator's routine set, keep the grant, so the
+ * app gets a new token with its refresh token, issued after the change. The
+ * comparison is that module's (`issuedBeforeCredentialChange`), on the
+ * token's `iat` in whole seconds: a token minted in the second of the change
+ * is refused too, as a signed link is. A clock that cannot be read refuses,
+ * and so does no clock reader at all.
+ *
  * Then the consent: admits when the consent for (`azp`, `sub`,
  * organization) exists and was created no later than the token was issued
  * (compared in whole seconds, the unit of `iat`). Refuses when it is missing,
@@ -241,20 +258,23 @@ async function isSkipConsentClient(store: OAuthGrantStore, clientId: string): Pr
  * step 5), read off the client row already in hand. A store error
  * propagates, and the verifier answers it as a refusal.
  *
- * Two indexed reads per call: the client by its unique `client_id`, and the
+ * Three indexed reads per call: the client by its unique `client_id`, the
+ * subject's password row (better-auth's `findCredentialAccount`), and the
  * consent by (`client_id`, `user_id`).
  */
 export async function mcpConsentAdmits(
   store: OAuthGrantStore | undefined,
   grant: McpGrantKey,
   issuedAt: number | undefined,
+  clock: CredentialClockReader | undefined,
 ): Promise<boolean> {
-  if (!store) return false;
+  if (!store || !clock) return false;
   const client = await clientOf(store, grant.clientId);
   if (!client || client.disabled) return false;
+  if (typeof issuedAt !== 'number' || !Number.isFinite(issuedAt)) return false;
+  if (issuedBeforeCredentialChange(issuedAt * 1000, await readCredentialChangedAt(clock, grant.userId))) return false;
   const [consent] = await consentsOf(store, grant);
   if (!consent) return client.skipConsent === true;
-  if (typeof issuedAt !== 'number' || !Number.isFinite(issuedAt)) return false;
   const createdAtMs =
     consent.createdAt instanceof Date || typeof consent.createdAt === 'string' || typeof consent.createdAt === 'number'
       ? new Date(consent.createdAt).getTime()

@@ -901,6 +901,27 @@ function ApprovalsQueue() {
     [tr],
   );
 
+  /**
+   * Why the SLA has no due time (ADR-0157 D9): 「日历算不出」 and the reason,
+   * from the refusal's code. A code or reason this page does not know reads as
+   * a calendar to fix, never as no SLA.
+   */
+  const slaRefusalLabel = useCallback(
+    (refusal: NonNullable<ApprovalRequestRow['sla_due_refusal']>): string => {
+      if (refusal.code === 'ERR_WORK_CALENDAR_NOT_MAINTAINED' && refusal.date) {
+        return tr('slaCalendarNotMaintained', 'Calendar can\'t compute: not maintained for {{date}}', { date: refusal.date });
+      }
+      if (refusal.code === 'ERR_WORK_CALENDAR_UNRESOLVED' && refusal.reason === 'not_found' && refusal.calendar) {
+        return tr('slaCalendarNotFound', 'Calendar can\'t compute: no calendar "{{calendar}}"', { calendar: refusal.calendar });
+      }
+      if (refusal.code === 'ERR_WORK_CALENDAR_UNRESOLVED' && refusal.reason === 'no_default') {
+        return tr('slaCalendarNoDefault', 'Calendar can\'t compute: no default calendar');
+      }
+      return tr('slaCalendarUnusable', 'Calendar can\'t compute: fix the calendar in Setup');
+    },
+    [tr],
+  );
+
   const recordHref = useCallback((r: ApprovalRequestRow): string => {
     const app = appName || 'setup';
     return `/apps/${app}/${encodeURIComponent(r.object_name)}/record/${encodeURIComponent(r.record_id)}`;
@@ -1592,6 +1613,15 @@ function ApprovalsQueue() {
                     {formatRelative(submittedAt(r))}
                     {r.status === 'pending' && (() => {
                       const sla = slaState(r.sla_due_at, now);
+                      if (!sla && r.sla_due_refusal) {
+                        // ADR-0157 D9: the working calendar cannot count the
+                        // deadline, so the request waits; say why in its place.
+                        return (
+                          <div className="mt-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                            {slaRefusalLabel(r.sla_due_refusal)}
+                          </div>
+                        );
+                      }
                       return sla ? (
                         <div className={cn(
                           'mt-0.5 text-[10px] font-medium',
@@ -1726,7 +1756,7 @@ function ApprovalsQueue() {
     tab, allSelected, toggleAll, allFilteredSelectable, tr, filteredRows, focusIndex, openRequest,
     selectedRowIds, toggleRow, deadLabelFor, readability, recordHref, recordLinkState, hiddenFields,
     unresolvableLabelFor, statusLabel, now, displayLocale, formatRelative, isActionable, inlineActing,
-    needsDecisionInputs, openApprove, openReject, slaLabel,
+    needsDecisionInputs, openApprove, openReject, slaLabel, slaRefusalLabel,
   ]);
 
   const hasFilters = !!query || processFilter !== 'all' || objectFilter !== 'all' || statusFilter !== 'all';

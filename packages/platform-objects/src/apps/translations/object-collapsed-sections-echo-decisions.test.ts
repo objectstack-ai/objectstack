@@ -989,7 +989,10 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     // 124 since #30692 gave the `fieldGroups` repeater its `requiresFeature`
     // sub-row (the deployment feature a group needs) — label and help text,
     // authored in all three locales, so `openEchoes` stays at zero.
-    expect(OPEN_LEAVES.length).toBe(124);
+    // 126 since #35900 gave the `fieldGroups` repeater its `fields` sub-row
+    // (the group's own member list) — label and help text, authored in every
+    // translated locale by that card, so `openEchoes` stays at zero.
+    expect(OPEN_LEAVES.length).toBe(126);
     expect(PANEL_LEAVES.some((l) => l.path === 'fields.placeholder')).toBe(false);
     expect(OPEN_LEAVES.some((l) => l.path === 'fields.placeholder')).toBe(true);
     for (const path of ['name', 'label', 'fields', 'fields.valueDomain', 'fields.deleteBehavior', 'fields.expression']) {

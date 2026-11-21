@@ -1370,7 +1370,21 @@ export const CEILINGS = new Map([
   // paragraph (home: SKILL.md, String Operators) and a second `$between` Date
   // example (home: the operator table's `$between` row). Arithmetic in bytes:
   // 9925 -> 9892 (-33 net) -> ceil(9892 / 4) = 2473; headroom 0 tokens.
-  ['skills/objectstack-query/rules/filters.md', 2473],
+  // 2473 -> 2596 (#35496): the `{current_iso_week}` period key in § Date Macros
+  // (its `YYYY-Www` value, the text-field-only rule, the `INVALID_FILTER` / 400
+  // refusal on date / datetime / time fields, the two date-only surfaces that
+  // refuse it) and the client resolver that covers all three vocabularies.
+  // Raise path the standing ruling 「A:先削重复,余额按实测提高」 (ruling record
+  // 6513306068, letter B). PAID DOWN FIRST — five restatements cut in the same
+  // section: the wrapper regex beside the prose that already says both
+  // spellings parse, the code comment repeating the sentence above its block,
+  // the second date-macro comparison in the session-token example (the week key
+  // takes its place), the two per-vocabulary predicates (one predicate answers
+  // for all three) and the driver sentence's list of value kinds. Arithmetic in
+  // bytes: 9876 landed -> 10382, +506 -> 127 tokens, the row's 4 tokens of
+  // headroom absorbed, ceiling +123, pinned AT the measurement.
+  //   ceil($(wc -c < skills/objectstack-query/rules/filters.md) / 4) == ceil(10382 / 4)
+  ['skills/objectstack-query/rules/filters.md', 2596],
   ['skills/objectstack-query/rules/pagination.md', 1382],
 
   // objectstack-ui `rules/` — the five files the #14296 item 1 split created.
@@ -1846,7 +1860,24 @@ export const CEILINGS = new Map([
   // 6984 -> 6570 after the cuts (-414); the teaching nets +466 -> 7036 ->
   // ceil(7036 / 4) = 1759; headroom was 0, so the ceiling moves +13, the
   // measured remainder only. Pinned AT the measurement.
-  ['skills/objectstack-data/references/seeds.md', 1759],
+  // 1759 -> 1812: `### externalId selection` says every record carries a value
+  // for each `externalId` field and that a blank one is refused at load, and the
+  // `externalId` row points at it. Raise path the standing ruling
+  // 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B). PAID DOWN
+  // FIRST — restatement cut in the same file: the `columns` row's shape literal
+  // (its own section shows it), the one-row best-practices table (a sentence
+  // now) and the second telling of what a refused seed value leaves behind.
+  // Arithmetic in bytes: 7033 -> 6905 after the cuts (-128); the teaching nets
+  // +340 -> 7245 -> ceil(7245 / 4) = 1812; headroom was 0, so the ceiling moves
+  // +53, the measured remainder only. Pinned AT the measurement.
+  // 1812 -> 1898: the note under the field table says a `seed` saved at runtime
+  // names an object that exists or the save answers `422 INVALID_METADATA` at
+  // `object`, and that a draft object is enough for a draft seed; the `object`
+  // row points at it in place of "never write manually". Same raise path and
+  // the same paydown as the step above (one PR, the cuts are its deletion):
+  // 7245 -> 7590 bytes (+345) -> ceil(7590 / 4) = 1898; headroom was 0, so the
+  // ceiling moves +86, the measured remainder only. Pinned AT the measurement.
+  ['skills/objectstack-data/references/seeds.md', 1898],
   // 1351 -> 1343: the body-pin values left the count (#31115, ruling B; see
   // BODY_PIN_REPIN); the file's count fell by the same 8, headroom unchanged.
   ['skills/objectstack-platform/references/bootstrap.md', 1343],

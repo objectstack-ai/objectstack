@@ -49,6 +49,9 @@ import { sqliteEnginePool } from './__tests__/sqlite-engine-pool.testkit';
 import 'better-auth';
 import 'better-auth/api';
 import 'better-auth/plugins';
+// The SSO discovery egress guard the source loads with a dynamic import, paid
+// here too, during collection (check-test-source-alias, "The source reach").
+import '@objectstack/core/egress';
 
 const BASE = 'http://localhost:3000';
 const AUTH = `${BASE}/api/v1/auth`;
@@ -283,6 +286,7 @@ describe('a password change’s after-effects land on the account it changed, an
       stampPasswordChangedAt: vi.fn(async () => {}),
       recordPasswordHistory: vi.fn(async () => {}),
       logDurabilityDegradation: vi.fn(),
+      getDataEngine: () => undefined,
     };
     const run = (ctx: unknown) => globalAfterHook.call(host as unknown as AfterHookHost, ctx);
     return { host, run };
@@ -323,7 +327,13 @@ describe('a password change’s after-effects land on the account it changed, an
 
   it('a reset carries no session: its after-effects land on the reset token’s account, as before', async () => {
     const { host, run } = afterHookOf();
-    await run(changeCtx(undefined, 'user_reset', '/reset-password'));
+    const resetCtx = changeCtx(undefined, 'user_reset', '/reset-password');
+    // The account the reset door named, and the store its sessions and links are ended through.
+    Object.assign(resetCtx.context, {
+      __osResetDoorUserId: 'user_reset',
+      internalAdapter: { deleteUserSessions: vi.fn(async () => {}), findAccounts: vi.fn(async () => []) },
+    });
+    await run(resetCtx);
     expect(host.stampPasswordChangedAt).toHaveBeenCalledWith('user_reset');
     expect(host.recordPasswordHistory).toHaveBeenCalledWith('user_reset', 'hash:old');
   });

@@ -489,5 +489,63 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Creado el"
       }
     }
+  },
+  sys_channel_account: {
+    label: "Cuenta de canal",
+    pluralLabel: "Cuentas de canal",
+    description: "La instalación de una app de chat de una organización, como su propia app de Slack, con el token de bot que se le emitió.",
+    fields: {
+      channel_id: {
+        label: "Canal"
+      },
+      display_name: {
+        label: "Espacio de trabajo"
+      },
+      external_id: {
+        label: "ID del espacio de trabajo"
+      },
+      bot_token: {
+        label: "Token del bot"
+      },
+      status: {
+        label: "Estado",
+        options: {
+          active: "Activa",
+          revoked: "Revocada"
+        }
+      }
+    }
+  },
+  sys_channel_user_link: {
+    label: "Vínculo de usuario del canal",
+    pluralLabel: "Vínculos de usuario del canal",
+    description: "El vínculo de una persona con su propio usuario en un espacio de trabajo de chat: se propone por coincidencia de correo y entrega en cuanto la persona lo confirma.",
+    fields: {
+      account_id: {
+        label: "Cuenta"
+      },
+      user_id: {
+        label: "Usuario"
+      },
+      external_user_id: {
+        label: "ID de usuario del chat"
+      },
+      external_display_name: {
+        label: "Nombre de usuario del chat"
+      },
+      state: {
+        label: "Estado",
+        options: {
+          proposed: "Propuesto",
+          confirmed: "Confirmado"
+        }
+      },
+      confirmed_at: {
+        label: "Confirmado el"
+      },
+      proposal_email_hash: {
+        label: "Hash del correo de la propuesta"
+      }
+    }
   }
 };

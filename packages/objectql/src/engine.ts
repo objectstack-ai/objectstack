@@ -2802,7 +2802,7 @@ export class ObjectQL implements IObjectQLEngine {
     context: ExecutionContext | undefined,
   ): Promise<{
     parents: Array<Record<string, unknown> | null>;
-    previousParents: Array<Record<string, unknown> | null | undefined>;
+    previousParents: Array<Record<string, unknown> | null | undefined>; servedColumns: Array<ReadonlySet<string> | null>;
   }> {
     // [#25522 cut 14] The body moved to `engine-master-detail-related.ts`, its docblock with it (see `MasterDetailRelatedHost`).
     const readLogger = () => this.logger;
@@ -4670,6 +4670,7 @@ export class ObjectQL implements IObjectQLEngine {
       resolvePredicateRelated: (...a) => this.resolvePredicateRelated(...a),
       resolveOptionPermissions: (...a) => this.resolveOptionPermissions(...a),
       getSummaryDescriptors: (...a) => this.getSummaryDescriptors(...a),
+      facade: this, getSchema: (...a) => this.getSchema(...a), resolveFormulaPermissions: (...a) => this.resolveFormulaPermissions(...a), resolveFormulaRelated: (...a) => this.resolveFormulaRelated(...a), formulaOptionLabels: (...a) => this.formulaOptionLabels(...a), // [#34821]
       assertReferencesResolve: (...a) => this.assertReferencesResolve(...a),
       previewHomeAmounts: (...a) => this.previewHomeAmounts(...a),
       homeAmountServing: (...a) => this.homeAmountServing(...a),

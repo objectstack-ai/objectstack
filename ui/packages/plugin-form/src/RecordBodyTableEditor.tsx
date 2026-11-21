@@ -48,6 +48,7 @@ import {
 import { buildMasterDetailEditBatch, idOf, isBlankRow, type ChildSchema } from './masterDetailTx';
 import { applyColumnPermissions } from './fieldWriteGate';
 import { deriveDetail } from './deriveMasterDetail';
+import { schemaDefaultValues } from './schemaDefaults';
 import { useFormChromeTranslation } from './formChrome';
 
 /** One reason the server gave about one line of a body table. */
@@ -266,6 +267,16 @@ export const RecordBodyTableEditor: React.FC<RecordBodyTableEditorProps> = ({ ob
     return () => { cancelled = true; };
   }, [dataSource, parentId, derived, objectName, relationshipField]);
 
+  // objectstack#35816 — a new line starts on the child object's static
+  // defaults, the values a create form seeds (`schemaDefaultValues`), so a
+  // required column with a default is filled instead of flagged empty. A
+  // default the server resolves per insert (`NOW()`, a CEL expression) is not
+  // seeded; the server fills it as it fills an omitted field.
+  const newRowValues = useMemo(
+    () => schemaDefaultValues(childSchema as Parameters<typeof schemaDefaultValues>[0]),
+    [childSchema],
+  );
+
   const snapshotRef = useRef<BodyTableSnapshot | null>(null);
   snapshotRef.current = rows && derived
     ? { childObject: objectName, relationshipField, rows, original, childSchema }
@@ -317,6 +328,11 @@ export const RecordBodyTableEditor: React.FC<RecordBodyTableEditorProps> = ({ ob
           disabled={session.saving}
           contextRecord={record?.data as Record<string, unknown> | undefined}
           lookupAutofill={lookupAutofillByField(childSchema?.fields as Record<string, unknown> | undefined)}
+          newRowValues={newRowValues}
+          // objectstack#35816 — a new line's empty required cell reads red
+          // once a save was refused, not the moment the line appears; the
+          // server stays the judge of what is missing.
+          newRowRequiredShown={rowErrors !== null || tableErrors !== null}
           field={({
             columns: applyColumnPermissions(derived.columns as GridColumn[], { perms, objectName, mode: 'edit' }),
             totalField: derived.amountField,

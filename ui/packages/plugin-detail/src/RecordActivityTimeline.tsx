@@ -52,6 +52,7 @@ import {
   fieldHistoryEntriesOf,
   fieldHistoryOf,
   isFieldHistoryEntry,
+  isRecordCreationEntry,
   filterTimelineStream,
   isSystemStreamEntry,
   timelineStreamFilters,
@@ -232,12 +233,14 @@ const FEED_TYPE_ICONS: Record<FeedItemType, React.ElementType> = {
 /**
  * Whether a stream entry is one person's field change, the kind
  * {@link foldStreamChanges} folds: an audit entry or an `updated` activity
- * row, not a milestone (`activityKind`) and not a reply.
+ * row, not a milestone (`activityKind`) and not a reply. The audit entry of
+ * the record's creation is not an edit: it stands as its own row, so a fold
+ * counts the edits alone, under 全部 and 变更 alike (objectstack#35788).
  */
 function isStreamFieldChange(item: FeedItem): boolean {
   return (
     item.type === 'field_change'
-    && (isFieldHistoryEntry(item) || item.activityType === 'updated')
+    && ((isFieldHistoryEntry(item) && !isRecordCreationEntry(item)) || item.activityType === 'updated')
     && item.activityKind === undefined
     && !item.parentId
   );

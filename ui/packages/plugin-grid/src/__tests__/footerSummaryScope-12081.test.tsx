@@ -74,7 +74,7 @@ afterEach(() => {
 const OBJECT = 'plan_line';
 const PAGE = 25;
 
-type Row = { id: string; name: string; stage: string; amount: number; note: string | null; closed_at: string; qty: number; currency_code: string } & Record<string, unknown>;
+type Row = { id: string; name: string; stage: string; amount: number; note: string | null; closed_at: string; qty: number; currency_code: string; approved: boolean | null } & Record<string, unknown>;
 /**
  * 300 rows; every fifth `note` is empty, every third row is `won`, and
  * `closed_at` is one day later per row, so the last row is the latest.
@@ -90,6 +90,8 @@ const ROWS: Row[] = Array.from({ length: 300 }, (_, i) => ({
   closed_at: new Date(Date.UTC(2025, 0, 1, 9, 30) + i * 86_400_000).toISOString(),
   qty: (i % 7) + 1,
   currency_code: i % 2 === 0 ? 'USD' : 'EUR',
+  // objectstack#35702 — a boolean: every fourth unset, then true / false alternating (75 / 75 / 150).
+  approved: i % 4 === 0 ? null : i % 2 === 0,
 }));
 
 const OBJECT_FIELDS = {
@@ -391,6 +393,44 @@ describe('the footer reads the whole matched set when the grid shows one page of
     expect(footerText('note')).toBe(`Note: Empty: ${fmt(ROWS.length - notes.length)}`);
   });
 
+  it('objectstack#35702 — a boolean\'s yes / no counts read the whole set; an unset cell is neither, it is empty', async () => {
+    const ds = makeDataSource();
+    const count = (v: boolean | null) => ROWS.filter((r) => r.approved === v).length;
+    render(hostGrid(ds, {
+      rows: ROWS,
+      columns: [
+        { field: 'name', label: 'Name' },
+        { field: 'approved', label: 'Approved', summary: 'count_true' },
+        { field: 'id', label: 'Id', summary: { type: 'count_false', field: 'approved' } },
+        { field: 'stage', label: 'Stage', summary: { type: 'count_empty', field: 'approved' } },
+      ],
+    }));
+    await waitFor(() => expect(footerText('approved')).toBe(`Approved: Yes: ${fmt(count(true))}`));
+    expect(footerText('id')).toBe(`Id: No: ${fmt(count(false))}`);
+    expect(footerText('stage')).toBe(`Stage: Empty: ${fmt(count(null))}`);
+    expect(count(true) + count(false) + count(null)).toBe(ROWS.length);
+    // ONE `SUM(approved)` and ONE `COUNT(approved)` node, shared by the three columns.
+    expect(ds.queryGroupHeaders.mock.calls[0][1].aggregations).toEqual([
+      { function: 'count', alias: 'count' },
+      { function: 'sum', field: 'approved', alias: 'sum_approved' },
+      { function: 'count', field: 'approved', alias: 'count_approved' },
+    ]);
+  });
+
+  it('objectstack#35702 — with no whole-set answer, the yes / no counts are the page\'s, and say so', async () => {
+    const page = ROWS.slice(0, PAGE);
+    render(hostGrid(makeDataSource({ door: 'absent' }), {
+      rows: ROWS,
+      columns: [
+        { field: 'name', label: 'Name' },
+        { field: 'approved', label: 'Approved', summary: 'count_true' },
+        { field: 'id', label: 'Id', summary: { type: 'count_false', field: 'approved' } },
+      ],
+    }));
+    await waitFor(() => expect(footerText('approved')).toBe(`Approved: Yes (this page): ${page.filter((r) => r.approved === true).length}`));
+    expect(footerText('id')).toBe(`Id: No (this page): ${page.filter((r) => r.approved === false).length}`);
+  });
+
   it('a currency column — the issue\'s own shape — formats the whole-set figure as its cells', async () => {
     const ds = makeDataSource();
     render(hostGrid(ds, {
@@ -593,17 +633,17 @@ describe('a date-family `min` / `max` in the footer reads as its cell, never as 
     render(hostGrid(ds, { rows, columns: CLOSED_MAX }));
     await waitFor(() => expect(footerText('closed_at')).toBeTruthy());
     await waitFor(() => expect(closedAtCell('Line 9')).toBeTruthy());
-    expect(footerText('closed_at')).toBe(`Closed At: Max: ${closedAtCell('Line 9')}`);
+    expect(footerText('closed_at')).toBe(`Closed At: Latest: ${closedAtCell('Line 9')}`);
     expect(footerText('closed_at')).not.toMatch(/2,025|NaN/);
   });
 
   it('own fetch, one page of 300: the whole set\'s `max` (the server\'s stored text) reads as the last row\'s cell', async () => {
     const ds = makeDataSource();
     render(ownFetchGrid(ds, CLOSED_MAX));
-    await waitFor(() => expect(footerText('closed_at')).toMatch(/^Closed At: Max: /));
+    await waitFor(() => expect(footerText('closed_at')).toMatch(/^Closed At: Latest: /));
     const footer = footerText('closed_at');
     expect(footer).not.toMatch(/2,025|NaN|this page/);
-    expect(footer).toBe(`Closed At: Max: ${await cellOf(ROWS[299])}`);
+    expect(footer).toBe(`Closed At: Latest: ${await cellOf(ROWS[299])}`);
   });
 
   it('a `sum` / `avg` over a datetime column draws no figure; CONTROL — a `max` over a number column still reads as a number', async () => {

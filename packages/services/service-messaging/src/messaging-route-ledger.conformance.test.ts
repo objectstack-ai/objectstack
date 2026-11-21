@@ -15,6 +15,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { registerPreferenceOptionsRoutes } from './preference-options-routes.js';
 import { registerInAppMessageRoutes } from './in-app-message-routes.js';
 import { registerMyPreferencesRoutes } from './my-preferences-routes.js';
+import { registerSlackLinkRoutes } from './slack-link-routes.js';
 import { MESSAGING_ROUTE_LEDGER } from './messaging-route-ledger.js';
 
 function createMockServer() {
@@ -35,6 +36,7 @@ function enumerateMessagingRoutes(): Set<string> {
     registerPreferenceOptionsRoutes(server as any, {} as any);
     registerMyPreferencesRoutes(server as any, {} as any);
     registerInAppMessageRoutes(server as any, {} as any);
+    registerSlackLinkRoutes(server as any, {} as any);
     const keys = new Set<string>();
     for (const verb of ['get', 'post', 'put', 'patch', 'delete'] as const) {
         for (const call of server[verb].mock.calls) keys.add(`${verb.toUpperCase()} ${call[0]}`);

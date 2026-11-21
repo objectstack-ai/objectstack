@@ -325,6 +325,7 @@ export const PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE: Readonly<Partial<Record<Pack
     'auth.two_factor_otp',
     'auth.email_change_notice',
     'auth.existing_account_sign_up',
+    'auth.password_changed_notice',
   ]),
 });
 
