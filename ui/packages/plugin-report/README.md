@@ -269,6 +269,20 @@ on every non-`joined` type. It draws above a `tabular` or `summary` table, and
 below the cross-tab of a `matrix` that declares `columns`; there `xAxis` may name
 a `rows` or a `columns` dimension.
 
+## The Export control
+
+A dataset-bound report draws an Export control beside its period chip,
+offering the formats `exportOptions.formats` names (`csv` and `xlsx` by
+default, none for `[]`). The control writes the table as drawn. It is offered
+only while the dataset's base object (the query answer's `object`) resolves an
+open export verdict, the one the list toolbar and the grid read:
+`resolveEffectiveCrudAffordances(objectDef, effectiveApiOperations).exportCsv`
+from `@object-ui/core`. So a base object that sets `userActions.exportCsv:
+false` gets no Export control on its reports, and neither does a caller whose
+effective API operations on it leave out `export`. The base object's definition
+is read through the report's data source (`getObjectSchema`); a source that
+cannot serve one leaves the control available.
+
 ## Server-side aggregation + drill-down
 
 A dataset-bound report selects its dimensions (`rows`, and for `matrix` also

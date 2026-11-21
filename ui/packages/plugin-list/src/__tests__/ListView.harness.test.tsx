@@ -2450,6 +2450,94 @@ describe('ListView.switcherChrome-7547', () => {
   });
 });
 
+// ── ListView.exportCsvGate-35619 ────────────────────────────────────────────────
+
+/**
+ * objectstack#35619 — the object's `userActions.exportCsv: false` hides the
+ * list's Export entry, every format, in both toolbar forms: the wide form's
+ * Export button and the Display panel's export footer. The verdict is the
+ * object's, read off the definition the list fetches, so each case waits for
+ * the row read, which runs only once that definition has settled. The
+ * CONTROLS render the same view over an object that does not author the key,
+ * and over one that authors `true`, and find the entry: the probe can see it.
+ */
+describe('ListView.exportCsvGate-35619', () => {
+  restoreAfterBlock();
+
+  function makeDataSource(userActions?: Record<string, unknown>) {
+    return {
+      find: vi.fn().mockResolvedValue({ data: [{ id: '1', name: 'Acme' }], total: 1 }),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn().mockResolvedValue({
+        name: 'account',
+        fields: { name: { type: 'text', label: 'Name' } },
+        ...(userActions ? { userActions } : {}),
+      }),
+    } as any;
+  }
+
+  async function renderList(compactToolbar: boolean, userActions?: Record<string, unknown>) {
+    const ds = makeDataSource(userActions);
+    render(
+      <SchemaRendererProvider dataSource={ds}>
+        <ListView
+          schema={{
+            type: 'list-view',
+            objectName: 'account',
+            viewType: 'grid',
+            fields: ['name'],
+            exportOptions: { formats: ['csv', 'json'] },
+            compactToolbar,
+          } as ListViewSchema}
+          dataSource={ds}
+        />
+      </SchemaRendererProvider>,
+    );
+    await waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalledWith('account'));
+    // The row read waits for the definition, so once it runs the verdict is the settled one.
+    await waitFor(() => expect(ds.find).toHaveBeenCalled());
+  }
+
+  const wideExport = () => screen.queryByRole('button', { name: /^export$/i });
+
+  function displayExportEntries() {
+    fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
+    const panel = screen.getByTestId('view-settings-content');
+    return within(panel).queryAllByTestId(/^display-export-(csv|xlsx|json)$/);
+  }
+
+  it('wide toolbar: exportCsv false draws no Export button', async () => {
+    await renderList(false, { exportCsv: false });
+    expect(wideExport()).toBeNull();
+  });
+
+  it('wide toolbar CONTROL: an object that does not author exportCsv keeps the Export button', async () => {
+    await renderList(false);
+    expect(wideExport()).toBeInTheDocument();
+  });
+
+  it('wide toolbar CONTROL: exportCsv true keeps the Export button', async () => {
+    await renderList(false, { exportCsv: true });
+    expect(wideExport()).toBeInTheDocument();
+  });
+
+  it('Display panel: exportCsv false draws no export entry, in any format', async () => {
+    await renderList(true, { exportCsv: false });
+    expect(displayExportEntries()).toHaveLength(0);
+  });
+
+  it('Display panel CONTROL: an object that does not author exportCsv keeps both formats', async () => {
+    await renderList(true);
+    expect(displayExportEntries().map((el) => el.getAttribute('data-testid'))).toEqual([
+      'display-export-csv',
+      'display-export-json',
+    ]);
+  });
+});
+
 // ── ListView.displayMenuClose-12621 ─────────────────────────────────────────────
 
 /**

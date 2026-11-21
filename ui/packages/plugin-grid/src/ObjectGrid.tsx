@@ -71,7 +71,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@object-ui/components';
-import { captureUpdateUndoData, resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, resolveAffordanceGrant, resolveFieldAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob, readActionPayload } from '@object-ui/core';
+import { captureUpdateUndoData, resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, resolveAffordanceGrant, resolveFieldAffordance, resolveEffectiveCrudAffordances, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob, readActionPayload } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import {
   RECORD_OVERLAY_DEFAULT_WIDTH,
@@ -1032,9 +1032,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const objectTypesPending =
     !!objectName && typeof dataSource?.getObjectSchema === 'function' && !objectFields;
   // [objectstack#3391] Server-resolved effective API operation set for this object
-  // (/me/permissions `apiOperations`). The Export button and handler AND their
-  // gate with this — a missing set (unrestricted object / old backend / no
-  // provider) keeps the current behavior. The frontend consumes the effective
+  // (/me/permissions `apiOperations`). The Export entries and handler AND their
+  // gate with this through `objectExportOffered` below — a missing set
+  // (unrestricted object / old backend / no provider) keeps the current behavior. The frontend consumes the effective
   // set the server resolved; it never reads the raw `apiMethods`.
   const perms = usePermissions();
   const { getObjectApiOperations } = perms;
@@ -1081,6 +1081,20 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // already knew the server would 403. Resolved here beside its siblings so
   // the three read as one block rather than drifting apart again.
   const addRowGranted = resolveAffordance('gridAddRow', affordanceSource).allowed;
+
+  // [objectstack#35619] The object's export verdict, read by every export entry
+  // this grid draws — the toolbar's Export menu, its handler and the table's own
+  // CSV button. `resolveEffectiveCrudAffordances` folds the object's
+  // `userActions.exportCsv` over its `managedBy` default (`false` hides every
+  // format) with the server's effective `export` operation, so neither half is
+  // spelled here. It describes the OBJECT, from `objectSchema` alone, and is not
+  // a grant: who may export is the permission set's `allowExport`, which reaches
+  // this grid through the effective operation set. With no object definition in
+  // hand the bucket default applies, which offers export in every bucket.
+  const objectExportOffered = resolveEffectiveCrudAffordances(
+    objectSchema as SchemaLike | null | undefined,
+    effectiveApiOps,
+  ).exportCsv;
 
   // [#5143] Whether THIS principal may edit THIS object's rows in place — the
   // single verdict behind every inline-edit affordance this grid renders
@@ -1817,11 +1831,13 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
 
   const handleExport = useCallback((format: ListViewExportFormat) => {
     // Object-level export permission gate. Default-allow: an explicit
-    // `operations.export === false` blocks it, and — when the server hands down
-    // an effective API operation set for this object (objectstack#3391) — so does its
-    // exclusion of `export`. Missing effective set keeps current behavior.
+    // `operations.export === false` blocks it, and so does a closed object export
+    // verdict (`objectExportOffered`: the object's `userActions.exportCsv`, and
+    // the server's effective API operation set excluding `export` when one is
+    // handed down, objectstack#3391). A missing effective set leaves the
+    // object's own verdict alone.
     if (schema.operations?.export === false) return;
-    if (effectiveApiOps && !effectiveApiOps.includes('export')) return;
+    if (!objectExportOffered) return;
     const exportConfig = schema.exportOptions;
     const maxRecords = exportConfig?.maxRecords || 0;
     const includeHeaders = exportConfig?.includeHeaders !== false;
@@ -1953,7 +1969,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       downloadFile(new Blob([JSON.stringify(unmasked, null, 2)], { type: 'application/json' }), fileNameFor('json'));
     }
     setShowExport(false);
-  }, [data, schema.exportOptions, schema.operations?.export, effectiveApiOps, schema.objectName, objectName, objectSchema, objectFields, objectTypesPending, generateColumns, dataSource, hasInlineData, schemaFilter, schemaSort, t]);
+  }, [data, schema.exportOptions, schema.operations?.export, objectExportOffered, schema.objectName, objectName, objectSchema, objectFields, objectTypesPending, generateColumns, dataSource, hasInlineData, schemaFilter, schemaSort, t]);
 
   // objectui#9050 step 2 — a refused filter: `schema.filter` (a render-time
   // `useMemo`, which would otherwise have thrown out of render), or a
@@ -3425,7 +3441,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // above the table when search/export are handled by the outer toolbar.
     showSelectionCount: false,
     sortable: true,
-    exportable: operations?.export,
+    // The table's own CSV button follows the object's export verdict too
+    // (objectstack#35619): `operations.export` asks for it, the object allows it.
+    exportable: operations?.export && objectExportOffered,
     // Flat list view: drop the rounded outer frame so the table sits flush
     // beneath the toolbar's `border-b`. Matches the Airtable-style grouped
     // mode introduced for `buildGroupedTableSchema`. Metadata can re-enable
@@ -4216,14 +4234,16 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // key the save gate refuses. Pinned by
   // `__tests__/gridNonAuthorKeys.test.tsx`.
   const showRowHeightToggle = schema.rowHeight !== undefined && !(schema as any).hideRowHeightToggle;
-  // Export is offered only when configured AND not blocked by object-level perms
-  // — including the server's effective API operation set (objectstack#3391): when present
-  // and it excludes `export`, the button is hidden. Missing set → unchanged.
+  // Export is offered only when configured AND not blocked: by the view's
+  // `operations.export`, or by the object's resolved export verdict
+  // (`objectExportOffered`: `userActions.exportCsv` over the bucket default,
+  // ANDed with the server's effective API operation set, objectstack#3391 /
+  // objectstack#35619). Missing set → the object's own verdict alone.
   const exportEnabled =
     !!schema.exportOptions &&
     exportableFormats.length > 0 &&
     schema.operations?.export !== false &&
-    (effectiveApiOps ? effectiveApiOps.includes('export') : true);
+    objectExportOffered;
   const hasToolbar = exportEnabled || showRowHeightToggle;
   const gridToolbar = hasToolbar ? (
     <div className="flex items-center justify-end gap-1 px-2 py-1">

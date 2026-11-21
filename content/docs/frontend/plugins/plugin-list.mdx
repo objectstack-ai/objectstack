@@ -72,6 +72,18 @@ console passes `false` for a view authored `navigation: { mode: 'none' }` or
 data API serves no single-record read (objectstack#33317, objectstack#33548,
 objectstack#33549).
 
+## The object's Export switch
+
+The list's Export entry (the wide toolbar's button and the Display panel's
+footer) follows the object as well as the view. An object that sets
+`userActions.exportCsv: false` gets no Export entry, in any format; the object
+grid and a dataset report on that object hide theirs too. All three read one
+verdict, `resolveEffectiveCrudAffordances(objectDef, effectiveApiOperations).exportCsv`
+from `@object-ui/core`: the authored switch over the object's `managedBy`
+default, ANDed with the caller's effective `export` API operation. Unset, the
+switch is on in every bucket. It hides the entry and is not a permission: who
+may export is the permission set's `allowExport`.
+
 ## Status
 
 This plugin is part of the v3.3.0 release. For full API reference and usage

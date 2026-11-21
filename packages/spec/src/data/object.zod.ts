@@ -4181,7 +4181,9 @@ const ObjectSchemaBase = strictObject(
     delete: z.union([z.boolean(), RowCrudActionOverrideSchema]).optional().describe(
       'Show row-level delete + bulk delete. Boolean, or an object adding per-record visibleWhen/disabledWhen CEL predicates.',
     ),
-    exportCsv: z.boolean().optional().describe('Show CSV export entry.'),
+    exportCsv: z.boolean().optional().describe(
+      "Show the Export entry (every format, not only CSV) on this object's grids, list views and reports; false hides it. Omitted: shown, in every managedBy bucket. It hides the entry and refuses no export request: who may export is the permission set's allowExport.",
+    ),
     transfer: z.union([z.boolean(), RowCrudActionOverrideSchema]).optional().describe(
       'Offer the Change Owner action (single and bulk) on records of this object. Boolean, or an object adding per-record visibleWhen/disabledWhen CEL predicates. Omitted: on, except off on a controlled_by_parent detail. Offered only where the platform injects a reassignable owner_id that is provable and not declared readonly (ownership user or omitted, no managedBy, not a sys_ object; an external object declares owner_id or maps a remote column onto it); enabled: true elsewhere is refused. Gates the action, not a plain owner_id write. Resolved by resolveUserActionTransfer.',
     ),

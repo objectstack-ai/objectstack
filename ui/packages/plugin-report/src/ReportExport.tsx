@@ -20,11 +20,16 @@
  *
  * Formats are `csv` / `xlsx`, on by default: absent means both, `formats: []`
  * means no control. Who may export is not a report key: the control is offered
- * only when the viewer's effective API operations on the dataset's BASE object
- * (the query answer's `object`) include `export` — the predicate the list
- * toolbar applies (`ObjectPermission.allowExport`). An absent operation set (no
- * provider, an unrestricted object, an older server) keeps it available, as it
- * does on the list.
+ * only when the dataset's BASE object (the query answer's `object`) resolves
+ * an open export verdict — `resolveEffectiveCrudAffordances(...).exportCsv`
+ * from `@object-ui/core`, the predicate the list toolbar and the grid apply.
+ * That is the object's `userActions.exportCsv` over its `managedBy` default
+ * (`exportCsv: false` hides the control, every format), ANDed with the
+ * viewer's effective API operations on the object including `export`
+ * (`ObjectPermission.allowExport`). The object definition is read through the
+ * report's data source; an absent operation set (no provider, an unrestricted
+ * object, an older server) and a definition not yet read or not readable keep
+ * the control available, as they do on the list.
  *
  * Both files are written in the browser. The list's XLSX goes through the
  * server record stream, which carries records, not aggregated report rows, so
@@ -35,9 +40,11 @@
 import * as React from 'react';
 import { Download, Loader2 } from 'lucide-react';
 import { Button, Popover, PopoverContent, PopoverTrigger } from '@object-ui/components';
-import { buildExportFileName } from '@object-ui/core';
+import { buildExportFileName, resolveEffectiveCrudAffordances, type SchemaLike } from '@object-ui/core';
 import { pickLocalized, useObjectTranslation } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
+import { useSettledSchema } from '@object-ui/react';
+import type { DataSource } from '@object-ui/types';
 
 /** One drawn cell: its text as shown, and the number behind a measure cell. */
 export interface ReportExportCell {
@@ -172,12 +179,22 @@ export interface ReportExportControlProps {
   name?: string;
   /** The drawn table; no control until there is one to export. */
   snapshot: ReportTableSnapshot | null;
+  /**
+   * The report's data source, which the dataset's base object definition is
+   * read from (its `userActions.exportCsv` and `managedBy`). Absent: no
+   * definition is read and the object's default verdict applies.
+   */
+  dataSource?: unknown;
 }
 
 /** The report header's Export control. Draws nothing when there is nothing the viewer may export. */
-export function ReportExportControl({ exportOptions, label, name, snapshot }: ReportExportControlProps) {
+export function ReportExportControl({ exportOptions, label, name, snapshot, dataSource }: ReportExportControlProps) {
   const { t, language } = useObjectTranslation();
   const { getObjectApiOperations } = usePermissions();
+  const { def: baseObject } = useSettledSchema<SchemaLike>(
+    snapshot?.object ?? '',
+    dataSource as DataSource | null | undefined,
+  );
   const [open, setOpen] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -186,7 +203,7 @@ export function ReportExportControl({ exportOptions, label, name, snapshot }: Re
   if (formats.length === 0 || !snapshot) return null;
   // The list toolbar's predicate, on the dataset's base object.
   const ops = snapshot.object ? getObjectApiOperations(snapshot.object) : undefined;
-  if (ops && !ops.includes('export')) return null;
+  if (!resolveEffectiveCrudAffordances(baseObject, ops).exportCsv) return null;
 
   const options = (exportOptions ?? {}) as ReportExportOptionsLike;
   const includeHeaders = options.includeHeaders !== false;

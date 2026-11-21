@@ -681,6 +681,20 @@ says how many records its list holds. `page:tabs` mounts a tab holding a list
 block while it is inactive (hidden), so the badge is there before the tab is
 opened; a tab with an authored `count` is not mounted early.
 
+## Export
+
+The Export entry (the wide toolbar's button and the Display panel's footer) is
+offered when the view declares `exportOptions` and three things allow it: the
+view's `allowExport` and `operations.export` are not `false`, and the object's
+resolved export verdict is open. That verdict is
+`resolveEffectiveCrudAffordances(objectDef, effectiveApiOperations).exportCsv`
+from `@object-ui/core`: the object's `userActions.exportCsv` over its
+`managedBy` default, ANDed with the caller's effective `export` API operation.
+An object that sets `userActions.exportCsv: false` therefore gets no Export
+entry in any format; one that does not set it keeps the entry, since every
+`managedBy` bucket defaults it on. The setting hides the entry and is not a
+permission: who may export is the permission set's `allowExport`.
+
 ## Sorting (and why relational columns are not offered)
 
 The toolbar sort becomes a server `$orderby` on the **flat field name**, so the
