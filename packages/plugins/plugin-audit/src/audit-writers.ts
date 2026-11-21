@@ -3149,7 +3149,6 @@ export function installAuditWriters(
     const replyUrl = consoleRecordUrl(source_object, source_id);
     const bodyPreview = String(row.body ?? '').slice(0, 240);
     for (const uid of userIds) {
-      if (uid === actorId) continue;
       try {
         const tr = translateWith(await resolveWriteLocale(tenantId ?? undefined, uid));
         const title = !actorName
