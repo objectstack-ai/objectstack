@@ -1116,13 +1116,13 @@ function declareOracleKeyTypePins(cell: FederationDialectCell): void {
 
           it('aggregate answers 2, in its where and in a measure filter', async () => {
             expect(countOf(await firstOnFresh((d) => d.aggregate(ORA_CHILD.object, { where: where(), aggregations: [{ function: 'count', alias: 'n' }] }, ORA_BYPASS)))).toBe(2);
-            expect(countOf(await firstOnFresh((d) => d.aggregate(ORA_CHILD.object, { aggregations: [{ function: 'count', alias: 'n', filter: where() }] } as any, ORA_BYPASS)))).toBe(2);
+            expect(countOf(await firstOnFresh((d) => d.aggregate(ORA_CHILD.object, { aggregations: [{ function: 'count', alias: 'n', filter: where() }] }, ORA_BYPASS)))).toBe(2);
           });
 
           it('findWithWindowFunctions answers [c1, c2]', async () => {
             // Oracle requires an ORDER BY in ROW_NUMBER's window, and a window
             // spec names its column as stored (not through `columnMap`): `ID`.
-            const out = await firstOnFresh((d) => d.findWithWindowFunctions(ORA_CHILD.object, { where: where(), windowFunctions: [{ function: 'row_number', alias: 'rn', orderBy: [{ field: 'ID' }] }] } as any, ORA_BYPASS));
+            const out = await firstOnFresh((d) => d.findWithWindowFunctions(ORA_CHILD.object, { where: where(), windowFunctions: [{ function: 'row_number', alias: 'rn', orderBy: [{ field: 'ID' }] }] }, ORA_BYPASS));
             expect(sortedIds(out)).toEqual(['c1', 'c2']);
           });
 
