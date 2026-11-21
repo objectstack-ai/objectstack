@@ -120,6 +120,7 @@ import {
 import type { QueryParams } from '@object-ui/types';
 import { Link2Off, Loader2 } from 'lucide-react';
 import { servedObjectLabel } from '../../hooks/servedObjectLabel.js';
+import { useReportRecordRead } from '../approval-decision/recordReadReport.js';
 
 /**
  * The one read the card makes. Structural, so the console's adapter satisfies
@@ -226,6 +227,9 @@ export function RecordPreviewCard({ objectName, recordId, dataSource, className 
   const { objectLabel } = useObjectLabel();
   // The host's record-URL builder (see "The link" in the module header).
   const recordLinks = useRelatedRecordActions();
+  // What this read learned, for a page that links the same record elsewhere
+  // only where it reads (objectstack#35415, `recordReadReport.ts`).
+  useReportRecordRead(targetObject, targetRecord, answer && answer.key === targetKey ? answer.status : 'loading');
 
   if (targetObject === null) {
     return <EmptyValue className={className} data-record-preview="absent" />;

@@ -251,6 +251,14 @@ function parseGroupingParam(raw: string | null, acceptField: ListUrlFieldGate): 
 }
 
 /**
+ * objectstack#35955 — a grouping held outside the address (the list's draft)
+ * through the same level-by-level checks the `uf__group` param gets.
+ */
+export function acceptGroupingConfig(value: unknown, acceptField: ListUrlFieldGate): GroupingConfig | undefined {
+  return value ? parseGroupingParam(JSON.stringify(value), acceptField) : undefined;
+}
+
+/**
  * Read the list state a URL carries. Each piece is `undefined` when the URL
  * does not carry it, or when nothing in it survives the checks above.
  */
