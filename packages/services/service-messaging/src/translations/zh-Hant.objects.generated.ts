@@ -489,5 +489,63 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         label: "建立時間"
       }
     }
+  },
+  sys_channel_account: {
+    label: "通道帳戶",
+    pluralLabel: "通道帳戶",
+    description: "組織安裝的聊天應用程式（例如其自有的 Slack 應用程式）及其取得的機器人權杖。",
+    fields: {
+      channel_id: {
+        label: "通道"
+      },
+      display_name: {
+        label: "工作區"
+      },
+      external_id: {
+        label: "工作區 ID"
+      },
+      bot_token: {
+        label: "機器人權杖"
+      },
+      status: {
+        label: "狀態",
+        options: {
+          active: "有效",
+          revoked: "已撤銷"
+        }
+      }
+    }
+  },
+  sys_channel_user_link: {
+    label: "通道使用者連結",
+    pluralLabel: "通道使用者連結",
+    description: "使用者與其在聊天工作區中本人帳號之間的連結：依電子郵件比對提議，本人確認後才開始傳送。",
+    fields: {
+      account_id: {
+        label: "帳戶"
+      },
+      user_id: {
+        label: "使用者"
+      },
+      external_user_id: {
+        label: "聊天使用者 ID"
+      },
+      external_display_name: {
+        label: "聊天使用者名稱"
+      },
+      state: {
+        label: "狀態",
+        options: {
+          proposed: "已提議",
+          confirmed: "已確認"
+        }
+      },
+      confirmed_at: {
+        label: "確認時間"
+      },
+      proposal_email_hash: {
+        label: "提議電子郵件雜湊"
+      }
+    }
   }
 };

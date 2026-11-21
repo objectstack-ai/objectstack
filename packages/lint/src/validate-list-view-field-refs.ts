@@ -372,6 +372,14 @@
  * door, and judged by this module's {@link columnSummaryRefusal}, under this
  * rule id.
  *
+ * [#35702] The boolean yes / no counts `count_true` / `count_false` ride
+ * `SUM(field)` (and `COUNT(field)`), which the door ACCEPTS over a number as
+ * well — where it answers a total, not a count of true cells. So they are
+ * judged by the spec's member × field-type table instead
+ * (`COLUMN_SUMMARY_FIELD_TYPES` through `isColumnSummaryCompatibleWithFieldType`,
+ * the boolean class only), under the same rule id: the footer would print a
+ * total labelled as a count, with no refusal anywhere to say so.
+ *
  * Not judged: `none`; `count` (fieldless, `COUNT(*)`); the four DERIVED
  * members (`count_filled` / `count_empty` / `percent_filled` /
  * `percent_empty`), which ride one `COUNT(field)` node and so compare no
@@ -466,7 +474,13 @@ import {
   isAggregateCompatibleWithFieldType,
   virtualFieldAggregateRemedy,
 } from '@objectstack/spec/data';
-import { COLUMN_SUMMARY_AGGREGATION, ListViewSchema, type ColumnSummary } from '@objectstack/spec/ui';
+import {
+  COLUMN_SUMMARY_AGGREGATION,
+  COLUMN_SUMMARY_FIELD_TYPES,
+  ListViewSchema,
+  isColumnSummaryCompatibleWithFieldType,
+  type ColumnSummary,
+} from '@objectstack/spec/ui';
 
 import {
   aggregateAcceptsDeclaration,
@@ -924,9 +938,10 @@ export function columnSummaryRefusal(
   const member = typeof summary === 'string' ? summary : isRec(summary) ? summary.type : undefined;
   if (typeof member !== 'string' || !Object.prototype.hasOwnProperty.call(COLUMN_SUMMARY_AGGREGATION, member)) return undefined;
   const mapping = COLUMN_SUMMARY_AGGREGATION[member as ColumnSummary];
+  // A member the spec restricts to some field types (the boolean yes / no counts) is judged by that table.
+  const restricted = Object.prototype.hasOwnProperty.call(COLUMN_SUMMARY_FIELD_TYPES, member);
   // `none`, the fieldless `count` and the derived `COUNT(field)` members compare no value.
-  if (mapping.kind !== 'aggregate' || mapping.fieldless) return undefined;
-  const fn = mapping.function;
+  if (!restricted && (mapping.kind !== 'aggregate' || mapping.fieldless)) return undefined;
   const field = strName(isRec(summary) && summary.field !== undefined ? summary.field : column.field);
   if (!field || field.includes('.')) return undefined;
   const verdict = resolveFieldPath(graph, object, field);
@@ -934,6 +949,17 @@ export function columnSummaryRefusal(
   const fieldType = verdict.meta?.type;
   if (!isJudgeableAggregateType(fieldType)) return undefined;
   const shape = { type: fieldType, multiple: verdict.meta?.multiple === true };
+  if (restricted) {
+    if (isColumnSummaryCompatibleWithFieldType(member, fieldType)) return undefined;
+    return {
+      message:
+        `summary "${member}" over "${field}" (${declaredAs(shape)}) is a true / false count, for a ` +
+        'boolean or toggle field only: here it would print a total as a count',
+      hint: `Point "${member}" at a boolean or toggle field, or count "${field}" with count_filled or count_empty.`,
+    };
+  }
+  if (mapping.kind !== 'aggregate') return undefined;
+  const fn = mapping.function;
   if (aggregateAcceptsDeclaration(fn, shape)) return undefined;
   return {
     message:

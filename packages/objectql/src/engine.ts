@@ -2799,7 +2799,7 @@ export class ObjectQL implements IObjectQLEngine {
     context: ExecutionContext | undefined,
   ): Promise<{
     parents: Array<Record<string, unknown> | null>;
-    previousParents: Array<Record<string, unknown> | null | undefined>;
+    previousParents: Array<Record<string, unknown> | null | undefined>; servedColumns: Array<ReadonlySet<string> | null>;
   }> {
     // [#25522 cut 14] The body moved to `engine-master-detail-related.ts`, its docblock with it (see `MasterDetailRelatedHost`).
     const readLogger = () => this.logger;
@@ -4667,6 +4667,7 @@ export class ObjectQL implements IObjectQLEngine {
       resolvePredicateRelated: (...a) => this.resolvePredicateRelated(...a),
       resolveOptionPermissions: (...a) => this.resolveOptionPermissions(...a),
       getSummaryDescriptors: (...a) => this.getSummaryDescriptors(...a),
+      facade: this, getSchema: (...a) => this.getSchema(...a), resolveFormulaPermissions: (...a) => this.resolveFormulaPermissions(...a), resolveFormulaRelated: (...a) => this.resolveFormulaRelated(...a), formulaOptionLabels: (...a) => this.formulaOptionLabels(...a), // [#34821]
       assertReferencesResolve: (...a) => this.assertReferencesResolve(...a),
       previewHomeAmounts: (...a) => this.previewHomeAmounts(...a),
       homeAmountServing: (...a) => this.homeAmountServing(...a),
@@ -5281,18 +5282,16 @@ export class ObjectQL implements IObjectQLEngine {
    * column: the question plugin-auth's organization delete asks before
    * anything is deleted. Only objects holding at least one row are listed.
    *
-   * The relations read are the ones {@link refuseOrganizationDeleteWhileOwned}
-   * judges, through the same reader ({@link cascadeRelationBehavior}: a
-   * federated object's unprovisioned injected column is no relation), widened
-   * to every behaviour: a tenant column its author declared `restrict` blocks
-   * the delete too, and one declared `cascade` would delete records, which is
-   * not the organization's own structure either. A count, never a row: the
-   * read is a system-identity `count`, and a table never provisioned holds no
-   * row.
+   * The relations read are the ones {@link refuseOrganizationDeleteWhileOwned} judges, through the same
+   * reader ({@link cascadeRelationBehavior}: a federated object's unprovisioned injected column is no
+   * relation), widened to every behaviour: a tenant column its author declared `restrict` blocks the delete
+   * too, and one declared `cascade` would delete records, which is not the organization's own structure
+   * either. A count, never a row: a system-identity `count`, and a table never provisioned holds no row.
    *
-   * `exclude` names the objects the caller removes as part of the delete
-   * itself. An append-only or engine-owned object is never counted ({@link
-   * outlivesOrganization}), the same set the engine's own refusal leaves out.
+   * `exclude` names the objects the caller removes as part of the delete itself. An append-only or
+   * engine-owned object is never counted ({@link outlivesOrganization}), the same set the engine's own
+   * refusal leaves out, and neither is `sys_unit`: the engine's cascade removes the organization's units
+   * with it [ruling 7035627429, option B].
    */
   organizationOwnedRowCounts(
     organizationId: string,
@@ -5864,6 +5863,7 @@ export class ObjectQL implements IObjectQLEngine {
       buildSession: (...a) => engine.buildSession(...a),
       buildUser: (...a) => engine.buildUser(...a),
       cascadeDeleteRelations: (...a) => engine.cascadeDeleteRelations(...a),
+      get cascadeIssuedDeletes() { return engine.cascadeIssuedDeletes; },
       claimReferentialCascadeDelete: (...a) => engine.claimReferentialCascadeDelete(...a),
       composeReadableIdsAtBoundary: (...a) => engine.composeReadableIdsAtBoundary(...a),
       delete: (...a) => engine.delete(...a),

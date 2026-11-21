@@ -45,11 +45,12 @@
  *
  * `InlineFieldInput` has exactly two non-test call sites — `DetailSection` (the
  * details body) and `HeaderHighlight` (the highlights strip). The canonical
- * record page routes a field to exactly one of them: `buildDefaultTabs` hands
- * the strip's field list to `buildDefaultDetails` as `hideFields`, so a
- * highlight is hidden from the body. Declaring `highlightFields` therefore
- * selects which call site renders the fields under test, with no classname
- * coupling and no double render.
+ * record page routes a field to exactly one of them: a strip's fields are
+ * left out of the body (`HighlightFieldsContext`), so the field list the
+ * strip holds selects which call site renders the fields under test, with no
+ * classname coupling and no double render. Since objectstack#35891 the default
+ * page draws no strip, so every case places it through a slotted page's
+ * `highlights` slot (`stripPage`), holding the list it declares.
  *
  * The two call sites build the record differently, which is why both are pinned
  * rather than one: `DetailView` hands `DetailSection` the saved record already
@@ -241,8 +242,7 @@ function makeDataSource(fields: Fields, record: Record<string, unknown> = RECORD
   } as any;
 }
 
-function makeMetadata() {
-  const pages: any[] = [];
+function makeMetadata(pages: any[] = []) {
   return {
     objects: [], pages, loading: false, error: null,
     refresh: async () => {}, invalidate: () => {},
@@ -251,10 +251,22 @@ function makeMetadata() {
   } as any;
 }
 
-function tree(ds: any, objects: any[]) {
+/**
+ * The record page that draws the strip. Since objectstack#35891 the default
+ * page draws none, so the strip is placed the way an author places it: a
+ * slotted page whose `highlights` slot holds the declared list.
+ */
+function stripPage(highlightFields: string[]) {
+  return {
+    name: `${OBJECT}_strip`, type: 'record', object: OBJECT, kind: 'slotted', isDefault: true, regions: [],
+    slots: { highlights: { type: 'record:highlights', properties: { fields: highlightFields } } },
+  };
+}
+
+function tree(ds: any, objects: any[], pages: any[] = []) {
   return (
     <MemoryRouter initialEntries={[`/app/demo/${OBJECT}/${REC}`]}>
-      <MetadataCtx.Provider value={makeMetadata()}>
+      <MetadataCtx.Provider value={makeMetadata(pages)}>
         <RecordDetailView
           dataSource={ds}
           objects={objects}
@@ -279,7 +291,7 @@ async function openInlineEdit(
   record: Record<string, unknown> = RECORD,
 ) {
   const ds = makeDataSource(fields, record);
-  const { container } = render(tree(ds, objectsWith(fields, highlightFields)));
+  const { container } = render(tree(ds, objectsWith(fields, highlightFields), [stripPage(highlightFields)]));
   await screen.findByText('Task one');
   fireEvent.doubleClick(screen.getByText('emea'));
   await waitFor(() => {

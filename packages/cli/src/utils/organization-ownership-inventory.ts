@@ -839,6 +839,11 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
   { object: 'sys_mailbox', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
   { object: 'sys_mail_message', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach); the message's mailbox carries the organization`, anchors: [parent('mailbox_id', 'sys_mailbox')] },
   { object: 'sys_mail_association', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach); the association's message carries the organization`, anchors: [parent('mail_message_id', 'sys_mail_message')] },
+  // Slack DM delivery (`@objectstack/service-messaging`, #34730): the link
+  // store writes an install and each link with its organization stamped, so a
+  // NULL row has no producer; a link's install is where one would take it.
+  { object: 'sys_channel_account', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
+  { object: 'sys_channel_user_link', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach); the link's install carries the organization`, anchors: [parent('account_id', 'sys_channel_account')] },
   // Ownership queues (`@objectstack/plugin-sharing`, ADR-0142): an organization
   // authors its queues, their members and its own assignment rules, and the
   // assignment engine writes its cursor, each under that organization. A

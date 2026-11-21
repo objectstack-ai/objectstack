@@ -36,7 +36,8 @@ import { readItemPreferLocal, useReadItemsByName } from '../hooks/useObjectPrese
 import { useLauncherApps } from '../hooks/useLauncherApps.js';
 import { resolveRecordFormTarget, resolveRecordFormModalLayout, resolveFormViewChrome, selectRecordFormView, resolveNavigateCreateUrl, resolveNavigateEditUrl, resolvePostCreateTarget, recordFormCreateValues, readRecordFormCreateValues, RECORD_FORM_CREATE_VALUES_STATE } from '../utils/recordFormNavigation.js';
 import { deriveRecordSurface, deriveRecordFlowSurface } from '@object-ui/plugin-view/core';
-import { isPhoneViewportNow } from '../hooks/usePhoneViewport.js';
+import { isPhoneViewportNow, usePhoneViewport } from '../hooks/usePhoneViewport.js';
+import { PhoneAppHome } from '../layout/PhoneAppHome.js';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
 import { RECORD_DRAWER_PARAM, RECORD_FORM_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_LINK_PARAM } from '../urlParams.js';
 import { appAddressSegment, appRouteSegment, canonicalAppPathname, matchAppBySegment } from '../utils/appRoute.js';
@@ -1968,6 +1969,11 @@ function AppRootLanding({
 }) {
   const gates = useNavMemberGates();
   const location = useLocation();
+  // objectstack#35881 — on a phone the app's root is the app's home: its whole
+  // menu, drawn by the sidebar into this page (`PhoneAppHome`), rather than a
+  // redirect to its first entry. Read synchronously, so the first frame does
+  // not start a redirect a phone would then undo.
+  const phone = usePhoneViewport();
   // objectstack#25338 — an app that names objects, none of which this member
   // may read, has nothing for them: its dashboards and pages would answer a
   // grid of "You don't have access" tiles. Say so once, before any landing is
@@ -2003,6 +2009,15 @@ function AppRootLanding({
     gates.evaluateVisibility,
     ctx,
   );
+  // objectstack#35881 — a phone never redirects to an entry: the menu is the
+  // page. An app that shows this member no entry, now or once its pending
+  // reads answer, still says so.
+  if (phone) {
+    if (appServesNoNavigation(shownApp) && appServesNoNavigation(undecidedApp)) {
+      return <AppNoAccessEmptyState app={app} setupPath={setupPath} />;
+    }
+    return <PhoneAppHome basePath={location.pathname.replace(/\/+$/, '')} />;
+  }
   if (
     undecidedLanding !== landing ||
     (!landing && appServesNoNavigation(shownApp) !== appServesNoNavigation(undecidedApp))
@@ -2027,6 +2042,7 @@ function AppRootLanding({
   if (appServesNoNavigation(shownApp)) {
     return <AppNoAccessEmptyState app={app} setupPath={setupPath} />;
   }
+
   // objectstack-ai/objectstack#29771 — a navigation with no in-app landing:
   // every entry the member is shown, in `navigation` and in every area, is a
   // `url` or `action` link (a working or `doc` entry anywhere would have

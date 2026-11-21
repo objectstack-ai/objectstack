@@ -458,6 +458,7 @@ describe('ConditionChipRow — the row under the view bar', () => {
         filterFields={FIELDS}
         onFiltersChange={() => {}}
         renderAdvanced={() => <div data-testid="advanced-builder" />}
+        renderSortLevels={() => <div data-testid="sort-levels-builder" />}
         {...props}
       />
     );
@@ -503,7 +504,7 @@ describe('ConditionChipRow — the row under the view bar', () => {
     expect(chips[2].textContent).toContain(' or ');
   });
 
-  it('sort chips come before filter chips, name field and direction, and flip on click', () => {
+  it('sort chips come before filter chips, name field and direction, and open the sort levels on click without flipping (objectstack#35876)', () => {
     const onSortChange = vi.fn();
     render(<Row sort={[{ id: 's1', field: 'amount', order: 'asc' }]} filters={twoStages} onSortChange={onSortChange} />);
     const row = screen.getByTestId('condition-chips');
@@ -511,11 +512,13 @@ describe('ConditionChipRow — the row under the view bar', () => {
       .map((el) => el.getAttribute('data-testid'))
       .filter((id) => id === 'sort-chip-amount' || id === 'filter-chip-stage');
     expect(order).toEqual(['sort-chip-amount', 'filter-chip-stage']);
-    const toggle = screen.getByTestId('sort-chip-toggle-amount');
-    expect(toggle.textContent).toBe('Amount');
-    expect(toggle.getAttribute('title')).toBe('Low → High');
-    fireEvent.click(toggle);
-    expect(onSortChange).toHaveBeenCalledWith([{ id: 's1', field: 'amount', order: 'desc' }]);
+    const chip = screen.getByTestId('sort-chip-open-amount');
+    expect(chip.textContent).toBe('Amount');
+    expect(chip.getAttribute('title')).toBe('Low → High');
+    expect(chip.getAttribute('aria-haspopup')).toBe('dialog');
+    fireEvent.click(chip);
+    expect(within(screen.getByTestId('sort-chip-panel')).getByTestId('sort-levels-builder')).toBeTruthy();
+    expect(onSortChange).not.toHaveBeenCalled();
   });
 
   it('two sort levels: dragging the second chip onto the first changes the priority', () => {

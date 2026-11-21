@@ -2762,8 +2762,17 @@ export const FieldSchema = lazySchema(() => {
   // side of ADR-0049. Do not restore a schema on its own; that middle state is what
   // both issues were filed about.
 
-  /** Layout & Grouping */
-  group: z.string().optional().describe('Field group name for organizing fields in forms and layouts (e.g., "contact_info", "billing", "system")'),
+  /**
+   * Layout & Grouping — the OLDER spelling of field-group membership, still
+   * read and not scheduled for removal. It names the `key` of one of the
+   * object's `fieldGroups`; the field joins that group in field declaration
+   * order. New metadata lists a group's members on the group instead
+   * (`fieldGroups[].fields`), which also orders them without moving the field.
+   * When both speak they must agree: a field one group lists may not name
+   * another group here. A field naming a group that lists `fields` without it
+   * is placed after the listed members.
+   */
+  group: z.string().optional().describe('Older spelling of field-group membership, still read: the key of one of the object\'s fieldGroups (e.g. "contact_info"); the field joins that group in field declaration order. New metadata lists members on the group instead (fieldGroups[].fields), which also sets their order. A field a group lists may not name a different group here; a field naming a group whose fields list leaves it out follows the listed ones.'),
 
   /**
    * Conditional field rules (CEL predicates over `record`). Evaluated on BOTH

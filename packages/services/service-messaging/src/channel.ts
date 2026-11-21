@@ -196,4 +196,35 @@ export interface MessagingChannel {
         ctx: MessagingChannelContext,
         query: ChannelAvailabilityQuery,
     ): ChannelAvailability | Promise<ChannelAvailability>;
+
+    /**
+     * Optional: which of these recipients can this channel address at all?
+     * The per-RECIPIENT counterpart of {@link isAvailable} (ADR-0013 addendum,
+     * step 2): a channel that reaches a person only through a link they set up
+     * (the `slack` channel: a confirmed `sys_channel_user_link`) answers the
+     * recipients that have one.
+     *
+     * Consulted by fan-out once per channel per emit, after the preference
+     * filter and BEFORE any delivery row is written. A recipient it leaves out
+     * is SKIPPED on this channel: no delivery row, no `send()`, no failed
+     * outcome, and nothing on `sys_notification.suppressed_channels` (that
+     * column answers for the tenant, not for one person). Their other channels
+     * are unchanged.
+     *
+     * OPTIONAL, and absence means every recipient is addressable. A throw is
+     * treated as every recipient addressable (fail-open) and logged; `send()`
+     * then answers an unaddressable recipient itself.
+     */
+    reachableRecipients?(
+        ctx: MessagingChannelContext,
+        query: RecipientReachQuery,
+    ): Promise<ReadonlySet<string>>;
+}
+
+/** What {@link MessagingChannel.reachableRecipients} is asked about. */
+export interface RecipientReachQuery {
+    /** Tenant the emit belongs to; absent on single-tenant / background emits. */
+    readonly organizationId?: string;
+    /** The recipients the preference filter left on this channel. */
+    readonly recipients: readonly string[];
 }

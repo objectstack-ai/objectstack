@@ -233,6 +233,8 @@ describe('platform-object predicates', () => {
     // left in deployed databases; the name no longer resolves as a platform
     // object (semantic entry `sys-notification-subscription-retired`).
     expect(PLATFORM_OBJECTS_BY_PACKAGE['service-messaging']).toEqual([
+      'sys_channel_account',
+      'sys_channel_user_link',
       'sys_http_delivery',
       'sys_inbox_message',
       'sys_notification_delivery',

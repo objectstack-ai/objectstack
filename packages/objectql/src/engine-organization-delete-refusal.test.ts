@@ -494,3 +494,122 @@ describe('[#24948] organizationOwnedRowCounts: the question plugin-auth asks bef
     expect(await engine.organizationOwnedRowCounts(ORG_ID)).toEqual([]);
   });
 });
+
+/** An organization's units of measure (`sys_unit`, platform-objects'): the registry injects the tenant column. */
+const UNIT = {
+  name: 'sys_unit',
+  label: 'Unit of Measure',
+  fields: {
+    code: { name: 'code', label: 'Code', type: 'text' as const },
+    retired: { name: 'retired', label: 'Retired', type: 'boolean' as const },
+  },
+};
+
+describe('[ruling 7035627429, option B] an organization delete removes its units, the one exemption from the sys_unit delete refusal', () => {
+  type Thrown = { code?: string; status?: number } | null;
+  const envelope = (e: Thrown) => e && { code: e.code, status: e.status };
+  const refusalOf = (p: Promise<unknown>): Promise<Thrown> => p.then(() => null, (e) => e as Thrown);
+  const REFUSED = { code: 'ERR_UNIT_DELETE_REFUSED', status: 405 };
+  const seedUnits = (store: ReturnType<typeof makeDriver>) => {
+    store.seed('sys_unit', { id: 'u1', code: 'JIN1', retired: false, organization_id: ORG_ID });
+    store.seed('sys_unit', { id: 'u2', code: 'SACK_50', retired: true, organization_id: ORG_ID });
+    store.seed('sys_unit', { id: 'u3', code: 'TAEL_1', retired: false, organization_id: OTHER_ORG });
+  };
+  /** The callers a direct delete is refused for: a user, a system writer and a system automation run. */
+  const CALLERS: Array<[string, Record<string, unknown>]> = [
+    ['a user', { userId: 'u_admin', tenantId: ORG_ID }],
+    ['a system writer', { isSystem: true, tenantId: ORG_ID }],
+    ['a system automation run', { isSystem: true, actor: 'svc:flow:units_cleanup', tenantId: ORG_ID }],
+  ];
+
+  it('deletes an organization whose only rows are its units, removing every one, retired included; another organization\'s unit stays', async () => {
+    const { engine, store } = await makeEngine([ORGANIZATION, ACCOUNT, UNIT]);
+    seedUnits(store);
+    const marked: unknown[] = [];
+    engine.registerHook('beforeDelete', async (ctx: any) => { marked.push(ctx.referentialCascadeDelete); }, { object: 'sys_unit' });
+
+    expect(await deleteOrg(engine)).toBeNull();
+
+    expect(store.rows('sys_organization').map((r) => r.id)).toEqual([OTHER_ORG]);
+    expect(store.rows('sys_unit').map((r) => [r.id, r.organization_id])).toEqual([['u3', OTHER_ORG]]);
+    // Each unit through the engine's delete, as a cascade child: its hooks carry the marker.
+    expect(store.writes).toEqual(['delete sys_unit/u1', 'delete sys_unit/u2', `delete sys_organization/${ORG_ID}`]);
+    expect(marked).toEqual([true, true]);
+  });
+
+  it('still refuses an organization that owns another record: 409 DELETE_RESTRICTED naming only that record, every unit kept', async () => {
+    const { engine, store } = await makeEngine([ORGANIZATION, ACCOUNT, UNIT]);
+    seedUnits(store);
+    store.seed('acct', { id: 'a1', organization_id: ORG_ID });
+
+    const err: any = await deleteOrg(engine);
+
+    expect(envelope(err)).toEqual({ code: 'DELETE_RESTRICTED', status: 409 });
+    expect(err?.dependents).toEqual([{ object: 'acct', count: 1 }]);
+    expect(store.writes).toEqual([]);
+    expect(store.rows('sys_unit').map((r) => r.id)).toEqual(['u1', 'u2', 'u3']);
+    expect(store.rows('sys_organization').map((r) => r.id)).toEqual([ORG_ID, OTHER_ORG]);
+  });
+
+  it('organizationOwnedRowCounts does not count units, and counts the record beside them', async () => {
+    const { engine, store } = await makeEngine([ORGANIZATION, ACCOUNT, UNIT]);
+    seedUnits(store);
+    expect(await engine.organizationOwnedRowCounts(ORG_ID)).toEqual([]);
+    store.seed('acct', { id: 'a1', organization_id: ORG_ID });
+    expect(await engine.organizationOwnedRowCounts(ORG_ID)).toEqual([{ object: 'acct', count: 1 }]);
+  });
+
+  it.each(CALLERS)('refuses a direct delete of a unit by %s, by id and batched, nothing removed', async (_who, context) => {
+    const { engine, store } = await makeEngine([ORGANIZATION, UNIT]);
+    seedUnits(store);
+    expect(envelope(await refusalOf(engine.delete('sys_unit', { where: { id: 'u1' }, context } as any)))).toEqual(REFUSED);
+    expect(envelope(await refusalOf(engine.delete('sys_unit', { where: { id: { $in: ['u1', 'u2'] } }, multi: true, context } as any)))).toEqual(REFUSED);
+    expect(store.writes).toEqual([]);
+  });
+
+  it('refuses a delete inside a cascade token the organization delete did not issue', async () => {
+    const { engine, store } = await makeEngine([ORGANIZATION, UNIT]);
+    seedUnits(store);
+    // The engine's own token store, reached around its `private`: a generic
+    // cascade token for exactly this unit is not the organization's removal.
+    const issued = (engine as any).cascadeIssuedDeletes;
+    const forged = await refusalOf(issued.run(
+      { object: 'sys_unit', id: 'u1', claimed: false },
+      () => engine.delete('sys_unit', { where: { id: 'u1' }, context: { isSystem: true, tenantId: ORG_ID } } as any),
+    ));
+    expect(envelope(forged)).toEqual(REFUSED);
+    expect(store.rows('sys_unit').map((r) => r.id)).toEqual(['u1', 'u2', 'u3']);
+  });
+
+  it('refuses every direct delete of a unit while its organization\'s delete is in flight, and the delete still removes them all', async () => {
+    const { engine, store } = await makeEngine([ORGANIZATION, UNIT]);
+    seedUnits(store);
+    const seen: Array<[string, Thrown]> = [];
+    const attempt = async (label: string, run: () => Promise<unknown>) => { seen.push([label, await refusalOf(run())]); };
+    // Before the walk: the organization's own hook, under each caller.
+    engine.registerHook('beforeDelete', async () => {
+      for (const [who, context] of CALLERS) {
+        await attempt(`org hook, ${who}, by id`, () => engine.delete('sys_unit', { where: { id: 'u1' }, context } as any));
+        await attempt(`org hook, ${who}, batched`, () => engine.delete('sys_unit', { where: { id: { $in: ['u1', 'u2'] } }, multi: true, context } as any));
+      }
+    }, { object: 'sys_organization' });
+    // Inside the removal of a unit: that unit's own hook, on its sibling and on itself (once: a
+    // delete the refusal let through would re-enter this hook).
+    let entered = false;
+    engine.registerHook('beforeDelete', async (ctx: any) => {
+      if (ctx.input?.id !== 'u1' || entered) return;
+      entered = true;
+      const context = { isSystem: true, tenantId: ORG_ID };
+      await attempt('unit hook, sibling by id', () => engine.delete('sys_unit', { where: { id: 'u2' }, context } as any));
+      await attempt('unit hook, itself by id', () => engine.delete('sys_unit', { where: { id: 'u1' }, context } as any));
+      await attempt('unit hook, batched', () => engine.delete('sys_unit', { where: { id: { $in: ['u2'] } }, multi: true, context } as any));
+    }, { object: 'sys_unit' });
+
+    expect(await deleteOrg(engine)).toBeNull();
+
+    expect(seen).toHaveLength(9);
+    for (const [label, thrown] of seen) expect(envelope(thrown), label).toEqual(REFUSED);
+    expect(store.writes).toEqual(['delete sys_unit/u1', 'delete sys_unit/u2', `delete sys_organization/${ORG_ID}`]);
+    expect(store.rows('sys_unit').map((r) => r.id)).toEqual(['u3']);
+  });
+});

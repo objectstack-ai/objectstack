@@ -35,6 +35,7 @@
     "@objectstack/types": "workspace:*"
   },
   "devDependencies": {
+    "@objectstack/connector-slack": "workspace:*",
     "@objectstack/driver-sql": "workspace:*",
     "@objectstack/lint": "workspace:*",
     "@objectstack/metadata-protocol": "workspace:*",
