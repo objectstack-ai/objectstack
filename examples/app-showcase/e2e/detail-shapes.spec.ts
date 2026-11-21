@@ -172,9 +172,9 @@ test('related-heavy: body tables, the tab row and the rail on Contoso', async ({
   // the right column from `RECORD_PAGE_TWO_COLUMN_MIN_WIDTH` (760 px,
   // `@object-ui/plugin-detail`), and ONE column below it — the details, then
   // the 概览 tab's rail. The tab row (objectstack#35595) is drawn in every
-  // tier. The case stays in that stack tier on purpose: the column tiers are what every
-  // other page of this smoke draws at the Desktop Chrome viewport, and the
-  // stack is also what the split pane (720 px) and a phone draw.
+  // tier. The case stays in that stack tier on purpose: the column tiers are
+  // what every other page of this smoke draws at the Desktop Chrome viewport,
+  // and the stack is also what the split pane (720 px) and a phone draw.
   //
   // The window and the sidebar are derived, not picked. A collapsed console
   // sidebar draws no icon rail from 768 px up — ruling 6973617688 on
@@ -220,6 +220,9 @@ test('related-heavy: body tables, the tab row and the rail on Contoso', async ({
   // the details, with its rows read at open, and takes no tab of its own; the
   // rest of Contoso's lists (Contacts and the Field Zoo lookups) are tabs, and
   // one with records is a card of the rail (objectstack#35596).
+  // CONTROL for the absence below: an ordinary list's tab is drawn under the
+  // same `OBJECT.FIELD` id, so a renamed id scheme reds here, not silently.
+  await expect(page.locator('[data-record-tab="showcase_contact.account"]')).toHaveCount(1);
   await expect(page.locator('[data-record-tab^="showcase_invoice."], [data-record-tab^="showcase_project."]')).toHaveCount(0);
   const details = page.locator('[data-record-column="details"]');
   const invoicesTable = details
