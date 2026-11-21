@@ -664,8 +664,8 @@ export interface SsoProviderAccessSwept {
 
 /** The logger the boot sweep reports through. */
 export interface SsoProviderAccessSweepLogger {
-  info?: (message: string, meta?: unknown) => void;
-  error?: (message: string, meta?: unknown) => void;
+  info?: (message: string, meta?: Record<string, unknown>) => void;
+  error?: (message: string) => void;
 }
 
 const SSO_GRANT_REASON_HEAD = `${SSO_GROUP_PROJECTION_REASON_PREFIX}: provider '`;
@@ -760,7 +760,7 @@ export async function reportSsoProviderAccessSweep(
       logger?.info?.(
         `[auth] Removed what deleted SSO providers left behind: ${plural(swept.removedGrants, 'projected permission-set grant')} `
           + `and ${plural(swept.revokedSessions, 'live session')} of providers that no longer exist.`,
-        swept,
+        { removedGrants: swept.removedGrants, revokedSessions: swept.revokedSessions },
       );
     }
     return swept;

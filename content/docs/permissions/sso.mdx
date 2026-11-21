@@ -1011,6 +1011,36 @@ the next one applies the mappings again.
 
 ---
 
+## Deleting an SSO provider
+
+Deleting a provider ends the access it vouched for. Setup's **Delete SSO
+Provider** (or `POST /api/v1/auth/sso/delete-provider` with
+`{ "providerId": "…" }`) first shows what the delete removes, then:
+
+- **unlinks** every user who signed in through the provider;
+- **ends the live sessions signed in through it.** Each session an SSO sign-in
+  opens records its provider (`sys_session.sso_provider_id`); the delete
+  revokes the live sessions that record this provider, with `revoke_reason`
+  `sso_provider_deleted`, so their next request is signed out. A session signed
+  in any other way (a password, another provider) is left as it is;
+- **removes its group mappings and the permission-set grants they projected**
+  (the grants whose `reason` is the provider's projection marker), never a grant
+  made by hand or by SCIM.
+
+The answer names each count: `unlinkedUsers`, `usersWithoutOtherSignIn`,
+`revokedSessions`, `removedGroupMappings` and `removedGrants`. When the cleanup
+after the delete fails, the answer says so (`dependentsRemoved: false`) and the
+failure is logged once at `error`.
+
+**At every boot**, what a provider that no longer exists left behind is removed
+too: a projected grant whose `reason` names a provider with no
+`sys_sso_provider` row is deleted, and a live session that records such a
+provider is revoked. So a cleanup that failed, or a provider removed before its
+grants were, is settled at the next start; the boot logs at `info` what it
+removed, and at `error` when it could not.
+
+---
+
 ## Verify configuration
 
 Restart the server (`pnpm dev`), then:
