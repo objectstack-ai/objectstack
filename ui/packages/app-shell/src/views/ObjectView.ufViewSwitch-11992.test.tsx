@@ -91,6 +91,8 @@ vi.mock('./MetadataInspector', () => ({
 }));
 vi.mock('./RecordDetailView', () => ({ RecordDetailView: () => null }));
 
+// Paid at collection, not in a case's clock: the source reaches `@objectstack/lint` on demand.
+import '@objectstack/lint';
 import { ObjectView } from './ObjectView';
 import { resetListDraftStoreForTests } from './listDraftStore';
 import { ExpressionProvider } from '../providers/ExpressionProvider';

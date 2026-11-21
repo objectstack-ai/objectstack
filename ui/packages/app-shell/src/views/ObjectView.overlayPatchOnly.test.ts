@@ -49,6 +49,8 @@ import { fileURLToPath } from 'node:url';
 import type { DataSource } from '@object-ui/types';
 import * as dataObjectstack from '@object-ui/data-objectstack';
 import { ObjectStackAdapter } from '@object-ui/data-objectstack';
+// Paid at collection, not in a case's clock: the source reaches `@objectstack/lint` on demand.
+import '@objectstack/lint';
 import { buildViewTabs, loadViewOverrides, sanitizeViewOverride } from './ObjectView';
 import { answerObjectViewRead } from './__tests__/objectViewRoute';
 // @ts-expect-error — plain-JS shared helper, intentionally untyped (`allowJs: false`)

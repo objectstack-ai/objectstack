@@ -122,6 +122,8 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => ({
 import { toast } from 'sonner';
 import { ConsoleShell, ConnectedShell } from '../ConsoleShell';
 import { useAdapter } from '../../providers/AdapterProvider';
+// Paid at collection, not in a case's clock: the source reaches `@objectstack/lint` on demand.
+import '@objectstack/lint';
 import { ObjectView } from '../../views/ObjectView';
 import { resetListDraftStoreForTests } from '../../views/listDraftStore';
 import { createPreferenceFramework, preferenceRowId, type PreferenceFramework } from './preferenceFramework';
