@@ -1265,6 +1265,7 @@ const es = {
   },
   view: {
     editViewConfig: "Editar configuración de vista",
+    showViewConfig: "Ver configuración de vista",
     rename: "Renombrar",
     duplicateView: "Duplicar vista",
     shareView: "Compartir vista",

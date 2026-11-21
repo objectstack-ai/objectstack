@@ -1260,6 +1260,7 @@ const fr = {
   },
   view: {
     editViewConfig: "Modifier la configuration de la vue",
+    showViewConfig: "Voir la configuration de la vue",
     rename: "Renommer",
     duplicateView: "Dupliquer la vue",
     shareView: "Partager la vue",

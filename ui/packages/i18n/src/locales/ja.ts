@@ -1228,6 +1228,7 @@ const ja = {
   },
   view: {
     editViewConfig: "ビュー設定を編集",
+    showViewConfig: "ビュー設定を表示",
     rename: "名前を変更",
     duplicateView: "ビューを複製",
     shareView: "ビューを共有",

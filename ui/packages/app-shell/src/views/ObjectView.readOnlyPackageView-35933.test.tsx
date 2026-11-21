@@ -2,8 +2,9 @@
 
 /**
  * objectstack#35933 — a view a read-only package ships offers an admin no save
- * of its own: no footer calculation menu (objectstack#35702) and no Rename in
- * the list's options menu. A shared view the console saved into the
+ * of its own: no footer calculation menu (objectstack#35702). Its Rename in
+ * the list's options menu stays (objectstack#35974): the label is written into
+ * the package's customization pair. A shared view the console saved into the
  * customization package, and the reader's own view, still offer the menu.
  *
  * A dotted view name cannot tell the two apart: every stored view is named
@@ -176,12 +177,14 @@ afterEach(() => {
 });
 
 describe('objectstack#35933 — a read-only package\'s view offers no save of its own', () => {
-  it('a view a read-only package ships: no calculation menu, no Rename', async () => {
+  it('a view a read-only package ships: no calculation menu; Rename stays (objectstack#35974)', async () => {
     mount(SHIPPED.name);
     await settle();
     await waitFor(() => expect(listProps.current).not.toBeNull());
     expect(offersMenu()).toBe(false);
-    expect(listProps.current?.onRenameView).toBeUndefined();
+    // objectstack#35974 — the rename lands in the package's customization
+    // pair (`updateView`), so it is offered.
+    expect(typeof listProps.current?.onRenameView).toBe('function');
   });
 
   it('a shared view saved into the customization package keeps the menu and Rename', async () => {

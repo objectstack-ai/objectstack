@@ -1255,6 +1255,7 @@ const zhHant = {
   },
   view: {
     editViewConfig: '編輯檢視配置',
+    showViewConfig: '查閱檢視配置',
     rename: '重新命名',
     duplicateView: '複製檢視',
     shareView: '共享檢視',
