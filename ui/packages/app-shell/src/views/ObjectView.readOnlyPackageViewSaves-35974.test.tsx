@@ -1,13 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectstack#35974 — on a list view a read-only package ships, the admin's
- * "configure view" panel is read-only (no Save) and Manage views offers no
- * pin, no set-as-default and no delete for it: the server refuses each of
- * those writes ("save it into the customization package"). A shared view the
- * console saved into the customization package and the reader's own view are
- * unchanged, and while the package's `writable` verdict is unknown (unread,
- * failed read) everything stays offered as before.
+ * objectstack#35974 (ruling record 7058654416) — on a list view a read-only
+ * package ships, Manage views hides only Delete and offers its configuration
+ * as "View config", which opens the panel read-only (no Save): the server
+ * refuses that view's delete and its panel save. Rename, pin and set as
+ * default stay: `updateView` writes them into the package's customization
+ * pair. A shared view the console saved into the customization package and
+ * the reader's own view are unchanged, and while the package's `writable`
+ * verdict is unknown (unread, failed read) everything stays offered as before.
  *
  * The verdict is objectstack#35933's: the package the row was served under
  * (`listViews()` carries `_packageId`) and the session-held package list
@@ -175,14 +176,43 @@ function mount(viewId: string) {
 
 const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 300)));
 
-/** The write affordances Manage views draws on a row: pin, set default, the ⋯ menu (rename, delete). */
-const rowOffers = (id: string) => ({
-  pin: screen.queryByTestId(`manage-views-pin-${id}`) !== null,
-  setDefault: screen.queryByTestId(`manage-views-default-${id}`) !== null,
-  menu: screen.queryByTestId(`manage-views-actions-${id}`) !== null,
-});
+/** The row's own affordances (pin, set default star, lock) and its `…` menu's entries, read by opening it. */
+async function rowOffers(id: string) {
+  const row = {
+    pin: screen.queryByTestId(`manage-views-pin-${id}`) !== null,
+    setDefault: screen.queryByTestId(`manage-views-default-${id}`) !== null,
+    lock: screen.queryByTestId(`manage-views-readonly-${id}`) !== null,
+  };
+  const trigger = screen.getByTestId(`manage-views-actions-${id}`);
+  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+  fireEvent.click(trigger);
+  await waitFor(() => expect(screen.getByRole('menu')).toBeTruthy());
+  const entries = ['rename', 'config', 'default', 'pin', 'delete']
+    .filter((key) => screen.queryByTestId(`manage-views-action-${key}-${id}`) !== null);
+  const configLabel = screen.queryByTestId(`manage-views-action-config-${id}`)?.textContent?.trim() ?? null;
+  fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
+  await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+  return { ...row, entries, configLabel };
+}
 
-const OFFERED = { pin: true, setDefault: true, menu: true };
+/** A row as every savable view is offered: everything, Delete included, "Edit view config". */
+const OFFERED = {
+  pin: true, setDefault: true, lock: false,
+  entries: ['rename', 'config', 'default', 'pin', 'delete'], configLabel: 'Edit view config',
+};
+/** A factory row of a read-only package: everything but Delete, "View config", no lock. */
+const FACTORY_OFFERS = {
+  pin: true, setDefault: true, lock: false,
+  entries: ['rename', 'config', 'default', 'pin'], configLabel: 'View config',
+};
+
+/** Open a row's `…` and click its configuration entry. */
+async function clickConfig(id: string) {
+  const trigger = await waitFor(() => screen.getByTestId(`manage-views-actions-${id}`));
+  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+  fireEvent.click(trigger);
+  fireEvent.click(await waitFor(() => screen.getByTestId(`manage-views-action-config-${id}`)));
+}
 
 beforeEach(() => {
   panelProps.current = null;
@@ -194,45 +224,30 @@ afterEach(() => {
   cleanup();
 });
 
-describe('objectstack#35974 — a read-only package\'s view: read-only panel, no Manage views writes', () => {
-  it('Manage views offers no pin, set default or delete on the shipped view, and keeps them on the custom one', async () => {
+describe('objectstack#35974 — a read-only package\'s view: no Delete, a read-only panel', () => {
+  it('Manage views: the shipped row offers everything but Delete and "View config"; the custom row is unchanged', async () => {
     mount(CUSTOM.name);
     await settle();
     await waitFor(() => expect(screen.getByTestId(`manage-views-row-${SHIPPED.name}`)).toBeTruthy());
-    // The ⋯ menu stays, holding only "View config" (next case).
-    await waitFor(() => expect(rowOffers(SHIPPED.name)).toEqual({ pin: false, setDefault: false, menu: true }));
-    expect(screen.getByTestId(`manage-views-readonly-${SHIPPED.name}`)).toBeTruthy();
-    expect(rowOffers(CUSTOM.name)).toEqual(OFFERED);
+    await waitFor(async () => expect(await rowOffers(SHIPPED.name)).toEqual(FACTORY_OFFERS));
+    expect(await rowOffers(CUSTOM.name)).toEqual(OFFERED);
   });
 
-  it('the shipped row\'s "View config" entry opens the panel on that view, read-only', async () => {
+  it('the shipped row\'s "View config" opens the panel on that view, read-only', async () => {
     mount(CUSTOM.name);
     await settle();
-    const trigger = await waitFor(() => screen.getByTestId(`manage-views-actions-${SHIPPED.name}`));
-    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
-    fireEvent.click(trigger);
-    const entry = await waitFor(() => screen.getByTestId(`manage-views-action-config-${SHIPPED.name}`));
-    expect(entry.textContent).toContain('View config');
-    // Nothing else of the row's menu: no rename, set default, pin or delete.
-    for (const key of ['rename', 'default', 'pin', 'delete']) {
-      expect(screen.queryByTestId(`manage-views-action-${key}-${SHIPPED.name}`)).toBeNull();
-    }
-    fireEvent.click(entry);
+    await waitFor(async () => expect((await rowOffers(SHIPPED.name)).configLabel).toBe('View config'));
+    await clickConfig(SHIPPED.name);
     await waitFor(() => expect(panelProps.current?.open).toBe(true));
     await waitFor(() => expect(panelProps.current?.activeView?.id).toBe(SHIPPED.name));
     await waitFor(() => expect(panelProps.current?.readOnly).toBe(true));
     expect(panelProps.current?.mode).toBe('edit');
   });
 
-  it('the custom row\'s entry still reads "Edit view config" and opens the panel savable', async () => {
+  it('the custom row\'s "Edit view config" opens the panel savable', async () => {
     mount(SHIPPED.name);
     await settle();
-    const trigger = await waitFor(() => screen.getByTestId(`manage-views-actions-${CUSTOM.name}`));
-    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
-    fireEvent.click(trigger);
-    const entry = await waitFor(() => screen.getByTestId(`manage-views-action-config-${CUSTOM.name}`));
-    expect(entry.textContent).toContain('Edit view config');
-    fireEvent.click(entry);
+    await clickConfig(CUSTOM.name);
     await waitFor(() => expect(panelProps.current?.activeView?.id).toBe(CUSTOM.name));
     await waitFor(() => expect(panelProps.current?.open).toBe(true));
     expect(panelProps.current?.readOnly).toBe(false);
@@ -259,8 +274,8 @@ describe('objectstack#35974 — a read-only package\'s view: read-only panel, no
     expect(panelProps.current?.readOnly).toBe(false);
     // My views are no row of Manage views; the shared rows are judged as ever.
     expect(screen.queryByTestId(`manage-views-row-${PERSONAL.id}`)).toBeNull();
-    await waitFor(() => expect(rowOffers(SHIPPED.name).pin).toBe(false));
-    expect(rowOffers(CUSTOM.name)).toEqual(OFFERED);
+    await waitFor(async () => expect(await rowOffers(SHIPPED.name)).toEqual(FACTORY_OFFERS));
+    expect(await rowOffers(CUSTOM.name)).toEqual(OFFERED);
   });
 
   it('while the package list is unread, the shipped view keeps every offer (the server still refuses)', async () => {
@@ -268,7 +283,7 @@ describe('objectstack#35974 — a read-only package\'s view: read-only panel, no
     mount(SHIPPED.name);
     await settle();
     await waitFor(() => expect(screen.getByTestId(`manage-views-row-${SHIPPED.name}`)).toBeTruthy());
-    expect(rowOffers(SHIPPED.name)).toEqual(OFFERED);
+    expect(await rowOffers(SHIPPED.name)).toEqual(OFFERED);
     expect(panelProps.current?.readOnly).toBe(false);
   });
 
@@ -277,7 +292,7 @@ describe('objectstack#35974 — a read-only package\'s view: read-only panel, no
     mount(SHIPPED.name);
     await settle();
     await waitFor(() => expect(screen.getByTestId(`manage-views-row-${SHIPPED.name}`)).toBeTruthy());
-    expect(rowOffers(SHIPPED.name)).toEqual(OFFERED);
+    expect(await rowOffers(SHIPPED.name)).toEqual(OFFERED);
     expect(panelProps.current?.readOnly).toBe(false);
   });
 });

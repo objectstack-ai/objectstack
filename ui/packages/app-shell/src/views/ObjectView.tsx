@@ -1134,7 +1134,9 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         listViewActions: {
             rename: activeView && activeIsPersonal && personalViewsReady && personalGrant('update')
                 ? (label: string) => handleRenamePersonalView(String(activeView.id), label)
-                : activeView && isAdmin && !activeViewPackageRefusesSaves && savedViews.some((sv: any) => viewRowId(sv) === activeView.id)
+                // A read-only package's view is renamed too (objectstack#35974):
+                // `updateView` writes the label into its customization pair.
+                : activeView && isAdmin && savedViews.some((sv: any) => viewRowId(sv) === activeView.id)
                     ? async (label: string) => { await handleRenameView(String(activeView.id), label); return true; }
                     : undefined,
             save: !isEnvironmentList && canUpdatePersonalView && listPersonalizedParts.length > 0 ? () => { void handleSaveToPersonalView(); } : undefined,

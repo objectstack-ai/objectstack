@@ -110,50 +110,49 @@ describe('ManageViewsDialog row menu (#10209)', () => {
   });
 });
 
-describe('ManageViewsDialog `readonlyConfigViewable` (objectstack#35974)', () => {
-  /** A saved view the server refuses to save: read-only, its configuration still readable. */
-  const VIEWABLE: ViewTabItem = {
-    id: 'crm_lead.shipped', label: 'Shipped', type: 'grid', readonly: true, readonlyConfigViewable: true,
-  };
+describe('ManageViewsDialog `definitionReadonly` (objectstack#35974)', () => {
+  /** A factory view of a read-only package: its definition is read-only, its row state is not. */
+  const FACTORY: ViewTabItem = { id: 'crm_lead.shipped', label: 'Shipped', type: 'grid', definitionReadonly: true };
 
-  it('a read-only row with the flag offers only the configuration entry, labelled as viewing', () => {
-    const onConfigView = vi.fn();
-    renderDialog([VIEWABLE], { onConfigView });
-    // No pin, no set default on the row itself.
-    expect(screen.queryByTestId(`manage-views-pin-${VIEWABLE.id}`)).toBeNull();
-    expect(screen.queryByTestId(`manage-views-default-${VIEWABLE.id}`)).toBeNull();
-    expect(screen.getByTestId(`manage-views-readonly-${VIEWABLE.id}`)).toBeInTheDocument();
-    open(screen.getByTestId(`manage-views-actions-${VIEWABLE.id}`));
-    expect(menuShape()).toEqual(['menuitem']);
-    const entry = screen.getByTestId(`manage-views-action-config-${VIEWABLE.id}`);
-    expect(entry).toHaveTextContent('View config');
-    expect(entry).not.toHaveTextContent('Edit');
-    for (const key of ['rename', 'default', 'pin', 'delete']) {
-      expect(screen.queryByTestId(`manage-views-action-${key}-${VIEWABLE.id}`)).toBeNull();
+  it('a definition-read-only row hides only Delete: rename, pin, set default and "View config" stay', () => {
+    renderDialog([FACTORY]);
+    // No lock: the row is not read-only.
+    expect(screen.queryByTestId(`manage-views-readonly-${FACTORY.id}`)).toBeNull();
+    expect(screen.getByTestId(`manage-views-pin-${FACTORY.id}`)).toBeInTheDocument();
+    expect(screen.getByTestId(`manage-views-default-${FACTORY.id}`)).toBeInTheDocument();
+    open(screen.getByTestId(`manage-views-actions-${FACTORY.id}`));
+    expect(menuShape()).toEqual(['menuitem', 'menuitem', 'menuitem', 'menuitem']);
+    for (const key of ['rename', 'config', 'default', 'pin']) {
+      expect(screen.getByTestId(`manage-views-action-${key}-${FACTORY.id}`)).toBeInTheDocument();
     }
+    expect(screen.queryByTestId(`manage-views-action-delete-${FACTORY.id}`)).toBeNull();
+    const config = screen.getByTestId(`manage-views-action-config-${FACTORY.id}`);
+    expect(config).toHaveTextContent('View config');
+    expect(config).not.toHaveTextContent('Edit');
   });
 
-  it('the entry hands the view to the host\'s `onConfigView`', async () => {
+  it('its "View config" hands the view to the host\'s `onConfigView`', async () => {
     const onConfigView = vi.fn();
-    renderDialog([VIEWABLE], { onConfigView });
-    open(screen.getByTestId(`manage-views-actions-${VIEWABLE.id}`));
-    fireEvent.click(screen.getByTestId(`manage-views-action-config-${VIEWABLE.id}`));
-    await waitFor(() => expect(onConfigView).toHaveBeenCalledWith(VIEWABLE.id));
+    renderDialog([FACTORY], { onConfigView });
+    open(screen.getByTestId(`manage-views-actions-${FACTORY.id}`));
+    fireEvent.click(screen.getByTestId(`manage-views-action-config-${FACTORY.id}`));
+    await waitFor(() => expect(onConfigView).toHaveBeenCalledWith(FACTORY.id));
   });
 
-  it('without the flag a read-only row is as before: no `…` trigger, no configuration entry', () => {
-    renderDialog([{ ...VIEWABLE, readonlyConfigViewable: undefined }]);
-    expect(screen.queryByTestId(`manage-views-actions-${VIEWABLE.id}`)).toBeNull();
-    expect(screen.queryByTestId(`manage-views-action-config-${VIEWABLE.id}`)).toBeNull();
-  });
-
-  it('on a mutable row the flag changes nothing: every entry, "Edit view config"', () => {
-    renderDialog([{ ...EDITABLE, readonlyConfigViewable: true }], { onDuplicate: vi.fn() });
-    open(screen.getByTestId(`manage-views-actions-${EDITABLE.id}`));
+  it('without the flag a row is as before: all six entries, "Edit view config", Delete under a separator', () => {
+    renderDialog([{ ...FACTORY, definitionReadonly: undefined }], { onDuplicate: vi.fn() });
+    open(screen.getByTestId(`manage-views-actions-${FACTORY.id}`));
     expect(menuShape()).toEqual([
       'menuitem', 'menuitem', 'menuitem', 'menuitem', 'menuitem', 'separator', 'menuitem',
     ]);
-    expect(screen.getByTestId(`manage-views-action-config-${EDITABLE.id}`)).toHaveTextContent('Edit view config');
+    expect(screen.getByTestId(`manage-views-action-config-${FACTORY.id}`)).toHaveTextContent('Edit view config');
+    expect(screen.getByTestId(`manage-views-action-delete-${FACTORY.id}`)).toBeInTheDocument();
+  });
+
+  it('`readonly` wins: a read-only row with the flag is as any read-only row (no `…`, lock drawn)', () => {
+    renderDialog([{ ...READONLY, definitionReadonly: true }]);
+    expect(screen.queryByTestId(`manage-views-actions-${READONLY.id}`)).toBeNull();
+    expect(screen.getByTestId(`manage-views-readonly-${READONLY.id}`)).toBeInTheDocument();
   });
 });
 
