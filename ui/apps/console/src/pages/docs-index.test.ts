@@ -78,7 +78,7 @@ describe('groupBooksByApp (objectstack#35424)', () => {
 });
 
 describe('the full-text search (objectstack#35424)', () => {
-  const listed = new Set(BOOKS.map((b) => b.name));
+  const listed = new Map(CARDS.map((c) => [c.name, c.label] as const));
   const SEARCHABLE = [
     { name: 'crm_start', label: 'Getting started', content: '# Welcome\n\nSign in, then open **Leads**.', packageId: 'app.crm' },
     { name: 'crm_quotes', label: 'Quotes', description: 'Leads become quotes', content: 'A quote expires after 30 days.', packageId: 'app.crm.revenue' },
@@ -101,9 +101,18 @@ describe('the full-text search (objectstack#35424)', () => {
   });
 
   it('answers no article of a book the page does not list', () => {
-    const withoutSetup = new Set([...listed].filter((b) => b !== 'com.objectstack.setup'));
+    const withoutSetup = new Map([...listed].filter(([b]) => b !== 'com.objectstack.setup'));
     expect(searchDocs('permission', SEARCHABLE, BOOKS, DOCS, withoutSetup)).toEqual([]);
     expect(searchDocs('permission', SEARCHABLE, BOOKS, DOCS, listed).map((h) => h.doc)).toEqual(['setup_overview']);
+  });
+
+  it('names a hit\'s book as the page\'s card does: an implicit book by its app, not its package', () => {
+    const groups = groupBooksByApp(BOOKS, CARDS, DOCS, [SETUP, SALES, SERVICE]);
+    const asListed = new Map(groups.flatMap((g) => g.cards.map((c) => [c.name, c.label] as const)));
+    const [hit] = searchDocs('permission', SEARCHABLE, BOOKS, DOCS, asListed);
+    expect(hit).toMatchObject({ doc: 'setup_overview', bookLabel: 'System Settings' });
+    // CONTROL: the book's own label is its package's humanized id.
+    expect(BOOKS.find((b) => b.name === 'com.objectstack.setup')?.label).not.toBe('System Settings');
   });
 
   it('searches the words a reader sees: no diagram source, no markup', () => {

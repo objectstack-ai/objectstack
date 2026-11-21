@@ -231,14 +231,16 @@ export function markTerms(text: string, terms: string[]): SnippetPart[] {
  * body, best first: a title match outranks a summary match, which outranks the
  * body; then the more often the words occur, the higher. Only articles that
  * read in one of `listedBooks` are answered, so the search never offers a doc
- * the page itself does not list.
+ * the page itself does not list; each hit names its book as the page's card
+ * does (`listedBooks` maps a listed book's name to its card label, so an
+ * implicit book reads as its app, not its package).
  */
 export function searchDocs(
   query: string,
   searchable: SearchableDoc[],
   books: Book[],
   docs: ResolverDoc[],
-  listedBooks: ReadonlySet<string>,
+  listedBooks: ReadonlyMap<string, string>,
   limit = 50,
 ): DocSearchHit[] {
   const terms = searchTerms(query);
@@ -270,7 +272,7 @@ export function searchDocs(
       ? snippetAround(body, first, terms)
       : markTerms(item.description ?? '', terms);
     scored.push({
-      hit: { doc: item.name, label, bookSlug: bookSlug(book), bookLabel: book.label ?? book.name, snippet },
+      hit: { doc: item.name, label, bookSlug: bookSlug(book), bookLabel: listedBooks.get(book.name) ?? book.label ?? book.name, snippet },
       score,
     });
   }

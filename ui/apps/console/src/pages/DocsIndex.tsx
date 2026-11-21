@@ -61,7 +61,11 @@ export default function DocsIndex() {
     [apps, appLabel],
   );
   const groups = useMemo(() => groupBooksByApp(books, cards, docs, indexApps), [books, cards, docs, indexApps]);
-  const listedBooks = useMemo(() => new Set(groups.flatMap((g) => g.cards.map((c) => c.name))), [groups]);
+  // Each listed book's name → its card's label, which a search hit names its book by.
+  const listedBooks = useMemo(
+    () => new Map(groups.flatMap((g) => g.cards.map((c) => [c.name, c.label] as const))),
+    [groups],
+  );
 
   const contents = useDocContents(searching);
   const hits = useMemo(
