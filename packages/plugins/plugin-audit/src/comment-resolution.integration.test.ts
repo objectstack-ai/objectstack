@@ -116,25 +116,31 @@ describe('sys_comment — a thread can be resolved and reopened (#36071)', () =>
     expect(await resolution(id)).toEqual({ is_resolved: false, resolved_by: null, resolved_at: null });
   });
 
-  it('a client-supplied resolver or time never lands: stripped and reported, the session user stored', async () => {
+  it('a client-supplied resolver or time never lands: the stamp replaces it, or it is stripped and reported', async () => {
     const { thread } = await newBoard();
     const id = await post(thread, 'question');
-    const drops: Row[] = [];
+    // Resolving: the stamp's own write replaces the client's value.
     await engine.update(
       COMMENT,
       { is_resolved: true, resolved_by: 'u_forged', resolved_at: FORGED },
-      { where: { id }, context: RESOLVER, onFieldsDropped: (e: Row) => drops.push(e) } as any,
+      { where: { id }, context: RESOLVER },
     );
     const row = await resolution(id);
     expect(row.resolved_by).toBe(RESOLVER.userId);
     expect(row.resolved_at).not.toBe(FORGED);
+
+    // Without a change of is_resolved there is no stamp: the client's values
+    // are stripped and reported, and the stored resolution stands.
+    const drops: Row[] = [];
+    await engine.update(
+      COMMENT,
+      { resolved_by: 'u_forged', resolved_at: FORGED },
+      { where: { id }, context: AUTHOR, onFieldsDropped: (e: Row) => drops.push(e) } as any,
+    );
+    expect(await resolution(id)).toEqual(row);
     expect(drops).toEqual([
       expect.objectContaining({ object: COMMENT, reason: 'readonly', fields: expect.arrayContaining(['resolved_by', 'resolved_at']) }),
     ]);
-
-    // Without a change of is_resolved, a client cannot move or clear them either.
-    await engine.update(COMMENT, { resolved_by: null, resolved_at: null }, { where: { id }, context: AUTHOR });
-    expect((await resolution(id)).resolved_by).toBe(RESOLVER.userId);
   });
 
   it('resolving an already-resolved thread keeps its first resolver', async () => {
