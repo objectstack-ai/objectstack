@@ -277,7 +277,7 @@ export type {
   CommentThreadData,
   CommentAvatarProps,
   CommentItemProps,
-  CommentThreadProps,
+  RecordCommentThreadProps,
   CommentItemActions,
   CommentComposerProps,
   CommentHoverActionsProps,

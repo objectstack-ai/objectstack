@@ -12,7 +12,7 @@ export { useRecordComments, type RecordCommentsData } from './useRecordComments'
 export { buildCommentThreads, latestRepliers, type CommentThreadData } from './commentThreads';
 export { CommentAvatar, type CommentAvatarProps } from './CommentAvatar';
 export { CommentItem, type CommentItemProps } from './CommentItem';
-export { CommentThread, type CommentThreadProps, type CommentItemActions } from './CommentThread';
+export { CommentThread, type RecordCommentThreadProps, type CommentItemActions } from './CommentThread';
 export { CommentComposer, type CommentComposerProps } from './CommentComposer';
 export { CommentHoverActions, type CommentHoverActionsProps } from './CommentHoverActions';
 export { CommentsPanel, type CommentsPanelProps } from './CommentsPanel';

@@ -31,7 +31,7 @@ export interface CommentItemActions {
   onDelete?: () => void;
 }
 
-export interface CommentThreadProps {
+export interface RecordCommentThreadProps {
   thread: CommentThreadData;
   /** The writes, as `useRecordComments` hands them. */
   comments: Pick<
@@ -63,7 +63,7 @@ function ownComment(item: FeedItem): boolean {
  * the caret in the reply box; a reply always answers the thread's first
  * comment.
  */
-export const CommentThread: React.FC<CommentThreadProps> = ({
+export const CommentThread: React.FC<RecordCommentThreadProps> = ({
   thread,
   comments,
   mode = 'expand',
