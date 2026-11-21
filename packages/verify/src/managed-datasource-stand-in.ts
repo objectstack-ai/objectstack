@@ -28,6 +28,13 @@
 // read by `bootStack` before it composes anything), naming the datasource and
 // the driver id. There is no switch around that refusal.
 //
+// The same bypass is open by NAME: the connection service keeps any driver
+// already registered under a datasource's name, whatever driver id it
+// declares. So `bootStack` also mounts {@link createManagedDatasourceDriverGuard}
+// first, which refuses the boot before any plugin starts when a plugin has
+// registered a driver under a managed datasource's name, a shipped id
+// (`mongodb`, `postgres`, …) included.
+//
 // A datasource ObjectStack does not own (`schemaMode` `external` or
 // `validate-only`) keeps its real driver: reads reach it, and `deriveCrudCases`
 // (`./derive.ts`) keeps every derived write off its objects.
@@ -112,6 +119,17 @@ function declaredDatasources(config: unknown): Array<Record<string, unknown>> {
     .map(([key, ds]) => ({ name: key, ...(ds as Record<string, unknown>) }));
 }
 
+/** Every datasource the app declares that is MANAGED ({@link isManagedDatasource}), other than `default`. */
+function managedDeclaredDatasources(config: unknown): UnstandableManagedDatasource[] {
+  const found: UnstandableManagedDatasource[] = [];
+  for (const ds of declaredDatasources(config)) {
+    const name = typeof ds.name === 'string' ? ds.name : String(ds.name);
+    if (name === 'default' || !isManagedDatasource(ds)) continue;
+    found.push({ name, driver: ds.driver });
+  }
+  return found;
+}
+
 /**
  * Every datasource the app declares that is MANAGED ({@link isManagedDatasource})
  * on a driver id the platform does not ship, other than `default` (which is
@@ -119,28 +137,102 @@ function declaredDatasources(config: unknown): Array<Record<string, unknown>> {
  * refuses to boot when this is not empty.
  */
 export function unstandableManagedDatasources(config: unknown): UnstandableManagedDatasource[] {
-  const found: UnstandableManagedDatasource[] = [];
-  for (const ds of declaredDatasources(config)) {
-    const name = typeof ds.name === 'string' ? ds.name : String(ds.name);
-    if (name === 'default' || !isManagedDatasource(ds)) continue;
-    if (managedStandInEngine(ds.driver, 'sqlite-wasm') !== undefined) continue;
-    found.push({ name, driver: ds.driver });
-  }
-  return found;
+  return managedDeclaredDatasources(config).filter(
+    (ds) => managedStandInEngine(ds.driver, 'sqlite-wasm') === undefined,
+  );
+}
+
+/** `datasource "NAME" (driver "ID")`, or `(no driver declared)` when the declaration names none. */
+function describeDatasources(found: readonly UnstandableManagedDatasource[]): string {
+  return found
+    .map((ds) => {
+      const driver =
+        ds.driver === undefined || ds.driver === null || ds.driver === ''
+          ? 'no driver declared'
+          : `driver ${JSON.stringify(ds.driver)}`;
+      return `datasource "${ds.name}" (${driver})`;
+    })
+    .join(', ');
 }
 
 /** The sentence `os verify` exits non-zero with when it refuses such a boot. */
 export function unstandableManagedDatasourceRefusal(found: readonly UnstandableManagedDatasource[]): string {
-  const named = found.map((ds) => `datasource "${ds.name}" (driver ${JSON.stringify(ds.driver)})`).join(', ');
   const one = found.length === 1;
   return (
-    `verify: refusing to boot: ${named} ${one ? 'is' : 'are'} managed on a driver id the platform does not ` +
-    `ship, so ${one ? 'it is' : 'they are'} supplied by a plugin. Verify writes only to stores it creates: it ` +
-    'runs every managed datasource on an ephemeral in-memory stand-in, and it has none for a driver it does not ' +
-    "ship. Booted anyway, the plugin's own driver would take the app's seed, hooks and flows to the real " +
-    `database ${one ? 'that datasource names' : 'those datasources name'}. There is no switch around this ` +
-    'refusal: verify a configuration that does not declare ' + (one ? 'it' : 'them') + '.'
+    `verify: refusing to boot: ${describeDatasources(found)} ${one ? 'is' : 'are'} managed and ` +
+    `${one ? 'names' : 'name'} no driver id the platform ships (a plugin's driver, or a misspelling), so verify ` +
+    'has no in-memory stand-in for ' + (one ? 'it' : 'them') + '. Verify writes only to stores it creates: it ' +
+    'runs every managed datasource on an ephemeral in-memory stand-in, and a driver a plugin registers under ' +
+    "that name would otherwise take the app's seed, hooks and flows to the real database behind it. There is " +
+    'no switch around this refusal: correct the driver id, or verify a configuration that does not declare ' +
+    (one ? 'it' : 'them') + '.'
   );
+}
+
+/** The sentence `os verify` exits non-zero with when a driver is already registered under a managed datasource's name. */
+function foreignManagedDriverRefusal(found: readonly UnstandableManagedDatasource[]): string {
+  const one = found.length === 1;
+  return (
+    `verify: refusing to boot: ${describeDatasources(found)} ${one ? 'is' : 'are'} managed, but a plugin ` +
+    `registered a driver of its own under ${one ? "that datasource's name" : "those datasources' names"}. The ` +
+    "datasource connection service keeps a driver registered under the datasource's name, so the boot would " +
+    "run on that driver instead of verify's in-memory stand-in, and the app's seed, hooks and flows and " +
+    "verify's own writes would reach whatever store it is connected to. Verify writes only to stores it " +
+    'creates. There is no switch around this refusal: verify a configuration that does not register a driver ' +
+    `under ${one ? 'that name' : 'those names'}.`
+  );
+}
+
+/**
+ * The guard `bootStack` mounts FIRST on its kernel when the app declares a
+ * managed datasource other than `default`, or `undefined` when it declares none.
+ *
+ * Why it is needed beside {@link unstandableManagedDatasources}: the datasource
+ * connection service answers `already-registered` for a datasource whose NAME
+ * the engine already holds a driver under, without reading its declared driver
+ * id, so verify's factory is never asked. A plugin that registers
+ * `driver.NAME` (the shape `DriverPlugin` and `driver-odata` use) for a
+ * managed datasource that declares a SHIPPED id would otherwise run the
+ * datasource on its own driver. This guard refuses that boot, naming the
+ * datasource and its declared driver id.
+ *
+ * Why its `start()` is the point: the kernel initialises every plugin before
+ * it starts any, and plugins register drivers in `init()` (ObjectQL adopts
+ * `driver.*` services in its own `start()`), so at the first `start()` every
+ * such registration is visible and no plugin has yet synced a schema, seeded,
+ * or connected a declared datasource. A driver registered later cannot take
+ * the name: the connection service has registered verify's stand-in by then,
+ * and the engine keeps the first driver registered under a name.
+ */
+export function createManagedDatasourceDriverGuard(config: unknown):
+  | { name: string; version: string; init: () => Promise<void>; start: (ctx: ManagedDriverGuardContext) => Promise<void> }
+  | undefined {
+  const managed = managedDeclaredDatasources(config);
+  if (managed.length === 0) return undefined;
+  return {
+    name: 'com.objectstack.verify.managed-datasource-driver-guard',
+    version: '1.0.0',
+    async init(): Promise<void> {},
+    async start(ctx: ManagedDriverGuardContext): Promise<void> {
+      const services = ctx.getServices();
+      let engine: { getDriverByName?: (name: string) => unknown } | undefined;
+      try {
+        engine = ctx.getService('objectql') as typeof engine;
+      } catch {
+        engine = undefined;
+      }
+      const foreign = managed.filter(
+        (ds) => services.has(`driver.${ds.name}`) || !!engine?.getDriverByName?.(ds.name),
+      );
+      if (foreign.length > 0) throw new Error(foreignManagedDriverRefusal(foreign));
+    },
+  };
+}
+
+/** What the guard reads from its plugin context. */
+export interface ManagedDriverGuardContext {
+  getServices(): Map<string, unknown>;
+  getService(name: string): unknown;
 }
 
 export interface VerifyDatasourceDriverFactoryOptions {

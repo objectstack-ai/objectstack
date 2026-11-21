@@ -43,8 +43,11 @@
 // driver id the platform does not ship (a plugin's) cannot be stood in: the
 // plugin registers its own driver, which the boot would then write through, so
 // `bootStack` refuses to boot while one is declared, naming the datasource and
-// the driver id, before it composes anything. There is no switch around that
-// refusal. Only the local flow run refuses a write to any object routed away
+// the driver id, before it composes anything. The same holds by NAME: a
+// plugin that registers a driver under a managed datasource's name would be
+// kept by the connection service whatever driver id the datasource declares,
+// so a guard started before every other plugin refuses that boot too. There
+// is no switch around either refusal. Only the local flow run refuses a write to any object routed away
 // from the default store (`flow-run.ts`).
 // `verify.external-datasource-no-writes.test.ts` pins the external half and
 // `verify.managed-datasource-stand-in.test.ts` the managed one.
@@ -76,6 +79,7 @@ import { createHostImporter, hostImportFailureKind } from '@objectstack/types/no
 import { materializeStackPlugin, resolveCapabilityArgument } from '@objectstack/core';
 import { createHandle, type VerifyHandle } from './handle.js';
 import {
+  createManagedDatasourceDriverGuard,
   createVerifyDatasourceDriverFactory,
   unstandableManagedDatasourceRefusal,
   unstandableManagedDatasources,
@@ -1081,6 +1085,12 @@ async function bootClaimed(
   // so the dogfood gate exercises the real declared-default connect path (the
   // §Risk mitigation the ADR promised), not the legacy pre-built DriverPlugin
   // escape hatch.
+  // Mounted FIRST so its start() runs before any other plugin's: it refuses
+  // the boot when a plugin registered a driver under a declared managed
+  // datasource's name, which the connection service would keep in place of
+  // verify's stand-in (`./managed-datasource-stand-in.ts`). No switch.
+  const managedDriverGuard = createManagedDatasourceDriverGuard(config);
+  if (managedDriverGuard) await kernel.use(managedDriverGuard as never);
   await kernel.use(new ObjectQLPlugin());
   const databaseDriver = opts.databaseDriver ?? 'sqlite-wasm';
   await kernel.use(new DefaultDatasourcePlugin({

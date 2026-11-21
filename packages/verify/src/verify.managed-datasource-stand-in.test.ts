@@ -33,8 +33,10 @@
  * driver id refuses the boot before anything is composed, naming the
  * datasource and the driver id, and the plugin's recording driver is never
  * called; its CONTROL is the same plugin driver behind an external datasource
- * in the boot above, which a REST write reaches. A third and fourth pin the
- * factory and the refusal reader without a boot.
+ * in the boot above, which a REST write reaches. A third pins the same refusal
+ * keyed on the NAME: a plugin that registers a driver under a managed
+ * `mongodb` datasource's name refuses the boot before its driver is called.
+ * The last two pin the factory and the refusal reader without a boot.
  *
  * ⚠️ This suite resolves `@objectstack/runtime` and the service packages
  * through their BUILT `dist/`. Rebuild them before trusting a run of this file.
@@ -516,6 +518,55 @@ describe("os verify refuses to boot while a managed datasource on a plugin's dri
   });
 });
 
+describe("os verify refuses to boot when a plugin registers a driver under a managed datasource's name", () => {
+  // A SHIPPED driver id (`mongodb`), so the declaration alone passes; the
+  // connection service would keep the plugin's driver registered under the
+  // datasource's name instead of asking verify's factory.
+  const SHADOWED_DS = 'vmd_docs_ds';
+  const shadowedCalls: Call[] = [];
+  const shadowedStack = defineStack({
+    manifest: {
+      id: 'com.objectstack.verify.managed-stand-in-shadowed',
+      namespace: 'vmd',
+      version: '0.0.0',
+      type: 'app',
+      name: 'Managed Name Shadowed Fixture',
+      description: "An app whose plugin registers a driver under a managed mongodb datasource's name.",
+    },
+    datasources: [
+      { name: SHADOWED_DS, label: 'Docs (managed mongodb)', driver: 'mongodb', schemaMode: 'managed', config: { url: 'mongodb://127.0.0.1:1/vmd' } },
+    ],
+    objects: [
+      {
+        name: 'vmd_doc',
+        label: 'Doc',
+        pluralLabel: 'Docs',
+        datasource: SHADOWED_DS,
+        sharingModel: 'public_read_write',
+        fields: { name: { type: 'text', label: 'Name' } },
+      },
+    ],
+    data: [{ object: 'vmd_doc', mode: 'upsert', externalId: 'name', records: [{ name: 'SEED' }] }],
+    plugins: [recordingDriverPlugin(SHADOWED_DS, shadowedCalls)],
+  } as never);
+
+  it('the boot is refused, naming the datasource and its declared driver id, and the plugin driver receives no call', async () => {
+    const refusal = await bootStack(shadowedStack as never, {}).then(
+      async (stack) => {
+        await stack.stop();
+        return undefined;
+      },
+      (e: unknown) => e as Error,
+    );
+    expect(refusal).toBeInstanceOf(Error);
+    expect(refusal?.message).toContain(`datasource "${SHADOWED_DS}" (driver "mongodb")`);
+    expect(refusal?.message).toContain('registered a driver of its own');
+    // The plugin did register its driver (init ran); the driver itself was never called: no
+    // connect, no schema sync, no seed write.
+    expect(shadowedCalls).toEqual([{ method: 'plugin.init' }]);
+  });
+});
+
 describe('unstandableManagedDatasources — which declarations refuse the boot', () => {
   const judged = (datasources: unknown) => unstandableManagedDatasources({ datasources });
 
@@ -550,6 +601,12 @@ describe('unstandableManagedDatasources — which declarations refuse the boot',
 
   it('reads a name-keyed map the way the harness does', () => {
     expect(judged({ plug: { driver: 'acme-plugin-driver' } })).toEqual([{ name: 'plug', driver: 'acme-plugin-driver' }]);
+  });
+
+  it('a declaration that names no driver is said so, not printed as undefined', () => {
+    expect(unstandableManagedDatasourceRefusal([{ name: 'a', driver: undefined }])).toContain(
+      'datasource "a" (no driver declared)',
+    );
   });
 
   it('the refusal names every one of them', () => {
