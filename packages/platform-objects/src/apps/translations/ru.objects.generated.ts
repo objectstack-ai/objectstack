@@ -328,6 +328,11 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      remove_user_manager: {
+        label: "Удалить руководителя",
+        confirmText: "Удалить руководителя этого пользователя? Пока руководитель не будет назначен снова, пользователь никому не подчиняется; маршрутизация согласований и область записей own_and_reports следуют этому изменению.",
+        successMessage: "Руководитель удалён"
+      },
       list_platform_admins: {
         label: "Администраторы платформы",
         resultDialog: {
