@@ -38,6 +38,10 @@ import React from 'react';
 import { render, cleanup, waitFor, screen } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
+// AppContent reaches the console's dynamic `@objectstack/lint` imports; their
+// first load is paid here, at collection, never inside a case's clock
+// (`check:test-source-alias`).
+import '@objectstack/lint';
 import { RECORD_SURFACE_PAGE_THRESHOLD } from '@object-ui/plugin-view';
 
 /** The part of the modal's schema this file reads. */
