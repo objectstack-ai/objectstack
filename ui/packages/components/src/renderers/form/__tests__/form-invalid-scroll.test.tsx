@@ -27,6 +27,8 @@ import { toast } from '../../../ui/sonner';
 // cold transform is billed to `hookTimeout`, which is why this carried a raised
 // timeout. See object-ui/no-dynamic-import-in-test-hook (objectui#3010/#3021).
 import '../../../renderers';
+// The renderers reach `react-runtime` through a dynamic import: pay its load at collection.
+import '@object-ui/react-runtime';
 
 let toastErrorSpy: ReturnType<typeof vi.spyOn>;
 
