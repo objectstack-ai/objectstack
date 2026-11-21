@@ -102,11 +102,16 @@ describe('showcase_task record action locations have a stock host (#22030)', () 
       expect(result.data?.actions).toEqual(ids);
     });
 
-    it('lists the task\'s whole record_header / record_more set — what the synthesized header carries', () => {
+    it('lists the task\'s whole record_header / record_more set — what the synthesized header carries — but the section bar\'s', () => {
       expect(ids.every((id) => typeof id === 'string')).toBe(true);
       expect(new Set(ids).size, 'no id is listed twice').toBe(ids.length);
+      // An action placed at record_section AND record_more is drawn on this
+      // page by the quick-actions bar; `record_more` is its place on the
+      // standard page a phone or the drawer draws (objectstack#36150), so the
+      // authored header leaves it out (see the record_section block below).
       const headerSet = taskActions
         .filter((a) => declares('record_header')(a) || declares('record_more')(a))
+        .filter((a) => !declares('record_section')(a))
         .map((a) => a.name as string);
       expect([...ids].sort()).toEqual([...headerSet].sort());
     });
@@ -183,13 +188,22 @@ describe('showcase_task record action locations have a stock host (#22030)', () 
       expect(names.length).toBeGreaterThan(0);
       expect(headerIds.length).toBeGreaterThan(0);
       expect(names.filter((n) => headerIds.includes(n))).toEqual([]);
-      // And by declaration: no task action is placed both in the header's
-      // locations and in the bar's, so a synthesized page cannot double it either.
-      const doubled = taskActions
+      // By declaration: no task action is placed both in the bar's location and
+      // INLINE in a header, so neither page draws one twice in view.
+      const inlineToo = taskActions
         .filter(declares('record_section'))
-        .filter((a) => declares('record_header')(a) || declares('record_more')(a))
+        .filter(declares('record_header'))
         .map((a) => a.name);
-      expect(doubled).toEqual([]);
+      expect(inlineToo).toEqual([]);
+    });
+
+    it('reaches every record_section action on the standard page too, under the ⋯ overflow (objectstack#36150)', () => {
+      // A phone and the side drawer draw the standard page, which has no
+      // section bar: an action the bar hosts is found there through its
+      // `record_more` location, which the synthesized header reads.
+      const sectionSet = taskActions.filter(declares('record_section'));
+      expect(sectionSet.length).toBeGreaterThan(0);
+      expect(sectionSet.filter((a) => !declares('record_more')(a)).map((a) => a.name)).toEqual([]);
     });
   });
 

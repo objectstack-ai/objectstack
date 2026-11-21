@@ -2623,7 +2623,8 @@ describe('RecordDetailView.recordTabRowUrl-27524', () => {
  *   - the premise, re-read live: the spec refuses each such page at `regions`;
  *   - a `full` page whose region places nothing, and one with no `regions`,
  *     draw the explanation naming the page, and no page body at all;
- *   - the record drawer draws the same explanation;
+ *   - the record drawer draws the standard page, with no explanation: an
+ *     authored page applies on the desktop full page only (objectstack#36150);
  *   - CONTROLS: the same page placing a component draws that page; a `slotted`
  *     page with no slots, and no assigned page, draw the default record page.
  */
@@ -2756,10 +2757,11 @@ describe('RecordDetailView.recordPagePlacesNoComponent-32478', () => {
     expect(panel.textContent).not.toContain('"{{name}}"');
   });
 
-  it('the record drawer explains it the same way', async () => {
+  it('the record drawer draws the standard page and no explanation: the authored page does not apply there (objectstack#36150)', async () => {
     const { container } = await mount([PLACES_NOTHING], true);
-    expect((await screen.findByTestId('record-page-places-no-component')).textContent).toContain(PAGE);
-    expect(container.querySelector('[data-page-type]')).toBeNull();
+    await waitFor(() => expect(container.querySelector('[data-page-type="record"]')).not.toBeNull());
+    expect(container.querySelector(`[aria-label="${PAGE}"]`)).toBeNull();
+    expect(screen.queryByTestId('record-page-places-no-component')).toBeNull();
   });
 
   it('CONTROL: the same page placing a component draws that page, and no explanation', async () => {
