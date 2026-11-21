@@ -246,9 +246,17 @@ The sandbox is handed a **JSON snapshot** of these (built by
 | `ctx.text` | `(key, params?) => Promise<string>` | A declared sentence in the organization's language — [`texts`](#declared-texts-texts). |
 | `ctx.title` | `(field?) => Promise<string \| null>` | **Name the record, not its id.** `ctx.title()` resolves this object's `nameField`, a **formula** included (no extra read); `ctx.title('account_id')` resolves a lookup's title (needs `api.read`). `null` when there is no title, never the id. **Per door:** `body` has it; a deprecated `handler` gets it at runtime, undeclared on `HookContext` (TS2339 when annotated) — use `body`; `ql.registerHook` and a bare `ObjectQL` `bindHooks` lack it. |
 
-(Action bodies additionally receive `ctx.recordId` and `ctx.record`, and their
+Action bodies additionally receive `ctx.recordId` and `ctx.record`, and their
 wrap is `(async (input, ctx) => { … })(input, ctx)` — the action params arrive as
-the first arg.)
+the first arg, so `input` and `ctx` are **already bound** in an action body.
+
+- **Refused when it declares them again:** `const input = ctx.input || {};` (or
+  `let ctx = …`) is `action-body-does-not-compile`: an **error** from
+  `os validate`, `os build`, `os lint` and a runtime action or object save
+  (`422 INVALID_METADATA`), naming the action, the `SyntaxError` and its line.
+  Fix: read the params as `input` (they are also `ctx.input`), or rename the
+  local (`const params = ctx.input || {};`). `os explain
+  action-body-does-not-compile` prints the rule.
 
 ### `ctx.api.object(name)` — the cross-object repo
 
