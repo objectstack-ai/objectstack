@@ -49,6 +49,8 @@ const createMemoryEngine = () => {
       : a === b;
   const matches = (row: any, where: Record<string, any> = {}) =>
     Object.entries(where).every(([k, v]) => {
+      // A conjunction of conditions, as the engine's predicate path takes one.
+      if (k === '$and' && Array.isArray(v)) return v.every((w) => matches(row, w));
       if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       const actual = row[k];
       if (v && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Date)) {
@@ -117,7 +119,15 @@ const createMemoryEngine = () => {
       // `delete` below is: this fake carries the ADOPTION write, so a fake looser
       // than the real engine would let a by-id update that ObjectQL refuses look
       // like a working adoption. `adopt-membership.ts` dispatches by scalar id.
-      assertEngineUpdateDispatch(patch, options);
+      const dispatch = assertEngineUpdateDispatch(patch, options);
+      // The predicate path (`multi: true`, a `where` and no id in the payload)
+      // writes every matching row and answers how many it wrote.
+      if (dispatch.kind === 'multi') {
+        const targets = rows(name).filter((r) => matches(r, options?.where));
+        for (const target of targets) assertMemberUnique(name, { ...target, ...patch }, target.id);
+        for (const target of targets) Object.assign(target, patch);
+        return targets.length;
+      }
       const row = rows(name).find((r) => r.id === patch.id);
       if (!row) return null;
       assertMemberUnique(name, { ...row, ...patch }, row.id);
