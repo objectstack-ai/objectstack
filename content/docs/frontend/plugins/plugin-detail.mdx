@@ -195,6 +195,41 @@ declare const handleAddComment: (text: string) => void;
 - **Positioning**: Panel can be placed at `bottom`, `right`, or `left` of the record view
 - **Collapsible**: Optional collapse/expand with configurable default state
 
+## The record's comment panel
+
+On the desktop console, a record's comments live in a panel of their own,
+opened from the comments icon in the record header (on the record page and in
+the record drawer), and no longer inside the 动态 (Activity) tab
+(objectstack#36075):
+
+- **The icon** shows how many top-level comments the record holds. A press
+  opens the panel, the next one closes it, and the browser remembers whether it
+  was left open, once for the record page and once for the drawer.
+- **The panel** is 380 px wide: 「评论」 and ✕ at the top, the threads oldest
+  first, the comment box at the foot. A thread's replies fold to 「N 条回复」
+  and open in place. A comment's actions (Reply, an emoji, and More with Edit
+  and Delete on your own comments) appear at its top right while the pointer is
+  over it.
+- **Where it sits**: beside the record from a 1280 px window, the record giving
+  way; over the record's right edge in a narrower window. In a drawer narrower
+  than 760 px (the default drawer is 720) it covers the drawer's body, and ✕ or
+  Esc returns to the record.
+- **The 动态 tab** then holds the system entries only: activity and field
+  changes, with no comment box and no All / Activity / Discussion chips. The
+  Changes chip stays where the record shows its field history; pressed again,
+  it goes back to every entry. The tab's count leaves the comments out.
+
+The panel and the icon come with the default record page and with a page that
+only fills its slots. A record page you author in full keeps the feed blocks it
+places (`record:discussion`, `record:activity`) exactly as before, and an object
+with `enable.feeds: false` shows no icon. On a phone the comments stay in the
+动态 tab.
+
+The components are exported from `@object-ui/plugin-detail` (`CommentsPanel`,
+`CommentsButton`, `CommentThread`, `CommentItem`, `CommentComposer`,
+`useRecordComments`); each reads the discussion off the host's
+`DiscussionContext`, as the feed blocks do.
+
 ## The `record:activity` block
 
 `RecordActivityTimeline` is a presenter: you hand it `items`. The SDUI block

@@ -17,8 +17,8 @@
  *
  * Pinned here, on the rendered page:
  *   1. a 500 on the comments read (payload part, and direct GET) shows the
- *      load-failure notice with a Retry, never the empty state, and the 动态
- *      tab names no count;
+ *      load-failure notice with a Retry, never the empty state, and names no
+ *      count (since objectstack#36075 in the comment panel, and on its icon);
  *   2. the same for the activity read;
  *   3. Retry re-reads only the failed source, directly, and the comments
  *      replace the notice once the server answers;
@@ -194,6 +194,7 @@ beforeEach(() => {
   __resetRecordApprovalsStore();
   RelatedCountStore._reset();
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+  window.localStorage.clear();
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
@@ -240,9 +241,28 @@ const faceOf = (c: HTMLElement) => c.querySelector('[data-related-enlarged="time
 const failedSources = (c: HTMLElement) =>
   Array.from(c.querySelectorAll('[data-failed-source]')).map((e) => e.getAttribute('data-failed-source'));
 const retryButton = (c: HTMLElement) => c.querySelector('[data-feed-retry]') as HTMLButtonElement | null;
-/** The 动态 tab's label, badge included. */
-const timelineTab = (c: HTMLElement) =>
-  Array.from(c.querySelectorAll('[role="tab"]')).find((t) => /^Activity/.test(t.textContent ?? ''))?.textContent;
+/**
+ * objectstack#36075 — on the default page the record's comments are the
+ * comment panel's, and so is a failed or refused comments read: the panel,
+ * opened from the header's comments icon (it stays open across a record
+ * switch).
+ */
+async function commentsPanelOf(c: HTMLElement, held: Held[]): Promise<HTMLElement> {
+  if (!c.querySelector('[data-comments-panel]')) {
+    const button = c.querySelector('[data-comments-button]') as HTMLElement | null;
+    expect(button, 'the header offers the comments icon').not.toBeNull();
+    await act(async () => { fireEvent.click(button!); });
+    await settle(held);
+  }
+  return c.querySelector('[data-comments-panel]') as HTMLElement;
+}
+const commentsNote = (panel: HTMLElement) =>
+  panel.querySelector('[data-comments-note]')?.getAttribute('data-comments-note') ?? null;
+const panelRetry = (panel: HTMLElement) =>
+  panel.querySelector('[data-comments-note="failed"] button') as HTMLButtonElement | null;
+const panelEmpty = (panel: HTMLElement) => panel.querySelector('[data-comments-empty]') !== null;
+/** The header icon's number, or `null` when it names none. */
+const commentsCount = (c: HTMLElement) => c.querySelector('[data-comments-count]')?.textContent ?? null;
 /** Open the record over an adapter that reads every stream on its own. */
 async function bootDirect(answers: Answers, search = '') {
   const booted = await boot(answers, search);
@@ -255,25 +275,27 @@ describe('objectstack#29188 — a failed comments read shows the load-failure no
     const { held, open } = await boot({ discussion: FAIL, activity: NO_ACTIVITY, attachments: { total: 0, records: [] } });
     const view = open();
     await settle(held);
-    const peek = peekOf(view.container);
-    expect(failedSources(peek)).toEqual(['comments']);
-    expect(peek.textContent).toContain(COMMENTS_FAILED);
-    expect(peek.textContent).not.toContain(EMPTY_ACTIVITY);
-    expect(retryButton(peek)).not.toBeNull();
+    // The comments icon names no count: unknown, not 0.
+    expect(commentsCount(view.container)).toBeNull();
+    const panel = await commentsPanelOf(view.container, held);
+    expect(commentsNote(panel)).toBe('failed');
+    expect(panel.textContent).toContain(COMMENTS_FAILED);
+    expect(panelEmpty(panel)).toBe(false);
+    expect(panelRetry(panel)).not.toBeNull();
     // Only the sentence: no status code, no server text, no table name.
-    expect(peek.textContent).not.toMatch(/500|DATABASE_ERROR|db down|sys_comment/);
-    // The stream's count is unknown, not 0.
-    expect(timelineTab(view.container)).toBe('Activity');
+    expect(panel.textContent).not.toMatch(/500|DATABASE_ERROR|db down|sys_comment/);
+    // The 动态 stream holds no comments, so a failed comments read is not its to report.
+    expect(failedSources(view.container).filter((s) => s === 'comments')).toEqual([]);
   });
 
   it('a 500 on a direct sys_comment read shows the same notice', async () => {
     const { held, open } = await bootDirect({ failGet: ['sys_comment'] });
     const view = open();
     await settle(held);
-    const peek = peekOf(view.container);
-    expect(failedSources(peek)).toEqual(['comments']);
-    expect(peek.textContent).not.toContain(EMPTY_ACTIVITY);
-    expect(timelineTab(view.container)).toBe('Activity');
+    expect(commentsCount(view.container)).toBeNull();
+    const panel = await commentsPanelOf(view.container, held);
+    expect(commentsNote(panel)).toBe('failed');
+    expect(panelEmpty(panel)).toBe(false);
   });
 
   it('Retry re-reads only the failed comments, directly, and draws them once the server answers', async () => {
@@ -282,9 +304,10 @@ describe('objectstack#29188 — a failed comments read shows the load-failure no
     const view = open();
     await settle(held);
     expect(streamReads(held)).toEqual([]);
-    expect(retryButton(peekOf(view.container))).not.toBeNull();
+    const panel = await commentsPanelOf(view.container, held);
+    expect(panelRetry(panel)).not.toBeNull();
 
-    await act(async () => { fireEvent.click(retryButton(peekOf(view.container))!); });
+    await act(async () => { fireEvent.click(panelRetry(panel)!); });
     await settle(held);
 
     // One direct comment read (and its reactions), never the activity again.
@@ -292,21 +315,21 @@ describe('objectstack#29188 — a failed comments read shows the load-failure no
     expect(readsOf(held, 'sys_activity')).toHaveLength(0);
     // The direct read answers an empty thread in this rig: the notice goes and
     // the empty state may speak now.
-    const peek = peekOf(view.container);
-    expect(failedSources(peek)).toEqual([]);
-    expect(retryButton(peek)).toBeNull();
-    expect(peek.textContent).toContain(EMPTY_ACTIVITY);
+    expect(commentsNote(panel)).toBeNull();
+    expect(panelRetry(panel)).toBeNull();
+    expect(panelEmpty(panel)).toBe(true);
   });
 
   it('a retry that fails again keeps the notice', async () => {
     const { held, open } = await bootDirect({ failGet: ['sys_comment'] });
     const view = open();
     await settle(held);
-    await act(async () => { fireEvent.click(retryButton(peekOf(view.container))!); });
+    const panel = await commentsPanelOf(view.container, held);
+    await act(async () => { fireEvent.click(panelRetry(panel)!); });
     await settle(held);
     expect(readsOf(held, 'sys_comment').length).toBeGreaterThanOrEqual(2);
-    expect(failedSources(peekOf(view.container))).toEqual(['comments']);
-    expect(peekOf(view.container).textContent).not.toContain(EMPTY_ACTIVITY);
+    expect(commentsNote(panel)).toBe('failed');
+    expect(panelEmpty(panel)).toBe(false);
   });
 });
 
@@ -318,8 +341,11 @@ describe('objectstack#29188 — a failed activity read shows the load-failure no
     const peek = peekOf(view.container);
     expect(failedSources(peek)).toEqual(['activity']);
     expect(peek.textContent).toContain(ACTIVITY_FAILED);
-    // The comment the discussion part carried still draws.
-    expect(peek.textContent).toContain('hello from the payload');
+    // The comment the discussion part carried still draws, in the comment
+    // panel (objectstack#36075), with no notice there.
+    const panel = await commentsPanelOf(view.container, held);
+    expect(panel.textContent).toContain('hello from the payload');
+    expect(commentsNote(panel)).toBeNull();
   });
 
   it('a 500 on a direct sys_activity read shows the notice', async () => {
@@ -357,10 +383,12 @@ describe('objectstack#29188 — controls', () => {
     });
     const view = open();
     await settle(held);
-    const peek = peekOf(view.container);
-    expect(peek.querySelector('[data-denied-source="comments"]')).not.toBeNull();
-    expect(failedSources(peek)).toEqual([]);
-    expect(retryButton(peek)).toBeNull();
+    const panel = await commentsPanelOf(view.container, held);
+    expect(commentsNote(panel)).toBe('denied');
+    expect(panelRetry(panel)).toBeNull();
+    expect(panel.querySelector('[data-comments-composer]')).toBeNull();
+    expect(failedSources(view.container)).toEqual([]);
+    expect(retryButton(view.container)).toBeNull();
   });
 });
 
@@ -387,15 +415,16 @@ describe('objectstack#30145 — navigating away from a failed feed read does not
     });
     const view = open();
     await settle(held);
-    expect(failedSources(peekOf(view.container))).toEqual(['comments']);
+    const panel = await commentsPanelOf(view.container, held);
+    expect(commentsNote(panel)).toBe('failed');
 
     await act(async () => { navigate(view, 'c2'); });
     await settle(held);
-    const peek = peekOf(view.container);
-    expect(failedSources(peek)).toEqual([]);
-    expect(retryButton(peek)).toBeNull();
-    expect(peek.textContent).not.toContain(COMMENTS_FAILED);
-    expect(peek.textContent).toContain(EMPTY_ACTIVITY);
+    const after = await commentsPanelOf(view.container, held);
+    expect(commentsNote(after)).toBeNull();
+    expect(panelRetry(after)).toBeNull();
+    expect(after.textContent).not.toContain(COMMENTS_FAILED);
+    expect(panelEmpty(after)).toBe(true);
   });
 
   it('record A settled on a failure; record B, answered with rows, draws its rows and no notice', async () => {
@@ -404,14 +433,17 @@ describe('objectstack#30145 — navigating away from a failed feed read does not
     });
     const view = open();
     await settle(held);
-    expect(failedSources(peekOf(view.container)).sort()).toEqual(['activity', 'comments']);
+    expect(failedSources(peekOf(view.container))).toEqual(['activity']);
+    const panel = await commentsPanelOf(view.container, held);
+    expect(commentsNote(panel)).toBe('failed');
 
     await act(async () => { navigate(view, 'c2'); });
     await settle(held);
-    const peek = peekOf(view.container);
-    expect(failedSources(peek)).toEqual([]);
-    expect(peek.textContent).not.toMatch(/couldn't load/);
-    expect(peek.textContent).toContain('hello from the payload');
+    expect(failedSources(view.container)).toEqual([]);
+    expect(view.container.textContent).not.toMatch(/couldn't load/);
+    const after = await commentsPanelOf(view.container, held);
+    expect(commentsNote(after)).toBeNull();
+    expect(after.textContent).toContain('hello from the payload');
   });
 
   it('A\'s read is still outstanding when B is opened: B shows its own state, and A\'s failure settling late stays off B', async () => {

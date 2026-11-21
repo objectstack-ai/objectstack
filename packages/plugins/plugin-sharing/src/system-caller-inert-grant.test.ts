@@ -63,6 +63,8 @@ import {
 } from '@objectstack/metadata-core';
 import { ERROR_CODE_LEDGER } from '@objectstack/spec/api';
 import { SharingService } from './sharing-service.js';
+import { inMembers } from './shared-record-ids.testkit.js';
+import { SharedRecordIds } from '@objectstack/spec/data';
 import { SharingRuleService } from './sharing-rule-service.js';
 import { backfillRuleGrants } from './sharing-plugin.js';
 
@@ -82,7 +84,8 @@ function makeEngine(schemas: Record<string, any>) {
       if (k === '$or' || k === '$and') continue;
       const rv = row[k];
       if (v != null && typeof v === 'object' && '$in' in (v as any)) {
-        if (!(v as any).$in.includes(rv)) return false;
+        // [ADR-0155] A share-grant leaf resolves over this double's own share rows.
+        if (!inMembers((v as any).$in, tables.sys_record_share).includes(rv)) return false;
         continue;
       }
       if (rv !== v) return false;
@@ -378,7 +381,7 @@ describe('[#8207] the sharing-rule evaluator can no longer materialise inert row
     // LIVE: the criteria-matched record is reachable, the unmatched one is not.
     expect(await sharing.canEdit('account', 'r1', { userId: 'usr_grantee' } as any)).toBe(false); // read-level grant
     const filter: any = await sharing.buildReadFilter('account', { userId: 'usr_grantee' } as any);
-    expect(filter.$or[1].id.$in).toEqual(['r1']);
+    expect(inMembers(filter.$or[1].id.$in, engine._tables.sys_record_share)).toEqual(['r1']);
   });
 
   it('the boot backfill still COMPLETES — one bad rule does not stop its siblings', async () => {
@@ -477,9 +480,11 @@ describe('[#25549] a public object admits a share to an external member of the r
     ).resolves.toMatchObject({ object_name: 'board', recipient_id: 'usr_ext', organization_id: 'org_a' });
     // The floored external reads the row it was handed beside the (empty) owner arm,
     // and not b2, which nobody shared to it.
-    expect(await svc.buildReadFilter('board', externalIn('org_a', 'usr_ext'))).toEqual({
-      $or: [{ owner_id: 'usr_ext' }, { id: { $in: ['b1'] } }],
+    const filter: any = await svc.buildReadFilter('board', externalIn('org_a', 'usr_ext'));
+    expect(filter).toEqual({
+      $or: [{ owner_id: 'usr_ext' }, { id: { $in: SharedRecordIds.read('board', 'usr_ext') } }],
     });
+    expect(inMembers(filter.$or[1].id.$in, engine._tables.sys_record_share)).toEqual(['b1']);
   });
 
   it('an INTERNAL recipient keeps the 422 — the row would never be consulted for it', async () => {
