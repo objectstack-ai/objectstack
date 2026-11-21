@@ -278,6 +278,8 @@ describe('MasterDetailForm under a create-only grant on the child (objectui#1208
 
   it('a create form\'s line cells are live: every line is an insert of the child', async () => {
     mountMD('create');
+    // A line to read (the grid draws no trailing entry row, objectstack#35507).
+    fireEvent.click(await waitFor(() => screen.getByTestId('line-items-add')));
     for (const el of [...(await cells('Instalment No.')), ...(await cells('Instalment notes'))]) {
       expect(el.disabled).toBe(false);
     }

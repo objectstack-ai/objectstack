@@ -187,7 +187,9 @@ describe('MasterDetailForm — non-atomic fallback (emulation via runBatchTransa
       return el;
     });
     fireEvent.change(input, { target: { value: 'PO-1' } });
-    // Fill the first (ghost) line so it persists as a real child row.
+    // Add and fill a first line so it persists as a real child row (the grid
+    // draws no trailing entry row, objectstack#35507).
+    fireEvent.click(await waitFor(() => screen.getByTestId('line-items-add')));
     const qty = await waitFor(() => screen.getAllByLabelText('Qty')[0] as HTMLInputElement);
     fireEvent.change(qty, { target: { value: '5' } });
   }
@@ -274,6 +276,8 @@ describe('MasterDetailForm — parent-scoped line rules ("paid invoice → lock 
       return el;
     });
     const qty = () => screen.getAllByLabelText('Qty')[0] as HTMLInputElement;
+    // A line to lock: the grid draws no trailing entry row (objectstack#35507).
+    fireEvent.click(await waitFor(() => screen.getByTestId('line-items-add')));
 
     // Header not paid → the Qty cell is editable.
     await waitFor(() => expect(qty().disabled).toBe(false));
@@ -298,6 +302,8 @@ describe('MasterDetailForm — parent-scoped line rules ("paid invoice → lock 
       return el;
     });
 
+    // A line to lock: the grid draws no trailing entry row (objectstack#35507).
+    fireEvent.click(await waitFor(() => screen.getByTestId('line-items-add')));
     fireEvent.change(status, { target: { value: 'paid' } });
     // The scrape-driven lock must NOT wipe the value the user just typed.
     await waitFor(() => expect((screen.getAllByLabelText('Qty')[0] as HTMLInputElement).disabled).toBe(true));
