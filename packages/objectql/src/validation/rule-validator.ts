@@ -4142,9 +4142,12 @@ function evaluateRule(rule: BaseRule, ctx: RuleContext): FieldValidationError | 
  * State-machine check.
  *
  * On UPDATE (with a prior record): if the state field changed, the new value
- * must appear in `transitions[oldValue]`. Lenient where it cannot reason (no
- * prior record, unchanged value, or a prior state with no declared transitions)
- * so it never blocks legitimate or legacy data.
+ * must appear in `transitions[oldValue]`, where `oldValue` is the STORED state.
+ * Clearing the field is a transition to the empty value `''`, judged the same
+ * way, so no sequence of writes leaves a state the machine would refuse to
+ * leave in one write. Lenient where it cannot reason (no prior record,
+ * unchanged value, or a prior state with no declared transitions) so it never
+ * blocks legitimate or legacy data.
  *
  * On INSERT: if the rule declares `initialStates` (#3165), the state field's
  * (defaulted) value must be one of them — the FSM entry point, since a `select`
@@ -4221,10 +4224,19 @@ function checkStateMachine(
   // The PATCH didn't touch the state field → no transition to validate.
   if (!(rule.field in data)) return null;
 
+  // Judged from the STORED state (`previous`), never from the payload.
   const from = previous[rule.field];
   const to = data[rule.field];
-  // No change, or clearing the value → nothing to enforce.
-  if (from === to || to === undefined || to === null) return null;
+  // Clearing the field is itself a transition — to the empty value, spelled
+  // `''` as a choice field's empty value is — and is judged like any other.
+  // Exempting it let a record leave any declared state, a dead-end included,
+  // in two writes the machine refuses as one: clear, then set (a cleared row's
+  // prior state is described by no key, so the lenient arm below admits
+  // whatever comes next). A state meant to be clearable lists `''` among its
+  // targets.
+  const cleared = isEmptyStateValue(to);
+  // No change: the same value, or an empty field written empty again.
+  if (from === to || (cleared && isEmptyStateValue(from))) return null;
 
   const fromKey = String(from);
   const allowed = rule.transitions[fromKey];
@@ -4232,8 +4244,8 @@ function checkStateMachine(
   // reason about its legal targets, so don't block.
   if (!Array.isArray(allowed)) return null;
 
-  if (!allowed.includes(String(to))) {
-    const toKey = String(to);
+  const toKey = cleared ? '' : String(to);
+  if (!allowed.includes(toKey)) {
     // `constraint` carries the raw option values a client acts on; the
     // built-in sentence names the same two states the way the user sees them.
     return fallback('invalid_transition', { from: fromKey, to: toKey }, undefined, () => {
@@ -4245,6 +4257,11 @@ function checkStateMachine(
     });
   }
   return null;
+}
+
+/** A state field carrying no state: absent, `null`, or the empty string. */
+function isEmptyStateValue(value: unknown): boolean {
+  return value === undefined || value === null || value === '';
 }
 
 /**
