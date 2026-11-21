@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { loadScenarioFile, readCapabilityAreas, type LoadedScenario } from '../src/index.js';
+import { ASK_KINDS, askKindCounts, askTurns, loadScenarioFile, readCapabilityAreas, type AskKind, type LoadedScenario } from '../src/index.js';
 import { namespacedScenario } from '../src/runner/namespace.js';
 import { buildPrompt, datasetQuestionPrompt, promptLanguageGaps } from '../src/runner/prompts.js';
 import { scoreGraph } from '../src/score/index.js';
@@ -36,6 +36,7 @@ afterAll(() => {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- a card is mutated as raw JSON on purpose
 type RawCard = any;
 
+const README = resolve(HERE, '../../../../docs/qa/scenarios/README.md');
 const raw = (id: string): RawCard => JSON.parse(readFileSync(join(CARDS, `${id}.json`), 'utf8'));
 
 function load(id: string, mutate: (c: RawCard) => void = () => {}) {
@@ -164,5 +165,93 @@ describe('the Build half checks each declared dataset on a built artifact', () =
     expect(fails((a) => a.datasets[0].dimensions.pop())).toEqual([['dataset-dimension:trip_plan.trip_status', 'missing']]);
     expect(fails((a) => (a.datasets[0].object = 'demotravel_employee'))).toEqual([['dataset:trip_plan', 'on demotravel_employee, not demotravel_trip_request']]);
     expect(fails((a) => a.datasets.pop()).map(([c]) => c)).toEqual(['dataset:claim_lines', 'dataset-measure:claim_lines.line_amount', 'dataset-dimension:claim_lines.expense_type']);
+  });
+});
+
+// ── Ask kinds: every question of a dataset card names the kind it asks, and the README's table is the cards' ──
+
+const question = (c: RawCard, id: string) => c.run.questions.find((x: { id: string }) => x.id === id);
+
+describe('the dataset cards name the kind of every question they ask, and ask every kind at least twice', () => {
+  const counts = (id: (typeof DATASET_CARDS)[number]) => {
+    const { card } = load(id);
+    return askKindCounts(card!.card, card!.personaTruths);
+  };
+
+  it.each(DATASET_CARDS)('%s: every question and dataset question names its kind', (id) => {
+    const c = load(id).card!.card;
+    expect([...c.run.questions, ...c.run.datasetQuestions!].filter((q) => q.askKind === undefined).map((q) => q.id)).toEqual([]);
+  });
+
+  it('across the two cards no kind is asked fewer than twice', () => {
+    const a = counts('order_to_cash');
+    const b = counts('travel_expense');
+    const short = ASK_KINDS.filter((k) => a[k] + b[k] < 2);
+    expect(short).toEqual([]);
+  });
+
+  it('a turn whose persona truth is withheld is a `forbidden` ask; the same question asked as a persona who may see it is the kind it names', () => {
+    const { card } = load('travel_expense');
+    const turns = askTurns(card!.card, card!.personaTruths).filter((t) => t.question === 'department_budgets');
+    expect(turns).toEqual([
+      { question: 'department_budgets', persona: 'employee', askKind: 'forbidden' },
+      { question: 'department_budgets', persona: 'dept_manager', askKind: 'group_sum' },
+    ]);
+  });
+
+  it('the README table states each card\'s count per kind, and the total, exactly as the cards ask them', () => {
+    const text = readFileSync(README, 'utf8');
+    const section = text.slice(text.indexOf('**What the open dataset cards ask, per kind**'));
+    const rows = new Map<string, number[]>();
+    for (const line of section.split('\n')) {
+      const m = /^\| `([a-z_]+)` \| (\d+) \| (\d+) \| (\d+) \|$/.exec(line);
+      if (m) rows.set(m[1]!, [Number(m[2]), Number(m[3]), Number(m[4])]);
+      else if (rows.size > 0 && !line.startsWith('|')) break;
+    }
+    const a = counts('order_to_cash');
+    const b = counts('travel_expense');
+    expect(Object.fromEntries(rows)).toEqual(Object.fromEntries(ASK_KINDS.map((k: AskKind) => [k, [a[k], b[k], a[k] + b[k]]])));
+  });
+});
+
+/** [case, card, mutation, the refusal's path, its message]. */
+const KIND_REFUSALS: Array<[string, (typeof DATASET_CARDS)[number], (c: RawCard) => void, string, RegExp]> = [
+  ['a question with no kind on a card that asks dataset questions', 'order_to_cash', (c) => delete question(c, 'open_receivables').askKind, 'run.questions[0].askKind', /names the kind of every question it asks/],
+  ['a dataset question with no kind', 'order_to_cash', (c) => delete dq(c, 'dq_bookings').askKind, 'run.datasetQuestions[0].askKind', /names the kind of every question it asks/],
+  ['a kind outside the closed set', 'order_to_cash', (c) => (question(c, 'open_receivables').askKind = 'trend'), 'run.questions[0].askKind', /Invalid option|expected one of/],
+  ['`top_n` on a truth that does not rank', 'order_to_cash', (c) => (question(c, 'open_receivables').askKind = 'top_n'), 'run.questions[0].askKind', /its truth is a `topN`/],
+  ['`count` on a grouped truth', 'order_to_cash', (c) => (question(c, 'receivables_aging').askKind = 'count'), 'run.questions[1].askKind', /with no `groupBy`/],
+  ['`group_sum` on a ranking', 'order_to_cash', (c) => (question(c, 'top_accounts_billed').askKind = 'group_sum'), 'run.questions[3].askKind', /with a `groupBy`/],
+  ['`time_range` with no window', 'order_to_cash', (c) => (question(c, 'receivables_aging').askKind = 'time_range'), 'run.questions[1].askKind', /filters with `in_window`/],
+  ['`join` with no relation path', 'order_to_cash', (c) => (question(c, 'receivables_aging').askKind = 'join'), 'run.questions[1].askKind', /relation path/],
+  ['`owner_latest` that groups by nobody', 'order_to_cash', (c) => (question(c, 'open_receivables').askKind = 'owner_latest'), 'run.questions[0].askKind', /groups by the person field/],
+  ['`unanswerable` on a question the seed answers', 'order_to_cash', (c) => (question(c, 'open_receivables').askKind = 'unanswerable'), 'run.questions[0].askKind', /only a question whose truth is `unanswerable`/],
+  ['an unanswerable truth named another kind', 'order_to_cash', (c) => (question(c, 'september_commission').askKind = 'count'), 'run.questions[9].askKind', /its kind is `unanswerable`/],
+  ['`business_term` on a question with a truth', 'order_to_cash', (c) => (question(c, 'open_receivables').askKind = 'business_term'), 'run.questions[0].askKind', /ask it as a dataset question/],
+  ['`forbidden` declared on a question one of its personas may see', 'travel_expense', (c) => (question(c, 'department_budgets').askKind = 'forbidden'), 'run.questions[8].askKind', /asked only as personas it is withheld from/],
+  ['a `metric_selected` dataset question named `ambiguous`', 'order_to_cash', (c) => (dq(c, 'dq_bookings').askKind = 'ambiguous'), 'run.datasetQuestions[0].askKind', /its kind is `business_term`/],
+  ['an `asked_back` dataset question named `business_term`', 'order_to_cash', (c) => (dq(c, 'dq_revenue').askKind = 'business_term'), 'run.datasetQuestions[2].askKind', /its kind is `ambiguous`/],
+  ['a `fallback_labelled` dataset question named `forbidden`', 'order_to_cash', (c) => (dq(c, 'dq_payment_count').askKind = 'forbidden'), 'run.datasetQuestions[4].askKind', /never `forbidden`/],
+];
+
+describe('the loader refuses an ask kind that does not fit its question, at `askKind`', () => {
+  it.each(KIND_REFUSALS)('%s', (_name, id, mutate, path, message) => {
+    const { card, refusals } = load(id, mutate);
+    expect(card).toBeUndefined();
+    const hit = refusals.filter((r) => r.path === path);
+    expect(hit.map((r) => r.message).join(' | ')).toMatch(message);
+  });
+
+  it('`forbidden` declared on a question asked only as a persona it is withheld from loads', () => {
+    const { refusals } = load('travel_expense', (c) => Object.assign(question(c, 'department_budgets'), { askKind: 'forbidden', personas: ['employee'] }));
+    expect(refusals).toEqual([]);
+  });
+
+  it('a card that asks no dataset question may leave its questions unnamed', () => {
+    const { refusals } = load('order_to_cash', (c) => {
+      delete c.run.datasetQuestions;
+      for (const q of c.run.questions) delete q.askKind;
+    });
+    expect(refusals).toEqual([]);
   });
 });

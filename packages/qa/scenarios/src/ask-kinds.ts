@@ -30,10 +30,12 @@ const FIGURE_KINDS = ['count', 'group_sum', 'top_n', 'time_range', 'join', 'owne
 
 /**
  * The kind one question turn asks: `forbidden` when the persona's truth is
- * `withheld`, otherwise the kind the question declares (`undefined` when it
- * declares none).
+ * `withheld`, otherwise the kind the question declares. A question that
+ * declares no kind has none on any turn, so a card that names no kinds
+ * reports none.
  */
 export function questionTurnKind(declared: AskKind | undefined, personaTruth: Truth | undefined): AskKind | undefined {
+  if (declared === undefined) return undefined;
   return personaTruth?.kind === 'withheld' ? 'forbidden' : declared;
 }
 
