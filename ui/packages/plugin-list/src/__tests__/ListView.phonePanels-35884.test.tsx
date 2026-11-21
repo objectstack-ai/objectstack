@@ -265,24 +265,28 @@ describe('phone panels and the on-screen keyboard (objectstack#35884)', () => {
   });
 });
 
-describe('SortBuilder, stacked layout (objectstack#35884)', () => {
+describe('the phone sort level, drawn in SortBuilder (objectstack#35884)', () => {
   const FIELDS = [
     { value: 'name', label: 'Name' },
     { value: 'amount', label: 'Amount' },
   ];
 
-  it('each level is two lines, the field over its direction', () => {
-    render(<SortBuilder layout="stacked" fields={FIELDS} value={[{ id: 'a', field: 'name', order: 'desc' }]} />);
+  it('each level is two lines, the field over its direction, with the builder\'s handle', async () => {
+    mount();
+    await screen.findByTestId('grid-stub');
+    await addSortLevel('name');
     const row = screen.getByTestId('sort-builder-row');
     expect(within(row).getByTestId('sort-builder-row-field')).toHaveTextContent('Name');
-    expect(within(row).getByTestId('sort-builder-row-direction')).toHaveTextContent('Z → A');
+    expect(within(row).getByTestId('sort-builder-row-direction')).toHaveTextContent('A → Z');
+    expect(within(row).getByTestId('sort-builder-handle')).toBeInTheDocument();
+    expect(within(row).getByTestId('sort-builder-row-menu')).toHaveAccessibleName('Options for Name');
   });
 
   it('a finger on the handle moves a level: dropped over the first, the second leads', () => {
     const onChange = vi.fn();
     render(
       <SortBuilder
-        layout="stacked"
+        renderLevel={(level) => <div>{level.handle}</div>}
         fields={FIELDS}
         value={[{ id: 'a', field: 'name', order: 'asc' }, { id: 'b', field: 'amount', order: 'desc' }]}
         onChange={onChange}

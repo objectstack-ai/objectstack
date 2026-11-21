@@ -7,20 +7,13 @@
  */
 
 import * as React from "react"
-import { X, Plus, GripVertical, MoreHorizontal, Check } from "lucide-react"
+import { X, Plus, GripVertical } from "lucide-react"
 import { createSafeTranslation } from "@object-ui/i18n"
 import type { SortItem as SpecSortItem } from "@objectstack/spec/shared"
 
 import { cn } from "../lib/utils"
 import { Button } from "../ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "../ui/dropdown-menu"
 
 const useSafeSortTranslation = createSafeTranslation(
   {
@@ -34,8 +27,6 @@ const useSafeSortTranslation = createSafeTranslation(
     'sortBuilder.addSort': 'Add sort',
     'sortBuilder.removeSort': 'Remove sort',
     'sortBuilder.reorder': 'Drag to reorder',
-    'sortBuilder.levelOptions': 'Options for {{label}}',
-    'sortBuilder.changeField': 'Change field',
   },
   'sortBuilder.sortBy',
 )
@@ -82,24 +73,22 @@ export interface SortBuilderProps {
   onChange?: (value: SortItem[]) => void;
   className?: string;
   /**
-   * How a level is drawn (objectstack#35884). `rows` (the default): one line
-   * of selects per level. `stacked`: the phone panel's form, two lines per
-   * level (the field, then its direction) with the handle at the left and a
-   * 「⋯」 at the right that changes the field, the direction or removes the
-   * level; 「Add sort」 is a dashed button under the levels. The levels, their
-   * order, the one-row-per-field rule and every write are the same in both.
+   * The host draws each level's face itself (objectstack#35884: the phone
+   * sheet's two-line level) and 「Add sort」 (none is drawn). The levels, their
+   * order, the handle (mouse, touch, keys) and every write stay the builder's.
    */
-  layout?: 'rows' | 'stacked';
-  /**
-   * The host draws the field choice for a new level (the phone panel's field
-   * list step). Absent ⇒ 「Add sort」 adds a level on the first field it may.
-   */
-  onAddLevel?: () => void;
-  /**
-   * `stacked` only: the host draws the field choice for the level `id`
-   * (its 「⋯」 → 「Change field」). Absent ⇒ the menu does not offer it.
-   */
-  onChangeLevelField?: (id: string) => void;
+  renderLevel?: (level: SortBuilderLevel) => React.ReactNode;
+}
+
+/** One level, as {@link SortBuilderProps.renderLevel} receives it. */
+export interface SortBuilderLevel {
+  item: SortItem;
+  /** The builder's reorder handle for this level. */
+  handle: React.ReactNode;
+  /** The words for this field's two directions. */
+  direction: { asc: string; desc: string };
+  setOrder: (order: 'asc' | 'desc') => void;
+  remove: () => void;
 }
 
 export function SortBuilder({
@@ -107,9 +96,7 @@ export function SortBuilder({
   value = [],
   onChange,
   className,
-  layout = 'rows',
-  onAddLevel,
-  onChangeLevelField,
+  renderLevel,
 }: SortBuilderProps) {
   const { t } = useSafeSortTranslation()
   // Normalize incoming items: ensure every row has an `id` (React key) and
@@ -199,7 +186,8 @@ export function SortBuilder({
   const rowsRef = React.useRef<HTMLDivElement | null>(null);
   const [touchDrag, setTouchDrag] = React.useState<{ from: number; over: number } | null>(null);
   const indexAt = (clientY: number): number => {
-    const rows = Array.from(rowsRef.current?.querySelectorAll<HTMLElement>('[data-testid="sort-builder-row"]') ?? []);
+    // The levels are the list's own children, one per level.
+    const rows = Array.from(rowsRef.current?.children ?? []);
     for (let i = 0; i < rows.length; i += 1) {
       const rect = rows[i].getBoundingClientRect();
       if (clientY < rect.top + rect.height / 2) return i;
@@ -226,9 +214,7 @@ export function SortBuilder({
     onPointerCancel: () => setTouchDrag(null),
   });
 
-  const fieldLabel = (field: string) => fields.find((f) => f.value === field)?.label ?? field;
-
-  // The handle, one control for both layouts: mouse drag (HTML5), touch drag
+  // The handle, one control for every level face: mouse drag (HTML5), touch drag
   // (pointer events), and ArrowUp / ArrowDown when focused.
   const renderHandle = (item: SortItem, index: number, className?: string) => (
     // A `span`, not a `<button>`: Firefox starts no HTML5 drag from a
@@ -291,95 +277,23 @@ export function SortBuilder({
     },
   });
 
-  const addLevel = onAddLevel ?? addItem;
-
-  if (layout === 'stacked') {
-    return (
-      <div className={cn("space-y-3", className)} data-layout="stacked">
-        <div ref={rowsRef} className="divide-y rounded-lg border" data-testid="sort-builder-levels">
-          {items.map((item, index) => {
-            const direction = directionLabels(item.field);
-            const label = fieldLabel(item.field);
-            return (
-              <div
-                key={item.id}
-                className={cn(
-                  "flex min-h-14 items-center gap-2 px-2 py-1.5",
-                  touchDrag && touchDrag.over === index && touchDrag.from !== index && "bg-accent",
-                  touchDrag && touchDrag.from === index && "opacity-60",
-                )}
-                data-testid="sort-builder-row"
-                data-field={item.field}
-                {...rowDropHandlers(index)}
-              >
-                {renderHandle(item, index, "h-11 w-8")}
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium" data-testid="sort-builder-row-field">{label}</div>
-                  <div className="truncate text-xs text-muted-foreground" data-testid="sort-builder-row-direction">
-                    {item.order === 'desc' ? direction.desc : direction.asc}
-                  </div>
-                </div>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-11 w-11 shrink-0"
-                      aria-label={t('sortBuilder.levelOptions', { label })}
-                      data-testid="sort-builder-row-menu"
-                    >
-                      <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-48">
-                    {onChangeLevelField && (
-                      <DropdownMenuItem onSelect={() => onChangeLevelField(item.id)} data-testid="sort-builder-row-change-field">
-                        {t('sortBuilder.changeField')}
-                      </DropdownMenuItem>
-                    )}
-                    {(['asc', 'desc'] as const).map((order) => (
-                      <DropdownMenuItem
-                        key={order}
-                        onSelect={() => updateItem(item.id, { order })}
-                        data-testid={`sort-builder-row-order-${order}`}
-                      >
-                        <Check className={cn("h-4 w-4", item.order === order ? "opacity-100" : "opacity-0")} aria-hidden="true" />
-                        {direction[order]}
-                      </DropdownMenuItem>
-                    ))}
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      className="text-destructive focus:text-destructive"
-                      onSelect={() => removeItem(item.id)}
-                      data-testid="sort-builder-row-remove"
-                    >
-                      {t('sortBuilder.removeSort')}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            );
-          })}
-        </div>
-        <button
-          type="button"
-          onClick={addLevel}
-          disabled={!firstChoosable}
-          className="flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-dashed text-sm text-muted-foreground hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-          data-testid="sort-builder-add"
-        >
-          <Plus className="h-4 w-4" aria-hidden="true" />
-          {t('sortBuilder.addSort')}
-        </button>
-      </div>
-    );
-  }
-
   return (
     <div className={cn("space-y-3", className)}>
-      <div ref={rowsRef} className="space-y-2">
+      <div ref={rowsRef} className={renderLevel ? "divide-y rounded-lg border" : "space-y-2"}>
         {items.map((item, index) => {
           const direction = directionLabels(item.field);
+          const over = touchDrag && touchDrag.over === index && touchDrag.from !== index;
+          if (renderLevel) return (
+            <div key={item.id} className={cn(over && "bg-accent")} data-testid="sort-builder-row" {...rowDropHandlers(index)}>
+              {renderLevel({
+                item,
+                handle: renderHandle(item, index, "h-11 w-8"),
+                direction,
+                setOrder: (order) => updateItem(item.id, { order }),
+                remove: () => removeItem(item.id),
+              })}
+            </div>
+          );
           return (
           // Below `sm` a level takes three lines so no select cuts its label:
           // the words, then the field beside Remove, then the direction.
@@ -387,7 +301,7 @@ export function SortBuilder({
             key={item.id}
             className={cn(
               "flex items-center gap-2 max-sm:grid max-sm:grid-cols-[auto_minmax(0,1fr)_auto]",
-              touchDrag && touchDrag.over === index && touchDrag.from !== index && "rounded bg-accent",
+              over && "rounded bg-accent",
             )}
             data-testid="sort-builder-row"
             {...rowDropHandlers(index)}
@@ -444,16 +358,16 @@ export function SortBuilder({
           );
         })}
       </div>
-       <Button
+      {!renderLevel && <Button
         variant="outline"
         size="sm"
-        onClick={addLevel}
+        onClick={addItem}
         className="h-8 max-sm:h-11"
         disabled={!firstChoosable}
       >
         <Plus className="h-3 w-3 mr-2" />
         {t('sortBuilder.addSort')}
-      </Button>
+      </Button>}
     </div>
   );
 }

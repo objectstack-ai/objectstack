@@ -20,7 +20,7 @@ At phone width (below `sm`) the console's object list changes its containers, no
 
 New exports and props:
 
-- `@object-ui/components`: `SortBuilder` takes `layout?: 'rows' | 'stacked'`, `onAddLevel` and `onChangeLevelField`; its handle reorders by touch in both layouts.
+- `@object-ui/components`: `SortBuilder` takes `renderLevel` (the host draws each level's face around the builder's own handle, order and writes, and 「Add sort」 itself), with the type `SortBuilderLevel`; its handle reorders by touch.
 - `@object-ui/plugin-list`: `PhonePanelSheet`, `useListPhonePanels`, `PHONE_CHIP`, `PHONE_CHIP_ACTIVE` and the types `PhonePanelSheetProps`, `ListPhonePanels`.
 - `@object-ui/plugin-grid`: `requestListSelection`, `useListPageSelecting` and `useListPageSelectable` (would 「Select」 open a selection in this page's list); `BulkActionBar` takes `open` (show 「0 selected ×」 with no actions while a host's selection is open and empty).
 

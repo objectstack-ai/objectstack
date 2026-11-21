@@ -92,6 +92,11 @@ export const LIST_CONDITION_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'dashboard.filters.range.this_week': 'This week',
   'dashboard.filters.range.this_month': 'This month',
   'dashboard.filters.range.last_30_days': 'Last 30 days',
+  // The phone sort sheet's level (objectstack#35884), in SortBuilder's words.
+  'sortBuilder.addSort': 'Add sort',
+  'sortBuilder.removeSort': 'Remove sort',
+  'sortBuilder.levelOptions': 'Options for {{label}}',
+  'sortBuilder.changeField': 'Change field',
 };
 
 export const useListConditionTranslation = createSafeTranslation(

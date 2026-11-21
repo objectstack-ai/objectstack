@@ -42,8 +42,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
   SortBuilder,
+  type SortBuilderLevel,
   type FilterBuilderRowGroup,
   type SortItem,
 } from '@object-ui/components';
@@ -315,6 +317,55 @@ function useStaged<T, S>(open: boolean, value: T, firstStep: S): [T, React.Dispa
 // Sort
 // ---------------------------------------------------------------------------
 
+/**
+ * A level of the phone sort sheet, drawn inside `SortBuilder` (`renderLevel`):
+ * the builder's handle, the field over its direction, and a 「⋯」 that changes
+ * the field, the direction or removes the level. The writes are the builder's.
+ */
+function PhoneSortLevel({ level, label, onChangeField }: { level: SortBuilderLevel; label: string; onChangeField: () => void }) {
+  const { t } = useListConditionTranslation();
+  const { item, direction } = level;
+  return (
+    <div className="flex min-h-14 items-center gap-2 px-2 py-1.5">
+      {level.handle}
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium" data-testid="sort-builder-row-field">{label}</div>
+        <div className="truncate text-xs text-muted-foreground" data-testid="sort-builder-row-direction">
+          {direction[item.order]}
+        </div>
+      </div>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-11 w-11 shrink-0"
+            aria-label={t('sortBuilder.levelOptions', { label })}
+            data-testid="sort-builder-row-menu"
+          >
+            <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-48">
+          <DropdownMenuItem onSelect={onChangeField} data-testid="sort-builder-row-change-field">
+            {t('sortBuilder.changeField')}
+          </DropdownMenuItem>
+          {(['asc', 'desc'] as const).map((order) => (
+            <DropdownMenuItem key={order} onSelect={() => level.setOrder(order)} data-testid={`sort-builder-row-order-${order}`}>
+              <Check className={cn('h-4 w-4', item.order === order ? 'opacity-100' : 'opacity-0')} aria-hidden="true" />
+              {direction[order]}
+            </DropdownMenuItem>
+          ))}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={level.remove} data-testid="sort-builder-row-remove">
+            {t('sortBuilder.removeSort')}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
 export interface PhoneSortSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -368,15 +419,32 @@ export function PhoneSortSheet({ open, onOpenChange, fields, shownFields, value,
       </div>
     );
   } else {
+    const held = new Set(staged.map((level) => level.field));
     body = (
-      <SortBuilder
-        layout="stacked"
-        fields={fields as SortBuilderFields}
-        value={staged}
-        onChange={setStaged}
-        onAddLevel={() => setStep({ kind: 'add' })}
-        onChangeLevelField={(id) => setStep({ kind: 'field', id })}
-      />
+      <div className="space-y-3">
+        <SortBuilder
+          fields={fields as SortBuilderFields}
+          value={staged}
+          onChange={setStaged}
+          renderLevel={(level) => (
+            <PhoneSortLevel
+              level={level}
+              label={fields.find((field) => field.value === level.item.field)?.label ?? level.item.field}
+              onChangeField={() => setStep({ kind: 'field', id: level.item.id })}
+            />
+          )}
+        />
+        <button
+          type="button"
+          onClick={() => setStep({ kind: 'add' })}
+          disabled={!fields.some((field) => !field.disabled && !held.has(field.value))}
+          className="flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-dashed text-sm text-muted-foreground hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+          data-testid="sort-builder-add"
+        >
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          {t('sortBuilder.addSort')}
+        </button>
+      </div>
     );
   }
 
