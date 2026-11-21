@@ -261,8 +261,6 @@ const ROSTER: Record<string, Member> = {
   'text-scalars': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'comment-parent-pair': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'comment-reactions': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
-  // The export path is mandatory with `--apply` and must not exist yet; the gate sits after both checks.
-  'list-preferences': { argv: ['--apply', '--export', join(SCRATCH, 'list-preferences-export.json')], confirm: '--yes', writes: BOOT },
   'files-to-references': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   // `--yes` belongs to the stored-row pass; without `--stored` the command converts source files.
   meta: { argv: ['--stored', '--apply'], confirm: '--yes', writes: BOOT },

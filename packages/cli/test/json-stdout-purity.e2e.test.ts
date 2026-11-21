@@ -140,10 +140,6 @@ const FAMILY: Record<string, string[]> = {
   // it boots read-only (plugin-audit's objects registered), reads
   // `sys_comment` below the data door and writes nothing.
   'migrate comment-reactions': [],
-  // [#35955] A dry run is its DEFAULT and the only form driven here: it boots
-  // read-only (plugin-auth's identity objects registered for their
-  // declarations) and reads `sys_user_preference`; it writes nothing.
-  'migrate list-preferences': [],
   'migrate files-to-references': [],
   'migrate meta': ['--stored'],
   'migrate multi-value-columns': [],

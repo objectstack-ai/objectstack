@@ -87,7 +87,6 @@ import MigrateTextScalars from '../commands/migrate/text-scalars.js';
 import MigrateCommentReactions from '../commands/migrate/comment-reactions.js';
 import MigrateDuplicates from '../commands/migrate/duplicates.js';
 import MigrateFilesToReferences from '../commands/migrate/files-to-references.js';
-import MigrateListPreferences from '../commands/migrate/list-preferences.js';
 import MigrateMeta from '../commands/migrate/meta.js';
 import MigrateMultiValueColumns from '../commands/migrate/multi-value-columns.js';
 import MigrateOrganizationOwnership from '../commands/migrate/organization-ownership.js';
@@ -240,13 +239,6 @@ const CALLERS: Record<string, Caller> = {
     run: invoke(MigrateTextScalars),
     noWrite: [{ label: 'migrate text-scalars', argv: ['--database-url', '@DB@', '--json'] }],
     write: [{ label: 'migrate text-scalars --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
-  },
-  'commands/migrate/list-preferences.ts': {
-    run: invoke(MigrateListPreferences),
-    noWrite: [{ label: 'migrate list-preferences', argv: ['--database-url', '@DB@', '--json'] }],
-    // The fixture stores no `ui.list.` row, so the run deletes nothing and
-    // writes no export: the plain boot a delete takes is what this case is about.
-    write: [{ label: 'migrate list-preferences --apply', argv: ['--apply', '--export', '@DIR@/list-preferences-export.json', '--yes', '--database-url', '@DB@', '--json'] }],
   },
   'commands/migrate/comment-parent-pair.ts': {
     run: invoke(MigrateCommentParentPair),

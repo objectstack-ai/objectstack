@@ -493,8 +493,6 @@ the protocol-18 step, which `os migrate meta --from 17` lists for your sources
 
 **Upgrading from 18.5.0 or earlier:** the first [`os migrate plan`](/docs/deployment/cli#schema-migrations) after the move lists a safe `create_index` for each `(created_at, id)` and `(owner_id)` index schema sync now builds without a declaration, and on SQLite a `normalize_boolean_storage` step for boolean cells stored as text; the next sync or `os migrate apply` builds them, and neither is destructive. Where an app declares `lifecycle.seal`, an `os migrate audit-* --apply` run on SQLite or Turso now needs every sealing server stopped and `--sealer-stopped` ([18.6.0 checklist](/docs/releases/v18/18-6#upgrade-checklist)).
 
-**Upgrading from 18.6.0 or earlier:** the Console no longer reads the per-user list preference rows (`sys_user_preference` keys `ui.list.<object>`). A reader's column widths, row height and view tab order are kept in their own browser from now on, so each list opens on its view's own layout until the reader changes it again. To clear the old rows, run [`os migrate list-preferences`](/docs/deployment/cli#os-migrate-list-preferences) once all your Consoles are upgraded, a dry run first and then `--apply --export <file>`. Leaving them does no harm: nothing reads them.
-
 The v17 and v18 lines are broken out per release. Each v17 minor shipped
 breaking changes under the repo's launch-window convention — which ships a
 breaking change as `minor` rather than `major`, so the version number is not the
