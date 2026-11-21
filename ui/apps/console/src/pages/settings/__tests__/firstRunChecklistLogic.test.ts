@@ -13,7 +13,9 @@ import {
   aiProviderState,
   browserRegion,
   checklistCompletion,
+  checklistDoneCount,
   dismissRecordKey,
+  drawsOneLine,
   hasInvitedColleagues,
   isKeySet,
   isMailConfigured,
@@ -26,6 +28,7 @@ import {
   type ChecklistStorage,
 } from '../firstRunChecklistLogic';
 import type { ResolvedSettingValue, SettingsManifest, Specifier } from '../types';
+import { MANAGED_PROFILE, isProfileOptionalRow } from '../firstRunChecklistProfile';
 
 const LOCALE_SPEC: Specifier = {
   type: 'select',
@@ -299,5 +302,48 @@ describe('in use is read from the stated source, never from a null value (object
       source: 'environment',
       optionLabel: 'OpenAI',
     });
+  });
+});
+
+describe('the done count names the required and optional rows apart, as the progress line counts them', () => {
+  const managedOptional = (id: string) => isProfileOptionalRow(MANAGED_PROFILE, id);
+  // A managed environment: seven required rows, six done; mail (drawn only
+  // once done) and the first record, both optional, done.
+  const managed = [
+    ...['organization_name', 'language_country', 'timezone', 'invite', 'first_app', 'ai_provider'].map((id) => ({
+      id,
+      done: true,
+    })),
+    { id: 'currency', done: false },
+    { id: 'mail', done: true },
+    { id: 'first_record', done: true },
+  ];
+
+  it('managed, six of seven required done and two optional done: progress 6 of 7, the done count 6 and 2', () => {
+    expect(checklistCompletion(managed, managedOptional)).toEqual({ done: 6, total: 7, complete: false });
+    expect(checklistDoneCount(managed, managedOptional)).toEqual({ required: 6, optional: 2 });
+  });
+
+  it('CONTROL: no optional row done, the required count is every done row', () => {
+    const rows = managed.map((r) => (r.id === 'mail' || r.id === 'first_record' ? { ...r, done: false } : r));
+    expect(checklistDoneCount(rows, managedOptional)).toEqual({ required: 6, optional: 0 });
+    expect(checklistDoneCount(rows, managedOptional).required).toBe(checklistCompletion(rows, managedOptional).done);
+  });
+});
+
+describe('above the page the card folds to one line once two rows or fewer are left', () => {
+  const rows = (left: number, done = 4) => [
+    ...Array.from({ length: done }, (_, i) => ({ done: true, id: `d${i}` })),
+    ...Array.from({ length: left }, (_, i) => ({ done: false, id: `l${i}` })),
+  ];
+
+  it('one or two rows left, optional ones counted alike: one line', () => {
+    expect(drawsOneLine(rows(1))).toBe(true);
+    expect(drawsOneLine(rows(2))).toBe(true);
+  });
+
+  it('CONTROL: three rows left, or none, draws no line', () => {
+    expect(drawsOneLine(rows(3))).toBe(false);
+    expect(drawsOneLine(rows(0))).toBe(false);
   });
 });

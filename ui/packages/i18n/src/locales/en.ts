@@ -2593,6 +2593,7 @@ const en = {
       progress: '{{done}} of {{total}} done',
       dismiss: 'Hide checklist',
       showDone: 'Show completed ({{done}})',
+      showDoneSplit: 'Show completed ({{required}} required · {{optional}} optional)',
       hideDone: 'Hide completed',
       optional: 'Optional',
       set: 'Set',

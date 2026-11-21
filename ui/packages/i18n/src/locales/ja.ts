@@ -2421,10 +2421,11 @@ const ja = {
     },
     firstRunChecklist: {
       title: "システムの準備",
-      description: "同僚が使い始める前に設定しておく項目です。どの項目も後から Setup で変更できます。",
+      description: "同僚が使い始める前に設定しておく項目です。どの項目も後から「セットアップ」で変更できます。",
       progress: "{{total}} 件中 {{done}} 件完了",
       dismiss: "チェックリストを非表示",
       showDone: "完了した項目を表示（{{done}}）",
+      showDoneSplit: "完了した項目を表示（必須 {{required}} · 任意 {{optional}}）",
       hideDone: "完了した項目を折りたたむ",
       optional: "任意",
       set: "設定",
@@ -2469,13 +2470,13 @@ const ja = {
       aiProvider: {
         title: '内蔵 AI を設定',
         todo: '使用中の AI プロバイダーはまだありません。プロバイダーを選び、キーを追加してください。',
-        doneSettings: '{{provider}}（Setup で設定）。',
+        doneSettings: '{{provider}}（セットアップで設定）。',
         doneEnvironment: '{{provider}}（サーバー環境から検出）。',
         action: '設定する',
       },
       connectAssistant: {
         title: '外部の AI アシスタントを接続',
-        todo: 'MCP 経由で、Claude や Doubao などのアシスタントから、あなた自身としてこのシステムを使えます。内蔵 AI は別途 Setup → AI と Embedder で設定します。',
+        todo: 'MCP 経由で、Claude や Doubao などのアシスタントから、あなた自身としてこのシステムを使えます。内蔵 AI は別途「セットアップ → AI と Embedder」で設定します。',
         done: 'あなたの AI アシスタントまたは API キーが接続されています。',
         action: '接続',
       },

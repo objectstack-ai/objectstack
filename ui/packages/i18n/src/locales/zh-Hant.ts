@@ -2159,10 +2159,11 @@ const zhHant = {
     },
     firstRunChecklist: {
       title: '完成初始設定',
-      description: '同事開始使用之前，先設定好這幾項。每一項之後都可以在 Setup 中修改。',
+      description: '同事開始使用之前，先設定好這幾項。每一項之後都可以在系統設定中修改。',
       progress: '已完成 {{done}}/{{total}}',
       dismiss: '隱藏清單',
       showDone: '顯示已完成的項（{{done}}）',
+      showDoneSplit: '顯示已完成的項（必做 {{required}} · 可選 {{optional}}）',
       hideDone: '收起已完成的項',
       optional: '可選',
       set: '設定',
@@ -2207,13 +2208,13 @@ const zhHant = {
       aiProvider: {
         title: '設定內建 AI',
         todo: '尚未啟用 AI 服務商。請選擇一個並填寫其金鑰。',
-        doneSettings: '{{provider}}，在 Setup 中設定。',
+        doneSettings: '{{provider}}，已在系統設定中配置。',
         doneEnvironment: '{{provider}}，從伺服器環境中檢測到。',
         action: '去設定',
       },
       connectAssistant: {
         title: '連線外部 AI 助手',
-        todo: '通過 MCP，在 Claude、豆包等助手裡以你自己的身份使用本系統。內建 AI 需另行在 Setup → AI 與向量化 中設定。',
+        todo: '通過 MCP，在 Claude、豆包等助手裡以你自己的身份使用本系統。內建 AI 需另行在「系統設定 → AI 與向量化」中設定。',
         done: '你已連線了 AI 助手或 API 金鑰。',
         action: '連線',
       },

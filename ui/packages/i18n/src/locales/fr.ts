@@ -2487,10 +2487,11 @@ const fr = {
     },
     firstRunChecklist: {
       title: "Préparez votre système",
-      description: "Ce qu’il faut configurer avant que vos collègues commencent. Chaque élément peut être modifié plus tard dans Setup.",
+      description: "Ce qu’il faut configurer avant que vos collègues commencent. Chaque élément peut être modifié plus tard dans Configuration.",
       progress: "{{done}} sur {{total}} terminés",
       dismiss: "Masquer la liste",
       showDone: "Afficher les étapes terminées ({{done}})",
+      showDoneSplit: "Afficher les étapes terminées ({{required}} obligatoires · {{optional}} facultatives)",
       hideDone: "Masquer les étapes terminées",
       optional: "Facultatif",
       set: "Définir",
@@ -2535,13 +2536,13 @@ const fr = {
       aiProvider: {
         title: 'Configurer l’IA intégrée',
         todo: 'Aucun fournisseur d’IA n’est encore utilisé. Choisissez-en un et ajoutez sa clé.',
-        doneSettings: '{{provider}}, défini dans Setup.',
+        doneSettings: '{{provider}}, défini dans Configuration.',
         doneEnvironment: '{{provider}}, détecté dans l’environnement du serveur.',
         action: 'Configurer',
       },
       connectAssistant: {
         title: 'Connecter un assistant IA externe',
-        todo: 'Travaillez dans ce système en votre nom depuis Claude, Doubao et d’autres assistants, via MCP. L’IA intégrée se configure à part, dans Setup → IA et Embedder.',
+        todo: 'Travaillez dans ce système en votre nom depuis Claude, Doubao et d’autres assistants, via MCP. L’IA intégrée se configure à part, dans Configuration → IA et Embedder.',
         done: "Un assistant IA ou une clé d'API à vous est connecté.",
         action: 'Connecter',
       },
