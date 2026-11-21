@@ -228,6 +228,7 @@ const pt = {
       noChildObject: "Este painel não tem nenhum objeto filho configurado: defina {{property}} como o objeto cujas linhas ele lista.",
     },
     keepEditing: "Continuar editando",
+    createMore: "Criar mais",
     discard: "Descartar",
     conflictTitle: "Conflito ao salvar",
     conflictMessage: "Outra pessoa alterou este registro enquanto você editava. Sobrescrever substituirá as alterações dela pelas suas.",
