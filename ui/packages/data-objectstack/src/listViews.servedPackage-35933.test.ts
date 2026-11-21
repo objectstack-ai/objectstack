@@ -86,7 +86,7 @@ function makeDS(seed: any[]) {
 describe('listViews carries the served package on every row (objectstack#35933)', () => {
   it('a flattened ViewItem row keeps its `_packageId`, shipped or custom', async () => {
     const rows = await makeDS([SHIPPED, CUSTOM]).listViews(OBJECT);
-    const byName = new Map(rows.map((r: any) => [r.name, r]));
+    const byName = new Map<string, any>(rows.map((r: any) => [r.name, r]));
     expect(byName.get(SHIPPED.name)?._packageId).toBe('com.example.showcase');
     expect(byName.get(CUSTOM.name)?._packageId).toBe('com.example.showcase.custom');
     // Still the flattened shape the switcher reads.
