@@ -2,6 +2,7 @@
 
 **Status**: Accepted (2026-07-30) — Q1/Q2/Q3 adjudicated same day (uniform semantics; `storage.notNull` spelling; the non-regression invariant unifies `required` and `requiredWhen`). **P0 implemented**: spec knob + parse-seam exclusivity, record-validator null-out rejection, rule-validator non-regression, driver DDL + drift rewired, `field-required-notnull-explicit` conversion. P1 (Console required-marker from the write contract) and P2 (criteria_json flip) follow.
 **Amended (2026-11-17)** — D1 and D5: a field that declares `required: true` together with its own `visibleWhen` is required **when shown** (maintainer ruling A on #34905, recorded in comment 6956761249). See [Amendment — required when shown](#amendment-2026-11-17--required-when-shown).
+**Amended (2026-11-20)** — the author-time fence: a dated note ([#35731](https://github.com/objectstack-ai/objectstack/issues/35731)) records that the formula warning fires only for a formula the form cannot compute (PR #35475). The paragraph is left as written.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove), [ADR-0078](./0078-no-silently-inert-metadata.md) (no silently inert metadata), the #3896/#3929 sharing-criteria case study, `driver-sql/schema-drift.ts` (the drift classifier whose `destructive` class this ADR exists to route around)
 **Consumers**: `@objectstack/spec` (`FieldSchema`), `@objectstack/objectql` (`validation/record-validator.ts`), `@objectstack/driver-sql` (`sql-driver.ts` column DDL, `schema-drift.ts`), `@objectstack/lint`, objectui form renderers (the required marker)
@@ -394,8 +395,10 @@ older `required` field; for those fields this amendment changes nothing on creat
 > judges. Two arms still warn, each with its own message: a formula that reads through a
 > reference, calls `label()` or calls `current_user.can()`, or reads such a formula at any depth,
 > which the write path cannot compute either, so the predicate counts as shown and the field stays
-> required on every write; and a formula that reads `os`, or reads such a formula, which the
-> server computes and may waive while the form keeps the field required. A formula the form can
+> required (the engine does compute a `current_user.can()` formula on a write that picks a
+> permission-gated option, so that verdict can differ between writes); and a formula that reads
+> `os`, or reads such a formula, which the server computes and may waive while the form keeps the
+> field required. A formula the form can
 > compute draws nothing, and so do a formula that reads the acting user and one served without its
 > expression. The other two warnings (a read through a reference field, and `storage.notNull`) are
 > unchanged. Still a warning, never a refusal. The paragraph is left as written; read its formula

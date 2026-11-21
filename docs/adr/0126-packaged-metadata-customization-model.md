@@ -101,7 +101,9 @@ them into three tiers by flags × item provenance (`packages/metadata-protocol/s
 > D6) copies an app's capabilities and renames them with the copy when it takes a new namespace
 > (`packages/metadata-protocol/src/package-namespace-rename.ts`). Ruled by the maintainer on
 > #35157: option A, record 6999763503 (「同意」), and the bound of record 7000639892
-> (「接受现有边界」). The code-only set is now field, job, api, agent. The table is left as
+> (「接受现有边界」). Of the five types the table lists in tier C, four stay there: field, job,
+> api, agent. The registry on `main` holds more types with no runtime write channel, admitted
+> after the survey this table records; this note does not re-measure the table, which is left as
 > written.
 
 Three real mechanisms operate across those tiers, each invented separately:

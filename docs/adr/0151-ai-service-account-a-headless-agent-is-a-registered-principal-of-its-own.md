@@ -10,6 +10,7 @@
 - **Consumers**: `@objectstack/platform-objects` (two `sys_user` columns), `@objectstack/plugin-auth` (the registration, key and lifecycle doors; the session and credential refusal), `@objectstack/core` (key admission carries the kind; the shared assembler stamps the principal), `@objectstack/plugin-security` (the agent ceiling at evaluation and at assignment), `@objectstack/plugin-audit` and `@objectstack/spec` (the hook surface, O4), and in `objectstack-ai/cloud` the licence layer and the console (cloud ADR-0116 D7, cloud#3886, cloud#3820).
 - **Amended** (2026-11-10, [#32060](https://github.com/objectstack-ai/objectstack/issues/32060)): a dated note under [What builds on this](#what-builds-on-this) records what O3 and O4 shipped. The status line above is left as it is.
 - **Amended** (2026-11-15, [#33689](https://github.com/objectstack-ai/objectstack/issues/33689)): a dated note under [D3](#d3--its-authority-its-own-grants-under-the-agent-ceiling) records that rule 3 holds unchanged under the amended action-confirmation contract. The status line above is left as it is.
+- **Amended** (2026-11-20, [#35731](https://github.com/objectstack-ai/objectstack/issues/35731)): a dated note under **Leaves unchanged** records the second producer of `performedBy`, the in-product AI path. The status line above is left as it is.
 
 ---
 
