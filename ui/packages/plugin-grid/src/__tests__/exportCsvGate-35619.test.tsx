@@ -32,6 +32,7 @@ import { __clearRecordCrudVerdictCache } from '../hooks/useRecordCrudVerdicts';
 import { installExplainDouble } from './explainDouble';
 import { registerAllFields } from '@object-ui/fields';
 import { ActionProvider, SchemaRendererProvider } from '@object-ui/react';
+import type { DataSource, ObjectGridSchema } from '@object-ui/types';
 
 registerAllFields();
 
@@ -46,8 +47,9 @@ async function renderGrid(userActions?: Record<string, unknown>) {
     fields: { id: { type: 'text' }, name: { type: 'text', label: 'Name' } },
     ...(userActions ? { userActions } : {}),
   }));
-  const dataSource: any = { getObjectSchema };
-  const schema: any = {
+  // Only the definition read is answered: the rows are inline.
+  const dataSource = { getObjectSchema } as unknown as DataSource;
+  const schema = {
     type: 'object-grid',
     objectName: 'test_object',
     columns: [{ field: 'name', label: 'Name' }],
@@ -55,7 +57,7 @@ async function renderGrid(userActions?: Record<string, unknown>) {
     exportOptions: { formats: ['csv', 'json'] },
     // Turns on the table's own CSV button beside the toolbar menu.
     operations: { export: true },
-  };
+  } as unknown as ObjectGridSchema;
   render(
     <ActionProvider>
       <SchemaRendererProvider dataSource={dataSource}>
