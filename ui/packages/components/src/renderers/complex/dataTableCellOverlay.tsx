@@ -144,7 +144,11 @@ export function CellOverlay({
               className,
             )}
           >
-            {children}
+            {/* Tab belongs to the grid's editor or to the browser, never to the
+                layer's own focus loop (Radix loops focus inside a popover). */}
+            <div className="contents" onKeyDown={(e) => { if (e.key === 'Tab') e.stopPropagation(); }}>
+              {children}
+            </div>
           </PopoverPrimitive.Content>
         </PopoverPrimitive.Root>
       )}
