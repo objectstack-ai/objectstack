@@ -781,6 +781,8 @@ function cellEditorWidthClass(type: string): string {
     case 'tags':
     case 'checkboxes':
       return 'w-full min-w-64';
+    case 'select':
+    case 'status':
     case 'date':
     case 'datetime':
     case 'phone':
@@ -3460,6 +3462,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
               // saved-row scoping rather than to `{}` — gated forever — and it
               // is the spelling objectui#7188's ruling chose.
               dependentValues={ctx.pendingRow ?? ctx.row}
+              // objectstack#35688 — the cell editor's face: pickers open at once,
+              // and a calendar day or a swatch ends the edit.
+              inCell
+              onCommit={() => ctx.commit()}
             />
             </div>
           );

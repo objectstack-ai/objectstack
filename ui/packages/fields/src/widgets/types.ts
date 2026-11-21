@@ -242,6 +242,30 @@ export type FieldWidgetComponentProps<T = any> = {
    */
   compact?: boolean;
   /**
+   * Draw the face for the list grid's cell editor, the layer over one cell
+   * (objectstack#35688): the control opens at once, sized to the cell's row.
+   * A single select shows its searchable option list and picks on a click or
+   * Enter; a multi-select or tags field a searchable check list; a date opens
+   * its calendar with the today / tomorrow / next week / clear picks; a colour
+   * its swatches. Without it every widget draws its form face, unchanged.
+   *
+   * **Producer**: `ObjectGrid`'s `renderCellEditor`, through `FieldEditWidget`.
+   * **Consumer**: the option, tags, date, time and colour widgets.
+   */
+  inCell?: boolean;
+  /**
+   * The user has finished: the host writes the value last handed to
+   * `onChange` and closes the editor. A widget calls it after the gesture
+   * that ends a choice (a day or a quick pick in the calendar, a swatch), and
+   * never instead of `onChange`.
+   *
+   * **Producer**: `ObjectGrid`'s `renderCellEditor` (the grid's commit).
+   * **Consumer**: the `inCell` faces of the date and colour widgets. A host
+   * that passes nothing keeps the editor open until it commits on its own
+   * terms (Enter, a click elsewhere).
+   */
+  onCommit?: () => void;
+  /**
    * Receive the FULL selected record rather than just its id, so a host can
    * auto-fill sibling fields from it (a line-item grid copying a product's
    * price). When provided, the host owns the resulting value change.

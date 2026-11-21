@@ -331,6 +331,8 @@ const pt = {
     options: {
       empty: "Nenhuma opção disponível",
       selectFirst: "Selecione primeiro {{fields}}",
+      search: "Pesquisar…",
+      noMatches: "Nenhuma opção correspondente",
     },
     objectRef: {
       loading: "Carregando objetos…",
@@ -415,6 +417,8 @@ const pt = {
     datePicker: {
       today: "Hoje",
       tomorrow: "Amanhã",
+      nextWeek: "Próxima semana",
+      clearPick: "Limpar",
       clear: "Limpar data",
       openCalendar: "Abrir calendário",
       time: "Horário",
@@ -429,6 +433,11 @@ const pt = {
     },
     tags: {
       placeholder: "Digite e pressione Enter para adicionar…",
+      add: "Adicionar “{{value}}”",
+    },
+    color: {
+      swatches: "Cores",
+      custom: "Cor personalizada",
     },
     // objectui#4028 — `AddressField`'s five sub-labels.
     address: {

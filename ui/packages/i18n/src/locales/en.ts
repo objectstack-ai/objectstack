@@ -499,6 +499,8 @@ const en = {
     options: {
       empty: 'No options available',
       selectFirst: 'Select {{fields}} first',
+      search: 'Search…',
+      noMatches: 'No matching options',
     },
     objectRef: {
       loading: 'Loading objects…',
@@ -643,6 +645,8 @@ const en = {
     datePicker: {
       today: 'Today',
       tomorrow: 'Tomorrow',
+      nextWeek: 'Next week',
+      clearPick: 'Clear',
       clear: 'Clear date',
       openCalendar: 'Open calendar',
       time: 'Time',
@@ -659,6 +663,11 @@ const en = {
     // is empty. The author-declared `field.placeholder` always wins over this.
     tags: {
       placeholder: 'Type and press Enter to add…',
+      add: 'Add "{{value}}"',
+    },
+    color: {
+      swatches: 'Colors',
+      custom: 'Custom color',
     },
     // objectui#4028 — `AddressField`'s five sub-labels, previously English
     // string literals with no key at all: on a Chinese console every address

@@ -5131,7 +5131,12 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                     pendingRow: rowHasChanges ? pendingRows.of(row, rowKey) : row,
                                     value: editValue,
                                     stage: stageEdit,
-                                    commit: (v?: any) => saveEdit(true, v),
+                                    // objectstack#35688 — a pick that commits hands the
+                                    // focus back to the selected cell, as Enter does.
+                                    commit: (v?: any) => {
+                                      focusSelectionRef.current = selectFirst;
+                                      saveEdit(true, v);
+                                    },
                                     cancel: cancelEdit,
                                   });
                                   if (node != null) {

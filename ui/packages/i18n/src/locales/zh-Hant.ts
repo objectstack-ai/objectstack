@@ -338,6 +338,8 @@ const zhHant = {
     options: {
       empty: '暫無可選項',
       selectFirst: '請先選擇{{fields}}',
+      search: '搜尋…',
+      noMatches: '沒有相符的選項',
     },
     objectRef: {
       loading: '正在載入物件…',
@@ -422,6 +424,8 @@ const zhHant = {
     datePicker: {
       today: '今天',
       tomorrow: '明天',
+      nextWeek: '下週',
+      clearPick: '清空',
       clear: '清除日期',
       openCalendar: '開啟日曆',
       time: '時間',
@@ -436,6 +440,11 @@ const zhHant = {
     },
     tags: {
       placeholder: '輸入後回車新增…',
+      add: '新增“{{value}}”',
+    },
+    color: {
+      swatches: '顏色',
+      custom: '自訂顏色',
     },
     // objectui#4028 — `AddressField`'s five sub-labels. These were English
     // string literals with no key, and this pack is the one the issue was
