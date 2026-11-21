@@ -727,6 +727,34 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
   modifyAllRecords: z.boolean().default(false).describe('Modify All Data (Bypass Sharing) — bypasses sharing rules and ownership on the objects record sharing enforces on; on an object with NO owner field sharing abstains, so the platform created_by write floor still applies. Includes delete: an omitted allowDelete parses to true, and an explicit allowDelete: false beside it is refused.'),
 
   /**
+   * View All Fields: a READ vote on every field of the object, fields added
+   * later included (ADR-0066 D2 ⑧; the field-axis split ruled on the
+   * decision card, ruling of record 6912661484, letter A).
+   *
+   * - It casts NO edit vote (ruled: read-only). An edit comes from the
+   *   default (a field no set names follows the object grant) or from an
+   *   explicit `editable: true` field row.
+   * - Inside one set, specific beats general: the set's own field row on the
+   *   same object is its whole say on that field, so an own
+   *   `readable: false` row means this set casts no read vote there.
+   * - It is a FIELD vote only: it grants no object access (pair it with
+   *   `allowRead`), widens no record (that is `viewAllRecords`), and plays no
+   *   part in the private-posture wildcard rule or in any admin posture.
+   * - Allowed on the `'*'` wildcard entry, where it votes on every object the
+   *   set does not name explicitly (the same lookup the super-user bits take).
+   *
+   * Today `viewAllRecords` / `modifyAllRecords` still vote on every field
+   * too, so on a set that carries either bit this key changes nothing; the
+   * built-in admin sets carry it so they keep their field visibility when
+   * those two bits stop voting on fields.
+   *
+   * Deliberately OPTIONAL (no Zod default), like `allowExport`: a default
+   * would materialize the key into every parsed entry, and a runtime built
+   * before the key existed refuses a key it does not know.
+   */
+  viewAllFields: z.boolean().optional().describe('View All Fields: a read vote on every field of this object, including fields added later. Casts no edit vote: edits come from the default or from explicit editable: true field rows. A field row of the same set beats it, so an own readable: false row keeps the field hidden for this set. Grants no object access and widens no record. Allowed on the \'*\' entry.'),
+
+  /**
    * [ADR-0057 D1] Read access DEPTH (Dataverse-style access level), layered on
    * top of OWD. For owner-scoped (`private`) objects it widens the owner-match:
    * `own` (owner only) | `own_and_reports` (me + my sys_user.manager_id
