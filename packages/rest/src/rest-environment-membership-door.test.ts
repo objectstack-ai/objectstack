@@ -262,7 +262,9 @@ describe('every data door judges environment membership', () => {
             it(`${mount} ${route.family}: a membership read that cannot answer is the loud outage, never served`, async () => {
                 const w = wiring(OUTSIDER, { registersMembership: true, members: [], readFaults: true });
                 const { status, body, thrown } = await drive(makeServer(w, true), route, mount);
-                const answered = thrown ? { status: thrown.status, code: thrown.code } : { status, code: body?.error?.code };
+                // This server's outage envelope carries the code at the top
+                // level (`handleRouteError`); a throw would carry it on itself.
+                const answered = thrown ? { status: thrown.status, code: thrown.code } : { status, code: body?.code };
                 expect(answered).toEqual({ status: 503, code: 'SERVICE_UNAVAILABLE' });
                 expect(w.reached).toEqual([]);
             });
