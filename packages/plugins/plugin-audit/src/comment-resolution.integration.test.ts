@@ -135,7 +135,7 @@ describe('sys_comment — a thread can be resolved and reopened (#36071)', () =>
     await engine.update(
       COMMENT,
       { resolved_by: 'u_forged', resolved_at: FORGED },
-      { where: { id }, context: AUTHOR, onFieldsDropped: (e: Row) => drops.push(e) } as any,
+      { where: { id }, context: AUTHOR, onFieldsDropped: (e: Row) => drops.push(e) },
     );
     expect(await resolution(id)).toEqual(row);
     expect(drops).toEqual([
@@ -206,12 +206,12 @@ describe('sys_comment — a thread can be resolved and reopened (#36071)', () =>
 
     const topLevel = { object_name: BOARD, record_id: recordId, parent_id: null };
     const unresolved = { ...topLevel, is_resolved: { $ne: true } };
-    expect(await engine.count(COMMENT, { where: unresolved, context: AUTHOR } as any)).toBe(2);
+    expect(await engine.count(COMMENT, { where: unresolved, context: AUTHOR })).toBe(2);
 
-    const open = await engine.find(COMMENT, { where: unresolved, orderBy: [{ field: 'created_at', order: 'asc' }], context: AUTHOR } as any);
+    const open = await engine.find(COMMENT, { where: unresolved, orderBy: [{ field: 'created_at', order: 'asc' }], context: AUTHOR });
     expect(open.map((r: Row) => String(r.id)).sort()).toEqual([a, c].sort());
 
-    const resolved = await engine.find(COMMENT, { where: { ...topLevel, is_resolved: true }, context: AUTHOR } as any);
+    const resolved = await engine.find(COMMENT, { where: { ...topLevel, is_resolved: true }, context: AUTHOR });
     expect(resolved.map((r: Row) => String(r.id))).toEqual([b]);
     expect(resolved[0].resolved_by).toBe(RESOLVER.userId);
   });
@@ -224,16 +224,16 @@ describe('sys_comment — a thread can be resolved and reopened (#36071)', () =>
     await engine.update(COMMENT, { is_resolved: null }, { where: { id }, context: SYS });
     expect((await read(id)).is_resolved ?? null).toBeNull();
     expect(
-      await engine.count(COMMENT, { where: { object_name: BOARD, record_id: recordId, parent_id: null, is_resolved: { $ne: true } }, context: AUTHOR } as any),
+      await engine.count(COMMENT, { where: { object_name: BOARD, record_id: recordId, parent_id: null, is_resolved: { $ne: true } }, context: AUTHOR }),
     ).toBe(1);
   });
 
   it('resolving writes no entry on the record\'s own activity stream', async () => {
     const { id: recordId, thread } = await newBoard();
     const id = await post(thread, 'question');
-    const before = await engine.count('sys_activity', { where: { object_name: BOARD, record_id: recordId }, context: SYS } as any);
+    const before = await engine.count('sys_activity', { where: { object_name: BOARD, record_id: recordId }, context: SYS });
     await engine.update(COMMENT, { is_resolved: true }, { where: { id }, context: RESOLVER });
     await engine.update(COMMENT, { is_resolved: false }, { where: { id }, context: RESOLVER });
-    expect(await engine.count('sys_activity', { where: { object_name: BOARD, record_id: recordId }, context: SYS } as any)).toBe(before);
+    expect(await engine.count('sys_activity', { where: { object_name: BOARD, record_id: recordId }, context: SYS })).toBe(before);
   });
 });
