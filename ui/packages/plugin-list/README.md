@@ -344,6 +344,35 @@ function TaskList() {
 }
 ```
 
+### The condition row for another host: `list-conditions`
+
+A host that draws a child object's rows itself, and sits below this package so
+it cannot import it (the record page's related tab, `@object-ui/plugin-detail`),
+reaches the list page's condition row through the registry as
+`list-conditions` (objectstack#35892), the way it reaches `object-grid`. It is
+the same `ConditionChipRow`, `SortPanel` and `FilterPanel` with the same field
+lists, and no view switch, view settings or search. It is controlled and every
+input is a React prop, never a node key:
+
+```tsx
+<SchemaRenderer
+  schema={{ type: 'list-conditions' }}
+  objectName="quote"
+  objectDef={quoteDefinition}
+  shownFields={['name', 'amount', 'status']}
+  sort={sort}
+  onSortChange={setSort}
+  filters={filterGroup}
+  onFiltersChange={(group, filterNode) => { setFilterGroup(group); setFilter(filterNode); }}
+  onDiscard={changed ? discard : undefined}
+/>
+```
+
+`onFiltersChange` hands back the group the panels edit and the query node the
+list page would send for it (`undefined` = no filter). **Discard**
+(`ConditionDiscardButton`, the list page's own) is drawn at the row's end while
+`onDiscard` is passed. Labels fold to icons when the row is narrow.
+
 ## Schema
 
 The ListView component accepts a `ListViewSchema`, exported from

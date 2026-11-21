@@ -31,7 +31,7 @@ import {
   cn,
 } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
-import type { ListViewProps } from '@object-ui/plugin-list';
+import { ConditionDiscardButton, type ListViewProps } from '@object-ui/plugin-list';
 import { ChevronDown, CopyPlus, RotateCcw, Save } from 'lucide-react';
 
 /** One part of a list that can differ from its view (`ListView`'s vocabulary). */
@@ -112,18 +112,13 @@ export function ListDraftActions({
   return (
     <span className={cn('flex shrink-0 items-center gap-1', className)} data-testid="list-draft">
       {/* The wide face: Discard beside Save ▾. */}
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
+      <ConditionDiscardButton
+        label={discardLabel}
         title={discardTitle}
         data-testid="list-draft-discard"
-        className="hidden h-6 shrink-0 gap-1 px-1.5 text-[13px] font-normal text-muted-foreground shadow-none @[40rem]/list:inline-flex"
-        onClick={onDiscard}
-      >
-        <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-        {discardLabel}
-      </Button>
+        className="hidden @[40rem]/list:inline-flex"
+        onDiscard={onDiscard}
+      />
       {offersSave ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -169,18 +164,13 @@ export function ListDraftActions({
           </DropdownMenuContent>
         </DropdownMenu>
       ) : (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
+        <ConditionDiscardButton
+          label={discardLabel}
           title={discardTitle}
           data-testid="list-draft-compact-discard"
-          className="inline-flex h-6 shrink-0 gap-1 px-1.5 text-[13px] font-normal text-muted-foreground shadow-none @[40rem]/list:hidden"
-          onClick={onDiscard}
-        >
-          <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-          {discardLabel}
-        </Button>
+          className="inline-flex @[40rem]/list:hidden"
+          onDiscard={onDiscard}
+        />
       )}
     </span>
   );

@@ -70,6 +70,8 @@ export const LIST_CONDITION_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'listConditions.chips.sortedBy': 'Sorted by {{field}}',
   'listConditions.chips.reset': 'Reset',
   'listConditions.chips.resetHint': 'Back to the view as saved',
+  'listConditions.chips.discard': 'Discard',
+  'listConditions.chips.discardHint': 'Back to the default sort and filter',
   'listConditions.chips.remove': 'Remove {{label}}',
   'listConditions.chips.dragSort': 'Drag to change the sort priority',
   'listConditions.chips.viewOwn': 'Part of this view; it cannot be removed here',

@@ -12,6 +12,7 @@ import { ListView } from './ListView';
 import { ListViewBlock } from './ListViewBlock';
 import { ViewSwitcher } from './ViewSwitcher';
 import { ObjectGallery } from './ObjectGallery';
+import { ListConditionsBlock } from './conditions/ListConditionsBlock';
 
 export { ListView, ListViewBlock, ViewSwitcher, ObjectGallery };
 // `ViewSwitcherDropdown`, `TabBarSelect` and `evaluateConditionalFormatting`
@@ -33,6 +34,9 @@ export type { ObjectGalleryProps } from './ObjectGallery';
 // `ListViewSwitcherProps`, because `@object-ui/plugin-view` publishes
 // `ViewSwitcherProps` for a different switcher (objectui#6349, batch 8).
 export type { ListViewSwitcherProps } from './ViewSwitcher';
+export type { ListConditionsHostProps } from './conditions/ListConditionsBlock';
+export { ConditionDiscardButton } from './conditions/ListConditionControls';
+export type { ConditionDiscardButtonProps } from './conditions/ListConditionControls';
 
 /**
  * Registry entry point for `<ListView>`. Both bridges it carries — the
@@ -406,4 +410,16 @@ ComponentRegistry.register('list', ListViewRenderer, {
   icon: 'LayoutList',
   // Same renderer, therefore the same declared surface as `list-view` above.
   inputs: LIST_VIEW_INPUTS.map((input) => ({ ...input })),
+});
+
+// objectstack#35892 — the list page's condition row (sort and filter chips,
+// the Sort and Filter panels) for a host that draws its own rows and sits
+// below this package: a record page's related tab reaches it here, as it
+// reaches `object-grid`. Host props only (`ListConditionsHostProps`): it
+// declares no input, since nothing about it is authored.
+ComponentRegistry.register('list-conditions', ListConditionsBlock, {
+  namespace: 'plugin-list',
+  label: 'List Conditions',
+  category: 'Views',
+  icon: 'ListFilter',
 });

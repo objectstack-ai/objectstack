@@ -98,6 +98,7 @@ export {
   readObjectSortability,
   isPlatformSortableField,
   filterPlatformSortableSort,
+  withHeaderSortPick,
 } from './utils/column-sortability.js';
 // [objectstack#27504] The served packaged-action activation: which declared
 // actions the installation switched off, stamped by the data layer and asked
