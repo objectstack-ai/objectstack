@@ -16,7 +16,7 @@ import type { useObjectListPreferences, ListViewPreference, ListViewPreferencePa
 const ObjectChart = lazy(() =>
   import('@object-ui/plugin-charts').then((m) => ({ default: m.ObjectChart })),
 );
-import { ListView } from '@object-ui/plugin-list';
+import { ListView, type ListToolbarTrailingState } from '@object-ui/plugin-list';
 import type { ListViewSchema, TreeViewConfig } from '@object-ui/types';
 import type { FilterBuilderRowGroup } from '@object-ui/components';
 import type { useAuth } from '@object-ui/auth';
@@ -158,9 +158,10 @@ export function useObjectViewListRenderer({
      * objectstack#35878 — the right end of the view bar, given the list's own
      * tools there (its search): the page's create button and ⋮ More after
      * them. `null` ⇒ the list's search alone. Called afresh on every render
-     * of the page, read through a store like the lead.
+     * of the page, read through a store like the lead. Given, the list hands
+     * it its export door too (objectstack#36113: 「Import / Export」 there).
      */
-    viewBarTrailing: ((tools: ReactNode) => ReactNode) | null;
+    viewBarTrailing: ((tools: ReactNode, state: ListToolbarTrailingState) => ReactNode) | null;
     /** objectstack#35878 — the condition row's right end: Discard and Save while the list holds a draft (objectstack#35955), or `null`. */
     conditionRowEnd: ReactNode;
     /** objectstack#28950 — what of the list differs from the view, keyed by the list identity. */
@@ -218,7 +219,7 @@ export function useObjectViewListRenderer({
     const hasPhoneTitle = phoneTitle != null;
     // objectstack#35878 — the view bar's right end and the condition row's,
     // read through stores the same way, so a change in them redraws only them.
-    const [trailStore] = useState(() => createLeadStore<((tools: ReactNode) => ReactNode) | null>(viewBarTrailing));
+    const [trailStore] = useState(() => createLeadStore<((tools: ReactNode, state: ListToolbarTrailingState) => ReactNode) | null>(viewBarTrailing));
     const [rowEndStore] = useState(() => createLeadStore<ReactNode>(conditionRowEnd));
     useLayoutEffect(() => {
         trailStore.set(viewBarTrailing);
@@ -416,7 +417,7 @@ export function useObjectViewListRenderer({
                         <div className="border-b px-2 py-1.5 sm:h-10 sm:pl-2.5 sm:pr-2 sm:py-0 flex items-center justify-between gap-2 min-w-0 bg-background">
                             <ViewBarLead store={leadStore} />
                             {/* objectstack#35878 — the page's acts end this bar too. */}
-                            {hasViewBarTrailing && <ViewBarTrailing store={trailStore} tools={null} />}
+                            {hasViewBarTrailing && <ViewBarTrailing store={trailStore} tools={null} state={NO_LIST_TOOLS} />}
                         </div>
                     )}
                     {chartFace}
@@ -1197,7 +1198,7 @@ export function useObjectViewListRenderer({
                 ) : null}
                 // objectstack#35878 — the bar's right end: the search, then
                 // the page's acts; and the condition row's right end.
-                toolbarTrailing={hasViewBarTrailing ? (tools) => <ViewBarTrailing store={trailStore} tools={tools} /> : undefined}
+                toolbarTrailing={hasViewBarTrailing ? (tools, state) => <ViewBarTrailing store={trailStore} tools={tools} state={state} /> : undefined}
                 conditionRowEnd={hasPhoneTitle ? <ViewBarLead store={rowEndStore} /> : undefined}
                 dataSource={ds}
             />
@@ -1236,8 +1237,11 @@ function ViewBarLead({ store }: { store: LeadStore }) {
     return <>{useSyncExternalStore(store.subscribe, store.get, store.get)}</>;
 }
 
+/** A chart heads its page with the view bar but draws no list: no export door. */
+const NO_LIST_TOOLS: ListToolbarTrailingState = {};
+
 /** Draws the view bar's right end from the store, around the list's own `tools`. */
-function ViewBarTrailing({ store, tools }: { store: LeadStore<((tools: ReactNode) => ReactNode) | null>; tools: ReactNode }) {
+function ViewBarTrailing({ store, tools, state }: { store: LeadStore<((tools: ReactNode, state: ListToolbarTrailingState) => ReactNode) | null>; tools: ReactNode; state: ListToolbarTrailingState }) {
     const render = useSyncExternalStore(store.subscribe, store.get, store.get);
-    return <>{render ? render(tools) : tools}</>;
+    return <>{render ? render(tools, state) : tools}</>;
 }
