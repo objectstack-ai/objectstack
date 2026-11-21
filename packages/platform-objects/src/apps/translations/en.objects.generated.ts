@@ -176,7 +176,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "Ban User",
-        description: "Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned, as are their OAuth access tokens and token refreshes. The keys work again after the unban.",
+        description: "Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned, as are their OAuth access tokens and token refreshes. The keys work again after the unban. The ban also suspends the AI service accounts they are accountable for, disables the OAuth applications they registered and revokes the SCIM credentials they minted; the unban restores none of these.",
         successMessage: "User banned",
         params: {
           banReason: {
