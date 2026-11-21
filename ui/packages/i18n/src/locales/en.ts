@@ -1830,7 +1830,9 @@ const en = {
     // objectstack#35892 — the related tab: a filter that matches nothing, and its bulk delete.
     relatedNoMatches: 'No records match the filter',
     deleteRowsTitle: 'Delete selected records',
-    deleteRowsConfirmation: 'Selected: {{count}}. This cannot be undone.',
+    deleteRowsConfirmation: '{{count}} records will be deleted. This cannot be undone.',
+    deleteRowsConfirmation_one: '{{count}} record will be deleted. This cannot be undone.',
+    deleteRowsConfirmation_other: '{{count}} records will be deleted. This cannot be undone.',
     actions: 'Actions',
     previousPage: 'Previous',
     nextPage: 'Next',

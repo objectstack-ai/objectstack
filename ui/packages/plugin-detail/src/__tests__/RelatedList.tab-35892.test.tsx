@@ -215,7 +215,7 @@ describe('the related tab is the child object\'s full list (objectstack#35892)',
     await waitFor(() => expect(grid()?.schema.data.items).toHaveLength(12));
     const reads = ds.find.mock.calls.length;
     act(() => grid().props.onBulkDelete(ROWS.slice(0, 3)));
-    expect(await screen.findByText('Selected: 3. This cannot be undone.')).toBeInTheDocument();
+    expect(await screen.findByText('3 records will be deleted. This cannot be undone.')).toBeInTheDocument();
     expect(onRowDelete).not.toHaveBeenCalled();
     fireEvent.click(document.querySelector('[data-related-bulk-delete-confirm]')!);
     await waitFor(() => expect(onRowDelete).toHaveBeenCalledTimes(3));

@@ -1724,7 +1724,11 @@ const ru = {
     // objectstack#35892 — the related tab: a filter that matches nothing, and its bulk delete.
     relatedNoMatches: "Нет записей, соответствующих фильтру",
     deleteRowsTitle: "Удалить выбранные записи",
-    deleteRowsConfirmation: "Выбрано: {{count}}. Это действие нельзя отменить.",
+    deleteRowsConfirmation: "{{count}} записи будут удалены. Это действие нельзя отменить.",
+    deleteRowsConfirmation_one: "{{count}} запись будет удалена. Это действие нельзя отменить.",
+    deleteRowsConfirmation_few: "{{count}} записи будут удалены. Это действие нельзя отменить.",
+    deleteRowsConfirmation_many: "{{count}} записей будут удалены. Это действие нельзя отменить.",
+    deleteRowsConfirmation_other: "{{count}} записи будут удалены. Это действие нельзя отменить.",
     createdBy: "Создано",
     updatedBy: "Обновлено",
     // objectui#3863 — base key, answering only a call made without a count: since

@@ -124,7 +124,9 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // objectstack#35892 — the related tab: a filter that matches nothing, and its bulk delete.
   'detail.relatedNoMatches': 'No records match the filter',
   'detail.deleteRowsTitle': 'Delete selected records',
-  'detail.deleteRowsConfirmation': 'Selected: {{count}}. This cannot be undone.',
+  'detail.deleteRowsConfirmation': '{{count}} records will be deleted. This cannot be undone.',
+  'detail.deleteRowsConfirmation_one': '{{count}} record will be deleted. This cannot be undone.',
+  'detail.deleteRowsConfirmation_other': '{{count}} records will be deleted. This cannot be undone.',
   'detail.actions': 'Actions',
   'detail.previousPage': 'Previous',
   'detail.nextPage': 'Next',

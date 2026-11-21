@@ -1662,7 +1662,10 @@ const es = {
     // objectstack#35892 — the related tab: a filter that matches nothing, and its bulk delete.
     relatedNoMatches: "Ningún registro coincide con el filtro",
     deleteRowsTitle: "Eliminar los registros seleccionados",
-    deleteRowsConfirmation: "Seleccionados: {{count}}. Esto no se puede deshacer.",
+    deleteRowsConfirmation: "Se eliminarán {{count}} registros. Esto no se puede deshacer.",
+    deleteRowsConfirmation_one: "Se eliminará {{count}} registro. Esto no se puede deshacer.",
+    deleteRowsConfirmation_many: "Se eliminarán {{count}} de registros. Esto no se puede deshacer.",
+    deleteRowsConfirmation_other: "Se eliminarán {{count}} registros. Esto no se puede deshacer.",
     actions: "Acciones",
     previousPage: "Anterior",
     nextPage: "Siguiente",

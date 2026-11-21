@@ -9,7 +9,7 @@
 
 feat(ui): a record page's related tab is the child object's full list
 
-Clause-②: yes (widening) — a new registry component `list-conditions` (`@object-ui/plugin-list`, host props only, no node keys) and its exported `ListConditionsHostProps`; new exports `ConditionDiscardButton` (`@object-ui/plugin-list`) and `withHeaderSortPick` (`@object-ui/core`); new i18n keys in every `@object-ui/i18n` locale pack (`listConditions.chips.discard`, `listConditions.chips.discardHint`, `detail.relatedNoMatches`, `detail.deleteRowsTitle`, `detail.deleteRowsConfirmation`); nothing removed or renamed
+Clause-②: yes (widening) — a new registry component `list-conditions` (`@object-ui/plugin-list`, host props only, no node keys) and its exported `ListConditionsHostProps`; new exports `ConditionDiscardButton` (`@object-ui/plugin-list`) and `withHeaderSortPick` (`@object-ui/core`); new i18n keys in every `@object-ui/i18n` locale pack (`listConditions.chips.discard`, `listConditions.chips.discardHint`, `detail.relatedNoMatches`, `detail.deleteRowsTitle`, `detail.deleteRowsConfirmation_*`, a count family); nothing removed or renamed
 Metadata-protocol: none
 
 On a record page, a related list opened as its own tab now works like the object's list page:

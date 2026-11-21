@@ -1530,7 +1530,9 @@ const zh = {
     // objectstack#35892 — the related tab: a filter that matches nothing, and its bulk delete.
     relatedNoMatches: '没有符合筛选条件的记录',
     deleteRowsTitle: '删除选中的记录',
-    deleteRowsConfirmation: '已选 {{count}} 条，删除后无法恢复。',
+    deleteRowsConfirmation: '将删除 {{count}} 条记录，删除后无法恢复。',
+    deleteRowsConfirmation_one: '将删除 {{count}} 条记录，删除后无法恢复。',
+    deleteRowsConfirmation_other: '将删除 {{count}} 条记录，删除后无法恢复。',
     actions: '操作',
     previousPage: '上一页',
     nextPage: '下一页',

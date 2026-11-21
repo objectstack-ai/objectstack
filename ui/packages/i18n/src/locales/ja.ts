@@ -1617,7 +1617,9 @@ const ja = {
     // objectstack#35892 — the related tab: a filter that matches nothing, and its bulk delete.
     relatedNoMatches: "フィルターに一致するレコードはありません",
     deleteRowsTitle: "選択したレコードを削除",
-    deleteRowsConfirmation: "選択中: {{count}} 件。この操作は元に戻せません。",
+    deleteRowsConfirmation: "{{count}} 件のレコードを削除します。この操作は元に戻せません。",
+    deleteRowsConfirmation_one: "{{count}} 件のレコードを削除します。この操作は元に戻せません。",
+    deleteRowsConfirmation_other: "{{count}} 件のレコードを削除します。この操作は元に戻せません。",
     createdBy: "作成者",
     updatedBy: "更新者",
     created: "作成",

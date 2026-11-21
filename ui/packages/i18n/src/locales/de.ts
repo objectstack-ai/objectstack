@@ -1609,7 +1609,9 @@ const de = {
     // objectstack#35892 — the related tab: a filter that matches nothing, and its bulk delete.
     relatedNoMatches: "Keine Datensätze entsprechen dem Filter",
     deleteRowsTitle: "Ausgewählte Datensätze löschen",
-    deleteRowsConfirmation: "Ausgewählt: {{count}}. Dies kann nicht rückgängig gemacht werden.",
+    deleteRowsConfirmation: "{{count}} Datensätze werden gelöscht. Dies kann nicht rückgängig gemacht werden.",
+    deleteRowsConfirmation_one: "{{count}} Datensatz wird gelöscht. Dies kann nicht rückgängig gemacht werden.",
+    deleteRowsConfirmation_other: "{{count}} Datensätze werden gelöscht. Dies kann nicht rückgängig gemacht werden.",
     actions: "Aktionen",
     previousPage: "Zurück",
     nextPage: "Weiter",

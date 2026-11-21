@@ -1659,7 +1659,10 @@ const fr = {
     // objectstack#35892 — the related tab: a filter that matches nothing, and its bulk delete.
     relatedNoMatches: "Aucun enregistrement ne correspond au filtre",
     deleteRowsTitle: "Supprimer les enregistrements sélectionnés",
-    deleteRowsConfirmation: "Sélectionnés : {{count}}. Cette action est irréversible.",
+    deleteRowsConfirmation: "{{count}} enregistrements seront supprimés. Cette action est irréversible.",
+    deleteRowsConfirmation_one: "{{count}} enregistrement sera supprimé. Cette action est irréversible.",
+    deleteRowsConfirmation_many: "{{count}} d'enregistrements seront supprimés. Cette action est irréversible.",
+    deleteRowsConfirmation_other: "{{count}} enregistrements seront supprimés. Cette action est irréversible.",
     actions: "Actions",
     previousPage: "Précédent",
     nextPage: "Suivant",

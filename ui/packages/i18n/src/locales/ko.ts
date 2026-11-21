@@ -1609,7 +1609,9 @@ const ko = {
     // objectstack#35892 — the related tab: a filter that matches nothing, and its bulk delete.
     relatedNoMatches: "필터와 일치하는 레코드가 없습니다",
     deleteRowsTitle: "선택한 레코드 삭제",
-    deleteRowsConfirmation: "선택됨: {{count}}개. 이 작업은 되돌릴 수 없습니다.",
+    deleteRowsConfirmation: "레코드 {{count}}개가 삭제됩니다. 이 작업은 되돌릴 수 없습니다.",
+    deleteRowsConfirmation_one: "레코드 {{count}}개가 삭제됩니다. 이 작업은 되돌릴 수 없습니다.",
+    deleteRowsConfirmation_other: "레코드 {{count}}개가 삭제됩니다. 이 작업은 되돌릴 수 없습니다.",
     actions: "작업",
     previousPage: "이전",
     nextPage: "다음",
