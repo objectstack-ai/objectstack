@@ -53,7 +53,7 @@ vi.mock('../ConsoleNotificationBanners', () => ({ ConsoleNotificationBanners: ()
 vi.mock('../../preview/DraftPreviewBar', () => ({ DraftPreviewBar: () => null }));
 vi.mock('../../preview/UnpublishedAppBar', () => ({ UnpublishedAppBar: () => null }));
 
-import { ConsoleLayout, isRecordPagePath } from '../ConsoleLayout';
+import { ConsoleLayout, isAppDocsPath, isRecordPagePath } from '../ConsoleLayout';
 import { NavigationProvider } from '../../context/NavigationContext';
 
 const APP = { name: 'crm', label: 'CRM', active: true, navigation: [] };
@@ -221,6 +221,36 @@ describe('the phone bottom bar is drawn on its three pages only (objectstack#358
         expect(insetKeepsBarFree(), `${width} px ${path}`).toBe(false);
         cleanup();
       }
+    }
+  });
+});
+
+describe('an app\'s docs pages draw no app menu (objectstack#35424)', () => {
+  const appMenu = () => screen.queryByTestId('sidebar-stub');
+
+  it('at 1440 px a docs index, a book and an article draw no app menu, and keep the app bar', () => {
+    for (const path of ['/apps/crm/docs', '/apps/crm/docs/crm_manual', '/apps/crm/docs/crm_manual/crm_quotes']) {
+      mountAt(path, 1440);
+      expect(appMenu(), path).toBeNull();
+      expect(screen.getByTestId('app-bar'), path).toBeInTheDocument();
+      cleanup();
+    }
+  });
+
+  it('control: every other app route keeps the app menu', () => {
+    for (const path of ['/apps/crm', '/apps/crm/crm_lead', '/apps/crm/dashboard/sales', '/apps/crm/docsearch']) {
+      mountAt(path, 1440);
+      expect(appMenu(), path).not.toBeNull();
+      cleanup();
+    }
+  });
+
+  it('isAppDocsPath names the docs tree under an app and nothing else', () => {
+    for (const path of ['/apps/crm/docs', '/apps/crm/docs/', '/apps/crm/docs/manual/intro']) {
+      expect(isAppDocsPath(path), path).toBe(true);
+    }
+    for (const path of ['/docs', '/docs/manual/intro', '/apps/crm', '/apps/crm/docsearch', '/apps/crm/crm_lead/docs']) {
+      expect(isAppDocsPath(path), path).toBe(false);
     }
   });
 });
