@@ -536,6 +536,9 @@ const fr = {
     cancelChanges: "Annuler les modifications",
     saveRow: "Enregistrer la ligne",
     cellReadOnly: "Cette cellule ne peut pas être modifiée ici.",
+    // objectstack#36023 — why a list cell's typed value was not saved, under the editor.
+    cellNotNumber: "Saisissez un nombre.",
+    cellInvalid: "Cette valeur n'est pas valide.",
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "Enregistrement…",
     cellSaved: "Enregistré",

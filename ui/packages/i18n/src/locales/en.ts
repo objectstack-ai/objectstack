@@ -795,6 +795,9 @@ const en = {
     cancelChanges: 'Cancel changes',
     saveRow: 'Save row',
     cellReadOnly: 'This cell can\'t be edited here.',
+    // objectstack#36023 — why a list cell's typed value was not saved, under the editor.
+    cellNotNumber: 'Enter a number.',
+    cellInvalid: 'This value isn\'t valid.',
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: 'Saving…',
     cellSaved: 'Saved',

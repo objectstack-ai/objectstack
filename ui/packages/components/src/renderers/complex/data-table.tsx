@@ -355,6 +355,11 @@ const TABLE_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // objectstack#35684 — a selected cell that opens no editor, when its host
   // gives no reason of its own.
   'table.cellReadOnly': 'This cell can\'t be edited here.',
+  // objectstack#36023 — why a list cell's typed value was not saved, said under the editor.
+  'table.cellNotNumber': 'Enter a number.',
+  'table.cellInvalid': 'This value isn\'t valid.',
+  'validation.email': 'Please enter a valid email address',
+  'validation.url': 'Please enter a valid URL',
   // objectstack#35685 — a list cell's own save state, and the way out of a
   // rule the list cannot complete.
   'table.cellSaving': 'Saving…',
@@ -1968,6 +1973,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     editValueRef.current = value;
     setEditValueState(value);
   };
+  // objectstack#36023 — why the open edit's last commit was refused, and the
+  // value it refused: the reason shows while the editor still holds that value.
+  const [editRefusal, setEditRefusal] = useState<{ text: string; value: unknown } | null>(null);
   // Track pending changes for multi-cell editing, per record (objectui#12310):
   // record key -> { row, changes: { columnKey -> newValue } }
   const [pendingChanges, setPendingChanges] = useState<PendingChanges>(new Map());
@@ -2800,6 +2808,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     const cell: EditingCell = { rowKey, columnKey, row };
     editingCellRef.current = cell;
     setEditingCell(cell);
+    setEditRefusal(null);
 
     // Check if there's a pending change for this cell, otherwise use current data value
     const rowChanges = pendingChanges.get(rowKey)?.changes;
@@ -2813,11 +2822,16 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       : { had: false, value: undefined };
   };
 
-  const saveEdit = (force: boolean = false, explicitValue?: any) => {
-    if (!editingCell) return;
+  /**
+   * Commit the open edit. `false` when nothing was committed: no edit is open,
+   * or the value was refused (objectstack#36023), and then the editor stays
+   * open with what was typed and the reason under it.
+   */
+  const saveEdit = (force: boolean = false, explicitValue?: any): boolean => {
+    if (!editingCell) return false;
 
     // Don't save if we're in cancelled state (unless forced)
-    if (!force && editingCell === null) return;
+    if (!force && editingCell === null) return false;
 
     const { rowKey, columnKey } = editingCell;
     // The record the editor is open on, as the table holds it now — or, if
@@ -2832,6 +2846,17 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     // (objectui#12664) has not reached state yet either.
     const valueToStage = explicitValue !== undefined ? explicitValue : editValueRef.current;
 
+    // objectstack#36023 — a value that fails its rules is not written: the
+    // editor stays open with the reader's input, and says why.
+    const refusal = selectFirst ? editRefusalOf(row, columnKey, valueToStage) : null;
+    if (refusal) {
+      setEditRefusal({ text: refusal, value: valueToStage });
+      // A commit blurs the editor's control first (`flushInjectedEditor`): give it the caret back.
+      const editor = tableRef.current?.querySelector<HTMLElement>('[data-slot="cell-editor-overlay"]');
+      if (editor && !editor.contains(document.activeElement)) firstEditorControl(editor)?.focus({ preventScroll: true });
+      return false;
+    }
+
     // objectstack#35685 — a value the host asks to confirm first: the editor
     // closes with nothing of this session staged, and the value is written
     // only once the host says yes (a no leaves the cell as it was).
@@ -2842,8 +2867,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       editingCellRef.current = null;
       setEditingCell(null);
       setEditValue('');
+      setEditRefusal(null);
       settleCommitConfirmation(asked, row, columnKey, valueToStage);
-      return;
+      return true;
     }
 
     // Update pending changes — or drop this cell's entry when the committed
@@ -2864,6 +2890,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     editingCellRef.current = null;
     setEditingCell(null);
     setEditValue('');
+    setEditRefusal(null);
+    return true;
   };
 
   // Latest-ref to `saveEdit` so the document-level click-outside listener (whose
@@ -2974,6 +3002,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     editingCellRef.current = null;
     setEditingCell(null);
     setEditValue('');
+    setEditRefusal(null);
   };
 
   const cancelEdit = () => {
@@ -3564,6 +3593,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   }, [selectedPosKey, editingCell]);
   // The preview's size, taken as the editor replaces it, so the layer does not jump.
   const [editorSeedSize, setEditorSeedSize] = useState<CellOverlaySize | null>(null);
+  // objectstack#36023 — the open editor is a panel under its cell (`GridCellFacts.editor`).
+  const [editorBelow, setEditorBelow] = useState(false);
   const focusSelectionRef = useRef(false);
   useEffect(() => {
     if (!focusSelectionRef.current || editingCell) return;
@@ -3598,6 +3629,27 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
 
   const factsOf = (row: any, col: TableColumn) => cellSelection?.describeCell?.(row, col.accessorKey) ?? null;
 
+  /**
+   * objectstack#36023 — why the open editor's value may not be committed, or
+   * `null`: first what the browser itself cannot read in the editor's input (a
+   * number box holding letters, an email box holding no address), then the
+   * host's rules for the cell (`GridCellFacts.validate`).
+   */
+  const editRefusalOf = (row: any, columnKey: string, value: unknown): string | null => {
+    const editor = tableRef.current?.querySelector<HTMLElement>('[data-slot="cell-editor-overlay"]');
+    const unreadable = editor
+      ? Array.from(editor.querySelectorAll('input')).find((input) => input.validity?.badInput || input.validity?.typeMismatch)
+      : undefined;
+    if (unreadable) {
+      if (unreadable.type === 'number') return t('table.cellNotNumber');
+      if (unreadable.type === 'email') return t('validation.email');
+      if (unreadable.type === 'url') return t('validation.url');
+      return t('table.cellInvalid');
+    }
+    const col = columns.find((c) => c.accessorKey === columnKey);
+    return (col && factsOf(row, col)?.validate?.(value)) || null;
+  };
+
   /** Why this cell opens no editor, or `null` when it opens one. */
   const readOnlyReasonOf = (row: any, col: TableColumn): string | null => {
     const reason = factsOf(row, col)?.readOnlyReason;
@@ -3620,7 +3672,10 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       ? tableRef.current?.querySelector<HTMLElement>('[data-slot="cell-preview-overlay"]')
       : null;
     const rect = preview?.getBoundingClientRect();
-    setEditorSeedSize(rect ? { width: rect.width, height: rect.height } : null);
+    // A panel under the cell does not take the size of the preview it replaces.
+    const below = factsOf(row, col)?.editor === 'below';
+    setEditorSeedSize(rect && !below ? { width: rect.width, height: rect.height } : null);
+    setEditorBelow(below);
     setSelectedCell({ rowIndex, colIndex });
     startEdit(row, col.accessorKey, seed);
   };
@@ -3661,6 +3716,17 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     const staged = pendingChanges.get(pendingRowKeyOf(row))?.changes;
     const current = staged && col.accessorKey in staged ? staged[col.accessorKey] : row[col.accessorKey];
     return current !== true;
+  });
+  /** Backspace or Delete on the selected cell: emptied and saved, or said why not. */
+  const clearCell = (rowIndex: number, colIndex: number) => writeCell(rowIndex, colIndex, (row, col) => {
+    // A two-state cell has no empty state to go to.
+    if (togglesCell(row, col)) return undefined;
+    const refusal = factsOf(row, col)?.clearRefusal;
+    if (refusal) {
+      setCellNotice({ rowIndex, colIndex, text: refusal });
+      return undefined;
+    }
+    return null;
   });
   const pasteIntoCell = (rowIndex: number, colIndex: number, text: string) => writeCell(rowIndex, colIndex, (row, col) => {
     const fromText = factsOf(row, col)?.fromText;
@@ -3753,9 +3819,10 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       e.preventDefault();
       toggleCell(rowIndex, colIndex);
     } else if ((e.key === 'Backspace' || e.key === 'Delete') && bare) {
-      // An empty editor; nothing is written until it commits.
+      // objectstack#36023 — the cell is cleared and saved at once; a cell the
+      // host refuses to clear (a required field) says why and keeps its value.
       e.preventDefault();
-      attemptEdit(rowIndex, colIndex, { value: '' });
+      clearCell(rowIndex, colIndex);
     }
     // A printable key lands in the catcher, which reads it (`typeIntoCell`).
   };
@@ -3832,9 +3899,11 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       e.preventDefault();
       // Already saving here; suppress the redundant save the ensuing blur triggers.
       skipBlurSaveRef.current = true;
-      saveEdit(true);
+      const committed = saveEdit(true);
+      // A refused value keeps the editor, whose next blur saves as before.
+      if (!committed) skipBlurSaveRef.current = false;
       // The select-first model: Enter saves and moves down, Tab right, Shift+Tab left.
-      if (selectFirst) moveSelection(e.key === 'Enter' ? 'down' : e.shiftKey ? 'left' : 'right');
+      if (committed && selectFirst) moveSelection(e.key === 'Enter' ? 'down' : e.shiftKey ? 'left' : 'right');
     } else if (e.key === 'Escape') {
       e.preventDefault();
       focusSelectionRef.current = selectFirst;
@@ -3910,7 +3979,19 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       // (objectui#12664): this runs before the browser moves focus, so a
       // widget that reads its input on blur would otherwise not have staged.
       flushInjectedEditor();
-      saveEditRef.current(true);
+      if (saveEditRef.current(true)) return;
+      // objectstack#36023 — a refused value keeps the editor open: this press
+      // and the click it makes do nothing, so the reader can correct it or
+      // press Escape.
+      e.preventDefault();
+      e.stopPropagation();
+      const swallowClick = (click: MouseEvent) => {
+        click.preventDefault();
+        click.stopPropagation();
+      };
+      document.addEventListener('click', swallowClick, { capture: true, once: true });
+      // A press that makes no click (a drag) leaves no listener behind.
+      window.setTimeout(() => document.removeEventListener('click', swallowClick, { capture: true }), 1000);
     };
     document.addEventListener('pointerdown', onPointerDown, true);
     return () => document.removeEventListener('pointerdown', onPointerDown, true);
@@ -4875,6 +4956,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         const hasPendingChange = rowChanges[col.accessorKey] !== undefined;
                         const cellValue = hasPendingChange ? rowChanges[col.accessorKey] : originalValue;
                         const isEditing = editingCell !== null && editingCell.rowKey === rowKey && editingCell.columnKey === col.accessorKey;
+                        // objectstack#36023 — a picker's panel opens under the cell, which keeps its value drawn.
+                        const editsBelow = isEditing && selectFirst && editorBelow;
                         // The reason the last refusal gave for THIS cell, if it
                         // named it (objectstack-ai/objectstack#27520).
                         const cellError = rowCellErrors?.[col.accessorKey];
@@ -5092,12 +5175,14 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                 </span>
                               );
                             })()}
-                            {isEditing ? (
+                            {isEditing && (
                               <CellOverlay
                                 kind="editor"
+                                placement={editsBelow ? 'below' : 'cover'}
                                 minSize={editorSeedSize}
-                                // Scrolled out of sight: commit, as a click outside does.
-                                onHidden={() => { flushInjectedEditor(); saveEditRef.current(true); }}
+                                // Scrolled out of sight: commit, as a click outside does; a
+                                // value that cannot be committed is discarded with the editor.
+                                onHidden={() => { flushInjectedEditor(); if (!saveEditRef.current(true)) exitEdit(true); }}
                               >
                                 {/* The per-type floor rides an inner box: on the layer's own
                                     class it would replace the layer's cell-width floor. */}
@@ -5146,7 +5231,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                     // focus back to the selected cell, as Enter does.
                                     commit: (v?: any) => {
                                       focusSelectionRef.current = selectFirst;
-                                      saveEdit(true, v);
+                                      if (!saveEdit(true, v)) focusSelectionRef.current = false;
                                     },
                                     cancel: cancelEdit,
                                   });
@@ -5199,8 +5284,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                             // A commit-on-blur widget stages
                                             // on this blur (objectui#12664).
                                             flushInjectedEditor();
-                                            saveEdit(true);
-                                            if (selectFirst) moveSelection(e.key === 'Enter' ? 'down' : e.shiftKey ? 'left' : 'right');
+                                            if (saveEdit(true) && selectFirst) moveSelection(e.key === 'Enter' ? 'down' : e.shiftKey ? 'left' : 'right');
                                           } else if (e.key === 'Escape') {
                                             e.preventDefault();
                                             focusSelectionRef.current = selectFirst;
@@ -5321,8 +5405,15 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                   />
                                 );
                               })()}</div>
+                                {editRefusal && isUnchangedCellValue(editValue, editRefusal.value) && (
+                                  // objectstack#36023 — why the value was not saved, under the input.
+                                  <p role="alert" data-testid="cell-edit-refusal" className="px-2 py-1 text-xs text-destructive">
+                                    {editRefusal.text}
+                                  </p>
+                                )}
                               </CellOverlay>
-                            ) : (
+                            )}
+                            {(!isEditing || editsBelow) && (
                               <div
                                 className={
                                   isFit

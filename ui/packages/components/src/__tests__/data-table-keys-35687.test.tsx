@@ -12,8 +12,8 @@
  *
  *   1. On the selected cell: the arrows and Tab move the selection; Escape
  *      clears it; typing opens the editor with the typed text in place of the
- *      value (a number column gets the number); Backspace opens it empty and
- *      writes nothing; Ctrl/Cmd+V converts and commits; Ctrl/Cmd+C copies.
+ *      value (a number column gets the number); Ctrl/Cmd+V converts and
+ *      commits; Ctrl/Cmd+C copies. (Backspace: section 4.)
  *   2. While editing: Enter commits and moves down, Tab / Shift+Tab commit and
  *      move right / left, Escape cancels and keeps the selection. In a
  *      multi-line editor Enter is the editor's and Ctrl/Cmd+Enter commits.
@@ -21,6 +21,11 @@
  *      Enter a browser raises after `compositionend`, never commit; a
  *      composition started on the selected cell opens the editor with the
  *      whole composed text.
+ *   4. objectstack#36023: Backspace / Delete clear the cell and save at once,
+ *      unless the host says why not (a required field); a picker's editor is a
+ *      panel under the cell, which keeps its value drawn; a commit the browser
+ *      or the host refuses keeps the editor and the input, says why under it,
+ *      and Escape discards.
  */
 import React from 'react';
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -118,15 +123,6 @@ describe('data-table select-first keys — on the selected cell (objectstack#356
     expect(t.editor()).toHaveValue(5);
     fireEvent.keyDown(t.editor()!, { key: 'Escape' });
     expect(t.cell(1, 1)).toHaveTextContent('20');
-    expect(t.onCellChange).not.toHaveBeenCalled();
-  });
-
-  it.each(['Backspace', 'Delete'])('%s opens an empty editor and writes nothing', (key) => {
-    const t = renderTable();
-    t.select(1, 1);
-    fireEvent.keyDown(t.catcher(), { key });
-    expect(t.editor()).not.toBeNull();
-    expect(t.editor()!.value).toBe('');
     expect(t.onCellChange).not.toHaveBeenCalled();
   });
 
@@ -266,5 +262,136 @@ describe('data-table select-first keys — an input method', () => {
     }
     expect(t.selected()).toBe('1:0');
     expect(t.onCellChange).not.toHaveBeenCalled();
+  });
+});
+
+describe('data-table select-first — clearing, the panel under the cell, a refused commit (objectstack#36023)', () => {
+  it.each(['Backspace', 'Delete'])('%s clears the cell and saves at once, with no editor', (key) => {
+    const t = renderTable();
+    t.select(1, 1);
+    fireEvent.keyDown(t.catcher(), { key });
+    expect(t.editor()).toBeNull();
+    expect(t.onCellChange).toHaveBeenCalledWith(1, 'amount', null, ROWS[1]);
+    expect(t.selected()).toBe('1:1');
+  });
+
+  it('a cell the host refuses to clear keeps its value and says why on the cell', () => {
+    const t = renderTable({}, { describeCell: () => ({ clearRefusal: 'Amount is required' }) });
+    t.select(1, 1);
+    fireEvent.keyDown(t.catcher(), { key: 'Backspace' });
+    expect(t.onCellChange).not.toHaveBeenCalled();
+    expect(t.editor()).toBeNull();
+    expect(t.cell(1, 1)).toHaveTextContent('20');
+    expect(document.querySelector('[data-testid="cell-readonly-reason"]')).toHaveTextContent('Amount is required');
+  });
+
+  it('a two-state cell has nothing to clear: Backspace writes nothing', () => {
+    const t = renderTable({}, { describeCell: () => ({ toggles: true }) });
+    t.select(0, 0);
+    fireEvent.keyDown(t.catcher(), { key: 'Delete' });
+    expect(t.onCellChange).not.toHaveBeenCalled();
+  });
+
+  it('a read-only cell says it is read-only and is not cleared', () => {
+    const t = renderTable({}, { describeCell: () => ({ readOnlyReason: 'This value is calculated.' }) });
+    t.select(0, 0);
+    fireEvent.keyDown(t.catcher(), { key: 'Backspace' });
+    expect(t.onCellChange).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-testid="cell-readonly-reason"]')).toHaveTextContent('This value is calculated.');
+  });
+
+  it('`editor: below` opens a panel under the cell, which keeps drawing its value; the default covers it', () => {
+    const below = renderTable({}, { describeCell: (_row, key) => (key === 'name' ? { editor: 'below' } : null) });
+    below.select(0, 0);
+    fireEvent.keyDown(below.catcher(), { key: 'Enter' });
+    const host = below.cell(0, 0);
+    expect(host.querySelector('[data-slot="cell-editor-overlay"]')).toHaveAttribute('data-placement', 'below');
+    expect(host.querySelector('[data-slot="cell-display"]')).toHaveTextContent('Alpha');
+    fireEvent.keyDown(below.editor()!, { key: 'Escape' });
+    cleanup();
+    // CONTROL: no fact, the layer covers the cell and the cell's text is not drawn under it.
+    const cover = renderTable();
+    cover.select(0, 0);
+    fireEvent.keyDown(cover.catcher(), { key: 'Enter' });
+    expect(cover.cell(0, 0).querySelector('[data-slot="cell-editor-overlay"]')).toHaveAttribute('data-placement', 'cover');
+    expect(cover.cell(0, 0).querySelector('[data-slot="cell-display"]')).toBeNull();
+  });
+
+  it('a value the host refuses keeps the editor and the input, says why, and Enter does not move', () => {
+    const validate = vi.fn((v: unknown) => (Number(v) > 100 ? 'Amount must be at most 100' : null));
+    const t = renderTable({}, { describeCell: (_row, key) => (key === 'amount' ? { validate } : null) });
+    t.select(0, 1);
+    fireEvent.change(t.catcher(), { target: { value: '5' } });
+    fireEvent.change(t.editor()!, { target: { value: '500' } });
+    fireEvent.keyDown(t.editor()!, { key: 'Enter' });
+    expect(validate).toHaveBeenCalledWith('500');
+    expect(t.onCellChange).not.toHaveBeenCalled();
+    expect(t.editor()).toHaveValue(500);
+    expect(t.selected()).toBe('0:1');
+    expect(t.cell(0, 1).querySelector('[data-testid="cell-edit-refusal"]')).toHaveTextContent('Amount must be at most 100');
+    // Tab is refused the same way.
+    fireEvent.keyDown(t.editor()!, { key: 'Tab' });
+    expect(t.selected()).toBe('0:1');
+    expect(t.onCellChange).not.toHaveBeenCalled();
+    // Correcting the value takes the reason away, and Enter commits and moves on.
+    fireEvent.change(t.editor()!, { target: { value: '50' } });
+    expect(t.cell(0, 1).querySelector('[data-testid="cell-edit-refusal"]')).toBeNull();
+    fireEvent.keyDown(t.editor()!, { key: 'Enter' });
+    expect(t.onCellChange).toHaveBeenCalledWith(0, 'amount', '50', ROWS[0]);
+    expect(t.selected()).toBe('1:1');
+  });
+
+  it('Escape after a refusal discards the edit', () => {
+    const t = renderTable({}, { describeCell: () => ({ validate: () => 'No.' }) });
+    t.select(0, 0);
+    fireEvent.change(t.catcher(), { target: { value: 'Z' } });
+    fireEvent.keyDown(t.editor()!, { key: 'Enter' });
+    expect(t.editor()).toHaveValue('Z');
+    fireEvent.keyDown(t.editor()!, { key: 'Escape' });
+    expect(t.editor()).toBeNull();
+    expect(t.cell(0, 0)).toHaveTextContent('Alpha');
+    expect(t.onCellChange).not.toHaveBeenCalled();
+  });
+
+  it('text a number box cannot read is refused by the table itself', () => {
+    const t = renderTable();
+    t.select(0, 1);
+    fireEvent.change(t.catcher(), { target: { value: '5' } });
+    const input = t.editor() as HTMLInputElement;
+    // jsdom never reports bad input; the browser does for text in a number box.
+    Object.defineProperty(input, 'validity', { configurable: true, value: { badInput: true, typeMismatch: false } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(t.onCellChange).not.toHaveBeenCalled();
+    expect(t.cell(0, 1).querySelector('[data-testid="cell-edit-refusal"]')).toHaveTextContent('Enter a number.');
+    // CONTROL: once the box reads, the commit goes through.
+    Object.defineProperty(input, 'validity', { configurable: true, value: { badInput: false, typeMismatch: false } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(t.onCellChange).toHaveBeenCalledWith(0, 'amount', 5, ROWS[0]);
+  });
+
+  it('a press outside an injected editor holding a refused value keeps the editor, and the click selects nothing', () => {
+    const t = renderTable(
+      {
+        renderCellEditor: (ctx: any) => (
+          <input data-testid="injected" value={ctx.value ?? ''} onChange={(e) => ctx.stage(e.target.value)} />
+        ),
+      },
+      { describeCell: (_row, key) => (key === 'name' ? { validate: (v) => (v === '' ? 'Name is required' : null) } : null) },
+    );
+    t.select(0, 0);
+    fireEvent.keyDown(t.catcher(), { key: 'Enter' });
+    const injected = () => t.container.querySelector<HTMLInputElement>('[data-testid="injected"]');
+    fireEvent.change(injected()!, { target: { value: '' } });
+    fireEvent.pointerDown(t.cell(2, 2));
+    fireEvent.click(t.cell(2, 2));
+    expect(injected()).not.toBeNull();
+    expect(t.selected()).toBe('0:0');
+    expect(t.onCellChange).not.toHaveBeenCalled();
+    expect(t.cell(0, 0).querySelector('[data-testid="cell-edit-refusal"]')).toHaveTextContent('Name is required');
+    // CONTROL: a value the host accepts commits on the press outside.
+    fireEvent.change(injected()!, { target: { value: 'Omega' } });
+    fireEvent.pointerDown(t.cell(2, 2));
+    expect(injected()).toBeNull();
+    expect(t.onCellChange).toHaveBeenCalledWith(0, 'name', 'Omega', ROWS[0]);
   });
 });
