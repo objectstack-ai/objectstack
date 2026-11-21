@@ -87,6 +87,7 @@ import { invitationRoleCapFailure, isPlainMemberInvitation } from './invitation-
 import { blankInvitationRoleRefusal } from './invite-role-not-found-code.js';
 import { invitationRoleLabel } from './invitation-role-label.js';
 import { requireVerifiedAddressOnListing } from './list-user-invitations-verification.js';
+import { addAcceptedInvitationRead } from './invitation-accepted-answer.js';
 import { resolveMembershipLimitOption } from './membership-limit.js';
 import { withSystemContext, withSystemReadContext } from './objectql-adapter.js';
 import { isDefaultOrganizationTarget, removeOrganizationAuthStructure } from './organization-delete.js';
@@ -756,6 +757,24 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
       '`listUserInvitations` endpoint at /organization/list-user-invitations, ' +
       'so the invitation inbox could NOT be held to a verified address by ' +
       'list-user-invitations-verification.ts; update it for the new vendor shape.',
+    );
+  }
+
+  // `GET /organization/accepted-invitation` — the signed-in recipient's read
+  // of an invitation they already accepted, naming the organization. The
+  // vendor's get-invitation refuses every non-pending invitation with the
+  // same code-less 400 as an unknown id and stays as it is; so does the
+  // signed-out invitation-preview (ADR-0138 D2). Added on this plugin's own
+  // endpoints record, read through the vendor's adapter with the very options
+  // above (`invitation-accepted-answer.ts` carries the full reading).
+  const acceptedReadAdded = await addAcceptedInvitationRead(organizationPlugin, organizationOptions);
+  if (!acceptedReadAdded) {
+    // A vendor release took the key or the path. Say so: the read the accept
+    // page asks for an accepted invitation is not this plugin's.
+    console.warn(
+      '[AuthManager] better-auth\'s organization plugin already carries a ' +
+      '`getAcceptedInvitation` endpoint or the /organization/accepted-invitation path, ' +
+      'so invitation-accepted-answer.ts did NOT add its read; reconcile it with the vendor shape.',
     );
   }
   return organizationPlugin;

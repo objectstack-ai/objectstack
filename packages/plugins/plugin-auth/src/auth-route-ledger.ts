@@ -317,6 +317,13 @@ export const AUTH_ROUTE_LEDGER: readonly AuthRouteLedgerEntry[] = [
   // Console's signed-out invitation landing page reads it, and no SDK method
   // builds it.
   { route: 'GET /api/v1/auth/organization/invitation-preview', family: 'organization', source: 'objectstack', disposition: 'public', requires: 'organization', note: 'the signed-out invitation preview: answers a caller with NO session, keyed by the invitation id the link carries (a capability token, ADR-0138 D2 class-2-shaped door by its dated note). Returns exactly { organizationName, inviterName, email } with the address masked, for a pending, unexpired invitation only; one uniform 404 for an unknown, expired, accepted, rejected or cancelled id; a fixed per-address rate limit (ADR-0121 D6); closed query set { id }. The vendor GET /organization/get-invitation answers 401 without a session and is unchanged' },
+  // The signed-in recipient's read of an invitation they already accepted
+  // (`invitation-accepted-answer.ts`): get-invitation refuses every
+  // non-pending invitation with the same code-less 400 as an unknown id, and
+  // the signed-out preview above stays uniform, so this is the one read that
+  // can say "you have joined". Added on the organization plugin's own
+  // endpoints record, so the catch-all publishes it.
+  { route: 'GET /api/v1/auth/organization/accepted-invitation', family: 'organization', source: 'better-auth', disposition: 'server-only', requires: 'organization', note: 'no SDK method builds this URL; the Console accept page is its reader. Session-required (401 UNAUTHENTICATED without one). Answers 200 { success, data: { invitationId, status: accepted, organizationId, organizationName, organizationSlug, isMember } } only when the invitation is accepted and the session user is its recipient by the vendor rule (the invitation address equals the session address, compared lowercase) with a verified address; every other case (unknown id, another user, an unverified recipient, the recipient own pending, rejected, canceled or expired invitation) answers one 404 RESOURCE_NOT_FOUND body after the same single invitation read. Closed query set { id }. GET /organization/get-invitation and the signed-out invitation-preview are unchanged' },
   { route: 'POST /api/v1/auth/organization/add-team-member', family: 'organization', source: 'better-auth', disposition: 'sdk', client: 'organizations.teams.addMember', requires: 'organization' },
   { route: 'POST /api/v1/auth/organization/cancel-invitation', family: 'organization', source: 'better-auth', disposition: 'sdk', client: 'organizations.invitations.cancel', requires: 'organization' },
   { route: 'POST /api/v1/auth/organization/create', family: 'organization', source: 'better-auth', disposition: 'sdk', client: 'organizations.create', requires: 'organization' },
@@ -409,6 +416,7 @@ export const BETTER_AUTH_MOUNTED_SURFACE: readonly string[] = [
   'GET /api/v1/auth/oauth2/userinfo',
   'GET /api/v1/auth/ok',
   'GET /api/v1/auth/one-time-token/generate',
+  'GET /api/v1/auth/organization/accepted-invitation',
   'GET /api/v1/auth/organization/get-active-member',
   'GET /api/v1/auth/organization/get-active-member-role',
   'GET /api/v1/auth/organization/get-full-organization',

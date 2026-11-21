@@ -808,6 +808,17 @@ in and opens the link from the invitation mail itself needs no separate step:
 the accept page offers the one-step form, which verifies the address as it
 accepts. No setting relaxes this rule.
 
+Once an invitation is no longer pending, `get-invitation` answers it with the
+same `400 "Invitation not found!"` as an unknown id, to everyone. A person who
+accepted and opens the link again can still learn where they joined:
+`GET /api/v1/auth/organization/accepted-invitation?id=…` answers the signed-in
+recipient whose address is verified with the organization (`organizationId`,
+`organizationName`, `organizationSlug`) and whether they are still a member
+(`isMember`). Every other caller, and every other state of the invitation,
+gets one `404 RESOURCE_NOT_FOUND`. The signed-out invitation preview is not
+affected: it still answers one uniform 404 for every invitation that is not
+pending.
+
 **A deployment without a live mail transport cannot onboard a password
 account by invitation link.** With no transport configured, or the log
 transport, no verification mail and no invitation mail reaches anyone, so an
