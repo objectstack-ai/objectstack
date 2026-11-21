@@ -269,6 +269,23 @@ export {
   AUTHZ_STORE_UNAVAILABLE_MESSAGE,
 } from './authz-store-unavailable.js';
 
+// The ONE environment-membership judgment every door of a multi-environment
+// host asks (the runtime dispatcher and the REST server), and the one switch
+// that turns it on.
+export {
+  judgeEnvironmentMembership,
+  resolveEnvironmentMembershipEnforcement,
+  isMembershipJudgedEnvironment,
+  ENVIRONMENT_MEMBER_OBJECT,
+  ENVIRONMENT_MEMBERSHIP_REQUIRED_CODE,
+  ENVIRONMENT_MEMBERSHIP_REQUIRED_STATUS,
+} from './environment-membership.js';
+export type {
+  EnvironmentMembershipRefusal,
+  EnvironmentMembershipEngine,
+  EnvironmentMembershipInput,
+} from './environment-membership.js';
+
 export {
   resolveAuthzContext,
   resolveUserAuthzGrants,

@@ -5206,7 +5206,12 @@ export default class Serve extends Command {
       try {
         const { createRestApiPlugin } = await import('@objectstack/rest');
         await kernel.use(
-          createRestApiPlugin({ api: { api: { enableProjectScoping, projectResolution } } as any }),
+          createRestApiPlugin({
+            api: { api: { enableProjectScoping, projectResolution } } as any,
+            // The same switch the dispatcher plugin is handed below, so the two
+            // doors of this host judge environment membership alike.
+            enforceProjectMembership: apiConfig.enforceProjectMembership,
+          }),
         );
         trackPlugin('RestAPI');
       } catch (e: any) {

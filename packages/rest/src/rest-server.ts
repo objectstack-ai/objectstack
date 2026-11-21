@@ -29,6 +29,10 @@ import {
     // `enforceApiAccess` asks beside the exposure decision, shared with the
     // runtime dispatcher's per-object gate.
     apiKeyManagementCredentialRefusal,
+    // The ONE environment-membership judgment, asked by the runtime dispatcher
+    // too: a signed-in non-member of the environment the host resolved is
+    // refused at every door of that host alike.
+    judgeEnvironmentMembership, type EnvironmentMembershipRefusal,
     // `isAudienceBindingSuggestionStatus` and `unknownAudienceBindingSuggestionStatusMessage`,
     // the suggested-binding `?status=` vocabulary (#7678), moved with `registerSecurityEndpoints`'
     // body to `security-routes.ts` (#23050 slice 6).
@@ -2131,6 +2135,8 @@ export class RestServer {
      * that name.
      */
     private kernelServiceProvider?: (name: string, environmentId?: string) => Promise<unknown>;
+    /** Whether {@link computeExecCtx} asks the environment-membership judgment. */
+    private readonly environmentMembershipEnforced: boolean;
     /**
      * One-shot latch for the "no matcher wired" degradation notice below, so a
      * host that never wired {@link metadataServiceProvider} says so once per
@@ -2192,6 +2198,16 @@ export class RestServer {
          * resolved through.
          */
         kernelServiceProvider?: (name: string, environmentId?: string) => Promise<unknown>,
+        /**
+         * Appended LAST for the #15256 reason above: the host's
+         * environment-membership switch, resolved by the composition root
+         * (`rest-api-plugin`) through `resolveEnvironmentMembershipEnforcement`
+         * — the reading the runtime dispatcher's plugin makes of the same
+         * `api.enforceProjectMembership` / environment-scoping pair. Absent ⇒
+         * off: the switch is the composition's to state, never this class's to
+         * guess.
+         */
+        environmentMembership?: { enforced: boolean },
     ) {
         this.protocol = protocol;
         this.config = this.normalizeConfig(config);
@@ -2215,6 +2231,7 @@ export class RestServer {
         this.tenancyServiceProvider = tenancyServiceProvider;
         this.auditServiceProvider = auditServiceProvider;
         this.kernelServiceProvider = kernelServiceProvider;
+        this.environmentMembershipEnforced = environmentMembership?.enforced === true;
     }
 
     /**
@@ -2485,6 +2502,16 @@ export class RestServer {
     private readonly apiKeyLifecycleRefusals = new WeakMap<object, ApiKeyLifecycleRefusalError>();
 
     /**
+     * The environment-membership refusal {@link computeExecCtx} reached for a
+     * request, kept beside it for {@link enforceAuth} — the
+     * {@link apiKeyLifecycleRefusals} shape: the caller resolves no context, so
+     * every door keeps its fail-closed answer, and the door behind
+     * `enforceAuth` answers the judgment's own status and code. Weak, so it
+     * lives no longer than the request object.
+     */
+    private readonly environmentMembershipRefusals = new WeakMap<object, EnvironmentMembershipRefusal>();
+
+    /**
      * Reject anonymous requests with HTTP 401 — unconditionally (#3963: the
      * `api.requireAuth` opt-out is retired). Returns `true` if the response was
      * sent and the caller should stop
@@ -2540,6 +2567,22 @@ export class RestServer {
             const lifecycle = req && typeof req === 'object' ? this.apiKeyLifecycleRefusals.get(req) : undefined;
             if (lifecycle) {
                 res.status(lifecycle.status).json({ error: { code: lifecycle.code, message: lifecycle.message } });
+                return true;
+            }
+            // A signed-in caller who is not a member of the environment the
+            // request resolved to: the judgment's refusal, in the body the
+            // runtime dispatcher answers the same caller with.
+            const membership = req && typeof req === 'object' ? this.environmentMembershipRefusals.get(req) : undefined;
+            if (membership) {
+                res.status(membership.status).json({
+                    success: false,
+                    error: {
+                        code: membership.code,
+                        message: membership.message,
+                        httpStatus: membership.status,
+                        details: { environmentId: membership.environmentId, userId: membership.userId },
+                    },
+                });
                 return true;
             }
             res.status(ANONYMOUS_DENY_STATUS).json(ANONYMOUS_DENY_BODY);
@@ -3559,6 +3602,38 @@ export class RestServer {
                 },
             });
             if (!base) return undefined;
+
+            // The environment-membership judgment — the one the runtime
+            // dispatcher asks for the same caller on the same host
+            // (`judgeEnvironmentMembership`, `@objectstack/core`), on the
+            // environment's own engine, on every request. Asked only where the
+            // credential is anchored in the environment the request resolved
+            // to: a credential anchored elsewhere is refused by `enforceAuth`
+            // with the anonymous-deny response, which a membership answer
+            // naming the environment must not pre-empt. `undefined` and
+            // `'platform'` are not environments on this server (see
+            // `credentialAnchoredElsewhere`). A session the ADR-0069 gate
+            // holds is answered by that gate first, as the dispatcher orders
+            // its two gates. A read that cannot answer throws the loud outage,
+            // re-raised by the net below.
+            if (
+                this.environmentMembershipEnforced
+                && environmentId !== undefined && environmentId !== 'platform'
+                && authEnvironmentId === environmentId
+                && typeof base.userId === 'string' && base.userId !== ''
+                && !base.authGate
+            ) {
+                const refusal = await judgeEnvironmentMembership({
+                    environmentId,
+                    userId: base.userId,
+                    activeOrganizationId: base.tenantId,
+                    engine: ql,
+                });
+                if (refusal) {
+                    if (req && typeof req === 'object') this.environmentMembershipRefusals.set(req, refusal);
+                    return undefined;
+                }
+            }
 
             const execCtx = {
                 ...base,
