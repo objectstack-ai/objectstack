@@ -62,6 +62,8 @@
 
 import { describe, it, expect, vi } from 'vitest';
 
+// Paid at collection: the source under test loads it on first use (`check:test-source-alias`).
+import '@objectstack/metadata';
 import { HttpDispatcher } from './http-dispatcher.js';
 import {
     actionSelectionIsRead,
