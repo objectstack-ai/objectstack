@@ -365,8 +365,11 @@
  * FAILED, naming the status alone, with
  * `ADVISORY_LIST_ACCESS_REMEDY` on a refusal; a page that never reached the
  * platform ⇒ FAILED with `ADVISORY_LIST_UNREACHED` and the row status
- * `not reached`; every page's `Link` is read through `advisoryListNextCursor`,
- * and a link it refuses ⇒ FAILED; a short page whose link names no next page,
+ * `not reached`; every page's `Link` is read through `advisoryListNextCursor`:
+ * a link naming the collection by numeric id has the repository's own id read
+ * once (`GET /repos/{repo}`, `advisoryListRepoIdOf`; unread ⇒ FAILED naming
+ * its status), and a link it refuses ⇒ FAILED with the link's shape beside the
+ * sentence (`advisoryListLinkShape`, ⛔ never a value); a short page whose link names no next page,
  * or a full one whose link names none, ends the walk, and a short page that
  * still names one ⇒ FAILED with `ADVISORY_LIST_SHORT_PAGE_NEXT`; a full page
  * with a next link is followed only on the cursor it admits, ⛔ never the link

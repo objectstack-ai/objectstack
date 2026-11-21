@@ -865,7 +865,7 @@
  * 31368 records them: 「你应该能自主读到所有的安全问题才是合理的」.
  *
  *   row             request                                                                    the payload carries
- *   `advisory_list` `GET …/security-advisories?state=S&per_page=100[&after=C]`, and nothing else  `public_key` alone
+ *   `advisory_list` `GET …/security-advisories?state=S&per_page=100[&after=C]`, and at most one `GET /repos/{repo}`  `public_key` alone
  *
  * The caller names NO state and NO query parameter: the row lists every state
  * in `ADVISORY_LIST_STATES` (`triage`, `draft` and `closed`, every unpublished
@@ -883,7 +883,23 @@
  * origin and path are the relay's own API and this collection, its `state` the
  * walk's own, and the cursor one value in `ADVISORY_LIST_CURSOR_SHAPE`
  * (`advisoryListNextCursor`); the next path is the relay's own spelling with
- * that cursor, never the link. A link that is none of these, a page that is not
+ * that cursor, never the link. The collection is this one under either
+ * spelling: `/repos/{repo}/security-advisories`, or the numeric
+ * `/repositories/{id}/security-advisories` GitHub's `Link` headers use for a
+ * request made on the named path (its pagination guide's example; this
+ * repository's own pull-files links, `scripts/pm/check-governed-merges.mjs`)
+ * — the numeric one only when `{id}` equals the repository's own id, which the
+ * walk reads ONCE, with one `GET /repos/{repo}`, the first time a link names
+ * one (`advisoryListRepoIdOf`: 200, its own full name, a positive integer),
+ * ⛔ never an id taken from the link; a read that fails is a FAILED action
+ * naming its status alone (`advisoryListRepoIdUnreadText`). Other query
+ * parameters of the link (`per_page`, a `page` beside the cursor) are never
+ * read. A refused link prints its SHAPE beside the fixed sentence
+ * (`advisoryListLinkShape`): the next-link count, the origin as the relay's or
+ * another, the path with the owner, the name and every id replaced by a
+ * placeholder, the query parameter NAMES, and whether `state` and `after`
+ * stand as the walk needs — ⛔ never a host, id, state, cursor or any other
+ * value, so the next mismatch reads from the job log. A link that is none of these, a page that is not
  * a list of advisories in the state asked for, an advisory whose `severity` is
  * not one of `ADVISORY_LIST_SEVERITIES` or null or whose `created_at` or
  * `updated_at` is neither null nor an ISO-8601 string
@@ -919,9 +935,10 @@
  * no byte read-back for it: opening the parts IS its read-back.
  *
  * ⛔ What crosses the public run: that the listing landed or failed, the HTTP
- * status, `advisoryListCall` (the call, its states in braces) and the padded
- * ciphertext. NEVER an id, a count, a state, a severity, a cursor, a page
- * number, or a byte or part count of the listing.
+ * status, `advisoryListCall` (the call, its states in braces), the padded
+ * ciphertext and, on a refused next link, that link's shape. NEVER an id, a
+ * count, a state, a severity, a cursor, a page number, or a byte or part count
+ * of the listing.
  *
  * The grant and the gate are `advisory_read`'s. Its `grant` is `read` on the
  * stroke-scoped `repository-advisories`, so the validator writes
@@ -929,8 +946,8 @@
  * workflow's existing input; it travels `alone`; and its `senderGate` is
  * `target-write` from `ADVISORY_READ_SENDER_GATES`: write, maintain or admin on
  * the target, which every stroke passes before its first request. A row naming
- * any other gate is refused before the first GET. The first live run measures
- * what the read grant lists and the form of the `Link` cursor. A refusal there
+ * any other gate is refused before the first GET. The repository read rides
+ * the stroke's literal `metadata: read`. A refusal there
  * is a FAILED action carrying `ADVISORY_LIST_ACCESS_REMEDY`, ⛔ never a retry
  * under a wider token.
  *
