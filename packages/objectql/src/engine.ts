@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { QueryAST, QueryInput, HookContext, ServiceObject } from '@objectstack/spec/data';
+import { QueryAST, QueryInput, HookContext, ServiceObject, type FixedReadLeaf } from '@objectstack/spec/data';
 // [commit 74155c735] The defaulting node schema `fillQueryAstDefaults` runs author input
 // through — the declared `.default()` stays in `packages/spec`, the engine
 // only invokes it.
@@ -52,6 +52,7 @@ import { negotiatedMessageLocale, objectDisplayLabel, validationMessageContext }
 // below hand each body the members it reads (`DatasourceRoutingHost`).
 import { getDriver, matchPattern, resolveDatasourceFromMapping } from './engine-datasource-routing.js';
 import { relationSemiJoinServes } from './relation-semi-join.js';
+import { fixedReadLeafClassAnswerOf } from './fixed-read-leaf-engine-answer.js';
 // [#25522 cut 3] The lifecycle health bodies; the methods of the same names
 // below hand each body the members it reads (`LifecycleHealthHost`).
 import { checkDriversHealth, resolvePrimaryDatasource } from './engine-lifecycle-health.js';
@@ -127,11 +128,10 @@ import { ExecutionContext, type InstalledPackageSource } from '@objectstack/spec
 // contract is new (#5945).
 import type { IPubSub, IScopedContext, IScopedObjectRepository, IntrospectedSchema as SpecIntrospectedSchema } from '@objectstack/spec/contracts';
 // [#20157] The judge-only filter-admission member's verdict and options.
-import type { EngineFilterJudgement, EngineFilterJudgementOptions, InternalFieldEvaluationOptions, InternalFieldEvaluationQuery } from '@objectstack/spec/contracts';
+import type { EngineFilterJudgement, EngineFilterJudgementOptions, EngineFixedReadLeafClass, IObjectQLEngine, InternalFieldEvaluationOptions, InternalFieldEvaluationQuery } from '@objectstack/spec/contracts';
 import {
   IDataDriver,
   IDataEngine,
-  type IObjectQLEngine,
   type EngineTransactionInfo,
   type EngineTransactionOptions,
   Logger,
@@ -1915,6 +1915,9 @@ export class ObjectQL implements IObjectQLEngine {
     // [#29986 codemod] The body moved to `engine-middleware-and-context.ts` (see `MiddlewareAndContextHost`).
     return MiddlewareAndContextFacet.hasObjectMiddleware.call(middlewareAndContextHost.of(this), objectName);
   }
+
+  /** [ADR-0155 D4] `IObjectQLEngine.fixedReadLeafClassOf`: the seam's own recognition of D4's two classes for `leaf`, `null` for neither. */
+  fixedReadLeafClassOf(leaf: FixedReadLeaf): EngineFixedReadLeafClass | null { return fixedReadLeafClassAnswerOf(this, leaf); }
 
   private executeWithMiddleware(ctx: OperationContext, executor: () => Promise<any>): Promise<any> {
     // [#29986 codemod] The body moved to `engine-middleware-and-context.ts`, its docblock with it (see `MiddlewareAndContextHost`).
