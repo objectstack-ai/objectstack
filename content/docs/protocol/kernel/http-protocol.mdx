@@ -1219,7 +1219,8 @@ export default defineStack({
         maxRequests: 600,   // requests permitted per window, per caller
       },
     },
-    // Believe `X-Forwarded-For` / `X-Real-IP`? Only behind a proxy you control.
+    // Believe `X-Forwarded-For` / `X-Real-IP`? Only from proxies you name:
+    // trustProxy: { networks: ['10.0.0.0/8'] },
     trustProxy: false,
   },
 });
@@ -1239,12 +1240,16 @@ second (so the sustained rate is exactly the declared one).
 2. **The caller's IP**, for anonymous traffic — the case that most needs a limit
    (credential stuffing, scraping) and has no identity yet.
 
-That IP comes from `X-Forwarded-For` / `X-Real-IP` **only when `server.trustProxy` is
-declared `true`**. Left at its default, the address is the transport's own peer
-address, which a client cannot forge. This is deliberate: an attacker who can choose
-their own `X-Forwarded-For` otherwise gets an unlimited supply of fresh buckets *and*
-can drain a chosen victim's. Declare `trustProxy` only when a reverse proxy you
-control overwrites those headers on every inbound request.
+That IP comes from a forwarded header **only when `server.trustProxy` is declared**.
+Left at its default, the address is the transport's own peer address, which a client
+cannot forge. This is deliberate: an attacker who can choose their own
+`X-Forwarded-For` otherwise gets an unlimited supply of fresh buckets *and* can drain
+a chosen victim's. Behind reverse proxies, declare the trusted-network form,
+`{ networks: [...] }` with their addresses or CIDR ranges: the header is believed only
+on a connection from one of them and is read from the right, past them (`header:
+'x-real-ip'` reads `X-Real-IP` instead). `true` believes the leftmost entry from any
+connection, so declare it only when a reverse proxy you control overwrites those
+headers on every inbound request, never one that appends to them.
 
 CORS preflights (`OPTIONS`) are never metered.
 
