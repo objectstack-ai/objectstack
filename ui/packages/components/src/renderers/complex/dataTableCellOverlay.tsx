@@ -154,9 +154,13 @@ export function CellOverlay({
   );
 }
 
-/** What a preview undoes so a cell renderer's content wraps instead of truncating. */
+/**
+ * What a preview undoes so a cell renderer's content wraps instead of
+ * truncating. Its height cap keeps the space-available cap in the same class:
+ * a second `max-h-*` would replace the layer's own.
+ */
 const PREVIEW_UNCLIP_CLASS =
-  'max-h-64 [&_*]:whitespace-normal! [&_*]:overflow-visible! [&_*]:text-clip! [&_*]:max-w-none! [&_.flex]:flex-wrap';
+  'max-h-[min(16rem,var(--radix-popper-available-height))] [&_*]:whitespace-normal! [&_*]:overflow-visible! [&_*]:text-clip! [&_*]:max-w-none! [&_.flex]:flex-wrap';
 
 /**
  * A form control at the row's density inside the editor layer: single-line

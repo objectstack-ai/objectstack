@@ -5084,11 +5084,13 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                             {isEditing ? (
                               <CellOverlay
                                 kind="editor"
-                                className={typeof schema.renderCellEditor === 'function' ? undefined : builtInEditorWidthClass(col.type)}
                                 minSize={editorSeedSize}
                                 // Scrolled out of sight: commit, as a click outside does.
                                 onHidden={() => { flushInjectedEditor(); saveEditRef.current(true); }}
-                              >{(() => {
+                              >
+                                {/* The per-type floor rides an inner box: on the layer's own
+                                    class it would replace the layer's cell-width floor. */}
+                                <div className={typeof schema.renderCellEditor === 'function' ? undefined : builtInEditorWidthClass(col.type)}>{(() => {
                                 // Type-aware inline editor. `col.type` is forwarded
                                 // from a producer's column inference, folded onto the
                                 // DECLARED vocabulary at that producer's emit seam
@@ -5302,7 +5304,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                     className="h-8 px-2 py-1"
                                   />
                                 );
-                              })()}</CellOverlay>
+                              })()}</div>
+                              </CellOverlay>
                             ) : (
                               <div
                                 className={

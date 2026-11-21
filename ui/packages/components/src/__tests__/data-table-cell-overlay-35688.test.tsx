@@ -126,6 +126,9 @@ describe('data-table — the editor and a cut-off cell draw on a layer over the 
     fireEvent.click(t.cell(0, 1));
     expect(t.previewLayer()).toHaveTextContent(LONG);
     expect(t.cell(0, 1).contains(t.previewLayer())).toBe(true);
+    // Its height cap keeps the space-available cap (one class, not two that merge away).
+    expect(t.previewLayer()!.className).toContain('max-h-[min(16rem,var(--radix-popper-available-height))]');
+    expect(t.previewLayer()!.className).not.toMatch(/(^|\s)max-h-64(\s|$)/);
     fireEvent.click(t.cell(0, 0));
     expect(t.previewLayer()).toBeNull();
   });
@@ -141,6 +144,10 @@ describe('data-table — the editor and a cut-off cell draw on a layer over the 
     expect(layer.querySelector('input')).toHaveValue(LONG);
     expect(layer.style.getPropertyValue('--cell-overlay-min-w')).toBe('300px');
     expect(layer.style.getPropertyValue('--cell-overlay-min-h')).toBe('72px');
+    // The utility that reads the seed survives the per-type floor, which rides an inner box.
+    expect(layer.className).toContain('min-w-[max(var(--radix-popper-anchor-width),var(--cell-overlay-min-w,0px))]');
+    expect(layer.className).not.toMatch(/(^|\s)min-w-40(\s|$)/);
+    expect(layer.querySelector('.min-w-40')).not.toBeNull();
     fireEvent.keyDown(layer.querySelector('input')!, { key: 'Escape' });
     expect(t.editorLayer()).toBeNull();
     expect(t.previewLayer()).toBeNull();
