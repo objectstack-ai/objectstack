@@ -43,6 +43,19 @@
  * reaches this compile with such a leaf: `NativeSQLStrategy.canHandle` declines
  * it to the ObjectQL strategy, whose engine answers through its own driver (the
  * #20987 decline, which reads the same population).
+ *
+ * ## The draft preview
+ *
+ * The door's third face, `?preview=draft`, evaluates the drafted seed rows in
+ * memory (`preview-evaluator.ts`) and gave the same wrong answers there: a
+ * drafted row holds the list itself, which never equals a scalar, so `$in`
+ * counted nothing and `$nin` counted the row it was asked to exclude. It meets
+ * the same refusal through {@link refusePreviewJsonColumnComparisons}, judged
+ * once on the lowered `where` before any row is read, so an empty seed draft
+ * is refused too. What it refuses is what the native compile refuses: the
+ * null comparand of `$eq` / `$ne` and an empty `$in` / `$nin` are not
+ * comparisons there (the normaliser lowers them to a null predicate and to a
+ * constant), and are answered on both faces.
  */
 
 import { JSON_COLUMN_INCOMPATIBLE_OPERATORS, jsonColumnOperatorRefusalText } from '@objectstack/core';
@@ -50,6 +63,7 @@ import type { StrategyContext } from '@objectstack/spec/contracts';
 import { isJsonStoredShape } from './contains-membership-sql.js';
 import { declaredValueShapeResolver } from './empty-operator-sql.js';
 import { CUBE_TO_MONGO_OP, invalidFilterError } from './strategies/filter-normalizer.js';
+import type { ValueShapeFieldDef } from '@objectstack/spec/data';
 
 /**
  * The `$` spelling of a normalised leaf operator when it is one
@@ -78,4 +92,53 @@ export function refuseWhereJsonColumnComparison(req: {
   const shape = declaredValueShapeResolver(req.ctx, req.target.object)?.(req.target.field);
   if (!isJsonStoredShape(shape)) return;
   throw invalidFilterError(jsonColumnOperatorRefusalText(req.target.field, spelling, false).diagnostic);
+}
+
+/**
+ * Does the authored operator `op` with `comparand` compare a value, the way the
+ * native compile's leaf would? The null comparand of `$eq` / `$ne` is the null
+ * predicate, and an empty `$in` / `$nin` the constant, there.
+ */
+function comparesAValue(op: string, comparand: unknown): boolean {
+  if (!JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(op)) return false;
+  if ((op === '$eq' || op === '$ne') && comparand === null) return false;
+  if ((op === '$in' || op === '$nin') && Array.isArray(comparand) && comparand.length === 0) return false;
+  return true;
+}
+
+/**
+ * The draft preview's face of the refusal: walk the lowered `where` once and
+ * throw `INVALID_FILTER` / 400, in the words {@link refuseWhereJsonColumnComparison}
+ * gives, at the first scalar comparison on a field `shapeOf` declares
+ * multi-valued or JSON-stored. Implicit equality is named as `$eq`, the
+ * spelling the native compile names it by. A field `shapeOf` cannot name is
+ * not judged.
+ *
+ * `shapeOf` receives the column a filter member reads (the preview reads a
+ * dataset dimension's member from its column).
+ */
+export function refusePreviewJsonColumnComparisons(
+  where: Record<string, unknown> | undefined,
+  shapeOf: (column: string) => ValueShapeFieldDef | undefined,
+  columnOf: (member: string) => string = (member) => member,
+): void {
+  if (!where || typeof where !== 'object' || Array.isArray(where)) return;
+  for (const [key, cond] of Object.entries(where)) {
+    if (key === '$and' || key === '$or') {
+      if (Array.isArray(cond)) for (const arm of cond) refusePreviewJsonColumnComparisons(arm as Record<string, unknown>, shapeOf, columnOf);
+      continue;
+    }
+    if (key === '$not') {
+      refusePreviewJsonColumnComparisons(cond as Record<string, unknown>, shapeOf, columnOf);
+      continue;
+    }
+    if (key.startsWith('$')) continue;
+    const column = columnOf(key);
+    const operatorMap = cond !== null && typeof cond === 'object' && !Array.isArray(cond) && !(cond instanceof Date);
+    const refused = operatorMap
+      ? Object.entries(cond as Record<string, unknown>).find(([op, comparand]) => comparesAValue(op, comparand))?.[0]
+      : comparesAValue('$eq', cond) ? '$eq' : undefined;
+    if (refused === undefined || !isJsonStoredShape(shapeOf(column))) continue;
+    throw invalidFilterError(jsonColumnOperatorRefusalText(column, refused, false).diagnostic);
+  }
 }
