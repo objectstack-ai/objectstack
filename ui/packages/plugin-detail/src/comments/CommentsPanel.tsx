@@ -45,10 +45,10 @@ export const CommentsPanel: React.FC<CommentsPanelProps> = ({ onClose, className
 
   let body: React.ReactNode;
   if (denied) {
-    body = <PanelNote text={t('detail.commentsAccessDenied')} />;
+    body = <PanelNote kind="denied" text={t('detail.commentsAccessDenied')} />;
   } else if (failed && threadCount === 0) {
     body = (
-      <PanelNote text={t('detail.commentsLoadFailed')}>
+      <PanelNote kind="failed" text={t('detail.commentsLoadFailed')}>
         {onRetry && (
           <Button size="sm" variant="outline" className="mt-2 h-7" onClick={onRetry}>
             {t('detail.retryLoadFeed')}
@@ -135,8 +135,11 @@ export const CommentsPanel: React.FC<CommentsPanelProps> = ({ onClose, className
   );
 };
 
-const PanelNote: React.FC<{ text: string; children?: React.ReactNode }> = ({ text, children }) => (
-  <div className="flex flex-1 flex-col items-center justify-center px-6 py-10 text-center text-sm text-muted-foreground">
+const PanelNote: React.FC<{ kind: 'denied' | 'failed'; text: string; children?: React.ReactNode }> = ({ kind, text, children }) => (
+  <div
+    className="flex flex-1 flex-col items-center justify-center px-6 py-10 text-center text-sm text-muted-foreground"
+    data-comments-note={kind}
+  >
     <p>{text}</p>
     {children}
   </div>

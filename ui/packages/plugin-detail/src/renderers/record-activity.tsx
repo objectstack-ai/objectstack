@@ -501,6 +501,9 @@ export function RecordTimelineCountProbe({
   const discussion = useDiscussionContext();
   const fieldChanges = React.useContext(RecordFieldChangesContext);
   const hostTotal = React.useContext(RecordTimelineTotalContext);
+  // objectstack#36075 — the stream it counts holds no comments while the
+  // comment panel holds them, exactly as the drawn stream does.
+  const commentsInPanel = React.useContext(RecordCommentsInPanelContext);
   const bag = (node?.properties ?? {}) as Record<string, any>;
   const read = (key: string) => node?.[key] ?? bag[key];
   const hostItems = Array.isArray(read('items')) ? (read('items') as FeedItem[]) : undefined;
@@ -508,8 +511,14 @@ export function RecordTimelineCountProbe({
   // objectstack#29188: a failed read leaves the count as unknown as a refused one.
   const denied = hostItems !== undefined
     ? false
-    : !!discussion?.activityDenied || !!discussion?.commentsDenied || !!discussion?.activityFailed || !!discussion?.commentsFailed;
-  const sourceItems = hostItems ?? (discussion?.items as FeedItem[] | undefined);
+    : !!discussion?.activityDenied ||
+      !!discussion?.activityFailed ||
+      (!commentsInPanel && (!!discussion?.commentsDenied || !!discussion?.commentsFailed));
+  const heldItems = hostItems ?? (discussion?.items as FeedItem[] | undefined);
+  const sourceItems = React.useMemo(
+    () => (commentsInPanel && heldItems ? heldItems.filter((item) => item.type !== 'comment') : heldItems),
+    [commentsInPanel, heldItems],
+  );
   const types = read('types');
   const showCompleted = read('showCompleted');
   const unifiedTimeline = read('unifiedTimeline');

@@ -14,7 +14,7 @@ import { CommentAvatar } from './CommentAvatar';
 import { CommentComposer } from './CommentComposer';
 import { CommentItem } from './CommentItem';
 import { latestRepliers, type CommentThreadData } from './commentThreads';
-import type { RecordComments } from './useRecordComments';
+import type { RecordCommentsData } from './useRecordComments';
 
 /**
  * What a comment's action row is handed, per comment: the surface decides how
@@ -35,7 +35,7 @@ export interface CommentThreadProps {
   thread: CommentThreadData;
   /** The writes, as `useRecordComments` hands them. */
   comments: Pick<
-    RecordComments,
+    RecordCommentsData,
     'onAddReply' | 'onToggleReaction' | 'onEditComment' | 'onDeleteComment' | 'mentionSuggestions' | 'onMentionSuggestionsWanted'
   >;
   /**

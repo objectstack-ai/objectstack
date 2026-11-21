@@ -273,7 +273,7 @@ export {
   CommentsButton,
 } from './comments';
 export type {
-  RecordComments,
+  RecordCommentsData,
   CommentThreadData,
   CommentAvatarProps,
   CommentItemProps,

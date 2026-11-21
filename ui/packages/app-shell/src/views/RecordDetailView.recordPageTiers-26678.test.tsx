@@ -373,7 +373,7 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     await expectTabRowOnly();
   });
 
-  it('`?tab=` addresses no strip on a laid-out page; `?related=timeline` is the 动态 tab: the full stream with its chips', async () => {
+  it('`?tab=` addresses no strip on a laid-out page; `?related=timeline` is the 动态 tab: the full stream', async () => {
     const tabbed = renderPage({ width: 720, search: '?tab=related' });
     await screen.findAllByText('Tasks', undefined, { timeout: 5000 });
     expect(tierOf(tabbed.container)).toBe('stack');
@@ -391,7 +391,9 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
       { timeout: 5000 },
     );
     expect(face.getAttribute('aria-label')).toBe('Activity');
-    expect(face.querySelector('[data-stream-filters]')).not.toBeNull();
+    // objectstack#36075 — the comment panel holds the comments, so the stream
+    // holds the system entries alone and offers no chips to sort them by.
+    expect(face.querySelector('[data-stream-filters]')).toBeNull();
     expect(face.querySelector('[data-record-timeline-peek]')).toBeNull();
     await expectTabRowOnly('timeline');
     // The face takes the page: no columns under it.
@@ -400,49 +402,59 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
   });
 });
 
-describe('RecordDetailView — the 动态 tab offers 变更 only while the record shows its field history (objectstack#30074)', () => {
-  /** The full stream's chips, in order, once the 动态 tab has drawn. */
-  const streamChips = async (container: HTMLElement) =>
+/**
+ * objectstack#30074 offered the 动态 tab's 变更 chip only while the record shows
+ * its field history. Since objectstack#36075 the desktop 动态 tab offers no
+ * chip at all (the comment panel holds the comments); the chip rule stays
+ * where the stream keeps the comments (the phone) and is pinned on the stream
+ * itself in plugin-detail's `recordTimelineStream-27055.test.tsx`. What the
+ * record page still owes here: the audit read goes out only for a tracked
+ * object, and neither answer brings a chip back.
+ */
+describe('RecordDetailView — the 动态 tab reads the field history only while the record shows it (objectstack#30074, objectstack#36075)', () => {
+  /** The 动态 tab's face, once drawn. */
+  const timelineFace = async (container: HTMLElement) =>
     waitFor(
       () => {
-        const chips = container.querySelectorAll('[data-related-enlarged="timeline"] [data-stream-filter]');
-        expect(chips.length).toBeGreaterThan(0);
-        return Array.from(chips).map((chip) => chip.getAttribute('data-stream-filter'));
+        const el = container.querySelector('[data-related-enlarged="timeline"]');
+        expect(el).not.toBeNull();
+        return el as HTMLElement;
       },
       { timeout: 5000 },
     );
 
-  /** The chips once this reader's audit read has gone out and settled. */
-  const streamChipsAfterAuditRead = async (container: HTMLElement) => {
-    await streamChips(container);
+  const settleAuditRead = async () => {
     await waitFor(() => expect(auditReads()).toBeGreaterThan(0), { timeout: 5000 });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    return streamChips(container);
   };
 
-  it('an object with `enable.trackHistory`, its audit read answered: 全部 / 活动 / 讨论 / 变更', async () => {
+  it('an object with `enable.trackHistory`: the audit is read, and the tab offers no chip', async () => {
     const { container } = renderPage({ width: 1440, search: '?related=timeline' });
-    expect(await streamChipsAfterAuditRead(container)).toEqual(['all', 'activity', 'discussion', 'changes']);
+    const face = await timelineFace(container);
+    await settleAuditRead();
+    expect(face.querySelector('[data-stream-filter]')).toBeNull();
   });
 
-  it('the same object without it: no 变更 chip, and no audit read', async () => {
+  it('the same object without it: no audit read', async () => {
     const untracked = OBJECTS.map((o) => (o.name === PARENT ? { ...o, enable: undefined } : o)) as typeof OBJECTS;
     const { container } = renderPage({ width: 1440, search: '?related=timeline', objects: untracked });
-    expect(await streamChips(container)).toEqual(['all', 'activity', 'discussion']);
+    const face = await timelineFace(container);
+    expect(face.querySelector('[data-stream-filter]')).toBeNull();
     expect(auditReads()).toBe(0);
   });
 
-  // objectstack#30344 — the field history this record page shows is the one
-  // THIS reader's audit read answers: a reader the server refuses it to has
-  // nothing for 变更 to hold, so the chip is not offered, as with history off.
-  it('a reader whose audit read is refused (403): no 变更 chip, as with history off', async () => {
+  // objectstack#30344 — a reader the server refuses the audit read to still
+  // gets the tab, with nothing for a chip to hold.
+  it('a reader whose audit read is refused (403): the tab still draws, with no chip', async () => {
     const { container } = renderPage({
       width: 1440,
       search: '?related=timeline',
       auditRead: () => Promise.reject(rejection(403, 'PERMISSION_DENIED')),
     });
-    expect(await streamChipsAfterAuditRead(container)).toEqual(['all', 'activity', 'discussion']);
+    const face = await timelineFace(container);
+    await settleAuditRead();
+    expect(face.querySelector('[data-stream-filter]')).toBeNull();
   });
 });

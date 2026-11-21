@@ -16,7 +16,7 @@ import { buildCommentThreads, type CommentThreadData } from './commentThreads';
  * the desktop comment panel, and the phone's comment page, read this and
  * nothing else.
  */
-export interface RecordComments {
+export interface RecordCommentsData {
   /** The threads, oldest first; each thread's replies oldest first. */
   threads: CommentThreadData[];
   /**
@@ -48,7 +48,7 @@ const NO_ITEMS: FeedItem[] = [];
  * exactly where the host offers it. Outside a provider it is an empty,
  * read-only discussion.
  */
-export function useRecordComments(): RecordComments {
+export function useRecordComments(): RecordCommentsData {
   const discussion = useDiscussionContext();
   const items = (discussion?.items as FeedItem[] | undefined) ?? NO_ITEMS;
   const threads = React.useMemo(() => buildCommentThreads(items), [items]);
@@ -64,8 +64,8 @@ export function useRecordComments(): RecordComments {
     failed,
     onRetry: failed ? discussion?.onRetryFeed : undefined,
     onAddComment: onAddComment ? (text: string) => onAddComment(text) : undefined,
-    onAddReply: discussion?.onAddReply as RecordComments['onAddReply'],
-    onToggleReaction: discussion?.onToggleReaction as RecordComments['onToggleReaction'],
+    onAddReply: discussion?.onAddReply as RecordCommentsData['onAddReply'],
+    onToggleReaction: discussion?.onToggleReaction as RecordCommentsData['onToggleReaction'],
     onEditComment: discussion?.onEditComment,
     onDeleteComment: discussion?.onDeleteComment,
     mentionSuggestions: discussion?.mentionSuggestions,

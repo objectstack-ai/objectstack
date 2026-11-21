@@ -1577,7 +1577,8 @@ describe('RecordDetailView.relatedListTitlePlural-11733', () => {
  *      for it; since objectstack#29188 it shows the load-failure notice, not
  *      the empty state;
  *   5. a refused `sys_comment` read beside an answered `sys_activity` read
- *      keeps the activity rows and says the comments are withheld.
+ *      keeps the activity rows and says the comments are withheld (since
+ *      objectstack#36075 in the comment panel, which holds the comments).
  *
  * The harness is `RecordDetailView.feedLoading.test.tsx`'s: the synthesized
  * record page composes `record:discussion`, so the panel arrives through the
@@ -1809,14 +1810,25 @@ describe('RecordDetailView.feedRefusal-11195', () => {
           }),
       });
 
+      window.localStorage.clear();
       renderDetail(dataSource);
 
       expect(await screen.findByText('Stage moved to qualified')).toBeTruthy();
-      const notice = await screen.findByTestId('activity-access-denied');
-      expect(notice.textContent).toContain(COMMENTS_DENIED);
-      expect(notice.textContent).not.toContain(ACTIVITY_DENIED);
-      expect(notice.querySelector('[data-denied-source="comments"]')).not.toBeNull();
-      expect(notice.querySelector('[data-denied-source="activity"]')).toBeNull();
+      // The 动态 stream holds no comments, so their refusal is not its to say.
+      expect(screen.queryByTestId('activity-access-denied')).toBeNull();
+      const button = await waitFor(() => {
+        const el = document.querySelector('[data-comments-button]');
+        expect(el).not.toBeNull();
+        return el as HTMLElement;
+      });
+      // The icon names no count for comments it may not read.
+      expect(button.querySelector('[data-comments-count]')).toBeNull();
+      fireEvent.click(button);
+      const panel = document.querySelector('[data-comments-panel]') as HTMLElement;
+      expect(panel.querySelector('[data-comments-note="denied"]')).not.toBeNull();
+      expect(panel.textContent).toContain(COMMENTS_DENIED);
+      expect(panel.textContent).not.toContain(ACTIVITY_DENIED);
+      expect(panel.querySelector('[data-comments-composer]')).toBeNull();
     });
   });
 });

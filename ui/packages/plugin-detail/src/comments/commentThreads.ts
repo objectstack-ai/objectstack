@@ -38,18 +38,42 @@ export function buildCommentThreads(items: readonly FeedItem[]): CommentThreadDa
     .map((item, index) => ({ item, index }))
     .sort((a, b) => createdAtOf(a.item) - createdAtOf(b.item) || a.index - b.index)
     .map(({ item }) => item);
-  const held = new Set<string>(comments.map((item) => String(item.id)));
+  const byId = new Map<string, FeedItem>(comments.map((item) => [String(item.id), item]));
+  // The thread a comment belongs to: its topmost held ancestor. A reply to a
+  // reply joins the same thread.
+  const rootIdOf = (item: FeedItem): string => {
+    let current = item;
+    const seen = new Set<string>([String(item.id)]);
+    while (current.parentId != null) {
+      const parentKey = String(current.parentId);
+      const parent = byId.get(parentKey);
+      if (!parent) break;
+      // Bad data that loops: the comment stands as its own thread.
+      if (seen.has(parentKey)) return String(item.id);
+      seen.add(parentKey);
+      current = parent;
+    }
+    return String(current.id);
+  };
   const threads: CommentThreadData[] = [];
   const byRoot = new Map<string, CommentThreadData>();
   for (const item of comments) {
-    if (item.parentId != null && held.has(String(item.parentId))) continue;
-    const thread: CommentThreadData = { root: item, replies: [] };
-    threads.push(thread);
-    byRoot.set(String(item.id), thread);
-  }
-  for (const item of comments) {
-    if (item.parentId == null) continue;
-    byRoot.get(String(item.parentId))?.replies.push(item);
+    const rootId = rootIdOf(item);
+    const thread = byRoot.get(rootId);
+    if (thread) {
+      if (thread.root !== item) thread.replies.push(item);
+    } else if (rootId === String(item.id)) {
+      const created: CommentThreadData = { root: item, replies: [] };
+      threads.push(created);
+      byRoot.set(rootId, created);
+    } else {
+      // A reply sorted ahead of its root (clock skew): its thread opens with
+      // the root, so it waits there.
+      const root = byId.get(rootId)!;
+      const created: CommentThreadData = { root, replies: [item] };
+      threads.push(created);
+      byRoot.set(rootId, created);
+    }
   }
   return threads;
 }
