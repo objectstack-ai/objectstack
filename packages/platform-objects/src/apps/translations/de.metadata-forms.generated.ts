@@ -70,7 +70,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       highlightFields: {
         label: "Hervorgehobene Felder",
-        helpText: "Feldnamen dieses Objekts, das wichtigste zuerst – der erste Eintrag gewinnt, wo nur einer Platz hat (ADR-0085). Steuert die Standardspalten der Liste, Karten, Vorschauen untergeordneter Datensätze und die Hervorhebungsleiste der Detailansicht. Ein Name, der kein Feld dieses Objekts ist, wird bei der Veröffentlichung abgelehnt."
+        helpText: "Feldnamen dieses Objekts, das wichtigste zuerst – der erste Eintrag gewinnt, wo nur einer Platz hat (ADR-0085). Steuert die Standardspalten von Listen und Bezugslisten, Karten, Vorschauen untergeordneter Datensätze, die Hover-Karte des Datensatzes und die Datensatzauswahl. Ein Name, der kein Feld dieses Objekts ist, wird bei der Veröffentlichung abgelehnt."
       },
       relatedLists: {
         label: "Verknüpfte Listen",

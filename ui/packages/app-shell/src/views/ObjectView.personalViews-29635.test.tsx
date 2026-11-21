@@ -211,7 +211,7 @@ function mountLeads(
 
 /** The list's toolbar has drawn: its Filter control is on screen. */
 const listToolbar = () =>
-  waitFor(() => expect(screen.getByTestId('toolbar-filter-trigger')).toBeInTheDocument(), { timeout: 5000 });
+  waitFor(() => expect(screen.getByTestId('condition-add-filter')).toBeInTheDocument(), { timeout: 5000 });
 
 /** The reader's pinned view of `crm_lead`, as the workspace preference keeps it. */
 const PIN_KEY = 'os:pref:list.view.pinned@object:crm_lead';
@@ -399,7 +399,7 @@ describe('objectstack#29635 — My views in the list view switcher', () => {
     await waitFor(() => expect(dataSource.find.mock.calls.some(([r]) => r === 'sys_personal_view')).toBe(true));
     // No list of the default view is drawn or read while the pin may name a personal view.
     await new Promise((r) => setTimeout(r, 50));
-    expect(screen.queryByTestId('toolbar-filter-trigger')).toBeNull();
+    expect(screen.queryByTestId('condition-add-filter')).toBeNull();
     expect(leadReads(dataSource)).toHaveLength(0);
 
     land({ data: [OWN] });
@@ -605,14 +605,15 @@ describe('objectstack#30073 — a personal view\'s conditions are Filter panel r
   const romeLink = (path: string) => `${path}?${applyListStateParams(new URLSearchParams(), { filters: ROME as never }).toString()}`;
   const storeListState = (state: unknown) => localStorage.setItem(localListStateKey('u1', 'crm_lead'), JSON.stringify(state));
   const storedListState = () => JSON.parse(localStorage.getItem(localListStateKey('u1', 'crm_lead')) ?? '{}');
-  const filterTrigger = () => screen.getByTestId('toolbar-filter-trigger');
+  const filterTrigger = () => screen.getByTestId('condition-add-filter');
   const lastLeadRead = (dataSource: ReturnType<typeof mountLeads>['dataSource']) => JSON.stringify(leadReads(dataSource).at(-1));
 
   it('opening a personal view seeds its conditions as panel rows, applied once, and the list is not personalized', async () => {
     const { dataSource } = mountLeads('/apps/crm/crm_lead/view/pv_mine');
     await listToolbar();
     expect(switcher()).toHaveTextContent('Paris leads');
-    await waitFor(() => expect(filterTrigger()).toHaveAttribute('aria-label', 'Filter, 1 active'));
+    // objectstack#35878: with a filter set, the condition row's add control is 「+」.
+    await waitFor(() => expect(filterTrigger()).not.toHaveAttribute('data-empty'));
     fireEvent.click(filterTrigger());
     // The trigger opens the shared field list (objectstack#35549); the panel
     // rows are its advanced step.
@@ -726,7 +727,7 @@ describe('objectstack#30073 — a personal view\'s conditions are Filter panel r
     await listToolbar();
     await waitFor(() => expect(lastLeadRead(dataSource)).toContain('Paris'));
     expect(lastLeadRead(dataSource)).toContain('open');
-    expect(filterTrigger()).toHaveAttribute('aria-label', 'Filter');
+    expect(filterTrigger()).toHaveAttribute('data-empty', 'true');
   });
 
   it('Save as my view leaves the view it came from without the temporary conditions and not personalized', async () => {
@@ -752,7 +753,7 @@ describe('objectstack#30073 — a personal view\'s conditions are Filter panel r
     expect(switcher()).toHaveTextContent('View 1');
     await waitFor(() => expect(leadReads(again.dataSource).length).toBeGreaterThan(0));
     expect(lastLeadRead(again.dataSource)).not.toContain('Rome');
-    expect(filterTrigger()).toHaveAttribute('aria-label', 'Filter');
+    expect(filterTrigger()).toHaveAttribute('data-empty', 'true');
     expect(screen.queryByTestId('list-personalized-marker')).toBeNull();
   });
 });

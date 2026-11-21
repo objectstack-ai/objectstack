@@ -9,7 +9,7 @@
 import * as React from 'react';
 import { cn, Button, Input, Popover, PopoverContent, PopoverTrigger, FilterBuilder, SortBuilder, NavigationOverlay, GroupingEditor, RefreshIndicator, DataErrorState, resolveIcon, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@object-ui/components';
 import type { SortItem } from '@object-ui/components';
-import { Search, Funnel, ArrowUpDown, X, EyeOff, Group, Paintbrush, Download, Rows4, Rows3, Rows2, Lock, Printer, Plus, Trash2, CheckSquare, AlertTriangle, ShieldAlert, RotateCw, Loader2, Info, Inbox } from 'lucide-react';
+import { Search, X, EyeOff, Group, Paintbrush, Download, Rows4, Rows3, Rows2, Lock, Printer, Plus, Trash2, CheckSquare, AlertTriangle, ShieldAlert, RotateCw, Loader2, Info, Inbox } from 'lucide-react';
 import type { FilterBuilderRowGroup } from '@object-ui/components';
 import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete, isCurrencyCompanion } from '@object-ui/components';
 import { ViewSwitcherDropdown } from './ViewSwitcher';
@@ -19,12 +19,10 @@ import {
   ViewSettingsPopover,
   groupFieldOptions,
   type ViewSettingsField,
-  PHONE_POPOVER_GUTTER,
   PHONE_TOUCH_TARGET,
-  useBelowSm,
 } from './components/ViewSettingsPopover';
 import { UserFilters, type UserFiltersHandle } from './UserFilters';
-import { ConditionChipRow, FilterPanel, SortPanel } from './conditions/ListConditionControls';
+import { ConditionChipRow, SortPanel } from './conditions/ListConditionControls';
 import {
   TOOLBAR_ROW,
   TOOLBAR_ROW_LEADING_PHONE,
@@ -35,7 +33,6 @@ import {
   TOOLBAR_USER_FILTERS_LEADING_PHONE,
   TOOLBAR_CLUSTER,
   TOOLBAR_CLUSTER_LEADING_PHONE,
-  TOOLBAR_TEXT_TRIGGER,
 } from './listToolbarRow';
 import {
   calendarWindowCovers,
@@ -472,6 +469,23 @@ export interface ListViewProps {
    * the list holds and which layout it draws.
    */
   toolbarLeading?: React.ReactNode | ((state: ListToolbarLeadingState) => React.ReactNode);
+  /**
+   * objectstack#35878 — the right end of the view bar, drawn by the host. It
+   * is called with the list's own tools for that end (its search) and returns
+   * what the end shows: the console puts the page's create button and ⋮ More
+   * after the search, and while rows are selected shows what the selection
+   * offers in their place. Absent ⇒ the search alone, as before.
+   *
+   * A HOST prop, never a schema key.
+   */
+  toolbarTrailing?: (tools: React.ReactNode) => React.ReactNode;
+  /**
+   * objectstack#35878 — the right end of the condition row under the view
+   * bar, drawn by the host: the console's 「Personalized · Reset」. Given, it
+   * takes the place of the row's own 「Reset」 (which puts back the filter and
+   * sort only). A HOST prop, never a schema key.
+   */
+  conditionRowEnd?: React.ReactNode;
   /**
    * A host-drawn node beside each row's title in the grid (objectui#13330),
    * handed to `ObjectGrid`'s `rowAdornment`: the cell of the object's declared
@@ -2118,6 +2132,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   initialFilters,
   initialSearchTerm,
   toolbarLeading,
+  toolbarTrailing,
+  conditionRowEnd,
   rowAdornment,
   recordLinkAdornment,
   rowOpensRecord,
@@ -2420,7 +2436,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   const [phoneSearchOpen, setPhoneSearchOpen] = React.useState(false);
 
   // Sort State
-  const [showSort, setShowSort] = React.useState(false);
   const [currentSort, setCurrentSort] = React.useState<SortItem[]>(() =>
     parseSortConfig(schema.sort),
   );
@@ -2506,7 +2521,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     );
   }, [currentSort, declaredSort]);
 
-  const [showFilters, setShowFilters] = React.useState(false);
 
   const [currentFilters, setCurrentFilters] = React.useState<FilterBuilderRowGroup>(() =>
     initialFilters && Array.isArray(initialFilters.conditions)
@@ -3346,8 +3360,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     setRefreshKey(k => k + 1);
   }, []);
 
-  // Below `sm` the Filter and Sort panels keep 16 px from both screen edges.
-  const belowSm = useBelowSm();
 
   const { ref: pullRef, isRefreshing, pullDistance } = usePullToRefresh<HTMLDivElement>({
     onRefresh: handlePullRefresh,
@@ -6826,10 +6838,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     || toolbarFlags.showHideFields || currentView === 'grid' || toolbarFlags.showRefresh
     || (resolvedExportOptions && exportPermitted && exportableFormats.length > 0)
   );
-  // Below `sm` the bar keeps Filter and Display only, so Sort rides in the
-  // Display panel there. Without a Display panel the Sort trigger stays on the
-  // bar at every width. Either way it follows `userActions.sort`.
-  const sortInDisplay = toolbarFlags.showSort && displayOffered;
   // The condition controls (objectstack#35549, objectstack#35550): the Filter
   // and Sort triggers open the shared field list, and the condition row under
   // the view bar draws the sort and filter chips. The fields the view shows,
@@ -6905,9 +6913,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       )}
     </div>
   ) : undefined;
-  // The Sort panel: every sort level at once. The toolbar Sort popover draws
-  // it as the shared field list's advanced step (objectstack#35550), and the
-  // Display panel draws it below `sm` (`sortInDisplay`).
+  // The Sort panel: every sort level at once. The condition row's sort chip
+  // draws it as the shared field list's advanced step (objectstack#35550,
+  // objectstack#35878).
   const sortPanelBody = (
     <div className="space-y-4">
       <div className="flex items-center justify-between border-b pb-2">
@@ -6978,7 +6986,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     <OwnWritesContext.Provider value={ownWrites}>
     <div
       ref={pullRef}
-      className={cn('flex flex-col h-full bg-background relative min-w-0 overflow-hidden', className)}
+      className={cn('@container/list flex flex-col h-full bg-background relative min-w-0 overflow-hidden', className)}
       {...regionAria}
       role={regionAria.role ?? 'region'}
       {...(schema.aria?.live ? { 'aria-live': schema.aria.live } : {})}
@@ -7035,6 +7043,75 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             <div className={TOOLBAR_LEADING} data-testid="list-toolbar-leading">
               {drawnToolbarLeading}
             </div>
+          )}
+          {/* 视图设置 (objectstack#35878, the Display panel of objectui#12423):
+              beside the view's name, not at the far end of the bar. Its
+              first level is the content itself: the view's name, its
+              columns, then Group, Row height and the rest. Every control
+              writes through the same door as its wide-form button; the panel
+              adds no storage of its own. */}
+          {displayOffered && (
+            <ViewSettingsPopover
+              t={t as any}
+              allFields={allFields as any}
+              fieldType={(name) => {
+                const type = (objectDef?.fields as Record<string, { type?: unknown } | undefined> | undefined)?.[name]?.type;
+                return typeof type === 'string' ? type : undefined;
+              }}
+              layout={viewSwitcherOffered ? (closeMenu) => (
+                <ViewSwitcherDropdown
+                  currentView={currentView}
+                  availableViews={availableViews}
+                  onViewChange={(view) => {
+                    // Choosing a layout completes the choice: Display closes
+                    // (objectui#12621).
+                    closeMenu();
+                    handleViewChange(view);
+                  }}
+                />
+              ) : undefined}
+              showGroup={toolbarFlags.showGroup}
+              groupingConfig={chosenGroupingConfig}
+              setGroupingConfig={changeGrouping}
+              showColor={toolbarFlags.showColor}
+              rowColorConfig={offeredRowColorConfig}
+              setRowColorConfig={setRowColorConfig}
+              showDensity={toolbarFlags.showDensity}
+              density={currentView === 'gallery'
+                ? {
+                    mode: galleryCardSize === 'small' ? 'compact' : galleryCardSize === 'medium' ? 'comfortable' : 'spacious',
+                    cycle: cycleGalleryDensity,
+                    setMode: setGalleryDensityMode,
+                  }
+                : density as any}
+              showHideFields={toolbarFlags.showHideFields}
+              hiddenFields={offeredHiddenFields}
+              updateHiddenFields={updateListedFields}
+              addableFields={addableFields}
+              onAddField={addListedField}
+              changedCount={displayChangedCount}
+              // objectstack#35551 — the view's name and its rename head the
+              // menu; the field order is the grid's column order, the state
+              // the header's column drag writes.
+              viewName={typeof schema.label === 'string' && schema.label && (onRenameView || onPersonalizationChange)
+                ? { label: schema.label, onRename: onRenameView }
+                : undefined}
+              fieldOrder={currentView === 'grid' ? (schema.columnState as { order?: string[]; widths?: Record<string, number> } | undefined)?.order : undefined}
+              onFieldOrderChange={currentView === 'grid' && onColumnStateChange
+                ? (order) => onColumnStateChange({ ...(schema.columnState as { order?: string[]; widths?: Record<string, number> } | undefined), order })
+                : undefined}
+              // objectstack#28950 — a host that marks a personalized list owns
+              // the one reset. It hands it over while there is something to
+              // restore, and the menu draws it as 恢复默认, dimmed between
+              // times (objectstack#35551); the list offers none of its own.
+              onReset={onResetView ?? (onPersonalizationChange ? () => {} : resetDisplayToViewDefault)}
+              resetDisabled={onResetView ? false : onPersonalizationChange ? true : undefined}
+              onSave={onSaveView}
+              exportFormats={resolvedExportOptions && exportPermitted && exportableFormats.length > 0 ? exportableFormats : undefined}
+              onExport={(format) => handleExport(format as 'csv' | 'xlsx' | 'json' | 'pdf')}
+              exportBusy={exportBusy}
+              exportError={exportError}
+            />
           )}
           {/* User Filters — filter elements (dropdown chips / preset tabs /
               toggles). Mutually exclusive with view tabs above, so at most
@@ -7180,54 +7257,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             <div className="hidden sm:block h-5 w-px bg-border/50 mx-1 shrink-0" />
           )}
 
-          {/* Filter — universal advanced filter builder.
-              Always shown when enabled. The left-side quick-filter chips
-              (filterElements) are predefined named filters; the
-              right-side Popover is a free-form field-by-field builder that
-              can express filters the chips cannot. They serve different
-              purposes and must coexist. */}
-          {toolbarFlags.showFilters && (
-          <Popover open={showFilters} onOpenChange={setShowFilters}>
-            <PopoverTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  TOOLBAR_TEXT_TRIGGER,
-                  PHONE_TOUCH_TARGET,
-                  hasFilters && "text-foreground font-medium"
-                )}
-                data-testid="toolbar-filter-trigger"
-                // From `sm` up Filter, Sort and Options are named text buttons
-                // (objectstack#35548); below `sm` they stay icons
-                // (objectui#12695). `aria-label` carries the active-filter
-                // count, which the badge would otherwise be alone in carrying
-                // (objectui#12500).
-                aria-label={hasFilters
-                  ? t('list.filterActive', { count: shownFilterCount })
-                  : t('list.filter')}
-                title={t('list.filter')}
-              >
-                <Funnel className="h-3.5 w-3.5 sm:hidden" aria-hidden="true" />
-                <span className="hidden sm:inline">{t('list.filter')}</span>
-                {hasFilters && (
-                  <span className="flex h-4 min-w-[16px] items-center justify-center text-[10px] font-medium text-muted-foreground tabular-nums">
-                    {shownFilterCount}
-                  </span>
-                )}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="start" collisionPadding={belowSm ? PHONE_POPOVER_GUTTER : undefined} className="w-auto max-w-[calc(100vw-2rem)] p-0">
-              <FilterPanel
-                fields={filterFields}
-                shownFields={shownFieldNames}
-                value={currentFilters}
-                onChange={applyPanelFilters}
-                renderAdvanced={advancedFilterBuilder}
-              />
-            </PopoverContent>
-          </Popover>
-          )}
+          {/* Filter and Sort are not on the bar (objectstack#35878): the
+              condition row under it carries them, as 「Filter」 and 「Sort」
+              before anything is set and as their chips after. */}
 
           {/* Group — hidden on mobile (collapsed into ViewSettingsPopover) */}
           {toolbarFlags.showGroup && !toolbarFlags.compactToolbar && (
@@ -7274,55 +7306,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                   />
                 </div>
               </div>
-            </PopoverContent>
-          </Popover>
-          )}
-
-          {/* Sort. Below `sm` the Display panel carries the Sort panel when it
-              is drawn (`sortInDisplay`), so this trigger hides there while no
-              sort is active; with no Display panel it stays on the bar at
-              every width. */}
-          {toolbarFlags.showSort && (
-          <Popover open={showSort} onOpenChange={setShowSort}>
-            <PopoverTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  TOOLBAR_TEXT_TRIGGER,
-                  PHONE_TOUCH_TARGET,
-                  // On a phone an active sort keeps this trigger, with its
-                  // level count, on the bar: the Display panel holds the
-                  // builder, but only the bar can show the list is sorted.
-                  // The open search field takes its slot while it is open.
-                  sortInDisplay && (currentSort.length === 0 || phoneSearchOpen) && "hidden sm:inline-flex",
-                  currentSort.length > 0 && "text-foreground font-medium"
-                )}
-                data-testid="toolbar-sort-trigger"
-                // Named from `sm` up (objectstack#35548), an icon below it
-                // (objectui#12695): `aria-label` and `title` name it there.
-                aria-label={t('list.sort')}
-                title={t('list.sort')}
-              >
-                <ArrowUpDown className="h-3.5 w-3.5 sm:hidden" aria-hidden="true" />
-                <span className="hidden sm:inline">{t('list.sort')}</span>
-                {currentSort.length > 0 && (
-                  <span className="flex h-4 min-w-[16px] items-center justify-center text-[10px] font-medium text-muted-foreground tabular-nums">
-                    {currentSort.length}
-                  </span>
-                )}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="start" collisionPadding={belowSm ? PHONE_POPOVER_GUTTER : undefined} className="w-auto max-w-[calc(100vw-2rem)] p-0">
-              <SortPanel
-                fields={sortFields}
-                shownFields={shownFieldNames}
-                value={currentSort}
-                onChange={applySort}
-                onDone={() => setShowSort(false)}
-                footer={sortPanelNote}
-                renderAdvanced={() => sortPanelBody}
-              />
             </PopoverContent>
           </Popover>
           )}
@@ -7450,78 +7433,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             );
           })()}
 
-          {/* Display (objectui#12423) — the default form of this cluster:
-              Layout, Group, Color, Hide fields, Density, Row numbers and Edit
-              inline in one panel, with Reset / Refresh / Export in its footer.
-              Every control writes through the same door as its wide-form
-              button above; the panel adds no storage of its own. Drawn on
-              mobile too (icon only): Refresh and Export live in it. */}
-          {displayOffered && (
-            <ViewSettingsPopover
-              t={t as any}
-              allFields={allFields as any}
-              fieldType={(name) => {
-                const type = (objectDef?.fields as Record<string, { type?: unknown } | undefined> | undefined)?.[name]?.type;
-                return typeof type === 'string' ? type : undefined;
-              }}
-              layout={viewSwitcherOffered ? (closeMenu) => (
-                <ViewSwitcherDropdown
-                  currentView={currentView}
-                  availableViews={availableViews}
-                  onViewChange={(view) => {
-                    // Choosing a layout completes the choice: Display closes
-                    // (objectui#12621).
-                    closeMenu();
-                    handleViewChange(view);
-                  }}
-                />
-              ) : undefined}
-              sort={sortInDisplay ? sortPanelBody : undefined}
-              showGroup={toolbarFlags.showGroup}
-              groupingConfig={chosenGroupingConfig}
-              setGroupingConfig={changeGrouping}
-              showColor={toolbarFlags.showColor}
-              rowColorConfig={offeredRowColorConfig}
-              setRowColorConfig={setRowColorConfig}
-              showDensity={toolbarFlags.showDensity}
-              density={currentView === 'gallery'
-                ? {
-                    mode: galleryCardSize === 'small' ? 'compact' : galleryCardSize === 'medium' ? 'comfortable' : 'spacious',
-                    cycle: cycleGalleryDensity,
-                    setMode: setGalleryDensityMode,
-                  }
-                : density as any}
-              showHideFields={toolbarFlags.showHideFields}
-              hiddenFields={offeredHiddenFields}
-              updateHiddenFields={updateListedFields}
-              addableFields={addableFields}
-              onAddField={addListedField}
-              changedCount={displayChangedCount}
-              // objectstack#35551 — the view's name and its rename head the
-              // menu; the field order is the grid's column order, the state
-              // the header's column drag writes.
-              viewName={typeof schema.label === 'string' && schema.label && (onRenameView || onPersonalizationChange)
-                ? { label: schema.label, onRename: onRenameView }
-                : undefined}
-              fieldOrder={currentView === 'grid' ? (schema.columnState as { order?: string[]; widths?: Record<string, number> } | undefined)?.order : undefined}
-              onFieldOrderChange={currentView === 'grid' && onColumnStateChange
-                ? (order) => onColumnStateChange({ ...(schema.columnState as { order?: string[]; widths?: Record<string, number> } | undefined), order })
-                : undefined}
-              // objectstack#28950 — a host that marks a personalized list owns
-              // the one reset. It hands it over while there is something to
-              // restore, and the menu draws it as 恢复默认, dimmed between
-              // times (objectstack#35551); the list offers none of its own.
-              onReset={onResetView ?? (onPersonalizationChange ? () => {} : resetDisplayToViewDefault)}
-              resetDisabled={onResetView ? false : onPersonalizationChange ? true : undefined}
-              onSave={onSaveView}
-              onRefresh={toolbarFlags.showRefresh ? () => setRefreshKey(k => k + 1) : undefined}
-              refreshing={loading}
-              exportFormats={resolvedExportOptions && exportPermitted && exportableFormats.length > 0 ? exportableFormats : undefined}
-              onExport={(format) => handleExport(format as 'csv' | 'xlsx' | 'json' | 'pdf')}
-              exportBusy={exportBusy}
-              exportError={exportError}
-            />
-          )}
 
           {/* --- Separator: Appearance | Export (wide form) --- */}
           {!toolbarFlags.compactToolbar && (toolbarFlags.showColor || toolbarFlags.showDensity) && resolvedExportOptions && exportPermitted && exportableFormats.length > 0 && (
@@ -7650,129 +7561,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             ) : null;
           })()}
 
-          {/* Search, scoped to this list. From `sm` up an icon button opens
-              a popover; below `sm` the icon expands into a field in place (the
-              phone form after this popover). Both write the same term. */}
-          {toolbarFlags.showSearch && (
-            <Popover open={showSearchPopover} onOpenChange={setShowSearchPopover}>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={cn(
-                    "hidden sm:inline-flex h-7 text-muted-foreground hover:text-foreground text-[13px] transition-colors duration-150",
-                    searchTerm ? "px-2 text-foreground font-medium" : "w-7 p-0"
-                  )}
-                  data-testid="search-icon-button"
-                  title={searchTerm ? `${t('list.search')}: ${searchTerm}` : t('list.search')}
-                  // An icon-only button names itself (objectui#12450), the same
-                  // two-attribute shape as Refresh: `title` alone is a tooltip,
-                  // and with a keyword the button's text was the bare keyword.
-                  aria-label={searchTerm ? `${t('list.search')}: ${searchTerm}` : t('list.search')}
-                >
-                  <Search className="h-3.5 w-3.5" />
-                  {/* Persisted keyword restored from storage keeps filtering after
-                      navigation while the popover starts closed — surface it on the
-                      trigger so the active search is visible without opening it. */}
-                  {searchTerm && (
-                    <span
-                      className="ml-1.5 max-w-[8rem] truncate text-[11px]"
-                      data-testid="search-active-keyword"
-                    >
-                      {searchTerm}
-                    </span>
-                  )}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="end" className="w-[calc(100vw-2rem)] sm:w-64 p-2" data-testid="search-popover">
-                <div className="relative">
-                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                  <Input
-                    placeholder={t('table.search')}
-                    value={searchTerm}
-                    onChange={(e) => handleSearchChange(e.target.value)}
-                    className="pl-7 h-8 text-xs"
-                    autoFocus
-                  />
-                  {searchTerm && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="absolute right-0.5 top-1/2 -translate-y-1/2 h-5 w-5 p-0 hover:bg-muted-foreground/20"
-                      onClick={() => handleSearchChange('')}
-                    >
-                      <X className="h-3 w-3" />
-                    </Button>
-                  )}
-                </div>
-              </PopoverContent>
-            </Popover>
-          )}
-
-          {/* Search, phone form: the icon expands into a field in place, with
-              the bar's touch size. Enter or Escape folds it back to the icon,
-              which then carries the active keyword as the desktop trigger
-              does; the clear button empties the term and folds it. */}
-          {toolbarFlags.showSearch && (phoneSearchOpen ? (
-            <div className="relative flex items-center sm:hidden" data-testid="phone-search">
-              <Search
-                className="pointer-events-none absolute left-2 h-3.5 w-3.5 text-muted-foreground"
-                aria-hidden="true"
-              />
-              <Input
-                type="search"
-                placeholder={t('table.search')}
-                aria-label={t('list.search')}
-                value={searchTerm}
-                onChange={(e) => handleSearchChange(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === 'Escape') setPhoneSearchOpen(false);
-                }}
-                onBlur={() => {
-                  if (!searchTerm) setPhoneSearchOpen(false);
-                }}
-                // 16px text: a smaller font makes iOS Safari zoom on focus.
-                className="h-7 w-36 pl-7 pr-7 text-base max-sm:h-11 max-sm:pr-11 [&::-webkit-search-cancel-button]:hidden"
-                autoFocus
-                data-testid="phone-search-input"
-              />
-              <Button
-                variant="ghost"
-                size="sm"
-                className="absolute right-0 h-7 w-7 p-0 text-muted-foreground hover:text-primary max-sm:h-11 max-sm:w-11"
-                aria-label={t('list.clearSearch')}
-                title={t('list.clearSearch')}
-                onClick={() => {
-                  handleSearchChange('');
-                  setPhoneSearchOpen(false);
-                }}
-                data-testid="phone-search-clear"
-              >
-                <X className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-          ) : (
-            <Button
-              variant="ghost"
-              size="sm"
-              className={cn(
-                "sm:hidden h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
-                PHONE_TOUCH_TARGET,
-                searchTerm && "text-foreground font-medium",
-              )}
-              aria-label={searchTerm ? `${t('list.search')}: ${searchTerm}` : t('list.search')}
-              title={searchTerm ? `${t('list.search')}: ${searchTerm}` : t('list.search')}
-              onClick={() => setPhoneSearchOpen(true)}
-              data-testid="phone-search-trigger"
-            >
-              <Search className="h-3.5 w-3.5" />
-              {searchTerm && (
-                <span className="max-w-[5rem] truncate text-[11px]" data-testid="phone-search-active-keyword">
-                  {searchTerm}
-                </span>
-              )}
-            </Button>
-          ))}
 
           {/* Add Record (top position) */}
           {toolbarFlags.showAddRecordTop && (
@@ -7788,18 +7576,154 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               <span className="hidden sm:inline">{t('list.addRecord')}</span>
             </Button>
           )}
+          {/* objectstack#35878 — the right end of the view bar: the list's
+              search, then whatever the host puts after it (the page's
+              create button and ⋮ More), or the search alone. The host may
+              swap the whole end for what a selection offers. */}
+          {(() => {
+            const searchTools = (
+              <>
+            {/* Search, scoped to this list. From `sm` up an icon button opens
+                a popover; below `sm` the icon expands into a field in place (the
+                phone form after this popover). Both write the same term. */}
+            {toolbarFlags.showSearch && (
+              <Popover open={showSearchPopover} onOpenChange={setShowSearchPopover}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={cn(
+                      "hidden sm:inline-flex h-7 text-muted-foreground hover:text-foreground text-[13px] transition-colors duration-150",
+                      searchTerm ? "px-2 text-foreground font-medium" : "w-7 p-0"
+                    )}
+                    data-testid="search-icon-button"
+                    title={searchTerm ? `${t('list.search')}: ${searchTerm}` : t('list.search')}
+                    // An icon-only button names itself (objectui#12450), the same
+                    // two-attribute shape as Refresh: `title` alone is a tooltip,
+                    // and with a keyword the button's text was the bare keyword.
+                    aria-label={searchTerm ? `${t('list.search')}: ${searchTerm}` : t('list.search')}
+                  >
+                    <Search className="h-3.5 w-3.5" />
+                    {/* Persisted keyword restored from storage keeps filtering after
+                        navigation while the popover starts closed — surface it on the
+                        trigger so the active search is visible without opening it. */}
+                    {searchTerm && (
+                      <span
+                        className="ml-1.5 max-w-[8rem] truncate text-[11px]"
+                        data-testid="search-active-keyword"
+                      >
+                        {searchTerm}
+                      </span>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-[calc(100vw-2rem)] sm:w-64 p-2" data-testid="search-popover">
+                  <div className="relative">
+                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                    <Input
+                      placeholder={t('table.search')}
+                      value={searchTerm}
+                      onChange={(e) => handleSearchChange(e.target.value)}
+                      className="pl-7 h-8 text-xs"
+                      autoFocus
+                    />
+                    {searchTerm && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="absolute right-0.5 top-1/2 -translate-y-1/2 h-5 w-5 p-0 hover:bg-muted-foreground/20"
+                        onClick={() => handleSearchChange('')}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            )}
+
+            {/* Search, phone form: the icon expands into a field in place, with
+                the bar's touch size. Enter or Escape folds it back to the icon,
+                which then carries the active keyword as the desktop trigger
+                does; the clear button empties the term and folds it. */}
+            {toolbarFlags.showSearch && (phoneSearchOpen ? (
+              <div className="relative flex items-center sm:hidden" data-testid="phone-search">
+                <Search
+                  className="pointer-events-none absolute left-2 h-3.5 w-3.5 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <Input
+                  type="search"
+                  placeholder={t('table.search')}
+                  aria-label={t('list.search')}
+                  value={searchTerm}
+                  onChange={(e) => handleSearchChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === 'Escape') setPhoneSearchOpen(false);
+                  }}
+                  onBlur={() => {
+                    if (!searchTerm) setPhoneSearchOpen(false);
+                  }}
+                  // 16px text: a smaller font makes iOS Safari zoom on focus.
+                  className="h-7 w-36 pl-7 pr-7 text-base max-sm:h-11 max-sm:pr-11 [&::-webkit-search-cancel-button]:hidden"
+                  autoFocus
+                  data-testid="phone-search-input"
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-0 h-7 w-7 p-0 text-muted-foreground hover:text-primary max-sm:h-11 max-sm:w-11"
+                  aria-label={t('list.clearSearch')}
+                  title={t('list.clearSearch')}
+                  onClick={() => {
+                    handleSearchChange('');
+                    setPhoneSearchOpen(false);
+                  }}
+                  data-testid="phone-search-clear"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  "sm:hidden h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
+                  PHONE_TOUCH_TARGET,
+                  searchTerm && "text-foreground font-medium",
+                )}
+                aria-label={searchTerm ? `${t('list.search')}: ${searchTerm}` : t('list.search')}
+                title={searchTerm ? `${t('list.search')}: ${searchTerm}` : t('list.search')}
+                onClick={() => setPhoneSearchOpen(true)}
+                data-testid="phone-search-trigger"
+              >
+                <Search className="h-3.5 w-3.5" />
+                {searchTerm && (
+                  <span className="max-w-[5rem] truncate text-[11px]" data-testid="phone-search-active-keyword">
+                    {searchTerm}
+                  </span>
+                )}
+              </Button>
+            ))}
+              </>
+            );
+            return toolbarTrailing ? toolbarTrailing(searchTools) : searchTools;
+          })()}
         </div>
       </div>
       )}
 
       {/* The condition row under the view bar (objectstack#35548): the slot
-          the filter and sort conditions are drawn in. Empty, it takes no
-          height (`empty:hidden`). */}
+          the filter and sort conditions are drawn in. It is always there
+          (objectstack#35878): with nothing set it holds the dashed 「Sort」
+          and 「Filter」 buttons, so the first condition does not push the
+          table down a row. One line; what does not fit scrolls sideways. */}
       {listChromeShown && (
         <div
           data-slot="list-condition-row"
           data-testid="list-condition-row"
-          className="empty:hidden flex flex-wrap items-center gap-1.5 border-b px-4 py-1.5 bg-background"
+          className="empty:hidden flex min-h-10 flex-nowrap items-center gap-1.5 border-b px-4 py-1.5 bg-background"
         >
           {/* objectstack#35549 / #35550: sort chips, the view's own
               conditions as locked chips, the reader's filter chips, then
@@ -7822,6 +7746,19 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             renderAdvanced={advancedFilterBuilder}
             renderSortLevels={() => sortPanelBody}
             onReset={conditionsDifferFromView ? handleResetConditions : undefined}
+            end={conditionRowEnd}
+            filterOffered={toolbarFlags.showFilters}
+            renderSortPanel={toolbarFlags.showSort ? (close) => (
+              <SortPanel
+                fields={sortFields}
+                shownFields={shownFieldNames}
+                value={currentSort}
+                onChange={applySort}
+                onDone={close}
+                footer={sortPanelNote}
+                renderAdvanced={() => sortPanelBody}
+              />
+            ) : undefined}
           />
         </div>
       )}

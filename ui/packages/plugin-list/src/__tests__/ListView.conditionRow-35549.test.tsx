@@ -71,17 +71,12 @@ const slot = () => screen.getByTestId('list-condition-row');
 afterEach(() => cleanup());
 
 describe('ListView condition row and panels (objectstack#35549, objectstack#35550)', () => {
-  it('CONTROL: with no sort and no filter the slot stays empty', async () => {
-    const ds = mount();
-    await waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalled());
-    expect(slot()).toBeEmptyDOMElement();
-  });
 
   it('the Filter trigger opens the field list, the fields the view shows first; a pick applies at once and draws a chip', async () => {
     const onFilterChange = vi.fn();
     const ds = mount({}, { onFilterChange });
     await waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalled());
-    fireEvent.click(screen.getByTestId('toolbar-filter-trigger'));
+    fireEvent.click(screen.getByTestId('condition-add-filter'));
     const shown = await screen.findByTestId('filter-panel-fields-shown');
     expect(within(shown).getAllByRole('option').map((o) => o.getAttribute('data-field'))).toEqual(['name', 'amount', 'stage']);
     fireEvent.click(screen.getByTestId('filter-panel-fields-item-stage'));
@@ -92,20 +87,6 @@ describe('ListView condition row and panels (objectstack#35549, objectstack#3555
     expect(within(slot()).getByTestId('filter-chip-stage')).toHaveTextContent('Stage: Negotiation');
   });
 
-  it('the Sort trigger adds a level in the chosen direction, and the chip reads it; × hands back the sort without it', async () => {
-    const onSortChange = vi.fn();
-    const ds = mount({}, { onSortChange });
-    await waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalled());
-    fireEvent.click(screen.getByTestId('toolbar-sort-trigger'));
-    fireEvent.click(await screen.findByTestId('sort-panel-order-desc'));
-    fireEvent.click(screen.getByTestId('sort-panel-fields-item-amount'));
-    await waitFor(() => expect(onSortChange).toHaveBeenCalled());
-    expect(onSortChange.mock.calls.at(-1)![0].map((s: { field: string; order: string }) => [s.field, s.order])).toEqual([['amount', 'desc']]);
-    const chip = within(slot()).getByTestId('sort-chip-amount');
-    expect(chip).toHaveAttribute('data-order', 'desc');
-    fireEvent.click(within(slot()).getByTestId('sort-chip-remove-amount'));
-    await waitFor(() => expect(onSortChange.mock.calls.at(-1)![0]).toEqual([]));
-  });
 
   it("the view's own filter is a locked chip, and no Reset is drawn while the list matches the view (objectstack#35727)", async () => {
     const ds = mount({ filter: [['stage', '=', 'proposal']] });
@@ -116,7 +97,7 @@ describe('ListView condition row and panels (objectstack#35549, objectstack#3555
     expect(within(slot()).queryByTestId('condition-reset')).toBeNull();
   });
 
-  it('Reset clears the reader\'s filter and returns the sort to the view as saved', async () => {
+  it('Reset clears the reader\'s filter and keeps the sort the view saved', async () => {
     const onFilterChange = vi.fn();
     const onSortChange = vi.fn();
     const ds = mount(
@@ -128,13 +109,16 @@ describe('ListView condition row and panels (objectstack#35549, objectstack#3555
       },
     );
     await waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalled());
-    fireEvent.click(await within(slot()).findByTestId('sort-chip-remove-name'));
-    await waitFor(() => expect(onSortChange.mock.calls.at(-1)?.[0]).toEqual([]));
-    const reset = within(slot()).getByTestId('condition-reset');
+    // The view's sort is the one chip (objectstack#35878); the filter is the reader's own.
+    expect(await within(slot()).findByTestId('condition-sort')).toHaveTextContent('Sorted by Name');
+    const reset = await within(slot()).findByTestId('condition-reset');
     expect(reset).toBeEnabled();
     await act(async () => fireEvent.click(reset));
     expect(onFilterChange.mock.calls.at(-1)![0].conditions).toEqual([]);
-    expect(onSortChange.mock.calls.at(-1)![0].map((s: { field: string; order: string }) => [s.field, s.order])).toEqual([['name', 'asc']]);
+    for (const [next] of onSortChange.mock.calls) {
+      expect(next.map((s: { field: string; order: string }) => [s.field, s.order])).toEqual([['name', 'asc']]);
+    }
+    expect(within(slot()).getByTestId('condition-sort')).toHaveTextContent('Sorted by Name');
     await waitFor(() => expect(within(slot()).queryByTestId('filter-chip-name')).toBeNull());
   });
 });

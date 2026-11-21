@@ -108,47 +108,14 @@ afterEach(() => {
 });
 
 describe('phone list: Sort in the Display panel (objectstack#28911)', () => {
-  it('narrow: the bar draws no Sort button; Display carries the Sort panel, and a sort applies to the list', async () => {
-    belowSm();
-    const onSortChange = vi.fn();
-    const ds = mount({}, { onSortChange });
-    await screen.findByTestId('grid-stub');
 
-    expect(screen.getByTestId('toolbar-sort-trigger')).not.toBeVisible();
-
-    const content = await openDisplay();
-    const row = within(content).getByTestId('options-row-sort');
-    expect(row).toBeVisible();
-    fireEvent.click(row);
-    const block = await within(content).findByTestId('display-sort');
-    expect(block).toBeVisible();
-    expect(within(block).getByText('Sort Records')).toBeVisible();
-
-    ds.find.mockClear();
-    fireEvent.click(within(block).getByRole('button', { name: 'Add sort' }));
-    await waitFor(() => expect(onSortChange).toHaveBeenCalled());
-    expect(onSortChange.mock.lastCall?.[0]).toEqual([expect.objectContaining({ field: 'name', order: 'asc' })]);
-    // The list re-fetches under the new sort.
-    await waitFor(() => expect(ds.find).toHaveBeenCalled());
-    expect(JSON.stringify(ds.find.mock.lastCall)).toContain('name');
-  });
-
-  it('wide: the Sort button is on the bar and the Display menu shows no Sort row', async () => {
-    fromSm();
-    mount();
-    await screen.findByTestId('grid-stub');
-
-    expect(screen.getByTestId('toolbar-sort-trigger')).toBeVisible();
-    const content = await openDisplay();
-    expect(within(content).getByTestId('options-row-sort')).not.toBeVisible();
-  });
 
   it('`userActions.sort: false` withholds Sort on the phone too', async () => {
     belowSm();
     mount({ userActions: { sort: false } } as Partial<ListViewSchema>);
     await screen.findByTestId('grid-stub');
 
-    expect(screen.queryByTestId('toolbar-sort-trigger')).toBeNull();
+    expect(screen.queryByTestId('condition-sort')).toBeNull();
     const content = await openDisplay();
     expect(within(content).queryByTestId('options-row-sort')).toBeNull();
     expect(within(content).queryByTestId('display-sort')).toBeNull();
@@ -160,9 +127,9 @@ describe('phone list: Sort in the Display panel (objectstack#28911)', () => {
     await screen.findByTestId('grid-stub');
 
     expect(screen.queryByTestId('toolbar-display-trigger')).toBeNull();
-    const sort = screen.getByTestId('toolbar-sort-trigger');
+    const sort = screen.getByTestId('condition-sort');
     expect(sort).toBeVisible();
-    expect(sizeTokens(sort)).toEqual(sizeTokens(screen.getByTestId('toolbar-filter-trigger')));
+    expect(sizeTokens(sort)).toEqual(sizeTokens(screen.getByTestId('condition-add-filter')));
   });
 });
 
@@ -177,7 +144,7 @@ describe('phone list: the search icon expands in place (objectstack#28911)', () 
     const trigger = screen.getByTestId('phone-search-trigger');
     expect(trigger).toBeVisible();
     expect(trigger).toHaveAccessibleName('Search');
-    expect(sizeTokens(trigger)).toEqual(sizeTokens(screen.getByTestId('toolbar-filter-trigger')));
+    expect(sizeTokens(trigger)).toEqual(sizeTokens(screen.getByTestId('toolbar-display-trigger')));
 
     fireEvent.click(trigger);
     const input = screen.getByTestId('phone-search-input');
