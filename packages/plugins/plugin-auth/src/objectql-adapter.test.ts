@@ -34,6 +34,8 @@ import {
 import { SystemObjectName } from '@objectstack/spec/system';
 import type { IDataEngine } from '@objectstack/core';
 import { sso } from '@better-auth/sso';
+import { twoFactor } from 'better-auth/plugins/two-factor';
+import { organization } from 'better-auth/plugins/organization';
 import { AuthManager } from './auth-manager';
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 
@@ -897,5 +899,182 @@ describe('a single-use auth value is redeemed at most once, even across processe
 
     expect(await redeem(adapter, 'no-such-value')).toBeNull();
     expect(await stored(driver, 'bystander')).toHaveLength(1);
+  });
+});
+
+describe('a guarded increment is one atomic conditional write, even across processes sharing a database', () => {
+  // The same two-replica shape as the single-use suite above: two ObjectQL
+  // engines, each with its own SQL driver connection to ONE SQLite file and
+  // its own factory-wrapped adapter. Each replica pauses once, right after its
+  // first read of a guarded row, until both replicas have read — so both
+  // calls see the guard pass before either one writes. The call shapes are
+  // the ones better-auth 1.7.12 issues (two-factor backup codes, the two-factor
+  // failed-verification counter, organization team seats).
+  const GUARDED = new Set(['sys_two_factor', 'sys_team']);
+  type Where = { field: string; value: unknown; operator?: string; connector?: string };
+  type Adapter = {
+    create(a: { model: string; data: Record<string, unknown> }): Promise<Record<string, unknown>>;
+    incrementOne(a: {
+      model: string; where: Where[]; increment: Record<string, number>; set?: Record<string, unknown>;
+    }): Promise<Record<string, unknown> | null>;
+  };
+  const gate = (parties: number) => {
+    let arrived = 0;
+    let open!: () => void;
+    const opened = new Promise<void>((resolve) => { open = resolve; });
+    return async () => {
+      if (++arrived === parties) open();
+      await opened;
+    };
+  };
+
+  const dirs: string[] = [];
+  const engines: ObjectQL[] = [];
+  afterEach(async () => {
+    while (engines.length) {
+      try { await engines.pop()!.destroy(); } catch { /* noop */ }
+    }
+    while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true });
+  });
+
+  const replica = async (file: string, atRead?: () => Promise<void>): Promise<{ adapter: Adapter; driver: SqlDriver }> => {
+    const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: file }, useNullAsDefault: true });
+    const engine = new ObjectQL();
+    engines.push(engine);
+    engine.registerDriver(driver, true);
+    await engine.init();
+    for (const object of authIdentityObjects) engine.registry.registerObject(object as never, '@objectstack/plugin-auth');
+    await engine.syncSchemas();
+
+    let read = false;
+    const seen = new Proxy(engine, {
+      get(target, prop) {
+        const member = Reflect.get(target, prop, target);
+        if (prop !== 'findOne') return typeof member === 'function' ? member.bind(target) : member;
+        return async (object: string, ...rest: unknown[]) => {
+          const row = await (member as (...a: unknown[]) => Promise<unknown>).call(target, object, ...rest);
+          if (GUARDED.has(object) && !read) {
+            read = true;
+            await atRead?.();
+          }
+          return row;
+        };
+      },
+    });
+    const options = {
+      plugins: [
+        twoFactor({ schema: buildTwoFactorPluginSchema() }),
+        organization({ schema: buildOrganizationPluginSchema(), teams: { enabled: true } }),
+      ],
+    };
+    const adapter = (createObjectQLAdapterFactory(seen as unknown as IDataEngine) as unknown as (o: unknown) => Adapter)(options);
+    return { adapter, driver };
+  };
+
+  /** Two replicas over one fresh file, both paused at their first guarded read. */
+  const twoReplicas = async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'os-auth-guarded-increment-'));
+    dirs.push(dir);
+    const file = join(dir, 'auth.db');
+    const bothRead = gate(2);
+    return [await replica(file, bothRead), await replica(file, bothRead)] as const;
+  };
+  /** One replica, no pause: the sequential control. */
+  const oneReplica = async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'os-auth-guarded-increment-'));
+    dirs.push(dir);
+    return replica(join(dir, 'auth.db'));
+  };
+
+  const eq = (field: string, value: unknown): Where => ({ field, value, operator: 'eq', connector: 'AND' });
+  const stored = async (driver: SqlDriver, object: string, id: unknown) =>
+    ((await driver.find(object, { object, where: { id } } as never)) as Array<Record<string, unknown>>)[0];
+
+  const enrolSecondFactor = async (adapter: Adapter, backupCodes = 'codes-v1') => {
+    const user = await adapter.create({ model: 'user', data: { email: `u${Math.random()}@example.com`, name: 'U', emailVerified: false } });
+    return adapter.create({ model: 'twoFactor', data: { userId: user.id, secret: 'totp-secret', backupCodes } });
+  };
+  const teamWithSeats = async (adapter: Adapter) => {
+    const org = await adapter.create({ model: 'organization', data: { name: 'Org', slug: `org-${Math.random()}`.replace('.', '') } });
+    return adapter.create({ model: 'team', data: { name: 'Team', organizationId: org.id, memberCount: 0 } });
+  };
+
+  // two-factor `backup-codes`: where = the code list as read, set = the list
+  // with the redeemed code removed.
+  const redeemBackupCode = (adapter: Adapter, id: unknown, from: string, to: string) =>
+    adapter.incrementOne({ model: 'twoFactor', where: [eq('id', id), eq('backupCodes', from)], increment: {}, set: { backupCodes: to } });
+  // two-factor `recordTwoFactorFailure`: unguarded beyond the row, +1.
+  const countFailure = (adapter: Adapter, id: unknown) =>
+    adapter.incrementOne({ model: 'twoFactor', where: [eq('id', id)], increment: { failedVerificationCount: 1 } });
+  // organization `reserveTeamSeat`: memberCount below the per-team maximum, +1.
+  const reserveSeat = (adapter: Adapter, id: unknown, maximum: number) =>
+    adapter.incrementOne({
+      model: 'team',
+      where: [eq('id', id), { field: 'memberCount', value: maximum, operator: 'lt', connector: 'AND' }],
+      increment: { memberCount: 1 },
+    });
+
+  it('of two concurrent redemptions of one backup code on two engines over one database, exactly one is accepted', async () => {
+    const [a, b] = await twoReplicas();
+    const row = await enrolSecondFactor(a.adapter);
+
+    const answers = await Promise.all([
+      redeemBackupCode(a.adapter, row.id, 'codes-v1', 'codes-v2-by-a'),
+      redeemBackupCode(b.adapter, row.id, 'codes-v1', 'codes-v2-by-b'),
+    ]);
+
+    expect(answers.filter((r) => r !== null), 'redemptions accepted').toHaveLength(1);
+    const accepted = answers.find((r) => r !== null)!;
+    expect((await stored(a.driver, 'sys_two_factor', row.id)).backup_codes).toBe(accepted.backupCodes);
+  });
+
+  it('two concurrent failed verifications on two engines over one database are both counted', async () => {
+    const [a, b] = await twoReplicas();
+    const row = await enrolSecondFactor(a.adapter);
+
+    const answers = await Promise.all([countFailure(a.adapter, row.id), countFailure(b.adapter, row.id)]);
+
+    expect(answers.map((r) => r?.failedVerificationCount).sort()).toEqual([1, 2]);
+    expect((await stored(a.driver, 'sys_two_factor', row.id)).failed_verification_count).toBe(2);
+  });
+
+  it('of two concurrent reservations of the last team seat on two engines over one database, exactly one is granted', async () => {
+    const [a, b] = await twoReplicas();
+    const team = await teamWithSeats(a.adapter);
+
+    const answers = await Promise.all([reserveSeat(a.adapter, team.id, 1), reserveSeat(b.adapter, team.id, 1)]);
+
+    expect(answers.filter((r) => r !== null), 'seats granted').toHaveLength(1);
+    expect(answers.find((r) => r !== null)).toMatchObject({ id: team.id, memberCount: 1 });
+    expect((await stored(a.driver, 'sys_team', team.id)).member_count).toBe(1);
+  });
+
+  it('one caller at a time: each guarded increment applies, and a guard that no longer holds changes nothing', async () => {
+    const { adapter, driver } = await oneReplica();
+    const row = await enrolSecondFactor(adapter);
+    const team = await teamWithSeats(adapter);
+
+    expect(await redeemBackupCode(adapter, row.id, 'codes-v1', 'codes-v2')).toMatchObject({ id: row.id, backupCodes: 'codes-v2' });
+    expect(await redeemBackupCode(adapter, row.id, 'codes-v1', 'codes-v3'), 'the same code list a second time').toBeNull();
+    expect((await stored(driver, 'sys_two_factor', row.id)).backup_codes).toBe('codes-v2');
+
+    expect((await countFailure(adapter, row.id))?.failedVerificationCount).toBe(1);
+    expect((await countFailure(adapter, row.id))?.failedVerificationCount).toBe(2);
+
+    expect(await reserveSeat(adapter, team.id, 2)).toMatchObject({ memberCount: 1 });
+    expect(await reserveSeat(adapter, team.id, 2)).toMatchObject({ memberCount: 2 });
+    expect(await reserveSeat(adapter, team.id, 2), 'no seat left').toBeNull();
+    expect((await stored(driver, 'sys_team', team.id)).member_count).toBe(2);
+
+    expect(await countFailure(adapter, 'no-such-row'), 'a row that does not exist').toBeNull();
+  });
+
+  it('a counter stored as null counts from zero', async () => {
+    const { adapter, driver } = await oneReplica();
+    const row = await enrolSecondFactor(adapter);
+    await driver.update('sys_two_factor', row.id as string, { failed_verification_count: null });
+
+    expect((await countFailure(adapter, row.id))?.failedVerificationCount).toBe(1);
+    expect((await stored(driver, 'sys_two_factor', row.id)).failed_verification_count).toBe(1);
   });
 });
