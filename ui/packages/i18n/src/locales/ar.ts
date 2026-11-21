@@ -1688,6 +1688,7 @@ const ar = {
     deleteCommentConfirm: "هل أنت متأكد أنك تريد حذف هذا التعليق؟",
     commentEditFailed: "لم يُحفظ تعديلك. يحتفظ التعليق بنصه السابق.",
     commentDeleteFailed: "لم يُحذف التعليق. يُرجى المحاولة مرة أخرى.",
+    commentDeleted: "تم حذف التعليق",
     mentionsWithheld: "لن يُرسَل إشعار بهذا التعليق إلى {{names}}.",
     linkCopyFailed: "فشل نسخ الرابط",
     claim: "استلام",

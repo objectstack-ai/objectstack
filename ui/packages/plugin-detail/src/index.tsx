@@ -161,6 +161,7 @@ export { FieldChangeItem } from './FieldChangeItem';
 export { SubscriptionToggle } from './SubscriptionToggle';
 export { ReactionPicker } from './ReactionPicker';
 export { ThreadedReplies } from './ThreadedReplies';
+export { CommentAuthorAvatar } from './CommentAuthorAvatar';
 export { RecordMetaFooter } from './RecordMetaFooter';
 export type { RecordMetaFooterProps } from './RecordMetaFooter';
 export type { DetailViewProps } from './DetailView';
@@ -185,6 +186,7 @@ export type { FieldChangeItemProps } from './FieldChangeItem';
 export type { SubscriptionToggleProps } from './SubscriptionToggle';
 export type { ReactionPickerProps } from './ReactionPicker';
 export type { ThreadedRepliesProps } from './ThreadedReplies';
+export type { CommentAuthorAvatarProps } from './CommentAuthorAvatar';
 
 // Track 3 (convergence): pure-function synthesizers for the default
 // detail page. Phase G slice 1 — not yet wired into RecordDetailView.
