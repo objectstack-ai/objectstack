@@ -104,6 +104,42 @@ describe('the console boot fallback (objectstack#35981)', () => {
     expect(frame.querySelectorAll('a, button, input, [role="menuitem"], [role="link"]')).toHaveLength(0);
   });
 
+  it('draws the shape the chrome will have: no app menu on a docs page, no app bar on a phone record page', () => {
+    // The frame reads the same predicates as `ConsoleLayout`, so nothing it
+    // draws is taken away when the chrome lands (objectstack#35424, #28483).
+    const width = window.innerWidth;
+    const setWidth = (w: number) =>
+      Object.defineProperty(window, 'innerWidth', { value: w, configurable: true, writable: true });
+    const sidebar = () => shell()!.querySelector('[data-sidebar="sidebar"]');
+    const header = () => shell()!.querySelector('header');
+    try {
+      setWidth(1440);
+      at('/apps/crm/docs/manual/intro', <ConsoleBootShell />);
+      expect(sidebar()).toBeNull();
+      expect(header()).not.toBeNull();
+      cleanup();
+
+      setWidth(390);
+      at(RECORD, <ConsoleBootShell />);
+      expect(header()).toBeNull();
+      cleanup();
+
+      // Control: the app menu and the app bar wherever the chrome draws them.
+      at('/apps/crm/account', <ConsoleBootShell />);
+      expect(header()).not.toBeNull();
+      cleanup();
+      setWidth(1440);
+      for (const path of [RECORD, '/apps/crm/account', '/apps/crm/docsearch']) {
+        at(path, <ConsoleBootShell />);
+        expect(sidebar(), path).not.toBeNull();
+        expect(header(), path).not.toBeNull();
+        cleanup();
+      }
+    } finally {
+      setWidth(width);
+    }
+  });
+
   it('keeps the splash while the session read is out, off an app route, and with no user', () => {
     authState.isLoading = true;
     at(RECORD, <ConsoleBootFallback />);

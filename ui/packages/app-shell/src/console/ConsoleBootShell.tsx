@@ -36,6 +36,8 @@ import { AppShell } from '@object-ui/layout';
 import { LoadingScreen } from '../chrome/LoadingScreen.js';
 import { CONSOLE_BELOW_TOP_BAR } from '../layout/consoleTopBar.js';
 import { primeConsoleSidebarOpen } from '../layout/consoleSidebarRail.js';
+import { isAppDocsPath, isRecordPagePath } from '../layout/consoleRoutePaths.js';
+import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 import { SkeletonDashboard, SkeletonDetail, SkeletonGrid } from '../skeletons/index.js';
 import { metadataReadsForAppRoute } from './appRouteMetadataReads.js';
 
@@ -57,7 +59,7 @@ export function RouteMetadataSkeleton({ reads, boot = false }: { reads: string; 
 }
 
 /** Widths of the sidebar's grey rows, fixed so two frames draw the same rows. */
-const SIDEBAR_ROWS = ['72%', '58%', '80%', '64%', '50%', '68%'];
+const SIDEBAR_ROWS = ['w-[72%]', 'w-[58%]', 'w-[80%]', 'w-[64%]', 'w-[50%]', 'w-[68%]'];
 
 /**
  * The console chrome's frame, empty: see the file header. Drawn on an app
@@ -71,9 +73,17 @@ export function ConsoleBootShell() {
   const { pathname } = useLocation();
   const appSubPath = pathname.split('/').filter(Boolean).slice(2).join('/');
   const reads = metadataReadsForAppRoute(appSubPath, []);
+  // The shape the chrome will have on this route, from the same predicates
+  // `ConsoleLayout` reads, so nothing the frame draws is removed when the
+  // chrome lands: no app menu beside a docs page (objectstack#35424), no app
+  // bar on a phone record page, which draws its own (objectstack#28483).
+  const phone = usePhoneViewport();
+  const docsPage = isAppDocsPath(pathname);
+  const recordPageOwnsTopBar = phone && isRecordPagePath(pathname);
   return (
     <div data-boot-splash="" data-boot-shell="" aria-busy="true" className="contents">
       <AppShell
+        showHeader={!recordPageOwnsTopBar}
         navbar={
           <div className="flex w-full items-center gap-3">
             <Skeleton className="h-7 w-28 rounded-md" />
@@ -82,6 +92,7 @@ export function ConsoleBootShell() {
           </div>
         }
         sidebar={
+          docsPage ? undefined : (
           <Sidebar collapsible="offcanvas" className={CONSOLE_BELOW_TOP_BAR}>
             <SidebarContent>
               <SidebarGroup>
@@ -89,13 +100,14 @@ export function ConsoleBootShell() {
                   {SIDEBAR_ROWS.map((width, i) => (
                     <div key={i} className="flex h-8 items-center gap-2 rounded-md px-2">
                       <Skeleton className="size-4 rounded-md" />
-                      <Skeleton className="h-4" style={{ width }} />
+                      <Skeleton className={`h-4 ${width}`} />
                     </div>
                   ))}
                 </SidebarMenu>
               </SidebarGroup>
             </SidebarContent>
           </Sidebar>
+          )
         }
         className="!p-0 overflow-y-auto overflow-x-hidden bg-muted/5 lg:flex lg:flex-col"
       >
