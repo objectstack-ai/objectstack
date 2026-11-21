@@ -1,6 +1,6 @@
 {
   "card": "travel_expense",
-  "cardSha256": "abe91b8f794f19d88ff72c8cda58e314f69e3c5d77992a01cecea501303d4f28",
+  "cardSha256": "29162eefb46055941a0263686c2853246b4c408d41acb90c6abe22f68886a768",
   "build": "travel_expense.json",
   "sha256": "5fe6f452d36fe56a0ecf0f8c782394076953baeb99ef2499763991e119a29989",
   "runner": "ec227fc7",

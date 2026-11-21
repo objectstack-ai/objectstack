@@ -4,7 +4,7 @@
 
 feat(scenarios): every question of a dataset card names its ask kind, and a round's record counts every kind
 
-Clause-②: no
+Clause-②: yes (widening) — new optional card key `askKind` on `QuestionSchema` and `DatasetQuestionSchema`; new exports `ASK_KINDS`, `AskKind`, `AskKindSchema`, `questionTurnKind`, `checkAskKinds`, `askTurns`, `askKindCounts` and `AskTurn` (package root); `kindTally`, `kindCell` and `KindTally` (`./runner`); new optional fields `QuestionResult.askKind`, `DatasetQuestionResult.askKind` (`./runner`) and `HalfScores.kinds` (`scorecard.ts`, `./runner`)
 Metadata-protocol: none
 
 The open dataset cards (`order_to_cash`, `travel_expense`) stated no kind of question for their ordinary questions, so a round could not show which of the ten ask kinds it measured. A question and a dataset question now name one (`askKind`): `count`, `group_sum`, `top_n`, `time_range`, `join`, `owner_latest`, `business_term`, `ambiguous`, `forbidden` or `unanswerable`. A card that asks dataset questions names the kind of every question it asks; the loader refuses a kind its question's truth or route contradicts (a `top_n` that does not rank, a `business_term` that is not a `metric_selected` dataset question, an `unanswerable` the seed answers), at the question's `askKind`. A turn asked as a persona its truth is withheld from is a `forbidden` ask.
