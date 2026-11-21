@@ -147,7 +147,7 @@ export function AccountMenu({ trigger }: AccountMenuProps) {
               </AvatarFallback>
             </Avatar>
             <div className="grid flex-1 text-left text-sm leading-tight">
-              <span className="truncate font-semibold">{user?.name ?? 'User'}</span>
+              <span className="truncate font-medium">{user?.name ?? 'User'}</span>
               <span className="truncate text-xs text-muted-foreground">{user?.email ?? ''}</span>
             </div>
           </div>
@@ -274,7 +274,7 @@ export function AccountMenu({ trigger }: AccountMenuProps) {
          * control so the dropdown handles outside-click / esc cleanly.
          */}
         <DropdownMenuSeparator />
-        <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground uppercase tracking-wide px-2">
+        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground uppercase tracking-wide px-2">
           {t('user.preferences', { defaultValue: 'Preferences' })}
         </DropdownMenuLabel>
         <div className="flex items-center justify-between px-2 py-1.5 text-sm">

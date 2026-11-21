@@ -158,7 +158,7 @@ export function SidebarAppMenu({ activeAppName, onAppChange }: SidebarAppMenuPro
           type="button"
           data-testid="sidebar-app-menu-trigger"
           title={activeLabel}
-          className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-left text-sm font-semibold text-sidebar-foreground outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring data-[state=open]:bg-sidebar-accent"
+          className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-left text-sm font-medium text-sidebar-foreground outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring data-[state=open]:bg-sidebar-accent"
         >
           <AppMark app={activeApp} size="sm" />
           <span className="min-w-0 truncate">{activeLabel}</span>

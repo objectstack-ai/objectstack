@@ -93,6 +93,14 @@ export interface ObjectFieldOption {
    * column carries them (objectstack#27515). Absent when none are declared.
    */
   options?: Array<{ value: string; label: string }>;
+  /**
+   * The field's declared `multiple: true` — a `select` / `lookup` / `user`
+   * whose stored value is a list. Read by the `filter-builder` widget alone:
+   * with the type it decides which operators the runtime `FilterBuilder`
+   * offers the column (`operatorsForField`), membership and the empty checks
+   * on a list. Absent otherwise.
+   */
+  multiple?: boolean;
 }
 
 /** One entry of the source object's view catalog (`view-ref`). */
@@ -2874,7 +2882,7 @@ function groupOfStoredRules(shown: { logic: 'and' | 'or'; rules: unknown[] } | n
 export function FilterBuilderField({ value, onChange, fields, readOnly, id, ariaLabelledBy, loadError }: {
   value?: FilterElementLite[];
   onChange: (rules: FilterElementLite[]) => void;
-  fields: Array<{ name: string; label?: string; type?: string; options?: Array<{ value: string; label: string }> }>;
+  fields: Array<{ name: string; label?: string; type?: string; options?: Array<{ value: string; label: string }>; multiple?: boolean }>;
   readOnly?: boolean;
   /**
    * Why `fields` is empty, when the reason is that the catalog failed to load
@@ -2933,12 +2941,16 @@ export function FilterBuilderField({ value, onChange, fields, readOnly, id, aria
   // picklist column's value as a picker over them and stores the option's
   // `value` — the runtime list filter's control, not a second editor. Without
   // them a picklist column got a free-text box, and the label an author typed
-  // there matched no record.
+  // there matched no record. `multiple` travels too: with the type it decides
+  // the operators the builder offers (`operatorsForField`), so a list-valued
+  // column is offered membership and the empty checks, never `equals` / `in`,
+  // which the data door refuses on a list.
   const fbFields = fields.map((f) => ({
     value: f.name,
     label: f.label || f.name,
     type: f.type,
     ...(f.options ? { options: f.options } : {}),
+    ...(f.multiple === true ? { multiple: true } : {}),
   }));
   const storedRules = rulesOfStoredElements(rules);
   const summary = storedRules.length

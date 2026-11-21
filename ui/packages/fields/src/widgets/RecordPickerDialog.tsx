@@ -1490,7 +1490,7 @@ export function RecordPickerDialog({
                             <TableHead
                               key={col.field}
                               style={styleWidth}
-                              className="cursor-pointer select-none relative group text-xs font-semibold uppercase tracking-wider"
+                              className="cursor-pointer select-none relative group text-xs font-medium uppercase tracking-wider"
                               onClick={() => handleSort(col.field)}
                               aria-sort={sortField === col.field ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
                             >

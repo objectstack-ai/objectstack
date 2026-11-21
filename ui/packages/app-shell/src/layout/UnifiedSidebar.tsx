@@ -762,7 +762,7 @@ export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false
               >
                 <Search className="h-3.5 w-3.5 shrink-0" aria-hidden />
                 <span className="flex-1 truncate text-left text-xs">{t('console.search', { defaultValue: 'Search…' })}</span>
-                <kbd className="pointer-events-none inline-flex h-5 items-center gap-0.5 rounded border bg-background px-1.5 text-[10px] font-medium text-muted-foreground">
+                <kbd className="pointer-events-none inline-flex h-5 items-center gap-0.5 rounded border bg-background px-1.5 text-xs font-medium text-muted-foreground">
                   <span className="text-xs">⌘</span>K
                 </kbd>
               </button>

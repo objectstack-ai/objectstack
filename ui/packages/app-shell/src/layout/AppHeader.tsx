@@ -676,7 +676,7 @@ export function AppHeader({
       <span className="flex-1 truncate text-left text-xs">
         {searchLabel}
       </span>
-      <kbd className="pointer-events-none inline-flex h-5 items-center gap-0.5 rounded border bg-background px-1.5 text-[10px] font-medium text-muted-foreground">
+      <kbd className="pointer-events-none inline-flex h-5 items-center gap-0.5 rounded border bg-background px-1.5 text-xs font-medium text-muted-foreground">
         <span className="text-xs">⌘</span>K
       </kbd>
     </button>
@@ -740,7 +740,7 @@ export function AppHeader({
         )}
 
         {(resolvedVariant === 'home' || resolvedVariant === 'docs') && (
-          <span className="hidden sm:inline ml-2 text-sm font-semibold tracking-tight">
+          <span className="hidden sm:inline ml-2 text-sm font-medium tracking-tight">
             {getProductName()}
           </span>
         )}

@@ -85,7 +85,7 @@ export function useObjectViewHeaderChrome({
             disabled={createDisabled}
             // 28px and 13px, like every control of the list's two bars
             // (objectstack#35548).
-            className="shadow-none gap-1 h-7 px-2.5 text-[13px]"
+            className="shadow-none gap-1 h-7 px-2.5 text-sm"
             data-testid="object-view-new-button"
         >
             <Plus className="h-3.5 w-3.5" />

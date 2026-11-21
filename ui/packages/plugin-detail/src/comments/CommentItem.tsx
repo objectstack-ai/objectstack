@@ -60,7 +60,7 @@ export const CommentItem: React.FC<CommentItemProps> = ({
     <div className={cn('group/comment relative', className)} data-comment-item="" data-comment-id={String(item.id)}>
       <div className="flex min-h-5 items-center gap-2 pr-1">
         <CommentAuthorAvatar name={item.actor} avatarUrl={item.actorAvatarUrl} />
-        <span className="truncate text-[13px] font-medium text-foreground">{item.actor}</span>
+        <span className="truncate text-sm font-medium text-foreground">{item.actor}</span>
         <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground" data-comment-when="">
           {formatCommentTime(item.createdAt, t, locale)}
         </span>
@@ -76,7 +76,7 @@ export const CommentItem: React.FC<CommentItemProps> = ({
           />
         ) : (
           item.body && (
-            <p className="mt-0.5 whitespace-pre-wrap break-words text-[13px] leading-5 text-foreground" data-comment-body="">
+            <p className="mt-0.5 whitespace-pre-wrap break-words text-sm leading-5 text-foreground" data-comment-body="">
               {item.body}
             </p>
           )
@@ -155,7 +155,7 @@ const CommentEditor: React.FC<{
         aria-label={t('detail.editComment')}
         disabled={saving}
         autoFocus
-        className="min-h-[60px] text-[13px]"
+        className="min-h-[60px] text-sm"
       />
       <div className="flex items-center gap-1.5">
         <Button size="sm" className="h-7" onClick={() => void save()} disabled={saving || !canSave}>

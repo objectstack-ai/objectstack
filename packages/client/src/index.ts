@@ -277,6 +277,40 @@ export interface UserWorkTransferReport {
 }
 
 /**
+ * [#35402] Who takes the records in `data.changeOwner` / `data.changeOwnerMany`:
+ * a person (`ownerId`), or an ownership queue (`queue`, ADR-0142) — exactly
+ * one. `notify` tells a person target; a queue target refuses it.
+ */
+export type ChangeOwnerRequest =
+  | { ownerId: string; queue?: undefined; notify?: boolean }
+  | { queue: string; ownerId?: undefined; notify?: undefined };
+
+/** [#35402] `data.changeOwner`'s answer: the record's new owner, or the queue it now sits in. */
+export interface ChangeOwnerResult {
+  object: string;
+  id: string;
+  /** `null` when the record now sits in `queue`. */
+  ownerId: string | null;
+  queue?: string;
+  notified: boolean;
+}
+
+/**
+ * [#35402] `data.changeOwnerMany`'s answer — the #30205 hand-over's per-object
+ * outcome, with every row that did not move listed by id.
+ */
+export interface ChangeOwnerReport {
+  object: string;
+  field: string;
+  ownerId: string | null;
+  queue?: string;
+  updated: number;
+  failed: number;
+  failures: Array<{ id: string; code: string; message: string }>;
+  notified: boolean;
+}
+
+/**
  * [#30237] One page of `recycleBin.list`: an object's recycle-bin entries,
  * newest first. Each snapshot row carries only the fields the caller may see
  * on its object.
@@ -8253,6 +8287,40 @@ export class ObjectStackClient {
             { method: 'POST', body: JSON.stringify(overrides ? { overrides } : {}) },
         );
         return this.unwrapResponse<CloneDataResult<T>>(res);
+    },
+
+    /**
+     * [#35402] Change Owner on ONE record — `POST /data/:object/:id/change-owner`:
+     * hand it to a person (`ownerId`) or move it to an ownership queue
+     * (`queue`), as the caller. Refused `403 CHANGE_OWNER_DISABLED` on an object
+     * that does not offer the action (`userActions.transfer`); a caller without
+     * the transfer grant on the record gets the `/data` write door's own `403`,
+     * and a record out of reach its `404`.
+     */
+    changeOwner: async (object: string, id: string, request: ChangeOwnerRequest): Promise<ChangeOwnerResult> => {
+        const route = this.getRoute('data');
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/${encodeURIComponent(object)}/${encodeURIComponent(id)}/change-owner`,
+            { method: 'POST', body: JSON.stringify(request) },
+        );
+        return this.unwrapResponse<ChangeOwnerResult>(res);
+    },
+
+    /**
+     * [#35402] Change Owner on a list of up to 500 records —
+     * `POST /data/:object/change-owner`: each moves by its own update as the
+     * caller, and the answer lists every row that did not move with its code
+     * and sentence. The whole call is refused before any write on an object
+     * that does not offer the action, a repeated or empty id list, a list past
+     * the cap, and an unknown or banned person.
+     */
+    changeOwnerMany: async (object: string, ids: string[], request: ChangeOwnerRequest): Promise<ChangeOwnerReport> => {
+        const route = this.getRoute('data');
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/${encodeURIComponent(object)}/change-owner`,
+            { method: 'POST', body: JSON.stringify({ ...request, ids }) },
+        );
+        return this.unwrapResponse<ChangeOwnerReport>(res);
     },
 
     /**

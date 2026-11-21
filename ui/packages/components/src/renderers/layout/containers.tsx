@@ -1368,7 +1368,7 @@ const PageTabsRenderer: React.FC<any> = ({ schema, className, ...props }) => {
               )}
               {item.count !== undefined && item.count !== null && item.count !== '' && Number(item.count) > 0 && (
                 <span
-                  className="ml-1.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-muted px-1 text-[10px] font-medium leading-none text-muted-foreground"
+                  className="ml-1.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-muted px-1 text-xs font-medium leading-none text-muted-foreground"
                   // The accessible name and the visible digits never disagree.
                   // Below 1000 the badge shows the number itself, so it goes in
                   // as a NUMBER and i18next selects the CLDR slot from it
@@ -1583,7 +1583,7 @@ const PageAccordionRenderer: React.FC<any> = ({ schema, className, ...props }) =
   // one without trying to share a generic prop bag.
   const commonChildren = itemsWithValue.map((item) => (
     <AccordionItem key={item.value} value={item.value} className={itemClass}>
-      <AccordionTrigger className="text-sm font-semibold tracking-tight hover:no-underline">
+      <AccordionTrigger className="text-sm font-medium tracking-tight hover:no-underline">
         {/* One wrapping element, not two siblings — AccordionTrigger's
             underlying primitive (`ui/accordion.tsx`, no-touch zone) lays its
             children out with `justify-between` against the auto-appended
@@ -3580,7 +3580,7 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
                 ? () => ctx.onToggleFavorite?.()
                 : undefined
             }
-            className="text-foreground [&_h1]:text-base [&_h1]:font-semibold [&_h1]:sm:text-base [&>div]:flex-nowrap [&>div]:items-center"
+            className="text-foreground [&_h1]:text-base [&_h1]:font-medium [&_h1]:sm:text-base [&>div]:flex-nowrap [&>div]:items-center"
           />
           {stageTag}
           {headerStateTags}

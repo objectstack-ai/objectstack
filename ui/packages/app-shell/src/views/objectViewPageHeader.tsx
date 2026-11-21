@@ -207,7 +207,7 @@ export function ObjectViewMoreMenu({
                   {description && (
                     <>
                       <DropdownMenuLabel
-                        className="text-[13px] font-normal leading-5 text-muted-foreground whitespace-normal"
+                        className="text-xs font-normal leading-5 text-muted-foreground whitespace-normal"
                         data-testid="object-view-description"
                       >
                         {description}
@@ -295,9 +295,9 @@ export function ObjectViewImportExportMenu({
                 <Button
                     size="sm"
                     variant="outline"
-                    // 28px and 13px, like every control of the list's bars
+                    // 28px and 14px, like every control of the list's bars
                     // (objectstack#35548).
-                    className="shadow-none h-7 gap-1 px-2 text-[13px] font-normal"
+                    className="shadow-none h-7 gap-1 px-2 text-sm font-normal"
                     data-testid="object-view-import-export"
                 >
                     <ArrowUpDown className="h-3.5 w-3.5" />

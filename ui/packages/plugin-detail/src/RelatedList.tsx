@@ -1023,8 +1023,8 @@ const BodyTableTotalsLine: React.FC<{ totals: readonly BodyTableTotal[] }> = ({ 
  * roomier defaults.
  */
 export const BODY_TABLE_DENSITY = [
-  '[&_thead_th]:h-8 [&_thead_th]:px-3 [&_thead_th]:py-0 [&_thead_th]:text-[13px]',
-  '[&_tbody_td]:h-8 [&_tbody_td]:px-3 [&_tbody_td]:py-0 [&_tbody_td]:text-[13px] [&_tbody_td]:leading-tight',
+  '[&_thead_th]:h-8 [&_thead_th]:px-3 [&_thead_th]:py-0 [&_thead_th]:text-xs',
+  '[&_tbody_td]:h-8 [&_tbody_td]:px-3 [&_tbody_td]:py-0 [&_tbody_td]:text-sm [&_tbody_td]:leading-tight',
 ].join(' ');
 
 /**
@@ -3999,7 +3999,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     return (
       <Card className={cn('shadow-none border-border/60 bg-transparent', className)}>
         <CardHeader className="py-3 px-4 sm:py-3 min-h-12 sm:min-h-0">
-          <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+          <CardTitle className="flex items-center gap-2 text-sm font-medium">
             <ObjectIconTile glyph={SectionIcon} color={sectionColor} />
             <span className="truncate">{title}</span>
           </CardTitle>
@@ -4150,7 +4150,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         const date = new Date(row[key]);
         if (Number.isNaN(date.getTime())) return null;
         return (
-          <span className="shrink-0 text-[11px] text-muted-foreground" data-related-card-chip="date">
+          <span className="shrink-0 text-xs text-muted-foreground" data-related-card-chip="date">
             {date.toLocaleDateString(displayLocale, { month: 'short', day: 'numeric' })}
           </span>
         );
@@ -4158,7 +4158,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       const raw = row[key];
       const option = Array.isArray(def?.options) ? def.options.find((o: any) => o?.value === raw) : undefined;
       return (
-        <Badge variant="secondary" className="h-5 shrink-0 px-1.5 text-[11px] font-normal" data-related-card-chip="status">
+        <Badge variant="secondary" className="h-5 shrink-0 px-1.5 text-xs font-normal" data-related-card-chip="status">
           {option?.label ?? String(raw)}
         </Badge>
       );
@@ -4169,7 +4169,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     const pendingRows = countAnswers && cardCount! > 0 ? Math.min(cardCount!, COMPACT_RELATED_ROWS) : 0;
     const countChip = !loadFailure && (
       <span
-        className="inline-flex h-5 shrink-0 items-center rounded bg-muted px-1.5 text-[11.5px] font-normal text-foreground"
+        className="inline-flex h-5 shrink-0 items-center rounded bg-muted px-1.5 text-xs font-normal text-foreground"
         data-related-card-count=""
       >
         {recordCount}
@@ -4186,7 +4186,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         aria-busy={pendingRows > 0 || undefined}
       >
         <div
-          className="group/panel-head relative flex h-11 sm:h-9 items-center gap-1.5 px-3 text-[12.5px] font-semibold"
+          className="group/panel-head relative flex h-11 sm:h-9 items-center gap-1.5 px-3 text-sm font-medium"
           data-related-panel-head=""
         >
           {open ? (
@@ -4219,7 +4219,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             </>
           )}
           {cardChrome?.fresh && (
-            <Badge className="h-4 shrink-0 px-1 text-[10px] font-normal" data-related-card-new="">
+            <Badge className="h-4 shrink-0 px-1 text-xs font-normal" data-related-card-new="">
               {t('detail.relatedCardNew', { defaultValue: 'New' })}
             </Badge>
           )}
@@ -4284,7 +4284,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             return (
               <div
                 key={row?.id ?? index}
-                className="flex min-h-11 sm:h-8 sm:min-h-0 items-center justify-between gap-2 border-t border-border px-3 text-[12.5px]"
+                className="flex min-h-11 sm:h-8 sm:min-h-0 items-center justify-between gap-2 border-t border-border px-3 text-sm"
                 data-related-card-row=""
               >
                 {/* objectstack#27604 — hovering the name (or Space on it)
@@ -4348,7 +4348,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       <section className={cn('flex min-w-0 flex-col gap-2', className)} data-related-enlarged-list="">
         <div className="flex min-w-0 items-center gap-2" data-related-enlarged-head="">
           <ObjectIconTile glyph={SectionIcon} color={sectionColor} />
-          <h3 className="min-w-0 flex-1 truncate text-sm font-semibold" data-related-enlarged-title="">
+          <h3 className="min-w-0 flex-1 truncate text-sm font-medium" data-related-enlarged-title="">
             {title}
           </h3>
           <div
@@ -4476,7 +4476,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         onClick={handleHeaderClick}
         data-related-list-head=""
       >
-        <CardTitle className={cn('flex items-center justify-between gap-2 text-sm font-semibold', compact && 'flex-wrap')}>
+        <CardTitle className={cn('flex items-center justify-between gap-2 text-sm font-medium', compact && 'flex-wrap')}>
           <div className="flex items-center gap-2 min-w-0">
             {isCollapsible && (
               collapsed

@@ -93,7 +93,7 @@ export function DocsNav({
                   aria-expanded={open}
                   disabled={searching}
                   onClick={() => setToggled((prev) => ({ ...prev, [slug]: !open }))}
-                  className="flex w-full items-start gap-2 rounded px-2 py-1.5 text-left font-semibold text-foreground hover:bg-muted/50 disabled:cursor-default disabled:hover:bg-transparent"
+                  className="flex w-full items-start gap-2 rounded px-2 py-1.5 text-left font-medium text-foreground hover:bg-muted/50 disabled:cursor-default disabled:hover:bg-transparent"
                 >
                   <span className="min-w-0 flex-1 break-words">{label}</span>
                   <span className="mt-px shrink-0 text-xs font-normal tabular-nums text-muted-foreground">{count}</span>

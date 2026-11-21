@@ -94,3 +94,58 @@ export function latestRepliers(replies: readonly FeedItem[], max = 3): FeedItem[
   }
   return out;
 }
+
+/**
+ * Whether the thread can be resolved and reopened (objectstack#36071): its
+ * first comment is a real top-level comment (not a reply whose parent is gone,
+ * which the server refuses to resolve) and the deployment stores resolution
+ * (the host set `resolved`).
+ */
+export function threadResolvable(thread: CommentThreadData): boolean {
+  return thread.root.parentId == null && typeof thread.root.resolved === 'boolean';
+}
+
+/** Whether the thread is resolved: its top-level comment's `resolved`. */
+export function threadResolved(thread: CommentThreadData): boolean {
+  return threadResolvable(thread) && thread.root.resolved === true;
+}
+
+/**
+ * 「只看我参与的」 (objectstack#36075 item 7): the viewer started the thread,
+ * replied in it, or is mentioned in it — the rule #36071's
+ * `threadsInvolvingUser` states for the server, read here off the host's
+ * viewer-relative marks (`authoredByViewer`, `mentionsViewer`).
+ */
+export function threadInvolvesViewer(thread: CommentThreadData): boolean {
+  return [thread.root, ...thread.replies].some(
+    (item) => item.authoredByViewer === true || item.mentionsViewer === true,
+  );
+}
+
+/** What the comment panel's filter menu holds (objectstack#36075 item 7). */
+export interface CommentThreadFilter {
+  /** 「显示已解决」: resolved threads are shown too. Off by default. */
+  showResolved: boolean;
+  /** 「只看我参与的」: only the threads the viewer is in. */
+  onlyMine: boolean;
+}
+
+export const DEFAULT_COMMENT_THREAD_FILTER: CommentThreadFilter = { showResolved: false, onlyMine: false };
+
+/** The threads the filter keeps, in their order. */
+export function filterCommentThreads(
+  threads: readonly CommentThreadData[],
+  filter: CommentThreadFilter,
+): CommentThreadData[] {
+  return threads.filter(
+    (thread) => (filter.showResolved || !threadResolved(thread)) && (!filter.onlyMine || threadInvolvesViewer(thread)),
+  );
+}
+
+/**
+ * The comments icon's number (objectstack#36075 item 8): the threads not
+ * resolved. Where the deployment stores no resolution, every thread.
+ */
+export function unresolvedThreadCount(threads: readonly CommentThreadData[]): number {
+  return threads.filter((thread) => !threadResolved(thread)).length;
+}
