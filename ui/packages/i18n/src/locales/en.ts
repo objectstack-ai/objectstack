@@ -794,6 +794,13 @@ const en = {
       approvalLocked: 'This record is locked while it\'s in approval.',
       noRecordPermission: 'You don\'t have permission to edit this record.',
     },
+    // objectstack#35685 — the confirm before a list cell moves a state-machine field.
+    stateChange: {
+      title: 'Change {{field}}?',
+      description: '{{field}} changes from {{from}} to {{to}}. Saving may trigger related automation.',
+      confirm: 'Change',
+      cancel: 'Cancel',
+    },
     actions: 'Actions',
     edit: 'Edit',
     delete: 'Delete',
@@ -1254,9 +1261,6 @@ const en = {
     options: 'Options',
     layout: 'Layout',
     resetToViewDefault: 'Reset to view default',
-    recordOpen: 'Open records',
-    recordOpenDrawer: 'Drawer',
-    recordOpenPage: 'Full page',
     addGroup: 'Add group field',
     collapsedByDefault: 'Collapsed by default',
     removeGroup: 'Remove',
@@ -1279,7 +1283,6 @@ const en = {
       rowHeightSpacious: 'Spacious',
       more: 'More',
       restoreDefaults: 'Restore defaults',
-      recordOpenAlwaysPage: 'Records always open as a full page',
     },
   },
   managedByBadge: {
@@ -1611,6 +1614,7 @@ const en = {
     pathStageChangeConflict: 'Someone else changed this record, and the latest version is now shown. Press the stage again if the move still applies.',
     pathStageChangeDenied: "You don't have permission to change this record's stage.",
     pathStageChangeFailed: 'The stage could not be changed.',
+    inlineEditRecordChanged: 'This record was changed elsewhere while you were editing. Your unsaved changes are kept, and Save writes them over the latest version.',
     stageMenuTrigger: 'Stage: {{stage}}. Change stage',
     stageMenuCurrent: 'current stage',
     stageMenuNotReachable: "Can't move here from {{stage}}",
@@ -1677,9 +1681,6 @@ const en = {
     // a possessive particle (ja/zh) writes its own arrangement here.
     recordDetailWithLabel: '{{label}} Detail',
     openAsFullPage: 'Open as full page',
-    // The record page's way back into the drawer it was expanded from
-    // (objectstack#26679).
-    collapseToDrawer: 'Collapse to drawer',
     recordDetailOverlay: 'Record detail overlay for {{title}}.',
     addToFavorites: 'Add to favorites',
     removeFromFavorites: 'Remove from favorites',
@@ -3243,7 +3244,7 @@ const en = {
       },
       cannotDeleteMetaView: 'This view is built in and defined in code — it cannot be deleted.',
       expandToPage: 'Open as full page',
-      openAsPage: 'Open as full page',
+      openInSidePanel: 'Open in side panel',
       allRecords: 'All Records',
       new: 'New',
       import: 'Import',

@@ -32,6 +32,7 @@ import type { Cube, FilterCondition } from '@objectstack/spec/data';
 import type { AnalyticsQuery } from '@objectstack/spec/contracts';
 
 import { AnalyticsService } from '../analytics-service.js';
+import { AnalyticsServicePlugin } from '../plugin.js';
 import {
   READ_SCOPE_FIXED_READ_LEAF_BRANDS,
   assertReadScopeComparandsRunnable,
@@ -295,6 +296,103 @@ describe('[ADR-0155 Q2] the share-grant leaf on the analytics faces, live on SQL
       const { sql, params } = await service({ native: false }).svc.generateSql(QUERY, CONTEXT);
       expect(sql).toContain('"srid_doc"."id" IN (SELECT "record_id" FROM "sys_record_share" WHERE "object_name" = $');
       expect(params).toEqual(expect.arrayContaining(['srid_doc', 'user', 'u1']));
+    });
+  });
+
+  // [#35946, ruling 7051956587] `AnalyticsServicePlugin` wires the hook from
+  // the "data" engine's `IObjectQLEngine.fixedReadLeafClassOf`, read
+  // structurally: the engine here is a plain object over the live engine's
+  // members, so the pin is the plugin's wiring, not the `ObjectQL` class. The
+  // member's three answers: a class, `null` for neither (compile), and
+  // `undefined` from an engine without it (decline).
+  describe('[#35946] AnalyticsServicePlugin asks the data engine\'s fixedReadLeafClassOf', () => {
+    const CUBE = {
+      name: 'docs', sql: 'srid_doc', public: true,
+      measures: { n: { sql: '*', type: 'count', title: 'n' } },
+      dimensions: { id: { label: 'id', type: 'string', sql: 'id' } },
+    } as unknown as Cube;
+    const QUERY = { cube: 'docs', dimensions: ['id'], measures: ['n'] } as AnalyticsQuery;
+    const READ_SCOPE = S.cases.find((c) => c.name.startsWith("the read scope's shape"))!;
+
+    /**
+     * The "data" engine as a plain object; `member` says what its
+     * `fixedReadLeafClassOf` is: the live engine's, none, or one that breaks
+     * the contract by answering `undefined` for neither.
+     */
+    const plainEngine = (member: 'present' | 'absent' | 'answers-undefined'): Record<string, unknown> => ({
+      aggregate: (o: string, q: any) => engine.aggregate(o, q),
+      getObject: (n: string) => engine.getObject(n),
+      judgeFilter: (o: string, w: any, j: any) => engine.judgeFilter(o, w, j),
+      hasObjectMiddleware: (o: string) => engine.hasObjectMiddleware(o),
+      getDriverForObject: (o: string) => engine.getDriverForObject(o),
+      ...(member === 'present' ? { fixedReadLeafClassOf: (leaf: any) => engine.fixedReadLeafClassOf(leaf) } : {}),
+      ...(member === 'answers-undefined' ? { fixedReadLeafClassOf: () => undefined } : {}),
+    });
+
+    async function viaPlugin(data: Record<string, unknown>) {
+      const registered: Record<string, unknown> = {};
+      const warn = vi.fn();
+      const rawSql = vi.fn(runRawSql);
+      const ctx = {
+        getService: (name: string) => (name === 'data' ? data : registered[name]),
+        registerService: (name: string, svc: unknown) => { registered[name] = svc; },
+        replaceService: (name: string, svc: unknown) => { registered[name] = svc; },
+        logger: { ...quiet, warn },
+      };
+      await new AnalyticsServicePlugin({
+        cubes: [CUBE],
+        queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: true, inMemory: false }),
+        executeRawSql: (_object, sql, params) => rawSql(sql, params),
+        getReadScope: () => READ_SCOPE.where() as FilterCondition,
+      }).init(ctx as never);
+      const svc = registered.analytics as AnalyticsService;
+      const answer = () => svc.query(QUERY, { userId: 'u1' } as never).then((r) => ({ rows: r.rows, err: null }), (err: any) => ({ rows: [], err }));
+      return { answer, rawSql, warn };
+    }
+    const idsOf = (rows: Array<Record<string, unknown>>) => rows.map((r) => String(r.id)).sort();
+
+    const LEAF = () => SharedRecordIds.read('srid_doc', 'u1');
+
+    it('the member present, the object in neither class: it answers null, and the native path compiles the leaf', async () => {
+      expect(engine.fixedReadLeafClassOf(LEAF())).toBeNull();
+      const { answer, rawSql } = await viaPlugin(plainEngine('present'));
+      const { rows, err } = await answer();
+      expect(err).toBeNull();
+      expect(rawSql).toHaveBeenCalledTimes(1);
+      expect(rawSql.mock.calls[0]![0]).toContain('IN (SELECT "record_id" FROM "sys_record_share"');
+      expect(idsOf(rows)).toEqual([...READ_SCOPE.expected]);
+    });
+
+    it('the member answers a D4 class: the native path declines, and the engine\'s seam refuses', async () => {
+      engine.registerHook('beforeFind', () => {}, { object: 'sys_record_share' });
+      try {
+        expect(engine.fixedReadLeafClassOf(LEAF())).toMatchObject({ class: 'registration-by-name', table: 'sys_record_share' });
+        const { answer, rawSql } = await viaPlugin(plainEngine('present'));
+        const { err } = await answer();
+        expect(rawSql).not.toHaveBeenCalled();
+        expect({ code: err?.code, status: err?.status }).toEqual(REFUSED);
+      } finally {
+        (engine as any).hooks.get('beforeFind').pop();
+      }
+    });
+
+    it('the member absent: the native path declines, the engine path answers, and the plugin says so once', async () => {
+      const { answer, rawSql, warn } = await viaPlugin(plainEngine('absent'));
+      const first = await answer();
+      await answer();
+      expect(first.err).toBeNull();
+      expect(rawSql).not.toHaveBeenCalled();
+      expect(idsOf(first.rows)).toEqual([...READ_SCOPE.expected]);
+      expect(warn.mock.calls.filter((c) => String(c[0]).includes('fixedReadLeafClassOf'))).toHaveLength(1);
+    });
+
+    it('a member that answers undefined (not the contract\'s null): the native path declines, the engine path answers', async () => {
+      const { answer, rawSql, warn } = await viaPlugin(plainEngine('answers-undefined'));
+      const { rows, err } = await answer();
+      expect(err).toBeNull();
+      expect(rawSql).not.toHaveBeenCalled();
+      expect(idsOf(rows)).toEqual([...READ_SCOPE.expected]);
+      expect(warn.mock.calls.filter((c) => String(c[0]).includes('fixedReadLeafClassOf'))).toHaveLength(0);
     });
   });
 });

@@ -21,9 +21,13 @@
  * its full width (objectstack#27545): over it the drawer draws no dimming
  * overlay and is non-modal, so a click on another row swaps the record
  * instead of closing it. A drawer with no list is the modal sheet over the
- * page, as before. A `maximizable` host gets `⤢`, which widens the drawer in
- * place over the whole content area — the sidebar stays — without leaving the
- * URL it is on.
+ * page, as before.
+ *
+ * The drawer is a floating card (objectstack#35854): inset 8 px from the
+ * viewport's top, right and bottom edges, rounded, with a shadow, never flush
+ * with the screen. It has one width state: the full-width 「⤢ maximize in
+ * place」 retired with it (a refresh lost it, and the full page is the wide
+ * face), so the bar's one ⤢ is the host's `onExpand`, which goes to the page.
  *
  * Works in conjunction with useNavigationOverlay hook from @object-ui/react —
  * the hook manages state while this component handles the visual presentation.
@@ -65,7 +69,7 @@
  */
 
 import React from 'react';
-import { ArrowLeft, ArrowUpRight, Maximize2, Minimize2, X } from 'lucide-react';
+import { ArrowLeft, Maximize2, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import {
   Sheet,
@@ -74,7 +78,6 @@ import {
   SheetTitle,
   SheetDescription,
 } from '../ui/sheet';
-import { useOptionalSidebar } from '../ui/sidebar';
 import { usePopperAwareInteractOutside } from './mobile-dialog-content';
 import { createSafeTranslation } from '@object-ui/i18n';
 import { ActiveListRecordProvider } from './record-list-face';
@@ -96,12 +99,10 @@ const OVERLAY_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // The drag handle is a bare `role="separator"` with no visible label, so
   // this literal IS the control to a screen reader.
   'common.resizeDrawer': 'Resize drawer',
-  // Default accessible name + tooltip of the icon-only ↗ a host's own page
-  // hop draws (`onExpand`). Hosts may override it via the `expandLabel` prop.
+  // Default accessible name + tooltip of the bar's one ⤢, the host's page
+  // hop (`onExpand`, objectstack#35854). Hosts may override it via the
+  // `expandLabel` prop.
   'detail.openAsFullPage': 'Open as full page',
-  // The bar's ⤢ / ⤡ pair (`maximizable`, objectstack#27545).
-  'detail.maximize': 'Maximize',
-  'detail.restoreSize': 'Restore size',
   // The drawer's accessible name when the host passes no `title`. The bar
   // draws no title text (objectstack#26679: the record body names
   // the record), so this is an accessible name only.
@@ -194,23 +195,14 @@ export interface NavigationOverlayProps {
    */
   activeListRecordId?: string | null;
   /**
-   * A host's own page hop, drawn as `↗` on the bar. The console's record
-   * pane passes none: its full page is reached from the list row's `↗` and the
-   * record header's `⋯` menu (objectstack#27545).
+   * The host's page hop, the bar's one `⤢` (objectstack#35854): the record
+   * shown, as the full page. The drawer has no wider state of its own.
    *
    * When omitted, the button is not rendered.
    */
   onExpand?: () => void;
   /**
-   * `⤢` maximize in place (objectstack#27545): the drawer widens over the whole
-   * content area — the viewport less the sidebar's live width — and the list
-   * behind it is hidden; `⤡` or `Esc` restores the width it had. Nothing else
-   * changes: the URL, the history, the list's scroll and the host's stack.
-   * Not remembered: every open starts at the pane's width.
-   */
-  maximizable?: boolean;
-  /**
-   * Optional label for the `↗` host page hop (accessible name & tooltip).
+   * Optional label for the `⤢` host page hop (accessible name & tooltip).
    *
    * When omitted the overlay resolves `detail.openAsFullPage` from the session
    * locale (English when no `I18nProvider` is mounted) — it is no longer a
@@ -327,38 +319,10 @@ function resolveWidth(width: string | number | undefined): string | undefined {
 const DRAWER_MIN_PX = 360;
 /**
  * The widest a reader can drag the pane, as a share of the viewport
- * (objectstack#27545: wider than that is what `⤢` is for). A remembered
- * width beyond it draws at this bound.
+ * (objectstack#27545: wider than that is what the full page is for). A
+ * remembered width beyond it draws at this bound.
  */
 const DRAWER_MAX_VW = 60;
-
-/**
- * The sidebar provider's own widths (`--sidebar-width`, `--sidebar-width-icon`
- * in `ui/sidebar.tsx`). Inside the provider the variables resolve to their
- * live values; these stand in only where they do not resolve — the drawer
- * renders in a portal outside the provider's element.
- */
-export const SIDEBAR_WIDTH_FALLBACK = '16rem';
-export const SIDEBAR_WIDTH_ICON_FALLBACK = '3rem';
-
-/**
- * The CSS length the sidebar takes right now: its full width when expanded,
- * its icon rail when collapsed, none on a phone or with no sidebar at all.
- * Read on every render from the sidebar's own state, so a collapse — the
- * reader's or the shell's own — widens a maximized pane at once.
- */
-function useLiveSidebarWidth(): string {
-  const sidebar = useOptionalSidebar();
-  if (!sidebar || sidebar.isMobile) return '0px';
-  return sidebar.state === 'collapsed'
-    ? `var(--sidebar-width-icon, ${SIDEBAR_WIDTH_ICON_FALLBACK})`
-    : `var(--sidebar-width, ${SIDEBAR_WIDTH_FALLBACK})`;
-}
-
-/** The width a maximized pane takes: the viewport less the live sidebar. */
-function maximizedWidthCss(sidebarWidth: string): string {
-  return `calc(100vw - ${sidebarWidth})`;
-}
 
 /**
  * Whether an `Esc` belongs to the element it was pressed in rather than to the
@@ -500,7 +464,6 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   mainContent,
   activeListRecordId,
   onExpand,
-  maximizable,
   expandLabel,
   storageKey,
   legacyStorageKey,
@@ -533,21 +496,13 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   // over never remounts it when the mode changes.
   const hasList = mainContent != null;
   const shown = paneMode && isOpen && !!selectedRecord;
-  const [maximizedState, setMaximized] = React.useState(false);
-  // Not remembered: a closed pane opens at its own width again.
-  React.useEffect(() => {
-    if (!shown) setMaximized(false);
-  }, [shown]);
-  const maximized = !!maximizable && shown && maximizedState;
-  const sidebarWidth = useLiveSidebarWidth();
   const handleInteractOutside = usePopperAwareInteractOutside();
   useRecordStepKeys(paneMode && shown, stepper);
-  // `Esc`: from maximized it restores, below the stack's root it goes back one
-  // level, at the root it closes. The drawer's dialog layer asks the same
-  // through `onEscapeKeyDown` below.
+  // `Esc`: below the stack's root it goes back one level, at the root it
+  // closes. The drawer's dialog layer asks the same through `onEscapeKeyDown`
+  // below.
   const handleEscape = () => {
-    if (maximized) setMaximized(false);
-    else if (onBack) onBack();
+    if (onBack) onBack();
     else close();
   };
   // The drawer's dialog layer hears `Esc` on the document in the capture
@@ -570,12 +525,12 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
 
   // Pane width policy: the reader's dragged width, bounded by the drag range
   // even when it was remembered at a wider viewport; otherwise the host's
-  // width as given. A maximized pane takes the content area instead.
+  // width as given.
   const paneWidthCss = resize.width != null
     ? `min(${resize.width}px, ${DRAWER_MAX_VW}vw)`
     : resolveWidth(width) ?? '42rem';
   const widthStyle: React.CSSProperties = {
-    ['--ov-w' as any]: maximized ? maximizedWidthCss(sidebarWidth) : paneWidthCss,
+    ['--ov-w' as any]: paneWidthCss,
   };
 
   // Use renderView when both renderView and view are provided; otherwise fallback to children
@@ -587,11 +542,11 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   };
 
   /* Drag-resize handle — only rendered on sm+ (mobile uses full viewport so
-     there's nothing meaningful to resize) and never while maximized. The
+     there's nothing meaningful to resize). The
      4px-wide invisible hit-area sits flush with the pane's left edge; the
      visible 1px tint reacts on hover so users discover the affordance.
      Double-click resets to the configured default. */
-  const resizeHandle = resize.enabled && !maximized ? (
+  const resizeHandle = resize.enabled ? (
     <div
       role="separator"
       aria-orientation="vertical"
@@ -628,17 +583,8 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
       frame={
         <>
           {onExpand && (
-            <RecordTopBarButton label={resolvedExpandLabel} onClick={() => onExpand()}>
-              <ArrowUpRight className="h-3.5 w-3.5" />
-            </RecordTopBarButton>
-          )}
-          {maximizable && (
-            <RecordTopBarButton
-              label={maximized ? t('detail.restoreSize') : t('detail.maximize')}
-              onClick={() => setMaximized((was) => !was)}
-              data-testid="record-pane-maximize"
-            >
-              {maximized ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+            <RecordTopBarButton label={resolvedExpandLabel} onClick={() => onExpand()} data-testid="record-pane-open-page">
+              <Maximize2 className="h-3.5 w-3.5" />
             </RecordTopBarButton>
           )}
           <RecordTopBarButton label={closeLabel} onClick={close}>
@@ -672,17 +618,19 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
         // documented choice rather than dropping it is what "one shared
         // overlay shell" has to mean when the two shells disagreed.
         onOpenAutoFocus={(e) => e.preventDefault()}
-        // objectstack#27545 — from maximized, `Esc` restores; objectstack#26679
-        // — below the root of an in-place stack, `Esc` goes back one level.
-        // Only the root's `Esc` closes. objectstack#28156 — a field's `Esc`
-        // stays the field's ({@link escapeOwnedByTarget}).
-        onEscapeKeyDown={maximized || onBack ? handleDrawerEscape : undefined}
+        // objectstack#26679 — below the root of an in-place stack, `Esc` goes
+        // back one level. Only the root's `Esc` closes. objectstack#28156 — a
+        // field's `Esc` stays the field's ({@link escapeOwnedByTarget}).
+        onEscapeKeyDown={onBack ? handleDrawerEscape : undefined}
         ref={sheetRef}
         className={cn(
           // Mobile: full width (no inline cap, no max-w from base sheet).
-          // sm+: honor the pane width via the `--ov-w` CSS var. The host's
-          // className still wins on more specific tokens.
-          'w-screen max-w-none sm:w-full sm:max-w-[var(--ov-w,42rem)] p-0 flex flex-col gap-0 overflow-hidden',
+          // sm+: honor the pane width via the `--ov-w` CSS var, as a floating
+          // card (objectstack#35854): 8 px clear of the viewport's top, right
+          // and bottom edges, rounded and shadowed, its own border all round.
+          // The host's className still wins on more specific tokens.
+          'w-screen max-w-none sm:w-[calc(100%-1rem)] sm:max-w-[var(--ov-w,42rem)] p-0 flex flex-col gap-0 overflow-hidden',
+          'sm:inset-y-2 sm:right-2 sm:h-auto sm:rounded-xl sm:border sm:shadow-2xl',
           // Hide shadcn Sheet's auto-rendered close (X) — it's the LAST
           // direct <button> child of SheetContent. We render our own close
           // inside the header so it sits in a single button cluster.
@@ -690,7 +638,7 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
           mode === 'drawer' && className,
         )}
         style={widthStyle}
-        data-maximized={maximized ? '' : undefined}
+        data-record-drawer-card=""
       >
         {resizeHandle}
         <SheetHeader className="shrink-0 gap-0 space-y-0 p-0 text-left">
@@ -712,17 +660,14 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   if (!hasList) return drawer;
 
   // --- The list under the drawer ---
-  // One element across every state — closed, drawer, maximized — so the list
-  // never remounts and its scroll survives (objectstack#27545), and it keeps
-  // its full width whether or not a record is open (objectstack#28915).
+  // One element across every state — closed, drawer — so the list never
+  // remounts and its scroll survives (objectstack#27545), and it keeps its
+  // full width whether or not a record is open (objectstack#28915).
   return (
     <>
       <ActiveListRecordProvider recordId={shown ? activeListRecordId ?? null : null}>
         <div
           className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
-          // Maximized, the drawer covers the list; the list keeps its place
-          // and its scroll, out of reach until the drawer is restored.
-          inert={maximized}
           data-testid="record-list-host"
         >
           {mainContent}

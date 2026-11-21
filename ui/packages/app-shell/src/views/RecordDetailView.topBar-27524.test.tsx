@@ -13,10 +13,11 @@
  *  - the page opened directly: the breadcrumb 「对象 › 记录名」 (the object goes
  *    to the object's list), ⊟ where the tier has a right column, nothing else
  *    — no counter, no ↓ ↑, no ⤡; the crumb row is gone;
- *  - the page the list row's ↗ opened: the counter (its tooltip naming the
- *    list's view), ↓ ↑ and `j` / `k` over the list's rows — a step replaces the
- *    page with the sibling's — ⤡ 「Collapse to drawer」 back to the list with
- *    the record stepped to open, and the object crumb back to the list;
+ *  - the page the list's record name opened (objectstack#35854): the counter
+ *    over the list's matched total (its tooltip naming the list's view), ↓ ↑
+ *    and `j` / `k` over the list's rows — a step replaces the page with the
+ *    sibling's — and the object crumb back to the list; no ⤡ (the
+ *    「Collapse to drawer」 hop retired);
  *  - the page under a `?from=` trail: ← and the path, each ancestor a link;
  *  - the record in a pane: the pane's bar names it at the root, and its ⊟ sits
  *    in that bar, not in the header's action row.
@@ -62,7 +63,7 @@ vi.mock('./MetadataInspector', () => ({
 }));
 
 import { RecordDetailView } from './RecordDetailView';
-import { RecordStackDrawer, recordDrawerReturnState, useRecordDrawerStack } from './recordDrawerStack';
+import { RecordStackDrawer, useRecordDrawerStack } from './recordDrawerStack';
 
 const APP = 'demo';
 const LEAD = 'crm_lead';
@@ -173,48 +174,34 @@ describe('the page\'s top bar (objectstack#27524, Target 7)', () => {
     expect(document.querySelector('[data-record-crumb-row]')).toBeNull();
   });
 
-  it('opened from the list row\'s ↗: the counter, ↓ ↑ and j / k over the list\'s rows, ⤡ and the object crumb back to the list', async () => {
-    const back = recordDrawerReturnState(
-      { pathname: `/apps/${APP}/${LEAD}`, search: '?recordId=r-2', state: null },
-      [{ objectName: LEAD, recordId: 'r-2', siblings: ROWS }],
-    );
-    mountPage({
-      pathname: `/apps/${APP}/${LEAD}/record/r-2`,
-      state: { ...back, from: { pathname: `/apps/${APP}/${LEAD}`, label: 'All leads' } },
-    });
+  it('opened by the list\'s record name: the counter over the list\'s matched total, ↓ ↑ and j / k over its rows', async () => {
+    const from = { pathname: `/apps/${APP}/${LEAD}`, label: 'All leads', siblings: ROWS, total: 40 };
+    mountPage({ pathname: `/apps/${APP}/${LEAD}/record/r-2`, state: { from } });
     await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
     const position = () => pageBar()!.querySelector('[data-record-top-bar-position]');
-    expect(position()?.textContent).toBe('2 / 3');
-    expect(position()?.getAttribute('title')).toBe('2 of 3 in All leads');
-    // ⊟ after the step group, ⤡ at the end.
-    const controls = Array.from(pageBar()!.querySelector('[data-record-top-bar-controls]')!.children);
-    expect(controls.at(-1)?.getAttribute('data-testid')).toBe('record-drawer-return');
+    expect(position()?.textContent).toBe('2 / 40');
+    expect(position()?.getAttribute('title')).toBe('2 of 40 in All leads');
+    expect(screen.queryByTestId('record-drawer-return')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Next record' }));
     await waitFor(() => expect(where()).toBe(`/apps/${APP}/${LEAD}/record/r-3`));
-    await waitFor(() => expect(position()?.textContent).toBe('3 / 3'));
+    await waitFor(() => expect(position()?.textContent).toBe('3 / 40'));
+    // The end of the rows the list loaded: ↓ stops there, even short of the total.
     expect((screen.getByRole('button', { name: 'Next record' }) as HTMLButtonElement).disabled).toBe(true);
     // `k` steps back; the arrow keys are the page's scroll, not the bar's.
     fireEvent.keyDown(document.body, { key: 'ArrowUp' });
     expect(where()).toBe(`/apps/${APP}/${LEAD}/record/r-3`);
     fireEvent.keyDown(document.body, { key: 'k' });
     await waitFor(() => expect(where()).toBe(`/apps/${APP}/${LEAD}/record/r-2`));
-
-    // ⤡ returns to the list with the record stepped to open in its pane.
-    fireEvent.click(screen.getByTestId('record-drawer-return'));
-    await waitFor(() => expect(where()).toBe(`/apps/${APP}/${LEAD}?recordId=r-2`));
-    expect(screen.getByTestId('where-state').textContent).toContain('"recordDrawerRestore":[{"objectName":"crm_lead","recordId":"r-2"');
   });
 
-  it('opened by a list whose rows open as pages: the counter and ↓ ↑ over its rows, and no ⤡', async () => {
+  it('control: with no total reported the counter counts the rows handed along', async () => {
     const from = { pathname: `/apps/${APP}/${LEAD}`, label: 'All leads', siblings: ROWS };
     mountPage({ pathname: `/apps/${APP}/${LEAD}/record/r-1`, state: { from } });
     await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
     const position = () => pageBar()!.querySelector('[data-record-top-bar-position]');
     expect(position()?.textContent).toBe('1 / 3');
     expect(position()?.getAttribute('title')).toBe('1 of 3 in All leads');
-    // That list opens no pane: there is nothing to collapse to.
-    expect(screen.queryByTestId('record-drawer-return')).toBeNull();
     // The object crumb is the list it came from.
     expect(pageBar()!.querySelector('[data-record-crumb-object]')?.getAttribute('href')).toBe(`/apps/${APP}/${LEAD}`);
 
@@ -234,12 +221,8 @@ describe('the page\'s top bar (objectstack#27524, Target 7)', () => {
     expect(pageBar()!.querySelector('[data-record-top-bar-step]')).toBeNull();
   });
 
-  it('the object crumb of a ↗ page returns to the list with no record open', async () => {
-    const back = recordDrawerReturnState(
-      { pathname: `/apps/${APP}/${LEAD}`, search: '?view=all&recordId=r-1', state: null },
-      [{ objectName: LEAD, recordId: 'r-1', siblings: ROWS }],
-    );
-    mountPage({ pathname: `/apps/${APP}/${LEAD}/record/r-1`, state: { ...back, from: { pathname: `/apps/${APP}/${LEAD}?view=all`, label: 'All leads' } } });
+  it('the object crumb returns to the list the page came from, as it was left, with no record open', async () => {
+    mountPage({ pathname: `/apps/${APP}/${LEAD}/record/r-1`, state: { from: { pathname: `/apps/${APP}/${LEAD}?view=all`, label: 'All leads', siblings: ROWS } } });
     const object = await waitFor(() => {
       const el = pageBar()?.querySelector('[data-record-crumb-object]');
       expect(el).toBeTruthy();

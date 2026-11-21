@@ -56,15 +56,30 @@ If some rows are confidential, the object's OWD should be `private` (or
 Two things the bits do **not** override, regardless of the OWD:
 
 - **Baseline row-level security.** RLS is a separate, *narrowing* layer. The
-  platform baseline `member_default` ships owner-scoped `update`/`delete`
+  platform baseline `member_default` ships creator-only `update`/`delete`
   policies (`created_by == current_user.id`, applicability domain
-  `org_member`), so rank-and-file members stay owner-scoped on writes even
-  under `public_read_write`. The super-user bits short-circuit RLS **only
+  `org_member`). Under `public_read_write` the update policy does not apply
+  (that OWD opens row updates) and the delete policy does; under every other
+  OWD both apply, and record sharing can replace them row by row, as below.
+  A `controlled_by_parent` detail's by-id write is judged by its master gate
+  instead. The super-user bits short-circuit RLS **only
   where the object's access posture permits it** — `access: { default:
   'private' }`, `tenancy.enabled: false` (deployment-level: no organization column), or better-auth
   managed objects (ADR-0066 D2 ①). On an ordinary tenant business object,
-  `modifyAllRecords` does *not* lift those policies
+  `modifyAllRecords` does *not* short-circuit those policies
   (`plugin-security/src/security-plugin.ts` `computeLayeredRlsFilter`).
+  Where record sharing enforces writes (an `owner_id` and a `private` or
+  `public_read` OWD), the sharing service's `allow` for a row replaces the
+  baseline floor for that row: ownership at the caller's write depth or
+  `modifyAllRecords`, and, for an update, an `edit` share. On an update, a
+  row sitting in a queue the caller belongs to gets the same `allow` under
+  any OWD. A by-id write takes that replacement, and so does a predicate
+  write unless an app-authored `using` policy for the write applies to the
+  caller (then it keeps the floor beside that policy). A write made on
+  another user's behalf keeps the floor. Under
+  `public_read_write` the sharing service abstains on a delete, so the
+  delete floor stays; on an object with no `owner_id` it abstains on both,
+  so both floors stay. An app-authored policy is never replaced.
   Org admins (`org_admin` / `org_owner`) are outside the `org_member`
   applicability domain and are not narrowed by the baseline.
 - **The Layer 0 tenant wall** (ADR-0095 D1) — always ANDs on top.

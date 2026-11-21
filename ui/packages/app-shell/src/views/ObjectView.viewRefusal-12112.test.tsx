@@ -96,7 +96,6 @@ vi.mock('./RecordDetailView', () => ({ RecordDetailView: () => null }));
 
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
-import { RECORD_OPEN_PREFERENCE_KEY } from '../utils/recordOpenPreference';
 
 const OBJECT_NAME = 'clm_contract';
 const LEGAL_CAP = 'clm_legal_workbench.view';
@@ -154,7 +153,6 @@ function makeDataSource() {
 function openView(viewId: string, access: Record<string, unknown>, opts: { recordOpen?: boolean } = {}) {
   const probeMetaItemAccess = vi.fn(async () => access);
   const objects = OBJECTS;
-  window.localStorage.removeItem(RECORD_OPEN_PREFERENCE_KEY);
   render(
     <I18nProvider instance={createI18n({ defaultLanguage: 'en', detectBrowserLanguage: false })}>
       <AdapterCtx.Provider value={{ probeMetaItemAccess } as never}>
@@ -184,7 +182,6 @@ async function settle() {
 describe('objectui#12112 — a refused list view, opened by name, says it was refused', () => {
   afterEach(() => {
     cleanup();
-    window.localStorage.removeItem(RECORD_OPEN_PREFERENCE_KEY);
   });
 
   it('a view the server refuses: a permission refusal in the server\'s words, not the default view', async () => {

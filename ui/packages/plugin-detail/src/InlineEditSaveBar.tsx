@@ -554,6 +554,22 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [editing, saving, locked, conflictOpen, handleSave, cancel]);
 
+  // objectstack#35685 — the record's version when this edit session began. A
+  // record read again meanwhile at another version was changed elsewhere (a
+  // list cell beside the drawer, another tab): the draft stays as typed and
+  // Save writes it over the record as it is now, so the bar says so.
+  const dataVersion = typeof data?.updated_at === 'string' ? (data.updated_at as string) : undefined;
+  const [editBase, setEditBase] = React.useState<{ version: string | undefined } | null>(null);
+  React.useEffect(() => {
+    if (!editing) {
+      setEditBase(null);
+      return;
+    }
+    setEditBase((prev) => prev ?? { version: dataVersion });
+  }, [editing, dataVersion]);
+  const changedWhileEditing =
+    !saving && editBase !== null && editBase.version !== undefined && dataVersion !== undefined && dataVersion !== editBase.version;
+
   // Render nothing unless a provider is present and the record is being edited.
   if (!inline || !inline.editing) return null;
 
@@ -607,6 +623,15 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
             ) : (
               inline.error
             )}
+          </div>
+        )}
+        {changedWhileEditing && (
+          <div
+            role="status"
+            data-inline-record-changed=""
+            className="mr-auto max-w-md rounded-md border bg-muted px-2 py-1 text-xs text-muted-foreground"
+          >
+            {t('detail.inlineEditRecordChanged')}
           </div>
         )}
         {/* The lock REASON is surfaced by DetailView's approval-lock band; here

@@ -185,3 +185,25 @@ export function useStudioDesignGate(path: string | null | undefined): string | n
   const entry = useStudioEntryGate(path);
   return entry?.posture === 'edit' ? entry.path : null;
 }
+
+/**
+ * objectstack#35933 — whether the server refuses a save into `packageId`, by
+ * the same `writable` verdict and the same session-held read as the Studio
+ * entries above: `true` only when the package list carries the package as
+ * read-only (a code or installed package). A list's saved shared view hands
+ * its served package here, and a view the answer is `true` for is offered no
+ * save of its own (its changes go to the package's customization, which the
+ * door says on a refused save).
+ *
+ * Fails open, the opposite of the entries above and on purpose: `null` (a
+ * personal view or a view bound to no package), a read still in flight, a
+ * failed read and a package the list leaves out (a kernel package) all
+ * answer `false`, so the save stays offered as it was before this read and
+ * the server's write gate refuses what it refuses. A save hidden from a
+ * writable view is the worse failure; one the server refuses is said.
+ * ⛔ Never a derivation from the view's name: every stored view is named
+ * `object.key`, the console's own saved shared views included.
+ */
+export function usePackageRefusesSaves(packageId: string | null): boolean {
+  return usePackagePosture(packageId) === 'view';
+}
