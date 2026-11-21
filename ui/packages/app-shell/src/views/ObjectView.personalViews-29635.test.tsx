@@ -108,7 +108,7 @@ import { ObjectView } from './ObjectView';
 import { listDraftScope, patchListDraft, readListDraft, resetListDraftStoreForTests, type ListDraftPatch } from './listDraftStore';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 import { UserStateAdaptersProvider, useAttachListStateFamily } from '../context/UserStateAdapters';
-import { ListPreferencesProvider, listPreferenceKey, localListStateKey } from '../context/ListPreferencesProvider';
+import { ListPreferencesProvider, listPreferenceKey } from '../context/ListPreferencesProvider';
 import { applyListStateParams } from './userFilterUrlState';
 import { toast } from 'sonner';
 
