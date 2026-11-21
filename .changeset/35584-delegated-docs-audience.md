@@ -1,4 +1,5 @@
 ---
+'@objectstack/mcp': patch
 '@objectstack/runtime': patch
 ---
 
@@ -15,3 +16,5 @@ Now, on such a connection:
 - The audience reads the person's own permission sets, resolved by the same grant resolution a request uses, in the organization the token's consent bound. A person who does not exist, or who holds no current membership in that organization, holds no set here, and permission-set manuals stay closed to them.
 - The token's own permission sets are never added to the person's: a manual whose audience is one of the token's scope sets stays closed unless the person holds it.
 - Manuals with the default audience answer as before. API keys, signed-in sessions and AI service accounts keep their own permission sets.
+
+Both tool descriptions now say so: on an OAuth connection, the person's own permission sets decide, never more.
