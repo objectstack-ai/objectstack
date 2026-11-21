@@ -64,8 +64,10 @@ import { describe, it, expect, vi } from 'vitest';
 
 import { HttpDispatcher } from './http-dispatcher.js';
 import {
+    actionSelectionIsRead,
     callData,
     invokeBusinessAction,
+    loadActionSelectionRecords,
     refuseDeniedSubjectLoad,
     loadActionSubjectRecord,
     GLOBAL_ACTION_OBJECT_KEY,
@@ -139,7 +141,9 @@ function makeQl() {
             if (object !== OBJECT) return [];
             const caller = options?.context?.userId;
             const wanted = options?.filters?.[0]?.[2] ?? options?.where?.id;
-            if (wanted !== undefined && wanted !== RECORD_ID) return [];
+            // A selection's batched read asks `{ id: { $in: [...] } }`.
+            const among: unknown[] | undefined = Array.isArray(wanted?.$in) ? wanted.$in : undefined;
+            if (among ? !among.includes(RECORD_ID) : wanted !== undefined && wanted !== RECORD_ID) return [];
             return caller === OWNER ? [{ id: RECORD_ID, status: 'open', owner_id: OWNER }] : [];
         }),
         insert: vi.fn(), update: vi.fn(), delete: vi.fn(),
@@ -173,7 +177,7 @@ function makeMetadata() {
 }
 
 /** REST — `POST /actions/<path>`, through the real dispatcher. */
-async function rest(userId: string, path: string) {
+async function rest(userId: string, path: string, body: unknown = {}) {
     const ql = makeQl();
     const automation = makeAutomation();
     const metadata = makeMetadata();
@@ -188,7 +192,7 @@ async function rest(userId: string, path: string) {
         context: { getService: resolve },
     };
     const context: any = { request: {}, environmentId: 'platform', executionContext: ec(userId) };
-    const res: any = await (new HttpDispatcher(kernel) as any).handleActions(path, 'POST', {}, context);
+    const res: any = await (new HttpDispatcher(kernel) as any).handleActions(path, 'POST', body, context);
     return {
         response: res.response,
         automation,
@@ -471,5 +475,102 @@ describe('[#16370] refuseDeniedSubjectLoad — the rule, isolated from every doo
             async () => { throw new Error('must not be called'); });
         expect(newRecord.recordLoadDenied).toBe(false);
         expect(() => refuseDeniedSubjectLoad(OBJECT, undefined, newRecord)).not.toThrow();
+    });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// A selection (`params._selectedIds`) is read like the subject row
+// ───────────────────────────────────────────────────────────────────────────
+
+describe('a selection is read in the caller\'s scope, on the flow arm and the script arm alike', () => {
+    const selection = { params: { _selectedIds: [RECORD_ID] } };
+
+    it('flow arm, REST and MCP: a selection the caller cannot read is refused 404 and NO run is created', async () => {
+        const viaRest = await rest(STRANGER, `/${OBJECT}/escalate_case`, selection);
+        expect({ status: viaRest.response.status, code: viaRest.response.body.error?.code }).toEqual({ status: 404, code: 'RECORD_NOT_FOUND' });
+        expect(viaRest.automation.execute).not.toHaveBeenCalled();
+
+        const viaMcp = await mcp(STRANGER, FLOW_ACTION.name, selection);
+        await expect(viaMcp.run()).rejects.toMatchObject({ code: 'RECORD_NOT_FOUND', status: 404 });
+        expect(viaMcp.automation.execute).not.toHaveBeenCalled();
+    });
+
+    it('script arm, REST and MCP: the same refusal, and NO trusted body is entered', async () => {
+        const viaRest = await rest(STRANGER, `/${OBJECT}/close_case`, selection);
+        expect({ status: viaRest.response.status, code: viaRest.response.body.error?.code }).toEqual({ status: 404, code: 'RECORD_NOT_FOUND' });
+        expect(viaRest.ql.executeAction).not.toHaveBeenCalled();
+
+        const viaMcp = await mcp(STRANGER, SCRIPT_ACTION.name, selection);
+        await expect(viaMcp.run()).rejects.toMatchObject({ code: 'RECORD_NOT_FOUND', status: 404 });
+        expect(viaMcp.ql.executeAction).not.toHaveBeenCalled();
+    });
+
+    it('the readable control: the owner\'s selection runs both arms, the ids handed on as sent', async () => {
+        const flow = await rest(OWNER, `/${OBJECT}/escalate_case`, selection);
+        expect(flow.response.status).toBe(200);
+        expect(flow.automation.execute).toHaveBeenCalledTimes(1);
+
+        const script = await rest(OWNER, `/${OBJECT}/close_case`, selection);
+        expect(script.response.status).toBe(200);
+        expect(script.actionCtx.params._selectedIds).toEqual([RECORD_ID]);
+    });
+
+    it('an object-less action key carrying a selection is refused 400 VALIDATION_FAILED, nothing runs', async () => {
+        const { response, ql } = await rest(OWNER, '/global/log_call', selection);
+        expect({ status: response.status, code: response.body.error?.code }).toEqual({ status: 400, code: 'VALIDATION_FAILED' });
+        expect(ql.executeAction).not.toHaveBeenCalled();
+
+        const viaMcp = await mcp(OWNER, GLOBAL_SCRIPT_ACTION.name, selection);
+        await expect(viaMcp.run()).rejects.toMatchObject({ status: 400 });
+        expect(viaMcp.ql.executeAction).not.toHaveBeenCalled();
+    });
+
+    it('an empty selection reads nothing and refuses nothing', async () => {
+        const { response, ql } = await rest(STRANGER, `/${OBJECT}/close_case`, { params: { _selectedIds: [] } });
+        expect(response.status).toBe(200);
+        const selectionReads = ql.find.mock.calls.filter(([, options]: any[]) => options?.where?.id?.$in !== undefined);
+        expect(selectionReads).toEqual([]);
+    });
+});
+
+describe('which arms read a selection', () => {
+    it('a script body and a flow are read; a declarative update, an api forward and the system principal are not', () => {
+        const member = { userId: OWNER };
+        expect(actionSelectionIsRead({ type: 'script' }, member)).toBe(true);
+        expect(actionSelectionIsRead({}, member)).toBe(true);
+        expect(actionSelectionIsRead({ type: 'flow' }, member)).toBe(true);
+        expect(actionSelectionIsRead({ operation: 'update', patch: { a: 1 } }, member)).toBe(false);
+        expect(actionSelectionIsRead({ type: 'api', target: '/api/v1/x' }, member)).toBe(false);
+        expect(actionSelectionIsRead({ type: 'script' }, { isSystem: true })).toBe(false);
+    });
+});
+
+describe('the selection read', () => {
+    const rowsOf = (delivered: ReadonlySet<string>) => vi.fn(async (chunk: string[]) => ({ records: chunk.filter((id) => delivered.has(id)).map((id) => ({ id })) }));
+
+    it('reads each distinct id once, in chunks no larger than the deployment allows, and delivers when every id is read', async () => {
+        const ids = Array.from({ length: 25 }, (_, i) => `r${i}`);
+        const find = rowsOf(new Set(ids));
+        const load = await loadActionSelectionRecords([...ids, ...ids], find, { maxPageSize: 10, rowBudget: 8 });
+        expect(load).toEqual({ selectionLoadDenied: false });
+        expect(find.mock.calls.map(([chunk]) => chunk.length)).toEqual([8, 8, 8, 1]);
+    });
+
+    it('one id the read does not deliver denies the whole selection, naming it', async () => {
+        const find = rowsOf(new Set(['a', 'c']));
+        expect(await loadActionSelectionRecords(['a', 'b', 'c'], find, {})).toEqual({ selectionLoadDenied: true, undelivered: 'b' });
+    });
+
+    it('a read that throws, or answers no row list, delivered nothing', async () => {
+        const thrown = vi.fn(async () => { throw Object.assign(new Error('no access'), { status: 403 }); });
+        expect(await loadActionSelectionRecords(['a'], thrown, {})).toEqual({ selectionLoadDenied: true, undelivered: 'a' });
+        const shapeless = vi.fn(async () => ({ total: 1 }));
+        expect(await loadActionSelectionRecords(['a'], shapeless, {})).toEqual({ selectionLoadDenied: true, undelivered: 'a' });
+    });
+
+    it('an empty selection asks nothing', async () => {
+        const find = rowsOf(new Set());
+        expect(await loadActionSelectionRecords([], find, {})).toEqual({ selectionLoadDenied: false });
+        expect(find).not.toHaveBeenCalled();
     });
 });

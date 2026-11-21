@@ -112,7 +112,12 @@ export const CloneTaskAction = defineAction({
   },
 });
 
-/** Mass Complete Tasks */
+/**
+ * Mass Complete Tasks — a bulk action written per record: a list view's
+ * selection dispatches it once per selected row, each call carrying that row's
+ * `recordId`, so every write is to a row the platform has already loaded in
+ * the caller's own scope (`ctx.record`).
+ */
 export const MassCompleteTasksAction = defineAction({
   name: 'todo_mass_complete',
   label: 'Complete Selected',
@@ -120,6 +125,7 @@ export const MassCompleteTasksAction = defineAction({
   icon: 'check-square',
   type: 'script',
   target: 'massCompleteTasks',
+  execution: 'perRecord',
   locations: ['list_toolbar'],
   successMessage: 'Selected tasks marked as complete!',
   refreshAfter: true,

@@ -3798,9 +3798,8 @@ export function enforceActionParams(deps: ActionExecutionDeps,
     if (!declaresParams && !isDeclarativeUpdateAction(action)) {
         // A param-less handler action keeps the ADR-0104 D2 pass-through for
         // its custom keys, except a near-miss spelling of a built-in
-        // (`selectedIds` for `_selectedIds`): that key reaches the handler
-        // unread by every door rule the built-in is read by, so it is refused,
-        // in the contract's own words.
+        // (`selectedIds` for `_selectedIds`), refused in the contract's own
+        // words: a selection is carried only under the key the door reads.
         const nearMisses = Object.keys(bag).filter(isBuiltinParamNearMiss);
         if (nearMisses.length === 0) return null;
         issues = validateActionParams([], Object.fromEntries(nearMisses.map((key) => [key, bag[key]])));
