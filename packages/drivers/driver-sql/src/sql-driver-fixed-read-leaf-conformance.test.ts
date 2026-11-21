@@ -1120,7 +1120,9 @@ function declareOracleKeyTypePins(cell: FederationDialectCell): void {
           });
 
           it('findWithWindowFunctions answers [c1, c2]', async () => {
-            const out = await firstOnFresh((d) => d.findWithWindowFunctions(ORA_CHILD.object, { where: where(), windowFunctions: [{ function: 'row_number', alias: 'rn' }] } as any, ORA_BYPASS));
+            // Oracle requires an ORDER BY in ROW_NUMBER's window, and a window
+            // spec names its column as stored (not through `columnMap`): `ID`.
+            const out = await firstOnFresh((d) => d.findWithWindowFunctions(ORA_CHILD.object, { where: where(), windowFunctions: [{ function: 'row_number', alias: 'rn', orderBy: [{ field: 'ID' }] }] } as any, ORA_BYPASS));
             expect(sortedIds(out)).toEqual(['c1', 'c2']);
           });
 
