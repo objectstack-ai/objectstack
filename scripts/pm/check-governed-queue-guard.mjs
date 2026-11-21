@@ -800,7 +800,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // Raised 74 → 84 with every card the pull NAMES: `security` on the second card behind a `Part of`, a branch name
   // and a `Refs`, their clean control, the first card beside a clean second, the second card unread, the limit, the
   // reader's own walk, `namedCardsOf`, and the cleared entry that spends no stage read — ten pins.
-  '⚖️ the low-risk skills arm at the queue: body, labels and every path, read off the pull this leg holds (#33501)': 84,
+  // 84 → 85 (#35612): the stage carries the record leg's verdict, so the `.claude/**` split reads a FAIL or a
+  // below-tier record Tier H wherever it is read (N1 of #35610).
+  '⚖️ the low-risk skills arm at the queue: body, labels and every path, read off the pull this leg holds (#33501)': 85,
   // Raised 12 → 13 with the arm's record stage on the ADR leg: a record without the line, a `security`-labelled card;
   // 13 → 14 with a second card the note names.
   '⚖️ the ADR leg at the queue: an add-only note clears on its PASS record, any other ADR change is H (#33539)': 14,
@@ -2407,7 +2409,15 @@ export function lowRiskRecordStage({ pair, recognisers }) {
     // register's reader, and holds a carried record to its own rule: the hops moved nothing under the row.
     ruleChangeVerified: readRuleChangeVerified(comment.body),
     ruleChangeCarried: located.carriedFrom ? ((refusal) => ({ from: located.carriedFrom, ok: refusal === null, reason: refusal }))(ruleChangeCarryRefusal(located.carriedFrom, pair)) : null,
+    // ...and the record LEG's own verdict on the same pair (`recordVerdict`, `recordPassVerdict`): the split's record
+    // conjunct holds only where the queue would clear this record — at its face's tier, on a clean PASS (N1 of #35610).
+    recordLeg: recordLegReading(recordPassVerdict(recordVerdict({ pair, recognisers }), pair, recognisers)),
   };
+}
+
+/** A record-leg verdict as the split's record stage carries it: `{ state, reason }`. Pure. */
+function recordLegReading(leg) {
+  return { state: leg?.state ?? 'unreadable', reason: leg?.verdictReason ?? leg?.reason ?? null };
 }
 
 /**
@@ -2660,7 +2670,7 @@ export function ruleChangeRecordVerdict(record, pair, recognisers, declared) {
   if (passed.state !== 'stands') return passed;
   const rows = (recognisers?.threads ?? []).flatMap((thread) => (Array.isArray(pair?.[thread.rows]) ? pair[thread.rows] : []));
   const comment = rows.find((r) => r?.id === record.id) ?? null;
-  const reasons = ruleChangeRecordReasons({ measured: true, reason: null, located: 'found', where: record.where ?? null, id: record.id ?? null, ruleChangeCarried: null, ruleChangeVerified: comment === null ? null : readRuleChangeVerified(comment.body) }, declared);
+  const reasons = ruleChangeRecordReasons({ measured: true, reason: null, located: 'found', where: record.where ?? null, id: record.id ?? null, ruleChangeCarried: null, ruleChangeVerified: comment === null ? null : readRuleChangeVerified(comment.body), recordLeg: recordLegReading(passed) }, declared);
   if (reasons.length > 0) return { ...passed, state: 'not-pass', verdict: null, verdictReason: `the \`.claude/**\` declaration split is not verified — ${reasons.join('; ')}` };
   return passed;
 }
@@ -4298,7 +4308,7 @@ export async function selfTest() {
   // The `.claude/**` declaration split (2026-11-19) as the queue leg leaves it once the body declares `none` and the
   // record on the head verifies it. The pure-verdict cases below are about the legs AFTER the tier, so `run` hands
   // every split entry that reading on the queue leg — the early-warning leg reads no body, exactly as the live one.
-  const VERIFIED_STAGE = Object.freeze({ measured: true, reason: null, located: 'found', where: 'PR', id: 1, carried: null, securityTouching: null, ruleChangeVerified: Object.freeze({ state: 'read', value: 'none' }), ruleChangeCarried: null });
+  const VERIFIED_STAGE = Object.freeze({ measured: true, reason: null, located: 'found', where: 'PR', id: 1, carried: null, securityTouching: null, ruleChangeVerified: Object.freeze({ state: 'read', value: 'none' }), ruleChangeCarried: null, recordLeg: Object.freeze({ state: 'stands', reason: null }) });
   const VERIFIED = Object.freeze({ measured: true, reason: null, body: 'Rule-change: none', record: VERIFIED_STAGE });
   const declared = (entry) => readLowRiskTier(entry, REPO, pull(HEAD, { body: 'Rule-change: none' }), { record: VERIFIED_STAGE });
   const run = (event, rows, approvals = new Map(), records = new Map()) => {
@@ -7101,12 +7111,25 @@ export async function selfTest() {
       const pairOf = (rows) => ({ pr: 70, card: REF_CARD, headSha: REF_HEAD, paths: [SK], repo: REPO, prComments: rows, cardComments: [] });
       const found = lowRiskRecordStage({ pair: pairOf([armRecord()]), recognisers: live });
       const absent = lowRiskRecordStage({ pair: pairOf([]), recognisers: live });
-      return JSON.stringify(found) === JSON.stringify({ measured: true, reason: null, located: 'found', where: 'PR', id: 900, carried: null, securityTouching: { state: 'read', value: 'no' }, ruleChangeVerified: { state: 'read', value: 'none' }, ruleChangeCarried: null }) &&
+      return JSON.stringify(found) === JSON.stringify({ measured: true, reason: null, located: 'found', where: 'PR', id: 900, carried: null, securityTouching: { state: 'read', value: 'no' }, ruleChangeVerified: { state: 'read', value: 'none' }, ruleChangeCarried: null, recordLeg: { state: 'stands', reason: null } }) &&
         absent.measured === true && absent.located === 'absent' && absent.securityTouching === null &&
         lowRiskRecordStage({ pair: pairOf([armRecord()]), recognisers: { available: false, reason: 'x' } }).measured === false &&
         lowRiskRecordStage({ pair: pairOf([armRecord()]), recognisers: { ...live, reading: undefined } }).measured === false &&
         lowRiskRecordStage({ pair: { ...pairOf([armRecord()]), prComments: undefined }, recognisers: live }).measured === false &&
         lowRiskRecordStage({ pair: pairOf([recordComment()]), recognisers: live }).securityTouching.state === 'missing';
+    })());
+    // N1 of #35610: the split's record stage carries the record LEG's verdict on the same comment, so a reader of the
+    // stage (`--pr`, the relay) can never print Tier S over a record the queue's record leg refuses.
+    assert('⛔ N1: the-stage-carries-the-record-legs-verdict-a-FAIL-or-a-below-tier-record-reads-Tier-H-on-the-split-and-a-clean-PASS-reads-S', (() => {
+      const pairOf = (rows, paths = ['.claude/agents/os-dev.md']) => ({ pr: 70, card: REF_CARD, headSha: REF_HEAD, paths, repo: REPO, prComments: rows, cardComments: [] });
+      const legOf = (row) => lowRiskRecordStage({ pair: pairOf([row]), recognisers: live });
+      const splitOn = (record) => applyRuleChangeSplit(governedPathsIn(['.claude/agents/os-dev.md'], REPO), REPO, { measured: true, reason: null, body: 'Rule-change: none', record })[0].tier;
+      const failed = legOf(recordComment({ verdictWord: '**VERDICT: FAIL**' }));
+      const below = legOf(recordComment({ tierLine: 'Served-tier: 75/75 `TIER_DEFAULT`' }));
+      const clean = legOf(recordComment());
+      return failed.recordLeg.state === 'not-pass' && /reads FAIL/.test(failed.recordLeg.reason) && failed.ruleChangeVerified.value === 'none' && splitOn(failed) === TIER_H &&
+        below.recordLeg.state === 'below-tier' && splitOn(below) === TIER_H &&
+        clean.recordLeg.state === 'stands' && splitOn(clean) === TIER_S;
     })());
     assert('readCardLabels-never-throws-and-counts-its-reads-a-card-nobody-could-name-reads-nothing', await (async () => {
       const none = await readCardLabels({ card: { card: null, reason: 'its body names no card' }, fetchLabels: async () => { throw new Error('must not be read'); } });
@@ -7189,7 +7212,7 @@ export async function selfTest() {
       const cardless = await stageOf({ pull: { ...pull, body: 'Clause-②: no\nMetadata-protocol: none\n' } });
       const unreadPull = await stageOf({ pull: null });
       return order === `comments 70,comments ${REF_CARD},labels ${REF_CARD},timeline ${REF_CARD}` && clean.apiCalls === 4 && clean.card.card === REF_CARD &&
-        JSON.stringify(clean.record) === JSON.stringify({ measured: true, reason: null, located: 'found', where: 'PR', id: 900, carried: null, securityTouching: { state: 'read', value: 'no' }, ruleChangeVerified: { state: 'read', value: 'none' }, ruleChangeCarried: null }) &&
+        JSON.stringify(clean.record) === JSON.stringify({ measured: true, reason: null, located: 'found', where: 'PR', id: 900, carried: null, securityTouching: { state: 'read', value: 'no' }, ruleChangeVerified: { state: 'read', value: 'none' }, ruleChangeCarried: null, recordLeg: { state: 'stands', reason: null } }) &&
         JSON.stringify(clean.cardLabels) === JSON.stringify({ measured: true, reason: null, card: REF_CARD, labels: ['tooling'], timeline: { measured: true, reason: null, events: [] }, others: { measured: true, reason: null, cards: [] } }) &&
         noLine.record.securityTouching.state === 'missing' && untrusted.record.located === 'absent' &&
         unloaded.apiCalls === 0 && unloaded.record.measured === false && /would not load: boom/.test(unloaded.record.reason) && unloaded.cardLabels.measured === false &&
