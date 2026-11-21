@@ -112,14 +112,16 @@ describe('buildWidgetScopedFilter: member filter on a field holding several valu
     });
   });
 
-  it('skips, with a warning naming the filter, a member filter on a structured JSON field', () => {
+  it('keeps = / $in for a member filter on a structured JSON field (no contains), explicit binding included', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const structured = resolveDashboardFilterDefs({
       globalFilters: [{ name: 'where', field: 'address', type: 'select' }],
     });
-    expect(buildWidgetScopedFilter(widget, structured, { where: 'x' }, undefined, operators)).toBeUndefined();
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(String(warn.mock.calls[0][0])).toContain('"where"');
+    expect(buildWidgetScopedFilter(widget, structured, { where: 'x' }, undefined, operators)).toEqual({ address: 'x' });
+    expect(
+      buildWidgetScopedFilter({ id: 'w4', filterBindings: { where: 'address' } }, structured, { where: ['x', 'y'] }, undefined, operators),
+    ).toEqual({ address: { $in: ['x', 'y'] } });
+    expect(warn).not.toHaveBeenCalled();
   });
 });
 

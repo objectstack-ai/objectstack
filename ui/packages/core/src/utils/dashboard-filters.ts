@@ -715,29 +715,15 @@ function isMemberFilter(def: DashboardFilterDef): boolean {
  * member is `{ field: { $contains: member } }`, and several (any of them) are
  * `$or` over one `$contains` each.
  *
- * A field stored as a JSON column that takes no `contains` (a structured value
- * such as `json` or `address`, empty checks only) cannot be matched by a
- * member at all: the filter is skipped with a console warning, never sent as a
- * query the server refuses or answers with zero rows.
+ * Only a field that takes `contains` reaches here. A field stored as a JSON
+ * column without it (a structured value such as `json` or `address`, empty
+ * checks only) holds no members, so the caller keeps the `=` / `$in` lowering
+ * for it, as before.
  */
 function buildJsonColumnMemberClause(
-  widget: Pick<DashboardWidgetSchema, 'id'>,
-  def: DashboardFilterDef,
   field: string,
   value: unknown,
-  operators: readonly string[],
 ): Record<string, unknown> | undefined {
-  if (!operators.includes('contains')) {
-    if (typeof console !== 'undefined') {
-      console.warn(
-        `[dashboard-filters] skipping filter "${def.name}" on widget "${widget.id ?? '?'}": ` +
-          `field "${field}" holds a structured value that a ${def.type} filter cannot match ` +
-          `(it takes only ${operators.join(' / ')}) — bind the filter to another field, ` +
-          `or opt this widget out with filterBindings: { "${def.name}": false }`,
-      );
-    }
-    return undefined;
-  }
   const members = (Array.isArray(value) ? value : [value]).filter(
     (m) => m !== undefined && m !== null && m !== '',
   );
@@ -835,13 +821,10 @@ export function buildWidgetScopedFilter(
       }
       continue;
     }
-    if (isMemberFilter(def) && jsonColumnOperators) {
-      const operators = jsonColumnOperators(field);
-      if (operators) {
-        const clause = buildJsonColumnMemberClause(widget, def, field, value, operators);
-        if (clause) conditions.push(clause);
-        continue;
-      }
+    if (isMemberFilter(def) && jsonColumnOperators?.(field)?.includes('contains')) {
+      const clause = buildJsonColumnMemberClause(field, value);
+      if (clause) conditions.push(clause);
+      continue;
     }
     const condition = buildFilterCondition(def, value);
     if (condition === undefined) continue;
