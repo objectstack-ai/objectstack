@@ -19,6 +19,7 @@ import {
   errorCodeFields,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
+import { composeProviderForDeclarations } from '../../utils/schema-migration-plugins.js';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy, JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 import { absentTableReads } from '../../utils/absent-table-reads.js';
@@ -187,7 +188,7 @@ export default class MigrateListPreferences extends Command {
 
     if (!json) printHeader('Migrate · list-preferences');
 
-    const refuse = async (error: string, message: string, extra: Record<string, unknown> = {}): Promise<void> => {
+    const refuse = async (error: string, message: string, extra: object = {}): Promise<void> => {
       if (json) await emitJson({ error, message, ...extra }, 0, { compact: true });
       else printError(message);
       this.exit(1);
@@ -256,11 +257,16 @@ export default class MigrateListPreferences extends Command {
 
     let stack;
     try {
-      // The dry run boots READ-ONLY, the boot `os migrate plan` takes: no
-      // schema DDL, no artifact seed, no sqlite file brought into existence.
+      // `sys_user_preference` is plugin-auth's: its identity objects are
+      // composed for their declarations only (no auth manager, nothing
+      // started), as `os user set-password` composes them. The dry run boots
+      // READ-ONLY, the boot `os migrate plan` takes: no schema DDL, no
+      // artifact seed, no sqlite file brought into existence.
+      const { createIdentityObjectsPlugin } = await import('@objectstack/plugin-auth');
       stack = await bootSchemaStack({
         jsonOutput: json,
         databaseUrl: flags['database-url'],
+        extraPlugins: [composeProviderForDeclarations(createIdentityObjectsPlugin())],
         ...(apply ? {} : { deferSchemaDdl: true, readOnlyProbe: true }),
       });
     } catch (error: any) {

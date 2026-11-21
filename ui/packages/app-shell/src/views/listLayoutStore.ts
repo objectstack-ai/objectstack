@@ -13,7 +13,8 @@
  *
  * ## Where it is kept
  *
- * One localStorage entry per reader and object, `list-layout:<user>:<object>`:
+ * One localStorage entry per signed-in reader and object,
+ * `list-layout:<user id>:<object>`, holding these three parts and nothing else:
  *
  * ```json
  * { "viewOrder": ["<view id>", …],
@@ -25,6 +26,9 @@
  * `viewOrder:*`) are removed once per page load and never read: what they
  * held is not carried over, so every list opens on its view's own layout
  * until the reader changes it again.
+ *
+ * With no signed-in reader there is no entry: nothing is read or written, and
+ * the list opens on its view's own layout.
  *
  * A sign-out clears this browser's storage, these entries with it
  * (`@object-ui/auth`'s signed-out purge).
@@ -66,9 +70,13 @@ export interface ListViewLayoutPatch {
 /** The localStorage key family this module owns. */
 export const LIST_LAYOUT_STORAGE_PREFIX = 'list-layout';
 
-/** The localStorage key of one reader's layout for one object. */
-export function listLayoutStorageKey(userId: string | null | undefined, objectName: string): string {
-  return `${LIST_LAYOUT_STORAGE_PREFIX}:${userId || 'anon'}:${objectName}`;
+/**
+ * The localStorage key of one reader's layout for one object; `null` with no
+ * signed-in reader or no object, which keeps no entry.
+ */
+export function listLayoutStorageKey(userId: string | null | undefined, objectName: string): string | null {
+  if (!userId || !objectName) return null;
+  return `${LIST_LAYOUT_STORAGE_PREFIX}:${userId}:${objectName}`;
 }
 
 /**
@@ -206,9 +214,10 @@ function clearRetiredListStateKeysOnce(): void {
 /** This browser's layout for the reader and object; `{}` when there is none. */
 export function readListLayout(userId: string | null | undefined, objectName: string): ObjectListLayout {
   const store = storage();
-  if (!objectName || !store) return {};
+  const key = listLayoutStorageKey(userId, objectName);
+  if (!key || !store) return {};
   try {
-    const raw = store.getItem(listLayoutStorageKey(userId, objectName));
+    const raw = store.getItem(key);
     return raw == null ? {} : sanitizeObjectListLayout(JSON.parse(raw));
   } catch {
     return {};
@@ -221,7 +230,7 @@ const snapshots = new Map<string, { raw: string | null; value: ObjectListLayout 
 const listeners = new Set<() => void>();
 
 function snapshotOf(key: string): ObjectListLayout {
-  let raw: string | null = null;
+  let raw: string | null;
   try {
     raw = storage()?.getItem(key) ?? null;
   } catch {
@@ -248,8 +257,8 @@ export function writeListLayout(
   state: ObjectListLayout,
 ): void {
   const store = storage();
-  if (!objectName || !store) return;
   const key = listLayoutStorageKey(userId, objectName);
+  if (!key || !store) return;
   try {
     if (!state.viewOrder && !state.perView) store.removeItem(key);
     else store.setItem(key, JSON.stringify(state));
@@ -283,7 +292,7 @@ export interface ObjectListLayoutHandle {
   patchView(viewId: string, patch: ListViewLayoutPatch): void;
 }
 
-/** The signed-in reader's list layout for one object, in this browser. */
+/** The signed-in reader's list layout for one object, in this browser; `{}` and no writes while nobody is signed in. */
 export function useObjectListLayout(objectName: string | undefined): ObjectListLayoutHandle {
   clearRetiredListStateKeysOnce();
   const { user } = useAuth();
@@ -292,13 +301,13 @@ export function useObjectListLayout(objectName: string | undefined): ObjectListL
   const key = listLayoutStorageKey(userId, name);
   const layout = useSyncExternalStore(
     subscribe,
-    () => (name ? snapshotOf(key) : EMPTY),
+    () => (key ? snapshotOf(key) : EMPTY),
     () => EMPTY,
   );
 
   const update = useCallback(
     (fn: (prev: ObjectListLayout) => ObjectListLayout) => {
-      if (!name) return;
+      if (!listLayoutStorageKey(userId, name)) return;
       const prev = readListLayout(userId, name);
       const next = fn(prev);
       if (JSON.stringify(next) === JSON.stringify(prev)) return;

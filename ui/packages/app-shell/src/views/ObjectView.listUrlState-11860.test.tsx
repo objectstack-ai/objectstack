@@ -98,9 +98,7 @@ import '@objectstack/lint';
 // opened with is read (objectui#11860's grouping pins below).
 import '@object-ui/plugin-grid';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
-import { buildListFilterKey } from './listFilterStorage';
 import { LIST_FILTER_PARAM, LIST_GROUP_PARAM, LIST_SEARCH_PARAM, LIST_SORT_PARAM, withoutListStateParams } from './userFilterUrlState';
-import { localListStateKey } from '../context/ListPreferencesProvider';
 import { listDraftScope, patchListDraft, resetListDraftStoreForTests, type ListDraftPatch } from './listDraftStore';
 import { acceptStoredFilters, acceptStoredSort } from './objectViewListUrlState';
 import { toast } from 'sonner';
@@ -485,10 +483,10 @@ function storeViewPreference(viewId: string, pref: { sort?: unknown; filters?: u
 
 describe('objectstack#35955 — state an earlier console stored for the reader no longer opens the list', () => {
   it('a stored sort and filter, in the server row\'s cache or the older per-browser key, are not applied', async () => {
-    localStorage.setItem(localListStateKey('u1', OBJ), JSON.stringify({
+    localStorage.setItem(`list-state:u1:${OBJ}`, JSON.stringify({
       perView: { all: { sort: [{ field: 'due_date', order: 'desc' }], filters: { id: 'root', logic: 'and', conditions: [{ id: 'p', field: 'priority', operator: 'equals', value: 'urgent' }] } } },
     }));
-    localStorage.setItem(buildListFilterKey('u1', OBJ, 'all')!, JSON.stringify({ search: 'mine' }));
+    localStorage.setItem(`list-filters:u1:${OBJ}:all`, JSON.stringify({ search: 'mine' }));
     const host = await mountHost([`${VIEW}/all`]);
     const q = lastQuery();
     expect(filterOf(q)).not.toContain('urgent');

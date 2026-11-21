@@ -718,7 +718,7 @@ export const SysUserDetailPage: Page = {
               },
               // ── Preferences ───────────────────────────────────────────
               // [#23803] This user's `sys_user_preference` rows — the console's
-              // per-user UI state (`ui.recent`, `ui.favorites`, `ui.list.<object>`
+              // per-user UI state (`ui.recent`, `ui.favorites`, `ui.record.<object>`
               // …). Setup's "User Preferences" menu entry, which listed every
               // user's rows, left the menu; this tab is where an administrator
               // reaches them now, from the user they belong to.

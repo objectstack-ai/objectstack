@@ -634,12 +634,11 @@ whose menu also holds Discard on a narrow list or a phone).
 - The draft survives opening a record and coming back. Opening another view or object,
   or reloading the list's page, drops it, so that reload opens the view as it is declared.
 - Column widths, the row height (density) and the views' order are not a draft: they are
-  remembered in this browser only, per user and object (localStorage
-  `list-layout:<user>:<object>`). Nothing is sent to the server, another browser or device
+  remembered in this browser only, per signed-in user and object (localStorage
+  `list-layout:<user id>:<object>`). Nothing is sent to the server, another browser or device
   opens the view's own layout, and signing out clears them with the rest of this browser's
   Console state. Earlier Consoles kept them, with a stored sort and filters, in the user's
-  `sys_user_preference` row `ui.list.<object>`; nothing reads that row now, and
-  `os migrate list-preferences` removes such rows.
+  `sys_user_preference` row `ui.list.<object>`; nothing reads that row now.
 - A link carrying list state (`uf_*` parameters) applies it as a draft, whether it opens in a
   new tab or in-app (an AI answer's list link, after a reload of the chat page too).
 - When a session ends, the sign-in page's return link keeps the list's path but never its

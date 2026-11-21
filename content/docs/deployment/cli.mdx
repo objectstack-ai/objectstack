@@ -1541,6 +1541,7 @@ where the data lives.
 | `os migrate record-currency-codes` | Write the currency code you give into the rows of a record-mode currency field that hold an amount and no code, the rows stored before the field was switched to `currencyMode: 'record'`. The code is never derived. No flag; idempotent. See [below](#os-migrate-record-currency-codes) |
 | `os migrate recompute-home-amounts` | Recompute the home-currency amounts a record-mode currency field stores, at the exchange rates in force now, after a rate is corrected or added. Reports the rows that change and lists, without writing, the rows it cannot convert. No flag; idempotent. See [below](#os-migrate-recompute-home-amounts) |
 | `os migrate comment-reactions` | Carry the emoji reactions a 17.x deployment stored in the retired `sys_comment.reactions` column into `sys_comment_reaction` records, list every stored value that does not read, and record the verified run that lets `os migrate apply --allow-destructive` drop the column |
+| `os migrate list-preferences` | Remove the per-user list preference rows (`sys_user_preference` keys starting with `ui.list.`) that the Console no longer reads. Dry run by default; `--apply` deletes only with `--export`, which writes every row it deletes to a file first. No flag. See [below](#os-migrate-list-preferences) |
 | `os migrate organization-ownership` | The v18 ownership ceremony (ADR-0131 D10): write a plan of what each table's rows will become, then `--apply` that reviewed plan. It upgrades a database 17.x or an 18.0 pre-release (`18.0.0-next.*`) created; a v18 server refuses to start on one until it has run. See [below](#os-migrate-organization-ownership) |
 | `os migrate activity-changed-fields` | Stamp the two read-rule columns (`changed_fields`, `milestone_key`) on the `sys_activity` rows written before they existed. Until it runs, those rows are withheld from every reader but the system, so run it at once after upgrading. No flag; idempotent |
 | `os migrate audit-mail-bodies` | Mask the mail bodies (`body_text`, `body_html`) that `sys_audit_log` and `sys_activity` copies of `sys_email` / `sys_identity_email` rows still hold in clear, written before the audit writer masked them. Covers the `archive` datasource `sys_audit_log` archives to as well. Reports counts only. No flag; idempotent. See [below](#os-migrate-audit-mail-bodies) |
@@ -1565,7 +1566,7 @@ A read-only data command does not read a table it found missing, since that tabl
 holds nothing, and answers with empty work and exit 0. `os migrate value-shapes` is
 clean over zero records and names the objects it did not read. `os migrate
 recorded-by` has nothing to convert and `os migrate resume` no interrupted runs.
-`os migrate meta --stored` has no stored metadata to examine, `os migrate
+`os migrate meta --stored` has no stored metadata to examine, `os migrate list-preferences` no preference row to report, `os migrate
 audit-metadata-bodies`, `os migrate audit-mail-bodies`, `os migrate audit-key-material` and `os migrate audit-side-copies` no audit copy to rewrite, and
 `os migrate account-issuer` no account to collide. `os secret orphans`, `os secret rewrap` and `os storage orphans`
 report no secret and no file. A read the command cannot avoid and that fails for any
@@ -2062,6 +2063,41 @@ A run that lists an unreadable value or fails a write exits `1`, and so does an
 `--apply` run whose read-back finds anything unconverted.
 A database created on v18 never had the column: the run finds nothing, and
 there is no drop to wait for.
+
+#### `os migrate list-preferences`
+
+The Console used to keep one `sys_user_preference` row per user and object, keyed
+`ui.list.<object>`, holding that user's state for the object's lists: the order of
+the view tabs and, per view, a sort, filters, a column layout, a row height and
+hidden or added columns. It keeps none of that on the server any more. A change a
+reader makes on a list is a draft that they save into a view or discard, and the
+column widths, the row height and the tab order are kept in the reader's own
+browser. Nothing reads the old rows, so leaving them does no harm. This command
+removes them. What they held is not carried over: every list opens on its view's
+own layout until the reader changes it again.
+
+```bash
+os migrate list-preferences                     # Dry run: how many rows, for how many users and which objects
+os migrate list-preferences --apply --export ./list-preferences-backup.json
+os migrate list-preferences --apply --export ./list-preferences-backup.json --yes --json   # CI / scripts
+```
+
+**Options:**
+- `--apply` — delete the listed rows (default off: a read-only dry run that writes nothing)
+- `--export <path>` — **mandatory with `--apply`**: every row the run deletes, as stored, written
+  owner-only and read back before the first delete; refuses to overwrite an existing file
+- `-y, --yes` — skip the confirmation prompt
+- `--force` — apply even when another process is using the SQLite file
+- `--database-url <url>`, `--json`
+
+Only keys that start with `ui.list.` are touched. Every other preference row,
+`ui.record.<object>` included, stays as it is. The rows are deleted by id, the ones
+the export holds and no others, and none of them enters the recycle bin. The run then
+reads the prefix again. If a row remains, or was written since by a Console that has
+not been upgraded, it is reported and the run exits `1`; run it again once every
+Console is upgraded. A run that finds nothing writes no export and exits `0`. It is
+never run for you: nothing on any boot, upgrade, migrate or lifecycle path invokes it,
+and it records no `sys_migration` verdict, because nothing waits for one.
 
 #### `os migrate activity-changed-fields`
 

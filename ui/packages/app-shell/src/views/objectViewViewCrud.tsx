@@ -437,9 +437,10 @@ export function useObjectViewViewCrud({
      * sequence, then a stored `sortOrder` — stays every user's default, and
      * the view editor is where an author changes it.
      */
+    const setViewOrder = listLayout.setViewOrder;
     const handleReorderViews = useCallback((orderedIds: string[]) => {
-        listLayout.setViewOrder(orderedIds);
-    }, [listLayout.setViewOrder]);
+        setViewOrder(orderedIds);
+    }, [setViewOrder]);
 
     const handleConfigView = useCallback((vid: string) => {
         // System (metadata-defined) views are read-only — opening the

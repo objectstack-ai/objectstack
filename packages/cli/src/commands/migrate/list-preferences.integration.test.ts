@@ -14,6 +14,9 @@ import MigrateListPreferences from './list-preferences.js';
 // reach through dynamic `import()`s at MODULE LOAD, not inside a case.
 import '@objectstack/runtime';
 import '@objectstack/objectql';
+import '@objectstack/plugin-auth';
+import '@objectstack/plugin-security';
+import '@objectstack/plugin-audit';
 
 /**
  * `os migrate list-preferences` against a real SQLite database: the step that
@@ -23,7 +26,8 @@ import '@objectstack/objectql';
  * ## The database
  *
  * The schema this version creates (`os migrate apply --yes` over an empty
- * file), with the rows an earlier Console left: three `ui.list.*` rows for two
+ * file, the composition `os serve` mounts with an auth secret, so the auth
+ * family's `sys_user_preference` is among it), with the rows an earlier Console left: three `ui.list.*` rows for two
  * users, and two CONTROLS that are never touched — another family's row
  * (`ui.record.account`) and a key that only looks alike (`ui.lists`).
  *
@@ -40,6 +44,7 @@ import '@objectstack/objectql';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI_ROOT = resolve(HERE, '..', '..', '..');
 const CASE_TIMEOUT_MS = 240_000;
+const SECRET = 'os35955-integration-secret-at-least-32-chars';
 
 const RETIRED = [
   { id: 'pref_l1', user_id: 'u1', key: 'ui.list.account', value: '{"viewOrder":["account.all"]}' },
@@ -145,12 +150,16 @@ beforeAll(async () => {
     [
       'export default {',
       "  manifest: { id: 'com.example.os35955listprefs', name: 'list prefs', version: '0.0.0', type: 'app' },",
+      "  requires: ['auth'],",
       "  objects: [{ name: 'os35955_thing', fields: { title: { type: 'text' } } }],",
       '};',
       '',
     ].join('\n'),
   );
   process.env.OS_ARTIFACT_PATH = join(dir, 'dist', 'objectstack.json');
+  // `os serve` composes the auth family, whose objects hold the preference
+  // rows, only when an auth secret resolves.
+  process.env.OS_AUTH_SECRET = SECRET;
   process.env.NODE_ENV = 'production';
   process.env.OS_TELEMETRY_DB = '0';
   dbFile = join(dir, 'upgraded.db');
