@@ -2,8 +2,8 @@
   "number": 35939,
   "kind": "issue",
   "title": "plugin-auth: a kernel without SSO answers 503 and logs an error on /sso/register, /sign-in/sso and /sso/callback/* (was 404) since #35781",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,23 @@
     "bug",
     "domain:server",
     "finding",
-    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "hotlong"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-20T20:48:19Z",
-  "updated_at": "2026-11-20T21:29:18Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T13:17:41Z",
+  "closed_at": "2026-11-21T13:15:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35939",
   "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\n**Defect.** Since PR #35781 (`ecd4b2b1a58`), when a kernel is built with SSO off (`enabled.sso` false), these paths answer `503 SERVICE_UNAVAILABLE` and log an error at error level:\n- `POST /api/v1/auth/sso/register`\n- `/sign-in/sso`\n- `/sso/callback/*`\n\nThe 503 message is \"SSO is unavailable: this server cannot judge its reads of an identity provider\". Before #35781 these paths answered the vendor's 404 with no log line.\n\n**Cause, read on `origin/main`:**\n- `packages/plugins/plugin-auth/src/auth-manager-request-routing.ts`, around line 237, wraps the vendor handler in `runSsoDiscoveryEgress` whenever `isSsoDiscoveryEgressPath(path)` holds. That is a check on the path alone.\n- `ssoProviderReadsObserverPlugin` is pushed only inside `if (enabled.sso)`, in `auth-manager-plugin-list.ts` around lines 787-793.\n- The result: on a kernel without SSO the adapter is never observed, so `runSsoDiscoveryEgress` refuses with 503 and logs an error (`auth-manager.ts`, around lines 4403-4425).\n\n**Reach.** Every deployment that does not mount SSO, which is the default without `OS_SSO_ENABLED`. Each request to these paths gets a 503 where a 404 belongs, plus one error-log line. The behaviour fails closed, so access is never widened. This is not a security finding.\n\n**Measured on cloud.** In cloud pin round cloud#4920 (draft PR cloud#4921, pin `dea68e93c68d`), `packages/objectos-runtime/src/environment-external-idp-sso.e2e.test.ts` goes red on 3 of 9 cases (`expected 503 to be 404`) for the free, team and business→team plans. At pin `de25d585bbfa` the message has 0 hits in the plugin-auth dist.\n\n**Fix shape.** Open the discovery-egress scope only when SSO is mounted, or have the guard check whether the observer was registered. An unmounted kernel then answers the vendor's 404 again, with no error log. Add a test: SSO off, `POST /sso/register` answers 404 and logs nothing at error level. Ablation: put the path-only condition back and that test goes red.\n\n**Why it matters to cloud.** Cloud's pin round cloud#4920 cannot land past `ecd4b2b1a58` without carrying this red. Cloud#4920 blocks cloud#4918 (p1), so the p1 grade inherits. Per the standing rule 「平台问题在平台修」, cloud does not adapt its assertions to the 503.\n\nRe-check: `git grep -n \"isSsoDiscoveryEgressPath(this.betterAuthEndpointPath\" -- packages/plugins/plugin-auth/src/auth-manager-request-routing.ts` still shows the path-only condition ⇒ the defect is present."

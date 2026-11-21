@@ -1,0 +1,33 @@
+{
+  "number": 36081,
+  "kind": "issue",
+  "title": "spec: an open self-hosted restriction profile always lists approval / approval_revise, so os validate --target cannot tell whether the kernel runs the approvals plugin",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:server",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-21T12:40:44Z",
+  "updated_at": "2026-11-21T12:55:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36081",
+  "body": "repo:objectstack#4 · os-elon-musk · session_016WV4d1k1GRsQbF3vCPKxhz\n\nFiling gate: ① (seat 4 contract review 7062697033 on PR #35887, finding S1, route (b) taken by area a4-C) · Source: fleet · Area: a4-C · Seat: repo:objectstack#4\n\n## 维护者速读\n- **问题：** 自托管服务器公开的“环境限制说明”永远把审批节点（approval / approval_revise）列为可用，即使这台服务器没装审批插件。所以 `os validate --target <自托管地址>` 会放行带审批节点的流程，但运行时才发现没有执行器。\n- **要做：** 二选一：要么规范改口（开放运行时的说明只列完整词表，不代表装了哪些插件）；要么让说明按服务器实际装的插件列出（这会多公开一项“是否装了审批插件”，需要另行裁定）。\n- **不做会怎样：** 自托管环境上，审批流程的这一项预检查永远通过，问题要到运行时才暴露。云端不受影响。\n- **你要做的：** 无，先由 spec 车道判断是否需要裁定。\n\n## What\n- `packages/spec/src/system/restriction-profile.zod.ts` puts `approval` / `approval_revise` in the profile vocabulary so that a profile states whether an environment runs the approvals plugin. Its reader rule reads: \"an environment that runs the approvals plugin lists them, and one that does not leaves them out\".\n- The self-hosted route `GET {basePath}/discovery/restriction-profile` (PR #35887, ADR-0138 D2 amendment under ruling A on #35848) answers a **constant** open profile with `nodeTypes = [...RestrictionProfileNodeType.options]` on every kernel. `@objectstack/rest` does not know whether the approvals plugin is composed (`approvals` is a requested capability, `packages/core/src/capability-providers.ts`).\n- At the consumer: the CLI's `judgeNodeType` judges the two types by this list alone. So against a self-hosted kernel without the plugin, `os validate --target` passes a flow with an `approval` node that fails at run time (`No executor registered for node type`, `service-automation`).\n- PR #35887 keeps the body constant and states that in the ADR note and the handler docblock (route (b) of S1). Deriving the list per kernel adds a second anonymous fact that ruling A does not cover. On the environment-scoped twin it would also make an anonymous request resolve an environment kernel by id.\n\n## Done when\nOne of these is decided and done:\n- **(b-spec)** The spec reader rule and the schema docs say an open self-hosted profile lists the whole vocabulary and does not state plugin composition. Optionally, the CLI's `--target` report notes that approval nodes are not checked against a self-hosted target.\n- **(a)** A maintainer ruling admits \"whether this kernel runs the approvals plugin\" as an anonymous fact. The route then derives the two types from the serving kernel's registered node types, with ADR-0138 D2 re-amended (Tier H).\n\n## Reader\nThe spec lane (`packages/spec/src/system/restriction-profile.zod.ts`), with the CLI (`packages/cli/src/utils/restriction-profile.ts`) if (b-spec) adds a note. If (a) is wanted, it goes to the maintainer through the seat first.\n\n## Dedupe\n`restriction profile approval nodeTypes` → 0. `RestrictionProfileNodeType approvals plugin` → 0. `restriction-profile approval_revise` → 6, all closed: #31344 and #31354 (they added the pair to the vocabulary for hosted Team engines), #31156 (the schema). None covers the open self-hosted route.\n\nGrade: `area:ai · bug (contract vs. served answer) · fleet-sourced · reach: self-hosted developers using os validate --target with approval flows on a kernel without the approvals plugin · evidence: read` → p3.\n"
+}

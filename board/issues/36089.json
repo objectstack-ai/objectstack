@@ -1,0 +1,32 @@
+{
+  "number": 36089,
+  "kind": "pull_request",
+  "title": "docs(skills): objects carry a colour from the nine-name palette; an object nav item draws its colour tile",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-21T13:06:04Z",
+  "updated_at": "2026-11-21T13:43:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36089",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4Uu9fyvLMxpnFDc8znm1Y6Esq)_\n\nrepo:objectstack#1 · os-sales · session_01L6bhgXP8uoLm9Q7zVHhYVY\n\nPart of #35985\nClause-②: no\nNo spec change and no export: the diff is skills text plus its changeset.\nMetadata-protocol: none\nSkills-docs: this PR (`skills/objectstack-data/SKILL.md`, `skills/objectstack-ui/rules/navigation.md`)\n\n## 维护者速读\n\n- AI 和开发者读技能说明时，会看到对象有一个 `color` 属性：9 个颜色名（gray、blue、teal、green、amber、orange、red、pink、purple），不写就是灰色方块，并被要求「每个对象都给一个，同一应用里尽量不重复」。命令行 `os explain object` 列出颜色另开小卡 #36099。\n- 这是对象颜色卡 #35985 的第 3 步：前两步已经把颜色加进对象定义、并换好了界面上所有对象图标。\n- 只改说明文字，不动运行时行为，撤回即恢复。\n- 还没闭环的一处：让 AI 新建应用时自动带上颜色，要 AI 服务把蓝图的 `color` 像 `icon` 一样传给对象，那部分代码不在本仓库（见下）。\n\n## What changes\n\n| File | Change |\n|---|---|\n| `skills/objectstack-data/SKILL.md` | The object example carries `\"color\": \"blue\"`; the optional-properties table gains a `color` row: the nine names, `gray` as the default, no hex, the console draws `icon` white on it, \"give every object one; avoid repeats in one app\". |\n| `skills/objectstack-ui/rules/navigation.md` | One sentence after the keys-by-type list: an `object` item's icon sits on its object's `color` tile. Paid for in the same file by trimming two restatements (the run-modes lead-in, which the heading already says, and the \"view authored for a one-off slice\" aside, which the `filters` bullet already says). |\n| `.changeset/35985-object-color-skills.md` | `@objectstack/skills` patch. |\n\nThe sentences are true of `main` 33d01694: the palette is `OBJECT_COLORS` in `packages/spec/src/data/object-icon.ts` (a non-palette value is refused by `z.enum`), an uncoloured object draws gray (`ObjectIconTile`), and an `object` navigation item draws `ObjectIconTile` with the item's `icon` (else the object's) and the object's colour (`ui/packages/layout/src/NavigationRenderer.tsx` `resolveNavItemIcon` + `resolveTargetColor`); dashboards, pages and links keep the line icon.\n\n## Open ends (named, not in this PR)\n\n- **PR 1 L2 N7:** `os explain object` listing `color` (`packages/cli/src/commands/explain.ts`) is its own card, #36099, so this PR stays skills-only.\n- **PR 2 L2 N1, unchanged from before:** a coloured object with no `icon` draws no tile on four hosts: the record row on the record page and in the drawer, the grid pointer cell, and home recents. The skills text already asks for `icon` on every object (31/31 in the reference apps), so authored apps do not meet it.\n- **AI service passthrough:** `BlueprintObjectSchema.color` shares the object's leaf (PR 1), but the step that turns a blueprint object into an object is not in this repository (no reader of `BlueprintObject*` outside `packages/spec`). The acceptance line \"ask the AI for an app with three new objects, three colours\" waits on the AI service passing `color` through as it does `icon`. The seat shuts the card by hand once the maintainer has seen this open end.\n\n## Verification\n\n- `node scripts/check-skills-token-ratchet.mjs`: 60 authored files within ceilings; `objectstack-data/SKILL.md` 6703 / 6710, `objectstack-ui/rules/navigation.md` 2563 / 2564.\n- `check-skill-links`, `check-skill-identifier-liveness`, `check-skill-top-level-keys`, `check-skill-frame-sync`, `check-skill-frame-freshness`, `check-skill-compatibility-version`: all OK.\n- Skill descriptions are unchanged, so the `evals/triggers.json` routing is not touched.\n- `node scripts/pm/check-governed-merges.mjs --pr 36089` on head 788cf668: see the seat's record.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgXP8uoLm9Q7zVHhYVY\n\n<!-- signed: repo:objectstack#1 · os-sales · session_01L6bhgXP8uoLm9Q7zVHhYVY -->\n"
+}

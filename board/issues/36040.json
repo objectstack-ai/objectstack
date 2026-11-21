@@ -1,0 +1,36 @@
+{
+  "number": 36040,
+  "kind": "pull_request",
+  "title": "feat(i18n): the sign-in page and the in-app language menu offer one list, every interface language",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-21T10:19:35Z",
+  "updated_at": "2026-11-21T11:11:36Z",
+  "closed_at": "2026-11-21T11:11:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-21T11:11:34Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36040",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4Uu1qXts4kjSdHqiSiLVNTeaY)_\n\nrepo:objectstack#1 · os-sales · session_01L6bhgTB7jMdUGcVwaMo3CH\n\nFixes #35425\n\nPart of epic #34571 (area b1-CX). Maintainer ruling 7056785432, option A: 「两处都列全部 11 种」. Flow: dev-thread rule (the card thread builds itself; L1 at L1-a, the seat runs the declaration L2).\n\n## What changes\n\n- **`@object-ui/i18n` provider.** `offerableLanguages` is now every platform locale table language (11 today), whatever the app ships, and never `null`. A new context field, `appContentLanguages`, carries the table languages the app's own `/api/v1/i18n/locales` list covers, or `null` when not known (in flight, no `loadLocales` wiring, signed out, a failed read, or an answer naming no table language). The `provisional` self-heal still judges a stored value against the table, so an out-of-table code (`th`) is still reverted and purged.\n- **`LocaleSwitcher`** (the sign-in page footer and the account menu are this one component) lists all 11. When the app list is known and leaves a language out, that row carries one muted line: `console.localeSwitcher.appContentDefault`, \"App content shows in the default language\" / 「应用内容显示为默认语言」 (says \"default language\", not \"English\", per the ruling). Signed out nothing is read about the app, so the sign-in page lists the 11 with no line. The menu's width is bounded (`max-w-[min(20rem,calc(100vw-2rem))]`) so a long hint wraps.\n- **Profile page language card** offers the same 11 and shows the same line under the picker when the chosen language is outside `appContentLanguages` (never for \"Use the deployment default\", never for a stored out-of-table tag).\n- **New locale key** `console.localeSwitcher.appContentDefault` in the ten hand-written packs; `zh-Hant` regenerated with `gen:zh-hant`.\n- Not changed: `GET /api/v1/i18n/locales`, the language packs, the organisation default-language setting (it does not read `offerableLanguages`).\n\n## Why\n\nThe account menu offered the platform table ∩ the app's declared locales (four on HotCRM), while the sign-in page, which has no session to ask the app with, offered all eleven. A language picked on the sign-in page (German, Korean) was then missing from the menu after sign-in. The ruling loosens ruling F of #29349 (implemented by #30514): one list everywhere, and the menu hint F rejected is now wanted.\n\n## Verification\n\n- `@object-ui/i18n` full suite: 105 files, 1962 passed / 13 skipped. `provider-app-locale-restore` rewritten: offered = the table (also while in flight and unwired); `appContentLanguages` = table ∩ app list in app order, region variants read through the table, `null` for `[]`, `['th']`, in flight and unwired; a stored `de` the app does not ship is kept; a stored `th` is still reverted.\n- `LocaleSwitcher.appLocales` rewritten (12 cases): 11 rows for a four-language app with exactly 7 hints; a sign-in-page `de` stays ticked after the app list lands and its hint reads in German; no hint while unknown (in flight, `[]`, failed, `['th']`); `th` never offered; stored spellings one row each, unmarked.\n- Console `ProfilePage*`, `i18nAfterSignIn-12034`, `loadLocales*`, `AuthFooter`, `LoginPage` suites: 18 files, 139 + 3 new `ProfilePage.language` cases passed (hint on an unshipped choice, none for the default, none while unknown, none for `th`).\n- `type-check` for `@object-ui/i18n` and `@object-ui/app-shell`: clean. eslint on touched files: 0 errors.\n- Browser, `pnpm dev:crm -- --fresh` (app-crm declares `en` + `zh-CN`) + console on Vite, 1280 and 375, account with no saved language: sign-in menu lists 11 and no hint → pick Deutsch → sign in → interface still German, account menu lists 11 with Deutsch ticked and the German hint on every row but English / 简体中文 → switch to 한국어 and 简体中文, hint follows the interface language. Screenshots in the project's evidence folder (`build-seat1/35425/`).\n- `overlap-check.mjs` clean before each push (shares the locale packs with #36038, #36037, #36026, #36024: all merge cleanly).\n\nAcceptance notes (behaviour this PR does not change):\n- A person who already has a saved language (`sys_user.locale`) gets that language after sign-in rather than the sign-in-page pick: the pick is saved only when they have none (#30399). The picked language is still listed and selectable in the menu.\n- At 375 px in German the account menu itself is wider than the screen (long German rows), so its language button sits off-screen and the language submenu opens partly clipped. The account menu's content is not touched here; English and Chinese fit.\n\nClause-②: yes (widening)\nMetadata-protocol: none\n\n`@object-ui/i18n` adds `appContentLanguages` to the i18n context and the locale key `console.localeSwitcher.appContentDefault`; `offerableLanguages` loses `| null` (an output that is never `null` now); nothing removed.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgTB7jMdUGcVwaMo3CH)_\n"
+}

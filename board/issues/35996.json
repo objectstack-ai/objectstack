@@ -14,18 +14,20 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-21T05:01:31Z",
-  "updated_at": "2026-11-21T05:50:55Z",
+  "updated_at": "2026-11-21T12:35:11Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35996",
   "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nSplit from #35797 by the seat (PR #35993's acceptance notes list both items; that PR stays on its three widgets). Same class as #35797, under the #35683 inline-edit work.\n\n## What is left\n\n1. **Three more Enter handlers have no composition guard.** Read only, not reproduced, on PR #35993's branch:\n   - `ui/packages/fields/src/widgets/GridField.tsx`: the cell `onKeyDown` moves to the next row on Enter.\n   - `ui/packages/fields/src/widgets/DatePickerField.tsx`: Enter commits the typed date text.\n   - `RecordPickerDialog`: Enter in the page-jump box jumps.\n2. **Two copies of one predicate.** The grid's `isImeKey` (`@object-ui/components`, from #35747) and `ui/packages/fields/src/widgets/imeKey.ts` (from #35993) are byte-identical, and nothing keeps them so.\n\n## Why\n\nA Chinese, Japanese or Korean user who presses Enter to pick a word from the input method also moves the grid field to the next row, commits a half-typed date, or jumps the picker's page. Two hand-kept copies of the guard drift apart the next time one is fixed.\n\n## To do\n\n1. Reproduce each of the three in Chromium with a real composition (CDP `Input.imeSetComposition`), then guard the ones that reproduce; say which did not.\n2. Leave one definition of the predicate. Pick its home (an export on the `@object-ui/components` entry, or a lower package both already depend on) and measure `Clause-②` on the built declarations.\n3. Pins per widget with a real composition sequence (compositionstart, keydown Enter with `isComposing: true` and keyCode 229, compositionend), Safari's post-composition 229 Enter pinned.\n\n## Acceptance\n\n- In each reproduced widget, an Enter during a composition does only what the input method does with it.\n- One predicate in the repository; the grid and the field widgets import it.\n\nBlocked-by: #35993.\nReader: the seat's area thread for derived bugs (b1-DB), `domain:ui`."

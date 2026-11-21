@@ -1,0 +1,34 @@
+{
+  "number": 36070,
+  "kind": "issue",
+  "title": "评论（四）小修：点「回复」后光标进回复框；没设头像的显示姓名首字；提到人的选单跟着光标；删除后给提示",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-21T12:18:58Z",
+  "updated_at": "2026-11-21T13:17:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36070",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#36062（专题：评论重做，维护者直派）。第一阶段。⛔ 不是认领。优先级 p2（协调席定的，维护者未指定）。\n\n## 维护者说过的（2026-11-21）\n\n- 「列专题卡，分阶段处理」\n- 「这个专题第一阶段你建议处理哪些功能」\n- 协调席建议第一阶段拆 4 张（电脑评论栏、已解决、手机整页两层、几处小修），并问回复通知要不要提前一起做，维护者：「同意」\n\n本卡和「评论（一）」互不依赖，在现在的界面上就能改，可以先做。评论栏做出来之后这些行为要带过去。\n\n## 现状（主干 `c00be39b74`，本机环境浏览器实测，1312 宽）\n\n- **回复**：点评论上的「回复」，回复框出现，但光标不在里面，页面焦点停在「回复」按钮上（查了页面当前焦点）。协调席用自动操作直接打字，文字进了上面的主输入框，发成了一条独立评论而不是回复。原评论已有回复且收起时，点「回复」看不到回复框。\n- **头像**：设了头像的显示 16 大小的头像；没设的显示一个评论小图标（`ui/packages/plugin-detail/src/RecordActivityTimeline.tsx:870`）。\n- **提到人**：输入 @ 弹出的人员选单在输入框左上角，不在光标旁边。\n- **删除**：确认后评论消失，没有任何提示。\n\n![现状：点「回复」后回复框出现在评论下面，但光标不在里面；评论前面是小图标不是头像](https://github.com/objectstack-ai/objectstack/blob/c74fdb3edc7d145c3a656861c48a94e740301bc0/comments/ours-timeline.jpg?raw=true)\n\n![参照：Attio 每条评论带作者头像，没设头像的显示姓名首字](https://github.com/objectstack-ai/objectstack/blob/c74fdb3edc7d145c3a656861c48a94e740301bc0/comments/attio-thread.jpg?raw=true)\n\n## 要做的\n\n1. 点「回复」后，光标直接在回复框里，可以马上打字。原评论有收起的回复时，先展开回复，再显示回复框并把光标放进去。\n2. 每条评论和回复前面显示作者头像，大小 20；没设头像的显示姓名首字的圆形色块（和别处的人员小块用同一套）。\n3. 提到人的选单出现在光标位置的下方；靠近底部放不下时出现在上方。\n4. 删除评论成功后，给一条提示「评论已删除」。\n\n## 不做的\n\n- 不改评论的位置和结构（「评论（一）」「评论（三）」）。\n- 不改提到人的候选范围和通知。\n\n## 验收\n\n- 发一条评论，点「回复」，不点任何地方直接打字再提交：文字出现在回复框里，提交后它收在原评论下面，显示「1 条回复」；刷新后仍然在原评论下面。\n- 对一条已有 1 条回复且收起的评论点「回复」：回复展开，回复框出现，光标在里面。\n- 没设头像的用户发的评论：前面是姓名首字的圆形色块，不是评论图标。\n- 在输入框中间一行的末尾输入 @：选单贴着光标出现。\n- 删除一条评论：出现「评论已删除」提示。\n- PR 正文附回复和头像的改动前后截图。\n\n## 协调席自己加的（不是维护者原话）\n\n- 第 2 项头像大小 20；第 3 项放不下时出现在上方。\n\n## 没有核对的\n\n- 真人用键盘时，点「回复」后直接打字，文字落在哪里，自动操作测不出来。现状里「进了主输入框」是自动操作的结果；焦点不在回复框是确认的。\n\nReader: `domain:ui` 车道。`ui/packages/plugin-detail/src/ThreadedReplies.tsx`（回复框）、`RecordActivityTimeline.tsx`（`:853` 起回复开合、`:870` 头像）、提到人选单在评论输入框组件里。\n\nDedupe: `评论 头像 首字`、`回复 光标 评论`（objectstack，open）→ 0。\n\n附图补于 2026-11-21T12:24Z。\n"
+}

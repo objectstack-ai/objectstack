@@ -14,18 +14,20 @@
     "area:data",
     "bug",
     "domain:server",
-    "pm:queue",
-    "priority:p2"
+    "pm:dispatched",
+    "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T22:18:18Z",
-  "updated_at": "2026-11-19T22:23:55Z",
+  "updated_at": "2026-11-21T13:24:06Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35667",
   "body": "repo:objectstack#1 · os-sales · session_01L6bhgTyMahdAdhXSzgy2nt\n\nFiling gate: ① product defect · Source: fleet · out-of-scope finding of the #35640 measurement (readings 7023666050, kind K7), filed on the seat's order after its fable review. ⛔ Not a claim.\n\nGrade: left to triage. The seat's review suggests **p2**: a platform fault, not specific to one driver. Reach: measured through `os verify --delete-behaviors` (system door) on `bootStack`.\n\n## Business reason\n\nA delete through the system door (`runAs: 'system'`, which flows, hooks and admin tooling use) of a record that has no `organization_id` fails instead of moving the record to the recycle bin. Such records include those of an object with `tenancy: { enabled: false }`, and any row the mongodb driver wrote, since it does not stamp one. The delete is lost, and the caller gets a database constraint error.\n\n## What happens\n\n`os verify --delete-behaviors` on a fixture whose objects carry no `organization_id` (tenancy disabled) reported 6 system-door faults with `NOT NULL constraint failed: sys_recycle_bin.organization_id`. This happened identically on a `memory` datasource and on a real mongod. The REST-door deletes of the same records held. The fault is the recycle-bin write, which copies the record's `organization_id` into a column that refuses null.\n\n## Expected\n\nA system-door delete of a record with no `organization_id` either lands in the recycle bin with the org the context supplies, or is recorded under a rule the recycle bin states for global records. It never fails on the constraint.\n\n## Done when\n\nA test deletes a `tenancy: { enabled: false }` record through the system door, and the delete succeeds with the record recoverable from the recycle bin (or the stated rule holds), on memory and on a SQL store.\n\nWho acts: the owner of the recycle bin (`sys_recycle_bin`) and the system delete path (triage routes).\nDedupe: `repo:objectstack-ai/objectstack is:issue is:open recycle bin organization_id` (2026-11-19 22:2xZ): no match (#35640, #35488 and #33631 are unrelated)."

@@ -1,0 +1,34 @@
+{
+  "number": 36047,
+  "kind": "issue",
+  "title": "控制台整体观感收齐：字号收成两档、不再用加粗到 600 的字重，控件圆角统一成 8，内容区改白底",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-21T11:16:36Z",
+  "updated_at": "2026-11-21T13:52:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36047",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（专题：控制台核心页面体验，维护者直派）。⛔ 不是认领。优先级 p2（协调席定的，维护者未指定）。\n\n## 维护者说过的（2026-11-21）\n\n- 「已经开发完成的的列表页相关功能和记录详情页，再继续深度详细对照 attio 每一个细节的效果，关于界面美观度和用户体验提出优化改进意见，和我沟通」\n- 协调席给了 12 条对照意见，维护者：「其他你的其他Attio意见， 1  3 4 5 7 8 10 都同意，立卡」（本卡是其中第 1、3、4 条）\n\n## 现状（主干 `c00be39b74`，本机环境浏览器实测，1440 宽，「客户」列表和「销售商机」记录页，量的是计算后的样式）\n\n- **字号和字重混用**。同一页里有 12、13、14 三种字号和 400、500、600 三种字重：列表正文 13，标签 12 且字重 600；记录页页签「概览」13/500，旁边的「跟进记录」14/400；字段标签 12/400，字段值 13/400 和 13/500 都有；「更多详情」「最近动态」13/600，「其他相关」12/500；「编辑」按钮 14/500。`text-[13px]` 在 `ui/packages` 里有 169 处。\n- **圆角不统一**。按钮和工具栏控件圆角 12（`ui/apps/console/src/index.css:406` 的 `--radius: 0.875rem` 一档派生），负责人小块圆角 4，标签全圆。\n- **内容区是灰底**。页面底色 rgb(246,246,249)（`ui/apps/console/src/index.css:410` `--background: 240 24% 97%`），列表的表格透明，直接铺在灰底上，没有白色承载面；记录页同样。\n\n![现状：我们的列表页（灰底、13 号字、圆角 12 的按钮）](https://github.com/objectstack-ai/objectstack/blob/e828d49e0e0c0c1994574e28a3edcb6a8070f658/look/ours-list.jpg?raw=true)\n\n![现状：我们的记录页](https://github.com/objectstack-ai/objectstack/blob/e828d49e0e0c0c1994574e28a3edcb6a8070f658/look/ours-record.jpg?raw=true)\n\n## 参照（Attio，同样 1440 宽实测）\n\n全站正文 14 号、字重 500，只有标签和分区小标题用 12 号；控件 28 高、圆角 8；整页白底，只有侧边栏是浅灰。\n\n![参照：Attio 列表页（白底、单一字号、圆角 8 的控件）](https://github.com/objectstack-ai/objectstack/blob/e828d49e0e0c0c1994574e28a3edcb6a8070f658/look/attio-list.jpg?raw=true)\n\n![参照：Attio 记录页](https://github.com/objectstack-ai/objectstack/blob/e828d49e0e0c0c1994574e28a3edcb6a8070f658/look/attio-record.jpg?raw=true)\n\n## 要做的\n\n1. **字号两档**：正文 14，次要信息 12。次要信息指：字段标签、分区小标题、表头、时间和计数这类说明文字、标签小块里的字。页面里不再出现 13。\n2. **字重两档**：正文 400；记录名称、页签、按钮、分区标题、表头用 500。不再用 600（页面大标题除外）。\n3. **控件圆角统一成 8**：按钮、输入框、下拉、工具栏控件、页签小块、人员和关联小块。弹出框、抽屉、卡片这类大的面不在这里改（弹出框看 objectstack-ai/objectstack#35980，抽屉看 objectstack-ai/objectstack#35411）。\n4. **内容区白底**：列表页、记录页的内容区底色改成白色；侧边栏保持浅灰，和内容区之间留一条细线。深色主题按同样的关系处理（内容区用最深的那档底色，侧边栏浅一档）。\n5. 改在主题变量和公共组件上，不要逐页覆盖。列表页、记录页、看板、弹出框里的表单都跟着变。\n\n## 不做的\n\n- 不换字体（Attio 用 Inter，我们保持系统字体）。\n- 不改手机版的字号（手机版另有卡，objectstack-ai/objectstack#35880 专题）。\n- 不改 Studio 和设置页的布局，它们用到公共组件的地方跟着变即可。\n- 不改列表行高（另卡，和本卡一起做的列表页观感卡）。\n- 不改颜色体系：主色、标签颜色不动。\n\n## 验收\n\n- 「客户」列表、「销售商机」记录页上逐个量文字：字号只有 14 和 12 两种（页面大标题除外），字重只有 400 和 500 两种。\n- 记录页的页签：选中和未选中的字号相同。\n- 按钮、输入框、下拉、人员小块、关联小块的圆角都是 8。\n- 列表页、记录页内容区底色是白色；侧边栏是浅灰；深色主题下两者也分得开。\n- 弹出框、抽屉的圆角和改动前一样。\n- PR 正文附列表页、记录页、看板、新建弹出框在浅色和深色下的改动前后截图。\n\n## 协调席自己加的（不是维护者原话）\n\n维护者同意的是三条方向：「字号和字重收成两档」「圆角统一成一个值」「列表区和记录区改成白底，灰色只留给侧边栏」。下面这些具体取值是协调席定的：\n\n- 字号取 14 和 12；字重取 400 和 500，以及各自用在哪些地方。Attio 是全部 500，中文字体的 500 比拉丁字体显得重，所以正文取 400。\n- 圆角取 8，以及大的面不在本卡改。\n- 第 4 项里深色主题的处理、侧边栏和内容区之间的细线。\n- 第 5 项和「不做的」五条。\n\n## 没有核对的\n\n- 只量了「客户」列表和「销售商机」记录页两处，看板、仪表盘、设置页没有逐个量。\n- 正文从 13 改到 14 后，列表每列能显示的字会变少，没有评估对现有列宽的影响。\n\nReader: `domain:ui` 车道。`ui/apps/console/src/index.css`（主题变量，`:179-210`、`:406-419`）、`ui/packages/components/src/index.css`、`ui/packages/components` 里的按钮、输入框、页签、标签。\n\nDedupe: `字号 字重 统一`、`圆角 统一 控件`、`页面底色 白底`（objectstack，open）→ 都是 0。相关：objectstack-ai/objectstack#35980（弹出框外观）、objectstack-ai/objectstack#35411（抽屉边角）、objectstack-ai/objectstack#35985（对象图标颜色）。\n\n附图补于 2026-11-21T11:25Z（维护者：「你没有带截图吗」「用 attio 的截图」）。\n"
+}

@@ -14,18 +14,20 @@
     "area:ai",
     "bug",
     "domain:devx",
-    "pm:queue",
-    "priority:p2"
+    "pm:dispatched",
+    "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-20T14:21:00Z",
-  "updated_at": "2026-11-20T14:49:45Z",
+  "updated_at": "2026-11-21T13:19:21Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35867",
   "body": "eval#1 · os-justin · session_01QSeKYpxQpmErd1ixfkgbYh\n\nFound by the daily MCP ask round #35866 (fixture series day 2), skill-on arm, `paid_reimbursement` as `dept_manager`.\n\n- **The answer:** the figure is right (46,680 over 28 claims). The turn lost only the `cited` axis: \"no source line for the demotravel_expense_claim figure(s)\".\n- **The source line the reply wrote:** `Source: Metrics: Claimed amount, Claim count (dataset: Reimbursement); grouped by Claim status`. That is, verbatim, the `sourceLine` the server returned from `query_dataset` (#35043), whose `nextStep` tells the client to cite it.\n- **What the grader requires:** `gradeRun` (`packages/qa/scenarios/src/score/scenario-run-grade.ts`) wants the object name or its label in a source line. The `query_dataset` answer also carried `object: demotravel_expense_claim`, but the dataset-shaped line names the dataset and its measures, not the object.\n\n**Effect:** a client that does exactly what the door tells it, citing the governed metric's own source line, loses `cited` on every dataset-routed figure. A client that writes `Source: OBJECT` by hand passes.\n\n**Expected:** a source line that names the dataset an answer came from, or the server's `sourceLine` for that answer, counts as cited for the figures the dataset served.\n\nOne sighting. The same shape will recur on every dataset-routed answer that cites the server's line."

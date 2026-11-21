@@ -13,18 +13,20 @@
   "labels": [
     "area:ai",
     "domain:server",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-17T10:12:17Z",
-  "updated_at": "2026-11-20T16:58:50Z",
+  "updated_at": "2026-11-21T13:18:52Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 8,
+  "comments": 13,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34774",
   "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this seat's chat, 2026-11-17, verbatim: 「三点都同意，按最终计划把后续里程碑的卡全部立出来」, and, on the list of thirteen cards the seat then showed: 「同意」. The ruling records are #34659 comment 6940528935 and #34691 comment 6943107981. Readings: objectstack `a0326b06`, cloud `53a5844`, 2026-11-17.\n\n## Why\n\nWhen the knowledge lives on the client, the one new way to fail is a client that learned a different version of the rules than the server enforces.\n\nWho acts: the server lane (`packages/mcp`, `packages/metadata-protocol`, `packages/runtime`). Reader: every client that builds.\n\n## Evidence\n\n- `initialize` reports `serverInfo.version`; nothing the open server sends says which `@objectstack/spec` and `@objectstack/skills` to install.\n- `RestrictionProfileSchema.versions { spec, skills }` exists (`packages/spec/src/system/restriction-profile.zod.ts:230-255`) and the CLI reads `GET /api/v1/discovery/restriction-profile` (`packages/cli/src/utils/restriction-profile.ts:139`); no open runtime package serves that route.\n- Claude Code reads the first 4,096 characters of a server's instructions; anything after is cut.\n\n## Scope\n\n- `initialize` instructions and discovery state `Authoring contract: @objectstack/spec <version>`.\n- `save_metadata_draft` takes an optional `clientSpecVersion`: a different major is refused with the install line; a different minor is advised (D4 = A). Validation of the stored item stays the final gate.\n- The open runtime serves the restriction profile at the route the CLI already reads.\n- The whole instructions text stays under 4,096 characters, the words a client routes on first.\n\n## Done when\n\n- A client declaring the previous major is refused with the command to run; `os validate --target` against a self-hosted runtime reads a profile instead of failing.\n\n## Relations\n\n- Parent: #34659. Ruling: D4 = A.\n- Blocked-by: #34766\n- Dedup, open and closed: `restriction-profile discovery route` none."

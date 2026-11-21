@@ -1,0 +1,36 @@
+{
+  "number": 36058,
+  "kind": "pull_request",
+  "title": "fix(plugin-detail): the summary chip reads a percent, currency or date formula by its return type",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-21T11:51:29Z",
+  "updated_at": "2026-11-21T12:43:50Z",
+  "closed_at": "2026-11-21T12:43:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-21T12:43:48Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36058",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoH1SLb7yGpZj1NnaFvhbT6W)_\nFixes #35798\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 记录详情页标题旁的摘要小标签:公式字段若声明为百分比、金额或日期,改动前显示原始数字(如 0.25),改动后与列表和要点条一致(如 25%)。\n- 属于记录详情页数据展示一致性的收尾,补上前一次修复要点条时没覆盖到的标题旁小标签。\n- 出错的话,查看此类记录的用户会看到小标签格式不对;只影响显示,不改数据,可直接撤回。\n- 无。\n\nSeat: `repo:objectstack#7 · os-tesla · session_01L9qibxWPiQYXSf1jxGbN3W`\n\n## What changes\n- `ui/packages/plugin-detail/src/formulaFieldType.ts` (new): `formulaReadsAsFieldType(type, returnType)`, moved out of `HeaderHighlight.tsx` and widened to answer `date` beside `currency` and `percent`. It is now the one spelling both header bands ask (the L1 ruling on PR #35793 left shared-or-local to this card; shared was chosen so the strip and the chip cannot drift on which return types read as a field type).\n- `DetailView.tsx`: the summary chip derives `armType = formulaReadsAsFieldType(ftype, merged.returnType) ?? ftype` and branches its currency / date / percent arms on it. A percent formula therefore reads at its own `scale` and `max` (`resolveFieldScale` / `percentCellScale` asked with type `percent`), a currency formula in its own `currencyConfig` (tenant currency when absent), a date formula as the chip's localized date. `ftype` is unchanged everywhere else (the `[object Object]` renderer fallback, the name half, `data-summary-chip` keeps the raw name). No `?? N`, no rounding or sign of the chip's own.\n- `HeaderHighlight.tsx`: imports the shared helper. Byte-neutral for the strip: its only reader is `isKpi`, which lists `currency` / `percent` and not `date`, so a date formula stays non-KPI as before (the 35734 pin stays green).\n- Changeset: one `patch` for `@object-ui/plugin-detail`.\n\n## Tests\nNew pin `ui/packages/plugin-detail/src/__tests__/summaryChip.formulaReturnType-35798.test.tsx`: each formula chip is asserted byte-equal to a field chip of the matching type holding the same stored value, and to a literal.\n- percent `0.25` -> `25%`; percent with `scale: 1, max: 100`, `42.25` -> `42.3%`\n- currency with fixed JPY `currencyConfig` -> `¥1,234`; currency with no config under a USD tenant -> `$1,250`\n- date `2026-03-04` -> `Mar 4, 2026`\n- CONTROL: `number` formula `1250` -> `1250`; `text` formula -> unchanged text\n\n<details><summary>Runs (head 4cf12024 tree; code unchanged since 46ab1bc7)</summary>\n\n- `cd ui && vitest run packages/plugin-detail/src/__tests__/summaryChip packages/plugin-detail/src/__tests__/HeaderHighlight.formulaReturnType-35734.test.tsx`: Test Files 10 passed, 1 skipped (`summaryChip.dateOnlyZone-10183`, skipped by design) (11); Tests 103 passed, 8 skipped. `summaryChip.displayLocale-9453.test.tsx` control rows green.\n- Reverse verification (fix committed, base `DetailView.tsx` checked out from 8145424b, restored from HEAD, hash equal to the HEAD blob): new pin 5 failed / 2 passed; received `0.25`, `42.25`, `1234`, `1250`, `2026-03-04`; both controls green. Restored tree: `git diff HEAD` empty.\n- `pnpm --filter @object-ui/plugin-detail run type-check` (`tsc --noEmit && tsc -p tsconfig.test.json`, the test project reaches `__tests__`): exit 0.\n</details>\n\n## Acceptance notes\n- The chip's date face is its own compact one (`dateStyle: 'medium'`), the same as a `date` field's chip; the highlight strip draws a date formula through `FormulaCellRenderer`'s `formatDate` default. Whether the chip should read exactly like the cell is the open question objectui#9453 recorded; this PR keeps the chip's face and does not answer it.\n- A percent formula's chip draws the bar, as a percent field's chip does; the chip does not read `percentDisplay` for either (unchanged here).\n\n## Verification\nRead first: `DetailView.tsx` hunk at `armType` (the risk: a non-formula type must keep its arm, `?? ftype`), then `formulaFieldType.ts`.\nTwo-minute check: `cd ui && pnpm exec vitest run packages/plugin-detail/src/__tests__/summaryChip.formulaReturnType-35798.test.tsx`, expect 7 passed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L9qibxWPiQYXSf1jxGbN3W\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibxWPiQYXSf1jxGbN3W)_\n"
+}

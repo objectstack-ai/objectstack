@@ -1,0 +1,32 @@
+{
+  "number": 36076,
+  "kind": "issue",
+  "title": "评论（三）手机：记录页右上角评论图标进整页，列表只列第一层、点进去回复；输入框固定在底部；长按评论出操作面板",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-21T12:22:23Z",
+  "updated_at": "2026-11-21T12:55:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36076",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#36062（专题：评论重做，维护者直派）。第一阶段。⛔ 不是认领。优先级 p2（协调席定的，维护者未指定）。\n\n## 维护者说过的（2026-11-21）\n\n- 「列专题卡，分阶段处理」\n- 「这个专题第一阶段你建议处理哪些功能」\n- 协调席建议第一阶段拆 4 张（电脑评论栏、已解决、手机整页两层、几处小修），并问回复通知要不要提前一起做，维护者：「同意」\n- 维护者发来 Attio 手机端截图并说明：「手机端，评论列第一层，点进去可以回复」「手机端长按评论以后，」\n\n## 现状（主干 `c00be39b74`，本机环境浏览器实测，手机宽度）\n\n评论在记录页「动态」页签里，和系统记录混在一起；输入框在页面顶部，提示写着「Ctrl+Enter 提交」。\n\n![现状：手机上评论在「动态」页签里](https://github.com/objectstack-ai/objectstack/blob/c74fdb3edc7d145c3a656861c48a94e740301bc0/comments/ours-mobile.jpg?raw=true)\n\n## 参照（Attio 手机端，维护者截图，只参照行为）\n\n![记录页右上角的评论图标](https://github.com/objectstack-ai/objectstack/blob/c74fdb3edc7d145c3a656861c48a94e740301bc0/comments/attio-m-record.png?raw=true)\n\n![评论列表只列第一层](https://github.com/objectstack-ai/objectstack/blob/c74fdb3edc7d145c3a656861c48a94e740301bc0/comments/attio-m-list.png?raw=true)\n\n![点进一串，在里面回复](https://github.com/objectstack-ai/objectstack/blob/c74fdb3edc7d145c3a656861c48a94e740301bc0/comments/attio-m-thread.png?raw=true)\n\n![输入框在底部，展开后的工具条](https://github.com/objectstack-ai/objectstack/blob/c74fdb3edc7d145c3a656861c48a94e740301bc0/comments/attio-m-composer.png?raw=true)\n\n![长按评论升起的面板](https://github.com/objectstack-ai/objectstack/blob/c74fdb3edc7d145c3a656861c48a94e740301bc0/comments/attio-m-longpress.png?raw=true)\n\n## 效果图（维护者已同意）\n\n维护者 2026-11-21 看过效果图后：「同意你的效果图，更新issue」。图在设计板图 44，下面是导出的图。图里的操作图标是文字符号代替的，不是最终图标；配色是设计板的深色，实现时跟产品主题走。\n\n![效果图五：手机四屏（记录页右上角图标；整页只列第一层；点进一串回复；长按面板）](https://github.com/objectstack-ai/objectstack/blob/2e96b896002169f4e6ee706545587d90eaf0a670/comments/mock-5-mobile.png?raw=true)\n\n\n## 要做的\n\n1. 手机记录页右上角加评论图标，带未解决数，点了进**整页**的评论列表。左上角返回记录页。\n2. **两层**：列表只列第一层评论；有回复的在下面显示头像加「N 条回复」，不展开。点一条评论进入这一串：原评论在最上面，回复按时间往下排。\n3. **输入框固定在屏幕底部**。平时一行；点了展开，下面一排是提到人、加粗、斜体、列表、代码，右边是发送按钮。在第一层列表里发的是新评论，在一串里发的是回复。\n4. **去掉「Ctrl+Enter 提交」的提示**，手机上用发送按钮。\n5. **长按一条评论**，从底部升起面板：第一行六个常用表情；下面依次是「标记已解决」（只在第一层评论上）、「编辑」「删除」（只对自己的评论，或有权限的人）。删除用红色，点了再确认一次。\n6. 表情加上后显示在评论文字下面，表情加数字；自己加过的有区别。点一下已有的表情是跟一个或取消。\n7. 列表右上角筛选：「显示已解决」「只看我参与的」。\n8. 手机上「动态」页签只留系统记录，和「评论（一）」一致。\n9. 「标记已解决」和筛选依赖「评论（二）」；那张没合并前先不显示。\n\n## 不做的\n\n- 不做列表页的评论汇总、卡片上的评论数（第二阶段）。\n- 不做「复制链接」（第二阶段）。\n- 不改电脑端。\n\n## 验收\n\n- 手机宽度下打开一条记录：右上角有评论图标；点了进整页，返回回到记录页原来的位置。\n- 发一条评论、在它下面回复两条：列表里这条下面显示「2 条回复」，回复不在第一层出现；点进去看到原评论和两条回复。\n- 输入框一直在屏幕底部，评论多了滚动时也在；键盘弹起时输入框在键盘上面。\n- 页面上没有「Ctrl+Enter」字样。\n- 长按一条自己的评论：面板里有表情、编辑、删除；长按别人的评论：没有编辑、删除。\n- 点一个表情：评论下面出现这个表情和数字 1；再点一次取消。\n- PR 正文附第一层列表、一串、输入框展开、长按面板四张截图。\n\n## 协调席自己加的（不是维护者原话）\n\n- 第 3 项工具条里放哪几项（沿用我们现有的格式按钮）。\n- 第 5 项面板里保留「编辑」「删除」（Attio 没有编辑），以及没有「复制链接」。\n- 第 6、7、8 项。\n\n## 没有核对的\n\n- 我们手机上现在对一条评论的操作怎么触发，没有试。\n- Attio 长按面板里没有「删除」，原因不明。\n\nReader: `domain:ui` 车道。和「评论（一）」用同一个评论组件；手机记录页的头部在手机专题 objectstack-ai/objectstack#35880 相关的代码里。\n\nDedupe: `评论 手机 长按`（objectstack，open）→ 0。\n\n效果图加于 2026-11-21T12:34Z。\n"
+}

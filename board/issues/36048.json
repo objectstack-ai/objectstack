@@ -1,0 +1,34 @@
+{
+  "number": 36048,
+  "kind": "issue",
+  "title": "列表观感：列之间加竖线，默认行高 32 改 36，底部每列的「添加统计」入口常显",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-21T11:17:30Z",
+  "updated_at": "2026-11-21T12:19:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36048",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35547（专题：列表页重做，维护者直派）。⛔ 不是认领。优先级 p2（协调席定的，维护者未指定）。\n\n## 维护者说过的（2026-11-21）\n\n- 「已经开发完成的的列表页相关功能和记录详情页，再继续深度详细对照 attio 每一个细节的效果，关于界面美观度和用户体验提出优化改进意见，和我沟通」\n- 协调席给了 12 条对照意见，维护者：「其他你的其他Attio意见， 1  3 4 5 7 8 10 都同意，立卡」（本卡是其中第 5、7、8 条）\n\n## 现状（主干 `c00be39b74`，本机环境浏览器实测，1440 宽，「客户」列表）\n\n- 表格只有行与行之间的横线，列之间没有竖线。列多时一行里的值不容易和表头对上。\n- 默认行高 32，表头也是 32，格子内边距上下 4、左右 12。\n- 底部一行左边显示「12 条记录」，各列的统计格子要鼠标移上去才出现入口（objectstack-ai/objectstack#35702 做的底部计算行，已合并）。不知道有这个功能的人看不到它。\n\n![现状：我们的列表（没有竖线，行高 32，底部只有「12 条记录」）](https://github.com/objectstack-ai/objectstack/blob/e828d49e0e0c0c1994574e28a3edcb6a8070f658/look/ours-list.jpg?raw=true)\n\n## 参照（Attio，同样 1440 宽实测）\n\n格子 36 高；行线和列线都是 1 的浅灰线 rgb(238,239,241)；底部一行每列都常显「+ Add calculation」，已选了统计的列显示结果。\n\n![参照：Attio 列表（列之间有竖线，行高 36，底部每列常显 Add calculation）](https://github.com/objectstack-ai/objectstack/blob/e828d49e0e0c0c1994574e28a3edcb6a8070f658/look/attio-list.jpg?raw=true)\n\n## 要做的\n\n1. **列之间加竖线**：表头和数据行都有，颜色和粗细跟现有的横线一致。冻结列和滚动区之间的分界线照旧，比普通竖线明显。\n2. **默认行高改成 36**：表头同样 36。用户在行高菜单里选的其他档位（紧凑、高、特高）不变；「默认」这一档从 32 变成 36。格内编辑时行高仍然不变（objectstack-ai/objectstack#36023 的规则）。\n3. **底部每列的统计入口常显**：没有选统计的列，底部格子里一直显示浅色的「+ 添加统计」；选了的显示结果。没有权限改这个视图的人看不到入口，只看到已有的结果。\n\n## 不做的\n\n- 不改统计的种类和存储方式（objectstack-ai/objectstack#35702 定的不变）。\n- 不改字号（另卡，和本卡一起立的整体观感卡）。\n- 不加表头的字段类型图标、名称列的记录图标（维护者这次没有同意这两条）。\n- 不改看板、手机列表。\n\n## 验收\n\n- 「客户」列表：任意两列之间有竖线，表头和数据行的竖线对齐；横向滚动时竖线跟着列走。\n- 默认行高下量数据行和表头，都是 36。把行高切到「紧凑」再切回「默认」，还是 36。\n- 双击一格进入编辑，行高不变。\n- 底部一行：没选统计的列显示「+ 添加统计」，不用鼠标移上去；点它出现统计种类的菜单。\n- 只读视图（比如包里带的视图、没有权限的人）：底部没有「+ 添加统计」。\n- PR 正文附改动前后截图。\n\n## 协调席自己加的（不是维护者原话）\n\n维护者同意的是「加竖线」「行高调到 36」「统计入口改成常显」。下面是协调席补的：\n\n- 第 1 项里冻结列分界线照旧。\n- 第 2 项里只改「默认」这一档、其他档位不动。\n- 第 3 项里没有权限的人看不到入口。\n- 「不做的」四条。\n\n## 没有核对的\n\n- 行高各档位现在的具体数值没有逐个量，只量了默认档。\n- 底部统计入口现在对只读视图是什么表现，没有试。\n\nReader: `domain:ui` 车道。`ui/packages/plugin-grid/src/ObjectGrid.tsx`（`:2114` 起的行高档位）、`ui/packages/components/src/renderers/complex/data-table.tsx`、底部计算行的组件（objectstack-ai/objectstack#35702 的 PR 里）。\n\nDedupe: `列表 竖线 分隔线`、`行高 36`、`添加统计 常显`（objectstack，open）→ 都是 0。相关：objectstack-ai/objectstack#35702（底部计算行，已关闭）、objectstack-ai/objectstack#36023（格内编辑行高不变）。\n\n附图补于 2026-11-21T11:26Z（维护者：「你没有带截图吗」「用 attio 的截图」）。\n"
+}

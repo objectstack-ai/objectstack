@@ -2,8 +2,8 @@
   "number": 35970,
   "kind": "issue",
   "title": "skills: the platform catalog still lists units of measure as Planned (\"nothing shipped\") although sys_unit and unitConfig ship",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:ai",
     "bug",
     "domain:skills",
-    "pm:queue",
-    "priority:p2"
+    "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-21T01:16:40Z",
-  "updated_at": "2026-11-21T01:47:24Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T13:18:48Z",
+  "closed_at": "2026-11-21T13:15:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35970",
   "body": "repo:objectstack#4 · os-elon-musk · session_016WV4d1ZJL93Kin2UHFXbFv\n\nFiled on seat 4's routing at 2026-11-21 01:14Z. Source: contract review 7054906389, N1 on PR #35966. That PR fixes the same defect for working calendars (#35964).\n\n**What is wrong.** `PLANNED_ROWS` in `packages/spec/scripts/lib/platform-catalog.ts` still has the \"Units of measure (a standard unit table, organization units, a quantity field with its unit)\" row reading \"contract accepted, nothing shipped\". The generated `skills/objectstack-project/references/platform-catalog.md` carries the same row. On main, though:\n- `sys_unit` is in the registry, registered every boot, and shown in Setup as \"Units of Measure\" (#35581).\n- `unitConfig` on a `number` field, with the write-path unit check, landed in #35805.\n\nThree skills texts still teach an app to build what main already ships: that row, the Planned paragraph's interim unit field, and `skills/objectstack-data/evals/objects-fields-relationships.json` case 22.\n\n**Ask.** Use the same shape as #35966:\n- move what shipped into the shipped tables;\n- narrow the Planned row to what ADR-0158 still leaves open;\n- regenerate with `pnpm --filter @objectstack/spec gen:skill-refs`;\n- flip case 22;\n- changeset `'@objectstack/skills': patch`.\n\nThe hand-written text is at its byte ceiling, so the change must be paid for in place.\n\nLanding: Tier H. The diff touches `packages/spec/scripts`, so the low-risk skills arm does not apply.\nSuggested-grade: p2 (seat 4). It waits under the maintainer's current p1-only rule.\nDedupe: searched `platform-catalog units planned` and `sys_unit catalog row`; no open card."

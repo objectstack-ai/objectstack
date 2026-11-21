@@ -1,0 +1,32 @@
+{
+  "number": 36083,
+  "kind": "issue",
+  "title": "service-analytics: refuse at dataset compile a raw measure over a record-mode amount or quantity with no code/unit dimension, and the derived-measure unit twin (ADR-0144 \"at build\")",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-21T12:42:28Z",
+  "updated_at": "2026-11-21T12:55:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36083",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibvMi1U7R2kBd3JbTPu\n\nFiling gate: ① a product defect with a named landing, measured · Source: fleet (L1 7062716121 on PR #36060, R2 item 2)\n\n## 维护者速读\n- 问题：ADR-0144 规定，数据集里对「按行币种金额」不分组直接求和的度量，要在编译数据集时就拒绝（`DATASET_INVALID`）。现在主干只在每次查询时拒绝，数据集本身能保存、能编译。单位那边（PR #36060）照着币种的实际做法做，也是查询时拒绝。\n- 影响：作者保存一个永远查不出结果的数据集也不会被提示，要到查询时才报错；ADR 和代码说的不一致。另外，把按行单位数量和别的数量相加的「派生度量」，目前没有人检查。\n- 这一步做什么：数据集编译时，对按行币种金额和按行单位数量上的原始聚合度量，如果数据集没有按代码字段或单位字段分组的维度，就拒绝；并给派生度量补上单位版的跨单位检查。\n- 要你做的：可能要你点头。币种一半已经发布，在编译时拒绝会让现在能保存的数据集保存不了（收窄），需要 ADR-0087 的处置说明；单位一半在 `unitConfig` 发布前合并就不算收窄。\n\n## What is wrong (measured)\nADR-0144's dated \"At build\" note: \"a dataset measure at compile, with existing codes (`DATASET_INVALID` at compile)\". On main, the record-currency guards at compile (`packages/services/service-analytics/src/measure-currency-coherence.ts`) judge a measure's `currency` key and derived measures across currencies only. A dataset whose measure is an ungrouped `sum` over a `record`-mode amount compiles, and the refusal rides each query selection through the cube door (`cube-record-currency-door.ts`, `INVALID_FIELD` / 400). Measured by the #35491 dev on a real engine (SqlDriver / better-sqlite3): such a dataset compiles; an ungrouped query answers `INVALID_FIELD` / 400.\n\nPR #36060 (ADR-0158 U7 R1) mirrors that per-selection shape for `record`-mode quantities; L1 accepted it as that PR's deviation. So ADR-0144's text and main differ for both families. A derived measure combining a `record`-mode quantity with another quantity (the unit twin of currency guard 2) is judged nowhere.\n\nreach: the public door: a dataset with such a measure saves and compiles (os validate, metadata save) and then can never serve that measure ungrouped.\n\n## Business reason\nAn author, or an AI writing a metadata app, gets a dataset that saves clean and fails at every query; the refusal belongs where the declaration is written (contract tightening at publish over runtime tolerance).\n\n## Ask\n- At dataset compile, refuse `DATASET_INVALID` a raw measure (`sum`/`avg`/`min`/`max`) over a `record`-mode currency amount or `record`-mode quantity when the dataset declares no dimension over its code or unit field. Keep the per-selection cube refusal.\n- The unit twin of guard 2: a derived measure that adds a `record`-mode quantity to another quantity of a different or unknown unit.\n- The currency half narrows what compiles today (released): `Clause-②: no (narrowing)`, its ADR-0087 disposition, and the maintainer's approval at landing. The unit half is no narrowing only while `unitConfig` is unreleased.\n\n## Order\nAfter PR #36060 merges. The ADR-0144 / ADR-0158 texts stay as ruled; this card brings code to them.\n\nGrading: area:data · Bug · ADR-ruled behaviour main does not implement.\nSuggested grade: p3 (no wrong number reaches anyone: every ungrouped query is already refused; the cost is a late refusal).\n\nDedupe: `repo:objectstack-ai/objectstack is:issue DATASET_INVALID record currency compile` (14 hits: #27579, #28019, #28194 fixed-currency guards, closed; #27187 the cube door, closed; #35491), `dataset measure record-mode compile` (#35046, #27579, #27187, closed) → no card for the compile-time record-mode refusal."
+}

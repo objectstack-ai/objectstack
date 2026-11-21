@@ -1,0 +1,31 @@
+{
+  "number": 36055,
+  "kind": "issue",
+  "title": "security (v19 major): View All / Modify All stop voting on fields — ADR-0087 conversion adds `viewAllFields: true` beside them, `superuserFieldVote` and `security-superuser-field-mask-inert` retire (step 3 of #34365, behaviour change)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:spec",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-21T11:27:59Z",
+  "updated_at": "2026-11-21T11:35:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36055",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibzFAE8YRsK8YCDAeLL\n\nFiling gate: ④ sub-card of the ruled decision #34365 (ruling 6912661484, verbatim 「同意，立决策卡」; implementation cards are cut after PR #34082, merged 2026-11-16T21:40Z) · Source: topic #34365\n\nParent: #34365 (step 3, \"v19 major\")\nBlocked-by: #36050, #36052\nGrade: left to triage. Suggested **p2** (the end state of the p2 security card #34365). Area: data. Type suggestion: Feature.\n⛔ **Behaviour change in a major.** Ships only in the v19 major, and is built only after the maintainer's go-ahead through the seat (this card's parent ruling sets the end state, not the build start).\nDedupe: `repo:objectstack-ai/objectstack is:issue viewAllFields` → 3 hits: #34365 (the parent), #33828 (closed), #6015 (triage seat post). No card covers this step.\n\n## Business reason\n\nThis is the step that fixes the defect class for good: one set's View All / Modify All will no longer re-open a field another set hides (hotcrm#2481's class). Every mainstream platform the parent card checked (Salesforce, Dataverse, ServiceNow, Odoo) keeps the record-wide bit off the field axis, and Salesforce added a separate read-only \"View All Fields\" for the same reason. The conversion keeps every existing app's behaviour verbatim, so no app owner loses access at upgrade.\n\n## What to build\n\n- `viewAllRecords` and `modifyAllRecords` cast **no field vote**: retire `superuserFieldVote` as a field-vote source (`packages/core/src/security/effective-object-permissions.ts`) in both merges (`getFieldPermissions`, `buildEffectiveFieldPermissions`), leaving `viewAllFields` as the only \"all fields\" channel. Readers of `superuserFieldVote` outside the merges (e.g. `packages/qa/scenarios/src/score/scenario-tags.ts`) move to the new reading.\n- One ADR-0087 mechanical conversion (`packages/spec/src/conversions/entries/19/`): add `viewAllFields: true` to every `objects` entry (wildcard included) that carries `viewAllRecords` or `modifyAllRecords` and does not already say `viewAllFields`. Behaviour kept verbatim; authors remove the bit where it isn't wanted.\n- One semantic upgrade-guide entry (`packages/spec/src/migrations/entries/semantic/`). After conversion, the only remaining behaviour change is \"Modify All plus the same set's own `editable: false` / `readable: false` row\" — the entry names it, and the lint that already names that case is its pointer.\n- Retire `security-superuser-field-mask-inert` (`packages/lint`), and re-point the cross-set warning from the step-2 lint sub-card (it no longer fires for View All / Modify All after the switch) — the PR says what that rule becomes.\n- ADR-0066 D2 ⑧ end-state note (governed, Tier H).\n- File the hotcrm follow-up when this lands: convert `sales_manager` (which relies on Modify All to read account roll-ups) from the converted `viewAllFields: true` to explicit rows (#34365 step 4).\n\n## Declarations the PR owes\n\n`Clause-②: yes` · `Metadata-protocol: semantic` (with a mechanical conversion) · `Skills-docs:` line · Tier H · contract review at the required tier · full verification (`!` major).\n\n## Acceptance\n\n- After conversion, every fixture app's field maps are identical to before; an unconverted set with View All alone no longer reads a field another set hides.\n- Gates green; L1 + L2 PASS on the final head; landed by the maintainer's approval."
+}

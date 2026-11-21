@@ -1,0 +1,34 @@
+{
+  "number": 36071,
+  "kind": "issue",
+  "title": "评论（二）后端：一串评论可以标记「已解决」，可恢复，可按已解决和「我参与的」筛选",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:server",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-21T12:19:56Z",
+  "updated_at": "2026-11-21T14:01:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36071",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#36062（专题：评论重做，维护者直派）。第一阶段。⛔ 不是认领。优先级 p2（协调席定的，维护者未指定）。\n\n## 维护者说过的（2026-11-21）\n\n- 「列专题卡，分阶段处理」\n- 「这个专题第一阶段你建议处理哪些功能」\n- 协调席建议第一阶段拆 4 张（电脑评论栏、已解决、手机整页两层、几处小修），并问回复通知要不要提前一起做，维护者：「同意」\n\n## 现状（主干 `c00be39b74`）\n\n评论对象 `sys_comment`（`packages/plugins/plugin-audit/src/objects/sys-comment.object.ts`）有回复关系 `parent_id`、提到、已编辑标记，没有「已解决」。本机返回的评论数据字段：`thread_id, object_name, record_id, parent_id, author_id, author_name, author_avatar_url, body, mentions, is_edited, edited_at`。\n\n## 参照（Attio，实测加文档，只参照行为）\n\n一串评论点对勾标记已解决，从默认列表里消失，没有删除；筛选「显示已解决」能看到，标着谁解决的；再点一次恢复。有评论已解决、取消解决的事件。\n\n## 要做的\n\n1. 第一层评论上加三项：是否已解决、解决人、解决时间。只有第一层评论（没有 `parent_id` 的）能标记；标记的是这一串。\n2. **谁能标记和恢复**：能在这条记录上发评论的人都可以。和发评论同一道权限，不另设。\n3. 解决人和解决时间由平台写，作者不能自己填。\n4. 回复不能单独标记已解决；往已解决的串里再发回复时，这一串自动恢复成未解决。\n5. 查询：能按「是否已解决」筛；能按「我参与的」筛（我发起的、我回复过的、提到我的串）。\n6. 给一条记录，能查出未解决的串数（界面的数字用）。\n7. 标记和恢复各写一条动态吗：**不写**。动态里只留系统对记录本身的改动。\n\n## 不做的\n\n- 不做界面（在「评论（一）」「评论（三）」卡）。\n- 不做一批记录一次查未解决数（第二阶段）。\n- 不改评论的读写权限规则。\n\n## 验收\n\n- 对一条第一层评论标记已解决：再读出来，是否已解决为真，解决人是当前用户，解决时间有值。\n- 对一条回复标记：被拒绝。\n- 没有这条记录评论权限的人标记：被拒绝。\n- 在请求里自己填解决人：被忽略或拒绝，存下来的是当前用户。\n- 往已解决的串里发一条回复：这一串变回未解决。\n- 按已解决筛、按「我参与的」筛：结果正确，包括「只被提到、没发过言」的情况。\n- 一条记录有 3 串评论、其中 1 串已解决：未解决数是 2。\n- PR 正文列出新加的字段名和查询方式，供界面卡使用。\n\n## 协调席自己加的（不是维护者原话）\n\n- 第 2 项谁能标记；第 4 项回复自动恢复；第 7 项不写动态。\n- 第 5 项「我参与的」包含哪三种。\n\n## 没有核对的\n\n- 字段加在评论对象上还是另设一个对象，由开发按现有做法定，在 PR 里说明。\n- 旧数据默认都是未解决，没有评估需不需要迁移脚本。\n\nReader: 后端车道（`packages/plugins/plugin-audit`：`objects/sys-comment.object.ts`、`comment-access-hooks.ts`、`audit-writers.ts`）。\n\nDedupe: `评论 已解决`（objectstack，open）→ 只有父单 objectstack-ai/objectstack#36062 和暂停的 objectstack-ai/objectstack#35947。"
+}

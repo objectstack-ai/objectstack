@@ -16,11 +16,13 @@
     "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-20T08:43:52Z",
-  "updated_at": "2026-11-20T22:09:00Z",
+  "updated_at": "2026-11-21T11:19:29Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

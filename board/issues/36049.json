@@ -1,0 +1,38 @@
+{
+  "number": 36049,
+  "kind": "issue",
+  "title": "记录页右上角「编辑」按钮降一档：从实心蓝色 36 高改成描边 28 高",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-21T11:18:35Z",
+  "updated_at": "2026-11-21T13:15:35Z",
+  "closed_at": "2026-11-21T13:15:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36049",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35590（专题：记录页重做，维护者直派）。⛔ 不是认领。优先级 p2（协调席定的，维护者未指定）。\n\n## 维护者说过的（2026-11-21）\n\n- 「已经开发完成的的列表页相关功能和记录详情页，再继续深度详细对照 attio 每一个细节的效果，关于界面美观度和用户体验提出优化改进意见，和我沟通」\n- 协调席给了 12 条对照意见，维护者：「其他你的其他Attio意见， 1  3 4 5 7 8 10 都同意，立卡」（本卡是其中第 10 条）\n\n## 现状（主干 `c00be39b74`，本机环境浏览器实测，1440 宽，「销售商机」记录页）\n\n右上角的「编辑」是实心蓝色按钮：76×36，底色 rgb(0,123,255)，白字 14/500，圆角 12。它是整页最显眼的东西，比记录名称和阶段都抢眼。记录页的字段已经可以就地编辑，「编辑」不是这一页的主要动作。\n\n![现状：右上角实心蓝色的「编辑」按钮](https://github.com/objectstack-ai/objectstack/blob/e828d49e0e0c0c1994574e28a3edcb6a8070f658/look/ours-record.jpg?raw=true)\n\n## 参照（Attio，实测）\n\n记录页没有「编辑」按钮，字段点一下就地改；顶部只有一排 28 高的小图标动作。\n\n![参照：Attio 记录页顶部只有一排小图标动作，没有实心按钮](https://github.com/objectstack-ai/objectstack/blob/e828d49e0e0c0c1994574e28a3edcb6a8070f658/look/attio-record.jpg?raw=true)\n\n## 要做的\n\n1. 「编辑」改成描边按钮（白底、细边、正文色的字和图标），高 28，和同一行的「⋯」、上下条切换按钮同高。\n2. 记录页顶部这一行不再有实心主色按钮。对象自己配置的主要动作（比如「提交审批」）如果现在是实心的，保持原样，不在本卡改。\n3. 抽屉里打开的记录页同样处理。\n\n## 不做的\n\n- 不去掉「编辑」按钮，不改它点了之后的行为。\n- 不改字段就地编辑。\n- 不改记录页布局（objectstack-ai/objectstack#35890）。\n- 不改列表页的「新建」按钮。\n\n## 验收\n\n- 「销售商机」记录页：「编辑」是描边样式，量出来高 28；和旁边的「⋯」同高、底边对齐。\n- 点「编辑」：和改动前一样进入编辑。\n- 从列表在侧边打开一条记录：抽屉里的「编辑」同样是描边、28 高。\n- 配了自定义主要动作的对象：那个动作的样式和改动前一样。\n- PR 正文附改动前后截图。\n\n## 协调席自己加的（不是维护者原话）\n\n维护者同意的是「编辑降为普通描边按钮，高度降到 28」。下面是协调席补的：\n\n- 第 2 项里自定义主要动作不动。\n- 第 3 项。\n- 「不做的」四条。\n\n## 没有核对的\n\n- 没有找到「编辑」按钮在代码里的位置，请开发自己定位。\n- 没有试过配了自定义主要动作的对象，第 2 项里「如果现在是实心的」是推测。\n- 圆角跟随整体观感卡统一成 8；那张卡没合并前本卡保持现有圆角即可。\n\nReader: `domain:ui` 车道。记录页头部组件（`ui/packages/app-shell` 或 `ui/packages/plugin-detail` 里，未核对）。\n\nDedupe: `编辑按钮 记录页 描边`（objectstack，open）→ 0。相关：objectstack-ai/objectstack#35890（记录页宽屏布局）、objectstack-ai/objectstack#35853（上下条切换）。\n\n附图补于 2026-11-21T11:26Z（维护者：「你没有带截图吗」「用 attio 的截图」）。\n"
+}

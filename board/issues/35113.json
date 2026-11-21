@@ -13,18 +13,20 @@
   "labels": [
     "area:ai",
     "domain:devx",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-18T04:23:34Z",
-  "updated_at": "2026-11-19T03:59:25Z",
+  "updated_at": "2026-11-21T12:18:42Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35113",
   "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this session's chat, 2026-11-18, verbatim: 「很多测试任务能在开源项目处理的尽量用开源项目」, and earlier: 「而且开源项目应该就可以测试，不需要访问 cloud」. Ruling behind it: D6 = A on #34659 (extend the open cards; borrow the hosted kinds, not the hosted fixture).\n\n## Why\n\nWhat decides most ask answers is in the framework: matching a word to a metric, compiling the query, counting and grouping, the permission line, the labels. Today the only test set that asks every kind of question sits in the hosted product's repository, needs a hosted environment and its model billing, and has run once. A regression in the framework is therefore found late, on the product, by a run that costs money, when it could be found the same day here for nothing.\n\nWho acts: the devx lane (`docs/qa/scenarios/**`, `packages/qa/scenarios/**`). Reader: the eval seat's daily round (#34869), and the cloud seat, which then runs its own set per release as a confirmation.\n\n## Evidence (read 2026-11-18)\n\n- The hosted ask set holds 56 questions in ten kinds: `count` 4, `group_sum` 5, `top_n` 4, `time_range` 4, `join` 3, `owner_latest` 6, `business_term` 10, `ambiguous` 7, `forbidden` 9, `unanswerable` 4; 41 asked as a manager, 15 as a member.\n- The open dataset cards (`order_to_cash`, `travel_expense`, from #34687) each carry 5 dataset questions: two metric, one ambiguous, one near-miss, one fallback. No open card states which of the ten kinds its ordinary questions cover.\n- The open runner already grades correct, cited and leaks per persona, and the route graders `metric-selected`, `asked-back`, `fallback-labelled`. The hosted repository already imports the open scorer and has a driver that runs the open cards against its own agent, so one card can be asked two ways.\n\n## Scope\n\n- A table in `docs/qa/scenarios/README.md`: the ten kinds, and for each which open card asks it and how many times.\n- Questions added until every kind is asked at least twice across the dataset cards, in Chinese and English, including `forbidden` asked as the member persona (the leak reading) and `unanswerable`.\n- Generic questions written for the open cards. ⛔ None is copied from the hosted set: its held-out questions stay private so they keep measuring.\n- The record of a round reports its counts per kind.\n\n## Done when\n\n- The table shows no kind at zero, and one ask round over the dataset cards reports every kind.\n\n## Out of scope\n\n- The hosted set, its environment and its cadence. Asking through the product's own agent.\n\n## Relations\n\n- Parent: #34659. Related: #34687, #34869, #34996.\n- Dedup, open and closed: `scenario ask cards question kinds forbidden unanswerable` — see the search this card was filed with; no card found."

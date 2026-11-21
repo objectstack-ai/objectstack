@@ -1,0 +1,36 @@
+{
+  "number": 36061,
+  "kind": "pull_request",
+  "title": "fix(record-page): the record header's Edit is an outline button, and the desktop header row is 28 high",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-21T12:10:09Z",
+  "updated_at": "2026-11-21T13:15:35Z",
+  "closed_at": "2026-11-21T13:15:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-21T13:15:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36061",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuRa2fjHRnGqyRenDNzXfkzY)_\n\nrepo:objectstack#1 · os-sales · session_01L6bhgTFnmxG5snBaBLNBei\n\nFixes #36049\n\nPart of epic #35590 (area b1-R2). Seat claim 7061925752. Height scope reviewed by fable before the build: reading A, the whole desktop header row is 28 high and only Edit changes face; \"keeps its style\" on the card means colour and rank, not height. Flow: dev-thread rule (the card thread builds itself; L1 at L1-c).\n\n## What changes\n\n- **Edit is never the filled button in the header row** (`page:header`, `containers.tsx` `renderButton`). The primary pick is unchanged; when the pick is a host button that does not declare `variant: 'primary'` (the record page's Edit, which is the pick only when the object declares no header action of its own), it draws `outline`. The page's own actions keep their pick and faces: a declared `variant: 'primary'` is filled, and with none the first page action still is. The edit state's Save (a host button declaring `variant: 'primary'`, #35816) stays filled. The phone's bottom bar (`face: 'bar'`) is unchanged and still draws Edit filled at 44.\n- **One row height, 28, on desktop** (`sm:h-7`): the row's buttons, the `⋯`, the approval levers a record under approval draws in that row (`DeclaredActionsBar` header parts: 32 → 28), and the trailing panel toggles (`PanelToggles`, 32 → 28; the record page is its one consumer). An action that declares its own `size` keeps it. Phone rows keep 36 (`size: 'sm'` below the `sm` breakpoint).\n- **`page:header` is a shared block**, so a custom page's header actions are 28 high on desktop too.\n- **Correction to the card:** the card says the `⋯` was already 28. On main it was 36, like Edit (measured below); since #35983 the 28-high previous/next switch sits on the header's first row, not beside Edit.\n- `maxVisible`'s registry description gains one sentence (\"The host's Edit is always an outline button…\"); `sdui.manifest.json`, its record and `content/docs/ui/components/page.mdx` regenerated (`gen-sdui-manifest-node.mjs`, `gen:sdui-reference`).\n- Not changed: what Edit does when pressed, inline field editing, the record layout (#35890), the list's New button, corner radius (follows #36047), `plugin-detail`'s standalone `DetailView` Edit (the console record page does not draw it).\n\n## Why\n\nItem 10 of the maintainer-approved Attio comparison: the solid blue 36-high Edit was the loudest thing on the record page, louder than the record's name and stage, though fields already edit in place, so Edit is not the page's main action.\n\n## Verification\n\n- `@object-ui/components` `page-header*` + `panel-toggles` suites: 31 files, 302 passed. New `page-header-edit-outline-36049.test.tsx` (5 cases: no app action → Edit outline + 28 and `⋯` 28; declared primary stays filled at 28; first page action without a variant still filled; a declared `size` keeps its height; panel toggles `h-7`). Two pins moved to the new face: `page-header-primary-12617` (\"with no app action, Edit is outline and nothing is filled\") and `page-header-danger-12764` (Edit still leads beside a lone danger action, now outline). `page-header-phone-bar-27058` (Edit filled in the bar) unchanged and green.\n- `@object-ui/app-shell` `DeclaredActionsBar*` + `RecordDetailView*`: 98 files, 762 passed.\n- `tsc --noEmit` for `@object-ui/components`: clean. eslint on touched files: 0 errors.\n- Browser, app-crm (`objectstack dev --seed-admin --fresh`) + console on Vite, 1280, light and dark, measured with `getBoundingClientRect`:\n\n| Page | Before | After |\n|---|---|---|\n| Opportunity record (no header action) | Edit 73×36 filled blue, `⋯` 34×36 | Edit 75×28 outline, `⋯` 34×28, panel toggle 28; all three top 96 / bottom 124 |\n| Lead record (declares Convert Lead) | Convert Lead 136×36 filled, Edit 36 outline | Convert Lead 136×28 still filled (same colour), Edit 28 outline |\n| Opportunity opened in the drawer from an account's related list | Edit 73×36 filled | Edit 75×28 outline, `⋯` 28 |\n| Opportunity, Edit pressed | edit state | edit state, Cancel 28 outline, Save 28 filled |\n\n  Screenshots (`before-*` / `after-*`, light and dark, record page, lead, drawer, edit state) and `*-measure.json` in the project's evidence folder (`build-seat1/36049/`).\n- `overlap-check.mjs` clean before push (shares `RecordDetailView.tsx` with #36042: merges cleanly).\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; eslint on the touched files is clean (the full `pnpm lint` is left to CI).\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgTFnmxG5snBaBLNBei\n"
+}

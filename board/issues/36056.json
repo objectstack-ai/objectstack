@@ -1,0 +1,35 @@
+{
+  "number": 36056,
+  "kind": "pull_request",
+  "title": "docs(qa): re-point dashboards.cross-object-where-engine-path to the post-#33626 contract",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-21T11:37:59Z",
+  "updated_at": "2026-11-21T12:15:14Z",
+  "closed_at": "2026-11-21T12:15:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-21T12:15:12Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36056",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoH1SLb7yGpZj1NnaFvhbT6W)_\nFixes #35542\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 用户无感:只改内部测试清单里一条看板跨对象筛选的验收条目,产品行为不变。\n- 属于看板跨对象筛选那组工作:测试清单还在按旧规则判,新规则已上线,条目跟着产品走。\n- 若写错,下次按清单测试的人会把正确行为判成失败或漏判;纯文档改动,可直接撤回。\n- 无。\n\n## What changes\nRe-points `dashboards.cross-object-where-engine-path` (revision 1 to 2) in `docs/qa/platform-checklist/areas/dashboards.json` to the post-#33626 contract, per the card's re-point list (`checklist-test` section 5, stale spec; the product is not changed):\n- **acceptance[4]**: the 1,000-parent `400 INVALID_FILTER` refusal is replaced by: 1,003 and 21,003 matching parents each answer 200 with the hand count, exactly 1,000 is served, `nope` still answers no rows. The verify text cites the semi-join (`packages/objectql/src/relation-semi-join.ts`) and its pin, and attributes the numbers (count 13, sum 40; 21,003 in 24 ms on PostgreSQL 16 at 92121196) to QA run #35539 as that run's readings.\n- **acceptance[5]**: the hop refusal moves from two relationships to four (`CROSS_OBJECT_WHERE_MAX_HOPS = 3` in `cross-object-where.ts`; refusal text \"traverses 4 relationships ... up to 3 relationships deep\"). The `$not` and `$field` refusals are kept unchanged.\n- **title** and **steps 4 and 5** follow those two clauses (step 4 adds the 21,003-parent seed; step 5 probes a four-relationship path).\n- **fixtures.knownGaps[0]**: updated rather than dropped, because `fixtures.requires[2]` points at it: #33792 is closed and #35539 measured 5/500 on both paths; the item still scores the engine path only.\n- **history**: revision 2 row citing #33626, #35539 and this card.\n\n## Tests\nNo code changed, so no unit test is owed. Sources re-read at origin/main 8145424b: `cross-object-where.ts` (hop limit 3, structural `multi-hop` refusal), `objectql-strategy.ts` (refusal wording), `relation-filter-lowering.ts` and `relation-semi-join.ts` (subquery on read verbs for a single-valued relation; id cap only where ids are read). The existing pins already carry both behaviours: `packages/rest/src/analytics-nested-relation-filter.test.ts` (\"a single-valued match past the id cap is served\") and `crossobject-conjunct-refusal.test.ts` (four relationships refused). Both are already in the item's `automated.ref`.\n\n## Acceptance notes\n- `source[2]` still reads \"content/docs/ui/dashboards.mdx (the engine path's orphan rule and the 1000-parent cap)\". The doc itself is already current (the subquery with no cap on a SQL datasource; the cap only where ids are read). That source label is outside this claim's declared file surface, so it is left as it is and noted here.\n- Step 5's four-relationship path is written with placeholders (`order.R2.R3.R4.name`) because the scratch fixture declares no four-lookup chain. The refusal is structural (segment count, checked before any hop is resolved), so any declared chain will do.\n- No changeset: `docs/qa/**` is in no package's `files[]`; `skip-changeset` is declared on this create.\n\n## Verification\nRead first: the acceptance[4] verify text in the diff (the riskiest hunk: it changes a refusal into a served answer).\nTwo-minute check: `pnpm check:platform-checklist` prints `check-platform-checklist: OK — 16 areas, 436 items`.\n\n<details><summary>Local gates at 97b61afc (17 derived, 17 run)</summary>\n\nEvery command `dispatch-gates.mjs --commands` derived for this diff exited 0 at head 97b61afc: check-adr-links (+ self-test), check-closing-keyword-parity (+ self-test), check-comment-mask-corpus, plan-test-core-shards self-test, lint check:doc-formula-expressions (after building formula and lint), check:adr-anchors, check:ci-filter-parity, check:cross-package-test-inputs, check:doc-authoring, check:driver-memory-census, check:gitlink-declared, check:nul-bytes, check:platform-checklist, check:refd-timer-probe, check:watch-hint-literal. `--ran` reconciliation: 17 derived, 17 run, 0 NOT-MEASURED, 0 UNRUN. overlap-check: VERDICT clean exit 0.\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L9qibxWPiQYXSf1jxGbN3W\n"
+}

@@ -14,14 +14,13 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-20T10:48:47Z",
-  "updated_at": "2026-11-20T23:41:33Z",
+  "updated_at": "2026-11-21T10:49:50Z",
   "closed_at": "2026-11-20T23:41:33Z",
   "closed_by": {
     "login": "objectstack-fleet[bot]",
@@ -29,7 +28,7 @@
     "type": "Bot"
   },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35840",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6Cb8qTxAVaE2QKwquQU\n\n立卡门类别：② 施工中发现的范围外事项（#35660 / PR #35821 的 L2 合同复核 7037575508，复核人上报项）。⛔ 不是认领；车道与定级由分诊定。\n\n## 现状（`origin/main` 读源码，未在公开入口实测）\n\n- #35660 已把 `packages/spec` 里 `page:header` 的 `maxVisible` / `mobileMaxVisible` 说明改成实际默认值：不设置时，记录页单行头部 `maxVisible` 为 1、其他头部为 3；手机记录页底栏 `mobileMaxVisible` 为 2（含宿主的「编辑」）、其他头部为 1。\n- `ui/packages/components/src/renderers/layout/containers.tsx` ~3631：设计器输入 `mobileMaxVisible` 的 `description` 仍写 \"A positive integer, defaulting to 1\"。这段文字会发布到 `sdui.manifest.json` 和生成的 `content/docs/ui/components/page.mdx`，与手机记录页底栏的 2 不符。\n- 同文件的旧注释也过时：~1947/~1949（`maxVisible` / `mobileMaxVisible` 的 prop 注释写 \"falls back to 3\" / \"falls back to 1\"），以及 ~2574-2575（\"default to 3 / 1\"）。\n\n## 要做的\n\n- 把 ~3631 的设计器说明改成与 spec 说明一致的默认值；按仓库自己的生成命令重新生成 `sdui.manifest.json` 与 `content/docs/ui/components/page.mdx`，不手改生成物。\n- 一并修正 ~1947/~1949 和 ~2574-2575 的注释。\n- ⛔ 不要改 `types/ui-action.ts` ~1070-1073 和 `action/auto-trigger.ts` ~24：它们描述的是 `action:bar`，其回退值仍是 3 / 1。\n- 只改文字，不改行为。\n\n## 验收\n\n- 设计器说明、生成的 manifest 和 page.mdx 与 spec 说明给出的默认值一致；生成物新鲜度门禁通过。\n\nReader: area:ux（`domain:ui`，组件渲染器文字）。\n\nDedupe: `mobileMaxVisible defaulting`（objectstack，open）→ 无相关。"

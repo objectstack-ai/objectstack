@@ -2,8 +2,8 @@
   "number": 35794,
   "kind": "issue",
   "title": "List inline edit: re-point two QA checklist items and the Task Desk page text to the select-first list",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,24 @@
   "labels": [
     "area:ux",
     "domain:devx",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-20T08:17:58Z",
-  "updated_at": "2026-11-20T10:50:46Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T12:29:57Z",
+  "closed_at": "2026-11-21T12:29:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35794",
   "body": "repo:objectstack#1 · os-sales · session_01L6bhgTC8kn7AdeMpMmyhJG\n\nFiling gate: ④ child of the coordination parent #35683 (list inline-edit redo). Source: the contract review of PR #35747 (record 7034067196, findings S1 and S2), which the seat ruled carried to a follow-up card instead of PR #35747 (that PR sits 12 changed lines under the 3000-line human-merge line). #35749 was the card first named for it; triage closed #35749 as not planned at 05:49Z, before these items were added, so they are filed here.\n\n## What is left\n\nAfter PR #35747, a list is editable in place with no mode and no switch, and a click on a data cell selects it instead of opening the record (the record opens from the name link or Space). Three texts still describe the old list, read at PR #35747 head `fb141148` (re-read on main before working):\n\n- `docs/qa/platform-checklist/areas/records-forms.json`, item `records-forms.v18-semantic-defaults` (revision 8): steps[0] names \"the Edit inline switch\" as a default the renderer shows; steps[1] tells the runner to find the 'Edit inline' switch and says cells are not editable on load and a click on a cell opens the record; acceptance[2] defines \"offered\" as \"the Edit inline switch is present\".\n- The same file, item `records-forms.form-view-gallery` (revision 8), steps[4]: \"open task-desk.page.ts; click a task row — ObjectForm formType=drawer opens\". A click on a row's assignee, status or priority cell now only selects it; the drawer opens from the title link or Space.\n- `examples/app-showcase/src/ui/pages/task-desk.page.ts`: the page's own text says \"Click a task to edit it in a drawer\".\n\n## Why\n\nA QA run follows these items to the letter. Run against the product as it is after #35747, it finds no switch and a click that opens nothing, and files a failure for a list that works. Each false failure costs a triage round and can reach the maintainer as a bug. The showcase text misleads the person trying the demo in the same way.\n\n## Done when\n\n- `v18-semantic-defaults` steps[0], steps[1] and acceptance[2] say: for an updater the list is editable in place with no switch, a click selects a cell and a double-click (or Enter, or typing) edits it; for a read-only member the cell says why it cannot be edited. Revision bumped with a history entry naming #35684.\n- `form-view-gallery` steps[4] opens the drawer through the title link (or Space on a selected cell). Revision bumped with a history entry.\n- The Task Desk text says to click a task's title.\n- If the maintainer's scope answer on #35683 (list page only, as built, or every grid) changes which hosts select first, the texts follow that answer.\n\nBlocked-by: #35747\n\nGrading: area:ux · Task · p2 · reach: QA runs and showcase visitors (false failures on a working list) · evidence: read on the PR #35747 branch at `fb141148`; the L2 record 7034067196, S1 and S2.\n\nReader: the seat's next area thread for epic #35683, or the `domain:ui` lane.\n\nDedupe: `v18-semantic-defaults` (objectstack issues, open) → 0; `task-desk` open → 1 (#6015, the triage seat post, not about this page)."

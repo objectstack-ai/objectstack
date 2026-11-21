@@ -14,18 +14,20 @@
     "area:ai",
     "domain:devx",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-15T06:37:33Z",
-  "updated_at": "2026-11-19T06:11:10Z",
+  "updated_at": "2026-11-21T12:23:39Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33691",
   "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nPart of objectstack-ai/cloud#3826, phase 1. Ruled on objectstack-ai/cloud#3826 by the account owner in seat session `session_01Q4EjjPP1zuWBNq3nBXVei9`: 「3826 照建议（征询版）」 (decision request 6890278459 and the revised D1 that follows it). Priority per the owner: 「分拆的任务能否直接标记为高优先级让车队开放」.\n\n## 维护者速读\n\n1. **要做的**：之前因为外部 AI 会自己「确认」，临时放宽了场景评分（#33676）。真人确认上线后，把评分恢复严格，并重跑 `asset_lifecycle` 场景。\n2. **验收**：在发布版上，同一个不可逆请求跑 6 次，6 次都停下来等确认，没有一次自己执行；评分规则恢复原样。\n3. **需要你做的**：无。\n\n## Change\n\nRevert objectstack#33676 and re-run the card `asset_lifecycle` on the published release that carries card B. The runner's client answers elicitations as the scenario's persona. Record the 6/6 reading.\n\nBlocked-by: #33690\n\n<!-- signed: repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9 -->"

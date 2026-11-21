@@ -2,8 +2,8 @@
   "number": 35425,
   "kind": "issue",
   "title": "应用内语言菜单只有 4 种，登录页能选的更多：两处统一成同一份清单",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-19T08:48:39Z",
-  "updated_at": "2026-11-21T03:42:46Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T11:11:36Z",
+  "closed_at": "2026-11-21T11:11:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35425",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派）。⛔ 不是认领。\n维护者 2026-11-19 原话：「系统语言好像不止四种，登录页可以切换很多，为什么右侧只能切换四种。」；听过解释后：「同意，三件事都立卡」。\n\n## 现状（界面实测：托管环境 `os-4e4qa4.objectos.app`（预览版，控制台比 `origin/main` 旧；源码位置按 `origin/main` 7ece0204a6 核对），zh-CN，2026-11-19）\n\n- 头像菜单 → 语言：只有 English、简体中文、日本語、Español 四项。\n- 同一环境 `GET /api/v1/i18n/locales` 返回 `en`、`zh-CN`、`ja-JP`、`es-ES` 四个。菜单取的是「平台语言表 ∩ 本环境应用提供的语言」（`ui/packages/app-shell/src/layout/LocaleSwitcher.tsx` 头部说明，objectstack#30514）。\n- 控制台界面本身有 11 个语言包（`ui/packages/i18n/src/locales/`：ar、de、en、es、fr、ja、ko、pt-BR、ru、zh-Hans、zh-Hant）。\n- 登录页用的是同一个组件（`ui/apps/console/src/pages/auth/AuthFooter.tsx:57`），未登录时没有应用语言清单可交，于是列出全部界面语言。登录页这一侧是维护者的观察加源码核对，本次没有在界面上打开登录页对照。\n- 结果：在登录页选了德语或韩语的人，登录后在菜单里找不到自己刚选的语言。\n\n## 要做的\n\n1. 登录页与应用内菜单用同一份清单。建议：都列全部界面语言；应用内容没有翻译的语言在菜单里加一行小字「应用内容显示为默认语言」，而不是藏掉。\n2. 如果裁决是继续按应用语言收窄，那登录页也按同一规则收窄（环境已知时），并且登录页选的语言若登录后不可用，要给出提示而不是静默换掉。\n3. 两种做法二选一，在卡上写明选了哪种。\n\n## 不做的\n\n- 不新增语言包；不改 `/api/v1/i18n/locales` 的返回。\n\n## 验收\n\n- 同一环境，登录页与头像菜单的语言清单一致；在登录页选的语言登录后仍是当前语言，或有明确提示。\n\nReader: `domain:ui` 车道，`LocaleSwitcher.tsx` 与 i18n provider 的「可选语言」计算。\n\nDedupe: `语言 菜单 登录页 四种`、`locale switcher sign-in languages`（objectstack / cloud，open）→ 0。"

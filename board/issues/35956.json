@@ -2,8 +2,8 @@
   "number": 35956,
   "kind": "issue",
   "title": "改一个值让别的字段变成必填时，就地弹出补填框，补完连同原改动一起保存：把看板拖动已有的做法推到列表单元格、记录页和阶段切换",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-20T23:22:55Z",
-  "updated_at": "2026-11-21T03:54:31Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T09:50:54Z",
+  "closed_at": "2026-11-21T09:50:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35956",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（专题：控制台核心业务操作体验，维护者直派）。⛔ 不是认领。优先级 p2（协调席定的，维护者未指定）。\n\n（2026-11-21T03:54Z 更正：本卡里的日期「11-22」应为「11-21」，已改。）\n\n维护者 2026-11-21 原话：「必填被拦时就地补填 也深度调研并立卡」。\n\n## 一句话\n\n把商机改成「赢单」，而「赢单原因」在赢单时必填：现在只有在看板上拖卡片时会弹出补填框，在列表里改单元格、在记录页上改、在头部切阶段，都只是被拒绝。本卡让这几处都用同一个补填框。\n\n## 现状（主干 `09f6d457bb`，读代码；见下面「没有实测的」）\n\n- 字段可以声明「必填条件」（`requiredWhen`，`packages/spec/src/data/field.zod.ts:1402`）。服务端在新建和修改时都会检查，不满足就整笔拒绝，回 `VALIDATION_FAILED` 并逐个列出字段（`packages/objectql/src/engine-insert.ts:1332` 起）。\n- **看板拖动已经做对了**（objectui#4254）：把卡片拖进某一列之前，先算出这次改动会让哪些字段变成必填且还空着，有的话不写入，弹出补填框；填完连同阶段一起写；取消则卡片留在原列。\n  - 预判：`ui/packages/plugin-kanban/src/requiredWhenPrompt.ts:81` `collectRequiredWhenPromptFields`，和表单、服务端用同一个求值器。\n  - 补填框：`ui/packages/plugin-kanban/src/RequiredFieldsDialog.tsx`，每个字段用表单同款的编辑控件。\n  - 不弹的四种情况：已经有值、当前不可见、只读、这种字段类型不能就地编辑（文件、富文本、公式等）。这些照旧直接写，由服务端拒绝。\n- **只有看板在用**。这两个文件在整个界面代码里只有 `ObjectKanban.tsx` 引用。\n- **列表单元格行内编辑**：被拒绝后，保存条里逐条写出原因，表格里有对应列的单元格标红（`ui/packages/components/src/renderers/complex/data-table.tsx:393-425`）。要补的字段如果不在这个视图的列里，就只有一句话，没有地方可填，只能放弃这次改动、打开记录去改。\n- **记录页行内编辑**：被拒绝后，原因显示在对应字段下面（`ui/packages/plugin-detail/src/InlineEditSaveBar.tsx`、`DetailSection.tsx:857-878`）。要补的字段如果在折叠的分组里或者这个页面没放，同样没有地方可填。\n- **完整表单（新建、编辑）**：字段都在表单里，必填条件随输入实时变化，就地标出。这一处没有问题。\n\n## 参照：Attio（帮助文档加界面）\n\n参照方式：Attio 是商业产品，只参照行为，⛔ 不抄代码。\n\n- 规则的写法是「如果〈条件〉，那么〈某字段〉必填」（界面实测，见图）。\n- 被拦时（2026-11-21 界面实测，本段更新于 2026-11-21T03:12Z）。协调席经维护者同意在 Attio 的交易对象上建了一条规则「阶段是 Won 时 Deal value 必填」，测完已删除。\n  - 在看板上把一条没有金额的交易拖进 Won 列：弹出「Updates required」。框里先是记录名，然后两行：第一行是触发的那次改动（Deal stage = Won，只读显示），第二行是要补的字段（Deal value，可输入）。只有一个「Save」按钮和右上角的关闭。\n  - 每一行的字段名旁有一个小问号，悬停显示「This update is required due to the 〈规则名〉 rule」，说明是哪条规则要求的。\n  - 不填直接点 Save：输入框下面出现红字「Must have a value」，框不关。\n  - 点关闭：卡片回到原来的列，没有任何提示，数据没变。弹框期间卡片已经先显示在 Won 列里，关闭后才退回。\n  - 在卡片上行内把阶段改成 Won（不是拖动）：弹出的是同一个框。\n  - 帮助文档另外写的两条没有实测：填的值又触发别的规则时框里追加字段；范围是「你自己做的任何改动，不管在哪做的」。\n- 已经不合规的老记录不会被标出来，下次有人改它时才拦，哪怕改的不是规则里的字段（帮助文档）。\n\n![参照：Attio 的补填框](https://github.com/objectstack-ai/objectstack/blob/4f8bb945b6a59b0bcf474b90ac0843facc629362/record-redo/required-attio-updates-required.jpg?raw=true)\n\n![参照：悬停问号说明是哪条规则要求的](https://github.com/objectstack-ai/objectstack/blob/4f8bb945b6a59b0bcf474b90ac0843facc629362/record-redo/required-attio-why-tooltip.jpg?raw=true)\n\n![参照：不填直接保存时的提示](https://github.com/objectstack-ai/objectstack/blob/4f8bb945b6a59b0bcf474b90ac0843facc629362/record-redo/required-attio-must-have-value.jpg?raw=true)\n\n![参照：Attio 的必填规则](https://github.com/objectstack-ai/objectstack/blob/ca934e04728d7115e71be798a2293c6bdf6d37e8/record-redo/required-attio-add-rule.jpg?raw=true)\n\n## 要做的\n\n1. **把预判和补填框从看板里提出来，做成通用的**，放到各处都能用的包里。看板改为用提出来的这一份，行为不变。\n2. **这几处在写入前都先预判，有要补的就弹同一个框**：\n   - 列表表格里改一个单元格；\n   - 记录页上行内改一个字段；\n   - 记录页头部切换阶段（objectstack-ai/objectstack#35853 把阶段条改成头部的下拉之后，就是那个下拉）；\n   - 看板拖动（已有）。\n3. **补填框的内容**：\n   - 先显示记录名；第一行是触发的那次改动，只读显示（例如「销售阶段：赢单」）；\n   - 下面列出要补的字段，用表单同款的编辑控件，带字段名和必填标记；\n   - 不填就点保存时，原因显示在对应的输入框下面，框不关；\n   - 「保存」把原改动和补填的值**一次写入**；「取消」原改动不写，界面回到改之前的值。\n4. **连环触发**：补填的值又让别的字段变成必填时，框里追加这些字段，不关框、不先保存一半。\n5. **服务端仍然拒绝时**（别人同时改了记录，或者拒绝来自预判不了的规则）：框不关，原因显示在框里对应的字段下面；说不上是哪个字段的，显示在框的底部。\n6. **预判不了的情况照旧**：对象级的校验规则、唯一性、上面说的四种不弹的情况，仍然走现在的拒绝提示。本卡只是让「补几个空字段就能过」的那一类不再是死路。\n7. **列表保存条的那句话补上去路**：行内编辑被拒绝、又不属于能弹框的情况时，保存条里加一个「打开记录」的链接。\n\n## 不做的\n\n- 不改规则的写法。Attio 的规则还支持「必须为空」「必须等于」「必须早于」，并且可以指定对谁生效（排除某些成员或自动化）；我们的「必填条件」只管必填，其余用校验规则写。要不要做成 Attio 那样的规则页签，维护者没有定，不在本卡。\n- 不改完整表单。\n- 不做批量修改时的补填。批量修改字段还不是内置操作（见 objectstack-ai/objectstack#35678 的「不做的」），内置之后再接。\n- 不改 AI 助手改记录时的审批卡。Attio 会把要补的字段加进审批卡，这个另议。\n- 不标记已经不合规的老记录。\n\n## 验收\n\n准备：给一个对象的字段 B 设必填条件「阶段等于赢单」，取一条 B 为空、阶段不是赢单的记录。\n\n- 列表里把这条记录的阶段单元格改成赢单：不写入，弹出补填框，框里说明是「改成赢单」触发的，列出 B。填 B 点保存：阶段和 B 同时变了，只发了一次写入。\n- 同上，点取消：阶段单元格回到原值，没有任何写入，没有报错提示。\n- 视图里没有 B 这一列：同样弹框，同样能补。\n- 记录页上行内把阶段改成赢单、B 在折叠的分组里：弹框，能补。\n- 记录页头部切阶段到赢单：弹框，能补。\n- 看板拖到赢单列：行为和改动前一样（同一个框）。\n- 再设一个字段 C 的必填条件「B 等于某个值」：在框里把 B 填成那个值，框里追加 C；C 填完才能保存。\n- B 已经有值时改成赢单：不弹框，直接保存。\n- B 是不能就地编辑的类型（例如富文本）：不弹框，走现在的拒绝提示；列表保存条里有「打开记录」。\n- 弹框期间另一个人把这条记录改了导致服务端拒绝：框不关，原因显示在框里。\n- 手机宽度（375）下框不溢出，控件可以正常操作。\n- 仓库里只剩一份预判和一个补填框。PR 正文列出迁移或改写的测试。\n\n## 协调席自己加的（不是维护者原话）\n\n- 范围选了「列表单元格、记录页行内、头部切阶段、看板」这四处。\n- 第 5 项、第 7 项。第 3 项现在照 Attio 实测的样子写。\n- 「不做的」五条都是协调席划的线，维护者没有逐条看过。\n\n## 没有实测的\n\n- **现状全部来自读代码**。本机环境里没有任何带必填条件的字段（协调席查了四个对象），想在设计器里加一条来实测没有做成。请接手的开发先在界面上确认列表和记录页被拒绝时的实际样子，和上面写的不一致就在卡上说明。\n- Attio 的补填框只在看板的拖动和卡片上行内改这两处实测过；表格单元格和记录页没有试。\n- 记录页头部切阶段现在走的是哪条写入路径、有没有自己的提示，没有查。\n\nReader: `domain:ui` 车道。`ui/packages/plugin-kanban`（`requiredWhenPrompt.ts`、`RequiredFieldsDialog.tsx`、`ObjectKanban.tsx`）、`ui/packages/components/src/renderers/complex/data-table.tsx`、`ui/packages/plugin-detail`（`InlineEditSaveBar.tsx`、`DetailSection.tsx`、头部）、`ui/packages/fields`、`ui/packages/core`。\n\nDedupe: `必填 补填`、`requiredWhen 行内编辑 拒绝`、`RequiredFieldsDialog`（objectstack，open）→ 都是 0。相关：objectui#4254（看板的补填框，已合并）、objectstack-ai/objectstack#27520（保存条里把拒绝原因说全）、objectstack-ai/objectstack#35853（头部阶段下拉）。\n\n"

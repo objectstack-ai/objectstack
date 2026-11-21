@@ -1,0 +1,37 @@
+{
+  "number": 36072,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth): a kernel without SSO answers 404 again on the SSO discovery endpoints, with no error log",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-21T12:19:58Z",
+  "updated_at": "2026-11-21T13:15:36Z",
+  "closed_at": "2026-11-21T13:15:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-21T13:15:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36072",
+  "body": "Fixes #35939\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：SSO 发现出口作用域现在只在 better-auth 实例真正挂载了 SSO 插件时才打开；没开 SSO 的部署对 /sso/register、/sign-in/sso、/sso/callback/* 重新回 404。\n- 为什么改：上一轮 SSO 出口加固后，作用域只看路径就打开，而它依赖的观察器只随 SSO 挂载，导致所有未开 SSO 的部署（默认形态）在这三个入口回 503 并每次打一行 error 日志；cloud 的 pin 轮因此 3/9 用例红。\n- 风险与回滚：开了 SSO 的部署行为不变（未被观察的适配器仍 503、发现读取仍走连接时守卫）；判据读的是实际构建出的插件清单，读不到时按“已挂载”处理，只会多拦不会放行。回滚即还原本 PR 一行条件。\n- 先看：packages/plugins/plugin-auth/src/auth-manager-request-routing.ts（runHandler 那一行条件）；packages/plugins/plugin-auth/src/sso-discovery-egress.ts（新判据 mountsSsoEndpoints）；packages/plugins/plugin-auth/src/sso-discovery-connect-time.test.ts（新 describe）。\n- 两分钟验证：pnpm --filter @objectstack/plugin-auth exec vitest run --maxWorkers=2 src/sso-discovery-connect-time.test.ts，预期 32 个用例全绿，其中新增 6 个“answers 404, and nothing is logged at error level”。\n- 需要你做的：无，席位落地。\n\n## What changes\n\nOn a kernel that does not mount SSO (the default without `OS_SSO_ENABLED` or `plugins.sso`), `POST /sso/register`, `/sign-in/sso` and `/sso/callback/*` answered `503 SERVICE_UNAVAILABLE` and logged one error line per request. The discovery-egress scope opened on `isSsoDiscoveryEgressPath(path)` alone, while `ssoProviderReadsObserverPlugin` is pushed only inside `if (enabled.sso)`, so `runSsoDiscoveryEgress` found no observed adapter and refused.\n\n- `sso-discovery-egress.ts`: new `mountsSsoEndpoints(auth)`. It reads the built instance's plugin list (`auth.options.plugins`, the same read `implicit-account-linking.ts` uses for the composed `sso` plugin) and answers whether the vendor's `sso` plugin is mounted. A list it cannot read answers `true`, so the scope opens.\n- `auth-manager-request-routing.ts`: the scope opens when the path names a discovery endpoint AND `mountsSsoEndpoints(auth)` holds. Unmounted: the vendor answers its own 404 and no provider read can happen. Mounted: unchanged. An unobserved adapter is still refused 503 before the endpoint runs.\n- `auth-manager.ts`: a docblock line on `runSsoDiscoveryEgress` saying it is reached only when SSO is mounted.\n\nWhy the composition and not `isSsoWired()`: `isSsoWired()` re-reads `OS_SSO_ENABLED` at request time, and better-auth is built lazily, so the two can disagree. If they disagree in the \"off\" direction, a kernel that mounted SSO would serve discovery with its reads unjudged. That fails open. The built plugin list is the composition that answers the request, so it cannot disagree with itself. The new CONTROL case pins this.\n\n## Tests\n\nNew top-level describe in `sso-discovery-connect-time.test.ts` (this file already holds the discovery-scope tests):\n- For `plugins.sso: false`, and for `plugins.sso` unset with `OS_SSO_ENABLED` unset: each of `POST /sso/register`, `POST /sign-in/sso` and `GET /sso/callback/:providerId` answers 404. `logger.error` is never called, and no warn or info line says \"SSO request refused\" (6 cases).\n- CONTROL: a kernel built with `OS_SSO_ENABLED=true`, with the env unset after the build and the context adapter rebuilt as a plain object, still answers 503 `SERVICE_UNAVAILABLE` with one error line.\n- The SSO-on refusal is already pinned by the existing describe \"a request whose auth context adapter is not the observed view is refused\", which runs all three doors on `plugins.sso: true`. Those cases stay green, unchanged.\n\nAblation (one-off, no test file kept): `node scripts/ablation-replace.mjs` deleted the anchor ` && mountsSsoEndpoints(auth)` (anchor 1 to 0, blob b04539afe0af to 739194970b07). The file then had 6 failed and 26 passed: the 6 new 404 cases went red with `expected 503 to be 404`, and the existing 503 pins and the CONTROL stayed green. The restore matched the HEAD blob and `git diff HEAD` was empty. A first attempt used `--replacement` with a substring of the anchor. The tool refused it (replacement count could not rise), so it was a no-op and the test never ran.\n\n## Acceptance notes\n\n- Before the fix, at commit a776f672d8c (test only), the new file section had 6 failed and 1 passed (the CONTROL). The response body was the card's exact 503 message.\n- `check:dual-build-cjs-loads` exited 3 (PREREQUISITE NOT MET: it needs every package's `dist/`, and this container has no room for a full build). NOT MEASURED locally; the PR's `Lint & Repo Gates` run carries it.\n- `test:repo` was not run locally. The diff touches no file in that project; `Test Core` carries it.\n\n## Verification\n\nAll readings were taken at head 1f505ba720c unless noted.\n\n<details><summary>plugin-auth tests and typecheck</summary>\n\n- `pnpm --filter @objectstack/plugin-auth exec vitest run --maxWorkers=2` (at 3f7ec3b181e; the later commit adds only the changeset): Test Files 291 passed (291), Tests 6184 passed and 10 skipped (6194), exit 0.\n- `pnpm --filter @objectstack/plugin-auth build && pnpm --filter @objectstack/plugin-auth typecheck`: exit 0. `check:test-typecheck`: OK, 10 files / 71 errors / 23 pinned signatures held in the ledger, unchanged.\n\n</details>\n\n<details><summary>Derived gate families (dispatch-gates --commands, 76)</summary>\n\n- 75 exit 0. `pnpm check:dual-build-cjs-loads` exit 3 (PREREQUISITE NOT MET).\n- `dispatch-gates --ran` with exit codes recorded: 76 derived families accounted for, 75 run, 1 NOT-MEASURED (derived from the recorded exit 3), 0 UNRUN.\n\n</details>\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Q4EjjPP1zuWBNq3nBXVei9)_\n"
+}

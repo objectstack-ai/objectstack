@@ -1,0 +1,33 @@
+{
+  "number": 36050,
+  "kind": "issue",
+  "title": "security: add the read-only `viewAllFields` object-permission bit — spec key, both field merges, built-in admin sets, every super-user-bit reader (step 2 of #34365, additive, no behaviour change)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-21T11:25:41Z",
+  "updated_at": "2026-11-21T14:11:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36050",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibzFAE8YRsK8YCDAeLL\n\nFiling gate: ④ sub-card of the ruled decision #34365 (ruling 6912661484, verbatim 「同意，立决策卡」; the ruling says the implementation cards are cut from it after PR #34082 merges — merged 2026-11-16T21:40Z) · Source: topic #34365\n\nParent: #34365 (step 2, \"next minor, additive only\")\nGrade: left to triage. Suggested **p2**: it is the first step of the p2 security card #34365 and blocks the rest of it. Area: data. Type suggestion: Feature (a new authorable key).\nDedupe: `repo:objectstack-ai/objectstack is:issue viewAllFields` → 3 hits: #34365 (the parent), #33828 (closed, the View All half that PR #34082 fixed), #6015 (triage seat post). No card covers this step.\n\n## Business reason\n\nToday a permission set's View All / Modify All on an object also votes on every field of it, so one set's View All re-opens a field another set hides (objectstack-ai/hotcrm#2481 was this case). The maintainer ruled the end state: View All / Modify All only widen records, and a separate read-only `viewAllFields` bit carries \"this role sees every field\". This step adds that bit so apps and the built-in admin sets can say it explicitly before the v19 switch takes the field vote away from View All / Modify All. Without it, the v19 conversion has nothing to convert to, and admins would lose field visibility at the switch.\n\n## What to build\n\n1. **Spec key.** `viewAllFields?: boolean` on `ObjectPermissionSchema` (`packages/spec/src/security/permission.zod.ts`), with a describe that says: read vote on every field of the object, including fields added later; **no edit vote** (ruled: read-only); a set's own explicit field row on the same object beats it (own `readable: false` row ⇒ that set casts no read vote on that field — same rule PR #34082 landed for View All). Allowed on the wildcard `'*'` entry. Liveness-ledger row and generated baselines as the spec gates require.\n2. **Both field merges honour it**, through the one shared vote in `packages/core/src/security/effective-object-permissions.ts` (`superuserFieldVote` today, or a sibling it calls): `PermissionEvaluator.getFieldPermissions` (`packages/plugins/plugin-security/src/permission-evaluator.ts`) and `buildEffectiveFieldPermissions` must give the same answer for the same sets.\n3. **Built-in admin sets carry it** on their wildcard entry: `admin_full_access` and `organization_admin` (`packages/plugins/plugin-security/src/objects/default-permission-sets.ts`), plus the no-wall admin-set derivation in the same file (around the wildcard `viewAllRecords`/`modifyAllRecords` split near line 1768) and `auto-org-admin-grant.ts` if it builds a wildcard entry.\n4. **Every reader that enumerates the super-user bits learns the new one**, or it becomes an over-grant or a false refusal (list from the ruling, \"at least\"):\n   - `packages/plugins/plugin-security/src/agent-ceiling-clamp.ts` (the clamped-key list, line ~49);\n   - `packages/plugins/plugin-security/src/delegated-admin-gate.ts` (the wildcard-bit loop, line ~754, and the doc at ~720);\n   - `packages/lint/src/validate-rollup-source-visibility.ts` (line ~222);\n   - `packages/spec/src/security/high-privilege.ts` (line ~166) and `packages/lint/src/build-access-matrix.ts`;\n   - the access explanation's object-bit echo, if it lists the bits.\n   The dev greps `viewAllRecords` across `packages/` and lists, in the PR body, each site it judged a super-user-bit enumerator and each it judged record-scope only.\n5. **ADR-0066 D2 ⑧ note** for this step (governed text, Tier H): the bit exists, it duplicates today's votes, and the v19 switch is the end state (#34365 step 3).\n\n## Constraints\n\n- **No behaviour change.** Every set that exists today answers exactly as before: the admin sets already read every field through View All / Modify All, so the new bit only duplicates their vote. A test pins this: for the built-in admin sets and for a View All set with and without its own `readable: false` row, `getFieldPermissions` and `buildEffectiveFieldPermissions` return the same maps before and after.\n- **No snapshot churn.** `access-matrix.json` of an app that does not author the bit stays byte-identical (emit the column only when true, or whatever shape keeps existing snapshots unchanged).\n- Read-only by ruling: `viewAllFields` never casts an edit vote. Edits come from the default (a field no set names) or explicit `editable: true` rows.\n- Muting / deny (ADR-0066 ⑦) is not built here.\n\n## Declarations the PR owes\n\n`Clause-②: yes` (widening: a new authorable key). `Metadata-protocol: added`. `Skills-docs: follow-up #N`, where #N is the skills / authoring sub-card of #34365 cut beside this one. Governed surface (`docs/adr/**`) ⇒ Tier H; contract review owed (spec + security surface).\n\n## Out of scope (own sub-cards of #34365)\n\n- `os explain` naming which channel opened a field.\n- The lint warning \"this set's View All / Modify All re-opens a field another set hides\".\n- Skills / authoring-rules teaching.\n- The v19 switch (View All / Modify All stop voting on fields, ADR-0087 conversion) — a behaviour change, built only on the maintainer's go-ahead.\n\n## Acceptance\n\n- The key parses, is in the liveness ledger as live, and both merges honour it with the own-row rule.\n- Built-in admin sets carry it; every enumerator listed above reads it; the no-behaviour-change pin passes.\n- Gates green; L1 + L2 (contract) PASS on the final head."
+}

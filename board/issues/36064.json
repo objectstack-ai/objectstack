@@ -1,0 +1,36 @@
+{
+  "number": 36064,
+  "kind": "pull_request",
+  "title": "fix(grid): an earlier save's Undo right after a newer save keeps the newer row on screen",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-21T12:14:40Z",
+  "updated_at": "2026-11-21T12:58:57Z",
+  "closed_at": "2026-11-21T12:58:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-21T12:58:55Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36064",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuVwX4pUdM1qvNLSqRZNSvv3)_\nFixes #35999\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none\nrepo:objectstack#1 · os-sales · session_01L6bhgW85kwjGaz7HqsmEuv\n\n## 维护者速读\n\n- 用户能看到什么变化:列表里先后改了同一行的两个单元格,随即撤销较早那一次时,这一行不再退回最初读到的旧值,较新那次修改留在屏幕上。\n- 为什么做:这是列表单元格自动保存与撤销那一组工作里的一处时序缺陷,它也让界面测试在无关的 PR 上偶尔变红。\n- 出错会怎样:只有显示错,服务器上的数据一直是对的,下次刷新列表就恢复;改动可以直接撤回。\n- 要你做什么:无。\n\n## What changes\n\nA select-first grid draws an Undo's answer over the row as the grid shows it now. `currentRowOf` reads that row from `rowPatchesRef`. The ref was mirrored from the `rowPatches` state by a passive `useEffect`, and the save's `setRowPatches` runs after an `await`, so it is a default-lane update. Its effects are therefore scheduled after the commit instead of inside it. That leaves a window in which the newer save is already in the DOM while the ref still holds the earlier save's patch. An Undo of the earlier save inside that window:\n\n1. read the stale patch row (old name, the earlier save's amount);\n2. failed the `held.row === row` check in `writeRowInPlace` against the real state, so it re-based the new patch onto that stale row;\n3. `patchedRowOf` rejected a patch whose `base` is not the loaded row, so the grid drew the row as first read (`alpha` / `10`) until the next load.\n\nThe server's record was right throughout. The guard came from `writtenVersionsRef`, which was always written synchronously. That is why the CI failure was the `getByText('A2')` after `findByText('10')`, and never the `If-Match` assertion before it.\n\nFix: `writeRowInPlace`, the only writer of the patches, builds the next map from the ref, assigns the ref, then calls `setRowPatches(next)`. The mirroring effect is gone. Nothing else sets the patches; a load does not reset them, because a load hands the grid new row objects and each patch stops applying by its `base`. So no effect is needed for load-driven resets.\n\nFiles to read first, by risk:\n1. `ui/packages/plugin-grid/src/ObjectGrid.tsx`: the `writeRowInPlace` hunk (ref set together with the state) and the removed `useEffect` beside `rowPatchesRef`.\n2. `ui/packages/plugin-grid/src/__tests__/ObjectGrid.autosave-35685.test.tsx`: the new test \"an earlier save's Undo pressed the moment a newer save is drawn keeps the newer save on screen\". The existing \"an earlier save's Undo is guarded by the newest version of its record\" is unchanged.\n\nTwo-minute check: `pnpm --dir ui exec vitest run packages/plugin-grid/src/__tests__/ObjectGrid.autosave-35685.test.tsx` should report 19 passed.\n\n## Tests\n\nThe new test presses the earlier save's toast Undo inside a `MutationObserver` callback the moment `A2` reaches the DOM. That is a microtask after React's commit and before the render's scheduled passive effects, so the test lands in the window on every run, not only under load. It asserts the third update's arguments and `If-Match`, that `A2` is still shown, and that `alpha` is not.\n\n<details><summary>Fixed tree (1ed9d921): window test 3/3, whole file 19/19, load loop 108/108</summary>\n\n```\n== leg fixed HEAD 1ed9d921 markers: ref-assign=1 effect=0\nwindow test run 1 exit=0       Tests  1 passed | 18 skipped (19)\nwindow test run 2 exit=0       Tests  1 passed | 18 skipped (19)\nwindow test run 3 exit=0       Tests  1 passed | 18 skipped (19)\nwhole file exit=0       Tests  19 passed (19)\nRESULT tag=fixed-load runs=108 fail=0\n```\nThe load loop ran 3 parallel loops of the original \"is guarded by the newest version\" test, with 1 `yes` CPU burner, on a shared 4-core box.\n</details>\n\n<details><summary>Ablation (fix reverted to main's code): window test red 3/3, with the CI failure's signature; restore proven</summary>\n\nThe ablation reverted both halves through `scripts/ablation-replace.mjs`: the mirroring `useEffect` was put back, and the functional `setRowPatches` updater was put back in place of the ref assignment. Each mutation showed the anchor moving 1 -> 0 and the blob changing.\n\n```\n== leg ablated HEAD 1ed9d921 markers: ref-assign=0 effect=1\nwindow test run 1 exit=1       Tests  1 failed | 18 skipped (19)\nwindow test run 2 exit=1       Tests  1 failed | 18 skipped (19)\nwindow test run 3 exit=1       Tests  1 failed | 18 skipped (19)\nwhole file exit=1       Tests  1 failed | 18 passed (19)\nTestingLibraryElementError: Unable to find an element with the text: A2.\nRESULT tag=ablated-load runs=33 fail=0\nablation-replace: ok restored: blob == HEAD (f49d4e10dba6) and `git diff HEAD` is empty\n```\nOn the ablated (main-equivalent) tree, the original test passed 33/33 under this box's load. The CI flake did not reproduce here by load alone, which matches the 3/3 and 5x18 local greens on the card. The deterministic window test is what pins the defect.\n</details>\n\n## Acceptance notes\n\n- The original flaky test is unchanged. It now has nothing to race: the ref is current from the moment the newer save's state is set.\n- No skip, quarantine, retry or timeout change.\n\n## Verification\n\n<details><summary>Derived gates (dispatch-gates --commands, 1ed9d921)</summary>\n\n```\ndispatch-gates --ran: 39 derived famil(ies) accounted for, 39 run, 0 NOT-MEASURED; all 39 exit 0\n  (incl. pnpm --dir ui exec vitest run scripts/: Test Files 172 passed | 2 skipped, Tests 5111 passed | 2 skipped)\npnpm --filter @object-ui/plugin-grid run type-check (after building its ^... closure): exit 0\nscoped cell-selection save tests (autosave-35685, cellSelection-35684, requiredPrompt-35956,\n  inCellSelectMultipleRouting-35688, objectGridRowPatch-35685): Test Files 5 passed, Tests 42 passed\npnpm --dir ui run check:new-line-citations: 0 new citation(s), exit 0\noverlap-check --branch=HEAD: clean vs origin/main, #36054, #36045, #36024 (all share ObjectGrid.tsx, all merge cleanly)\n```\nThe whole @object-ui/plugin-grid suite and the Test UI shards are left to CI.\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgW85kwjGaz7HqsmEuv\n"
+}

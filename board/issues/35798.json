@@ -2,8 +2,8 @@
   "number": 35798,
   "kind": "issue",
   "title": "Record header summary chip: a percent, currency or date formula is drawn as its raw value, because the chip picks its arm from the field type `formula`",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "area:data",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-20T08:28:39Z",
-  "updated_at": "2026-11-20T08:50:42Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T12:44:58Z",
+  "closed_at": "2026-11-21T12:43:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35798",
   "body": "repo:objectstack#7 · os-tesla · session_01L9qibvVRcFWKrfWeG5jzPb\n\nFiling gate ①, Source: fleet. Out-of-scope finding of the #35734 dev (os-dev-report 7034234321), confirmed fileable as its own p3 card by the L1 review of PR #35793 (7034338665). Dedupe: `summary chip formula`, `chip percent formula` and `formula returnType detail header` return only #35734, which fixes the header HIGHLIGHT strip (`HeaderHighlight.tsx`) and the grid footer, not this chip.\n\n## What happens (read at `origin/main` `ccded86a2`)\n`DetailView` (`ui/packages/plugin-detail/src/DetailView.tsx`, the `effectiveSummaryFields` chips beside the record title) resolves `ftype = sectionField?.type || objField?.type` and picks its arms from it: `currency`, `date` / `datetime`, `percent`, `select` / `status` / `multiselect`. A `formula` field has `ftype === 'formula'`, so a formula whose `returnType` is `percent`, `currency` or `date` takes none of them. The chip prints `String(val)`, for example `0.25` for a percent formula whose list cell reads `25%`, a bare `1250` for a currency formula, or an ISO string for a date formula. The cell-renderer fallback only runs when the text contains `[object Object]`.\n\nPR #35793 (#35734) resolves the same thing for the highlight strip and the footer through two module-local helpers. It adds a fourth and fifth place where a formula's value type is spelled, beside `FormulaCellRenderer`, plugin-form's `columnValueType` and plugin-grid's `alignsAsNumber`. This card is the place to decide whether the chip reuses one shared helper or keeps a module-local copy. That choice is context for the fix and not a card of its own (L1 ruling).\n\nreach: every record page whose `summaryFields` names a `percent`, `currency` or `date` formula: the chip beside the title disagrees with the same value's list cell and its highlight chip. Read from code, not run.\n\n## Done when\nA summary chip over a formula draws as its declared `returnType` where the spec reads that return type as a field type (`percent` at its declared scale and max, `currency` in its `currencyConfig` currency, `date` as a localized date), the same face the highlight strip uses after #35793. Pin each of the three, with a CONTROL showing a `number` / `text` formula unchanged. The existing `summaryChip.displayLocale-9453.test.tsx` control rows stay green.\n\n## Business rationale\nA record page's title chips are the first figures a user reads. A margin formula reading `0.25` beside a highlight strip and list that read `25%` looks like a different number. Reader: the area:data lane seat (d7-C), one small PR in `ui/packages/plugin-detail`, after #35793 lands (same helper question).\n\nGrade: p3 · area:data · Bug · record pages with formula summary chips, sometimes · evidence read."

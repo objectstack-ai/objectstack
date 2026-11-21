@@ -16,17 +16,17 @@
     "domain:ui",
     "finding",
     "pm:queue",
-    "priority:p2"
+    "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-21T04:55:22Z",
-  "updated_at": "2026-11-21T05:50:49Z",
+  "updated_at": "2026-11-21T13:16:13Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35992",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CZiaBg6rk7dpy1s9Me\n\nFiling gate: ① the part of #35559 its PR cannot reach inside its file surface. PR #35991 (#35559) makes the list's quick filter and the shared advanced filter builder offer 包含 / 不包含 / 为空 / 不为空 for multi-value fields, through one helper `jsonColumnFilterOperators(field)` in `@object-ui/components`. Two more surfaces were found by reading, not measured. Suggested grade: p2. ⛔ Not a claim; triage sets lane and grade.\n\n## By reading (origin/main, not measured)\n\n- **Dashboard filter bar.** A select / lookup global filter bound to a multi-value field is lowered to bare equality or `$in` by `ui/packages/core/src/…/dashboard-filters.ts` `buildFilterCondition`. The server refuses both on a JSON column (400 INVALID_FILTER; `packages/core/src/utils/json-column-operator-refusal.ts`). No showcase dashboard binds such a field today, so the dev could not measure it.\n- **Condition editors that build filter fields without `multiple`.** `FilterConditionField` (`@object-ui/fields`) and the metadata-admin / Studio condition rows (ConditionBuilder, flow-edge-condition-rows, dataset filter) pass no `multiple`. So a select / lookup / user field with `multiple: true` keeps its single-value operators there. multiselect, checkboxes and tags are already fixed by type through the shared builder. Whether the code that evaluates those conditions refuses these operators was not measured.\n\n## Done when\n\n- A dashboard global filter bound to a multi-value field sends `contains` (one member per condition, `or` for any-of), and the dashboard answers with rows instead of a refusal. Pinned with a fixture dashboard.\n- The condition editors pass `multiple` to the shared builder, so `multiple: true` select / lookup / user fields offer only what their evaluator accepts. Measure the evaluator first: if it is not the JSON-column refusal, state what it accepts.\n\nDedupe: issue search `dashboard filter multi-value equality`, `buildFilterCondition multiselect`, `FilterConditionField multiple` → only #35559."

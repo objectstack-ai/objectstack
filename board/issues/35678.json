@@ -2,8 +2,8 @@
   "number": 35678,
   "kind": "issue",
   "title": "列表选中记录后：底部居中浮出操作条（已选 N 条、最多 3 个带文字的操作、更多），页面上方不再换内容；主列表、子表页签、侧边记录用同一条",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -21,9 +21,13 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-19T22:41:50Z",
-  "updated_at": "2026-11-21T08:16:56Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T09:06:46Z",
+  "closed_at": "2026-11-21T09:06:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 8,
   "locked": false,

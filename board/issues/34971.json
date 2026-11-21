@@ -13,19 +13,21 @@
   "labels": [
     "area:data",
     "domain:server",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2",
     "security"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-17T20:11:22Z",
-  "updated_at": "2026-11-19T15:44:12Z",
+  "updated_at": "2026-11-21T13:15:16Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34971",
   "body": "security#2 · os-justin · session_01QSeKYn5CmmdShCJifm6WYj\n\nFollow-up from the contract review of #34969 (S1 and N1). Low.\n\n**The rule.** Under the `email_domain` and `open` audience postures, a self-serve sign-up the posture's own rule admits receives the declared self-registration permission set, whether or not it also holds a pending invitation. For an address on the allowlist, the domain rule admits it, not the invitation.\n\n**Now.** The admission verdict reads a pending invitation before it reads the posture. Its permission-set decision therefore differs from the binding decision #34969 made, which treats an on-allowlist address as domain-admitted. The two classifications in one request should agree.\n\n**Done when:**\n- The verdict judges an on-allowlist address by the domain rule first, under `email_domain`, and does the same under `open`.\n- A control in `invitation-acceptance-verified-address.test.ts` asserts the permission-set grant for an invited on-allowlist sign-up next to the membership.\n- The docs sentence \"admitted by its domain, invitation or not\" is true of both the grant and the binding."

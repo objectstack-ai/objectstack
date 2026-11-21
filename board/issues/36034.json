@@ -1,0 +1,31 @@
+{
+  "number": 36034,
+  "kind": "issue",
+  "title": "driver-sql: measure id = ANY(ARRAY(SELECT …)) against the share-grant semi-join for a caller with no grant on PostgreSQL (ADR-0155 step 6 cost)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-21T09:21:40Z",
+  "updated_at": "2026-11-21T09:48:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36034",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibyXo4gSy8DJPNz4ANz\n\nFiling gate: ② a measured cost the switch ships with · Source: fleet (#33787 step 6 dev report, open_questions[2]; seat 7's call 2026-11-21T09:20Z: \"ship it with the cost stated … and file the ANY(ARRAY()) follow-up card\"). Part of #33787.\n\n## 维护者速读\n- 问题：第 6 步（#33787）上线后，PostgreSQL 上一个\"没有任何共享授权\"的用户打开列表时，列表总数那条查询不再走负责人索引，改成全表扫描：10 万行从 1.46 ms 变 7.29 ms，100 万行从 7.88 ms 变 42.21 ms。列表本页不受影响，SQLite 不受影响。\n- 这一步做什么：在同样的数据上实测另一种写法 `id = ANY(ARRAY(SELECT …))`，看它能不能让总数查询回到索引、同时结果行完全不变（D-0）。\n- 不做会怎样：大表上无共享用户的列表总数慢几倍（毫秒级），结果正确。\n- 要你做的：看实测结果后再决定换不换写法（step 3 的 L2 已把这个写法列为你来权衡的选项）。\n\n## What is known\n- Step 6 measured, for a caller holding no grant, the list page of 50 and its total (medians of 25 runs). PG16 100k: page 1.59 → 1.72 ms (pkey index scan both), total 1.46 → 7.29 ms; the owner-index Bitmap becomes a Seq Scan with a hashed SubPlan. PG16 1M: page 1.65 → 1.58 ms, total 7.88 → 42.21 ms (Parallel Seq Scan). SQLite 100k and 1M keep the owner index (MULTI-INDEX OR).\n- The statement is ADR-0155 D2's: `id IN (SELECT record_id FROM sys_record_share WHERE object_name=? AND recipient_type='user' AND recipient_id=? AND record_id IS NOT NULL AND record_id <> '')`, with D2's \"⛔ No `EXISTS`, no correlated form, no join\". `id = ANY(ARRAY(SELECT …))` is uncorrelated and was named by step 3's L2 as a form for the maintainer to weigh. Whether it is inside D2's text is part of this card's question.\n\n## Scope\n- Measure on PG16 at 100k and 1M: today's semi-join vs `ANY(ARRAY(…))` for the no-grant caller (page and total) and for 5,000 / 6,000 grants. Plans and medians.\n- Same rows on every D6 pin (D-0), including the PG key-type cast (#35906) and the write form.\n- Report only, unless the maintainer rules a change. ⛔ No ADR edit here.\n\n## Dedupe\n`repo:objectstack-ai/objectstack is:issue \"ANY(ARRAY\" share` → none.\n\nGrade: p3 (a measured milliseconds cost with correct rows; the switch it follows is p2). Type: Task."
+}

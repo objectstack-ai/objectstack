@@ -1,0 +1,33 @@
+{
+  "number": 36066,
+  "kind": "pull_request",
+  "title": "docs(scenarios): an acknowledged roll-up finding on a withheld child is still charged",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-21T12:16:00Z",
+  "updated_at": "2026-11-21T13:51:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36066",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D7UBkcmf1Qy7iEMxarYt8wU)_\nFixes #35006\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感:场景评测的说明文档写明一条既有计分规则,并加一条测试钉住它,分数不变。\n- 属于「MCP 二期与问数」专题:回答作者写了理由的汇总泄漏告警要不要照样扣分。\n- 出错时只会让评测里写了理由的泄漏不再扣分,本改动只加文档和测试,可直接撤回。\n- 无\n\n## What changes\n\nThe seat ruled (reading 7062005269, from the maintainer's ruling on #33818): **count as today**. A `security-rollup-source-unreadable` finding that the build acknowledged with `rollupSourceUnreadableReason` is still charged as a failed Build check whenever the card withholds the roll-up's child (or the child field it reads) from that persona. A written reason does not change what the persona sees.\n\n- `packages/qa/scenarios/README.md`, the \"Roll-ups over withheld data\" bullet: states that rule, and how the acknowledged finding differs on the wire (the `info` arm, the reason appended to the message).\n- `packages/qa/scenarios/test/runner/orchestrate.test.ts`: one new top-level `describe`, placed right after the existing roll-up charge block. It runs the real `@objectstack/lint` rule on acknowledged permission sets and pins three things. First, the rule answers each finding at `info`, with the `...rollupSourceUnreadableReason` path and the `. Acknowledged on the set: \"REASON\"` suffix. Second, `rollupSourceCharges` reads every suffixed message without throwing, through both of its readings: the object gate (client_viewer) and the field gate (contractor). It charges each one. Third, as a control, the same build without the reasons is charged for exactly the same roll-ups.\n- `.changeset/35006-scenarios-acknowledged-rollup-charged.md`: `patch`, because `README.md` is in the package's `files[]`.\n\nNo `src/**` change and no score movement: the runner already charges these findings. This PR writes the rule down and pins it.\n\n## Tests\n\n<details><summary>Readings at the head this PR was opened on</summary>\n\n- `pnpm --filter @objectstack/scenarios build && pnpm --filter @objectstack/scenarios test && pnpm --filter @objectstack/scenarios typecheck` (under the verify lock): `VERDICT command-exit 0`. `Test Files 40 passed (40)`, `Tests 1211 passed (1211)`, then `tsc --noEmit` clean. A `--listFiles` count of 1 shows that the package's tsc program includes `test/runner/orchestrate.test.ts`.\n- Targeted: `vitest run test/runner/orchestrate.test.ts -t 'acknowledged roll-up|security-rollup-source-unreadable on a child'` gave `Tests 9 passed`: the 8 existing roll-up charge cases plus the new one.\n- No ablation: the diff changes no tested behaviour (a test-only pin plus prose).\n\n</details>\n\n## Acceptance notes\n\n- The `rollupSourceCharges` docblock in `orchestrate.ts` says \"the `info` row-scope arm — is not charged\". That is accurate, because it names the row-scope arm. I left it alone, since `src/**` is outside this claim's file surface.\n- The commit trailer is the model-free pair the pre-push hook (`check:commit-card-trailers`) requires. The dispatch spelled a model-named co-author, and the hook refused it.\n\n## Verification\n\nRead first: the new `describe` in `packages/qa/scenarios/test/runner/orchestrate.test.ts`. The risk hunk is the `charges` assertion: it would fail if the runner ever dropped `info` findings or stopped reading the suffixed message.\n\nTwo-minute check: `pnpm --filter @objectstack/scenarios exec vitest run --maxWorkers=2 test/runner/orchestrate.test.ts -t 'acknowledged roll-up'` should report 1 passed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cypybwgoxE3ZMZy8kt\n"
+}

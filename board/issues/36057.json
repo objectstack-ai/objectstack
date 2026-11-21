@@ -1,0 +1,31 @@
+{
+  "number": 36057,
+  "kind": "issue",
+  "title": "Scenario evals: delete the deprecated agent-confirmation grading names from @objectstack/scenarios in the next major",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:devx",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-21T11:40:14Z",
+  "updated_at": "2026-11-21T11:49:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36057",
+  "body": "repo:objectstack#4 · os-elon-musk · session_016WV4cypybwgoxE3ZMZy8kt\n\ncarries the deletion half of #33691; #33691 keeps the behaviour revert\n\n## 维护者速读\n\n1. **要做的**：#33691 已把临时放宽的场景评分关掉（严格评分恢复），但相关导出名仍留在已发布的评测包里，只标了弃用。下一个大版本时把它们删掉。\n2. **验收**：下一个大版本里这些弃用名不再导出；严格评分与「点名单条就算确认」的现行行为不变。\n3. **需要你做的**：无。\n\n## Change\n\n`@objectstack/scenarios` is published (npm `latest` 18.6.0), so deleting these exports is a Clause-② yes (narrowing) change: it lands in the next major's breaking window, with a BREAKING changeset carrying the FROM-TO map and its ADR-0087 disposition.\n\nThe behaviour half shipped in the PR for #33691: `AGENT_CONFIRMATION_MEETS_PENDING` is `false`, so every `pending_confirmation` operation grades strictly, and every name below carries `@deprecated` JSDoc pointing here.\n\nDelete (rule-only, `packages/qa/scenarios/src`):\n\n- `AGENT_CONFIRMATION_MEETS_PENDING` (`score/scenario-operation-grade.ts`, exported on `./score`, `./score/full`)\n- `confirmedByAgent` (same), and the `typeof confirmedByAgent` arm of `OperationGrade.confirmation` (the `askedFirst` arm stays)\n- `AgentConfirmedObservation` (type) and `OperationObservation.agentConfirmed`\n- `GradeOperationOptions.agentConfirmation` and `GradeOperationOptions.acceptAgentConfirmation`\n- `AgentConfirmationRule` (type): its `write` member type is still read by `gradeConfirmedWrite` and `declaredWriteCheck`; the deletion gives those an inline `Pick` of the card operation (`kind`, `object`, `target`, `values`) or a renamed type, and drops `ask`\n- `agentConfirmationChecks` and `confirmedRowsCheck` (module-internal)\n- `agentConfirmedOf` (`runner/observe.ts`, module-internal) and `ObserveInput.actionGates`\n- `actionGatesOf` (`runner/orchestrate.ts`, exported on `./runner`) and its call site\n- `ConfirmationTally.confirmedByAgent` (`runner/scorecard.ts`, `./runner`) and the scorecard's `confirmed by the agent` count\n- the `agentConfirmation` input `gradeCardOperation` builds (`score/index.ts`)\n- the tests that exercise the switch turned on (`test/score/scenario-operation-grade.test.ts`)\n\nKeep unchanged: `askNamesTarget`, `AskNaming`, `askedFirst`, `OperationGrade.confirmation` (its `askedFirst` arm). `runner/orchestrate.ts` reads them on the confirmation-turn path (an ambiguous ask gets no confirmation turn), per the later ruling that a named single-match delete is applied directly."
+}

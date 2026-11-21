@@ -1,0 +1,37 @@
+{
+  "number": 36030,
+  "kind": "pull_request",
+  "title": "fix(approvals): name an unstaffed position by its label on the timeline; system rows read as the system's",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-21T08:40:19Z",
+  "updated_at": "2026-11-21T09:40:42Z",
+  "closed_at": "2026-11-21T09:40:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-21T09:40:40Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36030",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4Uu9E1xEXQLqcywxKaDrDfGYv)_\nrepo:objectstack#1 · os-sales · session_01L6bhgT9mNgD8oKM93bFzg5\n\nFixes #35418\n\nClause-②: yes (widening) — @objectstack/plugin-approvals adds the optional `ApprovalServiceOptions.positionLabelSource`; @object-ui/i18n adds approvalsInbox.systemActor and approvalsInbox.actSystemNote; nothing removed\nMetadata-protocol: none\n\n## 维护者速读\n\n- 审批动态里「转交给管理员」那条说明不再出现内部岗位名：中文读者看到「岗位「销售经理」无人任职」，没有翻译时用岗位自己的显示名，都没有才退回内部名。\n- 系统自动写的条目（转交说明、排除提交人、无人可审、自动撤销等）操作人显示「系统」，说明类条目类型显示「系统说明」，不再是「评论 · —」；真人评论照旧是「评论 · 某人」。\n- 属于「控制台核心业务操作体验」专题；只改显示，库里存的审计原文、转交规则都不动，出问题可直接撤回。\n- 已知没做：「无人可审」说明里的「担任 position 'x' 的成员」也带内部岗位名（存的是拼好的整句），列为后续，不在本 PR。\n\n## What changes\n\n1. **The routing note names a position by its label.** `admin-rescue-note.ts`: `adminRescueNoteText(note, render, positionLabel?)` maps each unheld-position clause's `value` through `positionLabel` before rendering; `adminRescuePositions` lists the note's position names. `ApprovalService.localizeRoutingNotes` builds the map per read (`notePositionLabels`): the reader's pack `positions.<name>.label` (new `ReaderLabels.positionLabel`, key spelled by `positionLabelKey` beside the flow keys), else the declared `label` from the new optional `ApprovalServiceOptions.positionLabelSource`, else nothing (the name stands). `ApprovalsServicePlugin` wires that source to the `metadata` service's `get('position', name)`, resolved lazily like the i18n source. A throwing source is caught: the read never fails on a label. The row's stored English `comment` (the audit text, and what a read with no locale is served) is unchanged and keeps the name.\n2. **The timeline names the platform's rows.** `ApprovalActionTimeline.tsx`: a row with no `actor_id` reads its actor as `approvalsInbox.systemActor` (\"System\" / 系统) instead of \"—\"; a `comment` row with no actor (`isSystemNote`, new `utils/approvalSystemNote.ts`) reads its kind as `approvalsInbox.actSystemNote` (\"System note\" / 系统说明) instead of \"Commented\". `system:sla` keeps \"System (SLA)\". New keys in all eleven packs, translated.\n3. **Docs.** `content/docs/automation/approvals.mdx`, \"When a slate names no one\": the stored note keeps the English with the position's name; a reader is served it in their language with the position's label, shown as a system note (the Docs Drift Check listed this page).\n\nThe card allowed 「转交」 or 「系统」 for the kind. The three no-actor comment notes are not all hand-offs (admin routing, submitter exclusion, no approver), and telling them apart on the client would need a new field on the actions contract, so they share \"System note\" and the sentence itself says what happened. This reading was stated in the claim.\n\n## Tests\n\n<details><summary>Approvals plugin</summary>\n\n- `admin-rescue-note.test.ts`: a position clause takes the label it is given and only a position does (team literal and an unknown position keep their names); a clause the pack lacks falls back to English with the label; the stored English keeps the name; `adminRescuePositions` dedupes and skips non-position and empty slots.\n- `reader-locale-labels.test.ts`: `positionLabelKey` spelling, held to `TranslationDataSchema` by the existing round trip; the pick reads `positions.<name>.label` in the negotiated locale.\n- `admin-rescue-named-slate.integration.test.ts`, new describe `[#35418] the note names an unheld position by its label` (real in-memory i18n with the plugin's catalog plus an app pack): zh-CN reads 「岗位「销售经理」无人任职」 and no `sales_manager`; en reads the declared label \"position 'Sales Manager' has no holder\"; ja-JP with no translation reads the declared label; CONTROL the stored row and a no-locale read keep the name; a throwing source keeps the name and does not fail the read.\n- Run: those three files 45 passed; `approval-service.test.ts` + `submitter-exclusion-note.test.ts` 486 passed. `pnpm --filter @objectstack/plugin-approvals typecheck` exit 0.\n</details>\n\n<details><summary>Console and i18n</summary>\n\n- `ApprovalActionTimeline.systemNote-35418.test.tsx`: en \"System note · System\" with no \"Commented\" and no \"—\"; a person's comment keeps \"Commented · Bob\" (live control in the same DOM); a no-actor `cancel` row names \"System\"; zh 「系统说明 · 系统」 and 「评论 · Bob」. 3 passed.\n- `pnpm --dir ui exec vitest run packages/i18n/` (includes all-locale key parity): 105 files passed, 1957 passed, 13 skipped.\n- eslint over the changed files: 0 errors (one pre-existing `no-explicit-any` warning in `ApprovalActionTimeline.tsx`, not on a changed line).\n</details>\n\n## Follow-ups (not in this PR)\n\n- The no-approver note's `{{who}}` (\"…a member who holds position 'crm_sales_manager'…\") is stored pre-composed (`noApproverWho`), so it still names the machine name; labelling it means storing the slots instead of the joined string.\n\n## Verification\n\nRead first: `admin-rescue-note.ts` (`labelledPosition`), `ApprovalService.localizeRoutingNotes` and `notePositionLabels`, the `positionLabelSource` wiring in `approvals-plugin.ts`, `ApprovalActionTimeline.tsx` (`actionText`, `actorName`).\n\nTwo-minute check: `cd packages/plugins/plugin-approvals && pnpm exec vitest run src/admin-rescue-named-slate.integration.test.ts`; expect the `[#35418]` describe green.\n\n<details><summary>Local gates at 064e714d</summary>\n\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --ran`: 109 derived families accounted for, 109 run, 0 NOT-MEASURED (all with exit 0; the 28 families the docs commit added were run on 064e714d, the other 81 on cfacf209, which differs from it only by that docs page). Four first answered on a shallow, partly built clone and were rerun after the prerequisite: `check-plugin-teardown-shape --self-test` (pinned fixture commit fetched), `pnpm --dir ui exec vitest run scripts/` (needed the `@objectstack/client` dist; then 172 files passed, 2 skipped), `check:dual-build-cjs-loads` and `check:i18n` (after a full `pnpm build`). `node scripts/pm/overlap-check.mjs`: clean against origin/main 9b3227fe and 4 open PRs sharing the locale packs or `approval-service.ts` (#36018, #35994, #35969, #35968). CI families: not yet reported at open.\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgT9mNgD8oKM93bFzg5\n\n<!-- signed: repo:objectstack#1 · os-sales · session_01L6bhgT9mNgD8oKM93bFzg5 -->\n"
+}

@@ -14,18 +14,20 @@
     "area:data",
     "domain:ui",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-16T08:49:32Z",
-  "updated_at": "2026-11-19T05:09:17Z",
+  "updated_at": "2026-11-21T13:56:05Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34350",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jUg7BKfRBcTPyMxbLh\n\nFiling gate ③: area-directed (area S2 of seat domain:server#5). Seat ruling 6911721875 on #34005 (option A) on M1 of L2 contract review 6911685604 on PR #34198.\n\n## Today\n\n`extractDateWindows` (`ui/packages/plugin-dashboard/src/DatasetWidget.tsx`) lowers each closed date window in a compare widget's filter into the dataset query's `timeDimensions`, keyed by the filter key, which is an object field. The dashboards page documents a dotted `relationship.field` as a global filter's `field` and as a widget `filter` key, and the widget lint resolves it hop by hop. With PR #34198, a dataset query refuses a `timeDimensions` key that is not a declared dimension. `DatasetDimensionSchema.name` is a snake_case identifier with no dot, so no declaration can carry `account.founded_at`. A compare widget whose date key is a related record's field was served on `main` and is refused after #34198, and no change to the dataset alone can bring it back. PR #34198 states this as a break with no in-dataset remedy.\n\n## Ask\n\nGive that dashboard a way back without reopening the closed member set. For example, the renderer maps a dotted (or any non-identifier) date key to the declared date dimension whose source field is that path, and sends the declared name. Alternatively, the protocol settles another addressing, chosen by the reader's lane. Pin the dotted compare window served through a declared dimension, and the refusal when no declared dimension covers the path. Coordinate with #34308, the save gate for a compare widget's date key: the gate should accept exactly what this mapping can serve.\n\nBlocked-by: #34198.\n\nReader: domain:ui (dashboard renderer); domain:server if the ruling picks a server-side addressing. Size S–M."

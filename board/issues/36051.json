@@ -1,0 +1,31 @@
+{
+  "number": 36051,
+  "kind": "issue",
+  "title": "security: `os explain` names the channel that opened a field — own row, another set's row, the default, View All, Modify All or `viewAllFields` (step 2 of #34365, additive)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:devx",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-21T11:26:20Z",
+  "updated_at": "2026-11-21T11:35:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36051",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibzFAE8YRsK8YCDAeLL\n\nFiling gate: ④ sub-card of the ruled decision #34365 (ruling 6912661484, verbatim 「同意，立决策卡」; implementation cards are cut after PR #34082, merged 2026-11-16T21:40Z) · Source: topic #34365\n\nParent: #34365 (step 2)\nBlocked-by: #36050\nGrade: left to triage. Suggested **p2** (a step of the p2 security card #34365). Area: data. Type suggestion: Feature.\nDedupe: `repo:objectstack-ai/objectstack is:issue viewAllFields` → 3 hits: #34365 (the parent), #33828 (closed), #6015 (triage seat post). No card covers this step.\n\n## Business reason\n\nWhen a field is readable that an author meant to hide, the author's first question is \"which permission set opened it, and why\". Today the answer needs reading the merge code: one set's View All / Modify All re-opening a field another set hides is invisible in the explanation. The ruled path (#34365 step 2) asks `os explain` to name the channel, so authors can find and fix the over-grant before the v19 switch, and see what the switch will change for them.\n\n## What to build\n\n- The access explanation (`packages/plugins/plugin-security/src/explain-engine.ts`, its output shape in `packages/spec/src/security/explain.zod.ts`, and the CLI `packages/cli/src/commands/explain.ts`) says, per field the merge decides, which channel cast the winning read and edit vote: the set's own row, another set's row, the default (no set names the field), View All, Modify All, or `viewAllFields` — and the set's name.\n- Where View All or Modify All is the only channel that re-opens a field another set hides, the explanation says so in one line that names the v19 end state (#34365: View All / Modify All stop voting on fields).\n\n## Constraints\n\n- Read-only: explanation only, no enforcement change.\n- Additive to the explain output shape (new optional keys); existing consumers keep parsing.\n\n## Declarations the PR owes\n\n`Clause-②: yes` if the explain output schema gains keys; `Metadata-protocol: none` (no authorable key). Contract review owed if `packages/spec/src/**` changes.\n\n## Acceptance\n\n- A test with two sets — one hiding `obj.f`, one holding View All on `obj` — shows the explanation naming View All on the second set as the channel that opened `obj.f`; same for Modify All and `viewAllFields`.\n- Gates green; L1 (+ L2 if the spec shape changes) PASS on the final head."
+}

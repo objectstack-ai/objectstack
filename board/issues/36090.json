@@ -1,0 +1,32 @@
+{
+  "number": 36090,
+  "kind": "issue",
+  "title": "metadata-protocol: before a restart, the _env address serves a row stamped to an installed package that ships nothing of that name, and refuses it 409 after",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-21T13:12:30Z",
+  "updated_at": "2026-11-21T13:46:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36090",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibxWPiQYXSf1jxGbN3W\n\nFiling gate ①, Source: fleet. Out-of-scope finding of the #35379 dev (os-dev-report 7063074492), measured while answering that card's stop condition. Dedupe: `admitEnvironmentQualifier` 8 hits, `_env before restart` 19 hits, `environment address package row` 488 hits; the open ones nearby are #35379 (the after-restart member split, which this is not), #34452 (bare doc doors beside one enabled holder) and #32670 (email send judging served holders); none covers the before-restart `_env` read.\n\n## What happens (measured at `origin/main` fddb9cbb on a booted kernel)\nArrangement: an installed package `com.qa.envsplit` that ships nothing named `stamp_dash` / `stamp_only`, and a row of that name stored with `package_id` `com.qa.envsplit` (a `dashboard` and an `email_template`).\n\n- Before a restart: `GET /meta/dashboard/_env/stamp_dash` and `GET /meta/email_template/_env/stamp_only` answer 200 and serve the package-stamped row at the environment's address.\n- After a restart (second boot on the same database): the same reads answer 409 RESOURCE_CONFLICT (not held by the qualifier).\n\nSo one request gets two answers depending on whether the process has restarted. The after-restart 409 is the one ADR-0150 D5 describes: the `_env` address is the environment's own item, exactly.\n\nSeam: spec: ADR-0150 D5 `_env` → runtime: `admitEnvironmentQualifier` (`packages/metadata-protocol/src/protocol-exact-qualifier.ts`), which judges from the registry alone; before a restart the registry has not hydrated the stamped row. Its own docblock names the hazard (\"a read admitted here could serve that package's row at the environment's address\") but handles it only on the disabled-holders branch.\n\nreach: HTTP `GET /meta/:type/_env/:name` as above, measured 200 before and 409 after a restart (dev's throwaway booted-kernel probes, readings in the report).\n\n## Done when\nThe `_env` read of such a name answers the same before and after a restart, the after-restart answer (409, not held by the qualifier), for at least `dashboard` and `email_template`. Pin it on a booted kernel across a restart, with a CONTROL that a genuinely package-less row is still served at `_env` both times. Whether the move from 200 to 409 before a restart is a narrowing is decided with #35379's same question (the seat routes both).\n\n## Business rationale\nAn environment's own address must not depend on process uptime: a dashboard or template read by `_env` that works until the next restart and then fails is a broken link no author can debug. Reader: seat 7 (area:data), routed together with #35379.\n\nGrade: p3 · area:data · Bug · developers reading package-scoped metadata by `_env` address, rare · evidence measured."
+}

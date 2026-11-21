@@ -15,17 +15,17 @@
     "bug",
     "domain:devx",
     "pm:queue",
-    "priority:p2"
+    "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-20T17:49:29Z",
-  "updated_at": "2026-11-20T18:51:28Z",
+  "updated_at": "2026-11-21T13:19:52Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35907",
   "body": "repo:objectstack#4 · os-elon-musk · session_016WV4d1ZJL93Kin2UHFXbFv\n\nFiling gate ②: a follow-up of #34887 item 5b, split out on seat 4's ruling (2026-11-20 17:48Z, option A). Dedupe: searched `scenario no_confirmation_service applied action route not measured`; no open card. PR #35894 covers the confirmation-turn case only.\n\nSuggested-grade: p2. The scorer costs points on an operation the agent handled correctly.\n\n## What\n\nleave_balances `delete_withdrawn_request` expects `applied`. That is right under the maintainer's 「点名单条就算确认」: naming exactly one record is the approval, so the agent may delete it directly (`delete_record`, `confirm: true`). An agent that instead takes the card's own gated action `delete_leave_request` (`confirm: true`) gets `428 ACTION_CONFIRMATION_REQUIRED` with `reason: no_confirmation_service` on the open HTTP door (#33689). It cannot reach `applied` through that route, and it is graded fail.\n\nPR #35894 grades a confirmation turn that meets `no_confirmation_service` as not measured. It does not cover an `applied` operation whose single turn takes the gated action route and meets the same refusal.\n\n## Ask\n\nWhen an operation that expects `applied` has a turn whose write call on the operation's object went through a gated action and got `428` with `reason: no_confirmation_service`, and the target state was not reached by any other call, grade that operation not measured. Use the existing not-measured path, as #35894 does. A write that reached the target state through a raw data door after that refusal stays as #35894 leaves it: not measured, until a ruling says otherwise (seat 4, 17:48Z).\n\n## Done when\n\nThe scorer has a fixture in each direction: the gated route that is refused grades not measured, and the direct named delete grades applied. The fixture names the leave_balances operation.\n\nRelations: follow-up of #34887 (5b). Shares grading files with #35894 and #34214, so keep them serial. Lane: eval tooling (`packages/qa/scenarios`)."
