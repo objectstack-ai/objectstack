@@ -49,6 +49,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { SharingService } from './sharing-service.js';
+import { inMembers } from './shared-record-ids.testkit.js';
+import { SharedRecordIds } from '@objectstack/spec/data';
 import { SharingRuleService } from './sharing-rule-service.js';
 import {
   bindRuleHooks,
@@ -100,7 +102,8 @@ function makeEngine() {
       if (k === '$or' || k === '$and') continue;
       const rv = row[k];
       if (v != null && typeof v === 'object' && '$in' in (v as any)) {
-        if (!(v as any).$in.includes(rv)) return false;
+        // [ADR-0155] A share-grant leaf resolves over this double's own share rows.
+        if (!inMembers((v as any).$in, tables.sys_record_share).includes(rv)) return false;
         continue;
       }
       if (rv !== v) return false;
@@ -371,7 +374,9 @@ describe('#13533 a system write materialises sharing grants', () => {
       expect(await rep2CanSee()).toBe(false);
       // Not because sharing is off: rep2 is simply not the owner and the rule's
       // criteria is not satisfied yet.
-      expect(await sharing.buildReadFilter('crm_leave_request', REP2)).toEqual({ owner_id: 'rep2' });
+      expect(await sharing.buildReadFilter('crm_leave_request', REP2)).toEqual({
+        $or: [{ owner_id: 'rep2' }, { id: { $in: SharedRecordIds.read('crm_leave_request', 'rep2') } }],
+      });
     });
 
     it('SEES it the moment the approval write-back lands — no evaluate, no restart', async () => {
@@ -383,9 +388,13 @@ describe('#13533 a system write materialises sharing grants', () => {
       expect(await rep2CanSee()).toBe(true);
       // The grant is what widened the filter — the owner match is still there,
       // so this is additive access, not a scope escalation.
-      expect(await sharing.buildReadFilter('crm_leave_request', REP2)).toEqual({
-        $or: [{ owner_id: 'rep2' }, { id: { $in: ['lr1'] } }],
+      // The filter itself is the same leaf before and after (ADR-0155): what
+      // changed is the grant row it denotes, which the double resolves.
+      const filter: any = await sharing.buildReadFilter('crm_leave_request', REP2);
+      expect(filter).toEqual({
+        $or: [{ owner_id: 'rep2' }, { id: { $in: SharedRecordIds.read('crm_leave_request', 'rep2') } }],
       });
+      expect(inMembers(filter.$or[1].id.$in, engine._tables.sys_record_share)).toEqual(['lr1']);
     });
 
     it('the approver keeps seeing it either way — a manager view CANNOT observe this defect', async () => {

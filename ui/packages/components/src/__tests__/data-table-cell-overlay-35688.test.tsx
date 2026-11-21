@@ -212,7 +212,7 @@ describe('data-table — typed values edit flat in the cell; a rating is set in 
     expect(layer.className).toContain(':not([data-in-cell-input])]:h-8');
   });
 
-  function renderRating() {
+  function renderRating(facts: Record<string, unknown> = {}) {
     const onCellChange = vi.fn();
     const t = renderTable(
       {
@@ -230,7 +230,7 @@ describe('data-table — typed values edit flat in the cell; a rating is set in 
         data: [{ id: '1', name: 'Alpha', score: 2 }],
         onCellChange,
       },
-      { describeCell: (_row, key) => (key === 'score' ? { stars: 5 } : null) },
+      { describeCell: (_row, key) => (key === 'score' ? { stars: 5, ...facts } : null) },
     );
     return { ...t, onCellChange };
   }
@@ -248,6 +248,20 @@ describe('data-table — typed values edit flat in the cell; a rating is set in 
     fireEvent.keyDown(t.catcher(), { key: 'Backspace' });
     expect(t.onCellChange).toHaveBeenLastCalledWith(0, 'score', null, expect.anything());
     expect(t.editorLayer()).toBeNull();
+  });
+
+  it('a required rating is never cleared: 0, Backspace and Delete keep its stars and say why (objectstack#36023)', () => {
+    const t = renderRating({ clearRefusal: 'Score is required' });
+    fireEvent.click(t.cell(0, 1));
+    for (const key of ['0', 'Backspace', 'Delete']) {
+      fireEvent.keyDown(t.catcher(), { key });
+      expect(t.onCellChange).not.toHaveBeenCalled();
+      expect(document.querySelector('[data-testid="cell-readonly-reason"]')).toHaveTextContent('Score is required');
+      expect(t.cell(0, 1).querySelectorAll('[data-rating-star][data-filled]')).toHaveLength(2);
+    }
+    // CONTROL: a digit above zero still sets the stars on a required rating.
+    fireEvent.keyDown(t.catcher(), { key: '4' });
+    expect(t.onCellChange).toHaveBeenLastCalledWith(0, 'score', 4, expect.anything());
   });
 
   it('Enter, F2 and a double-click open no editor on a rating', () => {

@@ -759,6 +759,17 @@ affordances (View, Edit, Delete) are not governed by this key.
 }
 ```
 
+### Comments: author avatar, reply focus, mention menu
+
+Every comment and reply in `RecordActivityTimeline` leads with
+`CommentAuthorAvatar`: the author's 20 px image, or their initials on the round
+disc the person chips draw (`getPersonInitials` from `@object-ui/fields`).
+`ThreadedReplies` takes `focusReplyOnOpen`: each time its reply input opens it
+expands the replies and puts the caret in the input, so a host whose input opens
+behind its own Reply button lets the reader type straight away. In
+`RichTextCommentInput`, the `@` mention menu opens under the caret, or above it
+when the window has no room below.
+
 ### InlineEditSaveBar & InlineFieldInput
 
 The record-level inline-edit session (#2407): double-clicking a field (or its
@@ -892,6 +903,48 @@ export function RecordPage() {
         <SchemaRenderer schema={page} />
       )}
     </div>
+  );
+}
+```
+
+## The record's comment panel
+
+On the desktop the record's comments are a panel of their own, beside the
+record rather than inside 动态 (objectstack#36075). `CommentsPanel` draws 「评论」
+and ✕ at its top, the threads oldest first (a thread's replies fold to
+「N 条回复」 and open in place, with a reply box under them), and the comment box
+docked at its foot. Each comment's actions sit in one row at its top right while
+the pointer is over it (`CommentHoverActions`): Reply, an emoji, and More with
+Edit and Delete on the viewer's own comments. `CommentsButton` is the header's
+switch: the comments icon with the number of top-level comments.
+
+Every part reads the record's discussion off the host's `DiscussionContext`
+(`useRecordComments`) and offers each write exactly where the host hands it, so
+the panel needs no props beyond `onClose`. Where it sits and how wide is the
+host's to decide; the console's record page gives it 380 px beside the record
+from a 1280 px window, over the record's right edge in a narrower one, and the
+whole drawer body in a drawer narrower than 760 px. While the host wraps the
+page in `RecordCommentsInPanelContext` (value `true`), the default page's 动态
+stream draws the system entries alone: no comment rows, no All / Activity /
+Discussion chips (the Changes chip stays, a toggle), no comment box, and its
+count leaves the comments out.
+
+The pieces are exported one by one (`CommentThread`, `CommentItem`,
+`CommentComposer`, `buildCommentThreads`, and #36070's `CommentAuthorAvatar`) for a surface that
+lays them out another way, such as a phone's comment page.
+
+```tsx
+import * as React from 'react';
+import { CommentsButton, CommentsPanel, useRecordComments } from '@object-ui/plugin-detail';
+
+export function RecordCommentsSwitch() {
+  const [open, setOpen] = React.useState(false);
+  const { count } = useRecordComments();
+  return (
+    <>
+      <CommentsButton count={count} pressed={open} onPressedChange={setOpen} />
+      {open && <CommentsPanel onClose={() => setOpen(false)} />}
+    </>
   );
 }
 ```

@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useLayoutEffect, useCallback, useContext, useMemo, useRef, type ReactElement } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
-import { activityRowToFeedItem, composeImpersonatedActor, IMPERSONATED_ACTOR_FALLBACK, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RECORD_PAGE_TIMELINE_PANEL, RECORD_TIMELINE_PANEL_MAX_ENTRIES, RecordFieldChangesContext, RecordFieldHistoryContext, RecordTimelineTotalContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RECORD_PAGE_DETAILS_WIDTH, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
+import { activityRowToFeedItem, buildCommentThreads, CommentsButton, RecordCommentsInPanelContext, composeImpersonatedActor, IMPERSONATED_ACTOR_FALLBACK, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RECORD_PAGE_TIMELINE_PANEL, RECORD_TIMELINE_PANEL_MAX_ENTRIES, RecordFieldChangesContext, RecordFieldHistoryContext, RecordTimelineTotalContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RECORD_PAGE_DETAILS_WIDTH, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
 import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderPhoneContext, PageHeaderTrailingContext, PanelToggles, ObjectIconTile, RecordHeaderBarContext, RecordHeaderStateContext, RecordTopBar, RecordTopBarButton, cn, useRecordStepKeys, type PanelToggleItem, type RecordHeaderBar, type RecordHeaderGroupParts, type RecordHeaderState, type RecordTopBarStepper } from '@object-ui/components';
 import { isActingApprover } from '../utils/approvalDecisionFold.js';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
@@ -41,7 +41,8 @@ import { RecordEditStateController, bodyTablesSaveTogether, isMasterDetailChild,
 import { isRecordPagePushed, useRecordPageScrollMemory } from './recordPagePush.js';
 import { phoneRecordHeader } from './recordPhoneHeader.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
-import { PrefetchUpcomingRelatedCounts, RecordDrawerUpcomingContext, RecordPageDrawerHost, RecordPaneBarToggles, useRecordPane, useRecordPaneBar, useRecordPageReturn } from './recordDrawerStack.js';
+import { PrefetchUpcomingRelatedCounts, RecordDrawerUpcomingContext, RecordPageDrawerHost, RecordPaneBarComments, RecordPaneBarToggles, useRecordPane, useRecordPaneBar, useRecordPageReturn } from './recordDrawerStack.js';
+import { COMMENTS_PANEL_WIDTH, RecordCommentsAside, commentsPanelPlacement, useCommentsPanelOpen, useElementWidth, useWindowWidth } from './recordCommentsPanel.js';
 import {
   RECORD_PAGE_ACTIVITY_ROWS,
   RECORD_PAGE_ATTACHMENT_ROWS,
@@ -65,6 +66,7 @@ import { actionContextOrg } from '../utils/actionContextOrg.js';
 import { editFormLockedByState } from '../utils/editFormLockedByState.js';
 import { matchAppBySegment, resolveHostAppSegment } from '../utils/appRoute.js';
 import { hostInConsolePath } from '../utils/hostInConsolePath.js';
+import { useShellPageActionsSlot } from '../layout/shellPageActionsSlot.js';
 import { recycleBinRefusalLabelsOf, recycleBinRestoreOf } from '../utils/recycleBinRestore.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
 import type { TranslateFn } from '@object-ui/i18n';
@@ -91,6 +93,8 @@ import {
   RECORD_APPROVAL_EXCLUDED_ACTIONS,
 } from './recordApprovalActions.js';
 import { useApprovalQueueAdvance } from './approval-decision/approvalQueueAdvance.js';
+import { approvalSubjectTitle } from './approval-decision/approvalSubjectTitle.js';
+import { RecordReadReportContext, recordReadKey, type RecordReadReport } from './approval-decision/recordReadReport.js';
 // Side-effect registration of `record:approvals` — synthesized record pages
 // reference the node whenever the record has approval requests (#3461), so
 // the type must resolve wherever this view renders, not only under hosts
@@ -894,6 +898,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     [pageReturn.stepper, pageReturn.toList, originFromState?.label],
   );
   useRecordStepKeys(!embedded && !!pageStepper, pageStepper, { arrows: false });
+  // objectstack#36111 — whether the shell draws its top-right button group on
+  // this page (off while the top bar stands); the page face draws it in its
+  // navigation row, before ✕. A pane or drawer never does: the page under it
+  // has the group already.
+  const renderShellGroup = useShellPageActionsSlot();
+  const shellActions = renderShellGroup !== null && !embedded;
   // `language` is also the language a flow launch reads a refused write's
   // permission line in.
   const { t, language } = useObjectTranslation();
@@ -1183,7 +1193,31 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // one commit rather than drawn at a width it does not have.
   const [pageRootEl, setPageRootEl] = useState<HTMLDivElement | null>(null);
   const pageColumnsEligible = !assignedPage && !namedPageBlocked;
-  const recordPageTier = useRecordPageTier(pageRootEl, { enabled: pageColumnsEligible });
+  // ─── The record's comment panel (objectstack#36075) ──────────────────
+  // Offered on the desktop, page and drawer, wherever the page draws the
+  // platform's own 动态 stream: the default page and a slotted one. That is
+  // where the stream gives its comments up to the panel; a page whose author
+  // composed it keeps its discussion where the author put it (a page is what
+  // its author composes), and an object with feeds off has none. The phone's
+  // comment page is its own surface. Open or closed is the reader's, kept per
+  // page and per drawer; beside the record it takes 380 px from the page,
+  // whose tier is judged on what is left.
+  const commentsPhone = usePhoneViewport();
+  const commentsPanelOffered =
+    !!objectDef && objectDef.enable?.feeds !== false && pageColumnsEligible && !commentsPhone && !!pureRecordId;
+  const [commentsOpenChosen, setCommentsOpen] = useCommentsPanelOpen(embedded ? 'drawer' : 'page');
+  const commentsOpen = commentsPanelOffered && commentsOpenChosen;
+  const commentsWindowWidth = useWindowWidth();
+  const commentsHostWidth = useElementWidth(embedded ? pageRootEl : null);
+  const commentsPlacement = commentsPanelPlacement({
+    embedded: !!embedded,
+    windowWidth: commentsWindowWidth,
+    hostWidth: commentsHostWidth,
+  });
+  const recordPageTier = useRecordPageTier(pageRootEl, {
+    enabled: pageColumnsEligible,
+    reservedWidth: commentsOpen && commentsPlacement === 'beside' ? COMMENTS_PANEL_WIDTH : 0,
+  });
   const pageLaidOut = recordPageTier !== null;
   const columnScope = objectPreferenceScope(objectName ?? '');
   // objectstack#35890 — the width the reader dragged the pinned left column
@@ -1492,6 +1526,18 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // the served row (`readableRow`), NOT on a `useMemo` (AGENTS.md #10), so a
   // re-render never republishes an equal row as a new object to the page.
   const readablePageRecord = readableRow(pageRecord, perms, objectName);
+
+  // objectstack#35415 — on an approval request's page, what the page's own
+  // reads of a record learned (`recordReadReport.ts`): the title links to the
+  // record the request is about only where one of them read it. Keyed by
+  // `object::id`; collected only on that page, so no other page re-renders on
+  // its cards' reads.
+  const [readRecords, setReadRecords] = useState<Readonly<Record<string, boolean>>>({});
+  const reportRecordRead = useCallback<RecordReadReport>((target, id, readable) => {
+    const key = recordReadKey(target, id);
+    setReadRecords((prev) => (prev[key] === readable ? prev : { ...prev, [key]: readable }));
+  }, []);
+  const isRecordRead = (target: string, id: string) => readRecords[recordReadKey(target, id)] === true;
 
   // Derive a human-readable record title from the loaded record so
   // favourites (record:*) and the breadcrumb show e.g. "Acme Corporation"
@@ -2565,7 +2611,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // it opens later (the window effect below).
   const timelineDrawnOnOpen = feedOnOpen && pageColumnsEligible && !!feedPageOnOpen && buildDefaultPageColumns(feedPageOnOpen) !== null;
   const timelinePeekOnOpen = timelineDrawnOnOpen && enlargedRelatedParam !== RECORD_PAGE_TIMELINE_PANEL;
-  const streamDiscussion = feedOnOpen && objectDef?.enable?.feeds !== false;
+  const streamDiscussion = (feedOnOpen || commentsPanelOffered) && objectDef?.enable?.feeds !== false;
   const streamActivity = feedOnOpen && objectDef?.enable?.activities !== false;
   const recordPageStreams = {
     ...(streamDiscussion ? { discussion: true } : {}),
@@ -2846,7 +2892,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // Recorded during render, React's pattern for state derived from an earlier
   // render: no effect, and no render that reads the latch unset.
   if (feedConsumerOnScreen && !feedConsumerShown) setFeedConsumerShown(true);
-  const feedWanted = feedConsumerOnScreen || feedConsumerShown;
+  // The activity is read for a block that draws it; the discussion also for
+  // the comment panel (objectstack#36075), whose icon counts the threads at
+  // open, panel closed — so the discussion rides the open's payload.
+  const activityFeedWanted = feedConsumerOnScreen || feedConsumerShown;
+  const feedWanted = activityFeedWanted || commentsPanelOffered;
 
   // The host's own Attachments panel, appended at the page foot for a page
   // that places none (below), is mounted on every open but drawn below the
@@ -3204,8 +3254,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const feedRecordKey = objectName && pureRecordId ? `${objectName}:${pureRecordId}` : null;
   const feedItems = (feedRecordKey ? feedItemsByRecord[feedRecordKey] : undefined) ?? EMPTY_FEED;
   const feedVerdict = feedRecordKey ? feedVerdictByRecord[feedRecordKey] : undefined;
+  // objectstack#36075 — the feed is read in two steps where the comment panel
+  // asks the discussion before any block asks the activity: the key moves
+  // when the activity joins, so the feed shows its loading state again until
+  // that read answers (the panel keeps the threads it holds meanwhile).
   const feedFetchKey =
-    dataSource && feedRecordKey && (feedsEnabled || activitiesEnabled) ? feedRecordKey : null;
+    dataSource && feedRecordKey && (feedsEnabled || activitiesEnabled)
+      ? (activityFeedWanted || !activitiesEnabled ? feedRecordKey : `${feedRecordKey}#discussion`)
+      : null;
   const [settledFeedKey, setSettledFeedKey] = useState<string | null>(null);
   const feedLoading = feedFetchKey !== null && settledFeedKey !== feedFetchKey;
 
@@ -3498,7 +3554,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // activity to sees the panel say so, not "no activity". The verdict is
     // `isRefusedFeedRead`, the one the `record:activity` block's self-fetch
     // uses, so the two surfaces cannot disagree about what a refusal is.
-    const activityRead: Promise<any> | null = !activitiesEnabled || (retrying && !retrying.has('activity'))
+    const activityRead: Promise<any> | null = !activitiesEnabled || !activityFeedWanted || (retrying && !retrying.has('activity'))
       ? null
       : fromPage?.activity
         // objectstack#28470 — the payload's activity: the newest rows it
@@ -3571,7 +3627,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // objectstack#30035 — `recordInvalidationNonce`: a change to this record
     // reads its feed again (#2269, refresh data in place), as it reads the
     // record again in the record-load effect above.
-  }, [dataSource, objectName, pureRecordId, currentUser, feedsEnabled, activitiesEnabled, feedFetchKey, reactionStore, feedWanted, feedPlanReady, feedRetryNonce, recordInvalidationNonce]);
+  }, [dataSource, objectName, pureRecordId, currentUser, feedsEnabled, activitiesEnabled, activityFeedWanted, feedFetchKey, reactionStore, feedWanted, feedPlanReady, feedRetryNonce, recordInvalidationNonce]);
 
   // objectstack#29188 — the load-failure notice's Retry: read this record's
   // FAILED feed reads again, and only those. The feed shows its loading state
@@ -3636,9 +3692,19 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // comment writes. `null` (no count answered): the stream counts its rows.
   const timelineServed = feedRecordKey ? timelineCountByRecord[feedRecordKey] ?? null : null;
   const heldCommentCount = useMemo(() => feedItems.filter((item) => item.type === 'comment').length, [feedItems]);
+  // objectstack#36075 — where the comment panel holds the comments, the 动态
+  // stream names its system entries alone.
   const timelineTotal = timelineServed
-    ? Math.max(0, timelineServed.total - timelineServed.comments + heldCommentCount)
+    ? Math.max(0, timelineServed.total - timelineServed.comments + (commentsPanelOffered ? 0 : heldCommentCount))
     : null;
+  // The comments icon's number: the record's threads (its top-level comments),
+  // unknown while the read was refused or failed.
+  const commentThreadCount = useMemo(() => buildCommentThreads(feedItems).length, [feedItems]);
+  const commentsCount =
+    feedVerdict?.comments === 'refused' || feedVerdict?.comments === 'failed' ? null : commentThreadCount;
+  const commentsButton = commentsPanelOffered ? (
+    <CommentsButton count={commentsCount} pressed={commentsOpen} onPressedChange={setCommentsOpen} />
+  ) : null;
 
   /**
    * Note: comment-mention → notification fan-out lives on the server
@@ -3875,8 +3941,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
    * It asks first, through the console's ordinary destructive-action confirm:
    * this page's own `confirmHandler`, the `ActionConfirmDialog` the record's
    * Delete opens, painted destructive. A cancel settles `false` and nothing is
-   * sent. The row leaves the panel only once the server has deleted it; a
-   * refused delete raises a localized error and leaves the row where it was.
+   * sent. The row leaves the panel only once the server has deleted it, with a
+   * "Comment deleted" toast (objectstack#36070); a refused delete raises a localized error and leaves the row where it was.
    * A deleted reply takes one off its parent's `replyCount`, the count
    * `handleAddReply` adds one to.
    */
@@ -3920,6 +3986,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
               : item,
           ),
       }));
+      // The row is gone; say so, so the reader knows the delete went through
+      // and the comment did not just scroll away (objectstack#36070).
+      toast.success(t('detail.commentDeleted', { defaultValue: 'Comment deleted' }));
     },
     [dataSource, feedRecordKey, feedItemsByRecord, confirmHandler, t],
   );
@@ -5271,10 +5340,15 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // desktop face: back to the list the page came from as it was left
   // (objectstack#35854), else the object's default list.
   const closePage = pageReturn.toList ?? (objectListPath ? () => navigate(objectListPath) : undefined);
-  const pageFrame = closePage ? (
-    <RecordTopBarButton label={t('common.close', { defaultValue: 'Close' })} onClick={closePage} data-testid="record-page-close">
-      <X className="h-3.5 w-3.5" />
-    </RecordTopBarButton>
+  const pageFrame = closePage || shellActions ? (
+    <>
+      {shellActions && renderShellGroup?.({})}
+      {closePage && (
+        <RecordTopBarButton label={t('common.close', { defaultValue: 'Close' })} onClick={closePage} data-testid="record-page-close">
+          <X className="h-3.5 w-3.5" />
+        </RecordTopBarButton>
+      )}
+    </>
   ) : undefined;
   // objectstack#27058, Target 8 — the path row of a page one level down
   // (「线索 Mira Costa › 任务」): the `?from=` trail, each ancestor a link, the
@@ -5327,6 +5401,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       stepper={pageStepper}
       actionSlotRef={setBarActionSlot}
       toggles={approvalQueueSwitch || panelToggles ? <>{approvalQueueSwitch}{panelToggles}</> : undefined}
+      comments={commentsButton}
       frame={pageFrame}
       record={pageRecordRow}
     />
@@ -5464,6 +5539,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // objectstack#35891 — the stage tag is the stage's menu: the default
     // page draws no stage bar, so the header is where the stage moves.
     stage: (parts) => <RecordStageMenu {...parts} />,
+    // objectstack#35415 — an approval request's page is named by the record
+    // it asks a decision on, linked to it; else by the request's own title.
+    title: objectName === SYS_APPROVAL_REQUEST_OBJECT ? approvalSubjectTitle(readablePageRecord, isRecordRead) : undefined,
   };
   const sharedChrome = (
     <>
@@ -5485,10 +5563,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const pageTree = (
     <RecordHeaderBarContext.Provider value={headerBarForRecord}>
     <RecordHeaderStateContext.Provider value={recordHeaderState}>
+    <RecordReadReportContext.Provider value={objectName === SYS_APPROVAL_REQUEST_OBJECT ? reportRecordRead : null}>
     <div ref={setPageRootEl} className="h-full bg-background overflow-hidden flex flex-col relative" data-record-page-root="">
       {pageBar}
       {/* In a pane, the record's ⊟ goes into the pane's own top bar. */}
       {embedded && paneBar && <RecordPaneBarToggles>{panelToggles}</RecordPaneBarToggles>}
+      {embedded && paneBar && <RecordPaneBarComments>{commentsButton}</RecordPaneBarComments>}
       {/* On a print page the shared chrome joins the print chrome row below,
           so the row's buttons are not drawn under it. On the page it sits
           under the top bar, where it sat before the bar. */}
@@ -5633,6 +5713,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         {/* objectstack#27055 — the field changes of the timeline stream,
             for the synthesized page's `record:activity`; on an assigned page,
             for its feed blocks (objectstack#33996). */}
+        <RecordCommentsInPanelContext.Provider value={commentsPanelOffered}>
         <RecordFieldChangesContext.Provider value={timelineFieldChanges}>
         {/* objectstack#30074 — whether this record shows its field history
             (objectstack#30344: to this reader, whose audit read answered):
@@ -5672,7 +5753,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           onModal={modalHandler}
           handlers={{ api: apiActionHandler, flow: flowHandler, script: serverActionHandler, modal: modalActionHandler }}
         >
-          <div className="flex-1 overflow-hidden flex flex-row">
+          <div className="relative flex-1 overflow-hidden flex flex-row">
             {/* objectstack#35745 — no top padding here: the record page under
                 it pads its own top (`RecordPageColumns`, the `page` root), so
                 the tab row sits 12px under the header instead of under a 48px
@@ -5779,7 +5860,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   // A record drawn with no top bar of its own (a host's plain
                   // overlay, not the console's pane) keeps its ⊟ at the end of
                   // the header's action row.
-                  <PageHeaderTrailingContext.Provider value={embedded && !paneBar ? panelToggles : null}>
+                  <PageHeaderTrailingContext.Provider
+                    value={embedded && !paneBar && (commentsButton || panelToggles) ? <>{commentsButton}{panelToggles}</> : null}
+                  >
                   <RecordPageColumns
                     tier={recordPageTier}
                     columns={pageColumns}
@@ -5908,6 +5991,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                 })}
               />}
             </div>
+            {/* objectstack#36075 — the record's comment panel: beside the
+                record (which gives it the width), or over it. */}
+            {commentsOpen && (
+              <RecordCommentsAside placement={commentsPlacement} onClose={() => setCommentsOpen(false)} />
+            )}
             <MetadataPanel
               open={showDebug}
               sections={[{ title: 'Page Schema', data: renderedPage }]}
@@ -5929,6 +6017,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         </RecordTimelineTotalContext.Provider>
         </RecordFieldHistoryContext.Provider>
         </RecordFieldChangesContext.Provider>
+        </RecordCommentsInPanelContext.Provider>
         </DiscussionContextProvider>
         </HighlightFieldsProvider>
         </RecordEditStateController>
@@ -5982,6 +6071,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         onClose={() => setFlowRefusal(s => ({ ...s, open: false }))}
       />
     </div>
+    </RecordReadReportContext.Provider>
     </RecordHeaderStateContext.Provider>
     </RecordHeaderBarContext.Provider>
   );

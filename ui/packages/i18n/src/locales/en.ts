@@ -798,6 +798,9 @@ const en = {
     cancelChanges: 'Cancel changes',
     saveRow: 'Save row',
     cellReadOnly: 'This cell can\'t be edited here.',
+    // objectstack#36023 — why a list cell's typed value was not saved, under the editor.
+    cellNotNumber: 'Enter a number.',
+    cellInvalid: 'This value isn\'t valid.',
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: 'Saving…',
     cellSaved: 'Saved',
@@ -908,7 +911,7 @@ const en = {
       earliest: 'Earliest',
       latest: 'Latest',
       pageName: '{{label}} (this page)',
-      calculate: 'Calculate',
+      calculate: 'Add calculation',
       none: 'None',
       menuPercentEmpty: 'Percent empty',
       menuPercentFilled: 'Percent filled',
@@ -1657,6 +1660,7 @@ const en = {
     deleteCommentConfirm: 'Are you sure you want to delete this comment?',
     commentEditFailed: 'Your edit was not saved. The comment keeps its previous text.',
     commentDeleteFailed: 'The comment was not deleted. Please try again.',
+    commentDeleted: 'Comment deleted',
     // objectstack#28218 — a comment write whose answer names mentioned users the
     // server will not notify (`withheldMentions`): one sentence naming them, no reason.
     mentionsWithheld: '{{names}} will not be notified of this comment.',
@@ -1828,6 +1832,11 @@ const en = {
     addCommentPlaceholder: 'Add a comment… (Ctrl+Enter to submit)',
     noMatchingComments: 'No matching comments',
     noCommentsYet: 'No comments yet',
+    closeComments: 'Close comments',
+    collapseReplies: 'Collapse replies',
+    commentActions: 'Comment actions',
+    commentsEmptyHint: 'Write the first one below. Use @ to mention a colleague.',
+    resolveThread: 'Mark resolved',
     pinned: 'Pinned',
     pin: 'Pin',
     unpin: 'Unpin',
@@ -3241,11 +3250,25 @@ const en = {
       // (rename / pin / set-as-default / configure), so the copy has to cover
       // any change to a built-in view rather than name one operation.
       cannotEditMetaView: 'This view is built in and defined in code — it cannot be changed.',
+      // The 「Personalized · Reset to view」 marker's words (objectstack#28950), no longer drawn
+      // since objectstack#35955: kept in every pack, so no published key goes away.
       resetView: 'Reset to view',
       resetViewTitle: 'Puts back this view’s own filters, search, sort, grouping, column layout, hidden fields, density, layout, row color, row numbers and inline editing. Pinned views, favorites and how records open stay as they are. Only your list changes.',
-      linkFilterRefused: 'This link’s filter was not applied. It names a field you can’t filter on here, so the list shows the view without it.',
       personalized: 'Personalized',
       personalizedHeading: 'Your list differs from this view in',
+      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      draft: {
+        discard: 'Discard',
+        discardTitle: 'Puts the list back as its view declares it: filters, sort, grouping, columns and layout. Column widths and row height stay.',
+        save: 'Save',
+        heading: 'Unsaved changes',
+        partSeparator: ', ',
+        saveToView: 'Save to this view',
+        saveAsMyView: 'Save as my view',
+        copyName: '{{name}} copy',
+        saved: 'Saved',
+      },
+      linkFilterRefused: 'This link’s filter was not applied. It names a field you can’t filter on here, so the list shows the view without it.',
       personalizedParts: {
         filters: 'Filters',
         search: 'Search',
@@ -3265,6 +3288,7 @@ const en = {
       new: 'New',
       import: 'Import',
       importTitle: 'Import from CSV',
+      select: 'Select',
       importedToast: 'Imported {{count}} row(s).',
       importedToast_one: 'Imported {{count}} row.',
       importedToast_other: 'Imported {{count}} rows.',
@@ -5740,6 +5764,24 @@ const en = {
     },
   },
   listConditions: {
+    phone: {
+      toolbar: 'List tools',
+      sortCount: 'Sort, {{count}} levels',
+      sortCount_one: 'Sort, {{count}} level',
+      sortCount_other: 'Sort, {{count}} levels',
+      filterCount: 'Filter, {{count}} in use',
+      filterCount_one: 'Filter, {{count}} in use',
+      filterCount_other: 'Filter, {{count}} in use',
+      back: 'Back',
+      discard: 'Discard changes',
+      close: 'Close',
+      apply: 'Apply',
+      advancedNotice: 'This view uses an advanced filter. Change it on a computer.',
+      filterEmpty: 'No filter yet. Add one to show only the records that match.',
+      itemOptions: 'Options for {{label}}',
+      edit: 'Edit',
+      remove: 'Remove',
+    },
     fieldList: {
       search: 'Search fields',
       shown: 'In this view',
@@ -5822,6 +5864,8 @@ const en = {
     addSort: 'Add sort',
     removeSort: 'Remove sort',
     reorder: 'Drag to reorder',
+    levelOptions: 'Options for {{label}}',
+    changeField: 'Change field',
   },
   // `@object-ui/collaboration` — the comment thread's copy (objectstack#5506,
   // objectui#3424). The package used to carry every one of these as an English

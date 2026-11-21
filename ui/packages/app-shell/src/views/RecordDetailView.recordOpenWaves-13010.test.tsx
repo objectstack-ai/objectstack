@@ -411,6 +411,7 @@ beforeEach(() => {
   __clearRecordEditableCache();
   __resetRecordApprovalsStore();
   RelatedCountStore._reset();
+  window.localStorage.clear();
 });
 afterEach(() => {
   cleanup();
@@ -708,6 +709,16 @@ describe('the timeline, comments, attachments and user list wait for their panel
     // objectstack#28737 — the page payload serves the stream's count, so the
     // activity part asks the newest rows only.
     expect(pageStreams(held), table).toMatchObject({ discussion: true, activity: 5 });
+    for (const isRead of [isActivityRead, isCommentRead, isUserListRead]) {
+      expect(held.filter(isRead), table).toEqual([]);
+    }
+    // objectstack#36075 — the comment is the comment panel's, drawn from the
+    // same payload: opening the panel reads nothing.
+    const commentsButton = document.querySelector('[data-comments-button]') as HTMLElement;
+    expect(commentsButton, table).not.toBeNull();
+    await act(async () => { fireEvent.click(commentsButton); });
+    const panel = document.querySelector('[data-comments-panel]') as HTMLElement;
+    expect(panel.textContent).toContain('Ping the buyer on Friday');
     for (const isRead of [isActivityRead, isCommentRead, isUserListRead]) {
       expect(held.filter(isRead), table).toEqual([]);
     }

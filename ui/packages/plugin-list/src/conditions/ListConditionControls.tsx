@@ -147,7 +147,7 @@ function viewChipText(
 // ---------------------------------------------------------------------------
 
 /** One condition as the name read sees it: a field and the value it compares. */
-interface NamedCondition {
+export interface NamedCondition {
   field?: string;
   operator?: string;
   value?: unknown;
@@ -171,7 +171,7 @@ function lookupIds(value: unknown): string[] {
  * arrays the host rebuilds every render (`ui/AGENTS.md` #10). A read that
  * fails, or a record nothing names, answers `undefined`: the chip keeps the id.
  */
-function useLookupValueNames(
+export function useLookupValueNames(
   dataSource: Pick<DataSource, 'find' | 'getObjectSchema'> | null | undefined,
   fields: ReadonlyArray<ConditionField>,
   conditions: ReadonlyArray<NamedCondition>,
@@ -268,6 +268,12 @@ export interface FilterPanelProps {
   renderAdvanced: () => React.ReactNode;
   /** Open on this row's values instead of the field list. */
   conditionId?: string;
+  /**
+   * The field list's footer opens the advanced panel (the default). `false`
+   * (the phone's panel, objectstack#35884, which does not edit advanced
+   * filters): no footer.
+   */
+  advancedOffered?: boolean;
   testId?: string;
 }
 
@@ -280,6 +286,7 @@ export function FilterPanel({
   onChange,
   renderAdvanced,
   conditionId,
+  advancedOffered = true,
   testId = 'filter-panel',
 }: FilterPanelProps) {
   const { t } = useListConditionTranslation();
@@ -339,7 +346,7 @@ export function FilterPanel({
       shownFields={shownFields}
       onPick={pickField}
       testId={`${testId}-fields`}
-      footer={
+      footer={advancedOffered ? (
         <button
           type="button"
           onClick={() => setStep({ kind: 'advanced' })}
@@ -349,7 +356,7 @@ export function FilterPanel({
           <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
           {t('listConditions.filter.advanced')}
         </button>
-      }
+      ) : undefined}
     />
   );
 }
@@ -506,7 +513,7 @@ export interface ConditionChipRowProps {
 }
 
 const CHIP_CLASS =
-  'inline-flex h-6 max-w-[280px] shrink-0 items-center gap-1 rounded-full border px-2 text-[13px] leading-none';
+  'inline-flex h-6 max-w-[280px] shrink-0 items-center gap-1 rounded-md border px-2 text-[13px] leading-none';
 
 /**
  * A control of the condition row below `sm`: 44 px on both sides (WCAG 2.5.5),
@@ -517,7 +524,7 @@ const ROW_TOUCH_TARGET = 'max-sm:h-11 max-sm:min-w-11';
 
 /** 「Sort」, 「Filter」 and 「+」 before anything is set: dashed, so they do not read as a condition in force. */
 const EMPTY_BUTTON_CLASS =
-  'max-sm:h-11 max-sm:min-w-11 inline-flex h-6 shrink-0 items-center gap-1 rounded-full border border-dashed px-2 text-[13px] leading-none text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+  'max-sm:h-11 max-sm:min-w-11 inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-dashed px-2 text-[13px] leading-none text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
 export function ConditionChipRow({
   sort,

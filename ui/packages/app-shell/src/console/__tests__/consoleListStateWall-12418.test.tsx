@@ -23,11 +23,13 @@
  *
  * ## The pins
  *
- *   1. A header sort and a drag-reorder put NO metadata write on the wire,
- *      raise no error, and land as ONE preference write of the object's row.
- *   2. objectui#12474 — the density toggle and a Hide Fields change each put
- *      NO metadata write on the wire, raise no error, and land as ONE
- *      preference write each, of the same row.
+ *   1. A header sort and a drag-reorder put NO metadata write on the wire
+ *      and raise no error. The drag lands as ONE preference write of the
+ *      object's row; the sort is the list's draft (objectstack#35955) and
+ *      writes nothing.
+ *   2. objectui#12474 — the density toggle and a Hide Fields change put NO
+ *      metadata write on the wire and raise no error. The density lands as
+ *      ONE preference write of the same row; the hide is the draft's.
  *   3. CONTROL — the wall is live: a metadata write made in this same tree
  *      (the real adapter's own view write, `createView`) is answered 403.
  *      Since objectui#12474 no list toolbar control makes one, so the control
@@ -120,7 +122,10 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => ({
 import { toast } from 'sonner';
 import { ConsoleShell, ConnectedShell } from '../ConsoleShell';
 import { useAdapter } from '../../providers/AdapterProvider';
+// Paid at collection, not in a case's clock: the source reaches `@objectstack/lint` on demand.
+import '@objectstack/lint';
 import { ObjectView } from '../../views/ObjectView';
+import { resetListDraftStoreForTests } from '../../views/listDraftStore';
 import { createPreferenceFramework, preferenceRowId, type PreferenceFramework } from './preferenceFramework';
 
 const FIELDS = {
@@ -172,6 +177,7 @@ function boot() {
 const wait = (ms: number) => act(() => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
 beforeEach(() => {
+  resetListDraftStoreForTests();
   listProps = null;
   pageAdapter = null;
   localStorage.clear();
@@ -189,7 +195,7 @@ afterEach(() => {
 });
 
 describe('a user\'s list state under a walled posture (objectui#12418)', () => {
-  it('a header sort and a drag-reorder write no metadata, raise no error, and land as one preference write', async () => {
+  it('a header sort and a drag-reorder write no metadata and raise no error; the drag lands as one preference write, the sort as the draft', async () => {
     boot();
     await waitFor(() => expect(typeof listProps?.onSortChange).toBe('function'), { timeout: 5000 });
     await screen.findByTestId('stub-reorder');
@@ -213,13 +219,11 @@ describe('a user\'s list state under a walled posture (objectui#12418)', () => {
     // An update of the row the boot read found: no second read, no insert.
     expect(write.id).toBe(preferenceRowId('u1', 'ui.list.account'));
     expect(fake.wire.gets.length).toBe(readsBefore);
-    expect(write.value).toEqual({
-      viewOrder: [MINE_ID, ALL_ID],
-      perView: { [ALL_ID]: { sort: [{ field: 'name', order: 'desc' }] } },
-    });
+    // objectstack#35955 — the sort is the list's draft: it is stored nowhere.
+    expect(write.value).toEqual({ viewOrder: [MINE_ID, ALL_ID] });
   });
 
-  it('a density toggle and a Hide Fields change write no metadata, raise no error, and land as one preference write each (objectui#12474)', async () => {
+  it('a density toggle and a Hide Fields change write no metadata and raise no error; the density lands as one preference write, the hide as the draft (objectui#12474)', async () => {
     boot();
     await waitFor(() => expect(typeof listProps?.schema?.onDensityChange).toBe('function'), { timeout: 5000 });
     await wait(100);
@@ -245,16 +249,11 @@ describe('a user\'s list state under a walled posture (objectui#12418)', () => {
     act(() => {
       listProps.onHiddenFieldsChange(['name']);
     });
-    await waitFor(() => expect(fake.wire.writes).toHaveLength(2), { timeout: 3000 });
-    await wait(400);
+    // Past the preference debounce (500 ms) and a round trip: nothing more is written.
+    await wait(900);
     expect(fake.wire.metaWrites).toEqual([]);
     expect(toast.error).not.toHaveBeenCalled();
-    expect(fake.wire.writes).toHaveLength(2);
-    expect(fake.wire.writes[1].id).toBe(preferenceRowId('u1', 'ui.list.account'));
-    expect(fake.wire.writes[1].value).toEqual({
-      viewOrder: [ALL_ID, MINE_ID],
-      perView: { [ALL_ID]: { rowHeight: 'medium', hiddenFields: ['name'] } },
-    });
+    expect(fake.wire.writes).toHaveLength(1);
     expect(listProps.schema.hiddenFields).toEqual(['name']);
     // No second read: each write updates the row the boot read found.
     expect(fake.wire.gets.length).toBe(readsBefore);

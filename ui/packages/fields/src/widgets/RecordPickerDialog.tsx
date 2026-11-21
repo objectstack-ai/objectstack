@@ -50,6 +50,7 @@ import { useRecordQuery } from './useRecordQuery.js';
 import { isRecordReference, type LookupFilterEntry } from './lookupRecordReference.js';
 import { objectResolvesSearch } from './searchOffer.js';
 import { PHONE_TOUCH_HEIGHT } from './touchTarget.js';
+import { isImeKey } from './imeKey.js';
 // The one place a lookup column's display value is decided — shared with the
 // inline dropdown in LookupField so a single `lookupColumns` declaration
 // cannot render two different ways (objectui#5492).
@@ -974,7 +975,9 @@ export function RecordPickerDialog({
   // Page jump handler
   const handlePageJump = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key !== 'Enter') return;
+      // objectstack#35996 — an Enter that picks an input-method candidate
+      // neither jumps nor clears the box under the composition.
+      if (e.key !== 'Enter' || isImeKey(e)) return;
       const page = parseInt(pageJumpValue, 10);
       if (!isNaN(page) && page >= 1 && page <= totalPages) {
         setCurrentPage(page);

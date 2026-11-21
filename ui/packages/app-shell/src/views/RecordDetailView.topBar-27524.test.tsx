@@ -66,6 +66,7 @@ vi.mock('./MetadataInspector', () => ({
 
 import { RecordDetailView } from './RecordDetailView';
 import { RecordStackDrawer, useRecordDrawerStack } from './recordDrawerStack';
+import { ShellPageActionsScope } from '../layout/ShellPageActions';
 
 const APP = 'demo';
 const LEAD = 'crm_lead';
@@ -386,5 +387,50 @@ describe('the record row leads with the object\'s colour tile (objectstack#35985
     const tiles = document.querySelectorAll('[data-record-top-bar] [data-object-icon-tile]');
     expect(tiles).toHaveLength(1);
     expect(tiles[0].getAttribute('data-object-icon-tile')).toBe('orange');
+  });
+});
+
+describe('the shell\'s top-right button group on the record page (objectstack#36111)', () => {
+  function mountUnderShell(on: boolean | undefined) {
+    const dataSource = makeDataSource();
+    render(
+      <MemoryRouter initialEntries={[`/apps/${APP}/${LEAD}/record/r-1`]}>
+        <MetadataCtx.Provider value={metadata}>
+          <ShellPageActionsScope on={on}>
+            <Routes>
+              <Route
+                path="/apps/:appName/:objectName/record/:recordId"
+                element={<RecordDetailView dataSource={dataSource as never} objects={OBJECTS} onEdit={() => {}} />}
+              />
+            </Routes>
+          </ShellPageActionsScope>
+        </MetadataCtx.Provider>
+      </MemoryRouter>,
+    );
+  }
+
+  it('turned on: the group sits in the navigation row, before ✕, which stays last', async () => {
+    mountUnderShell(true);
+    await screen.findByTestId('record-page-close', undefined, { timeout: 5000 });
+    const nav = pageBar()!.querySelector('[data-record-top-bar-nav]') as HTMLElement;
+    const frame = nav.querySelector('[data-record-top-bar-frame]') as HTMLElement;
+    const group = within(frame).getByTestId('shell-page-actions');
+    expect(frame.lastElementChild?.getAttribute('data-testid')).toBe('record-page-close');
+    expect(group.nextElementSibling?.getAttribute('data-testid')).toBe('record-page-close');
+    // Help is always in it; the record row carries none of it.
+    expect(within(group).getByTestId('shell-page-actions-help')).toBeTruthy();
+    const record = pageBar()!.querySelector('[data-record-top-bar-record]') as HTMLElement;
+    expect(within(record).queryByTestId('shell-page-actions')).toBeNull();
+  });
+
+  it('while the top bar stands (the default, and with no shell above): no group, ✕ alone', async () => {
+    for (const on of [undefined, false] as const) {
+      mountUnderShell(on);
+      await screen.findByTestId('record-page-close', undefined, { timeout: 5000 });
+      const frame = pageBar()!.querySelector('[data-record-top-bar-frame]') as HTMLElement;
+      expect(within(frame).queryByTestId('shell-page-actions')).toBeNull();
+      expect(frame.children).toHaveLength(1);
+      cleanup();
+    }
   });
 });
