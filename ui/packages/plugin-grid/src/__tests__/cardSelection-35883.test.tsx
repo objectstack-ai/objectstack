@@ -98,11 +98,11 @@ describe('card list selection on a phone (objectstack#35883)', () => {
     fireEvent.pointerUp(acme);
     fireEvent.click(acme);
     expect(onRowClick).not.toHaveBeenCalled();
-    expect(acme).toHaveAttribute('aria-selected', 'true');
+    expect(acme).toHaveAttribute('aria-pressed', 'true');
     expect(onRowSelect).toHaveBeenLastCalledWith([expect.objectContaining({ id: 'a1' })]);
 
     const globex = await cardOf('Globex');
-    expect(globex).toHaveAttribute('aria-selected', 'false');
+    expect(globex).toHaveAttribute('aria-pressed', 'false');
     expect(within(globex).getByTestId('grid-card-check')).toBeInTheDocument();
     fireEvent.click(globex);
     expect(onRowSelect).toHaveBeenLastCalledWith([
@@ -134,8 +134,22 @@ describe('card list selection on a phone (objectstack#35883)', () => {
     act(() => requestListSelection(screen.getByTestId('page-column')));
     await waitFor(() => expect(screen.getAllByTestId('grid-card-check')).toHaveLength(2));
     for (const card of screen.getAllByTestId('grid-mobile-card')) {
-      expect(card).toHaveAttribute('aria-selected', 'false');
+      expect(card).toHaveAttribute('aria-pressed', 'false');
     }
+  });
+
+  it('a keyboard reaches the card: Enter opens it, and while selecting Space toggles it', async () => {
+    const { onRowClick, onRowSelect } = renderCards();
+    const acme = await cardOf('Acme');
+    expect(acme).toHaveAttribute('role', 'button');
+    expect(acme).toHaveAttribute('tabIndex', '0');
+    fireEvent.keyDown(acme, { key: 'Enter' });
+    expect(onRowClick).toHaveBeenCalledTimes(1);
+    act(() => requestListSelection(screen.getByTestId('page-column')));
+    await waitFor(() => expect(screen.getAllByTestId('grid-card-check')).toHaveLength(2));
+    fireEvent.keyDown(await cardOf('Acme'), { key: ' ' });
+    expect(onRowSelect).toHaveBeenLastCalledWith([expect.objectContaining({ id: 'a1' })]);
+    expect(onRowClick).toHaveBeenCalledTimes(1);
   });
 
   it('a list without selection: no long press, no 「Select」', async () => {

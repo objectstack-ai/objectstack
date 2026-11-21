@@ -3991,7 +3991,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
           key={row.id || row._id || idx}
           data-testid="grid-mobile-card"
           data-selected={cardSelected || undefined}
-          aria-selected={cardSelecting ? cardSelected : undefined}
+          // A control (objectui#13461): a button cannot hold the card's cells,
+          // so the card takes the role, the focus and Enter / Space itself.
+          // While selecting it is a toggle (`aria-pressed`).
+          role="button"
+          tabIndex={0}
+          aria-pressed={cardSelecting ? cardSelected : undefined}
           // A row the host says opens nothing (`rowOpensRecord: false`) draws
           // no pointer and no hover wash on its card either (objectstack#33548).
           className={cn(
@@ -4031,6 +4036,14 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
               longPress.current.fired = false;
               return;
             }
+            if (cardSelecting) toggleCardRow(row);
+            else navigation.handleClick(row);
+          }}
+          onKeyDown={(event) => {
+            // Only the card's own key: a link or button inside keeps its own.
+            if (event.target !== event.currentTarget) return;
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
             if (cardSelecting) toggleCardRow(row);
             else navigation.handleClick(row);
           }}
