@@ -267,6 +267,7 @@ refusal is answered before the base exists, so nothing is installed:
 |:---|:---|
 | A `targetNamespace` the namespace rule refuses, or a shared one | `400 INVALID_REQUEST`, naming `targetNamespace` |
 | An object whose copy name another object's copy takes (`ticket` beside `crm_ticket`) | `400 INVALID_REQUEST`, naming the object and the rename that clears it |
+| A package that declares no `namespace`, with an object whose name carries a prefix other than the one derived from the package id (`demoasset_asset` in `com.acme.asset-lifecycle`, which derives `asset_lifecycle`) | `400 INVALID_REQUEST`, naming the object, both prefixes and the missing `namespace`; declare it on the package |
 | A copy name that is not a legal item name, longer than an object's table name may be (63 characters), or longer than an item name may be (255) | `400 INVALID_REQUEST`, naming each item |
 | A renamed key that meets a key the item already holds (a permission set granting both `crm_lead` and `acme_lead`) | `400 INVALID_REQUEST`, naming the item and both keys |
 | A capability whose copy name another capability of the package declares (`crm.approve` beside `acme.approve`) | `400 INVALID_REQUEST`, naming the capability |

@@ -676,14 +676,17 @@ export function planUnmanagedImport(
  * A name that carries ANOTHER prefix — the producer's real namespace, dropped
  * from the manifest — would become a double-prefixed copy
  * (`<target>_<real>_<name>`) beside items the swap left alone, one app in
- * three spellings. So, renaming, every object of a body that declares no
- * namespace must carry the derived prefix; one that does not is refused at its
- * own name, naming the derived namespace, the prefix it carries, and the
- * missing key. Without a rename the save door's own prefix rule refuses the
- * same names (`NAMESPACE_PREFIX`), so this asks only on the rename path.
+ * three spellings. So, renaming a body that declares no namespace, an object
+ * whose name carries a prefix (`<prefix>_<shortName>`, ADR-0129 D2's object
+ * name) other than the derived one is refused at its own name, naming the
+ * derived namespace, the prefix it carries, and the missing key. A bare name
+ * (one segment, no prefix at all) keeps ADR-0048 §3.5's rename as amended:
+ * it takes the target prefix in front. Without a rename the save door's own
+ * prefix rule refuses the same names (`NAMESPACE_PREFIX`), so this asks only
+ * on the rename path.
  *
  * @returns the refusal sentence, or `undefined` when `name` carries the
- *   derived prefix.
+ *   derived prefix or no prefix.
  */
 function derivedNamespaceMismatch(
     sourcePackageId: string,
@@ -693,18 +696,13 @@ function derivedNamespaceMismatch(
 ): string | undefined {
     if (name.startsWith(`${derivedNamespace}_`)) return undefined;
     const separator = name.indexOf('_');
-    const carried = separator > 0 ? name.slice(0, separator) : undefined;
-    const carries = carried !== undefined
-        ? `it carries the prefix '${carried}_' instead`
-        : 'it carries no namespace prefix';
-    const remedy = carried !== undefined
-        ? `\`namespace: '${carried}'\` if that is the prefix every object name carries`
-        : 'and prefix every object name with it';
+    if (separator <= 0) return undefined;
+    const carried = name.slice(0, separator);
     return `Object '${name}' is not copied: package '${sourcePackageId}' declares no \`namespace\`, so its `
-        + `namespace was derived from its id as '${derivedNamespace}', and '${name}' does not carry the `
-        + `'${derivedNamespace}_' prefix — ${carries}. Renamed into namespace '${targetNamespace}' it would be `
+        + `namespace was derived from its id as '${derivedNamespace}', but '${name}' carries the prefix `
+        + `'${carried}_' instead. Renamed into namespace '${targetNamespace}' it would be `
         + `'${targetNamespace}_${name}', keeping a prefix the package never declared. Declare \`namespace\` on `
-        + `the package — ${remedy} — then install again.`;
+        + `the package — \`namespace: '${carried}'\` if that is the prefix its object names carry — then install again.`;
 }
 
 /** [#30794] One item the rename into a `targetNamespace` cannot copy, and why. */

@@ -1140,8 +1140,8 @@ describe('importUnmanagedPackage — `targetNamespace` (#30794)', () => {
 
 /**
  * A body that declares no `namespace` has one derived from its id; renamed into
- * a `targetNamespace`, an object name that does not carry the derived prefix
- * is refused, never double-prefixed. The body is the shape a publish snapshot
+ * a `targetNamespace`, an object name that carries ANOTHER prefix is refused,
+ * never double-prefixed; a bare name keeps ADR-0048 §3.5's rename. The body is the shape a publish snapshot
  * that dropped `manifest.namespace` hands over: a gallery package whose objects
  * carry their real prefix, `demoasset_`, under an id that derives
  * `asset_lifecycle_b`.
@@ -1164,7 +1164,7 @@ function namespacelessBody(objectName: string, extra: Record<string, unknown> = 
     };
 }
 
-describe('a namespace derived from the id, contradicted by the names — refused, never renamed', () => {
+describe('a namespace derived from the id, contradicted by a prefixed name — refused, never double-prefixed', () => {
     const refusedPlan = (body: Record<string, unknown>, targetNamespace: string) =>
         (() => { try { plan(body, { targetNamespace }); } catch (e) { return e as any; } throw new Error('expected a refusal'); })();
 
@@ -1178,17 +1178,15 @@ describe('a namespace derived from the id, contradicted by the names — refused
         const [{ reason }] = err.details.refused;
         // Both namespaces named, and the key whose absence made the guess.
         expect(reason).toContain("derived from its id as 'asset_lifecycle_b'");
-        expect(reason).toContain("the prefix 'demoasset_'");
+        expect(reason).toContain("carries the prefix 'demoasset_'");
         expect(reason).toContain('declares no `namespace`');
         expect(reason).toContain("`namespace: 'demoasset'`");
         expect(err.message).toContain("cannot be installed unmanaged into namespace 'trialdemoasset'");
     });
 
-    it('an object carrying no prefix is refused too — the derived namespace is a guess its names do not confirm', () => {
-        const err = refusedPlan(namespacelessBody('asset'), 'trialdemoasset');
-        expect([resolveThrownHttpError(err).status, resolveThrownHttpError(err).code]).toEqual([400, 'INVALID_REQUEST']);
-        expect(err.details.refused.map((r: any) => `${r.type}/${r.name}`)).toEqual(['object/asset']);
-        expect(err.details.refused[0].reason).toContain('carries no namespace prefix');
+    it('CONTROL: a bare object name, carrying no prefix at all, takes the target prefix in front as before (ADR-0048 §3.5)', () => {
+        const p = plan(namespacelessBody('asset'), { targetNamespace: 'trialdemoasset' });
+        expect(p.items.find((i) => i.type === 'object')).toMatchObject({ sourceName: 'asset', name: 'trialdemoasset_asset' });
     });
 
     it('names every contradicting object, and only those', () => {
@@ -1197,6 +1195,7 @@ describe('a namespace derived from the id, contradicted by the names — refused
                 { name: 'demoasset_asset', label: 'Asset', sharingModel: 'private', fields: {} },
                 { name: 'asset_lifecycle_b_owner', label: 'Owner', sharingModel: 'private', fields: {} },
                 { name: 'demoasset_site', label: 'Site', sharingModel: 'private', fields: {} },
+                { name: 'site', label: 'Bare', sharingModel: 'private', fields: {} },
             ],
         });
         const err = refusedPlan(body, 'trialdemoasset');
