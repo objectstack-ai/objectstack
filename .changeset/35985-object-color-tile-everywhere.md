@@ -9,7 +9,7 @@
 
 feat(ui): the object's colour tile replaces its line icon wherever else the object is named
 
-Clause-②: yes (widening) — `ConsolePageHeaderProps` gains the optional `iconTile` and `RecordSearchHit` the optional `color`; nothing removed or renamed
+Clause-②: yes (widening) — `ConsolePageHeaderProps` gains the optional `iconTile`, and `RecordSearchHit` and `RecordHoverCardObjectDef` the optional `color`; nothing removed or renamed
 Metadata-protocol: none
 
 The tile the navigation already draws for an object (a white glyph on the object's palette colour, gray when it has none) now also names the object in:

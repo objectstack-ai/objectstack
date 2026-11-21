@@ -78,6 +78,8 @@ export interface RecordHoverCardObjectDef {
   name?: string;
   label?: unknown;
   icon?: unknown;
+  /** The object's palette colour (`ObjectSchema.color`), for its icon tile; absent draws gray. */
+  color?: unknown;
   fields?: Record<string, Record<string, unknown> | null | undefined> | null;
   highlightFields?: unknown;
   [key: string]: unknown;
