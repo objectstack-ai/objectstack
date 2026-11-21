@@ -16,7 +16,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
-import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
+import showcaseStack from '@objectstack/example-showcase';
+import { SecurityPlugin, appSecurityPluginOptions, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { catalogPermissionSet } from './catalog-permission-set.js';
 
@@ -56,7 +57,11 @@ describe('[#35402] Change Owner doors on the showcase', () => {
 
   beforeAll(async () => {
     stack = await bootShowcase({
+      // The showcase's own `isDefault` member set stays the app default (what
+      // `objectstack serve` wires): every member reads, creates and edits a
+      // private note, and none holds the transfer grant on it.
       security: new SecurityPlugin({
+        ...appSecurityPluginOptions(showcaseStack),
         defaultPermissionSets: [...securityDefaultPermissionSets, noteTransferSet],
       }),
     });
@@ -87,7 +92,7 @@ describe('[#35402] Change Owner doors on the showcase', () => {
   });
 
   it('a controlled_by_parent detail is off by default: refused 403 CHANGE_OWNER_DISABLED even for a modifyAllRecords holder', async () => {
-    const line = await ql.findOne('showcase_invoice_line', { context: SYS });
+    const [line] = await ql.find('showcase_invoice_line', { limit: 1, context: SYS });
     const id = line?.id ?? 'no-line';
     const r = await stack.apiAs(adminToken, 'POST', `/data/showcase_invoice_line/${id}/change-owner`, { ownerId: bobId });
     const body: any = await r.json();

@@ -48,7 +48,7 @@ import {
     type ChangeOwnerMessaging,
     type ChangeOwnerTarget,
 } from '@objectstack/core';
-import { handleRouteError } from './error-response.js';
+import { handleRouteError, nestedRefusalEnvelope } from './error-response.js';
 import { refuseUnknownQueryParams } from './query-allowlist.js';
 import { wiredEngineOrLoud, type RestServer } from './rest-server.js';
 
@@ -131,17 +131,26 @@ function sendBodyRefusal(res: any, refusal: BodyRefusal): void {
 }
 
 /**
+ * The `/data` door's answer for a throw — status and flat body — read off
+ * `handleRouteError` through a sink, so it logs exactly as that door does.
+ */
+function classifiedAnswer(err: unknown, object: string): { status: number; body: Record<string, unknown> } {
+    const sink: { httpStatus: number; body?: Record<string, unknown>; status(httpStatus: number): typeof sink; json(body: Record<string, unknown>): typeof sink } = {
+        httpStatus: 500,
+        status(httpStatus) { sink.httpStatus = httpStatus; return sink; },
+        json(body) { sink.body = body; return sink; },
+    };
+    handleRouteError(sink, err, object);
+    return { status: sink.httpStatus, body: sink.body ?? {} };
+}
+
+/**
  * A refused row, worded the way the `/data` write door answers the same throw:
  * the shared classification (`handleRouteError`) sent to a sink — the
  * assigned-work hand-over's describer, for the same reason (`user-work-routes.ts`).
  */
 function rowFailureAnswer(err: unknown, object: string): { code: string; message: string } {
-    const sink: { body?: Record<string, unknown>; status(code: number): typeof sink; json(body: Record<string, unknown>): typeof sink } = {
-        status() { return sink; },
-        json(body) { sink.body = body; return sink; },
-    };
-    handleRouteError(sink, err, object);
-    const body = sink.body ?? {};
+    const { body } = classifiedAnswer(err, object);
     const nested = body.error && typeof body.error === 'object' ? body.error as Record<string, unknown> : undefined;
     const code = typeof body.code === 'string' && body.code.length > 0 ? body.code
         : typeof nested?.code === 'string' && nested.code.length > 0 ? nested.code : 'UPDATE_FAILED';
@@ -173,9 +182,12 @@ export function registerChangeOwnerEndpoints(this: ChangeOwnerRouteHost, basePat
         }
     };
 
-    /** The two gates every `/data` write passes, in that door's order. Answers `true` when it sent a refusal. */
+    /**
+     * The gates every `/data` write passes after the authenticated-caller
+     * floor (which each handler states itself, as the shared floor census
+     * reads it), in that door's order. Answers `true` when it sent a refusal.
+     */
     const gate = async (req: any, res: any, environmentId: string | undefined, context: unknown): Promise<boolean> => {
-        if (this.enforceAuth(req, res, context)) return true;
         if (refuseUnknownQueryParams(req, res, CHANGE_OWNER_QUERY_PARAMS)) return true;
         const p = await this.resolveProtocol(environmentId, req);
         return this.enforceApiAccess(req, res, p, environmentId, 'update', context);
@@ -188,7 +200,11 @@ export function registerChangeOwnerEndpoints(this: ChangeOwnerRouteHost, basePat
             } : undefined);
             return;
         }
-        handleRouteError(res, err, object);
+        // The `/data` door's classification, answered in the nested envelope
+        // this module declares: the same status and code a PATCH of the
+        // record would answer, never the flat `{ code, error }` dialect.
+        const nested = nestedRefusalEnvelope(classifiedAnswer(err, object));
+        sendError(res, nested.status, nested.code, nested.message, nested.extra);
     };
 
     // The bulk route first: `{data}/:object/change-owner` is a two-segment
@@ -202,6 +218,7 @@ export function registerChangeOwnerEndpoints(this: ChangeOwnerRouteHost, basePat
             try {
                 const environmentId = isScoped ? req.params?.environmentId : undefined;
                 const context = await this.resolveExecCtx(environmentId, req);
+                if (this.enforceAuth(req, res, context)) return;
                 if (await gate(req, res, environmentId, context)) return;
                 const shape = '{ ids, ownerId | queue, notify? }';
                 const body = closedBody(req.body, BULK_BODY_KEYS, shape);
@@ -235,6 +252,7 @@ export function registerChangeOwnerEndpoints(this: ChangeOwnerRouteHost, basePat
             try {
                 const environmentId = isScoped ? req.params?.environmentId : undefined;
                 const context = await this.resolveExecCtx(environmentId, req);
+                if (this.enforceAuth(req, res, context)) return;
                 if (await gate(req, res, environmentId, context)) return;
                 const body = closedBody(req.body, SINGLE_BODY_KEYS, '{ ownerId | queue, notify? }');
                 if (isRefusal(body)) return sendBodyRefusal(res, body);
