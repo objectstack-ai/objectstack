@@ -8321,7 +8321,9 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * organization's calendar, named by `escalation.calendar` or else its default
    * (D2), recomputed on every call and never stored (D12). A calendar refusal
    * (none resolves, or it is not maintained that far, D8) answers
-   * `{ refusal }` instead of a deadline (D9); every other failure throws.
+   * `{ refusal }` instead of a deadline (D9); every other failure throws, and
+   * each caller costs only that row its deadline: the sweep skips it until the
+   * next pass, {@link projectWorkingTimeDue} serves it with none.
    */
   private async slaDeadline(raw: any, cfg: any): Promise<SlaDeadline | undefined> {
     if (!escalationCountsWorkingTime(cfg)) {
@@ -8354,12 +8356,27 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * calendar cannot count it, through {@link slaDeadline}. `raws[i]` is the
    * stored row `rows[i]` was mapped from; a `wall_clock` row already carries
    * its deadline from the synchronous mapper and is left alone.
+   *
+   * A calendar read that errors (not a refusal) costs only its own row the
+   * deadline: it is logged and that row is served with none, never a
+   * wall-clock one (D2). Every caller serves a row that is already written —
+   * `openNodeRequest` after the insert and the approvers' notices, the list
+   * and single reads — so the error never fails the write or the other rows.
+   * The sweep reads {@link slaDeadline} itself and retries the row next pass.
    */
   private async projectWorkingTimeDue(raws: readonly any[], rows: ApprovalRequestRow[]): Promise<void> {
     for (let i = 0; i < rows.length; i++) {
       const cfg = parseJson<any>(raws[i]?.node_config_json, undefined);
       if (!escalationCountsWorkingTime(cfg)) continue;
-      const deadline = await this.slaDeadline(raws[i], cfg);
+      let deadline: SlaDeadline | undefined;
+      try {
+        deadline = await this.slaDeadline(raws[i], cfg);
+      } catch (err: any) {
+        this.logger?.warn?.('[approvals] working-time SLA deadline could not be computed; the request is served without one', {
+          request: raws[i]?.id, error: err?.message ?? String(err),
+        });
+        continue;
+      }
       if (!deadline) continue;
       if ('refusal' in deadline) rows[i]!.sla_due_refusal = deadline.refusal;
       else rows[i]!.sla_due_at = deadline.due;
