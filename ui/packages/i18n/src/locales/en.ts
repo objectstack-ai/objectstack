@@ -1526,6 +1526,7 @@ const en = {
   },
   view: {
     editViewConfig: 'Edit view config',
+    showViewConfig: 'View config',
     rename: 'Rename',
     duplicateView: 'Duplicate View',
     shareView: 'Share View',
