@@ -5579,7 +5579,7 @@ const fr = {
     sourceMandatory: "Obligatoire",
   },
   slackLink: {
-    title: "Slack",
+    title: "Messages directs Slack",
     loading: "Lecture de votre lien Slack…",
     loadFailed: "Impossible de lire votre lien Slack : {{reason}}",
     notInstalled: "Slack n’est pas installé pour votre organisation. Un administrateur de votre organisation l’installe dans Configuration avant que vous puissiez vous connecter.",
@@ -5596,10 +5596,10 @@ const fr = {
     disconnect: "Déconnecter",
   },
   slackSetup: {
-    title: "Slack",
+    title: "Messages directs Slack",
     subtitle: "Installez l’application Slack de votre organisation pour que les notifications parviennent aux personnes en messages directs Slack, et gérez qui est connecté.",
     notAllowed: "Gérer Slack nécessite la capacité {{capability}} dans votre organisation actuelle, que détiennent ses administrateurs.",
-    loading: "Chargement…",
+    loading: "Lecture de Slack…",
     install: "Installation",
     workspace: "Installé dans {{workspace}} ({{workspaceId}})",
     statusActive: "Actif",

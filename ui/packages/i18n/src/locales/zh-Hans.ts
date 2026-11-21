@@ -5488,7 +5488,7 @@ const zh = {
     sourceMandatory: "必收",
   },
   slackLink: {
-    title: "Slack",
+    title: "Slack 私信",
     loading: "正在读取您的 Slack 关联…",
     loadFailed: "无法读取您的 Slack 关联：{{reason}}",
     notInstalled: "您的组织尚未安装 Slack。需要组织管理员先在设置中安装，您才能关联。",
@@ -5505,10 +5505,10 @@ const zh = {
     disconnect: "解除关联",
   },
   slackSetup: {
-    title: "Slack",
+    title: "Slack 私信",
     subtitle: "安装组织自己的 Slack 应用，让通知以 Slack 私信送达成员，并管理已关联的人员。",
     notAllowed: "管理 Slack 需要您在当前组织中拥有 {{capability}} 权限，组织管理员拥有该权限。",
-    loading: "正在加载…",
+    loading: "正在读取 Slack…",
     install: "安装",
     workspace: "已安装到 {{workspace}}（{{workspaceId}}）",
     statusActive: "有效",

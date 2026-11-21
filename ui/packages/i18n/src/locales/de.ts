@@ -5429,7 +5429,7 @@ const de = {
     sourceMandatory: "Erforderlich",
   },
   slackLink: {
-    title: "Slack",
+    title: "Slack-Direktnachrichten",
     loading: "Ihre Slack-Verknüpfung wird gelesen…",
     loadFailed: "Ihre Slack-Verknüpfung konnte nicht gelesen werden: {{reason}}",
     notInstalled: "Slack ist für Ihre Organisation nicht installiert. Ein Administrator Ihrer Organisation installiert es unter Einrichtung, bevor Sie sich verbinden können.",
@@ -5446,10 +5446,10 @@ const de = {
     disconnect: "Trennen",
   },
   slackSetup: {
-    title: "Slack",
+    title: "Slack-Direktnachrichten",
     subtitle: "Installieren Sie die Slack-App Ihrer Organisation, damit Benachrichtigungen Personen als Slack-Direktnachrichten erreichen, und verwalten Sie, wer verbunden ist.",
     notAllowed: "Zum Verwalten von Slack ist die Berechtigung {{capability}} in Ihrer aktuellen Organisation erforderlich, die deren Administratoren haben.",
-    loading: "Wird geladen…",
+    loading: "Slack wird gelesen…",
     install: "Installation",
     workspace: "Installiert in {{workspace}} ({{workspaceId}})",
     statusActive: "Aktiv",

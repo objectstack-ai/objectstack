@@ -6048,7 +6048,7 @@ const ar = {
     sourceMandatory: "إلزامي",
   },
   slackLink: {
-    title: "Slack",
+    title: "رسائل Slack المباشرة",
     loading: "جارٍ قراءة ربط Slack الخاص بك…",
     loadFailed: "تعذّرت قراءة ربط Slack الخاص بك: {{reason}}",
     notInstalled: "لم يتم تثبيت Slack لمؤسستك. يثبّته أحد مسؤولي مؤسستك في الإعداد قبل أن تتمكن من الربط.",
@@ -6065,10 +6065,10 @@ const ar = {
     disconnect: "إلغاء الربط",
   },
   slackSetup: {
-    title: "Slack",
+    title: "رسائل Slack المباشرة",
     subtitle: "ثبّت تطبيق Slack الخاص بمؤسستك لتصل الإشعارات إلى الأشخاص كرسائل Slack مباشرة، وأدِر من هم مرتبطون.",
     notAllowed: "تتطلب إدارة Slack الصلاحية {{capability}} في مؤسستك الحالية، وهي صلاحية يملكها مسؤولوها.",
-    loading: "جارٍ التحميل…",
+    loading: "جارٍ قراءة Slack…",
     install: "التثبيت",
     workspace: "مثبّت في {{workspace}} ({{workspaceId}})",
     statusActive: "نشط",

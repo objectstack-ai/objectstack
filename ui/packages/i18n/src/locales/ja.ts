@@ -5430,7 +5430,7 @@ const ja = {
     sourceMandatory: "必須",
   },
   slackLink: {
-    title: "Slack",
+    title: "Slack のダイレクトメッセージ",
     loading: "Slack の連携を読み込んでいます…",
     loadFailed: "Slack の連携を読み込めませんでした: {{reason}}",
     notInstalled: "あなたの組織には Slack がインストールされていません。連携する前に、組織の管理者がセットアップでインストールします。",
@@ -5447,10 +5447,10 @@ const ja = {
     disconnect: "連携を解除",
   },
   slackSetup: {
-    title: "Slack",
+    title: "Slack のダイレクトメッセージ",
     subtitle: "組織の Slack アプリをインストールして通知を Slack のダイレクトメッセージで届け、連携しているユーザーを管理します。",
     notAllowed: "Slack の管理には、現在の組織での {{capability}} 権限が必要です。この権限は組織の管理者が持っています。",
-    loading: "読み込み中…",
+    loading: "Slack を読み込んでいます…",
     install: "インストール",
     workspace: "{{workspace}}（{{workspaceId}}）にインストール済み",
     statusActive: "有効",

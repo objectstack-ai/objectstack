@@ -5583,7 +5583,7 @@ const es = {
     sourceMandatory: "Obligatorio",
   },
   slackLink: {
-    title: "Slack",
+    title: "Mensajes directos de Slack",
     loading: "Leyendo su vínculo con Slack…",
     loadFailed: "No se pudo leer su vínculo con Slack: {{reason}}",
     notInstalled: "Slack no está instalado en su organización. Un administrador de su organización lo instala en Configuración antes de que pueda conectarse.",
@@ -5600,10 +5600,10 @@ const es = {
     disconnect: "Desconectar",
   },
   slackSetup: {
-    title: "Slack",
+    title: "Mensajes directos de Slack",
     subtitle: "Instale la aplicación de Slack de su organización para que las notificaciones lleguen a las personas como mensajes directos de Slack, y gestione quién está conectado.",
     notAllowed: "Gestionar Slack requiere la capacidad {{capability}} en su organización actual, que tienen sus administradores.",
-    loading: "Cargando…",
+    loading: "Leyendo Slack…",
     install: "Instalación",
     workspace: "Instalado en {{workspace}} ({{workspaceId}})",
     statusActive: "Activo",

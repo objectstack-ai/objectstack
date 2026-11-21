@@ -5427,7 +5427,7 @@ const ko = {
     sourceMandatory: "필수",
   },
   slackLink: {
-    title: "Slack",
+    title: "Slack 다이렉트 메시지",
     loading: "Slack 연결을 읽는 중…",
     loadFailed: "Slack 연결을 읽을 수 없습니다: {{reason}}",
     notInstalled: "조직에 Slack이 설치되어 있지 않습니다. 연결하기 전에 조직 관리자가 설정에서 설치해야 합니다.",
@@ -5444,10 +5444,10 @@ const ko = {
     disconnect: "연결 해제",
   },
   slackSetup: {
-    title: "Slack",
+    title: "Slack 다이렉트 메시지",
     subtitle: "조직의 Slack 앱을 설치하여 알림이 Slack 다이렉트 메시지로 전달되도록 하고, 연결된 사용자를 관리합니다.",
     notAllowed: "Slack을 관리하려면 현재 조직에서 {{capability}} 권한이 필요하며, 이 권한은 조직 관리자에게 있습니다.",
-    loading: "불러오는 중…",
+    loading: "Slack을 읽는 중…",
     install: "설치",
     workspace: "{{workspace}}({{workspaceId}})에 설치됨",
     statusActive: "활성",
