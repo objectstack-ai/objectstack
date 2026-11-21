@@ -8,6 +8,9 @@
  * edge variants by the `inset-y-0` class their variant carries, while centred
  * dialogs and bottom sheets keep the radius.
  *
+ * The record drawer is the exception: it is a floating card (objectstack#35854)
+ * that sets its own radius, so the global rule must not override it either.
+ *
  * The selector is read from the shipped stylesheet and matched against the DOM
  * the real primitives render, so a change to either side is seen here.
  */
@@ -20,6 +23,7 @@ import {
   Dialog,
   DialogContent,
   DialogTitle,
+  NavigationOverlay,
   Sheet,
   SheetContent,
   SheetTitle,
@@ -77,5 +81,39 @@ describe('edge sheets are not rounded by the dialog corner rule (#35411)', () =>
       </Dialog>,
     );
     expect(screen.getByRole('dialog').matches(roundingSelector())).toBe(true);
+  });
+});
+
+describe('the record drawer keeps its own floating-card radius (#35411, #35854)', () => {
+  // Renders the real NavigationOverlay drawer. Its own radius is asserted on
+  // the className it ships: the test DOM has no compiled Tailwind, so the
+  // utility's computed value is not readable here.
+  function renderRecordDrawer(): HTMLElement {
+    render(
+      <NavigationOverlay
+        isOpen
+        isOverlay
+        selectedRecord={{ id: 'r1' }}
+        mode="drawer"
+        close={() => {}}
+        setIsOpen={() => {}}
+        title="Lead"
+        width="720px"
+        mainContent={<div />}
+      >
+        {() => <div>record body</div>}
+      </NavigationOverlay>,
+    );
+    return screen.getByRole('dialog', { name: 'Lead' });
+  }
+
+  it('is not matched by the global rounding rule', () => {
+    const card = renderRecordDrawer();
+    expect(card.hasAttribute('data-record-drawer-card')).toBe(true);
+    expect(card.matches(roundingSelector())).toBe(false);
+  });
+
+  it('carries its own radius class', () => {
+    expect(renderRecordDrawer().className.split(/\s+/)).toContain('sm:rounded-xl');
   });
 });
