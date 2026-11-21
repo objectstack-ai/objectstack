@@ -57,6 +57,9 @@ export const COMMENT_RESOLVED_BY_FIELD = 'resolved_by';
 /** When the thread was resolved: the platform's, `readonly`. */
 export const COMMENT_RESOLVED_AT_FIELD = 'resolved_at';
 
+/** The object a thread's comments are rows of. */
+const COMMENT_OBJECT = 'sys_comment';
+
 const SYSTEM_CTX = { isSystem: true } as const;
 
 /** How many `parent_id` hops a reply is followed up to find its thread's top-level comment. */
@@ -203,13 +206,12 @@ export interface CommentReopenLogger {
  */
 async function threadRootOf(
   engine: CommentReopenEngine,
-  object: string,
   reply: Record<string, unknown>,
 ): Promise<Record<string, unknown> | null> {
   let current: Record<string, unknown> = reply;
   for (let hop = 0; hop < THREAD_ROOT_MAX_HOPS; hop++) {
     if (!isReplyRow(current)) return current;
-    const parent = await engine.findOne(object, { where: { id: current.parent_id }, context: { ...SYSTEM_CTX } });
+    const parent = await engine.findOne(COMMENT_OBJECT, { where: { id: current.parent_id }, context: { ...SYSTEM_CTX } });
     if (!parent) return null;
     current = parent;
   }
@@ -231,7 +233,7 @@ async function threadRootOf(
 export function installCommentReplyReopens(
   engine: CommentReopenEngine,
   logger: CommentReopenLogger,
-  opts: { object: string; packageId: string },
+  opts: { packageId: string },
 ): void {
   engine.registerHook(
     'afterInsert',
@@ -241,25 +243,24 @@ export function installCommentReplyReopens(
       if (!row || typeof row !== 'object' || !isReplyRow(row as Record<string, unknown>)) return;
       let rootId: unknown;
       try {
-        const root = await threadRootOf(engine, opts.object, row as Record<string, unknown>);
+        const root = await threadRootOf(engine, row as Record<string, unknown>);
         if (!root || root[COMMENT_RESOLVED_FIELD] !== true) return;
         rootId = root.id;
         if (typeof engine.update !== 'function') {
           throw new Error('the data engine composed here serves no update');
         }
-        await engine.update(opts.object, { [COMMENT_RESOLVED_FIELD]: false }, { where: { id: rootId }, context: { ...SYSTEM_CTX } });
+        await engine.update(COMMENT_OBJECT, { [COMMENT_RESOLVED_FIELD]: false }, { where: { id: rootId }, context: { ...SYSTEM_CTX } });
       } catch (e) {
-        const log = logger.error ?? logger.warn;
-        log.call(
-          logger,
+        const message =
           `[audit] comment resolution: reply ${String((row as Record<string, unknown>).id)} was stored, but its thread ` +
             `${rootId === undefined ? '' : `(comment ${String(rootId)}) `}could not be reopened and still reads resolved — ` +
             'it stays out of the default unresolved list until someone reopens it. Reopen it by setting is_resolved ' +
-            `to false on the thread's top-level comment. Cause: ${e instanceof Error ? e.message : String(e)}`,
-        );
+            `to false on the thread's top-level comment. Cause: ${e instanceof Error ? e.message : String(e)}`;
+        if (logger.error) logger.error(message);
+        else logger.warn(message);
       }
     },
-    { object: opts.object, packageId: opts.packageId },
+    { object: COMMENT_OBJECT, packageId: opts.packageId },
   );
 }
 

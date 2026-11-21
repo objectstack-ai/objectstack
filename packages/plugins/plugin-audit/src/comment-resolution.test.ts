@@ -107,7 +107,7 @@ describe('installCommentReplyReopens — a reopen that fails is said at error', 
         },
       },
       logger,
-      { object: 'sys_comment', packageId: 'test' },
+      { packageId: 'test' },
     );
     await hook!({ result: { id: 'r1', parent_id: 'root' }, session: { userId: 'u' } });
     expect(logger.error).toHaveBeenCalledTimes(1);
@@ -124,7 +124,7 @@ describe('installCommentReplyReopens — a reopen that fails is said at error', 
     installCommentReplyReopens(
       { registerHook: (_e, h) => { hook = h as any; }, findOne: async () => ({ id: 'root', is_resolved: true }), update },
       { warn: vi.fn() },
-      { object: 'sys_comment', packageId: 'test' },
+      { packageId: 'test' },
     );
     await hook!({ result: { id: 'r1', parent_id: 'root' }, session: { isSystem: true, preserveAudit: true } });
     expect(update).not.toHaveBeenCalled();

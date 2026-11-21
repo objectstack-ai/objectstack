@@ -1221,7 +1221,7 @@ export function installCommentAccessHooks(
   engine.registerHook('beforeUpdate', stampCommentResolution, { object: COMMENT_OBJECT, packageId: PACKAGE_ID });
 
   // ── Create: a reply reopens its resolved thread (#36071) ────────────
-  installCommentReplyReopens(engine, logger, { object: COMMENT_OBJECT, packageId: PACKAGE_ID });
+  installCommentReplyReopens(engine, logger, { packageId: PACKAGE_ID });
 
   // ── Create and re-point: the platform stamps the parent pair (ADR-0139 E7) ─
   // Its own registrations, for the stamp's reason above: every caller is
