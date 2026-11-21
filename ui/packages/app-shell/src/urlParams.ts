@@ -51,6 +51,9 @@ import { NAV_RUN_ACTION_PARAM } from '@object-ui/layout';
  * |             | objectui#2257). Never stacks history.          |              |
  * | `palette`   | Command palette overlay (alias `cmdk`).        | replace      |
  * | `shortcuts` | Keyboard-shortcuts dialog overlay.             | replace      |
+ * | `comments`  | The phone's comment page over a record route:  | push (open), |
+ * |             | empty = the threads, a top-level comment's id  | pop (close)  |
+ * |             | = that thread (objectstack#36076).             |              |
  * | `from`      | Ancestor breadcrumb trail for a record route,  | push (with   |
  * |             | so drilling record→related-record keeps a      | the drill-in) |
  * |             | clickable path back (`Account → #p → Invoice`).|              |
@@ -119,6 +122,20 @@ export const RECORD_RELATED_ENLARGE_PUSHED_STATE = '__relatedEnlargePushed';
  */
 export const NAV_DRAWER_OPEN_STATE = '__navDrawerOpen';
 
+/**
+ * The phone's comment page over the record page (`?comments=`, objectstack#36076):
+ * present and empty, the record's threads; a top-level comment's id, that
+ * thread. Read by `RecordDetailView` on a phone's record page only.
+ */
+export const RECORD_COMMENTS_PARAM = 'comments';
+
+/**
+ * History-state flag beside {@link RECORD_COMMENTS_PARAM}: the record view
+ * pushed this `?comments=` entry, so 「‹」 pops it. Not a URL parameter; an
+ * entry reached by a reload or a shared link carries none, and 「‹」 replaces.
+ */
+export const RECORD_COMMENTS_PUSHED_STATE = '__commentsPushed';
+
 /** Command palette overlay (ADR-0054 Phase 1; alias `cmdk`). */
 export const COMMAND_PALETTE_PARAM = 'palette';
 
@@ -161,6 +178,7 @@ export const RESERVED_URL_PARAMS: readonly string[] = [
   RECORD_FORM_LINK_PARAM,
   RECORD_DETAIL_TAB_PARAM,
   RECORD_RELATED_ENLARGE_PARAM,
+  RECORD_COMMENTS_PARAM,
   COMMAND_PALETTE_PARAM,
   KEYBOARD_SHORTCUTS_PARAM,
   RECORD_TRAIL_PARAM,

@@ -22,6 +22,8 @@ export interface CommentComposerProps {
    * zero: a press on 「回复」 lands the caret here, the draft kept.
    */
   focusSignal?: number;
+  /** `phone`: the phone's box, its toolbar under the text (`RichTextCommentInput`). */
+  layout?: 'default' | 'phone';
   className?: string;
 }
 
@@ -37,6 +39,7 @@ export const CommentComposer: React.FC<CommentComposerProps> = ({
   mentionSuggestions,
   onMentionSuggestionsWanted,
   focusSignal = 0,
+  layout,
   className,
 }) => {
   const boxRef = React.useRef<HTMLDivElement>(null);
@@ -70,6 +73,7 @@ export const CommentComposer: React.FC<CommentComposerProps> = ({
       onMentionSuggestionsWanted={onMentionSuggestionsWanted}
       disabled={submitting}
       compact
+      layout={layout}
     />
     </div>
   );

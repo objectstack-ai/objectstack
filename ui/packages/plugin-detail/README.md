@@ -974,6 +974,26 @@ The pieces are exported one by one (`CommentThread`, `CommentItem`,
 `CommentComposer`, `buildCommentThreads`, and #36070's `CommentAuthorAvatar`) for a surface that
 lays them out another way, such as a phone's comment page.
 
+### The phone's comment page
+
+`CommentsPage` (objectstack#36076) is that other layout: a full-screen page
+(`role="dialog"`, fixed over the host's page) that reads the same
+`useRecordComments`. Props: `threadId` (`null` for the list, else a thread's
+first comment's id), `onOpenThread(id)`, `onBack()`, `backLabel` (what the
+list's 「‹」 returns to) and `onEngage` (the first long press, when the host may
+ask what the actions take). The list draws each thread with
+`CommentThread mode="summary"`; a thread draws `mode="page"`, its comment and
+every reply with no reply box of its own, since the page docks one
+`CommentComposer layout="phone"` at its foot (a new comment in the list, a reply
+in a thread, each its own draft). The page follows the on-screen keyboard
+through `visualViewport`. A long press of 500 ms that travels under 10 px, or
+the context menu, raises `CommentActionSheet` with the comment's
+`CommentItemActions`, the same object `renderActions` hands the desktop's hover
+row, so the gates are the thread's. `RichTextCommentInput` takes
+`layout="phone"`: the toolbar under the text, at touch size, with no preview and
+no shortcut hints. The console mounts the page from `?comments=` on the phone's
+record page (`RECORD_COMMENTS_PARAM`).
+
 ```tsx
 import * as React from 'react';
 import { CommentsButton, CommentsPanel, useRecordComments } from '@object-ui/plugin-detail';

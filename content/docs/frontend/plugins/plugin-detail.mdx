@@ -234,12 +234,38 @@ the record drawer), and no longer inside the 动态 (Activity) tab
 The panel and the icon come with the default record page and with a page that
 only fills its slots. A record page you author in full keeps the feed blocks it
 places (`record:discussion`, `record:activity`) exactly as before, and an object
-with `enable.feeds: false` shows no icon. On a phone the comments stay in the
-动态 tab.
+with `enable.feeds: false` shows no icon.
+
+### On a phone
+
+On a phone the same icon sits at the right of the record page's top bar, with
+the same number, and opens the record's comments as a page of their own over
+the record (objectstack#36076). The record stays where it was under it: 「‹」
+and the browser's Back return to it as it was scrolled.
+
+- **Two levels.** The page lists each thread's first comment, with the faces of
+  the latest repliers and 「N 条回复」 under it; replies are not on the list. A
+  tap on a comment opens its thread: the comment first, then the replies,
+  oldest first. 「‹ 评论」 goes back to the list.
+- **The comment box** stays at the foot of the screen, and above the keyboard
+  while it is up. One line until you tap it; then a row under the text holds
+  mention, bold, italic, list and code, with send at the right end. In the list
+  it writes a new comment; in a thread, a reply. It names no keyboard shortcut.
+- **A long press** on a comment raises its actions from the bottom: six
+  reactions on one row, then 「标记已解决」 (on a thread's first comment), 「编辑」
+  and 「删除」, red, which asks before deleting. Each appears exactly where the
+  desktop's hover row would offer it. The comment's reactions show under its
+  text with their counts, yours marked; a tap on one adds yours or takes it back.
+- **The filter** at the list's top right is the desktop's: 「显示已解决」 and
+  「只看我参与的」.
+- **The 动态 tab** holds the system entries only, as on the desktop.
+
+The page is addressed by the URL (`?comments=` for the list, `?comments=<id>`
+for a thread), so a link or a reload opens it where it was.
 
 The components are exported from `@object-ui/plugin-detail` (`CommentsPanel`,
-`CommentsButton`, `CommentThread`, `CommentItem`, `CommentComposer`,
-`useRecordComments`); each reads the discussion off the host's
+`CommentsPage`, `CommentsButton`, `CommentThread`, `CommentItem`,
+`CommentComposer`, `useRecordComments`); each reads the discussion off the host's
 `DiscussionContext`, as the feed blocks do.
 
 ## The `record:activity` block

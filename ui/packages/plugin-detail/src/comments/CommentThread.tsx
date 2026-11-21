@@ -59,12 +59,23 @@ export interface RecordCommentThreadProps {
    * `expand`: the replies open in place, under the comment, with the reply
    * box after them (the desktop panel). `summary`: the thread stays one
    * comment and 「N 条回复」, and a press on it calls `onOpen` (the phone's
-   * list, which opens the thread on its own page).
+   * list, which opens the thread on its own page). `page`: the thread is the
+   * page, its comment first and every reply after it, oldest first; the page
+   * docks its own reply box, so the thread draws none (the phone's thread).
    */
-  mode?: 'expand' | 'summary';
+  mode?: 'expand' | 'summary' | 'page';
+  /**
+   * `summary`: opens the thread. `page`: 「回复」 was pressed; the host puts
+   * the caret in its reply box.
+   */
   onOpen?: () => void;
   /** Draws a comment's actions; absent, a comment has none on screen. */
   renderActions?: (actions: CommentItemActions) => React.ReactNode;
+  /**
+   * What a comment answers to besides its own controls: the phone's long
+   * press and tap (`useCommentPress`). Spread on each comment's box.
+   */
+  itemInteraction?: (actions: CommentItemActions) => React.HTMLAttributes<HTMLDivElement>;
   className?: string;
 }
 
@@ -114,6 +125,7 @@ export const CommentThread: React.FC<RecordCommentThreadProps> = ({
   mode = 'expand',
   onOpen,
   renderActions,
+  itemInteraction,
   className,
 }) => {
   const { t } = useDetailTranslation();
@@ -132,7 +144,7 @@ export const CommentThread: React.FC<RecordCommentThreadProps> = ({
   const resolvedBy = resolved ? resolverName(root, comments.mentionSuggestions) : undefined;
 
   const openReply = React.useCallback(() => {
-    if (mode === 'summary') {
+    if (mode !== 'expand') {
       onOpen?.();
       return;
     }
@@ -159,12 +171,15 @@ export const CommentThread: React.FC<RecordCommentThreadProps> = ({
     onDelete: onDeleteComment && deletableComment(item, moderates) ? () => void onDeleteComment(item.id) : undefined,
   });
 
-  const itemOf = (item: FeedItem, isRoot: boolean, footer?: React.ReactNode, itemClassName?: string) => (
+  const itemOf = (item: FeedItem, isRoot: boolean, footer?: React.ReactNode, itemClassName?: string) => {
+    const actions = renderActions || itemInteraction ? actionsOf(item, isRoot) : undefined;
+    return (
     <CommentItem
       key={String(item.id)}
       item={item}
       className={itemClassName}
-      actions={renderActions?.(actionsOf(item, isRoot))}
+      actions={actions && renderActions?.(actions)}
+      interactionProps={actions && itemInteraction?.(actions)}
       editing={editingId === item.id}
       onSaveEdit={
         onEditComment
@@ -178,7 +193,27 @@ export const CommentThread: React.FC<RecordCommentThreadProps> = ({
       onToggleReaction={onToggleReaction ? (emoji) => void onToggleReaction(item.id, emoji) : undefined}
       footer={footer}
     />
-  );
+    );
+  };
+
+  if (mode === 'page') {
+    return (
+      <div className={cn('py-3', className)} data-comment-thread="" data-comment-thread-page="">
+        {resolved && (
+          <p className="mb-1.5 flex items-center gap-1 text-xs text-muted-foreground" data-comment-resolved-mark="">
+            <Check className="h-3.5 w-3.5" aria-hidden="true" />
+            {resolvedBy ? t('detail.threadResolvedBy', { name: resolvedBy }) : t('detail.threadResolved')}
+          </p>
+        )}
+        {itemOf(root, true)}
+        {replies.length > 0 && (
+          <div className="mt-4 space-y-4 border-t border-border/60 pt-4" data-comment-replies="">
+            {replies.map((reply) => itemOf(reply, false))}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const open = mode === 'expand' && expanded;
   const summary = replies.length > 0 && !open && (

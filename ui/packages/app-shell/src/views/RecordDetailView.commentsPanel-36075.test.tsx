@@ -25,7 +25,7 @@ import * as React from 'react';
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, within, act, waitFor, fireEvent } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -147,13 +147,22 @@ interface MountOptions {
   objectName?: string;
   pages?: unknown[];
   embedded?: boolean;
+  /** The record route's query, `?comments=…` for the phone's comment page. */
+  search?: string;
 }
 
-async function mount({ objectName = OBJECT_NAME, pages = [], embedded = false }: MountOptions = {}) {
+/** The router's location now, for the phone's `?comments=` entries. */
+function LocationProbe() {
+  const location = useLocation();
+  return <span data-testid="location" data-search={location.search} data-pushed={String(!!(location.state as any)?.__commentsPushed)} />;
+}
+
+async function mount({ objectName = OBJECT_NAME, pages = [], embedded = false, search = '' }: MountOptions = {}) {
   const rendered = render(
     <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }} persistLanguage={false}>
       <MePermissionsProvider initialPermissions={PERMS}>
-        <MemoryRouter initialEntries={[`/app/service/${objectName}/${RECORD_ID}`]}>
+        <MemoryRouter initialEntries={[`/app/service/${objectName}/${RECORD_ID}${search}`]}>
+          <LocationProbe />
           <MetadataCtx.Provider value={metadataFor(pages)}>
             <RecordDetailView
               dataSource={makeDataSource()}
@@ -299,5 +308,87 @@ describe('the record comment panel (objectstack#36075)', () => {
     expect(panel(container)).toBeNull();
     fireEvent.click(button(container)!);
     expect(await within(panel(container)!).findByText(ADA_BODY)).toBeInTheDocument();
+  });
+});
+
+/**
+ * objectstack#36076 — the phone's comment page, through the REAL
+ * `RecordDetailView` at 375 wide:
+ *
+ * - The icon is in the phone's top bar with the number of threads; a press
+ *   pushes `?comments=` and draws the page over the record, which stays
+ *   mounted under it.
+ * - The list shows top-level comments only; a tap pushes the thread
+ *   (`?comments=<id>`), which shows the comment and its reply. 「‹」 pops back
+ *   to the list, then to the record, and the focus returns to the icon.
+ * - A link or a reload straight to a thread: 「‹」 replaces the URL one level up.
+ * - The 动态 tab keeps the system entries alone, as on the desktop.
+ * - No icon on an object with feeds off.
+ */
+describe("the phone's comment page (objectstack#36076)", () => {
+  beforeEach(() => setWindowWidth(375));
+
+  const page = () => document.querySelector('[data-comments-page]') as HTMLElement | null;
+  const search = () => document.querySelector('[data-testid="location"]')!.getAttribute('data-search');
+
+  it('the top bar carries the icon with the thread count; a press pushes the page over the record', async () => {
+    const { container } = await mount();
+    await waitFor(() => expect(button(container)).not.toBeNull());
+    expect(button(container)!.closest('[data-record-top-bar]')).not.toBeNull();
+    await waitFor(() => expect(button(container)!.querySelector('[data-comments-count]')).toHaveTextContent('2'));
+    expect(panel(container)).toBeNull();
+    fireEvent.click(button(container)!);
+    await waitFor(() => expect(page()).toHaveAttribute('data-comments-page', 'list'));
+    expect(search()).toBe('?comments=');
+    expect(document.querySelector('[data-testid="location"]')).toHaveAttribute('data-pushed', 'true');
+    const list = within(page()!);
+    expect(await list.findByText(ADA_BODY)).toBeInTheDocument();
+    expect(list.getByText(GRACE_BODY)).toBeInTheDocument();
+    expect(list.queryByText(REPLY_BODY)).toBeNull();
+    expect(list.getByRole('button', { name: /1 reply/ })).toBeInTheDocument();
+    // The record is still there, under the page.
+    expect(within(container).getAllByText(`Case ${RECORD_ID}`).length).toBeGreaterThan(0);
+  });
+
+  it('a tap opens the thread; 「‹」 goes back to the list, then to the record, focus on the icon', async () => {
+    const { container } = await mount();
+    await waitFor(() => expect(button(container)).not.toBeNull());
+    fireEvent.click(button(container)!);
+    fireEvent.click(await within(page()!).findByText(ADA_BODY));
+    await waitFor(() => expect(page()).toHaveAttribute('data-comments-page', 'thread'));
+    expect(search()).toBe('?comments=c-ada');
+    expect(within(page()!).getByText(REPLY_BODY)).toBeInTheDocument();
+    fireEvent.click(page()!.querySelector('[data-comments-page-back]')!);
+    await waitFor(() => expect(page()).toHaveAttribute('data-comments-page', 'list'));
+    expect(search()).toBe('?comments=');
+    fireEvent.click(page()!.querySelector('[data-comments-page-back]')!);
+    await waitFor(() => expect(page()).toBeNull());
+    expect(search()).toBe('');
+    await waitFor(() => expect(document.activeElement).toBe(button(container)));
+  });
+
+  it('a link straight to a thread: 「‹」 replaces the URL one level up', async () => {
+    await mount({ search: '?comments=c-ada' });
+    await waitFor(() => expect(page()).toHaveAttribute('data-comments-page', 'thread'));
+    fireEvent.click(page()!.querySelector('[data-comments-page-back]')!);
+    await waitFor(() => expect(page()).toHaveAttribute('data-comments-page', 'list'));
+    expect(search()).toBe('?comments=');
+    fireEvent.click(page()!.querySelector('[data-comments-page-back]')!);
+    await waitFor(() => expect(page()).toBeNull());
+    expect(search()).toBe('');
+  });
+
+  it('the 动态 tab keeps the system entries alone', async () => {
+    const { container } = await mount({ search: '?tab=activity' });
+    await waitFor(() => expect(button(container)).not.toBeNull());
+    await act(async () => {});
+    expect(within(container).queryByText(ADA_BODY)).toBeNull();
+    expect(within(container).queryByText('Ctrl+Enter', { exact: false })).toBeNull();
+  });
+
+  it('no icon on an object with feeds off', async () => {
+    const { container } = await mount({ objectName: NO_FEEDS });
+    await act(async () => {});
+    expect(button(container)).toBeNull();
   });
 });

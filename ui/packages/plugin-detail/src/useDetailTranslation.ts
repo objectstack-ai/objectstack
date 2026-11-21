@@ -167,6 +167,12 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'detail.threadResolved': "Resolved",
   'detail.threadResolvedBy': "Resolved by {{name}}",
   'detail.filterComments': "Filter comments",
+  // objectstack#36076 — the phone's comment page: a reaction in the long-press
+  // sheet, the thread's title, and the toolbar's names without their shortcut.
+  'detail.addReactionEmoji': 'React with {{emoji}}',
+  'detail.commentThread': 'Thread',
+  'detail.formatBold': 'Bold',
+  'detail.formatItalic': 'Italic',
   'detail.showResolvedComments': "Show resolved",
   'detail.commentsInvolvingMe': "Only threads I'm in",
   'detail.noUnresolvedComments': "No unresolved comments",
