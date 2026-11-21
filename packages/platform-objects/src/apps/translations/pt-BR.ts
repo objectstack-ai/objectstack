@@ -127,6 +127,7 @@ export const ptBR: TranslationData = {
         nav_datasources: { label: 'Fontes de dados' },
         nav_connector_credentials: { label: 'Credenciais dos conectores' },
         nav_connector_connections: { label: 'Conexões dos conectores' },
+        nav_slack: { label: 'Slack' },
 
         nav_oauth_apps: { label: 'Aplicativos OAuth' },
       },

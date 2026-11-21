@@ -129,6 +129,7 @@ export const ruSourceHashes: Readonly<Record<string, string>> = {
   'apps.setup.navigation.nav_datasources.label': '2f0648ce23158e6f',
   'apps.setup.navigation.nav_connector_credentials.label': '0504775224e05a81',
   'apps.setup.navigation.nav_connector_connections.label': '949e9a8fd25c3d57',
+  'apps.setup.navigation.nav_slack.label': 'c3c9e181e8c74b22',
   'apps.setup.navigation.nav_oauth_apps.label': '1b26cce61a4c10eb',
   'apps.studio.label': '5aaaaea2294ee893',
   'apps.studio.description': 'c026a5795933995d',
