@@ -244,6 +244,8 @@ export {
   dashboardFilterVariableDefs,
   buildFilterCondition,
   buildWidgetScopedFilter,
+  boundMemberFilterNames,
+  type DashboardFilterJsonColumnOperators,
 } from './utils/dashboard-filters.js';
 export * from './utils/merge-filters.js';
 export * from './utils/compare-to.js';
