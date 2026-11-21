@@ -720,6 +720,26 @@ declared filter is refused with a console explanation rather than dropped —
 answering with more rows than the metadata asked for is the failure this key's
 wiring exists to remove.
 
+On the record page, a related list opened as its own **tab** is the child
+object's full list (objectstack#35892). Its first row is the list's tile and
+name on the left and **+ Add** on the right; its second row is the list page's
+own condition row (`plugin-list`'s `ListConditionsBlock`, which the record page
+hands in through `RelatedListConditionsSlotContext`, since that package depends
+on this one; a host that supplies none gets no condition row): **Sort** and **Filter**, with no view switch, no
+view settings and no search. The table is the list page's grid: the column
+menu, cell editing where the reader may edit the child object, row selection
+with the floating bulk bar, and the footer row, whose calculations cover every
+matching row. Rows load as the page scrolls; there is no pager and no "Open in
+list". The tab title counts every child; the footer counts the rows the filter
+keeps. Whatever the reader changes there (sort, filter, footer calculations)
+lasts while they stay on the record, across its tabs and its drawer, and is
+gone after a reload or on another record. **Discard** appears once something
+changed and puts the tab back; nothing is saved. Column widths and order are
+kept by the grid in the reader's browser, as on the list page. A header sort,
+column widths or order that an earlier version remembered in the reader's
+record-page preference no longer apply. A tab whose child object is grouped
+by status draws no footer row.
+
 The **Add** affordance renders only where every link in its chain is available:
 a spec-valid `add.picker.object` *and* a `dataSource`. The picker dialog and the
 add callback both required the adapter already, so without it the button used to
@@ -758,6 +778,17 @@ affordances (View, Edit, Delete) are not governed by this key.
   "properties": { "objectName": "contract", "relationshipField": "renewed_from", "actions": [] }
 }
 ```
+
+### Comments: author avatar, reply focus, mention menu
+
+Every comment and reply in `RecordActivityTimeline` leads with
+`CommentAuthorAvatar`: the author's 20 px image, or their initials on the round
+disc the person chips draw (`getPersonInitials` from `@object-ui/fields`).
+`ThreadedReplies` takes `focusReplyOnOpen`: each time its reply input opens it
+expands the replies and puts the caret in the input, so a host whose input opens
+behind its own Reply button lets the reader type straight away. In
+`RichTextCommentInput`, the `@` mention menu opens under the caret, or above it
+when the window has no room below.
 
 ### InlineEditSaveBar & InlineFieldInput
 
@@ -892,6 +923,69 @@ export function RecordPage() {
         <SchemaRenderer schema={page} />
       )}
     </div>
+  );
+}
+```
+
+## The record's comment panel
+
+On the desktop the record's comments are a panel of their own, beside the
+record rather than inside 动态 (objectstack#36075). `CommentsPanel` draws 「评论」
+and ✕ at its top, the threads oldest first (a thread's replies fold to
+「N 条回复」 and open in place, with a reply box under them), and the comment box
+docked at its foot. Each comment's actions sit in one row at its top right while
+the pointer is over it (`CommentHoverActions`): Reply, an emoji, ✓ (resolve, on
+a thread's first comment) and More with Edit and Delete. Edit and Delete are
+offered on the viewer's own comments. On other people's, Delete needs
+`moderatesComments` on the `DiscussionContext` (the console sets it on the
+explain engine's definite allow of a by-id update of the record, the server's
+rule for moderating another member's comment), and Edit needs it together with
+`updatesOthersComments` (the console sets that on the explain engine's definite
+allow of an `update` of one comment the viewer did not write: the platform's
+row floor lets most members update only their own rows). Read both three-state
+with `useRecordVerdict`. `CommentsButton` is the header's switch: the comments icon
+with the number of unresolved threads.
+
+Resolved threads (objectstack#36071 stores them): where the rows carry a
+`resolved` (`FeedItem.resolved`, set by the host from `is_resolved`), ✓ hands
+`onResolveComment(id, true)`, and a resolved thread leaves the list. ✓ is on a
+thread the viewer started (`authoredByViewer` on its first comment), and on
+anyone's only where the host sets `updatesOthersComments`. The filter
+menu at the panel's top right holds 「显示已解决」 (a resolved thread then shows
+「已由 X 解决」, and its ✓ reopens it) and 「只看我参与的」 (threads the viewer
+started, replied in or is mentioned in, from `authoredByViewer` and
+`mentionsViewer`). The filter is held while the panel is open and not stored.
+Where the rows carry no `resolved`, there is no ✓ and no menu, and the count is
+every thread. `filterCommentThreads`, `unresolvedThreadCount` and
+`threadInvolvesViewer` are the rules, exported.
+
+Every part reads the record's discussion off the host's `DiscussionContext`
+(`useRecordComments`) and offers each write exactly where the host hands it, so
+the panel needs no props beyond `onClose`. Where it sits and how wide is the
+host's to decide; the console's record page gives it 380 px beside the record
+from a 1280 px window, over the record's right edge in a narrower one, and the
+whole drawer body in a drawer narrower than 760 px. While the host wraps the
+page in `RecordCommentsInPanelContext` (value `true`), the default page's 动态
+stream draws the system entries alone: no comment rows, no All / Activity /
+Discussion chips (the Changes chip stays, a toggle), no comment box, and its
+count leaves the comments out.
+
+The pieces are exported one by one (`CommentThread`, `CommentItem`,
+`CommentComposer`, `buildCommentThreads`, and #36070's `CommentAuthorAvatar`) for a surface that
+lays them out another way, such as a phone's comment page.
+
+```tsx
+import * as React from 'react';
+import { CommentsButton, CommentsPanel, useRecordComments } from '@object-ui/plugin-detail';
+
+export function RecordCommentsSwitch() {
+  const [open, setOpen] = React.useState(false);
+  const { count } = useRecordComments();
+  return (
+    <>
+      <CommentsButton count={count} pressed={open} onPressedChange={setOpen} />
+      {open && <CommentsPanel onClose={() => setOpen(false)} />}
+    </>
   );
 }
 ```

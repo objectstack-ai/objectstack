@@ -1297,7 +1297,7 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
               <dt className="text-muted-foreground">{t('form.masterDetail.tax', { rate: taxPct })}</dt>
               <dd className="tabular-nums" data-testid="md-tax">{money(taxAmount)}</dd>
             </div>
-            <div className="flex items-center justify-between border-t border-border pt-1.5 text-base font-semibold">
+            <div className="flex items-center justify-between border-t border-border pt-1.5 text-base font-medium">
               <dt>{t('form.masterDetail.total')}</dt>
               <dd className="tabular-nums" data-testid="md-grand-total">{money(grandTotal)}</dd>
             </div>

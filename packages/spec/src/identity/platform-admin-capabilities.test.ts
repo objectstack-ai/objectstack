@@ -31,6 +31,12 @@ describe('ADMIN_FULL_ACCESS_CAPABILITIES — the one platform-admin list plugin-
     expect(parsed.objects['*'].modifyAllRecords).toBe(true);
   });
 
+  it('[field-axis split, ruling 6912661484] the wildcard carries the read-only viewAllFields vote, and parses with it', () => {
+    expect(ADMIN_FULL_ACCESS_CAPABILITIES.objects!['*']!.viewAllFields).toBe(true);
+    const parsed = PermissionSetSchema.parse({ name: ADMIN_FULL_ACCESS, ...ADMIN_FULL_ACCESS_CAPABILITIES });
+    expect(parsed.objects['*'].viewAllFields).toBe(true);
+  });
+
   it('the wildcard grants NO export — export stays an opt-in axis, pinned at the declaration\'s new home', () => {
     // [#3544/#8681] export is an OPT-IN axis, deliberately absent from the
     // super-user wildcard (maintainer ruling 2026-08-15). Moving the

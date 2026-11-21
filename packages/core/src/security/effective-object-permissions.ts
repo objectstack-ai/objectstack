@@ -1049,6 +1049,15 @@ export function holdsSuperuserBypass(
  * it binds as it always did. Without `fieldName` the answer is the object-wide
  * one, for a reader that asks only whether an edit vote exists.
  *
+ * [Field-axis split, ruling of record 6912661484, letter A] A set that
+ * carries `viewAllFields` on the object ({@link holdsViewAllFields}) casts the
+ * same READ vote as View All, under the same own-row rule: inside one set,
+ * specific beats general, so its own `readable: false` row on the field means
+ * it casts no read vote there. It never casts an edit vote (ruled read-only).
+ * On a set that also holds View All or Modify All it duplicates the vote
+ * those bits already cast, so the built-in admin sets that carry it answer
+ * exactly as before.
+ *
  * Both merges apply it per field after their declared-entry votes —
  * `PermissionEvaluator.getFieldPermissions` per object and
  * {@link buildEffectiveFieldPermissions} for every object.
@@ -1063,11 +1072,38 @@ export function superuserFieldVote(
   let read = false;
   for (const ps of sets) {
     if (holdsSuperuserBypass(ps, objectName, 'modify')) return { readable: true, editable: true };
-    if (read || !holdsSuperuserBypass(ps, objectName, 'view')) continue;
+    if (read) continue;
+    if (!holdsSuperuserBypass(ps, objectName, 'view') && !holdsViewAllFields(ps, objectName)) continue;
     if (fieldName !== undefined && declaresOwnReadMask(ps, objectName, fieldName)) continue;
     read = true;
   }
   return read ? { readable: true, editable: false } : null;
+}
+
+/**
+ * [ADR-0066 D2 ⑧; the field-axis split, ruling of record 6912661484,
+ * letter A] Does `set` carry `viewAllFields` on `objectName`? The set's own
+ * entry for the object answers when it has one, otherwise its `'*'` wildcard
+ * does: the same lookup {@link holdsSuperuserBypass} takes, so a set's
+ * explicit entry for an object is its whole answer for that object on both
+ * bits, and the bit on the built-in admin wildcards duplicates exactly the
+ * vote their super-user bits already cast.
+ *
+ * A FIELD-axis question only. It is deliberately NOT a disjunct of
+ * {@link holdsSuperuserBypass}: that predicate is the row-level bypass every
+ * RLS, sharing and explain consumer folds through, and `viewAllFields`
+ * widens no record (nor any admin posture, ADR-0095 D3, nor the private-posture
+ * wildcard rule, ADR-0066 D2). Its one reader is {@link superuserFieldVote},
+ * where it casts a read vote and never an edit vote (ruled read-only).
+ */
+function holdsViewAllFields(
+  set: { objects?: Record<string, unknown> | null } | null | undefined,
+  objectName: string,
+): boolean {
+  const objects = set?.objects;
+  if (!objects || typeof objects !== 'object') return false;
+  const op = (objects[objectName] || objects['*']) as { viewAllFields?: unknown } | null | undefined;
+  return !!op && typeof op === 'object' && op.viewAllFields === true;
 }
 
 /**
@@ -1091,7 +1127,7 @@ function declaresOwnReadMask(
 /** A resolved permission set, as far as the field merge reads it. */
 export interface EffectiveFieldPermissionsInputSet {
   fields?: Record<string, unknown> | null;
-  /** Read only for the super-user vote ({@link superuserFieldVote}). */
+  /** Read only for the super-user and `viewAllFields` vote ({@link superuserFieldVote}). */
   objects?: Record<string, unknown> | null;
 }
 
@@ -1108,7 +1144,9 @@ export interface EffectiveFieldPermissionsInputSet {
  * A set holding the super-user bypass on an object then votes on every field
  * of it ({@link superuserFieldVote}, ruling of record 6573563853), except
  * that a View All set casts no read vote on a field its own row declares
- * `readable: false` (ADR-0066 D2 ⑧ note of 2026-11-15).
+ * `readable: false` (ADR-0066 D2 ⑧ note of 2026-11-15). A set carrying
+ * `viewAllFields` on the object casts that same read vote, under the same
+ * own-row rule, and never an edit vote (ruling of record 6912661484).
  *
  * Every entry is a FRESH object, as {@link buildEffectiveObjectPermissions}'s are.
  */

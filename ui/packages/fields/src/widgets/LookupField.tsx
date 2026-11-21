@@ -2016,12 +2016,12 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
                     return (
                       <React.Fragment key={option.value}>
                         {showRecentHeader && (
-                          <div className="px-3 pt-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                          <div className="px-3 pt-2 pb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                             {t('lookup.recentlyUsed')}
                           </div>
                         )}
                         {showResultsHeader && (
-                          <div className="mt-1 border-t px-3 pt-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                          <div className="mt-1 border-t px-3 pt-2 pb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                             {t('lookup.allResults')}
                           </div>
                         )}

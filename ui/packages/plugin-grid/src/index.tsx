@@ -39,7 +39,8 @@ export { RowActionMenu, formatActionLabel } from './components/RowActionMenu';
 export { BulkActionBar } from './components/SelectionBar';
 // objectstack#35678 — the list page's scope, registered by the Console's page
 // bars, and the kept scroll position a list host loads back to.
-export { useListPageScope } from './listPageScope';
+// objectstack#35883 — the phone's 「Select」 and whether a selection is open.
+export { useListPageScope, requestListSelection, useListPageSelecting, useListPageSelectable } from './listPageScope';
 export { readListScrollState } from './objectGridInfiniteLoad';
 export type { ListScrollState } from './objectGridInfiniteLoad';
 // The bare-name fold, its development warning and the bar's own gate (the

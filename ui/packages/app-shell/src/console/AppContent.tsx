@@ -486,7 +486,11 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // app whose served item carries its package; the whole registry everywhere
   // else, as before (that module says why). A page route reads the objects
   // its page binds (objectui#12980), resolved as `PageView` resolves the page,
-  // and a record route those of its declared record page (objectui#13046).
+  // and a record route those of its declared record page (objectui#13046),
+  // on the desktop only: on a phone the view draws the standard page, whose
+  // related lists read every object that points at the record's
+  // (objectstack#36150), so the scope follows the width as the view does.
+  const phoneViewport = usePhoneViewport();
   const {
     candidate: scopeCandidate,
     scope: objectScope,
@@ -546,6 +550,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
       const appName = typeof activeApp?.name === 'string' ? activeApp.name : undefined;
       return bundledReads && appName ? bundledReads.objectsReferencing(appName, objectName) : BUNDLE_MISS;
     },
+    phoneViewport,
   );
   // Until the app list has loaded, a scope candidate does not know its package
   // yet, and reads nothing (the splash is up).

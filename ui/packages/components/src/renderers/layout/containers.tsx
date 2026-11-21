@@ -61,6 +61,7 @@ import {
 import { RecordTitleChip } from '../../custom/RecordTitleChip';
 import { resolveFieldReadFace } from '../../lib/field-face';
 import { PageDescriptionContext } from './page-description-context';
+import { PageTitleDemotedContext } from './page-title-host-context';
 import { PageHeaderTrailingContext } from './page-header-trailing-context';
 import { PageHeaderPhoneContext } from './page-header-phone-context';
 import { RecordHeaderBarContext, RecordHeaderStateContext, type RecordHeaderState } from './record-header-bar-context';
@@ -1367,7 +1368,7 @@ const PageTabsRenderer: React.FC<any> = ({ schema, className, ...props }) => {
               )}
               {item.count !== undefined && item.count !== null && item.count !== '' && Number(item.count) > 0 && (
                 <span
-                  className="ml-1.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-muted px-1 text-[10px] font-medium leading-none text-muted-foreground"
+                  className="ml-1.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-muted px-1 text-xs font-medium leading-none text-muted-foreground"
                   // The accessible name and the visible digits never disagree.
                   // Below 1000 the badge shows the number itself, so it goes in
                   // as a NUMBER and i18next selects the CLDR slot from it
@@ -1582,7 +1583,7 @@ const PageAccordionRenderer: React.FC<any> = ({ schema, className, ...props }) =
   // one without trying to share a generic prop bag.
   const commonChildren = itemsWithValue.map((item) => (
     <AccordionItem key={item.value} value={item.value} className={itemClass}>
-      <AccordionTrigger className="text-sm font-semibold tracking-tight hover:no-underline">
+      <AccordionTrigger className="text-sm font-medium tracking-tight hover:no-underline">
         {/* One wrapping element, not two siblings — AccordionTrigger's
             underlying primitive (`ui/accordion.tsx`, no-touch zone) lays its
             children out with `justify-between` against the auto-appended
@@ -3157,6 +3158,9 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
   // title (objectui#12624): drawn under the title and subtitle, the order the
   // console page header uses, instead of above the title by the page.
   const pageDescription = React.useContext(PageDescriptionContext);
+  // objectstack#36111 — the host's page header holds the page's `h1`, so this
+  // header's title is drawn one level down, looking the same.
+  const titleDemoted = React.useContext(PageTitleDemotedContext);
   // The host's trailing chrome for the action row (objectstack#27241).
   const headerTrailing = React.useContext(PageHeaderTrailingContext);
   // A phone host's face (objectstack#27058): the actions go to its bottom bar,
@@ -3472,6 +3476,11 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
         ? (titleCandidate.trim() ? titleCandidate : '')
         : (recordDisplayValueAt({ value: titleCandidate }, 'value') ?? '')) ||
       placeholderTitle;
+    // The host's name for the record (`RecordHeaderState.title`), in both
+    // faces below, over every rung above; an empty one leaves them deciding.
+    const hostTitle = headerState?.title?.text?.trim() ? headerState.title : undefined;
+    const chipTitle = hostTitle ? hostTitle.text : resolvedTitle;
+    const chipTitleNode = hostTitle ? hostTitle.node : declaredFace;
     // The record's picture (objectui#11383, ruling A on hotcrm#1199). The
     // object names the field in its object-level `imageField`, and that
     // declaration is the ONLY channel: ⛔ no `page:header` prop, and no field
@@ -3555,8 +3564,8 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
       const title = headerBar.titleSlot ? createPortal(
         <span className="flex min-w-0 items-center gap-2" data-record-header-title="" {...headerAria}>
           <RecordTitleChip
-            title={resolvedTitle}
-            titleNode={declaredFace}
+            title={chipTitle}
+            titleNode={chipTitleNode}
             icon={recordPicture}
             // The bar's crumb names the object; a host note on it (how a
             // Setup record's object is managed) keeps its label beside the
@@ -3571,7 +3580,7 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
                 ? () => ctx.onToggleFavorite?.()
                 : undefined
             }
-            className="text-foreground [&_h1]:text-base [&_h1]:font-semibold [&_h1]:sm:text-base [&>div]:flex-nowrap [&>div]:items-center"
+            className="text-foreground [&_h1]:text-base [&_h1]:font-medium [&_h1]:sm:text-base [&>div]:flex-nowrap [&>div]:items-center"
           />
           {stageTag}
           {headerStateTags}
@@ -3599,8 +3608,8 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
       >
         <div className="flex flex-col min-w-0 sm:min-w-48 flex-1 w-full sm:w-auto">
           <RecordTitleChip
-            title={resolvedTitle}
-            titleNode={declaredFace}
+            title={chipTitle}
+            titleNode={chipTitleNode}
             icon={recordPicture}
             objectLabel={objectLabel}
             // Host-injected (objectui#13385): the note a host attaches to the
@@ -3652,9 +3661,11 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
     >
       <div className="flex items-center justify-between gap-4">
         <div className="flex flex-col">
-          {explicitTitle && (
+          {explicitTitle && (titleDemoted ? (
+            <h2 className="text-2xl font-semibold tracking-tight">{explicitTitle}</h2>
+          ) : (
             <h1 className="text-2xl font-semibold tracking-tight">{explicitTitle}</h1>
-          )}
+          ))}
           {subtitle && <p className="text-sm text-muted-foreground">{subtitle}</p>}
           {explicitTitle && pageDescription && (
             <p className="text-sm text-muted-foreground" data-page-description="">{pageDescription}</p>

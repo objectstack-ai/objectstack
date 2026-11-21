@@ -189,11 +189,15 @@ export const RecalcEstimateAction = defineAction({
   execution: 'perRecord',
   // Names the task (see MarkDoneAction's note on the hole and its fallback).
   successMessage: "Estimate recalculated for {{ record.title | default:'the task' }}.",
-  // `record_section` only: the Task Detail page's `record:quick_actions` bar
-  // names it, and the engine location-filters even explicitly-named actions.
-  // Not `record_more` too, so the page draws it once, in that bar, and not
-  // again under the header's ⋯ overflow.
-  locations: ['record_section'],
+  // `record_section`: the Task Detail page's `record:quick_actions` bar names
+  // it, and the engine location-filters even explicitly-named actions. And
+  // `record_more` (objectstack#36150): the authored page is drawn on the
+  // desktop full page only, and on a phone or in the side drawer the task
+  // takes the standard page, which draws no `record_section` action — the
+  // ⋯ overflow is where the action is found there. The authored header lists
+  // its action ids and leaves this one out, so the full page still draws it
+  // once, in the bar.
+  locations: ['record_section', 'record_more'],
   // The endpoint is record-scoped and rejects a body without an id. On a
   // record surface the page supplies it; invoked from a LIST ROW (see the
   // `legacy_row_actions` view) nothing else can, so name the body key the

@@ -784,6 +784,31 @@ const dropdownMenuRowTouchTargetPatches = [
 ];
 
 /**
+ * The dropdown-menu label weight patch (objectstack#36047).
+ *
+ * The console sets text in two weights, 400 and 500. Upstream's
+ * `DropdownMenuLabel` is `font-semibold` (600), the one menu face outside
+ * them; it is `font-medium` (500), size and spacing upstream's. Anchored on
+ * the label's whole class run, written from
+ * `scripts/__tests__/fixtures/shadcn-registry/dropdown-menu.registry.txt`.
+ *
+ * @type {LocalPatch[]}
+ */
+const dropdownMenuLabelWeightPatches = [
+  {
+    id: 'dropdown-menu-label-medium-weight',
+    issue: 'objectstack#36047',
+    reason:
+      'The console uses two text weights, 400 and 500. Upstream DropdownMenuLabel is ' +
+      '`font-semibold` (600); it is `font-medium` (500), everything else upstream.',
+    find: '"px-2 py-1.5 text-sm font-semibold",',
+    replace: '"px-2 py-1.5 text-sm font-medium",',
+    marker: '"px-2 py-1.5 text-sm font-medium",',
+    occurrences: 1,
+  },
+];
+
+/**
  * The tabs touch-target patch (objectstack#29215).
  *
  * `TabsTrigger` is `py-1.5 text-sm` upstream, 38 px tall inside the fixed
@@ -937,7 +962,7 @@ export const LOCAL_PATCHES = {
   ],
   slider: sliderThumbPassThroughPatches,
   calendar: calendarDisplayLocalePatches,
-  'dropdown-menu': dropdownMenuRowTouchTargetPatches,
+  'dropdown-menu': [...dropdownMenuRowTouchTargetPatches, ...dropdownMenuLabelWeightPatches],
   tabs: tabsTouchTargetPatches,
   badge: badgeWeightPatches,
 };

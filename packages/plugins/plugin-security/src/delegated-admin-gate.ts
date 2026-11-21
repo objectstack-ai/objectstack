@@ -717,7 +717,11 @@ function judgesTargetUserThroughCallerRead(ql: any): boolean {
  * set and the condition it fails:
  *
  * - by name — {@link ORGANIZATION_BOUNDARY_DENYLIST};
- * - (a) its `objects['*']` entry carries `viewAllRecords` or `modifyAllRecords`;
+ * - (a) its `objects['*']` entry carries `viewAllRecords` or `modifyAllRecords`,
+ *   or `viewAllFields` — the field half of the superuser wildcard, a read of
+ *   every field of every object, fields other sets hide included (the
+ *   field-axis split, ruling of record 6912661484: every reader of the
+ *   superuser bits learns the new one);
  * - (b) it carries an `adminScope`;
  * - (c) a name in its `systemPermissions` is not a capability declared
  *   `scope: 'org'` in the security catalog (a name no declaration carries is
@@ -751,9 +755,10 @@ export async function organizationBoundaryFailure(
   }
   const definition: any = entry.definition;
   const wildcard = (parseMaybeJson(definition.objects) ?? {})?.['*'];
-  for (const bit of ['viewAllRecords', 'modifyAllRecords'] as const) {
+  for (const bit of ['viewAllRecords', 'modifyAllRecords', 'viewAllFields'] as const) {
     if (wildcard?.[bit] === true) {
-      return `permission set '${setName}', which fails condition (a) of the organization boundary: its objects['*'] entry carries the superuser bit '${bit}'`;
+      const kind = bit === 'viewAllFields' ? 'the read-every-field bit' : 'the superuser bit';
+      return `permission set '${setName}', which fails condition (a) of the organization boundary: its objects['*'] entry carries ${kind} '${bit}'`;
     }
   }
   if (parseMaybeJson(definition.adminScope ?? definition.admin_scope)) {

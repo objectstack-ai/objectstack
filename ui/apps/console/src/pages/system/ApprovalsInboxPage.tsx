@@ -566,7 +566,7 @@ function InlineDecisionDialogs({ ref, tr, isMobile, onApprove, onReject }: {
  */
 function SelfSubmittedBadge({ label }: { label: string }) {
   return (
-    <Badge variant="outline" className="shrink-0 whitespace-nowrap px-1.5 py-0 text-[10px] font-normal">
+    <Badge variant="outline" className="shrink-0 whitespace-nowrap px-1.5 py-0 text-xs font-normal">
       {label}
     </Badge>
   );
@@ -1617,14 +1617,14 @@ function ApprovalsQueue() {
                         // ADR-0157 D9: the working calendar cannot count the
                         // deadline, so the request waits; say why in its place.
                         return (
-                          <div className="mt-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                          <div className="mt-0.5 text-xs font-medium text-amber-700 dark:text-amber-400">
                             {slaRefusalLabel(r.sla_due_refusal)}
                           </div>
                         );
                       }
                       return sla ? (
                         <div className={cn(
-                          'mt-0.5 text-[10px] font-medium',
+                          'mt-0.5 text-xs font-medium',
                           sla.overdue ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground',
                         )}>
                           {slaLabel(sla)}
@@ -2041,7 +2041,7 @@ function ApprovalsQueue() {
                 </div>
               )}
 
-              <div className="hidden md:block text-[11px] text-muted-foreground">
+              <div className="hidden md:block text-xs text-muted-foreground">
                 {tr('keyboardHint', 'Keyboard: j/k move · Enter open · x select · a approve · r reject')}
               </div>
             </>

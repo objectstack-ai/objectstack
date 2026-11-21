@@ -24,7 +24,7 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  *   - The rail is the 概览 tab's: another tab open draws no rail and no
  *     strip; CONTROL, back on 概览 both are drawn again.
  *   - A rail card's title opens its tab; CONTROL, the 概览 tab returns.
- *   - A card measures radius 8, a 13 px title with a grey count, 26 px rows.
+ *   - A card measures radius 8, a 14 px title with a grey count, 26 px rows.
  *   - objectstack#35783: an open list's tab is its menu — 「左移」 / 「右移」
  *     move it, 「隐藏」 sends it to 「更多」 — and 「更多」's 「恢复默认顺序」
  *     brings the default back. Order only: no width is read.
@@ -582,7 +582,7 @@ test.describe('the record page\'s tabs and 概览 rail, zh-CN (objectstack#35595
     ]);
     expect(Math.max(...rail.rows)).toBeLessThanOrEqual(3);
     expect(rail.radius).toBe('8px');
-    expect(rail.titleSize).toBe('13px');
+    expect(rail.titleSize).toBe('14px');
     expect(rail.rowHeight).toBe(26);
     expect(rail.countColor).not.toBe(rail.titleColor);
     expect(rail.other).toBe('其他相关');

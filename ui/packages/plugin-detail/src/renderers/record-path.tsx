@@ -550,7 +550,7 @@ const RecordPathBody: React.FC<RecordPathRendererProps> = ({
   const labelClass = (state: StageState, terminal?: 'won' | 'lost') =>
     cn(
       'block min-w-0 text-xs',
-      state === 'current' && (terminal === 'lost' ? 'font-semibold text-destructive' : 'font-semibold text-foreground'),
+      state === 'current' && (terminal === 'lost' ? 'font-medium text-destructive' : 'font-medium text-foreground'),
       state === 'completed' && 'font-normal text-muted-foreground',
       state === 'upcoming' && 'font-normal text-muted-foreground',
     );
@@ -648,7 +648,7 @@ const RecordPathBody: React.FC<RecordPathRendererProps> = ({
         >
           {o.terminal === 'lost' && <span aria-hidden="true" className="mr-1 opacity-70">✗</span>}
           {o.terminal !== 'lost' && o.state === 'completed' && (
-            <span aria-hidden="true" className="mr-1 text-emerald-600 dark:text-emerald-400 font-semibold">✓</span>
+            <span aria-hidden="true" className="mr-1 text-emerald-600 dark:text-emerald-400 font-medium">✓</span>
           )}
           {o.stage.label}
         </span>

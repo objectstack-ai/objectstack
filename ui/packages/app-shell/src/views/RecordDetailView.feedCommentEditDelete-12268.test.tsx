@@ -107,6 +107,7 @@ type Pack = {
     deleteCommentConfirm: string;
     commentEditFailed: string;
     commentDeleteFailed: string;
+    commentDeleted: string;
     edited: string;
     save: string;
     cancel: string;
@@ -286,7 +287,7 @@ async function mount(block: Block, perms: MePermissionsResponse = answer(), opti
               onEdit={() => {}}
               objectNameOverride={OBJECT_NAME}
               recordIdOverride={RECORD_ID}
-              embedded
+              /* objectstack#36150 — not `embedded`: an authored page draws on the full page only. */
             />
           </MetadataCtx.Provider>
         </MemoryRouter>
@@ -434,6 +435,7 @@ describe.each<Block>(['record:activity', 'record:discussion'])(
       await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
       expect(dataSource.delete).not.toHaveBeenCalled();
       expect(view.getByText(ADA_BODY)).toBeInTheDocument();
+      expect(toast.success).not.toHaveBeenCalledWith(EN.detail.commentDeleted);
 
       fireEvent.click(deleteIn(rowOf(view, ADA_BODY))!);
       dialog = await screen.findByRole('alertdialog');
@@ -446,6 +448,8 @@ describe.each<Block>(['record:activity', 'record:discussion'])(
       await waitFor(() => expect(view.queryByText(ADA_BODY)).toBeNull());
       expect(view.getByText(GRACE_BODY)).toBeInTheDocument();
       expect(toast.error).not.toHaveBeenCalled();
+      // The delete says it went through (objectstack#36070).
+      expect(toast.success).toHaveBeenCalledWith(EN.detail.commentDeleted);
     });
 
     it("deleting the author's comment keeps another member's reply to it on the page, at once and after the feed is read again", async () => {
@@ -494,6 +498,7 @@ describe.each<Block>(['record:activity', 'record:discussion'])(
       });
       await waitFor(() => expect(toast.error).toHaveBeenCalledWith(EN.detail.commentDeleteFailed));
       expect(view.getByText(ADA_BODY)).toBeInTheDocument();
+      expect(toast.success).not.toHaveBeenCalledWith(EN.detail.commentDeleted);
     });
   },
 );
