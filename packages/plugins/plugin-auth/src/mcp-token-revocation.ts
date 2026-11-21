@@ -221,6 +221,58 @@ async function isSkipConsentClient(store: OAuthGrantStore, clientId: string): Pr
 }
 
 /**
+ * The access-token claim that carries the token's issue time in milliseconds,
+ * which the credential-change rule compares (`iat` is whole seconds). It is
+ * written by this deployment's authorization server alone
+ * ({@link issuedAtMsAccessTokenClaim}) into the JWT it signs, so a client
+ * cannot set or alter it, and it is read only off a token whose signature has
+ * verified (`verifyMcpAccessTokenClaims`), one spelling for both ends. It is
+ * not in the provider's reserved access-token claim set.
+ */
+export const MCP_ISSUED_AT_MS_CLAIM = 'iat_ms';
+
+/**
+ * The access-token claims contributor (`oauthProvider({ extensions })`,
+ * `claims.accessToken`) that writes {@link MCP_ISSUED_AT_MS_CLAIM}: the
+ * server's clock, read while the provider mints the token. The provider
+ * stamps `iat` first, then derives the claims, then signs, so the value is
+ * the mint's own instant, never earlier than the second `iat` names.
+ *
+ * Only at a mint: the provider hands every mint its grant type, and calls
+ * the same contributor again with none when it re-derives an opaque token's
+ * claims at introspection, long after the mint. There the clock would name
+ * the introspection, not the issue, so nothing is contributed.
+ */
+export function issuedAtMsAccessTokenClaim(
+  input: { grantType?: unknown },
+  now: () => number = Date.now,
+): Record<string, number> {
+  return typeof input.grantType === 'string' && input.grantType ? { [MCP_ISSUED_AT_MS_CLAIM]: now() } : {};
+}
+
+/**
+ * A verified MCP access token's issue time in milliseconds, for the
+ * credential-change rule: the {@link MCP_ISSUED_AT_MS_CLAIM} the token was
+ * signed with, when it is an integer number of milliseconds inside the second
+ * the token's own `iat` names; otherwise `iat * 1000`, the start of that
+ * second.
+ *
+ * ⛔ The fallback is the whole-second rule, never an admit: a token minted
+ * before the claim shipped carries none, and a claim of another shape or
+ * outside its `iat` second cannot be placed, so the token is read as issued
+ * at the start of its second and is refused in the second of a change, as it
+ * was before the claim existed. Both arguments come from the same verified
+ * payload; nothing outside the signature reaches this function.
+ */
+export function mcpTokenIssuedAtMs(issuedAt: number, issuedAtMsClaim: unknown): number {
+  return typeof issuedAtMsClaim === 'number'
+    && Number.isSafeInteger(issuedAtMsClaim)
+    && Math.floor(issuedAtMsClaim / 1000) === issuedAt
+    ? issuedAtMsClaim
+    : issuedAt * 1000;
+}
+
+/**
  * The grant read the MCP door makes on every request: does the grant a
  * verified token was minted under still stand?
  *
@@ -243,10 +295,16 @@ async function isSkipConsentClient(store: OAuthGrantStore, clientId: string): Pr
  * under. A password reset ends the grant and every token minted under it; a
  * password change, and an administrator's routine set, keep the grant, so the
  * app gets a new token with its refresh token, issued after the change. The
- * comparison is that module's (`issuedBeforeCredentialChange`), on the
- * token's `iat` in whole seconds: a token minted in the second of the change
- * is refused too, as a signed link is. A clock that cannot be read refuses,
- * and so does no clock reader at all.
+ * comparison is that module's (`issuedBeforeCredentialChange`, strict `<`), in
+ * milliseconds, on the token's issue time as {@link mcpTokenIssuedAtMs} reads
+ * it: the server-written {@link MCP_ISSUED_AT_MS_CLAIM} inside the signed
+ * token, so a token minted in the second of the change, after it, is
+ * admitted, and one minted in that second before it is refused. A token whose
+ * claim is absent (minted before the claim shipped) or unreadable keeps the
+ * whole-second rule on its `iat`, which refuses every token minted in the
+ * second of the change: an issue time that cannot be placed is never read as
+ * after the change. A clock that cannot be read refuses, and so does no clock
+ * reader at all.
  *
  * Then the consent: admits when the consent for (`azp`, `sub`,
  * organization) exists and was created no later than the token was issued
@@ -267,12 +325,14 @@ export async function mcpConsentAdmits(
   grant: McpGrantKey,
   issuedAt: number | undefined,
   clock: CredentialClockReader | undefined,
+  issuedAtMsClaim?: unknown,
 ): Promise<boolean> {
   if (!store || !clock) return false;
   const client = await clientOf(store, grant.clientId);
   if (!client || client.disabled) return false;
   if (typeof issuedAt !== 'number' || !Number.isFinite(issuedAt)) return false;
-  if (issuedBeforeCredentialChange(issuedAt * 1000, await readCredentialChangedAt(clock, grant.userId))) return false;
+  const issuedAtMs = mcpTokenIssuedAtMs(issuedAt, issuedAtMsClaim);
+  if (issuedBeforeCredentialChange(issuedAtMs, await readCredentialChangedAt(clock, grant.userId))) return false;
   const [consent] = await consentsOf(store, grant);
   if (!consent) return client.skipConsent === true;
   const createdAtMs =

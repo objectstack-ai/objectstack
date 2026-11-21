@@ -38,7 +38,12 @@
  *    grant of one deletes that organization's whole refresh family (every
  *    rotation of it) and leaves the other organization's family refreshing;
  *    a refresh row with no organization dies on every withdraw (fail closed);
- *    a rotation racing the revoke does not leave a live successor behind.
+ *    a rotation racing the revoke does not leave a live successor behind;
+ *  - the password-change rule reads a token's issue time in milliseconds off
+ *    the claim its authorization server signs in: in the second of a change,
+ *    a token minted after it is admitted and one minted before it refused; a
+ *    token with no claim, or an unreadable one, keeps the whole-second
+ *    refusal.
  */
 
 import { createRequire } from 'node:module';
@@ -52,7 +57,17 @@ import { AuthManager } from './auth-manager.js';
 // here, during collection (check-test-source-alias, "The source reach").
 import '@objectstack/core/egress';
 import { authIdentityObjects } from './manifest.js';
-import { revokeMcpGrant, UNKNOWN_TOKEN_DESCRIPTIONS, type OAuthGrantStore } from './mcp-token-revocation.js';
+import { decodeJwt } from 'jose';
+import {
+  issuedAtMsAccessTokenClaim,
+  MCP_ISSUED_AT_MS_CLAIM,
+  mcpConsentAdmits,
+  mcpTokenIssuedAtMs,
+  revokeMcpGrant,
+  UNKNOWN_TOKEN_DESCRIPTIONS,
+  type OAuthGrantStore,
+} from './mcp-token-revocation.js';
+import { readCredentialChangedAt } from './credential-change-ends-prior-access.js';
 
 const BASE = 'http://localhost:3000';
 const AUTH = `${BASE}/api/v1/auth`;
@@ -456,6 +471,81 @@ describe("an MCP access token issued before the account's password changed", () 
       expect(await r.manager.verifyMcpAccessToken(refreshed.body.access_token)).toMatchObject({ clientId: client });
     }
   }, 60_000);
+});
+
+describe("the password-change rule reads an MCP token's issue time in milliseconds (security#2, option (a))", () => {
+  /**
+   * One second, frozen per step: a token minted 100 ms into it, the password
+   * changed 400 ms into it, a token minted 900 ms into it. Both tokens carry
+   * the same whole-second `iat`; only the signed claim tells them apart.
+   */
+  async function sameSecond() {
+    const r = await rig();
+    const { clientId, cookie, refresh_token } = await r.connect();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const second = (Math.floor(Date.now() / 1000) + 3) * 1000;
+
+    vi.setSystemTime(second + 100);
+    const before = await r.refresh(clientId, refresh_token);
+    expect(before.status, JSON.stringify(before.body)).toBe(200);
+
+    vi.setSystemTime(second + 400);
+    const changed = await r.postJson('/change-password', { currentPassword: PASSWORD, newPassword: `${PASSWORD}-changed` }, cookie);
+    expect(changed.status, await changed.clone().text()).toBe(200);
+    const auth: any = await (r.manager as any).getAuthContext();
+    const userId = String(decodeJwt(before.body.access_token).sub);
+    expect(await readCredentialChangedAt(auth.internalAdapter, userId), 'the change, in ms').toBe(second + 400);
+
+    vi.setSystemTime(second + 900);
+    const after = await r.refresh(clientId, before.body.refresh_token);
+    expect(after.status, JSON.stringify(after.body)).toBe(200);
+
+    /** The door's own read on `token`'s grant, with `claim` in place of the one it was signed with. */
+    const admitsWithClaim = (token: string, claim: unknown) =>
+      mcpConsentAdmits(auth.adapter, { clientId, userId }, decodeJwt(token).iat, auth.internalAdapter, claim);
+    return { r, second, before: before.body.access_token as string, after: after.body.access_token as string, admitsWithClaim };
+  }
+
+  it('⭐ a token minted in the second of the change, AFTER it, is admitted', async () => {
+    const { r, second, after } = await sameSecond();
+    expect(decodeJwt(after)).toMatchObject({ iat: second / 1000, [MCP_ISSUED_AT_MS_CLAIM]: second + 900 });
+    expect(await r.manager.verifyMcpAccessToken(after), 'minted after the change').not.toBeNull();
+  }, 60_000);
+
+  it('⭐ a token minted in the second of the change, BEFORE it, is refused', async () => {
+    const { r, second, before } = await sameSecond();
+    expect(decodeJwt(before)).toMatchObject({ iat: second / 1000, [MCP_ISSUED_AT_MS_CLAIM]: second + 100 });
+    expect(await r.manager.verifyMcpAccessToken(before), 'minted before the change').toBeNull();
+  }, 60_000);
+
+  it('a token with no claim (minted before the claim shipped) keeps the whole-second refusal in the second of the change', async () => {
+    const { after, admitsWithClaim } = await sameSecond();
+    expect(await admitsWithClaim(after, decodeJwt(after)[MCP_ISSUED_AT_MS_CLAIM]), 'control: the claim it was signed with').toBe(true);
+    expect(await admitsWithClaim(after, undefined), 'no claim').toBe(false);
+  }, 60_000);
+
+  it('an unreadable claim falls back to the whole-second refusal, never to an admit', async () => {
+    const { second, after, admitsWithClaim } = await sameSecond();
+    for (const claim of [
+      String(second + 900), // not a number
+      second + 900.5, // not whole milliseconds
+      second + 1_900, // outside the second its `iat` names, later
+      second - 100, // outside it, earlier
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      null,
+      {},
+    ]) {
+      expect(await admitsWithClaim(after, claim), `claim ${JSON.stringify(claim)}`).toBe(false);
+    }
+  }, 60_000);
+
+  it('the claim is contributed at a mint only, never at an opaque token\'s introspection', () => {
+    expect(issuedAtMsAccessTokenClaim({ grantType: 'refresh_token' }, () => 1_700_000_000_123)).toEqual({ [MCP_ISSUED_AT_MS_CLAIM]: 1_700_000_000_123 });
+    expect(issuedAtMsAccessTokenClaim({ grantType: undefined }, () => 1_700_000_000_123)).toEqual({});
+    expect(mcpTokenIssuedAtMs(1_700_000_000, 1_700_000_000_123)).toBe(1_700_000_000_123);
+    expect(mcpTokenIssuedAtMs(1_700_000_000, undefined)).toBe(1_700_000_000_000);
+  });
 });
 
 describe('a grant is revoked in its own organization only', () => {
