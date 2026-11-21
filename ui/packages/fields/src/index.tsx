@@ -2510,9 +2510,13 @@ function ReferencedRecordLink({
         className={cn('text-primary underline-offset-4 hover:underline', className)}
         // A host's list grid draws a referenced record as a small chip led by
         // the name's first letter (objectstack#35548); these say which link
-        // is one and what its letter is. Nothing else reads them.
+        // is one and what its letter is.
         data-record-link=""
         data-initial={recordLinkInitial(label)}
+        // The record the chip names: a select-first grid opens it in place on
+        // a single click when its host asks to (objectstack#36015).
+        data-record-object={objectName}
+        data-record-id={String(recordId)}
         onClick={(e) => {
           // The rows this cell sits in carry their own click handlers — the
           // detail row copies the field value, a related-list row opens ITS own

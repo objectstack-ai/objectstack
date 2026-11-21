@@ -71,6 +71,7 @@ export function ObjectViewRecordOverlay({
                  mode={mode}
                  width={navOverlay.width}
                  mainContent={list}
+                 listObjectName={objectDef.name}
                  onClose={handleDrawerClose}
                  onOpenAsPage={handleOpenAsPage}
                  stepScope={stepScope}

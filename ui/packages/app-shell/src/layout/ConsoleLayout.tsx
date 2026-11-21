@@ -29,7 +29,11 @@ import { PhonePageBarProvider } from './PhonePageBar.js';
 import { useLastApp } from '../context/LastAppProvider.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { appAddressSegment } from '../utils/appRoute.js';
-import { ShellPageActionsScope } from './ShellPageActions.js';
+import { ShellPageActionsScope, ShellSidebarExpandFallback } from './ShellPageActions.js';
+import { ChromeBannerHost } from './chromeBannerHost.js';
+import { ConnectionBanner } from './ConnectionBanner.js';
+import { useGoHomeShortcut } from '../chrome/goHomeShortcut.js';
+import { useHomePath } from '../hooks/useHomePath.js';
 import { AppHeader } from './AppHeader.js';
 import { useResponsiveSidebar } from '../hooks/useResponsiveSidebar.js';
 import { usePhoneNavDrawerHistory } from './usePhoneNavDrawerHistory.js';
@@ -182,6 +186,9 @@ export function ConsoleLayout({
   const mainContentRef = useRef<HTMLDivElement>(null);
 
   const location = useLocation();
+  // ⌘⇧H home from any app page, at every width (objectui#12605).
+  const homePath = useHomePath();
+  useGoHomeShortcut(true, homePath);
   // objectstack#28483 (ruling letter A) — on a phone a record page has one
   // bar, its own top bar (「‹ <object plural>」 and the stepper), so the app
   // bar is not mounted there. The app menu, search, notifications and account
@@ -272,7 +279,13 @@ export function ConsoleLayout({
          />
         )
       }
-      showHeader={!recordPageOwnsTopBar}
+      // objectstack#36112 — from 768 px up an app draws no top bar: the app
+      // menu, search, bell and account are the sidebar's, the page's buttons
+      // its own header's. A phone keeps its bar (and its record page draws its
+      // own instead, objectstack#28483). An app's docs pages keep it at every
+      // width: they mount no sidebar (objectstack#35424), so the bar is still
+      // where their account, search and bell are.
+      showHeader={(phone || docsPage) && !recordPageOwnsTopBar}
       navbar={
           <AppHeader
             variant="app"
@@ -317,15 +330,21 @@ export function ConsoleLayout({
       }
     >
       <ConsoleLayoutInner>
-        {/* objectstack#36111 — the shell decides whether the pages under it
-            draw the top-right button group: off while this layout draws the
-            top bar, which carries the same buttons. */}
-        <ShellPageActionsScope>
+        {/* objectstack#36111 — the pages under the shell draw its top-right
+            button group; objectstack#36112 — and the sidebar's expand button
+            at their headers' left edge while it is collapsed. */}
+        <ShellPageActionsScope sidebarExpand={!docsPage}>
         {/* ADR-0037: unmistakable watermark while rendering the draft overlay
             (?preview=draft) — with one-click exit and one-click Publish. */}
         {/* objectui#12463 — the banners sit in one non-shrinking box, so in
             the `lg` flex column above only the route page gives up height. */}
         <div data-testid="console-banners" className="shrink-0">
+        {/* objectstack#36112 — from 768 px up the shell's standing banners
+            (impersonation, read rate, storage) and the connection notice sit
+            here, the content's width, since no top bar carries them. */}
+        {!phone && <ChromeBannerHost />}
+        {/* A docs page's bar draws the connection state itself. */}
+        {!phone && !docsPage && <ConnectionBanner state={connectionState} />}
         <DraftPreviewBar />
         {/* ADR-0045: materialized-but-unlisted app — real and interactive,
             invisible to end users until the Publish visibility flip. */}
@@ -354,6 +373,7 @@ export function ConsoleLayout({
           data-testid="console-route"
           className="h-full lg:min-h-0 focus:outline-none"
         >
+        <ShellSidebarExpandFallback />
         {children}
         </div>
         </ShellPageActionsScope>

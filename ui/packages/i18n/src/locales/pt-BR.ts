@@ -3478,6 +3478,8 @@ const pt = {
     removeFromFavorites: "Remover {{name}} dos favoritos",
     allReports: "Todos os relatórios",
     keepOpen: "Manter a barra lateral aberta",
+    collapse: 'Recolher a barra lateral',
+    expand: 'Expandir a barra lateral',
   },
   topbar: {
     openAssistant: "Abrir o assistente {{name}}",
@@ -3647,6 +3649,7 @@ const pt = {
       backToHome: "Voltar ao início",
       settings: "Configurações",
       productHome: "Início do {{product}}",
+      addApp: 'Adicionar aplicativo',
     },
     activityFeed: {
       title: "Atividade recente",

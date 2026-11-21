@@ -3405,6 +3405,8 @@ const ja = {
     removeFromFavorites: "お気に入りから {{name}} を削除",
     allReports: "すべてのレポート",
     keepOpen: "サイドバーを開いたままにする",
+    collapse: 'サイドバーを折りたたむ',
+    expand: 'サイドバーを展開',
   },
   topbar: {
     openAssistant: "{{name}} アシスタントを開く",
@@ -3572,6 +3574,7 @@ const ja = {
       backToHome: "ホームに戻る",
       settings: "システム設定",
       productHome: "{{product}} ホーム",
+      addApp: 'アプリを追加',
     },
     activityFeed: {
       title: "最近の活動",

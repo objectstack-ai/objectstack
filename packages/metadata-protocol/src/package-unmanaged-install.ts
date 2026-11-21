@@ -519,7 +519,8 @@ export function planUnmanagedImport(
     // prefix. Without a `targetNamespace` it is the base's too (the stage-0
     // ACCEPT's Q3): the base must own that prefix for the save door's
     // namespace rule to admit the copied object names.
-    const sourceNamespace = stringKey(manifest, 'namespace') ?? deriveNamespaceFromPackageId(sourcePackageId) ?? undefined;
+    const declaredNamespace = stringKey(manifest, 'namespace');
+    const sourceNamespace = declaredNamespace ?? deriveNamespaceFromPackageId(sourcePackageId) ?? undefined;
     if (sourceNamespace === undefined) {
         throw invalidRequest(
             `Cannot determine the namespace of package '${sourcePackageId}': it declares none, and none derives `
@@ -618,6 +619,15 @@ export function planUnmanagedImport(
             items: items.map((item) => ({ type: item.type, name: item.name, body: item.body })),
             retryVerb: 'install',
         });
+        if (declaredNamespace === undefined) {
+            const contradicted = derivedNamespaceContradiction(
+                sourcePackageId,
+                sourceNamespace,
+                namespace,
+                items.filter((item) => item.type === 'object').map((item) => item.name),
+            );
+            if (contradicted !== undefined) throw unmanagedInstallRenameRefusal(sourcePackageId, namespace, contradicted);
+        }
         const refused: UnmanagedImportRenameRefusal[] = [];
         for (const item of items) {
             const reason = (item.type === 'object' ? planned.objectRefusal(item.name) : undefined)
@@ -662,6 +672,58 @@ export function planUnmanagedImport(
         items,
         strippedLocks,
     };
+}
+
+/**
+ * ⛔ A DERIVED NAMESPACE THE OBJECT NAMES CONTRADICT IS REFUSED, NEVER RENAMED.
+ * When the body declares no `namespace`, the source namespace is a guess
+ * (`deriveNamespaceFromPackageId`), and the rename engine trusts it: an object
+ * name without that prefix takes the target prefix in front of its whole name
+ * (ADR-0048 §3.5 as amended). When the producer's real namespace was dropped
+ * from the manifest, every object still carries it, and that rule turns the
+ * copy into `<target>_<real>_<name>` beside items the swap left alone, one app
+ * in three spellings.
+ *
+ * The signal is the object names' COMMON prefix, never one name's shape: a
+ * single name cannot tell a two-word short name (`purchase_order`) from a
+ * foreign prefix (`demoasset_site`). So only when there are at least two
+ * objects, every object name begins with the same first segment, that segment
+ * is not the derived namespace, and no object carries the derived prefix, is
+ * the copy refused: every object at its own name, naming the derived
+ * namespace and the common prefix, and asking for the missing key. Otherwise
+ * the ADR rename applies, unchanged. Object names only: ADR-0129 D2 puts the
+ * namespace on object names, while a package's flows, datasets or reports may
+ * be named without it, and its translation items are named by this planner.
+ * Without a rename the save door's own prefix rule refuses the same names
+ * (`NAMESPACE_PREFIX`), so this is asked only on the rename path.
+ *
+ * @returns one refusal per object, or `undefined` when the names do not
+ *   contradict the derived namespace.
+ */
+function derivedNamespaceContradiction(
+    sourcePackageId: string,
+    derivedNamespace: string,
+    targetNamespace: string,
+    objectNames: readonly string[],
+): UnmanagedImportRenameRefusal[] | undefined {
+    if (objectNames.length < 2) return undefined;
+    if (objectNames.some((name) => name.startsWith(`${derivedNamespace}_`))) return undefined;
+    const firstSegment = (name: string): string | undefined => {
+        const separator = name.indexOf('_');
+        return separator > 0 ? name.slice(0, separator) : undefined;
+    };
+    const common = firstSegment(objectNames[0]);
+    if (common === undefined || common === derivedNamespace) return undefined;
+    if (!objectNames.every((name) => firstSegment(name) === common)) return undefined;
+    return objectNames.map((name) => ({
+        type: 'object',
+        name,
+        reason: `Object '${name}' is not copied: package '${sourcePackageId}' declares no \`namespace\`, so its `
+            + `namespace was derived from its id as '${derivedNamespace}', but every one of its ${objectNames.length} `
+            + `object names begins '${common}_' instead. Renamed into namespace '${targetNamespace}' it would be `
+            + `'${targetNamespace}_${name}', keeping a prefix the package never declared. Declare \`namespace\` on `
+            + 'the package, the prefix its object names carry, then install again.',
+    }));
 }
 
 /** [#30794] One item the rename into a `targetNamespace` cannot copy, and why. */

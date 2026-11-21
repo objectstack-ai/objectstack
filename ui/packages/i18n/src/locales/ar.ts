@@ -3718,6 +3718,8 @@ const ar = {
     removeFromFavorites: "إزالة {{name}} من المفضلة",
     allReports: "كل التقارير",
     keepOpen: "إبقاء الشريط الجانبي مفتوحًا",
+    collapse: 'طي الشريط الجانبي',
+    expand: 'توسيع الشريط الجانبي',
   },
   topbar: {
     openAssistant: "فتح مساعد {{name}}",
@@ -3893,6 +3895,7 @@ const ar = {
       backToHome: "العودة إلى الرئيسية",
       settings: "الإعدادات",
       productHome: "الصفحة الرئيسية لـ {{product}}",
+      addApp: 'إضافة تطبيق',
     },
     activityFeed: {
       title: "النشاط الأخير",
