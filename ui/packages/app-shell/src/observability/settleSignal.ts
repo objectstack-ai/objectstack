@@ -178,6 +178,7 @@ export function installSettleSignalGlobal(): void {
 /** Test-only: reset the counter and listeners to a clean state. */
 export function __resetSettleSignal(): void {
   pending = 0;
+  counted = false;
   listeners.clear();
   idleWaiters = [];
 }
