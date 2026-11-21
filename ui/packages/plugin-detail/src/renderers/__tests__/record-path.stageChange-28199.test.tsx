@@ -12,8 +12,9 @@
  * field — and every path that does not opt in — keeps the readout.
  *
  * The last two groups pin objectstack#30075 (ruling: option A): the
- * synthesized default record page's path carries the opt-in, mounted here as
- * the JSON document `buildDefaultPageSchema` emits, through the real
+ * synthesized strip's path carries the opt-in (since objectstack#35891 the
+ * default page places no strip itself; a slotted page places this one),
+ * mounted here as the JSON document `buildDefaultPageSchema` emits, through the real
  * `SchemaRenderer`; an authored `highlights` slot keeps its declared value;
  * and a stage the field's blocking `state_machine` cannot reach from the
  * stored value is never offered as a press.
@@ -56,7 +57,7 @@ vi.mock('@object-ui/permissions', async (importOriginal) => {
 });
 
 import { RecordPathRenderer } from '../record-path';
-import { buildDefaultPageSchema } from '../../synth/buildDefaultPageSchema';
+import { buildDefaultHighlights, buildDefaultPageSchema } from '../../synth/buildDefaultPageSchema';
 // Registers `record:path` for the `SchemaRenderer` mounts below.
 import '../../index';
 
@@ -307,6 +308,14 @@ const MACHINE = {
   transitions: { draft: ['in_review', 'declined'], in_review: ['accepted', 'declined'] },
 };
 
+/**
+ * A slotted page placing the default strip (`buildDefaultHighlights` into the
+ * `highlights` slot). Since objectstack#35891 the default page draws no strip
+ * of its own; the sub-builder's path, which these pins read, is unchanged.
+ */
+const stripPage = (def: unknown): any =>
+  buildDefaultPageSchema(def as never, { slots: { highlights: buildDefaultHighlights(def as never) } } as never);
+
 /** Every `record:path` node among a synthesized page's top-level components. */
 const pathNodesOf = (page: any): any[] =>
   page.regions[0].components.filter((c: any) => c?.type === 'record:path');
@@ -334,14 +343,14 @@ function mountNode(node: unknown, opts: Omit<MountOptions, 'allowStageChange'> =
 const buttonNames = (row: HTMLElement): (string | null)[] =>
   within(row).queryAllByRole('button').map((b) => b.getAttribute('aria-label'));
 
-describe('#30075 the default record page turns click-to-advance on', () => {
-  it('the synthesized page writes allowStageChange: true on its path node', () => {
-    const [path] = pathNodesOf(buildDefaultPageSchema(QUOTE_DEF as never));
+describe('#30075 the synthesized strip turns click-to-advance on', () => {
+  it('the synthesized strip writes allowStageChange: true on its path node', () => {
+    const [path] = pathNodesOf(stripPage(QUOTE_DEF));
     expect(path.properties).toMatchObject({ statusField: 'status', allowStageChange: true });
   });
 
   it('a reader who may edit the stage field gets a press, with a confirmation, through the record update', async () => {
-    const [path] = pathNodesOf(buildDefaultPageSchema(QUOTE_DEF as never));
+    const [path] = pathNodesOf(stripPage(QUOTE_DEF));
     const { container, dataSource, refresh } = mountNode(path);
     expect(rows(container)).toHaveLength(2);
     for (const row of rows(container)) {
@@ -358,7 +367,7 @@ describe('#30075 the default record page turns click-to-advance on', () => {
   });
 
   it('a reader the page may not let edit this record keeps the read-only path', () => {
-    const [path] = pathNodesOf(buildDefaultPageSchema(QUOTE_DEF as never));
+    const [path] = pathNodesOf(stripPage(QUOTE_DEF));
     const { container } = mountNode(path, { canEdit: false });
     expect(rows(container)).toHaveLength(2);
     for (const row of rows(container)) expect(row.querySelectorAll('button,[tabindex]')).toHaveLength(0);
@@ -366,7 +375,7 @@ describe('#30075 the default record page turns click-to-advance on', () => {
 
   it('a reader without the edit grant on the stage field keeps the read-only path', () => {
     perms.writeDenied = ['status'];
-    const [path] = pathNodesOf(buildDefaultPageSchema(QUOTE_DEF as never));
+    const [path] = pathNodesOf(stripPage(QUOTE_DEF));
     const { container } = mountNode(path);
     expect(rows(container)).toHaveLength(2);
     for (const row of rows(container)) expect(row.querySelectorAll('button,[tabindex]')).toHaveLength(0);
@@ -395,7 +404,7 @@ describe('#30075 the press offers only the moves the field\'s state machine admi
   const MACHINED = { ...QUOTE_DEF, validations: [MACHINE] };
 
   it('a stage the machine cannot reach from the stored value is a readout, not a button', () => {
-    const [path] = pathNodesOf(buildDefaultPageSchema(MACHINED as never));
+    const [path] = pathNodesOf(stripPage(MACHINED));
     const { container } = mountNode(path, { objectSchema: MACHINED });
     for (const row of rows(container)) {
       expect(buttonNames(row)).toEqual(['Move to In review', 'Move to Declined']);
@@ -406,7 +415,7 @@ describe('#30075 the press offers only the moves the field\'s state machine admi
 
   it('control: a warning-severity machine does not narrow the press (the server would not refuse)', () => {
     const warned = { ...QUOTE_DEF, validations: [{ ...MACHINE, severity: 'warning' }] };
-    const [path] = pathNodesOf(buildDefaultPageSchema(warned as never));
+    const [path] = pathNodesOf(stripPage(warned));
     const { container } = mountNode(path, { objectSchema: warned });
     expect(buttonNames(rows(container)[0])).toEqual(['Move to In review', 'Move to Accepted', 'Move to Declined']);
   });
@@ -416,7 +425,7 @@ describe('#30075 the press offers only the moves the field\'s state machine admi
       code: 'VALIDATION_FAILED',
       fields: [{ field: 'amount', code: 'required', message: 'is required to send a quote for review' }],
     });
-    const [path] = pathNodesOf(buildDefaultPageSchema(MACHINED as never));
+    const [path] = pathNodesOf(stripPage(MACHINED));
     const { container, refresh } = mountNode(path, {
       objectSchema: MACHINED,
       dataSource: makeDataSource(async () => { throw refusal; }),

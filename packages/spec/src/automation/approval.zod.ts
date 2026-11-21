@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { BUILTIN_MEMBERSHIP_ROLES } from '../identity/membership-role';
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
+import { WORK_CALENDAR_CODE_PATTERN } from '../data/work-calendar';
 
 // Why the members sit in THIS order (the generated reference renders the JSDoc
 // below; this rationale stays in source):
@@ -860,16 +861,29 @@ export const ApprovalEscalationSchema = lazySchema(() => strictObject(
   // feature-level switch is whether the block exists at all.
   enabled: z.boolean().default(true).describe("Turns this step's deadline on or off. It is on by default once a deadline is set: switch it off to keep the settings without acting on them, or remove the escalation to drop the deadline altogether"),
   /**
-   * Wall-clock SLA. The approvals service adds `timeoutHours` to the request's
-   * `created_at` as elapsed milliseconds (hours × 3_600_000), so the deadline
-   * does not skip nights, weekends or holidays — the platform ships no
-   * business-hours calendar to count against. The clock is named in the
-   * declaration's own contract text rather than in prose beside it, so the
-   * number cannot be read as working hours at authoring time. No `clock` key
-   * exists because only one clock exists: a key with a single legal value would
-   * be declared-but-inert (ADR-0049).
+   * The deadline, in hours from the request's `created_at`. How the hours count
+   * is `clock`'s (ADR-0157 D5): under `wall_clock` the approvals service adds
+   * them as elapsed milliseconds (hours × 3_600_000), so nights, weekends and
+   * holidays count; under `working_time` it counts them through a working
+   * calendar (`addWorkingHours`), recomputed on every sweep (D12). The clock is
+   * named in the declaration's own contract text, so the number cannot be read
+   * as the other clock's hours at authoring time.
    */
-  timeoutHours: z.number().min(1).describe('How many hours a request may wait before the escalation runs. These are calendar (wall-clock) hours — nights, weekends and holidays count. The platform ships no business-hours calendar: a request opened at 17:00 on a Friday with 4 hours escalates at 21:00 that same Friday'),
+  timeoutHours: z.number().min(1).describe('How many hours a request may wait before the escalation runs, counted from when it was submitted. The clock decides how the hours count: wall-clock hours (the default) count nights, weekends and holidays, so a request opened at 17:00 on a Friday with 4 hours escalates at 21:00 that Friday; working hours count only the working periods of a working calendar'),
+  // ADR-0157 D5: the second clock. The default stays `wall_clock` because the
+  // sweep reads the node-config snapshot stored on each request, and a snapshot
+  // written before this key existed carries none — flipping the default would
+  // move every open deadline. "Calendar hours" is deliberately not a value
+  // name: it read as wall-clock hours before a working calendar existed.
+  clock: z.enum(['wall_clock', 'working_time']).default('wall_clock')
+    .describe("How the timeout's hours count: every hour, or only working hours. Wall-clock hours ('wall_clock', the default) count nights, weekends and holidays. Working hours ('working_time') count only the working periods of the organization's working calendar, skipping its holidays and counting its make-up workdays; when the calendar cannot count the deadline (no such calendar, or not maintained that far) the request does not escalate and shows why, until the calendar is fixed"),
+  // ADR-0157 D2: the explicit code, else the organization's default calendar,
+  // else a refusal — never wall-clock time. Read only under `working_time`; the
+  // approval lint refuses it beside `wall_clock`, where nothing reads it
+  // (`approval-escalation-calendar-without-working-time`). Whether the calendar
+  // exists is runtime data per organization, never a publish-time check (D9).
+  calendar: z.string().regex(new RegExp(WORK_CALENDAR_CODE_PATTERN)).optional()
+    .describe("Which working calendar counts the hours under working time, by its code. Leave it empty to use the organization's default calendar"),
   action: z.enum(['reassign', 'auto_approve', 'auto_reject', 'notify']).default('notify')
     .describe('What happens when the deadline passes: hand the request to someone else, approve it, reject it, or notify someone (the default)'),
   // Escalation hands the request to a position (the common case — e.g. an

@@ -130,7 +130,7 @@ Compound-cell prefix configuration
 
 ## ColumnSummary
 
-Aggregation function for the column footer summary — and, on a grouped list view, the per-group header summary (server-side): count (COUNT(*), the group count), count_unique (count_distinct), sum, avg, min, max map onto the query AST's AggregationFunction; count_filled, count_empty, percent_filled, percent_empty derive from one COUNT(field) node (the non-null count) and the group count — count_filled = COUNT(field), count_empty = count − COUNT(field), percent_filled = COUNT(field) / count (0 when count is 0), percent_empty = 1 − percent_filled. Server-side "empty" is null on every face; the footer's client-side reading of empty strings and empty arrays as empty is the renderer's to converge
+Aggregation function for the column footer summary — and, on a grouped list view, the per-group header summary (server-side): count (COUNT(*), the group count), count_unique (count_distinct), sum, avg, min, max map onto the query AST's AggregationFunction; count_filled, count_empty, percent_filled, percent_empty derive from one COUNT(field) node (the non-null count) and the group count — count_filled = COUNT(field), count_empty = count − COUNT(field), percent_filled = COUNT(field) / count (0 when count is 0), percent_empty = 1 − percent_filled. count_true and count_false are a boolean column's yes and no counts, boolean fields only — count_true = SUM(field), count_false = COUNT(field) − SUM(field); a null cell is neither. Server-side "empty" is null on every face; the footer's client-side reading of empty strings and empty arrays as empty is the renderer's to converge
 
 ### Allowed Values
 
@@ -141,6 +141,8 @@ Aggregation function for the column footer summary — and, on a grouped list vi
 * `count_unique`
 * `percent_empty`
 * `percent_filled`
+* `count_true`
+* `count_false`
 * `sum`
 * `avg`
 * `min`
@@ -157,7 +159,7 @@ Column footer summary configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| 'percent_empty' \| 'percent_filled' \| 'sum' \| 'avg' \| 'min' \| 'max'>` | ✅ | Aggregation function |
+| **type** | `Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| 'percent_empty' \| 'percent_filled' \| 'count_true' \| 'count_false' \| 'sum' \| 'avg' \| 'min' \| 'max'>` | ✅ | Aggregation function |
 | **field** | `string` | optional | Field to aggregate (defaults to the column field) |
 
 
@@ -725,7 +727,7 @@ List chart view configuration
 | **wrap** | `boolean` | optional | Allow text wrapping |
 | **type** | `string` | optional | Renderer type override (e.g., "currency", "date") |
 | **pinned** | `Enum<'left' \| 'right'>` | optional | Pin/freeze column to left or right side |
-| **summary** | `Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| 'percent_empty' \| 'percent_filled' \| 'sum' \| 'avg' \| 'min' \| 'max'> \| { type: Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| …>; field?: string }` | optional | Footer aggregation for this column — the function alone, or `{ type, field }` to aggregate another field |
+| **summary** | `Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| 'percent_empty' \| 'percent_filled' \| 'count_true' \| 'count_false' \| 'sum' \| 'avg' \| 'min' \| 'max'> \| { type: Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| …>; field?: string }` | optional | Footer aggregation for this column — the function alone, or `{ type, field }` to aggregate another field |
 | **prefix** | `{ field: string; type?: Enum<'badge' \| 'text'> }` | optional | Field rendered inline before this cell value |
 | **link** | `boolean` | optional | Functions as the primary navigation link (triggers View navigation) |
 | **action** | `string` | optional | Registered Action ID to execute when clicked |
