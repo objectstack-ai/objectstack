@@ -5095,7 +5095,13 @@ const es = {
     phone: {
       toolbar: 'Herramientas de la lista',
       sortCount: 'Orden, {{count}} niveles',
+      sortCount_one: 'Orden, {{count}} nivel',
+      sortCount_many: 'Orden, {{count}} niveles',
+      sortCount_other: 'Orden, {{count}} niveles',
       filterCount: 'Filtro, {{count}} activos',
+      filterCount_one: 'Filtro, {{count}} activo',
+      filterCount_many: 'Filtro, {{count}} activos',
+      filterCount_other: 'Filtro, {{count}} activos',
       back: 'Atrás',
       discard: 'Descartar cambios',
       close: 'Cerrar',

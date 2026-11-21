@@ -4947,7 +4947,11 @@ const ko = {
     phone: {
       toolbar: '목록 도구',
       sortCount: '정렬, {{count}}단계',
+      sortCount_one: '정렬, {{count}}단계',
+      sortCount_other: '정렬, {{count}}단계',
       filterCount: '필터, {{count}}개',
+      filterCount_one: '필터, {{count}}개',
+      filterCount_other: '필터, {{count}}개',
       back: '뒤로',
       discard: '변경 취소',
       close: '닫기',

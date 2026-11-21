@@ -4950,7 +4950,11 @@ const ja = {
     phone: {
       toolbar: 'リストツール',
       sortCount: '並べ替え（{{count}} 段階）',
+      sortCount_one: '並べ替え（{{count}} 段階）',
+      sortCount_other: '並べ替え（{{count}} 段階）',
       filterCount: '絞り込み（{{count}} 件）',
+      filterCount_one: '絞り込み（{{count}} 件）',
+      filterCount_other: '絞り込み（{{count}} 件）',
       back: '戻る',
       discard: '変更を破棄',
       close: '閉じる',

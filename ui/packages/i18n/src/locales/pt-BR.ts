@@ -5090,7 +5090,13 @@ const pt = {
     phone: {
       toolbar: 'Ferramentas da lista',
       sortCount: 'Ordenação, {{count}} níveis',
+      sortCount_one: 'Ordenação, {{count}} nível',
+      sortCount_many: 'Ordenação, {{count}} níveis',
+      sortCount_other: 'Ordenação, {{count}} níveis',
       filterCount: 'Filtro, {{count}} ativos',
+      filterCount_one: 'Filtro, {{count}} ativo',
+      filterCount_many: 'Filtro, {{count}} ativos',
+      filterCount_other: 'Filtro, {{count}} ativos',
       back: 'Voltar',
       discard: 'Descartar alterações',
       close: 'Fechar',

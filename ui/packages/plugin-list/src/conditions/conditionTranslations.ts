@@ -17,8 +17,10 @@ import { createSafeTranslation } from '@object-ui/i18n';
 export const LIST_CONDITION_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'listConditions.fieldList.search': 'Search fields',
   'listConditions.phone.toolbar': 'List tools',
-  'listConditions.phone.sortCount': 'Sort, {{count}} levels',
-  'listConditions.phone.filterCount': 'Filter, {{count}} in use',
+  'listConditions.phone.sortCount_one': 'Sort, {{count}} level',
+  'listConditions.phone.sortCount_other': 'Sort, {{count}} levels',
+  'listConditions.phone.filterCount_one': 'Filter, {{count}} in use',
+  'listConditions.phone.filterCount_other': 'Filter, {{count}} in use',
   'listConditions.phone.back': 'Back',
   'listConditions.phone.discard': 'Discard changes',
   'listConditions.phone.close': 'Close',

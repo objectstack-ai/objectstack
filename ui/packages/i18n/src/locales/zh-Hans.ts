@@ -5007,7 +5007,11 @@ const zh = {
     phone: {
       toolbar: '列表工具',
       sortCount: '排序，{{count}} 级',
+      sortCount_one: '排序，{{count}} 级',
+      sortCount_other: '排序，{{count}} 级',
       filterCount: '筛选，{{count}} 个',
+      filterCount_one: '筛选，{{count}} 个',
+      filterCount_other: '筛选，{{count}} 个',
       back: '返回',
       discard: '放弃改动',
       close: '关闭',

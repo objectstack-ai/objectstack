@@ -5703,7 +5703,11 @@ const en = {
     phone: {
       toolbar: 'List tools',
       sortCount: 'Sort, {{count}} levels',
+      sortCount_one: 'Sort, {{count}} level',
+      sortCount_other: 'Sort, {{count}} levels',
       filterCount: 'Filter, {{count}} in use',
+      filterCount_one: 'Filter, {{count}} in use',
+      filterCount_other: 'Filter, {{count}} in use',
       back: 'Back',
       discard: 'Discard changes',
       close: 'Close',

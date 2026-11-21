@@ -4948,7 +4948,11 @@ const de = {
     phone: {
       toolbar: 'Listenwerkzeuge',
       sortCount: 'Sortierung, {{count}} Ebenen',
+      sortCount_one: 'Sortierung, {{count}} Ebene',
+      sortCount_other: 'Sortierung, {{count}} Ebenen',
       filterCount: 'Filter, {{count}} aktiv',
+      filterCount_one: 'Filter, {{count}} aktiv',
+      filterCount_other: 'Filter, {{count}} aktiv',
       back: 'Zurück',
       discard: 'Änderungen verwerfen',
       close: 'Schließen',

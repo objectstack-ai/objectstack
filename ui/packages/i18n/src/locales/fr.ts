@@ -5091,7 +5091,13 @@ const fr = {
     phone: {
       toolbar: 'Outils de la liste',
       sortCount: 'Tri, {{count}} niveaux',
+      sortCount_one: 'Tri, {{count}} niveau',
+      sortCount_many: 'Tri, {{count}} niveaux',
+      sortCount_other: 'Tri, {{count}} niveaux',
       filterCount: 'Filtre, {{count}} actifs',
+      filterCount_one: 'Filtre, {{count}} actif',
+      filterCount_many: 'Filtre, {{count}} actifs',
+      filterCount_other: 'Filtre, {{count}} actifs',
       back: 'Retour',
       discard: 'Annuler les modifications',
       close: 'Fermer',
