@@ -44,6 +44,7 @@ import {
   fromLocalDay,
 } from './localeDateText.js';
 import { useFieldTranslation } from '../useFieldTranslation.js';
+import { isImeKey } from '../imeKey.js';
 
 /**
  * The `date` and date-time controls of the form field widgets
@@ -266,6 +267,9 @@ function TemporalPicker({
         domProps.onBlur?.(e);
       }}
       onKeyDown={(e) => {
+        // objectstack#35996 — an Enter that picks an input-method candidate
+        // does not commit the half-typed text.
+        if (isImeKey(e)) return;
         if (e.key === 'Enter') {
           // Commit, and keep a bare Enter from submitting the form with
           // the text not yet read.

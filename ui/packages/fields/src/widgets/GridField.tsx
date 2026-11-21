@@ -1161,6 +1161,10 @@ function GridFieldBody({
 
   const onCellKeyDown = useCallback(
     (e: React.KeyboardEvent, rowIdx: number, colIdx: number) => {
+      // objectstack#35996 — Enter and the arrows pressed while an input
+      // method composes pick or move its candidate: the grid neither moves
+      // nor appends a line on them.
+      if (isImeKey(e)) return;
       if (e.key === 'Enter' && rowIdx === rows.length - 1 && allowAdd && !isList) {
         e.preventDefault();
         addRow(colIdx);
