@@ -55,6 +55,7 @@ import {
   inferColumns,
   inferModalSize,
   dialogUndeclaredColumns,
+  dialogDrawsSingleColumn,
   sectionedFormColumns,
   sectionedGridLayout,
   CONTAINER_GRID_COLS,
@@ -346,7 +347,9 @@ const modalSizeClasses: Record<string, string> = {
 /**
  * The least grid the dialog draws where the author declared no `columns`
  * (objectui#12521): two from the container's `@md` tier up, one below it, so
- * the phone sheet keeps its single column. A field-heavy form draws more —
+ * the phone sheet keeps its single column — except in a short dialog that
+ * declares nothing, which draws one column in the narrow `lg` size
+ * (`dialogDrawsSingleColumn`, objectstack-ai/objectstack#35980). A field-heavy form draws more —
  * three in a bounded dialog, four in a `full` one — by
  * `dialogUndeclaredColumns` (objectstack-ai/objectstack#34607), whose
  * docblock carries the rule and the measured tier.
@@ -565,19 +568,31 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
   // undeclared grid is at least `DIALOG_DEFAULT_COLUMNS` wide whatever the
   // size, so the size reads that floor and never the count it then bounds
   // (objectstack-ai/objectstack#34607).
+  // objectstack-ai/objectstack#35980 — at most eight fields and no declared
+  // `columns` anywhere: one per row, in the narrow `lg` dialog. Maximized,
+  // the user asked for the room, and the form spreads as it did before.
+  const singleColumn = !maximized && dialogDrawsSingleColumn(
+    layoutFieldCount,
+    schema.columns,
+    (effectiveSections ?? []).map((s) => s.columns),
+  );
   const effectiveModalSize = useMemo(() => {
     if (maximized) return 'full';
     if (schema.modalSize) return schema.modalSize;
+    // A short dialog that declares no columns anywhere is one column in the
+    // narrow `lg` size (objectstack-ai/objectstack#35980).
+    if (singleColumn) return inferModalSize(1);
     const columns = effectiveSections?.length
       ? sectionedFormColumns(schema.columns, effectiveSections.map((s) => s.columns), DIALOG_DEFAULT_COLUMNS)
       : (clampColumns(schema.columns) ?? DIALOG_DEFAULT_COLUMNS);
     return inferModalSize(Math.min(columns, inferColumns(layoutFieldCount)));
-  }, [maximized, schema.modalSize, schema.columns, effectiveSections, layoutFieldCount]);
+  }, [maximized, schema.modalSize, schema.columns, effectiveSections, layoutFieldCount, singleColumn]);
 
   // The count an undeclared form or section draws in THIS dialog
   // (objectstack-ai/objectstack#34607): from the field count, bounded by the
-  // dialog's size — `dialogUndeclaredColumns`.
-  const undeclaredColumns = dialogUndeclaredColumns(layoutFieldCount, effectiveModalSize);
+  // dialog's size — `dialogUndeclaredColumns` — and one in a short dialog
+  // that declares nothing (`dialogDrawsSingleColumn`, #35980).
+  const undeclaredColumns = singleColumn ? 1 : dialogUndeclaredColumns(layoutFieldCount, effectiveModalSize);
 
   // Compute auto-layout for flat fields (no sections). A form that declares no
   // `columns` lays out at the dialog's undeclared count through the same
