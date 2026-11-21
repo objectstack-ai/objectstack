@@ -22,3 +22,8 @@ The desktop comment panel follows the doors:
 
 - ✓ is on every thread, the viewer's and anyone else's, and writes through the resolution door. It no longer asks the explain engine; that probe now gates only Edit on someone else's comment.
 - A viewer without the `sys_comment` delete grant (an ordinary member) is offered Delete on their own comments that have no reply, and it goes through the own-comment delete door; a viewer with the grant deletes through the data API as before, others' comments included where they may edit the record.
+
+Corrections to two earlier notes of this release, which stay as written:
+
+- A rank-and-file member now resolves and reopens a colleague's thread through the resolution door; this replaces the #36071 note's line "This is the one widening: an update that changes nothing but `is_resolved` is admitted without the author-or-record-editor rule", because the platform's row floor (`owner_only_writes`) runs first, so through the data API such a member still resolves only the threads they started and an administrator resolves any.
+- The desktop comment panel offers ✓ on every thread and writes it through the resolution door; this replaces the #36075 note's line "✓ is offered under the `sys_comment` update grant: on a thread the viewer started, and on anyone's only where the explain engine admits …", and its "Unchanged" line's "a deployment without the explain service shows ✓ and Edit on the viewer's own rows only" now holds for Edit alone.
