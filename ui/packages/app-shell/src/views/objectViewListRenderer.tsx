@@ -101,6 +101,7 @@ export function useObjectViewListRenderer({
     handleListRowsChange,
     handleListTotalChange,
     openInPanel,
+    openReferencedRecord,
     rowOpensRecord,
     phoneTitle,
     viewBarTrailing,
@@ -145,6 +146,8 @@ export function useObjectViewListRenderer({
     handleListTotalChange: ReturnType<typeof useObjectViewRecordNavigation>['handleListTotalChange'];
     /** objectstack#35854 — the name cell's 「在侧边打开」 (`./objectViewOpenAsPage.tsx`), or `null` for none. */
     openInPanel: { label: string; open: (recordId: string | number) => void } | null;
+    /** objectstack#36015 — a lookup chip's record in the side drawer, or `undefined` where the list has none. */
+    openReferencedRecord: ((objectName: string, recordId: string) => void) | undefined;
     /** objectstack#33317 — whether a row click opens the record: `false` for the `none` mode. */
     rowOpensRecord: boolean;
     /**
@@ -1182,6 +1185,9 @@ export function useObjectViewListRenderer({
                             : null;
                     }
                     : undefined}
+                // objectstack#36015 — a lookup chip in the grid opens the record it
+                // names in the same side drawer.
+                openReferencedRecord={openReferencedRecord}
                 // objectstack#33317 — a row that opens nothing (the view
                 // authored `navigation.mode: 'none'`, or a list-only object)
                 // draws no record link and no Open in its context menu.
@@ -1202,7 +1208,7 @@ export function useObjectViewListRenderer({
                 dataSource={ds}
             />
         );
-    }, [hasViewBarTrailing, trailStore, rowEndStore, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, listDraft.draft, listDraft.patch, managedUsers, managedUserMarker, openInPanel, rowOpensRecord, handleListRowsChange, handleListTotalChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, offersRename, offersSave, offersReset, offersSummaryPick, summaryPickKey, previewDrafts, previewDataSource, unpublishedObjects]);
+    }, [hasViewBarTrailing, trailStore, rowEndStore, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, listDraft.draft, listDraft.patch, managedUsers, managedUserMarker, openInPanel, openReferencedRecord, rowOpensRecord, handleListRowsChange, handleListTotalChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, offersRename, offersSave, offersReset, offersSummaryPick, summaryPickKey, previewDrafts, previewDataSource, unpublishedObjects]);
 
     return { renderListView };
 }
