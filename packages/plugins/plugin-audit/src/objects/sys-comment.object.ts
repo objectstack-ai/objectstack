@@ -159,6 +159,35 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * - **System writes** (seeds, imports, migrations) keep the values they
  *   supply, as they do for `author_id`.
  *
+ * ## Platform-written: the resolution `resolved_by` / `resolved_at` (#36071)
+ *
+ * A thread (a top-level comment and its replies) can be marked resolved and
+ * reopened. Its state is the top-level comment's `is_resolved`, the one
+ * column a caller writes; who resolved it and when are the platform's
+ * (`comment-resolution.ts`):
+ *
+ * - **The stamp.** A `beforeUpdate` handler, for every caller, sets
+ *   `resolved_by` to the session's user and `resolved_at` to the server clock
+ *   when `is_resolved` turns `true`, and clears both when it turns `false`.
+ *   An update that leaves `is_resolved` as stored stamps nothing, so a thread
+ *   keeps its first resolver.
+ * - **Read-only.** Both declare `readonly: true`: on update a non-system
+ *   caller's value is stripped and reported (`droppedFields`); on create the
+ *   create hook clears them and sets `is_resolved: false` over a client's
+ *   value — a new comment is unresolved. A `preserveAudit` update keeps a
+ *   supplied value.
+ * - **A thread, never a reply.** An update naming `is_resolved` on a reply is
+ *   refused (`VALIDATION_ERROR` / 400). On a reply the three columns stay at
+ *   their defaults and mean nothing.
+ * - **A reply reopens its thread.** A reply written into a resolved thread
+ *   sets the top-level comment back to unresolved, as the platform.
+ * - **Who may resolve** is who may update the comment: its author, or a user
+ *   who can edit the record the thread is on.
+ * - **Stored rows.** None to migrate: the column's declared default `false`
+ *   is the SQL column default, so a row written before it reads unresolved,
+ *   and a reader asking `is_resolved: { $ne: true }` matches a row that
+ *   carries no value too.
+ *
  * @namespace sys
  */
 export const SysComment = ObjectSchema.create({
@@ -287,6 +316,33 @@ export const SysComment = ObjectSchema.create({
       required: false,
       readonly: true,
       group: 'Lifecycle',
+    }),
+
+    // ── Resolution (#36071) ──────────────────────────────────────
+    // Meaningful on a top-level comment only: it is the state of the whole
+    // thread. `resolved_by` / `resolved_at` are platform-written (see
+    // "Platform-written: the resolution" above).
+    is_resolved: Field.boolean({
+      label: 'Resolved',
+      defaultValue: false,
+      description: 'Whether the thread this top-level comment starts is resolved; refused on a reply',
+      group: 'Resolution',
+    }),
+
+    resolved_by: Field.lookup('sys_user', {
+      label: 'Resolved By',
+      required: false,
+      readonly: true,
+      description: 'Who resolved the thread — stamped by the platform, never written by authors',
+      group: 'Resolution',
+    }),
+
+    resolved_at: Field.datetime({
+      label: 'Resolved At',
+      required: false,
+      readonly: true,
+      description: 'When the thread was resolved — stamped by the platform, never written by authors',
+      group: 'Resolution',
     }),
 
     // No `visibility` field: who can see a comment is decided by the record

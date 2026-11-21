@@ -3073,7 +3073,7 @@ export function installAuditWriters(
  * on sys_comment holding either a raw array of user ids `["u1","u2"]` or an
  * array of objects `[{ id: "u1" }, ...]`; a parse failure reads as no mention.
  */
-function parseCommentMentions(value: unknown): string[] {
+export function parseCommentMentions(value: unknown): string[] {
   let mentions: any = value;
   if (typeof mentions === 'string') {
     try { mentions = JSON.parse(mentions); } catch { mentions = null; }

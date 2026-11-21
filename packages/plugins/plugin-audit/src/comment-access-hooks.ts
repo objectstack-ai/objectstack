@@ -152,6 +152,13 @@ import {
   type ParentRecordGate,
   type ParentRecordGateEngine,
 } from './parent-record-read-gate.js';
+import {
+  clearClientResolution,
+  installCommentReplyReopens,
+  namesResolution,
+  refuseResolutionOnReply,
+  stampCommentResolution,
+} from './comment-resolution.js';
 
 /** Minimal engine surface these installers need — duck-typed (like
  * service-storage's attachment seams) so tests can fake it and so plugin-audit
@@ -186,6 +193,10 @@ export interface CommentAccessEngine {
    * declares its parent pair ({@link declaresCommentParentPair}). Optional: an
    * engine without it is treated as one whose `sys_comment` declares none. */
   getSchema?(object: string): unknown;
+  /** [#36071] The platform's own write that reopens a resolved thread when a
+   * reply is posted into it (`comment-resolution.ts`). Optional: an engine
+   * without it cannot reopen, and says so at `error` when a reply needs it. */
+  update?(object: string, data: Record<string, unknown>, options: Record<string, unknown>): Promise<unknown>;
 }
 
 /** Minimal shape of the engine `OperationContext` the read middleware reads. */
@@ -226,6 +237,8 @@ export interface CommentAccessLogger {
   info(msg: string, meta?: unknown): void;
   warn(msg: string, meta?: unknown): void;
   debug?(msg: string, meta?: unknown): void;
+  /** [#36071] A reply stored under a thread that could not be reopened. Absent: `warn`. */
+  error?(msg: string, meta?: unknown): void;
 }
 
 /** A comment author's display identity: the name and avatar URL the platform
@@ -941,6 +954,10 @@ export function installCommentAccessHooks(
     // touched; an absent one takes the field's default.
     if (Object.prototype.hasOwnProperty.call(data, 'is_edited')) data.is_edited = false;
     if (Object.prototype.hasOwnProperty.call(data, 'edited_at')) data.edited_at = null;
+    // [#36071] And not a resolved one: the resolution is the platform's to
+    // record on an update (`comment-resolution.ts`), never the client's to
+    // send on a create.
+    clearClientResolution(data);
 
     const target = parseCommentThreadId(data.thread_id);
     if (!target) {
@@ -1110,6 +1127,9 @@ export function installCommentAccessHooks(
       if (ctx?.session?.isSystem) return;
       if (!ctx?.session) return;
       const rows = await resolveTargetRows(ctx, 'update');
+      // [#36071] A thread is resolved on its top-level comment, never on a
+      // reply — refused for every non-system caller, the reply's author too.
+      if (namesResolution(ctx?.input?.data)) refuseResolutionOnReply(rows);
       if (rows.length) await authorizeRows(ctx, rows, 'update');
 
       // Moving a comment to another thread is an insert into that thread: the
@@ -1148,6 +1168,14 @@ export function installCommentAccessHooks(
   // whole-operation dispatch, and the stamp wants neither — see
   // {@link stampCommentBodyEdit}.
   engine.registerHook('beforeUpdate', stampCommentBodyEdit, { object: COMMENT_OBJECT, packageId: PACKAGE_ID });
+
+  // ── Update: the platform stamps who resolved a thread and when (#36071) ─
+  // Its own registration, for the edit stamp's reason above: every caller is
+  // stamped — see `stampCommentResolution` in `comment-resolution.ts`.
+  engine.registerHook('beforeUpdate', stampCommentResolution, { object: COMMENT_OBJECT, packageId: PACKAGE_ID });
+
+  // ── Create: a reply reopens its resolved thread (#36071) ────────────
+  installCommentReplyReopens(engine, logger, { object: COMMENT_OBJECT, packageId: PACKAGE_ID });
 
   // ── Create and re-point: the platform stamps the parent pair (ADR-0139 E7) ─
   // Its own registrations, for the stamp's reason above: every caller is
