@@ -224,6 +224,17 @@ const REGISTRY_FIXTURES: Record<string, RegistryFixture> = {
     sha256: '0a16955983c96c27e2a315ac3c930f624ff28f41a2815aa17151aa3bc574ebba',
     roundTrip: true,
   },
+  badge: {
+    url: 'https://ui.shadcn.com/r/styles/default/badge.json',
+    repoPath: 'apps/v4/public/r/styles/default/badge.json',
+    // Captured for objectstack#36047 at the same commit as the families above,
+    // from `raw.githubusercontent.com`.
+    headSha: '8a7701ec27eb9cb8e0377db769fbe6d744113c52',
+    sha256: 'db977d821af56ae3fb7952182d9c0a076a10c75c38bc2d2b000827e720423d32',
+    // `badge.tsx` carries the undeclared `whitespace-nowrap` edit and its
+    // comment (objectui#2762), so byte-equality is not available.
+    roundTrip: 'ships the undeclared `whitespace-nowrap` edit and its comment (objectui#2762)',
+  },
 };
 
 /** The captured registry bytes for `name`, exactly as served (pre-rewrite). */

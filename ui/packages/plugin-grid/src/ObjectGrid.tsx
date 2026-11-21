@@ -634,7 +634,7 @@ export const OBJECT_GRID_TABLE_DENSITY = [
   '[&_thead_th]:h-8 [&_thead_th]:py-0 [&_thead_th]:text-[13px] [&_tbody_tr]:border-border/50',
   // A referenced record (a lookup's link) is a small chip led by its name's
   // first letter; an option label keeps its colour, less saturated.
-  '[&_td_a[data-record-link]]:inline-flex [&_td_a[data-record-link]]:h-5 [&_td_a[data-record-link]]:max-w-full [&_td_a[data-record-link]]:items-center [&_td_a[data-record-link]]:gap-1 [&_td_a[data-record-link]]:rounded [&_td_a[data-record-link]]:bg-muted [&_td_a[data-record-link]]:px-1.5 [&_td_a[data-record-link]]:text-foreground [&_td_a[data-record-link]]:hover:no-underline [&_td_a[data-record-link]]:hover:bg-accent',
+  '[&_td_a[data-record-link]]:inline-flex [&_td_a[data-record-link]]:h-5 [&_td_a[data-record-link]]:max-w-full [&_td_a[data-record-link]]:items-center [&_td_a[data-record-link]]:gap-1 [&_td_a[data-record-link]]:rounded-md [&_td_a[data-record-link]]:bg-muted [&_td_a[data-record-link]]:px-1.5 [&_td_a[data-record-link]]:text-foreground [&_td_a[data-record-link]]:hover:no-underline [&_td_a[data-record-link]]:hover:bg-accent',
   '[&_td_a[data-record-link]]:before:flex [&_td_a[data-record-link]]:before:h-3.5 [&_td_a[data-record-link]]:before:w-3.5 [&_td_a[data-record-link]]:before:shrink-0 [&_td_a[data-record-link]]:before:items-center [&_td_a[data-record-link]]:before:justify-center [&_td_a[data-record-link]]:before:rounded-sm [&_td_a[data-record-link]]:before:bg-muted-foreground/20 [&_td_a[data-record-link]]:before:text-[10px] [&_td_a[data-record-link]]:before:font-medium [&_td_a[data-record-link]]:before:content-[attr(data-initial)]',
   '[&_td_[data-select-badge]]:saturate-[.6]',
 ].join(' ');
