@@ -413,6 +413,31 @@ export const SeedLoadResultSchema = lazySchema(() => z.object({
     .describe('Roll-up summary values left stale by writes for this dataset'),
 
   /**
+   * Number of roll-up summary values this dataset's records SUPPLIED that the
+   * loader did not write — "the seed named a total, the children decide it".
+   *
+   * A roll-up summary is a DERIVED value: the engine computes it from the
+   * child rows. A seed never stores one, on insert or on update (maintainer
+   * ruling D, record 7063117450): the loader takes every value a seed record supplies
+   * for a field its object declares `type: 'summary'` out of the record
+   * before the replay compare and before the write. A row the load creates
+   * starts the column at its empty-child-list value (`0` for `count` and
+   * `sum`, empty for `min`, `max` and `avg`) and the child rows the load
+   * writes compute it; a row the load matches keeps the value it holds. One
+   * per record and field, counted whether or not the rest of the record then
+   * lands.
+   *
+   * The rest of each record IS written, so neither `errored` nor `success`
+   * moves and `inserted + updated + skipped + errored` still reconciles
+   * against `total` — the reasoning that gave `referencesDropped` and
+   * `summariesStale` their own counters. Without it the dropped total would be
+   * visible only as a log line, and a parent seeded with a total and no
+   * children would read `0` with nothing in the result to say why.
+   */
+  summariesDropped: z.number().int().min(0).default(0)
+    .describe('Roll-up summary values supplied by seed records and not written (a seed never stores a roll-up)'),
+
+  /**
    * The ids of the stored rows this dataset's records landed on: a row a
    * record inserted, a row it updated, and a row its key matched on a replay
    * and left as it was. Each id appears once, in record order. Empty on a
@@ -538,6 +563,14 @@ export const SeedLoaderResultSchema = lazySchema(() => z.object({
      */
     totalSummariesStale: z.number().int().min(0).default(0)
       .describe('Total roll-up summary values left stale across the load'),
+
+    /**
+     * Total roll-up summary values the seed records supplied and the loader
+     * did not write — "the seed named a total, the children decide it". See
+     * `SeedLoadResult.summariesDropped`.
+     */
+    totalSummariesDropped: z.number().int().min(0).default(0)
+      .describe('Total roll-up summary values supplied by seed records and not written'),
 
     /** Number of circular dependency chains detected */
     circularDependencyCount: z.number().int().min(0).describe('Circular dependency chains detected'),
