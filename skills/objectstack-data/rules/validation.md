@@ -4,7 +4,7 @@
 - [Uniqueness — Use Unique Indexes](#uniqueness--use-unique-indexes) · [State Machine Validation](#state-machine-validation)
 - [Format](#format-validation) · [Cross-Field](#cross-field-validation) · [JSON Schema](#json-schema-validation) · [Conditional](#conditional-validation)
 - [External / Custom Validation → Lifecycle Hooks](#external--custom-validation--lifecycle-hooks) · [Validation Properties](#validation-properties)
-- [Incorrect vs Correct](#incorrect-vs-correct)
+- [Incorrect vs Correct](#incorrect-vs-correct) · [Conditional Field Rules](#conditional-field-rules)
 
 Unmarked blocks are fragments; `check:skill-examples` skips them.
 
@@ -48,8 +48,8 @@ exemption, so a row that already violates the rule is refused on any edit until
 a repairing write lands (frozen, not bricked). A condition that must hold only
 from a transition onward is not this tool: use `requiredWhen` or a field bound
 (`min` / `max` / `minLength` / `maxLength`), which judge the write, not the
-stored row (see **Choose by intent — invariant or transition gate** in
-`SKILL.md`).
+stored row (see **Choose by intent — invariant or transition gate** under
+[Conditional Field Rules](#conditional-field-rules)).
 
 <!-- os:check -->
 ```typescript
@@ -327,3 +327,72 @@ priority: 1000   // User validations (run last)
   events: ['update'],  // ✅ Only validate on update
 }
 ```
+
+## Conditional Field Rules
+
+Put conditional UI/data-entry rules on the **field definition** when the rule
+belongs to the data model and should apply everywhere the field is edited:
+default forms, Studio-authored forms, inline master-detail grids, public forms,
+and API-backed writes.
+
+<!-- os:check -->
+```typescript
+import { P } from '@objectstack/spec';
+import { ObjectSchema, Field } from '@objectstack/spec/data';
+
+export const Invoice = ObjectSchema.create({
+  name: 'invoice',
+  sharingModel: 'public_read_write',
+  fields: {
+    status: Field.select({
+      options: [
+        { label: 'Draft', value: 'draft' },
+        { label: 'Sent', value: 'sent' },
+        { label: 'Paid', value: 'paid' },
+        { label: 'Void', value: 'void' },
+      ],
+    }),
+    paid_at: Field.datetime({
+      visibleWhen: P`record.status == 'paid'`,
+      requiredWhen: P`record.status == 'paid'`,
+    }),
+    locked_total: Field.currency({
+      readonlyWhen: P`record.status == 'paid'`,
+    }),
+  },
+});
+```
+
+- Use `visibleWhen` to hide irrelevant fields in ObjectUI forms.
+- Use `readonlyWhen` for state-locked fields; the ObjectQL write path ignores
+  incoming changes when the predicate is `TRUE` (for everyone; per permission
+  set → field permission `when`, rules/security.md).
+- **`readonly: true` governs the end-user surface, not trusted system writers.**
+  A non-system write (REST/UI, and any `runAs:'user'` flow) has
+  the field **stripped**; the write reports
+  success but the value never lands. System-context writes —
+  `runAs:'system'` flows, system hooks, seeds, imports, migrations — are exempt
+  and DO write it. Keep the field `readonly` when automation maintains it; the
+  flow side: [objectstack-automation → Failure routing & `runAs`](../../objectstack-automation/SKILL.md#failure-routing--runas).
+- Use `requiredWhen` for conditional requiredness; the ObjectQL validator
+  enforces it on submit. The `conditionalRequired` alias was REMOVED in
+  protocol 17 — emitting it is a parse error.
+- **Choose by intent — invariant or transition gate.** A fact true of *every
+  stored record* is an invariant: a `validations[]` `script` rule. A row that
+  violates it is refused on any edit until repaired. A *transition* condition
+  ("required once the record reaches `paid`") is `requiredWhen` / field bounds,
+  which judge the write, not the stored row. "Required when X" reads like an
+  invariant and is not one; an invariant written as a gate never enforces
+  itself.
+- For inline `master_detail` grids, predicates are evaluated row-by-row against
+  the child row's `record`, so line-item rules should live on child fields.
+- For complex predicates, load **objectstack-formula** and emit CEL via
+  `P\`...\``; do not use Salesforce-style `AND`, `IN (...)`, or `{field}`
+  syntax.
+
+`os validate` catches a bare field ref (`done` for `record.done`) in any of
+these predicates. Unchecked, it faults at run time: an `error` validation rule
+or `requiredWhen` refuses the write naming it, an option `visibleWhen` only a
+write picking the option (forms still offer it); a `readonlyWhen` field stays
+editable and the save succeeds without its change (logged); a formula reads
+`null` (logged).

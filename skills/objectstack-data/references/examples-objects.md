@@ -1,4 +1,38 @@
-# Data — object authoring examples (moved verbatim from SKILL.md)
+# Data — object authoring: keys, examples, search, extensions
+
+- [Object keys](#object-keys) · [Field Groups](#field-groups-mvp) · [Quick-Start Template](#quick-start-template)
+- [Metadata Protection](#metadata-protection-protection) · [Search Fields](#search-fields-searchablefields) · [Object Extension Model](#object-extension-model)
+
+## Object keys
+
+The minimum is `name`, `fields` and an authored `sharingModel`
+([SKILL.md § Object Definition](../SKILL.md#object-definition)). Exact keys and
+defaults: `data/object.zod.ts`, through [_index.md](./_index.md). The ones to get
+right:
+
+| Property | Default | Description |
+|:---------|:--------|:------------|
+| `pluralLabel` | — | Plural form (e.g., "Accounts") — on 31/31 objects in the reference apps; author it alongside `label` |
+| `icon` | — | Icon name for nav, list headers and lookup pickers — on 31/31 objects in the reference apps |
+| `highlightFields` | derived | Ordered field keys used as a record's compact face: the columns a **related list** renders on the parent's detail page, and what a lookup picker shows. Declare it on the CHILD object (see [Relationships](../rules/relationships.md)) |
+| `namespace` | — | **Not a schema key** — an unknown key is refused, so authoring it is a build error. Embed the prefix directly in `name` instead |
+| `nameField` | derived (e.g. `'name'`/`'title'`) | **Canonical** record-title field — the stored field used as the record's display name. Use a single text/email field; a composite title to import, sort or search by is a stored computed field (a non-`formula` field with an `expression`); a text formula is display-only |
+| `titleFormat` | — | **Refused (ADR-0079)**: a save and `os validate` refuse it (`title-format-retired`). Move it to `nameField`; a composite title follows the `nameField` row |
+| `ownership` | `'user'` | Whether `owner_id` exists at all, a different axis from `sharingModel`. `'none'` only for a shared catalog or a pure junction table |
+
+### Object Capabilities (`enable`)
+
+| Flag | Default | Purpose |
+|:-----|:--------|:--------|
+| `trackHistory` | `false` | Field-level audit trail |
+| `searchable` | `true` | Index records for global search |
+| `apiEnabled` | `true` | Expose via automatic REST + MCP APIs |
+| `apiMethods` | all | Whitelist over the six primitives (`get`, `list`, `create`, `update`, `delete`, `bulk`); derived verbs (search/export/upsert/…) follow automatically |
+| `files` | `false` | Attachments & document management |
+| `feeds` | `true` | Social feed, comments, mentions — **opt-out**: explicit `false` hides the feed UI and rejects new comments |
+| `activities` | `true` | Activity timeline (`sys_activity` mirror of CRUD) — **opt-out**: explicit `false` stops mirroring and hides the timeline |
+| `clone` | `true` | Record deep cloning |
+| `aiReadable` | — | Platform `sys_*` objects only (not `sys_metadata`, `sys_metadata_history`): read-only AI access (query, get, aggregate, describe, list; no write). App objects never declare it, `false` included: refused at parse |
 
 ## Field Groups (MVP)
 
@@ -189,3 +223,88 @@ agents, tools, skills, reports, email-templates). Enforcement: `PUT`/`DELETE` on
 `/api/v1/meta/:type/:name` return `403 item_locked`, and an artifact lock
 overrides a package lock. Default to **no** `protection` block for
 tenant-authored metadata.
+
+## Search Fields (`searchableFields`)
+
+`searchableFields` on the object is the canonical set `$search` scans.
+Leave it unset and search auto-defaults to the `nameField` plus the object's
+short-text and enum columns (`text` / `email` / `phone` / `url` / `autonumber` /
+`textarea` / `markdown` / `select`) plus every field marked `searchable: true`,
+of any type except `secret` / `password` / `vector` or a virtual `formula`. `searchable: false`, the
+default, never removes a field the type default scans; declare
+`searchableFields` to choose the set. Views may narrow it, never widen it.
+
+### ⛔ Searching by a related record's title — mirror the value, always
+
+`$search` scans **the queried object's own columns**. A dotted path is never a
+search target: unlike `fields` / `sort` / `filters`, the search axis does not
+resolve traversal, and `project_id.name` in `searchableFields` (or in a
+`$searchFields` override) is **refused** (`os validate`
+`searchable-field-unknown`; a request, `400 INVALID_FIELD`), not silently dropped.
+
+**This is the one prescription — emit it every time.** To search by a related
+record's title, copy that title into a **stored field on this object** and
+declare *that* field searchable. A task list searched by project name:
+
+```typescript
+{
+  name: 'task',
+  enable: { searchable: true },
+  fields: {
+    name:         { type: 'text', required: true },
+    project_id:   { type: 'lookup', reference: 'project' },
+    project_name: { type: 'text', label: 'Project Name' },
+  },
+  searchableFields: ['name', 'project_name'],
+}
+```
+
+`?search=apollo` expands to `name $contains 'apollo' OR project_name $contains
+'apollo'` — one single-table scan, every driver.
+
+❌ **Never mirror onto a `formula` field.** It is *virtual* (no column to scan)
+and CEL reads only this record's own fields, so it cannot hold the related title;
+a `formula` entry in any `searchableFields` is refused — `os validate`
+`searchable-field-unsearchable`, a request `400 INVALID_FIELD`.
+
+**Mirror maintenance is the trade-off** — a mirror is only as fresh as whatever
+writes it. Cover both paths: a `beforeInsert` / `beforeUpdate` hook on `task`
+stamps `project_name` from the incoming `project_id`'s parent; an `afterUpdate`
+hook on `project` re-stamps its tasks when it is renamed. Rows written past the hooks (bulk import, direct SQL) need a
+one-off backfill. See [Lifecycle Hooks](./data-hooks.md).
+
+## Object Extension Model
+
+To add fields/validations/indexes to an object you do not own, author
+`defineObjectExtension({ extend, fields, fieldPatches, priority })` and register it on
+`defineStack({ objectExtensions: [...] })`. `priority` sets merge order (default
+`200`, range `0–999`); an extension can add but never remove, except that a new
+`label` without `pluralLabel` clears the base plural unless a tenant authored it (set both). ⛔ Not the same key
+as object-level `ownership` (the record-ownership enum
+`'user' | 'business_unit' | 'org' | 'none'`).
+
+**Relabel a field the owner declares with `fieldPatches` — never by redeclaring
+it in `fields`**, which takes the field over whole and cuts it off from the
+owner's upgrades. A patch carries display keys only:
+`label`, `description`, `inlineHelpText`,
+`placeholder`, and an option's `label` keyed by its stored `value`; the type,
+values and rules stay the owner's. A key the tenant edited keeps the tenant's
+text; between two extensions the higher `priority` wins. A patch naming a field
+or option value the target lacks is refused at install and by `os validate`, and
+a `picklist`-bound field's options are never patchable. Example:
+`defineObjectExtension({ extend: 'crm_account', fieldPatches: { industry: { label: 'Sector' }, type: { options: { customer: { label: 'Client' } } } } })`.
+Translate patched text in the patching package's `translations`, under the
+owner's keys (`objects.crm_account.fields.industry.label`, `.help`,
+`.options.<value>`): the owner's translation of the replaced text never applies, a
+pair `.custom` translation comes first on `/meta`, and an untranslated locale
+serves the patch text.
+
+**An object an installed package ships** is extended from the
+base's paired `.custom` package (`hotcrm.custom`; **objectstack-platform**
+§ Customizing an installed package), never replaced: it takes no `overrides`
+declaration. Every field the pair adds ends in `__c` (`region__c`). The suffix is
+reserved to the pair, so a `__c` field in any other package, or an unsuffixed
+field in a `.custom` extension, is refused at save, publish and install and by
+`os validate` / `os build`.
+Studio's **Add field** on a base object writes the same extension, as an
+`object_extension` item of the pair.

@@ -3,7 +3,7 @@
 - [Two spellings: `Field.*` factory or object literal](#two-spellings-field-factory-or-object-literal)
 - [Text & Content](#text--content) · [Numbers](#numbers) · [Date & Time](#date--time) · [Logic](#logic) · [Selection](#selection)
 - [Relational](#relational) · [Media](#media) · [Embedded](#embedded-json-sub-objects) · [Calculated](#calculated) · [Enhanced Types](#enhanced-types)
-- [Common Field Configurations](#common-field-configurations)
+- [Common Field Configurations](#common-field-configurations) · [Choosing a type](#choosing-a-type) · [Changing a field that has data](#changing-a-field-that-has-data)
 
 ## Two spellings: `Field.*` factory or object literal
 
@@ -265,3 +265,54 @@ The `format` is literal text interleaved with `{...}` tokens:
 2. **Put a delimiter between adjacent variable tokens** — `{section}-{zone}{000}`, not `{section}{zone}{000}`. Without one, `('AB','C')` and `('A','BC')` both render prefix `ABC` and share a counter (to keep numbers unique).
 3. **Pad width is a MINIMUM, not a cap.** `{000}` → `001`…`999`, then `1000`.
 4. **Only known tokens are interpolated.** Date tokens are **case-sensitive** — `{yyyy}` parses as a `{field}` reference and renders **empty** (rule 1 applies). Only a spelling no field could have — `{ YYYY }`, `{YYYY-MM}` — is emitted **literally**.
+
+## Choosing a type
+
+Credentials are `secret` (**encrypted-at-rest**, ADR-0100), never `password`,
+which on a generic object is **plaintext at rest**; `user` is the person picker.
+
+- A yes/no flag (`is_*`, `has_*`, "done?", "active?") is `{ type: 'boolean', defaultValue: false }`.
+  `required` on it refuses only `null`: an unchecked box is a value, so it
+  never means "must be checked". A box that must be checked (terms, consent)
+  is a `validations[]` rule: `{ name: 'terms', type: 'script',
+  condition: { dialect: 'cel', source: 'record.accepted != true' }, message: 'Accept the terms.' }`.
+  The default also lands seeded or imported rows that omit the column on
+  `false`, not a null that only looks unchecked.
+- A person on the record (approver, reviewer) is `type: 'user'` with
+  no `reference`, and optional unless the request says otherwise — the platform
+  already stamps the owner and `created_by`.
+- A dynamic default (`defaultValue: 'current_user'`, `'NOW()'`, a CEL envelope)
+  resolves when the record is SAVED with the field empty. Describe it as
+  save-time; whether a create form pre-displays it is a client capability you
+  cannot promise.
+
+## Changing a field that has data
+
+The metadata→DB sync is **additive-only**: new tables/columns are created on
+boot, but existing columns are **never** altered or dropped. A non-additive
+change to an object that already has data silently diverges from the physical
+schema, and the **database column wins at write time**:
+
+| Change | Existing DB on restart |
+|--------|------------------------|
+| add object / field / index | ✅ applied automatically |
+| `storage: { notNull: true }` removed (relax `NOT NULL`) | ⚠️ **never auto-applied** — the drift is `category: 'needs_confirm'` (`relax_not_null`), so `os migrate apply` confirms it |
+| `unique` re-scoped global → per-tenant | dev auto-heals; otherwise `os migrate apply` (`replace_unique_index`) |
+| type / length change, drop field | `os migrate apply` (`--allow-destructive` for drops / tightenings) |
+| rename a field | `renamedFrom: ['old_key']` on the new key: the sync carries the column's values |
+| declared index removed, or its columns changed | `os migrate apply` (`--allow-destructive` when it drops, or rebuilds as `UNIQUE`) |
+
+**`required` is not the `NOT NULL` dial.** `required` is the
+**write contract** — the engine refuses an insert that omits the value — and it
+implies nothing about the column. The physical constraint is a separate explicit
+opt-in, `storage: { notNull: true }`, and it is what drift detection compares
+against. So tightening `required` on a deployed object is safe (existing null
+rows stay readable), while declaring `storage.notNull` over null rows is a
+destructive migration. The two cannot be combined with `requiredWhen`.
+
+Tell-tale: `/meta` reports a field optional (no `required`, no `storage.notNull`)
+but writes that omit it fail with a **raw driver error** rather than a clean
+validation 400 — that is a stale `NOT NULL` column, not a validator bug. Run
+`os migrate plan` to preview and `os migrate apply` to reconcile, or ratify the
+column by declaring `storage: { notNull: true }`. CLI details: see
+**objectstack-platform**.
