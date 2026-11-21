@@ -28,13 +28,20 @@ import {
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CSS = fs.readFileSync(path.resolve(HERE, '../index.css'), 'utf8');
 
-/** The selector of the one rule that sets the 1.25rem dialog radius. */
+const DECLARATION = 'border-radius: 1.25rem !important;';
+
+/**
+ * The selector of the one rule that sets the 1.25rem dialog radius: the text
+ * between the end of whatever precedes the rule (a closing brace or the
+ * comment above it) and the rule's opening brace.
+ */
 function roundingSelector(): string {
-  const rules = [...CSS.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)]
-    .filter(([, , body]) => /border-radius:\s*1\.25rem/.test(body))
-    .map(([, selector]) => selector.trim());
-  expect(rules).toHaveLength(1);
-  return rules[0];
+  const at = CSS.indexOf(DECLARATION);
+  expect(at).toBeGreaterThan(-1);
+  expect(CSS.indexOf(DECLARATION, at + 1)).toBe(-1);
+  const open = CSS.lastIndexOf('{', at);
+  const start = Math.max(CSS.lastIndexOf('}', open), CSS.lastIndexOf('*/', open) + 1) + 1;
+  return CSS.slice(start, open).trim();
 }
 
 function renderSheet(side: 'left' | 'right' | 'bottom' | 'top'): HTMLElement {
