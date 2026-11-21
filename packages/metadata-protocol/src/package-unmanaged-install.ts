@@ -519,7 +519,8 @@ export function planUnmanagedImport(
     // prefix. Without a `targetNamespace` it is the base's too (the stage-0
     // ACCEPT's Q3): the base must own that prefix for the save door's
     // namespace rule to admit the copied object names.
-    const sourceNamespace = stringKey(manifest, 'namespace') ?? deriveNamespaceFromPackageId(sourcePackageId) ?? undefined;
+    const declaredNamespace = stringKey(manifest, 'namespace');
+    const sourceNamespace = declaredNamespace ?? deriveNamespaceFromPackageId(sourcePackageId) ?? undefined;
     if (sourceNamespace === undefined) {
         throw invalidRequest(
             `Cannot determine the namespace of package '${sourcePackageId}': it declares none, and none derives `
@@ -620,7 +621,10 @@ export function planUnmanagedImport(
         });
         const refused: UnmanagedImportRenameRefusal[] = [];
         for (const item of items) {
-            const reason = (item.type === 'object' ? planned.objectRefusal(item.name) : undefined)
+            const reason = (item.type === 'object' && declaredNamespace === undefined
+                ? derivedNamespaceMismatch(sourcePackageId, sourceNamespace, namespace, item.name)
+                : undefined)
+                ?? (item.type === 'object' ? planned.objectRefusal(item.name) : undefined)
                 ?? planned.copyNameRefusal(item.type, item.name);
             if (reason !== undefined) refused.push({ type: item.type, name: item.name, reason });
             for (const view of item.expands) {
@@ -662,6 +666,45 @@ export function planUnmanagedImport(
         items,
         strippedLocks,
     };
+}
+
+/**
+ * ⛔ A DERIVED NAMESPACE THE NAMES CONTRADICT IS REFUSED, NEVER RENAMED. When
+ * the body declares no `namespace`, the source namespace is a guess
+ * (`deriveNamespaceFromPackageId`), and the rename engine trusts it: an object
+ * name without that prefix takes the target prefix in front of its whole name.
+ * A name that carries ANOTHER prefix — the producer's real namespace, dropped
+ * from the manifest — would become a double-prefixed copy
+ * (`<target>_<real>_<name>`) beside items the swap left alone, one app in
+ * three spellings. So, renaming, every object of a body that declares no
+ * namespace must carry the derived prefix; one that does not is refused at its
+ * own name, naming the derived namespace, the prefix it carries, and the
+ * missing key. Without a rename the save door's own prefix rule refuses the
+ * same names (`NAMESPACE_PREFIX`), so this asks only on the rename path.
+ *
+ * @returns the refusal sentence, or `undefined` when `name` carries the
+ *   derived prefix.
+ */
+function derivedNamespaceMismatch(
+    sourcePackageId: string,
+    derivedNamespace: string,
+    targetNamespace: string,
+    name: string,
+): string | undefined {
+    if (name.startsWith(`${derivedNamespace}_`)) return undefined;
+    const separator = name.indexOf('_');
+    const carried = separator > 0 ? name.slice(0, separator) : undefined;
+    const carries = carried !== undefined
+        ? `it carries the prefix '${carried}_' instead`
+        : 'it carries no namespace prefix';
+    const remedy = carried !== undefined
+        ? `\`namespace: '${carried}'\` if that is the prefix every object name carries`
+        : 'and prefix every object name with it';
+    return `Object '${name}' is not copied: package '${sourcePackageId}' declares no \`namespace\`, so its `
+        + `namespace was derived from its id as '${derivedNamespace}', and '${name}' does not carry the `
+        + `'${derivedNamespace}_' prefix — ${carries}. Renamed into namespace '${targetNamespace}' it would be `
+        + `'${targetNamespace}_${name}', keeping a prefix the package never declared. Declare \`namespace\` on `
+        + `the package — ${remedy} — then install again.`;
 }
 
 /** [#30794] One item the rename into a `targetNamespace` cannot copy, and why. */
