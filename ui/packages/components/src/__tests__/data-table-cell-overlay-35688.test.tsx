@@ -63,7 +63,7 @@ afterEach(() => {
   }
 });
 
-function renderTable(extra: Record<string, unknown> = {}) {
+function renderTable(extra: Record<string, unknown> = {}, selection: React.ComponentProps<typeof GridCellSelectionProvider>['value'] = {}) {
   const DataTable = ComponentRegistry.get('data-table')!;
   const onCellChange = vi.fn();
   const schema = {
@@ -82,7 +82,7 @@ function renderTable(extra: Record<string, unknown> = {}) {
     ...extra,
   };
   const utils = render(
-    <GridCellSelectionProvider value={{}}>
+    <GridCellSelectionProvider value={selection}>
       <DataTable schema={schema} />
     </GridCellSelectionProvider>,
   );
@@ -147,7 +147,8 @@ describe('data-table — the editor and a cut-off cell draw on a layer over the 
     // The utility that reads the seed survives the per-type floor, which rides an inner box.
     expect(layer.className).toContain('min-w-[max(var(--radix-popper-anchor-width),var(--cell-overlay-min-w,0px))]');
     expect(layer.className).not.toMatch(/(^|\s)min-w-40(\s|$)/);
-    expect(layer.querySelector('.min-w-40')).not.toBeNull();
+    // objectstack#36023 — a typed value takes no per-type floor: it starts at the cell's width.
+    expect(layer.querySelector('.min-w-40')).toBeNull();
     fireEvent.keyDown(layer.querySelector('input')!, { key: 'Escape' });
     expect(t.editorLayer()).toBeNull();
     expect(t.previewLayer()).toBeNull();
@@ -189,5 +190,90 @@ describe('data-table — the editor and a cut-off cell draw on a layer over the 
     act(() => { box.dispatchEvent(new Event('scroll')); });
     expect(t.editorLayer()).toBeNull();
     expect(t.onCellChange).toHaveBeenCalledWith(0, 'name', 'Alpha 2', expect.anything());
+  });
+});
+
+describe('data-table — typed values edit flat in the cell; a rating is set in place (objectstack#36023)', () => {
+  it('the built-in text editor is the flat face, and the layer drops its padding, radius and shadow for it', () => {
+    const t = renderTable();
+    fireEvent.click(t.cell(0, 0));
+    fireEvent.keyDown(t.catcher(), { key: 'Enter' });
+    const layer = t.editorLayer()!;
+    const input = layer.querySelector<HTMLInputElement>('[data-in-cell-face="input"] input[data-in-cell-input]')!;
+    expect(input).toHaveValue('Alpha');
+    expect(input.className).toMatch(/\bborder-0\b/);
+    expect(input.className).toMatch(/\brounded-none\b/);
+    expect(input.className).not.toMatch(/(^|\s)h-10(\s|$)/);
+    // The layer reads the marked face (`:has()` utilities, spelled in full for Tailwind).
+    expect(layer.className).toContain('has-[[data-in-cell-face=input]]:p-0');
+    expect(layer.className).toContain('has-[[data-in-cell-face=input]]:rounded-none');
+    expect(layer.className).toContain('has-[[data-in-cell-face=input]]:border-2');
+    // The form-density height skips the flat input.
+    expect(layer.className).toContain(':not([data-in-cell-input])]:h-8');
+  });
+
+  function renderRating() {
+    const onCellChange = vi.fn();
+    const t = renderTable(
+      {
+        columns: [
+          { header: 'Name', accessorKey: 'name' },
+          {
+            header: 'Score',
+            accessorKey: 'score',
+            // The stars the rating cell renderer draws, one hit target each.
+            cell: (value: number) => (
+              <span>{[1, 2, 3, 4, 5].map((n) => <svg key={n} data-rating-star={n} data-filled={n <= value ? '' : undefined} />)}</span>
+            ),
+          },
+        ],
+        data: [{ id: '1', name: 'Alpha', score: 2 }],
+        onCellChange,
+      },
+      { describeCell: (_row, key) => (key === 'score' ? { stars: 5 } : null) },
+    );
+    return { ...t, onCellChange };
+  }
+
+  it('a digit on the selected rating sets that many stars, at most the scale; 0 and Backspace clear', () => {
+    const t = renderRating();
+    fireEvent.click(t.cell(0, 1));
+    fireEvent.keyDown(t.catcher(), { key: '3' });
+    expect(t.onCellChange).toHaveBeenLastCalledWith(0, 'score', 3, expect.anything());
+    fireEvent.keyDown(t.catcher(), { key: '9' });
+    expect(t.onCellChange).toHaveBeenLastCalledWith(0, 'score', 5, expect.anything());
+    fireEvent.keyDown(t.catcher(), { key: '0' });
+    expect(t.onCellChange).toHaveBeenLastCalledWith(0, 'score', null, expect.anything());
+    fireEvent.keyDown(t.catcher(), { key: '4' });
+    fireEvent.keyDown(t.catcher(), { key: 'Backspace' });
+    expect(t.onCellChange).toHaveBeenLastCalledWith(0, 'score', null, expect.anything());
+    expect(t.editorLayer()).toBeNull();
+  });
+
+  it('Enter, F2 and a double-click open no editor on a rating', () => {
+    const t = renderRating();
+    fireEvent.click(t.cell(0, 1));
+    fireEvent.keyDown(t.catcher(), { key: 'Enter' });
+    fireEvent.keyDown(t.catcher(), { key: 'F2' });
+    fireEvent.doubleClick(t.cell(0, 1));
+    expect(t.editorLayer()).toBeNull();
+    expect(t.onCellChange).not.toHaveBeenCalled();
+  });
+
+  it('the first click on a star only selects; a click on a star of the selected cell sets it', () => {
+    const t = renderRating();
+    const star = (n: number) => t.cell(0, 1).querySelector(`[data-rating-star="${n}"]`)!;
+    fireEvent.click(star(4));
+    expect(t.cell(0, 1)).toHaveAttribute('data-selected-cell');
+    expect(t.onCellChange).not.toHaveBeenCalled();
+    fireEvent.click(star(4));
+    expect(t.onCellChange).toHaveBeenCalledWith(0, 'score', 4, expect.anything());
+  });
+
+  it('CONTROL: without the stars fact a digit opens the editor as typing does', () => {
+    const t = renderTable();
+    fireEvent.click(t.cell(0, 0));
+    fireEvent.keyDown(t.catcher(), { key: '3' });
+    expect(t.onCellChange).not.toHaveBeenCalled();
   });
 });

@@ -143,6 +143,13 @@ interface RegistryFixture {
  * impossible to do quietly.
  */
 const REGISTRY_FIXTURES: Record<string, RegistryFixture> = {
+  'alert-dialog': {
+    url: 'https://ui.shadcn.com/r/styles/default/alert-dialog.json',
+    repoPath: 'apps/v4/public/r/styles/default/alert-dialog.json',
+    headSha: '8a7701ec27eb9cb8e0377db769fbe6d744113c52',
+    sha256: '49927179b99719522e455f7326c10d3d324f17fbc4ffd544569e0a94fbb292c7',
+    roundTrip: true,
+  },
   sheet: {
     url: 'https://ui.shadcn.com/r/styles/default/sheet.json',
     repoPath: 'apps/v4/public/r/styles/default/sheet.json',
@@ -446,8 +453,9 @@ describe('shadcn local patches — application to fresh upstream (objectstack#55
       'dialog-phone-close-touch-target',
     ]);
     expect(result.failed[0].found).toBe(0);
-    // The close-label family is independent of the class list and still lands.
-    expect(result.applied).toHaveLength(2);
+    // The close-label family (2) and the dialog surface family (3,
+    // objectstack#35980) are independent of the Close's class list and still land.
+    expect(result.applied).toHaveLength(5);
     expect(result.content).not.toContain('max-sm:size-11');
   });
 

@@ -824,6 +824,71 @@ const tabsTouchTargetPatches = [
 ];
 
 /**
+ * The shared dialog surface (objectstack-ai/objectstack#35980), for `dialog`
+ * and `alert-dialog`.
+ *
+ * Every modal dialog draws one look: a faint overlay with no blur, a white
+ * card with a hairline edge and a translucent outer ring, and controls one
+ * step smaller. Upstream draws an 80% black overlay and a `bg-background`
+ * card with `sm:rounded-lg`; the console used to restyle both with global
+ * `[role="dialog"]` rules, which also caught every popover and drawer.
+ *
+ * The payload stays OUT of `src/ui/`: the classes live in
+ * `packages/components/src/lib/dialog-surface.ts`. Each primitive gets one
+ * import and one class token on its overlay and on its content, placed just
+ * before `className`, so `tailwind-merge` resolves them over upstream's and a
+ * call site's own classes still win. Every `find` was written from the
+ * vendored registry bytes (`dialog.registry.txt`, `alert-dialog.registry.txt`).
+ *
+ * @param {string} primitive Human-readable primitive name, for messages.
+ * @param {string} importAnchor The upstream import line the new import follows.
+ * @returns {LocalPatch[]}
+ */
+function dialogSurfacePatches(primitive, importAnchor) {
+  const id = primitive.toLowerCase().replace(/\s+/g, '-');
+  const surfaceImport =
+    'import { DIALOG_CONTENT_SURFACE, DIALOG_OVERLAY_SURFACE } from "../lib/dialog-surface"';
+  const overlayEnd = 'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",\n';
+  const contentEnd = 'sm:rounded-lg",\n';
+  return [
+    {
+      id: `${id}-surface-import`,
+      issue: 'objectstack#35980',
+      reason: `Imports the shared dialog surface classes ${primitive}'s overlay and content append.`,
+      find: importAnchor,
+      replace: `${importAnchor}\n${surfaceImport}`,
+      marker: surfaceImport,
+      occurrences: 1,
+    },
+    {
+      id: `${id}-surface-overlay`,
+      issue: 'objectstack#35980',
+      reason:
+        `${primitive}'s overlay takes the shared faint dim in place of upstream's ` +
+        '80% black. Anchored on the end of the overlay class string, the only ' +
+        'string in the file that ends in `fade-in-0`.',
+      find: overlayEnd,
+      replace: `${overlayEnd}      DIALOG_OVERLAY_SURFACE,\n`,
+      marker: '      DIALOG_OVERLAY_SURFACE,\n',
+      occurrences: 1,
+    },
+    {
+      id: `${id}-surface-content`,
+      issue: 'objectstack#35980',
+      reason:
+        `${primitive}'s content takes the shared card (white, hairline edge, ` +
+        'outer ring, 12px corner, compact controls) over upstream\'s ' +
+        '`bg-background` / `shadow-lg` / `sm:rounded-lg`. Anchored on the end of ' +
+        'the content class string.',
+      find: contentEnd,
+      replace: `${contentEnd}        DIALOG_CONTENT_SURFACE,\n`,
+      marker: '        DIALOG_CONTENT_SURFACE,\n',
+      occurrences: 1,
+    },
+  ];
+}
+
+/**
  * The badge weight patch (objectstack#36047).
  *
  * The console sets text in two weights, 400 and 500; upstream's `Badge` is
@@ -856,7 +921,15 @@ const badgeWeightPatches = [
  */
 export const LOCAL_PATCHES = {
   sheet: [...i18nCloseLabelPatches('Sheet'), ...sheetHideOverlayPatches, ...sheetCloseTouchTargetPatches],
-  dialog: [...i18nCloseLabelPatches('Dialog'), ...phoneCloseTouchTargetPatches('Dialog')],
+  dialog: [
+    ...i18nCloseLabelPatches('Dialog'),
+    ...phoneCloseTouchTargetPatches('Dialog'),
+    ...dialogSurfacePatches('Dialog', 'import { X } from "lucide-react"'),
+  ],
+  'alert-dialog': dialogSurfacePatches(
+    'AlertDialog',
+    'import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog"',
+  ),
   sidebar: [
     ...sidebarCookieReadPatches,
     ...sidebarOptionalContextPatches,

@@ -14,6 +14,7 @@ import {
   Card,
   CardContent,
   Badge,
+  ObjectIconTile,
 } from '@object-ui/components';
 import {
   Search,
@@ -183,14 +184,19 @@ export function SearchResultsPage() {
     const order: string[] = [];
     const byObject = new Map<
       string,
-      { label: string; icon?: string; hits: typeof recordHits }
+      { label: string; icon?: string; color?: string; hits: typeof recordHits }
     >();
     for (const hit of recordHits) {
       let group = byObject.get(hit.objectName);
       if (!group) {
         const objDef = objectsByName.get(hit.objectName);
         const label = resolveKeyedI18nLabel(objDef?.label, t) || hit.objectLabel;
-        group = { label, icon: objDef?.icon ?? hit.icon, hits: [] };
+        group = {
+          label,
+          icon: objDef?.icon ?? hit.icon,
+          color: typeof objDef?.color === 'string' ? objDef.color : hit.color,
+          hits: [],
+        };
         byObject.set(hit.objectName, group);
         order.push(hit.objectName);
       }
@@ -273,7 +279,7 @@ export function SearchResultsPage() {
             return (
               <div key={`records:${group.objectName}`}>
                 <h2 className="text-sm font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
-                  <GroupIcon className="h-4 w-4" />
+                  <ObjectIconTile glyph={GroupIcon} color={group.color} />
                   {group.label}
                   <Badge variant="secondary" className="ml-1 text-xs">
                     {group.hits.length}
@@ -290,9 +296,7 @@ export function SearchResultsPage() {
                       >
                         <Card className="hover:bg-accent/50 transition-colors cursor-pointer">
                           <CardContent className="flex items-center gap-3 p-3">
-                            <div className="flex h-8 w-8 items-center justify-center rounded bg-primary/10 text-primary">
-                              <HitIcon className="h-4 w-4" />
-                            </div>
+                            <ObjectIconTile glyph={HitIcon} color={group.color} size="lg" />
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-medium truncate">{hit.display}</p>
                               {hit.subtitle && (

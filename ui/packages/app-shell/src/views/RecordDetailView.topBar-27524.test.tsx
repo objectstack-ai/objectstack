@@ -71,7 +71,8 @@ const APP = 'demo';
 const LEAD = 'crm_lead';
 const BASE_FIELDS = { id: { type: 'text', label: 'Id' }, name: { type: 'text', label: 'Name' } };
 const OBJECTS = [
-  { name: LEAD, label: 'Lead', pluralLabel: 'Leads', fields: BASE_FIELDS },
+  // objectstack#35985 — a coloured object, so the record row's tile is pinned below.
+  { name: LEAD, label: 'Lead', pluralLabel: 'Leads', icon: 'user', color: 'orange', fields: BASE_FIELDS },
   { name: 'crm_task', label: 'Task', pluralLabel: 'Tasks', fields: { ...BASE_FIELDS, lead: { type: 'lookup', reference: LEAD, label: 'Lead' } } },
 ];
 const ROWS = ['r-1', 'r-2', 'r-3'];
@@ -359,5 +360,30 @@ describe('the pane\'s top bar names the record (objectstack#27524)', () => {
     // The step keys stay: j names the next record once its header draws.
     fireEvent.keyDown(document.body, { key: 'j' });
     await waitFor(() => expect(paneTitle()).toBe('Record r-2'), { timeout: 5000 });
+  });
+});
+
+describe('the record row leads with the object\'s colour tile (objectstack#35985)', () => {
+  it('on the page: the tile in the object\'s colour, before the record\'s name', async () => {
+    mountPage(`/apps/${APP}/${LEAD}/record/r-1`);
+    await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
+    const record = pageBar()!.querySelector('[data-record-top-bar-record]') as HTMLElement;
+    const tiles = record.querySelectorAll('[data-object-icon-tile]');
+    expect(tiles).toHaveLength(1);
+    expect(tiles[0].getAttribute('data-object-icon-tile')).toBe('orange');
+  });
+
+  it('in a pane: the pane\'s record row draws the same tile', async () => {
+    render(
+      <MemoryRouter initialEntries={[`/apps/${APP}/${LEAD}?recordId=r-1`]}>
+        <MetadataCtx.Provider value={metadata}>
+          <PaneHost dataSource={makeDataSource()} />
+        </MetadataCtx.Provider>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(document.querySelector('[data-record-bar-title] h1')?.textContent).toBe('Record r-1'), { timeout: 5000 });
+    const tiles = document.querySelectorAll('[data-record-top-bar] [data-object-icon-tile]');
+    expect(tiles).toHaveLength(1);
+    expect(tiles[0].getAttribute('data-object-icon-tile')).toBe('orange');
   });
 });

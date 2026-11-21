@@ -34,18 +34,7 @@ import { useDetailTranslation } from './useDetailTranslation';
 import { hasCellValue } from './emptiness';
 import { useDefaultRecordPage } from './defaultRecordPage';
 import { dropFieldPredicateHidden, lazyPredicateRecord } from './fieldPredicateVisibility';
-
-/**
- * The field type a `formula` reads as, when its declared `returnType` is one
- * the spec reads AS a field type: `currency` ("an amount of money … as a
- * currency field declares it") and `percent` ("read and displayed as a
- * `percent` field reads its stored value"). `undefined` for any other field
- * or return type.
- */
-function formulaReadsAsFieldType(type: string | undefined, returnType: unknown): 'currency' | 'percent' | undefined {
-  if (type !== 'formula') return undefined;
-  return returnType === 'currency' || returnType === 'percent' ? returnType : undefined;
-}
+import { formulaReadsAsFieldType } from './formulaFieldType';
 
 export interface HeaderHighlightProps {
   fields: HighlightField[];
@@ -270,8 +259,9 @@ export const HeaderHighlight: React.FC<HeaderHighlightProps> = ({
 
             // A `formula` declaring a return type the spec reads AS a field
             // type (`currency`, `percent`) is a figure of that type, drawn by
-            // that type's cell, so it is a KPI chip as that field is. Every
-            // other formula keeps its own type here.
+            // that type's cell, so it is a KPI chip as that field is. A `date`
+            // formula reads as a date, which is no KPI. Every other formula
+            // keeps its own type here.
             const valueType = formulaReadsAsFieldType(resolvedType, objectDefField?.returnType) ?? resolvedType;
             const isKpi =
               valueType === 'number' ||

@@ -16,7 +16,9 @@
  *   reads) against the case's tokens; for a trigger case, whether the turn
  *   loaded the bundle (a `Skill` launch of it, or a `Read` of a file under its
  *   `.claude/skills/BUNDLE/`) against `should_trigger`. A trigger case runs on
- *   the with-skill arm only: without the bundle nothing can be loaded;
+ *   the with-skill arm only (without the bundle nothing can be loaded), in a
+ *   project holding the round's competing set beside its bundle
+ *   ({@link installedFor}), and its record names any other bundle it loaded;
  * - `invalid` — the turn did not run the arm it was meant to: the with-skill
  *   arm's init line does not list the bundle, or the no-skill arm's lists a
  *   bundle of the catalog. Out of the denominator, and counted;
@@ -60,6 +62,8 @@ export type LoadEvidence = 'skill-tool' | 'read';
 export interface TriggerReading {
   shouldTrigger: boolean;
   loadedBy: LoadEvidence[];
+  /** Every other catalog bundle the turn loaded (a neighbour that took the prompt); absent on a record written before. */
+  othersLoaded?: string[];
 }
 
 export interface RateLimitReading {
@@ -176,6 +180,8 @@ export interface SkillEvalRunRecord {
   skillFilesRead?: string[];
   /** A trigger case's reading: whether the turn loaded the bundle, and how. */
   trigger?: TriggerReading;
+  /** A trigger turn's installed bundles, its own first; absent on a record written before ⇒ its own alone. */
+  installed?: string[];
   /** The tools the turn called, in order. */
   toolCalls: string[];
   permissionDenials?: number;
@@ -211,6 +217,8 @@ export interface VerdictFacts {
   skillsInvoked: readonly string[];
   /** Absent on a record written before the runner kept it: read as none. */
   skillFilesRead?: readonly string[];
+  /** The bundles the turn's project held; absent ⇒ the case's own alone. */
+  installed?: readonly string[];
   resultSubtype?: string;
   answer?: string;
 }
@@ -227,6 +235,16 @@ export interface Verdict {
 /** The arms a case runs on: both, or the with-skill arm alone for a trigger case. Pure. */
 export const armsOf = (c: Pick<SkillEvalCase, 'shouldTrigger'>): readonly Arm[] => (c.shouldTrigger === undefined ? ARMS : ['with-skill']);
 
+/**
+ * The bundles a with-skill turn's project holds: the case's own, and for a
+ * trigger case the competing set `field` beside it (`--trigger-field
+ * selection`, the round's selection), so the description competes as it does
+ * in a real project; a behaviour case keeps its bundle alone, so its two arms
+ * still differ in exactly that bundle. Pure.
+ */
+export const installedFor = (c: Pick<SkillEvalCase, 'bundle' | 'shouldTrigger'>, field: readonly string[] | undefined): string[] =>
+  c.shouldTrigger !== undefined && field ? [...new Set([c.bundle, ...field])] : [c.bundle];
+
 /** How the turn reached `bundle`'s text, in a fixed order; empty ⇒ it did not. Pure. */
 export function loadEvidence(bundle: string, f: Pick<VerdictFacts, 'skillsInvoked' | 'skillFilesRead'>): LoadEvidence[] {
   const by: LoadEvidence[] = [];
@@ -241,11 +259,13 @@ export function loadEvidence(bundle: string, f: Pick<VerdictFacts, 'skillsInvoke
  * The with-skill arm is shown installed by the init line listing the bundle.
  * A bundle the init line never lists (`user-invocable: false`) is graded on
  * its answer, with `armEvidence` saying whether the turn launched it; a listed
- * bundle absent from the line is `invalid`. The no-skill arm is `invalid` when
+ * bundle absent from the line is `invalid`, the case's own or one installed
+ * beside it. The no-skill arm is `invalid` when
  * its init line lists a catalog bundle or it launches one.
  *
  * A trigger case is judged on {@link loadEvidence}, not on its answer: `pass`
- * when the turn loaded the bundle exactly when `shouldTrigger` says it should.
+ * when the turn loaded the bundle exactly when `shouldTrigger` says it should;
+ * any other bundle it loaded is named in `othersLoaded` and never counts.
  * A turn that loaded it is judged however it ended (the load already
  * happened); one that did not is judged only when it ended `success`, since a
  * turn cut short may have been about to load it. On the no-skill arm it is
@@ -264,6 +284,8 @@ export function verdictOf(c: SkillEvalCase, arm: Arm, f: VerdictFacts, catalog: 
     if (f.bundlesLoaded.includes(c.bundle)) armEvidence = 'init-line';
     else if (catalog.unlisted.includes(c.bundle)) armEvidence = f.skillsInvoked.includes(c.bundle) ? 'launched' : 'not-shown';
     else return { verdict: 'invalid', reason: `the with-skill turn's init line does not list \`${c.bundle}\``, ...none };
+    const absent = (f.installed ?? []).filter((b) => b !== c.bundle && !catalog.unlisted.includes(b) && !f.bundlesLoaded.includes(b));
+    if (absent.length) return { verdict: 'invalid', reason: `the with-skill turn's init line does not list ${absent.map((b) => `\`${b}\``).join(', ')}, installed beside \`${c.bundle}\``, ...none };
   } else {
     if (f.bundlesLoaded.length > 0) return { verdict: 'invalid', reason: `the no-skill turn's init line lists ${f.bundlesLoaded.map((b) => `\`${b}\``).join(', ')}`, ...none };
     const launched = f.skillsInvoked.filter((s) => catalog.bundles.includes(s));
@@ -271,7 +293,9 @@ export function verdictOf(c: SkillEvalCase, arm: Arm, f: VerdictFacts, catalog: 
   }
   const ev = armEvidence ? { armEvidence } : {};
   if (c.shouldTrigger !== undefined) {
-    const trigger: TriggerReading = { shouldTrigger: c.shouldTrigger, loadedBy: loadEvidence(c.bundle, f) };
+    // Its own bundle decides the verdict: a neighbour loaded instead leaves a should-load case failed.
+    const othersLoaded = catalog.bundles.filter((b) => b !== c.bundle && loadEvidence(b, f).length > 0);
+    const trigger: TriggerReading = { shouldTrigger: c.shouldTrigger, loadedBy: loadEvidence(c.bundle, f), othersLoaded };
     const loaded = trigger.loadedBy.length > 0;
     if (!loaded && f.resultSubtype !== 'success') {
       return { verdict: 'error', reason: `the turn ended \`${f.resultSubtype ?? 'absent'}\` without loading the bundle, so not loading it is not shown`, ...none, ...ev, trigger };
@@ -304,6 +328,7 @@ export function judgeTurn(
   catalog: CatalogView,
   startedAt: string,
   grade: Grader = gradeAnswer,
+  installed?: readonly string[],
 ): SkillEvalRunRecord {
   const turn = parseStreamJson(run.stdout);
   const facts = readStreamFacts(run.stdout);
@@ -320,6 +345,7 @@ export function judgeTurn(
     bundlesLoaded,
     skillsInvoked: facts.skillsInvoked,
     skillFilesRead: facts.skillFilesRead,
+    ...(installed && c.shouldTrigger !== undefined ? { installed: [...installed] } : {}),
     toolCalls: turn.toolCalls.map((t) => t.rawName),
     ...(facts.permissionDenials !== undefined ? { permissionDenials: facts.permissionDenials } : {}),
     ...(facts.deniedTools?.length ? { deniedTools: facts.deniedTools } : {}),
@@ -333,7 +359,7 @@ export function judgeTurn(
     startedAt,
     ...(facts.answer !== undefined ? { answer: facts.answer } : {}),
   } as const;
-  const v = verdictOf(c, arm, { process: run.process, initSeen: facts.initSkills !== undefined, bundlesLoaded, skillsInvoked: facts.skillsInvoked, skillFilesRead: facts.skillFilesRead, ...(turn.meta.resultSubtype ? { resultSubtype: turn.meta.resultSubtype } : {}), ...(facts.answer !== undefined ? { answer: facts.answer } : {}) }, catalog, grade);
+  const v = verdictOf(c, arm, { process: run.process, initSeen: facts.initSkills !== undefined, bundlesLoaded, skillsInvoked: facts.skillsInvoked, skillFilesRead: facts.skillFilesRead, ...(installed ? { installed } : {}), ...(turn.meta.resultSubtype ? { resultSubtype: turn.meta.resultSubtype } : {}), ...(facts.answer !== undefined ? { answer: facts.answer } : {}) }, catalog, grade);
   return applyVerdict(base, v);
 }
 
@@ -361,7 +387,7 @@ export function caseDrift(rec: Pick<SkillEvalRunRecord, 'caseHash'>, c: SkillEva
 export function regradeRecord(rec: SkillEvalRunRecord, c: SkillEvalCase, catalog: CatalogView, grade: Grader = gradeAnswer): SkillEvalRunRecord {
   if (caseDrift(rec, c) === 'changed') throw new Error(`--regrade: \`${rec.key}\` has changed since the turn ran (record ${rec.caseHash}, now ${hashCase(c)}); a changed case is set apart, never regraded`);
   const { reason: _reason, armEvidence: _ev, regradedFrom: _was, trigger: _trigger, ...rest } = rec;
-  const v = verdictOf(c, rec.arm, { process: rec.process, initSeen: rec.reason !== NO_INIT_LINE, bundlesLoaded: rec.bundlesLoaded, skillsInvoked: rec.skillsInvoked, ...(rec.skillFilesRead ? { skillFilesRead: rec.skillFilesRead } : {}), ...(rec.resultSubtype ? { resultSubtype: rec.resultSubtype } : {}), ...(rec.answer !== undefined ? { answer: rec.answer } : {}) }, catalog, grade);
+  const v = verdictOf(c, rec.arm, { process: rec.process, initSeen: rec.reason !== NO_INIT_LINE, bundlesLoaded: rec.bundlesLoaded, skillsInvoked: rec.skillsInvoked, ...(rec.skillFilesRead ? { skillFilesRead: rec.skillFilesRead } : {}), ...(rec.installed ? { installed: rec.installed } : {}), ...(rec.resultSubtype ? { resultSubtype: rec.resultSubtype } : {}), ...(rec.answer !== undefined ? { answer: rec.answer } : {}) }, catalog, grade);
   const out = applyVerdict(rest, v);
   const asRun = rec.regradedFrom ?? rec.verdict;
   return v.verdict === asRun ? out : { ...out, regradedFrom: asRun };
@@ -501,6 +527,8 @@ export interface RoundOptions {
   maxUtilization: number;
   model?: string;
   effort?: string;
+  /** The competing set every trigger turn installs beside its bundle ({@link installedFor}); absent ⇒ its own alone. */
+  triggerField?: readonly string[];
   /** Injected in tests; the live process runner otherwise. */
   runTurn?: typeof runTurnProcess;
   onRecord?: (r: SkillEvalRunRecord, done: number, total: number) => void;
@@ -544,12 +572,13 @@ export async function executeRound(jobs: readonly RoundJob[], opts: RoundOptions
       const at = next++;
       started.add(at);
       const job = jobs[at]!;
-      const dir = prepareArmWorkdir(job.arm, job.case.bundle, opts.skillsRoot);
+      const installed = installedFor(job.case, opts.triggerField);
+      const dir = prepareArmWorkdir(job.arm, installed, opts.skillsRoot);
       const startedAt = new Date().toISOString();
       try {
         placeCaseFiles(job.case.files, job.case.bundle, opts.skillsRoot, dir.cwd);
         const run = await runTurn(opts.bin, armArgs(dir.mcpConfigPath, opts), { cwd: dir.cwd, input: job.case.prompt, timeoutMs: opts.caseTimeoutMs, env });
-        const rec = judgeTurn(job.case, job.arm, job.repeat, run, opts.catalog, startedAt);
+        const rec = judgeTurn(job.case, job.arm, job.repeat, run, opts.catalog, startedAt, gradeAnswer, installed);
         records.push(rec);
         writeFileSync(join(runsDir, runRecordFile(job)), JSON.stringify(rec, null, 2) + '\n');
         opts.onRecord?.(rec, records.length, jobs.length);
