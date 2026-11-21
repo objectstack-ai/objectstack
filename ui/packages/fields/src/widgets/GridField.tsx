@@ -32,6 +32,7 @@ import { toDomProps } from './toDomProps.js';
 import { PHONE_TOUCH_HEIGHT, PHONE_TOUCH_SQUARE } from './touchTarget.js';
 import { toHostGroupProps } from './toHostGroupProps.js';
 import { fieldHelpText } from '../fieldHelpText.js';
+import { isImeKey } from './imeKey.js';
 import type { InlineGridColumn } from '@objectstack/spec/data';
 import { GRID_FIELD_RETIRED_KEYS, type GridFieldMetadata, type GridFieldRetiredKey } from '@object-ui/types';
 
@@ -1160,6 +1161,10 @@ function GridFieldBody({
 
   const onCellKeyDown = useCallback(
     (e: React.KeyboardEvent, rowIdx: number, colIdx: number) => {
+      // objectstack#35996 — Enter and the arrows pressed while an input
+      // method composes pick or move its candidate: the grid neither moves
+      // nor appends a line on them.
+      if (isImeKey(e)) return;
       if (e.key === 'Enter' && rowIdx === rows.length - 1 && allowAdd && !isList) {
         e.preventDefault();
         addRow(colIdx);

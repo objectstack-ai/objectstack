@@ -41,6 +41,10 @@ export { renderChildren, renderNodeSlot, isEmptyNodeSlot } from './lib/utils';
 export { cva } from 'class-variance-authority';
 export { getLazyIcon, isLucideIconName, LazyIcon, toKebabIconName } from './lib/lazy-icon';
 
+// The one "does the input method own this key?" predicate (objectstack#35996):
+// the list grid and the field widgets of `@object-ui/fields` both ask it.
+export { isImeKey } from './lib/ime-key';
+
 // The inline Markdown subset `element:text` draws (objectui#12778). Exported
 // because app-shell's marketplace README renderer draws its inline text with
 // the same one, so both share the raw-HTML skip and the link-scheme refusal.

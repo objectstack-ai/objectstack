@@ -14,15 +14,12 @@
 import type { TableColumn } from '@object-ui/types';
 
 /**
- * A key the input method owns: pressed while a composition is open
- * (`isComposing`), or the 229 a browser reports for the key that ends one
- * (Safari raises the candidate-picking Enter after `compositionend`, as 229).
- * Enter, Esc, Tab and the arrows pressed then pick or move a candidate; the
- * table must not commit, cancel or move on them.
+ * The input-method key guard the table asks before it commits, cancels or
+ * moves on Enter, Esc, Tab or an arrow. Defined once in `../../lib/ime-key`
+ * (objectstack#35996) and passed through here so the table keeps importing
+ * its key helpers from one module.
  */
-export function isImeKey(e: { nativeEvent: KeyboardEvent; keyCode?: number }): boolean {
-  return e.nativeEvent.isComposing === true || e.nativeEvent.keyCode === 229 || e.keyCode === 229;
-}
+export { isImeKey } from '../../lib/ime-key';
 
 /**
  * A press on a control a cell draws (a record link, a phone or mail link, a
