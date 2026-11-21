@@ -7423,6 +7423,116 @@
           "ref": "#35783"
         }
       ]
+    },
+    {
+      "id": "records-forms.record-open-path-and-header",
+      "title": "An object's list opens a record one way — the name opens the full page, the hover icon beside it the side drawer — and the record's header is two rows: the way through the list (↑ ↓, 「第 N 条，共 M 条 · 视图名」, ✕) over the record (its name, chips and up to three actions), with the tabs right under it",
+      "since": "v18.7",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase (the live lane's `ui/e2e/live/ci/start-backend.sh`, or `pnpm dev -- --fresh --seed-admin`)",
+          "the showcase_account list (14 seeded accounts, a synthesized record page with a tab row) and the showcase_task list (its showcase_task_detail page authors three record_header actions: Mark Done, Log Time, Archive)"
+        ]
+      },
+      "steps": [
+        "at 1280×900 open the showcase_account list and click the second account's name; read the URL and the header's two rows",
+        "reload the page; read the navigation row again; press ↓; then click the view's name (「All Records」) in the navigation row",
+        "on the list, hover the second row and click the 「在侧边打开」 icon beside the name; read the URL, the drawer's edges and its header; press ↓ in the drawer, then its 「整页打开」",
+        "paste the address of an account record into a fresh tab (no list behind it); read the navigation row; click ✕",
+        "open a backlog task from the showcase_task list and read the record row's buttons; open a task in the drawer at 820 px wide and read them again",
+        "at 390×844 with touch, open the account list and tap a record"
+      ],
+      "acceptance": [
+        {
+          "clause": "the record's name opens the full page and nothing else does: no reader setting and no `navigation.mode` picks the drawer instead",
+          "oracle": "dom",
+          "verify": "after steps[0] the URL is …/showcase_account/record/<id> with no ?recordId=, and no drawer card ([data-record-drawer-card]) is drawn",
+          "evidence": "the URL and a screenshot"
+        },
+        {
+          "clause": "the page remembers the list it came from, across a reload: ↑ ↓ walk the list's rows in its order, the navigation row reads 「2 of 14 · All Records」, and the view's name goes back to the list",
+          "oracle": "dom",
+          "verify": "[data-record-top-bar-position] reads '2 of 14' and [data-record-top-bar-scope] 'All Records' before and after the reload; after ↓ the position reads '3 of 14'; the scope click lands on the list",
+          "evidence": "the navigation row before and after the reload"
+        },
+        {
+          "clause": "the icon beside the name, shown while the row is hovered, opens the record in a side drawer over the list, a floating card 8 px off the window's top, right and bottom edges, with 「整页打开」 and ✕ and no full-width state",
+          "oracle": "dom",
+          "verify": "the icon's opacity is 0 at rest and 1 on hover; after the click the URL carries ?recordId=, the list is still drawn, the card's box is 8 px from three edges with a rounded corner, and its frame holds exactly two buttons",
+          "evidence": "the drawer screenshot"
+        },
+        {
+          "clause": "the header is two rows on the page and in the drawer: a 40 px navigation row (the stepper and position, or the object when no list is behind it; ✕ at its far right) over a 48 px record row (icon, the name at 16 px, chips, actions)",
+          "oracle": "dom",
+          "verify": "[data-record-top-bar-rows='2'] holds [data-record-top-bar-nav] (40 px) above [data-record-top-bar-record] (48 px); the close button ends within 12 px of the row's right edge; with no list behind it there is no [data-record-top-bar-stepper] and the object crumb shows, and ✕ goes to the object's list",
+          "evidence": "the three figure-40 screenshots"
+        },
+        {
+          "clause": "the record row shows three authored actions by default, and folds those that do not fit its width into ⋯ rather than wrapping",
+          "oracle": "dom",
+          "verify": "on a backlog task Mark Done, Log Time and Archive stand inline beside Edit and ⋯; in the 820 px drawer every visible button of [data-record-top-bar-actions] shares one top",
+          "evidence": "both screenshots"
+        },
+        {
+          "clause": "the page's first row (its tab row, or a stage bar) starts right under the header, with no blank band",
+          "oracle": "dom",
+          "verify": "the tab row's top minus the header's bottom is at most 12 px, on the page and in the drawer",
+          "evidence": "the measured gap"
+        },
+        {
+          "clause": "on a phone there is no side-drawer icon; a tap opens the page, whose one-row bar still knows the list",
+          "oracle": "dom",
+          "verify": "no [data-testid='record-open-in-panel'] is drawn; after the tap the URL is the record's page and the bar reads '2 / 14', also after a reload",
+          "evidence": "the phone screenshot"
+        },
+        {
+          "clause": "the pins pass at the run subject sha",
+          "oracle": "test",
+          "verify": "run ui/e2e/live/record-open-path-35854.spec.ts and ui/e2e/live/record-topbar-35853.spec.ts with the live config (playwright.live.config.ts), and ui/packages/app-shell/src/views/ObjectView.recordOpenPath-35854.test.tsx and ui/packages/components/src/__tests__/record-top-bar-two-rows-35853.test.tsx from ui/ with vitest; each reports ≥1 test and 0 failed",
+          "evidence": "the Playwright and vitest summary lines, with the subject sha"
+        }
+      ],
+      "negative": [
+        "a name click that opens the drawer, or a 「打开记录：抽屉 / 整页」 setting anywhere in the list's view settings, is a FAIL",
+        "a page opened from a list that loses its position or view name on a reload is a FAIL",
+        "a list view declaring navigation.mode 'none' (or preventNavigation) whose rows open a record is a FAIL: 'none' still means rows open nothing",
+        "a blank band of more than 12 px between the header and the tab row is a FAIL"
+      ],
+      "traps": [
+        "hydration-race",
+        "shared-browser-tab"
+      ],
+      "automated": {
+        "kind": "e2e",
+        "ref": "ui/e2e/live/record-open-path-35854.spec.ts (name → page, hover icon → drawer, provenance across a reload, phone), ui/e2e/live/record-topbar-35853.spec.ts (the two rows on the page and in the drawer, three actions, the width fold, the gap above the tabs, the phone bar); both in the live lane, not in the required `:ci` allowlist"
+      },
+      "source": [
+        "ui/packages/app-shell/src/views/objectViewRecordNavigation.ts",
+        "ui/packages/app-shell/src/views/objectViewOpenAsPage.tsx#OpenInSidePanelButton",
+        "ui/packages/app-shell/src/views/recordDrawerStack.tsx#useRecordPageReturn",
+        "ui/packages/components/src/custom/record-top-bar.tsx#RecordTopBar",
+        "ui/packages/components/src/custom/navigation-overlay.tsx",
+        "ui/packages/components/src/renderers/layout/containers.tsx#PageHeaderActions",
+        "ui/packages/app-shell/src/views/RecordDetailView.tsx",
+        "#35854",
+        "#35853"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-20",
+          "change": "initial — the one open path (#35854, maintainer ruling 「废弃」 on the open preference and navigation.mode) and the two-row record header (#35853, with the gap above the tabs of #35745), read from the PR branch and driven live against the showcase",
+          "ref": "#35854"
+        }
+      ]
     }
   ]
 }

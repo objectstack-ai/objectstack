@@ -31,6 +31,7 @@ import { useObjectTranslation } from '@object-ui/react';
 import { Loader2, Paperclip, ShieldAlert } from 'lucide-react';
 import type { ApprovalActionAttachmentLite, ApprovalActionLite } from '../../hooks/useRecordApprovals.js';
 import { isViaOverrideRow } from '../../utils/approvalOverride.js';
+import { isSystemNote } from '../../utils/approvalSystemNote.js';
 import { formatIdentity } from '../../utils/approverIdentity.js';
 
 /** Timeline dot color per action kind — same palette as the Approval Center. */
@@ -100,7 +101,8 @@ export function ApprovalActionTimeline({ actions, loading = false, stepText }: A
   }, [authFetch, tr]);
 
   const actionText = (a: ApprovalActionLite): string =>
-    a.action === 'submit' ? tr('actSubmit', 'Submitted')
+    isSystemNote(a) ? tr('actSystemNote', 'System note')
+      : a.action === 'submit' ? tr('actSubmit', 'Submitted')
       : a.action === 'approve' ? tr('actApprove', 'Approved')
       : a.action === 'reject' ? tr('actReject', 'Rejected')
       : a.action === 'recall' ? tr('actRecall', 'Recalled')
@@ -116,7 +118,9 @@ export function ApprovalActionTimeline({ actions, loading = false, stepText }: A
   const actorName = (a: ApprovalActionLite): string =>
     a.actor_id === 'system:sla'
       ? tr('systemSlaActor', 'System (SLA)')
-      : a.actor_name ?? formatIdentity(a.actor_id);
+      : !a.actor_id
+        ? tr('systemActor', 'System')
+        : a.actor_name ?? formatIdentity(a.actor_id);
 
   const actionStepText = (a: ApprovalActionLite): string | null => stepText?.(a) ?? null;
 

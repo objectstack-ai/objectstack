@@ -280,8 +280,17 @@ export interface NavigationOverlayProps {
    * Keep the step keys (`↑` / `↓` / `k` / `j`) but draw no counter and no
    * `↓` `↑` pair (objectstack#35593): a drawer over its list shows the list
    * beside it, so its header names neither the place nor the neighbours.
+   * objectstack#35853 reversed that: the console's drawer no longer passes
+   * it, and draws ↑ ↓ and 「第 N 条，共 M 条」 in its navigation row.
    */
   stepperHidden?: boolean;
+  /**
+   * The bar's record row (objectstack#35853): the record's icon, name and
+   * tags, or the slot the record header portals them into. Handed, the bar
+   * is two rows — navigation (`←`, `trail`, ↑ ↓ and the counter; ⤢ and ✕ at
+   * the right) over the record (this, the button group, `toggles`).
+   */
+  recordRow?: React.ReactNode;
 }
 
 /**
@@ -473,6 +482,7 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   toggles,
   actionSlotRef,
   stepperHidden = false,
+  recordRow,
 }) => {
   // Every chrome string below is locale-driven (objectstack#5430 for the two
   // close affordances, objectstack#5506 for the rest). Must stay above the
@@ -562,8 +572,10 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
 
   /* The bar — the record's top bar (objectstack#27524, Target 7, after
      objectstack#26679): the left end holds `←` and the host's breadcrumb; the
-     right end the counter and ↓ ↑, the host's panel switches, then ↗, ⤢ / ⤡
-     and ✕. */
+     right end the counter and ↓ ↑, the host's panel switches, then ⤢ and ✕.
+     With a `recordRow` it is two rows (objectstack#35853): `←`, the
+     breadcrumb, ↑ ↓ and the counter over the record, ⤢ and ✕ at the far
+     right of the first. */
   const bar = (
     <RecordTopBar
       leadingTestId="record-drawer-leading"
@@ -579,6 +591,7 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
       }
       stepper={stepperHidden ? undefined : stepper}
       actionSlotRef={actionSlotRef}
+      record={recordRow}
       toggles={toggles}
       frame={
         <>

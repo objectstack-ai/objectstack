@@ -413,7 +413,12 @@ function useGoHomeShortcut(enabled: boolean, homePath: string): void {
 // header doesn't ship phantom collaborators in production.
 const EMPTY_PRESENCE_USERS: PresenceUser[] = [];
 
-export type AppHeaderVariant = 'app' | 'home' | 'orgs' | 'studio';
+/**
+ * `docs` is the documentation portal's bar (`/docs/*`, objectstack#35424): the
+ * home bar — the product mark and name, the search in the middle, the
+ * utilities — with a 「/ Documentation」 crumb after the product name.
+ */
+export type AppHeaderVariant = 'app' | 'home' | 'orgs' | 'studio' | 'docs';
 
 export interface AppHeaderProps {
   variant?: AppHeaderVariant;
@@ -860,7 +865,8 @@ export function AppHeader({
   // search field and the utilities, so the field is the bar's middle, wider
   // than inside an app and named for what the palette finds. The `orgs` and
   // `studio` variants keep the search at the cluster's left edge.
-  const isHomeSearch = resolvedVariant === 'home' && hasCommandPalette;
+  // The docs portal's bar is the home bar with one crumb (objectstack#35424).
+  const isHomeSearch = (resolvedVariant === 'home' || resolvedVariant === 'docs') && hasCommandPalette;
   const centersSearch = (isApp && hasCommandPalette) || isHomeSearch;
   const searchLabel = isHomeSearch
     ? t('home.search', { defaultValue: 'Search apps, records, pages…' })
@@ -947,7 +953,7 @@ export function AppHeader({
           />
         )}
 
-        {resolvedVariant === 'home' && (
+        {(resolvedVariant === 'home' || resolvedVariant === 'docs') && (
           <span className="hidden sm:inline ml-2 text-sm font-semibold tracking-tight">
             {getProductName()}
           </span>
@@ -977,6 +983,19 @@ export function AppHeader({
             <span className="text-sm font-medium text-foreground/80 px-1.5">
               {t('organizations.title', { defaultValue: 'Organizations' })}
             </span>
+          </>
+        )}
+
+        {resolvedVariant === 'docs' && (
+          <>
+            <PathSep />
+            <Link
+              to="/docs"
+              data-testid="app-bar-docs-crumb"
+              className="text-sm font-medium text-foreground/80 px-1.5 hover:text-foreground"
+            >
+              {t('help.documentation', { defaultValue: 'Documentation' })}
+            </Link>
           </>
         )}
 

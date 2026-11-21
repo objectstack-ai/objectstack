@@ -213,6 +213,20 @@ function HomeRoute() {
   );
 }
 
+/**
+ * The docs portal's frame (objectstack#35424): Home's layout with the docs bar,
+ * around the lazily loaded docs layout, so the bar is up while the portal's
+ * chunk loads.
+ */
+function DocsPortalRoute() {
+  const { user } = useAuth();
+  return (
+    <DefaultHomeLayout userId={user?.id} variant="docs">
+      <Suspense fallback={<LoadingScreen />}><DocsLayout /></Suspense>
+    </DefaultHomeLayout>
+  );
+}
+
 export function App() {
   /**
    * The console's ONE upload destination, mounted above `ConsoleShell` so it
@@ -351,26 +365,6 @@ export function App() {
               * layer too late for a capability whose declared meaning is
               * "Enter the Studio metadata-design surfaces". */}
             {studioRoutes}
-            {/* Package documentation (ADR-0046): a platform-level portal
-              * lists every installed `doc` (grouped by package), and one
-              * viewer route renders any item; cross-references between docs
-              * resolve to that same viewer route. Both are app-independent. */}
-            {/* Docs portal (ADR-0046 §6). The layout fetches book + doc once
-              * and shares it with every child route via context. Children:
-              *   index        → book index
-              *   :slug        → a book landing, or a flat-doc permalink that
-              *                  redirects to its canonical /docs/<book>/<name>
-              *   :slug/:name  → in-book reader (doc identity stays single-
-              *                  coordinate; the book segment is derived nav). */}
-            <Route path="/docs" element={
-              <ProtectedRoute>
-                <Suspense fallback={<LoadingScreen />}><DocsLayout /></Suspense>
-              </ProtectedRoute>
-            }>
-              <Route index element={<Suspense fallback={<LoadingScreen />}><DocsIndex /></Suspense>} />
-              <Route path=":slug" element={<Suspense fallback={<LoadingScreen />}><DocsSlug /></Suspense>} />
-              <Route path=":slug/:name" element={<Suspense fallback={<LoadingScreen />}><DocPage /></Suspense>} />
-            </Route>
             {/* objectui#12700 — Home and every app share ONE
               * `/auth/me/permissions` source. A pathless layout route is their
               * common ancestor: its element (auth, the shell, the permissions
@@ -419,6 +413,25 @@ export function App() {
                 </RequireOrganization>
               }>
                 <Route path="/home" element={<HomeRoute />} />
+                {/* Package documentation (ADR-0046 §6): a platform-level portal
+                  * lists every installed `doc` (grouped by the launcher's apps),
+                  * and one viewer route renders any item; cross-references
+                  * between docs resolve to that same viewer route. App-independent,
+                  * so it is drawn in Home's frame with the docs bar (`docs`
+                  * variant: 「PRODUCT / Documentation」), under this layout for
+                  * the same `/auth/me/permissions` answer Home reads
+                  * (objectstack#35424). The layout fetches book + doc once and
+                  * shares it with every child route via context. Children:
+                  *   index        → book index
+                  *   :slug        → a book landing, or a flat-doc permalink that
+                  *                  redirects to its canonical /docs/<book>/<name>
+                  *   :slug/:name  → in-book reader (doc identity stays single-
+                  *                  coordinate; the book segment is derived nav). */}
+                <Route path="/docs" element={<DocsPortalRoute />}>
+                  <Route index element={<Suspense fallback={<LoadingScreen />}><DocsIndex /></Suspense>} />
+                  <Route path=":slug" element={<Suspense fallback={<LoadingScreen />}><DocsSlug /></Suspense>} />
+                  <Route path=":slug/:name" element={<Suspense fallback={<LoadingScreen />}><DocPage /></Suspense>} />
+                </Route>
                 <Route path="/apps/:appName/*" element={<AppContent />} />
                 {/* Internal authed form — same renderer as `/f/:slug`, different
                   * submit path, and (objectui#4109) rendered INSIDE the console
