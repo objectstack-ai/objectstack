@@ -9,7 +9,7 @@ Register them under `defineStack({ actions: [...] })`; the six types:
 folds the action into that object's surfaces: `locations` without it
 is refused at validate and publish (`action-no-object-binding`; set it, or
 `locations: []` if headless). With neither `locations` nor a view naming it in
-`rowActions` / `bulkActions` it renders nowhere (`action-no-placement`). A body
+`rowActions` / `bulkActions` / `bulkActionDefs` it renders nowhere (`action-no-placement`). A body
 that returns or assigns values writes nothing
 (`action-record-write-discarded`): it calls `ctx.api.object(...).update(...)`
 in `language: 'js'` (an `expression` body has no I/O) with
@@ -24,7 +24,7 @@ in `language: 'js'` (an `expression` body has no I/O) with
 | `record_related` | Related-list section inside a record |
 | `record_section` | Body section/tab of a record |
 | `list_item`      | Per-row action in list views |
-| `list_toolbar`   | Toolbar button; its body gets no `_selectedIds` |
+| `list_toolbar`   | Toolbar button; one ticked row is its `recordId`, several are refused (no `_selectedIds`) |
 
 ## Visibility, Disable & Feedback
 
