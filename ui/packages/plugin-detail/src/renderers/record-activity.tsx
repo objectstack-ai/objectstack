@@ -119,7 +119,13 @@ const splitDesigner = (props: Record<string, any>) => {
  */
 const BLOCK_NAME = 'record:activity';
 
-/** The stream's chips while its comments are the comment panel's: none. */
+/**
+ * The stream's chips while its comments are the comment panel's
+ * (objectstack#36075 item 5): 全部 / 活动 / 讨论 go, 变更 stays
+ * (objectstack#30074). It is offered where the record's field history is
+ * shown, and pressed again it goes back to every entry.
+ */
+const PANEL_STREAM_FILTERS: readonly TimelineStreamFilter[] = ['changes'];
 const NO_STREAM_FILTERS: readonly TimelineStreamFilter[] = [];
 
 export interface RecordActivityRendererProps {
@@ -325,9 +331,14 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
   // its `changes_only` is not offered either (objectstack#33996).
   const fieldHistoryShown = React.useContext(RecordFieldHistoryContext) && unifiedTimeline !== false;
   // objectstack#36075 — the comments are the comment panel's: the stream
-  // draws the system entries alone, so it offers no chip to filter them by.
+  // draws the system entries alone. Of its chips only 变更 is kept, the one
+  // that is not about comments (objectstack#30074).
   const commentsInPanel = React.useContext(RecordCommentsInPanelContext) && asStream;
-  const streamFilters = commentsInPanel ? NO_STREAM_FILTERS : timelineStreamFilters(fieldHistoryShown);
+  const streamFilters = commentsInPanel
+    ? fieldHistoryShown
+      ? PANEL_STREAM_FILTERS
+      : NO_STREAM_FILTERS
+    : timelineStreamFilters(fieldHistoryShown);
   const streamFilter: TimelineStreamFilter = streamFilters.includes(chosenStreamFilter) ? chosenStreamFilter : 'all';
 
   const discussionItems = discussion?.items as FeedItem[] | undefined;
@@ -451,7 +462,9 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
                 streamFilter,
                 streamFilters,
                 onStreamFilterChange: (next: TimelineStreamFilter) => {
-                  setStreamFilter(next);
+                  // A lone 变更 chip (the comments in the panel) has no 全部
+                  // beside it: pressed again, it goes back to every entry.
+                  setStreamFilter(commentsInPanel && next === streamFilter ? 'all' : next);
                   setStreamPages(1);
                 },
                 totalCount: applied.total,

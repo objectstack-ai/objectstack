@@ -925,8 +925,9 @@ host's to decide; the console's record page gives it 380 px beside the record
 from a 1280 px window, over the record's right edge in a narrower one, and the
 whole drawer body in a drawer narrower than 760 px. While the host wraps the
 page in `RecordCommentsInPanelContext` (value `true`), the default page's 动态
-stream draws the system entries alone: no comment rows, no chips, no comment
-box, and its count leaves the comments out.
+stream draws the system entries alone: no comment rows, no All / Activity /
+Discussion chips (the Changes chip stays, a toggle), no comment box, and its
+count leaves the comments out.
 
 The pieces are exported one by one (`CommentThread`, `CommentItem`,
 `CommentComposer`, `buildCommentThreads`, and #36070's `CommentAuthorAvatar`) for a surface that
