@@ -32,6 +32,7 @@ import {
 import { LIST_CONDITION_DEFAULT_TRANSLATIONS } from '../conditionTranslations';
 
 import { defaultQuickOperator, quickFilterOperators } from '../conditionModel';
+import type { FilterBuilderRow } from '@object-ui/components';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -509,16 +510,16 @@ describe('multi-value fields — the quick filter and the advanced panel offer o
   });
 
   it('contains on an option field picks ONE option; picking another replaces it', () => {
-    const rows: Array<{ operator: string; value: unknown }> = [];
+    const rows: FilterBuilderRow[] = [];
     function Host() {
-      const [row, setRow] = React.useState({ id: 'r', field: 'responsibilities', operator: 'contains' as const, value: '' as unknown });
+      const [row, setRow] = React.useState<FilterBuilderRow>({ id: 'r', field: 'responsibilities', operator: 'contains', value: '' });
       return (
         <FilterValuePanel
           field={MULTI_VALUE[0]}
-          row={row as never}
+          row={row}
           onChange={(next) => {
             rows.push(next);
-            setRow(next as never);
+            setRow(next);
           }}
         />
       );

@@ -161,6 +161,7 @@ describe('FilterBuilder — a multi-value row offers only what the server accept
       />,
     );
     fireEvent.click(screen.getByRole('button', { name: /add filter/i }));
-    expect(onChange.mock.calls.at(-1)[0].conditions[0]).toMatchObject({ field: 'responsibilities', operator: 'contains' });
+    const group = onChange.mock.calls[onChange.mock.calls.length - 1][0] as FilterBuilderRowGroup;
+    expect(group.conditions[0]).toMatchObject({ field: 'responsibilities', operator: 'contains' });
   });
 });
