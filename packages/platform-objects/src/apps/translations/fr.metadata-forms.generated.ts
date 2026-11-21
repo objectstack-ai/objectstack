@@ -106,7 +106,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.relatedList": {
         label: "Liste associée",
-        helpText: "Fait de cette entrée le tableau d’une liste associée au lieu d’une section de champs : indiquez l’objet enfant (ou object.field) dont la liste est dessinée à cette position dans la colonne de détails de l’enregistrement. Un tel groupe ne contient aucun champ ; un champ qui le désigne comme groupe est refusé, de même qu’un nom qui ne correspond à aucune relation pointant vers cet objet. La page de l’enregistrement ne dessine pas encore cet emplacement."
+        helpText: "Fait de cette entrée le tableau d’une liste associée au lieu d’une section de champs : indiquez l’objet enfant (ou object.field) dont la liste est dessinée à cette position dans la colonne de détails de l’enregistrement. Un tel groupe ne contient aucun champ ; un champ qui le désigne comme groupe est refusé, de même qu’un nom qui ne correspond à aucune relation pointant vers cet objet. Les formulaires de création et de modification du parent intègrent aussi le tableau en ligne, et « Modifier » sur la page de l’enregistrement sauvegarde l’enregistrement et ses lignes en une seule fois."
       },
       "fieldGroups.collapse": {
         label: "Réduire",
@@ -791,7 +791,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       inlineColumns: {
         label: "Colonnes en ligne",
-        helpText: "Colonnes de la grille en ligne sur le formulaire du parent, dans l’ordre d’affichage ; utilisées uniquement lorsque ce champ définit inlineEdit, qui s’écrit dans la source. Non défini : dérivées des champs modifiables de cet objet, et au-delà de six, les suivantes démarrent dans le sélecteur de colonnes de la grille. Une entrée qui ne désigne qu’un champ reprend le type, les options et les règles de ce champ ; les autres clés de colonne, à commencer par type, s’écrivent dans la source."
+        helpText: "Colonnes de la grille en ligne sur le formulaire du parent, dans l’ordre d’affichage ; utilisées uniquement lorsqu’un groupe de champs du parent désigne cet objet enfant (fieldGroups[].relatedList). Non défini : dérivées des champs modifiables de cet objet, et au-delà de six, les suivantes démarrent dans le sélecteur de colonnes de la grille. Une entrée qui ne désigne qu’un champ reprend le type, les options et les règles de ce champ ; les autres clés de colonne, à commencer par type, s’écrivent dans la source."
       },
       "inlineColumns.name": {
         label: "Nom",
