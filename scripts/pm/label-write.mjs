@@ -188,6 +188,14 @@
  * lands without that run is ejected by the queue's dogfood shards and takes its batch with it. So `--land` judges it
  * BEFORE anything else in the fold (`landDogfoodGate`), on step ①'s own read of the pull's title and body:
  *
+ *   repo      only a pull in a repository that CARRIES the battery is judged: `LAND_DOGFOOD_BATTERY_REPOS`, today
+ *             objectstack-ai/objectstack alone — the one repository with the `@objectstack/dogfood` battery and the
+ *             queue's dogfood shards. Anywhere else (cloud, hotcrm, …) the os-dev report can only say `n/a` and no
+ *             queue shard can eject the pull, so judging it would refuse every marked pull for good: it is NOT
+ *             judged, zero reads, and the fold prints a ✓ line naming the repository. A `--repo` that does not read
+ *             as `owner/name` is judged as before — the battery repository stays fail-closed. A repository that
+ *             gains a battery joins the list in the same pull that adds it.
+ *
  *   marker    the title's `!` (`titleBreakingMarker`): everything before the title's FIRST colon, ending in `!`
  *             (`fix(pm)!: …`, `feat!: …`) — on main's bang subjects it agrees with the changeset-side reader
  *             (`check-adr-0087-registration.mjs`'s type, optional scope, `!:`) — measured equal on all 1331 bang subjects
@@ -1623,6 +1631,11 @@ export const LAND_DOGFOOD_REPORT_KEY = 'dogfood_battery';
 export const LAND_COMMENT_PAGE_CAP = 30;
 /** How many merge-of-base commits the first-parent walk from the head steps over before it stops and refuses. */
 export const LAND_MERGE_HOP_CAP = 20;
+/**
+ * The repositories that carry the dogfood battery and its merge-queue shards (header: `repo`), matched
+ * case-insensitively. A pull in any other `owner/name` is not judged; ⛔ never add one that has no battery.
+ */
+export const LAND_DOGFOOD_BATTERY_REPOS = Object.freeze(['objectstack-ai/objectstack']);
 /** How much of the title a refusal quotes, at `clause2-line.mjs`'s `quoteLine` cap. */
 export const LAND_TITLE_QUOTE_CAP = 160;
 /** The compare statuses that put a commit on the base branch: the base is ahead of it, or it IS the base's tip. */
@@ -1630,6 +1643,16 @@ const ON_BASE_STATUSES = Object.freeze(['ahead', 'identical']);
 const FULL_SHA = /^[0-9a-f]{40}$/u;
 // A `dogfood_battery` that ran opens with the sha it ran on (os-dev.md: `<head sha> · VERDICT · …`), optionally quoted.
 const BATTERY_SHA_SHAPE = /^[`'"]?([0-9a-f]{7,40})(?![0-9a-z])/iu;
+
+/**
+ * Does `repo` carry the dogfood battery? `false` only for an `owner/name` outside `LAND_DOGFOOD_BATTERY_REPOS`; a
+ * value that does not read as `owner/name` answers `true`, so the gate judges it — fail-closed. Pure.
+ */
+export function repoCarriesDogfoodBattery(repo) {
+  const slug = typeof repo === 'string' ? repo.trim().toLowerCase() : '';
+  if (!/^[^/\s]+\/[^/\s]+$/u.test(slug)) return true;
+  return LAND_DOGFOOD_BATTERY_REPOS.some((r) => r.toLowerCase() === slug);
+}
 
 /**
  * Does a pull request's TITLE carry the conventional-commit breaking mark — `!` as the last character before its
@@ -1712,8 +1735,9 @@ export function readBatterySha(text) {
 }
 
 /**
- * The gate itself (header): on a `--land` stroke, BEFORE anything is judged or sent. A pull with no marker is not
- * judged (`{ judged: false }`, zero extra reads). A marked pull lands only when the NEWEST `os-dev-report` on the card
+ * The gate itself (header): on a `--land` stroke, BEFORE anything is judged or sent. A pull in a repository with no
+ * battery (`repoCarriesDogfoodBattery`) is not judged (`{ judged: false, noBattery: true }`, zero reads); nor is a
+ * pull with no marker (`{ judged: false }`, zero extra reads). A marked pull lands only when the NEWEST `os-dev-report` on the card
  * it delivers — trusted authors only (`recordAuthorTrusted`: the relay's identity and `GOVERNED_APPROVERS`; another
  * account's comment is data, ⛔ never a reason to land) — carries a `dogfood_battery` naming a sha that IS the pull's
  * current head, or is reached from the head by a first-parent walk over merges of the base branch alone:
@@ -1734,9 +1758,10 @@ export function readBatterySha(text) {
  * walk from it, reaches ANY tied card's battery sha. The result then carries `card`, `cleared` and `tied` (each card
  * read, its report and battery); a tie refusal carries `tied` with each card's reason. ⛔ Never a choice by number order.
  *
- * @returns {Promise<{ judged: false } | { judged: true, ok: boolean, title: string|null, marker: string, why?: string, clear?: string, report?: number|null, battery?: string|null, hops?: number, unread?: true, card?: number, cleared?: object[], tied?: object[] }>}
+ * @returns {Promise<{ judged: false, noBattery?: true } | { judged: true, ok: boolean, title: string|null, marker: string, why?: string, clear?: string, report?: number|null, battery?: string|null, hops?: number, unread?: true, card?: number, cleared?: object[], tied?: object[] }>}
  */
 export async function landDogfoodGate({ repo, issue, card, doCall }) {
+  if (!repoCarriesDogfoodBattery(repo)) return { judged: false, noBattery: true };
   const title = typeof card?.title === 'string' ? quoteLine(card.title, LAND_TITLE_QUOTE_CAP) : null;
   const read = landDogfoodMarkers({ title: card?.title, body: card?.body });
   const rerun = (head) =>
@@ -1915,7 +1940,9 @@ async function foldStroke(c) {
     record(
       gate.judged
         ? `[${stamp()}] ② dogfood gate ✓ — marker: ${gate.marker} · report comment ${gate.report} · ${LAND_DOGFOOD_REPORT_KEY} ${JSON.stringify(gate.battery)} · sha judged only · ${gate.hops === 0 ? 'ran on the head' : `ran ${gate.hops} merge(s) of the base below the head`}${Array.isArray(gate.tied) ? ` · a tie of ${gate.tied.length} cards (${gate.tied.map((r) => `#${r.card}`).join(', ')}), every thread read, cleared by ${gate.cleared.map((r) => `card #${r.card} comment ${r.report}`).join(', ')}` : ''}`
-        : `[${stamp()}] ② dogfood gate — not judged: no \`!\` in the title and no \`(narrowing)\` arm`,
+        : gate.noBattery
+          ? `[${stamp()}] ② dogfood gate ✓ — not judged: ${repo} has no dogfood battery (only ${LAND_DOGFOOD_BATTERY_REPOS.join(', ')} carries one)`
+          : `[${stamp()}] ② dogfood gate — not judged: no \`!\` in the title and no \`(narrowing)\` arm`,
     );
   }
   let text;
@@ -2706,7 +2733,7 @@ export async function relayMissProbe({ route, send }) {
 const FOLD_BATTERY = "the fold: a claim (comment + labels + assignee) and a verdict (comment + pr_ready + automerge_enable) as ONE relay stroke, the comment judged on post-stamped's path, every part read back on its own line, a part that fails read-back exit 4 and never repaired, RELAY-ONLY";
 const REAL_TRANSPORT_BATTERY = "the real transport: a comment-bearing stroke (a fold, a release) through fleet-write's own sendFleetWrite — fake fetch, real dispatch, real read-back — settles, exit 0, every ④ line printed";
 const KIND_BATTERY = 'the kind rule: no pm state added to a pull request, no `pm:awaiting-merge` added to an issue, a removal never refused, an unreadable kind refused — on both write paths, before the transport';
-const LAND_DOGFOOD_BATTERY = "the --land dogfood gate: a `!` title or a `(narrowing)` arm lands only on a trusted newest os-dev-report whose dogfood_battery names the head or a first-parent ancestor reached over merges of the base alone; every NOT MEASURED refuses before any send; an unmarked pull is not judged";
+const LAND_DOGFOOD_BATTERY = "the --land dogfood gate: a `!` title or a `(narrowing)` arm lands only on a trusted newest os-dev-report whose dogfood_battery names the head or a first-parent ancestor reached over merges of the base alone; every NOT MEASURED refuses before any send; an unmarked pull, or one in a repository with no battery, is not judged";
 const STATELESS_BATTERY = 'the stateless write: an OPEN card never loses its last pm state unless the same write adds a state or needs-user-decision or closes it, a parked card never keeps an assignee a state or assignee move left there, a release stays legal — before the transport, zero writes';
 const HAND_SET_BATTERY = "the hand-set grade: a `priority:*` whose newest `labeled` event is not the fleet's (no app, no bot actor), or is the fleet's with its own `Ruling-ref: <that grade>` fold beside it, is never changed — refused at step ② with zero writes unless the folded comment's `Ruling-ref:` names the grade it writes";
 const SELF_TEST_BATTERIES = Object.freeze({
@@ -2727,7 +2754,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   [REAL_TRANSPORT_BATTERY]: 5,
   [STATELESS_BATTERY]: 19,
   // Raised 50 → 65 with the fold's tie: two `Fixes` lines read on every tied card, passing and refusing, and the structural pin.
-  [LAND_DOGFOOD_BATTERY]: 65,
+  // Raised 65 → 70 with the battery repositories: the pure predicate, the zero-read gate, cloud `(narrowing)` and `!` landing, objectstack still refusing.
+  [LAND_DOGFOOD_BATTERY]: 70,
   [HAND_SET_BATTERY]: 42,
 });
 const SELF_TEST_BATTERY_FLOOR = 18;
@@ -3440,6 +3468,24 @@ export async function selfTest() {
     t('⭐ NOT JUDGED: no `!` and no `(narrowing)` arm lands as today — even over an `n/a` report — with no gate read at all', [plain.exit, plain.text.includes('not judged'), plain.fake.calls.map((c) => c.op)], [EXIT_OK, true, ['card-read', 'card-read', 'comments-list', 'pull-read']]);
     const widening = await land(pull({ title: 'feat(pm): a widening fixture', body: 'Fixes #8\n\nClause-②: yes (widening)\n', cards: {} }));
     t('…a `(widening)` arm is not a marker either', [widening.exit, widening.text.includes('not judged')], [EXIT_OK, true]);
+
+    // The battery repositories: a pull in a repository with no dogfood battery is not judged; objectstack stays fail-closed.
+    t('the battery repositories: objectstack (any case) carries one; cloud, hotcrm and gallery do not; a value that is no `owner/name` is judged — fail-closed',
+      ['objectstack-ai/objectstack', ' ObjectStack-AI/ObjectStack ', 'objectstack-ai/cloud', 'objectstack-ai/hotcrm', 'objectstack-ai/gallery', '', null, undefined, 'objectstack', 'a/b/c', 'a /b'].map(repoCarriesDogfoodBattery),
+      [true, true, false, false, false, true, true, true, true, true, true]);
+    const gateCalls = [];
+    const cloudGate = await landDogfoodGate({ repo: 'objectstack-ai/cloud', issue: 7, card: { title: 'fix(svc)!: x', body: 'Clause-②: no (narrowing)' }, doCall: async (...a) => { gateCalls.push(a); return { verdict: 'failed', status: 500, call: a[0] }; } });
+    t('⭐ the gate on a cloud pull carrying both markers: not judged, `noBattery`, and ZERO reads', [cloudGate, gateCalls.length], [{ judged: false, noBattery: true }, 0]);
+    const NARROW_NA = { title: 'fix(service-cloud): a narrowing fixture', body: 'Fixes #8\n\nClause-②: no (narrowing)\nMetadata-protocol: none\n', cards: { 8: [report(NA)] } };
+    const cloudArgv = ['--repo', 'objectstack-ai/cloud', ...landArgv.slice(2)];
+    const cloud = await driveOffline(cloudArgv, pull(NARROW_NA), { route, relay: 'success', files, now: NOW });
+    t('⭐ NOT JUDGED: a cloud pull with a `(narrowing)` arm over an `n/a` report lands — ONE dispatch, comment → pr_ready → automerge_enable, exit 0, no gate read, and the ✓ line names the repository',
+      [cloud.exit, cloud.sent[0]?.actions.map((a) => a.op), cloud.fake.board.draft, cloud.text.includes('② dogfood gate ✓ — not judged: objectstack-ai/cloud has no dogfood battery (only objectstack-ai/objectstack carries one)'), cloud.text.includes('REFUSED'), cloud.fake.calls.map((c) => c.op)],
+      [EXIT_OK, ['comment', 'pr_ready', 'automerge_enable'], false, true, false, ['card-read', 'card-read', 'comments-list', 'pull-read']], cloud.text.slice(-700));
+    const cloudBang = await driveOffline(cloudArgv, pull({ ...NARROW_NA, title: 'fix(service-cloud)!: a breaking fixture' }), { route, relay: 'success', files, now: NOW });
+    t('…and a cloud `!` title with the same arm lands the same way', [cloudBang.exit, cloudBang.text.includes('not judged: objectstack-ai/cloud has no dogfood battery')], [EXIT_OK, true], cloudBang.text.slice(-600));
+    const osNarrow = await land(pull(NARROW_NA));
+    t('⭐ REFUSED: the SAME `(narrowing)` pull over an `n/a` report in objectstack still refuses — exit 2, zero sends, nothing written', [...refused(osNarrow), osNarrow.text.includes('why: the battery was not run'), osNarrow.text.includes('has no dogfood battery')], [...REFUSED, true, false], osNarrow.text.slice(-600));
 
     // FAIL CLOSED — every case NOT MEASURED is a refusal.
     // Each case: its board, and the fragment of the `why` only its own branch prints — so a branch ablated away
