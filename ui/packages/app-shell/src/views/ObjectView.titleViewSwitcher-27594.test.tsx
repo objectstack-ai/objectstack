@@ -85,7 +85,6 @@ vi.mock('./RecordDetailView', () => ({ RecordDetailView: () => null }));
 import '@objectstack/lint';
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
-import { RECORD_OPEN_PREFERENCE_KEY } from '../utils/recordOpenPreference';
 
 // The page's own reads (the security `explain` probe among them) are relative
 // fetches, which happy-dom would send to a real socket. One double, installed
@@ -154,7 +153,7 @@ function mountLeads(entry = '/apps/crm/crm_lead/view/v1') {
 
 /** The list's toolbar has drawn: its Filter control is on screen. */
 const listToolbar = () =>
-  waitFor(() => expect(screen.getByTestId('toolbar-filter-trigger')).toBeInTheDocument(), { timeout: 5000 });
+  waitFor(() => expect(screen.getByTestId('condition-add-filter')).toBeInTheDocument(), { timeout: 5000 });
 
 /** The reader's pinned view of `crm_lead`, as the workspace preference keeps it. */
 const PIN_KEY = 'os:pref:list.view.pinned@object:crm_lead';
@@ -286,7 +285,6 @@ describe('objectstack#27594 — the list title is the view switcher', () => {
 
   it('a record open in the drawer over the list keeps the same one switcher in the title', async () => {
     setViewportWidth(1440);
-    localStorage.removeItem(RECORD_OPEN_PREFERENCE_KEY);
     mountLeads('/apps/crm/crm_lead/view/v1?recordId=lead_1');
     await listToolbar();
 

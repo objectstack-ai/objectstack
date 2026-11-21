@@ -91,19 +91,13 @@ const NO_VALUE: Row = { id: 'c2', field: 'priority', operator: 'equals', value: 
 const group = (...conditions: Row[]): React.ComponentProps<typeof ListView>['initialFilters'] =>
   ({ id: 'root', logic: 'and', conditions });
 
-const filterTrigger = () => screen.getByTestId('toolbar-filter-trigger');
+const filterTrigger = () => screen.getByTestId('condition-add-filter');
 
 afterEach(() => {
   cleanup();
 });
 
 describe('row 7: a filter row with no value is not a filter', () => {
-  it('the badge counts the finished rows only', async () => {
-    mount({}, { initialFilters: group(COMPLETE, NO_VALUE) });
-    await waitFor(() => expect(filterTrigger()).toHaveAccessibleName('Filter, 1 active'));
-    // The trigger reads its label, then the badge (objectstack#35548).
-    expect(filterTrigger().textContent).toBe('Filter1');
-  });
 
   it('a group of unfinished rows only draws no badge and keeps the first-run copy', async () => {
     const { container } = mount({}, { initialFilters: group(NO_VALUE), onAddRecord: () => {} });
@@ -115,10 +109,6 @@ describe('row 7: a filter row with no value is not a filter', () => {
     expect(panel.textContent).not.toMatch(/No matching records/);
   });
 
-  it('CONTROL: two finished rows count two', async () => {
-    mount({}, { initialFilters: group(COMPLETE, { ...NO_VALUE, value: 3 }) });
-    await waitFor(() => expect(filterTrigger()).toHaveAccessibleName('Filter, 2 active'));
-  });
 
   it('"Add filter" draws the new row in the panel but hands the host only the finished rows', async () => {
     const onFilterChange = vi.fn();
@@ -139,8 +129,9 @@ describe('row 7: a filter row with no value is not a filter', () => {
     expect(onFilterChange).toHaveBeenCalled();
     const stored = onFilterChange.mock.calls.at(-1)![0];
     expect(stored.conditions).toEqual([COMPLETE]);
-    // And the badge did not move.
-    expect(filterTrigger()).toHaveAccessibleName('Filter, 1 active');
+    // And the row shows the one finished condition (objectstack#35878: a
+    // chip, then 「+」; the bar has no count any more).
+    expect(filterTrigger()).not.toHaveAttribute('data-empty');
   });
 });
 

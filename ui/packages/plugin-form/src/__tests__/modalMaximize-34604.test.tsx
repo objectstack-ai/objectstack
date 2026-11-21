@@ -323,7 +323,8 @@ describe('#34604 — the master-detail (subforms) arm', () => {
     const { onOpenChange } = renderMd();
     const title = await headerInput();
     fireEvent.change(title, { target: { value: 'Q-1' } });
-    await waitFor(() => expect(qtyInputs().length).toBeGreaterThan(0));
+    // The grid is drawn: its Add button (the grid draws no trailing entry row, objectstack#35507).
+    await waitFor(() => expect(screen.getByTestId('line-items-add')).toBeTruthy());
     const before = qtyInputs().length;
     fireEvent.click(screen.getByRole('button', { name: /add/i }));
     await waitFor(() => expect(qtyInputs().length).toBe(before + 1));

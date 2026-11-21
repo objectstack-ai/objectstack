@@ -11,7 +11,7 @@ describe('deriveRelatedLists', () => {
     expect(deriveRelatedLists(project, null as any)).toEqual([]);
   });
 
-  it('derives a related list from a master_detail child (owned) — a body table by default (objectstack#35597)', () => {
+  it('derives a related list from a master_detail child (owned) — a tab by default, placeable by a field group (objectstack#35889)', () => {
     const task = {
       name: 'task',
       label: 'Task',
@@ -24,9 +24,36 @@ describe('deriveRelatedLists', () => {
         childLabel: 'Task',
         referenceField: 'project',
         isOwned: true,
-        isPrimary: true,
+        isPrimary: false,
+        isPlaceable: true,
       },
     ]);
+  });
+
+  it('a parent field group naming the master_detail child makes it a body table (objectstack#35889)', () => {
+    const task = {
+      name: 'task',
+      label: 'Task',
+      fields: { project: { type: 'master_detail', reference: 'project' } },
+    };
+    const placing = { ...project, fieldGroups: [{ key: 'tasks', relatedList: 'task' }] };
+    expect(deriveRelatedLists(placing, [placing, task])[0]).toMatchObject({ isPrimary: true, isPlaceable: true, keepsTab: true });
+    const byField = { ...project, fieldGroups: [{ key: 'tasks', relatedList: 'task.project' }] };
+    expect(deriveRelatedLists(byField, [byField, task])[0]).toMatchObject({ isPrimary: true, keepsTab: true });
+  });
+
+  it("a 'primary' FK is a body table with or without a group, and keeps no tab (objectstack#35889 item 4)", () => {
+    const task = {
+      name: 'task',
+      label: 'Task',
+      fields: { project: { type: 'master_detail', reference: 'project', relatedList: 'primary' } },
+    };
+    const placing = { ...project, fieldGroups: [{ key: 'tasks', relatedList: 'task' }] };
+    for (const parent of [project, placing]) {
+      const [list] = deriveRelatedLists(parent, [parent, task]);
+      expect(list).toMatchObject({ isPrimary: true, isPlaceable: true });
+      expect(list.keepsTab).toBeUndefined();
+    }
   });
 
   it('derives a related list from a lookup child', () => {
@@ -299,7 +326,14 @@ describe('deriveRelatedLists — a child the data API does not expose', () => {
  * body table (the derived list's `isPrimary`).
  */
 describe('authoredBodyTableIds (objectstack#35597)', () => {
-  const quote = { name: 'quote', label: 'Quote', fields: { name: { type: 'text' } } };
+  // objectstack#35889: a master-detail child is a body table only where a field
+  // group of the parent names it, so the quote's group places its lines.
+  const quote = {
+    name: 'quote',
+    label: 'Quote',
+    fields: { name: { type: 'text' } },
+    fieldGroups: [{ key: 'lines', relatedList: 'quote_line' }],
+  };
   const line = { name: 'quote_line', label: 'Line', fields: { quote: { type: 'master_detail', reference: 'quote' } } };
   const note = { name: 'note', label: 'Note', fields: { quote: { type: 'lookup', reference: 'quote' } } };
   const sideLine = { name: 'quote_term', label: 'Term', fields: { quote: { type: 'master_detail', reference: 'quote', relatedList: true } } };

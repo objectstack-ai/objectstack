@@ -42,7 +42,7 @@ import { RecordEditStateController, bodyTablesSaveTogether, isMasterDetailChild,
 import { isRecordPagePushed, useRecordPageScrollMemory } from './recordPagePush.js';
 import { phoneRecordHeader } from './recordPhoneHeader.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
-import { PrefetchUpcomingRelatedCounts, RecordDrawerReturnLink, RecordDrawerUpcomingContext, RecordPageDrawerHost, RecordPaneBarToggles, useRecordPane, useRecordPaneBar, useRecordPageReturn } from './recordDrawerStack.js';
+import { PrefetchUpcomingRelatedCounts, RecordDrawerUpcomingContext, RecordPageDrawerHost, RecordPaneBarToggles, useRecordPane, useRecordPaneBar, useRecordPageReturn } from './recordDrawerStack.js';
 import {
   RECORD_PAGE_ACTIVITY_ROWS,
   RECORD_PAGE_ATTACHMENT_ROWS,
@@ -345,8 +345,8 @@ function recordPagePlacesNoComponent(page: Parameters<typeof checkPageRecordPlac
 /**
  * The fields the highlight strip of a synthesized record page draws: the
  * `fields` of the `record:highlights` blocks among the page's top-level blocks,
- * where the synthesizer places the strip (a phone's cut-short one included)
- * and where a slotted page's own `highlights` slot lands. A field is read in
+ * where a slotted page's own `highlights` slot lands. The default page places
+ * no strip, so the list is empty there. A field is read in
  * either form the block accepts, a bare name or a `{ name }` entry, from the
  * block's `properties` bag over its own keys.
  */
@@ -4251,7 +4251,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         sections?: Array<Record<string, any>>;
         highlightFields?: string[];
         headerActions?: ActionDef[];
-        related?: Array<{ title?: string; objectName: string; relationshipField: string; columns?: any[]; icon?: string; isPrimary?: boolean; isBody?: boolean }>;
+        related?: Array<{ title?: string; objectName: string; relationshipField: string; columns?: any[]; icon?: string; isPrimary?: boolean; isBody?: boolean; keepsTab?: boolean }>;
         approvals?: { count?: number; node?: Record<string, any> };
       };
     }
@@ -4339,12 +4339,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       ...childRelations.filter((relation) => relation.isPrimary),
       ...childRelations.filter((relation) => !relation.isPrimary),
     ];
-    const related = orderedRelations.map(({ childObject, childLabel, referenceField, title: titleOverride, columns: columnsOverride, isPrimary, sort: inheritedSort, filter: declaredFilter }) => {
+    const related = orderedRelations.map(({ childObject, childLabel, referenceField, title: titleOverride, columns: columnsOverride, isPrimary, keepsTab, sort: inheritedSort, filter: declaredFilter }) => {
       const childObjectDef = objects.find((o: any) => o.name === childObject);
       // objectstack#27055, Target 8 — the record's own BODY: a list the author
-      // marks `relatedList: 'primary'`, or a `master_detail` FK declaring
-      // `inlineEdit` (the child is edited as part of the parent) and no
-      // `relatedList` — `relatedList: true` keeps it a side card. That is
+      // marks `relatedList: 'primary'`, or a `master_detail` FK declaring no
+      // `relatedList` that one of this object's field groups places
+      // (objectstack#35889; unplaced, it is a tab). That is
       // `isPrimary`: `deriveRelatedLists` sets it from `@objectstack/spec`'s
       // `isBodyTableRelationship` (objectstack#27478), the one predicate the
       // spec's refusal of a field group naming a side card reads too, so no
@@ -4393,6 +4393,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // verdict above: a body list is a table in the Details tab.
         ...(isPrimary ? { isPrimary: true } : {}),
         ...(isBody ? { isBody: true } : {}),
+        // objectstack#35889 item 4 — a body table a field group makes one
+        // keeps its tab as well; a `'primary'` one does not.
+        ...(keepsTab ? { keepsTab: true } : {}),
       };
     });
 
@@ -5126,8 +5129,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // name so authored business actions still win on collision.
   //
   // objectstack#27058, Target 4 — on a phone the default page's header reads
-  // the first two declared text highlights as its subtitle and shows at most
-  // four highlights after them.
+  // the first two declared text highlights as its subtitle. The page draws no
+  // highlight strip, so no highlight list is handed to the synthesizer.
   const phoneHeader = phonePage && !assignedPage
     ? phoneRecordHeader(objectDef, synthParts.highlightFields, readablePageRecord)
     : null;
@@ -5135,7 +5138,6 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     ? effectivePage
     : buildDefaultPageSchema(objectDef as any, {
         sections: synthParts.sections,
-        highlightFields: phoneHeader ? phoneHeader.highlightFields : synthParts.highlightFields,
         headerActions: synthParts.headerActions,
         related: synthParts.related,
         approvals: synthParts.approvals,
@@ -5328,13 +5330,6 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       {(() => {
         const plural = objectDef ? servedObjectPluralLabel(objectDef, language, objectPluralLabel) : objectName;
         const objectCrumbClass = cn(crumbClass, 'shrink-0');
-        if (pageReturn.toList) {
-          return (
-            <button type="button" onClick={pageReturn.toList} className={objectCrumbClass} title={originFromState?.label} data-record-crumb-object="">
-              {plural}
-            </button>
-          );
-        }
         if (originFromState?.pathname && originFromState?.label) {
           return (
             <Link
@@ -5420,7 +5415,6 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       stepper={pageStepper}
       actionSlotRef={setBarActionSlot}
       toggles={approvalQueueSwitch || panelToggles ? <>{approvalQueueSwitch}{panelToggles}</> : undefined}
-      frame={pageReturn.collapse ? <RecordDrawerReturnLink collapse={pageReturn.collapse} /> : undefined}
     />
   );
 

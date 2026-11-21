@@ -1,6 +1,6 @@
 # ADR-0035: Config-driven master-detail (declare on the relationship, forms derive)
 
-**Status**: Accepted · **Amended** (2026-10-28, [#27069](https://github.com/objectstack-ai/objectstack/issues/27069), maintainer rulings on that card: 「A」, an ordered list on the parent, and 「明细行的子表放在右侧合适嘛？」 / 「他如果做到放在基本信息下面，而条款和备注在后面」, line items in the record body) — `relatedList: 'primary'` is a **placement** (the record body, as a full-width table), no longer a prominence hint that orders lists; the order is the parent object's `relatedLists`; and an omitted `relatedList` on a `master_detail` FK that sets `inlineEdit` is now `'primary'` by default. See the note under the read-side table. · **Amended** (2026-11-19, [#35597](https://github.com/objectstack-ai/objectstack/issues/35597), under the record-page epic [#35590](https://github.com/objectstack-ai/objectstack/issues/35590), maintainer's words on that card: 「就是master-detail表类型的子表」 / 「主从的子表是否应该默认出现在概览的左侧区域？关键字段下面。」) — an omitted `relatedList` on ANY `master_detail` FK is `'primary'` (a body table) by default, `inlineEdit` or not; its totals are server-owned. See the second note under the read-side table.
+**Status**: Accepted · **Amended** (2026-10-28, [#27069](https://github.com/objectstack-ai/objectstack/issues/27069), maintainer rulings on that card: 「A」, an ordered list on the parent, and 「明细行的子表放在右侧合适嘛？」 / 「他如果做到放在基本信息下面，而条款和备注在后面」, line items in the record body) — `relatedList: 'primary'` is a **placement** (the record body, as a full-width table), no longer a prominence hint that orders lists; the order is the parent object's `relatedLists`; and an omitted `relatedList` on a `master_detail` FK that sets `inlineEdit` is now `'primary'` by default. See the note under the read-side table. · **Amended** (2026-11-19, [#35597](https://github.com/objectstack-ai/objectstack/issues/35597), under the record-page epic [#35590](https://github.com/objectstack-ai/objectstack/issues/35590), maintainer's words on that card: 「就是master-detail表类型的子表」 / 「主从的子表是否应该默认出现在概览的左侧区域？关键字段下面。」) — an omitted `relatedList` on ANY `master_detail` FK is `'primary'` (a body table) by default, `inlineEdit` or not; its totals are server-owned. See the second note under the read-side table. · **Amended** (2026-11-20, [#35889](https://github.com/objectstack-ai/objectstack/issues/35889), same epic, maintainer's words on that card: 「主从子表我认为不应该自动申明放在概览中，除非我通过 fieldGroup 强制指定」) — that default is withdrawn: an omitted `relatedList` on a `master_detail` FK is a tab, and the list is a body table (in the record page, the parent's forms and its edit state) only where a parent field group names it, and `inlineEdit` no longer inlines a child in the form by itself. See the third note under the read-side table.
 **Author**: surfaced while making master-detail (parent + child line-item) entry a first-class, low-config capability
 **Affects**: `@objectstack/spec` (field schema), `@object-ui/plugin-form`, `@object-ui/plugin-view`, `@object-ui/app-shell`; builds on ADR-0034 (atomic multi-write) and the cross-object batch endpoint (#1604)
 
@@ -138,6 +138,36 @@ a self-referential FK surfaces a "children" list.
 > create/edit form) and is unchanged: a master-detail child that does not set
 > `inlineEdit` is a body table on the record page and stays out of the
 > parent's form.
+
+> **Amended (2026-11-20, #35889; epic #35590).** The default of the note above
+> is withdrawn; the rest of it stands. An omitted `relatedList` on a
+> `master_detail` FK is a TAB of the parent's record page (with its count), as
+> on a `lookup` FK, `inlineEdit` or not (the maintainer on #35889:
+> 「主从子表我认为不应该自动申明放在概览中，除非我通过 fieldGroup 强制指定」,
+> 「我们已经开发好的功能也没必要作废」). Such a list becomes a body table only
+> where a field group of the PARENT names it (`fieldGroups[].relatedList`, a
+> child object name or `object.field`): the record page draws it at that
+> group's position, the parent's create and edit forms inline it, and the
+> record page's Edit saves the record fields and its rows in one batch
+> (#35599); its tab stays on the tab row. `relatedList: 'primary'` on the FK
+> still makes a body table with no group (and no tab, positioned by a group or not), `true` keeps a tab that no group can
+> place, and `false` hides it. The set a field group may name is unchanged
+> (`isGroupPlaceableRelationship`, read by the refusal at `defineStack` and at
+> the publish door); `isBodyTableRelationship` is still the one body-table
+> judgement, now told whether a parent group places the list. The WRITE side
+> follows the same group (maintainer ruling B on #35889,
+> 「明细表应该改成指看分组的定义了」): "Only `inlineEdit` children are inlined"
+> (Decision → Derivation rules) no longer holds. The parent's form, as derived
+> from its relationships, inlines a child exactly where a parent field group
+> names it (a form view that declares its own subforms still inlines what it
+> declares); `inlineEdit` on the FK no longer inlines a child by itself and
+> only picks the form factor of a placed one (`'grid'`, `'form'`, or the
+> shape-picked default), placed in the form below the record's fields until
+> the form places it at the group. A group may name only a list it can place,
+> so an `inlineEdit` child on a `lookup` FK, or on a FK declaring
+> `relatedList: true`, needs `relatedList: 'primary'` on its FK as well as the
+> group (a `master_detail` FK may instead drop `relatedList: true`); a group
+> naming a list its FK hides (`false`) is refused.
 
 The derivation is a pure function — `deriveRelatedLists(objectDef, objects)` in
 `@object-ui/app-shell` (`utils/deriveRelatedLists.ts`) — the read-side analogue

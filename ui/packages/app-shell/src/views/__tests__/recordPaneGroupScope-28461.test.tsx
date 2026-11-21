@@ -143,7 +143,6 @@ describe('the object page hands the opened row\'s group along (objectstack#28461
         viewLabel: (_object: string, _view: string, fallback: string) => fallback,
         unlabelledViewText: 'Untitled view',
         language: 'en',
-        recordOpenPreference: 'object' as never,
         // A desktop console: on a phone every record opens as a page.
         phone: false,
       }),
@@ -173,14 +172,14 @@ describe('the object page hands the opened row\'s group along (objectstack#28461
     });
   });
 
-  it('the row\'s ↗: the page steps within the group and its counter names it', () => {
+  it('the record\'s name: the page steps within the group and its counter names it', () => {
     const { result, navigate } = mountNavigation('view=all');
     act(() => result.current.handleListRowsChange(ROWS, GROUPS));
-    act(() => result.current.handleOpenRowAsPage('c-2'));
+    act(() => result.current.handleRowClick({ id: 'c-2' }));
     const state = navigate.mock.calls.at(-1)![1].state;
-    expect(state.recordDrawerReturn.path).toEqual([
-      { objectName: 'crm_contact', recordId: 'c-2', siblings: ['c-1', 'c-2', 'c-3'], scope: 'Acme Corporation' },
-    ]);
+    expect(state.from).toEqual({
+      pathname: '/apps/crm/crm_contact?view=all', label: 'All contacts', siblings: ['c-1', 'c-2', 'c-3'], scope: 'Acme Corporation',
+    });
     const page = renderHook(() => useRecordPageReturn('c-2'), {
       wrapper: ({ children }: { children: React.ReactNode }) => (
         <MemoryRouter initialEntries={[{ pathname: '/apps/crm/crm_contact/record/c-2', state }]}>{children}</MemoryRouter>

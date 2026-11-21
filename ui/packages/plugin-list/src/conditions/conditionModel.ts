@@ -24,6 +24,7 @@ import {
   FILTER_NUMBER_LIKE_TYPES,
   FILTER_SELECT_LIKE_TYPES,
 } from '@object-ui/types';
+import { jsonColumnFilterOperators } from '@object-ui/components';
 import type { FilterBuilderRow, FilterBuilderRowGroup, SortItem } from '@object-ui/components';
 
 /** One field the condition controls can name: the shape the list's field lists already carry. */
@@ -31,6 +32,8 @@ export interface ConditionField {
   value: string;
   label: string;
   type?: string;
+  /** The field's declared `multiple` flag: with the type, whether its value is a list. */
+  multiple?: boolean;
   options?: ReadonlyArray<{ value: string | number | boolean; label: string; color?: string }>;
   referenceTo?: string;
   displayField?: string;
@@ -72,8 +75,24 @@ export const QUICK_FILTER_OPERATORS: Readonly<Record<QuickFilterFamily, readonly
   boolean: ['equals'],
 };
 
+/**
+ * The operators the quick filter offers for one field, first one the default.
+ *
+ * A field stored as a JSON column (a multi-value field, or a structured-JSON
+ * type) takes the advanced panel's own JSON-column set,
+ * `jsonColumnFilterOperators` — the one helper both surfaces read, so the
+ * quick filter never offers an operator the server refuses on such a field
+ * (`等于` / `属于` on a multi-select answer `400 INVALID_FILTER`). Every other
+ * field takes its family's list.
+ */
+export function quickFilterOperators(
+  field: Pick<ConditionField, 'type' | 'options' | 'multiple'> | undefined,
+): readonly FilterBuilderRow['operator'][] {
+  return jsonColumnFilterOperators(field) ?? QUICK_FILTER_OPERATORS[quickFilterFamily(field)];
+}
+
 export function defaultQuickOperator(field: ConditionField | undefined): FilterBuilderRow['operator'] {
-  return QUICK_FILTER_OPERATORS[quickFilterFamily(field)][0];
+  return quickFilterOperators(field)[0];
 }
 
 const VALUELESS: ReadonlySet<string> = new Set(['is_empty', 'is_not_empty', 'is_null', 'is_not_null']);

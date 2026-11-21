@@ -890,9 +890,14 @@ What one run does:
   and ends every authorized app and approved device sign-in of the account** (a link is a
   social, OAuth or single sign-on link; the password itself stays; an app's consents,
   refresh tokens and stored access tokens are deleted, so it asks to be authorized again),
-  as an administrator's forced reset does: the sessions, keys, links and grants the
-  account held under the old password do not outlive it. It asks for no password change
-  at the next sign-in.
+  **disables every OAuth application the account registered and revokes every SCIM
+  credential it minted** (a platform administrator can enable a disabled application again;
+  a revoked credential is replaced by minting a new one), as an administrator's forced
+  reset does: the sessions, keys, links, grants, applications and credentials the account
+  held under the old password do not outlive it. An application another account registered
+  and a credential another administrator minted are not touched; the account's single
+  sign-on providers and two-factor enrolment are kept. It prints how many of each it ended,
+  and asks for no password change at the next sign-in.
 - **It writes the project database only.** A secondary storage the host configures for the
   auth service (a cache that can hold reset links and sessions) is out of its reach, for the
   reset links and the sessions alike. With one configured, run the command with the server

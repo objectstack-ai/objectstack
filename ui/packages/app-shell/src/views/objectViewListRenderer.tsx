@@ -16,7 +16,7 @@ import type { useObjectListPreferences, ListViewPreference, ListViewPreferencePa
 const ObjectChart = lazy(() =>
   import('@object-ui/plugin-charts').then((m) => ({ default: m.ObjectChart })),
 );
-import { ListView, type ListViewProps } from '@object-ui/plugin-list';
+import { ListView } from '@object-ui/plugin-list';
 import type { ListViewSchema, TreeViewConfig } from '@object-ui/types';
 import type { FilterBuilderRowGroup } from '@object-ui/components';
 import type { useAuth } from '@object-ui/auth';
@@ -42,7 +42,7 @@ import {
 } from './objectViewOptions.js';
 import { useViewTabsFit } from './objectViewChrome.js';
 import { ListRecordCountContext } from './objectViewTitleSwitcher.js';
-import { OpenAsPageLink } from './objectViewOpenAsPage.js';
+import { OpenInSidePanelButton } from './objectViewOpenAsPage.js';
 import type { useObjectViewIdentity } from './objectViewIdentity.js';
 import type { useObjectViewRecordNavigation } from './objectViewRecordNavigation.js';
 import type { useObjectViewToolbarAffordances } from './objectViewToolbarAffordances.js';
@@ -98,10 +98,12 @@ export function useObjectViewListRenderer({
     actions,
     handleRowClick,
     handleListRowsChange,
-    recordOpen,
-    openAsPage,
+    handleListTotalChange,
+    openInPanel,
     rowOpensRecord,
     phoneTitle,
+    viewBarTrailing,
+    conditionRowEnd,
     handleListPersonalizationChange,
     urlFilters,
     initialUfSelections,
@@ -136,10 +138,10 @@ export function useObjectViewListRenderer({
     handleRowClick: ReturnType<typeof useObjectViewRecordNavigation>['handleRowClick'];
     /** objectstack#26679 — the rows the list shows, for the drawer's root `↑` `↓`. */
     handleListRowsChange: ReturnType<typeof useObjectViewRecordNavigation>['handleListRowsChange'];
-    /** objectstack#26681 — the Display menu's Open records section; none on a phone (objectstack#27058). */
-    recordOpen: ListViewProps['recordOpen'];
-    /** objectstack#26681 — the name cell's ↗ (`./objectViewOpenAsPage.tsx`), or `null` for none. */
-    openAsPage: { objectName: string; label: string; open: (recordId: string | number) => void } | null;
+    /** objectstack#35853 — the count the list matched, the M of the record's 「第 N 条，共 M 条」. */
+    handleListTotalChange: ReturnType<typeof useObjectViewRecordNavigation>['handleListTotalChange'];
+    /** objectstack#35854 — the name cell's 「在侧边打开」 (`./objectViewOpenAsPage.tsx`), or `null` for none. */
+    openInPanel: { label: string; open: (recordId: string | number) => void } | null;
     /** objectstack#33317 — whether a row click opens the record: `false` for the `none` mode. */
     rowOpensRecord: boolean;
     /**
@@ -149,6 +151,15 @@ export function useObjectViewListRenderer({
      * `null` with no view to switch.
      */
     phoneTitle: ReactNode;
+    /**
+     * objectstack#35878 — the right end of the view bar, given the list's own
+     * tools there (its search): the page's create button and ⋮ More after
+     * them. `null` ⇒ the list's search alone. Called afresh on every render
+     * of the page, read through a store like the lead.
+     */
+    viewBarTrailing: ((tools: ReactNode) => ReactNode) | null;
+    /** objectstack#35878 — the condition row's right end: the 「Personalized · Reset」 marker, or `null`. */
+    conditionRowEnd: ReactNode;
     /** objectstack#28950 — what of the list differs from the view, keyed by the list identity. */
     handleListPersonalizationChange: ReturnType<typeof useObjectViewListUrlState>['handleListPersonalizationChange'];
     urlFilters: ReturnType<typeof useObjectViewUrlFilters>['urlFilters'];
@@ -202,6 +213,15 @@ export function useObjectViewListRenderer({
         leadStore.set(phoneTitle);
     });
     const hasPhoneTitle = phoneTitle != null;
+    // objectstack#35878 — the view bar's right end and the condition row's,
+    // read through stores the same way, so a change in them redraws only them.
+    const [trailStore] = useState(() => createLeadStore<((tools: ReactNode) => ReactNode) | null>(viewBarTrailing));
+    const [rowEndStore] = useState(() => createLeadStore<ReactNode>(conditionRowEnd));
+    useLayoutEffect(() => {
+        trailStore.set(viewBarTrailing);
+        rowEndStore.set(conditionRowEnd);
+    });
+    const hasViewBarTrailing = viewBarTrailing != null;
     // objectui#10694 — does the active view, as AUTHORED, declare a non-empty
     // `columns`? Booleans, so the relay keys on values and not on the memo's
     // Set (AGENTS.md #10).
@@ -384,8 +404,10 @@ export function useObjectViewListRenderer({
             const chartPage = (chartFace: ReactNode) => (
                 <div className="h-full flex flex-col min-w-0">
                     {hasPhoneTitle && (
-                        <div className="border-b px-2 py-1.5 sm:h-10 sm:pl-2.5 sm:pr-2 sm:py-0 flex items-center min-w-0 bg-background">
+                        <div className="border-b px-2 py-1.5 sm:h-10 sm:pl-2.5 sm:pr-2 sm:py-0 flex items-center justify-between gap-2 min-w-0 bg-background">
                             <ViewBarLead store={leadStore} />
+                            {/* objectstack#35878 — the page's acts end this bar too. */}
+                            {hasViewBarTrailing && <ViewBarTrailing store={trailStore} tools={null} />}
                         </div>
                     )}
                     {chartFace}
@@ -1086,6 +1108,7 @@ export function useObjectViewListRenderer({
                     handleRowClick(record, event);
                 }}
                 onRowsChange={handleListRowsChange}
+                onTotalChange={handleListTotalChange}
                 // objectstack#30850 — the page lives in the address (`uf__page`,
                 // replace): the list reads it and reports every move back.
                 page={listPage}
@@ -1130,13 +1153,13 @@ export function useObjectViewListRenderer({
                 // marks a user who holds nothing beyond the baseline. A host
                 // prop the grid draws beside the row's title.
                 rowAdornment={managedUsers ? managedUserMarker : undefined}
-                // objectstack#26681 — for a row that opens the drawer, the ↗
-                // beside its record link that opens the record as the full page.
-                recordLinkAdornment={openAsPage
+                // objectstack#35854 — the name opens the full page; the icon
+                // beside it, on hover, opens the record in the side drawer.
+                recordLinkAdornment={openInPanel
                     ? (row: Record<string, unknown>) => {
                         const id = row?.id ?? row?._id;
                         return (typeof id === 'string' && id !== '') || typeof id === 'number'
-                            ? <OpenAsPageLink objectName={openAsPage.objectName} recordId={id} label={openAsPage.label} onOpen={openAsPage.open} />
+                            ? <OpenInSidePanelButton recordId={id} label={openInPanel.label} onOpen={openInPanel.open} />
                             : null;
                     }
                     : undefined}
@@ -1144,8 +1167,6 @@ export function useObjectViewListRenderer({
                 // authored `navigation.mode: 'none'`, or a list-only object)
                 // draws no record link and no Open in its context menu.
                 rowOpensRecord={rowOpensRecord}
-                // objectstack#26681 — the Display menu's Open records section.
-                recordOpen={recordOpen}
                 // The toolbar row is the view bar: the view switcher, then the
                 // filter / sort / options tools (objectstack#27058,
                 // objectstack#35548). The switcher shows the list's own record
@@ -1155,22 +1176,26 @@ export function useObjectViewListRenderer({
                         <ViewBarLead store={leadStore} />
                     </ListRecordCountContext.Provider>
                 ) : null}
+                // objectstack#35878 — the bar's right end: the search, then
+                // the page's acts; and the condition row's right end.
+                toolbarTrailing={hasViewBarTrailing ? (tools) => <ViewBarTrailing store={trailStore} tools={tools} /> : undefined}
+                conditionRowEnd={hasPhoneTitle ? <ViewBarLead store={rowEndStore} /> : undefined}
                 dataSource={ds}
             />
         );
-    }, [activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, managedUsers, managedUserMarker, recordOpen, openAsPage, rowOpensRecord, handleListRowsChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, offersRename, offersSave, offersReset, offersSummaryPick, summaryPickKey, previewDrafts, previewDataSource, unpublishedObjects]);
+    }, [hasViewBarTrailing, trailStore, rowEndStore, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, managedUsers, managedUserMarker, openInPanel, rowOpensRecord, handleListRowsChange, handleListTotalChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, offersRename, offersSave, offersReset, offersSummaryPick, summaryPickKey, previewDrafts, previewDataSource, unpublishedObjects]);
 
     return { renderListView };
 }
 
-/** The page's current view-bar lead (the switcher), read by `ViewBarLead`. */
-interface LeadStore {
-    get: () => ReactNode;
-    set: (next: ReactNode) => void;
+/** The page's current view-bar lead (the switcher), read by `ViewBarLead`; also its right ends. */
+interface LeadStore<T = ReactNode> {
+    get: () => T;
+    set: (next: T) => void;
     subscribe: (listener: () => void) => () => void;
 }
 
-function createLeadStore(initial: ReactNode): LeadStore {
+function createLeadStore<T = ReactNode>(initial: T): LeadStore<T> {
     let current = initial;
     const listeners = new Set<() => void>();
     return {
@@ -1190,4 +1215,10 @@ function createLeadStore(initial: ReactNode): LeadStore {
 /** Draws the store's lead, re-rendering on its own when the page hands a new one. */
 function ViewBarLead({ store }: { store: LeadStore }) {
     return <>{useSyncExternalStore(store.subscribe, store.get, store.get)}</>;
+}
+
+/** Draws the view bar's right end from the store, around the list's own `tools`. */
+function ViewBarTrailing({ store, tools }: { store: LeadStore<((tools: ReactNode) => ReactNode) | null>; tools: ReactNode }) {
+    const render = useSyncExternalStore(store.subscribe, store.get, store.get);
+    return <>{render ? render(tools) : tools}</>;
 }

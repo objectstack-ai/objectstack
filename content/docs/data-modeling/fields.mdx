@@ -233,7 +233,8 @@ project: Field.masterDetail('project', {
   required: true,
 }),
 
-// Inline line items on the parent form
+// Inline line items on the parent form (the parent names the child in a
+// field group: fieldGroups: [{ key: 'lines', relatedList: 'order_line' }])
 order: Field.masterDetail('order', {
   label: 'Order',
   required: true,
@@ -249,7 +250,7 @@ order: Field.masterDetail('order', {
 | `lookupFilters` | `{ field, operator, value, orEmpty? }[]` | Base filters restricting which records are selectable (structured, picker-honored). `value` is a literal or a `{ $record }` reference — see below |
 | `dependsOn` | `(string \| { field, param? })[]` | Sibling fields that scope the candidates by equality; the picker is gated until they are set |
 | `deleteBehavior` | `enum` | `'set_null'`, `'cascade'`, `'restrict'` |
-| `inlineEdit` | `boolean \| 'grid' \| 'form'` | Render child records inline on the parent create/edit form (`true` = auto-pick, `'grid'`, or `'form'`) |
+| `inlineEdit` | `boolean \| 'grid' \| 'form'` | Form factor of the child rows on the parent create/edit form (`true` = auto-pick, `'grid'`, or `'form'`). The form inlines the child only where a field group of the parent names it (`fieldGroups[].relatedList`); `inlineEdit` alone inlines nothing |
 | `inlineColumns` | `array` | Optional explicit columns for the inline grid |
 | `inlineAmountField` | `string` | Optional numeric child field for the inline running total |
 | `lookupAutofill` | `{ target, source, overwrite? }[]` | Fields of this object a pick fills from the picked record (single-value `lookup` / `master_detail` only) — see below |

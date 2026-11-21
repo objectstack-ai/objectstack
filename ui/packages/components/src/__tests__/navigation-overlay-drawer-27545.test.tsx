@@ -16,23 +16,19 @@
  *    `mainContent` element in every state, so it never remounts, keeps its
  *    full width (nothing narrows it), and stays clickable. A drawer with no
  *    list stays the modal sheet (the control).
- * 2. `⤢` maximizes in place to the viewport less the LIVE sidebar width;
- *    `⤡` or `Esc` restores, `✕` closes, and a closed drawer forgets it.
+ * 2. objectstack#35854 — the drawer is a floating card (8 px clear of the
+ *    viewport's top, right and bottom, rounded, shadowed). It has no wider
+ *    state: the bar's one `⤢` is the host's `onExpand`, which goes to the
+ *    full page; `Esc` and `✕` close.
  * The drag range is 360 px to 60vw, and a remembered width is drawn inside it.
  */
 
 import * as React from 'react';
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { render, screen, cleanup, fireEvent, act } from '@testing-library/react';
-import {
-  NavigationOverlay,
-  SIDEBAR_WIDTH_FALLBACK,
-  SIDEBAR_WIDTH_ICON_FALLBACK,
-  type NavigationOverlayProps,
-} from '../custom/navigation-overlay';
+import { NavigationOverlay, type NavigationOverlayProps } from '../custom/navigation-overlay';
 import * as overlayModule from '../custom/navigation-overlay';
 import * as listFaceModule from '../custom/record-list-face';
-import { SidebarProvider } from '../ui/sidebar';
 
 let listMounts = 0;
 
@@ -72,7 +68,6 @@ function overlay(props: Partial<NavigationOverlayProps> = {}) {
       title="Lead"
       width="720px"
       mainContent={list}
-      maximizable
       {...props}
     >
       {() => <div data-testid="payload">record body</div>}
@@ -145,70 +140,56 @@ describe('1 — the drawer is over the list, non-modal, and the list never remou
   });
 });
 
-describe('2 — ⤢ maximizes in place to the viewport less the live sidebar', () => {
-  const maximize = () => screen.getByTestId('record-pane-maximize');
+describe('2 — the drawer is a floating card with one ⤢, which opens the page', () => {
   const drawerWidth = () => drawer()!.style.getPropertyValue('--ov-w').trim();
 
-  it('⤢ maximizes over the list, ⤡ restores; the list keeps its element and goes inert', () => {
+  it('is a card: clear of the viewport edges, rounded, shadowed, bordered all round', () => {
     render(overlay());
-    expect(maximize().getAttribute('aria-label')).toBe('Maximize');
+    const card = drawer()!;
+    expect(card.hasAttribute('data-record-drawer-card')).toBe(true);
+    for (const token of ['sm:inset-y-2', 'sm:right-2', 'sm:rounded-xl', 'sm:border', 'sm:shadow-2xl']) {
+      expect(card.className.split(/\s+/)).toContain(token);
+    }
     expect(drawerWidth()).toBe('720px');
-    fireEvent.click(maximize());
-    expect(drawer()!.hasAttribute('data-maximized')).toBe(true);
-    expect(drawerWidth()).toBe('calc(100vw - 0px)');
-    expect(listHost().hasAttribute('inert')).toBe(true);
-    expect(maximize().getAttribute('aria-label')).toBe('Restore size');
-    fireEvent.click(maximize());
-    expect(drawer()!.hasAttribute('data-maximized')).toBe(false);
-    expect(drawerWidth()).toBe('720px');
-    expect(listMounts).toBe(1);
   });
 
-  it('Esc restores from maximized, and only the next Esc closes', () => {
+  it('⤢ is the host\'s open-the-page hop, and there is no maximize control or state', () => {
+    const onExpand = vi.fn();
+    render(overlay({ onExpand }));
+    expect(screen.queryByTestId('record-pane-maximize')).toBeNull();
+    const open = screen.getByTestId('record-pane-open-page');
+    expect(open.getAttribute('aria-label')).toBe('Open as full page');
+    fireEvent.click(open);
+    expect(onExpand).toHaveBeenCalledTimes(1);
+    expect(drawer()!.hasAttribute('data-maximized')).toBe(false);
+    expect(drawerWidth()).toBe('720px');
+    expect(listHost().hasAttribute('inert')).toBe(false);
+  });
+
+  it('with no host hop there is no ⤢ at all', () => {
+    render(overlay());
+    expect(screen.queryByTestId('record-pane-open-page')).toBeNull();
+  });
+
+  it('Esc closes at once', () => {
     const setIsOpen = vi.fn();
     render(overlay({ setIsOpen }));
-    fireEvent.click(maximize());
-    fireEvent.keyDown(document.body, { key: 'Escape' });
-    expect(drawer()!.hasAttribute('data-maximized')).toBe(false);
-    expect(setIsOpen).not.toHaveBeenCalledWith(false);
     fireEvent.keyDown(document.body, { key: 'Escape' });
     expect(setIsOpen).toHaveBeenCalledWith(false);
   });
 
-  it('✕ closes the whole path even while maximized', () => {
+  it('✕ closes the whole path', () => {
     const close = vi.fn();
     render(overlay({ close }));
-    fireEvent.click(maximize());
     // By `title`: the sheet primitive's own (CSS-hidden) close shares the name in jsdom.
     fireEvent.click(screen.getByTitle('Close'));
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it('is not remembered: a drawer closed while maximized opens at its own width', () => {
-    const { rerender } = render(overlay());
-    fireEvent.click(maximize());
-    rerender(overlay({ isOpen: false, selectedRecord: null }));
-    rerender(overlay());
-    expect(drawer()!.hasAttribute('data-maximized')).toBe(false);
-    expect(drawerWidth()).toBe('720px');
-  });
-
-  it('reads the sidebar live: expanded, then collapsed to its icon rail', () => {
-    function Shell({ open }: { open: boolean }) {
-      return <SidebarProvider open={open} onOpenChange={() => {}}>{overlay()}</SidebarProvider>;
+  it('the maximize width helpers are gone from the published surface', () => {
+    for (const name of ['SIDEBAR_WIDTH_FALLBACK', 'SIDEBAR_WIDTH_ICON_FALLBACK', 'maximizedWidthCss', 'useLiveSidebarWidth']) {
+      expect(name in overlayModule).toBe(false);
     }
-    const { rerender } = render(<Shell open />);
-    fireEvent.click(maximize());
-    expect(drawerWidth()).toBe(`calc(100vw - var(--sidebar-width, ${SIDEBAR_WIDTH_FALLBACK}))`);
-    rerender(<Shell open={false} />);
-    expect(drawerWidth()).toBe(`calc(100vw - var(--sidebar-width-icon, ${SIDEBAR_WIDTH_ICON_FALLBACK}))`);
-  });
-
-  it('the fallbacks a portalled drawer reads are the sidebar provider’s own widths', () => {
-    const { container } = render(<SidebarProvider><span /></SidebarProvider>);
-    const wrapper = container.firstElementChild as HTMLElement;
-    expect(wrapper.style.getPropertyValue('--sidebar-width')).toBe(SIDEBAR_WIDTH_FALLBACK);
-    expect(wrapper.style.getPropertyValue('--sidebar-width-icon')).toBe(SIDEBAR_WIDTH_ICON_FALLBACK);
   });
 });
 

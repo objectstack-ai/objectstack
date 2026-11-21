@@ -11,15 +11,14 @@
  * through `ObjectView` (maintainer rulings of 2026-10-29), and objectstack#28915
  * (「默认改抽屉，分屏彻底退役，只留抽屉和整页」):
  *
- * - objectstack#28915 Target 1: with no choice made the record opens in the
- *   drawer OVER the list, and the list keeps its full width — every view
- *   column; it stays clickable, a click on another row swaps the record, and
- *   the open row is marked and follows `↓` `↑`. A stored `split` opens the
- *   drawer too.
- * - Target 3: `⤢` maximizes in place — same `?recordId=` URL, no history
- *   entry — and `Esc` restores.
- * - Target 5: a `?recordId=` change (a row click, a step) does not re-render
- *   the list: `ListView` renders are counted across both.
+ * - objectstack#28915 Target 1: a `?recordId=` opens the record in the drawer
+ *   OVER the list, and the list keeps its full width — every view column; it
+ *   stays clickable, another row's 「在侧边打开」 icon swaps the record, and
+ *   the open row is marked and follows `↓` `↑`.
+ * - objectstack#35854: the drawer has no maximized state; its one `⤢` opens
+ *   the full page, and the record's name in the list opens the page too.
+ * - Target 5: a `?recordId=` change (a hover-icon click, a step) does not
+ *   re-render the list: `ListView` renders are counted across both.
  *
  * The record body is not what this file reads, so `RecordDetailView` is a
  * null sink.
@@ -27,7 +26,10 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, cleanup, screen, fireEvent, waitFor, act } from '@testing-library/react';
+// `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
+import { render, cleanup, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
 
@@ -97,7 +99,6 @@ vi.mock('./metadata-admin/useMetadata', async (importOriginal) => ({
 
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
-import { RECORD_OPEN_PREFERENCE_KEY } from '../utils/recordOpenPreference';
 
 const OBJECT_NAME = 'duly_task';
 const VIEW_ID = `${OBJECT_NAME}.all`;
@@ -132,6 +133,7 @@ function LocationProbe() {
   const location = useLocation();
   return (
     <>
+      <output data-testid="location-pathname">{location.pathname}</output>
       <output data-testid="location-search">{location.search}</output>
       <output data-testid="location-key">{location.key}</output>
     </>
@@ -156,7 +158,6 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
-  window.localStorage.removeItem(RECORD_OPEN_PREFERENCE_KEY);
   window.history.replaceState(null, '', '/');
 });
 
@@ -195,13 +196,16 @@ async function openPage(search = '?recordId=r1') {
 }
 
 const search = () => screen.getByTestId('location-search').textContent;
+const pathname = () => screen.getByTestId('location-pathname').textContent;
 const historyKey = () => screen.getByTestId('location-key').textContent;
 const rowOf = (name: string) => screen.getByText(name).closest('tr') as HTMLElement;
+/** The row's 「在侧边打开」 icon beside its name. */
+const openInPanel = (name: string) => within(rowOf(name)).getByTestId('record-open-in-panel');
 const isOpenRow = (name: string) => rowOf(name).hasAttribute('data-active-record');
 const columnHeaders = () => screen.getAllByRole('columnheader').map((th) => th.textContent?.trim() ?? '');
 
 describe('objectstack#28915 Target 1 — the record opens in the drawer over a full-width, clickable list', () => {
-  it('with no choice made: the drawer over the list, every view column kept, the open row marked', async () => {
+  it('a ?recordId=: the drawer over the list, every view column kept, the open row marked', async () => {
     await openPage();
     expect(screen.getByRole('dialog')).toBeTruthy();
     expect(screen.queryByTestId('record-split-pane')).toBeNull();
@@ -213,19 +217,9 @@ describe('objectstack#28915 Target 1 — the record opens in the drawer over a f
     expect(isOpenRow('Beta')).toBe(false);
   });
 
-  it('a stored `split` reads as the default: the drawer, no pane beside the list', async () => {
-    window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'split');
+  it('another row\'s side-panel icon swaps the record, and the mark moves with it', async () => {
     await openPage();
-    expect(screen.getByRole('dialog')).toBeTruthy();
-    expect(screen.queryByTestId('record-split-pane')).toBeNull();
-    for (const label of COLUMN_LABELS) {
-      expect(columnHeaders().some((text) => text.includes(label))).toBe(true);
-    }
-  });
-
-  it('a click on another row swaps the record, and the mark moves with it', async () => {
-    await openPage();
-    fireEvent.click(screen.getByText('Gamma'));
+    fireEvent.click(openInPanel('Gamma'));
     await waitFor(() => expect(search()).toBe('?recordId=r3'));
     expect(isOpenRow('Gamma')).toBe(true);
     expect(isOpenRow('Alpha')).toBe(false);
@@ -234,7 +228,7 @@ describe('objectstack#28915 Target 1 — the record opens in the drawer over a f
 });
 
 describe('Target 5 — a `?recordId=` change does not re-render the list', () => {
-  it('a ↓ step and a row click leave the ListView render count where it was', async () => {
+  it('a ↓ step and a side-panel icon click leave the ListView render count where it was', async () => {
     await openPage();
     const settled = counter.listViewRenders;
     expect(settled).toBeGreaterThan(0);
@@ -244,7 +238,7 @@ describe('Target 5 — a `?recordId=` change does not re-render the list', () =>
     await waitFor(() => expect(isOpenRow('Beta')).toBe(true));
     expect(isOpenRow('Alpha')).toBe(false);
 
-    fireEvent.click(screen.getByText('Gamma'));
+    fireEvent.click(openInPanel('Gamma'));
     await waitFor(() => expect(search()).toBe('?recordId=r3'));
     await act(async () => {
       await new Promise((settle) => setTimeout(settle, 50));
@@ -253,20 +247,18 @@ describe('Target 5 — a `?recordId=` change does not re-render the list', () =>
   });
 });
 
-describe('Target 3 — ⤢ maximizes in place', () => {
-  it('keeps the URL and the history entry, hides the list, and Esc restores', async () => {
+describe('objectstack#35854 — the drawer\'s ⤢ and the record name both open the full page', () => {
+  it('⤢ opens the record\'s page, and there is no maximized state', async () => {
     await openPage();
-    const keyBefore = historyKey();
-    fireEvent.click(screen.getByRole('button', { name: 'Maximize' }));
-    const pane = screen.getByRole('dialog');
-    expect(pane.hasAttribute('data-maximized')).toBe(true);
-    expect(screen.getByTestId('record-list-host').hasAttribute('inert')).toBe(true);
-    expect(search()).toBe('?recordId=r1');
-    expect(historyKey()).toBe(keyBefore);
+    expect(screen.queryByRole('button', { name: 'Maximize' })).toBeNull();
+    expect(screen.getByRole('dialog').hasAttribute('data-maximized')).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Open as full page' }));
+    await waitFor(() => expect(pathname()).toBe(`/apps/demo/${OBJECT_NAME}/record/r1`));
+  });
 
-    fireEvent.keyDown(document.body, { key: 'Escape' });
-    expect(pane.hasAttribute('data-maximized')).toBe(false);
-    expect(search()).toBe('?recordId=r1');
-    expect(historyKey()).toBe(keyBefore);
+  it('a click on another row\'s name opens that record\'s page, not the drawer', async () => {
+    await openPage();
+    fireEvent.click(screen.getByText('Gamma'));
+    await waitFor(() => expect(pathname()).toBe(`/apps/demo/${OBJECT_NAME}/record/r3`));
   });
 });

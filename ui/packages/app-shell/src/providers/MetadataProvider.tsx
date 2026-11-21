@@ -19,6 +19,7 @@ import {
 import { isActionSwitchedOff, markSwitchedOffActions, markSwitchedOffActionsByObject, normalizeSchemaReferenceKeys } from '@object-ui/core';
 import { errorCodeIs } from '@object-ui/types';
 import { resolveInlineMode } from '@object-ui/plugin-form/core';
+import { fieldGroupsPlaceRelationship, isGroupPlaceableRelationship } from '@objectstack/spec/data';
 import {
   MetadataCtx,
   answeredLoadFailure,
@@ -705,19 +706,35 @@ export function mergeViewsIntoObjects(objects: any[], views: any[]): any[] {
 }
 
 /**
- * Relationship-driven master-detail: a child object's `master_detail`/`lookup`
- * field can carry `inlineEdit: true` to declare "edit me inline within my
- * parent's form". This pass scans every object for such fields and merges the
+ * Relationship-driven master-detail: a parent object's field group can name a
+ * child list (`fieldGroups[].relatedList`) to declare "these rows are part of
+ * me". This pass scans every object for such children and merges the
  * resulting child collections into each parent object's form view as
  * `subforms` — so the parent's standard create/edit form renders an atomic
  * master-detail form with NO view config and NO bespoke page. The intent lives
  * in the data model (where it's defined once, e.g. by an AI modelling the
  * schema); forms just follow. An explicit `form.subforms` entry for the same
  * child overrides the model-derived one.
+ *
+ * objectstack#35889 (maintainer ruling B, 「明细表应该改成指看分组的定义了」) —
+ * a child is inlined in its parent's form ONLY when a field group of the
+ * PARENT names it (`fieldGroups[].relatedList`) and a group may place it
+ * (`@objectstack/spec`'s `isGroupPlaceableRelationship`: a plain
+ * `master_detail` FK, or a `relatedList: 'primary'` one). That is the same
+ * test that puts its table into the record page's body, so the record page,
+ * its forms and the record page's edit state carry the same tables.
+ * `inlineEdit` on the FK no longer pulls a child in by itself: it only picks
+ * the form factor (`'grid'` / `'form'`; anything else lets the child's shape
+ * decide).
  */
 export function attachInlineSubforms(objects: any[]): any[] {
   if (!objects?.length) return objects;
   const inlineByParent: Record<string, any[]> = {};
+  // objectstack#35889 — each parent's field groups, by name.
+  const groupsByParent = new Map<string, unknown>();
+  for (const obj of objects) {
+    if (obj?.name && Array.isArray(obj.fieldGroups)) groupsByParent.set(obj.name, obj.fieldGroups);
+  }
   for (const child of objects) {
     const fields = child?.fields;
     if (!fields) continue;
@@ -726,19 +743,22 @@ export function attachInlineSubforms(objects: any[]): any[] {
       : Object.entries(fields);
     for (const [fname, fdef] of entries) {
       const d: any = fdef;
-      if (!fname || !d?.inlineEdit) continue;
+      if (!fname || !d) continue;
       if (d.type !== 'master_detail' && d.type !== 'lookup') continue;
       // `reference` is the only target spelling read (objectui#11070 round 4);
       // a legacy def was folded onto it at ingestion (`ensureType` runs
       // `normalizeSchemaReferenceKeys` over every `object` item it stores).
       const parent = d.reference;
       if (!parent) continue;
+      const placedByGroup = isGroupPlaceableRelationship(d)
+        && fieldGroupsPlaceRelationship(groupsByParent.get(parent), child.name, fname);
+      if (!placedByGroup) continue;
       (inlineByParent[parent] ||= []).push({
         childObject: child.name,
         relationshipField: fname,
         // Resolve the inline-edit form factor (grid vs per-row form) from the
         // declared value, falling back to the smart default by child shape.
-        inlineMode: resolveInlineMode(child, d.inlineEdit, { relationshipField: fname }),
+        inlineMode: resolveInlineMode(child, d.inlineEdit === 'grid' || d.inlineEdit === 'form' ? d.inlineEdit : undefined, { relationshipField: fname }),
         ...(d.inlineTitle ? { title: d.inlineTitle } : {}),
         ...(Array.isArray(d.inlineColumns) ? { columns: d.inlineColumns } : {}),
         ...(typeof d.inlineAmountField === 'string' ? { amountField: d.inlineAmountField } : {}),

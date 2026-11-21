@@ -70,7 +70,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       highlightFields: {
         label: "강조 필드",
-        helpText: "이 객체의 필드 이름을 중요한 순서대로 나열합니다. 하나만 들어갈 자리에서는 첫 항목이 우선합니다(ADR-0085). 기본 목록 열, 카드, 하위 레코드 미리보기, 상세 강조 영역을 결정합니다. 이 객체의 필드가 아닌 이름은 게시할 때 거부됩니다."
+        helpText: "이 객체의 필드 이름을 중요한 순서대로 나열합니다. 하나만 들어갈 자리에서는 첫 항목이 우선합니다(ADR-0085). 기본 목록 열과 관련 목록 열, 카드, 하위 레코드 미리보기, 레코드 호버 카드, 레코드 선택기를 결정합니다. 이 객체의 필드가 아닌 이름은 게시할 때 거부됩니다."
       },
       relatedLists: {
         label: "관련 목록",
@@ -1354,7 +1354,8 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "항목 클릭 탐색 구성(기본값 drawer, page, new_window 또는 none)"
       },
       "navigation.mode": {
-        label: "모드"
+        label: "모드",
+        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
       },
       "navigation.preventNavigation": {
         label: "탐색 방지",

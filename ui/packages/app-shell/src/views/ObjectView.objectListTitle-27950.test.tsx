@@ -95,7 +95,6 @@ vi.mock('./RecordDetailView', () => ({ RecordDetailView: () => null }));
 import '@objectstack/lint';
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
-import { RECORD_OPEN_PREFERENCE_KEY } from '../utils/recordOpenPreference';
 
 // The page's own reads (the security `explain` probe among them) are relative
 // fetches, which happy-dom would send to a real socket. One double, installed
@@ -172,7 +171,7 @@ function mount(entry: string, { sidebarOpen = true }: { sidebarOpen?: boolean } 
 
 /** The list's toolbar has drawn: its Filter control is on screen. */
 const listToolbar = () =>
-  waitFor(() => expect(screen.getByTestId('toolbar-filter-trigger')).toBeInTheDocument(), { timeout: 5000 });
+  waitFor(() => expect(screen.getByTestId('condition-add-filter')).toBeInTheDocument(), { timeout: 5000 });
 
 const heading = () => screen.getByRole('heading', { level: 1 });
 /** The view bar's leading slot: the one view switcher (objectstack#35548). */
@@ -217,11 +216,12 @@ describe('objectstack#27950, as redrawn by objectstack#35548 — the page bar na
   });
 
   it('a record open in the drawer over the list leaves one object label and one switcher', async () => {
-    localStorage.removeItem(RECORD_OPEN_PREFERENCE_KEY);
     mount('/apps/crm/crm_lead/view/mine?recordId=lead_1');
     await listToolbar();
     expect(screen.getAllByTestId('list-view-switcher')).toHaveLength(1);
-    expect(screen.getAllByTestId('page-header').filter((h) => h.dataset.posture === 'list')).toHaveLength(1);
+    // objectstack#35878: the view bar names the object; no page bar is drawn.
+    expect(screen.getAllByTestId('list-view-bar-object')).toHaveLength(1);
+    expect(screen.queryAllByTestId('page-header').filter((h) => h.dataset.posture === 'list')).toHaveLength(0);
   });
 
   it('a view with no label reads the plural in the switcher', async () => {

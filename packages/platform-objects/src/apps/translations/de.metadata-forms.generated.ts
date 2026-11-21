@@ -70,7 +70,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       highlightFields: {
         label: "Hervorgehobene Felder",
-        helpText: "Feldnamen dieses Objekts, das wichtigste zuerst – der erste Eintrag gewinnt, wo nur einer Platz hat (ADR-0085). Steuert die Standardspalten der Liste, Karten, Vorschauen untergeordneter Datensätze und die Hervorhebungsleiste der Detailansicht. Ein Name, der kein Feld dieses Objekts ist, wird bei der Veröffentlichung abgelehnt."
+        helpText: "Feldnamen dieses Objekts, das wichtigste zuerst – der erste Eintrag gewinnt, wo nur einer Platz hat (ADR-0085). Steuert die Standardspalten von Listen und Bezugslisten, Karten, Vorschauen untergeordneter Datensätze, die Hover-Karte des Datensatzes und die Datensatzauswahl. Ein Name, der kein Feld dieses Objekts ist, wird bei der Veröffentlichung abgelehnt."
       },
       relatedLists: {
         label: "Verknüpfte Listen",
@@ -1354,7 +1354,8 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Konfiguration der Navigation beim Klick auf ein Element (standardmäßig Seitenleiste, page, new_window oder none)"
       },
       "navigation.mode": {
-        label: "Modus"
+        label: "Modus",
+        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
       },
       "navigation.preventNavigation": {
         label: "Navigation verhindern",

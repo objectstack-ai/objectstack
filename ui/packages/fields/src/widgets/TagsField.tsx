@@ -3,6 +3,7 @@ import { Badge, Input, EmptyValue, cn } from '@object-ui/components';
 import { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
 import { useFieldTranslation } from './useFieldTranslation.js';
+import { isImeKey } from './imeKey.js';
 
 /**
  * TagsField - free-form list of string tags. Type a value and press Enter (or
@@ -62,6 +63,9 @@ export function TagsField({ value, onChange, field, readonly, className, error, 
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // The input method owns a key pressed while it composes (an Enter or a
+    // comma that picks a candidate): the draft is not a tag yet.
+    if (isImeKey(e)) return;
     if (e.key === 'Enter' || e.key === ',') {
       e.preventDefault();
       addTag(draft);

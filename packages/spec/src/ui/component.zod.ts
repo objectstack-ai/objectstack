@@ -1865,15 +1865,11 @@ export const RecordRelatedListProps = strictObject({
 
 /**
  * How many of an object's declared `highlightFields` (ADR-0085), after the
- * record's title field leaves the list, the DEFAULT record page draws in its
- * header strip. The Details body leaves those fields out, so an entry past
- * this count is drawn in the body instead.
- *
- * The one source both readers ask: the record page synthesizer in
- * `@object-ui/plugin-detail` cuts the strip with it, and the
- * `field-group-shadowed` lint in `@objectstack/lint` judges with it which
- * field groups the strip empties on the record page. A second literal on
- * either side is how the lint came to judge four while the page drew six.
+ * record's title field leaves the list, a SYNTHESIZED key-field strip draws.
+ * The default record page draws no such strip and leaves every highlighted
+ * field in its group; the strip is built only for a page that places one in
+ * its `highlights` slot, by the record page synthesizer in
+ * `@object-ui/plugin-detail`, which cuts the list with this count.
  *
  * Not the bound of an authored `record:highlights` block's `fields`
  * ({@link RecordHighlightsProps}): an authored page writes its own strip.
