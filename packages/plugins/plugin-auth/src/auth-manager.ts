@@ -265,6 +265,11 @@ import {
   isOwnedAccountSuspensionComplete,
   suspendAccountsOfDirectoryDeactivatedOwner,
 } from './service-account-owner-leaves.js';
+import {
+  directoryRegistrationsIncompleteMessage,
+  directoryRevokedCredentialsMessage,
+  endRegistrationsOfARemovedAccount,
+} from './removed-account-registrations.js';
 // [objectstack-ai/cloud#3606, ruling A] `/oauth2/revoke` for an MCP access
 // token: the answer `handleRequest` gives after the provider's, through
 // `answerOAuthTokenRevocation` below.
@@ -5218,7 +5223,20 @@ export class AuthManager {
    * still deactivated. It runs on every inactive call after the key
    * revocation, an account already suspended keeps its own reason, and a
    * suspension that does not finish never fails the deprovision; it is
-   * reported once at `error`. An administrator's ban leaves the accounts alone.
+   * reported once at `error`. An administrator's ban suspends them too, with a
+   * reason of its own (`admin-ban-endpoints.ts`).
+   *
+   * An inactive state also ends what a password reset ends of the user's
+   * registrations (`removed-account-registrations.ts`): every OAuth application
+   * the user registered is disabled and every SCIM credential the user minted
+   * is revoked, each revoke recorded against the connection's service
+   * principal; the single sign-on providers the user registered are kept, and a
+   * re-activation restores none of these. It runs on every inactive call after
+   * the suspension and never fails the deprovision. A revoked credential pauses
+   * provisioning through its connection, which looks like nothing from here, so
+   * it is reported in one `error` line naming the credentials and the remedy;
+   * an arm that does not finish is reported once at `error` too, and the next
+   * inactive write retries it.
    *
    * [ADR-0135 D4] This callback also writes the directory-managed mark
    * (`sys_user.source = 'idp_provisioned'`, `scim-identity-source.ts`) on every
@@ -5302,6 +5320,10 @@ export class AuthManager {
       // re-activation resumes none of them.
       const suspension = await suspendAccountsOfDirectoryDeactivatedOwner(engine as never, state.userId);
       if (!isOwnedAccountSuspensionComplete(suspension)) this.logScimAccountSuspensionIncomplete(state.userId, suspension);
+      // ...and ends what a password reset ends of the user's registrations: the
+      // OAuth applications they registered disabled, the SCIM credentials they
+      // minted revoked. A re-activation restores none of them.
+      await this.endScimDeactivatedRegistrations(engine, state.userId);
       try {
         await markDirectoryProvisionedUsers(engine as never, [state.userId]);
       } catch (e) {
@@ -5353,6 +5375,55 @@ export class AuthManager {
     const sink = this.config.logger as { error?: (msg: string, meta?: unknown) => void } | undefined;
     if (typeof sink?.error === 'function') sink.error(message, meta);
     else console.error(message, meta);
+  }
+
+  /**
+   * The directory's half of the rule that an account disabled by any door
+   * keeps nothing running in its name (`removed-account-registrations.ts`):
+   * disable the OAuth applications `userId` registered and revoke the SCIM
+   * credentials they minted, each revoke recorded against the connection that
+   * deactivated them. Never throws. A revoked credential pauses provisioning
+   * through its connection while everything looks healthy, so it is logged at
+   * `error`, once, naming the credentials and the remedy; an arm that did not
+   * finish is logged at `error` once too (the user is disabled, so nothing
+   * looks wrong, but what was not ended keeps working).
+   */
+  private async endScimDeactivatedRegistrations(engine: unknown, userId: string): Promise<void> {
+    const { scimRequestConnectionId, scimServicePrincipal } = await import('./scim-connection-service.js');
+    const connectionId = scimRequestConnectionId();
+    const sink = this.config.logger as
+      | { error?: (msg: string, meta?: unknown) => void; warn?: (msg: string, meta?: unknown) => void }
+      | undefined;
+    const outcome = await endRegistrationsOfARemovedAccount(
+      engine as never,
+      userId,
+      connectionId !== undefined
+        ? {
+            actorId: scimServicePrincipal(connectionId),
+            servicePrincipal: true,
+            act: 'a directory deactivation',
+            warn: (message) => (typeof sink?.warn === 'function' ? sink.warn(message) : console.warn(message)),
+          }
+        : undefined,
+    );
+    const error = (message: string, meta: unknown): void => {
+      if (typeof sink?.error === 'function') sink.error(message, meta);
+      else console.error(message, meta);
+    };
+    if (outcome.scimCredentials.length > 0) {
+      error(directoryRevokedCredentialsMessage(userId, outcome.scimCredentials), {
+        object: 'sys_scim_connection_credential',
+        revoked: outcome.scimCredentials,
+      });
+    }
+    if (outcome.error !== undefined) {
+      error(directoryRegistrationsIncompleteMessage(userId, outcome), {
+        object: 'sys_oauth_application',
+        disabled: outcome.ownedApps.length,
+        revoked: outcome.scimCredentials.length,
+        error: outcome.error,
+      });
+    }
   }
 
   /**

@@ -190,16 +190,7 @@ async function endRegistrations(
   userId: string,
   opts: { logger?: { warn(msg: string): void }; auditActorId?: string },
 ): Promise<void> {
-  const store: RegistrationStore = {
-    find: (object, query, opts) => engine.find(object, query, opts),
-    findOne: async (object, query, opts) =>
-      (engine.findOne
-        ? ((await engine.findOne(object, query, opts)) as Record<string, unknown> | null)
-        : (rowsOf(await engine.find(object, { ...query, limit: 1 }, opts))[0] ?? null)),
-    update: (object, data, opts) => engine.update(object, data, opts),
-    ...(typeof engine.insert === 'function' ? { insert: engine.insert.bind(engine) } : {}),
-    ...(typeof engine.getSchema === 'function' ? { getSchema: engine.getSchema.bind(engine) } : {}),
-  };
+  const store = registrationStoreOf(engine);
   const ended: EndedRegistrations = { ownedApps: [], scimCredentials: [] };
   const trail = opts.auditActorId
     ? { actorId: opts.auditActorId, warn: opts.logger ? (message: string) => opts.logger?.warn(message) : undefined }
@@ -211,6 +202,27 @@ async function endRegistrations(
   }
   outcome.ownedApps = ended.ownedApps.length;
   outcome.scimCredentials = ended.scimCredentials.length;
+}
+
+/**
+ * The data engine as the store {@link endWhatTheAccountRegistered} reads and
+ * writes through: an engine with no single-row read is read through `find`.
+ * Shared by every caller of that arm that holds a plain engine: the forced
+ * resets here, and the removal of an account (`removed-account-registrations.ts`).
+ */
+export function registrationStoreOf(
+  engine: ForcedResetRevocationEngine & { find(object: string, query?: unknown, opts?: unknown): Promise<unknown> },
+): RegistrationStore {
+  return {
+    find: (object, query, opts) => engine.find(object, query, opts),
+    findOne: async (object, query, opts) =>
+      (engine.findOne
+        ? ((await engine.findOne(object, query, opts)) as Record<string, unknown> | null)
+        : (rowsOf(await engine.find(object, { ...query, limit: 1 }, opts))[0] ?? null)),
+    update: (object, data, opts) => engine.update(object, data, opts),
+    ...(typeof engine.insert === 'function' ? { insert: engine.insert.bind(engine) } : {}),
+    ...(typeof engine.getSchema === 'function' ? { getSchema: engine.getSchema.bind(engine) } : {}),
+  };
 }
 
 function isLiveSession(row: Record<string, any>, now: number): boolean {
