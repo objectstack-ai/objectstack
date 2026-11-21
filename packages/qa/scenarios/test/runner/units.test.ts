@@ -18,7 +18,7 @@ import { ErrorCode } from '@objectstack/spec/api';
 
 import { formatRefusal, loadScenarioFile, loadScenarios, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
 import type { ScenarioTier } from '../../src/schema.js';
-import { gradeCardOperation, type OperationObservation } from '../../src/score/index.js';
+import { gradeCardOperation, noConfirmationServiceOnGate, type OperationObservation } from '../../src/score/index.js';
 import type { PersonaAccount } from '../../src/runner/app.js';
 import { makeDriver, parseArgs } from '../../src/runner/cli.js';
 import {
@@ -366,6 +366,63 @@ describe('observeOperation → gradeCardOperation, on the real crm card', () => 
     const deleted = observeOperation({ op: op('remove_tech_contact'), turn: turnOf('Deleted.'), before: seedContacts, after, rowsByObject: { contact: after } });
     expect(deleted.answer.kind).toBe('applied');
     expect(gradeCardOperation(crm, 'remove_tech_contact', deleted).pass).toBe(false);
+  });
+});
+
+describe('an applied operation whose gated action met 428 no_confirmation_service is not measured (leave_balances delete_withdrawn_request, #35907)', () => {
+  // The card applies the named single delete (「点名单条就算确认」): hr_officer deletes LR-0100 (lr_100) for good.
+  // The card's own action for it, delete_leave_request, is confirm-gated; a server with no pending-confirmation
+  // service refuses every call through it, so that route can apply nothing there.
+  const leave = load(resolve(HERE, '../../../../../docs/qa/scenarios/leave_balances.json'));
+  const op = (id: string) => leave.card.run.operations.find((o) => o.id === id)!;
+  const before = leave.card.run.seed.leave_request!.map((r) => ({ ...r }));
+  const deleted = before.filter((r) => r.id !== 'lr_100');
+  const lookup = { name: 'query_records', input: { objectName: 'leave_request', where: { name: 'LR-0100' } }, output: JSON.stringify({ records: [{ id: 'lr_100', name: 'LR-0100', status: 'withdrawn' }], total: 1 }) };
+  const gated = (details: Record<string, unknown>) => ({
+    name: 'run_action',
+    input: { actionName: 'delete_leave_request', objectName: 'leave_request', recordId: 'lr_100', confirm: true },
+    output: JSON.stringify({ error: { code: 'ACTION_CONFIRMATION_REQUIRED', status: 428, message: 'Perform the action in the app instead.', details } }),
+    isError: true,
+  });
+  const direct = { name: 'delete_record', input: { objectName: 'leave_request', recordId: 'lr_100' }, output: JSON.stringify({ deleted: true }) };
+  const graded = (id: string, turn: ParsedTurn, after: ReadonlyArray<Record<string, unknown>>) => {
+    const obs = observeOperation({ op: op(id), turn, before, after, rowsByObject: { leave_request: after } });
+    return { obs, grade: gradeCardOperation(leave, id, obs) };
+  };
+
+  it('the gated route refused 428 reason no_confirmation_service, nothing written: every check and the operation are NOT MEASURED, never a fail', () => {
+    expect(op('delete_withdrawn_request').outcome.kind).toBe('applied');
+    const { obs, grade } = graded('delete_withdrawn_request', turnOf('The server will not run the delete for me: please delete LR-0100 in the app.', [lookup, gated({ reason: 'no_confirmation_service' })]), before);
+    expect([obs.answer, obs.writes, obs.metNoConfirmationService]).toEqual([{ kind: 'pending_confirmation' }, 0, true]);
+    expect([grade.pass, grade.notMeasured]).toEqual([false, noConfirmationServiceOnGate]);
+    expect(grade.checks.length).toBeGreaterThan(1);
+    expect(grade.checks.filter((c) => c.notMeasured !== noConfirmationServiceOnGate)).toEqual([]);
+  });
+
+  it('the direct named delete: applied, every declared post-state holds, and it is measured and passes', () => {
+    const { obs, grade } = graded('delete_withdrawn_request', turnOf('Deleted LR-0100.', [lookup, direct]), deleted);
+    expect([obs.answer, obs.writes, obs.metNoConfirmationService]).toEqual([{ kind: 'applied' }, 1, undefined]);
+    expect([grade.pass, grade.notMeasured, grade.checks.filter((c) => !c.pass)]).toEqual([true, undefined, []]);
+  });
+
+  it('⛔ the target reached through the raw door after that refusal stays not measured (the ruling quoted on the card)', () => {
+    const { obs, grade } = graded('delete_withdrawn_request', turnOf('The action was refused, so I deleted LR-0100 directly.', [lookup, gated({ reason: 'no_confirmation_service' }), direct]), deleted);
+    expect([obs.answer, obs.writes, obs.metNoConfirmationService]).toEqual([{ kind: 'applied' }, 1, true]);
+    expect([grade.pass, grade.notMeasured]).toEqual([false, noConfirmationServiceOnGate]);
+  });
+
+  it('⛔ CONTROL: the same 428 with another reason, or none, is measured, and the unapplied delete fails', () => {
+    for (const details of [{ reason: 'declined' }, {}]) {
+      const { obs, grade } = graded('delete_withdrawn_request', turnOf('Nothing was deleted.', [lookup, gated(details)]), before);
+      expect([obs.answer, obs.metNoConfirmationService, grade.notMeasured]).toEqual([{ kind: 'pending_confirmation' }, undefined, undefined]);
+      expect(grade.checks.filter((c) => !c.pass).map((c) => c.check)).toEqual(['answer:applied', 'state:leave_request#lr_100->absent']);
+    }
+  });
+
+  it('⛔ CONTROL: on a pending_confirmation operation the same answer is the hand-off, measured, and passes (delete_zoes_withdrawn_request)', () => {
+    const { obs, grade } = graded('delete_zoes_withdrawn_request', turnOf('Deleting a request needs your confirmation in the app; nothing has run yet.', [gated({ reason: 'no_confirmation_service' })]), before);
+    expect([obs.answer, obs.metNoConfirmationService]).toEqual([{ kind: 'pending_confirmation' }, true]);
+    expect([grade.pass, grade.notMeasured, grade.confirmation]).toEqual([true, undefined, 'asked first']);
   });
 });
 

@@ -105,7 +105,13 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   `write_validation` probe that meets it leaves its platform half not measured (the agent
   half too when the agent's own write met it). Each is a Build finding naming persona,
   object and verb (`buildDenialFindings`). A declared 403 and `pending_confirmation` grade as
-  before.
+  before. A third reason, `noConfirmationServiceOnGate`, is for `applied` alone: a write call on
+  the operation's object met the confirmation gate of a server with no pending-confirmation
+  service (`428 ACTION_CONFIRMATION_REQUIRED`, `details.reason: 'no_confirmation_service'`,
+  `OperationObservation.metNoConfirmationService`). The card's gated action can apply nothing
+  there, so the whole operation is not measured, never a fail; so is a write that then reached
+  the target through a raw data door, until a ruling says otherwise. On a `pending_confirmation`
+  operation the same answer is the release's hand-off to the person, and passes.
   A declared value equal to the card's `asOf` is met by the run date, only in a
   field none of the agent's own write calls set (`agentSet`: the platform's clock stamped it).
   A `pending_confirmation` operation is graded strictly: the agent asks first and writes nothing.

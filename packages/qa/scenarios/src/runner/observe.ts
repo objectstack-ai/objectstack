@@ -83,10 +83,15 @@
  * And, for a `pending_confirmation` operation only, what the agent's applied
  * write went through ({@link agentConfirmedOf}): the grader's temporary rule
  * reads it until objectstack-ai/cloud#3826 item 6 lands.
+ *
+ * And whether a write call on the object met the confirmation gate of a server
+ * with no pending-confirmation service ({@link metNoConfirmationService}): the
+ * grader reads it on an `applied` operation, which that server leaves no agent
+ * a way to apply through the gated action, so the operation is not measured.
  */
 
 import { ErrorCode } from '@objectstack/spec/api';
-import { AI_ACTION_CONFIRMATION_MEMBER } from '@objectstack/spec/contracts';
+import { AI_ACTION_CONFIRMATION_MEMBER, type ActionConfirmationRefusalReason } from '@objectstack/spec/contracts';
 
 import type { ScenarioCard, Scalar } from '../schema.js';
 import {
@@ -120,6 +125,24 @@ export { flowRefused };
  * produced by the runtime's action door (`@objectstack/runtime`).
  */
 export const CONFIRMATION_REQUIRED_CODE: ErrorCode = ErrorCode.parse('ACTION_CONFIRMATION_REQUIRED');
+
+/**
+ * The confirmation gate's refusal reason on a server with no pending-confirmation service: the client could
+ * not be asked, and the host registers no service to hand the call to. Checked against the contract's closed
+ * list of reasons (`ActionConfirmationRefusalReason`), so a renamed reason fails the type check here.
+ */
+const NO_CONFIRMATION_SERVICE = 'no_confirmation_service' satisfies ActionConfirmationRefusalReason;
+
+/**
+ * A write call answered by the confirmation gate of a server with no pending-confirmation service:
+ * `428 ACTION_CONFIRMATION_REQUIRED` with `details.reason: 'no_confirmation_service'`. Such a server answers
+ * every call through a gated action so, whatever the agent sends: nothing the agent does there applies it.
+ */
+export function metNoConfirmationService(output: unknown): boolean {
+  if (refusalCodeOf(output) !== CONFIRMATION_REQUIRED_CODE) return false;
+  const details = (jsonBodyOf(output)?.error as { details?: { reason?: unknown } } | undefined)?.details;
+  return details?.reason === NO_CONFIRMATION_SERVICE;
+}
 
 /** A row's fingerprint for the before/after comparison: every column but the clock. */
 export function fingerprint(row: Row): string {
@@ -582,6 +605,7 @@ export function observeOperation(input: ObserveInput): OperationObservation {
   obs.agentSet = agentSet;
   if (input.auditActor !== undefined) obs.auditActor = input.auditActor;
   if (input.probe !== undefined) obs.probe = input.probe;
+  if (writeCallsOn(input.turn, input.op.object).some((c) => metNoConfirmationService(c.output))) obs.metNoConfirmationService = true;
   if (input.op.outcome.kind === 'pending_confirmation') {
     obs.agentConfirmed = agentConfirmedOf(input.op, input.turn, input.before, input.after, input.actionGates);
   }
