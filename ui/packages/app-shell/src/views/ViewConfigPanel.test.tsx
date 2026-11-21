@@ -14,10 +14,11 @@ import { render, screen, fireEvent } from '@testing-library/react';
 // Swap the heavy spec-driven inspector for a light stub that lets a test drive
 // `onPatch` — the seam ViewConfigPanel mirrors edits back to the host with.
 vi.mock('./metadata-admin/inspectors/ViewVariantInspector', () => ({
-  ViewVariantInspector: ({ draft, onPatch }: any) => (
+  ViewVariantInspector: ({ draft, onPatch, readOnly }: any) => (
     <button
       type="button"
       data-testid="mock-inspector-edit"
+      data-readonly={String(!!readOnly)}
       onClick={() =>
         onPatch({ config: { ...(draft?.config ?? {}), columns: ['a', 'b', 'c'] } })
       }
@@ -30,7 +31,7 @@ vi.mock('./metadata-admin/inspectors/ViewVariantInspector', () => ({
 // The ADR-0034 draft/publish chrome does its own async metadata reads; stub it
 // out so these tests stay focused on the local discard/close behavior.
 vi.mock('./RuntimeDraftBar', () => ({
-  RuntimeDraftBar: () => null,
+  RuntimeDraftBar: () => <span data-testid="mock-draft-bar" />,
 }));
 
 import { ViewConfigPanel } from './ViewConfigPanel';
@@ -91,5 +92,36 @@ describe('ViewConfigPanel — discard', () => {
 
     expect(props.onClose).toHaveBeenCalledTimes(1);
     expect(props.onCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe('ViewConfigPanel — read-only (objectstack#35974)', () => {
+  it('a view the server refuses to save: shown with its controls disabled, no Save, no draft bar, Close only', () => {
+    const props = makeProps({ mode: 'edit', readOnly: true });
+    render(<ViewConfigPanel {...props} />);
+
+    expect(screen.getByTestId('mock-inspector-edit').getAttribute('data-readonly')).toBe('true');
+    expect(screen.queryByTestId('view-config-save')).toBeNull();
+    expect(screen.queryByTestId('view-config-discard')).toBeNull();
+    expect(screen.queryByTestId('mock-draft-bar')).toBeNull();
+
+    // An edit a control would still send is not relayed to the host's list.
+    fireEvent.click(screen.getByTestId('mock-inspector-edit'));
+    expect(props.onViewUpdate).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('view-config-close'));
+    expect(props.onClose).toHaveBeenCalledTimes(1);
+    expect(props.onSave).not.toHaveBeenCalled();
+  });
+
+  it('a savable view (the default) keeps its editable controls, Save, Discard and the draft bar', () => {
+    const props = makeProps({ mode: 'edit' });
+    render(<ViewConfigPanel {...props} />);
+
+    expect(screen.getByTestId('mock-inspector-edit').getAttribute('data-readonly')).toBe('false');
+    expect(screen.getByTestId('view-config-save')).toBeTruthy();
+    expect(screen.getByTestId('view-config-discard')).toBeTruthy();
+    expect(screen.getByTestId('mock-draft-bar')).toBeTruthy();
+    expect(screen.queryByTestId('view-config-close')).toBeNull();
   });
 });

@@ -44,6 +44,8 @@ import type { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { ChevronDown } from 'lucide-react';
 import { viewRowId } from '../utils/viewIdentity.js';
 import { useRecentItems } from '../hooks/useRecentItems.js';
+import { usePackagesRefusingSaves } from '../hooks/useStudioDesignGate.js';
+import { studioPackageId } from '../utils/appRoute.js';
 import { useListViewFavorites, type ListViewFavorites } from '../layout/listViewFavorites.js';
 import type { useMetaItemRefusal } from '../hooks/useMetaItemRefusal.js';
 import type { useServedViewItems } from '../hooks/useServedViewItems.js';
@@ -354,9 +356,25 @@ export function useObjectViewTitleSwitcher({
         } as ViewTabItem;
     });
 
+    // objectstack#35974 — Manage views offers no pin, default, delete or
+    // rename on a saved view a read-only package ships: the server refuses
+    // each (it goes to the customization package). Its row is read-only there,
+    // by the package the row was served under and the session-held `writable`
+    // verdict objectstack#35933 reads. Unknown (unread, failed, unlisted)
+    // keeps the row as it was. Manage views only: the switcher's sections
+    // above still read `authored` from `isSystem`.
+    const refusingPackages = usePackagesRefusingSaves(isAdmin
+        ? savedViews.map((sv: any) => studioPackageId(sv)).filter((id: string | null): id is string => id !== null)
+        : []);
     // The reader's own views are switched to here but are no view the admin's
     // Manage views lists: they are each reader's data, not the object's views.
-    const viewTabItems = viewItems.filter((item) => !personalViewIds.has(item.id));
+    const viewTabItems = viewItems
+        .filter((item) => !personalViewIds.has(item.id))
+        .map((item) => {
+            if (item.readonly) return item;
+            const packageId = studioPackageId(savedViews.find((sv: any) => viewRowId(sv) === item.id));
+            return packageId !== null && refusingPackages.has(packageId) ? { ...item, readonly: true } : item;
+        });
     const switcherViews: TitleSwitcherView[] = viewItems.map((item) => {
         const personal = personalViewIds.has(item.id);
         return {

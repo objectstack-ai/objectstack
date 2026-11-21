@@ -1414,6 +1414,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                             metadataClient={metadataClient}
                             dataSource={dataSource}
                             onAfterChange={() => setRefreshKey(k => k + 1)}
+                            readOnly={viewConfigPanelMode === 'edit' && activeViewPackageRefusesSaves}
                         />
                     </Suspense>
                 </div>

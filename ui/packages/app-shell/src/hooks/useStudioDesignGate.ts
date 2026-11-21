@@ -207,3 +207,46 @@ export function useStudioDesignGate(path: string | null | undefined): string | n
 export function usePackageRefusesSaves(packageId: string | null): boolean {
   return usePackagePosture(packageId) === 'view';
 }
+
+const NO_REFUSING_PACKAGES: ReadonlySet<string> = new Set();
+
+/**
+ * objectstack#35974 — {@link usePackageRefusesSaves} for a list of packages
+ * at once, for a surface that draws one row per view (Manage views): the ids
+ * among `packageIds` the package list carries as read-only. The same
+ * `writable` verdict, the same session-held read (one request, answered per id
+ * by `fetchSessionPackages`) and the same fail-open: an id still being read, an
+ * id whose read failed and an id the list leaves out are not in the answer, so
+ * that row keeps what it offered before this read.
+ *
+ * Keyed on the ids themselves, never on the array's identity: callers may hand
+ * a fresh array each render.
+ */
+export function usePackagesRefusingSaves(packageIds: readonly string[]): ReadonlySet<string> {
+  const session = usePackageListSession();
+  const key = JSON.stringify([...new Set(packageIds)].sort());
+  const [verdict, setVerdict] = useState<{
+    key: string;
+    session: string;
+    refusing: ReadonlySet<string>;
+  } | null>(null);
+  useEffect(() => {
+    const ids = JSON.parse(key) as string[];
+    if (ids.length === 0) return undefined;
+    let cancelled = false;
+    void Promise.allSettled(ids.map((id) => fetchSessionPackages(session, id))).then((answers) => {
+      if (cancelled) return;
+      const refusing = new Set<string>();
+      answers.forEach((answer, i) => {
+        if (answer.status === 'fulfilled' && packageStudioPosture(answer.value, ids[i]) === 'view') {
+          refusing.add(ids[i]);
+        }
+      });
+      setVerdict({ key, session, refusing });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [key, session]);
+  return verdict && verdict.key === key && verdict.session === session ? verdict.refusing : NO_REFUSING_PACKAGES;
+}

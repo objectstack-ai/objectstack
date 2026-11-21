@@ -116,6 +116,13 @@ export interface ViewConfigPanelProps {
     dataSource?: any;
     /** Called after a publish / discard so the host can refresh its read. */
     onAfterChange?: () => void;
+    /**
+     * objectstack#35974 — the view is one the server refuses to save (a view
+     * a read-only package ships): the panel shows its configuration with
+     * every control disabled, relays no edit to the host, and offers no Save
+     * and no draft publish or discard, only Close.
+     */
+    readOnly?: boolean;
 }
 
 /**
@@ -147,7 +154,7 @@ function mapObjectFields(objectDef: ViewConfigPanelProps['objectDef']): ObjectFi
     });
 }
 
-export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, objectDef, onViewUpdate, onSave, onCreate, metadataClient, dataSource, onAfterChange }: ViewConfigPanelProps) {
+export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, objectDef, onViewUpdate, onSave, onCreate, metadataClient, dataSource, onAfterChange, readOnly = false }: ViewConfigPanelProps) {
     const { t } = useObjectTranslation();
     const panelRef = useRef<HTMLDivElement>(null);
     const locale = useMetadataLocale();
@@ -293,6 +300,8 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
     // that declares none (objectui#10694 judges a draft's `columns` against
     // those). Relaying an untouched stored field would present it as an edit.
     const handlePatch = useCallback((patch: Record<string, unknown>) => {
+        // A read-only view takes no edit, whichever control would have sent one.
+        if (readOnly) return;
         const next: InspectorViewDraft = { ...draftRef.current, ...(patch as Partial<InspectorViewDraft>) };
         draftRef.current = next;
         setDraft(next);
@@ -307,7 +316,7 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
                 onViewUpdate(field, value);
             }
         }
-    }, [onViewUpdate]);
+    }, [onViewUpdate, readOnly]);
 
     const handleSave = useCallback(async () => {
         const flat = inspectorDraftToRuntimeView(draft);
@@ -406,7 +415,7 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
                     variantKey="config"
                     familyKey={familyKey}
                     isHome
-                    readOnly={false}
+                    readOnly={readOnly}
                     locale={locale}
                     objectFieldsOverride={objectFields}
                     onPatch={handlePatch}
@@ -417,7 +426,7 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
                 data-testid="view-config-footer"
                 className="flex items-center justify-end gap-2 border-t px-4 py-2.5"
             >
-                {mode === 'edit' && (
+                {mode === 'edit' && !readOnly && (
                     <RuntimeDraftBar
                         type="view"
                         name={activeView.id}
@@ -429,22 +438,35 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
                         onAfterChange={handleAfterChange}
                     />
                 )}
-                <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleDiscard}
-                    data-testid="view-config-discard"
-                >
-                    {t('console.objectView.discard')}
-                </Button>
-                <Button
-                    size="sm"
-                    onClick={handleSave}
-                    disabled={saving || awaitingAuthored || (mode === 'edit' && !isDirty)}
-                    data-testid="view-config-save"
-                >
-                    {t('console.objectView.save')}
-                </Button>
+                {readOnly ? (
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={onClose}
+                        data-testid="view-config-close"
+                    >
+                        {t('common.close')}
+                    </Button>
+                ) : (
+                    <>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleDiscard}
+                            data-testid="view-config-discard"
+                        >
+                            {t('console.objectView.discard')}
+                        </Button>
+                        <Button
+                            size="sm"
+                            onClick={handleSave}
+                            disabled={saving || awaitingAuthored || (mode === 'edit' && !isDirty)}
+                            data-testid="view-config-save"
+                        >
+                            {t('console.objectView.save')}
+                        </Button>
+                    </>
+                )}
             </div>
         </div>
     );
