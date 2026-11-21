@@ -15,7 +15,9 @@ import { isCellHidden, revealCell, type CellOverlaySize } from './dataTableCellO
 
 /**
  * A layer drawn over one grid cell, top-left on the cell's own corner, at least
- * as wide as the cell, free to grow wider and taller (objectstack#35688).
+ * as wide as the cell, free to grow wider and taller (objectstack#35688) — or,
+ * `placement="below"`, a panel opened under the cell, which keeps showing its
+ * value (objectstack#36023).
  *
  * Invariants:
  * - The table's layout never moves: the layer is `position: fixed` (Radix
@@ -24,7 +26,8 @@ import { isCellHidden, revealCell, type CellOverlaySize } from './dataTableCellO
  *   read the grid makes — click-outside, focus, keydown routing — keeps seeing
  *   the editor as inside its cell.
  * - Near the viewport's bottom it flips so its bottom edge sits on the cell's
- *   bottom edge; near the right edge it shifts left. Its height is capped at
+ *   bottom edge (a panel below: on the cell's top edge); near the right edge
+ *   it shifts left. Its height is capped at
  *   the space available and scrolls inside.
  * - On open, the cell is scrolled clear of the frozen columns, the right-pinned
  *   columns and the sticky header; once a scroll hides the cell behind them or
@@ -39,6 +42,7 @@ export function CellOverlay({
   kind,
   minSize,
   onHidden,
+  placement = 'cover',
 }: {
   children: React.ReactNode;
   className?: string;
@@ -46,6 +50,8 @@ export function CellOverlay({
   kind: 'preview' | 'editor';
   minSize?: CellOverlaySize | null;
   onHidden?: () => void;
+  /** `cover` = over the cell; `below` = a panel under it, the cell left as drawn. */
+  placement?: 'cover' | 'below';
 }) {
   const markerRef = React.useRef<HTMLSpanElement | null>(null);
   const contentRef = React.useRef<HTMLDivElement | null>(null);
@@ -118,9 +124,10 @@ export function CellOverlay({
           <PopoverPrimitive.Content
             ref={contentRef}
             data-slot={kind === 'editor' ? 'cell-editor-overlay' : 'cell-preview-overlay'}
+            data-placement={placement}
             side="bottom"
             align="start"
-            sideOffset={-cellHeight}
+            sideOffset={placement === 'below' ? 2 : -cellHeight}
             avoidCollisions
             collisionPadding={8}
             // The grid owns focus, Escape and click-outside; the layer only places.
@@ -139,6 +146,8 @@ export function CellOverlay({
               kind === 'preview'
                 ? [PREVIEW_UNCLIP_CLASS, 'px-3 py-1.5 text-[13px] leading-normal whitespace-pre-wrap break-words']
                 : EDITOR_DENSITY_CLASS,
+              // A panel under the cell: the selection frame stays on the cell.
+              placement === 'below' && 'border-border',
               className,
             )}
           >

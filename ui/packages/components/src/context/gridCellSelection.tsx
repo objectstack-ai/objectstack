@@ -14,8 +14,8 @@
  * single click, never edited by it and never opening the record. An editor
  * opens on double-click, Enter, F2 or typing (Space included; a two-state
  * cell flips instead); the title link or a touch tap opens the record; Esc
- * cancels; Enter and Tab commit and move (in a multi-line editor Enter is a
- * newline and Ctrl/Cmd+Enter commits). A cell that opens no editor says why
+ * cancels; Enter commits and stays on the cell, Tab commits and moves (in a
+ * multi-line editor Enter is a newline and Ctrl/Cmd+Enter commits). A cell that opens no editor says why
  * in place. Outside a provider (`null`, the default) the table keeps its
  * click-to-edit / click-to-open behaviour byte for byte, so every host that
  * does not mount this keeps what it had.
@@ -48,6 +48,24 @@ export interface GridCellFacts {
    * text is not one (Ctrl/Cmd+V on the selected cell then writes nothing).
    */
   fromText?: (text: string) => unknown;
+  /**
+   * Where this cell's editor draws: `below` opens it as a panel under the
+   * cell, which keeps showing its value (a picker: a list, a calendar); absent
+   * or `cover`, the editor is a layer over the cell itself (typed input).
+   */
+  editor?: 'cover' | 'below';
+  /**
+   * Why Backspace or Delete on the selected cell leaves it as it is (a
+   * required field), as a sentence in the reader's language. Absent ⇒ those
+   * keys clear the cell and save at once.
+   */
+  clearRefusal?: string | null;
+  /**
+   * Why a value committed into this cell is refused before it is saved, or
+   * `null` when it is accepted. A refused commit keeps the editor open with
+   * what was typed, and says the reason under it; Escape discards.
+   */
+  validate?: (value: unknown) => string | null | undefined;
 }
 
 export interface GridCellSelection {

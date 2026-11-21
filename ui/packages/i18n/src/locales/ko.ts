@@ -529,6 +529,9 @@ const ko = {
     cancelChanges: "변경 취소",
     saveRow: "행 저장",
     cellReadOnly: "이 셀은 여기에서 편집할 수 없습니다.",
+    // objectstack#36023 — why a list cell's typed value was not saved, under the editor.
+    cellNotNumber: "숫자를 입력하세요.",
+    cellInvalid: "이 값은 유효하지 않습니다.",
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "저장 중…",
     cellSaved: "저장됨",

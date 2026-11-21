@@ -48,7 +48,7 @@ import { resolveI18nLabel as resolveInlineI18nLabel } from '@objectstack/spec/ui
 import { stateMachineNextValues } from './inline-edit-options';
 import { isStateMachineField, stateLabelOf, type StateChangeConfirm } from './objectGridStateConfirm';
 import { useCellRequiredPrompt } from './objectGridRequiredPrompt';
-import { cellReadOnlyKind, readOnlyReasonText, inlineTyping, choiceFromText } from './objectGridCellFacts';
+import { cellReadOnlyKind, readOnlyReasonText, inlineTyping, choiceFromText, inlineEditorPlacement, clearRefusalText, cellValueRefusal } from './objectGridCellFacts';
 import {
   Badge, Button, NavigationOverlay, EmptyValue,
   legacyRecordDrawerWidthKey, recordOverlayWidthStorageKey,
@@ -1327,6 +1327,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
             typing: inlineTyping(type),
             ...(type === 'boolean' || type === 'toggle' ? { toggles: true } : {}),
             ...(fromText ? { fromText } : {}),
+            // objectstack#36023 — a picker opens under the cell; a required
+            // field refuses Backspace; a commit is judged by the form's rules.
+            ...(inlineEditorPlacement(type) ? { editor: inlineEditorPlacement(type) } : {}),
+            clearRefusal: clearRefusalText(fieldDef, columnKey, t),
+            validate: (value) => cellValueRefusal(fieldDef, columnKey, value, t),
           };
         },
         onCellSelect: (row) => {
