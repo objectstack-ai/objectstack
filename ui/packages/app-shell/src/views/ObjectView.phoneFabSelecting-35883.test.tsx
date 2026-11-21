@@ -22,6 +22,9 @@ import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
+// The page's draft bar reaches `import('@objectstack/lint')` inside a function;
+// its first load is paid here, at collection, not in a clocked case.
+import '@objectstack/lint';
 
 /** Controllable principal verdict, keyed by action (`can()` is permissive by default). */
 let principal: Record<string, boolean> = {};
