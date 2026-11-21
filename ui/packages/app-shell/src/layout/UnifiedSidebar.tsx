@@ -40,6 +40,7 @@ import {
   LayoutGrid,
   Layers,
   Pin,
+  Search,
 } from 'lucide-react';
 import { NavigationRenderer, hasVisibleNavigationItems, type NavItemActionContext } from '@object-ui/layout';
 import type { NavigationArea, NavigationItem } from '@object-ui/types';
@@ -78,6 +79,12 @@ import {
 } from './ContextSelectors.js';
 import { AppMark } from './AppMark.js';
 import { CONSOLE_BELOW_TOP_BAR } from './consoleTopBar.js';
+import { LocalizedSidebarTrigger } from './LocalizedSidebarTrigger.js';
+import { SidebarAppMenu } from './SidebarAppMenu.js';
+import { InboxBell } from './InboxBell.js';
+import { AccountMenu } from './AccountMenu.js';
+import { useCommandPalette, useCommandPaletteProviderMounted } from '../context/CommandPaletteProvider.js';
+import { confirmUnsavedLeave } from '../chrome/unsavedEdits.js';
 import { SIDEBAR_EDGE_ZONE, useConsoleSidebarRail, useConsoleSidebarRailPanel } from './consoleSidebarRail.js';
 import { SidebarItemMenu, sidebarItemDesignPath, favoriteDesignPath } from './SidebarItemMenu.js';
 import { SortableFavoriteRows, type FavoriteRowDragProps } from './SortableFavoriteRows.js';
@@ -178,7 +185,7 @@ function isOverviewGroup(item: NavigationItem): boolean {
   return id === 'overview' || label === 'overview';
 }
 
-export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSidebarProps) {
+export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false }: UnifiedSidebarProps) {
   const { isMobile, setOpenMobile } = useSidebar();
   const location = useLocation();
   const { t, language } = useObjectTranslation();
@@ -199,6 +206,12 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
   const sidebarRef = React.useRef<HTMLDivElement | null>(null);
   const railPanel = useConsoleSidebarRailPanel(rail, sidebarRef);
   const keepOpenLabel = t('sidebar.keepOpen', { defaultValue: 'Keep sidebar open' });
+  // objectstack#36112 — from 768 px up the console draws no top bar: the
+  // sidebar starts at the top of the window and carries the app menu, the
+  // search and the bell in its head, and the account at its foot.
+  const shellChrome = rail.desktop && context === 'app';
+  const { openCommandPalette } = useCommandPalette();
+  const hasCommandPalette = useCommandPaletteProviderMounted();
 
   // Swipe-from-left-edge gesture to open sidebar on mobile
   React.useEffect(() => {
@@ -700,7 +713,7 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
     <Sidebar
       ref={sidebarRef}
       collapsible={railPanel.collapsible}
-      className={cn(CONSOLE_BELOW_TOP_BAR, railPanel.panelClassName)}
+      className={cn(!rail.desktop && CONSOLE_BELOW_TOP_BAR, railPanel.panelClassName)}
       {...railPanel.panelProps}
     >
       {/* Mobile-only drawer header — the app's glyph and name (objectui#12201
@@ -721,6 +734,40 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
             <Link to={homePath} onClick={() => setOpenMobile(false)} data-testid="mobile-sidebar-home" aria-label={t('layout.appSwitcher.allApps', { defaultValue: 'All apps' })} title={t('layout.appSwitcher.allApps', { defaultValue: 'All apps' })} className="inline-flex size-11 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
               <LayoutGrid className="h-5 w-5" />
             </Link>
+          </div>
+        </SidebarHeader>
+      )}
+      {shellChrome && activeApp && (
+        <SidebarHeader className="gap-1 p-2 pb-1" data-testid="sidebar-shell-head">
+          <div className="flex min-w-0 items-center gap-1">
+            <SidebarAppMenu
+              activeAppName={activeAppName ?? activeApp.name}
+              onAppChange={(segment) => confirmUnsavedLeave(() => onAppChange?.(segment))}
+            />
+            <LocalizedSidebarTrigger
+              className="text-muted-foreground"
+              aria-label={t('sidebar.collapse', { defaultValue: 'Collapse sidebar' })}
+              data-testid="sidebar-collapse"
+            />
+          </div>
+          <div className="flex min-w-0 items-center gap-1">
+            {hasCommandPalette && (
+              <button
+                type="button"
+                data-testid="action:command-palette:open"
+                aria-label={t('console.search', { defaultValue: 'Search…' })}
+                aria-keyshortcuts="Meta+K Control+K"
+                onClick={openCommandPalette}
+                className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md border bg-background/60 px-2.5 text-muted-foreground transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+              >
+                <Search className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                <span className="flex-1 truncate text-left text-xs">{t('console.search', { defaultValue: 'Search…' })}</span>
+                <kbd className="pointer-events-none inline-flex h-5 items-center gap-0.5 rounded border bg-background px-1.5 text-[10px] font-medium text-muted-foreground">
+                  <span className="text-xs">⌘</span>K
+                </kbd>
+              </button>
+            )}
+            <InboxBell />
           </div>
         </SidebarHeader>
       )}
@@ -867,26 +914,30 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
           beside the content and keeps it there (on the fold, for this
           browser); in a sidebar kept open on a narrow window it is pressed,
           and turns the fold back on (objectstack#35062). */}
-      {railPanel.keepOpenControl && (
-        <SidebarFooter className="border-t border-sidebar-border">
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                data-testid="sidebar-keep-open"
-                aria-pressed={railPanel.keepOpenControl.pressed}
-                isActive={railPanel.keepOpenControl.pressed}
-                tooltip={keepOpenLabel}
-                onClick={railPanel.keepOpenControl.onPress}
-              >
-                <Pin className="h-4 w-4" />
-                <span>{keepOpenLabel}</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
+      {(railPanel.keepOpenControl || shellChrome) && (
+        <SidebarFooter className="gap-1 border-t border-sidebar-border p-2">
+          {railPanel.keepOpenControl && (
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  data-testid="sidebar-keep-open"
+                  aria-pressed={railPanel.keepOpenControl.pressed}
+                  isActive={railPanel.keepOpenControl.pressed}
+                  tooltip={keepOpenLabel}
+                  onClick={railPanel.keepOpenControl.onPress}
+                >
+                  <Pin className="h-4 w-4" />
+                  <span>{keepOpenLabel}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          )}
+          {shellChrome && <AccountMenu trigger="sidebar" />}
         </SidebarFooter>
       )}
-      {/* No footer trigger: the app bar's left slot holds the shell's one
-          sidebar trigger at every width (objectui#12429). */}
+      {/* No footer trigger: from 768 px up the trigger is the head's collapse
+          button and, while collapsed, the page header's expand button; on a
+          phone the app bar's left slot holds it. */}
     </Sidebar>
     {/* objectstack#35062 — the window's left edge while the sidebar is
         hidden: resting the pointer on it, or a press, floats the menu. For
@@ -895,7 +946,7 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
       <div
         data-testid="console-sidebar-edge"
         aria-hidden="true"
-        className={cn(SIDEBAR_EDGE_ZONE, CONSOLE_BELOW_TOP_BAR)}
+        className={cn(SIDEBAR_EDGE_ZONE, rail.desktop ? 'top-0 h-svh' : CONSOLE_BELOW_TOP_BAR)}
         {...railPanel.edgeZoneProps}
       />
     )}

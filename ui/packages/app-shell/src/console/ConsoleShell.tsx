@@ -62,6 +62,7 @@ import { ConsoleElementApiOpen } from './ConsoleElementApiOpen.js';
 import { ImpersonationBanner } from '../layout/ImpersonationBanner.js';
 import { ReadRateBanner } from '../layout/ReadRateBanner.js';
 import { StorageUsageBanner } from '../layout/StorageUsageBanner.js';
+import { ChromeBannerSlot } from '../layout/chromeBannerHost.js';
 import { getRuntimeConfig } from '../runtime-config.js';
 
 // The console's every pre-React / pre-auth gate (Suspense fallback, adapter
@@ -204,31 +205,36 @@ function ConsoleShellProviders({ children }: { children: ReactNode }) {
                   <LastAppProvider>
                   <ListPreferencesProvider>
                     <RecordPreferencesProvider>
-                      {/* objectui#4467 — the impersonation indicator. Above the
-                          routes, so it is chrome for EVERY console page (home has
-                          its own layout and would otherwise carry no indicator),
-                          and in flow rather than overlaid, so it never covers the
-                          header it warns about. Renders null on every ordinary
-                          session. */}
-                      <ImpersonationBanner />
-                      {/* objectui#9954 — the environment admin's read-rate report.
-                          Beside the impersonation indicator for the same reason it
-                          is here: chrome for EVERY console page, including `/home`,
-                          which has its own layout and would otherwise carry no
-                          report. Renders null unless the control plane's verdict is
-                          `anomalous`, so an ordinary session and an unmeasured
-                          environment both see nothing — and a non-admin session
-                          never even issues the request, nor does any session on a
-                          runtime whose config does not serve `storageUsage`
-                          (objectui#11002). */}
-                      <ReadRateBanner />
-                      {/* objectui#10439 — the environment admin's storage-capacity
-                          banner, beside the read-rate report and behind the same
-                          two gates (the admin, and the runtime serving
-                          `storageUsage`); the two read one `/usage/storage` response.
-                          Renders null unless the runtime's own verdict says `warn`
-                          (80% and up) or `blocked` (uploads and imports refused). */}
-                      <StorageUsageBanner />
+                      {/* objectstack#36112 — inside an app from 768 px up the three
+                          are drawn at the top of the content area instead
+                          (`ChromeBannerSlot`); everywhere else, here. */}
+                      <ChromeBannerSlot>
+                        {/* objectui#4467 — the impersonation indicator. Above the
+                            routes, so it is chrome for EVERY console page (home has
+                            its own layout and would otherwise carry no indicator),
+                            and in flow rather than overlaid, so it never covers the
+                            header it warns about. Renders null on every ordinary
+                            session. */}
+                        <ImpersonationBanner />
+                        {/* objectui#9954 — the environment admin's read-rate report.
+                            Beside the impersonation indicator for the same reason it
+                            is here: chrome for EVERY console page, including `/home`,
+                            which has its own layout and would otherwise carry no
+                            report. Renders null unless the control plane's verdict is
+                            `anomalous`, so an ordinary session and an unmeasured
+                            environment both see nothing — and a non-admin session
+                            never even issues the request, nor does any session on a
+                            runtime whose config does not serve `storageUsage`
+                            (objectui#11002). */}
+                        <ReadRateBanner />
+                        {/* objectui#10439 — the environment admin's storage-capacity
+                            banner, beside the read-rate report and behind the same
+                            two gates (the admin, and the runtime serving
+                            `storageUsage`); the two read one `/usage/storage` response.
+                            Renders null unless the runtime's own verdict says `warn`
+                            (80% and up) or `blocked` (uploads and imports refused). */}
+                        <StorageUsageBanner />
+                      </ChromeBannerSlot>
                       <Suspense fallback={<LoadingFallback />}>{children}</Suspense>
                       {/* ADR-0069 — full-screen gate (expired password / required MFA) above all routes */}
                       <RemediationOverlay />

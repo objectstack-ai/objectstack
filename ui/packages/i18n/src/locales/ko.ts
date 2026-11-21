@@ -3393,6 +3393,8 @@ const ko = {
     removeFromFavorites: "즐겨찾기에서 {{name}} 제거",
     allReports: "모든 보고서",
     keepOpen: "사이드바를 열어 두기",
+    collapse: '사이드바 접기',
+    expand: '사이드바 펼치기',
   },
   topbar: {
     openAssistant: "{{name}} 어시스턴트 열기",
@@ -3559,6 +3561,7 @@ const ko = {
       backToHome: "홈으로 돌아가기",
       settings: "시스템 설정",
       productHome: "{{product}} 홈",
+      addApp: '앱 추가',
     },
     activityFeed: {
       title: "최근 활동",

@@ -3474,6 +3474,8 @@ const zh = {
     removeFromFavorites: '从收藏中移除 {{name}}',
     allReports: '全部报表',
     keepOpen: '保持侧边栏展开',
+    collapse: '收起侧边栏',
+    expand: '展开侧边栏',
   },
   topbar: {
     aiAssistant: 'AI 助手',
@@ -3629,6 +3631,7 @@ const zh = {
       backToHome: '返回首页',
       settings: '系统设置',
       productHome: '{{product}} 首页',
+      addApp: '添加应用',
     },
     systemNav: {
       systemSettings: '系统设置',

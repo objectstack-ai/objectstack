@@ -3469,6 +3469,8 @@ const fr = {
     removeFromFavorites: "Retirer {{name}} des favoris",
     allReports: "Tous les rapports",
     keepOpen: "Garder la barre latérale ouverte",
+    collapse: 'Réduire la barre latérale',
+    expand: 'Développer la barre latérale',
   },
   topbar: {
     openAssistant: "Ouvrir l'assistant {{name}}",
@@ -3638,6 +3640,7 @@ const fr = {
       backToHome: "Retour à l'accueil",
       settings: "Paramètres",
       productHome: "Accueil {{product}}",
+      addApp: 'Ajouter une application',
     },
     activityFeed: {
       title: "Activité récente",

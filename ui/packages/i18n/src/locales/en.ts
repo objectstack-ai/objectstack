@@ -4067,6 +4067,8 @@ const en = {
     removeFromFavorites: 'Remove {{name}} from favorites',
     allReports: 'All reports',
     keepOpen: 'Keep sidebar open',
+    collapse: 'Collapse sidebar',
+    expand: 'Expand sidebar',
   },
   topbar: {
     aiAssistant: 'AI Assistant',
@@ -4239,6 +4241,7 @@ const en = {
       backToHome: 'Back to home',
       settings: 'Settings',
       productHome: '{{product}} home',
+      addApp: 'Add app',
     },
     systemNav: {
       systemSettings: 'System Settings',

@@ -41,3 +41,20 @@ export function useShellPageActionsSlot(): ShellPageActionsRender | null {
   const phone = usePhoneViewport();
   return renderGroup && !phone ? renderGroup : null;
 }
+
+/** Draws the sidebar's expand button for a header's left edge. */
+export type ShellSidebarExpandRender = () => React.ReactNode;
+
+/** The expand button the shell hands its headers; `null` outside the shell. */
+export const ShellSidebarExpandSlotContext = React.createContext<ShellSidebarExpandRender | null>(null);
+
+/**
+ * The expand button to draw at a header's left edge (objectstack#36112): the
+ * shell's, unless this is a phone, whose top bar keeps its own controls. It
+ * draws itself only while the sidebar is collapsed.
+ */
+export function useShellSidebarExpandSlot(): ShellSidebarExpandRender | null {
+  const render = React.useContext(ShellSidebarExpandSlotContext);
+  const phone = usePhoneViewport();
+  return render && !phone ? render : null;
+}
