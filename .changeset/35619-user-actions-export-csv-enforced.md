@@ -3,6 +3,7 @@
 '@object-ui/plugin-grid': minor
 '@object-ui/plugin-list': minor
 '@object-ui/plugin-report': minor
+'@objectstack/platform-objects': patch
 ---
 
 feat: an object's `userActions.exportCsv: false` hides the console's Export entry
@@ -20,4 +21,4 @@ Every surface reads one verdict, `resolveEffectiveCrudAffordances(objectSchema, 
 
 Nothing changes for an object that does not author the key: every `managedBy` bucket still defaults `exportCsv` to `true` (ADR-0103), so its Export entry stays. The setting hides the entry and is not a permission: no export request is refused because of it, and who may export is still the permission set's `allowExport`. The report reads the base object's definition through the report's data source, and a report whose source cannot serve one keeps its Export control.
 
-The spec's `exportCsv` description and the Studio form's help text now say this. The liveness ledger grades `userActions.exportCsv` `live`, so an authored `exportCsv: true` no longer raises the `liveness-dead-property` warning at `os lint` / `os validate`. Nothing needs migrating.
+The spec's `exportCsv` description and the Studio form's help text now say this; the form's English help text bundle in `@objectstack/platform-objects` is regenerated to match, and the translated locales keep their wording. The liveness ledger grades `userActions.exportCsv` `live`, so an authored `exportCsv: true` no longer raises the `liveness-dead-property` warning at `os lint` / `os validate`. Nothing needs migrating.
