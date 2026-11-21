@@ -10,7 +10,9 @@ import {
   MENTION_EMAIL_LINK_LINES,
   MENTION_EMAIL_TEMPLATES,
   MENTION_EMAIL_WINDOW_MS,
+  REPLY_EMAIL_TEMPLATES,
   mentionEmailDedupKey,
+  replyEmailDedupKey,
 } from './mention-email.js';
 
 /**
@@ -46,6 +48,16 @@ describe('the mention e-mail templates', () => {
   });
 });
 
+describe('[#36074] the reply e-mail templates', () => {
+  it('are the mention e-mail\'s, one per catalog locale, under the reply topic', () => {
+    expect(REPLY_EMAIL_TEMPLATES.map((t) => t.locale).sort()).toEqual(Object.keys(AuditTranslations).sort());
+    for (const t of REPLY_EMAIL_TEMPLATES) {
+      const mention = MENTION_EMAIL_TEMPLATES.find((m) => m.locale === t.locale)!;
+      expect(t).toEqual({ ...mention, topic: 'collab.reply' });
+    }
+  });
+});
+
 describe('the burst window', () => {
   it('is 10 minutes, keyed per organization and person, and clock-aligned', () => {
     expect(MENTION_EMAIL_WINDOW_MS).toBe(600_000);
@@ -57,6 +69,16 @@ describe('the burst window', () => {
     expect(mentionEmailDedupKey('org_2', 'u_1', start)).not.toBe(key);
     // Never the inbox notice's per-comment key family.
     expect(key.startsWith('collab.mention:')).toBe(false);
+  });
+
+  it('[#36074] the reply e-mail has the same window under its own key, so it never holds back a mention e-mail', () => {
+    const start = 1_000 * MENTION_EMAIL_WINDOW_MS;
+    const key = replyEmailDedupKey('org_1', 'u_1', start);
+    expect(key).toBe(`collab.reply.email:org_1:u_1:1000`);
+    expect(mentionEmailDedupKey('org_1', 'u_1', start)).toBe(`collab.mention.email:org_1:u_1:1000`);
+    expect(replyEmailDedupKey('org_1', 'u_1', start + MENTION_EMAIL_WINDOW_MS - 1)).toBe(key);
+    expect(replyEmailDedupKey('org_1', 'u_1', start + MENTION_EMAIL_WINDOW_MS)).not.toBe(key);
+    expect(key.startsWith('collab.reply:')).toBe(false);
   });
 });
 
@@ -95,7 +117,7 @@ describe('AuditPlugin wires the mention e-mail', () => {
       messaging: { emit: async () => ({}), registerBuiltinTemplates: (t: readonly unknown[]) => registered.push(t) },
       auth: { getConsoleUrl: (path: string) => `https://app.example.test/_console${path}` },
     });
-    expect(registered).toEqual([MENTION_EMAIL_TEMPLATES]);
+    expect(registered).toEqual([MENTION_EMAIL_TEMPLATES, REPLY_EMAIL_TEMPLATES]);
     expect(opts.getConsoleUrl('/me_task/t1')).toBe('https://app.example.test/_console/me_task/t1');
   });
 
@@ -110,5 +132,6 @@ describe('AuditPlugin wires the mention e-mail', () => {
     });
     expect(opts).toBeDefined();
     expect(warns.filter((w) => w.includes('@mention e-mail templates were NOT registered'))).toHaveLength(1);
+    expect(warns.filter((w) => w.includes('comment reply e-mail templates were NOT registered'))).toHaveLength(1);
   });
 });
