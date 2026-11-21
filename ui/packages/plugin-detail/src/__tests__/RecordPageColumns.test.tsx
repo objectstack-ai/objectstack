@@ -291,7 +291,7 @@ describe('RecordPageColumns — the rail: 审批, 附件, 最近动态, 其他�
     await waitFor(() => expect(cards(again.container)).toEqual(['timeline', 'note.parent_id']));
   });
 
-  it('a card shows at most three rows, a grey count after its 13 px title, rows 26 px high, radius 8', async () => {
+  it('a card shows at most three rows, a grey count after its 14 px title, rows 26 px high, radius 8', async () => {
     TOTALS.note = 9;
     find.mockImplementation(async (objectName: string) => ({
       data: Array.from({ length: Math.min(TOTALS[objectName] ?? 0, 5) }, (_, i) => ({ id: `${objectName}-${i}`, name: `${objectName} ${i}` })),
@@ -303,7 +303,7 @@ describe('RecordPageColumns — the rail: 审批, 附件, 最近动态, 其他�
       await waitFor(() => expect(card()?.querySelectorAll('[data-record-summary-row]').length).toBe(3));
       expect(card()!.className).toContain('rounded-[8px]');
       const title = card()!.querySelector('[data-record-summary-card-title]')!;
-      expect(title.className).toContain('text-[13px]');
+      expect(title.className).toContain('text-sm');
       const count = title.querySelector('[data-record-summary-card-count]')!;
       expect(count.textContent).toBe('9');
       expect(count.className).toContain('text-muted-foreground');

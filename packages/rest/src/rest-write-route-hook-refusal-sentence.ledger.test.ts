@@ -65,6 +65,7 @@ import { mountAndRecordDirectRoutes } from './direct-mount-composition.js';
 import { REST_ROUTE_LEDGER } from './rest-route-ledger.js';
 import { sandboxFaultAnswer } from './error-response.js';
 import { isSandboxOwnFault } from '@objectstack/types';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 const SENTENCE = 'Locked rows cannot be changed here.';
 const WRAPPER = `hook 'mz_guard' threw: Error: ${SENTENCE}`;
@@ -188,7 +189,16 @@ function boot(error: () => Error, protocol: Record<string, Fn> = {}): Booted {
         // the free text `kg`, for the unit code backfill door.
         getObject: (name: string) => (name === OBJECT ? { name, fields: { ...RECORD_CURRENCY_FIELDS, ...UNIT_CODE_FIELDS } } : undefined),
         count: async () => 0,
-        update: async () => { calls.push('engine.update'); throw error(); },
+        // Opened by the engine's own dispatch predicate, so a door that hands
+        // `update` a shape `ObjectQL.update` refuses reds here, not in production.
+        update: async (_object: string, data: unknown, options: unknown) => {
+            assertEngineUpdateDispatch(data as any, options as any);
+            calls.push('engine.update');
+            throw error();
+        },
+        // [#35402] The Change Owner doors read the object's definition to ask
+        // whether it offers the action: an owned object with the switch unset.
+        getSchema: (name: string) => (name === OBJECT ? { name, fields: { owner_id: { type: 'lookup', reference: 'sys_user' } } } : undefined),
         // [#30237] The recycle bin's doors call the engine's own verbs.
         listRecycleBin: async () => ({ object: OBJECT, entries: [], hasMore: false }),
         restore: async () => { calls.push('engine.restore'); throw error(); },
@@ -422,6 +432,14 @@ const ANSWERS_THE_SENTENCE: Record<string, Driver> = {
     'POST /api/v1/security/users/:id/assigned-work/transfer': {
         called: 'engine.update', body: { toUserId: 'u2' },
         answer: (res) => res.body?.data?.objects?.[0]?.failures?.[0]?.message,
+    },
+    // [#35402] The Change Owner doors write through the engine's by-id
+    // update: the single door answers the `/data` door's sentence in its
+    // refusal, the bulk one inside its `200`, in the refused row's entry.
+    'POST /api/v1/data/:object/:id/change-owner': { called: 'engine.update', body: { ownerId: 'u2' } },
+    'POST /api/v1/data/:object/change-owner': {
+        called: 'engine.update', body: { ids: ['r1'], ownerId: 'u2' },
+        answer: (res) => res.body?.data?.failures?.[0]?.message,
     },
     // [#30237] The recycle bin's write doors: the engine's verb is what the refusal reaches.
     'POST /api/v1/data/:object/recycle-bin/:entryId/restore': { called: 'engine.restore' },

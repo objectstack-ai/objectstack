@@ -458,7 +458,7 @@ export function DatasetDefaultInspector({
   // Base-object fields for the filter builders (scope + measure filters operate on
   // the base table; relationship-path filters are out of scope for v1).
   const filterFields = React.useMemo(
-    () => fieldOptions.filter((f) => !f.value.includes('.')).map((f) => ({ value: f.value, label: f.label, type: f.type })),
+    () => fieldOptions.filter((f) => !f.value.includes('.')).map((f) => ({ value: f.value, label: f.label, type: f.type, ...(f.multiple ? { multiple: true } : {}) })),
     [fieldOptions],
   );
   const datasetFilter = draft.filter && typeof draft.filter === 'object' ? (draft.filter as FilterCondition) : undefined;

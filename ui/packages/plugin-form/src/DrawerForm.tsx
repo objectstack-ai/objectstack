@@ -799,7 +799,7 @@ const DrawerFormBody: React.FC<DrawerFormProps> = ({
     if (error) {
       return (
         <div className="p-4 border border-red-300 bg-red-50 rounded-md">
-          <h3 className="text-red-800 font-semibold">{t('form.errorLoading')}</h3>
+          <h3 className="text-red-800 font-medium">{t('form.errorLoading')}</h3>
           <p className="text-red-600 text-sm mt-1">{error.message}</p>
         </div>
       );
@@ -995,7 +995,7 @@ const DrawerFormBody: React.FC<DrawerFormProps> = ({
       <div className="@container rounded-md border bg-card p-4">
         {(schema.title || schema.description) && (
           <div className="mb-3 space-y-0.5">
-            {schema.title && <div className="text-sm font-semibold">{schema.title}</div>}
+            {schema.title && <div className="text-sm font-medium">{schema.title}</div>}
             {schema.description && <p className="text-xs text-muted-foreground">{schema.description}</p>}
           </div>
         )}

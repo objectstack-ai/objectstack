@@ -6,13 +6,13 @@ import path from 'node:path';
 import { uiRoot } from '../scripts/ui-root.mjs';
 
 /**
- * GEOMETRY pin for objectstack#33833: on a phone the list's toolbar row keeps
- * the view name readable. Below `sm` the Console hands the list its view
- * switcher as `toolbarLeading`, and the row that draws it also carries the
- * user-filter chips, the 「In a queue」 toggle and the tool cluster, whose
- * icons are 44 px touch targets there. On one line those left the name about
- * a character and a half (「全部客户」 drawn as 「全.」 at 375 px). The row now
- * wraps below `sm` (`listToolbarRow.ts` in plugin-list says how).
+ * GEOMETRY pin for objectstack#33833, re-pointed at the phone toolbar of
+ * objectstack#35883: on a phone the list's view name stays readable. Below
+ * `sm` the list draws ONE row of pills (`PhoneListToolbar`, plugin-list's
+ * `phone/PhoneListPanels.tsx`): the view switcher's pill (the view's name,
+ * its count, the caret), then Sort, Filter and Search, each a 44 px pill.
+ * The name takes what the three pills leave and ends in an ellipsis only
+ * when it is wider than that.
  *
  * ⚠️ A Playwright spec, not a vitest test: jsdom and happy-dom have no layout
  * engine, so a width read there is 0 and a class-shape assertion would pass
@@ -20,29 +20,23 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  *
  * ## What is real here and what is a fixture
  *
- * REAL, read out of the sources at run time: the row's classes (the constants
- * in `packages/plugin-list/src/listToolbarRow.ts`, by name), the 「In a queue」
- * toggle's and the View settings trigger's class strings and the phone
- * touch-target classes from plugin-list, the switcher's own classes from app-shell's
- * `objectViewTitleSwitcher.tsx` (the trigger now draws the view type's icon
- * and the record count beside the name, objectstack#35548), and the phone
- * title's wrapper from
- * `ObjectView.tsx`, compiled with the installed `tailwindcss`. Change a class
- * in any of them and what this file measures changes with it.
+ * REAL, read out of the sources at run time: the row's and its view slot's
+ * classes and `PHONE_CHIP` (plugin-list `phone/PhoneListPanels.tsx`), the
+ * phone search pill's own classes (`ListView.tsx`), the switcher pill's
+ * classes (app-shell `objectViewTitleSwitcher.tsx`) and the phone title's
+ * wrapper (`ObjectView.tsx`), compiled with the installed `tailwindcss`.
+ * Change a class in any of them and what this file measures changes with it.
  *
  * FIXTURE: the element tree is transcribed from those sources, icons are empty
- * boxes of their declared size, the `Button` base is reduced to its layout
- * tokens (`inline-flex items-center justify-center whitespace-nowrap`), and
- * fonts are Chromium's. The assertions are clipping, overflow and lines, not
- * pixels.
+ * boxes of their declared size, and fonts are Chromium's. The assertions are
+ * clipping, overflow and lines, not pixels.
  */
 
 const ROOT = uiRoot();
 const read = (rel: string) => readFileSync(path.join(ROOT, rel), 'utf8');
 
-const ROW_FILE = 'packages/plugin-list/src/listToolbarRow.ts';
+const PANELS_FILE = 'packages/plugin-list/src/phone/PhoneListPanels.tsx';
 const LIST_FILE = 'packages/plugin-list/src/ListView.tsx';
-const TOUCH_FILE = 'packages/plugin-list/src/components/ViewSettingsPopover.tsx';
 const SWITCHER_FILE = 'packages/app-shell/src/views/objectViewTitleSwitcher.tsx';
 const OBJECT_VIEW_FILE = 'packages/app-shell/src/views/ObjectView.tsx';
 
@@ -55,7 +49,8 @@ function constant(source: string, file: string, name: string): string {
 
 /**
  * The first quoted class string of the JSX tag that carries `anchor`
- * (`className="…"`, or the first literal of `className={cn('…'`), read from
+ * (`className="…"`, or the first literal of `className={cn('…'` or
+ * `className={cn(CONSTANT, '…'`), read from
  * the tag's opening `<` up to the next element's. `mustContain` holds tokens
  * that string has to carry, so a walk onto the wrong element throws instead of
  * measuring it.
@@ -68,7 +63,7 @@ function tagClass(source: string, file: string, anchor: string, mustContain: str
   next.lastIndex = at;
   const end = next.exec(source)?.index ?? source.length;
   const tag = source.slice(open, end);
-  const hit = /className=(?:"([^"]+)"|\{cn\(\s*(?:\/\/[^\n]*\n\s*)*['"]([^'"]+)['"])/.exec(tag);
+  const hit = /className=(?:"([^"]+)"|\{cn\(\s*(?:\/\/[^\n]*\n\s*)*(?:[A-Z_]+,\s*)?['"]([^'"]+)['"])/.exec(tag);
   if (!hit) throw new Error(`${file}: no class string in the tag carrying ${anchor}`);
   const cls = hit[1] ?? hit[2];
   for (const token of mustContain) {
@@ -79,98 +74,47 @@ function tagClass(source: string, file: string, anchor: string, mustContain: str
   return cls;
 }
 
-const rowSrc = read(ROW_FILE);
+const panelsSrc = read(PANELS_FILE);
 const listSrc = read(LIST_FILE);
-const ROW_NAMES = [
-  'TOOLBAR_ROW',
-  'TOOLBAR_ROW_LEADING_PHONE',
-  'TOOLBAR_LEFT_GROUP_LEADING',
-  'TOOLBAR_LEADING',
-  'TOOLBAR_USER_FILTERS',
-  'TOOLBAR_USER_FILTERS_LEADING_PHONE',
-  'TOOLBAR_CLUSTER',
-  'TOOLBAR_CLUSTER_LEADING_PHONE',
-] as const;
-const ROW = Object.fromEntries(ROW_NAMES.map((n) => [n, constant(rowSrc, ROW_FILE, n)])) as Record<
-  (typeof ROW_NAMES)[number],
-  string
->;
-
 const switcherSrc = read(SWITCHER_FILE);
 const objectViewSrc = read(OBJECT_VIEW_FILE);
-const SWITCHER = {
-  phoneTitle: tagClass(objectViewSrc, OBJECT_VIEW_FILE, 'data-testid="list-phone-title"', ['min-w-0', 'max-sm:font-semibold']),
-  trigger: tagClass(switcherSrc, SWITCHER_FILE, 'data-testid="list-view-switcher"', ['min-w-0', 'max-sm:min-h-11']),
+
+const PHONE_CHIP = constant(panelsSrc, PANELS_FILE, 'PHONE_CHIP');
+const BAR = {
+  row: tagClass(panelsSrc, PANELS_FILE, 'data-testid="phone-list-toolbar"', ['flex-nowrap', 'overflow-x-auto']),
+  view: tagClass(panelsSrc, PANELS_FILE, 'data-testid="phone-list-toolbar-view"', ['min-w-0', 'shrink']),
+  phoneTitle: tagClass(objectViewSrc, OBJECT_VIEW_FILE, 'data-testid="list-phone-title"', ['min-w-0']),
+  // `cn(PHONE_CHIP, '…')`: the literal after the constant.
+  trigger: `${PHONE_CHIP} ${tagClass(switcherSrc, SWITCHER_FILE, 'data-testid="list-view-switcher"', ['max-w-full'])}`,
+  label: tagClass(switcherSrc, SWITCHER_FILE, 'data-testid="list-view-switcher-label"', ['min-w-0', 'truncate']),
+  count: tagClass(switcherSrc, SWITCHER_FILE, 'data-testid="list-view-switcher-count"', ['shrink-0']),
+  search: `${PHONE_CHIP} ${tagClass(listSrc, LIST_FILE, 'data-testid="phone-search-trigger"', ['sm:hidden'])}`,
 };
-// The switcher's outer span is the first element of its return.
-const SWITCHER_OUTER = (() => {
-  const hit = /return \(\s*<span className="([^"]+)">\s*<Popover/.exec(switcherSrc);
-  if (!hit) throw new Error(`${SWITCHER_FILE}: the switcher's outer span was not found`);
-  return hit[1];
-})();
-
-const BUTTON_BASE = 'inline-flex items-center justify-center whitespace-nowrap';
-const QUEUE = `${BUTTON_BASE} ${tagClass(listSrc, LIST_FILE, 'data-testid="queue-sitting-filter"', ['shrink-0', 'h-7'])}`;
-const PHONE_TOUCH_TARGET = constant(read(TOUCH_FILE), TOUCH_FILE, 'PHONE_TOUCH_TARGET');
-// The bar's icon triggers draw from one constant (objectstack#35548). Since
-// objectstack#35878 Filter and Sort live in the condition row, and the bar's
-// trigger that reads the constant is View settings, an icon below `sm`. The
-// four icon buttons below stand for the bar's tools at their touch size.
-const TEXT_TRIGGER = constant(rowSrc, ROW_FILE, 'TOOLBAR_TEXT_TRIGGER');
-if (!/className=\{cn\(\s*TOOLBAR_TEXT_TRIGGER,\s*PHONE_TOUCH_TARGET,[\s\S]{0,200}data-testid="toolbar-display-trigger"/.test(read(TOUCH_FILE))) {
-  throw new Error(`${TOUCH_FILE}: the View settings trigger no longer draws from TOOLBAR_TEXT_TRIGGER + PHONE_TOUCH_TARGET`);
+if (!/className=\{cn\(PHONE_CHIP,/.test(switcherSrc)) {
+  throw new Error(`${SWITCHER_FILE}: the phone switcher pill no longer draws from PHONE_CHIP`);
 }
-const ICON_BUTTON = `${BUTTON_BASE} ${TEXT_TRIGGER} ${PHONE_TOUCH_TARGET}`;
-const ICON = 'h-3.5 w-3.5';
-// The trigger's own children (objectstack#35548): type icon → name → count → caret.
-const TYPE_ICON = 'flex shrink-0 h-4 w-4';
-const COUNT = 'shrink-0 font-normal tabular-nums';
+if (!/className=\{cn\(\s*PHONE_CHIP,\s*'sm:hidden'/.test(listSrc)) {
+  throw new Error(`${LIST_FILE}: the phone search pill no longer draws from PHONE_CHIP`);
+}
+const ICON = 'h-4 w-4';
 const CARET = 'h-3.5 w-3.5 shrink-0';
-const CHIP = 'h-7 w-24 shrink-0';
 
-/** The classes the row uses, with the phone additions or (`phone: false`) without them. */
-function rowClasses(phone: boolean) {
-  const plus = (base: string, add: string) => (phone ? `${base} ${add}` : base);
-  return {
-    row: plus(ROW.TOOLBAR_ROW, ROW.TOOLBAR_ROW_LEADING_PHONE),
-    left: phone ? ROW.TOOLBAR_LEFT_GROUP_LEADING : ROW.TOOLBAR_LEFT_GROUP_LEADING.replace(/\s*max-sm:\S+/g, ''),
-    leading: phone ? ROW.TOOLBAR_LEADING : ROW.TOOLBAR_LEADING.replace(/\s*max-sm:\S+/g, ''),
-    filters: plus(ROW.TOOLBAR_USER_FILTERS, ROW.TOOLBAR_USER_FILTERS_LEADING_PHONE),
-    cluster: plus(ROW.TOOLBAR_CLUSTER, ROW.TOOLBAR_CLUSTER_LEADING_PHONE),
-  };
-}
-
-function fixture(label: string, { chips = 0, phone = true } = {}): string {
-  const c = rowClasses(phone);
-  const icon = `<span class="${ICON}"></span>`;
+function fixture(label: string): string {
+  const pill = (id: string, cls: string) => `<button id="${id}" class="${cls}"><span class="${ICON}"></span></button>`;
   return `
-<div id="row" class="${c.row}">
-  <div class="${c.left}">
-    <div id="leading" class="${c.leading}">
-      <span class="${SWITCHER.phoneTitle}"><span class="flex min-w-0"><span class="${SWITCHER_OUTER}">
-        <button id="trigger" class="${SWITCHER.trigger}"><span class="${TYPE_ICON}"></span><span id="label" class="truncate">${label}</span><span class="${COUNT}">1,284</span><span class="${CARET}"></span></button>
-      </span></span></span>
-    </div>
-    ${chips > 0 ? `<div id="chips" class="${c.filters}"><div class="flex items-center gap-1">${Array.from({ length: chips }, () => `<span class="${CHIP}"></span>`).join('')}</div></div>` : ''}
-    <button id="queue" class="${QUEUE}">${icon}In a queue</button>
+<div id="row" class="${BAR.row}">
+  <div id="leading" class="${BAR.view}">
+    <span class="${BAR.phoneTitle}"><span class="flex min-w-0">
+      <button id="trigger" class="${BAR.trigger}"><span id="label" class="${BAR.label}">${label}</span><span class="${BAR.count}">1,284</span><span class="${CARET}"></span></button>
+    </span></span>
   </div>
-  <div id="cluster" class="${c.cluster}">${Array.from({ length: 4 }, () => `<button class="${ICON_BUTTON}">${icon}</button>`).join('')}</div>
+  ${pill('sort', PHONE_CHIP)}
+  ${pill('filter', PHONE_CHIP)}
+  ${pill('search', BAR.search)}
 </div>`;
 }
 
-const CANDIDATES = [
-  ...Object.values(ROW),
-  ...Object.values(SWITCHER),
-  SWITCHER_OUTER,
-  QUEUE,
-  ICON_BUTTON,
-  ICON,
-  TYPE_ICON,
-  COUNT,
-  CARET,
-  CHIP,
-  'truncate flex min-w-0 items-center gap-1',
-]
+const CANDIDATES = [...Object.values(BAR), PHONE_CHIP, ICON, CARET, 'flex min-w-0']
   .join(' ')
   .split(/\s+/)
   .filter(Boolean);
@@ -187,7 +131,7 @@ test.beforeAll(async () => {
   });
   css = compiler.build(CANDIDATES);
   if (!css.includes('@media')) {
-    throw new Error('Tailwind produced no media queries, so the max-sm variants under test would be inert.');
+    throw new Error('Tailwind produced no media queries, so the sm variants under test would be inert.');
   }
 });
 
@@ -197,16 +141,17 @@ type Reading = {
   labelScrollWidth: number;
   labelClipped: boolean;
   row: Box;
+  rowScrolls: boolean;
   leading: Box;
-  queue: Box;
-  cluster: Box;
-  chips: Box | null;
+  pills: Box[];
   overflowX: number;
 };
 
 async function measure(page: Page, html: string, width: number): Promise<Reading> {
   await page.setViewportSize({ width, height: 812 });
-  await page.setContent(`<style>${css}</style>${html}`, { waitUntil: 'load' });
+  // The meta makes a mobile project lay the page out at the viewport's width,
+  // not 980 px, so the `sm:` variants answer the width under test.
+  await page.setContent(`<meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style>${html}`, { waitUntil: 'load' });
   await page.evaluate(() => document.fonts?.ready);
   return page.evaluate(() => {
     const box = (id: string) => {
@@ -222,10 +167,12 @@ async function measure(page: Page, html: string, width: number): Promise<Reading
       labelScrollWidth: label.scrollWidth,
       labelClipped: label.scrollWidth > Math.ceil(w),
       row: box('row')!,
+      rowScrolls: (() => {
+        const row = document.getElementById('row')!;
+        return row.scrollWidth > row.clientWidth;
+      })(),
       leading: box('leading')!,
-      queue: box('queue')!,
-      cluster: box('cluster')!,
-      chips: box('chips'),
+      pills: ['sort', 'filter', 'search'].map((id) => box(id)!),
       overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
     };
   });
@@ -233,51 +180,40 @@ async function measure(page: Page, html: string, width: number): Promise<Reading
 
 const within = (inner: Box, outer: Box) => inner.left >= outer.left - 0.5 && inner.right <= outer.right + 0.5;
 
-test.describe('list toolbar keeps the view name readable on a phone (objectstack#33833)', () => {
-  test('ListView draws its toolbar row from these constants', () => {
-    for (const name of ROW_NAMES) {
-      expect(listSrc.includes(name), `${LIST_FILE} no longer reads ${name}, so this file would measure nothing it draws`).toBe(true);
-    }
-  });
+const NAMES = ['全部客户', 'All Customers'];
 
-  for (const width of [320, 375, 390]) {
-    for (const label of ['全部客户', 'All Customers']) {
-      test(`${width}px: 「${label}」 is drawn whole, and nothing scrolls the page`, async ({ page }) => {
+test.describe('the phone toolbar keeps the view name readable (objectstack#33833, #35883)', () => {
+  for (const width of [375, 390]) {
+    for (const label of NAMES) {
+      test(`${width}px: 「${label}」 is drawn whole on one row with Sort, Filter and Search`, async ({ page }) => {
         const r = await measure(page, fixture(label), width);
         expect(r.labelClipped, `label ${r.labelWidth.toFixed(2)}px of ${r.labelScrollWidth}px`).toBe(false);
         expect(r.overflowX, 'the toolbar pushed the page sideways').toBe(0);
-        for (const [name, b] of [['queue', r.queue], ['cluster', r.cluster]] as const) {
-          expect(within(b, r.row), `${name} leaves the row`).toBe(true);
+        expect(r.rowScrolls, 'the row scrolls sideways').toBe(false);
+        for (const pill of r.pills) {
+          expect(within(pill, r.row), 'a pill leaves the row').toBe(true);
+          expect(pill.top < r.leading.bottom && pill.bottom > r.leading.top, 'a pill left the name\'s line').toBe(true);
+          expect(Math.round(pill.bottom - pill.top), 'a 44 px touch target').toBe(44);
         }
-        // The tools keep the row's right edge (its `px-2` padding) on whichever line they land.
-        expect(r.row.right - r.cluster.right, 'the tool cluster left the right edge').toBeLessThanOrEqual(8.5);
       });
     }
   }
 
-  test('375px with five filter chips, wider than the row: the name is whole, the chips scroll inside the row', async ({ page }) => {
-    const r = await measure(page, fixture('全部客户', { chips: 5 }), 375);
-    expect(r.labelClipped, `label ${r.labelWidth.toFixed(2)}px of ${r.labelScrollWidth}px`).toBe(false);
-    expect(r.overflowX).toBe(0);
-    expect(within(r.chips!, r.row), 'chips leave the row').toBe(true);
+  test('320px: 「全部客户」 is whole; a wider name gives way with an ellipsis, and the pills stay on screen', async ({ page }) => {
+    const short = await measure(page, fixture('全部客户'), 320);
+    expect(short.labelClipped).toBe(false);
+    expect(short.rowScrolls).toBe(false);
+    const wide = await measure(page, fixture('All Customers In The Northwest Sales Region Pipeline'), 320);
+    expect(wide.labelClipped, 'a name wider than the room is truncated').toBe(true);
+    expect(wide.overflowX).toBe(0);
+    expect(wide.rowScrolls, 'the name, not the row, gives way').toBe(false);
+    for (const pill of wide.pills) expect(within(pill, wide.row), 'a pill leaves the row').toBe(true);
   });
 
-  test('375px with a name longer than the row: it keeps most of the row and ends in an ellipsis', async ({ page }) => {
-    const r = await measure(page, fixture('All Customers In The Northwest Sales Region Pipeline'), 375);
-    expect(r.labelClipped, 'a name wider than the row is truncated').toBe(true);
-    expect(r.labelWidth, `label ${r.labelWidth.toFixed(2)}px in a ${r.row.width}px row`).toBeGreaterThan(r.row.width * 0.6);
-    expect(r.overflowX).toBe(0);
-  });
-
-  // CONTROL: from `sm` up the phone additions are inert, so the row lays out
-  // exactly as it does without them, on one line.
-  test('1280px: the row is one line and identical with or without the phone classes', async ({ page }) => {
-    const withPhone = await measure(page, fixture('全部客户', { chips: 2 }), 1280);
-    const without = await measure(page, fixture('全部客户', { chips: 2, phone: false }), 1280);
-    expect(withPhone).toEqual(without);
-    expect(withPhone.labelClipped).toBe(false);
-    for (const [name, b] of [['queue', withPhone.queue], ['cluster', withPhone.cluster]] as const) {
-      expect(b.top < withPhone.leading.bottom && b.bottom > withPhone.leading.top, `${name} is on the name's line`).toBe(true);
-    }
+  // CONTROL: from `sm` up the phone search pill is not drawn (`sm:hidden`);
+  // the row itself is the phone's only (the list draws it below `sm` alone).
+  test('640px: the search pill is not drawn', async ({ page }) => {
+    const r = await measure(page, fixture('全部客户'), 640);
+    expect(r.pills[2].width).toBe(0);
   });
 });

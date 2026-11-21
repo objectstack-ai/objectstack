@@ -210,7 +210,7 @@ const GalleryIconTile: React.FC<{
                     className="h-6 w-6 object-contain transition-transform duration-300 ease-out group-hover:scale-110"
                 />
             ) : (
-                <span className={cn('text-base font-semibold', placeholder.text)}>
+                <span className={cn('text-base font-medium', placeholder.text)}>
                     {title[0]?.toUpperCase()}
                 </span>
             )}
@@ -837,7 +837,7 @@ export const ObjectGallery: React.FC<ObjectGalleryProps> = (props) => {
                         <div className="flex items-start gap-3">
                             <GalleryIconTile imageUrl={imageUrl} title={title} placeholder={placeholder} />
                             <div className="min-w-0 flex-1">
-                                <h3 className="font-semibold tracking-tight truncate text-sm leading-tight text-foreground" title={title}>
+                                <h3 className="font-medium tracking-tight truncate text-sm leading-tight text-foreground" title={title}>
                                     {titleContent}
                                 </h3>
                                 {renderFields(item)}
@@ -866,7 +866,7 @@ export const ObjectGallery: React.FC<ObjectGalleryProps> = (props) => {
                     hidden={!showCoverArea}
                 />
                 <CardContent className={cn('p-3', showCoverArea && 'border-t border-border/60')}>
-                    <h3 className="font-semibold tracking-tight truncate text-sm leading-tight text-foreground" title={title}>
+                    <h3 className="font-medium tracking-tight truncate text-sm leading-tight text-foreground" title={title}>
                         {titleContent}
                     </h3>
                     {renderFields(item)}

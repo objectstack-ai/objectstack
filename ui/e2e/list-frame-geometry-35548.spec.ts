@@ -12,8 +12,8 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  *   view bar 40 (the object's name as the page's heading, the switcher and
  *   View settings on the left; search, New and ⋮ on the right) · condition
  *   row 40, resident · header 36 · row 36, its line included
- *   (objectstack#36048; 32 and 33 before it), 13px on the heading, the header,
- *   the cells and the bar buttons, the view switcher as one trigger (type
+ *   (objectstack#36048; 32 and 33 before it), 14px on the heading, the cells
+ *   and the bar buttons and 12px on the header (objectstack#36047), the view switcher as one trigger (type
  *   icon → name → count → caret), and each column total under its own
  *   column, right edge on the column's right edge. No page bar is drawn
  *   above the view bar. A line of the row lines' colour and weight runs
@@ -60,6 +60,7 @@ const read = (rel: string) => readFileSync(path.join(ROOT, rel), 'utf8');
 
 const FILES = {
   pageBar: 'packages/app-shell/src/views/objectViewPageHeader.tsx',
+  pageHeader: 'packages/app-shell/src/layout/PageHeader.tsx',
   viewSettings: 'packages/plugin-list/src/components/ViewSettingsPopover.tsx',
   chrome: 'packages/app-shell/src/views/objectViewHeaderChrome.tsx',
   row: 'packages/plugin-list/src/listToolbarRow.ts',
@@ -88,14 +89,19 @@ function carrying(cls: string, want: string[], where: string): string {
   return cls;
 }
 
-// ── the page's name and acts, in the view bar (objectstack#35878) ───────────
-const OBJECT_NAME = carrying(pick('pageBar', /data-testid="list-view-bar-object"[\s\S]*?<h1 className="([^"]+)"/, "the view bar's object name"), ['text-[13px]', 'truncate'], 'object name');
-const NEW_BUTTON = carrying(pick('chrome', /className="(shadow-none gap-1 h-7[^"]*)"/, 'the create button'), ['h-7', 'text-[13px]'], 'create button');
+// ── the page bar: the object's row (objectstack#36113) ──────────────────────
+const PAGE_BAR = carrying(pick('pageHeader', /className=\{cn\(\s*'(relative shrink-0 border-b[^']*)'/, 'the page header'), ['border-b'], 'page header');
+const PAGE_BAR_LIST = carrying(pick('pageHeader', /list && '([^']+)'/, "the page header's list height"), ['h-11'], 'list page header');
+const PAGE_BAR_ROW = carrying(pick('pageHeader', /\{list \? \(\s*<div className="([^"]+)"/, "the list page header's row"), ['h-full', 'items-center'], 'list page header row');
+const OBJECT_NAME = carrying(pick('pageHeader', /<h1 className="(min-w-0 max-w-full shrink-0 truncate text-sm[^"]*)"/, "the list page header's object name"), ['text-sm', 'truncate'], 'object name');
+// ── the page's acts, at the view bar's end (objectstack#35878, objectstack#36113) ──
+const NEW_BUTTON = carrying(pick('chrome', /className="(shadow-none gap-1 h-7[^"]*)"/, 'the create button'), ['h-7', 'text-sm'], 'create button');
+const IO_BUTTON = carrying(pick('pageBar', /className="(shadow-none h-7 [^"]*)"\s*data-testid="object-view-import-export"/, 'the Import / Export button'), ['h-7', 'text-sm'], 'Import / Export button');
 
 // ── view bar ────────────────────────────────────────────────────────────────
 const TOOLBAR_ROW = constant('row', 'TOOLBAR_ROW');
 const TOOLBAR_CLUSTER = constant('row', 'TOOLBAR_CLUSTER');
-const TEXT_TRIGGER = carrying(constant('row', 'TOOLBAR_TEXT_TRIGGER'), ['h-7', 'text-[13px]'], 'TOOLBAR_TEXT_TRIGGER');
+const TEXT_TRIGGER = carrying(constant('row', 'TOOLBAR_TEXT_TRIGGER'), ['h-7', 'text-sm'], 'TOOLBAR_TEXT_TRIGGER');
 const CONDITION_ROW = carrying(
   pick('list', /data-slot="list-condition-row"[\s\S]*?className="([^"]+)"/, 'the condition row'),
   ['min-h-10', 'flex-nowrap'],
@@ -103,26 +109,28 @@ const CONDITION_ROW = carrying(
 );
 const SWITCHER_TRIGGER = carrying(
   pick('switcher', /data-testid="list-view-switcher"[\s\S]*?className=\{cn\(\s*(?:\/\/[^\n]*\n\s*)*'([^']+)'/, 'the switcher trigger'),
-  ['h-7', 'text-[13px]', 'items-center'],
+  ['h-7', 'text-sm', 'items-center'],
   'switcher trigger',
 );
 /** The trigger's children in source order, read off their test ids. */
 const SWITCHER_PARTS = ['type-icon', 'label', 'count', 'caret'] as const;
-const switcherBody = SRC.switcher.slice(SRC.switcher.indexOf('data-testid="list-view-switcher"'), SRC.switcher.indexOf('</PopoverTrigger>'));
+// The desktop trigger, inside its popover's trigger: the phone toolbar's pill
+// (objectstack#35883) comes first in the file and draws no type icon.
+const switcherBody = SRC.switcher.slice(SRC.switcher.indexOf('<PopoverTrigger'), SRC.switcher.indexOf('</PopoverTrigger>'));
 
 // ── grid ────────────────────────────────────────────────────────────────────
 const DENSITY = (() => {
   const block = pick('grid', /export const OBJECT_GRID_TABLE_DENSITY = \[([\s\S]*?)\]\.join/, 'OBJECT_GRID_TABLE_DENSITY');
   return [...block.matchAll(/'([^']+)'/g)].map((m) => m[1]).join(' ');
 })();
-const ROW_CELL = carrying(pick('grid', /rowHeightMode === 'compact'\s*\?\s*'([^']+)'/, 'the default (compact) row arm'), ['h-9', 'text-[13px]'], 'row arm');
+const ROW_CELL = carrying(pick('grid', /rowHeightMode === 'compact'\s*\?\s*'([^']+)'/, 'the default (compact) row arm'), ['h-9', 'text-sm'], 'row arm');
 const ROW_ACTION = (() => {
   const at = SRC.rowAction.indexOf('data-testid="row-action-trigger"');
   const cls = [...SRC.rowAction.slice(0, at).matchAll(/className="([^"]+)"/g)].pop()?.[1];
   if (!cls) throw new Error(`${FILES.rowAction}: the row ⋮ trigger's class was not found`);
   return cls;
 })();
-const HEADER_LABEL = carrying(pick('dataTable', /<span className="([^"]+)" title=\{col\.header/, 'the column header label'), ['text-[13px]'], 'header label');
+const HEADER_LABEL = carrying(pick('dataTable', /<span className="([^"]+)" title=\{col\.header/, 'the column header label'), ['text-xs'], 'header label');
 const SUMMARY_CELL = carrying(pick('dataTable', /"(h-8 px-\S+ py-0 [^"]+)",\s*\n\s*col\.align === 'right'/, 'the summary cell'), ['h-8', 'tabular-nums'], 'summary cell');
 /** What the summary cell adds for a right-aligned column, read off its own arm. */
 const SUMMARY_RIGHT = pick('dataTable', /"h-8 px-\S+ py-0 [^"]+",\s*\n\s*col\.align === 'right' && '([^']+)'/, "the summary cell's right-aligned arm");
@@ -166,15 +174,15 @@ function fixture(locale: 'zh' | 'en' = 'zh'): string {
     </tr>`;
   return `
 <div id="topbar" style="height:48px"></div>
+<div id="page" class="${PAGE_BAR} ${PAGE_BAR_LIST}"><div class="${PAGE_BAR_ROW}"><div class="flex min-w-0 flex-1 items-center gap-2"><span class="${ICON_16}"></span><h1 id="title" class="${OBJECT_NAME}">商机</h1></div></div></div>
 <div id="viewbar" class="${TOOLBAR_ROW}">
   <div class="flex min-w-0 flex-1 items-center gap-2">
-    <span class="flex min-w-0 items-center gap-1.5"><span class="${ICON_16}"></span><h1 id="title" class="${OBJECT_NAME}">商机</h1><span>/</span></span>
     <button id="switcher" class="${SWITCHER_TRIGGER}">
       <span id="sw-type-icon" class="${ICON_16}"></span><span id="sw-label" class="truncate">全部商机</span><span id="sw-count" class="shrink-0 tabular-nums">12</span><span id="sw-caret" class="h-3.5 w-3.5 shrink-0"></span>
     </button>
     <button class="bar-button inline-flex items-center ${TEXT_TRIGGER}">视图设置</button>
   </div>
-  <div class="${TOOLBAR_CLUSTER}"><button class="inline-flex h-7 w-7"></button><button id="new" class="inline-flex items-center ${NEW_BUTTON}">新建</button><button class="inline-flex h-7 w-7"></button></div>
+  <div class="${TOOLBAR_CLUSTER}"><button class="inline-flex h-7 w-7"></button><button id="io" class="bar-button inline-flex items-center ${IO_BUTTON}">导入 / 导出</button><button id="new" class="inline-flex items-center ${NEW_BUTTON}">新建商机</button><button class="inline-flex h-7 w-7"></button></div>
 </div>
 <div id="condition" class="${CONDITION_ROW}"><span class="inline-flex h-6 w-16 shrink-0"></span><span class="inline-flex h-6 w-16 shrink-0"></span></div>
 <table class="${TABLE} ${DENSITY}" style="table-layout:fixed;width:${40 + COLUMNS.reduce((n, c) => n + c.width, 0) + 64}px">
@@ -197,7 +205,7 @@ function fixture(locale: 'zh' | 'en' = 'zh'): string {
 }
 
 const CANDIDATES = [
-  OBJECT_NAME, NEW_BUTTON, TOOLBAR_ROW, TOOLBAR_CLUSTER, TEXT_TRIGGER, CONDITION_ROW,
+  PAGE_BAR, PAGE_BAR_LIST, PAGE_BAR_ROW, OBJECT_NAME, NEW_BUTTON, IO_BUTTON, TOOLBAR_ROW, TOOLBAR_CLUSTER, TEXT_TRIGGER, CONDITION_ROW,
   SWITCHER_TRIGGER, DENSITY, ROW_CELL, ROW_ACTION, HEADER_LABEL, SUMMARY_CELL, SUMMARY_RIGHT, TABLE, THEAD, TR, TH, TD, ICON_16,
   ...COLUMNS.map((c) => c.align),
   'flex min-w-0 flex-1 items-center gap-2 gap-1.5 h-6 w-16 inline-flex h-7 w-7 truncate shrink-0 tabular-nums h-3.5 w-3.5 h-4 w-4 w-10 w-16 justify-end px-3 h-8 py-0 border-t border-b-0',
@@ -294,24 +302,28 @@ test.describe('the list page frame (objectstack#35548)', () => {
   test('the sources still draw what this file measures', () => {
     expect(SRC.grid.includes('OBJECT_GRID_TABLE_DENSITY, schema.className'), `${FILES.grid} no longer hands its density to the table`).toBe(true);
     expect(/className=\{cn\(\s*TOOLBAR_TEXT_TRIGGER,[\s\S]{0,200}data-testid="toolbar-display-trigger"/.test(SRC.viewSettings), `${FILES.viewSettings}: View settings no longer draws from TOOLBAR_TEXT_TRIGGER`).toBe(true);
-    // The view bar names the object as the page's heading (objectstack#35878).
-    expect(SRC.pageBar.includes('data-testid="list-view-bar-object-name"'), `${FILES.pageBar} no longer names the object in the view bar`).toBe(true);
+    // The page bar names the object as the page's heading, and the view bar
+    // does not (objectstack#36113, which split objectstack#35878's one row).
+    expect(SRC.pageBar.includes('data-testid="list-view-bar-object-name"'), `${FILES.pageBar} names the object in the view bar again`).toBe(false);
+    expect(/<ObjectViewPageHeader \{\.\.\.pageBarProps\} hosted=\{listBarHosted\} \/>/.test(read('packages/app-shell/src/views/ObjectView.tsx')), 'the list page no longer draws its page bar above the view bar').toBe(true);
     // One trigger: type icon → name → count → caret, in that source order.
     const at = SWITCHER_PARTS.map((p) => switcherBody.indexOf(`data-testid="list-view-switcher-${p}"`));
     expect(at.every((i) => i > 0), `a switcher part is missing: ${JSON.stringify(at)}`).toBe(true);
     expect([...at].sort((a, b) => a - b)).toEqual(at);
   });
 
-  test('1280×800: no page bar, view bar 40, condition row 40, header 36, rows 36, first row top ≤ 168', async ({ page }) => {
+  test('1280×800: page bar 44, view bar 40, condition row 40, header 36, rows 36, first row top ≤ 212', async ({ page }) => {
     const r = await measure(page);
-    expect(r.page, 'a page bar is drawn above the view bar').toBeNull();
-    expect(r.viewbar.top).toBeCloseTo(48, 0);
+    expect(r.page, 'no page bar above the view bar').not.toBeNull();
+    expect(r.page!.top).toBeCloseTo(48, 0);
+    expect(r.page!.height, 'the object\'s row').toBeCloseTo(44, 0);
+    expect(r.viewbar.top).toBeCloseTo(92, 0);
     expect(r.viewbar.height).toBeCloseTo(40, 0);
     expect(r.condition.height, 'the resident condition row').toBeCloseTo(40, 0);
-    expect(r.thead.top, 'the header under the two rows').toBeCloseTo(128, 0);
+    expect(r.thead.top, 'the header under the three rows').toBeCloseTo(172, 0);
     expect(r.thead.height).toBeCloseTo(36, 0);
     for (const h of r.rowHeights) expect(h, 'a data row is not 36px').toBeCloseTo(36, 0);
-    expect(r.firstRow.top).toBeLessThanOrEqual(168);
+    expect(r.firstRow.top).toBeLessThanOrEqual(212);
     expect(r.newButton.height).toBeGreaterThanOrEqual(24);
     expect(r.newButton.height).toBeLessThanOrEqual(28);
     for (const h of r.barButtons) {
@@ -321,13 +333,13 @@ test.describe('the list page frame (objectstack#35548)', () => {
     expect(r.overflowX).toBe(0);
   });
 
-  test('13px on the object name, the header, the cells and every bar button', async ({ page }) => {
+  test('14px on the object name, the cells and every bar button; 12px on the header (objectstack#36047)', async ({ page }) => {
     const { fonts } = await measure(page);
-    expect(fonts.title).toBe('13px');
-    expect(fonts.header).toBe('13px');
-    expect(fonts.cell).toBe('13px');
-    expect(fonts.bar.length).toBe(3);
-    for (const f of fonts.bar) expect(f).toBe('13px');
+    expect(fonts.title).toBe('14px');
+    expect(fonts.header).toBe('12px');
+    expect(fonts.cell).toBe('14px');
+    expect(fonts.bar.length).toBe(4);
+    for (const f of fonts.bar) expect(f).toBe('14px');
   });
 
   test('a line between columns in the header, the rows and the footer, the row lines\' colour and weight, none after the last cell (objectstack#36048)', async ({ page }) => {

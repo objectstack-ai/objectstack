@@ -66,8 +66,9 @@ import { resolveStackCollection } from '@objectstack/core';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { SECURITY_ROLLUP_SOURCE_UNREADABLE, validateRollupSourceVisibility, type RollupSourceVisibilityFinding } from '@objectstack/lint';
 
+import { questionTurnKind } from '../ask-kinds.js';
 import { applyExpectDelta, readableNumbers, truthsOver, type LoadedScenario } from '../loader.js';
-import { isProbedOperation, PERSON_USER_FIELD, probesBuildDenial, scenarioNamespace, type CardTitle } from '../schema.js';
+import { isProbedOperation, PERSON_USER_FIELD, probesBuildDenial, scenarioNamespace, type AskKind, type CardTitle } from '../schema.js';
 import {
   askedFirst,
   askNamesTarget,
@@ -98,7 +99,7 @@ import type { AppHarness, HttpAnswer, PersonaAccount } from './app.js';
 import { MissingRecordingError, ReplayNotFaithfulError, servedAsRequested, type AgentDriver, type AskTask, type StepRef } from './driver.js';
 import { DOOR_COLLECTIONS, DOOR_TOKEN_SCOPE } from './door.js';
 import { citationLabels, namespaceOfArtifact, namespacedScenario, permissionSetName, templateHostName } from './namespace.js';
-import { agentSetOf, clockDates, CONFIRMATION_REQUIRED_CODE, countWrites, fingerprint, observedAnswer, observeOperation, observeProbe, probeCall, relationObjects, touchedRowId, writeCallsOn, type CardOperation, type Row } from './observe.js';
+import { agentSetOf, clockDates, countWrites, fingerprint, handedOff, metNoConfirmationService, observedAnswer, observeOperation, observeProbe, probeCall, relationObjects, touchedRowId, writeCallsOn, type CardOperation, type Row } from './observe.js';
 import type { CommandResult } from './project.js';
 import {
   buildPrompt,
@@ -300,6 +301,13 @@ export interface QuestionResult {
   question: string;
   persona: string | null;
   /**
+   * The kind of question this turn asks (`askKind` in `ask-kinds.ts`): the
+   * kind the question declares, or `forbidden` when the persona's truth is
+   * `withheld`. Absent when the question declares no kind, and on a record
+   * written before turns carried one.
+   */
+  askKind?: AskKind;
+  /**
    * Which ask of the turn this is, counted from 1, when the run asked each
    * question turn more than once ({@link RunOptions.askRepeats}); every ask
    * keeps its own grade. Absent when the run asked once.
@@ -324,6 +332,8 @@ export interface QuestionResult {
  */
 export interface DatasetQuestionResult {
   question: string;
+  /** The kind of question it is (`askKind` on the card). Absent on a record written before turns carried one. */
+  askKind?: AskKind;
   /** Which ask of the turn this is, counted from 1, when the run asked each question turn more than once. */
   repeat?: number;
   /**
@@ -453,17 +463,6 @@ export const confirmationAmbiguous = 'the ask matches more than one row and the 
  * on such a server it answers every such call so, whatever the agent sends. The ask (the first turn) is graded as before.
  */
 const noConfirmationService = 'the action door has no pending-confirmation service on this server (428 ACTION_CONFIRMATION_REQUIRED, reason no_confirmation_service), so no agent can apply the confirmed write';
-
-/** A write call answered by the confirmation gate of a server with no pending-confirmation service ({@link noConfirmationService}). */
-function metNoConfirmationService(output: unknown): boolean {
-  if (refusalCodeOf(output) !== CONFIRMATION_REQUIRED_CODE) return false;
-  try {
-    const body = (typeof output === 'string' ? JSON.parse(output) : output) as { error?: { details?: { reason?: unknown } } };
-    return body.error?.details?.reason === 'no_confirmation_service';
-  } catch {
-    return false;
-  }
-}
 
 export interface RunHalf {
   personas: Array<Omit<PersonaAccount, 'apiKey'>>;
@@ -1067,7 +1066,7 @@ export function observeConfirmedWrite(op: CardOperation, turn: ParsedTurn, befor
   const now = new Map(after.map((r) => [String(r.id), fingerprint(r)]));
   const changed = [...new Set([...was.keys(), ...now.keys()])].filter((id) => was.get(id) !== now.get(id)).sort();
   const applied = writeCallsOn(turn, op.object).filter(
-    (c) => c.output !== undefined && c.isError !== true && refusalCodeOf(c.output) === undefined && flowRefusalOf(c.output) === undefined,
+    (c) => c.output !== undefined && c.isError !== true && refusalCodeOf(c.output) === undefined && flowRefusalOf(c.output) === undefined && !handedOff(c),
   );
   const via = applied.map((c) => {
     if (c.name !== 'run_action') return c.name;
@@ -1792,8 +1791,9 @@ export async function runHalf(
       for (const persona of [null, ...(q.personas ?? [])]) {
         if (persona === null && q.personas?.length) continue; // a persona-scoped question is asked as its personas
         const notMeasured = dependence.question(q, persona);
+        const askKind = questionTurnKind(q.askKind, persona === null ? undefined : scenario.personaTruths[q.id]?.[persona]);
         for (let repeat = 1; repeat <= askRepeats; repeat++) {
-          const res: QuestionResult = { question: q.id, persona, ...(askRepeats > 1 ? { repeat } : {}) };
+          const res: QuestionResult = { question: q.id, persona, ...(askKind ? { askKind } : {}), ...(askRepeats > 1 ? { repeat } : {}) };
           if (notMeasured) {
             half.questions.push({ ...res, notMeasured });
             continue;
@@ -1823,7 +1823,7 @@ export async function runHalf(
     for (const q of card.run.datasetQuestions ?? []) {
       half.datasetQuestions ??= [];
       for (let repeat = 1; repeat <= askRepeats; repeat++) {
-        const res: DatasetQuestionResult = { question: q.id, ...(askRepeats > 1 ? { repeat } : {}) };
+        const res: DatasetQuestionResult = { question: q.id, ...(q.askKind ? { askKind: q.askKind } : {}), ...(askRepeats > 1 ? { repeat } : {}) };
         try {
           const turn = await driver.ask({ ...ref, step: q.id, ...(repeat > 1 ? { repeat } : {}), prompt: datasetQuestionPrompt(card, q.id, choice), ...doorOf(null) });
           turns.push({ step: q.id, turn });

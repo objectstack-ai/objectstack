@@ -370,6 +370,50 @@ function TaskList() {
 }
 ```
 
+### The condition row for another host: `ListConditionsBlock`
+
+A host that draws a child object's rows itself gets the list page's condition
+row as `ListConditionsBlock` (objectstack#35892). The record page's related tab
+is one: `@object-ui/plugin-detail` sits below this package, so it cannot import
+the block, and the record page hands it in through `plugin-detail`'s
+`RelatedListConditionsSlotContext`. It is the same `ConditionChipRow`,
+`SortPanel` and `FilterPanel` with the same field lists, and no view switch,
+view settings or search. It is a host element, not a registered node type: it is
+controlled, and every input is a React prop.
+
+```tsx
+import { useState } from 'react';
+import type { FilterBuilderRowGroup, SortItem } from '@object-ui/components';
+import { ListConditionsBlock } from '@object-ui/plugin-list';
+
+const NO_FILTER: FilterBuilderRowGroup = { id: 'root', logic: 'and', conditions: [] };
+
+export function QuoteConditions({ quoteDefinition }: { quoteDefinition: { fields?: Record<string, unknown> } }) {
+  const [sort, setSort] = useState<SortItem[]>([]);
+  const [filterGroup, setFilterGroup] = useState<FilterBuilderRowGroup>(NO_FILTER);
+  const [, setFilter] = useState<unknown[] | undefined>(undefined);
+  const changed = sort.length > 0 || filterGroup.conditions.length > 0;
+  const discard = () => { setSort([]); setFilterGroup(NO_FILTER); setFilter(undefined); };
+  return (
+    <ListConditionsBlock
+      objectName="quote"
+      objectDef={quoteDefinition}
+      shownFields={['name', 'amount', 'status']}
+      sort={sort}
+      onSortChange={setSort}
+      filters={filterGroup}
+      onFiltersChange={(group, filterNode) => { setFilterGroup(group); setFilter(filterNode); }}
+      onDiscard={changed ? discard : undefined}
+    />
+  );
+}
+```
+
+`onFiltersChange` hands back the group the panels edit and the query node the
+list page would send for it (`undefined` = no filter). **Discard**
+(`ConditionDiscardButton`, the list page's own) is drawn at the row's end while
+`onDiscard` is passed. Labels fold to icons when the row is narrow.
+
 ## Schema
 
 The ListView component accepts a `ListViewSchema`, exported from
@@ -706,6 +750,22 @@ block hands it the reporter `usePageTabCountReporter()` from
 says how many records its list holds. `page:tabs` mounts a tab holding a list
 block while it is inactive (hidden), so the badge is there before the tab is
 opened; a tab with an authored `count` is not mounted early.
+
+## Export
+
+The Export entry (the wide toolbar's button and the Display panel's footer) is
+offered when the view declares `exportOptions` and three things allow it: the
+view's `allowExport` and `operations.export` are not `false`, and the object's
+resolved export verdict is open. That verdict is
+`isObjectExportOffered(objectDef, effectiveApiOperations)` from
+`@object-ui/core`: the object's `userActions.exportCsv` over its
+`managedBy` default, ANDed with the caller's effective `export` API operation.
+An object that sets `userActions.exportCsv: false` therefore gets no Export
+entry in any of its formats (CSV, XLSX, JSON); one that does not set it keeps
+the entry, since every `managedBy` bucket defaults it on. The setting hides the
+entry and is not a permission: who may export is the permission set's
+`allowExport`. It covers the download of the object's data only: a Gantt view's
+PNG and PDF export of the chart it draws is not gated by it.
 
 ## Sorting (and why relational columns are not offered)
 

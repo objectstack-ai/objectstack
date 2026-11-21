@@ -132,7 +132,7 @@ export type {
 } from './ConcurrentUpdateDialog';
 // `__clearRecordEditableCache` is test-only and stays off the barrel
 // (objectui#13453); tests import it from `useRecordEditable` directly.
-export { useRecordEditable, seedRecordVerdict } from './useRecordEditable';
+export { useRecordEditable, useRecordVerdict, seedRecordVerdict } from './useRecordEditable';
 // objectstack#27627 — the record page payload's field projection, for the
 // in-place edit blocks' first ask.
 export { seedRecordFieldAccess } from './recordFieldAccess';
@@ -161,6 +161,7 @@ export { FieldChangeItem } from './FieldChangeItem';
 export { SubscriptionToggle } from './SubscriptionToggle';
 export { ReactionPicker } from './ReactionPicker';
 export { ThreadedReplies } from './ThreadedReplies';
+export { CommentAuthorAvatar } from './CommentAuthorAvatar';
 export { RecordMetaFooter } from './RecordMetaFooter';
 export type { RecordMetaFooterProps } from './RecordMetaFooter';
 export type { DetailViewProps } from './DetailView';
@@ -185,6 +186,7 @@ export type { FieldChangeItemProps } from './FieldChangeItem';
 export type { SubscriptionToggleProps } from './SubscriptionToggle';
 export type { ReactionPickerProps } from './ReactionPicker';
 export type { ThreadedRepliesProps } from './ThreadedReplies';
+export type { CommentAuthorAvatarProps } from './CommentAuthorAvatar';
 
 // Track 3 (convergence): pure-function synthesizers for the default
 // detail page. Phase G slice 1 — not yet wired into RecordDetailView.
@@ -237,6 +239,10 @@ export { RecordBodyTablesContext } from './relatedListCompact';
 // the host's editor through this slot.
 export { RecordBodyTableEditorSlotContext } from './relatedListCompact';
 export type { RecordBodyTableEditorSlot } from './relatedListCompact';
+// objectstack#35892 — the related tab's condition row, supplied by the host
+// (`plugin-list`'s `ListConditionsBlock`) through this slot.
+export { RelatedListConditionsSlotContext } from './relatedListCompact';
+export type { RelatedListConditionsProps } from './relatedListCompact';
 // objectstack#27056 — for the app-shell record drawer's prefetch: it warms
 // the next record's related counts before the reader steps to it.
 export { prefetchRelatedCounts, relatedCountTargetsIn } from './useRelatedCounts';
@@ -252,10 +258,43 @@ export {
   // panel's most entries (the host asks that many activity rows at open).
   RecordTimelineTotalContext,
   RECORD_TIMELINE_PANEL_MAX_ENTRIES,
+  // objectstack#36075 — the record's comments live in its comment panel.
+  RecordCommentsInPanelContext,
   auditEntriesToFeedItems,
   mergeTimelineStream,
 } from './recordTimelineStream';
 export type { AuditEntryLike, TimelineStreamFilter } from './recordTimelineStream';
+// objectstack#36075 — the record's comment panel and the parts the phone's
+// comment page shares with it.
+export {
+  useRecordComments,
+  buildCommentThreads,
+  latestRepliers,
+  threadResolvable,
+  threadResolved,
+  threadInvolvesViewer,
+  filterCommentThreads,
+  unresolvedThreadCount,
+  DEFAULT_COMMENT_THREAD_FILTER,
+  CommentItem,
+  CommentThread,
+  CommentComposer,
+  CommentHoverActions,
+  CommentsPanel,
+  CommentsButton,
+} from './comments';
+export type {
+  RecordCommentsData,
+  CommentThreadData,
+  CommentThreadFilter,
+  CommentItemProps,
+  RecordCommentThreadProps,
+  CommentItemActions,
+  CommentComposerProps,
+  CommentHoverActionsProps,
+  CommentsPanelProps,
+  CommentsButtonProps,
+} from './comments';
 // objectstack#27055 — the reader's arrangement of the related cards: the pure
 // merge rule and the stored record's codec halves, for the host's
 // workspace-preference store.

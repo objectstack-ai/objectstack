@@ -23,7 +23,11 @@ import { ObjectView as PluginObjectView, ManageViewsDialog } from '@object-ui/pl
 // Plugin registration is handled by the host app (e.g. apps/console/src/main.tsx
 // uses ComponentRegistry.registerLazy so heavy plugins stay code-split).
 // Do NOT add eager `import '@object-ui/plugin-*'` side-effect imports here.
-import { Plus } from 'lucide-react';
+import { CheckSquare, Plus } from 'lucide-react';
+import { DropdownMenuItem, ObjectIconTile } from '@object-ui/components';
+import { requestListSelection, useListPageSelectable, useListPageSelecting } from '@object-ui/plugin-grid';
+import type { ListToolbarTrailingState } from '@object-ui/plugin-list';
+import { usePublishPhonePageBar } from '../layout/PhonePageBar.js';
 import { useObjectListFavorite } from '../layout/SidebarItemMenu.js';
 import { useMetaItemRefusal } from '../hooks/useMetaItemRefusal.js';
 import { useTenancyPosture } from '../hooks/useTenancyPosture.js';
@@ -89,8 +93,8 @@ import { useObjectViewHeaderChrome } from './objectViewHeaderChrome.js';
 import {
     ListViewBarHostContext,
     OBJECT_VIEW_PAGE_COLUMN_ATTR,
-    ObjectViewBarObjectName,
     ObjectViewBarTrailing,
+    ObjectViewMoreMenu,
     ObjectViewPageHeader,
     type ObjectViewPageBarProps,
 } from './objectViewPageHeader.js';
@@ -1253,20 +1257,19 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         // objectstack#35548 — the view switcher leads the list's view bar at
         // every width (on a phone since objectstack#27058); the page bar only
         // names the object.
-        // objectstack#35878 — and from `sm` up the object's name leads it,
-        // 「Object / View ▾」: the page draws no page bar of its own above the
-        // list. The 「Personalized · Reset」 marker ends the condition row.
+        // objectstack#36113 — the object's name is the page bar's, the row
+        // above (objectstack#35878 had led this bar with it).
         phoneTitle: titleSwitcher ? (
-            <span className="flex min-w-0 max-w-full items-center gap-1.5 max-sm:text-base max-sm:font-semibold" data-testid="list-phone-title">
-                <ObjectViewBarObjectName objectDef={objectDef} objectPluralLabel={listTitleOf} />
+            <span className="flex min-w-0 max-w-full items-center gap-1.5" data-testid="list-phone-title">
                 <span className="flex min-w-0">{titleSwitcher}</span>
             </span>
         ) : null,
         // The page's acts, after the list's search: read from the ref the page
-        // fills once its header chrome is known (below).
+        // fills once its header chrome is known (below). The list hands its
+        // export door with the tools (objectstack#36113).
         viewBarTrailing: titleSwitcher
-            ? (tools: ReactNode) => (pageBarPropsRef.current
-                ? <ObjectViewBarTrailing tools={tools} {...pageBarPropsRef.current} />
+            ? (tools: ReactNode, state: ListToolbarTrailingState) => (pageBarPropsRef.current
+                ? <ObjectViewBarTrailing tools={tools} exportDoor={state.export} {...pageBarPropsRef.current} />
                 : tools)
             : null,
         conditionRowEnd: draftActions,
@@ -1363,6 +1366,10 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         toolbarBar,
         viewAccess,
         titleSwitcher,
+        createLabel: t('console.objectView.newObject', {
+            object: servedObjectLabel(objectDef, language, objectLabel),
+            defaultValue: 'New {{object}}',
+        }),
     });
 
     const pageBarProps: ObjectViewPageBarProps = {
@@ -1383,6 +1390,39 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         foldedHeaderActions,
     };
     pageBarPropsRef.current = pageBarProps;
+
+    // objectstack#35883 — on a phone the page's top row is its own: 「‹」 (the
+    // app bar's), the object's icon and name, then ⋮ More with 「Select」 first.
+    // The app bar draws it in place of its pill, search, bell and avatar.
+    const [pageColumnEl, setPageColumnEl] = useState<HTMLDivElement | null>(null);
+    const listSelecting = useListPageSelecting(pageColumnEl);
+    // 「Select」 is offered only where the list would open a selection: cards
+    // whose rows take more than one tick (not a kanban, a calendar, or a list
+    // with no or single selection).
+    const listSelectable = useListPageSelectable(pageColumnEl);
+    const phoneDescription = objectDef.description ? objectDesc(objectDef) : undefined;
+    usePublishPhonePageBar(phone ? {
+        // The object's colour tile, as the desktop page bar draws it (objectstack#35985).
+        icon: <ObjectIconTile icon={(objectDef as any)?.icon} color={(objectDef as any)?.color} />,
+        title: listTitleOf(objectDef),
+        end: (
+            <ObjectViewMoreMenu
+                description={phoneDescription}
+                importShown={importShown}
+                setShowImport={setShowImport}
+                importDisabled={importDisabled}
+                listFavorite={listFavorite}
+                triggerClassName="h-11 w-11 px-0 shadow-none"
+                leading={listSelectable ? (
+                    <DropdownMenuItem onSelect={() => requestListSelection(pageColumnEl)} data-testid="object-view-select">
+                        <CheckSquare className="h-4 w-4" />
+                        <span>{t('console.objectView.select', { defaultValue: 'Select' })}</span>
+                    </DropdownMenuItem>
+                ) : undefined}
+                t={t}
+            />
+        ),
+    } : null);
 
     // The list itself: one element whether or not a record is open
     // (objectstack#27545), so a `?recordId=` change — a row click, a step —
@@ -1419,7 +1459,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // over (objectstack#27545); it keeps its full width (objectstack#28915).
     const pageColumn = (
         <ListViewBarHostContext.Provider value={setListBarHosted}>
-        <div className="h-full flex flex-col bg-background min-w-0 overflow-hidden" {...{ [OBJECT_VIEW_PAGE_COLUMN_ATTR]: '' }}>
+        <div ref={setPageColumnEl} className="h-full flex flex-col bg-background min-w-0 overflow-hidden" {...{ [OBJECT_VIEW_PAGE_COLUMN_ATTR]: '' }}>
              {/* 1. Header with breadcrumb + description.
                  The managed-by badge sits inline with the title so the
                  lifecycle bucket (system / config / append-only /
@@ -1439,9 +1479,10 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                  toolbar row, beside its filter / sort / display tools
                  (objectstack#27058). */}
              {/* objectstack#25992 slice 10: the header moved to `./objectViewPageHeader.tsx`. */}
-             {/* objectstack#35878 — not drawn while the list's view bar
-                 names the object and carries its acts. */}
-             {!listBarHosted && <ObjectViewPageHeader {...pageBarProps} />}
+             {/* objectstack#36113 — the page's first row: while the list's
+                 view bar carries the page's acts it draws the object's icon
+                 and name alone, ended by the shell's button group. */}
+             <ObjectViewPageHeader {...pageBarProps} hosted={listBarHosted} />
 
              {/* Floating "+" action button — phone-only counterpart to the
                  PageHeader's primary create action we just hid. Positioned
@@ -1469,7 +1510,8 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                  objectui#13134 — the list it floats over leaves room at its
                  end while it is drawn (`listFabClearance`), and only then: the
                  same `showCreate` decides both. */}
-             {showCreate && (
+             {/* objectstack#35883 — not while cards are being selected. */}
+             {showCreate && !listSelecting && (
                <button
                  type="button"
                  onClick={actions.create}

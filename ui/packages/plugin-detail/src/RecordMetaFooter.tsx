@@ -326,7 +326,7 @@ export const RecordMetaFooter: React.FC<RecordMetaFooterProps> = ({
         </span>
       )}
       {recordId && (
-        <span className="font-mono text-[11px] text-muted-foreground/80" data-record-meta-id="">
+        <span className="font-mono text-xs text-muted-foreground/80" data-record-meta-id="">
           {recordId}
         </span>
       )}

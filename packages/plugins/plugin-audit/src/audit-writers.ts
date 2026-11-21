@@ -97,7 +97,9 @@ import type { MentionGateInput } from './mention-recipient-gate.js';
 import {
   MENTION_EMAIL_CHANNEL,
   MENTION_TOPIC,
+  REPLY_TOPIC,
   mentionEmailDedupKey,
+  replyEmailDedupKey,
   type MentionBuiltinTemplate,
 } from './mention-email.js';
 // [ADR-0139 E6] The ONE derivation of the two writer-stamped columns the
@@ -2888,6 +2890,22 @@ export function installAuditWriters(
    * the capability opt-in this card restores.
    */
 
+  /**
+   * The record a comment is on as a Console page under the deployment's
+   * address (`mention-email.ts`): the inbox notice's own `/{object}/{id}`
+   * link, absolute through `getConsoleUrl` when it answers. No record, no
+   * link — and no e-mail.
+   */
+  const consoleRecordUrl = (object: string | undefined, id: string | undefined): string | null => {
+    const recordPath = object && id ? `/${object}/${id}` : null;
+    if (!recordPath) return null;
+    try {
+      return opts.getConsoleUrl?.(recordPath) || recordPath;
+    } catch {
+      return recordPath;
+    }
+  };
+
   /** Said once: a writer composed without the mention gate emits no mention notification. */
   let warnedNoMentionGate = false;
   /**
@@ -2906,20 +2924,24 @@ export function installAuditWriters(
    * `ctx.input.options`, the caller's bag), which the data protocol answers to
    * the author as `withheldMentions`; nothing is stored on the comment.
    */
-  const writeCommentMentions = async (ctx: HookContext) => {
-    if (ctx.object !== 'sys_comment') return;
-    if (ctx.event !== 'afterInsert' && ctx.event !== 'afterUpdate') return;
+  const writeCommentMentions = async (ctx: HookContext): Promise<ReadonlySet<string>> => {
+    // [#36074] Every user this write's mentions name, as entered and as the
+    // gate resolved them: the reply notice skips each (they get this notice).
+    const named = new Set<string>();
+    if (ctx.object !== 'sys_comment') return named;
+    if (ctx.event !== 'afterInsert' && ctx.event !== 'afterUpdate') return named;
     const messaging = getMessaging();
-    if (!messaging) return; // no pipeline installed → no mention notifications
+    if (!messaging) return named; // no pipeline installed → no mention notifications
     const row: any = ctx.result;
-    if (!row || typeof row !== 'object') return;
+    if (!row || typeof row !== 'object') return named;
 
     let mentioned = parseCommentMentions(row.mentions);
     if (ctx.event === 'afterUpdate') {
       const before = new Set(parseCommentMentions((ctx as any).previous?.mentions));
       mentioned = mentioned.filter((m) => !before.has(m));
     }
-    if (mentioned.length === 0) return;
+    for (const m of mentioned) named.add(m);
+    if (mentioned.length === 0) return named;
 
     const [source_object, source_id] = String(row.thread_id ?? '').split(':');
     const sess: any = (ctx as any).session ?? {};
@@ -2941,15 +2963,7 @@ export function installAuditWriters(
     // is on — the inbox notice's own `/{object}/{id}` link — as a Console page
     // under the deployment's address. No record, no e-mail: a mail with no
     // way back to the thread is not worth the daily mail budget.
-    const recordPath = source_object && source_id ? `/${source_object}/${source_id}` : null;
-    let mentionUrl: string | null = null;
-    if (recordPath) {
-      try {
-        mentionUrl = opts.getConsoleUrl?.(recordPath) || recordPath;
-      } catch {
-        mentionUrl = recordPath;
-      }
-    }
+    const mentionUrl = consoleRecordUrl(source_object, source_id);
     const tenantId: string | null = sess.organizationId ?? row.organization_id ?? null;
     const commentId = row.id != null ? String(row.id) : null;
 
@@ -2967,7 +2981,7 @@ export function installAuditWriters(
           );
         } catch {}
       }
-      return;
+      return named;
     }
     const withheld: string[] = [];
     let userIds: string[];
@@ -2982,8 +2996,9 @@ export function installAuditWriters(
       });
     } catch (err) {
       try { (engine as any).logger?.warn?.('Mention recipient gate failed; no mention notifications emitted', { commentId, err: String((err as any)?.message ?? err) }); } catch {}
-      return;
+      return named;
     }
+    for (const uid of [...userIds, ...withheld]) named.add(uid);
     // [#27703] The gate's own verdict, to the write that asked for it: the
     // author learns which of the users they named will not be notified. Ids
     // only — the reason stays in the log line the gate already wrote.
@@ -3052,12 +3067,141 @@ export function installAuditWriters(
         try { (engine as any).logger?.warn?.('Mention notification emit failed', { uid, err: String((err as any)?.message ?? err) }); } catch {}
       }
     }
+    return named;
   };
+
+  /** Said once: a writer composed without the recipient gate emits no reply notice. */
+  let warnedNoReplyGate = false;
+  /**
+   * [#36074] A reply notifies the thread's starter and everyone who replied in
+   * it before: the same inbox notice and e-mail as a mention, under
+   * `collab.reply` (`mention-email.ts`), to the people
+   *
+   *  - the thread names: the author of each comment up the reply's `parent_id`
+   *    chain — its top-level comment's author is the starter — and every
+   *    distinct author of a reply to that top-level comment, read as ONE
+   *    grouped query (`author_id … WHERE parent_id = ? GROUP BY author_id`,
+   *    on the `parent_id` index), never the thread's rows into memory;
+   *  - minus the reply's author, and minus everyone this reply's mentions name
+   *    (`mentioned`): they get the mention notice, not two;
+   *  - judged by the mention recipient gate (`admitMentionRecipients`), so
+   *    each reaches only a person who can READ the record and this reply,
+   *    judged in their own envelope.
+   *
+   * Only a NEW reply notifies: an edit of a reply (`afterUpdate`) or a
+   * top-level comment notifies no participant. The author is never told who
+   * was withheld — that answer is the mention's (`onMentionsWithheld`), whose
+   * author named the people.
+   */
+  const writeCommentReplyNotices = async (ctx: HookContext, mentioned: ReadonlySet<string>): Promise<void> => {
+    if (ctx.object !== 'sys_comment' || ctx.event !== 'afterInsert') return;
+    const row: any = ctx.result;
+    if (!row || typeof row !== 'object') return;
+    const parentId = row.parent_id != null && String(row.parent_id) ? String(row.parent_id) : null;
+    if (!parentId) return;
+    const messaging = getMessaging();
+    if (!messaging) return;
+    if (!opts.admitMentionRecipients) {
+      if (!warnedNoReplyGate) {
+        warnedNoReplyGate = true;
+        try {
+          (engine as any).logger?.warn?.(
+            '[audit] no comment recipient gate is composed — reply notifications are not emitted. '
+              + 'AuditPlugin wires one; a host calling installAuditWriters directly passes `admitMentionRecipients`.',
+          );
+        } catch {}
+      }
+      return;
+    }
+    const commentId = row.id != null ? String(row.id) : null;
+    const actorId: string | null = row.author_id != null ? String(row.author_id) : null;
+    const actorName: string | null = row.author_name ?? null;
+
+    let thread: CommentThreadParticipants | null;
+    try {
+      thread = await readThreadParticipants(engine, parentId, String(row.thread_id ?? ''));
+    } catch (err) {
+      try { (engine as any).logger?.warn?.('Reply participants read failed; no reply notifications emitted', { commentId, err: String((err as any)?.message ?? err) }); } catch {}
+      return;
+    }
+    if (!thread) return;
+    const candidates = thread.participants.filter((uid) => uid !== actorId && !mentioned.has(uid));
+    if (candidates.length === 0) return;
+
+    const sess: any = (ctx as any).session ?? {};
+    const tenantId: string | null = sess.organizationId ?? row.organization_id ?? null;
+    let userIds: string[];
+    try {
+      userIds = await opts.admitMentionRecipients({
+        mentions: candidates,
+        threadId: row.thread_id,
+        actorId,
+        organizationId: row.organization_id ?? tenantId,
+        commentId,
+        notice: 'reply',
+      });
+    } catch (err) {
+      try { (engine as any).logger?.warn?.('Reply recipient gate failed; no reply notifications emitted', { commentId, err: String((err as any)?.message ?? err) }); } catch {}
+      return;
+    }
+
+    const [source_object, source_id] = String(row.thread_id ?? '').split(':');
+    const replyUrl = consoleRecordUrl(source_object, source_id);
+    const bodyPreview = String(row.body ?? '').slice(0, 240);
+    for (const uid of userIds) {
+      try {
+        const tr = translateWith(await resolveWriteLocale(tenantId ?? undefined, uid));
+        const title = !actorName
+          ? (tr('messages.repliedAnonymous') ?? 'Someone replied to a comment')
+          : uid === thread.starterId
+            ? (tr('messages.repliedToYourComment', { actor: actorName }) ?? `${actorName} replied to your comment`)
+            : (tr('messages.repliedInYourThread', { actor: actorName }) ?? `${actorName} replied in a comment thread you are in`);
+        await messaging.emit({
+          topic: REPLY_TOPIC,
+          audience: [uid],
+          severity: 'info',
+          source: source_object ? { object: source_object, id: source_id ?? '' } : undefined,
+          actorId: actorId ?? undefined,
+          organizationId: tenantId ?? undefined,
+          dedupKey: commentId ? `${REPLY_TOPIC}:${commentId}:${uid}` : undefined,
+          payload: { title, body: bodyPreview, actorName },
+        });
+        // The e-mail: the mention e-mail's second emit, under the reply topic
+        // and its own 10-minute window (`replyEmailDedupKey`).
+        if (replyUrl) {
+          try {
+            await messaging.emit({
+              topic: REPLY_TOPIC,
+              audience: [uid],
+              severity: 'info',
+              source: { object: source_object, id: source_id },
+              actorId: actorId ?? undefined,
+              organizationId: tenantId ?? undefined,
+              channels: [MENTION_EMAIL_CHANNEL],
+              dedupKey: replyEmailDedupKey(tenantId, uid, Date.now()),
+              payload: { title, body: bodyPreview, actorName, mentionUrl: replyUrl },
+            });
+          } catch (err) {
+            try { (engine as any).logger?.warn?.('Reply e-mail emit failed', { uid, err: String((err as any)?.message ?? err) }); } catch {}
+          }
+        }
+      } catch (err) {
+        try { (engine as any).logger?.warn?.('Reply notification emit failed', { uid, err: String((err as any)?.message ?? err) }); } catch {}
+      }
+    }
+  };
+
+  /** The comment's insert: its mentions first, then the reply notice, which skips whoever those mentions name. */
+  const writeCommentNotices = async (ctx: HookContext): Promise<void> => {
+    const mentioned = await writeCommentMentions(ctx);
+    await writeCommentReplyNotices(ctx, mentioned);
+  };
+
   // [#5860] A CLOSED single-name allow list — the handler's first line already
   // refused every other object, and unlike the skip list above that knowledge
   // was always expressible. Saying it here is behaviour-conserving and takes
   // this registration out of every other object's `afterInsert` demand.
-  engine.registerHook('afterInsert', writeCommentMentions, { object: 'sys_comment', packageId });
+  engine.registerHook('afterInsert', writeCommentNotices, { object: 'sys_comment', packageId });
   // [#27703] And on `afterUpdate`, so a mention added by editing a comment is
   // judged and notified like one written with it. The registration is what
   // has the engine bind `previous` on this object's update.
@@ -3068,12 +3212,79 @@ export function installAuditWriters(
   return { resolveActorSnapshot };
 }
 
+/** [#36074] Who a comment thread names: its starter and everyone in it, starter first. */
+interface CommentThreadParticipants {
+  /** The author of the thread's top-level comment. */
+  starterId: string | null;
+  /** Each distinct author in the thread, the starter first. */
+  participants: string[];
+}
+
+/** How far up `parent_id` a reply's thread is followed — the Console writes one level. */
+const MAX_REPLY_ANCESTRY = 16;
+const THREAD_READ_CONTEXT = { isSystem: true } as const;
+
+/**
+ * [#36074] The participants of the thread `parentId` belongs to: up the
+ * `parent_id` chain to the top-level comment (bounded, cycle-safe; the
+ * Console replies to a top-level comment only, so this is one read), each
+ * comment's author on the way, then every distinct author of a reply to the
+ * top-level comment in ONE grouped read. Every read is held to the reply's
+ * own `threadId` (its record): a parent, or a sibling reply, on another
+ * record's thread is not this thread. System context: these are the
+ * candidates, and each is judged by the recipient gate after. `null` when the
+ * parent cannot be found on this thread — no thread, no notice.
+ */
+async function readThreadParticipants(engine: any, parentId: string, threadId: string): Promise<CommentThreadParticipants | null> {
+  if (!threadId) return null;
+  const ancestors: string[] = [];
+  const seen = new Set<string>();
+  let rootId: string | null = null;
+  let cursor: string | null = parentId;
+  while (cursor && !seen.has(cursor) && seen.size < MAX_REPLY_ANCESTRY) {
+    seen.add(cursor);
+    const rows: any[] = await engine.find('sys_comment', {
+      where: { id: cursor },
+      fields: ['id', 'thread_id', 'author_id', 'parent_id'],
+      limit: 1,
+      context: THREAD_READ_CONTEXT,
+    });
+    const comment = Array.isArray(rows) ? rows[0] : undefined;
+    // A parent on another record's thread is not this thread: the walk stops
+    // there, so a `parent_id` written across records draws no candidate from
+    // the other thread.
+    if (!comment || String(comment.thread_id ?? '') !== threadId) break;
+    rootId = String(comment.id);
+    if (comment.author_id != null && String(comment.author_id)) ancestors.unshift(String(comment.author_id));
+    cursor = comment.parent_id != null && String(comment.parent_id) ? String(comment.parent_id) : null;
+  }
+  if (!rootId) return null;
+  const replyAuthors: any[] = await engine.aggregate(
+    'sys_comment',
+    {
+      where: { parent_id: rootId, thread_id: threadId },
+      groupBy: ['author_id'],
+      aggregations: [{ function: 'count', field: 'id', alias: 'replies' }],
+    },
+    { context: THREAD_READ_CONTEXT },
+  );
+  const participants: string[] = [];
+  const add = (uid: unknown) => {
+    if (uid == null) return;
+    const id = String(uid);
+    if (id && !participants.includes(id)) participants.push(id);
+  };
+  for (const uid of ancestors) add(uid);
+  for (const r of replyAuthors ?? []) add(r?.author_id);
+  return { starterId: ancestors[0] ?? null, participants };
+}
+
 /**
  * The entries of a comment's `mentions` field. It is a JSON-string textarea
  * on sys_comment holding either a raw array of user ids `["u1","u2"]` or an
  * array of objects `[{ id: "u1" }, ...]`; a parse failure reads as no mention.
  */
-function parseCommentMentions(value: unknown): string[] {
+export function parseCommentMentions(value: unknown): string[] {
   let mentions: any = value;
   if (typeof mentions === 'string') {
     try { mentions = JSON.parse(mentions); } catch { mentions = null; }

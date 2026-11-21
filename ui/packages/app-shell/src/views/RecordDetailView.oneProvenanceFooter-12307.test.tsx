@@ -139,7 +139,7 @@ async function renderRecordPage(pages: any[]): Promise<HTMLElement> {
           onEdit={() => {}}
           objectNameOverride={OBJECT}
           recordIdOverride={REC}
-          embedded
+          /* objectstack#36150 — not `embedded`: an authored page draws on the full page only. */
         />
       </MetadataCtx.Provider>
     </MemoryRouter>,

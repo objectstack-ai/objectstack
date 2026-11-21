@@ -85,7 +85,10 @@ export const SysApprovalRequestDetailPage: Page = {
       name: 'main',
       width: 'full',
       components: [
-        // ── The record header: the request's title, and every action placed
+        // ── The record header: the request's title (the console names the
+        // request by the business record it is about, linked to it, wherever
+        // the approvals get serves that record's title, objectstack#35415;
+        // else by the flow's label, the object's `nameField`), and every action placed
         // on the object at `record_header` / `record_more`, read live, as the
         // synthesized header drew them. The object places none of its own, so
         // only an action another package places there shows (a bare header
