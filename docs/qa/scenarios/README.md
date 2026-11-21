@@ -395,7 +395,8 @@ A `fallback_labelled` dataset question names the figure kind it asks (`count`, `
 and need not.
 
 **What the open dataset cards ask, per kind** (turns of one round, each asked once;
-`packages/qa/scenarios/test/dataset-cards.test.ts` holds this table equal to the cards):
+`packages/qa/scenarios/test/dataset-cards.test.ts` holds the cards to these figures, so a card edit
+that moves one changes the test and this table together):
 
 | Kind | `order_to_cash` | `travel_expense` | Total |
 |:---|---:|---:|---:|

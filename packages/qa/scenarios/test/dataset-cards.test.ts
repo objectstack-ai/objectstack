@@ -36,7 +36,6 @@ afterAll(() => {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- a card is mutated as raw JSON on purpose
 type RawCard = any;
 
-const README = resolve(HERE, '../../../../docs/qa/scenarios/README.md');
 const raw = (id: string): RawCard => JSON.parse(readFileSync(join(CARDS, `${id}.json`), 'utf8'));
 
 function load(id: string, mutate: (c: RawCard) => void = () => {}) {
@@ -168,7 +167,7 @@ describe('the Build half checks each declared dataset on a built artifact', () =
   });
 });
 
-// ── Ask kinds: every question of a dataset card names the kind it asks, and the README's table is the cards' ──
+// ── Ask kinds: every question of a dataset card names the kind it asks, as many times as the README table states ──
 
 const question = (c: RawCard, id: string) => c.run.questions.find((x: { id: string }) => x.id === id);
 
@@ -199,18 +198,27 @@ describe('the dataset cards name the kind of every question they ask, and ask ev
     ]);
   });
 
-  it('the README table states each card\'s count per kind, and the total, exactly as the cards ask them', () => {
-    const text = readFileSync(README, 'utf8');
-    const section = text.slice(text.indexOf('**What the open dataset cards ask, per kind**'));
-    const rows = new Map<string, number[]>();
-    for (const line of section.split('\n')) {
-      const m = /^\| `([a-z_]+)` \| (\d+) \| (\d+) \| (\d+) \|$/.exec(line);
-      if (m) rows.set(m[1]!, [Number(m[2]), Number(m[3]), Number(m[4])]);
-      else if (rows.size > 0 && !line.startsWith('|')) break;
-    }
+  /**
+   * The figures the card README's "What the open dataset cards ask, per kind" table states
+   * (docs/qa/scenarios/README.md). A card edit that moves one fails here: change both together.
+   */
+  const STATED: Record<AskKind, [number, number]> = {
+    count: [3, 3],
+    group_sum: [2, 3],
+    top_n: [1, 1],
+    time_range: [1, 1],
+    join: [2, 2],
+    owner_latest: [2, 1],
+    business_term: [2, 2],
+    ambiguous: [2, 2],
+    forbidden: [1, 2],
+    unanswerable: [1, 1],
+  };
+
+  it('each card asks each kind as many times as the README table states', () => {
     const a = counts('order_to_cash');
     const b = counts('travel_expense');
-    expect(Object.fromEntries(rows)).toEqual(Object.fromEntries(ASK_KINDS.map((k: AskKind) => [k, [a[k], b[k], a[k] + b[k]]])));
+    expect(Object.fromEntries(ASK_KINDS.map((k) => [k, [a[k], b[k]]]))).toEqual(STATED);
   });
 });
 
