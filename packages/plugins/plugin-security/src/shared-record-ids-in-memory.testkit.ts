@@ -20,6 +20,11 @@
  * a row would have matched. A leaf anywhere but an `$in` comparand is one the
  * engine refuses, and throws here.
  *
+ * Call it where the scoped `where` is handed to the double, never inside the
+ * double's own `find`: `check:objectql-double-limit` lifts a `find` double out
+ * of its file to drive it, and an imported call in its body cannot be driven,
+ * so the double reads UNJUDGED and the baseline never grows.
+ *
  * `.testkit.ts`, not `.test.ts`: it holds no assertions and is not collected
  * as a suite, and it is imported only by tests.
  */

@@ -153,16 +153,13 @@ function makeEngine(schema: Record<string, unknown>, storeFaults: ReadonlyMap<st
   };
   const middlewares: any[] = [];
   return {
+    _tables: tables,
     _middlewares: middlewares,
     registerMiddleware: (mw: any) => middlewares.push(mw),
     getSchema: (name: string) => (name === OBJECT ? schema : undefined),
     async find(object: string, options: any = {}) {
       const rows = (tables[object] ??= []);
-      // [ADR-0155 plan step 6] The share-grant leaf, resolved once for the
-      // statement as the driver's semi-join is: with the share store down, the
-      // statement fails on that fault, whichever arm the row would match.
-      const where = resolveFixedReadLeavesInMemory(options.filter ?? options.where, (table) => tables[table]);
-      const hits = rows.filter((r) => matches(r, where));
+      const hits = rows.filter((r) => matches(r, options.filter ?? options.where));
       return typeof options.limit === 'number' ? hits.slice(0, options.limit) : hits;
     },
     async findOne(object: string, options: any = {}) {
@@ -253,7 +250,16 @@ async function makeStack(
             reached = true;
             // A write stops at the engine's door: reaching it is the admission
             // under test, and no write verb is exercised on this double.
-            if (operation === 'read') rows = await engine.find(OBJECT, { where: opCtx.ast.where });
+            // [ADR-0155 plan step 6] The share-grant leaf in the scoped `where`
+            // is resolved here, once for the statement, as a driver's
+            // semi-join is (`shared-record-ids-in-memory.testkit.ts`): this
+            // double is no driver. With the share store down, the statement
+            // fails on that fault, whichever arm the row would match.
+            if (operation === 'read') {
+              rows = await engine.find(OBJECT, {
+                where: resolveFixedReadLeavesInMemory(opCtx.ast.where, (table) => engine._tables[table]),
+              });
+            }
             // [#20013] …except the one step the engine takes at that door
             // before its statement: it runs the installed stored-row seam
             // (`postHookWriteImageCheck`) on the row it writes, the prior row
