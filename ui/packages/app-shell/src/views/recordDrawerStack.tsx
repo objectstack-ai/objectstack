@@ -59,7 +59,6 @@ import { ChevronRight } from 'lucide-react';
 import { getIcon } from '../utils/getIcon.js';
 import {
   NavigationOverlay,
-  cn,
   type NavigationOverlayMode,
   type RecordTopBarStepper,
   RecordHeaderBarContext,
