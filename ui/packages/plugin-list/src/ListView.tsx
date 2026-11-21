@@ -5757,7 +5757,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    * The two narrowings now sit downstream of it, one per builder.
    */
   const candidateFields = React.useMemo(() => {
-    let fields: Array<{ value: string; label: string; type: string; options?: any; referenceTo?: string; displayField?: string }>;
+    let fields: Array<{ value: string; label: string; type: string; multiple?: boolean; options?: any; referenceTo?: string; displayField?: string }>;
 
     // Translate select-field option labels through the i18n resolver.
     // fieldDef.options may be an array of { value, label } or a keyed object;
@@ -5804,6 +5804,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             value: key,
             label: tFieldLabel(key, field.label || key),
             type: field.type || 'text',
+            // With the type, whether the field's value is a list: the filter
+            // offers a multi-value field only the operators the server takes.
+            multiple: field.multiple === true,
             options: buildOptions(key, field.options),
             // ⚠️ objectui#6837 half 2: the READ narrows to `reference` (the only
             // spelling the protocol declares — `FieldSchema` refuses `reference_to`
