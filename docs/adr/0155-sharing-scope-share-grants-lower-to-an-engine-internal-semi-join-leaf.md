@@ -529,6 +529,18 @@ The rest of the census is ②, ruled row by row in [Q2](#q2--an-evaluator-that-c
 `driver-odata`, a driver this repository does not ship, an object on another datasource, the analytics read-scope
 compilers, the explainer's record pass, and the host class D4 recognises.
 
+> **Note (2026-11-21, #33787) — the switch landed before plan step 4, so `driver-memory` takes R2 until a driver
+> declares the leaf.** Plan step 4 (#35873, `driver-memory`'s in-process evaluation) is on hold. Ruling
+> [`7045701086`](https://github.com/objectstack-ai/objectstack/issues/33787#issuecomment-7045701086) made it no
+> prerequisite of plan step 6, and seat 7's call in claim amendment
+> [`7060526112`](https://github.com/objectstack-ai/objectstack/issues/33787#issuecomment-7060526112) confirmed what
+> `driver-memory` answers meanwhile. It declares no `fixedReadLeaves`, so from the switch on it answers as ②'s R2 row
+> does: its share grants go inert, stop counting and fail closed (neither scope carries the share arm, and the edit
+> gate reads no grant), and the grant door and the sharing-rule save door refuse with `SHARING_NOT_ENABLED` / 422.
+> The `driver-memory` row above, Q2's closing sentence and plan step 6's "lands last" record the order the plan
+> expected. They stand as written, and this note records the order that happened. Once plan step 4 lands and the
+> driver declares the leaf, share grants on `driver-memory` count again, with no change to plugin-sharing.
+
 ### D6 — What the switch must show
 
 The plugin-sharing switch is where #33787 ends. Its card carries the pins the defect card and the seat set (#33787's

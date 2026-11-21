@@ -1519,6 +1519,8 @@ describe('[ADR-0111 D5] sys_record_share read self-scope (middleware)', () => {
     expect(ctx.ast.where).toEqual({
       $or: [{ recipient_id: 'mallory' }, { granted_by: 'mallory' }],
     });
+    // [ADR-0155 plan step 6] `where` only, as on the general read path.
+    expect(ctx.ast.filter).toBeUndefined();
   });
 
   it('manage_sharing (and the legacy manage_platform_settings) keeps the tenant-wide list', async () => {
@@ -1535,6 +1537,7 @@ describe('[ADR-0111 D5] sys_record_share read self-scope (middleware)', () => {
     const ctx = findCtx({});
     await mw(ctx, async () => {});
     expect(ctx.ast.where).toEqual({ id: '__deny_all__' });
+    expect(ctx.ast.filter).toBeUndefined();
   });
 
   it('system context is untouched', async () => {

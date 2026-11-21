@@ -1512,8 +1512,10 @@ export function buildSharingMiddleware(
           // platform-authored as any sharing filter.
           markFilterSubtreeProvenance(selfScope, 'policy');
           vouchCallerWhereBeforeRewrite(ast, ctx.options);
+          // [ADR-0155 plan step 6] `where` only, as in the general read merge
+          // below: the AST's `filter` key is not walked by the executor seam
+          // and no driver reads it, so the scope is no longer mirrored there.
           ast.where = composeAnd(ast.where, selfScope);
-          ast.filter = composeAnd(ast.filter, selfScope);
           ctx.ast = ast;
         }
         return next();

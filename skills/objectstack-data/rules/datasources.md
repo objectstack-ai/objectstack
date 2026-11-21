@@ -5,8 +5,9 @@ connection to a data store. Objects route to one via their `datasource` field.
 `default` is host-reserved (connected from `OS_DATABASE_URL`; declaring one
 named `default` is refused). Declare one under its own name only for a
 **separate** or **external** store. Share grants count only on
-`sys_record_share`'s datasource under a SQL driver; elsewhere a grant or
-sharing rule is refused `SHARING_NOT_ENABLED` (422).
+`sys_record_share`'s datasource under a SQL driver; elsewhere a grant or rule
+save is refused `SHARING_NOT_ENABLED` (422), and a `sharingRules` reconcile
+aborts on it.
 
 ## `schemaMode` — who owns the schema
 
@@ -14,7 +15,7 @@ sharing rule is refused `SHARING_NOT_ENABLED` (422).
 |:--|:--|
 | `managed` (default) | ObjectStack owns the schema; DDL + migrations allowed. |
 | `external` | A mature external DB ObjectStack does **not** own; DDL forbidden; boot mismatch **fails**. |
-| `validate-only` | Like `external`, but a mismatch **warns** instead of failing boot. |
+| `validate-only` | Like `external`, but a mismatch **warns**. |
 
 ## Federated (external) objects
 
@@ -27,7 +28,7 @@ ObjectSchema.create({
   sharingModel: 'public_read',
   external: {
     remoteName: 'customers',        // remote TABLE
-    // remoteSchema: 'public',      // optional schema/namespace (pg/mysql)
+    // remoteSchema: 'public',      // schema/namespace (pg/mysql)
     // columnMap: { cust_region: 'region' }, // remoteColumn → localField
   },
   fields: { id: { type: 'text' }, name: { type: 'text' }, region: { type: 'text' } },

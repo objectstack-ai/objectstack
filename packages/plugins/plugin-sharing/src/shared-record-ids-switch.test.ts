@@ -94,6 +94,8 @@ for (const cell of CELLS) {
     let knex: any;
     /** The queue and approval arms are wired while this is on. */
     let arms = true;
+    /** What the `security` service hands a composed `ReadableIds` scope for DEAL: the leaf, or today's list. */
+    let parentScope: 'leaf' | 'list' = 'leaf';
     let grantsSeeded = 0;
     let marker = 0;
 
@@ -122,11 +124,11 @@ for (const cell of CELLS) {
       expect(Number(stored), 'the grants the caller holds on the object').toBe(n);
     }
 
-    /** The retired statement's scope: the grant rows under `limit: 5000`, merged with the approval ids. */
-    async function todaysScope(verb: 'read' | 'update'): Promise<Record<string, unknown>> {
+    /** The retired statement's scope for `user`: the grant rows under `limit: 5000`, merged with the approval ids. */
+    async function todaysScope(verb: 'read' | 'update', user: string = ME): Promise<Record<string, unknown>> {
       const grants = await ql.find('sys_record_share', {
         where: {
-          object_name: DEAL, recipient_type: 'user', recipient_id: ME,
+          object_name: DEAL, recipient_type: 'user', recipient_id: user,
           ...(verb === 'update' ? { access_level: { $in: [...WRITE_ACCESS_LEVELS] } } : {}),
         },
         fields: ['record_id'],
@@ -136,8 +138,8 @@ for (const cell of CELLS) {
         (grants as Array<{ record_id: unknown }>)
           .map((g) => g.record_id).filter((v) => v != null).map(String).filter((v) => v !== ''),
       );
-      if (verb === 'read' && arms) listed.add(APPROVAL);
-      const disjuncts: unknown[] = [{ owner_id: ME }];
+      if (verb === 'read' && arms && user === ME) listed.add(APPROVAL);
+      const disjuncts: unknown[] = [{ owner_id: user }];
       if (arms) disjuncts.push({ owner_id: null, queue: QUEUE });
       if (listed.size > 0) disjuncts.push({ id: { $in: [...listed] } });
       return disjuncts.length === 1 ? (disjuncts[0] as Record<string, unknown>) : { $or: disjuncts };
@@ -159,9 +161,9 @@ for (const cell of CELLS) {
       await ql.update(DEAL, { name }, { where: { name: { $ne: '__never__' } }, multi: true, context } as never);
       return ids(await ql.find(DEAL, { where: { name }, fields: ['id'] }, { context: SYSTEM } as never));
     }
-    async function listUpdate(): Promise<string[]> {
+    async function listUpdate(scope?: Record<string, unknown>): Promise<string[]> {
       const name = `touched_${++marker}`;
-      const where = { $and: [{ name: { $ne: '__never__' } }, await todaysScope('update')] };
+      const where = { $and: [{ name: { $ne: '__never__' } }, scope ?? await todaysScope('update')] };
       await ql.update(DEAL, { name }, { where, multi: true, context: SYSTEM } as never);
       return ids(await ql.find(DEAL, { where: { name }, fields: ['id'] }, { context: SYSTEM } as never));
     }
@@ -184,7 +186,9 @@ for (const cell of CELLS) {
       // here, one whose read filter for an object is the sharing scope.
       const services = new Map<string, unknown>([['security', {
         canReadObject: async () => true,
-        getReadFilter: (object: string, context: unknown) => service.buildReadFilter(object, context as never),
+        getReadFilter: (object: string, context: unknown) => (parentScope === 'list' && object === DEAL
+          ? todaysScope('read')
+          : service.buildReadFilter(object, context as never)),
         explain: async () => ({ allowed: true }),
       }]]);
       await (new ObjectQLPlugin({ ql, registerProtocol: false } as never) as any).init({
@@ -253,6 +257,39 @@ for (const cell of CELLS) {
       expect(viaLeaf).toEqual(await listUpdate());
       expect(viaLeaf).not.toContain(APPROVAL);
       expect(viaLeaf).not.toContain(shrId(5000));
+    });
+
+    it('5,000 grants, nested: the leaf inside a composed ReadableIds scope admits the rows today\'s list does', async () => {
+      arms = true;
+      const where = { deal_id: { $in: ReadableIds.of(DEAL) } };
+      const lineIds = async () => ids(await ql.find(LINE, { where, fields: ['id'] }, { context: asMe() } as never));
+      const lineCount = () => ql.count(LINE, { where }, { context: asMe() } as never);
+      const viaLeaf = await lineIds();
+      const countViaLeaf = await lineCount();
+      parentScope = 'list';
+      const listed = await Promise.resolve()
+        .then(async () => ({ ids: await lineIds(), count: await lineCount() }))
+        .finally(() => { parentScope = 'leaf'; });
+      const viaList = listed.ids;
+      const countViaList = listed.count;
+      // Owned, the 5,000 granted, the queued and the approval row: one line each.
+      expect(viaLeaf).toHaveLength(OWNED + 5000 + 2);
+      expect(viaLeaf).toEqual(viaList);
+      expect(countViaLeaf).toBe(countViaList);
+    });
+
+    it('5,000 grants, delegated: the two leaves, AND-ed, admit and update the rows today\'s two lists do', async () => {
+      arms = false;
+      const listScope = async (verb: 'read' | 'update') => ({ $and: [await todaysScope(verb, AGENT), await todaysScope(verb, ME)] });
+      const viaLeaf = await leafIds(asAgentForMe());
+      const viaList = ids(await ql.find(DEAL, { where: await listScope('read'), fields: ['id'] }, { context: SYSTEM } as never));
+      // The agent's 100 grants on shr_*, all within the delegator's 5,000, and its 50 on rows the delegator owns.
+      expect(viaLeaf).toHaveLength(150);
+      expect(viaLeaf).toEqual(viaList);
+      expect(await leafCount(asAgentForMe())).toBe(await ql.count(DEAL, { where: await listScope('read') }, { context: SYSTEM } as never));
+      const touched = await leafUpdate(asAgentForMe());
+      expect(touched).toHaveLength(50);
+      expect(touched).toEqual(await listUpdate(await listScope('update')));
     });
 
     it('5,001 grants: the leaf counts the 5,001st, where today\'s list stops at 5,000', async () => {
