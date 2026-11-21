@@ -4,9 +4,9 @@
  * [#35655] A seed never stores a roll-up (summary) value (maintainer ruling D,
  * record 7063117450). The seed loader takes a seed record's value for every
  * `type: 'summary'` field out of the record before the replay compare and the
- * write; the roll-up is computed from the child rows; the load result counts
- * the dropped values in `summariesDropped`, and one `warn` per dataset names
- * the object, the fields and the count.
+ * write; the roll-up is computed from the child rows; and one `warn` per
+ * dataset names the object, the fields and the count. That notice is the
+ * report (the seat's correction 7064615114): no load-result key carries it.
  *
  * Measured on unfixed `main` 493ad095d4 with this file's harness (the real
  * ObjectQL engine and the real SeedLoaderService), parent `ss_inv` seeded with
@@ -18,7 +18,7 @@
  *   6  the same seed loaded twice               load 1: 42 / 2, load 2: 999 / 99
  *
  * Every case below asserts the parent equal to its roll-up after every load,
- * and the drop counted. One rule for every aggregate: a `sum`, a `count` and a
+ * and the drop reported by the notice. One rule for every aggregate: a `sum`, a `count` and a
  * `max` (no empty-set value, so it stays empty) are seeded side by side, and a
  * roll-up an extension contributes is dropped like the base object's own.
  */
@@ -162,6 +162,9 @@ describe('[#35655] a seed never stores a roll-up value: the children decide it, 
   const inv = (name: string) => [...storeFor('ss_inv').values()].find((r: any) => r.name === name);
   const resultOf = (r: any, object: string) => r.results.find((x: any) => x.object === object);
   const dropWarns = () => warns.filter((w) => w.message.includes('roll-up summary'));
+  /** The notice's meta, per dataset that dropped anything. */
+  const dropMetas = () => dropWarns().map((w) => w.meta);
+  const ALL = { object: 'ss_inv', fields: ['line_total', 'line_count', 'line_max'], droppedValues: 3 };
 
   it('case 3: a parent seeded with totals and no children stores the empty-set values, and the load reports the drop', async () => {
     const r = await load([P([{ name: 'A', ...SUPPLIED }])]);
@@ -170,39 +173,44 @@ describe('[#35655] a seed never stores a roll-up value: the children decide it, 
     // sum and count start at 0; max has no empty-set value and stays empty.
     expect(inv('A')).toMatchObject({ line_total: 0, line_count: 0 });
     expect(inv('A')?.line_max ?? null).toBeNull();
-    expect(resultOf(r, 'ss_inv')).toMatchObject({ inserted: 1, errored: 0, summariesDropped: 3 });
-    expect(r.summary.totalSummariesDropped).toBe(3);
+    expect(resultOf(r, 'ss_inv')).toMatchObject({ inserted: 1, errored: 0 });
     // One line for the dataset, naming the object, every field and the count.
-    expect(dropWarns()).toHaveLength(1);
-    expect(dropWarns()[0].meta).toEqual({ object: 'ss_inv', fields: ['line_total', 'line_count', 'line_max'], summariesDropped: 3 });
+    expect(dropMetas()).toEqual([ALL]);
+    expect(dropWarns()[0].message).toContain('The ss_inv seed supplies 3 value(s)');
     expect(dropWarns()[0].message).toContain('`line_total`, `line_count`, `line_max`');
+    // The notice is the whole report: the load result carries no key for it.
+    expect(Object.keys(resultOf(r, 'ss_inv'))).not.toContain('summariesDropped');
   });
 
   it('case 1 (control): parent and children in one load store the roll-up, and the drop is still reported', async () => {
     const r = await load([P([{ name: 'A', ...SUPPLIED }]), C(LINES)]);
 
     expect(inv('A')).toMatchObject({ line_total: 42, line_count: 2, line_max: 32 });
-    expect(resultOf(r, 'ss_inv').summariesDropped).toBe(3);
-    expect(resultOf(r, 'ss_line').summariesDropped).toBe(0);
+    // The parent's dataset gives the notice; the children's, which supply no roll-up, gives none.
+    expect(dropMetas()).toEqual([ALL]);
+    expect(resultOf(r, 'ss_line')).toMatchObject({ inserted: 2 });
   });
 
   it('case 4: a re-seed over existing children keeps the computed values, and a roll-up-only difference is no write', async () => {
     await load([P([{ name: 'A' }]), C(LINES)]);
     expect(inv('A')).toMatchObject({ line_total: 42, line_count: 2, line_max: 32 });
 
+    warns = [];
     const r = await load([P([{ name: 'A', ...SUPPLIED }])]);
 
     expect(inv('A')).toMatchObject({ line_total: 42, line_count: 2, line_max: 32 });
-    expect(resultOf(r, 'ss_inv')).toMatchObject({ updated: 0, skipped: 1, summariesDropped: 3 });
+    expect(resultOf(r, 'ss_inv')).toMatchObject({ updated: 0, skipped: 1 });
+    expect(dropMetas()).toEqual([ALL]);
   });
 
   it('case 4 under `update` mode: the matched row keeps its computed values', async () => {
     await load([P([{ name: 'A' }]), C(LINES)]);
 
-    const r = await load([P([{ name: 'A', ...SUPPLIED }], 'update')]);
+    warns = [];
+    await load([P([{ name: 'A', ...SUPPLIED }], 'update')]);
 
     expect(inv('A')).toMatchObject({ line_total: 42, line_count: 2, line_max: 32 });
-    expect(resultOf(r, 'ss_inv').summariesDropped).toBe(3);
+    expect(dropMetas()).toEqual([ALL]);
   });
 
   it('case 6: the same seed replayed stores the same totals on both loads', async () => {
@@ -211,9 +219,12 @@ describe('[#35655] a seed never stores a roll-up value: the children decide it, 
     await load(seeds);
     expect(inv('A')).toMatchObject({ line_total: 42, line_count: 2, line_max: 32 });
 
+    warns = [];
     const r = await load(seeds);
     expect(inv('A')).toMatchObject({ line_total: 42, line_count: 2, line_max: 32 });
-    expect(resultOf(r, 'ss_inv')).toMatchObject({ updated: 0, skipped: 1, summariesDropped: 3 });
+    expect(resultOf(r, 'ss_inv')).toMatchObject({ updated: 0, skipped: 1 });
+    // Every replay says it again: the seed still supplies the totals.
+    expect(dropMetas()).toEqual([ALL]);
   });
 
   it('a roll-up an extension contributes is dropped like the object\'s own', async () => {
@@ -222,17 +233,16 @@ describe('[#35655] a seed never stores a roll-up value: the children decide it, 
       fields: { ext_total: { type: 'summary', summaryOperations: { object: 'ss_line', field: 'amount', function: 'sum' } } },
     } as any, 'ext-package', undefined, 'extend');
 
-    const r = await load([P([{ name: 'A', ext_total: 7 }])]);
+    await load([P([{ name: 'A', ext_total: 7 }])]);
 
     expect(inv('A')).toMatchObject({ ext_total: 0 });
-    expect(resultOf(r, 'ss_inv').summariesDropped).toBe(1);
-    expect(dropWarns()[0].meta?.fields).toEqual(['ext_total']);
+    expect(dropMetas()).toEqual([{ object: 'ss_inv', fields: ['ext_total'], droppedValues: 1 }]);
   });
 
   it('a seed that supplies no roll-up value reports nothing', async () => {
     const r = await load([P([{ name: 'A' }]), C(LINES)]);
 
-    expect(r.summary.totalSummariesDropped).toBe(0);
+    expect(r.success).toBe(true);
     expect(dropWarns()).toEqual([]);
   });
 });

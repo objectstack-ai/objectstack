@@ -311,11 +311,14 @@ describe('the counter survives the contract, and the contract survives older pay
 
 /**
  * [#35655] The other half of a seed and a roll-up: a seed never stores a
- * value it supplies for a `summary` field (maintainer ruling D, record
- * 7063117450). The loader takes it out of the record before the write, counts
- * it in `summariesDropped`, and the engine computes the column from the child
- * rows. These pins read the engine's CALLS, so they hold whatever the engine
- * would do with the key; the stored outcome on the real engine is pinned in
+ * value it supplies for a `summary` field (maintainer ruling D, as analysed in
+ * 7062334196; the seat's correction 7064615114). The loader takes it out of
+ * the record before the write, and the engine computes the column from the
+ * child rows. The drop is reported by one `warn` per dataset naming the
+ * object, the fields and the count: that notice is the report, and no
+ * load-result key carries it. These pins read the engine's CALLS and the
+ * notice, so they hold whatever the engine would do with the key; the stored
+ * outcome on the real engine is pinned in
  * `packages/objectql/src/seed-summary-never-stored.test.ts`.
  */
 describe('a seed never hands the engine a roll-up value (#35655)', () => {
@@ -346,8 +349,11 @@ describe('a seed never hands the engine a roll-up value (#35655)', () => {
     (engine[verb] as any).mock.calls
       .filter(([object]: [string]) => object === 'drop_invoice')
       .flatMap(([, data]: [string, any]) => (Array.isArray(data) ? data : [data]).map((row: any) => Object.keys(row)));
+  /** The roll-up drop notices the load logged: `[message, meta]` per `warn`. */
+  const dropNotices = (logger: ReturnType<typeof createLogger>) =>
+    (logger.warn as any).mock.calls.filter(([m]: [string]) => m.includes('roll-up summary'));
 
-  it('on insert: neither roll-up reaches the engine, the rest of the row does, and the drop is counted and named once', async () => {
+  it('on insert: neither roll-up reaches the engine, the rest of the row does, and one notice names the object, fields and count', async () => {
     const { engine, store } = createFaithfulEngine();
     const logger = createLogger();
 
@@ -365,20 +371,25 @@ describe('a seed never hands the engine a roll-up value (#35655)', () => {
       expect(keys).not.toContain('payments');
     }
     expect(store.drop_invoice.map((r) => r.total)).toEqual([10, 20, 30]);
-    // A supplied `null` is a supplied value too: three values, two fields.
-    expect(result.results[0]).toMatchObject({ inserted: 3, errored: 0, summariesDropped: 3 });
-    expect(result.summary.totalSummariesDropped).toBe(3);
+    // The rest of each record landed: nothing about the drop is an error.
+    expect(result.results[0]).toMatchObject({ inserted: 3, errored: 0 });
     expect(result.success).toBe(true);
-    const drops = (logger.warn as any).mock.calls.filter(([m]: [string]) => m.includes('roll-up summary'));
+    // A supplied `null` is a supplied value too: three values, two fields, ONE notice.
+    const drops = dropNotices(logger);
     expect(drops).toHaveLength(1);
-    expect(drops[0][1]).toEqual({ object: 'drop_invoice', fields: ['paid', 'payments'], summariesDropped: 3 });
+    expect(drops[0][1]).toEqual({ object: 'drop_invoice', fields: ['paid', 'payments'], droppedValues: 3 });
+    expect(drops[0][0]).toContain('drop_invoice');
+    expect(drops[0][0]).toContain('`paid`, `payments`');
+    // The notice is the whole report: the load result carries no key for it.
+    expect(Object.keys(result.results[0])).not.toContain('summariesDropped');
   });
 
-  it('on a matched row (upsert): the update carries no roll-up, and a roll-up-only difference writes nothing', async () => {
+  it('on a matched row (upsert): the update carries no roll-up, a roll-up-only difference writes nothing, and the notice still speaks', async () => {
     const { engine, store } = createFaithfulEngine();
+    const logger = createLogger();
     store.drop_invoice = [{ id: 'inv-1', name: 'INV-1', total: 10, paid: 42, payments: 2 }];
 
-    const result = await new SeedLoaderService(engine, rollUpMetadata(), createLogger()).load({
+    const result = await new SeedLoaderService(engine, rollUpMetadata(), logger).load({
       seeds: [{ ...seedFor('drop_invoice', [
         { name: 'INV-1', total: 10, paid: 999, payments: 99 },
       ]), mode: 'upsert' }] as any,
@@ -387,7 +398,10 @@ describe('a seed never hands the engine a roll-up value (#35655)', () => {
 
     expect(writtenKeys(engine, 'update')).toEqual([]);
     expect(store.drop_invoice[0]).toMatchObject({ paid: 42, payments: 2 });
-    expect(result.results[0]).toMatchObject({ updated: 0, skipped: 1, summariesDropped: 2 });
+    expect(result.results[0]).toMatchObject({ updated: 0, skipped: 1 });
+    expect(dropNotices(logger).map(([, meta]: [string, any]) => meta)).toEqual([
+      { object: 'drop_invoice', fields: ['paid', 'payments'], droppedValues: 2 },
+    ]);
   });
 
   it('on a matched row whose other columns changed: the update writes them and still no roll-up', async () => {
@@ -407,41 +421,34 @@ describe('a seed never hands the engine a roll-up value (#35655)', () => {
     expect(keys[0]).not.toContain('paid');
     expect(keys[0]).not.toContain('payments');
     expect(store.drop_invoice[0]).toMatchObject({ total: 11, paid: 42, payments: 2 });
-    expect(result.results[0]).toMatchObject({ updated: 1, summariesDropped: 2 });
+    expect(result.results[0]).toMatchObject({ updated: 1 });
   });
 
-  it('a dry run (validate) counts the same drop and writes nothing', async () => {
+  it('a dry run (validate) gives the same notice and writes nothing', async () => {
     const { engine } = createFaithfulEngine();
+    const logger = createLogger();
 
-    const result = await new SeedLoaderService(engine, rollUpMetadata(), createLogger()).validate(
+    await new SeedLoaderService(engine, rollUpMetadata(), logger).validate(
       [seedFor('drop_invoice', [{ name: 'INV-1', total: 10, paid: 3000 }])] as any,
     );
 
     expect(writtenKeys(engine, 'insert')).toEqual([]);
-    expect(result.results[0].summariesDropped).toBe(1);
+    expect(dropNotices(logger).map(([, meta]: [string, any]) => meta)).toEqual([
+      { object: 'drop_invoice', fields: ['paid'], droppedValues: 1 },
+    ]);
   });
 
-  it('CONTROL: a field the definition does not type `summary` is written as authored, and nothing is reported', async () => {
+  it('CONTROL: a field the definition does not type `summary` is written as authored, and no notice is logged', async () => {
     const { engine } = createFaithfulEngine();
     const logger = createLogger();
     const plain = { drop_invoice: { name: 'drop_invoice', fields: { name: { type: 'text' }, total: { type: 'number' }, paid: { type: 'currency' } } } };
 
-    const result = await new SeedLoaderService(engine, rollUpMetadata(plain), logger).load({
+    await new SeedLoaderService(engine, rollUpMetadata(plain), logger).load({
       seeds: [seedFor('drop_invoice', [{ name: 'INV-1', total: 10, paid: 3000 }])] as any,
       config: CONFIG,
     });
 
     expect(writtenKeys(engine, 'insert')[0]).toContain('paid');
-    expect(result.results[0].summariesDropped).toBe(0);
-    expect((logger.warn as any).mock.calls.filter(([m]: [string]) => m.includes('roll-up summary'))).toEqual([]);
-  });
-
-  it('defaults to 0 for a payload written before the field existed', () => {
-    const legacyPerObject = {
-      object: 'drop_invoice', mode: 'ignore',
-      inserted: 1, updated: 0, skipped: 0, errored: 0, total: 1,
-      referencesResolved: 0, referencesDeferred: 0, errors: [],
-    };
-    expect(SeedLoadResultSchema.parse(legacyPerObject).summariesDropped).toBe(0);
+    expect(dropNotices(logger)).toEqual([]);
   });
 });

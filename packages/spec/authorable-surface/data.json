@@ -984,7 +984,6 @@
     "data/SeedLoadResult:referencesDropped",
     "data/SeedLoadResult:referencesResolved",
     "data/SeedLoadResult:skipped",
-    "data/SeedLoadResult:summariesDropped",
     "data/SeedLoadResult:summariesStale",
     "data/SeedLoadResult:total",
     "data/SeedLoadResult:updated",

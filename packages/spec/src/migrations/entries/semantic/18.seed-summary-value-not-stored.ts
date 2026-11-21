@@ -29,13 +29,13 @@ export const entry: SemanticMigration = {
     + 'refused for it. The loader now takes every such value out of the record before the replay compare and the '
     + 'write, on insert and on update: a created row starts the column at its empty-child-list value (0 for `count` '
     + 'and `sum`, empty for `min`, `max` and `avg`) and the seeded child rows compute it; a matched row keeps the '
-    + 'value it holds. The load result counts the values it did not write in `summariesDropped` per dataset and '
-    + '`summary.totalSummariesDropped`, and the load logs one warning per dataset naming the object and the fields. '
+    + 'value it holds. The load logs one warning per dataset naming the object, the fields and how many values it '
+    + 'did not write. '
     + 'There is no mechanical rewrite: only the author knows whether the total stands for child rows that should be '
     + 'seeded or for a figure that is not a roll-up at all. Rows an earlier load stored a supplied total on are data, '
     + 'not metadata: the next child write recomputes them',
   acceptanceCriteria:
-    'No seed record supplies a value for a `summary` field: every seed load result reports `summariesDropped: 0` '
-    + 'for each dataset and the boot log carries no roll-up drop warning, and every seeded roll-up equals the '
-    + 'aggregate of its seeded child rows after the first boot and after a restart.',
+    'No seed record supplies a value for a `summary` field: the boot log and a seed validation carry no roll-up '
+    + 'drop warning for any dataset, and every seeded roll-up equals the aggregate of its seeded child rows after the '
+    + 'first boot and after a restart.',
 };

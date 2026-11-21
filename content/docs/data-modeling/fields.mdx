@@ -415,11 +415,9 @@ seed record supplies for a summary field is not written, on create or on
 update, and the rest of the record is. The summary is computed from the seeded
 child records, so a parent seeded with a total and no children shows the
 empty-set value (`0` for `count` and `sum`, empty for `min`, `max` and `avg`),
-and re-seeding a parent leaves its computed value in place. The load result
-counts the values it did not write in `summariesDropped` (per dataset) and
-`summary.totalSummariesDropped`, and the load logs one warning per dataset that
-names the object and the fields. To show a total, seed the child records it
-sums. Server code that runs with `isSystem: true` can still write the column,
+and re-seeding a parent leaves its computed value in place. The load logs one
+warning per dataset that names the object, the fields and how many values it
+did not write. To show a total, seed the child records it sums. Server code that runs with `isSystem: true` can still write the column,
 as it can any read-only column: a historical import (`treatAsHistorical: true`,
 which only the system principal may send) keeps a pre-computed total, on create
 and on update. Undoing an ordinary

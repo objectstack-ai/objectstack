@@ -782,7 +782,7 @@ function createOnlySeedColumns(dataset: Seed, externalId: string | string[]): Re
  * not it is declared `readonly`. A seed never stores a value for one (maintainer
  * ruling D, record 7063117450): the engine computes it from the child rows, so
  * {@link SeedLoaderService} takes a seed record's value for it out before the
- * replay compare and before the write, and reports it in `summariesDropped`.
+ * replay compare and before the write, and says so in one `warn` per dataset.
  *
  * Keyed on `type === 'summary'` literally, as the engine's roll-up readers
  * are (`summaryFieldsLockedOnWrite`, `getSummaryDescriptors`). A definition
@@ -1801,7 +1801,6 @@ export class SeedLoaderService implements ISeedLoaderService {
         referencesDeferred: 0,
         referencesDropped: 0,
         summariesStale: 0,
-        summariesDropped: 0,
         landedIds: [],
         insertedIds: [],
         errors: [error],
@@ -2129,7 +2128,7 @@ export class SeedLoaderService implements ISeedLoaderService {
     // the values this dataset's records supplied for them, and which of them
     // did — reported once, after the record loop.
     const summaryFields = summaryFieldNames(objectDefinition);
-    let summariesDropped = 0;
+    let summaryValuesDropped = 0;
     const summaryFieldsDropped = new Set<string>();
     // How a replay compares each field (`isNoOpReplay`): [#24562] a temporal
     // field in its stored form, [#24624] a field the read path masks never by
@@ -2275,7 +2274,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       for (const field of summaryFields) {
         if (!Object.prototype.hasOwnProperty.call(record, field)) continue;
         if (record[field] !== undefined) {
-          summariesDropped++;
+          summaryValuesDropped++;
           summaryFieldsDropped.add(field);
         }
         delete record[field];
@@ -3231,20 +3230,20 @@ export class SeedLoaderService implements ISeedLoaderService {
     )];
 
     // [#35655] Once per dataset, naming the object, the fields and the count:
-    // the seed asked for a total the platform did not store. `warn`, not
+    // the seed asked for a total the platform did not store. This notice IS
+    // the report (ruling D as analysed in 7062334196, point (e); the seat's
+    // correction 7064615114): no load-result key carries it. `warn`, not
     // `error`: nothing claimed persisted is lost — a roll-up is never the
-    // seed's to write, the rest of every record landed, and the machine trace
-    // is `summariesDropped` on this object's result.
-    if (summariesDropped > 0) {
+    // seed's to write, and the rest of every record landed.
+    if (summaryValuesDropped > 0) {
       const fields = [...summaryFieldsDropped];
       this.logger.warn(
-        `[SeedLoader] The ${objectName} seed supplies ${summariesDropped} value(s) for the roll-up summary ` +
+        `[SeedLoader] The ${objectName} seed supplies ${summaryValuesDropped} value(s) for the roll-up summary ` +
           `field(s) ${fields.map((f) => `\`${f}\``).join(', ')}, which a seed never stores: the values are not ` +
           `written, the rest of each record is, and each roll-up is computed from its child rows, so a record ` +
           `with no children reads the empty-child-list value (0 for count and sum, empty for min, max and avg). ` +
-          `Seed the child rows the total counts, and leave the summary field out of the ${objectName} seed. ` +
-          `The count is summariesDropped on this object's load result.`,
-        { object: objectName, fields, summariesDropped },
+          `Seed the child rows the total counts, and leave the summary field out of the ${objectName} seed.`,
+        { object: objectName, fields, droppedValues: summaryValuesDropped },
       );
     }
 
@@ -3261,7 +3260,6 @@ export class SeedLoaderService implements ISeedLoaderService {
       referencesDeferred,
       referencesDropped,
       summariesStale: this.summariesStale - summariesStaleAtStart,
-      summariesDropped,
       landedIds,
       insertedIds,
       errors,
@@ -5587,7 +5585,6 @@ export class SeedLoaderService implements ISeedLoaderService {
         totalReferencesDeferred: 0,
         totalReferencesDropped: 0,
         totalSummariesStale: 0,
-        totalSummariesDropped: 0,
         circularDependencyCount: 0,
         durationMs,
       },
@@ -5616,8 +5613,6 @@ export class SeedLoaderService implements ISeedLoaderService {
       // — the field is declared with `.default(0)`, so it survives a parse of a
       // payload written before it existed (#4998).
       totalSummariesStale: results.reduce((sum, r) => sum + r.summariesStale, 0),
-      // [#35655] Every entry is built by `loadDataset`, which always populates it.
-      totalSummariesDropped: results.reduce((sum, r) => sum + r.summariesDropped, 0),
       circularDependencyCount: graph.circularDependencies.length,
       durationMs,
     };
