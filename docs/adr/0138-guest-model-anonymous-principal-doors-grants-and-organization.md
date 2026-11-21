@@ -359,7 +359,11 @@ finding F1) admits one more route into the **discovery** role of the control-pla
 `GET {basePath}/discovery/restriction-profile`, and its environment-scoped twin
 `GET {basePath}/environments/:environmentId/discovery/restriction-profile` where environment scoping mounts it. What
 it serves: a constant open profile, a `RestrictionProfileSchema` value that restricts nothing, with
-`versions { spec, skills }`. The one fact it adds to what an anonymous caller already reads is the `@objectstack/spec`
+`versions { spec, skills }`. Its `allowedFlowNodeTypes` is the profile's whole node-type vocabulary, the approvals
+plugin's `approval` / `approval_revise` included; it is not a statement of which plugins this kernel runs, so
+`os validate --target` against a self-hosted runtime does not check whether an approval flow has an executor there.
+The spec-side reader rule that says otherwise is spec-lane card [#36081](https://github.com/objectstack-ai/objectstack/issues/36081).
+The one fact it adds to what an anonymous caller already reads is the `@objectstack/spec`
 version the runtime runs, which `/discovery`'s anonymous `version` states too unless an operator stamp
 (`OS_RUNTIME_VERSION`) replaces it. It reads no query parameter, and `api.enableDiscovery: false` unmounts it with the
 rest of discovery. Why: `os validate --target <url>` reads it without a credential, so a developer can check a build
@@ -839,7 +843,8 @@ This record moved from Proposed to Accepted when all four held. All four hold:
          literally: the REST root (`packages/rest/src/rest-server.ts#RestServer.registerDiscoveryEndpoints`)
          and the dispatcher's well-known document
          (`packages/runtime/src/dispatcher-plugin.ts#createDispatcherPlugin`). They play the
-         allowlist's discovery role.
+         allowlist's discovery role, as does the restriction profile beside them
+         (`packages/rest/src/discovery-routes.ts#registerDiscoveryEndpoints`, the dated D2 note).
        - The local storage adapter's signed byte URLs
          (`packages/services/service-storage/src/local-storage-adapter.ts#LocalStorageAdapter.verifyToken`):
          the signed, expiring token an authorized upload or download mints is the credential, the

@@ -16,7 +16,7 @@
 // all: `name`/`environment`/`locale` were absent (required), and `scoping` was
 // undeclared.
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   ApiRoutesSchema,
   DiscoverySchema,
@@ -464,5 +464,35 @@ describe('[#34774] the open runtime serves the restriction profile the CLI reads
     const { status, body } = await served(false, { query: { environment: 'prod' } });
     expect(status).toBe(400);
     expect(body.error.code).toBe('VALIDATION_ERROR');
+  });
+});
+
+describe('[#34774] the restriction profile when the spec manifest is unreadable', () => {
+  afterEach(() => { vi.doUnmock('module'); vi.resetModules(); });
+
+  it('answers 503 SERVICE_UNAVAILABLE and publishes no profile', async () => {
+    vi.resetModules(); // a fresh module-level version cache
+    vi.doMock('module', async (importOriginal) => {
+      const real: any = await importOriginal();
+      const createRequire = (url: any) => {
+        const req = real.createRequire(url);
+        return Object.assign((id: string) => {
+          if (id === '@objectstack/spec/package.json') throw new Error('manifest unreadable');
+          return req(id);
+        }, req);
+      };
+      return { ...real, default: { ...real, createRequire }, createRequire };
+    });
+    const { RestServer: FreshRestServer } = await import('./rest-server.js');
+    const rest = new FreshRestServer(createMockServer() as any, {} as any, { api: {} } as any);
+    rest.registerRoutes();
+    let body: any;
+    let status = 200;
+    const res: any = { json: (b: any) => { body = b; }, status: (s: number) => { status = s; return res; } };
+    await rest.getRouteManager().get('GET', '/api/v1/discovery/restriction-profile')!.handler({} as any, res);
+    expect(status).toBe(503);
+    expect(body.success).toBe(false);
+    expect(body.data).toBeUndefined();
+    expect(body.code ?? body.error?.code).toBe('SERVICE_UNAVAILABLE');
   });
 });

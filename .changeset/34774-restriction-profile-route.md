@@ -13,3 +13,5 @@ feat(rest): a self-hosted runtime serves the restriction profile `os validate --
 - It reads no query parameter: any one is refused `400 VALIDATION_ERROR`.
 - When the runtime cannot read the `@objectstack/spec` version it runs, it answers `503 SERVICE_UNAVAILABLE` and publishes no profile.
 - `api.enableDiscovery: false` unmounts it together with the rest of discovery; the CLI then fails as it does for any server that does not serve the route.
+- `allowedFlowNodeTypes` is a constant: the profile's whole node-type vocabulary, the approvals plugin's `approval` / `approval_revise` included. It does not say which plugins the runtime runs, so `os validate --target` does not check whether an approval flow has an executor on that runtime.
+- fix(rest): the CommonJS build (`require('@objectstack/rest')`) now resolves package manifests as the ESM build does. Its `import.meta.url` compiled to an empty object, so this route answered `503` on every request and `loadOpenApiSpec` could not read the static OpenAPI artifact; the package now builds with tsup's `shims`.

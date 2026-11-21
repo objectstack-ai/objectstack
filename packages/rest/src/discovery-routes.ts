@@ -463,7 +463,7 @@ export function registerDiscoveryEndpoints(this: DiscoveryRouteHost, basePath: s
         path: `${basePath}/discovery/restriction-profile`,
         handler: async (req: any, res: any) => {
             try {
-                if (refuseUnknownQueryParams(req, res, [])) return; // it reads no query parameter
+                if (refuseUnknownQueryParams(req, res, RESTRICTION_PROFILE_PARAMS)) return;
                 const spec = await servedSpecVersion();
                 if (!spec) {
                     sendDeclaredFault(res, {
@@ -485,10 +485,17 @@ export function registerDiscoveryEndpoints(this: DiscoveryRouteHost, basePath: s
     });
 }
 
+/** [#34774] The restriction-profile route's closed query set: it reads none. */
+export const RESTRICTION_PROFILE_PARAMS: readonly string[] = [];
+
 /**
  * [#34774] The open runtime restricts nothing a profile can name: every rule
  * allows, and `allowedFlowNodeTypes` is the profile's whole (derived)
- * vocabulary. `versions.skills` is `versions.spec`: `@objectstack/skills` and
+ * vocabulary, a constant, including the approvals plugin's `approval` /
+ * `approval_revise`. It is NOT a statement of which plugins this kernel runs,
+ * so `os validate --target` against a self-hosted runtime does not check
+ * whether an approval flow has an executor there (ADR-0138 D2 note; the
+ * spec-side reader rule is card #36081). `versions.skills` is `versions.spec`: `@objectstack/skills` and
  * `@objectstack/spec` are one `fixed` changeset group, as the MCP server's
  * skills install line also relies on.
  */
