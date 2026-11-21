@@ -50,11 +50,12 @@ export const SysRecordShare = ObjectSchema.create({
   // it with its object's label. No `titleFormat`: a declared, required pointer
   // outranks it on every title reader, so it would only be dead text.
   nameField: 'recipient_id',
-  // Neither half of the `record_id` / `object_name` pointer pair is listed. The
-  // record page's strip draws a listed field as its stored text, so the type
-  // half read as an API name and the id half as a raw id; a field the strip
-  // draws is also hidden from the Details tab, which is where `record_id`
-  // draws as the labelled pointer card (`sharing-pointer-pairs.test.ts`).
+  // Neither half of the `record_id` / `object_name` pointer pair is listed. A
+  // highlight strip (on a page that places one; the default record page draws
+  // none) draws a listed field as its stored text, so the type half read as an
+  // API name and the id half as a raw id; the Details tab is where
+  // `record_id` draws as the labelled pointer card
+  // (`sharing-pointer-pairs.test.ts`).
   highlightFields: ['recipient_id', 'access_level', 'source'],
 
   // A list names the shared record with the pointer's id half, `record_id`:

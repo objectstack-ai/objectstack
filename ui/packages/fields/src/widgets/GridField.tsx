@@ -14,8 +14,12 @@ import {
   PopoverContent,
   Checkbox,
   Label,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
 } from '@object-ui/components';
-import { Plus, Trash2, SlidersHorizontal, Maximize2, Copy, GripVertical } from 'lucide-react';
+import { Plus, Trash2, SlidersHorizontal, Maximize2, Copy, GripVertical, Info } from 'lucide-react';
 import { formatDate, formatDateTime, resolveFieldRuleState, toDisplayDate } from '@object-ui/core';
 import { useDisplayLocale, useLocalization, formatDisplayNumber } from '@object-ui/i18n';
 import { resolveFieldCurrency, currencyFractionDigits, currencySymbol } from '../currency.js';
@@ -27,6 +31,7 @@ import { useFieldTranslation } from './useFieldTranslation.js';
 import { toDomProps } from './toDomProps.js';
 import { PHONE_TOUCH_HEIGHT, PHONE_TOUCH_SQUARE } from './touchTarget.js';
 import { toHostGroupProps } from './toHostGroupProps.js';
+import { fieldHelpText } from '../fieldHelpText.js';
 import type { InlineGridColumn } from '@objectstack/spec/data';
 import { GRID_FIELD_RETIRED_KEYS, type GridFieldMetadata, type GridFieldRetiredKey } from '@object-ui/types';
 
@@ -688,8 +693,9 @@ type GridFieldProps = FieldWidgetComponentProps<Row[]> & {
    *  object's static field defaults, by field name. A grid column carries no
    *  default (the spec's inline column refuses `defaultValue`), so the host
    *  that holds the child schema hands them over. Every new line takes them:
-   *  the trailing entry line, "Add", and a line typed into the entry line. A
-   *  line already in the value keeps what it holds. Absent: a new line starts
+   *  "Add", Enter on the last line, and a line typed into the entry line an
+   *  empty grid draws after the form refused it (`hostFailedEmpty`). A line
+   *  already in the value keeps what it holds. Absent: a new line starts
    *  blank, as before. */
   newRowValues?: Row;
   /** When the host sets it, an empty required cell on a NEW line (one with
@@ -698,7 +704,67 @@ type GridFieldProps = FieldWidgetComponentProps<Row[]> & {
    *  it, and does once a save was refused. A stored line is flagged as
    *  before. Absent: every line is flagged at once, as before. */
   newRowRequiredShown?: boolean;
+  /** The help text of each column's child field, by column name
+   *  ({@link ColumnHelp}, objectstack#35804): drawn as an info button beside
+   *  the column's header label. A grid column carries no field definition (the
+   *  spec's inline column declares no help key), so the host that holds the
+   *  child object's served definition hands it over through
+   *  {@link columnHelpByField}. A column it does not name draws no button. */
+  columnHelp?: ColumnHelp;
 };
+
+/**
+ * The help text of a grid's columns, by column name (objectstack#35804).
+ * Each value is what the record form draws under the same field.
+ */
+export type ColumnHelp = Readonly<Record<string, string>>;
+
+/**
+ * The {@link ColumnHelp} of a child object's fields: each field's help read
+ * through {@link fieldHelpText}, the ONE read the record form's help line uses
+ * (objectui#12213), so a grid header and the form show the same text. Hand it
+ * the child object's definition as the server serves it, the one the record
+ * form reads: another package's `objectExtensions.fieldPatches` are already
+ * applied there, and the help is in the reader's language. A field with no
+ * help is left out.
+ */
+export function columnHelpByField(fields: Readonly<Record<string, unknown>> | null | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!fields || typeof fields !== 'object') return out;
+  for (const [name, def] of Object.entries(fields)) {
+    if (!def || typeof def !== 'object') continue;
+    const help = fieldHelpText(def as Parameters<typeof fieldHelpText>[0]);
+    if (help) out[name] = help;
+  }
+  return out;
+}
+
+/**
+ * The info button beside a column's header label (objectstack#35804): the
+ * column's help on hover and on keyboard focus, and the button's accessible
+ * name is the help itself, so a screen reader hears it on reaching the button.
+ * Its own provider, so the grid draws it under any host.
+ */
+function ColumnHeaderHelp({ help }: { help: string | undefined }) {
+  if (!help) return null;
+  return (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label={help}
+            className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-sm align-middle text-muted-foreground/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            data-testid="line-items-column-help"
+          >
+            <Info className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-xs whitespace-normal text-xs font-normal">{help}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
 
 /**
  * The retired snake_case field-level keys a grid field's metadata carries, in
@@ -821,6 +887,7 @@ function GridFieldBody({
   columnCurrencies,
   newRowValues,
   newRowRequiredShown,
+  columnHelp,
   ...props
 }: GridFieldProps) {
   // The field-level keys, read as `GridFieldMetadata` declares them and as
@@ -983,9 +1050,9 @@ function GridFieldBody({
 
   /**
    * Merge a field patch into a row. `rowIdx === rows.length` targets the
-   * trailing "ghost" row (always-present empty line) — editing it materialises
-   * a new real row, so the user never has to click "Add line" to keep entering.
-   * Computed columns are recomputed for the touched row on every change.
+   * entry line an empty grid draws once the form refused it (`hasGhost`) —
+   * editing it materialises a new real row. Computed columns are recomputed
+   * for the touched row on every change.
    */
   const applyPatch = useCallback(
     (rowIdx: number, patch: Row) => {
@@ -1048,29 +1115,53 @@ function GridFieldBody({
     [applyCell],
   );
 
-  const addRow = useCallback(() => {
+  // Keyboard navigation across cells (spreadsheet-style): the table is a focus
+  // grid. Enter / ArrowUp / ArrowDown move between rows in the same column;
+  // Tab / Shift-Tab fall through to the browser's natural row-major order.
+  // Cells carry data-cell="row-col" so we can target neighbours.
+  //
+  // objectstack#35507 — the grid no longer draws an empty entry line under
+  // its lines, so the two keyboard paths that line carried are kept here: Add
+  // moves focus into the line it appends (Tab reaches Add after the last
+  // line), and Enter on the last line appends a line and moves to the same
+  // column in it. The line exists only once the host hands it back in
+  // `value`, so the focus waits for it (`pendingFocus`).
+  const gridRef = useRef<HTMLTableElement>(null);
+  const focusCell = useCallback((rowIdx: number, colIdx: number): boolean => {
+    const el = gridRef.current?.querySelector<HTMLElement>(`[data-cell="${rowIdx}-${colIdx}"]`);
+    if (!el) return false;
+    el.focus();
+    if (el instanceof HTMLInputElement) el.select();
+    return true;
+  }, []);
+  /** The line and column to focus once the host hands an appended line back; `null` column = its first focusable cell. */
+  const pendingFocus = useRef<{ rowIdx: number; colIdx: number | null } | null>(null);
+  React.useEffect(() => {
+    const pending = pendingFocus.current;
+    if (!pending || rows.length <= pending.rowIdx) return;
+    pendingFocus.current = null;
+    if (pending.colIdx != null && focusCell(pending.rowIdx, pending.colIdx)) return;
+    const first = gridRef.current?.querySelector<HTMLElement>(`[data-cell^="${pending.rowIdx}-"]`);
+    if (first) {
+      first.focus();
+      if (first instanceof HTMLInputElement) first.select();
+    }
+  }, [rows.length, focusCell]);
+
+  const addRow = useCallback((focusColIdx: number | null = null) => {
     if (maxRows != null && rows.length >= maxRows) return;
+    pendingFocus.current = { rowIdx: rows.length, colIdx: focusColIdx };
     // objectstack#35816 — a line Add starts on the host's defaults is marked
     // untouched until its first edit (`UNTOUCHED_NEW_ROW`).
     emit([...rows, newRowValues ? { ...blankRow(), [UNTOUCHED_NEW_ROW]: true } : blankRow()]);
   }, [rows, blankRow, maxRows, emit, newRowValues]);
 
-  // Keyboard navigation across cells (spreadsheet-style): the table is a focus
-  // grid. Enter / ArrowUp / ArrowDown move between rows in the same column;
-  // Tab / Shift-Tab fall through to the browser's natural row-major order
-  // (and into the ever-present ghost row, so tabbing past the last cell starts
-  // a new line). Cells carry data-cell="row-col" so we can target neighbours.
-  const gridRef = useRef<HTMLTableElement>(null);
-  const focusCell = useCallback((rowIdx: number, colIdx: number) => {
-    const el = gridRef.current?.querySelector<HTMLElement>(`[data-cell="${rowIdx}-${colIdx}"]`);
-    if (el) {
-      el.focus();
-      if (el instanceof HTMLInputElement) el.select();
-    }
-  }, []);
   const onCellKeyDown = useCallback(
     (e: React.KeyboardEvent, rowIdx: number, colIdx: number) => {
-      if (e.key === 'ArrowDown' || e.key === 'Enter') {
+      if (e.key === 'Enter' && rowIdx === rows.length - 1 && allowAdd && !isList) {
+        e.preventDefault();
+        addRow(colIdx);
+      } else if (e.key === 'ArrowDown' || e.key === 'Enter') {
         e.preventDefault();
         focusCell(rowIdx + 1, colIdx);
       } else if (e.key === 'ArrowUp') {
@@ -1078,7 +1169,7 @@ function GridFieldBody({
         if (rowIdx > 0) focusCell(rowIdx - 1, colIdx);
       }
     },
-    [focusCell],
+    [focusCell, rows.length, allowAdd, isList, addRow],
   );
 
   const removeRow = useCallback(
@@ -1202,6 +1293,7 @@ function GridFieldBody({
                   )}
                 >
                   {c.label || c.name}
+                  <ColumnHeaderHelp help={columnHelp?.[c.name]} />
                 </th>
               ))}
             </tr>
@@ -1272,12 +1364,24 @@ function GridFieldBody({
   }
 
   // ── Editable rendering ──────────────────────────────────────────────────────
-  // A trailing "ghost" empty row is always present in grid mode (start-with-one
-  // + auto-append): editing it materialises a real row, so the user keeps
-  // entering lines without clicking "Add". Index-based keys keep the input
-  // mounted across materialisation, so focus/caret survive the transition.
-  const hasGhost = !isList && allowAdd && (maxRows == null || rows.length < maxRows);
+  // objectstack#35507 — no empty entry line is drawn under the lines. It used
+  // to be, always ("start-with-one + auto-append"), directly above the Add
+  // button, which does the same job: it had no actions, produced no write, and
+  // users read it as a broken line they could not delete. Both followed
+  // `allowAdd`, so no grid loses its way to add a line; Add and Enter on the
+  // last line carry its keyboard path (see `pendingFocus`). An empty grid says
+  // so and names the Add button instead.
+  //
+  // One state still draws the entry line: a REQUIRED grid the form refused
+  // while EMPTY (`hostFailedEmpty`, below). There the line is what the
+  // failure is about: its required cells carry the field's failure to
+  // assistive tech on the controls a user types into to fix it (objectui#3318),
+  // and the Add button, the only other control, is an action, not what is
+  // invalid. Typing into it materialises a real line, as before.
+  const hostFailedEmpty = !!error && rows.length === 0;
+  const hasGhost = !isList && allowAdd && hostFailedEmpty && (maxRows == null || maxRows > 0);
   const displayRows: Row[] = hasGhost ? [...rows, blankRow()] : rows;
+  const addLabel = cfg.addLabel || t('fields.grid.addLine', { defaultValue: 'Add line' });
 
   /**
    * FORM-level failure driving the per-CELL channel (objectui#3318).
@@ -1296,8 +1400,11 @@ function GridFieldBody({
    * a POPULATED grid already marks its own empty required cells inline, so
    * this changes nothing there, and an empty grid that has NOT failed stays
    * unmarked (no premature alarm before validation runs).
+   *
+   * Since objectstack#35507 that entry line is drawn ONLY in this state: an
+   * empty grid that has not failed draws its empty-state hint instead.
+   * (`hostFailedEmpty` itself is computed above, beside `hasGhost`.)
    */
-  const hostFailedEmpty = !!error && rows.length === 0;
 
   /** Cell content: read-only display (list mode / computed columns) or an
    *  editable borderless control (spreadsheet feel).
@@ -1509,13 +1616,29 @@ function GridFieldBody({
                 >
                   {c.label || c.name}
                   {c.required && !c.computed && <span className="text-destructive"> *</span>}
+                  <ColumnHeaderHelp help={columnHelp?.[c.name]} />
                 </th>
               ))}
               {hasRowActions && <th style={{ width: actionColWidth }} />}
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {isList && rows.length === 0 ? (
+            {!isList && displayRows.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={columns.length + (hasRowActions ? 1 : 0) + 1}
+                  className="px-3 py-6 text-center text-muted-foreground"
+                  data-testid="line-items-empty"
+                >
+                  {allowAdd
+                    ? t('fields.grid.noItemsAddHint', {
+                        label: addLabel,
+                        defaultValue: 'No items yet — click “{{label}}” to begin.',
+                      })
+                    : t('fields.grid.noItems', { defaultValue: 'No items' })}
+                </td>
+              </tr>
+            ) : isList && rows.length === 0 ? (
               <tr>
                 <td
                   colSpan={columns.length + (hasRowActions ? 1 : 0) + 1}
@@ -1692,12 +1815,12 @@ function GridFieldBody({
           variant="outline"
           size="sm"
           className={PHONE_TOUCH_HEIGHT}
-          onClick={isList && onAdd ? onAdd : addRow}
+          onClick={isList && onAdd ? onAdd : () => addRow()}
           disabled={maxRows != null && rows.length >= maxRows}
           data-testid="line-items-add"
         >
           <Plus className="mr-1.5 h-4 w-4" />
-          {cfg.addLabel || t('fields.grid.addLine', { defaultValue: 'Add line' })}
+          {addLabel}
         </Button>
       )}
     </div>

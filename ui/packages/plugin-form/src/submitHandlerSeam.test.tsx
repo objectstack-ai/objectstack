@@ -117,7 +117,7 @@ const masterDetailSchema = (formType: string) => ({
 });
 
 /**
- * Fill the parent header AND the first (ghost) line, so the save carries BOTH
+ * Fill the parent header AND a first line, so the save carries BOTH
  * legs. Without a real child row the batch would be a single-op list and the
  * atomicity claim would have nothing to be atomic about.
  */
@@ -128,6 +128,8 @@ async function fillHeaderAndLine(container: HTMLElement) {
     return el;
   });
   fireEvent.change(ref, { target: { value: 'PO-1' } });
+  // The grid draws no trailing entry row (objectstack#35507): Add the line first.
+  fireEvent.click(await waitFor(() => screen.getByTestId('line-items-add')));
   const qty = await waitFor(() => screen.getAllByLabelText('Qty')[0] as HTMLInputElement);
   fireEvent.change(qty, { target: { value: '5' } });
 }

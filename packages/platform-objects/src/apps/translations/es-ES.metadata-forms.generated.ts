@@ -70,7 +70,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       highlightFields: {
         label: "Campos destacados",
-        helpText: "Nombres de campo de este objeto, del más importante al menos; donde solo cabe uno, gana la primera entrada (ADR-0085). Determinan las columnas de lista predeterminadas, las tarjetas, las vistas previas de registros hijos y la franja destacada del detalle. Un nombre que no sea un campo de este objeto se rechaza al publicar."
+        helpText: "Nombres de campo de este objeto, del más importante al menos; donde solo cabe uno, gana la primera entrada (ADR-0085). Determinan las columnas predeterminadas de las listas y de las listas relacionadas, las tarjetas, las vistas previas de registros hijos, la tarjeta flotante del registro y el selector de registros. Un nombre que no sea un campo de este objeto se rechaza al publicar."
       },
       relatedLists: {
         label: "Orden de listas relacionadas",
@@ -106,7 +106,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.relatedList": {
         label: "Lista relacionada",
-        helpText: "Convierte esta entrada en la tabla de una lista relacionada en lugar de una sección de campos: indica el objeto hijo (u objeto.campo) cuya lista se dibuja en esta posición de la columna de detalles del registro. Un grupo así no contiene campos; se rechaza un campo que lo indique como su grupo, y también un nombre que no coincide con ninguna relación que apunte a este objeto. La página de registro aún no dibuja esta ubicación."
+        helpText: "Convierte esta entrada en la tabla de una lista relacionada en lugar de una sección de campos: indica el objeto hijo (u objeto.campo) cuya lista se dibuja en esta posición de la columna de detalles del registro. Un grupo así no contiene campos; se rechaza un campo que lo indique como su grupo, y también un nombre que no coincide con ninguna relación que apunte a este objeto. Los formularios de creación y edición del registro padre también incluyen la tabla en línea, y «Editar» en la página de registro guarda el registro y sus filas a la vez."
       },
       "fieldGroups.collapse": {
         label: "Contraer",
@@ -791,7 +791,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       inlineColumns: {
         label: "Columnas en línea",
-        helpText: "Columnas de la cuadrícula en línea del formulario del registro padre, en orden de visualización; solo se usan cuando este campo define inlineEdit, que se escribe en el código fuente. Sin definir: se derivan de los campos editables de este objeto y, a partir de seis, el resto empieza en el selector de columnas de la cuadrícula. Una entrada que solo nombra un campo toma de ese campo su tipo, opciones y reglas; las demás claves de columna, empezando por type, se escriben en el código fuente."
+        helpText: "Columnas de la cuadrícula en línea del formulario del registro padre, en orden de visualización; solo se usan cuando un grupo de campos del objeto padre indica este objeto hijo (fieldGroups[].relatedList). Sin definir: se derivan de los campos editables de este objeto y, a partir de seis, el resto empieza en el selector de columnas de la cuadrícula. Una entrada que solo nombra un campo toma de ese campo su tipo, opciones y reglas; las demás claves de columna, empezando por type, se escriben en el código fuente."
       },
       "inlineColumns.name": {
         label: "Nombre",

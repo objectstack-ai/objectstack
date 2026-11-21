@@ -37,7 +37,7 @@
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { BatchTransactionOperation, GridFieldMetadata } from '@object-ui/types';
 import { resolveAffordance, type SchemaLike } from '@object-ui/core';
-import { LineItemsField, lookupAutofillByField, useBooleanValueLabel, type GridColumn } from '@object-ui/fields';
+import { LineItemsField, lookupAutofillByField, columnHelpByField, useBooleanValueLabel, type GridColumn } from '@object-ui/fields';
 import { cn } from '@object-ui/components';
 import { usePermissions } from '@object-ui/permissions';
 import {
@@ -328,6 +328,8 @@ export const RecordBodyTableEditor: React.FC<RecordBodyTableEditorProps> = ({ ob
           disabled={session.saving}
           contextRecord={record?.data as Record<string, unknown> | undefined}
           lookupAutofill={lookupAutofillByField(childSchema?.fields as Record<string, unknown> | undefined)}
+          // Each child field's help, on its column header (objectstack#35804).
+          columnHelp={columnHelpByField(childSchema?.fields as Record<string, unknown> | undefined)}
           newRowValues={newRowValues}
           // objectstack#35816 — a new line's empty required cell reads red
           // once a save was refused, not the moment the line appears; the

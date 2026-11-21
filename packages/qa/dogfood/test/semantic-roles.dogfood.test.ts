@@ -92,8 +92,9 @@ describe('ADR-0085 semantic roles survive the served pipeline', () => {
     ]);
     expect(def.fields?.status?.group).toBe('basics');
     expect(def.fields?.amount?.group).toBe('money');
-    // Non-highlighted group members (the detail body hides highlighted
-    // fields, so these keep their groups visible on detail pages).
+    // Non-highlighted group members (a page that places a
+    // `record:highlights` block hides highlighted fields from the body, so
+    // these keep their groups visible there too).
     expect(def.fields?.code?.group).toBe('basics');
     expect(def.fields?.budget?.group).toBe('money');
     // The spec channel for a per-field currency is currencyConfig (a bare
@@ -114,7 +115,7 @@ describe('ADR-0085 semantic roles survive the served pipeline', () => {
 
     // `false` is the only "this status-shaped field is NOT a lifecycle" signal.
     // It has to arrive as a STRICT false: a serializer that drops falsy values
-    // (or a renderer falsy-check) silently turns the stepper back on — the
+    // (or a renderer falsy-check) silently turns the stage tag back on — the
     // exact bug PR objectui#2168 fixed. The fixture's `status` field is named
     // to trip the heuristic if this suppression ever leaks.
     expect(def.stageField).toBe(false);
