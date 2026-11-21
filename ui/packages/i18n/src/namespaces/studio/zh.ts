@@ -1340,6 +1340,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.condition.op.atLeast': '至少',
   'engine.inspector.condition.op.atMost': '至多',
   'engine.inspector.condition.op.contains': '包含',
+  'engine.inspector.condition.op.notContains': '不包含',
   'engine.inspector.condition.op.inAnyOf': '属于（任一）',
   'engine.inspector.condition.op.notIn': '不属于',
   'engine.inspector.view.type.grid': '表格 / 列表',
