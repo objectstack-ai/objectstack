@@ -4,9 +4,11 @@
  * A masking-off ask round (`--schema-masking off`, `src/runner/schema-masking.ts`):
  * the field-level-security question asked on the open cards. The flag boots
  * the app with object-schema masking off (ADR-0106 D8) and nowhere else, the
- * round's records say so, `summary` never sums such a round with a default
- * one, and the masking variable inherited from the shell is refused before
- * any card runs. A default round's record keeps its bytes.
+ * round's records say so, and `summary` never sums such a round with a default
+ * one. The masking variable inherited from the shell makes a masking-off round
+ * too, recorded as one (read as the metadata plane reads it); `--schema-masking
+ * on` beside it is refused before any card runs. A default round's record
+ * keeps its bytes.
  *
  * The grade itself is the one every round uses (`gradeCardAnswer`, as
  * `orchestrate.ts` calls it): asked as `employee`, from whom `travel_expense`
@@ -28,7 +30,7 @@ import { formatRefusal, loadScenarioFile, readCapabilityAreas, type LoadedScenar
 import { bootEnv, main, parseArgs } from '../../src/runner/cli.js';
 import { namespacedScenario } from '../../src/runner/namespace.js';
 import { hiddenValues } from '../../src/runner/orchestrate.js';
-import { schemaMaskingHostEnv, schemaMaskingRefusal, schemaMaskingText } from '../../src/runner/schema-masking.js';
+import { roundSchemaMasking, schemaMaskingHostEnv, schemaMaskingRefusal, schemaMaskingText } from '../../src/runner/schema-masking.js';
 import { runRecord } from '../../src/runner/scorecard.js';
 import { readSummaryRecords, renderSummaryTable, summaryMain, summaryTables } from '../../src/runner/summary.js';
 import { gradeCardAnswer } from '../../src/score/index.js';
@@ -53,15 +55,27 @@ describe('--schema-masking: the flag, and the variable the shell carries', () =>
     expect(OBJECT_SCHEMA_MASK_DISABLE_ENV).toBe('OS_ALLOW_UNMASKED_OBJECT_METADATA');
   });
 
-  it('refuses the variable set without the flag, whatever its value, and allows it with `off`', () => {
-    for (const value of ['1', 'true', '0', 'false', '']) {
+  it('records the variable the shell sets as a masking-off round, read as the metadata plane reads it', () => {
+    for (const value of ['1', 'true', 'yes']) {
       const env = { [OBJECT_SCHEMA_MASK_DISABLE_ENV]: value };
-      expect(schemaMaskingRefusal(undefined, env)).toContain(`\`${OBJECT_SCHEMA_MASK_DISABLE_ENV}\` is set in this environment`);
-      expect(schemaMaskingRefusal('on', env)).toContain('pass `--schema-masking off`');
+      expect(roundSchemaMasking(undefined, env)).toBe('off');
+      expect(roundSchemaMasking('off', env)).toBe('off');
+      expect(schemaMaskingRefusal(undefined, env)).toBeUndefined();
       expect(schemaMaskingRefusal('off', env)).toBeUndefined();
+      // `on` beside a variable that turns masking off says two things.
+      expect(schemaMaskingRefusal('on', env)).toBe(
+        `--schema-masking on asks for masked apps, and \`${OBJECT_SCHEMA_MASK_DISABLE_ENV}\` in this environment turns object-schema masking off (ADR-0106 D8) for every app the run boots. Unset it, or pass \`--schema-masking off\`.`,
+      );
     }
+    // A value the metadata plane reads as masked stamps nothing, and leaves `on` standing.
+    for (const value of ['0', 'false', 'FALSE', '', '  ']) {
+      const env = { [OBJECT_SCHEMA_MASK_DISABLE_ENV]: value };
+      expect(roundSchemaMasking(undefined, env)).toBe('on');
+      expect(schemaMaskingRefusal('on', env)).toBeUndefined();
+    }
+    expect(roundSchemaMasking(undefined, {})).toBe('on');
+    expect(roundSchemaMasking('off', {})).toBe('off');
     expect(schemaMaskingRefusal(undefined, {})).toBeUndefined();
-    expect(schemaMaskingRefusal('off', {})).toBeUndefined();
   });
 
   it('gives the booted app the opt-out on a masking-off round only, beside door mode’s OAuth server', () => {
@@ -85,13 +99,13 @@ describe('--schema-masking: the flag, and the variable the shell carries', () =>
       else process.env[OBJECT_SCHEMA_MASK_DISABLE_ENV] = saved;
     });
 
-    it('refuses a run the shell turned masking off for, before it makes a directory or loads a card', async () => {
+    it('refuses `--schema-masking on` in a shell that turned masking off, before it makes a directory or loads a card', async () => {
       process.env[OBJECT_SCHEMA_MASK_DISABLE_ENV] = '1';
       const root = tmp();
       const out = join(root, 'runs');
       const work = join(root, 'work');
-      await expect(main(['--driver', 'recorded:/nonexistent.json', '--out', out, '--work', work])).rejects.toThrow(
-        `\`${OBJECT_SCHEMA_MASK_DISABLE_ENV}\` is set in this environment, and every app the run boots inherits it`,
+      await expect(main(['--schema-masking', 'on', '--driver', 'recorded:/nonexistent.json', '--out', out, '--work', work])).rejects.toThrow(
+        `--schema-masking on asks for masked apps, and \`${OBJECT_SCHEMA_MASK_DISABLE_ENV}\` in this environment turns object-schema masking off`,
       );
       expect(existsSync(out)).toBe(false);
       expect(existsSync(work)).toBe(false);

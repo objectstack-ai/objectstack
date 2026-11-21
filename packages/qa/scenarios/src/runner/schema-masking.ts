@@ -19,35 +19,54 @@
  * (`env.schemaMasking: 'off'`); `summary` never sums such a run with a
  * default one.
  *
- * The variable reaches the app only through the flag. Every child the runner
- * spawns inherits the runner's own environment (`subscriptionOnlyEnv`,
- * `driver.ts`), so the variable exported in the operator's shell would turn
- * masking off with nothing in the record to say it. A run started so is
- * refused before any card runs ({@link schemaMaskingRefusal}), whatever the
- * value: how a value reads (`0`, `false`) is the booted app's version's
- * business, not the runner's. Refused rather than recorded, so that every
- * masking-off record is one an operator asked for by flag, and a default
- * round's record keeps its bytes.
+ * The variable exported in the operator's shell turns masking off too: every
+ * child the runner spawns inherits the runner's own environment
+ * (`subscriptionOnlyEnv`, `driver.ts`), the booted app included. Such a run is
+ * a masking-off round, and it is recorded as one ({@link roundSchemaMasking}):
+ * the variable is read with the metadata plane's own predicate
+ * (`isObjectSchemaMaskingEnabled`), so the record says `off` exactly when the
+ * app reads the value as off, and a value it reads as masked (`0`, `false`,
+ * blank) stamps nothing. Recorded rather than refused, so no run the runner
+ * started before the flag is turned away, and the record states what ran.
+ * Only `--schema-masking on` beside a variable that turns masking off is
+ * refused ({@link schemaMaskingRefusal}): the two say opposite things.
  */
 
-import { OBJECT_SCHEMA_MASK_DISABLE_ENV } from '@objectstack/metadata-core';
+import { isObjectSchemaMaskingEnabled, OBJECT_SCHEMA_MASK_DISABLE_ENV } from '@objectstack/metadata-core';
 
 /** The values `--schema-masking` takes: `on` is the default (masked, nothing stamped), `off` the D8 opt-out. */
 export const SCHEMA_MASKING_SETTINGS = ['on', 'off'] as const;
 export type SchemaMasking = (typeof SCHEMA_MASKING_SETTINGS)[number];
 
+type Env = Readonly<Record<string, string | undefined>>;
+
+/** Does the operator's environment turn masking off, as the metadata plane reads {@link OBJECT_SCHEMA_MASK_DISABLE_ENV}. */
+const environmentTurnsMaskingOff = (env: Env): boolean => !isObjectSchemaMaskingEnabled(undefined, { ...env });
+
 /**
- * Why a run may not start, or `undefined` when it may: the operator's
- * environment sets {@link OBJECT_SCHEMA_MASK_DISABLE_ENV} and `--schema-masking`
- * is not `off`. Pure over its inputs.
+ * Why a run may not start, or `undefined` when it may: `--schema-masking on`
+ * while the environment sets {@link OBJECT_SCHEMA_MASK_DISABLE_ENV} to a value
+ * that turns masking off, which every booted app would inherit. Pure over its
+ * inputs.
  */
-export function schemaMaskingRefusal(masking: SchemaMasking | undefined, env: Readonly<Record<string, string | undefined>> = process.env): string | undefined {
-  if (env[OBJECT_SCHEMA_MASK_DISABLE_ENV] === undefined || masking === 'off') return undefined;
+export function schemaMaskingRefusal(flag: SchemaMasking | undefined, env: Env = process.env): string | undefined {
+  if (flag !== 'on' || !environmentTurnsMaskingOff(env)) return undefined;
   return (
-    `\`${OBJECT_SCHEMA_MASK_DISABLE_ENV}\` is set in this environment, and every app the run boots inherits it: ` +
-    `object-schema masking (ADR-0106 D8) could be off while the run's records say nothing of it. ` +
-    `Unset it for a default round, or pass \`--schema-masking off\` for a masking-off round the records state.`
+    `--schema-masking on asks for masked apps, and \`${OBJECT_SCHEMA_MASK_DISABLE_ENV}\` in this environment turns ` +
+    `object-schema masking off (ADR-0106 D8) for every app the run boots. Unset it, or pass \`--schema-masking off\`.`
   );
+}
+
+/**
+ * The schema masking a run's apps are booted with, which every record of the
+ * run states: `off` when `--schema-masking off` says so, or when no flag is
+ * given and the environment turns masking off
+ * ({@link OBJECT_SCHEMA_MASK_DISABLE_ENV}, read as the metadata plane reads
+ * it); `on` otherwise. Pure over its inputs.
+ */
+export function roundSchemaMasking(flag: SchemaMasking | undefined, env: Env = process.env): SchemaMasking {
+  if (flag !== undefined) return flag;
+  return environmentTurnsMaskingOff(env) ? 'off' : 'on';
 }
 
 /** What the booted app's environment gains: the D8 opt-out on a masking-off round, nothing otherwise. */

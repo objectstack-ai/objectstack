@@ -305,8 +305,11 @@ the persona passes, one that calls it blank or empty fails (the `withheld` grade
 - **Never summed with a default round**: `summary` refuses a table whose runs differ in it, naming
   `schema masking` and the records on each side.
 - **The shell cannot turn it off unrecorded**: every child the runner spawns inherits its environment, so a run
-  started with `OS_ALLOW_UNMASKED_OBJECT_METADATA` set (any value) and without `--schema-masking off` is refused
-  before any card runs. Unset it, or pass the flag.
+  started with `OS_ALLOW_UNMASKED_OBJECT_METADATA` set and no flag is a masking-off round, and is recorded as one: the
+  runner reads the variable with the metadata plane's own predicate (`isObjectSchemaMaskingEnabled`), prints
+  `schema masking: off (…) — set by the environment, not by --schema-masking` and stamps every record. A value the
+  platform reads as masked (`0`, `false`, blank) stamps nothing. `--schema-masking on` beside a value that turns
+  masking off is refused before any card runs.
 - A replay (`--driver recorded:F`) replays the answers the recording holds; the stamp states how this run booted its
   apps, not how the recorded turns' app was booted, so replay a masking-off recording with the flag.
 
