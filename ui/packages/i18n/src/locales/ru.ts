@@ -547,6 +547,9 @@ const ru = {
     cancelChanges: "Отменить изменения",
     saveRow: "Сохранить строку",
     cellReadOnly: "Эту ячейку нельзя изменить здесь.",
+    // objectstack#36023 — why a list cell's typed value was not saved, under the editor.
+    cellNotNumber: "Введите число.",
+    cellInvalid: "Это значение недопустимо.",
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "Сохранение…",
     cellSaved: "Сохранено",

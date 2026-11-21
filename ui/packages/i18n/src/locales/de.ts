@@ -530,6 +530,9 @@ const de = {
     cancelChanges: "Änderungen verwerfen",
     saveRow: "Zeile speichern",
     cellReadOnly: "Diese Zelle kann hier nicht bearbeitet werden.",
+    // objectstack#36023 — why a list cell's typed value was not saved, under the editor.
+    cellNotNumber: "Geben Sie eine Zahl ein.",
+    cellInvalid: "Dieser Wert ist ungültig.",
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "Wird gespeichert…",
     cellSaved: "Gespeichert",

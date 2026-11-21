@@ -543,6 +543,9 @@ const zhHant = {
     cancelChanges: '取消更改',
     saveRow: '儲存行',
     cellReadOnly: '此單元格不能在這裡編輯。',
+    // objectstack#36023 — why a list cell's typed value was not saved, under the editor.
+    cellNotNumber: '請輸入數字。',
+    cellInvalid: '這個值無效。',
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: '儲存中…',
     cellSaved: '已儲存',

@@ -9,10 +9,12 @@
 /**
  * The cell facts `ObjectGrid` hands the select-first table
  * (objectstack#35684, objectstack#35687): the reason order, what typing does
- * per field type, and what pasted text stands for in a choice field.
+ * per field type, and what pasted text stands for in a choice field; and
+ * (objectstack#36023) which editors open under the cell, which cells refuse
+ * Backspace, and which committed values the field's rules refuse.
  */
 import { describe, it, expect } from 'vitest';
-import { cellReadOnlyKind, inlineTyping, choiceFromText, type CellReadOnlyInputs } from './objectGridCellFacts';
+import { cellReadOnlyKind, inlineTyping, choiceFromText, inlineEditorPlacement, clearRefusalText, cellValueRefusal, type CellReadOnlyInputs } from './objectGridCellFacts';
 import { fieldInlineReadOnlyKind, isFieldInlineEditable } from './inline-edit-options';
 
 const OPEN: CellReadOnlyInputs = {
@@ -100,5 +102,43 @@ describe('choiceFromText — pasted text in a choice field (objectstack#35687)',
     expect(choiceFromText({ type: 'lookup' })!('Acme')).toBeUndefined();
     expect(choiceFromText({ type: 'text' })).toBeNull();
     expect(choiceFromText(undefined)).toBeNull();
+  });
+});
+
+// The sentences, keyed: what the grid's translation hands back for each rule.
+const t = (key: string, o: Record<string, unknown> = {}) => `${key}|${Object.entries(o).map(([k, v]) => `${k}=${v}`).join(',')}`;
+
+describe('the editor, Backspace and the commit rules a cell is given (objectstack#36023)', () => {
+  it('pickers open under the cell; typed input, long text and an address edit in place', () => {
+    for (const type of ['select', 'status', 'multiselect', 'tags', 'date', 'datetime', 'time', 'color', 'lookup', 'master_detail', 'user']) {
+      expect(inlineEditorPlacement(type), type).toBe('below');
+    }
+    for (const type of ['text', 'number', 'currency', 'percent', 'email', 'phone', 'url', 'textarea', 'address', 'rating', 'boolean', undefined]) {
+      expect(inlineEditorPlacement(type), String(type)).toBeUndefined();
+    }
+  });
+
+  it('a required field refuses Backspace in the form\'s words, or its own message; any other may be cleared', () => {
+    expect(clearRefusalText({ type: 'text', required: true, label: 'Name' }, 'name', t)).toBe('validation.required|field=Name');
+    expect(clearRefusalText({ type: 'text', required: true }, 'name', t)).toBe('validation.required|field=name');
+    expect(clearRefusalText({ type: 'text', required: true, required_message: 'Say a name' }, 'name', t)).toBe('Say a name');
+    expect(clearRefusalText({ type: 'text' }, 'name', t)).toBeNull();
+    expect(clearRefusalText(undefined, 'name', t)).toBeNull();
+  });
+
+  it('a commit is judged by the record form\'s rules: required, length, range, email and URL shape', () => {
+    const name = { type: 'text', label: 'Name', required: true, minLength: 2, maxLength: 4 };
+    expect(cellValueRefusal(name, 'name', '', t)).toBe('validation.required|field=Name');
+    expect(cellValueRefusal(name, 'name', 'A', t)).toBe('validation.minLength|field=Name,min=2');
+    expect(cellValueRefusal(name, 'name', 'Alpha', t)).toBe('validation.maxLength|field=Name,max=4');
+    expect(cellValueRefusal(name, 'name', 'Abe', t)).toBeNull();
+    const amount = { type: 'number', label: 'Amount', min: 0, max: 100 };
+    expect(cellValueRefusal(amount, 'amount', 101, t)).toBe('validation.max|field=Amount,max=100');
+    expect(cellValueRefusal(amount, 'amount', -1, t)).toBe('validation.min|field=Amount,min=0');
+    expect(cellValueRefusal(amount, 'amount', null, t)).toBeNull();
+    expect(cellValueRefusal({ type: 'email', label: 'Mail' }, 'mail', 'nobody', t)).toBe('validation.email|field=Mail');
+    expect(cellValueRefusal({ type: 'email', label: 'Mail' }, 'mail', 'a@b.co', t)).toBeNull();
+    expect(cellValueRefusal({ type: 'url', label: 'Site' }, 'site', 'example.com', t)).toBe('validation.url|field=Site');
+    expect(cellValueRefusal({ type: 'select', options: ['a'] }, 'pick', 'a', t)).toBeNull();
   });
 });

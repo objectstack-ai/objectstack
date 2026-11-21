@@ -530,6 +530,9 @@ const ja = {
     cancelChanges: "変更を取り消す",
     saveRow: "行を保存",
     cellReadOnly: "このセルはここでは編集できません。",
+    // objectstack#36023 — why a list cell's typed value was not saved, under the editor.
+    cellNotNumber: "数値を入力してください。",
+    cellInvalid: "この値は無効です。",
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "保存中…",
     cellSaved: "保存しました",

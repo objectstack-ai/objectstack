@@ -564,6 +564,9 @@ const ar = {
     cancelChanges: "إلغاء التغييرات",
     saveRow: "حفظ الصف",
     cellReadOnly: "لا يمكن تحرير هذه الخلية هنا.",
+    // objectstack#36023 — why a list cell's typed value was not saved, under the editor.
+    cellNotNumber: "أدخل رقمًا.",
+    cellInvalid: "هذه القيمة غير صالحة.",
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "جارٍ الحفظ…",
     cellSaved: "تم الحفظ",
