@@ -22,6 +22,9 @@ vi.mock('../providers/MetadataProvider', async (importOriginal) => ({
   useMetadata: () => ({ apps: [] }),
 }));
 
+// The module reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { useObjectViewViewCrud } from './objectViewViewCrud';
 
 type Args = Parameters<typeof useObjectViewViewCrud>[0];
