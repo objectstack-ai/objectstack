@@ -47,6 +47,7 @@ import {
     foldQueryAliasSlots,
     isFilterAST,
     parseFilterAST,
+    RAW_FILE_VALUES_CONTEXT_KEY,
 } from '@objectstack/spec/data';
 import type { EngineAggregateOptions, EngineCountOptions } from '@objectstack/spec/data';
 import { malformedFilterArrayError } from './protocol-data-request-shapes.js';
@@ -1050,11 +1051,18 @@ export class ProtocolDataCrudFacet {
         }
 
         const ctx = request.context;
-        const ctxOpt = ctx !== undefined ? { context: ctx } : undefined;
 
+        // The source is read as the caller reads it, but with its file-class
+        // fields (`FILE_REFERENCE_TYPES`, single and `multiple`) in their
+        // STORED form: the bare `sys_file` id(s), never the expanded
+        // `{ id, name, size, mimeType, url }` object (or the refused-reader
+        // `{ id, metadataRefused }` marker) the read resolver serves. The
+        // insert below takes the stored form only — an expanded object is
+        // refused by the media value-shape check — and a copied id then
+        // follows the same field-reference rule an `overrides` id does.
         const source = await host.engine.findOne(
             request.object,
-            { where: { id: request.id }, ...ctxOpt },
+            { where: { id: request.id }, context: { ...(ctx ?? {}), [RAW_FILE_VALUES_CONTEXT_KEY]: true } },
         );
         if (!source) throw recordNotFoundError(request.object, request.id, ctx);
 
