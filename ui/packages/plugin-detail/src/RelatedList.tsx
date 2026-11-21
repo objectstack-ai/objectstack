@@ -3599,6 +3599,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // the child object.
   const tabInlineEdit = tabList
     && resolveAffordance('listInlineEdit', { objectSchema, objectName: api, perms }).allowed;
+  // The bulk bar's delete is one batch call to the data source, so it reads
+  // the child object's `relatedRowDelete` row itself, beside the row delete
+  // the host hands in (objectstack#35892).
+  const tabBulkDelete = !!onRowDelete
+    && resolveAffordance('relatedRowDelete', { objectSchema, objectName: api, perms }).allowed;
   const viewSchema = React.useMemo(() => {
     if (schema) return schema;
 
@@ -3805,7 +3810,8 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         ...(tabFindParams ? { findParams: tabFindParams } : {}),
         ...(objectSchema?.fields ? { objectFields: objectSchema.fields } : {}),
         ...(onRowEdit ? { onEdit: onRowEdit } : {}),
-        ...(onRowDelete ? { onDelete: handleDeleteRow, onBulkDelete: handleBulkDeleteRows } : {}),
+        ...(onRowDelete ? { onDelete: handleDeleteRow } : {}),
+        ...(tabBulkDelete ? { onBulkDelete: handleBulkDeleteRows } : {}),
         ...(writeTabColumnState ? { onColumnStateChange: writeTabColumnState } : {}),
       };
     }
@@ -3822,7 +3828,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       ...(onRowDelete ? { onDelete: handleDeleteRow } : {}),
       ...(writeTabColumnState ? { onColumnStateChange: writeTabColumnState } : {}),
     };
-  }, [writeTabColumnState, enlargedGrid, windowed, total, currentPage, effectivePageSize, relatedData.length, hasMore, sortedData.length, paginatedData.length, activeSort, handleTableSort, objectSchema, onRowEdit, onRowDelete, handleDeleteRow, tabList, tabRecordCountLead, pickTabSummary, tabFindParams, handleBulkDeleteRows]);
+  }, [writeTabColumnState, enlargedGrid, windowed, total, currentPage, effectivePageSize, relatedData.length, hasMore, sortedData.length, paginatedData.length, activeSort, handleTableSort, objectSchema, onRowEdit, onRowDelete, handleDeleteRow, tabList, tabRecordCountLead, pickTabSummary, tabFindParams, handleBulkDeleteRows, tabBulkDelete]);
 
   // objectstack#35601 — a stateful child (tasks) is grouped by its status on
   // the related tab: open groups first, completed last (`statusGroupsOf`).
