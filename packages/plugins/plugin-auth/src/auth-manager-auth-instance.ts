@@ -180,6 +180,7 @@ export interface AuthInstanceHost {
   roleChangeGrantDeps: AuthManager['roleChangeGrantDeps'];
   sendChangeEmailNotice: AuthManager['sendChangeEmailNotice'];
   sendPasswordChangeReminder: AuthManager['sendPasswordChangeReminder'];
+  sendPasswordResetNotice: AuthManager['sendPasswordResetNotice'];
   sendExistingAccountSignUpNotice: AuthManager['sendExistingAccountSignUpNotice'];
   settleSignInAttempt: AuthManager['settleSignInAttempt'];
   settleSsoProviderDelete: AuthManager['settleSsoProviderDelete'];
@@ -896,6 +897,7 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
           roleChangeGrantDeps: (...a) => this.roleChangeGrantDeps(...a),
           sendChangeEmailNotice: (...a) => this.sendChangeEmailNotice(...a),
           sendPasswordChangeReminder: (...a) => this.sendPasswordChangeReminder(...a),
+          sendPasswordResetNotice: (...a) => this.sendPasswordResetNotice(...a),
           settleSignInAttempt: (...a) => this.settleSignInAttempt(...a),
           settleSsoProviderDelete: (...a) => this.settleSsoProviderDelete(...a),
           settleSsoSignOutOfIdp: (...a) => this.settleSsoSignOutOfIdp(...a),

@@ -25,8 +25,9 @@ import { composeProviderForDeclarations } from '../../utils/schema-migration-plu
  * refusal names this command. The reset itself is plugin-auth's
  * `setOperatorPassword`: it writes the account's password credential with
  * better-auth's own hash, clears the development seed stamp and a sign-in
- * lock, and ends every session, API key, linked sign-in account and
- * authorized app of the account.
+ * lock, ends every session, API key, linked sign-in account and authorized
+ * app of the account, disables the OAuth applications it registered and
+ * revokes the SCIM credentials it minted.
  *
  * - **The password never travels on the command line**, where a shell history
  *   and the process table keep it: it is asked for twice, unechoed, on a
@@ -38,7 +39,8 @@ import { composeProviderForDeclarations } from '../../utils/schema-migration-plu
 export default class UserSetPassword extends Command {
   static override description =
     'Set a user\'s password in the project database, ending the account\'s sessions, API keys, linked '
-    + 'sign-in accounts and authorized apps. '
+    + 'sign-in accounts and authorized apps, disabling the OAuth applications it registered and revoking the '
+    + 'SCIM credentials it minted. '
     + 'The reset a server outside development mode names when it refuses a development seed credential.';
 
   static override examples = [
@@ -108,13 +110,16 @@ export default class UserSetPassword extends Command {
             printSuccess(`The password of ${args.email.trim()} is set.`);
             printInfo(
               `${outcome.sessionsEnded} session(s) ended, ${outcome.apiKeysRevoked} API key(s) revoked, `
-                + `${outcome.signInAccountsUnlinked} linked sign-in account(s) unlinked and `
-                + `${outcome.authorizedAppsEnded} authorized app(s) ended; `
+                + `${outcome.signInAccountsUnlinked} linked sign-in account(s) unlinked, `
+                + `${outcome.authorizedAppsEnded} authorized app(s) ended, `
+                + `${outcome.ownedAppsDisabled} registered OAuth application(s) disabled and `
+                + `${outcome.scimCredentialsRevoked} minted SCIM credential(s) revoked; `
                 + 'the account signs in with the new password.',
             );
             if (!outcome.revocationComplete) {
               printWarning(
-                'Not every session, API key, linked sign-in account or authorized app could be ended: end the rest by hand.',
+                'Not every session, API key, linked sign-in account, authorized app, registered OAuth application '
+                  + 'or minted SCIM credential could be ended: end the rest by hand.',
               );
             }
           }

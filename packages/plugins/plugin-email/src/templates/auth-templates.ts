@@ -997,9 +997,11 @@ export const AUTH_EXISTING_ACCOUNT_SIGN_UP_TEMPLATES: EmailTemplate[] = [
 /**
  * Sent to the account's own address when its password was CHANGED
  * (`POST /change-password`, which proves the current password) and the
- * account still holds an API key, a linked sign-in account or an authorized
- * app. A password reset ends them; a change ends none, so the owner is
- * reminded what stayed active, and told that a reset is the way to end it all.
+ * account still holds an API key, a linked sign-in account, an authorized
+ * app, an enabled OAuth application it registered or an active SCIM
+ * credential it minted. A password reset ends them; a change ends none, so
+ * the owner is reminded what stayed active, and told that a reset is the way
+ * to end it all.
  *
  * The template engine has no loops or conditionals, so each list arrives as
  * one prepared string (names joined with commas, or a dash when empty) beside
@@ -1015,6 +1017,10 @@ const PASSWORD_CHANGED_NOTICE_VARIABLES: EmailTemplate['variables'] = [
   { name: 'signInAccounts', type: 'string', required: true, description: 'Their providers, comma-separated, or a dash when there are none' },
   { name: 'authorizedAppCount', type: 'number', required: true, description: 'How many apps the account authorized are still authorized' },
   { name: 'authorizedApps', type: 'string', required: true, description: 'Their names, comma-separated, or a dash when there are none' },
+  { name: 'ownedAppCount', type: 'number', required: true, description: 'How many OAuth applications the account registered are still enabled' },
+  { name: 'ownedApps', type: 'string', required: true, description: 'Their names, comma-separated, or a dash when there are none' },
+  { name: 'scimCredentialCount', type: 'number', required: true, description: 'How many SCIM provisioning credentials the account minted are still active' },
+  { name: 'scimCredentials', type: 'string', required: true, description: 'Their connections, comma-separated, or a dash when there are none' },
   { name: 'appName', type: 'string', required: false, description: 'Product/app name (brand override)' },
 ];
 
@@ -1032,9 +1038,11 @@ export const AUTH_PASSWORD_CHANGED_NOTICE_TEMPLATE: EmailTemplate = {
 <li>API keys ({{apiKeyCount}}): {{apiKeys}}</li>
 <li>Linked sign-in accounts ({{signInAccountCount}}): {{signInAccounts}}</li>
 <li>Authorized apps ({{authorizedAppCount}}): {{authorizedApps}}</li>
+<li>OAuth applications you registered ({{ownedAppCount}}): {{ownedApps}}</li>
+<li>SCIM provisioning credentials you minted ({{scimCredentialCount}}): {{scimCredentials}}</li>
 </ul>
-<p>Revoke any API key you do not use from the API Keys list, unlink any sign-in account you do not recognise, and withdraw any app you no longer use.</p>
-<p style="margin:24px 0;padding:16px;background:#fef2f2;border-left:4px solid #dc2626;border-radius:4px"><strong>If you did not change your password, reset it.</strong> A password reset ends every API key, every linked sign-in account and every authorized app of the account, as well as its sessions. Then contact your {{appName}} administrator.</p>
+<p>Revoke any API key you do not use from the API Keys list, unlink any sign-in account you do not recognise, withdraw any app you no longer use, delete any OAuth application you registered and no longer use, and revoke any SCIM credential you no longer need.</p>
+<p style="margin:24px 0;padding:16px;background:#fef2f2;border-left:4px solid #dc2626;border-radius:4px"><strong>If you did not change your password, reset it.</strong> A password reset ends every API key, every linked sign-in account and every authorized app of the account, as well as its sessions, disables the OAuth applications it registered and revokes the SCIM credentials it minted. Then contact your {{appName}} administrator.</p>
 `,
     'You received this email because the password of your {{appName}} account was changed.',
   ),
@@ -1047,16 +1055,22 @@ active:
 - API keys ({{apiKeyCount}}): {{apiKeys}}
 - Linked sign-in accounts ({{signInAccountCount}}): {{signInAccounts}}
 - Authorized apps ({{authorizedAppCount}}): {{authorizedApps}}
+- OAuth applications you registered ({{ownedAppCount}}): {{ownedApps}}
+- SCIM provisioning credentials you minted ({{scimCredentialCount}}): {{scimCredentials}}
 
 Revoke any API key you do not use from the API Keys list, unlink any sign-in
-account you do not recognise, and withdraw any app you no longer use.
+account you do not recognise, withdraw any app you no longer use, delete any
+OAuth application you registered and no longer use, and revoke any SCIM
+credential you no longer need.
 
 If you did not change your password, reset it. A password reset ends every API
 key, every linked sign-in account and every authorized app of the account, as
-well as its sessions. Then contact your {{appName}} administrator.`,
+well as its sessions, disables the OAuth applications it registered and
+revokes the SCIM credentials it minted. Then contact your {{appName}}
+administrator.`,
   variables: PASSWORD_CHANGED_NOTICE_VARIABLES,
   active: true,
-  description: 'Sent to the account when its password was changed and it still holds API keys, linked sign-in accounts or authorized apps, which a change, unlike a reset, does not end. Notification only.',
+  description: 'Sent to the account when its password was changed and it still holds API keys, linked sign-in accounts, authorized apps, OAuth applications it registered or SCIM credentials it minted, which a change, unlike a reset, does not end. Notification only.',
 };
 
 export const AUTH_PASSWORD_CHANGED_NOTICE_TEMPLATE_ZH_CN: EmailTemplate = {
@@ -1073,9 +1087,11 @@ export const AUTH_PASSWORD_CHANGED_NOTICE_TEMPLATE_ZH_CN: EmailTemplate = {
 <li>API 密钥（{{apiKeyCount}}）：{{apiKeys}}</li>
 <li>已关联的登录账号（{{signInAccountCount}}）：{{signInAccounts}}</li>
 <li>已授权的应用（{{authorizedAppCount}}）：{{authorizedApps}}</li>
+<li>您注册的 OAuth 应用（{{ownedAppCount}}）：{{ownedApps}}</li>
+<li>您生成的 SCIM 同步凭据（{{scimCredentialCount}}）：{{scimCredentials}}</li>
 </ul>
-<p>请在 API 密钥列表中撤销不再使用的密钥，解除您不认识的登录账号的关联，并撤回不再使用的应用的授权。</p>
-<p style="margin:24px 0;padding:16px;background:#fef2f2;border-left:4px solid #dc2626;border-radius:4px"><strong>如果不是您本人修改了密码，请重置密码。</strong>重置密码会结束账号的全部 API 密钥、全部已关联的登录账号、全部已授权的应用以及全部会话。随后请联系您的 {{appName}} 管理员。</p>
+<p>请在 API 密钥列表中撤销不再使用的密钥，解除您不认识的登录账号的关联，撤回不再使用的应用的授权，删除不再使用的、您注册的 OAuth 应用，并吊销不再需要的 SCIM 凭据。</p>
+<p style="margin:24px 0;padding:16px;background:#fef2f2;border-left:4px solid #dc2626;border-radius:4px"><strong>如果不是您本人修改了密码，请重置密码。</strong>重置密码会结束账号的全部 API 密钥、全部已关联的登录账号、全部已授权的应用以及全部会话，停用账号注册的 OAuth 应用，并吊销账号生成的 SCIM 凭据。随后请联系您的 {{appName}} 管理员。</p>
 `,
     '您收到本邮件，是因为您的 {{appName}} 账号密码已修改。',
   ),
@@ -1087,13 +1103,17 @@ export const AUTH_PASSWORD_CHANGED_NOTICE_TEMPLATE_ZH_CN: EmailTemplate = {
 - API 密钥（{{apiKeyCount}}）：{{apiKeys}}
 - 已关联的登录账号（{{signInAccountCount}}）：{{signInAccounts}}
 - 已授权的应用（{{authorizedAppCount}}）：{{authorizedApps}}
+- 您注册的 OAuth 应用（{{ownedAppCount}}）：{{ownedApps}}
+- 您生成的 SCIM 同步凭据（{{scimCredentialCount}}）：{{scimCredentials}}
 
-请在 API 密钥列表中撤销不再使用的密钥，解除您不认识的登录账号的关联，并撤回不再
-使用的应用的授权。
+请在 API 密钥列表中撤销不再使用的密钥，解除您不认识的登录账号的关联，撤回不再
+使用的应用的授权，删除不再使用的、您注册的 OAuth 应用，并吊销不再需要的 SCIM
+凭据。
 
 如果不是您本人修改了密码，请重置密码。重置密码会结束账号的全部 API 密钥、全部
-已关联的登录账号、全部已授权的应用以及全部会话。随后请联系您的 {{appName}} 管理员。`,
-  description: '账号密码被修改且账号仍持有 API 密钥、已关联的登录账号或已授权的应用时发送：与重置不同，修改密码不会结束它们。仅为通知。',
+已关联的登录账号、全部已授权的应用以及全部会话，停用账号注册的 OAuth 应用，并
+吊销账号生成的 SCIM 凭据。随后请联系您的 {{appName}} 管理员。`,
+  description: '账号密码被修改且账号仍持有 API 密钥、已关联的登录账号、已授权的应用、其注册的 OAuth 应用或其生成的 SCIM 凭据时发送：与重置不同，修改密码不会结束它们。仅为通知。',
 };
 
 export const AUTH_PASSWORD_CHANGED_NOTICE_TEMPLATE_JA_JP: EmailTemplate = {
@@ -1110,9 +1130,11 @@ export const AUTH_PASSWORD_CHANGED_NOTICE_TEMPLATE_JA_JP: EmailTemplate = {
 <li>API キー（{{apiKeyCount}}）: {{apiKeys}}</li>
 <li>連携済みのサインイン アカウント（{{signInAccountCount}}）: {{signInAccounts}}</li>
 <li>承認済みのアプリ（{{authorizedAppCount}}）: {{authorizedApps}}</li>
+<li>登録した OAuth アプリケーション（{{ownedAppCount}}）: {{ownedApps}}</li>
+<li>発行した SCIM プロビジョニング資格情報（{{scimCredentialCount}}）: {{scimCredentials}}</li>
 </ul>
-<p>使用していない API キーは API キー一覧から失効させ、心当たりのないサインイン アカウントは連携を解除し、使用していないアプリは承認を取り消してください。</p>
-<p style="margin:24px 0;padding:16px;background:#fef2f2;border-left:4px solid #dc2626;border-radius:4px"><strong>パスワードを変更した覚えがない場合は、パスワードをリセットしてください。</strong>パスワードのリセットでは、アカウントのすべての API キー、すべての連携済みサインイン アカウント、すべての承認済みアプリ、およびすべてのセッションが終了します。そのうえで {{appName}} の管理者へご連絡ください。</p>
+<p>使用していない API キーは API キー一覧から失効させ、心当たりのないサインイン アカウントは連携を解除し、使用していないアプリは承認を取り消し、使用していない登録済み OAuth アプリケーションは削除し、不要になった SCIM 資格情報は失効させてください。</p>
+<p style="margin:24px 0;padding:16px;background:#fef2f2;border-left:4px solid #dc2626;border-radius:4px"><strong>パスワードを変更した覚えがない場合は、パスワードをリセットしてください。</strong>パスワードのリセットでは、アカウントのすべての API キー、すべての連携済みサインイン アカウント、すべての承認済みアプリ、およびすべてのセッションが終了し、アカウントが登録した OAuth アプリケーションは無効化され、発行した SCIM 資格情報は失効します。そのうえで {{appName}} の管理者へご連絡ください。</p>
 `,
     '{{appName}} アカウントのパスワードが変更されたため、本メールをお送りしています。',
   ),
@@ -1125,15 +1147,20 @@ export const AUTH_PASSWORD_CHANGED_NOTICE_TEMPLATE_JA_JP: EmailTemplate = {
 - API キー（{{apiKeyCount}}）: {{apiKeys}}
 - 連携済みのサインイン アカウント（{{signInAccountCount}}）: {{signInAccounts}}
 - 承認済みのアプリ（{{authorizedAppCount}}）: {{authorizedApps}}
+- 登録した OAuth アプリケーション（{{ownedAppCount}}）: {{ownedApps}}
+- 発行した SCIM プロビジョニング資格情報（{{scimCredentialCount}}）: {{scimCredentials}}
 
 使用していない API キーは API キー一覧から失効させ、心当たりのないサインイン
-アカウントは連携を解除し、使用していないアプリは承認を取り消してください。
+アカウントは連携を解除し、使用していないアプリは承認を取り消し、使用していない
+登録済み OAuth アプリケーションは削除し、不要になった SCIM 資格情報は失効させて
+ください。
 
 パスワードを変更した覚えがない場合は、パスワードをリセットしてください。パスワードの
 リセットでは、アカウントのすべての API キー、すべての連携済みサインイン アカウント、
-すべての承認済みアプリ、およびすべてのセッションが終了します。そのうえで {{appName}}
-の管理者へご連絡ください。`,
-  description: 'パスワードが変更され、アカウントが API キー、連携済みのサインイン アカウント、または承認済みのアプリを保持しているときに送信されます。リセットと異なり、変更ではこれらは終了しません。通知のみです。',
+すべての承認済みアプリ、およびすべてのセッションが終了し、アカウントが登録した
+OAuth アプリケーションは無効化され、発行した SCIM 資格情報は失効します。そのうえで
+{{appName}} の管理者へご連絡ください。`,
+  description: 'パスワードが変更され、アカウントが API キー、連携済みのサインイン アカウント、承認済みのアプリ、登録した OAuth アプリケーション、または発行した SCIM 資格情報を保持しているときに送信されます。リセットと異なり、変更ではこれらは終了しません。通知のみです。',
 };
 
 export const AUTH_PASSWORD_CHANGED_NOTICE_TEMPLATE_ES_ES: EmailTemplate = {
@@ -1150,9 +1177,11 @@ export const AUTH_PASSWORD_CHANGED_NOTICE_TEMPLATE_ES_ES: EmailTemplate = {
 <li>Claves de API ({{apiKeyCount}}): {{apiKeys}}</li>
 <li>Cuentas de inicio de sesión vinculadas ({{signInAccountCount}}): {{signInAccounts}}</li>
 <li>Aplicaciones autorizadas ({{authorizedAppCount}}): {{authorizedApps}}</li>
+<li>Aplicaciones OAuth que registraste ({{ownedAppCount}}): {{ownedApps}}</li>
+<li>Credenciales SCIM de aprovisionamiento que emitiste ({{scimCredentialCount}}): {{scimCredentials}}</li>
 </ul>
-<p>Revoca desde la lista de claves de API las que no uses, desvincula las cuentas de inicio de sesión que no reconozcas y retira la autorización a las aplicaciones que ya no uses.</p>
-<p style="margin:24px 0;padding:16px;background:#fef2f2;border-left:4px solid #dc2626;border-radius:4px"><strong>Si no has cambiado tu contraseña, restablécela.</strong> Al restablecer la contraseña se cierran todas las claves de API, todas las cuentas de inicio de sesión vinculadas y todas las aplicaciones autorizadas de la cuenta, además de sus sesiones. Después, ponte en contacto con el administrador de {{appName}}.</p>
+<p>Revoca desde la lista de claves de API las que no uses, desvincula las cuentas de inicio de sesión que no reconozcas, retira la autorización a las aplicaciones que ya no uses, elimina las aplicaciones OAuth que registraste y ya no uses, y revoca las credenciales SCIM que ya no necesites.</p>
+<p style="margin:24px 0;padding:16px;background:#fef2f2;border-left:4px solid #dc2626;border-radius:4px"><strong>Si no has cambiado tu contraseña, restablécela.</strong> Al restablecer la contraseña se cierran todas las claves de API, todas las cuentas de inicio de sesión vinculadas y todas las aplicaciones autorizadas de la cuenta, además de sus sesiones, se desactivan las aplicaciones OAuth que registró y se revocan las credenciales SCIM que emitió. Después, ponte en contacto con el administrador de {{appName}}.</p>
 `,
     'Recibes este correo porque se ha cambiado la contraseña de tu cuenta de {{appName}}.',
   ),
@@ -1165,16 +1194,21 @@ siguen activas:
 - Claves de API ({{apiKeyCount}}): {{apiKeys}}
 - Cuentas de inicio de sesión vinculadas ({{signInAccountCount}}): {{signInAccounts}}
 - Aplicaciones autorizadas ({{authorizedAppCount}}): {{authorizedApps}}
+- Aplicaciones OAuth que registraste ({{ownedAppCount}}): {{ownedApps}}
+- Credenciales SCIM de aprovisionamiento que emitiste ({{scimCredentialCount}}): {{scimCredentials}}
 
 Revoca desde la lista de claves de API las que no uses, desvincula las cuentas
-de inicio de sesión que no reconozcas y retira la autorización a las
-aplicaciones que ya no uses.
+de inicio de sesión que no reconozcas, retira la autorización a las
+aplicaciones que ya no uses, elimina las aplicaciones OAuth que registraste y
+ya no uses, y revoca las credenciales SCIM que ya no necesites.
 
 Si no has cambiado tu contraseña, restablécela. Al restablecer la contraseña se
 cierran todas las claves de API, todas las cuentas de inicio de sesión
 vinculadas y todas las aplicaciones autorizadas de la cuenta, además de sus
-sesiones. Después, ponte en contacto con el administrador de {{appName}}.`,
-  description: 'Se envía a la cuenta cuando se cambia su contraseña y aún tiene claves de API, cuentas de inicio de sesión vinculadas o aplicaciones autorizadas, que un cambio, a diferencia de un restablecimiento, no cierra. Solo notificación.',
+sesiones, se desactivan las aplicaciones OAuth que registró y se revocan las
+credenciales SCIM que emitió. Después, ponte en contacto con el administrador
+de {{appName}}.`,
+  description: 'Se envía a la cuenta cuando se cambia su contraseña y aún tiene claves de API, cuentas de inicio de sesión vinculadas, aplicaciones autorizadas, aplicaciones OAuth que registró o credenciales SCIM que emitió, que un cambio, a diferencia de un restablecimiento, no cierra. Solo notificación.',
 };
 
 /**
@@ -1186,6 +1220,273 @@ export const AUTH_PASSWORD_CHANGED_NOTICE_TEMPLATES: EmailTemplate[] = [
   AUTH_PASSWORD_CHANGED_NOTICE_TEMPLATE_ZH_CN,
   AUTH_PASSWORD_CHANGED_NOTICE_TEMPLATE_JA_JP,
   AUTH_PASSWORD_CHANGED_NOTICE_TEMPLATE_ES_ES,
+];
+
+// ───────────────────────────────────────────────────────────────────────────
+// auth.password_reset_notice — what a password reset ended, and what it kept
+// ───────────────────────────────────────────────────────────────────────────
+/**
+ * Sent to the account's own address once a self-service password reset
+ * (`POST /reset-password`, `POST /phone-number/reset-password`) completed and
+ * ended what the account held before it. It counts the API keys, linked
+ * sign-in accounts and authorized apps the reset ended, names each OAuth
+ * application it disabled and each SCIM credential it revoked, and names what
+ * it KEPT — the single sign-on providers the account registered and its
+ * second factor — so the owner can check them.
+ *
+ * As in the change notice, the template engine has no loops or conditionals:
+ * each list arrives as one prepared string (comma-joined, or a dash when
+ * empty) beside its count. The footer is overridden: a reset the owner did not
+ * make is not safe to ignore.
+ */
+const PASSWORD_RESET_NOTICE_VARIABLES: EmailTemplate['variables'] = [
+  { name: 'user.name', type: 'string', required: false, description: 'Recipient display name' },
+  { name: 'user.email', type: 'string', required: true, description: 'The account email — the recipient' },
+  { name: 'apiKeyCount', type: 'number', required: true, description: 'How many API keys of the account the reset revoked' },
+  { name: 'signInAccountCount', type: 'number', required: true, description: 'How many linked sign-in accounts the reset unlinked' },
+  { name: 'authorizedAppCount', type: 'number', required: true, description: 'How many authorized apps the reset ended' },
+  { name: 'ownedAppCount', type: 'number', required: true, description: 'How many OAuth applications the account registered the reset disabled' },
+  { name: 'ownedApps', type: 'string', required: true, description: 'Their names, comma-separated, or a dash when there are none' },
+  { name: 'scimCredentialCount', type: 'number', required: true, description: 'How many SCIM provisioning credentials the account minted the reset revoked' },
+  { name: 'scimCredentials', type: 'string', required: true, description: 'Their connections, comma-separated, or a dash when there are none' },
+  { name: 'ssoProviderCount', type: 'number', required: true, description: 'How many single sign-on providers the account registered, which the reset kept' },
+  { name: 'ssoProviders', type: 'string', required: true, description: 'Their provider ids, comma-separated, or a dash when there are none' },
+  { name: 'twoFactorCount', type: 'number', required: true, description: 'The account\'s second-factor enrolments, which the reset kept: 1 when it is enrolled, else 0' },
+  { name: 'appName', type: 'string', required: false, description: 'Product/app name (brand override)' },
+];
+
+const RESET_ALERT_STYLE = 'margin:24px 0;padding:16px;background:#fef2f2;border-left:4px solid #dc2626;border-radius:4px';
+
+export const AUTH_PASSWORD_RESET_NOTICE_TEMPLATE: EmailTemplate = {
+  name: 'auth.password_reset_notice',
+  label: 'Password Reset Notice (what the reset ended and kept)',
+  locale: 'en-US',
+  subject: 'Your {{appName}} password was reset',
+  bodyHtml: wrap(
+    'Your password was reset',
+    `
+<p>Hi {{user.name}},</p>
+<p>The password of your {{appName}} account (<strong>{{user.email}}</strong>) was reset, and every session of the account was signed out. A password reset also ends the other ways into the account it held before the reset:</p>
+<ul>
+<li>API keys revoked ({{apiKeyCount}})</li>
+<li>Linked sign-in accounts unlinked ({{signInAccountCount}})</li>
+<li>Authorized apps ended ({{authorizedAppCount}})</li>
+<li>OAuth applications you registered, disabled ({{ownedAppCount}}): {{ownedApps}}</li>
+<li>SCIM provisioning credentials you minted, revoked ({{scimCredentialCount}}): {{scimCredentials}}</li>
+</ul>
+<p>Mint a new API key, link a sign-in account again and authorize an app again where you still need one. A platform administrator can enable a disabled OAuth application again. A revoked SCIM credential cannot be restored: provisioning through its connection waits until a platform administrator mints a new credential and gives it to the identity provider.</p>
+<p>The reset kept these. Check that you recognise each one:</p>
+<ul>
+<li>Single sign-on providers you registered ({{ssoProviderCount}}): {{ssoProviders}}</li>
+<li>Two-factor authentication enrolments ({{twoFactorCount}})</li>
+</ul>
+<p style="${RESET_ALERT_STYLE}"><strong>If you did not reset your password, contact your {{appName}} administrator at once</strong>, and reset it again.</p>
+`,
+    'You received this email because the password of your {{appName}} account was reset.',
+  ),
+  bodyText: `Hi {{user.name}},
+
+The password of your {{appName}} account ({{user.email}}) was reset, and every
+session of the account was signed out. A password reset also ends the other
+ways into the account it held before the reset:
+
+- API keys revoked ({{apiKeyCount}})
+- Linked sign-in accounts unlinked ({{signInAccountCount}})
+- Authorized apps ended ({{authorizedAppCount}})
+- OAuth applications you registered, disabled ({{ownedAppCount}}): {{ownedApps}}
+- SCIM provisioning credentials you minted, revoked ({{scimCredentialCount}}): {{scimCredentials}}
+
+Mint a new API key, link a sign-in account again and authorize an app again
+where you still need one. A platform administrator can enable a disabled OAuth
+application again. A revoked SCIM credential cannot be restored: provisioning
+through its connection waits until a platform administrator mints a new
+credential and gives it to the identity provider.
+
+The reset kept these. Check that you recognise each one:
+
+- Single sign-on providers you registered ({{ssoProviderCount}}): {{ssoProviders}}
+- Two-factor authentication enrolments ({{twoFactorCount}})
+
+If you did not reset your password, contact your {{appName}} administrator at
+once, and reset it again.`,
+  variables: PASSWORD_RESET_NOTICE_VARIABLES,
+  active: true,
+  description: 'Sent to the account when a self-service password reset completed: what the reset ended (API keys, linked sign-in accounts, authorized apps, the OAuth applications the account registered, the SCIM credentials it minted) and what it kept (single sign-on providers, second factor). Notification only.',
+};
+
+export const AUTH_PASSWORD_RESET_NOTICE_TEMPLATE_ZH_CN: EmailTemplate = {
+  ...AUTH_PASSWORD_RESET_NOTICE_TEMPLATE,
+  locale: 'zh-CN',
+  label: '密码重置通知（重置结束与保留的内容）',
+  subject: '您的 {{appName}} 密码已重置',
+  bodyHtml: wrap(
+    '您的密码已重置',
+    `
+<p>{{user.name}} 您好：</p>
+<p>您的 {{appName}} 账号（<strong>{{user.email}}</strong>）的密码已重置，账号的全部会话均已退出。重置密码还会结束账号在重置前持有的其他访问方式：</p>
+<ul>
+<li>已吊销的 API 密钥（{{apiKeyCount}}）</li>
+<li>已解除关联的登录账号（{{signInAccountCount}}）</li>
+<li>已结束授权的应用（{{authorizedAppCount}}）</li>
+<li>已停用的、您注册的 OAuth 应用（{{ownedAppCount}}）：{{ownedApps}}</li>
+<li>已吊销的、您生成的 SCIM 同步凭据（{{scimCredentialCount}}）：{{scimCredentials}}</li>
+</ul>
+<p>如仍需要，请重新生成 API 密钥、重新关联登录账号并重新授权应用。平台管理员可以重新启用已停用的 OAuth 应用。已吊销的 SCIM 凭据无法恢复：在平台管理员生成新凭据并交给身份提供方之前，通过该连接的同步会暂停。</p>
+<p>以下内容在重置后保留，请确认每一项都是您认识的：</p>
+<ul>
+<li>您注册的单点登录提供方（{{ssoProviderCount}}）：{{ssoProviders}}</li>
+<li>双重验证登记（{{twoFactorCount}}）</li>
+</ul>
+<p style="${RESET_ALERT_STYLE}"><strong>如果不是您本人重置了密码，请立即联系您的 {{appName}} 管理员</strong>，并再次重置密码。</p>
+`,
+    '您收到本邮件，是因为您的 {{appName}} 账号密码已重置。',
+  ),
+  bodyText: `{{user.name}} 您好：
+
+您的 {{appName}} 账号（{{user.email}}）的密码已重置，账号的全部会话均已退出。
+重置密码还会结束账号在重置前持有的其他访问方式：
+
+- 已吊销的 API 密钥（{{apiKeyCount}}）
+- 已解除关联的登录账号（{{signInAccountCount}}）
+- 已结束授权的应用（{{authorizedAppCount}}）
+- 已停用的、您注册的 OAuth 应用（{{ownedAppCount}}）：{{ownedApps}}
+- 已吊销的、您生成的 SCIM 同步凭据（{{scimCredentialCount}}）：{{scimCredentials}}
+
+如仍需要，请重新生成 API 密钥、重新关联登录账号并重新授权应用。平台管理员可以
+重新启用已停用的 OAuth 应用。已吊销的 SCIM 凭据无法恢复：在平台管理员生成新凭据
+并交给身份提供方之前，通过该连接的同步会暂停。
+
+以下内容在重置后保留，请确认每一项都是您认识的：
+
+- 您注册的单点登录提供方（{{ssoProviderCount}}）：{{ssoProviders}}
+- 双重验证登记（{{twoFactorCount}}）
+
+如果不是您本人重置了密码，请立即联系您的 {{appName}} 管理员，并再次重置密码。`,
+  description: '自助重置密码完成后发送：重置结束了什么（API 密钥、已关联的登录账号、已授权的应用、账号注册的 OAuth 应用、账号生成的 SCIM 凭据）以及保留了什么（单点登录提供方、双重验证）。仅为通知。',
+};
+
+export const AUTH_PASSWORD_RESET_NOTICE_TEMPLATE_JA_JP: EmailTemplate = {
+  ...AUTH_PASSWORD_RESET_NOTICE_TEMPLATE,
+  locale: 'ja-JP',
+  label: 'パスワード リセットのお知らせ（終了したものと保持されたもの）',
+  subject: '{{appName}} のパスワードがリセットされました',
+  bodyHtml: wrap(
+    'パスワードがリセットされました',
+    `
+<p>{{user.name}} 様</p>
+<p>{{appName}} アカウント（<strong>{{user.email}}</strong>）のパスワードがリセットされ、アカウントのすべてのセッションがサインアウトされました。パスワードのリセットでは、リセット前にアカウントが保持していたその他のアクセス手段も終了します。</p>
+<ul>
+<li>失効した API キー（{{apiKeyCount}}）</li>
+<li>連携を解除したサインイン アカウント（{{signInAccountCount}}）</li>
+<li>承認を終了したアプリ（{{authorizedAppCount}}）</li>
+<li>無効化した、登録済みの OAuth アプリケーション（{{ownedAppCount}}）: {{ownedApps}}</li>
+<li>失効した、発行済みの SCIM プロビジョニング資格情報（{{scimCredentialCount}}）: {{scimCredentials}}</li>
+</ul>
+<p>引き続き必要な場合は、API キーを新たに発行し、サインイン アカウントを再度連携し、アプリを再度承認してください。無効化された OAuth アプリケーションは、プラットフォーム管理者が再度有効にできます。失効した SCIM 資格情報は元に戻せません。プラットフォーム管理者が新しい資格情報を発行して ID プロバイダーに設定するまで、その接続によるプロビジョニングは停止します。</p>
+<p>次のものはリセット後も保持されています。いずれも心当たりがあることを確認してください。</p>
+<ul>
+<li>登録したシングル サインオン プロバイダー（{{ssoProviderCount}}）: {{ssoProviders}}</li>
+<li>2 要素認証の登録（{{twoFactorCount}}）</li>
+</ul>
+<p style="${RESET_ALERT_STYLE}"><strong>パスワードをリセットした覚えがない場合は、直ちに {{appName}} の管理者へご連絡ください。</strong>そのうえでパスワードを再度リセットしてください。</p>
+`,
+    '{{appName}} アカウントのパスワードがリセットされたため、本メールをお送りしています。',
+  ),
+  bodyText: `{{user.name}} 様
+
+{{appName}} アカウント（{{user.email}}）のパスワードがリセットされ、アカウントの
+すべてのセッションがサインアウトされました。パスワードのリセットでは、リセット前に
+アカウントが保持していたその他のアクセス手段も終了します。
+
+- 失効した API キー（{{apiKeyCount}}）
+- 連携を解除したサインイン アカウント（{{signInAccountCount}}）
+- 承認を終了したアプリ（{{authorizedAppCount}}）
+- 無効化した、登録済みの OAuth アプリケーション（{{ownedAppCount}}）: {{ownedApps}}
+- 失効した、発行済みの SCIM プロビジョニング資格情報（{{scimCredentialCount}}）: {{scimCredentials}}
+
+引き続き必要な場合は、API キーを新たに発行し、サインイン アカウントを再度連携し、
+アプリを再度承認してください。無効化された OAuth アプリケーションは、プラットフォーム
+管理者が再度有効にできます。失効した SCIM 資格情報は元に戻せません。プラットフォーム
+管理者が新しい資格情報を発行して ID プロバイダーに設定するまで、その接続による
+プロビジョニングは停止します。
+
+次のものはリセット後も保持されています。いずれも心当たりがあることを確認してください。
+
+- 登録したシングル サインオン プロバイダー（{{ssoProviderCount}}）: {{ssoProviders}}
+- 2 要素認証の登録（{{twoFactorCount}}）
+
+パスワードをリセットした覚えがない場合は、直ちに {{appName}} の管理者へご連絡
+ください。そのうえでパスワードを再度リセットしてください。`,
+  description: 'セルフサービスのパスワード リセットが完了したときに送信されます。リセットで終了したもの（API キー、連携済みのサインイン アカウント、承認済みのアプリ、アカウントが登録した OAuth アプリケーション、発行した SCIM 資格情報）と保持されたもの（シングル サインオン プロバイダー、2 要素認証）を伝えます。通知のみです。',
+};
+
+export const AUTH_PASSWORD_RESET_NOTICE_TEMPLATE_ES_ES: EmailTemplate = {
+  ...AUTH_PASSWORD_RESET_NOTICE_TEMPLATE,
+  locale: 'es-ES',
+  label: 'Aviso de restablecimiento de contraseña (lo que se cerró y lo que se conservó)',
+  subject: 'Se ha restablecido tu contraseña de {{appName}}',
+  bodyHtml: wrap(
+    'Se ha restablecido tu contraseña',
+    `
+<p>Hola {{user.name}}:</p>
+<p>Se ha restablecido la contraseña de tu cuenta de {{appName}} (<strong>{{user.email}}</strong>) y se han cerrado todas las sesiones de la cuenta. Un restablecimiento de contraseña también cierra las demás formas de entrar en la cuenta que esta tenía antes del restablecimiento:</p>
+<ul>
+<li>Claves de API revocadas ({{apiKeyCount}})</li>
+<li>Cuentas de inicio de sesión desvinculadas ({{signInAccountCount}})</li>
+<li>Aplicaciones autorizadas cerradas ({{authorizedAppCount}})</li>
+<li>Aplicaciones OAuth que registraste, desactivadas ({{ownedAppCount}}): {{ownedApps}}</li>
+<li>Credenciales SCIM de aprovisionamiento que emitiste, revocadas ({{scimCredentialCount}}): {{scimCredentials}}</li>
+</ul>
+<p>Si todavía las necesitas, crea una nueva clave de API, vuelve a vincular la cuenta de inicio de sesión y vuelve a autorizar la aplicación. Un administrador de la plataforma puede volver a activar una aplicación OAuth desactivada. Una credencial SCIM revocada no se puede restaurar: el aprovisionamiento por su conexión queda en pausa hasta que un administrador de la plataforma emita una credencial nueva y se la entregue al proveedor de identidad.</p>
+<p>El restablecimiento conservó lo siguiente. Comprueba que reconoces cada elemento:</p>
+<ul>
+<li>Proveedores de inicio de sesión único que registraste ({{ssoProviderCount}}): {{ssoProviders}}</li>
+<li>Inscripciones de autenticación en dos pasos ({{twoFactorCount}})</li>
+</ul>
+<p style="${RESET_ALERT_STYLE}"><strong>Si no has restablecido tu contraseña, ponte en contacto de inmediato con el administrador de {{appName}}</strong> y vuelve a restablecerla.</p>
+`,
+    'Recibes este correo porque se ha restablecido la contraseña de tu cuenta de {{appName}}.',
+  ),
+  bodyText: `Hola {{user.name}}:
+
+Se ha restablecido la contraseña de tu cuenta de {{appName}} ({{user.email}}) y
+se han cerrado todas las sesiones de la cuenta. Un restablecimiento de
+contraseña también cierra las demás formas de entrar en la cuenta que esta
+tenía antes del restablecimiento:
+
+- Claves de API revocadas ({{apiKeyCount}})
+- Cuentas de inicio de sesión desvinculadas ({{signInAccountCount}})
+- Aplicaciones autorizadas cerradas ({{authorizedAppCount}})
+- Aplicaciones OAuth que registraste, desactivadas ({{ownedAppCount}}): {{ownedApps}}
+- Credenciales SCIM de aprovisionamiento que emitiste, revocadas ({{scimCredentialCount}}): {{scimCredentials}}
+
+Si todavía las necesitas, crea una nueva clave de API, vuelve a vincular la
+cuenta de inicio de sesión y vuelve a autorizar la aplicación. Un administrador
+de la plataforma puede volver a activar una aplicación OAuth desactivada. Una
+credencial SCIM revocada no se puede restaurar: el aprovisionamiento por su
+conexión queda en pausa hasta que un administrador de la plataforma emita una
+credencial nueva y se la entregue al proveedor de identidad.
+
+El restablecimiento conservó lo siguiente. Comprueba que reconoces cada
+elemento:
+
+- Proveedores de inicio de sesión único que registraste ({{ssoProviderCount}}): {{ssoProviders}}
+- Inscripciones de autenticación en dos pasos ({{twoFactorCount}})
+
+Si no has restablecido tu contraseña, ponte en contacto de inmediato con el
+administrador de {{appName}} y vuelve a restablecerla.`,
+  description: 'Se envía a la cuenta cuando se completa un restablecimiento de contraseña de autoservicio: lo que el restablecimiento cerró (claves de API, cuentas de inicio de sesión vinculadas, aplicaciones autorizadas, las aplicaciones OAuth que la cuenta registró, las credenciales SCIM que emitió) y lo que conservó (proveedores de inicio de sesión único, segundo factor). Solo notificación.',
+};
+
+/**
+ * Every locale row of the password-reset notice, in one list so the
+ * `(name, locale)` set is enumerable rather than re-derived per call site.
+ */
+export const AUTH_PASSWORD_RESET_NOTICE_TEMPLATES: EmailTemplate[] = [
+  AUTH_PASSWORD_RESET_NOTICE_TEMPLATE,
+  AUTH_PASSWORD_RESET_NOTICE_TEMPLATE_ZH_CN,
+  AUTH_PASSWORD_RESET_NOTICE_TEMPLATE_JA_JP,
+  AUTH_PASSWORD_RESET_NOTICE_TEMPLATE_ES_ES,
 ];
 
 /**
@@ -1207,4 +1508,5 @@ export const BUILTIN_AUTH_TEMPLATES: EmailTemplate[] = [
   ...AUTH_EMAIL_CHANGE_NOTICE_TEMPLATES,
   ...AUTH_EXISTING_ACCOUNT_SIGN_UP_TEMPLATES,
   ...AUTH_PASSWORD_CHANGED_NOTICE_TEMPLATES,
+  ...AUTH_PASSWORD_RESET_NOTICE_TEMPLATES,
 ];
