@@ -7619,9 +7619,9 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       // A slot holder hands over their OWN slot and no other: `from` must be
       // one of the addresses this actor acts under (`actorAddresses`, the
       // same set the slot test reads). Moving another approver's slot is the
-      // system's or the override's, never a fellow approver's.
-      if (!context.isSystem && !isOverride
-        && !actorAddresses(actorId, await this.actingCaller(context)).includes(from)) {
+      // system's or the override's (`isOverride` admits the system), never a
+      // fellow approver's.
+      if (!isOverride && !actorAddresses(actorId, await this.actingCaller(context)).includes(from)) {
         throw new Error(
           `FORBIDDEN: actor '${actorId}' may hand over only their own slot, and '${from}' is another approver's: `
           + `it moves only for its holder, an administrator, or the system`,
