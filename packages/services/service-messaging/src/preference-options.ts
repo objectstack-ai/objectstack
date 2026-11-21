@@ -47,7 +47,8 @@
  * template sites: `plugin-approvals` (`approval.*`), `plugin-audit`
  * (`collab.mention`, `collab.reply`), `plugin-security` (`security.access_upgrade`,
  * `system.upgrade_impact`), `plugin-auth` (the two phone SMS template
- * topics) and this package's Slack link store (`messaging.slack_link_removed`).
+ * topics), this package's Slack link store (`messaging.slack_link_removed`)
+ * and core's Change Owner (`record.owner_changed`, `change-record-owner.ts`).
  * Kept sorted; a feature that starts sending a new fixed topic adds
  * it here.
  */
@@ -67,6 +68,7 @@ export const PLATFORM_NOTIFICATION_TOPICS: readonly string[] = [
     'collab.mention',
     'collab.reply',
     'messaging.slack_link_removed',
+    'record.owner_changed',
     'security.access_upgrade',
     'system.upgrade_impact',
 ];

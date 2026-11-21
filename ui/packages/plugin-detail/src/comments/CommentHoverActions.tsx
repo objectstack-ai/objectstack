@@ -26,8 +26,13 @@ export interface CommentHoverActionsProps {
   onReply?: () => void;
   /** Adds (or takes back) the viewer's reaction. */
   onReact?: (emoji: string) => void;
-  /** Marks the thread resolved; offered only where the deployment stores it. */
+  /**
+   * Marks the thread resolved, or reopens it when `resolved`; offered only on
+   * a thread's top-level comment, where the deployment stores it.
+   */
   onResolve?: () => void;
+  /** The thread is resolved: the ✓ reads 「恢复」 and shows pressed. */
+  resolved?: boolean;
   /** The author's Edit; under 更多. */
   onEdit?: () => void;
   /** The author's Delete; under 更多, the host confirms first. */
@@ -48,6 +53,7 @@ export const CommentHoverActions: React.FC<CommentHoverActionsProps> = ({
   onReply,
   onReact,
   onResolve,
+  resolved = false,
   onEdit,
   onDelete,
 }) => {
@@ -114,11 +120,12 @@ export const CommentHoverActions: React.FC<CommentHoverActionsProps> = ({
       {onResolve && (
         <button
           type="button"
-          className={ICON_BUTTON}
-          aria-label={t('detail.resolveThread')}
-          title={t('detail.resolveThread')}
+          className={cn(ICON_BUTTON, resolved && 'text-primary hover:text-primary')}
+          aria-label={resolved ? t('detail.reopenThread') : t('detail.resolveThread')}
+          aria-pressed={resolved}
+          title={resolved ? t('detail.reopenThread') : t('detail.resolveThread')}
           onClick={onResolve}
-          data-comment-action="resolve"
+          data-comment-action={resolved ? 'reopen' : 'resolve'}
         >
           <Check className="h-3.5 w-3.5" />
         </button>

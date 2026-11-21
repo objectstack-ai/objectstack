@@ -74,7 +74,7 @@ const match = (row: Row, where: Record<string, any>) => Object.entries(where).ev
 });
 
 /** An in-memory engine: equality and `$contains` filters, a per-object read/write refusal. */
-function fakeEngine(seed: Record<string, Row[]>, opts: { unreadable?: string[]; refuseUpdate?: (object: string, id: string) => boolean; disabled?: string[]; configs?: Record<string, unknown> } = {}) {
+function fakeEngine(seed: Record<string, Row[]>, opts: { unreadable?: string[]; hidden?: Record<string, string[]>; refuseUpdate?: (object: string, id: string) => boolean; disabled?: string[]; configs?: Record<string, unknown> } = {}) {
   const tables = new Map(Object.entries(seed).map(([k, rows]) => [k, rows.map((r) => ({ ...r }))]));
   const calls: Array<{ op: string; object: string; context: any; where?: any }> = [];
   const guard = (object: string, context: any) => {
@@ -93,7 +93,9 @@ function fakeEngine(seed: Record<string, Row[]>, opts: { unreadable?: string[]; 
     async find(object, q) {
       calls.push({ op: 'find', object, context: q?.context, where: q?.where });
       guard(object, q?.context);
-      const rows = (tables.get(object) ?? []).filter((r) => match(r, q?.where ?? {}));
+      // A row the caller's read door does not return; an elevated read still finds it.
+      const visible = (r: Row) => q?.context?.isSystem || !opts.hidden?.[object]?.includes(r.id);
+      const rows = (tables.get(object) ?? []).filter((r) => visible(r) && match(r, q?.where ?? {}));
       return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
     },
     async update(object, data, o) {
@@ -235,12 +237,26 @@ describe('[#30205] transferUserAssignedWork', () => {
     }
   });
 
-  it('reads the target\'s ban state elevated inside the caller\'s tenant, even when the caller cannot read users', async () => {
-    const engine = fakeEngine(seed(), { unreadable: ['sys_user'] });
+  it('reads a readable target\'s ban state elevated, inside the caller\'s tenant', async () => {
+    const engine = fakeEngine(seed());
     const err = await transferUserAssignedWork(engine, 'u_gone', 'u_also_banned', CALLER).then(() => null, (e) => e);
     expect(err?.field?.code).toBe('reference_user_banned');
-    const read = engine.calls.find((c) => c.object === 'sys_user')!;
-    expect(read.context).toEqual({ ...CALLER, isSystem: true });
+    const reads = engine.calls.filter((c) => c.object === 'sys_user');
+    expect(reads.map((c) => c.context)).toEqual([CALLER, { ...CALLER, isSystem: true }]);
+  });
+
+  it('[#29029] a user the caller cannot read answers as unknown, active or banned, and its ban is not read', async () => {
+    for (const opts of [{ unreadable: ['sys_user'] }, { hidden: { sys_user: ['u_next', 'u_also_banned'] } }]) {
+      for (const to of ['u_next', 'u_also_banned']) {
+        const engine = fakeEngine(seed(), opts);
+        const err = await transferUserAssignedWork(engine, 'u_gone', to, CALLER).then(() => null, (e) => e);
+        expect(err, `${to} ${JSON.stringify(opts)}`).toBeInstanceOf(UserWorkTransferRefusal);
+        expect({ status: err.status, code: err.code, field: err.field?.code })
+          .toEqual({ status: 404, code: 'RESOURCE_NOT_FOUND', field: 'reference_not_found' });
+        expect(engine.calls.filter((c) => c.object === 'sys_user' && c.context?.isSystem)).toHaveLength(0);
+        expect(engine.calls.filter((c) => c.op === 'update')).toHaveLength(0);
+      }
+    }
   });
 });
 

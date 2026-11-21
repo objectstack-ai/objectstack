@@ -8,12 +8,13 @@
 
 import * as React from 'react';
 import { cn } from '@object-ui/components';
+import { Check } from 'lucide-react';
 import type { FeedItem } from '@object-ui/types';
 import { useDetailTranslation } from '../useDetailTranslation';
 import { CommentAuthorAvatar } from '../CommentAuthorAvatar';
 import { CommentComposer } from './CommentComposer';
 import { CommentItem } from './CommentItem';
-import { latestRepliers, type CommentThreadData } from './commentThreads';
+import { latestRepliers, threadResolvable, threadResolved, type CommentThreadData } from './commentThreads';
 import type { RecordCommentsData } from './useRecordComments';
 
 /**
@@ -27,6 +28,14 @@ export interface CommentItemActions {
   isRoot: boolean;
   onReply?: () => void;
   onReact?: (emoji: string) => void;
+  /**
+   * Resolves the thread, or reopens it when it is resolved (`resolved`).
+   * Offered on the thread's top-level comment only, where the deployment
+   * stores resolution (objectstack#36071).
+   */
+  onResolve?: () => void;
+  /** The thread is resolved: the resolve control reads as 「恢复」. */
+  resolved?: boolean;
   onEdit?: () => void;
   onDelete?: () => void;
 }
@@ -36,7 +45,15 @@ export interface RecordCommentThreadProps {
   /** The writes, as `useRecordComments` hands them. */
   comments: Pick<
     RecordCommentsData,
-    'onAddReply' | 'onToggleReaction' | 'onEditComment' | 'onDeleteComment' | 'mentionSuggestions' | 'onMentionSuggestionsWanted'
+    | 'onAddReply'
+    | 'onToggleReaction'
+    | 'onEditComment'
+    | 'onDeleteComment'
+    | 'onResolveComment'
+    | 'moderates'
+    | 'updatesOthers'
+    | 'mentionSuggestions'
+    | 'onMentionSuggestionsWanted'
   >;
   /**
    * `expand`: the replies open in place, under the comment, with the reply
@@ -51,9 +68,37 @@ export interface RecordCommentThreadProps {
   className?: string;
 }
 
-/** Whether the viewer wrote this comment: the host's verdict, never re-derived here. */
+/** The viewer wrote this comment (`authoredByViewer`, the host's verdict, never re-derived here). */
 function ownComment(item: FeedItem): boolean {
   return item.type === 'comment' && item.authoredByViewer === true;
+}
+
+/**
+ * Whether the viewer may edit this comment (objectstack#36075 item 6): their
+ * own, or anyone's where the host says both that the viewer may moderate this
+ * record's comments (the server admits a parent record editor) and that the
+ * server admits their update of a row they did not write (the row floor).
+ */
+function editableComment(item: FeedItem, moderates: boolean | undefined, updatesOthers: boolean | undefined): boolean {
+  return ownComment(item) || (item.type === 'comment' && moderates === true && updatesOthers === true);
+}
+
+/** Whether the viewer may delete this comment: their own, or anyone's where they moderate. */
+function deletableComment(item: FeedItem, moderates: boolean | undefined): boolean {
+  return ownComment(item) || (item.type === 'comment' && moderates === true);
+}
+
+/**
+ * The resolver's name: the host's, else the entry for their id in a mention
+ * list the composer already loaded, else none — the mark then says 「已解决」.
+ */
+function resolverName(
+  root: FeedItem,
+  suggestions: RecordCommentsData['mentionSuggestions'],
+): string | undefined {
+  if (root.resolvedByName) return root.resolvedByName;
+  if (root.resolvedById == null) return undefined;
+  return suggestions?.find((s) => s.id === root.resolvedById)?.label;
 }
 
 /**
@@ -78,7 +123,13 @@ export const CommentThread: React.FC<RecordCommentThreadProps> = ({
   // on an open thread still lands it there.
   const [replyFocus, setReplyFocus] = React.useState(0);
   const [editingId, setEditingId] = React.useState<string | number | null>(null);
-  const { onAddReply, onToggleReaction, onEditComment, onDeleteComment } = comments;
+  const { onAddReply, onToggleReaction, onEditComment, onDeleteComment, onResolveComment, moderates, updatesOthers } =
+    comments;
+  const resolvable = threadResolvable(thread);
+  const resolved = threadResolved(thread);
+  // The host names the resolver (a by-id read of the ids it could not name);
+  // a mention list the composer already loaded is used too, never read for it.
+  const resolvedBy = resolved ? resolverName(root, comments.mentionSuggestions) : undefined;
 
   const openReply = React.useCallback(() => {
     if (mode === 'summary') {
@@ -94,14 +145,25 @@ export const CommentThread: React.FC<RecordCommentThreadProps> = ({
     isRoot,
     onReply: onAddReply ? openReply : undefined,
     onReact: onToggleReaction ? (emoji: string) => void onToggleReaction(item.id, emoji) : undefined,
-    onEdit: onEditComment && ownComment(item) ? () => setEditingId(item.id) : undefined,
-    onDelete: onDeleteComment && ownComment(item) ? () => void onDeleteComment(item.id) : undefined,
+    // ✓ writes the top-level row: on a thread the viewer started, or anyone's
+    // where the server admits their update of a row they did not write.
+    onResolve:
+      isRoot && resolvable && onResolveComment && (ownComment(item) || updatesOthers === true)
+        ? () => {
+            // A refused write changed nothing, and the host has said so.
+            void Promise.resolve(onResolveComment(item.id, !resolved)).catch(() => undefined);
+          }
+        : undefined,
+    resolved: isRoot && resolved,
+    onEdit: onEditComment && editableComment(item, moderates, updatesOthers) ? () => setEditingId(item.id) : undefined,
+    onDelete: onDeleteComment && deletableComment(item, moderates) ? () => void onDeleteComment(item.id) : undefined,
   });
 
-  const itemOf = (item: FeedItem, isRoot: boolean, footer?: React.ReactNode) => (
+  const itemOf = (item: FeedItem, isRoot: boolean, footer?: React.ReactNode, itemClassName?: string) => (
     <CommentItem
       key={String(item.id)}
       item={item}
+      className={itemClassName}
       actions={renderActions?.(actionsOf(item, isRoot))}
       editing={editingId === item.id}
       onSaveEdit={
@@ -142,8 +204,19 @@ export const CommentThread: React.FC<RecordCommentThreadProps> = ({
   );
 
   return (
-    <div className={cn('py-3', className)} data-comment-thread="" data-comment-thread-open={open ? 'true' : 'false'}>
-      {itemOf(root, true, summary || undefined)}
+    <div
+      className={cn('py-3', className)}
+      data-comment-thread=""
+      data-comment-thread-open={open ? 'true' : 'false'}
+      data-comment-thread-resolved={resolved ? 'true' : undefined}
+    >
+      {resolved && (
+        <p className="mb-1.5 flex items-center gap-1 text-xs text-muted-foreground" data-comment-resolved-mark="">
+          <Check className="h-3.5 w-3.5" aria-hidden="true" />
+          {resolvedBy ? t('detail.threadResolvedBy', { name: resolvedBy }) : t('detail.threadResolved')}
+        </p>
+      )}
+      {itemOf(root, true, summary || undefined, resolved && !open ? 'opacity-70' : undefined)}
       {open && (
         <div className="ml-2.5 mt-2 space-y-3 border-l-2 border-border pl-4" data-comment-replies="">
           {replies.map((reply) => itemOf(reply, false))}
