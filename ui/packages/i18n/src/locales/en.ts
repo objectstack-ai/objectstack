@@ -908,7 +908,7 @@ const en = {
       earliest: 'Earliest',
       latest: 'Latest',
       pageName: '{{label}} (this page)',
-      calculate: 'Calculate',
+      calculate: 'Add calculation',
       none: 'None',
       menuPercentEmpty: 'Percent empty',
       menuPercentFilled: 'Percent filled',

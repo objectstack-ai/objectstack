@@ -674,7 +674,7 @@ const es = {
       earliest: "Más antigua",
       latest: "Más reciente",
       pageName: "{{label}} (esta página)",
-      calculate: "Calcular",
+      calculate: "Añadir cálculo",
       none: "Ninguno",
       menuPercentEmpty: "Porcentaje vacío",
       menuPercentFilled: "Porcentaje con valor",

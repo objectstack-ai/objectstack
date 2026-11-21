@@ -714,7 +714,7 @@ const ar = {
       earliest: "الأقدم",
       latest: "الأحدث",
       pageName: "{{label}} (هذه الصفحة)",
-      calculate: "حساب",
+      calculate: "إضافة حساب",
       none: "لا شيء",
       menuPercentEmpty: "نسبة الفارغ",
       menuPercentFilled: "نسبة المعبأ",

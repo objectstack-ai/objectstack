@@ -669,7 +669,7 @@ const pt = {
       earliest: "Mais antiga",
       latest: "Mais recente",
       pageName: "{{label}} (esta página)",
-      calculate: "Calcular",
+      calculate: "Adicionar cálculo",
       none: "Nenhum",
       menuPercentEmpty: "Percentual vazio",
       menuPercentFilled: "Percentual preenchido",

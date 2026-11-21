@@ -685,7 +685,7 @@ const ru = {
       earliest: "Самая ранняя",
       latest: "Самая поздняя",
       pageName: "{{label}} (эта страница)",
-      calculate: "Вычислить",
+      calculate: "Добавить расчёт",
       none: "Нет",
       menuPercentEmpty: "Доля пустых",
       menuPercentFilled: "Доля заполненных",

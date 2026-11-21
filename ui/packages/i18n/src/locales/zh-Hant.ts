@@ -636,7 +636,7 @@ const zhHant = {
       earliest: '最早',
       latest: '最晚',
       pageName: '{{label}}（本頁）',
-      calculate: '計算',
+      calculate: '新增統計',
       none: '無',
       menuPercentEmpty: '空值佔比',
       menuPercentFilled: '非空佔比',

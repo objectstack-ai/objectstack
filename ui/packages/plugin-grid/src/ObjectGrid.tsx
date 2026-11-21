@@ -627,11 +627,20 @@ function getDataConfig(schema: ObjectGridSchema): ViewData | null {
  * deliberately at that package's floor, and that is exactly how `bf97b98c8` took it.
  */
 /**
- * The grid table's frame (objectstack#35548): every header cell 32px tall at
- * 13px, and the row lines a shade off the background rather than a rule.
+ * The grid table's frame (objectstack#35548): every header cell at 13px, and
+ * the row lines a shade off the background rather than a rule.
+ * objectstack#36048 — the header is 36px tall, as the default row is, and a
+ * line of the same shade and weight as the row lines runs between columns in
+ * the header, the rows and the footer row (none after the last cell). The
+ * line is an inset shadow on the cell's right edge, not a border: the table
+ * collapses its borders, and a collapsed border belongs to the table, so a
+ * frozen (sticky) cell's border stays behind when the rows scroll sideways
+ * and the frozen columns lose their lines. The inset shadow is the cell's
+ * own and composes with the last frozen column's scroll shadow.
  */
 export const OBJECT_GRID_TABLE_DENSITY = [
-  '[&_thead_th]:h-8 [&_thead_th]:py-0 [&_thead_th]:text-[13px] [&_tbody_tr]:border-border/50',
+  '[&_thead_th]:h-9 [&_thead_th]:py-0 [&_thead_th]:text-[13px] [&_tbody_tr]:border-border/50',
+  '[&_th:not(:last-child)]:inset-shadow-[-1px_0_0_0] [&_th:not(:last-child)]:inset-shadow-border/50 [&_td:not(:last-child)]:inset-shadow-[-1px_0_0_0] [&_td:not(:last-child)]:inset-shadow-border/50',
   // A referenced record (a lookup's link) is a small chip led by its name's
   // first letter; an option label keeps its colour, less saturated.
   '[&_td_a[data-record-link]]:inline-flex [&_td_a[data-record-link]]:h-5 [&_td_a[data-record-link]]:max-w-full [&_td_a[data-record-link]]:items-center [&_td_a[data-record-link]]:gap-1 [&_td_a[data-record-link]]:rounded [&_td_a[data-record-link]]:bg-muted [&_td_a[data-record-link]]:px-1.5 [&_td_a[data-record-link]]:text-foreground [&_td_a[data-record-link]]:hover:no-underline [&_td_a[data-record-link]]:hover:bg-accent',
@@ -2123,11 +2132,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
 
   // Density-driven cell padding/font (applied to every column so it actually reaches <td>).
   // `h-*` enforces a minimum row height so the action-button column doesn't dictate it.
-  // objectstack#35548 — the default (`compact`) row is 33px: a 32px cell and
-  // the row's 1px line.
+  // objectstack#36048 — the default (`compact`) row is 36px, its line
+  // included, as the header is (it was a 32px cell, objectstack#35548). The
+  // measured heights are pinned by `e2e/list-frame-geometry-35548.spec.ts`.
   const rowHeightCellClass =
     rowHeightMode === 'compact'
-      ? 'px-3 py-1 h-8 text-[13px] leading-tight'
+      ? 'px-3 py-1 h-9 text-[13px] leading-tight'
       : rowHeightMode === 'short'
         ? 'px-3 py-1 h-9 text-[13px] leading-normal'
         : rowHeightMode === 'tall'
@@ -3568,7 +3578,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     keyboardNavigation: schema.keyboardNavigation ?? inlineEditable,
     // The save bar sits on the grid's own inset, as its cells do (`px-3`),
     // never flush against the view's edge (objectstack-ai/objectstack#27520).
-    // objectstack#35548 — a 32px header at 13px over faint row lines.
+    // objectstack#35548 / #36048 — a 36px header at 13px over faint row and column lines.
     className: ['[&>[data-slot=table-toolbar]]:px-3 [&>[data-slot=table-toolbar]]:pt-2', OBJECT_GRID_TABLE_DENSITY, schema.className].filter(Boolean).join(' '),
     cellClassName: rowHeightMode === 'compact'
       ? 'px-3 py-1 text-[13px] leading-tight'

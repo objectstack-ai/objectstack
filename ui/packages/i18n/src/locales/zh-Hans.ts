@@ -636,7 +636,7 @@ const zh = {
       earliest: '最早',
       latest: '最晚',
       pageName: '{{label}}（本页）',
-      calculate: '计算',
+      calculate: '添加统计',
       none: '无',
       menuPercentEmpty: '空值占比',
       menuPercentFilled: '非空占比',
