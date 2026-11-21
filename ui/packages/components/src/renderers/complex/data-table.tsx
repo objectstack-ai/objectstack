@@ -19,7 +19,7 @@ import { caretToEnd, defaultTyping, defaultValueFromText, firstEditorControl, is
 import { useHorizontalOverflow, HOVER_SCROLLBAR_CLASSES } from '../../custom/use-horizontal-overflow';
 import { ActiveListRow, listRecordIdOf } from '../../custom/record-list-face';
 import { describeIgnoredBind, describeNonArrayData } from './dataTableBindDiagnostic';
-import { CellOverlay, CELL_OVERLAY_HOST_CLASS, isCellContentTruncated } from './dataTableCellOverlay';
+import { CellOverlay, CELL_OVERLAY_HOST_CLASS, isCellContentTruncated, type CellOverlaySize } from './dataTableCellOverlay';
 import { ComponentRegistry, compareSortValues, csvBlob, evalRowPredicate, formatDate, hasDeclaredPredicate, isActionSwitchedOff, formatDateTime, fromDateTimeInputValue, getSortValue, isEmptyValue, isImpossibleStoredDay, toDateInputValue, toDateTimeInputValue } from '@object-ui/core';
 import type { DataTableSchema, TableColumn, TableSortItem, TableColumnType } from '@object-ui/types';
 import type { SortDirection } from '@objectstack/spec/shared';
@@ -98,20 +98,11 @@ import {
 // longer reach this set. Typed as `TableColumnType` so re-adding one is a tsc
 // error rather than a silent re-opening of the undeclared dialect.
 /**
- * objectstack#35688 — what a cell's layer undoes so its content wraps instead
- * of truncating, and how wide a type's editor starts.
+ * objectstack#35688 — how wide a built-in editor's layer starts (a host's
+ * injected editor sizes its own). Never narrower than the cell.
  */
-const PREVIEW_UNCLIP_CLASS = '[&_*]:whitespace-normal! [&_*]:overflow-visible! [&_*]:text-clip! [&_.flex]:flex-wrap max-h-64';
-function editorOverlayClass(type: TableColumnType | undefined): string | undefined {
-  switch (type) {
-    case 'date':
-    case 'datetime':
-      return 'min-w-56';
-    case 'text':
-      return 'max-w-[min(28rem,var(--radix-popper-available-width))]';
-    default:
-      return undefined;
-  }
+function builtInEditorWidthClass(type: TableColumnType | undefined): string {
+  return type === 'date' || type === 'datetime' ? 'min-w-56' : 'min-w-40';
 }
 
 const NUMERIC_EDIT_TYPES = new Set<TableColumnType>(['number', 'currency', 'percent']);
@@ -3557,13 +3548,20 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     setSelectedCellKey(pos ? { rowKey: pendingRowKeyOf(paginatedData[pos.rowIndex]), columnKey: columns[pos.colIndex].accessorKey } : null);
   // objectstack#35688 — a selected cell whose content is cut off shows it in
   // full on a layer over the cell. Measured after the selection draws.
+  // It opens when the selection lands on such a cell, not when an edit there
+  // ends; Esc, a click elsewhere or an arrow key closes it.
   const [previewKey, setPreviewKey] = useState<string | null>(null);
   const selectedPosKey = selectedPos ? `${selectedPos.rowIndex}:${selectedPos.colIndex}` : null;
+  const previewSeenKeyRef = useRef<string | null>(null);
   useLayoutEffect(() => {
-    if (!selectedPosKey || editingCell) { setPreviewKey(null); return; }
+    const landed = selectedPosKey !== previewSeenKeyRef.current;
+    previewSeenKeyRef.current = selectedPosKey;
+    if (!selectedPosKey || editingCell || !landed) { setPreviewKey(null); return; }
     const display = tableRef.current?.querySelector<HTMLElement>('[data-selected-cell] [data-slot="cell-display"]');
     setPreviewKey(isCellContentTruncated(display ?? null) ? selectedPosKey : null);
   }, [selectedPosKey, editingCell]);
+  // The preview's size, taken as the editor replaces it, so the layer does not jump.
+  const editorSeedSizeRef = useRef<CellOverlaySize | null>(null);
   const focusSelectionRef = useRef(false);
   useEffect(() => {
     if (!focusSelectionRef.current || editingCell) return;
@@ -3616,6 +3614,11 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       return;
     }
     setCellNotice(null);
+    const preview = previewKey === `${rowIndex}:${colIndex}`
+      ? tableRef.current?.querySelector<HTMLElement>('[data-slot="cell-preview-overlay"]')
+      : null;
+    const rect = preview?.getBoundingClientRect();
+    editorSeedSizeRef.current = rect ? { width: rect.width, height: rect.height } : null;
     setSelectedCell({ rowIndex, colIndex });
     startEdit(row, col.accessorKey, seed);
   };
@@ -3698,7 +3701,11 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     if (e.key === 'Escape') {
       const rowKey = pendingRowKeyOf(row);
       if (cellNotice) setCellNotice(null);
-      else if (autosaves && pendingChanges.get(rowKey)?.changes && col.accessorKey in pendingChanges.get(rowKey)!.changes && !runningSavesRef.current.has(rowKey)) {
+      else if (previewKey !== null) {
+        // objectstack#35688 — the full-content preview closes; the cell stays selected.
+        e.preventDefault();
+        setPreviewKey(null);
+      } else if (autosaves && pendingChanges.get(rowKey)?.changes && col.accessorKey in pendingChanges.get(rowKey)!.changes && !runningSavesRef.current.has(rowKey)) {
         // objectstack#35685 — a kept (refused) edit: Esc drops it.
         e.preventDefault();
         discardCellChange(rowKey, col.accessorKey);
@@ -3735,7 +3742,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     }
     if ((e.key === 'Enter' || e.key === 'F2') && bare && !e.shiftKey) {
       e.preventDefault();
-      attemptEdit(rowIndex, colIndex);
+      // objectstack#35688 — a two-state cell flips in place; it opens no layer.
+      if (togglesCell(row, col)) toggleCell(rowIndex, colIndex);
+      else attemptEdit(rowIndex, colIndex);
     } else if (e.key === ' ' && bare && togglesCell(row, col)) {
       // A two-state cell flips; on any other cell Space is typed like any key
       // and opens the editor (the catcher reads it).
@@ -5068,7 +5077,13 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                               );
                             })()}
                             {isEditing ? (
-                              <CellOverlay kind="editor" className={editorOverlayClass(col.type)}>{(() => {
+                              <CellOverlay
+                                kind="editor"
+                                className={typeof schema.renderCellEditor === 'function' ? undefined : builtInEditorWidthClass(col.type)}
+                                minSize={editorSeedSizeRef.current}
+                                // Scrolled out of sight: commit, as a click outside does.
+                                onHidden={() => { flushInjectedEditor(); saveEditRef.current(true); }}
+                              >{(() => {
                                 // Type-aware inline editor. `col.type` is forwarded
                                 // from a producer's column inference, folded onto the
                                 // DECLARED vocabulary at that producer's emit seam
@@ -5311,7 +5326,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                             )}
                             {showsPreview && (
                               // objectstack#35688 — the whole content of a cut-off cell, in place.
-                              <CellOverlay kind="preview" className={cn(PREVIEW_UNCLIP_CLASS, editorOverlayClass(col.type))}>
+                              <CellOverlay kind="preview" onHidden={() => setPreviewKey(null)}>
                                 {typeof col.cell === 'function'
                                   ? col.cell(cellValue, row)
                                   : (cellValue != null && typeof cellValue === 'object' ? String(cellValue) : formatCellValue(cellValue) as any)}

@@ -759,32 +759,35 @@ function RowGroupsReport({
   return null;
 }
 
-/** objectstack#35688 — the starting width of a field type's editor layer (never narrower than its cell). */
+/**
+ * objectstack#35688 — how wide a field type's editor layer starts. The layer
+ * is never narrower than its cell and grows to fit this; the editor fills it.
+ */
 function cellEditorWidthClass(type: string): string {
   switch (type) {
     case 'address':
     case 'location':
-      return 'w-[22rem]';
+      return 'w-full min-w-[22rem]';
     case 'textarea':
     case 'markdown':
     case 'code':
     case 'json':
-      return 'w-80';
+      return 'w-full min-w-80';
     case 'lookup':
     case 'master_detail':
     case 'user':
-      return 'w-72';
+      return 'w-full min-w-72';
     case 'multiselect':
     case 'tags':
     case 'checkboxes':
-      return 'w-64';
+      return 'w-full min-w-64';
     case 'date':
     case 'datetime':
     case 'phone':
     case 'url':
     case 'email':
     case 'currency':
-      return 'w-56';
+      return 'w-full min-w-56';
     default:
       return 'w-full min-w-40';
   }
