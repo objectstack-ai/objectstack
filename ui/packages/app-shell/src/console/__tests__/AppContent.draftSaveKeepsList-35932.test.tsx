@@ -264,6 +264,10 @@ function boot(admin: boolean) {
   );
 }
 
+/** Forget what the list was handed (a function, so the read after it is not narrowed to `null`). */
+function forgetList() {
+  list.props = null;
+}
 const skeletonUp = () => screen.queryByTestId('route-metadata-skeleton') !== null;
 /** The calculation the list draws under `field`, as the list's schema carries it. */
 const summaryOf = (field: string) => {
@@ -285,7 +289,7 @@ const storedSummaries = (body: any) =>
 beforeEach(() => {
   server.holdViews = false;
   saves.length = 0;
-  list.props = null;
+  forgetList();
   list.mounts = 0;
   metadata.current = null;
   resetDataSource();
@@ -361,7 +365,7 @@ describe('objectstack#35932 — a shared view\'s draft save keeps the list on sc
     expect(saves.map((s) => s.options?.mode)).toEqual(['draft']);
     cleanup();
 
-    list.props = null;
+    forgetList();
     boot(false);
     await waitFor(() => expect(list.props?.schema?.columns).toBeDefined(), { timeout: 5000 });
     expect(summaryOf('amount')).toBeUndefined();

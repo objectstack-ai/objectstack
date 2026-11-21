@@ -181,12 +181,12 @@ export function useObjectViewViewCrud({
     const handleDraftBarChange = useCallback(() => {
         dropViewDraftOnRead.current = true;
         setRefreshKey(k => k + 1);
-    }, []);
+    }, [setRefreshKey]);
     useEffect(() => {
         if (!dropViewDraftOnRead.current) return;
         dropViewDraftOnRead.current = false;
         setViewDraft(null);
-    }, [savedViews]);
+    }, [savedViews, setViewDraft]);
 
     /**
      * Create a new view: the Create View dialog's door and the view-config
