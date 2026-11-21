@@ -16,19 +16,23 @@
  * one rule wherever it is drawn (the page, the split pane, the overlay drawer,
  * the maximized pane, a phone):
  *
- *  - 760 px and up: details | the right rail (320 px) — the 概览 tab's
- *    summary of the other tabs (objectstack#35596: 审批, 附件, 最近动态, then
- *    the related lists with records);
- *  - 1120 px and up: the same, wide — the details field grid takes three
- *    columns, the right rail 380 px;
- *  - below 760 px: ONE column — the details sections, then the rail.
+ *  - a full page with room for a 320 px left column and 400 px of tabs
+ *    (objectstack#35890, figure 41, `RECORD_PAGE_PIN_MIN_WIDTH`): the details
+ *    pinned to a left column (400 px, the reader may drag it; it narrows on
+ *    its own to leave the tabs 400), the other tabs beside it — the tab row
+ *    without the details, open on its first tab — each side scrolling on its
+ *    own;
+ *  - anywhere else (narrower, a drawer, a pane, a phone, a page with no other
+ *    tab, or one whose field groups place a related table): the tab row with
+ *    the details as its first tab, 「详情」, the open tab drawn the full width.
+ *    The field grid takes up to three columns; pinned, one.
  *
- * (Container widths — see the two constants for how they are derived.) Above
- * the columns sit the header, the record's tab row — 概览, one tab per related
- * list, 附件, 审批, 动态 (objectstack#35595) — and, on 概览 only, the strip
- * (`record:path`, `record:highlights`) across the whole width. Every other
- * tab draws its block in full in place of the columns; the 动态 stream is a
- * tab, never a column.
+ * (Container widths — see the two constants for how they are derived.) The
+ * tab row is the details, one tab per related list, 附件, 审批, 动态
+ * (objectstack#35595); a page with only the details draws none. A strip the
+ * page places (`record:path`, `record:highlights`) sits atop the details.
+ * The right rail of summary cards (objectstack#35596) is gone: each tab's
+ * count carries what it said (objectstack#35890).
  *
  * ## Why the layout is derived, never authored
  *
@@ -127,9 +131,76 @@ export function recordPageTierFor(width: number): RecordPageTier {
   return 'stack';
 }
 
-/** Whether a tier draws the right column beside the details (`⊟` applies). */
+/**
+ * Whether a tier is one that drew the right rail beside the details.
+ *
+ * @deprecated No tier draws a right rail since objectstack#35890; the pinned
+ * layout is {@link recordPagePinsDetails}. Kept, answering as it did, for a
+ * caller that still reads it.
+ */
 export function recordPageTierHasRightColumn(tier: RecordPageTier | null | undefined): boolean {
   return tier === 'two-column' || tier === 'wide';
+}
+
+/** The pinned left column's width when the reader never dragged it (objectstack#35890). */
+export const RECORD_PAGE_DETAILS_WIDTH = 400;
+/**
+ * The narrowest the pinned left column gets, dragged or yielding room to the
+ * tabs beside it (objectstack#35890).
+ */
+export const RECORD_PAGE_DETAILS_MIN_WIDTH = 320;
+/** The least the pinned layout keeps for the tabs beside the left column. */
+export const RECORD_PAGE_TABS_MIN_WIDTH = 400;
+/** The gap between the pinned left column and the tabs; the drag handle sits in it. */
+export const RECORD_PAGE_PINNED_GAP = 24;
+
+/**
+ * The narrowest page content (inside the page's padding) that pins the
+ * details (objectstack#35890): the narrowest left column, the gap and the
+ * least the tabs keep. ONE rule decides both whether the page pins and how
+ * wide the left column is ({@link clampDetailsWidth}): a narrower page — a
+ * window without room, or a page the comment panel narrowed — keeps the
+ * details as its first tab.
+ */
+export const RECORD_PAGE_PIN_MIN_WIDTH =
+  RECORD_PAGE_DETAILS_MIN_WIDTH + RECORD_PAGE_PINNED_GAP + RECORD_PAGE_TABS_MIN_WIDTH;
+
+/**
+ * Whether the synthesized record page pins its details to a left column, the
+ * other tabs beside it (objectstack#35890, figure 41): only on a full page (a
+ * drawer or a pane keeps the details as its first tab), only when its content
+ * is at least {@link RECORD_PAGE_PIN_MIN_WIDTH} wide, only when the page has
+ * another tab to put beside them, and never when a field group places a
+ * related table among the fields (objectstack#35889) — a table does not fit
+ * the left column, so that page keeps the details as its full-width first tab.
+ * An unknown width (zero or not a number) never pins.
+ */
+export function recordPagePinsDetails(
+  contentWidth: number,
+  columns: Pick<DefaultPageColumns, 'details' | 'timeline' | 'related'> | null | undefined,
+  fullPage: boolean,
+): boolean {
+  if (!fullPage || !columns || !(contentWidth >= RECORD_PAGE_PIN_MIN_WIDTH)) return false;
+  if (columns.timeline.length === 0 && columns.related.length === 0) return false;
+  return relatedListIdsIn(columns.details).length === 0;
+}
+
+/**
+ * The width the pinned left column takes in page content `contentWidth` CSS
+ * px wide, from the reader's dragged `width` (absent: {@link
+ * RECORD_PAGE_DETAILS_WIDTH}): never under {@link
+ * RECORD_PAGE_DETAILS_MIN_WIDTH}, and yielding to the tabs beside it, which
+ * keep at least {@link RECORD_PAGE_TABS_MIN_WIDTH} — the left column narrows
+ * on its own when room is short, and takes the asked width back when it
+ * returns. An unknown content width keeps the width asked, clamped from
+ * below.
+ */
+export function clampDetailsWidth(width: number | undefined, contentWidth: number): number {
+  const asked = typeof width === 'number' && Number.isFinite(width) ? width : RECORD_PAGE_DETAILS_WIDTH;
+  const max = contentWidth > 0
+    ? contentWidth - RECORD_PAGE_PINNED_GAP - RECORD_PAGE_TABS_MIN_WIDTH
+    : Number.POSITIVE_INFINITY;
+  return Math.round(Math.max(RECORD_PAGE_DETAILS_MIN_WIDTH, Math.min(asked, max)));
 }
 
 /**
