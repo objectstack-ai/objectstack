@@ -150,6 +150,43 @@ describe('MasterDetailForm — a group-placed collection sits at its group (obje
     expect(submitted).not.toHaveBeenCalled();
   });
 
+  it('an expanded row editor opens in the slot beside its collection, a form of its own, with no nesting warning', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const parent = parentWith([HEADER_GROUP, LINES_GROUP, TOTALS_GROUP]);
+    const child = { name: 'po_line', fields: { qty: { type: 'number', label: 'Qty' }, note: { type: 'text', label: 'Note' }, po: { type: 'master_detail', label: 'PO', reference: 'po' } } };
+    const ds = makeDataSource(parent, {
+      getObjectSchema: vi.fn(async (object: string) => (object === 'po_line' ? child : parent)),
+      findOne: vi.fn().mockResolvedValue({ id: 'po1', ref: 'PO-7', memo: 'm' }),
+      find: vi.fn().mockImplementation((object: string) =>
+        Promise.resolve({ data: object === 'po_line' ? [{ id: 'l1', po: 'po1', qty: 3, note: 'n' }] : [] }),
+      ),
+    });
+    const withEditor = [{ ...details[0], formFields: ['qty', 'note'] }];
+    const { container } = render(
+      <MasterDetailForm schema={{ objectName: 'po', mode: 'edit', recordId: 'po1', details: withEditor } as any} dataSource={ds} />,
+    );
+    const expand = await waitFor(() => {
+      const el = container.querySelector('[data-form-slot] [data-testid="line-items-expand-0"]') as HTMLElement | null;
+      if (!el) throw new Error('no expand in the placed collection');
+      return el;
+    });
+    fireEvent.click(expand);
+    const editor = await waitFor(() => {
+      const el = container.querySelector('[data-testid="md-row-form"]') as HTMLElement | null;
+      if (!el || !el.querySelector('input')) throw new Error('editor not open');
+      return el;
+    });
+    const header = container.querySelector('[data-form-section="__section_header"]')!.closest('form')!;
+    expect(editor.closest('[data-form-slot]')).toBe(container.querySelector('[data-form-slot]'));
+    for (const input of editor.querySelectorAll('input')) {
+      expect((input as HTMLInputElement).form).not.toBe(header);
+      expect(editor.contains((input as HTMLInputElement).form)).toBe(true);
+    }
+    const nesting = errors.mock.calls.filter((call) => /cannot be a descendant of|cannot contain a nested|validateDOMNesting/i.test(call.map(String).join(' ')));
+    expect(nesting).toEqual([]);
+    errors.mockRestore();
+  });
+
   it('saves the record and its lines in one batch from the placed table', async () => {
     const batchTransaction = vi.fn().mockResolvedValue({ results: [{ id: 'po1' }] });
     const ds = makeDataSource(parentWith([HEADER_GROUP, LINES_GROUP, TOTALS_GROUP]), { batchTransaction });

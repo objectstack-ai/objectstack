@@ -913,18 +913,24 @@ interface MasterDetailLinesProps {
  * never blocks Save with a browser bubble), a line button without a `type`
  * submits only the wrapper, which does nothing, and Enter in a cell finds the
  * wrapper's disabled default button and submits nothing.
+ *
+ * `ownsForm` says `children` already are a form of their own (an expanded row
+ * editor is an `ObjectForm`, its only other control a `type="button"`), so no
+ * wrapper is drawn: a form inside a form is a nesting React refuses.
  */
 const preventSubmit = (event: React.FormEvent) => event.preventDefault();
 
-const FormSlotPlacement: React.FC<{ store: FormSlotStore; id: string; children: React.ReactNode }> = ({
-  store,
-  id,
-  children,
-}) => {
+const FormSlotPlacement: React.FC<{
+  store: FormSlotStore;
+  id: string;
+  ownsForm?: boolean;
+  children: React.ReactNode;
+}> = ({ store, id, ownsForm = false, children }) => {
   useSyncExternalStore(store.subscribe, store.getVersion, store.getVersion);
   const at = store.placement(id);
   if (at === 'inline') return <>{children}</>;
   if (!at) return null;
+  if (ownsForm) return createPortal(children, at);
   return createPortal(
     <form noValidate onSubmit={preventSubmit} data-form-slot-owner="">
       <button type="submit" disabled hidden aria-hidden="true" tabIndex={-1} />
@@ -2384,7 +2390,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
           everything on the parent Save. */}
       {expanded && expandedDetail && (
         // Beside its collection: where the header placed that collection, there.
-        <FormSlotPlacement store={slotStore} id={expanded.entryId}>
+        <FormSlotPlacement store={slotStore} id={expanded.entryId} ownsForm>
         <Card className="border-primary/40 shadow-none ring-1 ring-primary/10" data-testid="md-row-form">
           <CardHeader className="pb-2 flex flex-row items-center justify-between gap-2 space-y-0">
             <CardTitle className="text-sm font-medium">
