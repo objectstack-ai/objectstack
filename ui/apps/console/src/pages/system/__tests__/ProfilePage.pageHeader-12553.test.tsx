@@ -49,7 +49,7 @@ vi.mock('@object-ui/fields', async (importOriginal) => ({
 /** Each call site's key, so the pin names the pack key it reads. */
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  useObjectTranslation: () => ({ t: (key: string) => `«${key}»`, offerableLanguages: ['en'] }),
+  useObjectTranslation: () => ({ t: (key: string) => `«${key}»`, offerableLanguages: ['en'], appContentLanguages: null }),
 }));
 
 vi.mock('@object-ui/react', async (importOriginal) => ({

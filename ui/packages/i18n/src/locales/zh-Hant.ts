@@ -2874,6 +2874,7 @@ const zhHant = {
     },
     localeSwitcher: {
       label: '語言',
+      appContentDefault: '應用內容顯示為預設語言',
     },
     system: {
       aiApprovals: {
