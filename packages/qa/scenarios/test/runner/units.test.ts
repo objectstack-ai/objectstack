@@ -795,6 +795,49 @@ describe('namespace-relative cards', () => {
   });
 });
 
+describe('the build contract asks for a stage-scoped field lock on a confirm-first action, and on no other action', () => {
+  // The gate guards the action's own door only and is not widened to `update_record`, so the
+  // line asks the build to lock the change itself. The fragments below are what the build reads.
+  const LOCK = 'lock the change it makes';
+  const STAGE = 'at the stage it acts on (a field permission `when` in their permission set)';
+  const DELETE_EXEMPT = 'an action that deletes its row locks nothing, and those people keep their delete right';
+  const actionLines = (contract: string): string[] => contract.split('\n').filter((l) => / on `[a-z0-9_]+`: /.test(l) && l.startsWith('- `'));
+
+  it('service_desk: the confirm-first `close_ticket` line carries the lock; `log_ticket`, `reply_to_customer` and `resolve_ticket` do not', () => {
+    const desk = namespacedScenario(load(resolve(HERE, '../../../../../docs/qa/scenarios/service_desk.json'))).card;
+    const lines = actionLines(dataContract(desk));
+    expect(lines).toHaveLength(4);
+    const close = lines.find((l) => l.includes('close_ticket` on '))!;
+    expect(close).toContain(': Close a resolved ticket for good; irreversible. (confirm first; ');
+    for (const fragment of [LOCK, STAGE, DELETE_EXEMPT]) expect(close).toContain(fragment);
+    for (const plain of lines.filter((l) => l !== close)) {
+      expect(plain).not.toContain('confirm first');
+      expect(plain).not.toContain(LOCK);
+    }
+  });
+
+  it('every card: each confirm-gated action line asks for the lock, and each plain one asks for nothing', () => {
+    const files = ['asset_lifecycle', 'crm_account_with_contacts', 'invoice_with_line_items', 'leave_balances', 'order_to_cash', 'project_with_tasks', 'requisition_to_receipt', 'service_desk', 'travel_expense'];
+    let gated = 0;
+    for (const f of files) {
+      const card = namespacedScenario(load(resolve(HERE, `../../../../../docs/qa/scenarios/${f}.json`))).card;
+      const lines = actionLines(dataContract(card));
+      expect(lines, f).toHaveLength(card.run.agentActions!.length);
+      card.run.agentActions!.forEach((a, i) => {
+        if (a.confirm) {
+          gated += 1;
+          expect(lines[i], `${f} ${a.name}`).toContain(`(confirm first; `);
+          expect(lines[i], `${f} ${a.name}`).toContain(LOCK);
+          expect(lines[i], `${f} ${a.name}`).toContain(DELETE_EXEMPT);
+        } else {
+          expect(lines[i], `${f} ${a.name}`).not.toContain(LOCK);
+        }
+      });
+    }
+    expect(gated).toBe(9);
+  });
+});
+
 // ── The seed's load plan ────────────────────────────────────────────────────
 
 const SCENARIOS_DIR = resolve(HERE, '../../../../../docs/qa/scenarios');
