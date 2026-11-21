@@ -32,9 +32,12 @@
 // already registered under a datasource's name, whatever driver id it
 // declares. So `bootStack` also mounts {@link createManagedDatasourceDriverGuard}
 // first, which refuses the boot when a driver verify's factory did not build
-// is registered under a managed datasource's name, a shipped id (`mongodb`,
-// `postgres`, …) included: before any plugin starts for a `driver.*` service,
-// and at the engine's `registerDriver` for anything registered after that.
+// is registered under a managed datasource's name while verify's stand-in does
+// not hold that name, a shipped id (`mongodb`, `postgres`, …) included: before
+// any plugin starts for a `driver.*` service, and at the engine's
+// `registerDriver` for anything registered after that. Once the stand-in holds
+// the name, the engine keeps it and discards a later driver, so that boot runs
+// on the stand-in and is not refused.
 //
 // A datasource ObjectStack does not own (`schemaMode` `external` or
 // `validate-only`) keeps its real driver: reads reach it, and `deriveCrudCases`
@@ -170,12 +173,16 @@ export function unstandableManagedDatasourceRefusal(found: readonly UnstandableM
   );
 }
 
-/** The sentence `os verify` exits non-zero with when a driver is already registered under a managed datasource's name. */
+/**
+ * The sentence `os verify` exits non-zero with when a plugin registers a driver
+ * under a managed datasource's name while verify's stand-in does not hold it.
+ */
 function foreignManagedDriverRefusal(found: readonly UnstandableManagedDatasource[]): string {
   const one = found.length === 1;
   return (
     `verify: refusing to boot: ${describeDatasources(found)} ${one ? 'is' : 'are'} managed, but a plugin ` +
-    `registered a driver of its own under ${one ? "that datasource's name" : "those datasources' names"}. The ` +
+    `registered a driver of its own under ${one ? "that datasource's name" : "those datasources' names"} while ` +
+    `verify's in-memory stand-in did not hold ${one ? 'it' : 'them'}. The ` +
     "datasource connection service keeps a driver registered under the datasource's name, so the boot would " +
     "run on that driver instead of verify's in-memory stand-in, and the app's seed, hooks and flows and " +
     "verify's own writes would reach whatever store it is connected to. Verify writes only to stores it " +
@@ -219,11 +226,19 @@ export interface ManagedDatasourceDriverGuard {
   init(): Promise<void>;
   start(ctx: ManagedDriverGuardContext): Promise<void>;
   /**
-   * The sentence the guard refused the boot with, once it has. The kernel
-   * hands a failed `start()` on wrapped in its own rollback message, so
-   * `bootStack` rethrows this sentence on its own.
+   * The sentence the guard refused with, once it has, even when the caller of
+   * `registerDriver` caught the refusal and carried on. `bootStack` refuses a
+   * boot that returned with this set.
    */
   readonly refusal: string | undefined;
+  /**
+   * The guard's sentence when `error` is, or has in its `cause` chain, a
+   * refusal the guard threw; otherwise `undefined`. The kernel hands a failed
+   * `start()` on wrapped in its own rollback message, with the original as its
+   * `cause`, so `bootStack` rethrows this sentence on its own, and a boot that
+   * failed for another reason keeps its own error.
+   */
+  refusalIn(error: unknown): string | undefined;
 }
 
 /** What the guard reads from its plugin context. */
@@ -266,20 +281,32 @@ function ownDriverName(driver: unknown): string | undefined {
  *   boot before any plugin starts.
  * - The engine's `registerDriver`, which `start()` then wraps on the engine
  *   instance. It is the engine's one public way to put a driver under a name
- *   (its driver map is private), and every later registration calls it:
- *   ObjectQL's adoption, an `objectql:drivers-ready` handler (fired after the
- *   engine's `init()` and before the boot's schema sync), any later plugin
- *   and the connection service itself. A driver under a managed name that is
- *   not one verify's factory built for that datasource
- *   ({@link ManagedStandInLedger}) is refused there, before the engine holds
- *   it, so it receives no call: no schema sync, seed, hook or verify write
- *   reaches it. That refusal fails the `start()` of the plugin whose code made
- *   the call; `bootStack` rethrows the guard's own sentence ({@link
- *   ManagedDatasourceDriverGuard.refusal}).
+ *   (its driver map is private in the TypeScript type only), and every later
+ *   registration calls it: ObjectQL's adoption, an `objectql:drivers-ready`
+ *   handler (fired after the engine's `init()` and before the boot's schema
+ *   sync), any later plugin, an app's `onEnable` bridge and the connection
+ *   service itself. A driver under a managed name that is not one verify's
+ *   factory built for that datasource ({@link ManagedStandInLedger}) is
+ *   refused there while the engine does not hold verify's stand-in under that
+ *   name, before the engine holds the driver, so no connect, schema sync,
+ *   seed, hook or verify write reaches it. That refusal fails the `start()` of
+ *   the plugin whose code made the call; `bootStack` rethrows the guard's own
+ *   sentence ({@link ManagedDatasourceDriverGuard.refusalIn}), and refuses the
+ *   boot too when the caller caught the refusal and the boot went on
+ *   ({@link ManagedDatasourceDriverGuard.refusal}). Once the engine holds the
+ *   stand-in under the name (the connection service registered it: AppPlugin's
+ *   `start()`, or its `objectql:drivers-ready` handler for a mapped
+ *   datasource), the wrap forwards a later driver to the engine, which keeps
+ *   the stand-in and discards the newcomer without calling it, so that boot
+ *   runs on the stand-in and is not refused.
  *
- * Not covered: a datasource the configuration handed to `bootStack` does not
- * declare, and a plugin that replaces the `objectql` service or takes this
- * guard's plugin name.
+ * Not covered, each a deliberate step around the guard rather than a shape an
+ * author falls into: a datasource the configuration handed to `bootStack` does
+ * not declare; a plugin that replaces the `objectql` service or takes this
+ * guard's plugin name; one that calls the engine prototype's `registerDriver`
+ * on the engine, or deletes or overwrites the wrap (a plain writable own
+ * property); and a driver whose `name` answers differently on the wrap's read
+ * and the engine's.
  */
 export function createManagedDatasourceDriverGuard(
   config: unknown,
@@ -289,15 +316,26 @@ export function createManagedDatasourceDriverGuard(
   if (managed.length === 0) return undefined;
   const byName = new Map(managed.map((ds) => [ds.name, ds]));
   let refusal: string | undefined;
+  const thrown = new WeakSet<object>();
   const refuse = (found: readonly UnstandableManagedDatasource[]): never => {
     refusal = foreignManagedDriverRefusal(found);
-    throw new Error(refusal);
+    const error = new Error(refusal);
+    thrown.add(error);
+    throw error;
   };
   return {
     name: 'com.objectstack.verify.managed-datasource-driver-guard',
     version: '1.0.0',
     get refusal(): string | undefined {
       return refusal;
+    },
+    refusalIn(error: unknown): string | undefined {
+      const seen = new Set<unknown>();
+      for (let at: unknown = error; at && typeof at === 'object' && !seen.has(at); at = (at as { cause?: unknown }).cause) {
+        seen.add(at);
+        if (thrown.has(at)) return (at as Error).message;
+      }
+      return undefined;
     },
     async init(): Promise<void> {},
     async start(ctx: ManagedDriverGuardContext): Promise<void> {
@@ -330,7 +368,15 @@ export function createManagedDatasourceDriverGuard(
       guarded.registerDriver = (driver: unknown, ...rest: unknown[]): unknown => {
         const name = ownDriverName(driver);
         const ds = name === undefined ? undefined : byName.get(name);
-        if (ds && !standIns.isStandIn(ds.name, driver)) refuse([ds]);
+        // Refused only when it could take the name: while the engine holds
+        // verify's stand-in under it, the engine keeps that and discards this.
+        if (
+          ds &&
+          !standIns.isStandIn(ds.name, driver) &&
+          !standIns.isStandIn(ds.name, guarded.getDriverByName?.(ds.name))
+        ) {
+          refuse([ds]);
+        }
         return register.call(guarded, driver, ...rest);
       };
     },

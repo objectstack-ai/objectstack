@@ -48,7 +48,9 @@
 // kept by the connection service whatever driver id the datasource declares,
 // so a guard started before every other plugin refuses that boot too, and,
 // for a driver registered after that, the engine's `registerDriver` refuses
-// any driver under that name verify's factory did not build. There is no
+// any driver under that name verify's factory did not build while verify's
+// stand-in does not hold the name (once it does, the engine keeps it and
+// discards the newcomer, and the boot runs on the stand-in). There is no
 // switch around either refusal. Only the local flow run refuses a write to any object routed away
 // from the default store (`flow-run.ts`).
 // `verify.external-datasource-no-writes.test.ts` pins the external half and
@@ -1092,8 +1094,9 @@ async function bootClaimed(
   // the boot when a plugin registered a driver under a declared managed
   // datasource's name, which the connection service would keep in place of
   // verify's stand-in, and from then on refuses any registration under such a
-  // name of a driver verify's factory did not build — the ledger below, shared
-  // with that factory (`./managed-datasource-stand-in.ts`). No switch.
+  // name of a driver verify's factory did not build while the stand-in does
+  // not hold that name — the ledger below, shared with that factory
+  // (`./managed-datasource-stand-in.ts`). No switch.
   const managedStandIns = createManagedStandInLedger();
   const managedDriverGuard = createManagedDatasourceDriverGuard(config, managedStandIns);
   if (managedDriverGuard) await kernel.use(managedDriverGuard as never);
@@ -1445,11 +1448,29 @@ async function bootClaimed(
   } catch (e) {
     // The kernel wraps a failed start() in its rollback message, and names the
     // plugin whose code made the call: ObjectQL's, for a registration the guard
-    // refused inside its start(). The guard's own sentence is the answer.
-    if (managedDriverGuard?.refusal !== undefined) throw Object.assign(new Error(managedDriverGuard.refusal), { cause: e });
+    // refused inside its start(). When the guard's refusal is what failed the
+    // boot, its own sentence is the answer; any other failure keeps its error.
+    const refusal = managedDriverGuard?.refusalIn(e);
+    if (refusal !== undefined) throw Object.assign(new Error(refusal), { cause: e });
     throw e;
   } finally {
     restoreRegistryLogLevel();
+  }
+  // A refusal the caller of `registerDriver` caught and carried on from: the
+  // driver never took the name, and the boot is refused all the same.
+  if (managedDriverGuard?.refusal !== undefined) {
+    try {
+      await (await kernel.getServiceAsync<{ close?(): Promise<void> }>('http-server')).close?.();
+    } catch {
+      /* best-effort */
+    }
+    try {
+      await (kernel as any).shutdown?.();
+    } catch {
+      /* best-effort */
+    }
+    restoreTenancyPosture();
+    throw new Error(managedDriverGuard.refusal);
   }
 
   // Secret fields (Field.secret) refuse to persist without a crypto provider —

@@ -89,10 +89,13 @@ don't exercise, silently breaks at runtime." Point this at *your* app.
 > does not ship (a plugin's, or a misspelling) cannot be stood in: `objectstack
 > verify` refuses to boot while one is declared, naming the datasource and the
 > driver id, and exits non-zero. It refuses the same way when a plugin
-> registers a driver of its own under a managed datasource's name, whatever
-> driver id the datasource declares, because the boot would keep that driver
-> instead of the stand-in: the driver is refused before the engine holds it,
-> so it receives no call. There is no switch around either refusal. Only
+> registers a driver of its own under a managed datasource's name before the
+> stand-in holds it, whatever driver id the datasource declares, because the
+> boot would keep that driver instead of the stand-in: the driver is refused
+> before the engine holds it, so no connect, schema sync or write reaches it.
+> A driver registered under the name once the stand-in holds it is discarded
+> by the engine, and that boot runs on the stand-in. There is no switch around
+> either refusal. Only
 > the `--flow` run refuses every write routed away from the in-memory default
 > database.
 
