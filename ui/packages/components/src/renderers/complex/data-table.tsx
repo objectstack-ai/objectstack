@@ -1511,6 +1511,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     disableInnerScroll = false,
     rowGroups,
     summaryRow,
+    floatingBar,
     isRowEditable,
     // Read ONLY to diagnose it. `data-table` does not resolve `bind` and the
     // objectui#6575 ruling is explicit that it must not start — see
@@ -5401,6 +5402,14 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                  * height stability instead. */}
               </>
             )}
+            {/* objectstack#35678 — the room kept after the last row while a
+                bar floats over the bottom of the scroll box: the last row
+                scrolls clear of it. Not a row anyone reads. */}
+            {floatingBar != null && (
+              <tr aria-hidden="true" className="h-16 border-0 hover:bg-transparent" data-testid="data-table-floating-bar-room">
+                <td colSpan={fullRowColSpan} className="p-0" />
+              </tr>
+            )}
           </TableBody>
           {/* The summary row (objectstack#35548): the table's own last row,
               held at the bottom of the scroll box, each figure in its
@@ -5463,6 +5472,24 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
           // seam before the right-pinned columns and the box's scrollbars.
           style={{ right: rightShadow.right, bottom: rightShadow.bottom }}
         />
+      )}
+      {/* objectstack#35678 — the host's floating bar (`floatingBar`), centred
+          at the bottom of the scroll box, above the summary row. A zero-height
+          box after the scroll box, held at the bottom of the viewport while a
+          table taller than its page runs past it (`sticky`). */}
+      {floatingBar != null && (
+        <div className="pointer-events-none sticky bottom-0 z-30 h-0" data-testid="data-table-floating-bar">
+          <div
+            className={cn(
+              "absolute inset-x-0 flex justify-center px-4",
+              // 2.0625rem is the summary row's h-8 plus its 1px border-t:
+              // the bar sits 1rem above the row instead of over it.
+              summaryRow ? "bottom-[calc(2.0625rem+1rem)]" : "bottom-3",
+            )}
+          >
+            {floatingBar}
+          </div>
+        </div>
       )}
       </div>
 

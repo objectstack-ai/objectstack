@@ -7,14 +7,18 @@
  */
 
 /**
- * objectstack#35554 — a list page's grid carries no row control and no bulk
- * bar: its selection is drawn into the page bar's slot (`./listPageBarSlot`).
- * A grid outside any page bar's scope (a related list, a page block) keeps
- * its Actions column and its bottom bar.
+ * objectstack#35678 — every grid draws ONE selection bar, floated at the
+ * bottom centre of its table: 「已选 N 条」 and ×, up to three labelled
+ * actions, the rest behind More. Nothing above the list changes. The table
+ * keeps room after its last row while the bar floats there.
  *
- * The page bar here is a fixture built on the same `useListPageBarHost` the
- * Console page header calls; the grid, its table, the selection bar and the
- * menus are real.
+ * objectstack#35554 — a list page's grid (inside a registered list page scope,
+ * `./listPageScope`) still carries no row-end control; a grid outside any
+ * scope (a related list, a page block) keeps its Actions column.
+ *
+ * The page column here is a fixture built on the same `useListPageScope` the
+ * Console page bars call; the grid, its table, the selection bar and the menus
+ * are real.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
@@ -22,7 +26,7 @@ import '@testing-library/jest-dom';
 import React from 'react';
 
 import { ObjectGrid } from '../ObjectGrid';
-import { useListPageBarHost } from '../listPageBarSlot';
+import { useListPageScope } from '../listPageScope';
 import { registerAllFields } from '@object-ui/fields';
 import { ActionProvider, SchemaRendererProvider } from '@object-ui/react';
 import { __clearRecordCrudVerdictCache } from '../hooks/useRecordCrudVerdicts';
@@ -74,14 +78,14 @@ const SCHEMA: any = {
   ],
 };
 
-/** The fixture page bar: the slot, and the state the list writes. */
+/** The fixture page bar: it registers its page column as a list page scope. */
 const PageBar: React.FC = () => {
-  const [slot, setSlot] = React.useState<HTMLDivElement | null>(null);
   const [scope, setScope] = React.useState<HTMLElement | null>(null);
-  const state = useListPageBarHost(slot, scope);
+  useListPageScope(scope);
   return (
-    <div ref={(el) => setScope(el?.parentElement ?? null)} data-testid="page-bar" data-selecting={state.selecting ? 'yes' : 'no'}>
-      <div ref={setSlot} data-testid="page-bar-slot" />
+    <div ref={(el) => setScope(el?.parentElement ?? null)} data-testid="page-bar">
+      <span>Accounts</span>
+      <button type="button">New</button>
     </div>
   );
 };
@@ -108,7 +112,10 @@ const tick = (name: string) => {
   fireEvent.click(within(row).getByRole('checkbox'));
 };
 
-describe('objectstack#35554 — the list page bar takes the row controls', () => {
+const bar = () => screen.getByTestId('bulk-actions-bar');
+const checked = () => screen.getAllByRole('checkbox').filter((c) => c.getAttribute('data-state') === 'checked');
+
+describe('objectstack#35678 — one floating selection bar for every grid', () => {
   it('a list page grid draws no Actions column and no hover control', async () => {
     const { container } = renderListPage(true);
     await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument());
@@ -116,50 +123,76 @@ describe('objectstack#35554 — the list page bar takes the row controls', () =>
     expect(screen.queryAllByTestId('row-action-trigger')).toHaveLength(0);
   });
 
-  it('CONTROL: a grid with no page bar keeps its Actions column', async () => {
+  it('CONTROL: a grid in no list page scope keeps its Actions column', async () => {
     const { container } = renderListPage(false);
     await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument());
     await waitFor(() => expect(container.querySelector('th[data-column-key="_actions"]')).not.toBeNull());
     expect(screen.getAllByTestId('row-action-trigger').length).toBeGreaterThan(0);
   });
 
-  it('one row selected: the slot holds the count and that record\'s first two actions, no bottom bar', async () => {
+  it("one row selected: the bar floats in the table with that record's first three actions; the page bar is untouched", async () => {
     renderListPage(true);
     await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument());
+    const pageBarBefore = screen.getByTestId('page-bar').outerHTML;
     tick('Alice');
-    const slot = screen.getByTestId('page-bar-slot');
-    await waitFor(() => expect(within(slot).getByTestId('list-selection-bar')).toBeInTheDocument());
-    expect(screen.getByTestId('page-bar')).toHaveAttribute('data-selecting', 'yes');
-    expect(within(slot).getByTestId('list-selection-count')).toHaveTextContent('1');
-    expect(within(slot).getByTestId('row-action-inline-submit_approval')).toBeInTheDocument();
-    expect(within(slot).getByTestId('row-action-inline-make_quote')).toBeInTheDocument();
-    expect(within(slot).queryByTestId('row-action-inline-clone')).toBeNull();
-    expect(within(slot).getByTestId('selection-actions-more')).toBeInTheDocument();
-    expect(screen.queryByTestId('bulk-actions-bar')).toBeNull();
+    await waitFor(() => expect(bar()).toBeInTheDocument());
+    expect(screen.getByTestId('data-table-floating-bar')).toContainElement(bar());
+    expect(within(bar()).getByTestId('bulk-selection-count')).toHaveTextContent('1');
+    expect(within(bar()).getByTestId('row-action-inline-submit_approval')).toBeInTheDocument();
+    expect(within(bar()).getByTestId('row-action-inline-make_quote')).toBeInTheDocument();
+    expect(within(bar()).getByTestId('row-action-inline-clone')).toBeInTheDocument();
+    // Edit and Delete are the fourth and fifth: behind More.
+    expect(within(bar()).queryByTestId('selection-action-edit')).toBeNull();
+    expect(within(bar()).getByTestId('selection-actions-more')).toBeInTheDocument();
+    expect(screen.getByTestId('page-bar').outerHTML).toBe(pageBarBefore);
   });
 
-  it('two rows selected: the bulk actions instead; Cancel restores the page bar', async () => {
+  it('while the bar floats, the table keeps room after its last row; × takes both away', async () => {
+    renderListPage(true);
+    await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument());
+    expect(screen.queryByTestId('data-table-floating-bar-room')).toBeNull();
+    tick('Alice');
+    tick('Bob');
+    await waitFor(() => expect(within(bar()).getByTestId('bulk-selection-count')).toHaveTextContent('2'));
+    const room = screen.getByTestId('data-table-floating-bar-room');
+    expect(room).toHaveAttribute('aria-hidden', 'true');
+    // The room is the table body's last row, after Carol.
+    expect(room.parentElement!.lastElementChild).toBe(room);
+    fireEvent.click(within(bar()).getByTestId('bulk-selection-clear'));
+    await waitFor(() => expect(screen.queryByTestId('bulk-actions-bar')).toBeNull());
+    expect(screen.queryByTestId('data-table-floating-bar-room')).toBeNull();
+    expect(checked()).toHaveLength(0);
+  });
+
+  it('two rows selected: the bulk actions instead', async () => {
     renderListPage(true);
     await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument());
     tick('Alice');
     tick('Bob');
-    const slot = screen.getByTestId('page-bar-slot');
-    await waitFor(() => expect(within(slot).getByTestId('list-selection-count')).toHaveTextContent('2'));
-    expect(within(slot).getByTestId('bulk-action-mass_update')).toBeInTheDocument();
-    expect(within(slot).getByTestId('bulk-action-assign')).toBeInTheDocument();
-    expect(within(slot).queryByTestId('row-action-inline-submit_approval')).toBeNull();
-    expect(screen.queryByTestId('bulk-actions-bar')).toBeNull();
-    fireEvent.click(within(slot).getByTestId('list-selection-cancel'));
-    await waitFor(() => expect(screen.getByTestId('page-bar')).toHaveAttribute('data-selecting', 'no'));
-    expect(within(slot).queryByTestId('list-selection-bar')).toBeNull();
-    expect(screen.getAllByRole('checkbox').filter((c) => c.getAttribute('data-state') === 'checked')).toHaveLength(0);
+    await waitFor(() => expect(within(bar()).getByTestId('bulk-selection-count')).toHaveTextContent('2'));
+    expect(within(bar()).getByTestId('bulk-action-mass_update')).toBeInTheDocument();
+    expect(within(bar()).getByTestId('bulk-action-assign')).toBeInTheDocument();
+    expect(within(bar()).getByTestId('bulk-action-tag')).toBeInTheDocument();
+    expect(within(bar()).queryByTestId('row-action-inline-submit_approval')).toBeNull();
   });
 
-  it('CONTROL: a grid with no page bar keeps the bottom bulk bar', async () => {
+  it('Esc clears the selection', async () => {
+    renderListPage(true);
+    await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument());
+    tick('Alice');
+    await waitFor(() => expect(bar()).toBeInTheDocument());
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('bulk-actions-bar')).toBeNull());
+    expect(checked()).toHaveLength(0);
+  });
+
+  it('CONTROL: a grid in no list page scope draws the same bar', async () => {
     renderListPage(false);
     await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument());
     tick('Alice');
-    await waitFor(() => expect(screen.getByTestId('bulk-actions-bar')).toBeInTheDocument());
+    tick('Bob');
+    await waitFor(() => expect(within(bar()).getByTestId('bulk-selection-count')).toHaveTextContent('2'));
+    expect(screen.getByTestId('data-table-floating-bar')).toContainElement(bar());
   });
 
   it('Shift extends a selection over the rows between', async () => {
@@ -168,8 +201,7 @@ describe('objectstack#35554 — the list page bar takes the row controls', () =>
     tick('Alice');
     const carolCell = screen.getByText('Carol').closest('tr')!.querySelector('[data-slot="row-leading-cell"]')!;
     fireEvent.click(carolCell, { shiftKey: true });
-    const slot = screen.getByTestId('page-bar-slot');
-    await waitFor(() => expect(within(slot).getByTestId('list-selection-count')).toHaveTextContent('3'));
+    await waitFor(() => expect(within(bar()).getByTestId('bulk-selection-count')).toHaveTextContent('3'));
   });
 
   it('right-click on a row: the row\'s actions, Delete last, after a separator, in the danger colour', async () => {
