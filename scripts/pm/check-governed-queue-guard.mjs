@@ -480,9 +480,13 @@
  *     not have crossed a `.claude/**` hunk (`ruleChangeCarryRefusal`);
  *   - the four guard instruments and this guard's own workflow file are plain
  *     Tier H rows of the register, so nothing here names them;
- *   - the `pull_request` early-warning leg reads no body, so it names such a
- *     diff "Tier H UNTIL the PR body is read" (`declarationUnread`) and never
- *     reddens; `CODEOWNERS` must carry a line for each always-Tier-H path.
+ *   - the `pull_request` early-warning leg reads the body its event payload
+ *     carries (the body as of the event: an edit after it is read by the next
+ *     push or by the queue leg) and no record, so a `yes` or missing line is
+ *     Tier H on the body, a declared seat value is "Tier H UNTIL its record is
+ *     read" (`ruleChangeRecordStagePending`), and a payload with no body names
+ *     the diff "Tier H UNTIL the PR body is read" (`declarationUnread`); it
+ *     never reddens. `CODEOWNERS` must carry a line for each always-Tier-H path.
  *
  * ## The FOURTH leg: the SIZE line (#19036, maintainer ruling 2026-09-18)
  *
@@ -724,6 +728,7 @@ import {
   governedSurfacesFor,
   governedTierFor,
   groupHitsByException,
+  landingTierOf,
   landsByHumanMerge,
   lowRiskArmVerdict,
   mergeWorkflowReadings,
@@ -732,6 +737,7 @@ import {
   recomputeProvenanceFor,
   readRuleChangeVerified,
   readWorkflowDiff,
+  ruleChangeRecordStagePending,
   renderLiftApprovals,
   renderLowRiskLines,
   renderRuleChangeLines,
@@ -770,7 +776,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the 2026-09-04 unpinned predicate (the queue leg\'s)': 12,
   'decomposition, and the multi-PR group trap': 13,
   'the verdict table, both events': 10,
-  'the pull_request leg is an EARLY WARNING and never reddens': 6,
+  // 6 → 9 (#35612): the leg reads the payload's body — a declared `none` waits on its record, `yes` is Tier H on the
+  // body, no body still waits on the body; an entry with no split row is untouched.
+  'the pull_request leg is an EARLY WARNING and never reddens': 9,
   'the replay fixtures: the three incidents this guard descends from': 11,
   '⭐ the ordering guarantee, measured with a spy that THROWS': 7,
   'the words a reader acts on (requirement (e))': 26,
@@ -1359,6 +1367,8 @@ export function resolveEventContext({ eventName, payload }) {
       headSha: pull.head.sha,
       namedPull: Number(pull.number),
       draft: pull.draft === true,
+      // The body as of this event (#35612): the early-warning leg reads the `.claude/**` declaration off it.
+      body: typeof pull.body === 'string' ? pull.body : null,
       label: `pull request #${pull.number}`,
     };
   }
@@ -1773,6 +1783,14 @@ export function renderGuardVerdict(verdict) {
           '           A missing line or `Rule-change: yes` is Tier H: the maintainer\'s hand or an authorized APPROVED review',
           `           (GOVERNED_APPROVERS: ${GOVERNED_APPROVERS.join(', ')}). The queue leg reads the body and the record;`,
           '           `node scripts/pm/check-governed-merges.mjs --pr <n>` reads them now.',
+        ]
+      : ruleChangeRecordStagePending(entry.surfaces)
+      ? [
+          `        ⚖️ landing tier: H(人合) UNTIL its record is read — the PR body declares \`Rule-change: ${entry.surfaces.find((s) => s?.ruleChangeVerdict?.declared)?.ruleChangeVerdict.declared ?? '(unread)'}\`, and every governed path`,
+          `           above lies under ${tierSGlobs()}, which splits by declaration (2026-11-19): it lands Tier S(席内达档 L2 审核落地)`,
+          `           once a \`## Contract review\` comment on ${REVIEW_OF_RECORD_LOCATION} naming the CURRENT head — \`Served-tier:`,
+          '           CONTRACT_REVIEW_TIER`, `**VERDICT: PASS**` — reads the same value on its `Rule-change-verified:` line. This leg',
+          '           reads no record; the queue leg does, and `node scripts/pm/check-governed-merges.mjs --pr <n>` reads it now.',
         ]
       : entry.tier === TIER_S
       ? [
@@ -2250,6 +2268,18 @@ export function readLowRiskTier(entry, repo, pull, { timeline = null, runGit = n
 }
 
 /**
+ * The early-warning leg's reading of the `.claude/**` declaration split off the event payload's body (#35612): the
+ * entry's split rows re-read with `{ body }` and no record, the tier re-read on the slice. Mutates and returns `entry`.
+ * Every other row passes through `applyRuleChangeSplit` as the same object. Pure but for the mutation.
+ */
+export function readPayloadDeclaration(entry, repo, body) {
+  if (!entry || !Array.isArray(entry.surfaces) || !entry.surfaces.some((s) => s?.ruleChangeVerdict)) return entry;
+  entry.surfaces = applyRuleChangeSplit(entry.surfaces, repo, { measured: true, reason: null, body: String(body ?? '') });
+  entry.tier = landingTierOf(entry.surfaces);
+  return entry;
+}
+
+/**
  * A reader that answers each key from its first SUCCESSFUL read. A rejection is not cached: the next caller
  * reads again, so one leg's transient failure is never another leg's verdict.
  */
@@ -2689,8 +2719,13 @@ export function ruleChangeRecordVerdict(record, pair, recognisers, declared) {
  * still governs everything the verdict is derived FROM; it never governed
  * things the verdict merely mentions.
  */
-export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fetchComments, fetchTimeline = null, fetchLabels = null, loadRecognisers = loadRecordRecognisers, lifted = [], runGit = null, baseRef = null }) {
+export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fetchComments, fetchTimeline = null, fetchLabels = null, loadRecognisers = loadRecordRecognisers, lifted = [], runGit = null, baseRef = null, pullBody = null }) {
   const { governed, unattributed } = decomposeGovernedWork(rows, assertGovernedRepo(repo, 'runGuard'));
+  // The early-warning leg reads the `.claude/**` declaration off the body its event payload carries (#35612); no record
+  // is read here, so a declared seat value stays Tier H with its record stage pending and the words say so.
+  if (event === EVENT_PULL_REQUEST && typeof pullBody === 'string') {
+    for (const entry of governed) readPayloadDeclaration(entry, repo, pullBody);
+  }
   if (governed.length === 0 && unattributed.length === 0) {
     return guardVerdict({ event, repo, governed, unattributed, apiCalls: 0, lifted });
   }
@@ -4135,7 +4170,7 @@ async function main() {
   const fetchLabels = makeLabelReader(reader);
 
   const runGit = (args, input) => git(repoRoot, args, input);
-  const verdict = await runGuard({ event: context.event, repo, rows, fetchReviews, fetchPull, fetchComments, fetchTimeline, fetchLabels, lifted, runGit, baseRef: context.baseSha ?? null });
+  const verdict = await runGuard({ event: context.event, repo, rows, fetchReviews, fetchPull, fetchComments, fetchTimeline, fetchLabels, lifted, runGit, baseRef: context.baseSha ?? null, pullBody: context.body ?? null });
   // The SIZE leg (#19036): every queued pull request, through the same pull
   // reader the governed leg reads heads with. `merge_group` only, '' on the
   // other leg, so the `pull_request` output is byte-identical to what it was.
@@ -4695,6 +4730,25 @@ export async function selfTest() {
       /`Rule-change: none`/.test(warnedSText) && /`Rule-change-verified:`/.test(warnedSText) && /declaration split .*NOT MEASURED/.test(warnedSText) && !/No review of record\n? *substitutes here/.test(warnedSText),
     warnedSText,
   );
+  // #35612: the early-warning leg reads the body its event payload carries — `yes` is Tier H on the body, a declared
+  // `none` is Tier H UNTIL its record is read (this leg reads none), and the control: no body is still "UNTIL the PR
+  // body is read". End to end through `runGuard` with the payload body, and the context carries the body.
+  const payloadRun = async (body) => runGuard({ event: 'pull_request', repo: REPO, rows: [row(9529, ['.claude/agents/os-dev.md'])], fetchReviews: async () => [], fetchPull: async () => { throw new Error('the pull_request leg reads no pull'); }, fetchComments: async () => { throw new Error('the pull_request leg reads no thread'); }, pullBody: body });
+  const payloadNone = await payloadRun('Fixes #1\n\nRule-change: none\n');
+  const payloadYes = await payloadRun('Fixes #1\n\nRule-change: yes\n');
+  const payloadUnread = await payloadRun(null);
+  const [noneText, yesText, unreadText] = [payloadNone, payloadYes, payloadUnread].map(renderGuardVerdict);
+  assert('⭐ #35612 the-early-warning-reads-the-payload-body-a-declared-none-is-Tier-H-UNTIL-its-record-is-read-and-names-the-value',
+    payloadNone.exitCode === EXIT_CLEAR && payloadNone.entries[0].tier === TIER_H && !declarationUnread(payloadNone.entries[0]) && ruleChangeRecordStagePending(payloadNone.entries[0].surfaces) &&
+      /landing tier: H\(人合\) UNTIL its record is read — the PR body declares `Rule-change: none`/.test(noneText) && /`Rule-change-verified:`/.test(noneText) && !/UNTIL the PR body is read/.test(noneText),
+    noneText);
+  assert('⛔ #35612 a-payload-body-declaring-yes-is-Tier-H-on-the-body-with-the-maintainers-landing-and-the-control-no-body-still-reads-UNTIL-the-PR-body-is-read',
+    payloadYes.entries[0].tier === TIER_H && !ruleChangeRecordStagePending(payloadYes.entries[0].surfaces) && /declares `Rule-change: yes`/.test(yesText) && /authorized APPROVED review/.test(yesText) && !/UNTIL/.test(yesText) &&
+      declarationUnread(payloadUnread.entries[0]) && /UNTIL the PR body is read/.test(unreadText) &&
+      resolveEventContext({ eventName: 'pull_request', payload: { pull_request: { number: 1, body: 'Rule-change: none', base: { sha: 'b'.repeat(40) }, head: { sha: 'h'.repeat(40) } } } }).body === 'Rule-change: none' &&
+      resolveEventContext({ eventName: 'pull_request', payload: { pull_request: { number: 1, body: null, base: { sha: 'b'.repeat(40) }, head: { sha: 'h'.repeat(40) } } } }).body === null,
+    yesText);
+  assert('#35612 readPayloadDeclaration-leaves-an-entry-with-no-split-row-as-it-was', (() => { const e = decomposeGovernedWork([row(9530, ['AGENTS.md'])], REPO).governed[0]; const before = e.surfaces; return readPayloadDeclaration(e, REPO, 'Rule-change: none').surfaces === before && e.tier === TIER_H; })());
   const warnedHText = renderGuardVerdict(warnedV);
   assert('and-names-Tier-H-and-the-approval-it-waits-for-with-no-Tier-S-block', /landing tier: H/.test(warnedHText) && /authorized APPROVED review/.test(warnedHText) && !/Tier S \(/.test(warnedHText), warnedHText);
   // The PR #25965 shape end to end on this leg: the warning names the PAYLOAD's
