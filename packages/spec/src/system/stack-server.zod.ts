@@ -194,7 +194,7 @@ export const TrustedProxyNetworksSchema = lazySchema(() => strictObject(
   },
   {
     networks: z.array(
-      z.string().trim().refine((entry) => TRUSTED_NETWORK_ENTRY.test(entry), {
+      z.string().regex(TRUSTED_NETWORK_ENTRY, {
         message:
           'is not an IP address or a CIDR range. Each entry is an address, or an address, "/" and a prefix length: '
           + '0 to 32 for IPv4, 0 to 128 for IPv6 (e.g. "10.0.0.0/8", "192.0.2.7", "2001:db8::/32").',

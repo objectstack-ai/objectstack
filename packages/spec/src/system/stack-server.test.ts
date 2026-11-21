@@ -18,6 +18,7 @@ import { defineStack } from '../stack.zod';
 import {
   StackServerConfigSchema,
   ServerRateLimitConfigSchema,
+  TrustedProxyNetworksSchema,
 } from './stack-server.zod';
 import { ObjectStackDefinitionSchema } from '../stack.zod';
 
@@ -145,5 +146,53 @@ describe('server.trustProxy defaults to not believing the caller', () => {
     expect(description).toMatch(/RESOLVED PRINCIPAL/);
     expect(description).toMatch(/falling back to the caller IP/);
     expect(description).toMatch(/Retry-After/);
+  });
+});
+
+describe('server.trustProxy accepts a trusted-network form', () => {
+  it('accepts the form, defaulting the header to x-forwarded-for', () => {
+    expect(StackServerConfigSchema.parse({ trustProxy: { networks: ['10.0.0.0/8', '2001:db8::/32', '192.0.2.7'] } }))
+      .toEqual({
+        trustProxy: { networks: ['10.0.0.0/8', '2001:db8::/32', '192.0.2.7'], header: 'x-forwarded-for' },
+      });
+    expect(StackServerConfigSchema.parse({ trustProxy: { networks: ['::1'], header: 'x-real-ip' } }).trustProxy)
+      .toEqual({ networks: ['::1'], header: 'x-real-ip' });
+  });
+
+  it('still accepts `true` and `false`', () => {
+    expect(StackServerConfigSchema.parse({ trustProxy: true }).trustProxy).toBe(true);
+    expect(StackServerConfigSchema.parse({ trustProxy: false }).trustProxy).toBe(false);
+  });
+
+  it('is reachable from defineStack', () => {
+    const stack = defineStack({ manifest, server: { trustProxy: { networks: ['10.0.0.0/8'] } } });
+    expect(stack.server?.trustProxy).toEqual({ networks: ['10.0.0.0/8'], header: 'x-forwarded-for' });
+  });
+
+  it('refuses an empty or missing network list', () => {
+    for (const trustProxy of [{ networks: [] }, {}]) {
+      const result = StackServerConfigSchema.safeParse({ trustProxy });
+      expect(result.success, JSON.stringify(trustProxy)).toBe(false);
+    }
+    const direct = TrustedProxyNetworksSchema.safeParse({ networks: [] });
+    expect(direct.success).toBe(false);
+    expect(direct.error!.issues[0]!.path).toEqual(['networks']);
+  });
+
+  it('refuses an entry that is not an address or a CIDR range', () => {
+    for (const entry of ['proxy.internal', '10.0.0.0/33', '256.0.0.1', '2001:db8::/129', '10.0.0.0/8 ', '']) {
+      const result = TrustedProxyNetworksSchema.safeParse({ networks: [entry] });
+      expect(result.success, JSON.stringify(entry)).toBe(false);
+      expect(result.error!.issues[0]!.path, JSON.stringify(entry)).toEqual(['networks', 0]);
+    }
+  });
+
+  it('refuses a header it does not read, and an unknown key', () => {
+    const header = TrustedProxyNetworksSchema.safeParse({ networks: ['10.0.0.0/8'], header: 'forwarded' });
+    expect(header.success).toBe(false);
+    expect(header.error!.issues[0]!.path).toEqual(['header']);
+    const unknown = TrustedProxyNetworksSchema.safeParse({ networks: ['10.0.0.0/8'], hops: 1 });
+    expect(unknown.success).toBe(false);
+    expect(unknown.error!.issues[0]!.code).toBe('unrecognized_keys');
   });
 });
