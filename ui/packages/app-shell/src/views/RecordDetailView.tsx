@@ -11,6 +11,8 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useContext, useMemo, useRef, type ReactElement } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
 import { activityRowToFeedItem, buildCommentThreads, CommentsButton, RecordCommentsInPanelContext, composeImpersonatedActor, IMPERSONATED_ACTOR_FALLBACK, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RECORD_PAGE_TIMELINE_PANEL, RECORD_TIMELINE_PANEL_MAX_ENTRIES, RecordFieldChangesContext, RecordFieldHistoryContext, RecordTimelineTotalContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageTierHasRightColumn, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
+// objectstack#36075 — the comment panel's unresolved count and the moderator's verdict.
+import { unresolvedThreadCount, useRecordVerdict } from '@object-ui/plugin-detail';
 import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderPhoneContext, PageHeaderTrailingContext, PanelToggles, ObjectIconTile, RecordHeaderBarContext, RecordHeaderStateContext, RecordTopBar, RecordTopBarButton, cn, useRecordStepKeys, type PanelToggleItem, type RecordHeaderBar, type RecordHeaderGroupParts, type RecordHeaderState, type RecordTopBarStepper } from '@object-ui/components';
 import { isActingApprover } from '../utils/approvalDecisionFold.js';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
@@ -495,6 +497,76 @@ function mergeFeedRows(prev: readonly FeedItem[], incoming: readonly FeedItem[])
     const tb = b.createdAt ? Date.parse(b.createdAt) : 0;
     return ta - tb;
   });
+}
+
+/**
+ * Whether a `sys_comment` row's stored `mentions` name `userId`
+ * (objectstack#36075, 「只看我参与的」): a JSON id list, as this page writes
+ * it, or a list of ids or `{ id }` objects, as #36071's `threadsInvolvingUser`
+ * reads it. Anything unreadable names nobody.
+ */
+function rowMentionsUser(raw: unknown, userId: string | undefined): boolean {
+  if (!userId || raw == null) return false;
+  let list: unknown = raw;
+  if (typeof raw === 'string') {
+    try {
+      list = JSON.parse(raw);
+    } catch {
+      return false;
+    }
+  }
+  if (!Array.isArray(list)) return false;
+  return list.some((entry) =>
+    entry != null && typeof entry === 'object'
+      ? String((entry as { id?: unknown }).id) === userId
+      : String(entry) === userId,
+  );
+}
+
+/**
+ * The resolution of a `sys_comment` row as the feed carries it
+ * (objectstack#36071, #36075): `resolved` only where the row carries
+ * `is_resolved` (a deployment that stores none offers no resolve control),
+ * the resolver's id and when, and the resolver's name where this page knows
+ * it — the viewer, or an author of the same discussion (`namesById`).
+ */
+function commentResolutionOf(
+  row: Record<string, unknown>,
+  namesById: ReadonlyMap<string, string>,
+): Pick<FeedItem, 'resolved' | 'resolvedById' | 'resolvedByName' | 'resolvedAt'> {
+  if (row.parent_id != null && row.parent_id !== '') return {};
+  if (!Object.prototype.hasOwnProperty.call(row, 'is_resolved')) return {};
+  const resolved = row.is_resolved === true;
+  if (!resolved) return { resolved: false };
+  const by = row.resolved_by;
+  const byId = by != null && typeof by === 'object' ? (by as { id?: unknown }).id : by;
+  const resolvedById = byId != null && byId !== '' ? String(byId) : undefined;
+  const expandedName = by != null && typeof by === 'object' ? (by as { name?: unknown }).name : undefined;
+  return {
+    resolved: true,
+    resolvedById,
+    resolvedByName:
+      typeof expandedName === 'string' && expandedName !== ''
+        ? expandedName
+        : resolvedById
+          ? namesById.get(resolvedById)
+          : undefined,
+    resolvedAt: typeof row.resolved_at === 'string' ? row.resolved_at : undefined,
+  };
+}
+
+/** The top-level comment a comment's thread is resolved on: its topmost held ancestor. */
+function threadRootIdOf(items: readonly FeedItem[], itemId: string | number): string | number {
+  const byId = new Map(items.map((item) => [String(item.id), item]));
+  let current = byId.get(String(itemId));
+  const seen = new Set<string>();
+  while (current && current.parentId != null && !seen.has(String(current.id))) {
+    seen.add(String(current.id));
+    const parent = byId.get(String(current.parentId));
+    if (!parent) break;
+    current = parent;
+  }
+  return current ? current.id : itemId;
 }
 
 /**
@@ -3574,6 +3646,15 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         for (const c of res.data as Array<{ parent_id?: unknown }>) {
           if (c.parent_id) replyCounts.set(c.parent_id, (replyCounts.get(c.parent_id) ?? 0) + 1);
         }
+        // objectstack#36075 — a resolver this page can name: the viewer, or an
+        // author of this discussion (their stored `author_name`).
+        const namesById = new Map<string, string>();
+        for (const c of res.data as Array<{ author_id?: unknown; author_name?: unknown }>) {
+          if (c.author_id != null && typeof c.author_name === 'string' && c.author_name !== '') {
+            namesById.set(String(c.author_id), c.author_name);
+          }
+        }
+        if (currentUser.id && currentUser.name) namesById.set(String(currentUser.id), currentUser.name);
         const mapped: FeedItem[] = res.data.map((c: any) => ({
           id: c.id,
           type: 'comment' as const,
@@ -3591,6 +3672,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           // feed never derives it.
           edited: c.is_edited === true,
           authoredByViewer: isCommentAuthor(c.author_id, currentUser.id),
+          // objectstack#36075 — the thread's resolution (#36071) and whether
+          // the row mentions the viewer (「只看我参与的」).
+          ...commentResolutionOf(c, namesById),
+          mentionsViewer: rowMentionsUser(c.mentions, currentUser.id),
           reactions:
             reactionStore === 'records'
               ? toReactions(records?.stored.get(String(c.id)))
@@ -3786,9 +3871,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const timelineTotal = timelineServed
     ? Math.max(0, timelineServed.total - timelineServed.comments + (commentsPanelOffered ? 0 : heldCommentCount))
     : null;
-  // The comments icon's number: the record's threads (its top-level comments),
-  // unknown while the read was refused or failed.
-  const commentThreadCount = useMemo(() => buildCommentThreads(feedItems).length, [feedItems]);
+  // The comments icon's number: the record's unresolved threads (#36075 item
+  // 8; every thread where the deployment stores no resolution), unknown while
+  // the read was refused or failed.
+  const commentThreadCount = useMemo(() => unresolvedThreadCount(buildCommentThreads(feedItems)), [feedItems]);
   const commentsCount =
     feedVerdict?.comments === 'refused' || feedVerdict?.comments === 'failed' ? null : commentThreadCount;
   const commentsButton = commentsPanelOffered ? (
@@ -3887,8 +3973,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       const threadId = `${objectName}:${pureRecordId}`;
       const roster = await mentionRosterFor(text);
       const mentionIds = extractMentions(text, roster);
+      let stored: unknown;
       try {
-        await dataSource.create('sys_comment', {
+        stored = await dataSource.create('sys_comment', {
           id: newItem.id,
           thread_id: threadId,
           author_id: currentUser.id,
@@ -3901,13 +3988,20 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       } catch (err) {
         throw commentWriteFailed(err);
       }
+      // objectstack#36075 — a new thread is unresolved (the platform says so,
+      // #36071): resolvable at once where the stored row, or any comment of
+      // this discussion, shows the deployment stores resolution.
       const key = feedRecordKey;
+      const storesResolution =
+        (!!stored && typeof stored === 'object' && Object.prototype.hasOwnProperty.call(stored, 'is_resolved'))
+        || (feedItemsByRecord[key] ?? EMPTY_FEED).some(item => typeof item.resolved === 'boolean');
+      if (storesResolution) newItem.resolved = false;
       setFeedItemsByRecord(prev => ({
         ...prev,
         [key]: [...(prev[key] ?? EMPTY_FEED), newItem],
       }));
     },
-    [currentUser, dataSource, objectName, pureRecordId, feedRecordKey, mentionRosterFor, commentWriteFailed, tellMentionsWithheld],
+    [currentUser, dataSource, objectName, pureRecordId, feedRecordKey, feedItemsByRecord, mentionRosterFor, commentWriteFailed, tellMentionsWithheld],
   );
 
   const handleAddReply = useCallback(
@@ -3949,13 +4043,20 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       const key = feedRecordKey;
       setFeedItemsByRecord(prev => {
         const updated = [...(prev[key] ?? EMPTY_FEED), newItem];
+        // objectstack#36071 — a reply into a resolved thread reopens it (the
+        // platform does so on the stored row); the panel shows it reopened.
+        const rootId = threadRootIdOf(updated, parentId);
         return {
           ...prev,
-          [key]: updated.map(item =>
-            item.id === parentId
+          [key]: updated.map(item => {
+            let next = item.id === parentId
               ? { ...item, replyCount: (item.replyCount ?? 0) + 1 }
-              : item
-          ),
+              : item;
+            if (next.id === rootId && next.resolved === true) {
+              next = { ...next, resolved: false, resolvedById: undefined, resolvedByName: undefined, resolvedAt: undefined };
+            }
+            return next;
+          }),
         };
       });
     },
@@ -4081,6 +4182,77 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     },
     [dataSource, feedRecordKey, feedItemsByRecord, confirmHandler, t],
   );
+
+  /**
+   * Resolve or reopen a thread (objectstack#36071, #36075 item 7), by its
+   * top-level comment: `{ is_resolved }` and nothing else, the one update
+   * whoever may comment on the record is admitted to (maintainer ruling
+   * record 7063285032). The platform stamps who and when; the row changes
+   * only once the server has stored it, from the stored record it answers
+   * with, and a refused write raises a localized error and leaves the thread
+   * as it was.
+   */
+  const handleResolveComment = useCallback(
+    async (itemId: string | number, resolved: boolean) => {
+      if (!dataSource || !feedRecordKey) return;
+      const key = feedRecordKey;
+      const row = (feedItemsByRecord[key] ?? EMPTY_FEED).find(item => item.id === itemId);
+      if (!row || row.type !== 'comment' || row.parentId != null) return;
+      let stored: Record<string, unknown> | null | undefined;
+      try {
+        stored = await dataSource.update(COMMENT_OBJECT, String(itemId), { is_resolved: resolved });
+      } catch (err) {
+        toast.error(
+          t('detail.commentResolveFailed', { defaultValue: 'The thread was not updated. Please try again.' }),
+        );
+        throw err instanceof Error ? err : new Error(String(err));
+      }
+      // The stored row's word where it answers with one; the viewer resolved it.
+      const names = new Map<string, string>();
+      if (currentUser.id && currentUser.name) names.set(String(currentUser.id), currentUser.name);
+      const fromStored =
+        stored && typeof stored === 'object' && Object.prototype.hasOwnProperty.call(stored, 'is_resolved')
+          ? commentResolutionOf({ ...stored, parent_id: null }, names)
+          : null;
+      const next: Pick<FeedItem, 'resolved' | 'resolvedById' | 'resolvedByName' | 'resolvedAt'> = fromStored
+        ?? (resolved
+          ? {
+              resolved: true,
+              resolvedById: currentUser.id ? String(currentUser.id) : undefined,
+              resolvedByName: currentUser.name || undefined,
+              resolvedAt: new Date().toISOString(),
+            }
+          : { resolved: false });
+      setFeedItemsByRecord(prev => ({
+        ...prev,
+        [key]: (prev[key] ?? EMPTY_FEED).map(item =>
+          item.id === itemId
+            ? { ...item, resolved: next.resolved, resolvedById: next.resolvedById, resolvedByName: next.resolvedByName, resolvedAt: next.resolvedAt }
+            : item,
+        ),
+      }));
+    },
+    [currentUser, dataSource, feedRecordKey, feedItemsByRecord, t],
+  );
+
+  // objectstack#36075 item 6 — may the viewer edit and delete OTHER people's
+  // comments here? The server admits a comment's author, or a caller whose
+  // by-id update of the record is admitted (`comment-access-hooks.ts`,
+  // "Parent EDIT"): the explain engine's record verdict for `update`, the
+  // question `recordWriteAllowed` asks. Asked three-state and offered only on
+  // a definite allow: failing open here would offer every member a delete of
+  // their colleagues' words that the server refuses. The page's own edit
+  // gates (approval lock, `userActions.edit`, its predicates) are not the
+  // server's comment rule, so they do not join. Asked once the panel is open:
+  // where `userActions.edit: false` keeps the page from asking it, opening the
+  // record still sends no explain for it (objectui#13045); elsewhere the page's
+  // own question answers this one from the same cache.
+  const moderatesComments = useRecordVerdict(
+    objectDef?.name,
+    pureRecordId,
+    'update',
+    commentsOpen,
+  ) === true;
 
   /**
    * A reaction click shows at once and is stored in the background, and a
@@ -5800,6 +5972,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           // `authoredByViewer`.
           onEditComment={feedGates.commentEdit ? handleEditComment : undefined}
           onDeleteComment={feedGates.commentDelete ? handleDeleteComment : undefined}
+          // objectstack#36071 / #36075 — resolve and reopen ride the comment
+          // grant: whoever may comment on the record may resolve its threads
+          // (ruling 7063285032). The panel offers it where the rows say the
+          // deployment stores resolution.
+          onResolveComment={feedsEnabled && feedGates.commentEdit ? handleResolveComment : undefined}
+          moderatesComments={moderatesComments}
           onToggleReaction={
             (reactionStore === 'records'
               ? feedGates.reactionAdd

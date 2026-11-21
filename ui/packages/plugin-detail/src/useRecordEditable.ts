@@ -363,6 +363,30 @@ export function useRecordEditable(
   operation: RecordOperation = 'update',
   enabled = true,
 ): boolean {
+  // Fail-open: every uncertainty — not asked, not answered yet, answered
+  // nothing usable — reads as allowed, and the server does its job.
+  return useRecordVerdict(objectName, recordId, operation, enabled) ?? true;
+}
+
+/**
+ * The same verdict as {@link useRecordEditable}, THREE-STATE (objectstack#36075):
+ * `true` or `false` once the explain engine has answered for this principal and
+ * record, `undefined` while it has not — not asked (`enabled` false, no
+ * object or record), not answered yet, or answered nothing usable (non-OK,
+ * no record verdict, a network failure). Same cache, same in-flight sharing,
+ * same staling by a data change; only the uncertainty is left to the caller.
+ *
+ * For an affordance that must not be offered on a guess: the comment panel
+ * offers Edit and Delete on OTHER people's comments only on a definite `true`
+ * (the server admits a parent record editor there), where failing open would
+ * invite every member to a write the server refuses.
+ */
+export function useRecordVerdict(
+  objectName: string | undefined,
+  recordId: string | undefined,
+  operation: RecordOperation = 'update',
+  enabled = true,
+): boolean | undefined {
   // [objectui#5683] The acting user, or `null` when the client has no answer —
   // a standalone embed with no provider, an anonymous session, or a load still
   // in flight. `usePermissions()` degrades to the no-provider value rather than
@@ -379,8 +403,8 @@ export function useRecordEditable(
   // record (the same match `forgetChangedRecords` drops its entries by), so a
   // mounted header asks again in place.
   const invalidationNonce = useDataInvalidation(objectName, recordId);
-  const [allowed, setAllowed] = React.useState<boolean>(() =>
-    key && verdictCache.has(key) ? verdictCache.get(key)! : true,
+  const [verdict, setVerdict] = React.useState<boolean | undefined>(() =>
+    key && verdictCache.has(key) ? verdictCache.get(key)! : undefined,
   );
   // Read the context directly (not `useSchemaContext`, which throws when no
   // provider is mounted): a standalone `detail:view` embed has no host fetch
@@ -390,31 +414,30 @@ export function useRecordEditable(
   React.useEffect(() => {
     retainForPrincipal(principal);
     if (!enabled || !objectName || !recordId) {
-      setAllowed(true);
+      setVerdict(undefined);
       return;
     }
     if (verdictCache.has(key)) {
-      setAllowed(verdictCache.get(key)!);
+      setVerdict(verdictCache.get(key)!);
       return;
     }
     // No answer for THIS key yet. Whatever is on screen was computed for a
     // different key — another record, another operation, or (objectui#10107)
     // another principal — or for this key before the record changed
     // (objectui#10184), and holding it across the round trip is the same
-    // reuse the cache now forbids, just without the map. An unanswered
-    // question fails open, as every other uncertainty in this hook does.
-    setAllowed(true);
+    // reuse the cache now forbids, just without the map. Unanswered.
+    setVerdict(undefined);
     let cancelled = false;
     // Asked once per key however many mounts ask it at once (objectui#11699).
-    void askVerdict(key, objectName, recordId, operation, apiFetch).then((verdict) => {
-      if (verdict !== undefined && !cancelled) setAllowed(verdict);
+    void askVerdict(key, objectName, recordId, operation, apiFetch).then((answer) => {
+      if (answer !== undefined && !cancelled) setVerdict(answer);
     });
     return () => {
       cancelled = true;
     };
   }, [key, principal, objectName, recordId, operation, enabled, apiFetch, invalidationNonce]);
 
-  return allowed;
+  return verdict;
 }
 
 /**

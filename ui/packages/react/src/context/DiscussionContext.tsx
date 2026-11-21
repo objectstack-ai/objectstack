@@ -60,6 +60,22 @@ export interface DiscussionContextValue {
    * nothing was deleted.
    */
   onDeleteComment?: (itemId: string | number) => void | Promise<void>;
+  /**
+   * Resolve (`true`) or reopen (`false`) the thread of a top-level comment
+   * (objectstack#36071, #36075). Offered to whoever may comment on the record
+   * (maintainer ruling record 7063285032); the comment panel draws it on the
+   * rows whose `resolved` the host set. A rejection means nothing changed.
+   */
+  onResolveComment?: (itemId: string | number, resolved: boolean) => void | Promise<void>;
+  /**
+   * The viewer may edit and delete OTHER people's comments on this record
+   * (objectstack#36075 item 6): the server admits a comment's author or a user
+   * whose by-id update of the record is admitted. `true` only on a definite
+   * allow; absent or `false`, the panel offers Edit and Delete on the viewer's
+   * own comments alone. The handlers still come from `onEditComment` /
+   * `onDeleteComment`.
+   */
+  moderatesComments?: boolean;
   /** Optional list of users (or any mentionable entities) the comment
    *  input can suggest after the user types `@`. When omitted the input
    *  falls back to free-text @-mentions without autocompletion. */
@@ -124,6 +140,8 @@ export const DiscussionContextProvider: React.FC<DiscussionContextProviderProps>
     value.onToggleReaction,
     value.onEditComment,
     value.onDeleteComment,
+    value.onResolveComment,
+    value.moderatesComments,
     value.mentionSuggestions,
     value.onMentionSuggestionsWanted,
     value.onUploadAttachments,

@@ -132,7 +132,7 @@ export type {
 } from './ConcurrentUpdateDialog';
 // `__clearRecordEditableCache` is test-only and stays off the barrel
 // (objectui#13453); tests import it from `useRecordEditable` directly.
-export { useRecordEditable, seedRecordVerdict } from './useRecordEditable';
+export { useRecordEditable, useRecordVerdict, seedRecordVerdict } from './useRecordEditable';
 // objectstack#27627 — the record page payload's field projection, for the
 // in-place edit blocks' first ask.
 export { seedRecordFieldAccess } from './recordFieldAccess';
@@ -266,6 +266,12 @@ export {
   useRecordComments,
   buildCommentThreads,
   latestRepliers,
+  threadResolvable,
+  threadResolved,
+  threadInvolvesViewer,
+  filterCommentThreads,
+  unresolvedThreadCount,
+  DEFAULT_COMMENT_THREAD_FILTER,
   CommentItem,
   CommentThread,
   CommentComposer,
@@ -276,6 +282,7 @@ export {
 export type {
   RecordCommentsData,
   CommentThreadData,
+  CommentThreadFilter,
   CommentItemProps,
   RecordCommentThreadProps,
   CommentItemActions,
