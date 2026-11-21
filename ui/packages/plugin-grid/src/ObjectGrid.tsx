@@ -907,10 +907,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const patchedRowsCacheRef = React.useRef(new WeakMap<any[], { patches: ReadonlyMap<string, RowPatch>; rows: any[] }>());
   // objectstack#35685 — the select-first saves Undo can still take back
   // (`./objectGridCellUndo`), and what an undo reads when it runs, which may
-  // be well after the render that offered it: the patches over the rows.
+  // be well after the render that offered it: the patches over the rows,
+  // which `writeRowInPlace` sets together with the state it renders from.
   const cellUndoRef = React.useRef(createCellUndoStack());
   const rowPatchesRef = React.useRef(rowPatches);
-  useEffect(() => { rowPatchesRef.current = rowPatches; }, [rowPatches]);
   const [showExport, setShowExport] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -2879,12 +2879,15 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         if (resolved.outcome === 'reloaded') return resolved;
         answer = resolved.result;
       }
-      setRowPatches((prev) => {
-        const next = new Map(prev);
-        const held = prev.get(id);
-        next.set(id, { base: held && held.row === row ? held.base : row, row: mergeSavedRow(row, shown, answer) });
-        return next;
-      });
+      // The ref is the patches' one source and moves with the write, not after
+      // the render: an undo pressed once this row is drawn, before React's
+      // effects ran, reads this patch and not the one it replaced.
+      const prev = rowPatchesRef.current;
+      const next = new Map(prev);
+      const held = prev.get(id);
+      next.set(id, { base: held && held.row === row ? held.base : row, row: mergeSavedRow(row, shown, answer) });
+      rowPatchesRef.current = next;
+      setRowPatches(next);
       return { outcome: 'saved', result: answer };
     } finally {
       releaseOwnWrite();

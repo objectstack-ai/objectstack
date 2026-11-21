@@ -334,6 +334,36 @@ describe('ObjectGrid autosave — Undo takes a save back as a new guarded update
     expect(screen.getByText('A2')).toBeInTheDocument();
   });
 
+  it("an earlier save's Undo pressed the moment a newer save is drawn keeps the newer save on screen", async () => {
+    // The Undo runs in the very turn the newer row reaches the DOM, before
+    // React's effects for that render have run: what the undo draws over must
+    // already be the newer save, or the row falls back to the values it was
+    // read with (objectstack#35999).
+    const ds = makeDataSource();
+    const { container } = renderGrid(ds, true);
+    await screen.findByText('beta');
+    await editSelectFirst(container, dataCell(container, 0, '10'), '11');
+    await screen.findByText('11');
+    let pressed = false;
+    const observer = new MutationObserver(() => {
+      if (pressed || !container.textContent?.includes('A2')) return;
+      pressed = true;
+      undoOfToast(0)!.onClick();
+    });
+    observer.observe(container, { subtree: true, childList: true, characterData: true });
+    try {
+      await editSelectFirst(container, dataCell(container, 0, 'alpha'), 'a2');
+      await waitFor(() => expect(pressed).toBe(true));
+    } finally {
+      observer.disconnect();
+    }
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(3));
+    expect(ds.update.mock.calls[2].slice(1)).toEqual(['d1', { amount: 10 }, { ifMatch: '2026-11-20T11:00:02.000Z' }]);
+    await screen.findByText('10');
+    expect(screen.getByText('A2')).toBeInTheDocument();
+    expect(screen.queryByText('alpha')).toBeNull();
+  });
+
   it("someone else's later change answers 409 on the undo, even after a re-read: Cancel keeps their value", async () => {
     const ds = makeDataSource();
     // The server refuses a write whose If-Match is not the record's version.
