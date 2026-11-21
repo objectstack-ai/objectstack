@@ -249,3 +249,23 @@ function SidebarHost() {
     </SidebarProvider>
   );
 }
+
+describe('an app\'s automatic tile colour stays on its tile (objectstack#36157)', () => {
+  /** An app declaring neither a logo nor a colour: the tile gets a palette colour, the theme nothing. */
+  const UNDECLARED = { name: 'meeting_notes', label: 'Meeting notes', active: true, navigation: NAV };
+
+  it('the pill draws the automatic colour, and the primary controls keep the platform default', () => {
+    mountConsole(UNDECLARED);
+    expect(within(appPill()).getByTestId('app-mark-tile')).toHaveAttribute('data-app-tile', 'pink');
+    // Only a declared `branding` reaches the theme: no brand colour is written.
+    for (const prop of ['--brand-primary', '--primary', '--sidebar-primary']) {
+      expect(document.documentElement.style.getPropertyValue(prop), prop).toBe('');
+    }
+  });
+
+  it('CONTROL — a declared colour is the theme\'s primary and the tile\'s', () => {
+    mountConsole(PLAIN);
+    expect(within(appPill()).getByTestId('app-mark-tile')).toHaveAttribute('data-app-tile', 'declared');
+    expect(document.documentElement.style.getPropertyValue('--brand-primary')).toBe('#2563eb');
+  });
+});

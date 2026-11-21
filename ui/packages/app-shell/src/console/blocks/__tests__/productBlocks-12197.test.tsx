@@ -18,6 +18,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
+import { launcherTileColorClasses } from '../../home/launcherTile';
 // The basic renderers, for the `element:button` nodes a hero and a checklist
 // step carry as their actions.
 import '@object-ui/components';
@@ -215,6 +216,14 @@ describe('tile-grid', () => {
     expect(tile.textContent).toContain('Sales');
     expect(tile.className).toContain('w-28');
     expect(screen.getByTestId('tile-grid-add')).toHaveAttribute('href', '/marketplace');
+  });
+
+  it('draws each tile\'s icon on a solid palette colour keyed by its href, never a gradient (objectstack#36157)', () => {
+    renderBlock({ type: 'tile-grid', properties: { items: [{ label: 'CRM', href: '/apps/crm', icon: 'briefcase' }] } });
+    const square = screen.getByTestId('tile-grid-tile-0').firstElementChild!;
+    expect(square.className).toContain(launcherTileColorClasses('/apps/crm'));
+    expect(square.className).toContain('text-white');
+    expect(square.className).not.toMatch(/gradient|from-|to-/);
   });
 
   it('reads its tiles from the bound response', async () => {
