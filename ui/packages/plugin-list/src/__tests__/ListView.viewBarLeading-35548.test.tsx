@@ -102,10 +102,12 @@ const lead = (calls: ListToolbarLeadingState[]) => (s: ListToolbarLeadingState) 
 /** The view bar's own controls, read off the row that carries the leading node. */
 function viewBar() {
   const row = screen.getByTestId('list-toolbar-leading').parentElement!.parentElement!;
+  // Filter and Sort are the condition row's since objectstack#35878.
+  const conditions = screen.queryByTestId('list-condition-row');
   return {
     row,
-    filter: row.querySelector('[data-testid="toolbar-filter-trigger"]'),
-    sort: row.querySelector('[data-testid="toolbar-sort-trigger"]'),
+    filter: conditions?.querySelector('[data-testid="condition-add-filter"]') ?? null,
+    sort: conditions?.querySelector('[data-testid="condition-sort"]') ?? null,
     options: row.querySelector('[data-testid="toolbar-display-trigger"]'),
   };
 }
@@ -128,19 +130,12 @@ describe('objectstack#35548 — one view bar, handed the list state', () => {
     expect(bar.row.className.split(/\s+/)).toEqual(expect.arrayContaining(['border-b', 'sm:h-10']));
     for (const trigger of [bar.filter, bar.sort, bar.options]) {
       expect(trigger, 'a text trigger is missing from the kanban view bar').not.toBeNull();
-      expect(trigger!.className.split(/\s+/)).toContain('text-[13px]');
+      expect(trigger!.className.split(/\s+/)).toContain('text-sm');
     }
     // Text, not icons, from `sm` up: each trigger carries its label.
     expect(bar.filter!.textContent).toMatch(/Filter|筛选/);
     expect(bar.sort!.textContent).toMatch(/Sort|排序/);
-    expect(bar.options!.textContent).toMatch(/Options|选项/);
+    expect(bar.options!.textContent).toMatch(/View settings|视图设置/);
   });
 
-  it('draws the condition row empty, so it takes no height', async () => {
-    mount(GRID, lead([]));
-    await waitFor(() => expect(screen.getByTestId('host-switcher')).toBeInTheDocument());
-    const slot = screen.getByTestId('list-condition-row');
-    expect(slot).toBeEmptyDOMElement();
-    expect(slot.className.split(/\s+/)).toContain('empty:hidden');
-  });
 });

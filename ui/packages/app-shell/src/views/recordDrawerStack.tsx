@@ -41,7 +41,6 @@
 import {
   Fragment,
   createContext,
-  createElement,
   useCallback,
   useContext,
   useEffect,
@@ -56,14 +55,13 @@ import {
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { ChevronRight } from 'lucide-react';
-import { getIcon } from '../utils/getIcon.js';
 import {
   NavigationOverlay,
-  cn,
   type NavigationOverlayMode,
   type RecordTopBarStepper,
   RecordHeaderBarContext,
   type RecordHeaderBar,
+  ObjectIconTile,
 } from '@object-ui/components';
 import { overlayWidthFor } from '@object-ui/plugin-view/core';
 import type { FieldContainerLike } from '@object-ui/core';
@@ -514,11 +512,11 @@ export function RecordStackDrawer({
   // reported, by level key: the breadcrumb names the record, and an ancestor
   // that was not opened with a title is still named by the one it reported.
   const [toggleSlot, setToggleSlot] = useState<HTMLElement | null>(null);
+  const [commentsSlot, setCommentsSlot] = useState<HTMLElement | null>(null);
   const [titles, setTitles] = useState<Readonly<Record<string, string>>>({});
-  // objectstack#35593 — the bar is the record's one header row: the record
-  // header draws the record's name and tags, and its button group, into these
-  // two slots. While it holds them, the bar draws no 「对象 › 记录名」 crumb
-  // and no counter or ↓ ↑ (the list is beside the drawer); the step keys stay.
+  // objectstack#35593 / objectstack#35853 — the record header draws the
+  // record's name and tags, and its button group, into the bar's record row
+  // (these two slots). While it holds them the bar draws no name of its own.
   const [headerTitleSlot, setHeaderTitleSlot] = useState<HTMLElement | null>(null);
   const [headerActionSlot, setHeaderActionSlot] = useState<HTMLElement | null>(null);
   const [headerClaimed, setHeaderClaimed] = useState(false);
@@ -530,13 +528,14 @@ export function RecordStackDrawer({
   const bar = useMemo<RecordPaneBarApi>(
     () => ({
       toggleSlot,
+      commentsSlot,
       reportTitle: (recordId: string, title: string | undefined) => {
         if (!currentObject || !title) return;
         const key = `${currentObject}:${recordId}`;
         setTitles((prev) => (prev[key] === title ? prev : { ...prev, [key]: title }));
       },
     }),
-    [toggleSlot, currentObject],
+    [toggleSlot, commentsSlot, currentObject],
   );
   const defOf = (objectName: string) =>
     objects.find((o) => (o as { name?: unknown } | null)?.name === objectName);
@@ -554,17 +553,36 @@ export function RecordStackDrawer({
   const titleOf = (level: RecordDrawerLevel) => titles[levelKey(level)!] || level.title || shortId(level.recordId);
   const crumbClass =
     'min-w-0 truncate rounded px-1 hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
-  // objectstack#35593 — with the record's header in the bar, the drawer's row
-  // leads with the object's icon (no object name, as the full page's crumb has).
-  const rootIconName = current ? (defOf(current.objectName) as { icon?: unknown } | undefined)?.icon : undefined;
-  const rootIcon = typeof rootIconName === 'string'
-    ? createElement(getIcon(rootIconName), { className: 'mr-1.5 h-4 w-4 shrink-0 text-muted-foreground', 'aria-hidden': true })
+  // The record row's icon: the object's tile, as the full page draws it
+  // (objectstack#35985 — white glyph on the object's colour, gray without one).
+  const rootDef = current ? (defOf(current.objectName) as { icon?: unknown; color?: unknown } | undefined) : undefined;
+  const rootIcon = typeof rootDef?.icon === 'string'
+    ? <ObjectIconTile icon={rootDef.icon} color={typeof rootDef.color === 'string' ? rootDef.color : undefined} />
     : null;
-  const headerTitleSlotEl = (
-    <span ref={setHeaderTitleSlot} className="flex min-w-0 items-center empty:hidden" data-record-bar-title="" />
-  );
-  const trail = !current ? undefined : depth > 0 ? (
+  // objectstack#35853 — the bar's record row: the icon, then the record's
+  // name and tags as the record header draws them into the slot; until it
+  // does (a record with no header, a read in flight), the bar's own name.
+  const recordRow = current ? (
     <>
+      {rootIcon}
+      {!headerClaimed && (
+        <span className="min-w-0 truncate text-base font-medium text-foreground" data-record-drawer-title="">
+          {titleOf(current)}
+        </span>
+      )}
+      <span ref={setHeaderTitleSlot} className="flex min-w-0 items-center empty:hidden" data-record-bar-title="" />
+    </>
+  ) : undefined;
+  const rootScope = current?.scope ?? stepScope;
+  const scopedStepper = stepper && depth === 0 && rootScope
+    // The view's name returns to the list, which is under the drawer: closing is the way back.
+    ? { ...stepper, scope: rootScope, onScope: onClose }
+    : stepper;
+  // objectstack#35853 — the navigation row's left end: one level down the
+  // ancestors, each returning to its level, then the shown record's object;
+  // at the root with a list context nothing (↑ ↓ and 「第 N 条，共 M 条 · 视图名」
+  // say where it is), and with none the object's name.
+  const trail = !current ? undefined : depth > 0 ? (
     <nav className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground" data-testid="record-drawer-trail">
       {path.slice(0, depth).map((level, index) => (
         <span key={`${index}:${levelKey(level)}`} className="flex min-w-0 items-center gap-1">
@@ -575,35 +593,17 @@ export function RecordStackDrawer({
           <ChevronRight className="h-3 w-3 shrink-0" aria-hidden="true" />
         </span>
       ))}
-      {!headerClaimed && <span className="truncate" aria-current="page">{labelOf(current.objectName)}</span>}
+      <span className="truncate" aria-current="page">{labelOf(current.objectName)}</span>
     </nav>
-    {headerTitleSlotEl}
-    </>
-  ) : (
-    <>
-    {/* While the record's header holds the bar, its name is the bar's:
-        no 「对象 › 记录名」 crumb (objectstack#35593). */}
-    {!headerClaimed && (
+  ) : scopedStepper ? undefined : (
     <nav
       aria-label={t('common.breadcrumb', { defaultValue: 'Breadcrumb' })}
       className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground"
       data-testid="record-drawer-crumb"
     >
-      <button type="button" onClick={onClose} className={cn(crumbClass, 'shrink-0')} data-record-crumb-object="">
-        {pluralLabelOf(current.objectName)}
-      </button>
-      <ChevronRight className="h-3 w-3 shrink-0" aria-hidden="true" />
-      <span className="min-w-0 truncate px-1 font-medium text-foreground" aria-current="page">
-        {titleOf(current)}
-      </span>
+      <span className="min-w-0 truncate px-1" data-record-crumb-object="">{pluralLabelOf(current.objectName)}</span>
     </nav>
-    )}
-    {headerClaimed && rootIcon}
-    {headerTitleSlotEl}
-    </>
   );
-  const rootScope = current?.scope ?? stepScope;
-  const scopedStepper = stepper && depth === 0 && rootScope ? { ...stepper, scope: rootScope } : stepper;
   return (
     <NavigationOverlay
       isOpen={open && !!current}
@@ -621,10 +621,11 @@ export function RecordStackDrawer({
       onBack={depth > 0 ? () => popTo(depth - 1) : undefined}
       trail={trail}
       stepper={scopedStepper}
-      stepperHidden={headerClaimed}
       actionSlotRef={setHeaderActionSlot}
+      recordRow={recordRow}
       onExpand={pane ? () => pane.openAsPage() : undefined}
       toggles={<span ref={setToggleSlot} className="contents" data-record-pane-toggles="" />}
+      comments={<span ref={setCommentsSlot} className="contents" data-record-pane-comments="" />}
     >
       {() => (
         <RecordDrawerContext.Provider value={api}>
@@ -658,6 +659,13 @@ export function RecordPaneBarToggles({ children }: { children: ReactNode }) {
   const bar = useContext(RecordPaneBarContext);
   if (!bar?.toggleSlot || children == null || children === false) return null;
   return createPortal(children, bar.toggleSlot);
+}
+
+/** The record's comments switch, drawn into its pane's bar before the button group (objectstack#36075). */
+export function RecordPaneBarComments({ children }: { children: ReactNode }) {
+  const bar = useContext(RecordPaneBarContext);
+  if (!bar?.commentsSlot || children == null || children === false) return null;
+  return createPortal(children, bar.commentsSlot);
 }
 
 /**

@@ -19,7 +19,7 @@ import { ApiBillingRefusedError } from '../../src/runner/driver.js';
 import type { TurnProcessRun } from '../../src/runner/drivers/process.js';
 import { ARM_TOOLS, armArgs, prepareArmWorkdir } from '../../src/skill-evals/arms.js';
 import { hashCase, loadSkillEvalCatalog, notUserInvocable, parseEvalFile, selectBundles, type SkillEvalCase } from '../../src/skill-evals/cases.js';
-import { main, parseSkillEvalArgs, regradeRound, ROUND_RECORD_SCHEMA, turnsLine } from '../../src/skill-evals/cli.js';
+import { main, parseSkillEvalArgs, regradeRound, ROUND_RECORD_SCHEMA, triggerFieldLine, turnsLine } from '../../src/skill-evals/cli.js';
 import { gradeAnswer } from '../../src/skill-evals/grade.js';
 import { executeRound, judgeTurn, planRound, preflight, rateLimitStop, regradeRecord, regradeRecords, type SkillEvalRunRecord } from '../../src/skill-evals/run.js';
 import { runSelfTest, SELF_TEST_BATTERIES, SELF_TEST_BATTERY_FLOOR, selfTestReached } from '../../src/skill-evals/self-test.js';
@@ -506,7 +506,7 @@ describe('trigger cases: graded on whether the with-skill turn loaded the bundle
     const md = renderSummaryMarkdown(s, { title: 'T', lines: [] });
     expect(md).toContain('## Trigger cases');
     expect(md).toContain('| alpha-skill | 2 | 1/1 (100%) | 0/1 (0%) | 0 | 1 | 0 |');
-    expect(md).toContain('| alpha-skill/triggers#2 | no | 0/1 (0%) | 1 / 0 |');
+    expect(md).toContain('| alpha-skill/triggers#2 | no | 0/1 (0%) | 1 / 0 |  |');
     // A round with no trigger case renders no trigger section.
     expect(renderSummaryMarkdown(summariseRound([], [], []), { title: 'T', lines: [] })).not.toContain('## Trigger cases');
   });
@@ -563,6 +563,44 @@ describe('trigger cases: graded on whether the with-skill turn loaded the bundle
     const round = JSON.parse(readFileSync(join(dir, 'round.json'), 'utf8')) as { regraded: { added: string[] }; summary: { cases: unknown[]; triggers: { cases: unknown[] } } };
     expect([round.regraded.added, round.summary.cases.length, round.summary.triggers.cases.length]).toEqual([[], 0, 2]);
     expect(readFileSync(join(dir, 'summary.md'), 'utf8')).toMatch(/^# Skill evals · beta-skill × trigger cases × the with-skill arm × 1 rep\n[\s\S]*## Trigger cases/);
+  }, REGRADE_COMMAND_TEST_TIMEOUT_MS);
+
+  it('a trigger turn installs the competing set: a neighbour loaded instead fails a should-load case and is named; round.json and --regrade keep the set', async () => {
+    const root = writeCatalog();
+    writeFileSync(join(root, 'alpha-skill', 'evals', 'triggers.json'), JSON.stringify({ evals: [{ id: 1, prompt: 'load me', should_trigger: true }, { id: 2, prompt: 'leave me', should_trigger: false }] }));
+    const cat = loadSkillEvalCatalog(root);
+    const cases = selectBundles(cat, ['alpha-skill'], true);
+    const field = ['alpha-skill', 'beta-skill'];
+    const dir = mkdtempSync(join(scratch, 'round-'));
+    const seen: string[] = [];
+    const exec = await executeRound(planRound(cases, 1), {
+      bin: 'claude', skillsRoot: root, catalog: { bundles: cat.bundles, unlisted: cat.unlistedBundles }, outDir: dir, maxTurns: 5, caseTimeoutMs: 1000, concurrency: 1, maxUtilization: 0.9, triggerField: field,
+      runTurn: async (_bin, _args, o) => {
+        const skills = readdirSync(join(o.cwd, '.claude', 'skills')).sort();
+        seen.push(`${o.input}|${skills.join()}|${existsSync(join(o.cwd, '.claude', 'skills', 'beta-skill', 'evals'))}`);
+        // The neighbour takes every prompt: a missed load for `load me`, nothing of alpha's loaded for `leave me`.
+        const [init, ...rest] = stream({ skills, answer: 'x' }).split('\n');
+        return exited([init, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 's', name: 'Skill', input: { skill: 'beta-skill' } }] } }), ...rest].join('\n'));
+      },
+    });
+    expect(seen).toEqual(['load me|alpha-skill,beta-skill|false', 'leave me|alpha-skill,beta-skill|false']);
+    expect(exec.records.map((r) => [r.verdict, r.installed, r.trigger?.othersLoaded])).toEqual([['fail', field, ['beta-skill']], ['pass', field, ['beta-skill']]]);
+    // A neighbour installed but absent from the init line: the turn did not run the field it was meant to.
+    expect(judgeTurn(cases[0]!, 'with-skill', 1, exited(stream({ skills: ['alpha-skill'], answer: 'x' })), { bundles: cat.bundles, unlisted: [] }, 't', gradeAnswer, field)).toMatchObject({ verdict: 'invalid', reason: expect.stringMatching(/`beta-skill`, installed beside `alpha-skill`/) });
+    const summary = summariseRound(cases, exec.records, []);
+    writeFileSync(join(dir, 'round.json'), JSON.stringify({ schema: ROUND_RECORD_SCHEMA, round: 'r', runner: { repo: 'x', sha: 'y' }, startedAt: 't', finishedAt: 't', wallMs: 1, skills: { source: 'workspace skills/', bundles: ['alpha-skill'], allBundles: false }, driver: { driver: 'claude-code-cli', version: 'v', authMethod: 'oauth_token', apiBilled: false, servedModels: [], maxTurns: 5, caseTimeoutMs: 1, concurrency: 1, maxUtilization: 0.9 }, scope: { cases: 2, arms: ['with-skill'], repeats: 1, plannedTurns: 2, ranTurns: 2, notRunTurns: 0, triggersOnly: true }, triggerField: { mode: 'selection', bundles: field }, summary }));
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      expect(regradeRound(dir, cat, 'workspace skills/')).toBe(0);
+    } finally {
+      log.mockRestore();
+    }
+    const round = JSON.parse(readFileSync(join(dir, 'round.json'), 'utf8')) as { triggerField: unknown };
+    expect(round.triggerField).toEqual({ mode: 'selection', bundles: field });
+    const md = readFileSync(join(dir, 'summary.md'), 'utf8');
+    expect(md).toContain("- trigger turns installed the round's selection, 2 bundle(s): alpha-skill, beta-skill (--trigger-field selection)");
+    expect(md).toContain('| alpha-skill/triggers#1 | yes | 0/1 (0%) | 0 / 0 | beta-skill ×1 |');
+    expect(triggerFieldLine(undefined)).toMatch(/own bundle alone \(a round recorded before --trigger-field/);
   }, REGRADE_COMMAND_TEST_TIMEOUT_MS);
 });
 

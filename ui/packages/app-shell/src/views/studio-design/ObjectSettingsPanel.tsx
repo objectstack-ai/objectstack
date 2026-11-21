@@ -27,13 +27,13 @@
  *     first (`7a90afdf9`).
  *  3. Semantic roles (ADR-0085) — the cross-surface presentation roles:
  *     `nameField`, `stageField` (string | false | unset), `highlightFields`
- *     (an ordered list with a strip preview — `HighlightFieldsEditor`), and
+ *     (an ordered list — `HighlightFieldsEditor`), and
  *     `relatedLists` (objectstack#27069), the business order of the record
  *     page's related lists, over the object's inbound relationships
  *     (`RelatedListsEditor`).
  *     These are the ONLY presentation knobs the protocol carries, so the
  *     builder must make them directly editable — otherwise designers fall
- *     back to guessing which heuristic picked their title/stepper/columns.
+ *     back to guessing which heuristic picked their title/stage/columns.
  *  4. Capabilities (framework#2707/#2727) — the `enable.*` record-surface
  *     switches. Only LIVE flags are exposed (every toggle is enforced at
  *     runtime — writer gates, 403s, or UI surfaces): trackHistory & files

@@ -39,8 +39,9 @@ export interface ObjectDefLike {
   label?: string;
   fields?: Record<string, ObjectDefFieldLike>;
   /** Semantic role (ADR-0085): the linear-lifecycle field driving the
-   *  `record:path` stepper. `false` = the status-shaped field is NOT a
-   *  linear flow — suppress stage detection entirely (#2065). */
+   *  header's stage tag, and a `record:path` a page places itself. `false` =
+   *  the status-shaped field is NOT a linear flow — suppress stage detection
+   *  entirely (#2065). */
   stageField?: string | false;
   stages?: Array<{ value: any; label: string }>;
   /** Semantic role (ADR-0085): the object's most important fields — the
@@ -475,13 +476,13 @@ export function resolveTitleField(def: ObjectDefLike | undefined): string | null
 }
 
 /**
- * How many highlights the record header shows (objectstack#27055, the v3
+ * How many highlights a synthesized strip shows (objectstack#27055, the v3
  * header: 「要点 6 项等宽」 — the same six Studio's highlight editor offers).
- * A declared `highlightFields` list longer than this is cut here.
+ * A declared `highlightFields` list longer than this is cut here. The default
+ * record page draws no strip; {@link buildDefaultHighlights} builds one for a
+ * page that places it in its `highlights` slot.
  *
- * Declared once in `@objectstack/spec/ui` and re-exported here: the
- * `field-group-shadowed` lint judges which field groups this strip empties
- * with the same constant, so its verdict matches the page.
+ * Declared once in `@objectstack/spec/ui` and re-exported here.
  */
 export { RECORD_HIGHLIGHTS_MAX };
 
@@ -852,9 +853,9 @@ export const BODY_TABLE_PAGE_SIZE = 10;
  *    since objectstack#35889 a master-detail list is a body table only where a
  *    group places it) goes AFTER the field sections the record page
  *    draws open (objectstack#35742: the record's own fields first, then its
- *    body tables — 「主记录的字段分组 → 主从子表」; the header strip's
- *    stage bar and key fields sit above both, objectstack#35597's
- *    「关键字段下面」), stacked in the order given — the parent's
+ *    body tables — 「主记录的字段分组 → 主从子表」; on the default
+ *    page both sit directly under the header, which draws no stage bar and
+ *    no key fields), stacked in the order given — the parent's
  *    `relatedLists`, then the derived order. The sections drawn CLOSED that
  *    trail the last open one (a group whose collapse is `collapsed`, an
  *    enumerated section that is `collapsible` and `defaultCollapsed`) follow

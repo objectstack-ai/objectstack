@@ -10,14 +10,16 @@ import { uiRoot } from '../scripts/ui-root.mjs';
 
 /**
  * Acceptance pin for objectstack#35554: the object list page has no Actions
- * column, a selection swaps the page bar, the row's context menu ends with a
- * separated Delete, and a list with no declared `pagination` loads as it
- * scrolls and comes back to the row it was left at.
+ * column, the row's context menu ends with a separated Delete, and a list with
+ * no declared `pagination` loads as it scrolls and comes back to the row it
+ * was left at. Since objectstack#35678 a selection no longer swaps the page
+ * bar: one bar floats at the bottom centre of the list, and the cases at the
+ * end pin it on a child-table tab and the side record too.
  *
  * ## Why a Playwright spec and not a vitest test
  *
- * The page bar and the list are siblings, the selection is drawn into the bar
- * through a portal, and "the last row is fully visible", "scroll to the end
+ * The bar floats over the list's scroller, and "the bar sits above the summary
+ * row", "the last row is fully visible", "scroll to the end
  * loads more" and "back lands near row 60" are questions about layout and
  * scrolling, which jsdom does not have. The bundling follows
  * `e2e/list-narrow-pinned-columns-35446.spec.ts`.
@@ -37,6 +39,10 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  *   - The page column is a flex column holding the header and the list, the
  *     shape `ObjectView` draws; the shell (top bar, sidebar) is out of scope
  *     and absent, so the column is the viewport.
+ *   - The record page (a header, a tab strip and a child-table tab) and the
+ *     side record (a right-hand dialog over the list page) are plain markup
+ *     shaped like the console's; the grid in each is the real `ObjectGrid`
+ *     over one opportunity's 30 line items, with no list-page scope.
  *   - The rows (120 opportunities), the fields and the actions are literals
  *     shaped like HotCRM's opportunity list; the data source pages them by
  *     `$skip` / `$top` and answers `total`. Dispatched actions are recorded
@@ -74,6 +80,11 @@ interface Case {
   /** Declare `pagination` on the view (the list keeps its pager). */
   paged?: boolean;
   theme?: 'light' | 'dark';
+  /**
+   * objectstack#35678 — where the grid sits: the list page (default), a
+   * record page's child-table tab, or a side record panel over the list.
+   */
+  face?: 'list' | 'tab' | 'drawer';
 }
 
 const ENTRY = '\0list-no-actions-column:entry';
@@ -104,7 +115,7 @@ import * as React from 'react';
 import { createRoot } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 import ${JSON.stringify(COMPONENTS)};
-import ${JSON.stringify(PLUGIN_GRID)};
+import { ObjectGrid } from ${JSON.stringify(PLUGIN_GRID)};
 import { ListView } from ${JSON.stringify(PLUGIN_LIST)};
 import { registerAllFields } from ${JSON.stringify(FIELDS)};
 import { ActionProvider, SchemaRendererProvider } from ${JSON.stringify(REACT_BINDINGS)};
@@ -141,14 +152,31 @@ const ROWS = Array.from({ length: ${ROW_COUNT} }, (_, i) => ({
   owner: '销售 ' + ((i % 5) + 1),
   close_date: '2027-01-' + String((i % 28) + 1).padStart(2, '0'),
 }));
+// objectstack#35678 — a child object for the record page's tab and the side
+// record panel: one opportunity's line items.
+const LINE_FIELDS = {
+  id: { name: 'id', type: 'text' },
+  product: { name: 'product', label: '产品', type: 'text' },
+  quantity: { name: 'quantity', label: '数量', type: 'number' },
+  price: { name: 'price', label: '单价', type: 'currency' },
+};
+const LINES = Array.from({ length: 30 }, (_, i) => ({
+  id: 'l' + String(i + 1).padStart(3, '0'),
+  product: '产品 ' + (i + 1),
+  quantity: (i % 7) + 1,
+  price: 500 + i * 50,
+}));
 const dataSource = {
-  find: async (_object, params = {}) => {
-    window.__finds.push({ skip: params.$skip ?? 0, top: params.$top });
+  find: async (object, params = {}) => {
+    const rows = object === 'opportunity_line' ? LINES : ROWS;
+    if (object !== 'opportunity_line') window.__finds.push({ skip: params.$skip ?? 0, top: params.$top });
     const skip = params.$skip ?? 0;
-    const top = params.$top ?? ROWS.length;
-    return { data: ROWS.slice(skip, skip + top), total: ROWS.length };
+    const top = params.$top ?? rows.length;
+    return { data: rows.slice(skip, skip + top), total: rows.length };
   },
-  getObjectSchema: async (name) => ({ name, label: '商机', fields: FIELDS }),
+  getObjectSchema: async (name) => name === 'opportunity_line'
+    ? { name, label: '商机明细', fields: LINE_FIELDS }
+    : { name, label: '商机', fields: FIELDS },
 };
 const record = (name) => async () => { window.__dispatched.push(name); return { success: true }; };
 const rowActionDefs = [
@@ -161,7 +189,31 @@ const bulkActionDefs = [
   { name: 'mass_assign', label: '批量分配' },
   { name: 'mass_tag', label: '批量打标签' },
 ];
-const handlers = Object.fromEntries([...rowActionDefs, ...bulkActionDefs].map((d) => [d.name, record(d.name)]));
+const lineBulkActionDefs = [
+  { name: 'line_discount', label: '批量折扣' },
+  { name: 'line_reprice', label: '重新定价' },
+];
+const handlers = Object.fromEntries([...rowActionDefs, ...bulkActionDefs, ...lineBulkActionDefs].map((d) => [d.name, record(d.name)]));
+const lineSchema = {
+  type: 'object-grid',
+  objectName: 'opportunity_line',
+  columns: ['product', 'quantity', 'price'],
+  selection: { type: 'multiple' },
+  bulkActionDefs: lineBulkActionDefs,
+};
+// The line grid as a record page's child-table tab and as the side record
+// panel draw it: no list-page scope, so its rows keep their own actions.
+const lineGrid = () => h('div', { 'data-testid': 'line-grid' },
+  h(ObjectGrid, { schema: lineSchema, dataSource, onEdit: () => {}, onDelete: () => {} }));
+const recordHeader = () => h('div', { className: 'border-b border-border px-6 py-5' },
+  h('h1', { className: 'text-xl font-semibold' }, '商机 1'),
+  h('p', { className: 'mt-1 text-sm text-muted-foreground' }, '客户 1 · 资格审查 · 销售 1'),
+  h('div', { className: 'mt-4 grid grid-cols-3 gap-4 text-sm' },
+    ...['金额', '赢率', '预计成交日期'].map((label) => h('div', { key: label },
+      h('div', { className: 'text-muted-foreground' }, label), h('div', null, '—')))));
+const tabStrip = () => h('div', { role: 'tablist', className: 'flex gap-4 border-b border-border px-6' },
+  h('button', { role: 'tab', 'aria-selected': 'false', className: 'py-2 text-sm text-muted-foreground' }, '详情'),
+  h('button', { role: 'tab', 'aria-selected': 'true', className: 'border-b-2 border-primary py-2 text-sm font-medium' }, '商机明细'));
 
 const schema = {
   type: 'list-view',
@@ -182,7 +234,7 @@ function Header() {
     identityImportEnabled: false, objectCanImport: false, importVisible: false, importDisabled: false,
     setShowImport: () => {}, listFavorite: null, isEnvironmentList: false,
     toolbarBar: { type: 'action:bar', location: 'list_toolbar', actions: [], maxVisible: 3, mobileMaxVisible: 0 },
-    viewAccess: { refusal: null },
+    viewAccess: { refusal: null }, createLabel: '新建商机',
   });
   return h(ObjectViewPageHeader, {
     objectDef: { name: 'opportunity', label: '商机', pluralLabel: '商机', icon: 'briefcase' },
@@ -217,17 +269,27 @@ function ViewBarLead({ recordCount, layout }) {
     }));
 }
 
+const listPage = () => h('div', { id: 'page-column', className: 'h-screen flex flex-col bg-background min-w-0 overflow-hidden' },
+  h(Header),
+  h('div', { className: 'flex-1 min-h-0 flex flex-col' },
+    h(ListView, { schema, dataSource, toolbarLeading: (state) => h(ViewBarLead, state), onEdit: () => window.__dispatched.push('edit'), onDelete: () => window.__dispatched.push('delete') })));
+// A record page scrolls as one column, its child-table tab inside it.
+const recordPage = () => h('div', { id: 'page-column', 'data-testid': 'record-page', className: 'h-screen overflow-y-auto bg-background text-foreground' },
+  recordHeader(), tabStrip(), h('div', { className: 'p-6' }, lineGrid()));
+// The side record panel over the list page: a dialog with its own scroller.
+const sideRecord = () => h(React.Fragment, null,
+  listPage(),
+  h('div', { role: 'dialog', 'aria-label': '商机 1', 'data-testid': 'side-record', className: 'fixed inset-y-0 right-0 flex w-[480px] max-w-full flex-col border-l border-border bg-background text-foreground shadow-xl' },
+    h('div', { className: 'min-h-0 flex-1 overflow-y-auto' }, recordHeader(), tabStrip(), h('div', { className: 'p-4' }, lineGrid()))));
+const face = c.face === 'tab' ? recordPage : c.face === 'drawer' ? sideRecord : listPage;
+
 const root = createRoot(document.getElementById('root'));
 let mounts = 0;
 window.__remount = () => root.render(
   h(I18nProvider, { key: ++mounts, config: { defaultLanguage: 'zh-CN', fallbackLanguage: 'en', detectBrowserLanguage: false } },
     h(MemoryRouter, { initialEntries: ['/apps/sales/opportunity/view/open'] },
       h(ActionProvider, { handlers },
-        h(SchemaRendererProvider, { dataSource },
-          h('div', { id: 'page-column', className: 'h-screen flex flex-col bg-background min-w-0 overflow-hidden' },
-            h(Header),
-            h('div', { className: 'flex-1 min-h-0 flex flex-col' },
-              h(ListView, { schema, dataSource, toolbarLeading: (state) => h(ViewBarLead, state), onEdit: () => window.__dispatched.push('edit'), onDelete: () => window.__dispatched.push('delete') }))))))),
+        h(SchemaRendererProvider, { dataSource }, face())))),
 );
 window.__unmount = () => root.render(null);
 window.__remount();
@@ -391,38 +453,68 @@ for (const viewport of VIEWPORTS) {
       expect(fits.lastRight).toBeLessThanOrEqual(fits.boxRight + 0.5);
     });
 
-    test('two rows selected: the page bar reads 「已选 2 条」 with the bulk actions, nothing floats over the rows; Cancel restores it', async ({ page }, testInfo) => {
+    test('two rows selected: the bar floats at the bottom centre of the list, above the summary row; the page header stays; × clears', async ({ page }, testInfo) => {
       await mount(page, viewport);
       await rowCheckbox(page, '商机 1').click();
       await rowCheckbox(page, '商机 2').click();
-      const bar = page.getByTestId('list-selection-page-bar');
+      await styleUntilStable(page);
+      // objectstack#35678 — one floating bar, drawn by the table itself.
+      const bar = page.getByTestId('data-table-floating-bar').getByTestId('bulk-actions-bar');
       await expect(bar).toBeVisible();
-      await expect(bar.getByTestId('list-selection-count')).toHaveText('已选 2 条');
+      await expect(page.getByTestId('bulk-actions-bar')).toHaveCount(1);
+      await expect(bar.getByTestId('bulk-selection-count')).toHaveText('已选 2 条');
       await expect(bar.getByTestId('bulk-action-mass_update')).toBeVisible();
       await expect(bar.getByTestId('bulk-action-mass_assign')).toBeVisible();
-      await expect(bar.getByTestId('bulk-action-mass_tag')).toHaveCount(0);
-      await expect(page.getByTestId('bulk-actions-bar')).toHaveCount(0);
-      await expect(page.getByTestId('page-header')).toBeHidden();
-      // Nothing is drawn over the bottom of the list: the point just inside
-      // the scroll box's bottom edge answers the table.
-      const bottomHit = await page.evaluate(() => {
-        const box = document.querySelector<HTMLElement>('[data-table-scroll-box]')!;
-        const r = box.getBoundingClientRect();
-        const hit = document.elementFromPoint(r.left + 40, Math.min(r.bottom, window.innerHeight) - 4);
-        return !!hit && box.contains(hit);
-      });
-      expect(bottomHit).toBe(true);
-      await shoot(page, testInfo, `selected-2-${viewport.width}.png`);
-      await bar.getByTestId('list-selection-cancel').click();
-      await expect(bar).toBeHidden();
+      await expect(bar.getByTestId('bulk-action-mass_tag')).toBeVisible();
+      // Three actions: three buttons, nothing behind More.
+      await expect(bar.getByTestId('selection-actions-more')).toHaveCount(0);
+      // The top of the page does not change.
       await expect(page.getByTestId('page-header')).toBeVisible();
+      const geometry = await page.evaluate(() => {
+        const box = document.querySelector<HTMLElement>('[data-table-scroll-box]')!.getBoundingClientRect();
+        const bar = document.querySelector<HTMLElement>('[data-testid="bulk-actions-bar"]')!.getBoundingClientRect();
+        const foot = document.querySelector<HTMLElement>('[data-table-scroll-box] tfoot')?.getBoundingClientRect() ?? null;
+        return { boxCentre: box.left + box.width / 2, barCentre: bar.left + bar.width / 2, barBottom: bar.bottom, boxBottom: box.bottom, footTop: foot?.top ?? null };
+      });
+      // Centred on the list area, not the window.
+      expect(Math.abs(geometry.barCentre - geometry.boxCentre)).toBeLessThanOrEqual(1);
+      expect(geometry.barBottom).toBeLessThanOrEqual(geometry.boxBottom);
+      // Above the footer calc row when the list draws one.
+      if (geometry.footTop !== null) expect(geometry.barBottom).toBeLessThanOrEqual(geometry.footTop);
+      await shoot(page, testInfo, `selected-2-${viewport.width}.png`);
+      // At the end of the list the last row clears the bar.
+      for (let i = 0; i < 4; i++) {
+        await page.evaluate(() => {
+          const box = document.querySelector<HTMLElement>('[data-table-scroll-box]')!;
+          box.scrollTop = box.scrollHeight;
+        });
+        await page.waitForTimeout(300);
+      }
+      await expect.poll(() => loadedRows(page)).toBe(ROW_COUNT);
+      await page.evaluate(() => {
+        const box = document.querySelector<HTMLElement>('[data-table-scroll-box]')!;
+        box.scrollTop = box.scrollHeight;
+      });
+      const clearance = await page.evaluate(() => {
+        const rows = document.querySelectorAll<HTMLElement>('tbody tr:has([data-slot="row-leading-cell"])');
+        const last = rows[rows.length - 1].getBoundingClientRect();
+        const bar = document.querySelector<HTMLElement>('[data-testid="bulk-actions-bar"]')!.getBoundingClientRect();
+        return { lastBottom: last.bottom, barTop: bar.top };
+      });
+      expect(clearance.lastBottom).toBeLessThanOrEqual(clearance.barTop);
+      await shoot(page, testInfo, `selected-2-end-${viewport.width}.png`);
+      await bar.getByTestId('bulk-selection-clear').click();
+      await expect(page.getByTestId('bulk-actions-bar')).toHaveCount(0);
+      await expect(page.getByTestId('data-table-floating-bar-room')).toHaveCount(0);
+      await expect(rowCheckbox(page, '商机 1')).not.toBeChecked();
     });
 
-    test('one row and two rows expose different actions', async ({ page }) => {
+    test('one row and two rows expose different actions; Esc clears', async ({ page }) => {
       await mount(page, viewport);
       await rowCheckbox(page, '商机 1').click();
-      const bar = page.getByTestId('list-selection-page-bar');
-      await expect(bar.getByTestId('list-selection-count')).toHaveText('已选 1 条');
+      await styleUntilStable(page);
+      const bar = page.getByTestId('bulk-actions-bar');
+      await expect(bar.getByTestId('bulk-selection-count')).toHaveText('已选 1 条');
       await expect(bar.getByTestId('row-action-inline-submit_approval')).toBeVisible();
       await expect(bar.getByTestId('row-action-inline-make_quote')).toBeVisible();
       await expect(bar.getByTestId('bulk-action-mass_update')).toHaveCount(0);
@@ -431,6 +523,8 @@ for (const viewport of VIEWPORTS) {
       await rowCheckbox(page, '商机 2').click();
       await expect(bar.getByTestId('row-action-inline-submit_approval')).toHaveCount(0);
       await expect(bar.getByTestId('bulk-action-mass_update')).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.getByTestId('bulk-actions-bar')).toHaveCount(0);
     });
 
     test('right-click on a row: its actions, 「删除」 last after a separator', async ({ page }) => {
@@ -460,11 +554,11 @@ for (const viewport of VIEWPORTS) {
       await expect.poll(() => loadedRows(page)).toBe(100);
       await page.locator('thead').getByRole('checkbox').click();
       await styleUntilStable(page);
-      const bar = page.getByTestId('list-selection-page-bar');
-      await expect(bar.getByTestId('list-selection-count')).toHaveText('已选 100 条');
-      await expect(bar.getByTestId('list-selection-select-all')).toHaveText('选择全部 120 条');
-      await bar.getByTestId('list-selection-select-all').click();
-      await expect(bar.getByTestId('list-selection-count')).toContainText('120');
+      const bar = page.getByTestId('bulk-actions-bar');
+      await expect(bar.getByTestId('bulk-selection-count')).toHaveText('已选 100 条');
+      await expect(bar.getByTestId('bulk-select-all-matching')).toHaveText('选择全部 120 条');
+      await bar.getByTestId('bulk-select-all-matching').click();
+      await expect(bar.getByTestId('bulk-selection-count')).toContainText('120');
     });
 
     test('opening row 60 and coming back lands near row 60', async ({ page }) => {
@@ -516,6 +610,122 @@ test.describe('visual acceptance at 1280×800, zh-CN (objectstack#35554)', () =>
       await page.getByText('商机 5', { exact: true }).click({ button: 'right' });
       await styleUntilStable(page);
       await shoot(page, testInfo, `context-menu-${theme}.png`);
+    });
+  }
+});
+
+/**
+ * objectstack#35678 — one floating selection bar on every face a grid has: the
+ * list page, a record page's child-table tab, the side record panel; light and
+ * dark; and a 375px window, where it stays on one line inside the window.
+ */
+async function barBox(page: Page) {
+  return page.evaluate(() => {
+    const bar = document.querySelector<HTMLElement>('[data-testid="bulk-actions-bar"]')!;
+    const r = bar.getBoundingClientRect();
+    const cs = getComputedStyle(bar);
+    return {
+      top: r.top, bottom: r.bottom, left: r.left, right: r.right, height: r.height,
+      centre: r.left + r.width / 2,
+      overflows: bar.scrollWidth > bar.clientWidth,
+      border: cs.borderTopColor, background: cs.backgroundColor,
+      page: getComputedStyle(document.body).backgroundColor,
+      viewportWidth: window.innerWidth, viewportHeight: window.innerHeight,
+    };
+  });
+}
+
+test.describe('the selection bar on every face (objectstack#35678)', () => {
+  test.use({ deviceScaleFactor: 2 });
+  test.beforeAll(async () => {
+    test.setTimeout(240_000);
+    if (!bundle) bundle = await bundlePage();
+  });
+
+  for (const theme of ['light', 'dark'] as const) {
+    test(`${theme}: the list page`, async ({ page }, testInfo) => {
+      await mount(page, VIEWPORTS[0], { theme });
+      await rowCheckbox(page, '商机 1').click();
+      await rowCheckbox(page, '商机 2').click();
+      await styleUntilStable(page);
+      const bar = await barBox(page);
+      expect(bar.border).not.toBe(bar.background);
+      await shoot(page, testInfo, `bar-list-${theme}.png`);
+    });
+
+    test(`${theme}: a record page's child-table tab`, async ({ page }, testInfo) => {
+      await mount(page, VIEWPORTS[0], { theme, face: 'tab' });
+      await page.getByText('产品 1', { exact: true }).waitFor();
+      await rowCheckbox(page, '产品 1').click();
+      await rowCheckbox(page, '产品 2').click();
+      await styleUntilStable(page);
+      const grid = page.getByTestId('line-grid');
+      await expect(grid.getByTestId('bulk-actions-bar')).toBeVisible();
+      await expect(grid.getByTestId('bulk-selection-count')).toHaveText('已选 2 条');
+      // Outside the list page the rows keep their own menu: two bulk actions.
+      await expect(grid.getByTestId('bulk-action-line_discount')).toBeVisible();
+      await expect(grid.getByTestId('bulk-action-line_reprice')).toBeVisible();
+      const gridBox = (await grid.boundingBox())!;
+      const bar = await barBox(page);
+      // The record page scrolls as one column: the bar holds to the bottom
+      // of the window while the tab's table runs past it, centred on the table.
+      expect(bar.bottom).toBeLessThanOrEqual(bar.viewportHeight);
+      expect(Math.abs(bar.centre - (gridBox.x + gridBox.width / 2))).toBeLessThanOrEqual(1);
+      expect(bar.border).not.toBe(bar.background);
+      await shoot(page, testInfo, `bar-tab-${theme}.png`);
+      await page.getByTestId('record-page').evaluate((el) => { el.scrollTop = el.scrollHeight; });
+      const clearance = await page.evaluate(() => {
+        const rows = document.querySelectorAll<HTMLElement>('[data-testid="line-grid"] tbody tr:has([data-slot="row-leading-cell"])');
+        const last = rows[rows.length - 1].getBoundingClientRect();
+        const bar = document.querySelector<HTMLElement>('[data-testid="bulk-actions-bar"]')!.getBoundingClientRect();
+        return { lastBottom: last.bottom, barTop: bar.top };
+      });
+      expect(clearance.lastBottom).toBeLessThanOrEqual(clearance.barTop);
+      await shoot(page, testInfo, `bar-tab-end-${theme}.png`);
+    });
+
+    test(`${theme}: the side record`, async ({ page }, testInfo) => {
+      await mount(page, VIEWPORTS[0], { theme, face: 'drawer' });
+      const panel = page.getByTestId('side-record');
+      await panel.getByText('产品 1', { exact: true }).waitFor();
+      await rowCheckbox(page, '产品 1').click();
+      await rowCheckbox(page, '产品 2').click();
+      await styleUntilStable(page);
+      await expect(panel.getByTestId('bulk-actions-bar')).toBeVisible();
+      await expect(page.getByTestId('bulk-actions-bar')).toHaveCount(1);
+      const panelBox = (await panel.getByTestId('line-grid').boundingBox())!;
+      const bar = await barBox(page);
+      expect(bar.left).toBeGreaterThanOrEqual(panelBox.x);
+      expect(bar.right).toBeLessThanOrEqual(panelBox.x + panelBox.width);
+      expect(bar.bottom).toBeLessThanOrEqual(bar.viewportHeight);
+      expect(bar.border).not.toBe(bar.background);
+      await shoot(page, testInfo, `bar-side-record-${theme}.png`);
+      // Esc inside the panel that holds the bar still clears it.
+      await page.keyboard.press('Escape');
+      await expect(page.getByTestId('bulk-actions-bar')).toHaveCount(0);
+    });
+  }
+
+  for (const face of ['list', 'drawer'] as const) {
+    test(`375px, ${face === 'list' ? 'the list page' : 'the side record'}: one line, inside the window`, async ({ page }, testInfo) => {
+      await mount(page, VIEWPORTS[0], { face });
+      const scope = face === 'list' ? page.locator('body') : page.getByTestId('side-record');
+      const [first, second] = face === 'list' ? ['商机 1', '商机 2'] : ['产品 1', '产品 2'];
+      await scope.getByText(first, { exact: true }).waitFor();
+      await rowCheckbox(page, first).click();
+      await rowCheckbox(page, second).click();
+      // The selection outlives the move to a phone-width window.
+      await page.setViewportSize({ width: 375, height: 812 });
+      await styleUntilStable(page);
+      await expect(page.getByTestId('bulk-actions-bar')).toBeVisible();
+      await expect(page.getByTestId('bulk-selection-count')).toHaveText('已选 2 条');
+      const bar = await barBox(page);
+      expect(bar.overflows).toBe(false);
+      expect(Math.round(bar.height)).toBe(44);
+      expect(bar.left).toBeGreaterThanOrEqual(0);
+      expect(bar.right).toBeLessThanOrEqual(375);
+      expect(bar.bottom).toBeLessThanOrEqual(812);
+      await shoot(page, testInfo, `bar-375-${face}.png`);
     });
   }
 });

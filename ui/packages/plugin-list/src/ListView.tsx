@@ -9,7 +9,7 @@
 import * as React from 'react';
 import { cn, Button, Input, Popover, PopoverContent, PopoverTrigger, FilterBuilder, SortBuilder, NavigationOverlay, GroupingEditor, RefreshIndicator, DataErrorState, resolveIcon, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@object-ui/components';
 import type { SortItem } from '@object-ui/components';
-import { Search, Funnel, ArrowUpDown, X, EyeOff, Group, Paintbrush, Download, Rows4, Rows3, Rows2, Lock, Printer, Plus, Trash2, CheckSquare, AlertTriangle, ShieldAlert, RotateCw, Loader2, Info, Inbox } from 'lucide-react';
+import { Search, X, EyeOff, Group, Paintbrush, Download, Rows4, Rows3, Rows2, Lock, Printer, Plus, Trash2, CheckSquare, AlertTriangle, ShieldAlert, RotateCw, Loader2, Info, Inbox } from 'lucide-react';
 import type { FilterBuilderRowGroup } from '@object-ui/components';
 import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete, isCurrencyCompanion } from '@object-ui/components';
 import { ViewSwitcherDropdown } from './ViewSwitcher';
@@ -17,14 +17,24 @@ import { ListEmptyState, hasDeclaredFilter, filterNamesCurrentUser } from './Lis
 import { ListViewCompactHeader, ListViewCompactRows, ListViewCappedRows, CAPPED_LIST_DEFAULT_LIMIT } from './ListViewCompact';
 import {
   ViewSettingsPopover,
+  ViewSettingsContent,
   groupFieldOptions,
   type ViewSettingsField,
-  PHONE_POPOVER_GUTTER,
   PHONE_TOUCH_TARGET,
   useBelowSm,
 } from './components/ViewSettingsPopover';
+import {
+  ListPhonePanelsContext,
+  PhoneFilterSheet,
+  PhoneListToolbar,
+  PhonePanelSheet,
+  PhoneSortSheet,
+  PHONE_CHIP,
+  PHONE_CHIP_ACTIVE,
+  type ListPhonePanels,
+} from './phone/PhoneListPanels';
 import { UserFilters, type UserFiltersHandle } from './UserFilters';
-import { ConditionChipRow, FilterPanel, SortPanel } from './conditions/ListConditionControls';
+import { ConditionChipRow, SortPanel } from './conditions/ListConditionControls';
 import {
   TOOLBAR_ROW,
   TOOLBAR_ROW_LEADING_PHONE,
@@ -35,7 +45,6 @@ import {
   TOOLBAR_USER_FILTERS_LEADING_PHONE,
   TOOLBAR_CLUSTER,
   TOOLBAR_CLUSTER_LEADING_PHONE,
-  TOOLBAR_TEXT_TRIGGER,
 } from './listToolbarRow';
 import {
   calendarWindowCovers,
@@ -52,7 +61,7 @@ import { useDensityMode, resolveInlineAriaProps } from '@object-ui/react';
 import type { DataTableSchema, DependsOnInput, ListViewSchema, ObjectMapConfig } from '@object-ui/types';
 import { detectStatusField, isSystemManagedField } from '@object-ui/types';
 import { usePullToRefresh } from '@object-ui/mobile';
-import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, toFilterNodeSafely, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING, kanbanDeclaredLanes, csvBlob, readWithheldFieldNames, refersToWithheldField } from '@object-ui/core';
+import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, isObjectExportOffered, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, toFilterNodeSafely, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING, kanbanDeclaredLanes, csvBlob, readWithheldFieldNames, refersToWithheldField, withHeaderSortPick } from '@object-ui/core';
 import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLocale, pickLocalized, recordCurrencyField, recordCurrencyReadField } from '@object-ui/i18n';
 // Two resolvers, two vocabularies — the repo spells the distinction into the
 // NAMES (objectui#4167). `resolveInlineI18nLabel` is the spec's own
@@ -472,6 +481,27 @@ export interface ListViewProps {
    * the list holds and which layout it draws.
    */
   toolbarLeading?: React.ReactNode | ((state: ListToolbarLeadingState) => React.ReactNode);
+  /**
+   * objectstack#35878 — the right end of the view bar, drawn by the host. It
+   * is called with the list's own tools for that end (its search) and returns
+   * what the end shows: the console puts the page's create button and ⋮ More
+   * after the search. Absent ⇒ the search alone, as before.
+   *
+   * objectstack#36113 — the second argument carries the list's export door
+   * (`ListToolbarTrailingState`), for a host that draws it at the bar's end
+   * too; the 视图设置 footer keeps its own export entries. The phone's row
+   * passes no export door.
+   *
+   * A HOST prop, never a schema key.
+   */
+  toolbarTrailing?: (tools: React.ReactNode, state: ListToolbarTrailingState) => React.ReactNode;
+  /**
+   * objectstack#35878 — the right end of the condition row under the view
+   * bar, drawn by the host: the console's 「Personalized · Reset」. Given, it
+   * takes the place of the row's own 「Reset」 (which puts back the filter and
+   * sort only). A HOST prop, never a schema key.
+   */
+  conditionRowEnd?: React.ReactNode;
   /**
    * A host-drawn node beside each row's title in the grid (objectui#13330),
    * handed to `ObjectGrid`'s `rowAdornment`: the cell of the object's declared
@@ -1223,7 +1253,7 @@ function filterRowsKey(group: FilterBuilderRowGroup): string {
   return JSON.stringify([rows.length > 1 ? group.logic ?? 'and' : 'and', rows]);
 }
 
-function appliedFilterGroup(group: FilterBuilderRowGroup): FilterBuilderRowGroup {
+export function appliedFilterGroup(group: FilterBuilderRowGroup): FilterBuilderRowGroup {
   const rows = group.conditions ?? [];
   const finished = rows.filter(isAppliedFilterRow);
   const kept = finished.filter((c) => !isCurrencyCompanion(c, group) || isCurrencyCompanion(c, { ...group, conditions: finished }));
@@ -1895,7 +1925,7 @@ const NO_DRAFT_ONLY_FIELDS: ReadonlySet<string> = new Set<string>();
 const NO_DRAFT_ONLY_QUERY_DROPS: readonly string[] = [];
 
 /** The names `objectDef` marks {@link DRAFT_ONLY_FIELD_KEY}, in either field-map shape. */
-function readDraftOnlyFieldNames(objectDef: unknown): ReadonlySet<string> {
+export function readDraftOnlyFieldNames(objectDef: unknown): ReadonlySet<string> {
   const raw = (objectDef as { fields?: unknown } | null | undefined)?.fields;
   if (!raw || typeof raw !== 'object') return NO_DRAFT_ONLY_FIELDS;
   const entries: Array<[unknown, unknown]> = Array.isArray(raw)
@@ -1976,7 +2006,7 @@ function omitDraftOnlyFilterFields(node: unknown, draftOnly: ReadonlySet<string>
  * hook. Every memo that calls it already depends on those two, so none depends
  * on a function's identity (AGENTS.md #10).
  */
-function canReadField(
+export function canReadField(
   perms: ReturnType<typeof usePermissions>,
   objectName: string | undefined,
   field: string,
@@ -1993,11 +2023,183 @@ function canReadField(
  * is not blank and can be removed; the hide-fields lists never offer one to
  * add. A plain function of the definition's field map, like `canReadField`.
  */
-function isDeclaredHidden(
+export function isDeclaredHidden(
   defs: Record<string, { hidden?: unknown } | undefined> | undefined,
   field: string,
 ): boolean {
   return defs?.[field]?.hidden === true;
+}
+
+/**
+ * A field's declared `options` (an array of `{ value, label }` or a keyed
+ * object) as the array the pickers' value lists read, before the host
+ * translates the labels. `undefined` when none are declared.
+ */
+export function conditionOptionsOf(raw: unknown): Array<{ value: any; label: string; [k: string]: any }> | undefined {
+  if (!raw) return undefined;
+  return Array.isArray(raw)
+    ? raw.map((o: any) => ({
+        value: o?.value ?? o,
+        label: o?.label ?? String(o?.value ?? o),
+        ...(o && typeof o === 'object' ? o : {}),
+      }))
+    : Object.entries(raw as Record<string, any>).map(([value, meta]) => ({
+        value,
+        label: (meta as any)?.label || value,
+        ...(meta as any),
+      }));
+}
+
+/** One field the Filter and Sort pickers may name, as the object definition declares it. */
+export interface ConditionCandidateField {
+  value: string;
+  label: string;
+  type: string;
+  multiple?: boolean;
+  options?: any;
+  referenceTo?: string;
+  displayField?: string;
+  currencyField?: string;
+}
+
+/**
+ * The fields an object definition offers the condition controls, in the
+ * definition's own order: the base set both pickers narrow (see
+ * `candidateFields` in `ListView` for every rule this reads). Shared with any
+ * host of the same controls over the same object (the related tab's condition
+ * row, objectstack#35892), so the two lists never drift.
+ */
+export function conditionCandidatesOf(
+  defs: Record<string, any>,
+  label: (field: string, fallback: string) => string,
+  options: (field: string, raw: unknown) => any[] | undefined,
+): ConditionCandidateField[] {
+  return Object.entries(defs).map(([key, field]: [string, any]) => ({
+    value: key,
+    label: label(key, field.label || key),
+    type: field.type || 'text',
+    // With the type, whether the field's value is a list: the filter
+    // offers a multi-value field only the operators the server takes.
+    multiple: field.multiple === true,
+    options: options(key, field.options),
+    // ⚠️ objectui#6837 half 2: the READ narrows to `reference` (the only
+    // spelling the protocol declares — `FieldSchema` refuses `reference_to`
+    // by name). The EMITTED key is unchanged: it is what this emit's TARGET
+    // contract declares, and renaming it would be a separate change.
+    // Target contract here: this file's own local filter-field descriptor,
+    // which spells it camelCase `referenceTo`.
+    referenceTo: field.reference,
+    // objectui#10545 — the display field is read in the DECLARED spelling
+    // and only in it. `FieldSchema` declares `displayField`; it refuses
+    // `display_field` and `reference_field` with `unrecognized_keys`. This is
+    // the single spelling `plugin-grid`'s copy set reads
+    // (`RELATIONAL_META_READ_SET`, objectui#7155). A stored pre-strict
+    // `display_field` is folded onto `displayField` once, at ingestion
+    // (`normalizeSchemaReferenceKeys`, objectui#7650), never here.
+    //
+    // No id column is read: `FieldSchema` declares none for a lookup (it
+    // refuses `idField` and `id_field` alike), so the filter's value
+    // picker keys the lookup by its own `id` default.
+    displayField: field.displayField,
+    // ADR-0144 D6: a `record`-mode amount's row pairs with its code
+    // field, so the filter compares within one currency.
+    ...(recordCurrencyField(field) ? { currencyField: recordCurrencyField(field) } : {}),
+  }));
+}
+
+/**
+ * The FILTER picker's fields, in the order its list draws them (see
+ * `filterFields` in `ListView` for why each rule is there): readable, not
+ * declared hidden and not draft-only unless a held condition names it; this
+ * list's columns first in column order, then the other business fields, then
+ * the system fields, then a hidden field kept by a held condition.
+ */
+export function filterConditionFieldsOf<T extends { value: string }>(
+  candidates: ReadonlyArray<T>,
+  opts: {
+    defs: Record<string, { hidden?: unknown; system?: boolean } | undefined> | undefined;
+    perms: ReturnType<typeof usePermissions>;
+    objectName: string | undefined;
+    /** The fields the held filter rows name. */
+    held: ReadonlySet<string>;
+    /** The list's columns, in the order it shows them. */
+    columnOrder: ReadonlyArray<string>;
+    draftOnly: ReadonlySet<string>;
+  },
+): T[] {
+  const { defs, perms, objectName, held, columnOrder, draftOnly } = opts;
+  const isHidden = (name: string) => isDeclaredHidden(defs, name);
+  const columnRank = new Map<string, number>();
+  for (const name of columnOrder) {
+    if (name && !columnRank.has(name)) columnRank.set(name, columnRank.size);
+  }
+  // 0: a column of this view · 1: another business field · 2: a system
+  // field · 3: a hidden field kept only because a held condition names it.
+  const tierOf = (name: string) =>
+    isHidden(name) ? 3 : columnRank.has(name) ? 0 : isSystemManagedField(name, defs?.[name]) ? 2 : 1;
+  return candidates
+    .filter((f) => canReadField(perms, objectName, f.value))
+    .filter((f) => !isHidden(f.value) || held.has(f.value))
+    // objectstack#34807 — a draft-only field cannot filter the list (the
+    // data door refuses it), so it is not offered; a held condition naming
+    // one keeps its row, so it can be removed.
+    .filter((f) => !draftOnly.has(f.value) || held.has(f.value))
+    .map((field, index) => ({ field, index, tier: tierOf(field.value) }))
+    .sort((a, b) =>
+      a.tier - b.tier ||
+      (a.tier === 0 ? columnRank.get(a.field.value)! - columnRank.get(b.field.value)! : a.index - b.index),
+    )
+    .map(({ field }) => field);
+}
+
+/**
+ * The SORT picker's fields (see `sortFields` in `ListView` for why each rule
+ * is there): readable, not declared hidden, not relational and one the
+ * platform orders by; a field the current sort already names stays listed,
+ * removable only. Also says whether a relational field was left out
+ * (`excluded`) and whether the current sort names one (`picked`).
+ */
+export function sortConditionFieldsOf(
+  candidates: ReadonlyArray<{ value: string; label: string; type: string }>,
+  opts: {
+    defs: Record<string, { hidden?: unknown } | undefined> | undefined;
+    perms: ReturnType<typeof usePermissions>;
+    objectName: string | undefined;
+    /** The fields the current sort names. */
+    inUse: ReadonlySet<string>;
+    platformSortability: ReturnType<typeof readObjectSortability>;
+    draftOnly: ReadonlySet<string>;
+    /** Appended to a relational field's label when the sort keeps it (it orders by the stored id). */
+    byIdSuffix: string;
+  },
+): { fields: Array<{ value: string; label: string; disabled?: boolean; type?: string }>; excluded: boolean; picked: boolean } {
+  const { defs, perms, objectName, inUse, platformSortability, draftOnly, byIdSuffix } = opts;
+  let excluded = false;
+  let picked = false;
+  const fields: Array<{ value: string; label: string; disabled?: boolean; type?: string }> = [];
+  for (const field of candidates) {
+    const offered = canReadField(perms, objectName, field.value) && !isDeclaredHidden(defs, field.value);
+    if (!offered && !inUse.has(field.value)) continue;
+    const relational = EXPANDABLE_FIELD_TYPES.has(field.type);
+    const platformSortable = !draftOnly.has(field.value) && (platformSortability
+      ? isPlatformSortableField(platformSortability, field.value)
+      : !UNMATERIALIZED_FIELD_TYPES.has(field.type));
+    if (offered && !relational && platformSortable) {
+      fields.push({ value: field.value, label: field.label, type: field.type });
+      continue;
+    }
+    if (inUse.has(field.value)) {
+      if (relational) picked = true;
+      fields.push({
+        value: field.value,
+        label: relational ? `${field.label} ${byIdSuffix}` : field.label,
+        disabled: true,
+      });
+      continue;
+    }
+    if (relational) excluded = true;
+  }
+  return { fields, excluded, picked };
 }
 
 /** The item a value none of a picker's options carries is shown by. */
@@ -2081,6 +2283,28 @@ export interface ListToolbarLeadingState {
 }
 
 /**
+ * The list's export door, handed to a host that draws it (objectstack#36113):
+ * the formats this reader may export the list as, and the act that exports
+ * the list as one of them — the same `handleExport` the 视图设置 footer runs,
+ * behind the same permission and format verdicts (`run` does nothing for a
+ * format outside `formats`).
+ */
+export interface ListExportDoor {
+  formats: readonly string[];
+  run: (format: string) => void;
+  /** A server-streamed export is in flight. */
+  busy: boolean;
+  /** The last export's failure, said in the list's words; `null` ⇒ none. */
+  error: string | null;
+}
+
+/** What `toolbarTrailing` is called with besides the tools (objectstack#36113). */
+export interface ListToolbarTrailingState {
+  /** Absent ⇒ no format is offered or the reader may not export. */
+  export?: ListExportDoor;
+}
+
+/**
  * Imperative handle exposed by ListView via React.forwardRef.
  * Allows parent components to trigger a data refresh programmatically.
  *
@@ -2118,6 +2342,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   initialFilters,
   initialSearchTerm,
   toolbarLeading,
+  toolbarTrailing,
+  conditionRowEnd,
   rowAdornment,
   recordLinkAdornment,
   rowOpensRecord,
@@ -2418,9 +2644,13 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   const [showSearchPopover, setShowSearchPopover] = React.useState(false);
   // Below `sm` the list search is an icon that expands into a field in place.
   const [phoneSearchOpen, setPhoneSearchOpen] = React.useState(false);
+  // objectstack#35883 / #35884 — below `sm` the list draws the phone's one
+  // toolbar row and opens its sort, filter and view-settings panels as
+  // bottom sheets (`./phone/PhoneListPanels.tsx`); which one is open.
+  const belowSm = useBelowSm();
+  const [phonePanel, setPhonePanel] = React.useState<'sort' | 'filter' | 'settings' | null>(null);
 
   // Sort State
-  const [showSort, setShowSort] = React.useState(false);
   const [currentSort, setCurrentSort] = React.useState<SortItem[]>(() =>
     parseSortConfig(schema.sort),
   );
@@ -2506,7 +2736,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     );
   }, [currentSort, declaredSort]);
 
-  const [showFilters, setShowFilters] = React.useState(false);
 
   const [currentFilters, setCurrentFilters] = React.useState<FilterBuilderRowGroup>(() =>
     initialFilters && Array.isArray(initialFilters.conditions)
@@ -3045,19 +3274,26 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   const [exportError, setExportError] = React.useState<string | null>(null);
 
   // Object-level export permission gate. Default-allow: export stays enabled
-  // unless `allowExport === false` or `operations.export === false`, AND — when
-  // the server hands down an effective API operation set for this object
-  // (/me/permissions `apiOperations`, objectstack#3391) — unless it excludes `export`.
-  // Missing effective set (unrestricted object / old backend / no provider)
-  // keeps the current behavior. The frontend consumes the effective set the
-  // server resolved; it never reads the raw `apiMethods`.
+  // unless `allowExport === false` or `operations.export === false`, AND unless
+  // the object's resolved export verdict closes it. That verdict is
+  // `isObjectExportOffered` from `@object-ui/core`:
+  // the object's `userActions.exportCsv` over its `managedBy` default
+  // (objectstack#35619 — `exportCsv: false` hides the whole entry, every
+  // format) ANDed with the server's effective API operation set
+  // (/me/permissions `apiOperations`, objectstack#3391) when one is handed
+  // down. A missing set (unrestricted object / old backend / no provider) and
+  // an object definition still in flight keep the default, which offers
+  // export in every bucket. The frontend consumes the effective set the server
+  // resolved; it never reads the raw `apiMethods`. Every export door below —
+  // the wide toolbar, the Display panel's footer and `handleExport` — reads
+  // this one name.
   const affordancePerms = usePermissions();
   const { getObjectApiOperations } = affordancePerms;
   const effectiveApiOps = schema.objectName ? getObjectApiOperations(schema.objectName) : undefined;
   const exportPermitted =
     schema.allowExport !== false &&
     schema.operations?.export !== false &&
-    (effectiveApiOps ? effectiveApiOps.includes('export') : true);
+    isObjectExportOffered(objectDef as SchemaLike | null, effectiveApiOps);
 
   // [objectstack#3720] Bulk-action gate for the NON-grid views (kanban / calendar /
   // gallery / …), whose bulk bar this component renders itself — the grid path
@@ -3346,8 +3582,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     setRefreshKey(k => k + 1);
   }, []);
 
-  // Below `sm` the Filter and Sort panels keep 16 px from both screen edges.
-  const belowSm = useBelowSm();
 
   const { ref: pullRef, isRefreshing, pullDistance } = usePullToRefresh<HTMLDivElement>({
     onRefresh: handlePullRefresh,
@@ -5740,25 +5974,15 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    * The two narrowings now sit downstream of it, one per builder.
    */
   const candidateFields = React.useMemo(() => {
-    let fields: Array<{ value: string; label: string; type: string; options?: any; referenceTo?: string; displayField?: string }>;
+    let fields: Array<{ value: string; label: string; type: string; multiple?: boolean; options?: any; referenceTo?: string; displayField?: string }>;
 
     // Translate select-field option labels through the i18n resolver.
     // fieldDef.options may be an array of { value, label } or a keyed object;
     // we normalize to array form so FilterBuilder's value-pickers show
     // localized option labels (e.g. 网站 instead of "Web").
     const buildOptions = (key: string, raw: any): any[] | undefined => {
-      if (!raw) return undefined;
-      const arr: Array<{ value: any; label: string; [k: string]: any }> = Array.isArray(raw)
-        ? raw.map((o: any) => ({
-            value: o?.value ?? o,
-            label: o?.label ?? String(o?.value ?? o),
-            ...(o && typeof o === 'object' ? o : {}),
-          }))
-        : Object.entries(raw as Record<string, any>).map(([value, meta]) => ({
-            value,
-            label: (meta as any)?.label || value,
-            ...(meta as any),
-          }));
+      const arr = conditionOptionsOf(raw);
+      if (!arr) return undefined;
       return schema.objectName ? translateOptions(schema.objectName, key, arr) : arr;
     };
 
@@ -5783,45 +6007,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
            }];
         });
     } else {
-        fields = Object.entries(objectDef.fields).map(([key, field]: [string, any]) => ({
-            value: key,
-            label: tFieldLabel(key, field.label || key),
-            type: field.type || 'text',
-            options: buildOptions(key, field.options),
-            // ⚠️ objectui#6837 half 2: the READ narrows to `reference` (the only
-            // spelling the protocol declares — `FieldSchema` refuses `reference_to`
-            // by name). The EMITTED key is unchanged: it is what this emit's TARGET
-            // contract declares, and renaming it would be a separate change.
-            // Target contract here: this file's own local filter-field descriptor,
-            // which spells it camelCase `referenceTo`.
-            // ⚠️ The SIBLING branch above (the `schema.columns` fallback) is NOT
-            // narrowed: it reads a list-view COLUMN, and the spec's `ListColumnSchema`
-            // declares neither `reference` nor `reference_to` — measured, both refused
-            // with no rename hint. That is a different question and is filed, not
-            // answered here.
-            referenceTo: field.reference,
-            // objectui#10545 — the display field is read in the DECLARED spelling
-            // and only in it. `objectDef` is
-            // `dataSource.getObjectSchema(schema.objectName)`, the object-schema
-            // def, and `FieldSchema` declares `displayField`; it refuses
-            // `display_field` (renaming it to `displayField`) and
-            // `reference_field` (pointing at `referenceVia`, a different key)
-            // with `unrecognized_keys`. This is the single spelling `plugin-grid`'s
-            // copy set reads (`RELATIONAL_META_READ_SET`, objectui#7155), and it
-            // supersedes the objectui#7642 census KEEP, which held only while
-            // this chain had no `displayField` leg. A stored pre-strict
-            // `display_field` is folded onto `displayField` once, at ingestion
-            // (`normalizeSchemaReferenceKeys`, objectui#7650), never here.
-            //
-            // No id column is read: `FieldSchema` declares none for a lookup (it
-            // refuses `idField` and `id_field` alike), so the filter's value
-            // picker keys the lookup by its own `id` default, and `plugin-grid`'s
-            // copy set copies no id column either.
-            displayField: field.displayField,
-            // ADR-0144 D6: a `record`-mode amount's row pairs with its code
-            // field, so the filter compares within one currency.
-            ...(recordCurrencyField(field) ? { currencyField: recordCurrencyField(field) } : {}),
-        }));
+        // The definition's fields, read by the one shared mapping
+        // (`conditionCandidatesOf`, above), so every host of these controls
+        // offers the same list.
+        fields = conditionCandidatesOf(objectDef.fields, tFieldLabel, buildOptions);
     }
 
     return fields;
@@ -5873,33 +6062,14 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    * The predicate is `canReadField`, which the Sort picker shares
    * (objectui#11943).
    */
-  const filterFields = React.useMemo(() => {
-    const defs: Record<string, { hidden?: unknown; system?: boolean } | undefined> | undefined = objectDef?.fields;
-    const isHidden = (name: string) => isDeclaredHidden(defs, name);
-    const held = new Set((currentFilters.conditions ?? []).map((c) => c.field));
-    const columnRank = new Map<string, number>();
-    for (const column of effectiveFields) {
-      const name = columnIdentity(column);
-      if (name && !columnRank.has(name)) columnRank.set(name, columnRank.size);
-    }
-    // 0: a column of this view · 1: another business field · 2: a system
-    // field · 3: a hidden field kept only because a held condition names it.
-    const tierOf = (name: string) =>
-      isHidden(name) ? 3 : columnRank.has(name) ? 0 : isSystemManagedField(name, defs?.[name]) ? 2 : 1;
-    return candidateFields
-      .filter((f) => canReadField(perms, schema.objectName, f.value))
-      .filter((f) => !isHidden(f.value) || held.has(f.value))
-      // objectstack#34807 — a draft-only field cannot filter the list (the
-      // data door refuses it), so it is not offered; a held condition naming
-      // one keeps its row, so it can be removed.
-      .filter((f) => !draftOnlyFields.has(f.value) || held.has(f.value))
-      .map((field, index) => ({ field, index, tier: tierOf(field.value) }))
-      .sort((a, b) =>
-        a.tier - b.tier ||
-        (a.tier === 0 ? columnRank.get(a.field.value)! - columnRank.get(b.field.value)! : a.index - b.index),
-      )
-      .map(({ field }) => field);
-  }, [candidateFields, currentFilters.conditions, effectiveFields, objectDef, schema.objectName, perms, draftOnlyFields]);
+  const filterFields = React.useMemo(() => filterConditionFieldsOf(candidateFields, {
+    defs: objectDef?.fields,
+    perms,
+    objectName: schema.objectName,
+    held: new Set((currentFilters.conditions ?? []).map((c) => c.field)),
+    columnOrder: effectiveFields.map((column) => columnIdentity(column)).filter((name): name is string => !!name),
+    draftOnly: draftOnlyFields,
+  }), [candidateFields, currentFilters.conditions, effectiveFields, objectDef, schema.objectName, perms, draftOnlyFields]);
 
   // Sort candidates: ALL fields the view can name, minus the ones the sort
   // cannot honestly reach (objectui#4243 — previously ⊂ filter candidates).
@@ -5983,42 +6153,15 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // the request by).
 
   const { sortFields, sortHasRelationalField, sortPicksRelationalField } = React.useMemo(() => {
-    const inUse = new Set(currentSort.map((item) => item.field).filter(Boolean));
-    let excluded = false;
-    // objectui#12528 — the current sort names a relational field (a stored or
-    // URL sort; the picker never offers one), so the list IS sorted by the
-    // stored ID: said in one line under the rows, only while it is true.
-    let picked = false;
-    const fields: Array<{ value: string; label: string; disabled?: boolean; type?: string }> = [];
-    const defs: Record<string, { hidden?: unknown } | undefined> | undefined = objectDef?.fields;
-    for (const field of candidateFields) {
-      const offered = canReadField(perms, schema.objectName, field.value) && !isDeclaredHidden(defs, field.value);
-      if (!offered && !inUse.has(field.value)) continue;
-      const relational = EXPANDABLE_FIELD_TYPES.has(field.type);
-      // A draft-only field (objectstack#34807) is never sortable: the data
-      // door refuses it, whatever the projection says.
-      const platformSortable = !draftOnlyFields.has(field.value) && (platformSortability
-        ? isPlatformSortableField(platformSortability, field.value)
-        : !UNMATERIALIZED_FIELD_TYPES.has(field.type));
-      // `type` lets the picker name a date's direction as time
-      // (objectstack#27520): "Oldest → Newest", not "A → Z".
-      if (offered && !relational && platformSortable) {
-        fields.push({ value: field.value, label: field.label, type: field.type });
-        continue;
-      }
-      if (inUse.has(field.value)) {
-        if (relational) picked = true;
-        // Listed only because the current sort names it: `disabled`, so its
-        // own row shows it and can drop it, and nothing can choose it anew.
-        fields.push({
-          value: field.value,
-          label: relational ? `${field.label} ${t('list.sortByIdSuffix')}` : field.label,
-          disabled: true,
-        });
-        continue;
-      }
-      if (relational) excluded = true;
-    }
+    const { fields, excluded, picked } = sortConditionFieldsOf(candidateFields, {
+      defs: objectDef?.fields,
+      perms,
+      objectName: schema.objectName,
+      inUse: new Set(currentSort.map((item) => item.field).filter(Boolean)),
+      platformSortability,
+      draftOnly: draftOnlyFields,
+      byIdSuffix: t('list.sortByIdSuffix'),
+    });
     return { sortFields: fields, sortHasRelationalField: excluded, sortPicksRelationalField: picked };
   }, [candidateFields, currentSort, t, platformSortability, perms, schema.objectName, objectDef, draftOnlyFields]);
 
@@ -6101,9 +6244,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       field: s.field,
       order: s.order,
     }));
-    const items: SortItem[] = picked.length === 1 && currentSort.length >= 2
-      ? [picked[0], ...currentSort.filter((s) => s.field !== picked[0].field)]
-      : picked;
+    const items: SortItem[] = withHeaderSortPick(currentSort, picked);
     setCurrentSort(items);
     setServerPage(1);
     emitSortChange(items);
@@ -6823,10 +6964,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     || toolbarFlags.showHideFields || currentView === 'grid' || toolbarFlags.showRefresh
     || (resolvedExportOptions && exportPermitted && exportableFormats.length > 0)
   );
-  // Below `sm` the bar keeps Filter and Display only, so Sort rides in the
-  // Display panel there. Without a Display panel the Sort trigger stays on the
-  // bar at every width. Either way it follows `userActions.sort`.
-  const sortInDisplay = toolbarFlags.showSort && displayOffered;
   // The condition controls (objectstack#35549, objectstack#35550): the Filter
   // and Sort triggers open the shared field list, and the condition row under
   // the view bar draws the sort and filter chips. The fields the view shows,
@@ -6902,9 +7039,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       )}
     </div>
   ) : undefined;
-  // The Sort panel: every sort level at once. The toolbar Sort popover draws
-  // it as the shared field list's advanced step (objectstack#35550), and the
-  // Display panel draws it below `sm` (`sortInDisplay`).
+  // The Sort panel: every sort level at once. The condition row's sort chip
+  // draws it as the shared field list's advanced step (objectstack#35550,
+  // objectstack#35878).
   const sortPanelBody = (
     <div className="space-y-4">
       <div className="flex items-center justify-between border-b pb-2">
@@ -6971,11 +7108,162 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     </div>
   );
 
+  // Search, phone form: the icon expands into a field in place, with the
+  // bar's touch size. Enter or Escape folds it back to the icon, which then
+  // carries the active keyword as the desktop trigger does; the clear button
+  // empties the term and folds it. Below `sm` it is a chip of the phone
+  // toolbar (objectstack#35883), which draws the list's one search.
+  const phoneSearch = toolbarFlags.showSearch ? (phoneSearchOpen ? (
+              <div className="relative flex items-center sm:hidden" data-testid="phone-search">
+                <Search
+                  className="pointer-events-none absolute left-2 h-3.5 w-3.5 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <Input
+                  type="search"
+                  placeholder={t('table.search')}
+                  aria-label={t('list.search')}
+                  value={searchTerm}
+                  onChange={(e) => handleSearchChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === 'Escape') setPhoneSearchOpen(false);
+                  }}
+                  onBlur={() => {
+                    if (!searchTerm) setPhoneSearchOpen(false);
+                  }}
+                  // 16px text: a smaller font makes iOS Safari zoom on focus.
+                  className="h-7 w-36 pl-7 pr-7 text-base max-sm:h-11 max-sm:pr-11 [&::-webkit-search-cancel-button]:hidden"
+                  autoFocus
+                  data-testid="phone-search-input"
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-0 h-7 w-7 p-0 text-muted-foreground hover:text-primary max-sm:h-11 max-sm:w-11"
+                  aria-label={t('list.clearSearch')}
+                  title={t('list.clearSearch')}
+                  onClick={() => {
+                    handleSearchChange('');
+                    setPhoneSearchOpen(false);
+                  }}
+                  data-testid="phone-search-clear"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  PHONE_CHIP,
+                  'sm:hidden',
+                  searchTerm ? PHONE_CHIP_ACTIVE : 'text-muted-foreground',
+                )}
+                aria-label={searchTerm ? `${t('list.search')}: ${searchTerm}` : t('list.search')}
+                title={searchTerm ? `${t('list.search')}: ${searchTerm}` : t('list.search')}
+                onClick={() => setPhoneSearchOpen(true)}
+                data-testid="phone-search-trigger"
+              >
+                <Search className="h-4 w-4" />
+                {searchTerm && (
+                  <span className="max-w-[5rem] truncate text-xs" data-testid="phone-search-active-keyword">
+                    {searchTerm}
+                  </span>
+                )}
+              </Button>
+            )) : null;
+
+  // 视图设置's props, once: the desktop draws them as the popover beside the
+  // view's name, the phone as the content of its bottom sheet
+  // (objectstack#35883: a row of the view panel opens it there).
+  const viewSettingsElement = (
+    <ViewSettingsPopover
+      t={t as any}
+      allFields={allFields as any}
+      fieldType={(name) => {
+        const type = (objectDef?.fields as Record<string, { type?: unknown } | undefined> | undefined)?.[name]?.type;
+        return typeof type === 'string' ? type : undefined;
+      }}
+      layout={viewSwitcherOffered ? (closeMenu) => (
+        <ViewSwitcherDropdown
+          currentView={currentView}
+          availableViews={availableViews}
+          onViewChange={(view) => {
+            // Choosing a layout completes the choice: Display closes
+            // (objectui#12621).
+            closeMenu();
+            handleViewChange(view);
+          }}
+        />
+      ) : undefined}
+      showGroup={toolbarFlags.showGroup}
+      groupingConfig={chosenGroupingConfig}
+      setGroupingConfig={changeGrouping}
+      showColor={toolbarFlags.showColor}
+      rowColorConfig={offeredRowColorConfig}
+      setRowColorConfig={setRowColorConfig}
+      showDensity={toolbarFlags.showDensity}
+      density={currentView === 'gallery'
+        ? {
+            mode: galleryCardSize === 'small' ? 'compact' : galleryCardSize === 'medium' ? 'comfortable' : 'spacious',
+            cycle: cycleGalleryDensity,
+            setMode: setGalleryDensityMode,
+          }
+        : density as any}
+      showHideFields={toolbarFlags.showHideFields}
+      hiddenFields={offeredHiddenFields}
+      updateHiddenFields={updateListedFields}
+      addableFields={addableFields}
+      onAddField={addListedField}
+      changedCount={displayChangedCount}
+      // objectstack#35551 — the view's name and its rename head the
+      // menu; the field order is the grid's column order, the state
+      // the header's column drag writes.
+      viewName={typeof schema.label === 'string' && schema.label && (onRenameView || onPersonalizationChange)
+        ? { label: schema.label, onRename: onRenameView }
+        : undefined}
+      fieldOrder={currentView === 'grid' ? (schema.columnState as { order?: string[]; widths?: Record<string, number> } | undefined)?.order : undefined}
+      onFieldOrderChange={currentView === 'grid' && onColumnStateChange
+        ? (order) => onColumnStateChange({ ...(schema.columnState as { order?: string[]; widths?: Record<string, number> } | undefined), order })
+        : undefined}
+      // objectstack#28950 — a host that marks a personalized list owns
+      // the one reset. It hands it over while there is something to
+      // restore, and the menu draws it as 恢复默认, dimmed between
+      // times (objectstack#35551); the list offers none of its own.
+      onReset={onResetView ?? (onPersonalizationChange ? () => {} : resetDisplayToViewDefault)}
+      resetDisabled={onResetView ? false : onPersonalizationChange ? true : undefined}
+      onSave={onSaveView}
+      exportFormats={resolvedExportOptions && exportPermitted && exportableFormats.length > 0 ? exportableFormats : undefined}
+      onExport={(format) => handleExport(format as 'csv' | 'xlsx' | 'json' | 'pdf')}
+      exportBusy={exportBusy}
+      exportError={exportError}
+    />
+  );
+  // objectstack#36113 — the same door, for a host that draws it at the view
+  // bar's end too (`toolbarTrailing`'s state).
+  const exportDoor: ListExportDoor | undefined = resolvedExportOptions && exportPermitted && exportableFormats.length > 0
+    ? {
+        formats: exportableFormats,
+        // A format outside `formats` (one the server cannot stream, say) is
+        // refused here, as the footer never offers it.
+        run: (format) => {
+          if (exportableFormats.includes(format)) handleExport(format as 'csv' | 'xlsx' | 'json' | 'pdf');
+        },
+        busy: exportBusy,
+        error: exportError,
+      }
+    : undefined;
+  const phonePanels: ListPhonePanels | null = React.useMemo(
+    () => ({ openViewSettings: displayOffered ? () => setPhonePanel('settings') : undefined }),
+    [displayOffered],
+  );
+
   return (
     <OwnWritesContext.Provider value={ownWrites}>
     <div
       ref={pullRef}
-      className={cn('flex flex-col h-full bg-background relative min-w-0 overflow-hidden', className)}
+      className={cn('@container/list flex flex-col h-full bg-background relative min-w-0 overflow-hidden', className)}
       {...regionAria}
       role={regionAria.role ?? 'region'}
       {...(schema.aria?.live ? { 'aria-live': schema.aria.live } : {})}
@@ -7007,7 +7295,91 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           read as one segmented control rather than a loose bag of icons.
           Not in the compact posture (objectui#12703), nor in the capped one
           (objectstack#26613). */}
-      {listChromeShown && (
+      {/* objectstack#35883 — below `sm`, one row of pills: the view, Sort,
+          Filter and Search, and the host's end (its Save) at the right. The
+          counts on Sort and Filter say what is in force, so there is no
+          condition row. Authored quick filters keep a line of their own. */}
+      {listChromeShown && belowSm && (
+        <ListPhonePanelsContext.Provider value={phonePanels}>
+          <PhoneListToolbar
+            lead={hasToolbarLeading ? drawnToolbarLeading : undefined}
+            sortCount={toolbarFlags.showSort ? currentSort.length : null}
+            filterCount={toolbarFlags.showFilters ? (appliedPanelFilters.conditions ?? []).length : null}
+            onOpenSort={() => setPhonePanel('sort')}
+            onOpenFilter={() => setPhonePanel('filter')}
+            trailing={toolbarTrailing ? toolbarTrailing(phoneSearch, {}) : phoneSearch}
+            end={conditionRowEnd}
+          />
+          {((filterElements && userFilterBarShown) || (queueFilterOffered && !datasetChartOnScreen)) && (
+            <div className="flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto border-b px-3 py-1.5" data-testid="phone-list-quick-filters">
+              {filterElements && userFilterBarShown && (
+                <div className={TOOLBAR_USER_FILTERS} data-testid="user-filters">
+                  <UserFilters
+                    ref={userFiltersRef}
+                    config={filterElements}
+                    objectDef={objectDef}
+                    objectDefPending={!objectDefLoaded}
+                    data={data}
+                    onFilterChange={setUserFilterConditions}
+                    maxVisible={3}
+                    initialSelections={userFilterSelections}
+                    onSelectionsChange={onUserFilterSelectionsChange}
+                  />
+                </div>
+              )}
+              {queueFilterOffered && !datasetChartOnScreen && (
+                <Button
+                  type="button"
+                  variant={sittingInQueueOnly ? 'secondary' : 'ghost'}
+                  size="sm"
+                  className="h-10 shrink-0 gap-1 rounded-full px-3 text-xs"
+                  aria-pressed={sittingInQueueOnly}
+                  title={t('list.sittingInQueueHint')}
+                  data-testid="queue-sitting-filter"
+                  onClick={() => setSittingInQueueOnly((on) => !on)}
+                >
+                  <Inbox className="h-3.5 w-3.5" aria-hidden="true" />
+                  {t('list.sittingInQueue')}
+                </Button>
+              )}
+            </div>
+          )}
+          {toolbarFlags.showSort && (
+            <PhoneSortSheet
+              open={phonePanel === 'sort'}
+              onOpenChange={(open) => setPhonePanel(open ? 'sort' : null)}
+              fields={sortFields}
+              shownFields={shownFieldNames}
+              value={currentSort}
+              onApply={applySort}
+              note={sortPanelNote}
+            />
+          )}
+          {toolbarFlags.showFilters && (
+            <PhoneFilterSheet
+              open={phonePanel === 'filter'}
+              onOpenChange={(open) => setPhonePanel(open ? 'filter' : null)}
+              fields={filterFields}
+              shownFields={shownFieldNames}
+              value={currentFilters}
+              onApply={applyPanelFilters}
+              dataSource={dataSource}
+            />
+          )}
+          {displayOffered && (
+            <PhonePanelSheet
+              open={phonePanel === 'settings'}
+              onOpenChange={(open) => setPhonePanel(open ? 'settings' : null)}
+              title={t('list.viewSettings')}
+              testId="phone-view-settings-panel"
+            >
+              <ViewSettingsContent {...viewSettingsElement.props} closeMenu={() => setPhonePanel(null)} />
+            </PhonePanelSheet>
+          )}
+        </ListPhonePanelsContext.Provider>
+      )}
+
+      {listChromeShown && !belowSm && (
       <div className={cn(TOOLBAR_ROW, hasToolbarLeading && TOOLBAR_ROW_LEADING_PHONE)}>
         {/* With a host's leading node the left group grows (`flex-1`) so that
             node's `flex-1` wrapper has the width the tool cluster leaves —
@@ -7033,6 +7405,13 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               {drawnToolbarLeading}
             </div>
           )}
+          {/* 视图设置 (objectstack#35878, the Display panel of objectui#12423):
+              beside the view's name, not at the far end of the bar. Its
+              first level is the content itself: the view's name, its
+              columns, then Group, Row height and the rest. Every control
+              writes through the same door as its wide-form button; the panel
+              adds no storage of its own. */}
+          {displayOffered && viewSettingsElement}
           {/* User Filters — filter elements (dropdown chips / preset tabs /
               toggles). Mutually exclusive with view tabs above, so at most
               one filter element group ever renders here. On mobile we keep
@@ -7114,7 +7493,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 <EyeOff className="h-3.5 w-3.5 mr-1.5" />
                 <span className="hidden sm:inline">{t('list.hideFields')}</span>
                 {offeredHiddenFields.size > 0 && (
-                  <span className="ml-1 flex h-4 min-w-[16px] items-center justify-center text-[10px] font-medium text-muted-foreground tabular-nums">
+                  <span className="ml-1 flex h-4 min-w-[16px] items-center justify-center text-xs font-medium text-muted-foreground tabular-nums">
                     {offeredHiddenFields.size}
                   </span>
                 )}
@@ -7177,54 +7556,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             <div className="hidden sm:block h-5 w-px bg-border/50 mx-1 shrink-0" />
           )}
 
-          {/* Filter — universal advanced filter builder.
-              Always shown when enabled. The left-side quick-filter chips
-              (filterElements) are predefined named filters; the
-              right-side Popover is a free-form field-by-field builder that
-              can express filters the chips cannot. They serve different
-              purposes and must coexist. */}
-          {toolbarFlags.showFilters && (
-          <Popover open={showFilters} onOpenChange={setShowFilters}>
-            <PopoverTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  TOOLBAR_TEXT_TRIGGER,
-                  PHONE_TOUCH_TARGET,
-                  hasFilters && "text-foreground font-medium"
-                )}
-                data-testid="toolbar-filter-trigger"
-                // From `sm` up Filter, Sort and Options are named text buttons
-                // (objectstack#35548); below `sm` they stay icons
-                // (objectui#12695). `aria-label` carries the active-filter
-                // count, which the badge would otherwise be alone in carrying
-                // (objectui#12500).
-                aria-label={hasFilters
-                  ? t('list.filterActive', { count: shownFilterCount })
-                  : t('list.filter')}
-                title={t('list.filter')}
-              >
-                <Funnel className="h-3.5 w-3.5 sm:hidden" aria-hidden="true" />
-                <span className="hidden sm:inline">{t('list.filter')}</span>
-                {hasFilters && (
-                  <span className="flex h-4 min-w-[16px] items-center justify-center text-[10px] font-medium text-muted-foreground tabular-nums">
-                    {shownFilterCount}
-                  </span>
-                )}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="start" collisionPadding={belowSm ? PHONE_POPOVER_GUTTER : undefined} className="w-auto max-w-[calc(100vw-2rem)] p-0">
-              <FilterPanel
-                fields={filterFields}
-                shownFields={shownFieldNames}
-                value={currentFilters}
-                onChange={applyPanelFilters}
-                renderAdvanced={advancedFilterBuilder}
-              />
-            </PopoverContent>
-          </Popover>
-          )}
+          {/* Filter and Sort are not on the bar (objectstack#35878): the
+              condition row under it carries them, as 「Filter」 and 「Sort」
+              before anything is set and as their chips after. */}
 
           {/* Group — hidden on mobile (collapsed into ViewSettingsPopover) */}
           {toolbarFlags.showGroup && !toolbarFlags.compactToolbar && (
@@ -7241,7 +7575,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 <Group className="h-3.5 w-3.5 mr-1.5" />
                 <span className="hidden sm:inline">{t('list.group')}</span>
                 {chosenGroupingConfig && chosenGroupingConfig.fields?.length > 0 && (
-                  <span className="ml-1 flex h-4 min-w-[16px] items-center justify-center text-[10px] font-medium text-muted-foreground tabular-nums">
+                  <span className="ml-1 flex h-4 min-w-[16px] items-center justify-center text-xs font-medium text-muted-foreground tabular-nums">
                     {chosenGroupingConfig.fields.length}
                   </span>
                 )}
@@ -7271,55 +7605,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                   />
                 </div>
               </div>
-            </PopoverContent>
-          </Popover>
-          )}
-
-          {/* Sort. Below `sm` the Display panel carries the Sort panel when it
-              is drawn (`sortInDisplay`), so this trigger hides there while no
-              sort is active; with no Display panel it stays on the bar at
-              every width. */}
-          {toolbarFlags.showSort && (
-          <Popover open={showSort} onOpenChange={setShowSort}>
-            <PopoverTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  TOOLBAR_TEXT_TRIGGER,
-                  PHONE_TOUCH_TARGET,
-                  // On a phone an active sort keeps this trigger, with its
-                  // level count, on the bar: the Display panel holds the
-                  // builder, but only the bar can show the list is sorted.
-                  // The open search field takes its slot while it is open.
-                  sortInDisplay && (currentSort.length === 0 || phoneSearchOpen) && "hidden sm:inline-flex",
-                  currentSort.length > 0 && "text-foreground font-medium"
-                )}
-                data-testid="toolbar-sort-trigger"
-                // Named from `sm` up (objectstack#35548), an icon below it
-                // (objectui#12695): `aria-label` and `title` name it there.
-                aria-label={t('list.sort')}
-                title={t('list.sort')}
-              >
-                <ArrowUpDown className="h-3.5 w-3.5 sm:hidden" aria-hidden="true" />
-                <span className="hidden sm:inline">{t('list.sort')}</span>
-                {currentSort.length > 0 && (
-                  <span className="flex h-4 min-w-[16px] items-center justify-center text-[10px] font-medium text-muted-foreground tabular-nums">
-                    {currentSort.length}
-                  </span>
-                )}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="start" collisionPadding={belowSm ? PHONE_POPOVER_GUTTER : undefined} className="w-auto max-w-[calc(100vw-2rem)] p-0">
-              <SortPanel
-                fields={sortFields}
-                shownFields={shownFieldNames}
-                value={currentSort}
-                onChange={applySort}
-                onDone={() => setShowSort(false)}
-                footer={sortPanelNote}
-                renderAdvanced={() => sortPanelBody}
-              />
             </PopoverContent>
           </Popover>
           )}
@@ -7447,78 +7732,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             );
           })()}
 
-          {/* Display (objectui#12423) — the default form of this cluster:
-              Layout, Group, Color, Hide fields, Density, Row numbers and Edit
-              inline in one panel, with Reset / Refresh / Export in its footer.
-              Every control writes through the same door as its wide-form
-              button above; the panel adds no storage of its own. Drawn on
-              mobile too (icon only): Refresh and Export live in it. */}
-          {displayOffered && (
-            <ViewSettingsPopover
-              t={t as any}
-              allFields={allFields as any}
-              fieldType={(name) => {
-                const type = (objectDef?.fields as Record<string, { type?: unknown } | undefined> | undefined)?.[name]?.type;
-                return typeof type === 'string' ? type : undefined;
-              }}
-              layout={viewSwitcherOffered ? (closeMenu) => (
-                <ViewSwitcherDropdown
-                  currentView={currentView}
-                  availableViews={availableViews}
-                  onViewChange={(view) => {
-                    // Choosing a layout completes the choice: Display closes
-                    // (objectui#12621).
-                    closeMenu();
-                    handleViewChange(view);
-                  }}
-                />
-              ) : undefined}
-              sort={sortInDisplay ? sortPanelBody : undefined}
-              showGroup={toolbarFlags.showGroup}
-              groupingConfig={chosenGroupingConfig}
-              setGroupingConfig={changeGrouping}
-              showColor={toolbarFlags.showColor}
-              rowColorConfig={offeredRowColorConfig}
-              setRowColorConfig={setRowColorConfig}
-              showDensity={toolbarFlags.showDensity}
-              density={currentView === 'gallery'
-                ? {
-                    mode: galleryCardSize === 'small' ? 'compact' : galleryCardSize === 'medium' ? 'comfortable' : 'spacious',
-                    cycle: cycleGalleryDensity,
-                    setMode: setGalleryDensityMode,
-                  }
-                : density as any}
-              showHideFields={toolbarFlags.showHideFields}
-              hiddenFields={offeredHiddenFields}
-              updateHiddenFields={updateListedFields}
-              addableFields={addableFields}
-              onAddField={addListedField}
-              changedCount={displayChangedCount}
-              // objectstack#35551 — the view's name and its rename head the
-              // menu; the field order is the grid's column order, the state
-              // the header's column drag writes.
-              viewName={typeof schema.label === 'string' && schema.label && (onRenameView || onPersonalizationChange)
-                ? { label: schema.label, onRename: onRenameView }
-                : undefined}
-              fieldOrder={currentView === 'grid' ? (schema.columnState as { order?: string[]; widths?: Record<string, number> } | undefined)?.order : undefined}
-              onFieldOrderChange={currentView === 'grid' && onColumnStateChange
-                ? (order) => onColumnStateChange({ ...(schema.columnState as { order?: string[]; widths?: Record<string, number> } | undefined), order })
-                : undefined}
-              // objectstack#28950 — a host that marks a personalized list owns
-              // the one reset. It hands it over while there is something to
-              // restore, and the menu draws it as 恢复默认, dimmed between
-              // times (objectstack#35551); the list offers none of its own.
-              onReset={onResetView ?? (onPersonalizationChange ? () => {} : resetDisplayToViewDefault)}
-              resetDisabled={onResetView ? false : onPersonalizationChange ? true : undefined}
-              onSave={onSaveView}
-              onRefresh={toolbarFlags.showRefresh ? () => setRefreshKey(k => k + 1) : undefined}
-              refreshing={loading}
-              exportFormats={resolvedExportOptions && exportPermitted && exportableFormats.length > 0 ? exportableFormats : undefined}
-              onExport={(format) => handleExport(format as 'csv' | 'xlsx' | 'json' | 'pdf')}
-              exportBusy={exportBusy}
-              exportError={exportError}
-            />
-          )}
 
           {/* --- Separator: Appearance | Export (wide form) --- */}
           {!toolbarFlags.compactToolbar && (toolbarFlags.showColor || toolbarFlags.showDensity) && resolvedExportOptions && exportPermitted && exportableFormats.length > 0 && (
@@ -7647,129 +7860,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             ) : null;
           })()}
 
-          {/* Search, scoped to this list. From `sm` up an icon button opens
-              a popover; below `sm` the icon expands into a field in place (the
-              phone form after this popover). Both write the same term. */}
-          {toolbarFlags.showSearch && (
-            <Popover open={showSearchPopover} onOpenChange={setShowSearchPopover}>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={cn(
-                    "hidden sm:inline-flex h-7 text-muted-foreground hover:text-foreground text-[13px] transition-colors duration-150",
-                    searchTerm ? "px-2 text-foreground font-medium" : "w-7 p-0"
-                  )}
-                  data-testid="search-icon-button"
-                  title={searchTerm ? `${t('list.search')}: ${searchTerm}` : t('list.search')}
-                  // An icon-only button names itself (objectui#12450), the same
-                  // two-attribute shape as Refresh: `title` alone is a tooltip,
-                  // and with a keyword the button's text was the bare keyword.
-                  aria-label={searchTerm ? `${t('list.search')}: ${searchTerm}` : t('list.search')}
-                >
-                  <Search className="h-3.5 w-3.5" />
-                  {/* Persisted keyword restored from storage keeps filtering after
-                      navigation while the popover starts closed — surface it on the
-                      trigger so the active search is visible without opening it. */}
-                  {searchTerm && (
-                    <span
-                      className="ml-1.5 max-w-[8rem] truncate text-[11px]"
-                      data-testid="search-active-keyword"
-                    >
-                      {searchTerm}
-                    </span>
-                  )}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="end" className="w-[calc(100vw-2rem)] sm:w-64 p-2" data-testid="search-popover">
-                <div className="relative">
-                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                  <Input
-                    placeholder={t('table.search')}
-                    value={searchTerm}
-                    onChange={(e) => handleSearchChange(e.target.value)}
-                    className="pl-7 h-8 text-xs"
-                    autoFocus
-                  />
-                  {searchTerm && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="absolute right-0.5 top-1/2 -translate-y-1/2 h-5 w-5 p-0 hover:bg-muted-foreground/20"
-                      onClick={() => handleSearchChange('')}
-                    >
-                      <X className="h-3 w-3" />
-                    </Button>
-                  )}
-                </div>
-              </PopoverContent>
-            </Popover>
-          )}
-
-          {/* Search, phone form: the icon expands into a field in place, with
-              the bar's touch size. Enter or Escape folds it back to the icon,
-              which then carries the active keyword as the desktop trigger
-              does; the clear button empties the term and folds it. */}
-          {toolbarFlags.showSearch && (phoneSearchOpen ? (
-            <div className="relative flex items-center sm:hidden" data-testid="phone-search">
-              <Search
-                className="pointer-events-none absolute left-2 h-3.5 w-3.5 text-muted-foreground"
-                aria-hidden="true"
-              />
-              <Input
-                type="search"
-                placeholder={t('table.search')}
-                aria-label={t('list.search')}
-                value={searchTerm}
-                onChange={(e) => handleSearchChange(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === 'Escape') setPhoneSearchOpen(false);
-                }}
-                onBlur={() => {
-                  if (!searchTerm) setPhoneSearchOpen(false);
-                }}
-                // 16px text: a smaller font makes iOS Safari zoom on focus.
-                className="h-7 w-36 pl-7 pr-7 text-base max-sm:h-11 max-sm:pr-11 [&::-webkit-search-cancel-button]:hidden"
-                autoFocus
-                data-testid="phone-search-input"
-              />
-              <Button
-                variant="ghost"
-                size="sm"
-                className="absolute right-0 h-7 w-7 p-0 text-muted-foreground hover:text-primary max-sm:h-11 max-sm:w-11"
-                aria-label={t('list.clearSearch')}
-                title={t('list.clearSearch')}
-                onClick={() => {
-                  handleSearchChange('');
-                  setPhoneSearchOpen(false);
-                }}
-                data-testid="phone-search-clear"
-              >
-                <X className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-          ) : (
-            <Button
-              variant="ghost"
-              size="sm"
-              className={cn(
-                "sm:hidden h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
-                PHONE_TOUCH_TARGET,
-                searchTerm && "text-foreground font-medium",
-              )}
-              aria-label={searchTerm ? `${t('list.search')}: ${searchTerm}` : t('list.search')}
-              title={searchTerm ? `${t('list.search')}: ${searchTerm}` : t('list.search')}
-              onClick={() => setPhoneSearchOpen(true)}
-              data-testid="phone-search-trigger"
-            >
-              <Search className="h-3.5 w-3.5" />
-              {searchTerm && (
-                <span className="max-w-[5rem] truncate text-[11px]" data-testid="phone-search-active-keyword">
-                  {searchTerm}
-                </span>
-              )}
-            </Button>
-          ))}
 
           {/* Add Record (top position) */}
           {toolbarFlags.showAddRecordTop && (
@@ -7785,18 +7875,93 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               <span className="hidden sm:inline">{t('list.addRecord')}</span>
             </Button>
           )}
+          {/* objectstack#35878 — the right end of the view bar: the list's
+              search, then whatever the host puts after it (the page's
+              create button and ⋮ More), or the search alone. The host may
+              swap the whole end for what a selection offers. */}
+          {(() => {
+            const searchTools = (
+              <>
+            {/* Search, scoped to this list. From `sm` up an icon button opens
+                a popover; below `sm` the icon expands into a field in place (the
+                phone form after this popover). Both write the same term. */}
+            {toolbarFlags.showSearch && (
+              <Popover open={showSearchPopover} onOpenChange={setShowSearchPopover}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={cn(
+                      "hidden sm:inline-flex h-7 text-muted-foreground hover:text-foreground text-sm transition-colors duration-150",
+                      // objectstack#36113 — a list narrower than 48rem keeps
+                      // the icon alone, still pressed in the term's colour.
+                      searchTerm ? "px-2 text-foreground font-medium @max-[48rem]/list:w-7 @max-[48rem]/list:px-0" : "w-7 p-0"
+                    )}
+                    data-testid="search-icon-button"
+                    title={searchTerm ? `${t('list.search')}: ${searchTerm}` : t('list.search')}
+                    // An icon-only button names itself (objectui#12450), the same
+                    // two-attribute shape as Refresh: `title` alone is a tooltip,
+                    // and with a keyword the button's text was the bare keyword.
+                    aria-label={searchTerm ? `${t('list.search')}: ${searchTerm}` : t('list.search')}
+                  >
+                    <Search className="h-3.5 w-3.5" />
+                    {/* Persisted keyword restored from storage keeps filtering after
+                        navigation while the popover starts closed — surface it on the
+                        trigger so the active search is visible without opening it. */}
+                    {searchTerm && (
+                      <span
+                        className="ml-1.5 max-w-[8rem] truncate text-xs @max-[48rem]/list:hidden"
+                        data-testid="search-active-keyword"
+                      >
+                        {searchTerm}
+                      </span>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-[calc(100vw-2rem)] sm:w-64 p-2" data-testid="search-popover">
+                  <div className="relative">
+                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                    <Input
+                      placeholder={t('table.search')}
+                      value={searchTerm}
+                      onChange={(e) => handleSearchChange(e.target.value)}
+                      className="pl-7 h-8 text-xs"
+                      autoFocus
+                    />
+                    {searchTerm && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="absolute right-0.5 top-1/2 -translate-y-1/2 h-5 w-5 p-0 hover:bg-muted-foreground/20"
+                        onClick={() => handleSearchChange('')}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            )}
+
+            {phoneSearch}
+              </>
+            );
+            return toolbarTrailing ? toolbarTrailing(searchTools, { export: exportDoor }) : searchTools;
+          })()}
         </div>
       </div>
       )}
 
       {/* The condition row under the view bar (objectstack#35548): the slot
-          the filter and sort conditions are drawn in. Empty, it takes no
-          height (`empty:hidden`). */}
-      {listChromeShown && (
+          the filter and sort conditions are drawn in. It is always there
+          (objectstack#35878): with nothing set it holds the dashed 「Sort」
+          and 「Filter」 buttons, so the first condition does not push the
+          table down a row. One line; what does not fit scrolls sideways. */}
+      {listChromeShown && !belowSm && (
         <div
           data-slot="list-condition-row"
           data-testid="list-condition-row"
-          className="empty:hidden flex flex-wrap items-center gap-1.5 border-b px-4 py-1.5 bg-background"
+          className="empty:hidden flex min-h-10 flex-nowrap items-center gap-1.5 border-b px-4 py-1.5 bg-background"
         >
           {/* objectstack#35549 / #35550: sort chips, the view's own
               conditions as locked chips, the reader's filter chips, then
@@ -7819,6 +7984,19 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             renderAdvanced={advancedFilterBuilder}
             renderSortLevels={() => sortPanelBody}
             onReset={conditionsDifferFromView ? handleResetConditions : undefined}
+            end={conditionRowEnd}
+            filterOffered={toolbarFlags.showFilters}
+            renderSortPanel={toolbarFlags.showSort ? (close) => (
+              <SortPanel
+                fields={sortFields}
+                shownFields={shownFieldNames}
+                value={currentSort}
+                onChange={applySort}
+                onDone={close}
+                footer={sortPanelNote}
+                renderAdvanced={() => sortPanelBody}
+              />
+            ) : undefined}
           />
         </div>
       )}

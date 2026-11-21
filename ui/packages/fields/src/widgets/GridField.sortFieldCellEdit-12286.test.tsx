@@ -57,12 +57,17 @@ describe('GridField: a cell edit renumbers no row (objectui#12286)', () => {
     expect(next).toEqual([rows[0], { ...rows[1], description: 'B2' }]);
   });
 
-  it('CONTROL: typing into the trailing entry row ADDS a line, and an add renumbers every row', () => {
-    const next = typeInto([{ description: 'A', position: 0 }, { description: 'B', position: 0 }], 2, 'C');
+  it('CONTROL: Add appends a line, and an add renumbers every row', () => {
+    // The trailing entry line this used to type into is gone (objectstack#35507);
+    // Add is the add, and it renumbers as the entry line did.
+    const onChange = vi.fn();
+    render(<GridField value={[{ description: 'A', position: 0 }, { description: 'B', position: 0 }]} onChange={onChange} field={field} />);
+    fireEvent.click(screen.getByTestId('line-items-add'));
+    const next: Row[] = onChange.mock.calls[0][0];
     expect(next.map((r) => [r.description, r.position])).toEqual([
       ['A', 0],
       ['B', 1],
-      ['C', 2],
+      [null, 2],
     ]);
   });
 });

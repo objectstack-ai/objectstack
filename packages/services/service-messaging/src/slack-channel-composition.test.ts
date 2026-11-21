@@ -13,6 +13,11 @@
  *
  * The `/automation` save doors read the same list; their side is pinned in
  * `@objectstack/runtime` (`automation-notify-slack-composition.test.ts`).
+ *
+ * [#34730 step 3] Setup's Slack entry (`SLACK_SETUP_UI_BUNDLE`) is registered
+ * on the same condition, and read back through the Setup app fold the
+ * `/api/v1/meta/app` door serves (`SchemaRegistry.getApp`): listed under
+ * Integrations with connector-slack composed, absent without it.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -22,7 +27,13 @@ import {
     assertEngineUpdateDispatch,
     type EngineFindOneQueryInput,
 } from '@objectstack/metadata-core';
+import { SchemaRegistry } from '@objectstack/objectql';
+import { SETUP_APP } from '@objectstack/platform-objects/apps';
+import { ManifestSchema } from '@objectstack/spec/kernel';
+import { PLATFORM_CAPABILITIES } from '@objectstack/spec/security';
 import { MessagingServicePlugin } from './messaging-service-plugin.js';
+import { SLACK_ADMIN_CAPABILITY } from './slack-link-routes.js';
+import { SLACK_SETUP_COMPONENT_REF, SLACK_SETUP_UI_BUNDLE } from './slack-setup-ui.js';
 import type { MessagingService } from './messaging-service.js';
 import { MY_PREFERENCES_ROUTE } from './my-preferences-routes.js';
 import { PREFERENCE_OPTIONS_ROUTE } from './preference-options-routes.js';
@@ -51,12 +62,13 @@ async function compose(opts: { slack: boolean }) {
         async update(_object: string, data: any, options?: any) { assertEngineUpdateDispatch(data, options); return {}; },
         async delete(_object: string, options?: any) { assertEngineDeleteDispatch(options); return {}; },
     };
+    const manifests: Array<{ id?: string; navigationContributions?: unknown[] }> = [];
     const handlers = new Map<string, (req: unknown, res: unknown) => Promise<void>>();
     const mount = (verb: string) => (path: string, handler: (req: unknown, res: unknown) => Promise<void>) => { handlers.set(`${verb} ${path}`, handler); };
     const services = new Map<string, unknown>([
         ['data', engine],
         ['objectql', engine],
-        ['manifest', { register() {} }],
+        ['manifest', { register: (m: { id?: string }) => { manifests.push(m); } }],
         ['http-server', { get: mount('GET'), post: mount('POST'), put: mount('PUT'), delete: mount('DELETE'), patch: mount('PATCH'), use() {} }],
         ['auth', {
             api: {
@@ -93,6 +105,7 @@ async function compose(opts: { slack: boolean }) {
     }
     return {
         messaging: services.get('messaging') as MessagingService,
+        manifests,
         optionChannels: async () => (await get(PREFERENCE_OPTIONS_ROUTE)).channels.map((c: any) => c.value),
         myChannels: async () => (await get(MY_PREFERENCES_ROUTE)).channels.map((c: any) => c.channel),
     };
@@ -116,5 +129,42 @@ describe('the slack channel is known only where connector-slack is composed', ()
         expect(c.messaging.getChannel('slack')?.id).toBe('slack');
         expect(await c.optionChannels()).toContain('slack');
         expect(await c.myChannels()).toContain('slack');
+    });
+});
+
+/** Setup's Integrations group as the meta door serves it: the shell plus every contribution the boot registered. */
+function setupIntegrations(manifests: Array<{ id?: string; navigationContributions?: unknown[] }>) {
+    const registry = new SchemaRegistry({ multiTenant: false, collisionPolicy: 'error' });
+    (registry as any).logLevel = 'silent';
+    registry.registerApp(structuredClone(SETUP_APP), '@objectstack/platform-objects');
+    for (const m of manifests) {
+        if (m.id && Array.isArray(m.navigationContributions)) registry.setPackageNavContributions(m.id, m.navigationContributions as any);
+    }
+    const group = (registry.getApp('setup') as any)?.navigation?.find((item: any) => item?.id === 'group_integrations');
+    return (group?.children ?? []) as Array<{ id: string; componentRef?: string; requiredPermissions?: string[] }>;
+}
+
+describe('Setup lists the Slack page only where connector-slack is composed', () => {
+    it('the bundle is a valid manifest naming the console page and the capability the Slack admin doors ask', () => {
+        expect(() => ManifestSchema.parse(SLACK_SETUP_UI_BUNDLE)).not.toThrow();
+        expect(SLACK_SETUP_COMPONENT_REF).toBe('messaging:slack');
+        expect(SLACK_ADMIN_CAPABILITY).toBe('setup.write');
+        expect(PLATFORM_CAPABILITIES.find((c) => c.name === SLACK_ADMIN_CAPABILITY)?.scope).toBe('org');
+    });
+
+    it('with a slack service: the entry is registered once and served under Integrations', async () => {
+        const c = await compose({ slack: true });
+        expect(c.manifests.filter((m) => m.id === SLACK_SETUP_UI_BUNDLE.id)).toHaveLength(1);
+        const entry = setupIntegrations(c.manifests).find((item) => item.id === 'nav_slack');
+        expect(entry?.componentRef).toBe('messaging:slack');
+        expect(entry?.requiredPermissions).toEqual(['setup.write']);
+    });
+
+    it('without a slack service: no entry is registered and Integrations serves none', async () => {
+        const c = await compose({ slack: false });
+        expect(c.manifests.map((m) => m.id)).not.toContain(SLACK_SETUP_UI_BUNDLE.id);
+        expect(setupIntegrations(c.manifests).map((item) => item.id)).not.toContain('nav_slack');
+        // The control: the same boot registered the messaging manifest, whose Setup entries it serves.
+        expect(c.manifests.map((m) => m.id)).toContain('com.objectstack.service.messaging');
     });
 });

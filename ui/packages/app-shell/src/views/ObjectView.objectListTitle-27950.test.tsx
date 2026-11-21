@@ -171,7 +171,7 @@ function mount(entry: string, { sidebarOpen = true }: { sidebarOpen?: boolean } 
 
 /** The list's toolbar has drawn: its Filter control is on screen. */
 const listToolbar = () =>
-  waitFor(() => expect(screen.getByTestId('toolbar-filter-trigger')).toBeInTheDocument(), { timeout: 5000 });
+  waitFor(() => expect(screen.getByTestId('condition-add-filter')).toBeInTheDocument(), { timeout: 5000 });
 
 const heading = () => screen.getByRole('heading', { level: 1 });
 /** The view bar's leading slot: the one view switcher (objectstack#35548). */
@@ -219,7 +219,10 @@ describe('objectstack#27950, as redrawn by objectstack#35548 — the page bar na
     mount('/apps/crm/crm_lead/view/mine?recordId=lead_1');
     await listToolbar();
     expect(screen.getAllByTestId('list-view-switcher')).toHaveLength(1);
+    // objectstack#36113: the page bar names the object, once; the view bar
+    // does not (objectstack#35878 had moved the name into it).
     expect(screen.getAllByTestId('page-header').filter((h) => h.dataset.posture === 'list')).toHaveLength(1);
+    expect(screen.queryByTestId('list-view-bar-object')).toBeNull();
   });
 
   it('a view with no label reads the plural in the switcher', async () => {

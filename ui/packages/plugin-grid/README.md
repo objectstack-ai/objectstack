@@ -591,6 +591,15 @@ const schema: ObjectGridBlockNode = {
 deprecated legacy alias, read only when `selection` is absent. Declaring bulk
 actions auto-enables multi-select, so the two keys agree by construction.
 
+Selected rows get one bar floating at the bottom centre of the grid
+(`BulkActionBar`, objectstack#35678): the count and ×, up to three labelled
+actions and the rest under More (Delete last), and "Select all N" when every
+loaded row is selected and more match. × or Esc clears the selection. The bar
+floats above the summary row, and the grid keeps room after its last row so
+that row scrolls clear of it. A host that draws the object list page registers
+its page column with `useListPageScope(element)`: there rows draw no actions of their
+own, and one selected record offers that record's actions in the bar.
+
 To react to a selection in React, pass the `onRowSelect` **component prop** —
 see [Row callbacks are component props](#row-callbacks-are-component-props).
 
@@ -1117,6 +1126,20 @@ const persistence = (
    - Save individual rows using row-level save button
    - Save all changes at once using "Save All" button
    - Cancel individual row changes or all changes
+
+### Export
+
+The toolbar's Export menu (offered when the schema declares `exportOptions`) and
+the table's own CSV button (`operations.export: true`) are both offered only
+while the object's resolved export verdict is open:
+`isObjectExportOffered(objectSchema, effectiveApiOperations)` from
+`@object-ui/core`, which is the object's `userActions.exportCsv` over its
+`managedBy` default, ANDed with the caller's effective `export` API operation.
+An object that sets `userActions.exportCsv: false` gets neither entry, in any
+format; one that does not set it keeps them, since every `managedBy` bucket
+defaults it on. `operations.export: false` on the schema closes them too. The
+setting hides the entries and is not a permission: who may export is the
+permission set's `allowExport`.
 
 ## TypeScript Support
 

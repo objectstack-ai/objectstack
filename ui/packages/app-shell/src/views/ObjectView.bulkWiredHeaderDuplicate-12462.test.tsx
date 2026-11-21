@@ -181,7 +181,7 @@ function mountLeads(viewName: keyof typeof LIST_VIEWS) {
 
 /** The page header, once its schema-driven toolbar has drawn the plain action. */
 async function headerWithToolbar(): Promise<HTMLElement> {
-  const header = await screen.findByTestId('page-header', undefined, { timeout: 5000 });
+  const header = await screen.findByTestId('list-view-bar-actions', undefined, { timeout: 5000 });
   await within(header).findByRole('button', { name: /Refresh Scores/ }, { timeout: 5000 });
   return header;
 }
@@ -196,12 +196,12 @@ async function rowBoxes(): Promise<HTMLElement[]> {
 }
 
 /**
- * objectstack#35554 — the selection's actions on the list page: the page bar's
- * selection face, its exposed buttons and the ones behind its "⋮". Returns the
+ * objectstack#35678 — the selection's actions on the list page: the floating
+ * selection bar, its exposed buttons and the ones behind its More. Returns the
  * bar and the action names it carries.
  */
 async function selectionBar(): Promise<{ bar: HTMLElement; names: string[] }> {
-  const bar = await screen.findByTestId('list-selection-bar', undefined, { timeout: 5000 });
+  const bar = await screen.findByTestId('bulk-actions-bar', undefined, { timeout: 5000 });
   const names = within(bar).queryAllByTestId(/^bulk-action-/).map((el) => el.getAttribute('data-testid')!.slice('bulk-action-'.length));
   const more = within(bar).queryByTestId('selection-actions-more');
   if (more) {
@@ -230,7 +230,7 @@ describe('objectui#12462 — a bulk-wired, record-scoped list_toolbar action lea
 
     // Zero rows: the header has the plain action and not the duplicate; no bar.
     expect(addToCampaignIn(header)).toBeNull();
-    expect(screen.queryByTestId('list-selection-bar')).toBeNull();
+    expect(screen.queryByTestId('bulk-actions-bar')).toBeNull();
 
     // Two rows: the selection carries the action; the header still lacks it.
     await tickRows(2);
@@ -239,9 +239,9 @@ describe('objectui#12462 — a bulk-wired, record-scoped list_toolbar action lea
     expect(addToCampaignIn(header)).toBeNull();
     expect(within(header).getByRole('button', { name: /Refresh Scores/ })).toBeInTheDocument();
 
-    // Cancelling the selection brings the page bar back.
-    await act(async () => { fireEvent.click(within(bar).getByTestId('list-selection-cancel')); });
-    await waitFor(() => expect(screen.queryByTestId('list-selection-bar')).toBeNull(), { timeout: 5000 });
+    // × clears the selection and the bar goes.
+    await act(async () => { fireEvent.click(within(bar).getByTestId('bulk-selection-clear')); });
+    await waitFor(() => expect(screen.queryByTestId('bulk-actions-bar')).toBeNull(), { timeout: 5000 });
   });
 
   it('the view wires it in a `bulkActionDefs` entry: the header lacks it, the bar carries it', async () => {
@@ -294,7 +294,7 @@ describe('objectui#12462 — the deep link arms only what the header draws', () 
     // The header has drawn its toolbar and the grid its rows, so an armed link
     // would have run by now. `hidden: true`: an open param dialog takes the
     // page out of the accessibility tree, and this wait must not be what fails.
-    const header = await screen.findByTestId('page-header', undefined, { timeout: 5000 });
+    const header = await screen.findByTestId('list-view-bar-actions', undefined, { timeout: 5000 });
     await within(header).findByRole('button', { name: /Refresh Scores/, hidden: true }, { timeout: 5000 });
     await rowBoxes();
 

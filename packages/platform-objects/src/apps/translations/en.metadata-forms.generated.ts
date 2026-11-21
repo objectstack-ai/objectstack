@@ -52,6 +52,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Icon",
         helpText: "Lucide icon name (e.g. \"building\", \"users\")"
       },
+      color: {
+        label: "Color",
+        helpText: "Color of the square the icon is drawn on, from the fixed palette. Unset draws gray."
+      },
       description: {
         label: "Description",
         helpText: "Developer documentation"
@@ -70,7 +74,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       highlightFields: {
         label: "Highlight Fields",
-        helpText: "Field names of this object, most important first — the first entry wins where only one fits (ADR-0085). Drives the default list columns, cards, child-record previews and the detail highlight strip. A name that is not a field of this object is refused at publish."
+        helpText: "Field names of this object, most important first — the first entry wins where only one fits (ADR-0085). Drives the default list and related-list columns, cards, child-record previews, the record hover card and the record picker. A name that is not a field of this object is refused at publish."
       },
       relatedLists: {
         label: "Related Lists",
@@ -451,7 +455,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "userActions.exportCsv": {
         label: "Export CSV",
-        helpText: "The CSV export entry. Unset: shown, since every managedBy bucket offers export."
+        helpText: "The Export entry that downloads this object's data (CSV, XLSX or JSON) on its grids, list views and dataset reports: on shows it, off hides it. A Gantt chart's PNG / PDF export is not covered. Unset: shown, since every managedBy bucket offers export. It is not a permission: who may export is the permission set's allowExport."
       },
       "userActions.transfer": {
         label: "Change Owner",

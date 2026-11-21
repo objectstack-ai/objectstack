@@ -185,7 +185,7 @@ export function AppSwitcher({
           className="flex max-h-[85vh] flex-col gap-0 rounded-t-2xl p-0"
         >
           <div className="flex h-14 shrink-0 items-center justify-center px-14">
-            <SheetTitle className="text-base font-semibold">{switchLabel}</SheetTitle>
+            <SheetTitle className="text-base font-medium">{switchLabel}</SheetTitle>
           </div>
           <PhoneAppList
             variant="sheet"
@@ -256,7 +256,7 @@ export function AppSwitcher({
             <span className="flex-1 truncate">
               {t('layout.appSwitcher.backToHome', { defaultValue: 'Back to home' })}
             </span>
-            <kbd className="pointer-events-none ml-auto font-mono text-[10px] text-muted-foreground">
+            <kbd className="pointer-events-none ml-auto font-mono text-xs text-muted-foreground">
               {shortcutKeycaps(GO_HOME_SHORTCUT.chord).join('')}
             </kbd>
           </Link>

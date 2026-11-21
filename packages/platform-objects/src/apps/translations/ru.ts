@@ -127,6 +127,7 @@ export const ru: TranslationData = {
         nav_datasources: { label: 'Источники данных' },
         nav_connector_credentials: { label: 'Учётные данные коннекторов' },
         nav_connector_connections: { label: 'Подключения коннекторов' },
+        nav_slack: { label: 'Slack' },
 
         nav_oauth_apps: { label: 'Приложения OAuth' },
       },

@@ -175,14 +175,32 @@ function cellAt(container: HTMLElement, rowIndex: number, index: number): HTMLEl
   return tds[index];
 }
 
-/** Single-click into a cell and hand back the widget's own trigger button. */
-async function openEditor(cell: HTMLElement): Promise<HTMLButtonElement> {
+/**
+ * Single-click into a cell and hand back the lookup's in-cell face. Since
+ * objectstack#35688 S3 the cell's editor IS the candidate list (no trigger
+ * button to press first): the list is open, the gate shows as a hint in its
+ * place, and "Browse all" sits under it.
+ */
+async function openEditor(cell: HTMLElement): Promise<HTMLElement> {
   fireEvent.click(cell);
   return await waitFor(() => {
-    const btn = cell.querySelector('button');
-    expect(btn).toBeTruthy();
-    return btn as HTMLButtonElement;
+    const panel = cell.querySelector('[data-testid="lookup-in-cell"]');
+    expect(panel).toBeTruthy();
+    return panel as HTMLElement;
   });
+}
+
+/**
+ * Esc where the user presses it: on whatever holds focus inside the cell's
+ * editor (the list's search box), so it reaches the grid's own key handling.
+ */
+function pressEscape(): void {
+  fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+}
+
+/** The in-cell face's gate hint, or null when the list is usable. */
+function gateOf(panel: HTMLElement): HTMLElement | null {
+  return panel.querySelector('[data-testid="lookup-in-cell-gated"]');
 }
 
 const ROW_NORTH = { id: 't1', title: 'Task one', region: 'north', owner: null, regional_owner: null };
@@ -198,19 +216,19 @@ describe('objectui#7165 — the grid feeds the inline editor its row as dependen
     // CONTROL — same reference, same records, no `dependsOn`. Load-bearing in
     // BOTH directions: if this column were broken the test below would be
     // measuring a dead picker path rather than the declared key.
-    const controlTrigger = await openEditor(cellAt(container, 0, 2));
-    expect(controlTrigger.getAttribute('data-testid')).toBe('lookup-trigger-owner');
-    expect(controlTrigger.disabled).toBe(false);
-    fireEvent.keyDown(document.body, { key: 'Escape' });
+    const controlPanel = await openEditor(cellAt(container, 0, 2));
+    expect(gateOf(controlPanel)).toBeNull();
+    await waitFor(() => expect(within(controlPanel).getByText('Person 01')).toBeInTheDocument());
+    pressEscape();
 
     // ⭐ THE CARD'S MEASUREMENT, INVERTED. On `51449a043` and on `899730e0a`
     // before this change, this trigger was `lookup-trigger-gated`, `disabled`,
     // reading "Select region first" — with the row already carrying
-    // `region: 'north'`. It is now an ordinary named, enabled trigger.
-    const dependentTrigger = await openEditor(cellAt(container, 0, 3));
-    expect(dependentTrigger.getAttribute('data-testid')).toBe('lookup-trigger-regional_owner');
-    expect(dependentTrigger.disabled).toBe(false);
-    expect(dependentTrigger.textContent).not.toMatch(/select region first/i);
+    // `region: 'north'`. It is now an ordinary usable list (since
+    // objectstack#35688 S3 the in-cell face is the list itself).
+    const dependentPanel = await openEditor(cellAt(container, 0, 3));
+    expect(gateOf(dependentPanel)).toBeNull();
+    expect(dependentPanel.textContent).not.toMatch(/select region first/i);
     // The browse-all button shared the gate (PR objectui#2216) and is live too.
     expect(within(cellAt(container, 0, 3)).getByTestId('browse-all-records')).not.toBeDisabled();
   });
@@ -225,18 +243,18 @@ describe('objectui#7165 — the grid feeds the inline editor its row as dependen
     // `$filter`, so only the six north people are candidates. This is what
     // proves the fix supplied a CORRECT record and not merely a non-empty one
     // — an unscoped picker would list Person 07.
-    fireEvent.click(await openEditor(cellAt(container, 0, 3)));
+    await openEditor(cellAt(container, 0, 3));
     await waitFor(() => expect(screen.getByText('Person 01')).toBeInTheDocument());
     expect(screen.queryByText('Person 07')).not.toBeInTheDocument();
     expect(ds.refQueries.some((q: any) => q?.$filter?.region === 'north')).toBe(true);
-    fireEvent.keyDown(document.body, { key: 'Escape' });
+    pressEscape();
     await waitFor(() => expect(screen.queryByText('Person 01')).not.toBeInTheDocument());
 
     // CONTROL — the sibling column declares no `dependsOn`, so the SAME
     // reference over the SAME records is unfiltered and a south person is
     // offered. Without this, "Person 07 is absent" could just mean the picker
     // never loaded.
-    fireEvent.click(await openEditor(cellAt(container, 0, 2)));
+    await openEditor(cellAt(container, 0, 2));
     await waitFor(() => expect(screen.getByText('Person 07')).toBeInTheDocument());
   });
 
@@ -250,16 +268,16 @@ describe('objectui#7165 — the grid feeds the inline editor its row as dependen
     const { container } = renderGrid(ds, rows);
     await waitFor(() => expect(screen.getByText('Task two')).toBeInTheDocument());
 
-    const gatedTrigger = await openEditor(cellAt(container, 1, 3));
-    expect(gatedTrigger.getAttribute('data-testid')).toBe('lookup-trigger-gated');
-    expect(gatedTrigger.disabled).toBe(true);
-    expect(gatedTrigger.textContent).toMatch(/region/i);
-    fireEvent.keyDown(document.body, { key: 'Escape' });
+    const gatedPanel = await openEditor(cellAt(container, 1, 3));
+    expect(gateOf(gatedPanel)?.textContent).toMatch(/region/i);
+    expect(within(gatedPanel).getByTestId('browse-all-records')).toBeDisabled();
+    expect(within(gatedPanel).queryAllByRole('option')).toHaveLength(0);
+    pressEscape();
 
     // CONTROL — the row above, same render, same column: filled parent, open.
-    const openTrigger = await openEditor(cellAt(container, 0, 3));
-    expect(openTrigger.getAttribute('data-testid')).toBe('lookup-trigger-regional_owner');
-    expect(openTrigger.disabled).toBe(false);
+    const openPanel = await openEditor(cellAt(container, 0, 3));
+    expect(gateOf(openPanel)).toBeNull();
+    expect(within(openPanel).getByTestId('browse-all-records')).not.toBeDisabled();
   });
 
   it('4 — ⭐ objectui#7188: a STAGED parent re-scopes the child before anything is saved', async () => {
@@ -291,7 +309,7 @@ describe('objectui#7165 — the grid feeds the inline editor its row as dependen
 
     // Open the child. Clicking another cell moves the edit; the staged value
     // stays in `pendingChanges`.
-    fireEvent.click(await openEditor(cellAt(container, 0, 3)));
+    await openEditor(cellAt(container, 0, 3));
     await waitFor(() => expect(screen.getByText('Person 07')).toBeInTheDocument());
 
     // ⭐ PROOF THE STAGING LANDED AND NOTHING WAS SAVED. Without the first half

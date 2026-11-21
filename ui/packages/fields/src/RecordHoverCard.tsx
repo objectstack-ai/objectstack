@@ -41,7 +41,7 @@
 
 import * as React from 'react';
 import { createPortal } from 'react-dom';
-import { HoverCard, HoverCardContent, HoverCardTrigger, LazyIcon, Skeleton } from '@object-ui/components';
+import { HoverCard, HoverCardContent, HoverCardTrigger, ObjectIconTile, Skeleton } from '@object-ui/components';
 import {
   buildExpandFields,
   getRecordDisplayName,
@@ -68,7 +68,7 @@ import { getCellRenderer, pickRecordDisplayName, resolveCellRendererType } from 
 const OPEN_DELAY_MS = 400;
 /** How long the card stays after the pointer leaves (time to reach it). */
 const CLOSE_DELAY_MS = 200;
-/** The record header's six (`RECORD_HIGHLIGHTS_MAX` in `@object-ui/plugin-detail`). */
+/** The six a synthesized highlight strip draws (`RECORD_HIGHLIGHTS_MAX` in `@objectstack/spec/ui`). */
 const HIGHLIGHTS_MAX = 6;
 /** Records whose read the module keeps; the oldest goes first. */
 const READS_MAX = 200;
@@ -78,6 +78,8 @@ export interface RecordHoverCardObjectDef {
   name?: string;
   label?: unknown;
   icon?: unknown;
+  /** The object's palette colour (`ObjectSchema.color`), for its icon tile; absent draws gray. */
+  color?: unknown;
   fields?: Record<string, Record<string, unknown> | null | undefined> | null;
   highlightFields?: unknown;
   [key: string]: unknown;
@@ -264,7 +266,7 @@ function CardTitle({
   const open =
     onOpen ?? (host?.openRecord ? () => host.openRecord!(objectName, recordId) : undefined);
   const className =
-    'block max-w-full truncate rounded-sm text-left text-sm font-semibold text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+    'block max-w-full truncate rounded-sm text-left text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
   if (href) {
     return (
       <a
@@ -299,7 +301,7 @@ function CardTitle({
     );
   }
   return (
-    <span className="block truncate text-sm font-semibold" data-record-hover-card-title="">
+    <span className="block truncate text-sm font-medium" data-record-hover-card-title="">
       {children}
     </span>
   );
@@ -375,13 +377,12 @@ function RecordHoverCardBody({
       aria-busy={pending || undefined}
     >
       <div className="flex min-w-0 items-start gap-2">
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-          <LazyIcon
-            name={typeof objectSchema?.icon === 'string' ? objectSchema.icon : undefined}
-            className="h-4 w-4"
-            aria-hidden="true"
-          />
-        </span>
+        {/* The target object's tile, in its colour (objectstack#35985). */}
+        <ObjectIconTile
+          icon={typeof objectSchema?.icon === 'string' ? objectSchema.icon : undefined}
+          color={typeof objectSchema?.color === 'string' ? objectSchema.color : undefined}
+          size="lg"
+        />
         <div className="min-w-0 flex-1">
           <CardTitle objectName={objectName} recordId={recordId} onOpen={onOpen} onDone={onDone}>
             {name}

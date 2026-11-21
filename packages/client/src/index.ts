@@ -236,6 +236,19 @@ export type { QualifiedAddressOptions } from './package-address';
 export type ApiRouteType = keyof ApiRoutes;
 
 /**
+ * The options of `meta.getItems` (`GET /meta/:type`). `packageId` scopes the
+ * list to one package (`?package=`); `names` narrows it to those items in one
+ * request (`?names=a,b,c`); `include` asks for what the list omits by default
+ * (`?include=`): `'content'` keeps each `doc`'s body (ADR-0046), `'grants'`
+ * adds each `position`'s grants.
+ */
+export interface MetaItemsListOptions {
+  packageId?: string;
+  names?: readonly string[];
+  include?: 'content' | 'grants';
+}
+
+/**
  * [#30205] `security.assignedWork.count`'s answer: per object and user field,
  * how many records hold the user, as the caller can read them.
  */
@@ -261,6 +274,40 @@ export interface UserWorkTransferReport {
   updated: number;
   failed: number;
   remaining: number;
+}
+
+/**
+ * [#35402] Who takes the records in `data.changeOwner` / `data.changeOwnerMany`:
+ * a person (`ownerId`), or an ownership queue (`queue`, ADR-0142) — exactly
+ * one. `notify` tells a person target; a queue target refuses it.
+ */
+export type ChangeOwnerRequest =
+  | { ownerId: string; queue?: undefined; notify?: boolean }
+  | { queue: string; ownerId?: undefined; notify?: undefined };
+
+/** [#35402] `data.changeOwner`'s answer: the record's new owner, or the queue it now sits in. */
+export interface ChangeOwnerResult {
+  object: string;
+  id: string;
+  /** `null` when the record now sits in `queue`. */
+  ownerId: string | null;
+  queue?: string;
+  notified: boolean;
+}
+
+/**
+ * [#35402] `data.changeOwnerMany`'s answer — the #30205 hand-over's per-object
+ * outcome, with every row that did not move listed by id.
+ */
+export interface ChangeOwnerReport {
+  object: string;
+  field: string;
+  ownerId: string | null;
+  queue?: string;
+  updated: number;
+  failed: number;
+  failures: Array<{ id: string; code: string; message: string }>;
+  notified: boolean;
 }
 
 /**
@@ -2083,12 +2130,16 @@ export class ObjectStackClient {
      *   (sent as `?names=a,b,c`). A name that matches no item is simply absent
      *   from the answer. An empty `names` array is sent as an empty filter,
      *   which the server refuses with `400`; leave `names` out to list every item.
+     *   `include` asks for what the list leaves out by default (`?include=`):
+     *   `'content'` keeps each `doc`'s body (ADR-0046), `'grants'` adds each
+     *   `position`'s grants.
      */
-    getItems: async (type: string, options?: { packageId?: string; names?: readonly string[] }): Promise<GetMetaItemsResponse> => {
+    getItems: async (type: string, options?: MetaItemsListOptions): Promise<GetMetaItemsResponse> => {
         const route = this.getRoute('metadata');
         const params = new URLSearchParams();
         if (options?.packageId) params.set('package', options.packageId);
         if (options?.names !== undefined) params.set('names', options.names.join(','));
+        if (options?.include) params.set('include', options.include);
         const qs = params.toString();
         const url = `${this.baseUrl}${route}/${type}${qs ? `?${qs}` : ''}`;
         const res = await this.fetch(url);
@@ -8239,6 +8290,40 @@ export class ObjectStackClient {
     },
 
     /**
+     * [#35402] Change Owner on ONE record — `POST /data/:object/:id/change-owner`:
+     * hand it to a person (`ownerId`) or move it to an ownership queue
+     * (`queue`), as the caller. Refused `403 CHANGE_OWNER_DISABLED` on an object
+     * that does not offer the action (`userActions.transfer`); a caller without
+     * the transfer grant on the record gets the `/data` write door's own `403`,
+     * and a record out of reach its `404`.
+     */
+    changeOwner: async (object: string, id: string, request: ChangeOwnerRequest): Promise<ChangeOwnerResult> => {
+        const route = this.getRoute('data');
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/${encodeURIComponent(object)}/${encodeURIComponent(id)}/change-owner`,
+            { method: 'POST', body: JSON.stringify(request) },
+        );
+        return this.unwrapResponse<ChangeOwnerResult>(res);
+    },
+
+    /**
+     * [#35402] Change Owner on a list of up to 500 records —
+     * `POST /data/:object/change-owner`: each moves by its own update as the
+     * caller, and the answer lists every row that did not move with its code
+     * and sentence. The whole call is refused before any write on an object
+     * that does not offer the action, a repeated or empty id list, a list past
+     * the cap, and an unknown or banned person.
+     */
+    changeOwnerMany: async (object: string, ids: string[], request: ChangeOwnerRequest): Promise<ChangeOwnerReport> => {
+        const route = this.getRoute('data');
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/${encodeURIComponent(object)}/change-owner`,
+            { method: 'POST', body: JSON.stringify({ ...request, ids }) },
+        );
+        return this.unwrapResponse<ChangeOwnerReport>(res);
+    },
+
+    /**
      * [#26594] The field projection of ONE record —
      * `GET /data/:object/:id/field-access`, declared by
      * `GetRecordFieldAccessResponseSchema` (`@objectstack/spec/api`): the
@@ -8696,11 +8781,12 @@ export class ScopedEnvironmentClient {
       const res = await this.parent._fetch(this.metaUrl(''));
       return this.parent._unwrap<GetMetaTypesResponse>(res);
     },
-    /** The unscoped surface's `getItems`, `names` included (one `?names=a,b,c` request). */
-    getItems: async (type: string, options?: { packageId?: string; names?: readonly string[] }): Promise<GetMetaItemsResponse> => {
+    /** The unscoped surface's `getItems`, `names` and `include` included (one `?names=a,b,c` request). */
+    getItems: async (type: string, options?: MetaItemsListOptions): Promise<GetMetaItemsResponse> => {
       const params = new URLSearchParams();
       if (options?.packageId) params.set('package', options.packageId);
       if (options?.names !== undefined) params.set('names', options.names.join(','));
+      if (options?.include) params.set('include', options.include);
       const qs = params.toString();
       const res = await this.parent._fetch(this.metaUrl(`/${type}${qs ? `?${qs}` : ''}`));
       return this.parent._unwrap<GetMetaItemsResponse>(res);

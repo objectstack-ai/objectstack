@@ -178,7 +178,7 @@ describe('master-detail Save bar sits at the record dialog bottom (objectstack#3
     expect(has(bar, 'sticky')).toBe(false);
     expect(has(bar, 'bottom-0')).toBe(false);
     expect(bar.getAttribute('class') ?? '').not.toMatch(/(^|\s)after:/);
-    expect(has(bar, 'shrink-0', 'border-t', 'bg-background', 'px-4', 'sm:px-6', 'py-3')).toBe(true);
+    expect(has(bar, 'shrink-0', 'border-t', 'bg-card', 'px-4', 'sm:px-5', 'py-3')).toBe(true);
 
     // Nothing between the bar and the dialog scrolls: the body's scroller is
     // the bar's sibling, so the bar is outside the scrolled content.
@@ -187,7 +187,7 @@ describe('master-detail Save bar sits at the record dialog bottom (objectstack#3
     }
     expect(body.contains(bar)).toBe(false);
     expect(body.nextElementSibling).toBe(bar);
-    expect(has(body, 'min-h-0', 'flex-1', 'overflow-y-auto', '@container', 'px-4', 'sm:px-6', 'py-4')).toBe(true);
+    expect(has(body, 'min-h-0', 'flex-1', 'overflow-y-auto', '@container', 'px-4', 'sm:px-5', 'py-4')).toBe(true);
     expect(body.querySelector('form')).not.toBeNull();
 
     // The form's root fills the dialog's frame, which fills the dialog below

@@ -40,8 +40,13 @@
  * whose record page is declared as a full page reads the objects that page
  * binds, by name, the way a page route does (objectui#13046), once the page
  * list has answered; the page it picks is the page `RecordDetailView` renders
- * (`usePageAssignment`'s choice). A record route with no declared record page,
- * or a slotted one, reads the whole registry: its synthesized page derives
+ * (`usePageAssignment`'s choice). objectstack#36150 — that page is drawn on
+ * the desktop full page only: on a phone (below `PHONE_BELOW_WIDTH`, read as
+ * the view reads it) the route takes the synthesized page's arm below, as the
+ * view does, through the same `authoredRecordPageApplies` (a page named in the
+ * URL, and the platform pages that keep their own, still read their page's
+ * objects). A record route with no declared record page,
+ * or a slotted one, or an authored page off the desktop, reads the whole registry: its synthesized page derives
  * the related lists from every object that points at the record's object, in
  * any package. objectstack#29552 — except for an object the app's navigation
  * reaches: the app bundle holds every object that points at it
@@ -91,7 +96,9 @@ import { APP_ROUTE_METADATA_READS } from './appRouteMetadataReads.js';
 import { matchAppBySegment } from '../utils/appRoute.js';
 import { COMMAND_PALETTE_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_PARAM } from '../urlParams.js';
 import type { ReadNamesWithoutViews } from '../hooks/useObjectPresence.js';
-import type { BundledRead } from '../providers/bundledReads.js';
+import { BUNDLE_MISS, useBundledReads, type BundledRead } from '../providers/bundledReads.js';
+import { authoredRecordPageApplies } from '../views/recordPageSurface.js';
+import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 
 type ReadObjectScope = NonNullable<MetadataContextValue['readObjectScope']>;
 export type AppObjectScope = ReturnType<ReadObjectScope>;
@@ -454,14 +461,20 @@ export interface PagesRead {
  * segment), else the object's default record page (`defaultRecordPageObject`),
  * else its first record page. Only a full page is returned. A slotted page, or
  * none, returns `null`: the view synthesizes that page, and derives its related
- * lists from every object that points at the record's object.
+ * lists from every object that points at the record's object. So does a full
+ * page where it does not apply (objectstack#36150): on a phone, unless the URL
+ * names it or the object keeps its own page (`authoredRecordPageApplies`).
  */
 function declaredRecordPage(
   pages: readonly unknown[],
   objectName: string,
   pageName: string | undefined,
   appName: string | undefined,
+  phone: boolean,
 ): unknown {
+  // objectstack#36150 — the record route is the full page, never embedded:
+  // the drawer reads the registry beside the route's scope.
+  if (!authoredRecordPageApplies({ embedded: false, phone, objectName, requestedPageName: pageName })) return null;
   const page = pageName
     ? pages.find((p) => isRecord(p) && p.name === pageName && isRecordPageOf(p, objectName))
     : (() => {
@@ -690,6 +703,8 @@ export function readAppObjectScope(
   readPages?: () => PagesRead,
   readDashboard?: (dashboardName: string) => DashboardRead,
   readObjectsReferencing?: (objectName: string) => BundledRead<readonly string[]>,
+  /** objectstack#36150 — the viewport is a phone's (`usePhoneViewport`), as the record view reads it. */
+  phone = false,
 ): AppObjectScopeRead {
   const route = matchObjectScopeRoute(subPath, hostPaths);
   const candidate = !!route && !!readObjectScope && !hasRecordFormOverlay(search);
@@ -735,7 +750,7 @@ export function readAppObjectScope(
       }
       return { candidate, scope: PENDING_OBJECT_SCOPE, ready: false, ...NOT_READ };
     }
-    const page = declaredRecordPage(pagesRead.pages, route.objectName, route.pageName, typeof app.name === 'string' ? app.name : undefined);
+    const page = declaredRecordPage(pagesRead.pages, route.objectName, route.pageName, typeof app.name === 'string' ? app.name : undefined, phone);
     if (!page) {
       // objectstack#29552 — the synthesized page: its related lists are
       // derived from every object that points at the record's object, which
@@ -947,14 +962,33 @@ export function enterAppBundle(dataSource: unknown, appName: string | undefined)
  * scope composes its views from the bundle instead of reading the
  * `/meta/view` list before the app was entered. Leaving the app ends the
  * entry, so coming back revalidates the bundle as entering it always has.
+ *
+ * objectstack#35416 — on a record route it also starts the page list, and
+ * hands {@link readAppObjectScope} the same page-list and bundle readers
+ * `AppContent` does, so the record route's reads leave beside the permission
+ * read instead of one wave after it.
  */
 export function useAppObjectScopePrefetch(): void {
-  const { apps, readObjectScope } = useMetadata();
+  const metadata = useMetadata();
+  const { apps, readObjectScope, ensureType, getTypeStatus } = metadata;
+  const bundledReads = useBundledReads();
   const dataSource = useAdapter() as BundleHost | null;
   const { pathname, search } = useLocation();
+  // objectstack#36150 — the same surface `AppContent` reads the scope for.
+  const phone = usePhoneViewport();
   const segments = pathname.split('/').filter(Boolean);
   const app = segments[0] === 'apps' && segments[1] ? matchAppBySegment(apps, segments[1]) : undefined;
   const bundleAppName = typeof app?.name === 'string' && app.name ? app.name : undefined;
+  const subPath = segments.slice(2).join('/');
+  // objectstack#35416 — a record route's page list, asked here rather than
+  // when `AppContent` mounts below the session's permission read: the route
+  // asks it on every record route (`APP_ROUTE_METADATA_READS`), so this is
+  // the same request one wave earlier, and the scope read below can start
+  // the package object list beside it.
+  const recordRoute = !!app && !!readObjectScope && matchObjectScopeRoute(subPath, [])?.recordId !== undefined;
+  useEffect(() => {
+    if (recordRoute && ensureType) void ensureType('page');
+  }, [recordRoute, ensureType]);
   useEffect(() => {
     const load = dataSource?.loadAppBundle;
     if (!dataSource || !bundleAppName || typeof load !== 'function') return;
@@ -964,5 +998,28 @@ export function useAppObjectScopePrefetch(): void {
       rootEnteredApps.delete(bundleAppName);
     };
   }, [dataSource, bundleAppName]);
-  if (app && readObjectScope) readAppObjectScope(readObjectScope, app, segments.slice(2).join('/'), search);
+  if (!app || !readObjectScope) return;
+  // The record route's readers, as `AppContent` hands them: the page list and
+  // its status, and the objects the app bundle says point at the record's.
+  readAppObjectScope(
+    readObjectScope,
+    app,
+    subPath,
+    search,
+    [],
+    undefined,
+    () => {
+      // Read only when the record route asks: the provider's `pages` starts
+      // the page list when read.
+      const status = getTypeStatus?.('page');
+      const pages = metadata.pages;
+      return {
+        pages: Array.isArray(pages) ? (pages as unknown[]) : [],
+        settled: status === undefined || status === 'ready' || status === 'error',
+      };
+    },
+    undefined,
+    (objectName) => (bundledReads && bundleAppName ? bundledReads.objectsReferencing(bundleAppName, objectName) : BUNDLE_MISS),
+    phone,
+  );
 }

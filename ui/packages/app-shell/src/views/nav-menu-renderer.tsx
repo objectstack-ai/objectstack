@@ -122,12 +122,13 @@ import { useMetadata } from '@object-ui/react';
 import { useAuth } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
 import { useObjectTranslation } from '@object-ui/i18n';
-import { Badge, Separator, cn } from '@object-ui/components';
+import { Badge, NeutralIconTile, ObjectIconTile, Separator, cn } from '@object-ui/components';
 import {
   hasVisibleNavigationItems,
   resolveActiveNavItem,
   resolveHref,
   resolveNavItemIcon,
+  resolveNavKindIcon,
   resolveNavItemLabel,
   type NavTemplateContext,
 } from '@object-ui/layout';
@@ -135,7 +136,7 @@ import type { NavigationItem } from '@object-ui/types';
 import { useNavVisibility } from '../hooks/useNavMemberGates.js';
 import { useNavActionDispatch } from '../hooks/useNavActionDispatch.js';
 import { useNavTargetLabel } from '../hooks/useNavTargetLabel.js';
-import { useNavTargetIcon } from '../hooks/useNavTargetIcon.js';
+import { useNavTargetColor, useNavTargetIcon } from '../hooks/useNavTargetIcon.js';
 import { useNavDocTargetCheck } from '../hooks/useNavDocTargetCheck.js';
 import { withoutUnreadableObjectEntries } from '../utils/navObjectReadGate.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
@@ -186,6 +187,7 @@ export const NavMenuRenderer: React.FC<NavMenuRendererProps> = ({
   // And the same icon resolver: an `object` entry with no `icon` draws its
   // object's icon on both surfaces.
   const targetIcon = useNavTargetIcon();
+  const targetColor = useNavTargetColor();
 
   /* ── The three guards, wired to the same providers `UnifiedSidebar` uses ── */
 
@@ -369,7 +371,9 @@ export const NavMenuRenderer: React.FC<NavMenuRendererProps> = ({
         );
       }
 
-      const Icon = getIcon(resolveNavItemIcon(item, targetIcon));
+      const isObjectEntry = item.type === 'object' && !!item.objectName;
+      const iconName = isObjectEntry ? resolveNavItemIcon(item, targetIcon) : resolveNavKindIcon(item) ?? resolveNavItemIcon(item);
+      const Icon = getIcon(iconName);
       const text = label(item);
       const badge =
         item.badge !== undefined && item.badge !== null && item.badge !== '' ? (
@@ -379,7 +383,13 @@ export const NavMenuRenderer: React.FC<NavMenuRendererProps> = ({
         ) : null;
       const body = (
         <>
-          <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+          {/* objectstack#35985 / #36141 — the sidebar's tiles: an object entry
+              draws its object's tile, every other entry the neutral one. */}
+          {item.type === 'object' && item.objectName ? (
+            <ObjectIconTile icon={iconName} glyph={Icon} color={targetColor({ kind: 'object', objectName: item.objectName })} size="sm" className="-mx-0.5" />
+          ) : (
+            <NeutralIconTile icon={iconName} glyph={Icon} size="sm" className="-mx-0.5" />
+          )}
           <span className="truncate">{text}</span>
           {badge}
         </>

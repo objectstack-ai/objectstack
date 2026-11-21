@@ -4641,8 +4641,8 @@ const OBJECT_FIELD_REF_UNKNOWN_EXPLANATION: RuleExplanation = {
       'on the CLI and at the runtime publish gate alike: the reference is parsed, unmarked and ' +
       'silently inert (ADR-0078), and a misspelling is refused loudly at authoring.',
     // The positions are held to the rule by its test, each fired.
-    'Object-level: `highlightFields` (the default list columns, record cards, previews and the ' +
-      'detail highlight strip each skip the entry and render one field short); ' +
+    'Object-level: `highlightFields` (the default list columns, record cards, previews, the hover ' +
+      'card and the record picker each skip the entry and render one field short); ' +
       '`publicSharing.redactFields` (the redaction fails OPEN: records served through a share link ' +
       'still carry the field, and a misspelled entry is indistinguishable from one never written); ' +
       'and `indexes[].fields` (the SQL driver skips the WHOLE index at sync, logged at error, ' +
@@ -5905,7 +5905,7 @@ const SEMANTIC_ROLE_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
   paragraphs: [
     'An object\'s semantic roles point into its own field map (ADR-0085): `stageField` (stage ' +
       'detection) and each `highlightFields` entry (the default list columns, record cards, ' +
-      'previews and the detail highlight strip). A pointer at a system column the registry injects ' +
+      'previews, the hover card and the record picker). A pointer at a system column the registry injects ' +
       '(`owner_id`, `created_by`, `organization_id` and the rest) resolves on every object that gets ' +
       'the column, so naming one is legitimate.',
     // The external arm, the local twin and the declared column are held to the rule by its test.

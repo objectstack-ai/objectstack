@@ -88,7 +88,13 @@ vi.mock('@object-ui/plugin-list', async (importOriginal) => ({
   ListView: (props: any) => {
     // objectstack#35548 — the view switcher leads the list's view bar: draw the slot.
     const lead = props.toolbarLeading;
-    return typeof lead === 'function' ? lead({ recordCount: null, layout: 'grid' }) : lead ?? null;
+    // objectstack#35878 — the condition row's end (the 「Personalized」 marker) draws too.
+    return (
+      <>
+        {typeof lead === 'function' ? lead({ recordCount: null, layout: 'grid' }) : lead ?? null}
+        {props.conditionRowEnd ?? null}
+      </>
+    );
   },
 }));
 vi.mock('@object-ui/plugin-view', async (importOriginal) => ({
@@ -250,7 +256,7 @@ describe('the object list’s header folds its actions (objectui#12705)', () => 
     headerWidth = 400;
     const { cluster, labelled, openMenu } = renderList(OPPORTUNITY);
     expect(cluster.getAttribute('data-folded')).toBe('true');
-    expect(labelled()).toEqual(['console.objectView.new']);
+    expect(labelled()).toEqual(['New Opportunity']);
     expect(within(cluster).getByTestId('object-view-new-button')).toBeTruthy();
     expect(openMenu()).toEqual(['console.objectView.import', 'Update Stage', 'Add to favorites']);
   });
@@ -258,7 +264,7 @@ describe('the object list’s header folds its actions (objectui#12705)', () => 
   it('at a 600 px header nothing folds: the description waits in the ⋮, so the name has the room', () => {
     const { cluster, labelled } = renderList(OPPORTUNITY);
     expect(cluster.getAttribute('data-folded')).toBe('false');
-    expect(labelled()).toEqual(['Update Stage', 'console.objectView.new']);
+    expect(labelled()).toEqual(['Update Stage', 'New Opportunity']);
     expect(within(screen.getByTestId('page-header')).queryByText(OPPORTUNITY.description)).toBeNull();
   });
 
@@ -281,7 +287,7 @@ describe('the object list’s header folds its actions (objectui#12705)', () => 
     headerWidth = 1280;
     const { cluster, labelled } = renderList(OPPORTUNITY);
     expect(cluster.getAttribute('data-folded')).toBe('false');
-    expect(labelled()).toEqual(['Update Stage', 'console.objectView.new']);
+    expect(labelled()).toEqual(['Update Stage', 'New Opportunity']);
     expect(within(cluster).getByTestId('object-view-more-actions')).toBeTruthy();
   });
 

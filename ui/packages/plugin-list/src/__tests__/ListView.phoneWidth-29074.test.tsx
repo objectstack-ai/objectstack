@@ -13,17 +13,15 @@
  *   field and Clear) are 44 px touch targets below `sm` and keep their
  *   compact size from `sm` up: the `max-sm:` tokens beside the unchanged
  *   desktop ones.
- * - An active sort shows on the phone bar: the Sort trigger, with its level
- *   count, stays there while a sort is active (the Display panel still holds
- *   the builder), and goes while none is or while the search field is open.
+ * - (The phone bar's own Sort trigger is gone since objectstack#35878: Sort
+ *   is the resident condition row's chip at every width.)
  * - `useBelowSm` answers the `sm` media query for the panels' 16 px inset.
  *
- * happy-dom has no viewport and no Tailwind stylesheet: "narrow" mounts the
- * one base rule below `sm`, `.hidden { display: none }`, as
- * `ListView.phoneSortSearch-28911.test.tsx` does.
+ * happy-dom has no viewport and no Tailwind stylesheet, so the size tokens are
+ * read from the class list.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, renderHook, screen, fireEvent, within, cleanup } from '@testing-library/react';
+import { render, renderHook, screen, fireEvent, cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 import { ComponentRegistry } from '@object-ui/core';
@@ -31,7 +29,6 @@ import { SchemaRendererProvider } from '@object-ui/react';
 import type { ListViewSchema } from '@object-ui/types';
 import { ListView } from '../ListView';
 import { PHONE_TOUCH_TARGET, useBelowSm } from '../components/ViewSettingsPopover';
-import { openAdvancedSort } from './conditionPanels';
 
 const RECORDS = [{ id: '1', name: 'Acme', stage: 'won' }];
 
@@ -43,14 +40,6 @@ const SCHEMA: ListViewSchema = {
 } as ListViewSchema;
 
 let previousGrid: ReturnType<typeof ComponentRegistry.get>;
-let viewportStyle: HTMLStyleElement | null = null;
-
-/** The base (below `sm`) Tailwind rule, and nothing else. */
-function belowSm() {
-  viewportStyle = document.createElement('style');
-  viewportStyle.textContent = '.hidden { display: none; }';
-  document.head.appendChild(viewportStyle);
-}
 
 function mount(schema: Partial<ListViewSchema> = {}) {
   const dataSource = {
@@ -81,19 +70,23 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  viewportStyle?.remove();
-  viewportStyle = null;
   vi.unstubAllGlobals();
   if (previousGrid) ComponentRegistry.register('object-grid', previousGrid as any);
 });
 
 describe('list bar touch targets below sm (objectstack#29074)', () => {
-  it('Filter, Sort, Display and the phone search trigger are 44 px below sm and keep h-7 from sm up', async () => {
+  it('Filter, Sort and Display are 44 px below sm and keep h-7 from sm up; the phone search pill is 44 px', async () => {
     mount();
     await screen.findByTestId('grid-stub');
-    for (const id of ['toolbar-filter-trigger', 'toolbar-sort-trigger', 'toolbar-display-trigger', 'phone-search-trigger']) {
-      const el = screen.getByTestId(id);
-      expect(tokens(el), id).toEqual(expect.arrayContaining(['h-7', 'min-w-7', ...PHONE_TOUCH_TARGET.split(' ')]));
+    const display = screen.getByTestId('toolbar-display-trigger');
+    expect(tokens(display)).toEqual(expect.arrayContaining(['h-7', 'min-w-7', ...PHONE_TOUCH_TARGET.split(' ')]));
+    // objectstack#35883 — the phone search is a pill of the phone toolbar,
+    // 44 px at its one width (it is not drawn from `sm` up).
+    expect(tokens(screen.getByTestId('phone-search-trigger'))).toEqual(expect.arrayContaining(['h-11', 'min-w-11', 'sm:hidden']));
+    // Filter and Sort are the condition row's since objectstack#35878: 24 px
+    // from `sm` up, the same 44 px below it.
+    for (const id of ['condition-add-filter', 'condition-sort']) {
+      expect(tokens(screen.getByTestId(id)), id).toEqual(expect.arrayContaining(['h-6', ...PHONE_TOUCH_TARGET.split(' ')]));
     }
   });
 
@@ -108,48 +101,6 @@ describe('list bar touch targets below sm (objectstack#29074)', () => {
   });
 });
 
-describe('an active sort shows on the phone bar (objectstack#29057)', () => {
-  it('narrow, unsorted: the bar draws no Sort trigger', async () => {
-    belowSm();
-    mount();
-    await screen.findByTestId('grid-stub');
-    expect(screen.getByTestId('toolbar-sort-trigger')).not.toBeVisible();
-  });
-
-  it('narrow, sorted: the Sort trigger stays on the bar with the level count, and opens the sort builder', async () => {
-    belowSm();
-    mount({ sort: [{ field: 'name', order: 'asc' }] } as Partial<ListViewSchema>);
-    await screen.findByTestId('grid-stub');
-    const trigger = screen.getByTestId('toolbar-sort-trigger');
-    expect(trigger).toBeVisible();
-    expect(trigger).toHaveTextContent('1');
-    expect(trigger).toHaveAccessibleName('Sort');
-
-    fireEvent.click(trigger);
-    expect(await openAdvancedSort()).toBeVisible();
-  });
-
-  it('narrow, sorted: the open search field takes the Sort trigger slot, which comes back when it folds', async () => {
-    belowSm();
-    mount({ sort: [{ field: 'name', order: 'asc' }] } as Partial<ListViewSchema>);
-    await screen.findByTestId('grid-stub');
-    fireEvent.click(screen.getByTestId('phone-search-trigger'));
-    expect(screen.getByTestId('toolbar-sort-trigger')).not.toBeVisible();
-
-    fireEvent.keyDown(screen.getByTestId('phone-search-input'), { key: 'Escape' });
-    expect(screen.getByTestId('toolbar-sort-trigger')).toBeVisible();
-  });
-
-  it('the Display menu still carries the Sort level while the bar shows the indicator', async () => {
-    belowSm();
-    mount({ sort: [{ field: 'name', order: 'asc' }] } as Partial<ListViewSchema>);
-    await screen.findByTestId('grid-stub');
-    fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
-    const content = await screen.findByTestId('view-settings-content');
-    fireEvent.click(within(content).getByTestId('options-row-sort'));
-    expect(await within(content).findByTestId('display-sort')).toBeInTheDocument();
-  });
-});
 
 describe('useBelowSm', () => {
   function stubMatchMedia(matches: boolean) {

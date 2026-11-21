@@ -12,7 +12,8 @@ import { test, expect, type Page } from '@playwright/test';
  *   3. in the edit state Save is the one filled button, after Cancel;
  *   4. a line added to the Expense Lines table starts on the child object's
  *      defaults (Category "Other", Status "Submitted") with no cell flagged
- *      red, and a line added and left as it came is not stored by the save.
+ *      red, and a line added and left as it came is not stored by the save,
+ *      which says so.
  *
  * ⚠️ Layout is the reason this is a Playwright spec: jsdom lays nothing out,
  * so the 12 px is read here off real boxes. The vitest pins
@@ -101,22 +102,27 @@ test('record page polish (#35745, #35816) — showcase Expense Report', async ({
     // ── 4. A new line starts on its defaults, unflagged; left as it came, it is not stored. ──
     const editor = page.locator('[data-body-table-editor]').first();
     await editor.scrollIntoViewIfNeeded();
-    const lines = editor.locator('tbody tr');
+    // A line row, not the empty state's row (an empty grid draws one).
+    const lines = editor.locator('tbody tr').filter({ hasNot: page.getByTestId('line-items-empty') });
     const before = await lines.count();
     await editor.getByTestId('line-items-add').click();
     await expect(lines).toHaveCount(before + 1);
-    // The grid keeps a trailing entry line, so the added line is the one before it.
-    const added = lines.nth(before - 1);
+    const added = lines.nth(before);
     await expect(added).toContainText('Other');
     await expect(added).toContainText('Submitted');
     await expect(editor.locator('[data-testid^="line-items-invalid"]')).toHaveCount(0);
 
     await save.click();
     await expect(toolbar.getByRole('button', { name: 'Edit', exact: true })).toBeVisible({ timeout: 15_000 });
-    const stored = await request.get(`${API}/api/v1/data/${LINE}?$top=500`);
+    // objectstack#35940 (ruling 7056413638): the save says the line was left out.
+    await expect(page.getByText('1 blank line was not saved')).toBeVisible();
+    // Asked of the server for this report's lines only: a filter the route
+    // ignored would answer other reports' lines, and fail the count.
+    const ofThisReport = encodeURIComponent(JSON.stringify([['expense_report', 'equals', id]]));
+    const stored = await request.get(`${API}/api/v1/data/${LINE}?$filter=${ofThisReport}`);
     expect(stored.ok(), await stored.text()).toBeTruthy();
     const body = await stored.json();
-    const rows: any[] = (body.records ?? body.data ?? []).filter((r: any) => r.expense_report === id);
+    const rows: any[] = body.records ?? body.data ?? [];
     expect(rows, 'an added line left on its defaults is not stored').toHaveLength(0);
   } finally {
     await request.delete(`${API}/api/v1/data/${OBJECT}/${encodeURIComponent(id)}`);

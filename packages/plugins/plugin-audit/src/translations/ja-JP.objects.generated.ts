@@ -266,6 +266,18 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       edited_at: {
         label: "編集日時"
       },
+      is_resolved: {
+        label: "解決済み",
+        help: "このトップレベルのコメントから始まるスレッドが解決済みかどうか。返信には設定できません"
+      },
+      resolved_by: {
+        label: "解決者",
+        help: "スレッドを解決したユーザー。プラットフォームが記録し、作成者は書き込めません"
+      },
+      resolved_at: {
+        label: "解決日時",
+        help: "スレッドが解決された日時。プラットフォームが記録し、作成者は書き込めません"
+      },
       created_at: {
         label: "作成日時"
       },

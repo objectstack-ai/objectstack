@@ -272,7 +272,7 @@ export interface UserWorkTransferReport {
  */
 export type UserWorkFailureDescriber = (err: unknown, object: string) => { code: string; message: string } | undefined;
 
-function failureOf(id: unknown, err: unknown, object: string, describe?: UserWorkFailureDescriber): UserWorkTransferFailure {
+export function failureOf(id: unknown, err: unknown, object: string, describe?: UserWorkFailureDescriber): UserWorkTransferFailure {
   const described = describe?.(err, object);
   if (described) return { id: String(id), code: described.code, message: described.message.slice(0, 500) };
   const e = err as { code?: unknown; message?: unknown } | null;
@@ -281,6 +281,58 @@ function failureOf(id: unknown, err: unknown, object: string, describe?: UserWor
     code: typeof e?.code === 'string' && e.code.length > 0 ? e.code : 'UPDATE_FAILED',
     message: String(e?.message ?? err).slice(0, 500),
   };
+}
+
+/**
+ * Whether the caller's own read of `sys_user` returns `userId`. A read the
+ * caller is refused outright (no read on users at all) answers `false`, as the
+ * write path's caller read does; any other fault is the caller's to answer.
+ */
+async function callerReadsUser(engine: Pick<UserWorkEngine, 'find'>, userId: string, context: unknown): Promise<boolean> {
+  try {
+    const rows = await engine.find(USER_OBJECT, { where: { id: userId }, fields: ['id'], limit: 1, context });
+    return rows.length > 0;
+  } catch (err) {
+    const e = err as { code?: unknown; status?: unknown; statusCode?: unknown } | null;
+    if (e?.code === 'PERMISSION_DENIED' || e?.status === 403 || e?.statusCode === 403) return false;
+    throw err;
+  }
+}
+
+/**
+ * Refuse, before any write, a hand-over target that names no user or a user
+ * whose ban is in force ({@link UserWorkTransferRefusal}, naming `field` — the
+ * request member that carried the id). Shared by this module's transfer and the
+ * Change Owner endpoint (`change-record-owner.ts`), so a bulk hand-over refuses
+ * once instead of failing every row the same way.
+ *
+ * The target is read the way the write path's reference check reads a user
+ * (#29029): through the caller's own read door first. A user the caller cannot
+ * read answers exactly as a user that exists nowhere (`404`,
+ * `reference_not_found`), and its ban is never read. Only a user the caller
+ * can read has its ban state read, elevated past the ban fields' own
+ * visibility and inside the caller's tenant.
+ */
+export async function assertAssignableUser(
+  engine: Pick<UserWorkEngine, 'find'>,
+  userId: string,
+  context: unknown,
+  field: string,
+): Promise<void> {
+  const unknown = () =>
+    new UserWorkTransferRefusal(404, 'RESOURCE_NOT_FOUND', `No user has id "${userId}"`, { field, code: 'reference_not_found' });
+  if (!(await callerReadsUser(engine, userId, context))) throw unknown();
+  const elevated = { ...((context as object | undefined) ?? {}), isSystem: true };
+  const [target] = await engine.find(USER_OBJECT, {
+    where: { id: userId },
+    fields: [...USER_BAN_FIELDS],
+    limit: 1,
+    context: elevated,
+  });
+  if (!target) throw unknown();
+  if (isUserBanInForce(target)) {
+    throw new UserWorkTransferRefusal(400, 'VALIDATION_ERROR', `User "${userId}" is banned and cannot be assigned new records; pick an active user`, { field, code: 'reference_user_banned' });
+  }
 }
 
 /**
@@ -301,22 +353,7 @@ export async function transferUserAssignedWork(
   if (fromUserId === toUserId) {
     throw new UserWorkTransferRefusal(400, 'VALIDATION_ERROR', 'toUserId must name a different user than the one whose work is transferred');
   }
-  // The target's existence and ban state are facts about the user, read the
-  // way the write path's reference check reads them: past the caller's row
-  // visibility, inside the caller's tenant.
-  const elevated = { ...((context as object | undefined) ?? {}), isSystem: true };
-  const [target] = await engine.find(USER_OBJECT, {
-    where: { id: toUserId },
-    fields: [...USER_BAN_FIELDS],
-    limit: 1,
-    context: elevated,
-  });
-  if (!target) {
-    throw new UserWorkTransferRefusal(404, 'RESOURCE_NOT_FOUND', `No user has id "${toUserId}"`, { field: 'toUserId', code: 'reference_not_found' });
-  }
-  if (isUserBanInForce(target)) {
-    throw new UserWorkTransferRefusal(400, 'VALIDATION_ERROR', `User "${toUserId}" is banned and cannot be assigned new records; pick an active user`, { field: 'toUserId', code: 'reference_user_banned' });
-  }
+  await assertAssignableUser(engine, toUserId, context, 'toUserId');
 
   const only = options.objects && options.objects.length > 0 ? new Set(options.objects) : undefined;
   const { fields } = userAssignedWorkFields(servedObjects(engine));

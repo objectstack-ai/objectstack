@@ -3,10 +3,11 @@ name: objectstack-query
 description: >
   Write an ObjectQL query over ObjectStack records: filter, sort, paginate,
   aggregate by group, expand related records, full-text search. Use when writing
-  a query in app code or a hook, choosing a pagination strategy, or shaping a
-  records query or aggregation sent over MCP. Not for adding objects or fields
-  (objectstack-data), a list view's filter or a dashboard dataset
-  (objectstack-ui), or designing an API endpoint (objectstack-api).
+  a query in app code or a hook, or choosing a pagination strategy. Not for a
+  business question answered from the app's records: a number, ranking or
+  governed metric (objectstack-ask); adding objects or fields
+  (objectstack-data); a list view's filter or a dashboard dataset
+  (objectstack-ui); an API endpoint (objectstack-api).
 license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:

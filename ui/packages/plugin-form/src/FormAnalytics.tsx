@@ -159,7 +159,7 @@ export const FormAnalytics: React.FC<FormAnalyticsProps> = ({
                     style={{ height: `${(day.count / maxDaily) * 100}%`, minHeight: day.count > 0 ? '4px' : '0' }}
                     title={`${day.date}: ${day.count} submissions`}
                   />
-                  <span className="text-[10px] text-muted-foreground truncate w-full text-center">
+                  <span className="text-xs text-muted-foreground truncate w-full text-center">
                     {day.date.slice(-5)}
                   </span>
                 </div>

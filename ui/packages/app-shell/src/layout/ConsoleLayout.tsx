@@ -25,9 +25,11 @@ import { ConsoleNotificationBanners } from './ConsoleNotificationBanners.js';
 import { UnifiedSidebar } from './UnifiedSidebar.js';
 import { PhoneAppNavBar, isPhoneTabRoute } from './PhoneAppNavBar.js';
 import { PhoneAppHomeSlotProvider } from './PhoneAppHome.js';
+import { PhonePageBarProvider } from './PhonePageBar.js';
 import { useLastApp } from '../context/LastAppProvider.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { appAddressSegment } from '../utils/appRoute.js';
+import { ShellPageActionsScope } from './ShellPageActions.js';
 import { AppHeader } from './AppHeader.js';
 import { useResponsiveSidebar } from '../hooks/useResponsiveSidebar.js';
 import { usePhoneNavDrawerHistory } from './usePhoneNavDrawerHistory.js';
@@ -135,6 +137,15 @@ export function isRecordPagePath(pathname: string): boolean {
   return /^\/apps\/[^/]+\/[^/]+\/record\/[^/]+(?:\/page\/[^/]+)?\/?$/.test(pathname);
 }
 
+/**
+ * Is `pathname` one of an app's documentation pages, `/apps/APP/docs` and
+ * everything under it (objectstack#35424)? A reader there has one navigation,
+ * the docs' own, so the app's menu is not drawn beside it.
+ */
+export function isAppDocsPath(pathname: string): boolean {
+  return /^\/apps\/[^/]+\/docs(?:\/|$)/.test(pathname);
+}
+
 /** Inner component that can access SidebarProvider context */
 function ConsoleLayoutInner({ children }: { children: React.ReactNode }) {
   useResponsiveSidebar();
@@ -185,6 +196,9 @@ export function ConsoleLayout({
   // the top left goes back. The route slot leaves the bar's height free at its
   // end.
   const phoneNavBar = phone && isPhoneTabRoute(location.pathname);
+  // objectstack#35424 — a docs page draws its own left column (the app's
+  // books and a way back to the app), so the app menu is not mounted there.
+  const docsPage = isAppDocsPath(location.pathname);
   // objectstack#35881 — the app this person last had open, where a phone
   // lands after sign-in. Recorded at every width: it is the person's last app.
   const { rememberApp } = useLastApp();
@@ -246,13 +260,17 @@ export function ConsoleLayout({
     {/* objectstack#35881 — the phone app home's slot, shared by the sidebar
         (which draws the menu into it) and the route (which holds it). */}
     <PhoneAppHomeSlotProvider>
+    {/* objectstack#35883 — a page's own phone top row, drawn by the app bar. */}
+    <PhonePageBarProvider>
     <AppShell
       sidebar={
+        docsPage ? undefined : (
          <UnifiedSidebar
            activeAppName={activeAppName}
            onAppChange={onAppChange}
            railOverlay
          />
+        )
       }
       showHeader={!recordPageOwnsTopBar}
       navbar={
@@ -299,6 +317,10 @@ export function ConsoleLayout({
       }
     >
       <ConsoleLayoutInner>
+        {/* objectstack#36111 — the shell decides whether the pages under it
+            draw the top-right button group: off while this layout draws the
+            top bar, which carries the same buttons. */}
+        <ShellPageActionsScope>
         {/* ADR-0037: unmistakable watermark while rendering the draft overlay
             (?preview=draft) — with one-click exit and one-click Publish. */}
         {/* objectui#12463 — the banners sit in one non-shrinking box, so in
@@ -334,6 +356,7 @@ export function ConsoleLayout({
         >
         {children}
         </div>
+        </ShellPageActionsScope>
       </ConsoleLayoutInner>
 
       {/* objectstack#35882 — the phone's bottom bar, after the page in reading order. */}
@@ -342,6 +365,7 @@ export function ConsoleLayout({
       {/* Under `md` the drawer is a bottom sheet (no room for a rail on a phone). */}
       {chatDock.sheet}
     </AppShell>
+    </PhonePageBarProvider>
     </PhoneAppHomeSlotProvider>
     </CommandPaletteProvider>
     </ChatDockControlProvider>

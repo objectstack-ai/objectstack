@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { act, render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import React from 'react';
 import { registerAllFields } from '@object-ui/fields';
+import { MePermissionsProvider } from '@object-ui/permissions';
 import { MasterDetailForm } from './MasterDetailForm';
 
 // Capture toast calls so we can assert the form is never a silent no-op.
@@ -17,14 +18,14 @@ import { MasterDetailForm } from './MasterDetailForm';
 // single surviving raiser, and only the deep-module mock can see it — the
 // same reason `MasterDetailForm.outcomeToastSupersede.test.tsx` (#7345)
 // already mocks this exact path.
-const { toastSuccess, toastError } = vi.hoisted(() => ({ toastSuccess: vi.fn(), toastError: vi.fn() }));
+const { toastSuccess, toastError, toastInfo } = vi.hoisted(() => ({ toastSuccess: vi.fn(), toastError: vi.fn(), toastInfo: vi.fn() }));
 vi.mock('@object-ui/components/ui/sonner', async (orig) => {
   const actual = await (orig as any)();
   // Inherit the real toast surface and override only what this file asserts:
   // a hand-listed double freezes sonner's methods at whatever was typed that
   // day, and the next one the form calls (`dismiss`, objectui#7345) resolves
   // to undefined — the `check:vi-mock-inherit` defect, one level down.
-  return { ...actual, toast: { ...actual.toast, success: toastSuccess, error: toastError } };
+  return { ...actual, toast: { ...actual.toast, success: toastSuccess, error: toastError, info: toastInfo } };
 });
 
 registerAllFields();
@@ -187,7 +188,9 @@ describe('MasterDetailForm — non-atomic fallback (emulation via runBatchTransa
       return el;
     });
     fireEvent.change(input, { target: { value: 'PO-1' } });
-    // Fill the first (ghost) line so it persists as a real child row.
+    // Add and fill a first line so it persists as a real child row (the grid
+    // draws no trailing entry row, objectstack#35507).
+    fireEvent.click(await waitFor(() => screen.getByTestId('line-items-add')));
     const qty = await waitFor(() => screen.getAllByLabelText('Qty')[0] as HTMLInputElement);
     fireEvent.change(qty, { target: { value: '5' } });
   }
@@ -274,6 +277,8 @@ describe('MasterDetailForm — parent-scoped line rules ("paid invoice → lock 
       return el;
     });
     const qty = () => screen.getAllByLabelText('Qty')[0] as HTMLInputElement;
+    // A line to lock: the grid draws no trailing entry row (objectstack#35507).
+    fireEvent.click(await waitFor(() => screen.getByTestId('line-items-add')));
 
     // Header not paid → the Qty cell is editable.
     await waitFor(() => expect(qty().disabled).toBe(false));
@@ -298,6 +303,8 @@ describe('MasterDetailForm — parent-scoped line rules ("paid invoice → lock 
       return el;
     });
 
+    // A line to lock: the grid draws no trailing entry row (objectstack#35507).
+    fireEvent.click(await waitFor(() => screen.getByTestId('line-items-add')));
     fireEvent.change(status, { target: { value: 'paid' } });
     // The scrape-driven lock must NOT wipe the value the user just typed.
     await waitFor(() => expect((screen.getAllByLabelText('Qty')[0] as HTMLInputElement).disabled).toBe(true));
@@ -343,5 +350,223 @@ describe('MasterDetailForm — showSubmit gate (Studio screen preview)', () => {
     );
     const cancelBtn = await waitFor(() => screen.getByTestId('md-form-cancel'));
     expect(cancelBtn).toHaveTextContent('取消');
+  });
+});
+
+describe('MasterDetailForm — a new line starts on the child\'s defaults and waits to read red (objectstack#35940)', () => {
+  const USER_ID = 'user-42';
+  // `name` is required with no default; `note` is required with one;
+  // `applicant` defaults to the acting user, which only a known session can seed.
+  const lineSchema = {
+    name: 'po_line',
+    fields: {
+      name: { type: 'text', label: 'Name', required: true },
+      note: { type: 'text', label: 'Note', required: true, defaultValue: 'Pending' },
+      applicant: { type: 'user', label: 'Applicant', defaultValue: 'current_user' },
+      po: { type: 'master_detail', label: 'PO', reference: 'po' },
+    },
+  };
+  const ME_PERMISSIONS = {
+    authenticated: true,
+    userId: USER_ID,
+    tenantId: 't1',
+    roles: ['user'],
+    permissionSets: [],
+    objects: { '*': { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: true } },
+    fields: {},
+  };
+  const columns = [
+    { name: 'name', label: 'Name', type: 'text', required: true },
+    { name: 'note', label: 'Note', type: 'text', required: true },
+  ];
+  const lineDataSource = (overrides: any = {}) =>
+    makeDataSource({
+      getObjectSchema: vi.fn(async (name: string) => (name === 'po_line' ? lineSchema : parentSchema)),
+      ...overrides,
+    });
+  const schemaWith = (detail: Record<string, unknown> = {}, extra: Record<string, unknown> = {}) =>
+    ({
+      objectName: 'po',
+      mode: 'create',
+      fields: ['ref'],
+      details: [{ childObject: 'po_line', relationshipField: 'po', columns, ...detail }],
+      ...extra,
+    }) as any;
+  const cell = (container: HTMLElement, row: number, col: number) =>
+    container.querySelector(`[data-cell="${row}-${col}"]`) as HTMLInputElement | null;
+  const lineCount = (container: HTMLElement) => container.querySelectorAll('[data-testid="line-items"] tbody tr').length;
+  /** Add a line once the child schema (and so its defaults) has answered, and see it start on them. */
+  const addSeededLine = async (container: HTMLElement, linesBefore = 0) => {
+    await screen.findByTestId('line-items-add');
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    fireEvent.click(screen.getByTestId('line-items-add'));
+    await waitFor(() => expect(lineCount(container)).toBe(linesBefore + 1));
+    await waitFor(() => expect(cell(container, linesBefore, 1)?.value).toBe('Pending'));
+  };
+  const createOps = (batch: ReturnType<typeof vi.fn>) =>
+    (batch.mock.calls[0][0] as Array<{ object: string; action: string; data?: Record<string, unknown> }>).filter(
+      (op) => op.object === 'po_line' && op.action === 'create',
+    );
+
+  it('an added line shows the defaults and no red cell; once a save is tried its empty required cell reads red', async () => {
+    const batchTransaction = vi.fn().mockRejectedValue(new Error('Name is required'));
+    const { container } = render(<MasterDetailForm schema={schemaWith()} dataSource={lineDataSource({ batchTransaction })} />);
+    await addSeededLine(container);
+    expect(cell(container, 0, 1)!.value).toBe('Pending');
+    // An edit to another cell: the line is the user's input, its Name still empty.
+    fireEvent.change(cell(container, 0, 1)!, { target: { value: 'Later' } });
+    expect(container.querySelector('[data-testid^="line-items-invalid-"]')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('md-form-submit'));
+    await waitFor(() => expect(screen.getByTestId('line-items-invalid-0-name')).toBeInTheDocument());
+    // The cell with a default is filled, so it is never flagged.
+    expect(screen.queryByTestId('line-items-invalid-0-note')).toBeNull();
+  });
+
+  it('CONTROL: a stored line\'s empty required cell is flagged at once, as before', async () => {
+    const ds = lineDataSource({
+      find: vi.fn().mockResolvedValue({ data: [{ id: 'l1', po: 'p1', name: null, note: 'x' }] }),
+      findOne: vi.fn().mockResolvedValue({ id: 'p1', ref: 'PO-1' }),
+    });
+    render(<MasterDetailForm schema={schemaWith({}, { mode: 'edit', recordId: 'p1' })} dataSource={ds} />);
+    await waitFor(() => expect(screen.getByTestId('line-items-invalid-0-name')).toBeInTheDocument());
+  });
+
+  it('the line is written with its defaults, the acting user included (the context a create form seeds with)', async () => {
+    const batchTransaction = vi.fn().mockResolvedValue({ results: [{ id: 'po1' }, { id: 'l1' }] });
+    const { container } = render(
+      <MePermissionsProvider initialPermissions={ME_PERMISSIONS as any}>
+        <MasterDetailForm schema={schemaWith()} dataSource={lineDataSource({ batchTransaction })} />
+      </MePermissionsProvider>,
+    );
+    await addSeededLine(container);
+    fireEvent.change(cell(container, 0, 0)!, { target: { value: 'Bolts' } });
+    fireEvent.click(screen.getByTestId('md-form-submit'));
+    await waitFor(() => expect(batchTransaction).toHaveBeenCalledTimes(1));
+    expect(createOps(batchTransaction)).toEqual([
+      expect.objectContaining({ data: expect.objectContaining({ name: 'Bolts', note: 'Pending', applicant: USER_ID }) }),
+    ]);
+  });
+
+  it('a line Add started and the row editor then applied is input, and is written', async () => {
+    const batchTransaction = vi.fn().mockResolvedValue({ results: [{ id: 'po1' }, { id: 'l1' }] });
+    const { container } = render(
+      <MasterDetailForm
+        schema={schemaWith({ formFields: ['name', 'note', 'applicant'] })}
+        dataSource={lineDataSource({ batchTransaction })}
+      />,
+    );
+    await addSeededLine(container);
+    fireEvent.click(screen.getByTestId('line-items-expand-0'));
+    const editor = await waitFor(() => screen.getByTestId('md-row-form'));
+    const name = await waitFor(() => {
+      const el = editor.querySelector('input[name="name"]') as HTMLInputElement | null;
+      if (!el) throw new Error('row editor not ready');
+      return el;
+    });
+    // Typed in the editor, not in the grid: only Apply carries it to the line,
+    // and a line still marked untouched would be skipped whatever it holds.
+    fireEvent.change(name, { target: { value: 'Washers' } });
+    fireEvent.click(within(editor).getByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(screen.queryByTestId('md-row-form')).toBeNull());
+    fireEvent.click(screen.getByTestId('md-form-submit'));
+    await waitFor(() => expect(batchTransaction).toHaveBeenCalledTimes(1));
+    expect(createOps(batchTransaction)).toEqual([
+      expect.objectContaining({ data: expect.objectContaining({ name: 'Washers', note: 'Pending' }) }),
+    ]);
+  });
+  describe('ruling 7056413638: a line Add started and nobody edited is skipped, said so, and never red', () => {
+    beforeEach(() => toastInfo.mockClear());
+
+    it('create: the line is not written, the save says so, and a host onSuccess still hears the rest', async () => {
+      const batchTransaction = vi.fn().mockResolvedValue({ results: [{ id: 'po1' }] });
+      const onSuccess = vi.fn();
+      const { container } = render(
+        <MasterDetailForm schema={schemaWith({}, { onSuccess })} dataSource={lineDataSource({ batchTransaction })} />,
+      );
+      await addSeededLine(container);
+      fireEvent.click(screen.getByTestId('md-form-submit'));
+      await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+      expect(createOps(batchTransaction)).toEqual([]);
+      expect(toastInfo).toHaveBeenCalledTimes(1);
+      expect(toastInfo.mock.calls[0][0]).toBe('1 blank line was not saved');
+    });
+
+    it('a refused save flags the edited new line and leaves the untouched one unflagged', async () => {
+      const batchTransaction = vi.fn().mockRejectedValue(new Error('Name is required'));
+      const { container } = render(<MasterDetailForm schema={schemaWith()} dataSource={lineDataSource({ batchTransaction })} />);
+      await addSeededLine(container);
+      fireEvent.click(screen.getByTestId('line-items-add'));
+      await waitFor(() => expect(lineCount(container)).toBe(2));
+      fireEvent.change(cell(container, 1, 1)!, { target: { value: 'Later' } });
+      fireEvent.click(screen.getByTestId('md-form-submit'));
+      await waitFor(() => expect(screen.getByTestId('line-items-invalid-1-name')).toBeInTheDocument());
+      expect(screen.queryByTestId('line-items-invalid-0-name')).toBeNull();
+      expect(toastInfo).not.toHaveBeenCalled();
+    });
+
+    it('edit: the skipped line leaves with the save, as on the record page', async () => {
+      const batchTransaction = vi.fn().mockResolvedValue({ results: [{ id: 'p1' }] });
+      const ds = lineDataSource({
+        batchTransaction,
+        find: vi.fn().mockResolvedValue({ data: [{ id: 'l1', po: 'p1', name: 'Nuts', note: 'x' }] }),
+        findOne: vi.fn().mockResolvedValue({ id: 'p1', ref: 'PO-1' }),
+      });
+      const { container } = render(<MasterDetailForm schema={schemaWith({}, { mode: 'edit', recordId: 'p1' })} dataSource={ds} />);
+      await waitFor(() => expect(cell(container, 0, 0)?.value).toBe('Nuts'));
+      await addSeededLine(container, 1);
+      fireEvent.click(screen.getByTestId('md-form-submit'));
+      await waitFor(() => expect(toastInfo).toHaveBeenCalledTimes(1));
+      expect(createOps(batchTransaction)).toEqual([]);
+      await waitFor(() => expect(lineCount(container)).toBe(1));
+      expect(cell(container, 0, 0)!.value).toBe('Nuts');
+    });
+  });
+});
+
+/**
+ * objectstack#35804 — the line grid's column headers show each child field's
+ * help, read from the child object's definition as `getObjectSchema` serves
+ * it: the definition the record form reads too, so a help another package
+ * wrote through `objectExtensions.fieldPatches` (applied by the server before
+ * it serves the object) and the reader's language both arrive here.
+ */
+describe('MasterDetailForm — line column headers show the child fields\' help (objectstack#35804)', () => {
+  const lineSchema = {
+    name: 'po_line',
+    fields: {
+      po: { type: 'lookup', label: 'PO', reference: 'po' },
+      // The served definition: `description` carries what a patch or a
+      // translation put there, and `inlineHelpText` wins over it.
+      qty: { type: 'number', label: 'Qty', description: 'Whole units only.' },
+      price: { type: 'number', label: 'Price', inlineHelpText: 'Tax-inclusive.', description: 'Not this.' },
+      note: { type: 'text', label: 'Note' },
+    },
+  };
+  const ds = () =>
+    makeDataSource({
+      getObjectSchema: vi.fn(async (name: string) => (name === 'po_line' ? lineSchema : parentSchema)),
+    });
+  const schema = (detail: Record<string, unknown>) =>
+    ({ objectName: 'po', mode: 'create', fields: ['ref'], details: [detail] }) as any;
+
+  it.each([
+    ['derived columns', { childObject: 'po_line' }],
+    // The console's shape for a child field's `inlineColumns`: names the
+    // form hydrates from the child schema (a column declaring its `type`
+    // opts out of that hydration, and an entry whose every column does loads
+    // no child schema, so it has no help to show, as it has no lookup
+    // autofill pairs).
+    [
+      'authored columns',
+      { childObject: 'po_line', relationshipField: 'po', columns: [{ name: 'qty' }, { name: 'price' }, { name: 'note' }] },
+    ],
+  ])('%s: each header carries its field\'s help, the form\'s own read of it', async (_label, detail) => {
+    render(<MasterDetailForm schema={schema(detail)} dataSource={ds()} />);
+    const qtyHelp = await screen.findByRole('button', { name: 'Whole units only.' });
+    expect(qtyHelp.closest('th')!.textContent).toContain('Qty');
+    expect(screen.getByRole('button', { name: 'Tax-inclusive.' }).closest('th')!.textContent).toContain('Price');
+    // CONTROL: a field with no help draws no info button on its header.
+    expect(screen.getByRole('columnheader', { name: 'Note' }).querySelector('button')).toBeNull();
   });
 });

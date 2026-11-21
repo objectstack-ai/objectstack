@@ -4,6 +4,11 @@ import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
 import { ObjectDefaultInspector } from './ObjectDefaultInspector';
+// The inspector reaches the console's dynamic `@objectstack/formula` and
+// `@objectstack/lint` imports (CEL authoring); their first load is paid here,
+// at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 // The designer's `designer.*` / `perm.*` rows live in `@object-ui/i18n`'s `studio`
 // namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
 // Resident before any case, so the zh rows below read synchronously.
@@ -77,7 +82,7 @@ describe('ObjectDefaultInspector — basics', () => {
     fireEvent.change(labelledInput('Plural label'), { target: { value: 'Accounts' } });
     expect(onPatch).toHaveBeenCalledWith({ pluralLabel: 'Accounts' });
     // The Icon field is the icon picker (objectui#12531): pick, don't type.
-    fireEvent.click(screen.getByRole('combobox', { name: 'Icon' }));
+    fireEvent.click(screen.getByRole('combobox', { name: 'Icon and color' }));
     fireEvent.change(screen.getByLabelText('Search icons…'), { target: { value: 'building' } });
     fireEvent.click(screen.getAllByRole('option').find((o) => o.getAttribute('title') === 'building')!);
     expect(onPatch).toHaveBeenCalledWith({ icon: 'building' });
@@ -182,7 +187,7 @@ describe('ObjectDefaultInspector — read-only', () => {
     );
     expect(labelledInput('Label')).toBeDisabled();
     expect(labelledInput('Plural label')).toBeDisabled();
-    expect(screen.getByRole('combobox', { name: 'Icon' })).toBeDisabled();
+    expect(screen.getByRole('combobox', { name: 'Icon and color' })).toBeDisabled();
   });
 });
 

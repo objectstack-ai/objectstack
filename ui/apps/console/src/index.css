@@ -402,12 +402,20 @@
  * ============================================================ */
 @layer base {
   :root {
-    /* iOS uses larger, concentric corner radii */
+    /* Large surfaces (cards, `rounded-lg`) keep the larger iOS corner. */
     --radius: 0.875rem;
 
-    /* iOS "grouped" canvas: soft system gray (≈ #F2F2F7) instead of pure
-       white, so white cards/popovers float above it with real depth. */
-    --background: 240 24% 97%;
+    /* Controls share one 8px corner: buttons, inputs, selects, toolbar
+       controls, menus and chips are `rounded-md`. What sits inside one (a tab
+       trigger in its list, a menu row) is `rounded-sm`, 6px, so the corners
+       stay concentric. Set here rather than derived from `--radius`, which
+       would move the cards with them. */
+    --radius-md: 0.5rem;
+    --radius-sm: 0.375rem;
+
+    /* The content area is white; the sidebar is the one grey surface beside
+       it (see `--sidebar` below), and cards are told apart by their border. */
+    --background: 0 0% 100%;
     --secondary: 240 18% 94%;
     --muted: 240 18% 94%;
     --accent: 240 18% 94%;
@@ -415,7 +423,8 @@
   }
 
   .dark {
-    /* iOS dark uses near-black, not blue-black; cards sit slightly above. */
+    /* iOS dark uses near-black, not blue-black; the content area is the
+       darkest step and cards and the sidebar sit one step above it. */
     --background: 240 6% 6%;
     --card: 240 6% 10%;
     --popover: 240 6% 11%;
@@ -448,8 +457,10 @@ header.sticky {
   background-color: hsl(var(--background) / 0.6) !important;
 }
 
-/* Soft, diffuse iOS elevation on floating surfaces (dialogs, menus, popovers). */
-[role="dialog"],
+/* Soft, diffuse iOS elevation on floating surfaces (drawers, menus, popovers).
+   A modal dialog draws its own two-layer card (`dialog-surface`,
+   `packages/components/src/lib/dialog-surface.ts`) and is skipped here. */
+[role="dialog"]:not(.dialog-surface),
 [role="menu"],
 [data-radix-popper-content-wrapper] > * {
   box-shadow:
@@ -488,8 +499,9 @@ header.sticky {
     --ring: 211 100% 50%;
     --sidebar-primary: 211 100% 50%;
     --sidebar-ring: 211 100% 50%;
-    /* iOS sidebar is a translucent vibrancy material → near-white base. */
-    --sidebar: 240 24% 98%;
+    /* The sidebar is a light grey beside the white content area, drawn at
+       70% over it (the frosted rule below), so it reads as ≈ #F7F7F8. */
+    --sidebar: 240 12% 96%;
   }
   .dark {
     /* iOS dark blue (#0A84FF) is a touch brighter for contrast. */
@@ -497,7 +509,8 @@ header.sticky {
     --ring: 211 100% 60%;
     --sidebar-primary: 211 100% 60%;
     --sidebar-ring: 211 100% 60%;
-    --sidebar: 240 6% 8%;
+    /* One step lighter than the content area's 6%. */
+    --sidebar: 240 6% 11%;
   }
 }
 
@@ -513,8 +526,14 @@ header.sticky {
   background-color: hsl(135 59% 49%) !important;
 }
 
-/* iOS sheet/dialog: extra-rounded corners. */
-[role="dialog"] {
+/* iOS popover / bottom drawer: extra-rounded corners on the surfaces that float
+   beside a control or rise from the bottom. Keyed on their own containers —
+   a popover inside the floating layer's wrapper, the bottom drawer by its own
+   attribute — and no longer on every `[role="dialog"]`: a modal dialog carries
+   its own corner (`dialog-surface`), and a full-height edge drawer meets the
+   viewport on three edges, so it keeps square corners. */
+[data-radix-popper-content-wrapper] > [role="dialog"],
+[data-vaul-drawer] {
   border-radius: 1.25rem !important;
 }
 
@@ -548,8 +567,10 @@ header.sticky {
  * (CSS-only overrides; shadcn ui components not edited)
  * ------------------------------------------------------------ */
 
-/* iOS "spotlight"-style backdrop: blur + lighten the dim behind any
-   dialog / sheet / command palette overlay instead of a flat 80% black. */
+/* iOS "spotlight"-style backdrop for drawers: blur + lighten the dim behind a
+   sheet or a bottom drawer instead of a flat 80% black. A modal dialog's
+   overlay no longer carries `bg-black/80` (its faint, unblurred dim is
+   `DIALOG_OVERLAY_SURFACE`), so this rule reaches drawers only. */
 .fixed.inset-0.z-50.bg-black\/80 {
   background-color: rgb(0 0 0 / 0.35) !important;
   -webkit-backdrop-filter: blur(8px) saturate(140%);

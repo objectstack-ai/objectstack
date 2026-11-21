@@ -12,8 +12,10 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *
  * Enforcement lives in `@objectstack/plugin-sharing`:
  *   - For objects with `sharingModel: 'private'`, the engine middleware
- *     AND-s `{$or:[{owner_id:userId},{id:{$in:[grantedRecordIds]}}]}`
- *     into every `find` against that object.
+ *     AND-s `{$or:[{owner_id:userId},{id:{$in:SharedRecordIds.read(object,userId)}}]}`
+ *     into every `find` against that object: the share-grant leaf
+ *     (ADR-0155), which the driver evaluates as a semi-join on this table,
+ *     so every grant counts and none is read into memory.
  *   - For objects with `sharingModel: 'private' | 'read'`, the same
  *     middleware enforces edit/delete by checking ownership OR a share
  *     row with `access_level in ('edit','full')`. `full` is no longer
@@ -50,11 +52,12 @@ export const SysRecordShare = ObjectSchema.create({
   // it with its object's label. No `titleFormat`: a declared, required pointer
   // outranks it on every title reader, so it would only be dead text.
   nameField: 'recipient_id',
-  // Neither half of the `record_id` / `object_name` pointer pair is listed. The
-  // record page's strip draws a listed field as its stored text, so the type
-  // half read as an API name and the id half as a raw id; a field the strip
-  // draws is also hidden from the Details tab, which is where `record_id`
-  // draws as the labelled pointer card (`sharing-pointer-pairs.test.ts`).
+  // Neither half of the `record_id` / `object_name` pointer pair is listed. A
+  // highlight strip (on a page that places one; the default record page draws
+  // none) draws a listed field as its stored text, so the type half read as an
+  // API name and the id half as a raw id; the Details tab is where
+  // `record_id` draws as the labelled pointer card
+  // (`sharing-pointer-pairs.test.ts`).
   highlightFields: ['recipient_id', 'access_level', 'source'],
 
   // A list names the shared record with the pointer's id half, `record_id`:
@@ -313,8 +316,8 @@ export const SysRecordShare = ObjectSchema.create({
 
   indexes: [
     // Hot path: "all records visible to user U on object O" — the
-    // middleware reads (object_name, recipient_type, recipient_id) to
-    // build the `id IN (...)` predicate on every find.
+    // share-grant leaf's semi-join (ADR-0155) reads (object_name,
+    // recipient_type, recipient_id) inside every sharing-scoped statement.
     { fields: ['object_name', 'recipient_type', 'recipient_id'] },
     // "all grants on this record" — used by the share-management UI
     // and by canEdit() to look up explicit grants.

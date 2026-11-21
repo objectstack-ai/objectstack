@@ -562,9 +562,10 @@ export const RowActionInlineButton: React.FC<{
   row: any;
   objectFields?: unknown;
   onActionDef?: (def: RowActionDef, row: any) => void;
-  /** objectstack#35554 — the page bar draws its exposed actions as outline buttons. */
+  /** objectstack#35678 — the selection bar draws its exposed actions as outline buttons, at its own size. */
   buttonVariant?: 'default' | 'secondary' | 'destructive' | 'ghost' | 'link' | 'outline';
-}> = ({ def, row, objectFields, onActionDef, buttonVariant }) => {
+  buttonClassName?: string;
+}> = ({ def, row, objectFields, onActionDef, buttonVariant, buttonClassName }) => {
   const scope = usePredicateScope();
   const isVisible = React.useMemo(
     () => isCustomRowActionVisible(def, row, scope, objectFields),
@@ -582,7 +583,7 @@ export const RowActionInlineButton: React.FC<{
     <Button
       variant={buttonVariant ?? toButtonVariant(def.variant)}
       size="sm"
-      className="h-6"
+      className={buttonClassName ?? 'h-6'}
       data-testid={`row-action-inline-${def.name}`}
       disabled={isDisabled}
       aria-describedby={disabledReason?.id}

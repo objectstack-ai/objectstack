@@ -95,7 +95,18 @@
  * one control under them names how many are done and shows them (in their
  * place in the list) or folds them again, so the card keeps the first screen
  * for the work left (objectstack#32157). Unfolding is this mount's own state:
- * a fresh visit starts folded.
+ * a fresh visit starts folded. The control counts the required rows and the
+ * optional ones apart once an optional row is done, since the progress line
+ * counts the required rows alone (`checklistDoneCount`).
+ *
+ * Above the page, once few rows are left to do (`drawsOneLine`: two or fewer,
+ * optional ones included), the card folds to one line: its title, its
+ * progress, each row left by its title and a Set button, and the close
+ * button; no description, no done rows and no control to unfold them. The
+ * line wraps on a narrow page rather than scroll. A localization row's Set
+ * opens the full card with that row's editor, and the card folds back to the
+ * line once the editor closes; every other row's Set opens the page its row
+ * links to. A phone's card (`afterApps`) folds its own way, above.
  *
  * ## Hiding it
  *
@@ -150,8 +161,10 @@ import {
   LOCALIZATION_NAMESPACE,
   TIMEZONE_KEY,
   checklistCompletion,
+  checklistDoneCount,
   deviceStorage,
   dismissRecordKey,
+  drawsOneLine,
   hasInvitedColleagues,
   isOrganizationNamed,
   localizationRows,
@@ -260,14 +273,14 @@ function ChecklistRow({
           {title}
           {optional ? (
             <span
-              className="ml-2 rounded-full border border-border px-1.5 py-px align-middle text-[11px] font-normal text-muted-foreground"
+              className="ml-2 rounded-full border border-border px-1.5 py-px align-middle text-xs font-normal text-muted-foreground"
               data-testid={`first-run-checklist-optional-${id}`}
             >
               {t('console.firstRunChecklist.optional')}
             </span>
           ) : null}
         </p>
-        {detail ? <p className="mt-0.5 text-[13px] text-muted-foreground">{detail}</p> : null}
+        {detail ? <p className="mt-0.5 text-xs text-muted-foreground">{detail}</p> : null}
         {children}
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}
@@ -460,6 +473,19 @@ function SettingsRowEditor({
  */
 export type FirstRunChecklistPlacement = 'top' | 'afterApps';
 
+/**
+ * One row as the checklist draws it: the full row (`node`), and what the
+ * one-line form draws of it, its title and where its Set goes (a page to open,
+ * or the localization row to open for editing in the full card).
+ */
+interface ChecklistDrawnRow {
+  id: string;
+  done: boolean;
+  title: string;
+  set?: { to: string } | { edit: ChecklistSettingsRow['id'] };
+  node: ReactNode;
+}
+
 export function FirstRunChecklist({ placement = 'top' }: { placement?: FirstRunChecklistPlacement } = {}) {
   const { t, language } = useObjectTranslation();
   const { user, activeOrganization, getMembers, listInvitations, getAuthConfig } = useAuth();
@@ -607,11 +633,14 @@ export function FirstRunChecklist({ placement = 'top' }: { placement?: FirstRunC
   const localization = localizationRows(settings.localization.manifest, settings.localization.values, browser);
   const organizationNamed = isOrganizationNamed(activeOrganization?.name);
 
-  const rows: Array<{ id: string; done: boolean; node: ReactNode }> = [];
+  const rows: ChecklistDrawnRow[] = [];
 
+  const organizationPath = `${setupPath}/sys_organization/record/${encodeURIComponent(orgId)}`;
   rows.push({
     id: 'organization_name',
     done: organizationNamed,
+    title: t('console.firstRunChecklist.organizationName.title'),
+    set: { to: organizationPath },
     node: (
       <ChecklistRow
         key="organization_name"
@@ -626,7 +655,7 @@ export function FirstRunChecklist({ placement = 'top' }: { placement?: FirstRunC
         }
         action={
           <RowLink
-            to={`${setupPath}/sys_organization/record/${encodeURIComponent(orgId)}`}
+            to={organizationPath}
             label={organizationNamed ? t('console.firstRunChecklist.change') : t('console.firstRunChecklist.organizationName.action')}
             testId="first-run-checklist-link-organization_name"
           />
@@ -640,6 +669,8 @@ export function FirstRunChecklist({ placement = 'top' }: { placement?: FirstRunC
     rows.push({
       id: row.id,
       done: row.done,
+      title: settingsRowTitle(row, t),
+      set: { edit: row.id },
       node: (
         <ChecklistRow
           key={row.id}
@@ -701,6 +732,8 @@ export function FirstRunChecklist({ placement = 'top' }: { placement?: FirstRunC
     rows.push({
       id: 'mail',
       done,
+      title: t('console.firstRunChecklist.mail.title'),
+      set: { to: `${setupPath}/system/settings/mail` },
       node: (
         <ChecklistRow
           key="mail"
@@ -725,6 +758,8 @@ export function FirstRunChecklist({ placement = 'top' }: { placement?: FirstRunC
     rows.push({
       id: 'invite',
       done: colleagues,
+      title: t('console.firstRunChecklist.invite.title'),
+      set: { to: `${setupPath}/sys_user/view/all_users` },
       node: (
         <ChecklistRow
           key="invite"
@@ -751,6 +786,8 @@ export function FirstRunChecklist({ placement = 'top' }: { placement?: FirstRunC
     rows.push({
       id: 'ai_provider',
       done: ai.done,
+      title: t('console.firstRunChecklist.aiProvider.title'),
+      set: { to: `${setupPath}/system/settings/${AI_NAMESPACE}` },
       node: (
         <ChecklistRow
           key="ai_provider"
@@ -786,6 +823,8 @@ export function FirstRunChecklist({ placement = 'top' }: { placement?: FirstRunC
     rows.push({
       id: 'connect_assistant',
       done,
+      title: t('console.firstRunChecklist.connectAssistant.title'),
+      set: { to: assistantPath },
       node: (
         <ChecklistRow
           key="connect_assistant"
@@ -816,6 +855,7 @@ export function FirstRunChecklist({ placement = 'top' }: { placement?: FirstRunC
       rows.push({
         id: 'first_app',
         done,
+        title: t('console.firstRunChecklist.firstApp.title'),
         node: (
           <ChecklistRow
             key="first_app"
@@ -834,6 +874,8 @@ export function FirstRunChecklist({ placement = 'top' }: { placement?: FirstRunC
       rows.push({
         id: 'first_record',
         done,
+        title: t('console.firstRunChecklist.firstRecord.title'),
+        set: firstOwn ? { to: `/apps/${appRouteSegment(firstOwn)}` } : undefined,
         node: (
           <ChecklistRow
             key="first_record"
@@ -861,7 +903,9 @@ export function FirstRunChecklist({ placement = 'top' }: { placement?: FirstRunC
   const drawn = rows.filter((row) => profileDrawsRow(profile, row.id, row.done));
   // Done rows are folded away, the optional ones included; only the required
   // ones decide whether the checklist is still drawn and what its progress says.
-  const doneCount = drawn.filter((row) => row.done).length;
+  // The control that unfolds them names the required and the optional apart,
+  // so its count never reads larger than the progress line's.
+  const doneCount = checklistDoneCount(drawn, optionalRow);
   const completion = checklistCompletion(drawn, optionalRow);
   if (completion.complete) return null;
 
@@ -872,6 +916,86 @@ export function FirstRunChecklist({ placement = 'top' }: { placement?: FirstRunC
 
   const progress = t('console.firstRunChecklist.progress', { done: completion.done, total: completion.total });
 
+  const dismissButton = (
+    <button
+      type="button"
+      onClick={hide}
+      aria-label={t('console.firstRunChecklist.dismiss')}
+      title={t('console.firstRunChecklist.dismiss')}
+      className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+      data-testid="first-run-checklist-dismiss"
+    >
+      <X className="h-4 w-4" />
+    </button>
+  );
+
+  // Above the page, with few rows left and none open for editing: one line,
+  // each row left by its title and its Set. A localization row's Set opens the
+  // full card with that row's editor; the others open their page.
+  if (!foldable && editing === null && drawsOneLine(drawn)) {
+    return (
+      <div className="px-4 pt-4 sm:px-6 lg:px-8">
+        <section
+          className="mx-auto flex max-w-[1120px] flex-wrap items-center gap-x-4 gap-y-1.5 rounded-xl border border-border bg-card py-2 pl-4 pr-1.5"
+          data-testid="first-run-checklist"
+          data-one-line="true"
+          aria-labelledby="first-run-checklist-title"
+        >
+          <p className="flex min-w-0 items-baseline gap-2">
+            <span id="first-run-checklist-title" className="text-sm font-medium tracking-tight">
+              {t('console.firstRunChecklist.title')}
+            </span>
+            <span className="shrink-0 text-xs text-muted-foreground" data-testid="first-run-checklist-progress">
+              {progress}
+            </span>
+          </p>
+          <ul className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1.5">
+            {drawn
+              .filter((row) => !row.done)
+              .map(({ id, title, set }) => (
+                <li
+                  key={id}
+                  className="flex min-w-0 items-center gap-2"
+                  data-testid={`first-run-checklist-row-${id}`}
+                  data-done="false"
+                  data-optional={optionalRow(id) ? 'true' : undefined}
+                >
+                  <Circle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                  <span className="min-w-0 text-sm">{title}</span>
+                  {optionalRow(id) ? (
+                    <span
+                      className="shrink-0 rounded-full border border-border px-1.5 py-px text-xs text-muted-foreground"
+                      data-testid={`first-run-checklist-optional-${id}`}
+                    >
+                      {t('console.firstRunChecklist.optional')}
+                    </span>
+                  ) : null}
+                  {set && 'edit' in set ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 shrink-0"
+                      onClick={() => setEditing(set.edit)}
+                      data-testid={`first-run-checklist-set-${id}`}
+                    >
+                      {t('console.firstRunChecklist.set')}
+                    </Button>
+                  ) : set ? (
+                    <Button asChild size="sm" variant="outline" className="h-7 shrink-0">
+                      <Link to={set.to} data-testid={`first-run-checklist-link-${id}`}>
+                        {t('console.firstRunChecklist.set')}
+                      </Link>
+                    </Button>
+                  ) : null}
+                </li>
+              ))}
+          </ul>
+          {dismissButton}
+        </section>
+      </div>
+    );
+  }
+
   if (foldable && !unfolded) {
     return (
       <section
@@ -881,7 +1005,7 @@ export function FirstRunChecklist({ placement = 'top' }: { placement?: FirstRunC
         aria-labelledby="first-run-checklist-title"
       >
         <p className="flex min-w-0 items-baseline gap-2">
-          <span id="first-run-checklist-title" className="truncate text-[13px] font-semibold tracking-tight">
+          <span id="first-run-checklist-title" className="truncate text-sm font-medium tracking-tight">
             {t('console.firstRunChecklist.title')}
           </span>
           <span className="shrink-0 text-xs text-muted-foreground" data-testid="first-run-checklist-progress">
@@ -915,10 +1039,10 @@ export function FirstRunChecklist({ placement = 'top' }: { placement?: FirstRunC
     >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <h2 id="first-run-checklist-title" className="text-base font-semibold tracking-tight">
+          <h2 id="first-run-checklist-title" className="text-base font-medium tracking-tight">
             {t('console.firstRunChecklist.title')}
           </h2>
-          <p className="mt-1 text-[13px] text-muted-foreground">{t('console.firstRunChecklist.description')}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{t('console.firstRunChecklist.description')}</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <span className="text-xs text-muted-foreground" data-testid="first-run-checklist-progress">
@@ -938,22 +1062,13 @@ export function FirstRunChecklist({ placement = 'top' }: { placement?: FirstRunC
               <ChevronUp className="h-4 w-4" aria-hidden />
             </button>
           ) : null}
-          <button
-            type="button"
-            onClick={hide}
-            aria-label={t('console.firstRunChecklist.dismiss')}
-            title={t('console.firstRunChecklist.dismiss')}
-            className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-            data-testid="first-run-checklist-dismiss"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          {dismissButton}
         </div>
       </div>
       <ol className="mt-2 divide-y divide-border" id="first-run-checklist-rows">
         {drawn.filter((row) => showDone || !row.done).map((row) => row.node)}
       </ol>
-      {doneCount > 0 ? (
+      {doneCount.required + doneCount.optional > 0 ? (
         <div className="border-t border-border py-2">
           <button
             type="button"
@@ -970,7 +1085,9 @@ export function FirstRunChecklist({ placement = 'top' }: { placement?: FirstRunC
             )}
             {showDone
               ? t('console.firstRunChecklist.hideDone')
-              : t('console.firstRunChecklist.showDone', { done: doneCount })}
+              : doneCount.optional > 0
+                ? t('console.firstRunChecklist.showDoneSplit', { required: doneCount.required, optional: doneCount.optional })
+                : t('console.firstRunChecklist.showDone', { done: doneCount.required })}
           </button>
         </div>
       ) : null}

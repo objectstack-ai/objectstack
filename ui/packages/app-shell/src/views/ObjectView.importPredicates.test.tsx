@@ -99,7 +99,13 @@ vi.mock('@object-ui/plugin-list', async (importOriginal) => ({
   ListView: (props: any) => {
     // objectstack#35548 — the view switcher leads the list's view bar: draw the slot.
     const lead = props.toolbarLeading;
-    return typeof lead === 'function' ? lead({ recordCount: null, layout: 'grid' }) : lead ?? null;
+    // objectstack#35878 — the condition row's end (the 「Personalized」 marker) draws too.
+    return (
+      <>
+        {typeof lead === 'function' ? lead({ recordCount: null, layout: 'grid' }) : lead ?? null}
+        {props.conditionRowEnd ?? null}
+      </>
+    );
   },
 }));
 vi.mock('@object-ui/plugin-view', async (importOriginal) => ({
@@ -177,13 +183,16 @@ function renderList(objects: any[]) {
 }
 
 /**
- * Import is an entry of the page bar's ⋮ menu since objectstack#35548 (beside
- * the description and the favorites entry): opens the menu, then reads the
- * entry. A greyed entry is Radix's `data-disabled`, read here as `disabled`.
+ * Import is an entry of the view bar's 「Import / Export」 menu once the list's
+ * view bar carries the page's acts (objectstack#36113), and of the page bar's
+ * ⋮ menu until then: opens whichever is drawn, then reads the entry. Both read
+ * the one verdict pair. A greyed entry is Radix's `data-disabled`, read here
+ * as `disabled`.
  */
 const importButton = () => {
-  const more = document.querySelector('[data-testid="object-view-more-actions"]');
-  if (more && more.getAttribute('aria-expanded') !== 'true') fireEvent.keyDown(more, { key: 'Enter' });
+  const menu = document.querySelector('[data-testid="object-view-import-export"]')
+    ?? document.querySelector('[data-testid="object-view-more-actions"]');
+  if (menu && menu.getAttribute('aria-expanded') !== 'true') fireEvent.keyDown(menu, { key: 'Enter' });
   const item = document.querySelector('[data-testid="object-view-import-button"]');
   return item ? { disabled: item.hasAttribute('data-disabled') } : null;
 };

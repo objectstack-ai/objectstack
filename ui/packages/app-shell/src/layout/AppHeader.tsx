@@ -54,24 +54,20 @@ import {
 } from '@object-ui/components';
 import {
   Search,
-  HelpCircle,
   LogOut,
   Plus,
   Layers,
   Bot,
   User,
   Building2,
-  BookOpen,
-  ExternalLink,
-  Keyboard,
   Pencil,
   Eye,
   MoreHorizontal,
-  Info,
   ChevronLeft,
 } from 'lucide-react';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 import { isPhoneTabRoute } from './PhoneAppNavBar.js';
+import { PhonePageBarEnd, PhonePageBarTitle, useHasPhonePageBar } from './PhonePageBar.js';
 
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, type RefObject } from 'react';
 import { useOffline } from '@object-ui/react';
@@ -86,7 +82,6 @@ import type { ActivityItem } from './ActivityFeed.js';
 import { InboxPopover } from './InboxPopover.js';
 import { AppSwitcher } from './AppSwitcher.js';
 import type { ConnectionState } from '@object-ui/data-objectstack';
-import { useAdapter } from '../providers/AdapterProvider.js';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
 import { useServedAppLabel } from '../hooks/useServedAppLabel.js';
 import type { BreadcrumbItem as BreadcrumbItemType } from '@object-ui/types';
@@ -94,17 +89,14 @@ import { useAuth, getUserInitials } from '@object-ui/auth';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { useBundledReads } from '../providers/bundledReads.js';
 import { readItemPreferLocal, useReadItemsByName } from '../hooks/useObjectPresence.js';
-import { preferLocal, matchAppBySegment, appStudioRoutePath } from '../utils/index.js';
+import { preferLocal, matchAppBySegment } from '../utils/index.js';
 import { appAddressSegment } from '../utils/appRoute.js';
 import { connectAssistantPath } from '../console/connect/connectAssistantPath.js';
 import { getIcon } from '../utils/getIcon.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
 import { useCommandPalette, useCommandPaletteProviderMounted } from '../context/CommandPaletteProvider.js';
-import { useUrlOverlay } from '../hooks/useUrlOverlay.js';
 import { metadataText, servedObjectPluralLabel } from '../hooks/useNavTargetLabel.js';
-import { KEYBOARD_SHORTCUTS_PARAM } from '../urlParams.js';
 import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
-import { useStudioEntryGate } from '../hooks/useStudioDesignGate.js';
 import { useSharedActivityFeed, type ActivityFeedReading } from '../hooks/sharedUserFeeds.js';
 import { useInboxBell } from '../hooks/useInboxBell.js';
 import { useHomePath } from '../hooks/useHomePath.js';
@@ -117,8 +109,8 @@ import { getProductName, getLogoUrl } from '../runtime-config.js';
 import { LocalizedSidebarTrigger } from './LocalizedSidebarTrigger.js';
 import { PreviewBadge } from './PreviewBadge.js';
 import { AssistantTopBarButton } from './AssistantTopBarButton.js';
-import { AboutDialog } from './AboutDialog.js';
-import { getConsoleBuild } from '../buildIdentity.js';
+import { HelpMenu } from './HelpMenu.js';
+import { useAppStudioEntry } from './ShellPageActions.js';
 import { GO_HOME_SHORTCUT, useAdvertiseShortcut, type ShortcutChord } from '../chrome/advertisedShortcuts.js';
 import { confirmUnsavedLeave } from '../chrome/unsavedEdits.js';
 
@@ -413,7 +405,12 @@ function useGoHomeShortcut(enabled: boolean, homePath: string): void {
 // header doesn't ship phantom collaborators in production.
 const EMPTY_PRESENCE_USERS: PresenceUser[] = [];
 
-export type AppHeaderVariant = 'app' | 'home' | 'orgs' | 'studio';
+/**
+ * `docs` is the documentation portal's bar (`/docs/*`, objectstack#35424): the
+ * home bar — the product mark and name, the search in the middle, the
+ * utilities — with a 「/ Documentation」 crumb after the product name.
+ */
+export type AppHeaderVariant = 'app' | 'home' | 'orgs' | 'studio' | 'docs';
 
 export interface AppHeaderProps {
   variant?: AppHeaderVariant;
@@ -458,6 +455,11 @@ export function AppHeader({
   // leftmost control is 「‹」 back to the app's home.
   const phone = usePhoneViewport();
   const phoneTab = isApp && phone && isPhoneTabRoute(location.pathname);
+  // objectstack#35883 — a page with its own phone top row (the object list:
+  // its icon and name, then its 「⋮ More」) takes the bar's middle and right:
+  // no app pill, search, bell, assistant or avatar there.
+  const hasPhonePageBar = useHasPhonePageBar();
+  const phonePageBar = isApp && phone && !phoneTab && hasPhonePageBar;
   const phoneAppHome = `/apps/${params.appName ?? activeAppName ?? ''}`;
   const { isOnline } = useOffline();
   // Idempotent, direct open of the ⌘K command palette (ADR-0054 C1). Replaces a
@@ -470,12 +472,6 @@ export function AppHeader({
   // nothing. The `/studio` landing mounts one with the palette's `studio` scope
   // (objectui#11863), so its `studio` variant draws the trigger.
   const hasCommandPalette = useCommandPaletteProviderMounted();
-  // Click-reachable entry for the keyboard-shortcuts dialog (was `?`-key only).
-  // Shares the `?shortcuts=1` URL param with KeyboardShortcutsDialog (C2/C3).
-  const { openOverlay: openShortcuts } = useUrlOverlay(KEYBOARD_SHORTCUTS_PARAM);
-  // The help menu's About dialog (objectui#12970): ephemeral, so component
-  // state, not a URL param — nobody shares a link to it.
-  const [aboutOpen, setAboutOpen] = useState(false);
   const {
     user,
     signOut,
@@ -484,7 +480,6 @@ export function AppHeader({
     activeOrganization,
     isOrganizationsLoading,
   } = useAuth();
-  const dataSource = useAdapter();
   // Runtime AI gating: hide the top-bar AI entry point when the server serves
   // no AI (Community Edition) so it can't dead-end on a chat with no agent.
   // Same signal as the FAB and the `/ai` route guard.
@@ -509,43 +504,6 @@ export function AppHeader({
   const readItemsByName = useReadItemsByName(metadata);
   const { currentAppName, recordTitle } = useNavigationContext();
 
-  /**
-   * Help menu — lazily-loaded `doc` metadata (ADR-0046) so the "?" menu can
-   * surface a contextual "This app's docs" entry. Fetched once on first menu
-   * open (names/labels only — `content` is omitted from the list response);
-   * `null` = not yet loaded, `[]` = loaded-but-empty.
-   */
-  const [helpDocs, setHelpDocs] = useState<Array<{ name: string; label?: string; _packageId?: string }> | null>(null);
-  const loadHelpDocs = useCallback(async () => {
-    if (helpDocs !== null) return; // fetch at most once per mount
-    try {
-      const client: any = dataSource?.getClient?.();
-      if (!client?.meta?.getItems) {
-        setHelpDocs([]);
-        return;
-      }
-      const result: any = await client.meta.getItems('doc');
-      // `meta.getItems` answers the `{ type, items: [...] }` envelope (or a
-      // bare array from the ADR-0037 preview path) — the two shapes
-      // `MetadataProvider`'s `extractItems` accepts. A `value` arm used to
-      // trail them; measured zero producers emit `value` at THIS seam
-      // (objectui#6917), so it is gone (AGENTS.md #0.1).
-      const items: any[] = Array.isArray(result)
-        ? result
-        : Array.isArray(result?.items)
-          ? result.items
-          : [];
-      setHelpDocs(
-        items
-          .map((it) => ({ name: it?.name, label: it?.label, _packageId: it?._packageId }))
-          .filter((d) => d.name),
-      );
-    } catch {
-      // Soft-degrade: docs are an optional feature — a failed fetch just
-      // means the menu shows the static entries (All docs / Online docs).
-      setHelpDocs([]);
-    }
-  }, [helpDocs, dataSource]);
 
   /**
    * Recent activity for the bell's Activity tab (#4197).
@@ -649,13 +607,8 @@ export function AppHeader({
   // ADR-0048 (A) — appNameKey may be a package id (route segment); match by it.
   const currentApp = matchAppBySegment(metadataApps || [], appNameKey);
 
-  // Help menu — docs owned by the current app (matched by package id, the
-  // precise owner link; ADR-0048). Empty when not inside an app, the app
-  // ships no docs, or the lazy fetch hasn't run yet.
+  // The help menu's owner link for the app's docs (ADR-0048).
   const currentAppPackageId = (currentApp as any)?._packageId as string | undefined;
-  const currentAppDocs = currentAppPackageId
-    ? (helpDocs ?? []).filter((d) => d._packageId === currentAppPackageId)
-    : [];
 
   // App → Studio reverse bridge (ADR-0080): admins jump from the running app
   // to its owning package's design surface. Null when there is nothing to open
@@ -682,9 +635,9 @@ export function AppHeader({
   // switcher draw a browse entry (an eye, 「Open {app} in Studio」) where a
   // writable package's app gets the pencil. The posture is the gate's, read
   // once; the console's own apps and an unread list still draw neither.
-  const studioEntry = useStudioEntryGate(
-    isApp ? appStudioRoutePath(currentApp, true, { type: routeType, name: pathParts[3] }) : null,
-  );
+  // The derivation is `useAppStudioEntry`'s, the one the page's button group
+  // reads too (objectstack#36111), so the two open the same place.
+  const studioEntry = useAppStudioEntry(isApp, activeAppName).entry;
   // ADR-0146 D5 — the read-only entry's words: 「Open {app} in Studio」, the
   // app switcher's row text, named for the app the bar is in.
   const viewInStudioText = t('topbar.openAppInStudio', {
@@ -782,6 +735,10 @@ export function AppHeader({
             ?? reportLabel({ name: reportName, label: humanizeSlug(reportName) }),
         });
       }
+    } else if (routeType === 'docs') {
+      // objectstack#35424 — 「APP / Documentation」: the docs page names its
+      // book and article itself, above the article.
+      extraSegments.push({ label: t('help.documentation', { defaultValue: 'Documentation' }) });
     } else if (routeType === 'system') {
       extraSegments.push({ label: t('console.breadcrumb.system') });
       if (pathParts[3]) {
@@ -856,7 +813,8 @@ export function AppHeader({
   // search field and the utilities, so the field is the bar's middle, wider
   // than inside an app and named for what the palette finds. The `orgs` and
   // `studio` variants keep the search at the cluster's left edge.
-  const isHomeSearch = resolvedVariant === 'home' && hasCommandPalette;
+  // The docs portal's bar is the home bar with one crumb (objectstack#35424).
+  const isHomeSearch = (resolvedVariant === 'home' || resolvedVariant === 'docs') && hasCommandPalette;
   const centersSearch = (isApp && hasCommandPalette) || isHomeSearch;
   const searchLabel = isHomeSearch
     ? t('home.search', { defaultValue: 'Search apps, records, pages…' })
@@ -880,7 +838,7 @@ export function AppHeader({
       <span className="flex-1 truncate text-left text-xs">
         {searchLabel}
       </span>
-      <kbd className="pointer-events-none inline-flex h-5 items-center gap-0.5 rounded border bg-background px-1.5 text-[10px] font-medium text-muted-foreground">
+      <kbd className="pointer-events-none inline-flex h-5 items-center gap-0.5 rounded border bg-background px-1.5 text-xs font-medium text-muted-foreground">
         <span className="text-xs">⌘</span>K
       </kbd>
     </button>
@@ -909,11 +867,12 @@ export function AppHeader({
             <ChevronLeft className="h-5 w-5" aria-hidden />
           </Link>
           )
-        ) : isApp ? (
+        ) : isApp && routeType !== 'docs' ? (
           <LocalizedSidebarTrigger className="shrink-0 mr-1 max-md:size-11 max-md:mr-0" aria-label={t('common.toggleSidebar', { defaultValue: 'Toggle sidebar' })} />
         ) : (
           // objectui#12605 — the product mark sits at the same x on every
-          // surface. Off an app there is no sidebar to toggle, so the
+          // surface. Off an app, and on an app's docs pages (objectstack#35424,
+          // which draw no app menu), there is no sidebar to toggle, so the
           // trigger's slot (its 28 px box and its gap) is held empty: the
           // mark does not jump left when the viewer goes home. Below `sm` the
           // mark is not drawn inside an app, so there is nothing to hold.
@@ -942,8 +901,8 @@ export function AppHeader({
           />
         )}
 
-        {resolvedVariant === 'home' && (
-          <span className="hidden sm:inline ml-2 text-sm font-semibold tracking-tight">
+        {(resolvedVariant === 'home' || resolvedVariant === 'docs') && (
+          <span className="hidden sm:inline ml-2 text-sm font-medium tracking-tight">
             {getProductName()}
           </span>
         )}
@@ -975,6 +934,19 @@ export function AppHeader({
           </>
         )}
 
+        {resolvedVariant === 'docs' && (
+          <>
+            <PathSep />
+            <Link
+              to="/docs"
+              data-testid="app-bar-docs-crumb"
+              className="text-sm font-medium text-foreground/80 px-1.5 hover:text-foreground"
+            >
+              {t('help.documentation', { defaultValue: 'Documentation' })}
+            </Link>
+          </>
+        )}
+
         {resolvedVariant === 'studio' && (
           <>
             <PathSep />
@@ -984,7 +956,8 @@ export function AppHeader({
           </>
         )}
 
-        {isApp && (
+        {phonePageBar && <PhonePageBarTitle />}
+        {isApp && !phonePageBar && (
           <>
             {/* App pill — the app's glyph and name, and its switcher, after
                 the product mark's `/` rule. At every width: below `sm` it is
@@ -1080,7 +1053,8 @@ export function AppHeader({
 
         {/* Group 1: Search */}
         {/* Only where a palette is mounted (objectui#11912) — see `hasCommandPalette`. */}
-        {hasCommandPalette && !phoneTab && (
+        {phonePageBar && <PhonePageBarEnd />}
+        {hasCommandPalette && !phoneTab && !phonePageBar && (
           <div
             data-topbar-group
             data-topbar-search
@@ -1104,7 +1078,7 @@ export function AppHeader({
         )}
 
         {/* Group 2: Edit app, Inbox (notifications + approvals + activity) & Help */}
-        <div data-topbar-group className="flex items-center gap-0.5 shrink-0">
+        <div data-topbar-group className={cn('flex items-center gap-0.5 shrink-0', phonePageBar && 'hidden')}>
           {/* Edit app — the app → builder reverse bridge (ADR-0080), at the
               left edge of this utility cluster (objectui#12201 item 6).
               Admins jump from the running app to its owning package's design
@@ -1193,76 +1167,19 @@ export function AppHeader({
               objectstack#34608: it opens and closes the drawer in place. */}
           {aiEnabled && <AssistantTopBarButton />}
 
-          {/* Help & Documentation — an aggregated menu rather than a bare
-              external link: contextual "This app's docs" (only when the
-              current app ships docs), the in-product docs hub, and the online
-              docs. The left-sidebar already links the hub, so this entry point
-              earns its place by being context-aware. */}
-          <DropdownMenu onOpenChange={(open) => { if (open) void loadHelpDocs(); }}>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 hidden md:flex shrink-0"
-                aria-label={t('sidebar.helpTooltip', { defaultValue: 'Help & Documentation' })}
-              >
-                <HelpCircle className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-56 rounded-lg" sideOffset={4}>
-              {currentAppDocs.length > 0 && currentAppPackageId ? (
-                <DropdownMenuItem
-                  className="cursor-pointer"
-                  onClick={() =>
-                    leaveTo(
-                      currentAppDocs.length === 1
-                        ? `/apps/${currentAppPackageId}/docs/${currentAppDocs[0].name}`
-                        : `/apps/${currentAppPackageId}/docs`,
-                    )
-                  }
-                >
-                  <BookOpen className="mr-2 h-4 w-4" />
-                  {t('help.appDocs', { defaultValue: "This app's docs" })}
-                </DropdownMenuItem>
-              ) : null}
-              <DropdownMenuItem className="cursor-pointer" onClick={() => leaveTo('/docs')}>
-                <Layers className="mr-2 h-4 w-4" />
-                {t('help.allDocs', { defaultValue: 'All documentation' })}
-              </DropdownMenuItem>
-              {isApp ? (
-                <DropdownMenuItem
-                  className="cursor-pointer"
-                  data-testid="action:keyboard-shortcuts:open"
-                  onClick={openShortcuts}
-                >
-                  <Keyboard className="mr-2 h-4 w-4" />
-                  {t('help.keyboardShortcuts', { defaultValue: 'Keyboard shortcuts' })}
-                </DropdownMenuItem>
-              ) : null}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem asChild className="cursor-pointer">
-                <a href="https://docs.objectstack.ai" target="_blank" rel="noopener noreferrer">
-                  <ExternalLink className="mr-2 h-4 w-4" />
-                  {t('help.onlineDocs', { defaultValue: 'Online documentation' })}
-                </a>
-              </DropdownMenuItem>
-              {/* About — names the console's own build, on every variant
-                  (objectui#12970). */}
-              <DropdownMenuItem
-                className="cursor-pointer"
-                data-testid="action:about:open"
-                onClick={() => setAboutOpen(true)}
-              >
-                <Info className="mr-2 h-4 w-4" />
-                {t('help.about', { defaultValue: 'About' })}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} build={getConsoleBuild()} />
+          {/* Help & Documentation — the shared 「?」 menu (objectstack#36111:
+              the page's button group draws the same component). The
+              left-sidebar already links the hub, so this entry point earns
+              its place by being context-aware. */}
+          <HelpMenu
+            inApp={isApp}
+            appPackageId={currentAppPackageId}
+            triggerClassName="h-8 w-8 hidden md:flex shrink-0"
+          />
         </div>
 
         {/* Group 3: Account (theme + lang moved into avatar dropdown) */}
-        <div data-topbar-group className="flex items-center gap-0.5 shrink-0">        {/* User Profile + Organization switcher */}
+        <div data-topbar-group className={cn('flex items-center gap-0.5 shrink-0', phonePageBar && 'hidden')}>        {/* User Profile + Organization switcher */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
@@ -1291,7 +1208,7 @@ export function AppHeader({
                   </AvatarFallback>
                 </Avatar>
                 <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-semibold">{user?.name ?? 'User'}</span>
+                  <span className="truncate font-medium">{user?.name ?? 'User'}</span>
                   <span className="truncate text-xs text-muted-foreground">{user?.email ?? ''}</span>
                 </div>
               </div>
@@ -1418,7 +1335,7 @@ export function AppHeader({
              * control so the dropdown handles outside-click / esc cleanly.
              */}
             <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground uppercase tracking-wide px-2">
+            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground uppercase tracking-wide px-2">
               {t('user.preferences', { defaultValue: 'Preferences' })}
             </DropdownMenuLabel>
             <div className="flex items-center justify-between px-2 py-1.5 text-sm">

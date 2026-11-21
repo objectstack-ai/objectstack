@@ -6,12 +6,19 @@ import path from 'node:path';
 import { uiRoot } from '../scripts/ui-root.mjs';
 
 /**
- * GEOMETRY pin for objectstack#35548 (epic #35547): the list page's frame.
+ * GEOMETRY pin for objectstack#35548 (epic #35547), as redrawn by
+ * objectstack#35878 (two rows): the list page's frame.
  *
- *   page bar 44 · view bar 40 · empty condition row 0 · header 32 · row 33,
- *   13px on the header, the cells and the bar buttons, the view switcher as one
- *   trigger (type icon → name → count → caret), and each column total under
- *   its own column, right edge on the column's right edge.
+ *   view bar 40 (the object's name as the page's heading, the switcher and
+ *   View settings on the left; search, New and ⋮ on the right) · condition
+ *   row 40, resident · header 36 · row 36, its line included
+ *   (objectstack#36048; 32 and 33 before it), 14px on the heading, the cells
+ *   and the bar buttons and 12px on the header (objectstack#36047), the view switcher as one trigger (type
+ *   icon → name → count → caret), and each column total under its own
+ *   column, right edge on the column's right edge. No page bar is drawn
+ *   above the view bar. A line of the row lines' colour and weight runs
+ *   between columns in the header, the rows and the footer row, and none
+ *   after the last cell, drawn as an inset shadow (objectstack#36048).
  *
  * ⚠️ A Playwright spec, not a vitest test: jsdom has no layout engine, so a
  * height read there is 0 and a class-shape assertion would pass against
@@ -20,10 +27,11 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  * ## What is real here and what is a fixture
  *
  * REAL, read out of the sources at run time and compiled with the installed
- * `tailwindcss`: the page bar's classes (`PageHeader.tsx`, list posture) and
+ * `tailwindcss`: the view bar's object name (`objectViewPageHeader.tsx`) and
  * the 「新建」 button's (`objectViewHeaderChrome.tsx`); the view bar's row,
- * cluster and text-trigger constants (`listToolbarRow.ts`) and its condition
- * row (`ListView.tsx`); the switcher trigger and the order of its children
+ * cluster and text-trigger constants (`listToolbarRow.ts`), the View settings
+ * trigger that reads that constant (`ViewSettingsPopover.tsx`) and the
+ * condition row (`ListView.tsx`); the switcher trigger and the order of its children
  * (`objectViewTitleSwitcher.tsx`); the grid's density constant and default
  * row arm (`ObjectGrid.tsx`), the row ⋮ trigger (`RowActionMenu.tsx`), the
  * header label and summary cell classes (`data-table.tsx`), the Shadcn table
@@ -40,7 +48,9 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  * ## The live reading this was cut from
  * CRM 商机 at 1280×800 zh-CN, light and dark: top bar 48, page bar 44, view
  * bar 40, header 32, first data row top 164, rows 33, 13px throughout, totals
- * on their columns' right edges. The kanban view draws the same two bars —
+ * on their columns' right edges. After objectstack#35878 (showcase tasks at
+ * 1312, light and dark): top bar 48, view bar 40, condition row 40, the
+ * header's top at 128 with and without a condition set. The kanban view draws the same two bars —
  * pinned in `ListView.viewBarLeading-35548.test.tsx`, where the bars are
  * drawn for every view type by one component.
  */
@@ -49,7 +59,9 @@ const ROOT = uiRoot();
 const read = (rel: string) => readFileSync(path.join(ROOT, rel), 'utf8');
 
 const FILES = {
+  pageBar: 'packages/app-shell/src/views/objectViewPageHeader.tsx',
   pageHeader: 'packages/app-shell/src/layout/PageHeader.tsx',
+  viewSettings: 'packages/plugin-list/src/components/ViewSettingsPopover.tsx',
   chrome: 'packages/app-shell/src/views/objectViewHeaderChrome.tsx',
   row: 'packages/plugin-list/src/listToolbarRow.ts',
   list: 'packages/plugin-list/src/ListView.tsx',
@@ -77,43 +89,48 @@ function carrying(cls: string, want: string[], where: string): string {
   return cls;
 }
 
-// ── page bar ────────────────────────────────────────────────────────────────
-const PAGE_OUTER = `relative shrink-0 border-b ${carrying(pick('pageHeader', /list && '([^']+)'/, 'the list posture height'), ['h-11'], 'page bar')}`;
-const PAGE_INNER = carrying(pick('pageHeader', /\{list \? \(\s*<div className="([^"]+)"/, 'the list posture row'), ['h-full', 'items-center'], 'page bar row');
-const PAGE_TITLE = carrying(pick('pageHeader', /list \? \([\s\S]*?<h1 className="([^"]+)"/, 'the list posture title'), ['text-[13px]'], 'page title');
-const NEW_BUTTON = carrying(pick('chrome', /className="(shadow-none gap-1 h-7[^"]*)"/, 'the create button'), ['h-7', 'text-[13px]'], 'create button');
+// ── the page bar: the object's row (objectstack#36113) ──────────────────────
+const PAGE_BAR = carrying(pick('pageHeader', /className=\{cn\(\s*'(relative shrink-0 border-b[^']*)'/, 'the page header'), ['border-b'], 'page header');
+const PAGE_BAR_LIST = carrying(pick('pageHeader', /list && '([^']+)'/, "the page header's list height"), ['h-11'], 'list page header');
+const PAGE_BAR_ROW = carrying(pick('pageHeader', /\{list \? \(\s*<div className="([^"]+)"/, "the list page header's row"), ['h-full', 'items-center'], 'list page header row');
+const OBJECT_NAME = carrying(pick('pageHeader', /<h1 className="(min-w-0 max-w-full shrink-0 truncate text-sm[^"]*)"/, "the list page header's object name"), ['text-sm', 'truncate'], 'object name');
+// ── the page's acts, at the view bar's end (objectstack#35878, objectstack#36113) ──
+const NEW_BUTTON = carrying(pick('chrome', /className="(shadow-none gap-1 h-7[^"]*)"/, 'the create button'), ['h-7', 'text-sm'], 'create button');
+const IO_BUTTON = carrying(pick('pageBar', /className="(shadow-none h-7 [^"]*)"\s*data-testid="object-view-import-export"/, 'the Import / Export button'), ['h-7', 'text-sm'], 'Import / Export button');
 
 // ── view bar ────────────────────────────────────────────────────────────────
 const TOOLBAR_ROW = constant('row', 'TOOLBAR_ROW');
 const TOOLBAR_CLUSTER = constant('row', 'TOOLBAR_CLUSTER');
-const TEXT_TRIGGER = carrying(constant('row', 'TOOLBAR_TEXT_TRIGGER'), ['h-7', 'text-[13px]'], 'TOOLBAR_TEXT_TRIGGER');
+const TEXT_TRIGGER = carrying(constant('row', 'TOOLBAR_TEXT_TRIGGER'), ['h-7', 'text-sm'], 'TOOLBAR_TEXT_TRIGGER');
 const CONDITION_ROW = carrying(
   pick('list', /data-slot="list-condition-row"[\s\S]*?className="([^"]+)"/, 'the condition row'),
-  ['empty:hidden'],
+  ['min-h-10', 'flex-nowrap'],
   'condition row',
 );
 const SWITCHER_TRIGGER = carrying(
   pick('switcher', /data-testid="list-view-switcher"[\s\S]*?className=\{cn\(\s*(?:\/\/[^\n]*\n\s*)*'([^']+)'/, 'the switcher trigger'),
-  ['h-7', 'text-[13px]', 'items-center'],
+  ['h-7', 'text-sm', 'items-center'],
   'switcher trigger',
 );
 /** The trigger's children in source order, read off their test ids. */
 const SWITCHER_PARTS = ['type-icon', 'label', 'count', 'caret'] as const;
-const switcherBody = SRC.switcher.slice(SRC.switcher.indexOf('data-testid="list-view-switcher"'), SRC.switcher.indexOf('</PopoverTrigger>'));
+// The desktop trigger, inside its popover's trigger: the phone toolbar's pill
+// (objectstack#35883) comes first in the file and draws no type icon.
+const switcherBody = SRC.switcher.slice(SRC.switcher.indexOf('<PopoverTrigger'), SRC.switcher.indexOf('</PopoverTrigger>'));
 
 // ── grid ────────────────────────────────────────────────────────────────────
 const DENSITY = (() => {
   const block = pick('grid', /export const OBJECT_GRID_TABLE_DENSITY = \[([\s\S]*?)\]\.join/, 'OBJECT_GRID_TABLE_DENSITY');
   return [...block.matchAll(/'([^']+)'/g)].map((m) => m[1]).join(' ');
 })();
-const ROW_CELL = carrying(pick('grid', /rowHeightMode === 'compact'\s*\?\s*'([^']+)'/, 'the default (compact) row arm'), ['h-8', 'text-[13px]'], 'row arm');
+const ROW_CELL = carrying(pick('grid', /rowHeightMode === 'compact'\s*\?\s*'([^']+)'/, 'the default (compact) row arm'), ['h-9', 'text-sm'], 'row arm');
 const ROW_ACTION = (() => {
   const at = SRC.rowAction.indexOf('data-testid="row-action-trigger"');
   const cls = [...SRC.rowAction.slice(0, at).matchAll(/className="([^"]+)"/g)].pop()?.[1];
   if (!cls) throw new Error(`${FILES.rowAction}: the row ⋮ trigger's class was not found`);
   return cls;
 })();
-const HEADER_LABEL = carrying(pick('dataTable', /<span className="([^"]+)" title=\{col\.header/, 'the column header label'), ['text-[13px]'], 'header label');
+const HEADER_LABEL = carrying(pick('dataTable', /<span className="([^"]+)" title=\{col\.header/, 'the column header label'), ['text-xs'], 'header label');
 const SUMMARY_CELL = carrying(pick('dataTable', /"(h-8 px-\S+ py-0 [^"]+)",\s*\n\s*col\.align === 'right'/, 'the summary cell'), ['h-8', 'tabular-nums'], 'summary cell');
 /** What the summary cell adds for a right-aligned column, read off its own arm. */
 const SUMMARY_RIGHT = pick('dataTable', /"h-8 px-\S+ py-0 [^"]+",\s*\n\s*col\.align === 'right' && '([^']+)'/, "the summary cell's right-aligned arm");
@@ -157,17 +174,17 @@ function fixture(locale: 'zh' | 'en' = 'zh'): string {
     </tr>`;
   return `
 <div id="topbar" style="height:48px"></div>
-<div id="page" class="${PAGE_OUTER}"><div class="${PAGE_INNER}">
-  <div class="flex min-w-0 flex-1 items-center gap-2"><span class="${ICON_16}"></span><h1 id="title" class="${PAGE_TITLE}">商机</h1></div>
-  <div class="flex items-center gap-2"><button class="inline-flex h-7 w-7"></button><button id="new" class="inline-flex items-center ${NEW_BUTTON}">新建</button></div>
-</div></div>
+<div id="page" class="${PAGE_BAR} ${PAGE_BAR_LIST}"><div class="${PAGE_BAR_ROW}"><div class="flex min-w-0 flex-1 items-center gap-2"><span class="${ICON_16}"></span><h1 id="title" class="${OBJECT_NAME}">商机</h1></div></div></div>
 <div id="viewbar" class="${TOOLBAR_ROW}">
-  <div class="flex min-w-0 flex-1 items-center"><button id="switcher" class="${SWITCHER_TRIGGER}">
-    <span id="sw-type-icon" class="${ICON_16}"></span><span id="sw-label" class="truncate">全部商机</span><span id="sw-count" class="shrink-0 tabular-nums">12</span><span id="sw-caret" class="h-3.5 w-3.5 shrink-0"></span>
-  </button></div>
-  <div class="${TOOLBAR_CLUSTER}">${['筛选', '排序', '选项'].map((l) => `<button class="bar-button inline-flex items-center ${TEXT_TRIGGER}">${l}</button>`).join('')}</div>
+  <div class="flex min-w-0 flex-1 items-center gap-2">
+    <button id="switcher" class="${SWITCHER_TRIGGER}">
+      <span id="sw-type-icon" class="${ICON_16}"></span><span id="sw-label" class="truncate">全部商机</span><span id="sw-count" class="shrink-0 tabular-nums">12</span><span id="sw-caret" class="h-3.5 w-3.5 shrink-0"></span>
+    </button>
+    <button class="bar-button inline-flex items-center ${TEXT_TRIGGER}">视图设置</button>
+  </div>
+  <div class="${TOOLBAR_CLUSTER}"><button class="inline-flex h-7 w-7"></button><button id="io" class="bar-button inline-flex items-center ${IO_BUTTON}">导入 / 导出</button><button id="new" class="inline-flex items-center ${NEW_BUTTON}">新建商机</button><button class="inline-flex h-7 w-7"></button></div>
 </div>
-<div id="condition" class="${CONDITION_ROW}"></div>
+<div id="condition" class="${CONDITION_ROW}"><span class="inline-flex h-6 w-16 shrink-0"></span><span class="inline-flex h-6 w-16 shrink-0"></span></div>
 <table class="${TABLE} ${DENSITY}" style="table-layout:fixed;width:${40 + COLUMNS.reduce((n, c) => n + c.width, 0) + 64}px">
   <thead class="${THEAD}"><tr class="${TR}">
     <th class="${TH}" style="width:40px"></th>
@@ -188,10 +205,10 @@ function fixture(locale: 'zh' | 'en' = 'zh'): string {
 }
 
 const CANDIDATES = [
-  PAGE_OUTER, PAGE_INNER, PAGE_TITLE, NEW_BUTTON, TOOLBAR_ROW, TOOLBAR_CLUSTER, TEXT_TRIGGER, CONDITION_ROW,
+  PAGE_BAR, PAGE_BAR_LIST, PAGE_BAR_ROW, OBJECT_NAME, NEW_BUTTON, IO_BUTTON, TOOLBAR_ROW, TOOLBAR_CLUSTER, TEXT_TRIGGER, CONDITION_ROW,
   SWITCHER_TRIGGER, DENSITY, ROW_CELL, ROW_ACTION, HEADER_LABEL, SUMMARY_CELL, SUMMARY_RIGHT, TABLE, THEAD, TR, TH, TD, ICON_16,
   ...COLUMNS.map((c) => c.align),
-  'flex min-w-0 flex-1 items-center gap-2 inline-flex h-7 w-7 truncate shrink-0 tabular-nums h-3.5 w-3.5 h-4 w-4 w-10 w-16 justify-end px-3 h-8 py-0 border-t border-b-0',
+  'flex min-w-0 flex-1 items-center gap-2 gap-1.5 h-6 w-16 inline-flex h-7 w-7 truncate shrink-0 tabular-nums h-3.5 w-3.5 h-4 w-4 w-10 w-16 justify-end px-3 h-8 py-0 border-t border-b-0',
 ]
   .join(' ')
   .split(/\s+/)
@@ -200,7 +217,9 @@ const CANDIDATES = [
 let css = '';
 test.beforeAll(async () => {
   const twEntry = fileURLToPath(import.meta.resolve('tailwindcss/index.css'));
-  const compiler = await compile('@import "tailwindcss";', {
+  // The app's border colour, so the row line and the column line resolve to a
+  // real colour each and their comparison below means something.
+  const compiler = await compile('@import "tailwindcss"; @theme { --color-border: rgb(225 225 234); }', {
     base: path.dirname(twEntry),
     loadStylesheet: async (id: string, base: string) => {
       const file = id === 'tailwindcss' ? twEntry : path.resolve(base, id);
@@ -232,7 +251,7 @@ async function measure(page: Page, locale: 'zh' | 'en' = 'zh') {
       return { key, th: rect(th)!, foot: rect(foot), text: rect(text ?? null), cellText: rect(cellText) };
     });
     return {
-      page: rect($('#page'))!,
+      page: rect($('#page')),
       viewbar: rect($('#viewbar'))!,
       condition: rect($('#condition'))!,
       thead: rect($('thead tr'))!,
@@ -249,6 +268,31 @@ async function measure(page: Page, locale: 'zh' | 'en' = 'zh') {
       switcherOrder: ['type-icon', 'label', 'count', 'caret'].map((p) => rect($(`#sw-${p}`))!.left),
       cols,
       footText: ($('#tfoot') as HTMLElement).innerText,
+      // objectstack#36048 — the column lines, read off one cell per part.
+      lines: (() => {
+        // The line is an inset shadow on the cell's right edge (a collapsed
+        // border would stay behind a frozen cell when the rows scroll):
+        // read the one inset layer, its offsets and its colour.
+        const border = (el: Element | null) => {
+          if (!el) return null;
+          const layers = getComputedStyle(el).boxShadow.split(/,(?![^(]*\))/).map((l) => l.trim());
+          const inset = layers.filter((l) => /\binset\b/.test(l) && !/^(rgba\(0, 0, 0, 0\)|transparent)\s/.test(l));
+          const one = inset[0] ?? '';
+          const m = /\s((?:-?[\d.]+px\s+){3}-?[\d.]+px)\s+inset$/.exec(one);
+          return { insetLayers: inset.length, offsets: m ? m[1] : '', color: m ? one.slice(0, m.index).trim() : '', borderRight: getComputedStyle(el).borderRightWidth };
+        };
+        const rowLine = getComputedStyle(document.querySelector('tbody tr')!);
+        return {
+          rowLine: { width: rowLine.borderBottomWidth, color: rowLine.borderBottomColor },
+          header: border($('thead th[data-col="account"]')),
+          headerLast: border($('thead th:last-child')),
+          body: border($('tbody tr td[data-col="account"]')),
+          bodyLead: border($('tbody tr td:first-child')),
+          bodyLast: border($('tbody tr td:last-child')),
+          foot: border($('#tfoot td[data-col="account"]')),
+          footLast: border($('#tfoot td:last-child')),
+        };
+      })(),
       overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
     };
   });
@@ -257,21 +301,29 @@ async function measure(page: Page, locale: 'zh' | 'en' = 'zh') {
 test.describe('the list page frame (objectstack#35548)', () => {
   test('the sources still draw what this file measures', () => {
     expect(SRC.grid.includes('OBJECT_GRID_TABLE_DENSITY, schema.className'), `${FILES.grid} no longer hands its density to the table`).toBe(true);
-    expect(SRC.list.includes('TOOLBAR_TEXT_TRIGGER'), `${FILES.list} no longer draws its triggers from TOOLBAR_TEXT_TRIGGER`).toBe(true);
+    expect(/className=\{cn\(\s*TOOLBAR_TEXT_TRIGGER,[\s\S]{0,200}data-testid="toolbar-display-trigger"/.test(SRC.viewSettings), `${FILES.viewSettings}: View settings no longer draws from TOOLBAR_TEXT_TRIGGER`).toBe(true);
+    // The page bar names the object as the page's heading, and the view bar
+    // does not (objectstack#36113, which split objectstack#35878's one row).
+    expect(SRC.pageBar.includes('data-testid="list-view-bar-object-name"'), `${FILES.pageBar} names the object in the view bar again`).toBe(false);
+    expect(/<ObjectViewPageHeader \{\.\.\.pageBarProps\} hosted=\{listBarHosted\} \/>/.test(read('packages/app-shell/src/views/ObjectView.tsx')), 'the list page no longer draws its page bar above the view bar').toBe(true);
     // One trigger: type icon → name → count → caret, in that source order.
     const at = SWITCHER_PARTS.map((p) => switcherBody.indexOf(`data-testid="list-view-switcher-${p}"`));
     expect(at.every((i) => i > 0), `a switcher part is missing: ${JSON.stringify(at)}`).toBe(true);
     expect([...at].sort((a, b) => a - b)).toEqual(at);
   });
 
-  test('1280×800: bars 44 and 40, empty condition row 0, header 32, rows 33, first row top ≤ 168', async ({ page }) => {
+  test('1280×800: page bar 44, view bar 40, condition row 40, header 36, rows 36, first row top ≤ 212', async ({ page }) => {
     const r = await measure(page);
-    expect(r.page.height).toBeCloseTo(44, 0);
+    expect(r.page, 'no page bar above the view bar').not.toBeNull();
+    expect(r.page!.top).toBeCloseTo(48, 0);
+    expect(r.page!.height, 'the object\'s row').toBeCloseTo(44, 0);
+    expect(r.viewbar.top).toBeCloseTo(92, 0);
     expect(r.viewbar.height).toBeCloseTo(40, 0);
-    expect(r.condition.height, 'the empty condition row takes height').toBe(0);
-    expect(r.thead.height).toBeCloseTo(32, 0);
-    for (const h of r.rowHeights) expect(h, 'a data row is not 33px').toBeCloseTo(33, 0);
-    expect(r.firstRow.top).toBeLessThanOrEqual(168);
+    expect(r.condition.height, 'the resident condition row').toBeCloseTo(40, 0);
+    expect(r.thead.top, 'the header under the three rows').toBeCloseTo(172, 0);
+    expect(r.thead.height).toBeCloseTo(36, 0);
+    for (const h of r.rowHeights) expect(h, 'a data row is not 36px').toBeCloseTo(36, 0);
+    expect(r.firstRow.top).toBeLessThanOrEqual(212);
     expect(r.newButton.height).toBeGreaterThanOrEqual(24);
     expect(r.newButton.height).toBeLessThanOrEqual(28);
     for (const h of r.barButtons) {
@@ -281,13 +333,29 @@ test.describe('the list page frame (objectstack#35548)', () => {
     expect(r.overflowX).toBe(0);
   });
 
-  test('13px on the page title, the header, the cells and every bar button', async ({ page }) => {
+  test('14px on the object name, the cells and every bar button; 12px on the header (objectstack#36047)', async ({ page }) => {
     const { fonts } = await measure(page);
-    expect(fonts.title).toBe('13px');
-    expect(fonts.header).toBe('13px');
-    expect(fonts.cell).toBe('13px');
-    expect(fonts.bar.length).toBe(5);
-    for (const f of fonts.bar) expect(f).toBe('13px');
+    expect(fonts.title).toBe('14px');
+    expect(fonts.header).toBe('12px');
+    expect(fonts.cell).toBe('14px');
+    expect(fonts.bar.length).toBe(4);
+    for (const f of fonts.bar) expect(f).toBe('14px');
+  });
+
+  test('a line between columns in the header, the rows and the footer, the row lines\' colour and weight, none after the last cell (objectstack#36048)', async ({ page }) => {
+    const { lines } = await measure(page);
+    expect(lines.rowLine.width).toBe('1px');
+    expect(lines.rowLine.color).not.toBe('rgba(0, 0, 0, 0)');
+    for (const [part, b] of Object.entries({ header: lines.header, body: lines.body, bodyLead: lines.bodyLead, foot: lines.foot })) {
+      expect(b, part).not.toBeNull();
+      expect(b!.insetLayers, `${part}: one column line`).toBe(1);
+      expect(b!.offsets, `${part}: a 1px line on the right edge`).toBe('-1px 0px 0px 0px');
+      expect(b!.color, `${part}: column line colour`).toBe(lines.rowLine.color);
+      expect(b!.borderRight, `${part}: drawn as a shadow, not a border`).toBe('0px');
+    }
+    for (const [part, b] of Object.entries({ headerLast: lines.headerLast, bodyLast: lines.bodyLast, footLast: lines.footLast })) {
+      expect(b!.insetLayers, `${part}: a line after the last cell`).toBe(0);
+    }
   });
 
   test('the switcher reads type icon → name → count → caret, left to right', async ({ page }) => {

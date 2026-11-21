@@ -36,9 +36,9 @@ import { getBadgeColorClasses, getBadgeHexAppearance } from '@object-ui/fields';
 import { ChevronLeft } from 'lucide-react';
 import { DATE_RANGE_PRESET_MACRO_WINDOWS, type DateRangePreset } from '@objectstack/spec/data';
 import {
-  QUICK_FILTER_OPERATORS,
   isValuelessOperator,
   quickFilterFamily,
+  quickFilterOperators,
   seedValueFor,
   type ConditionField,
 } from './conditionModel';
@@ -81,7 +81,9 @@ function useDebounced(callback: (value: string) => void, delay: number) {
 export function FilterValuePanel({ field, row, onChange, onBack, testId = 'filter-values' }: FilterValuePanelProps) {
   const { t } = useListConditionTranslation();
   const family = quickFilterFamily(field);
-  const offered = QUICK_FILTER_OPERATORS[family];
+  const offered = quickFilterOperators(field);
+  // A row whose operator the field no longer offers (a saved `equals` on a
+  // multi-value field) still shows it, so the reader can see and change it.
   const operators = offered.includes(row.operator) ? offered : [row.operator, ...offered];
   const operatorLabel = (op: string) => quickOperatorLabel(op, t);
 
@@ -105,10 +107,10 @@ export function FilterValuePanel({ field, row, onChange, onBack, testId = 'filte
             <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />
           </Button>
         )}
-        <span className="truncate text-[13px] font-medium">{field.label}</span>
+        <span className="truncate text-sm font-medium">{field.label}</span>
         <Select value={row.operator} onValueChange={setOperator}>
           <SelectTrigger
-            className="ml-auto h-7 w-auto min-w-0 gap-1 border-0 px-2 text-[13px] text-muted-foreground shadow-none"
+            className="ml-auto h-7 w-auto min-w-0 gap-1 border-0 px-2 text-sm text-muted-foreground shadow-none"
             aria-label={t('listConditions.filter.operator')}
             data-testid={`${testId}-operator`}
           >
@@ -216,7 +218,7 @@ function OptionValues({
           onChange={(e) => setQuery(e.target.value)}
           placeholder={t('listConditions.filter.searchOptions')}
           aria-label={t('listConditions.filter.searchOptions')}
-          className="h-8 text-[13px]"
+          className="h-8 text-sm"
           data-testid={`${testId}-option-search`}
         />
       )}
@@ -228,7 +230,7 @@ function OptionValues({
           return (
             <li key={key}>
               <label
-                className="flex h-8 cursor-pointer items-center gap-2 rounded-sm px-2 text-[13px] hover:bg-accent"
+                className="flex h-8 cursor-pointer items-center gap-2 rounded-sm px-2 text-sm hover:bg-accent"
                 data-testid={`${testId}-option-${key}`}
                 data-checked={checked || undefined}
               >
@@ -251,7 +253,7 @@ function OptionValues({
           );
         })}
         {shown.length === 0 && (
-          <li className="px-2 py-2 text-[13px] text-muted-foreground">{t('listConditions.filter.noOptions')}</li>
+          <li className="px-2 py-2 text-xs text-muted-foreground">{t('listConditions.filter.noOptions')}</li>
         )}
       </ul>
     </div>
@@ -280,7 +282,7 @@ function TextValue({
       }}
       placeholder={t('listConditions.filter.textPlaceholder')}
       aria-label={t('listConditions.filter.textPlaceholder')}
-      className="h-8 text-[13px]"
+      className="h-8 text-sm"
       data-testid={`${testId}-text`}
     />
   );
@@ -317,7 +319,7 @@ function NumberValues({
           onChange={(e) => set(0, e.target.value)}
           aria-label={t('listConditions.filter.from')}
           placeholder={t('listConditions.filter.from')}
-          className="h-8 text-[13px]"
+          className="h-8 text-sm"
           data-testid={`${testId}-number-from`}
         />
         <Input
@@ -326,7 +328,7 @@ function NumberValues({
           onChange={(e) => set(1, e.target.value)}
           aria-label={t('listConditions.filter.to')}
           placeholder={t('listConditions.filter.to')}
-          className="h-8 text-[13px]"
+          className="h-8 text-sm"
           data-testid={`${testId}-number-to`}
         />
       </div>
@@ -340,7 +342,7 @@ function NumberValues({
       onChange={(e) => setValue(toNumber(e.target.value))}
       placeholder={t('listConditions.filter.numberPlaceholder')}
       aria-label={t('listConditions.filter.numberPlaceholder')}
-      className="h-8 text-[13px]"
+      className="h-8 text-sm"
       data-testid={`${testId}-number`}
     />
   );
@@ -379,7 +381,7 @@ function DateValues({
         type={inputType}
         value={typeof row.value === 'string' ? row.value : ''}
         onChange={(e) => setValue(e.target.value)}
-        className="h-8 text-[13px]"
+        className="h-8 text-sm"
         aria-label={field.label}
         data-testid={`${testId}-date`}
       />
@@ -398,7 +400,7 @@ function DateValues({
           aria-checked={current === w}
           onClick={() => setValue(quickDateWindowValue(w))}
           className={cn(
-            'flex h-8 items-center rounded-sm px-2 text-left text-[13px] hover:bg-accent',
+            'flex h-8 items-center rounded-sm px-2 text-left text-sm hover:bg-accent',
             current === w && 'bg-accent font-medium',
           )}
           data-testid={`${testId}-window-${w}`}
@@ -407,14 +409,14 @@ function DateValues({
         </button>
       ))}
       <div className="mt-1 border-t pt-1.5" data-testid={`${testId}-custom`}>
-        <div className="px-2 pb-1 text-[11px] text-muted-foreground">{t('listConditions.filter.customRange')}</div>
+        <div className="px-2 pb-1 text-xs text-muted-foreground">{t('listConditions.filter.customRange')}</div>
         <div className="flex items-center gap-1.5">
           <Input
             type={inputType}
             value={custom ? String(pair[0] ?? '') : ''}
             onChange={(e) => setValue([e.target.value, String(pair[1] ?? '')])}
             aria-label={t('listConditions.filter.from')}
-            className="h-8 text-[13px]"
+            className="h-8 text-sm"
             data-testid={`${testId}-date-from`}
           />
           <Input
@@ -422,7 +424,7 @@ function DateValues({
             value={custom ? String(pair[1] ?? '') : ''}
             onChange={(e) => setValue([String(pair[0] ?? ''), e.target.value])}
             aria-label={t('listConditions.filter.to')}
-            className="h-8 text-[13px]"
+            className="h-8 text-sm"
             data-testid={`${testId}-date-to`}
           />
         </div>
@@ -455,7 +457,7 @@ function BooleanValues({
           aria-checked={row.value === choice.value}
           onClick={() => setValue(choice.value)}
           className={cn(
-            'flex h-8 items-center rounded-sm px-2 text-left text-[13px] hover:bg-accent',
+            'flex h-8 items-center rounded-sm px-2 text-left text-sm hover:bg-accent',
             row.value === choice.value && 'bg-accent font-medium',
           )}
           data-testid={`${testId}-boolean-${choice.value}`}

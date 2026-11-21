@@ -309,6 +309,35 @@ const LEDGER: Readonly<Record<string, LedgerRow>> = {
     readers: ['props@fields/src/widgets/AvatarField.tsx', 'props@fields/src/widgets/FileField.tsx', 'props@fields/src/widgets/ImageField.tsx'],
     why: 'RUNTIME SLOT — a host-supplied function; JSON has no function value (the objectui#6124 shape).',
   },
+  // objectstack#35688 — the list grid's cell editor (`ObjectGrid` through
+  // `FieldEditWidget`) sets these two; a form never does. The typed inputs,
+  // rating and record pickers read them since S3 (objectstack#36023).
+  inCell: {
+    readers: [
+      'props@fields/src/widgets/ColorField.tsx', 'props@fields/src/widgets/CurrencyField.tsx',
+      'props@fields/src/widgets/EmailField.tsx', 'props@fields/src/widgets/LookupField.tsx',
+      'props@fields/src/widgets/MultiSelectField.tsx', 'props@fields/src/widgets/NumberField.tsx',
+      'props@fields/src/widgets/PercentField.tsx', 'props@fields/src/widgets/PhoneField.tsx',
+      'props@fields/src/widgets/RatingField.tsx', 'props@fields/src/widgets/TagsField.tsx',
+      'props@fields/src/widgets/TextField.tsx', 'props@fields/src/widgets/TimeField.tsx',
+      'props@fields/src/widgets/UrlField.tsx',
+    ],
+    why: 'RUNTIME SLOT (objectstack#35688) — host plumbing: the grid cell editor asks for the in-cell face; where a '
+      + 'widget is drawn is the host\'s fact, not something a form document authors.',
+  },
+  onCommit: {
+    readers: [
+      'props@fields/src/widgets/ColorField.tsx', 'props@fields/src/widgets/CurrencyField.tsx',
+      'props@fields/src/widgets/EmailField.tsx', 'props@fields/src/widgets/LookupField.tsx',
+      'props@fields/src/widgets/MultiSelectField.tsx', 'props@fields/src/widgets/NumberField.tsx',
+      'props@fields/src/widgets/PercentField.tsx', 'props@fields/src/widgets/PhoneField.tsx',
+      'props@fields/src/widgets/RatingField.tsx', 'props@fields/src/widgets/TagsField.tsx',
+      'props@fields/src/widgets/TextField.tsx', 'props@fields/src/widgets/TimeField.tsx',
+      'props@fields/src/widgets/UrlField.tsx',
+    ],
+    why: 'RUNTIME SLOT (objectstack#35688) — a host-supplied function (the grid cell editor\'s commit); JSON has no '
+      + 'function value (the objectui#6124 shape).',
+  },
   // ── runtime-only, by an existing ruling ─────────────────────────────────
   field: {
     readers: [

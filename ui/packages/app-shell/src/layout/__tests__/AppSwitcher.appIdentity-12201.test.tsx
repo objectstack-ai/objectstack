@@ -7,7 +7,8 @@
  * - The pill draws the active app's `branding.logo` LEFT of the app's name.
  * - Every dropdown row carries its app's glyph: the logo, or — for an app with
  *   no `branding.logo` — its `icon` on a tile, coloured by its own
- *   `branding.primaryColor` when that is a hex, neutral otherwise.
+ *   `branding.primaryColor` when that is a hex, else by the palette colour its
+ *   name picks (objectstack#36157).
  * - The dropdown ends with the way back to Home, 「All apps」, and, for a
  *   viewer the top bar offers its Studio button to, 「Edit APP in Studio」 to
  *   the button's own target.
@@ -65,7 +66,9 @@ vi.mock('../../providers/MetadataProvider', () => ({
 }));
 
 import { AppSwitcher } from '../AppSwitcher';
-import { appTileColors } from '../appTileColors';
+import { OBJECT_COLORS } from '@objectstack/spec/data';
+import { OBJECT_COLOR_TILE_CLASS } from '@object-ui/components';
+import { AUTO_TILE_COLORS, appTileColors, appTileFace, autoTileColor } from '../appTileColors';
 
 const LOGO = 'https://cdn.example.test/hotcrm-icon.svg';
 const HOTCRM = { name: 'hotcrm', label: 'HotCRM', icon: 'flame', branding: { logo: LOGO, primaryColor: '#ea580c' } };
@@ -141,11 +144,15 @@ describe('every switcher row carries its app\'s glyph (objectui#12201)', () => {
     expect(tile.style.getPropertyValue('--os-app-tile-bg')).not.toBe(appTileColors(HOTCRM.branding.primaryColor)!.bg);
   });
 
-  it('CONTROL — an app declaring neither a logo nor a colour gets the neutral tile, still with its icon', () => {
+  it('an app declaring neither a logo nor a colour gets its automatic palette colour, still with its icon (objectstack#36157)', () => {
     renderSwitcher('hotcrm');
     const tile = within(menu().getByTestId('app-switcher-row-plain')).getByTestId('app-mark-tile');
     expect(tile.querySelector('svg')).toHaveAttribute('data-icon', 'box');
-    expect(tile.className).toContain('bg-muted');
+    expect(tile).toHaveAttribute('data-app-tile', 'teal');
+    for (const cls of OBJECT_COLOR_TILE_CLASS.teal.split(' ')) expect(tile.className).toContain(cls);
+    expect(tile.className).toContain('text-white');
+    // ⛔ not the neutral grey tile it used to be, and no colour painted inline.
+    expect(tile.className).not.toContain('bg-muted');
     expect(tile.className).not.toContain('--os-app-tile-bg');
     expect(tile.getAttribute('style')).toBeNull();
   });
@@ -209,5 +216,50 @@ describe('`appTileColors` — the fallback tile\'s colours from `branding.primar
     // saturated hue (97 %) is eased back, as is pure red's.
     expect(appTileColors('#fde68a')?.bgDark).toBe('hsl(48 87% 77%)');
     expect(appTileColors('#ff0000')?.bgDark).toBe('hsl(0 90% 65%)');
+  });
+});
+
+describe('an app with no declared colour gets a solid palette colour by its name (objectstack#36157)', () => {
+  it('picks from the objects\' palette without its neutral grey, in the palette\'s order', () => {
+    expect(AUTO_TILE_COLORS).toEqual(OBJECT_COLORS.filter((c) => c !== 'gray'));
+    expect(AUTO_TILE_COLORS).toEqual(['blue', 'teal', 'green', 'amber', 'orange', 'red', 'pink', 'purple']);
+  });
+
+  it('pins the pick: djb2, signed 32-bit at every step, absolute value modulo the palette', () => {
+    // A changed algorithm or palette order moves every app without a colour:
+    // these names are the guard, a non-ASCII name and a negative hash included.
+    expect({
+      '': autoTileColor(''),
+      plain: autoTileColor('plain'),
+      blank_main_app: autoTileColor('blank_main_app'),
+      meeting_notes: autoTileColor('meeting_notes'),
+      crm_customer_management: autoTileColor('crm_customer_management'),
+      会议纪要: autoTileColor('会议纪要'),
+      long: autoTileColor('x_long_application_name_to_overflow_the_32_bit_hash_many_times'),
+    }).toEqual({
+      '': 'red',
+      plain: 'teal',
+      blank_main_app: 'purple',
+      meeting_notes: 'pink',
+      crm_customer_management: 'orange',
+      会议纪要: 'blue',
+      long: 'pink',
+    });
+  });
+
+  it('the face: a declared hex wins, else the automatic colour, else (no name) the neutral tile', () => {
+    expect(appTileFace(PROJECTS)).toMatchObject({ kind: 'declared' });
+    expect(appTileFace({ name: 'named', branding: { primaryColor: 'orange' } })).toMatchObject({ kind: 'auto', color: autoTileColor('named') });
+    expect(appTileFace(PLAIN)).toEqual({ kind: 'auto', color: 'teal', className: `text-white ${OBJECT_COLOR_TILE_CLASS.teal}` });
+    expect(appTileFace(undefined)).toMatchObject({ kind: 'neutral' });
+    expect(appTileFace({})).toMatchObject({ kind: 'neutral' });
+  });
+
+  it('every surface that draws an app gets the same colour for it: the pill and its switcher row', () => {
+    renderSwitcher('plain');
+    const pillTile = within(pill()).getByTestId('app-mark-tile');
+    const rowTile = within(menu().getByTestId('app-switcher-row-plain')).getByTestId('app-mark-tile');
+    expect(pillTile.getAttribute('data-app-tile')).toBe('teal');
+    expect(rowTile.getAttribute('data-app-tile')).toBe('teal');
   });
 });

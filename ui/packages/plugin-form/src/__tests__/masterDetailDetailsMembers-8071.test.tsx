@@ -111,7 +111,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import React from 'react';
 import { registerAllFields, type GridColumn } from '@object-ui/fields';
 import type { ObjectMasterDetailFormProps } from '@objectstack/spec/ui';
@@ -214,8 +214,26 @@ function gridOf(heading: string): Record<string, any> {
 const headings = (container: HTMLElement) =>
   Array.from(container.querySelectorAll('section > h3')).map((h) => h.textContent);
 
-/** Fill the Nth ghost `Qty` cell (0-based), which turns it into a real line. */
+/**
+ * The line grid whose columns include `label`, its Add pressed until it draws
+ * line `n` (0-based): the grid draws no trailing entry row (objectstack#35507).
+ */
+async function addLineTo(label: string, n: number) {
+  const grid = await waitFor(() => {
+    const found = screen
+      .getAllByTestId('line-items')
+      .find((el) => within(el).queryAllByRole('columnheader', { name: label }).length > 0);
+    if (!found) throw new Error(`no grid with a ${label} column yet`);
+    return found;
+  });
+  while (within(grid).queryAllByLabelText(label).length <= n) {
+    fireEvent.click(within(grid).getByTestId('line-items-add'));
+  }
+}
+
+/** Fill the Nth `Qty` cell (0-based), adding lines until it exists. */
 async function fillQty(n: number, value: string) {
+  await addLineTo('Qty', n);
   const cell = await waitFor(() => {
     const cells = screen.getAllByLabelText('Qty');
     if (cells.length <= n) throw new Error(`no Qty cell ${n} yet`);
@@ -402,6 +420,7 @@ describe('`object-master-detail-form` — the member shape of `details`', () => 
     fireEvent.change(container.querySelector('input[name="ref"]')!, { target: { value: 'PO-1' } });
     await fillQty(0, '5');
     await fillQty(1, '7');
+    await addLineTo('Note', 0);
     fireEvent.change(screen.getAllByLabelText('Note')[0], { target: { value: 'rush' } });
 
     fireEvent.click(screen.getByRole('button', { name: /^create$/i }));

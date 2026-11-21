@@ -61,6 +61,7 @@ import {
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import type { ListViewSchema } from '@object-ui/types';
 import { ListView, LIST_DEFAULT_TRANSLATIONS, viewFilterRequiresOwner } from '../ListView';
+import type { ListToolbarTrailingState } from '../ListView';
 import { filterNamesCurrentUser } from '../ListEmptyState';
 import { openAdvancedSort } from './conditionPanels';
 
@@ -289,7 +290,9 @@ describe('ListView.hostDrawnConditions-35727', () => {
     expect(JSON.stringify(recordReads(ds).at(-1)![1])).toContain('acc_1');
     expect(within(slot()).queryByTestId('view-condition-chip')).toBeNull();
     expect(within(slot()).queryByTestId('condition-reset')).toBeNull();
-    expect(slot()).toBeEmptyDOMElement();
+    // The row is resident (objectstack#35878): no chip, only the dashed
+    // 「Sort」 and 「Filter」 buttons.
+    expect(within(slot()).getByTestId('condition-add-filter')).toHaveAttribute('data-empty', 'true');
   });
 
   it.each([
@@ -2185,8 +2188,11 @@ describe('ListView.draftOnlyColumn-34807', () => {
       // advanced step is the builder, whose first picker reads the same list.
       // Both are read, so a field either offers is caught.
       const listed = Array.from(content.querySelectorAll('[role="option"][data-field]')).map(text);
-      fireEvent.click(within(content).getByTestId(/^(filter|sort)-panel-open-advanced$/));
-      const advanced = await within(content).findByTestId(/^(filter|sort)-panel-advanced$/);
+      // A sort in force: the one sort chip opens every level at once
+      // (objectstack#35878 on objectstack#35876), no field list before it.
+      const direct = within(content).queryByTestId('sort-chip-panel');
+      if (!direct) fireEvent.click(within(content).getByTestId(/^(filter|sort)-panel-open-advanced$/));
+      const advanced = direct ?? (await within(content).findByTestId(/^(filter|sort)-panel-advanced$/));
       return [...listed, ...(await comboboxOptions(within(advanced).getAllByRole('combobox')[0]))];
     } finally {
       fireEvent.click(trigger);
@@ -2246,7 +2252,7 @@ describe('ListView.draftOnlyColumn-34807', () => {
     await mountList({ draft: true }, { sort: [{ field: 'title', order: 'asc' }] }, {
       initialFilters: { id: 'root', logic: 'and', conditions: [{ id: 'c1', field: 'title', operator: 'contains', value: 'a' }] },
     });
-    const filterOptions = await popoverFirstComboboxOptions(/^filter/i);
+    const filterOptions = await popoverFirstComboboxOptions(/^(add )?filter$/i);
     expect(filterOptions).toContain('Title');
     expect(filterOptions).not.toContain('Priority (draft)');
     const sortOptions = await popoverFirstComboboxOptions(/^sort/i);
@@ -2282,7 +2288,7 @@ describe('ListView.draftOnlyColumn-34807', () => {
     expect(lastParams().$orderby).toEqual([{ field: 'priority', order: 'desc' }]);
     expect(JSON.stringify(lastParams().$filter)).toContain('"priority"');
     expect(notice()).toBeNull();
-    const filterOptions = await popoverFirstComboboxOptions(/^filter/i);
+    const filterOptions = await popoverFirstComboboxOptions(/^(add )?filter$/i);
     expect(filterOptions).toContain('Priority');
   });
 });
@@ -2442,6 +2448,188 @@ describe('ListView.switcherChrome-7547', () => {
     it('draws NO chrome for a whitelist of one, as before', () => {
       expect(chromeDrawn({ appearance: { allowedVisualizations: ['grid'] } })).toBe(false);
     });
+  });
+});
+
+// ── ListView.exportCsvGate-35619 ────────────────────────────────────────────────
+
+/**
+ * objectstack#35619 — the object's `userActions.exportCsv: false` hides the
+ * list's Export entry, every format, in both toolbar forms: the wide form's
+ * Export button and the Display panel's export footer. The verdict is the
+ * object's, read off the definition the list fetches, so each case waits for
+ * the row read, which runs only once that definition has settled. The
+ * CONTROLS render the same view over an object that does not author the key,
+ * and over one that authors `true`, and find the entry: the probe can see it.
+ */
+describe('ListView.exportCsvGate-35619', () => {
+  restoreAfterBlock();
+
+  function makeDataSource(userActions?: Record<string, unknown>) {
+    return {
+      find: vi.fn().mockResolvedValue({ data: [{ id: '1', name: 'Acme' }], total: 1 }),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn().mockResolvedValue({
+        name: 'account',
+        fields: { name: { type: 'text', label: 'Name' } },
+        ...(userActions ? { userActions } : {}),
+      }),
+    } as any;
+  }
+
+  async function renderList(compactToolbar: boolean, userActions?: Record<string, unknown>) {
+    const ds = makeDataSource(userActions);
+    render(
+      <SchemaRendererProvider dataSource={ds}>
+        <ListView
+          schema={{
+            type: 'list-view',
+            objectName: 'account',
+            viewType: 'grid',
+            fields: ['name'],
+            exportOptions: { formats: ['csv', 'json'] },
+            compactToolbar,
+          } as ListViewSchema}
+          dataSource={ds}
+        />
+      </SchemaRendererProvider>,
+    );
+    await waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalledWith('account'));
+    // The row read waits for the definition, so once it runs the verdict is the settled one.
+    await waitFor(() => expect(ds.find).toHaveBeenCalled());
+  }
+
+  const wideExport = () => screen.queryByRole('button', { name: /^export$/i });
+
+  function displayExportEntries() {
+    fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
+    const panel = screen.getByTestId('view-settings-content');
+    return within(panel).queryAllByTestId(/^display-export-(csv|xlsx|json)$/);
+  }
+
+  it('wide toolbar: exportCsv false draws no Export button', async () => {
+    await renderList(false, { exportCsv: false });
+    expect(wideExport()).toBeNull();
+  });
+
+  it('wide toolbar CONTROL: an object that does not author exportCsv keeps the Export button', async () => {
+    await renderList(false);
+    expect(wideExport()).toBeInTheDocument();
+  });
+
+  it('wide toolbar CONTROL: exportCsv true keeps the Export button', async () => {
+    await renderList(false, { exportCsv: true });
+    expect(wideExport()).toBeInTheDocument();
+  });
+
+  it('Display panel: exportCsv false draws no export entry, in any format', async () => {
+    await renderList(true, { exportCsv: false });
+    expect(displayExportEntries()).toHaveLength(0);
+  });
+
+  it('Display panel CONTROL: an object that does not author exportCsv keeps both formats', async () => {
+    await renderList(true);
+    expect(displayExportEntries().map((el) => el.getAttribute('data-testid'))).toEqual([
+      'display-export-csv',
+      'display-export-json',
+    ]);
+  });
+});
+
+// ── ListView.toolbarTrailingExportDoor-36113 ────────────────────────────────────
+
+/**
+ * objectstack#36113 — `toolbarTrailing` is handed the list's export door with
+ * its tools, so a host draws 「Import / Export」 at the view bar's end. The door
+ * is the export verdict the 视图设置 footer reads: absent where that footer
+ * offers no export, and its `run` is the footer's export. The footer keeps its
+ * entries.
+ */
+describe('ListView.toolbarTrailingExportDoor-36113', () => {
+  restoreAfterBlock();
+
+  function makeDataSource(userActions?: Record<string, unknown>) {
+    return {
+      find: vi.fn().mockResolvedValue({ data: [{ id: '1', name: 'Acme' }], total: 1 }),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      exportDownload: vi.fn().mockResolvedValue(new Blob(['name\nAcme'])),
+      getObjectSchema: vi.fn().mockResolvedValue({
+        name: 'account',
+        fields: { name: { type: 'text', label: 'Name' } },
+        ...(userActions ? { userActions } : {}),
+      }),
+    } as any;
+  }
+
+  async function renderList(userActions?: Record<string, unknown>) {
+    const ds = makeDataSource(userActions);
+    const seen: Array<ListToolbarTrailingState> = [];
+    render(
+      <SchemaRendererProvider dataSource={ds}>
+        <ListView
+          schema={{
+            type: 'list-view',
+            objectName: 'account',
+            viewType: 'grid',
+            fields: ['name'],
+            exportOptions: { formats: ['csv', 'json'] },
+          } as ListViewSchema}
+          dataSource={ds}
+          toolbarTrailing={(tools, state) => {
+            seen.push(state);
+            return <span data-testid="host-end">{tools}{state.export ? <button type="button" data-testid="host-export" onClick={() => state.export!.run('csv')}>{state.export.formats.join(',')}</button> : null}</span>;
+          }}
+        />
+      </SchemaRendererProvider>,
+    );
+    await waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalledWith('account'));
+    await waitFor(() => expect(ds.find).toHaveBeenCalled());
+    return { ds, seen };
+  }
+
+  it('the host is handed the formats the footer offers, and the footer keeps them', async () => {
+    await renderList();
+    expect(await screen.findByTestId('host-export')).toHaveTextContent('csv,json');
+    fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
+    const panel = screen.getByTestId('view-settings-content');
+    expect(within(panel).queryAllByTestId(/^display-export-(csv|json)$/)).toHaveLength(2);
+  });
+
+  it('the door runs the list\'s export', async () => {
+    const { ds } = await renderList();
+    fireEvent.click(await screen.findByTestId('host-export'));
+    await waitFor(() => expect(ds.exportDownload).toHaveBeenCalledWith('account', expect.objectContaining({ format: 'csv' })));
+  });
+
+  it('the door refuses a format it does not offer', async () => {
+    const { ds, seen } = await renderList();
+    await screen.findByTestId('host-export');
+    const door = seen.at(-1)!.export!;
+    expect(door.formats).not.toContain('xlsx');
+    await act(async () => {
+      door.run('xlsx');
+      door.run('pdf');
+    });
+    expect(ds.exportDownload).not.toHaveBeenCalled();
+    // The control: an offered format through the same handle does export.
+    await act(async () => {
+      door.run('json');
+    });
+    await waitFor(() => expect(ds.exportDownload).toHaveBeenCalledWith('account', expect.objectContaining({ format: 'json' })));
+    expect(ds.exportDownload).toHaveBeenCalledTimes(1);
+  });
+
+  it('exportCsv false: no door, as the footer draws no entry', async () => {
+    const { seen } = await renderList({ exportCsv: false });
+    await screen.findByTestId('host-end');
+    expect(screen.queryByTestId('host-export')).toBeNull();
+    expect(seen.at(-1)?.export).toBeUndefined();
   });
 });
 

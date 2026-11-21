@@ -127,7 +127,7 @@ export const RecordSummaryCard: React.FC<{
   >
     <button
       type="button"
-      className="flex h-9 w-full min-w-0 items-center gap-1.5 rounded-[8px] px-3 text-left text-[13px] font-semibold hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="flex h-9 w-full min-w-0 items-center gap-1.5 rounded-[8px] px-3 text-left text-sm font-medium hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       onClick={() => onOpen?.(id)}
       data-record-summary-card-title=""
     >

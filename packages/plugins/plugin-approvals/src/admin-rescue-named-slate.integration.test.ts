@@ -475,4 +475,75 @@ describe('an empty admin_rescue slate opens on the organization\'s administrator
       ]);
     });
   });
+  // [#35418] The note names an unheld position by its label, never by its
+  // machine name: the reader's pack (`positions.<name>.label`) first, else the
+  // position's declared `label`, else the name, as before.
+  describe('[#35418] the note names an unheld position by its label', () => {
+    let labelled: ApprovalService;
+    const declared: Record<string, string> = { sales_manager: 'Sales Manager' };
+    const noteFor = async (requestId: string, locale?: string) =>
+      (await labelled.listActions(requestId, { ...as('u_sub', ORG), ...(locale ? { locale } : {}) }))
+        .filter((a) => a.action === 'comment' && !a.actor_id)
+        .map((a) => a.comment);
+
+    beforeAll(() => {
+      const i18n = createMemoryI18n();
+      for (const [locale, data] of Object.entries(ApprovalsTranslations)) {
+        i18n.loadTranslations(locale, data as Record<string, unknown>);
+      }
+      // An app's pack, as `AppPlugin` loads it: zh-CN translates the position.
+      i18n.loadTranslations('zh-CN', { positions: { sales_manager: { label: '销售经理' } } });
+      labelled = new ApprovalService({
+        engine: engine as any,
+        clock: { now: () => new Date(now += 1000) },
+        logger: { warn: () => {}, info: () => {}, error: () => {}, debug: () => {} } as any,
+        i18nServiceSource: () => i18n,
+        positionLabelSource: async (name) => declared[name],
+      });
+    });
+
+    it('a zh-CN reader reads the translated label, and never the machine name', async () => {
+      const row = await open('label_zh', UNSTAFFED);
+      const [comment] = await noteFor(row.id, 'zh-CN');
+      expect(comment).toBe('审批人名单未指向任何人，因此已转交本组织管理员处理：岗位「销售经理」无人任职。');
+      expect(comment).not.toContain('sales_manager');
+    });
+
+    it('a reader whose pack holds no translation reads the declared label', async () => {
+      const row = await open('label_en', UNSTAFFED);
+      expect(await noteFor(row.id, 'en')).toEqual([
+        "Routed to this organization's administrators because the approver slate named no one: "
+          + "position 'Sales Manager' has no holder.",
+      ]);
+      expect((await noteFor(row.id, 'ja-JP'))[0]).toContain('役職「Sales Manager」');
+    });
+
+    it('CONTROL: the stored row keeps the name, and a reader with no locale is served it', async () => {
+      const row = await open('label_stored', UNSTAFFED);
+      const ENGLISH = "Routed to this organization's administrators because the approver slate named no one: "
+        + "position 'sales_manager' has no holder.";
+      expect((await actionsOf(row.id)).find((a) => a.action === 'comment')?.comment).toBe(ENGLISH);
+      expect(await noteFor(row.id)).toEqual([ENGLISH]);
+    });
+
+    it('a position no pack and no declaration knows keeps its name, and a failing source does not fail the read', async () => {
+      const row = await open('label_unknown', UNSTAFFED);
+      const bare = new ApprovalService({
+        engine: engine as any,
+        clock: { now: () => new Date(now += 1000) },
+        logger: { warn: () => {}, info: () => {}, error: () => {}, debug: () => {} } as any,
+        i18nServiceSource: () => {
+          const i18n = createMemoryI18n();
+          for (const [locale, data] of Object.entries(ApprovalsTranslations)) {
+            i18n.loadTranslations(locale, data as Record<string, unknown>);
+          }
+          return i18n;
+        },
+        positionLabelSource: async () => { throw new Error('metadata exploded'); },
+      });
+      const served = (await bare.listActions(row.id, { ...as('u_sub', ORG), locale: 'zh-CN' }))
+        .filter((a) => a.action === 'comment' && !a.actor_id);
+      expect(served.map((a) => a.comment)).toEqual(['审批人名单未指向任何人，因此已转交本组织管理员处理：岗位「sales_manager」无人任职。']);
+    });
+  });
 });

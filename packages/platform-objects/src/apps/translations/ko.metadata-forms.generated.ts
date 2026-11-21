@@ -52,6 +52,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "아이콘",
         helpText: "Lucide 아이콘 이름(예: \"building\", \"users\")"
       },
+      color: {
+        label: "색상",
+        helpText: "아이콘이 그려지는 사각형의 색상으로, 고정 팔레트에서 선택합니다. 설정하지 않으면 회색으로 표시됩니다."
+      },
       description: {
         label: "설명",
         helpText: "개발자 문서"
@@ -70,7 +74,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       highlightFields: {
         label: "강조 필드",
-        helpText: "이 객체의 필드 이름을 중요한 순서대로 나열합니다. 하나만 들어갈 자리에서는 첫 항목이 우선합니다(ADR-0085). 기본 목록 열, 카드, 하위 레코드 미리보기, 상세 강조 영역을 결정합니다. 이 객체의 필드가 아닌 이름은 게시할 때 거부됩니다."
+        helpText: "이 객체의 필드 이름을 중요한 순서대로 나열합니다. 하나만 들어갈 자리에서는 첫 항목이 우선합니다(ADR-0085). 기본 목록 열과 관련 목록 열, 카드, 하위 레코드 미리보기, 레코드 호버 카드, 레코드 선택기를 결정합니다. 이 객체의 필드가 아닌 이름은 게시할 때 거부됩니다."
       },
       relatedLists: {
         label: "관련 목록",
@@ -106,7 +110,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.relatedList": {
         label: "관련 목록",
-        helpText: "이 항목을 필드 섹션 대신 관련 목록의 테이블로 만듭니다. 레코드의 세부 정보 열에서 이 위치에 목록을 그릴 하위 객체(또는 object.field)를 지정하세요. 이런 그룹은 필드를 담지 않습니다. 이 그룹을 자기 그룹으로 지정한 필드는 거부되며, 이 객체를 가리키는 관계와 일치하지 않는 이름도 거부됩니다. 레코드 페이지는 아직 이 배치를 그리지 않습니다."
+        helpText: "이 항목을 필드 섹션 대신 관련 목록의 테이블로 만듭니다. 레코드의 세부 정보 열에서 이 위치에 목록을 그릴 하위 객체(또는 object.field)를 지정하세요. 이런 그룹은 필드를 담지 않습니다. 이 그룹을 자기 그룹으로 지정한 필드는 거부되며, 이 객체를 가리키는 관계와 일치하지 않는 이름도 거부됩니다. 상위 레코드의 생성 및 편집 양식에도 이 테이블이 인라인으로 포함되며, 레코드 페이지의 '편집'은 레코드와 그 행을 함께 저장합니다."
       },
       "fieldGroups.collapse": {
         label: "접기",
@@ -791,7 +795,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       inlineColumns: {
         label: "인라인 열",
-        helpText: "상위 레코드 양식의 인라인 그리드 열을 표시 순서대로 나열합니다. 이 필드가 소스에 작성되는 inlineEdit를 설정할 때만 사용됩니다. 설정하지 않으면 이 객체의 편집 가능한 필드에서 도출되며, 여섯 개를 넘는 나머지는 그리드의 열 선택기에서 시작합니다. 필드만 지정한 항목은 그 필드의 유형, 옵션, 규칙을 가져오며, 유형을 비롯한 다른 열 키는 소스에 작성합니다."
+        helpText: "상위 레코드 양식의 인라인 그리드 열을 표시 순서대로 나열합니다. 상위 객체의 필드 그룹이 이 하위 객체를 지정할 때(fieldGroups[].relatedList)만 사용됩니다. 설정하지 않으면 이 객체의 편집 가능한 필드에서 도출되며, 여섯 개를 넘는 나머지는 그리드의 열 선택기에서 시작합니다. 필드만 지정한 항목은 그 필드의 유형, 옵션, 규칙을 가져오며, 유형을 비롯한 다른 열 키는 소스에 작성합니다."
       },
       "inlineColumns.name": {
         label: "이름",
