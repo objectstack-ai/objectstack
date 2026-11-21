@@ -362,7 +362,9 @@ export function ViewVariantInspector({
       fieldCatalog = { status: 'loading' };
     } else {
       fieldCatalog = loaded(
-        objectFields.map((f) => ({ name: f.name, label: f.label, type: f.type })),
+        // `multiple` rides along for the filter's operator set: a list-valued
+        // column is offered membership and the empty checks only.
+        objectFields.map((f) => ({ name: f.name, label: f.label, type: f.type, ...(f.multiple ? { multiple: true } : {}) })),
       );
     }
     // objectui#8167 — `none`, and the reason is recorded here rather than
