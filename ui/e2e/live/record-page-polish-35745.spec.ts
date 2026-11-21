@@ -12,7 +12,8 @@ import { test, expect, type Page } from '@playwright/test';
  *   3. in the edit state Save is the one filled button, after Cancel;
  *   4. a line added to the Expense Lines table starts on the child object's
  *      defaults (Category "Other", Status "Submitted") with no cell flagged
- *      red, and a line added and left as it came is not stored by the save.
+ *      red, and a line added and left as it came is not stored by the save,
+ *      which says so.
  *
  * ⚠️ Layout is the reason this is a Playwright spec: jsdom lays nothing out,
  * so the 12 px is read here off real boxes. The vitest pins
@@ -113,6 +114,8 @@ test('record page polish (#35745, #35816) — showcase Expense Report', async ({
 
     await save.click();
     await expect(toolbar.getByRole('button', { name: 'Edit', exact: true })).toBeVisible({ timeout: 15_000 });
+    // objectstack#35940 (ruling 7056413638): the save says the line was left out.
+    await expect(page.getByText('1 blank line was not saved')).toBeVisible();
     // Asked of the server for this report's lines only: a filter the route
     // ignored would answer other reports' lines, and fail the count.
     const ofThisReport = encodeURIComponent(JSON.stringify([['expense_report', 'equals', id]]));
