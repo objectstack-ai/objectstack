@@ -2437,7 +2437,59 @@ export const PER_CHUNK_GZIP_CEILINGS = Object.freeze({
   // per-chunk rows. No exemption was added and no import was made lazy. The
   // headroom `pnpm check:eager-closure` prints on YOUR build is the figure in
   // force, ⛔ not this one.
-  'ui-components': 355_000,
+  //
+  // ⚠️ RAISED ×1.30 (2026-11-21), from 347,000 to 451,100, ON EXPLICIT
+  // MAINTAINER RULING, ⛔ not by a measurement here. It replaces the +8,000
+  // above (objectstack#36100) within the hour: the maintainer, verbatim,
+  // 2026-11-21T14:01Z, on that change's thread: 「这个可以大幅放宽」 (this can be
+  // raised by a lot), then the 30% option on the decision card that followed,
+  // recorded on objectstack#36023 as comment 7063869131. The factor applies to
+  // the ceiling that ruling 7063116595 started from, 347,000. ⛔ Rounded
+  // nowhere: 347,000 × 1.30 is 451,100 exactly.
+  //
+  // HEADROOM — one container, one instrument: `CI=true pnpm exec turbo run
+  // build --filter=@object-ui/console...`, reading
+  // `apps/console/dist/eager-closure.json`, twice on one tree: `main` at
+  // `1586ddec` (objectstack#36100 landed) alone, then the same `main` with
+  // objectstack#36039's head `fbbaaa99` merged in (`034f0628`, local, not
+  // pushed). This file is not a console build input, so the branch builds the
+  // same bytes as `main`. Gzipped bytes:
+  //
+  //   | chunk                 | `1586ddec` | `034f0628` |  delta |
+  //   |-----------------------|-----------:|-----------:|-------:|
+  //   | `vendor-objectstack`  |    671,638 |    671,638 |      0 |
+  //   | `i18n-locale-en`      |     65,900 |     65,900 |      0 |
+  //   | `framework`           |     88,341 |     88,341 |      0 |
+  //   | `ui-components`       |    347,621 |    350,177 | +2,556 |
+  //   | ⇒ aggregate           |  2,030,013 |  2,032,544 | +2,531 |
+  //
+  // The same 104 eager chunks by name in both builds; besides this one, none
+  // moved by more than 21 bytes. Under 451,100 this chunk has 103,479 bytes
+  // of headroom on `main` and 100,923 once S5 lands (0.14x
+  // REGRESSION_THIS_GATE_MUST_CATCH_BYTES); under 355,000 it had 7,379 and
+  // 4,823. The headroom `pnpm check:eager-closure` prints on YOUR build is the
+  // figure in force, ⛔ not this one.
+  //
+  // WHAT THE BYTES BUY: SHARED headroom, so form and field PRs stop being
+  // ejected from the queue on this line one at a time, ⛔ not a budget for a
+  // new component group: a whole group still belongs behind a lazy boundary.
+  // ⭐ PAYBACK: objectstack#36102 takes GridField out of the eager chunk (it is
+  // `import()`ed but also statically exported, `packages/fields/src/index.tsx`);
+  // re-measure when it lands.
+  //
+  // WHAT MOVED WITH IT, read from "Raising one" above and the two constraints
+  // it names as checked: this ceiling passes on its baseline below, and
+  // 451,100 − 265,937 = 185,163 bytes stays under
+  // REGRESSION_THIS_GATE_MUST_CATCH_BYTES (695 × 1024 = 711,680). Both hold
+  // with the baseline at its measurement, so the baseline below goes BACK to
+  // 265,937: the +8,000 objectstack#36100 gave it only kept the
+  // ceiling-minus-baseline gap, which a ruled raise deliberately widens, as
+  // the 30% ruling on `i18n-locale-en` (2026-11-17) and the 20% ruling
+  // (objectui#12653) left their PER_CHUNK_BASELINE rows alone. ⛔ Not moved
+  // either: MAX_EAGER_CLOSURE_GZIP_BYTES (it passes on both builds), BASELINE,
+  // REGRESSION_THIS_GATE_MUST_CATCH_BYTES and the other per-chunk rows. No
+  // exemption was added and no import was made lazy.
+  'ui-components': 451_100,
 });
 
 /**
@@ -2653,7 +2705,12 @@ export const PER_CHUNK_BASELINE = Object.freeze({
   // from 265,937 by the same +8,000 bytes (the entry on that key of
   // PER_CHUNK_GZIP_CEILINGS), which keeps the ceiling-minus-baseline gap this
   // key carried. ⚠️ So this is no longer one build's reading.
-  'ui-components': 273_937,
+  //
+  // ⭐ Moved BACK to that reading, 265,937, by the ×1.30 raise on its ceiling
+  // (2026-11-21, ruling 7063869131 on objectstack#36023): a ruled raise widens
+  // the gap rather than keeping it (the entry on that key of
+  // PER_CHUNK_GZIP_CEILINGS), so this is again `bbf6b02d9`'s reading.
+  'ui-components': 265_937,
 });
 
 /**
