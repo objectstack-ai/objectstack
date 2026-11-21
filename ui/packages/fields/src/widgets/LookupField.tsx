@@ -1342,16 +1342,23 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
   );
   const handleDialogSelectRecords = useCallback(
     (records: Record<string, unknown>[]) => {
+      // In a list cell a single pick from Browse all is the whole edit, as a
+      // pick from the in-cell list is (objectstack#35688): the dialog hands
+      // the id to `onSelect` first, the row here, and the cell commits last,
+      // after the declared targets filled. A multiple pick stays staged.
+      const commitsCell = inCell && !multiple && records.length === 1;
       if (multiple || !onSelectRecord || records.length !== 1) {
         handlePickerSelectRecords(records);
+        if (commitsCell) onCommit?.();
         return;
       }
       const row = records[0];
       if (referenceTo) pushRecentLookupId(referenceTo, recordValue(row, idField) as string | number | undefined, perms.userId);
       setPickedRecords(records);
       onSelectRecord(recordToOption(row, declaredDisplayField, idField, effectiveDescriptionField, refObjectSchema, perms, referenceTo));
+      if (commitsCell) onCommit?.();
     },
-    [multiple, onSelectRecord, handlePickerSelectRecords, referenceTo, idField, declaredDisplayField, effectiveDescriptionField, refObjectSchema, perms],
+    [multiple, onSelectRecord, handlePickerSelectRecords, referenceTo, idField, declaredDisplayField, effectiveDescriptionField, refObjectSchema, perms, inCell, onCommit],
   );
 
   // ── Recently-used, quick-create, combined option list ────────────────────

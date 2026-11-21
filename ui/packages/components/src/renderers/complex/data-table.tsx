@@ -3671,7 +3671,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   /** The star count of a rating cell set in place (objectstack#36023), or `null`. */
   const starsOf = (row: any, col: TableColumn): number | null => {
     const stars = factsOf(row, col)?.stars;
-    return typeof stars === 'number' && stars > 0 ? Math.floor(stars) : null;
+    // Whole stars first, then the floor: a host's 0.5 is no scale at all.
+    const whole = typeof stars === 'number' && Number.isFinite(stars) ? Math.floor(stars) : 0;
+    return whole > 0 ? whole : null;
   };
   const setStars = (rowIndex: number, colIndex: number, count: number) =>
     writeCell(rowIndex, colIndex, () => (count > 0 ? count : null));

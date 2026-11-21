@@ -47,7 +47,8 @@ export interface GridCellFacts {
    * A rating out of this many stars, set in place and never in an editor: on
    * the selected cell a digit key sets that many stars (0 clears), a click on
    * a star the cell draws (`data-rating-star`) sets it, and Backspace or
-   * Delete clears it; each commits.
+   * Delete clears it; each commits. A digit sets at most 9, so on a wider
+   * scale the top values are set by a click.
    */
   stars?: number;
   /**

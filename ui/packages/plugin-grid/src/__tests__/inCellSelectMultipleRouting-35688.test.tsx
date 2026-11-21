@@ -17,7 +17,7 @@
  * edit; on a select-first grid a rating is set by a digit, with no editor.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, cleanup, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 
@@ -196,6 +196,29 @@ describe('ObjectGrid cell editor: lookups and ratings (objectstack#35688 S3)', (
 
     await waitFor(() => expect(screen.queryByTestId('lookup-in-cell')).toBeNull());
     await waitFor(() => expect(screen.getByText(/1 row modified/)).toBeInTheDocument());
+  });
+
+  it('a single pick from Browse all ends the edit too, and saves the picked id', async () => {
+    const { container, ds } = renderGrid(true);
+    await waitFor(() => expect(screen.getByText('Design system')).toBeInTheDocument());
+
+    fireEvent.click(cellUnder(container, 'Tier'));
+    const catcher = container.querySelector<HTMLInputElement>('[data-slot="cell-type-catcher"]')!;
+    fireEvent.keyDown(catcher, { key: 'Enter' });
+    const panel = await screen.findByTestId('lookup-in-cell');
+    fireEvent.click(within(panel).getByTestId('browse-all-records'));
+
+    // The full picker (a portal dialog): one click on a row is a single pick.
+    const row = await waitFor(() => {
+      const r = Array.from(document.querySelectorAll('[role="dialog"] tbody tr')).find((tr) => /Silver/.test(tr.textContent ?? ''));
+      expect(r).toBeTruthy();
+      return r as HTMLElement;
+    });
+    fireEvent.click(row);
+
+    await waitFor(() => expect(container.querySelector('[data-slot="cell-editor-overlay"]')).toBeNull());
+    await waitFor(() => expect(ds.update).toHaveBeenCalled());
+    expect(ds.update.mock.calls[0].slice(0, 3)).toEqual([OBJECT, 'r1', { tier: 'silver' }]);
   });
 
   it('on a select-first grid a digit sets the rating and opens no editor', async () => {
