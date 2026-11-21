@@ -267,9 +267,11 @@ export function notUserInvocable(skillMd: string): boolean {
  * `triggersOnly` (`--triggers-only`), to their trigger cases. A name that is
  * not a bundle of the catalog, or names one with no case left to run, is
  * refused, never dropped: a misspelt touched skill would otherwise run nothing
- * and read as a clean round. So is a trigger-only selection with no case.
+ * and read as a clean round. So is a trigger-only selection with no case. With
+ * `competing` (trigger turns install the selection), a named bundle with no
+ * case is kept while a trigger case is selected: it is installed as a competitor.
  */
-export function selectBundles(catalog: SkillEvalCatalog, names: readonly string[] | undefined, triggersOnly = false): SkillEvalCase[] {
+export function selectBundles(catalog: SkillEvalCatalog, names: readonly string[] | undefined, triggersOnly = false, competing = false): SkillEvalCase[] {
   const pool = triggersOnly ? catalog.cases.filter((c) => c.shouldTrigger !== undefined) : catalog.cases;
   const kind = triggersOnly ? 'trigger case (`should_trigger`)' : 'eval case';
   if (!names || names.length === 0) {
@@ -279,7 +281,7 @@ export function selectBundles(catalog: SkillEvalCatalog, names: readonly string[
   const unknown = names.filter((n) => !catalog.bundles.includes(n));
   if (unknown.length) throw new Error(`--skills names ${unknown.map((n) => `\`${n}\``).join(', ')}, not a bundle under ${catalog.root} (bundles: ${catalog.bundles.join(', ')})`);
   const noCases = names.filter((n) => !pool.some((c) => c.bundle === n));
-  if (noCases.length) throw new Error(`--skills names ${noCases.map((n) => `\`${n}\``).join(', ')}, a bundle with no ${kind} under ${catalog.root}`);
-  const set = new Set(names);
-  return pool.filter((c) => set.has(c.bundle));
+  const picked = pool.filter((c) => names.includes(c.bundle));
+  if (noCases.length && !(competing && picked.some((c) => c.shouldTrigger !== undefined))) throw new Error(`--skills names ${noCases.map((n) => `\`${n}\``).join(', ')}, a bundle with no ${kind} under ${catalog.root}`);
+  return picked;
 }
