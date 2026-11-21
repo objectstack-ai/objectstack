@@ -129,7 +129,7 @@ export const CarrierCallback = defineFlow({
 ```
 
 `requires: ['automation', 'triggers']`. The sender signs each post
-under `CARRIER_HOOK_SECRET` (SKILL.md *Signature* bullet). A vendor signing
+under `CARRIER_HOOK_SECRET` (*Signature* bullet below). A vendor signing
 its own header adds, keyed by that ref, `signature: { signs: 'body', header:
 'X-DocuSign-Signature-1', algorithm: 'hmac-sha256', encoding: 'base64' }`.
 
@@ -184,3 +184,28 @@ against the `redirectUri` that `GET …/:name/connection` answers, then connects
 (no secret for a public client; a reconnect naming no client keeps it). The connection keeps it
 encrypted; a read shows `client: { source: 'installer', clientId, hasSecret }`.
 Still never park a short-lived token behind a `bearer` ref.
+
+## Inbound webhook (`api`) triggers (ADR-0041 Tier 1)
+
+Endpoint: `POST /api/v1/automation/hooks/:flowName/:hookId`. Configure it on
+the **start node `config`**:
+
+| `config` key | Purpose |
+|:-------------|:--------|
+| `hookId` | URL path token (default `'default'`). **Rotate it to revoke** a leaked endpoint |
+| `secretRef` / `secret` | HMAC-SHA256 secret, **one required** (else refused at registration and `os validate`). Ship `secretRef: 'NAME'`: an env var the deployment fills, not `OS_*`; unfilled ⇒ `503`. Never a literal |
+
+- **Signature:** `x-objectstack-signature: t=<unix seconds>,v1=<hex>` — HMAC-SHA256 of `<t>.<raw body>`; `t` within 300 s. Vendor-signed: `config.signature` replaces it (recipe 4).
+- **Idempotency:** `x-idempotency-key` dedupes retries — author the flow to be idempotent (delivery is at-least-once).
+- **Queue-backed:** the endpoint ACKs `202` and enqueues; the flow runs on the consumer.
+- The JSON body surfaces to the flow as the trigger record (`record.*` / bare fields) plus `params`.
+- **A flow name two packages hold:** the bare hook above answers `401 INVALID_SIGNATURE` whatever the signature (cause: server log only). Each package's flow is reached only at `POST /api/v1/automation/hooks/:namespace/:flowName/:hookId`, by its `manifest.namespace` (`_env` there: a flow no package ships).
+
+## When the answer is platform code
+
+Platform code only when one holds — and then it is the platform's, filed as a
+card, the app still writing none: the protocol is not HTTP; the work writes
+identity objects (users, units, positions); it processes files locally; one fixed
+action contract spans several vendors; the callback is signed in no form
+`config.signature` declares. A document the loader cannot take yet (YAML, Swagger 2.0,
+`$ref`) is a gap named against its platform card.
