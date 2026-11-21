@@ -21,7 +21,7 @@
  * header and the shell's button group arrived: from the phone breakpoint up
  * the top bar's 「Edit app」 (and the group's, once the shell turns it on)
  * opens the same surface through the same gate
- * (`ShellPageActions.pageRoute-36111`). So this file reads the pencil at a
+ * (`ShellPageActions-36111`). So this file reads the pencil at a
  * phone's width.
  */
 

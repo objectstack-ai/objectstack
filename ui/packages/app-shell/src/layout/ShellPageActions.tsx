@@ -9,8 +9,8 @@
  * The SHELL decides whether it is drawn, not the page: `ConsoleLayout` mounts
  * `ShellPageActionsScope`, and each page's header draws `<ShellPageActions/>`
  * where its top-right is — the console `PageHeader` after the page's own
- * actions, the record page's navigation row before its ✕, a custom page's
- * authored `page:header` through the host slot `PageHeaderTrailingContext`.
+ * actions (reports and every custom page draw that header too), the record
+ * page's navigation row before its ✕.
  *
  * While the top bar still draws the same three buttons the group is OFF, so
  * nothing doubles: `SHELL_PAGE_ACTIONS_DEFAULT` is `false`, and the one way to

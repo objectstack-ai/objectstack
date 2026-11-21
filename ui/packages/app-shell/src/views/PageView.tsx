@@ -458,10 +458,11 @@ export function PageView() {
   // group's once the shell turns it on.
   const canEditInStudio = phone && studioPath !== null;
   const interfacePage = !!(page as any).interfaceConfig?.source;
-  // The page's name and description, as the page renderer reads them
-  // (`label`, the spec's key, before objectui's `title`).
+  // The page's name and description, in the page renderer's own order
+  // (`title` before `label`, `page.tsx`), so the header names the page with
+  // the words the renderer drew there before.
   const pageLabel =
-    metadataText((page as any).label, language) ?? metadataText((page as any).title, language) ?? (page as any).name ?? pageName;
+    metadataText((page as any).title, language) ?? metadataText((page as any).label, language) ?? (page as any).name ?? pageName;
   const pageDescription = metadataText((page as any).description, language);
   // The console header — on every page from the phone breakpoint up, whatever
   // the author composed (an interface page draws it itself, below). The page
