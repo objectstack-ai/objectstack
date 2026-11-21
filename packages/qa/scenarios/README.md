@@ -164,7 +164,9 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   is no leak on a line naming the platform's sign-in accounts ("User accounts: 3") when no tool output
   served a restricted row or field. A number inside an identifier (`INV-003`, `i3`; a digit after a
   Latin letter, `isIdentifierToken`) is no figure for the answer or the leak scan; `3k`, `3 days`
-  and `USD3,000` still are.
+  and `USD3,000` still are. A figure a `query_dataset` answer served over its object is cited by a
+  source line naming that answer's dataset, or by the answer's `sourceLine` carried verbatim — the
+  source the door tells the client to cite, which names the dataset rather than the object.
 
 ### The closed capability-tag table
 
