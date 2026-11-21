@@ -48,6 +48,7 @@ import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
 import { render, waitFor, cleanup, screen, act, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, BrowserRouter } from 'react-router-dom';
+import { toast } from 'sonner';
 import { RelatedCountStore } from '@object-ui/components';
 import { ComponentRegistry } from '@object-ui/core';
 import { I18nProvider, LocalizationProvider, createI18n } from '@object-ui/i18n';
@@ -2941,7 +2942,8 @@ describe('RecordDetailView.recordEditState-35599', () => {
     showcase_task: [{ id: 't1', subject: 'Call', quote: RECORD_ID }],
   };
 
-  function renderPage(objects: ReturnType<typeof objectsWith>, opts: { emptyTables?: boolean } = {}) {
+  /** `i18n`: under the real English provider, so a notice reads as the pack writes it. */
+  function renderPage(objects: ReturnType<typeof objectsWith>, opts: { emptyTables?: boolean; i18n?: boolean } = {}) {
     const metadata = {
       objects, pages: [], loading: false, error: null,
       refresh: async () => {}, invalidate: () => {},
@@ -2960,7 +2962,7 @@ describe('RecordDetailView.recordEditState-35599', () => {
       batchTransaction: vi.fn(async (ops: unknown[]) => ({ results: ops.map(() => ({})) })),
     };
     const onEdit = vi.fn();
-    const view = render(
+    const page = (
       <MemoryRouter initialEntries={[`/apps/demo/${PARENT}/record/${RECORD_ID}`]}>
         <MetadataCtx.Provider value={metadata}>
           <NavigationProvider>
@@ -2973,7 +2975,12 @@ describe('RecordDetailView.recordEditState-35599', () => {
             </Routes>
           </NavigationProvider>
         </MetadataCtx.Provider>
-      </MemoryRouter>,
+      </MemoryRouter>
+    );
+    const view = render(
+      opts.i18n
+        ? <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }} persistLanguage={false}>{page}</I18nProvider>
+        : page,
     );
     return { ...view, dataSource, onEdit };
   }
@@ -3036,6 +3043,8 @@ describe('RecordDetailView.recordEditState-35599', () => {
     const lines = editor(container, 'showcase_line.quote')!;
     fireEvent.change(cells(lines, 'Quantity')[0], { target: { value: '5' } });
     fireEvent.click(lines.querySelectorAll('button[aria-label="Remove row"]')[1] as HTMLElement);
+    // The new line comes from Add: the grid draws no blank entry line beside it (objectstack#35507).
+    fireEvent.click(lines.querySelector('[data-testid="line-items-add"]') as HTMLElement);
     const products = cells(lines, 'Product');
     fireEvent.change(products[products.length - 1], { target: { value: 'Crate' } });
     const tasks = editor(container, 'showcase_task.quote')!;
@@ -3192,6 +3201,36 @@ describe('RecordDetailView.recordEditState-35599', () => {
     expect(cells(again, 'Product').map((i) => i.value)).toEqual(expect.arrayContaining(['Anvil', 'Bolt']));
     expect(cells(again, 'Product').map((i) => i.value)).not.toContain('Crate');
     expect(summaryInput(view.container)).not.toBeNull();
+  });
+
+  it('objectstack#35940 (ruling 7056413638): a line Add started and nobody edited is not written, and the save says so', async () => {
+    const view = renderPage(objectsWith(), { i18n: true });
+    await enterEditState(view);
+    vi.mocked(toast.info).mockClear();
+    fireEvent.change(summaryInput(view.container)!, { target: { value: 'Second' } });
+    const lines = editor(view.container, 'showcase_line.quote')!;
+    const before = cells(lines, 'Product').length;
+    fireEvent.click(lines.querySelector('[data-testid="line-items-add"]') as HTMLElement);
+    await waitFor(() => expect(cells(lines, 'Product').length).toBe(before + 1), { timeout: 5000 });
+    await act(async () => { fireEvent.click(headerButton('Save')!); });
+    await waitFor(() => expect(view.dataSource.batchTransaction).toHaveBeenCalledTimes(1), { timeout: 5000 });
+    // The record's update alone: the untouched line is not created.
+    const ops = view.dataSource.batchTransaction.mock.calls[0][0] as Array<Record<string, any>>;
+    expect(ops.map((o) => [o.object, o.action])).toEqual([[PARENT, 'update']]);
+    await waitFor(() => expect(headerButton('Edit')).not.toBeNull(), { timeout: 5000 });
+    expect(toast.info).toHaveBeenCalledTimes(1);
+    expect(toast.info).toHaveBeenCalledWith('1 blank line was not saved');
+  });
+
+  it('CONTROL — a save that skips no untouched line says nothing more', async () => {
+    const view = renderPage(objectsWith());
+    await enterEditState(view);
+    vi.mocked(toast.info).mockClear();
+    editEverything(view.container);
+    await act(async () => { fireEvent.click(headerButton('Save')!); });
+    await waitFor(() => expect(view.dataSource.batchTransaction).toHaveBeenCalledTimes(1), { timeout: 5000 });
+    await waitFor(() => expect(headerButton('Edit')).not.toBeNull(), { timeout: 5000 });
+    expect(toast.info).not.toHaveBeenCalled();
   });
 
   it('item 5: a child without bulk keeps its table read-only in the edit state, with the notice', async () => {

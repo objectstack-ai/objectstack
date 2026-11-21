@@ -135,6 +135,15 @@ export function isRecordPagePath(pathname: string): boolean {
   return /^\/apps\/[^/]+\/[^/]+\/record\/[^/]+(?:\/page\/[^/]+)?\/?$/.test(pathname);
 }
 
+/**
+ * Is `pathname` one of an app's documentation pages, `/apps/APP/docs` and
+ * everything under it (objectstack#35424)? A reader there has one navigation,
+ * the docs' own, so the app's menu is not drawn beside it.
+ */
+export function isAppDocsPath(pathname: string): boolean {
+  return /^\/apps\/[^/]+\/docs(?:\/|$)/.test(pathname);
+}
+
 /** Inner component that can access SidebarProvider context */
 function ConsoleLayoutInner({ children }: { children: React.ReactNode }) {
   useResponsiveSidebar();
@@ -185,6 +194,9 @@ export function ConsoleLayout({
   // the top left goes back. The route slot leaves the bar's height free at its
   // end.
   const phoneNavBar = phone && isPhoneTabRoute(location.pathname);
+  // objectstack#35424 — a docs page draws its own left column (the app's
+  // books and a way back to the app), so the app menu is not mounted there.
+  const docsPage = isAppDocsPath(location.pathname);
   // objectstack#35881 — the app this person last had open, where a phone
   // lands after sign-in. Recorded at every width: it is the person's last app.
   const { rememberApp } = useLastApp();
@@ -248,11 +260,13 @@ export function ConsoleLayout({
     <PhoneAppHomeSlotProvider>
     <AppShell
       sidebar={
+        docsPage ? undefined : (
          <UnifiedSidebar
            activeAppName={activeAppName}
            onAppChange={onAppChange}
            railOverlay
          />
+        )
       }
       showHeader={!recordPageOwnsTopBar}
       navbar={

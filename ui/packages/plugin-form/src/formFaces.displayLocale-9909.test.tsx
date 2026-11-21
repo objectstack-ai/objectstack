@@ -128,6 +128,8 @@ const SURFACES: Surface[] = [
     name: 'MasterDetailForm — subtotal stack',
     node: () => <MasterDetailForm schema={MASTER_DETAIL_SCHEMA} dataSource={masterDetailDataSource()} />,
     read: async () => {
+      // The grid draws no trailing entry row (objectstack#35507): Add the line first.
+      fireEvent.click(await waitFor(() => screen.getByTestId('line-items-add')));
       const cell = await waitFor(() => screen.getAllByLabelText('Line Total')[0] as HTMLInputElement);
       fireEvent.change(cell, { target: { value: '1234.5' } });
       return waitFor(() => {

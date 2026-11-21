@@ -115,10 +115,9 @@ describe('the list toolbar defaults to Filter · Sort · Display · Search (obje
   it('the bar draws exactly those four, in that order, for a view offering every control', async () => {
     mount();
     await screen.findByTestId('grid-stub');
+    // objectstack#35878: Filter and Sort moved to the condition row, and
+    // 视图设置 beside the view name; the cluster keeps Search.
     expect(clusterButtons()).toEqual([
-      'toolbar-filter-trigger',
-      'toolbar-sort-trigger',
-      'toolbar-display-trigger',
       'search-icon-button',
       // Search's phone form (objectstack#28911), drawn below `sm` only. No
       // stylesheet is mounted here, so both forms of Search are in the DOM.
@@ -158,10 +157,11 @@ describe('the list toolbar defaults to Filter · Sort · Display · Search (obje
     expect(panel.getByTestId('options-row-layout')).toContainElement(panel.getByTestId('view-switcher-value'));
     expect(panel.getByTestId('options-row-group')).toBeInTheDocument();
     expect(panel.getByTestId('options-row-color')).toBeInTheDocument();
-    expect(panel.getByTestId('options-row-fields')).toBeInTheDocument();
+    expect(panel.getByTestId('options-add-column')).toBeInTheDocument();
     expect(panel.getByTestId('options-row-row-height')).toBeInTheDocument();
     expect(panel.getByTestId('display-reset-button')).toHaveTextContent('Restore defaults');
-    expect(panel.getByTestId('refresh-button')).toHaveTextContent('Refresh');
+    // objectstack#35878 (「刷新去掉」): no Refresh in the panel.
+    expect(panel.queryByTestId('refresh-button')).toBeNull();
     expect(panel.getByTestId('display-export-csv')).toHaveTextContent('Export as CSV');
     // objectstack#35684 retired the Edit inline switch and objectstack#35663
     // the Row numbers switch, so this list's menu has no More level at all.
@@ -212,13 +212,4 @@ describe('the list toolbar defaults to Filter · Sort · Display · Search (obje
     expect(within(content).queryByRole('switch', { name: /row numbers/i })).toBeNull();
   });
 
-  it('the footer Refresh re-fetches, as the wide toolbar button does', async () => {
-    const dataSource = mount();
-    await screen.findByTestId('grid-stub');
-    await waitFor(() => expect(dataSource.find).toHaveBeenCalled());
-    const before = dataSource.find.mock.calls.length;
-    const content = await openDisplay();
-    fireEvent.click(within(content).getByTestId('refresh-button'));
-    await waitFor(() => expect(dataSource.find.mock.calls.length).toBeGreaterThan(before));
-  });
 });

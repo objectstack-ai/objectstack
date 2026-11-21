@@ -55,7 +55,9 @@ import { narrowDirectoryForExternalCaller } from './external-directory-door.js';
 import {
   accessAPasswordChangeKeeps,
   endWhatTheAccountAddedBeforeAReset,
+  whatAResetKeeps,
   type MountedOAuthGrants,
+  type ResetEndedAccess,
 } from './password-reset-ends-added-access.js';
 import { SESSION_SCOPING_REFUSAL } from './organization-access-policy.js';
 import { refuseIntrospectionForBannedSubject } from './oauth-token-read-ban-refusal.js';
@@ -90,6 +92,7 @@ export interface AfterHookHost {
   roleChangeGrantDeps: AuthManager['roleChangeGrantDeps'];
   sendChangeEmailNotice: AuthManager['sendChangeEmailNotice'];
   sendPasswordChangeReminder: AuthManager['sendPasswordChangeReminder'];
+  sendPasswordResetNotice: AuthManager['sendPasswordResetNotice'];
   settleSignInAttempt: AuthManager['settleSignInAttempt'];
   settleSsoProviderDelete: AuthManager['settleSsoProviderDelete'];
   settleSsoSignOutOfIdp: AuthManager['settleSsoSignOutOfIdp'];
@@ -245,14 +248,45 @@ function mountedOAuthGrantsOf(ctx: any): MountedOAuthGrants {
 }
 
 /**
- * A completed self-service reset ends what the account added before it, and a
- * password change reminds the account what it keeps
- * (`password-reset-ends-added-access.ts`). A completed reset whose account
- * cannot be named, and a reset's read or write that fails, reach the
- * requester as an error; the reminder never fails the change.
+ * Mail the account a completed self-service reset just ended for what it
+ * ended and what it kept (`auth.password_reset_notice`). Best-effort: a
+ * notice whose account or kept setup cannot be read, or that cannot be sent,
+ * is logged at warn and never fails the reset, which has already ended
+ * everything it ends.
+ */
+async function noticeWhatAResetEnded(
+  this: Pick<AfterHookHost, 'getDataEngine' | 'sendPasswordResetNotice'>,
+  ctx: any,
+  internal: { findUserById(id: string): Promise<unknown> },
+  userId: string,
+  ended: ResetEndedAccess,
+): Promise<void> {
+  try {
+    const user = (await internal.findUserById(userId)) as { email?: unknown; name?: unknown } | null | undefined;
+    if (typeof user?.email !== 'string' || !user.email) return;
+    const kept = await whatAResetKeeps(this.getDataEngine() as never, userId);
+    await this.sendPasswordResetNotice(
+      { email: user.email, id: userId, ...(typeof user.name === 'string' && user.name ? { name: user.name } : {}) },
+      ended,
+      kept,
+      ctx,
+    );
+  } catch (err) {
+    ctx?.context?.logger?.warn?.('AuthManager: the password-reset notice could not be read', {
+      error: (err as Error)?.message,
+    });
+  }
+}
+
+/**
+ * A completed self-service reset ends what the account added before it and
+ * tells the account so, and a password change reminds the account what it
+ * keeps (`password-reset-ends-added-access.ts`). A completed reset whose
+ * account cannot be named, and a reset's read or write that fails, reach the
+ * requester as an error; neither mail ever fails the reset or the change.
  */
 async function endOrRemindWhatTheAccountAdded(
-  this: Pick<AfterHookHost, 'getDataEngine' | 'sendPasswordChangeReminder'>,
+  this: Pick<AfterHookHost, 'getDataEngine' | 'sendPasswordChangeReminder' | 'sendPasswordResetNotice'>,
   ctx: any,
 ): Promise<void> {
   const resetDoor = RESET_DOOR_PATHS.has(ctx?.path);
@@ -267,23 +301,39 @@ async function endOrRemindWhatTheAccountAdded(
     if (typeof subject !== 'string' || !subject || !internal) {
       throw new Error(
         'a password reset completed, but the account it reset could not be named, so the API keys, linked '
-          + 'sign-in accounts and authorized apps it held before the reset were not ended; reset it again',
+          + 'sign-in accounts, authorized apps, registered OAuth applications and minted SCIM credentials it '
+          + 'held before the reset were not ended; reset it again',
       );
     }
-    await endWhatTheAccountAddedBeforeAReset(
-      { accounts: internal, apiKeys: this.getDataEngine() as never, oauth: mountedOAuthGrantsOf(ctx) },
+    const engine = this.getDataEngine() as never;
+    const ended = await endWhatTheAccountAddedBeforeAReset(
+      {
+        accounts: internal,
+        apiKeys: engine,
+        oauth: mountedOAuthGrantsOf(ctx),
+        registrations: engine,
+        warn: (message) => ctx?.context?.logger?.warn?.(message),
+      },
       subject,
     );
+    await noticeWhatAResetEnded.call(this, ctx, internal, subject, ended);
     return;
   }
   const user = ctx?.context?.session?.user as { id?: unknown; email?: unknown; name?: unknown } | undefined;
   if (!internal || typeof user?.id !== 'string' || !user.id || typeof user.email !== 'string' || !user.email) return;
   try {
+    const engine = this.getDataEngine() as never;
     const kept = await accessAPasswordChangeKeeps(
-      { accounts: internal, apiKeys: this.getDataEngine() as never, oauth: mountedOAuthGrantsOf(ctx) },
+      { accounts: internal, apiKeys: engine, oauth: mountedOAuthGrantsOf(ctx), registrations: engine },
       user.id,
     );
-    if (kept.apiKeys.length === 0 && kept.signInAccounts.length === 0 && kept.authorizedApps.length === 0) return;
+    if (
+      kept.apiKeys.length === 0
+      && kept.signInAccounts.length === 0
+      && kept.authorizedApps.length === 0
+      && kept.ownedApps.length === 0
+      && kept.scimCredentials.length === 0
+    ) return;
     await this.sendPasswordChangeReminder(
       { email: user.email, id: user.id, ...(typeof user.name === 'string' && user.name ? { name: user.name } : {}) },
       kept,

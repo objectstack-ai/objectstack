@@ -24,12 +24,34 @@ import { ConditionChipRow, FilterPanel, SortPanel, describeConditionValue, sortD
 import {
   addSortLevel,
   chipsAreIndependent,
-  moveSortItem,
   quickFilterFamily,
   readViewConditions,
   type ConditionField,
 } from '../conditionModel';
 import { LIST_CONDITION_DEFAULT_TRANSLATIONS } from '../conditionTranslations';
+
+import { defaultQuickOperator, quickFilterOperators } from '../conditionModel';
+import type { FilterBuilderRow } from '@object-ui/components';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { operatorsForField } from '@object-ui/components';
+import { en as enPack, zh as zhPack } from '@object-ui/i18n/locales';
+import { parseFilterAST } from '@objectstack/spec/data';
+import { convertFilterGroupToAST } from '../../ListView';
+
+// The server's JSON-column refusal set, read from the module every server face
+// imports it from (`@objectstack/core`, which no UI package depends on): the
+// string members of its `JSON_COLUMN_INCOMPATIBLE_OPERATORS` literal.
+const HERE = dirname(fileURLToPath(import.meta.url));
+const REFUSAL_SOURCE = readFileSync(
+  resolve(HERE, '../../../../../../packages/core/src/utils/json-column-operator-refusal.ts'),
+  'utf8',
+);
+const REFUSAL_LITERAL = /JSON_COLUMN_INCOMPATIBLE_OPERATORS[^=]*=\s*new Set\(\[([^\]]*)\]/.exec(REFUSAL_SOURCE)?.[1] ?? '';
+const JSON_COLUMN_INCOMPATIBLE_OPERATORS: ReadonlySet<string> = new Set(
+  [...REFUSAL_LITERAL.matchAll(/'([^']+)'/g)].map((m) => m[1]),
+);
 
 const STAGE: ConditionField = {
   value: 'stage',
@@ -390,6 +412,147 @@ describe('FilterValuePanel', () => {
   });
 });
 
+describe('multi-value fields — the quick filter and the advanced panel offer only what the server accepts', () => {
+  const OPTIONS = [
+    { value: 'quality_lead', label: 'Quality lead' },
+    { value: 'safety_officer', label: 'Safety officer' },
+  ];
+  const MULTI_VALUE: ConditionField[] = [
+    { value: 'responsibilities', label: 'Responsibilities', type: 'select', multiple: true, options: OPTIONS },
+    { value: 'labels', label: 'Labels', type: 'multiselect', options: OPTIONS },
+    { value: 'channels', label: 'Channels', type: 'checkboxes', options: OPTIONS },
+    { value: 'tags', label: 'Tags', type: 'tags' },
+    { value: 'team', label: 'Team', type: 'user', multiple: true },
+    { value: 'accounts', label: 'Accounts', type: 'lookup', multiple: true, referenceTo: 'account' },
+  ];
+  const STRUCTURED: ConditionField = { value: 'address', label: 'Address', type: 'address' };
+  const MULTI_OFFER = ['contains', 'not_contains', 'is_empty', 'is_not_empty'];
+
+  /** The `$`-operators the server sees for one builder row, through the list's own lowering and the spec's parse. */
+  function wireOperators(field: string, operator: string, value: unknown): string[] {
+    const ast = convertFilterGroupToAST({
+      id: 'root',
+      logic: 'and',
+      conditions: [{ id: 'r', field, operator: operator as never, value: value as never }],
+    });
+    const parsed = parseFilterAST(ast) as Record<string, unknown> | undefined;
+    const ops: string[] = [];
+    const walk = (node: unknown) => {
+      if (!node || typeof node !== 'object') return;
+      for (const [key, sub] of Object.entries(node as Record<string, unknown>)) {
+        if (key === '$and' || key === '$or') {
+          (sub as unknown[]).forEach(walk);
+        } else if (sub !== null && typeof sub === 'object' && !Array.isArray(sub)) {
+          ops.push(...Object.keys(sub as object));
+        } else {
+          ops.push('$eq'); // the bare `{ field: value }` spelling is implicit equality
+        }
+      }
+    };
+    walk(parsed);
+    return ops;
+  }
+  const sample = (op: string) => (op === 'in' || op === 'not_in' ? ['quality_lead'] : 'quality_lead');
+
+  it('reads the refusal set it checks against (lit control: equals and in are in it, contains and the empty test are not)', () => {
+    for (const op of ['$eq', '$ne', '$in', '$nin', '$startsWith']) expect(JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(op), op).toBe(true);
+    for (const op of ['$contains', '$notContains', '$empty', '$null']) expect(JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(op), op).toBe(false);
+  });
+
+  it('offers contains / not contains / is empty / is not empty on every multi-value field, contains first', () => {
+    for (const field of MULTI_VALUE) {
+      expect(quickFilterOperators(field), field.type).toEqual(MULTI_OFFER);
+      expect(defaultQuickOperator(field)).toBe('contains');
+      expect(operatorsForField(field).map((op) => op.value), field.type).toEqual(MULTI_OFFER);
+    }
+  });
+
+  it('offers a structured-JSON field the empty pair only: it has no members to name', () => {
+    expect(quickFilterOperators(STRUCTURED)).toEqual(['is_empty', 'is_not_empty']);
+    expect(operatorsForField(STRUCTURED).map((op) => op.value)).toEqual(['is_empty', 'is_not_empty']);
+  });
+
+  it('no offered operator reaches the server as one its JSON-column refusal names', () => {
+    for (const field of [...MULTI_VALUE, STRUCTURED]) {
+      const offered = new Set([...quickFilterOperators(field), ...operatorsForField(field).map((op) => op.value)]);
+      for (const op of offered) {
+        const refused = wireOperators(field.value, op, sample(op)).filter((w) => JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(w));
+        expect(refused, `${field.type} ${op}`).toEqual([]);
+      }
+    }
+  });
+
+  it('every operator offered before (equals / not equals / in / not in) is one the server refuses — the control leg', () => {
+    for (const op of ['equals', 'not_equals', 'in', 'not_in']) {
+      const refused = wireOperators('responsibilities', op, sample(op)).filter((w) => JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(w));
+      expect(refused.length, op).toBeGreaterThan(0);
+    }
+  });
+
+  it('「包含」 sends one member under $contains, the shape the refusal prescribes', () => {
+    expect(
+      convertFilterGroupToAST({
+        id: 'root',
+        logic: 'and',
+        conditions: [{ id: 'r', field: 'responsibilities', operator: 'contains', value: 'quality_lead' }],
+      }),
+    ).toEqual(['responsibilities', 'contains', 'quality_lead']);
+    expect(wireOperators('responsibilities', 'contains', 'quality_lead')).toEqual(['$contains']);
+    expect(wireOperators('responsibilities', 'not_contains', 'quality_lead')).toEqual(['$notContains']);
+  });
+
+  it('a single-value select keeps its operators (CONTROL)', () => {
+    expect(quickFilterOperators(STAGE)).toEqual(['in', 'not_in', 'is_empty', 'is_not_empty']);
+    expect(operatorsForField(STAGE).map((op) => op.value)).toContain('equals');
+    expect(operatorsForField(STAGE).map((op) => op.value)).toContain('in');
+    expect(operatorsForField({ type: 'select', multiple: false }).map((op) => op.value)).toContain('equals');
+  });
+
+  it('contains on an option field picks ONE option; picking another replaces it', () => {
+    const rows: FilterBuilderRow[] = [];
+    function Host() {
+      const [row, setRow] = React.useState<FilterBuilderRow>({ id: 'r', field: 'responsibilities', operator: 'contains', value: '' });
+      return (
+        <FilterValuePanel
+          field={MULTI_VALUE[0]}
+          row={row}
+          onChange={(next) => {
+            rows.push(next);
+            setRow(next);
+          }}
+        />
+      );
+    }
+    render(<Host />);
+    expect(screen.getByRole('listbox').getAttribute('aria-multiselectable')).toBeNull();
+    fireEvent.click(within(screen.getByTestId('filter-values-option-quality_lead')).getByRole('checkbox'));
+    fireEvent.click(within(screen.getByTestId('filter-values-option-safety_officer')).getByRole('checkbox'));
+    expect(rows.map((r) => r.value)).toEqual(['quality_lead', 'safety_officer']);
+  });
+
+  it('a saved view holding a refused operator still draws it, so the reader can change it', () => {
+    render(
+      <FilterValuePanel
+        field={MULTI_VALUE[0]}
+        row={{ id: 'r', field: 'responsibilities', operator: 'equals', value: 'quality_lead' }}
+        onChange={() => {}}
+      />,
+    );
+    expect(screen.getByTestId('filter-values-operator').textContent).toBe('equals');
+  });
+
+  it('reads 包含 / 不包含 / 为空 / 不为空 in zh-CN and contains / does not contain in en, on both surfaces', () => {
+    const zhQuick = zhPack.listConditions.operators as Record<string, string>;
+    const zhAdvanced = zhPack.filterBuilder.operators as Record<string, string>;
+    expect(MULTI_OFFER.map((op) => zhQuick[op])).toEqual(['包含', '不包含', '为空', '不为空']);
+    expect(MULTI_OFFER.map((op) => zhAdvanced[op])).toEqual(['包含', '不包含', '为空', '不为空']);
+    const enQuick = enPack.listConditions.operators as Record<string, string>;
+    expect(MULTI_OFFER.map((op) => enQuick[op])).toEqual(['contains', 'does not contain', 'is empty', 'is not empty']);
+    const t = (key: string) => LIST_CONDITION_DEFAULT_TRANSLATIONS[key] ?? key;
+    expect(describeConditionValue(MULTI_VALUE[0], 'contains', 'quality_lead', t as never)).toBe('contains Quality lead');
+  });
+});
+
 describe('SortPanel — the same field list with the direction on top', () => {
   it('sorts by amount descending in two clicks after the trigger (three in all)', () => {
     const onChange = vi.fn();
@@ -464,11 +627,6 @@ describe('ConditionChipRow — the row under the view bar', () => {
     );
   }
 
-  it('CONTROL: draws nothing at all with no sort, no view condition and no filter', () => {
-    const { container } = render(<div data-testid="slot"><Row onReset={() => {}} /></div>);
-    expect(screen.getByTestId('slot').childElementCount).toBe(0);
-    expect(container.textContent).toBe('');
-  });
 
   it('a filter chip names the field and its values; × removes it', () => {
     const onFiltersChange = vi.fn();
@@ -504,39 +662,7 @@ describe('ConditionChipRow — the row under the view bar', () => {
     expect(chips[2].textContent).toContain(' or ');
   });
 
-  it('sort chips come before filter chips, name field and direction, and open the sort levels on click without flipping (objectstack#35876)', () => {
-    const onSortChange = vi.fn();
-    render(<Row sort={[{ id: 's1', field: 'amount', order: 'asc' }]} filters={twoStages} onSortChange={onSortChange} />);
-    const row = screen.getByTestId('condition-chips');
-    const order = Array.from(row.querySelectorAll('[data-testid^="sort-chip-"], [data-testid^="filter-chip-"]'))
-      .map((el) => el.getAttribute('data-testid'))
-      .filter((id) => id === 'sort-chip-amount' || id === 'filter-chip-stage');
-    expect(order).toEqual(['sort-chip-amount', 'filter-chip-stage']);
-    const chip = screen.getByTestId('sort-chip-open-amount');
-    expect(chip.textContent).toBe('Amount');
-    expect(chip.getAttribute('title')).toBe('Low → High');
-    expect(chip.getAttribute('aria-haspopup')).toBe('dialog');
-    fireEvent.click(chip);
-    expect(within(screen.getByTestId('sort-chip-panel')).getByTestId('sort-levels-builder')).toBeTruthy();
-    expect(onSortChange).not.toHaveBeenCalled();
-  });
 
-  it('two sort levels: dragging the second chip onto the first changes the priority', () => {
-    const onSortChange = vi.fn();
-    const sort: SortItem[] = [
-      { id: 's1', field: 'stage', order: 'asc' },
-      { id: 's2', field: 'amount', order: 'desc' },
-    ];
-    render(<Row sort={sort} onSortChange={onSortChange} />);
-    const first = screen.getByTestId('sort-chip-stage');
-    const second = screen.getByTestId('sort-chip-amount');
-    expect(second.getAttribute('draggable')).toBe('true');
-    fireEvent.dragStart(second);
-    fireEvent.dragOver(first);
-    fireEvent.drop(first);
-    expect(onSortChange.mock.calls[0][0].map((s: SortItem) => s.field)).toEqual(['amount', 'stage']);
-    expect(moveSortItem(sort, 0, 1).map((s) => s.field)).toEqual(['amount', 'stage']);
-  });
 
   it('「Reset」 calls the host, and is not drawn at all while the host passes none (objectstack#35727)', () => {
     const onReset = vi.fn();
@@ -570,10 +696,6 @@ describe('ConditionChipRow — the row under the view bar', () => {
       expect(screen.getAllByTestId('view-condition-chip').map((c) => c.getAttribute('data-field'))).toEqual(['account', 'amount']);
     });
 
-    it('when every view condition is the host\'s and the reader has none, the row draws nothing', () => {
-      render(<div data-testid="slot"><Row viewFilter={[['account', '=', 'a1']]} hostDrawnFields={['account']} /></div>);
-      expect(screen.getByTestId('slot').childElementCount).toBe(0);
-    });
 
     it('a locked lookup chip names the record it points at, read through the data source', async () => {
       const ds = lookupSource(async () => ({ data: [{ id: 'a1', title: 'Globex' }] }));
@@ -624,14 +746,6 @@ describe('ConditionChipRow — the row under the view bar', () => {
     expect(screen.getByTestId('advanced-builder')).toBeTruthy();
   });
 
-  it('an unfinished row draws no chip', () => {
-    const { container } = render(
-      <div data-testid="slot">
-        <Row filters={{ id: 'root', logic: 'and', conditions: [{ id: 'x', field: 'stage', operator: 'in', value: [] }] }} />
-      </div>,
-    );
-    expect(container.querySelector('[data-testid="condition-chips"]')).toBeNull();
-  });
 });
 
 describe('condition model', () => {
@@ -659,5 +773,103 @@ describe('condition model', () => {
     expect(describeConditionValue(FIELDS[2], 'greater_than_or_equal', 100, t as never)).toBe('≥ 100');
     expect(describeConditionValue(FIELDS[3], 'between', quickDateWindowValue('today'), t as never)).toBe('Today');
     expect(describeConditionValue(STAGE, 'is_empty', undefined, t as never)).toBe('is empty');
+  });
+});
+
+describe('ConditionChipRow — the resident row of the two-row toolbar (objectstack#35878)', () => {
+  const sortPanel = (close: () => void) => (
+    <button type="button" data-testid="sort-panel-stand-in" onClick={close}>panel</button>
+  );
+  function TwoRow(props: Partial<React.ComponentProps<typeof ConditionChipRow>>) {
+    return (
+      <ConditionChipRow
+        sort={[]}
+        sortFields={FIELDS}
+        onSortChange={() => {}}
+        filters={EMPTY}
+        filterFields={FIELDS}
+        onFiltersChange={() => {}}
+        renderAdvanced={() => <div data-testid="advanced-builder" />}
+        renderSortLevels={() => <div data-testid="sort-levels-builder" />}
+        renderSortPanel={sortPanel}
+        {...props}
+      />
+    );
+  }
+  const stageFilter: FilterBuilderRowGroup = {
+    id: 'root',
+    logic: 'and',
+    conditions: [{ id: 'c1', field: 'stage', operator: 'in', value: ['negotiation'] }],
+  };
+
+  it('with nothing set it is there, with the dashed 「Sort」 and 「Filter」 buttons and nothing else', () => {
+    render(<TwoRow />);
+    expect(screen.getByTestId('condition-sort')).toHaveTextContent('Sort');
+    expect(screen.getByTestId('condition-sort')).toHaveAttribute('data-levels', '0');
+    expect(screen.getByTestId('condition-add-filter')).toHaveTextContent('Filter');
+    expect(screen.getByTestId('condition-add-filter')).toHaveAttribute('data-empty', 'true');
+    expect(screen.getByTestId('condition-sort').className).toContain('border-dashed');
+    expect(screen.queryByTestId('condition-reset')).toBeNull();
+  });
+
+  it('a sort of any number of levels is ONE chip, 「Sorted by X」 with 「+N」, before the filter chips; it opens every level and changes no sort (objectstack#35876)', () => {
+    const sort: SortItem[] = [
+      { id: 's1', field: 'amount', order: 'desc' },
+      { id: 's2', field: 'name', order: 'asc' },
+      { id: 's3', field: 'stage', order: 'asc' },
+    ];
+    const onSortChange = vi.fn();
+    render(<TwoRow sort={sort} filters={stageFilter} onSortChange={onSortChange} />);
+    const chips = screen.getAllByTestId('condition-sort');
+    expect(chips).toHaveLength(1);
+    expect(chips[0]).toHaveTextContent('Sorted by Amount');
+    expect(screen.getByTestId('sort-chip-more')).toHaveTextContent('+2');
+    expect(chips[0].compareDocumentPosition(screen.getByTestId('filter-chip-stage')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(chips[0]);
+    expect(within(screen.getByTestId('sort-chip-panel')).getByTestId('sort-levels-builder')).toBeInTheDocument();
+    expect(screen.queryByTestId('sort-panel-stand-in')).toBeNull();
+    expect(onSortChange).not.toHaveBeenCalled();
+  });
+
+  it('with no sort the dashed 「Sort」 opens the sort panel, whose close closes it', () => {
+    render(<TwoRow />);
+    fireEvent.click(screen.getByTestId('condition-sort'));
+    expect(screen.queryByTestId('sort-chip-panel')).toBeNull();
+    fireEvent.click(screen.getByTestId('sort-panel-stand-in'));
+    expect(screen.queryByTestId('sort-panel-stand-in')).toBeNull();
+  });
+
+  it('CONTROL: one level reads no 「+N」', () => {
+    render(<TwoRow sort={[{ id: 's1', field: 'name', order: 'asc' }]} />);
+    expect(screen.getByTestId('condition-sort')).toHaveTextContent('Sorted by Name');
+    expect(screen.queryByTestId('sort-chip-more')).toBeNull();
+  });
+
+  it('with a filter of the reader\'s own: its chip, then 「+」, which opens the field list', () => {
+    render(<TwoRow filters={stageFilter} />);
+    expect(screen.getByTestId('filter-chip-stage')).toBeInTheDocument();
+    const add = screen.getByTestId('condition-add-filter');
+    expect(add).not.toHaveAttribute('data-empty');
+    expect(add).toHaveAccessibleName('Add filter');
+    expect(add.compareDocumentPosition(screen.getByTestId('filter-chip-stage')) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    fireEvent.click(add);
+    expect(screen.getByTestId('filter-panel-fields')).toBeInTheDocument();
+  });
+
+  it('the host\'s end takes the place of the row\'s own Reset', () => {
+    render(<TwoRow filters={stageFilter} onReset={() => {}} end={<span data-testid="host-end">Personalized</span>} />);
+    expect(screen.getByTestId('condition-row-end')).toContainElement(screen.getByTestId('host-end'));
+    expect(screen.queryByTestId('condition-reset')).toBeNull();
+  });
+
+  it('without a sort panel or a filter to offer, and nothing set, the row draws nothing', () => {
+    const { container } = render(<TwoRow renderSortPanel={undefined} filterOffered={false} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('one line: what does not fit scrolls sideways', () => {
+    render(<TwoRow filters={stageFilter} />);
+    const row = screen.getByTestId('condition-chips');
+    expect(row.className.split(/\s+/)).toEqual(expect.arrayContaining(['flex-nowrap', 'overflow-x-auto']));
   });
 });

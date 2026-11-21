@@ -108,7 +108,7 @@ describe('ListView toolbar buttons keep a name when icon-only (objectui#12500)',
     await renderToolbar();
 
     const filter = screen.getByRole('button', { name: 'Filter' });
-    expect(filter).toHaveAttribute('data-testid', 'toolbar-filter-trigger');
+    expect(filter).toHaveAttribute('data-testid', 'condition-add-filter');
 
     // The empty state's own CTA is named "Add record" too; the two toolbar
     // slots (`position: 'both'`) are the ones under test.
@@ -125,13 +125,6 @@ describe('ListView toolbar buttons keep a name when icon-only (objectui#12500)',
     expect(screen.getByRole('button', { name: 'Export' })).toBeInTheDocument();
   });
 
-  it('below sm, one active filter: the Filter name carries "Filter" and the count', async () => {
-    belowSm();
-    await renderToolbar({}, { initialFilters: ONE_FILTER });
-
-    const filter = screen.getByTestId('toolbar-filter-trigger');
-    expect(filter).toHaveAccessibleName('Filter, 1 active');
-  });
 
   it('CONTROL, wide: each name is its visible label exactly once', async () => {
     await renderToolbar({ compactToolbar: false, exportOptions: { formats: ['csv'] } });
@@ -139,7 +132,7 @@ describe('ListView toolbar buttons keep a name when icon-only (objectui#12500)',
     // From `sm` up Filter is a named text button again (objectstack#35548;
     // objectui#12695 had made it an icon at every width): its visible label
     // is its name, once.
-    const filter = screen.getByTestId('toolbar-filter-trigger');
+    const filter = screen.getByTestId('condition-add-filter');
     expect(filter.textContent).toBe('Filter');
     expect(filter).toHaveAccessibleName('Filter');
 

@@ -17,7 +17,8 @@ import { SysEmail } from './sys-email.object.js';
  *
  *  - **Silent, on every render.** `highlightFields` is the object's ordered
  *    "most important fields" pointer (`packages/spec/src/data/object.zod.ts`
- *    — "Drives default columns, cards, previews, detail highlight strip"),
+ *    — "Drives default list and related-list columns, cards, hover cards,
+ *    previews and the record picker"),
  *    and every consumer of it SKIPS an entry it cannot resolve. Nothing
  *    throws, nothing logs: the platform's own email log just renders one
  *    column short, and the missing one is the recipient.

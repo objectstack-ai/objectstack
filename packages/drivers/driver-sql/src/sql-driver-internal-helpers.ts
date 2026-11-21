@@ -40,6 +40,25 @@ import type { Knex } from 'knex';
 import type { SqlDriver } from './sql-driver.js';
 import { fixedInnerReadPredicates } from './fixed-read-leaf-compile.js';
 import { castFixedReadLeafColumn, fixedReadLeafKeyReading, refuseFixedReadLeafKey } from './fixed-read-leaf-key-type.js';
+import { oracleUuidRawProjection } from './sql-driver-oracle-dialect.js';
+
+/** What a fixed-read leaf's `$in` arm says of the outer column the subquery is compared with. */
+export interface FixedReadLeafOuter {
+  /** The outer object (the filter compiler's coercion key), `null` when unknown. */
+  readonly object: string | null;
+  /** The outer column, as the statement spells it. */
+  readonly column: string;
+  /** The driver named as the evaluator in a PostgreSQL no-reading refusal (`refuseFixedReadLeafKey`). */
+  readonly evaluator?: string;
+  /** PostgreSQL: the caller's transaction, on whose connection the key type is read (`fixedReadLeafKeyReading`). */
+  readonly transaction?: unknown;
+  /**
+   * Oracle: the outer column is a `RAW(16)` uuid column, the same reading
+   * (`oracleRawUuidFieldsByObject`, same object and field) that makes the
+   * list bind its members as `HEXTORAW(?)`.
+   */
+  readonly oracleRawUuid?: boolean;
+}
 
 /**
  * The `SqlDriver` members the bodies of {@link InternalHelpersFacet} read — every one of
@@ -185,8 +204,17 @@ export class InternalHelpersFacet {
    *   connection, `outer.transaction`) is refused, ADR-0139 D3's
    *   envelope (`INTERNAL_ERROR` / 500, logged once), ⛔ never compiled
    *   uncast: a `character(n)` key would miss a padded grant silently (D2).
+   * - **Oracle, a `RAW(16)` uuid key (O2, ruling A carried to Oracle).** Where
+   *   `outer.oracleRawUuid` says the list binds its members as `HEXTORAW(?)`,
+   *   the projection is the same conversion over the column, behind the
+   *   list's own gate (`oracleUuidRawProjection`): a grant `UUID_TEXT` admits
+   *   is the 16 bytes the list binds; any other grant fails the statement
+   *   (ORA-01465), as the list refuses it before SQL.
+   *   Any other Oracle key projects `record_id` as before (a `NUMBER` key
+   *   converts it the way it converts the list's text binds). Oracle has no
+   *   no-reading refusal: an unprimed key compiles as the list's text binds do.
    */
-  static fixedReadLeafSubquery(this: Pick<InternalHelpersHost, 'getBuilder' | 'isOracle' | 'knex' | 'logger' | 'physicalSchemaByObject' | 'physicalTableByObject'>, leaf: FixedReadLeaf, outer?: { readonly object: string | null; readonly column: string; readonly evaluator?: string; readonly transaction?: unknown }): Knex.QueryBuilder {
+  static fixedReadLeafSubquery(this: Pick<InternalHelpersHost, 'getBuilder' | 'isOracle' | 'knex' | 'logger' | 'physicalSchemaByObject' | 'physicalTableByObject'>, leaf: FixedReadLeaf, outer?: FixedReadLeafOuter): Knex.QueryBuilder {
     const read = fixedInnerReadPredicates(leaf, { emptyStringIsNull: this.isOracle });
     let projection: string | Knex.Raw = read.column;
     // [ADR-0155 O2] PostgreSQL only: the physical table as `getBuilder`
@@ -203,6 +231,8 @@ export class InternalHelpersFacet {
       }
       if (reading.kind === 'cast') projection = castFixedReadLeafColumn(this.knex, read.column, reading.cast);
     }
+    // [ADR-0155 O2, ruling A carried to Oracle] A RAW(16) uuid key: the list's `HEXTORAW` conversion over the column.
+    if (this.isOracle && outer?.oracleRawUuid === true) projection = oracleUuidRawProjection(this.knex, read.column);
     const inner = this.getBuilder(read.table).select(projection);
     for (const [column, value] of read.equals) inner.where(column, value);
     for (const [column, values] of read.memberOf) inner.whereIn(column, [...values]);
