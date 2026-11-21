@@ -24,12 +24,25 @@ import { ConditionChipRow, FilterPanel, SortPanel, describeConditionValue, sortD
 import {
   addSortLevel,
   chipsAreIndependent,
+  defaultQuickOperator,
   moveSortItem,
   quickFilterFamily,
+  quickFilterOperators,
   readViewConditions,
   type ConditionField,
 } from '../conditionModel';
 import { LIST_CONDITION_DEFAULT_TRANSLATIONS } from '../conditionTranslations';
+import { operatorsForField } from '@object-ui/components';
+import { en as enPack, zh as zhPack } from '@object-ui/i18n/locales';
+import { parseFilterAST } from '@objectstack/spec/data';
+import { convertFilterGroupToAST } from '../../ListView';
+
+// The server's JSON-column refusal set, read from the module the server's
+// faces import it from. That module imports nothing, so it loads on its own.
+const REFUSAL_MODULE = new URL('../../../../../../packages/core/src/utils/json-column-operator-refusal.ts', import.meta.url);
+const { JSON_COLUMN_INCOMPATIBLE_OPERATORS } = (await import(REFUSAL_MODULE.href)) as {
+  JSON_COLUMN_INCOMPATIBLE_OPERATORS: ReadonlySet<string>;
+};
 
 const STAGE: ConditionField = {
   value: 'stage',
@@ -659,5 +672,141 @@ describe('condition model', () => {
     expect(describeConditionValue(FIELDS[2], 'greater_than_or_equal', 100, t as never)).toBe('≥ 100');
     expect(describeConditionValue(FIELDS[3], 'between', quickDateWindowValue('today'), t as never)).toBe('Today');
     expect(describeConditionValue(STAGE, 'is_empty', undefined, t as never)).toBe('is empty');
+  });
+});
+
+describe('multi-value fields — the quick filter and the advanced panel offer only what the server accepts', () => {
+  const OPTIONS = [
+    { value: 'quality_lead', label: 'Quality lead' },
+    { value: 'safety_officer', label: 'Safety officer' },
+  ];
+  const MULTI_VALUE: ConditionField[] = [
+    { value: 'responsibilities', label: 'Responsibilities', type: 'select', multiple: true, options: OPTIONS },
+    { value: 'labels', label: 'Labels', type: 'multiselect', options: OPTIONS },
+    { value: 'channels', label: 'Channels', type: 'checkboxes', options: OPTIONS },
+    { value: 'tags', label: 'Tags', type: 'tags' },
+    { value: 'team', label: 'Team', type: 'user', multiple: true },
+    { value: 'accounts', label: 'Accounts', type: 'lookup', multiple: true, referenceTo: 'account' },
+  ];
+  const STRUCTURED: ConditionField = { value: 'address', label: 'Address', type: 'address' };
+  const MULTI_OFFER = ['contains', 'not_contains', 'is_empty', 'is_not_empty'];
+
+  /** The `$`-operators the server sees for one builder row, through the list's own lowering and the spec's parse. */
+  function wireOperators(field: string, operator: string, value: unknown): string[] {
+    const ast = convertFilterGroupToAST({
+      id: 'root',
+      logic: 'and',
+      conditions: [{ id: 'r', field, operator: operator as never, value: value as never }],
+    });
+    const parsed = parseFilterAST(ast) as Record<string, unknown> | undefined;
+    const ops: string[] = [];
+    const walk = (node: unknown) => {
+      if (!node || typeof node !== 'object') return;
+      for (const [key, sub] of Object.entries(node as Record<string, unknown>)) {
+        if (key === '$and' || key === '$or') {
+          (sub as unknown[]).forEach(walk);
+        } else if (sub !== null && typeof sub === 'object' && !Array.isArray(sub)) {
+          ops.push(...Object.keys(sub as object));
+        } else {
+          ops.push('$eq'); // the bare `{ field: value }` spelling is implicit equality
+        }
+      }
+    };
+    walk(parsed);
+    return ops;
+  }
+  const sample = (op: string) => (op === 'in' || op === 'not_in' ? ['quality_lead'] : 'quality_lead');
+
+  it('offers contains / not contains / is empty / is not empty on every multi-value field, contains first', () => {
+    for (const field of MULTI_VALUE) {
+      expect(quickFilterOperators(field), field.type).toEqual(MULTI_OFFER);
+      expect(defaultQuickOperator(field)).toBe('contains');
+      expect(operatorsForField(field).map((op) => op.value), field.type).toEqual(MULTI_OFFER);
+    }
+  });
+
+  it('offers a structured-JSON field the empty pair only: it has no members to name', () => {
+    expect(quickFilterOperators(STRUCTURED)).toEqual(['is_empty', 'is_not_empty']);
+    expect(operatorsForField(STRUCTURED).map((op) => op.value)).toEqual(['is_empty', 'is_not_empty']);
+  });
+
+  it('no offered operator reaches the server as one its JSON-column refusal names', () => {
+    for (const field of [...MULTI_VALUE, STRUCTURED]) {
+      const offered = new Set([...quickFilterOperators(field), ...operatorsForField(field).map((op) => op.value)]);
+      for (const op of offered) {
+        const refused = wireOperators(field.value, op, sample(op)).filter((w) => JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(w));
+        expect(refused, `${field.type} ${op}`).toEqual([]);
+      }
+    }
+  });
+
+  it('every operator offered before (equals / not equals / in / not in) is one the server refuses — the control leg', () => {
+    for (const op of ['equals', 'not_equals', 'in', 'not_in']) {
+      const refused = wireOperators('responsibilities', op, sample(op)).filter((w) => JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(w));
+      expect(refused.length, op).toBeGreaterThan(0);
+    }
+  });
+
+  it('「包含」 sends one member under $contains, the shape the refusal prescribes', () => {
+    expect(
+      convertFilterGroupToAST({
+        id: 'root',
+        logic: 'and',
+        conditions: [{ id: 'r', field: 'responsibilities', operator: 'contains', value: 'quality_lead' }],
+      }),
+    ).toEqual(['responsibilities', 'contains', 'quality_lead']);
+    expect(wireOperators('responsibilities', 'contains', 'quality_lead')).toEqual(['$contains']);
+    expect(wireOperators('responsibilities', 'not_contains', 'quality_lead')).toEqual(['$notContains']);
+  });
+
+  it('a single-value select keeps its operators (CONTROL)', () => {
+    expect(quickFilterOperators(STAGE)).toEqual(['in', 'not_in', 'is_empty', 'is_not_empty']);
+    expect(operatorsForField(STAGE).map((op) => op.value)).toContain('equals');
+    expect(operatorsForField(STAGE).map((op) => op.value)).toContain('in');
+    expect(operatorsForField({ type: 'select', multiple: false }).map((op) => op.value)).toContain('equals');
+  });
+
+  it('contains on an option field picks ONE option; picking another replaces it', () => {
+    const rows: Array<{ operator: string; value: unknown }> = [];
+    function Host() {
+      const [row, setRow] = React.useState({ id: 'r', field: 'responsibilities', operator: 'contains' as const, value: '' as unknown });
+      return (
+        <FilterValuePanel
+          field={MULTI_VALUE[0]}
+          row={row as never}
+          onChange={(next) => {
+            rows.push(next);
+            setRow(next as never);
+          }}
+        />
+      );
+    }
+    render(<Host />);
+    expect(screen.getByRole('listbox').getAttribute('aria-multiselectable')).toBeNull();
+    fireEvent.click(within(screen.getByTestId('filter-values-option-quality_lead')).getByRole('checkbox'));
+    fireEvent.click(within(screen.getByTestId('filter-values-option-safety_officer')).getByRole('checkbox'));
+    expect(rows.map((r) => r.value)).toEqual(['quality_lead', 'safety_officer']);
+  });
+
+  it('a saved view holding a refused operator still draws it, so the reader can change it', () => {
+    render(
+      <FilterValuePanel
+        field={MULTI_VALUE[0]}
+        row={{ id: 'r', field: 'responsibilities', operator: 'equals', value: 'quality_lead' }}
+        onChange={() => {}}
+      />,
+    );
+    expect(screen.getByTestId('filter-values-operator').textContent).toBe('equals');
+  });
+
+  it('reads 包含 / 不包含 / 为空 / 不为空 in zh-CN and contains / does not contain in en, on both surfaces', () => {
+    const zhQuick = zhPack.listConditions.operators as Record<string, string>;
+    const zhAdvanced = zhPack.filterBuilder.operators as Record<string, string>;
+    expect(MULTI_OFFER.map((op) => zhQuick[op])).toEqual(['包含', '不包含', '为空', '不为空']);
+    expect(MULTI_OFFER.map((op) => zhAdvanced[op])).toEqual(['包含', '不包含', '为空', '不为空']);
+    const enQuick = enPack.listConditions.operators as Record<string, string>;
+    expect(MULTI_OFFER.map((op) => enQuick[op])).toEqual(['contains', 'does not contain', 'is empty', 'is not empty']);
+    const t = (key: string) => LIST_CONDITION_DEFAULT_TRANSLATIONS[key] ?? key;
+    expect(describeConditionValue(MULTI_VALUE[0], 'contains', 'quality_lead', t as never)).toBe('contains Quality lead');
   });
 });
