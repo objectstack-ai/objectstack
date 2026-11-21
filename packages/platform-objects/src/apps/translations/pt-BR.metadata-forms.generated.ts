@@ -70,7 +70,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       highlightFields: {
         label: "Campos em destaque",
-        helpText: "Nomes de campos deste objeto, os mais importantes primeiro — a primeira entrada vence onde só cabe uma (ADR-0085). Define as colunas padrão da lista, os cartões, as pré-visualizações de registros filhos e a faixa de destaque do detalhe. Um nome que não seja um campo deste objeto é recusado na publicação."
+        helpText: "Nomes de campos deste objeto, os mais importantes primeiro — a primeira entrada vence onde só cabe uma (ADR-0085). Define as colunas padrão das listas e das listas relacionadas, os cartões, as pré-visualizações de registros filhos, o cartão flutuante do registro e o seletor de registros. Um nome que não seja um campo deste objeto é recusado na publicação."
       },
       relatedLists: {
         label: "Listas relacionadas",
@@ -1354,7 +1354,8 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Configuração da navegação ao clicar em um item (painel lateral por padrão, page, new_window ou none)"
       },
       "navigation.mode": {
-        label: "Modo"
+        label: "Modo",
+        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
       },
       "navigation.preventNavigation": {
         label: "Impedir navegação",

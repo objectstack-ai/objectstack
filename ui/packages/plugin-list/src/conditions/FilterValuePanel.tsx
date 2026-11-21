@@ -36,9 +36,9 @@ import { getBadgeColorClasses, getBadgeHexAppearance } from '@object-ui/fields';
 import { ChevronLeft } from 'lucide-react';
 import { DATE_RANGE_PRESET_MACRO_WINDOWS, type DateRangePreset } from '@objectstack/spec/data';
 import {
-  QUICK_FILTER_OPERATORS,
   isValuelessOperator,
   quickFilterFamily,
+  quickFilterOperators,
   seedValueFor,
   type ConditionField,
 } from './conditionModel';
@@ -81,7 +81,9 @@ function useDebounced(callback: (value: string) => void, delay: number) {
 export function FilterValuePanel({ field, row, onChange, onBack, testId = 'filter-values' }: FilterValuePanelProps) {
   const { t } = useListConditionTranslation();
   const family = quickFilterFamily(field);
-  const offered = QUICK_FILTER_OPERATORS[family];
+  const offered = quickFilterOperators(field);
+  // A row whose operator the field no longer offers (a saved `equals` on a
+  // multi-value field) still shows it, so the reader can see and change it.
   const operators = offered.includes(row.operator) ? offered : [row.operator, ...offered];
   const operatorLabel = (op: string) => quickOperatorLabel(op, t);
 

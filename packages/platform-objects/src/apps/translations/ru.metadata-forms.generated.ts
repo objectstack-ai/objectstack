@@ -70,7 +70,7 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       highlightFields: {
         label: "Ключевые поля",
-        helpText: "Имена полей этого объекта, самые важные первыми — там, где помещается только одно, побеждает первое (ADR-0085). Определяют столбцы списка по умолчанию, карточки, предпросмотр дочерних записей и полосу ключевых полей на странице записи. Имя, не являющееся полем этого объекта, отклоняется при публикации."
+        helpText: "Имена полей этого объекта, самые важные первыми — там, где помещается только одно, побеждает первое (ADR-0085). Определяют столбцы по умолчанию для списков и связанных списков, карточки, предпросмотр дочерних записей, всплывающую карточку записи и выбор записи. Имя, не являющееся полем этого объекта, отклоняется при публикации."
       },
       relatedLists: {
         label: "Связанные списки",
@@ -1354,7 +1354,8 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Настройка навигации по щелчку на элементе (по умолчанию боковая панель, page, new_window или none)"
       },
       "navigation.mode": {
-        label: "Режим"
+        label: "Режим",
+        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
       },
       "navigation.preventNavigation": {
         label: "Запретить навигацию",

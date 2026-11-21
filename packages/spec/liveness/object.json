@@ -45,7 +45,7 @@
     "highlightFields": {
       "status": "live",
       "proof": "packages/qa/dogfood/test/semantic-roles.dogfood.test.ts#semantic-roles-served",
-      "note": "ADR-0085 semantic role (renamed from compactLayout): objectui default list/grid columns (ObjectGrid/ObjectView/InterfaceListPage), child-record previews (first entry), record:details auto layout, detail highlight strip (first RECORD_HIGHLIGHTS_MAX = 6, after the title)."
+      "note": "ADR-0085 semantic role (renamed from compactLayout): objectui default list/grid columns (ObjectGrid/ObjectView/InterfaceListPage), child-record previews (first entry), record:details auto layout, the record hover card, related-list default columns and the record picker. The default record page draws no key-field strip from it; a page that places one in its highlights slot draws the first RECORD_HIGHLIGHTS_MAX, after the title."
     },
     "relatedLists": {
       "status": "live",

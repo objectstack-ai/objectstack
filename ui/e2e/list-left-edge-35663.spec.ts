@@ -10,9 +10,10 @@ import { uiRoot } from '../scripts/ui-root.mjs';
 
 /**
  * GEOMETRY pin for objectstack#35663 (epic #35547): the list page draws ONE
- * left edge, 16 px in from the main area, for the page bar's object icon, the
- * view bar's view icon, the header's select-all box, every row's checkbox and
- * the footer's count; the selection column is 40 px wide (16 inset + 16 box +
+ * left edge, 16 px in from the main area, for the view bar's object icon (the
+ * page bar's until objectstack#35878 moved the object's name into the view
+ * bar), the header's select-all box, every row's checkbox and the footer's
+ * count; the selection column is 40 px wide (16 inset + 16 box +
  * 8 gap) on a list that fits and on one that scrolls sideways, before and
  * after a scroll; the grid draws no row numbers and every row's checkbox is
  * visible without a hover.
@@ -34,9 +35,8 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  *
  * ## What is real here and what is a fixture
  *
- * REAL: plugin-grid's `ObjectGrid` with the `data-table` it draws, and
- * app-shell's `PageHeader` in its list posture, bundled by Vite from source and
- * mounted with React's client renderer; the view bar's classes are
+ * REAL: plugin-grid's `ObjectGrid` with the `data-table` it draws, bundled by
+ * Vite from source and mounted with React's client renderer; the view bar's classes are
  * `listToolbarRow.ts`'s own constants, imported into the bundle; the view
  * switcher's trigger class and the record-count bar's class are read out of
  * `objectViewTitleSwitcher.tsx` and `ListView.tsx` at run time. The stylesheet
@@ -68,7 +68,6 @@ const THEME_CSS = source('packages/components/src/index.css');
 // Workspace sources by path, never by package name: the e2e type-check program
 // imports no workspace package (it builds nothing first).
 const PLUGIN_GRID = source('packages/plugin-grid/src/index.tsx');
-const PAGE_HEADER = source('packages/app-shell/src/layout/PageHeader.tsx');
 const TOOLBAR_ROW_TS = source('packages/plugin-list/src/listToolbarRow.ts');
 const FIELDS_PKG = source('packages/fields/src/index.tsx');
 const REACT_BINDINGS = source('packages/react/src/index.ts');
@@ -90,6 +89,10 @@ const CHART_BAR_CLASS = pick(
   /const chartPage = [\s\S]*?hasPhoneTitle && \(\s*<div className="([^"]+)"/,
   'the chart view bar class',
 );
+/** The view bar's object name and its right end (objectstack#35878), read off their constants. */
+const PAGE_BAR_FILE = 'packages/app-shell/src/views/objectViewPageHeader.tsx';
+const OBJECT_NAME_CLASS = pick(PAGE_BAR_FILE, /export const VIEW_BAR_OBJECT_NAME = '([^']+)'/, 'VIEW_BAR_OBJECT_NAME');
+const VIEW_BAR_END_CLASS = `flex shrink-0 items-center gap-0.5 ${pick(PAGE_BAR_FILE, /export const VIEW_BAR_END_INSET = '([^']+)'/, 'VIEW_BAR_END_INSET')}`;
 const FOOTER_CLASS = pick(
   'packages/plugin-list/src/ListView.tsx',
   /className="([^"]+)"\s*data-testid="record-count-bar"/,
@@ -147,13 +150,14 @@ import * as React from 'react';
 import { createRoot } from 'react-dom/client';
 import { MemoryRouter } from ${JSON.stringify(ROUTER)};
 import { ObjectGrid } from ${JSON.stringify(PLUGIN_GRID)};
-import { PageHeader } from ${JSON.stringify(PAGE_HEADER)};
 import * as Row from ${JSON.stringify(TOOLBAR_ROW_TS)};
 import { registerAllFields } from ${JSON.stringify(FIELDS_PKG)};
 import { ActionProvider, SchemaRendererProvider } from ${JSON.stringify(REACT_BINDINGS)};
 
 registerAllFields();
 const h = React.createElement;
+const OBJECT_NAME_CLASS = ${JSON.stringify(OBJECT_NAME_CLASS)};
+const VIEW_BAR_END_CLASS = ${JSON.stringify(VIEW_BAR_END_CLASS)};
 const c = window.__case;
 const LABELS = {
   name: 'Name', email: 'Email', phone: 'Phone', account: 'Account', title: 'Title', department: 'Department',
@@ -181,20 +185,27 @@ createRoot(document.getElementById('root')).render(
         h('div', { className: 'flex', style: { width: c.viewport + 'px' } },
           h('div', { id: 'sidebar', style: { width: c.sidebar + 'px', flexShrink: 0 } }),
           h('div', { id: 'main', className: 'flex min-w-0 flex-1 flex-col bg-background', style: { height: '640px' } },
-            h(PageHeader, {
-              posture: 'list',
-              title: 'Contacts',
-              icon: box16('page-icon'),
-              actions: h('button', { id: 'page-new', className: 'inline-flex h-7 items-center px-2' }, 'New'),
-            }),
+            // objectstack#35878: no page bar; the view bar leads with the
+            // object's icon and name, then 「/」 and the switcher, then View
+            // settings, and ends with search, New and ⋮ at the right edge.
             h('div', { id: 'viewbar', className: Row.TOOLBAR_ROW },
               h('div', { className: Row.TOOLBAR_LEFT_GROUP_LEADING },
                 h('div', { className: Row.TOOLBAR_LEADING },
-                  h('button', { id: 'switcher', className: c.switcherClass }, box16('view-icon'), h('span', { className: 'truncate' }, 'All contacts')))),
+                  h('span', { className: OBJECT_NAME_CLASS }, box16('page-icon'), h('span', { className: 'truncate' }, 'Contacts'), h('span', null, '/')),
+                  h('button', { id: 'switcher', className: c.switcherClass }, box16('view-icon'), h('span', { className: 'truncate' }, 'All contacts'))),
+                h('button', { className: 'inline-flex items-center ' + Row.TOOLBAR_TEXT_TRIGGER }, 'View settings')),
               h('div', { id: 'cluster', className: Row.TOOLBAR_CLUSTER },
-                ...['Filter', 'Sort', 'Options'].map((l) => h('button', { key: l, className: 'bar-button inline-flex items-center ' + Row.TOOLBAR_TEXT_TRIGGER }, l)))),
+                h('div', { className: VIEW_BAR_END_CLASS },
+                  h('button', { className: 'inline-flex h-7 w-7' }),
+                  h('button', { id: 'page-new', className: 'inline-flex h-7 items-center px-2' }, 'New'),
+                  h('button', { className: 'inline-flex h-7 w-7 items-center justify-center' }, box16('page-more'))))),
+            // The chart bar's lead is the same one node (the object's name and
+            // the switcher), as \`ViewBarLead\` draws it.
             h('div', { id: 'chartbar', className: c.chartBarClass },
-              h('button', { id: 'chart-switcher', className: c.switcherClass }, box16('chart-view-icon'), h('span', { className: 'truncate' }, 'Pipeline chart'))),
+              h('div', { className: 'flex min-w-0 items-center' },
+                h('span', { className: OBJECT_NAME_CLASS }, box16('chart-page-icon'), h('span', { className: 'truncate' }, 'Contacts'), h('span', null, '/')),
+                h('button', { id: 'chart-switcher', className: c.switcherClass }, box16('chart-view-icon'), h('span', { className: 'truncate' }, 'Pipeline chart'))),
+              h('div', { className: VIEW_BAR_END_CLASS }, h('button', { className: 'inline-flex h-7 w-7' }))),
             h('div', { className: 'flex min-h-0 flex-1 flex-col' },
               h(ObjectGrid, {
                 dataSource,
@@ -325,6 +336,7 @@ interface Reading {
   /** Left edges, from the main area's left. */
   left: {
     pageIcon: number;
+    chartPageIcon: number;
     viewIcon: number;
     /** The chart view's view bar (objectstack#35729). */
     chartViewIcon: number;
@@ -334,7 +346,7 @@ interface Reading {
     firstHeaderText: number;
     firstCellText: number;
   };
-  /** Right edges, from the main area's right (distance in): the page bar's button box, the view bar's last label. */
+  /** Right edges, from the main area's right (distance in): ⋮ (the bar's last button) and the view bar's cluster. */
   right: { pageAction: number; viewCluster: number; footer: number; scrollBox: number };
   /** The right padding of the list's view bar and of the chart view's (objectstack#35729). */
   barPaddingRight: { list: number; chart: number };
@@ -383,6 +395,7 @@ async function readEdges(page: Page): Promise<Reading> {
       overflows: box.scrollWidth > box.clientWidth + 1,
       left: {
         pageIcon: x(document.getElementById('page-icon')),
+        chartPageIcon: x(document.getElementById('chart-page-icon')),
         viewIcon: x(document.getElementById('view-icon')),
         chartViewIcon: x(document.getElementById('chart-view-icon')),
         headerCheckbox: x(document.querySelector('thead [role="checkbox"]')),
@@ -392,9 +405,8 @@ async function readEdges(page: Page): Promise<Reading> {
         firstCellText: Math.round((textOf(firstCell).left - main.left) * 10) / 10,
       },
       right: {
-        pageAction: inRight(document.getElementById('page-new')),
-        // The last trigger's label (the trigger's box is unpainted at rest).
-        viewCluster: Math.round((main.right - textOf([...document.querySelectorAll('.bar-button')].pop()!).right) * 10) / 10,
+        pageAction: inRight(document.getElementById('page-more')),
+        viewCluster: inRight(document.getElementById('cluster')),
         footer: Math.round((main.right - r(document.getElementById('footer-text')!.parentElement).right) * 10) / 10,
         scrollBox: inRight(box),
       },
@@ -452,9 +464,8 @@ function report(testInfo: TestInfo, name: string, value: unknown): void {
 
 function expectOnEdge(r: Reading, edge: number, slack = 1): void {
   const named: Array<[string, number]> = [
-    ['page-bar icon', r.left.pageIcon],
-    ['view-bar icon', r.left.viewIcon],
-    ['chart view-bar icon', r.left.chartViewIcon],
+    ['view-bar object icon', r.left.pageIcon],
+    ['chart view-bar object icon', r.left.chartPageIcon],
     ['select-all box', r.left.headerCheckbox],
     ...r.left.rowCheckboxes.map((v, i): [string, number] => [`row ${i + 1} checkbox`, v]),
     ['footer count', r.left.footerText],
@@ -485,9 +496,10 @@ test.describe('the list page draws one left edge (objectstack#35663)', () => {
       expect(r.rowNumbers, 'the grid draws row numbers').toBe(0);
       expect(r.rowCheckboxOpacity.length).toBe(12);
       for (const o of r.rowCheckboxOpacity) expect(o, 'a row checkbox is hidden until hover').toBe(1);
-      // The right edges: the page bar's action and the view bar's cluster end
-      // on one line, 16 in, as the footer's padding does.
-      expect(Math.abs(r.right.pageAction - r.right.viewCluster), `page action ${r.right.pageAction} vs view cluster ${r.right.viewCluster}`).toBeLessThanOrEqual(1);
+      // The right edges: ⋮, the bar's last control (objectstack#35678), ends
+      // the view bar's cluster 16 in, as the footer's padding does.
+      // The cluster's box ends at the bar's own 8px padding; ⋮'s icon, 16 in.
+      expect(r.right.viewCluster, `view cluster ends ${r.right.viewCluster} in`).toBeLessThan(r.right.pageAction);
       expect(Math.abs(r.right.pageAction - EDGE)).toBeLessThanOrEqual(1);
       // The chart view's view bar is the list's (objectstack#35729): its icon
       // is on the list's view icon (also in `expectOnEdge`), its right end the list bar's.
@@ -523,7 +535,6 @@ test.describe('the list page draws one left edge (objectstack#35663)', () => {
       };
       const cards = [...document.querySelectorAll('[data-testid="grid-mobile-card"]')];
       return {
-        pageIcon: x(document.getElementById('page-icon')),
         viewIcon: x(document.getElementById('view-icon')),
         chartViewIcon: x(document.getElementById('chart-view-icon')),
         cardContent: cards.map((c) => x(c.firstElementChild)),
@@ -534,7 +545,9 @@ test.describe('the list page draws one left edge (objectstack#35663)', () => {
     expect(r.cardContent.length).toBe(12);
     // Below `sm` the chart view's view bar keeps the list bar's `px-2` (objectstack#35729).
     expect(Math.abs(r.chartViewIcon - r.viewIcon), `chart view icon ${r.chartViewIcon} vs list view icon ${r.viewIcon}`).toBeLessThanOrEqual(1);
-    for (const at of [r.pageIcon, r.viewIcon, r.chartViewIcon, ...r.cardContent, r.footerText]) {
+    // The object's name is not drawn below `sm` (the phone's top bar names it,
+    // objectstack#35878), so the switcher leads the bar there.
+    for (const at of [r.viewIcon, r.chartViewIcon, ...r.cardContent, r.footerText]) {
       expect(at).toBeGreaterThanOrEqual(12);
     }
   });

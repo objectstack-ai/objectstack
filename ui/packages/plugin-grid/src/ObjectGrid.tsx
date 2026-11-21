@@ -760,6 +760,40 @@ function RowGroupsReport({
   return null;
 }
 
+/**
+ * objectstack#35688 — how wide a field type's editor layer starts. The layer
+ * is never narrower than its cell and grows to fit this; the editor fills it.
+ */
+function cellEditorWidthClass(type: string): string {
+  switch (type) {
+    case 'address':
+    case 'location':
+      return 'w-full min-w-[22rem]';
+    case 'textarea':
+    case 'markdown':
+    case 'code':
+    case 'json':
+      return 'w-full min-w-80';
+    case 'lookup':
+    case 'master_detail':
+    case 'user':
+      return 'w-full min-w-72';
+    case 'multiselect':
+    case 'tags':
+    case 'checkboxes':
+      return 'w-full min-w-64';
+    case 'date':
+    case 'datetime':
+    case 'phone':
+    case 'url':
+    case 'email':
+    case 'currency':
+      return 'w-full min-w-56';
+    default:
+      return 'w-full min-w-40';
+  }
+}
+
 export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   schema,
   dataSource,
@@ -3431,6 +3465,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
             };
           }
           return (
+            // objectstack#35688 — the editor draws on a layer over the cell; this
+            // sets how wide the layer starts for the field's type.
+            <div className={cellEditorWidthClass(fieldDef.type)}>
             <FieldEditWidget
               field={field}
               value={ctx.value}
@@ -3466,6 +3503,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
               // is the spelling objectui#7188's ruling chose.
               dependentValues={ctx.pendingRow ?? ctx.row}
             />
+            </div>
           );
         }
       : undefined,

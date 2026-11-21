@@ -6481,6 +6481,11 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
         // unpublished view (ADR-0037). The overlay tags the item, not its
         // nested spec, so read from either.
         const isDraft = v._draft === true || spec?._draft === true;
+        // objectstack#35933 — the package the server served the row under
+        // (the item's `_packageId`, which the overlay stamps on the item,
+        // not on a nested spec), carried as served on both arms, so the list
+        // can tell a view a read-only package ships from one it may save.
+        const packageId = typeof v._packageId === 'string' && v._packageId !== '' ? v._packageId : undefined;
         // Canonical ViewItem (ADR-0017) carries its body under `config`;
         // the display `type` (grid/kanban/gallery/…) lives at `config.type`,
         // and only the list/form *family* sits at the top level (`viewKind`).
@@ -6516,9 +6521,15 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
           }
           row.isDefault = !!spec.isDefault;
           if (isDraft) row._draft = true;
+          if (packageId !== undefined) row._packageId = packageId;
           return row;
         }
-        return isDraft ? { ...spec, _draft: true } : spec;
+        if (!isDraft && (packageId === undefined || spec?._packageId === packageId)) return spec;
+        return {
+          ...spec,
+          ...(isDraft ? { _draft: true } : {}),
+          ...(packageId !== undefined ? { _packageId: packageId } : {}),
+        };
       });
     } catch (err) {
       // Kept verbatim, on every arm. The console breadcrumb was never the

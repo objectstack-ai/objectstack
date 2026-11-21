@@ -72,7 +72,13 @@ vi.mock('@object-ui/plugin-list', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@object-ui/plugin-list')>()),
   ListView: (props: any) => {
     const lead = props.toolbarLeading;
-    return typeof lead === 'function' ? lead({ recordCount: null, layout: 'grid' }) : lead ?? null;
+    // objectstack#35878 — the condition row's end (the 「Personalized」 marker) draws too.
+    return (
+      <>
+        {typeof lead === 'function' ? lead({ recordCount: null, layout: 'grid' }) : lead ?? null}
+        {props.conditionRowEnd ?? null}
+      </>
+    );
   },
 }));
 vi.mock('@object-ui/plugin-view', async (importOriginal) => ({

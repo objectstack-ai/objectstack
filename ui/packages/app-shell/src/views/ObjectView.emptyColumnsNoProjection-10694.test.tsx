@@ -301,7 +301,7 @@ async function hideThroughToggle(field: string): Promise<void> {
   }
   const panel = await screen.findByTestId('view-settings-content');
   if (!within(panel).queryByTestId('options-page-fields')) {
-    fireEvent.click(within(panel).getByTestId('options-row-fields'));
+    fireEvent.click(within(panel).getByTestId('options-add-column'));
   }
   fireEvent.click(await within(panel).findByTestId(`options-fields-hide-${field}`));
 }
@@ -525,7 +525,7 @@ describe('an unprojected view applies neither hiddenFields nor fieldOrder on the
     expect(drawn).not.toContain('owner');
     fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
     const panel = await screen.findByTestId('view-settings-content');
-    fireEvent.click(within(panel).getByTestId('options-row-fields'));
+    fireEvent.click(within(panel).getByTestId('options-add-column'));
     await within(panel).findByText(/^region$/i);
     expect(within(panel).queryByText(/^owner$/i)).toBeNull();
 
@@ -588,7 +588,7 @@ describe('an unprojected view applies neither hiddenFields nor fieldOrder on the
     await mountRoute(listViews, PROBE_ID, makeDataSource());
     fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
     const panel = await screen.findByTestId('view-settings-content');
-    fireEvent.click(within(panel).getByTestId('options-row-fields'));
+    fireEvent.click(within(panel).getByTestId('options-add-column'));
     await within(panel).findByText(/^region$/i);
     expect(within(panel).queryByText(/^owner$/i)).toBeNull();
 

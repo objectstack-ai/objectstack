@@ -70,7 +70,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       highlightFields: {
         label: "重點欄位",
-        helpText: "本物件的欄位名，依重要性從高到低排列——只能放下一個時取第一項（ADR-0085）。決定預設清單欄、卡片、子記錄預覽和詳細資料頁面的重點資訊條。不是本物件欄位的名稱會在發布時被拒絕。"
+        helpText: "本物件的欄位名，依重要性從高到低排列——只能放下一個時取第一項（ADR-0085）。決定預設清單欄和相關清單欄、卡片、子記錄預覽、記錄懸停卡片和記錄選擇器。不是本物件欄位的名稱會在發布時被拒絕。"
       },
       relatedLists: {
         label: "相關清單順序",
@@ -1354,7 +1354,8 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         helpText: "點選條目時的導覽設定（預設為抽屜，也可為 page、new_window 或 none）"
       },
       "navigation.mode": {
-        label: "模式"
+        label: "模式",
+        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
       },
       "navigation.preventNavigation": {
         label: "禁止導覽",

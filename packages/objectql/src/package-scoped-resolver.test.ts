@@ -282,7 +282,7 @@ describe('ADR-0150 D3 exceptions', () => {
       email_template: [
         'auth.password_reset', 'auth.verify_email', 'auth.magic_link', 'auth.invitation',
         'auth.account_invitation', 'auth.two_factor_otp', 'auth.email_change_notice', 'auth.existing_account_sign_up',
-        'auth.password_changed_notice',
+        'auth.password_changed_notice', 'auth.password_reset_notice',
       ],
     });
     install(A);

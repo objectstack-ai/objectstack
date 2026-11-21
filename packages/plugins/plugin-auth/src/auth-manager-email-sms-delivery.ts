@@ -50,8 +50,9 @@
  * move.
  *
  * Added here since, in the same shape: the reminder a password change sends
- * of what it left active (`sendPasswordChangeReminder`,
- * `password-reset-ends-added-access.ts`).
+ * of what it left active (`sendPasswordChangeReminder`), and the notice a
+ * completed self-service reset sends of what it ended and what it kept
+ * (`sendPasswordResetNotice`), both `password-reset-ends-added-access.ts`.
  */
 
 import type { StandardErrorCode } from '@objectstack/spec/api';
@@ -232,14 +233,19 @@ export async function sendChangeEmailNotice(
 export async function sendPasswordChangeReminder(
   this: Pick<EmailSmsDeliveryHost, 'config' | 'emailLocaleArg' | 'getAppName' | 'getEmailService' | 'storedRecipientLocale'>,
   to: { email: string; name?: string; id?: string },
-  kept: { apiKeys: readonly string[]; signInAccounts: readonly string[]; authorizedApps: readonly string[] },
+  kept: {
+    apiKeys: readonly string[];
+    signInAccounts: readonly string[];
+    authorizedApps: readonly string[];
+    ownedApps: readonly string[];
+    scimCredentials: readonly string[];
+  },
   requestSource?: unknown,
 ): Promise<void> {
   try {
     const email = this.getEmailService();
     if (!email || !to.email) return;
     const storedLocale = to.id ? await this.storedRecipientLocale({ id: to.id }) : undefined;
-    const list = (items: readonly string[]) => (items.length > 0 ? items.join(', ') : '—');
     await email.sendTemplate({
       template: 'auth.password_changed_notice',
       to: { address: to.email, ...(to.name ? { name: to.name } : {}) },
@@ -252,6 +258,10 @@ export async function sendPasswordChangeReminder(
         signInAccounts: list(kept.signInAccounts),
         authorizedAppCount: kept.authorizedApps.length,
         authorizedApps: list(kept.authorizedApps),
+        ownedAppCount: kept.ownedApps.length,
+        ownedApps: list(kept.ownedApps),
+        scimCredentialCount: kept.scimCredentials.length,
+        scimCredentials: list(kept.scimCredentials),
         appName: this.getAppName(),
       },
       relatedObject: 'sys_user',
@@ -263,6 +273,61 @@ export async function sendPasswordChangeReminder(
     // Best-effort, as the change-email notice: a reminder that cannot be sent
     // never fails the password change it follows.
     this.config.logger?.warn?.('AuthManager: the password-change reminder could not be sent', {
+      error: (err as Error)?.message,
+    });
+  }
+}
+
+/** One list of a notice, prepared: the names joined with commas, or a dash when there are none. */
+function list(items: readonly string[]): string {
+  return items.length > 0 ? items.join(', ') : '—';
+}
+
+/** The body of `AuthManager#sendPasswordResetNotice`; the method's docblock there is its contract. */
+export async function sendPasswordResetNotice(
+  this: Pick<EmailSmsDeliveryHost, 'config' | 'emailLocaleArg' | 'getAppName' | 'getEmailService' | 'storedRecipientLocale'>,
+  to: { email: string; name?: string; id?: string },
+  ended: {
+    apiKeys: number;
+    signInAccounts: number;
+    authorizedApps: number;
+    ownedApps: readonly string[];
+    scimCredentials: readonly string[];
+  },
+  kept: { ssoProviders: readonly string[]; twoFactor: boolean },
+  requestSource?: unknown,
+): Promise<void> {
+  try {
+    const email = this.getEmailService();
+    if (!email || !to.email) return;
+    const storedLocale = to.id ? await this.storedRecipientLocale({ id: to.id }) : undefined;
+    await email.sendTemplate({
+      template: 'auth.password_reset_notice',
+      to: { address: to.email, ...(to.name ? { name: to.name } : {}) },
+      ...this.emailLocaleArg(requestSource, storedLocale),
+      data: {
+        user: { name: to.name || to.email, email: to.email, ...(to.id ? { id: to.id } : {}) },
+        apiKeyCount: ended.apiKeys,
+        signInAccountCount: ended.signInAccounts,
+        authorizedAppCount: ended.authorizedApps,
+        ownedAppCount: ended.ownedApps.length,
+        ownedApps: list(ended.ownedApps),
+        scimCredentialCount: ended.scimCredentials.length,
+        scimCredentials: list(ended.scimCredentials),
+        ssoProviderCount: kept.ssoProviders.length,
+        ssoProviders: list(kept.ssoProviders),
+        twoFactorCount: kept.twoFactor ? 1 : 0,
+        appName: this.getAppName(),
+      },
+      relatedObject: 'sys_user',
+      ...(to.id ? { relatedId: to.id } : {}),
+      // A notice to the account holder: identity mail (ADR-0131 D7, Q2 A).
+      identityMail: true,
+    });
+  } catch (err) {
+    // Best-effort, as the change reminder: a notice that cannot be sent never
+    // fails the reset it follows, which has already ended what it ends.
+    this.config.logger?.warn?.('AuthManager: the password-reset notice could not be sent', {
       error: (err as Error)?.message,
     });
   }

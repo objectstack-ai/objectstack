@@ -4510,9 +4510,11 @@ const RELATED_LIST_AUDIT_FKS: ReadonlySet<string> = new Set(['created_by', 'upda
  * spelled the way an entry may name it.
  *
  * [#27478] A field group's `relatedList` that DOES name inbound relationships
- * must name body tables only (`isBodyTableRelationship`, ruling B on #27055):
- * the group positions a body table and never promotes a side card, so one that
- * names a side card or a hidden list would draw nothing at the group. Judged
+ * must name lists a group may place only (`isGroupPlaceableRelationship`,
+ * ruling B on #27055 as amended by #35889): the group positions a `'primary'`
+ * body table or makes a plain `master_detail` one, and never promotes a side
+ * card, so one that names a side card or a hidden list would draw nothing at
+ * the group. Judged
  * here for the same reason — the FK's keys live on the child — and on the same
  * children: a child left unjudged above is left unjudged here. The sentence is
  * `fieldGroupBodyTableRefusal`'s, which `@objectstack/lint` writes too.
