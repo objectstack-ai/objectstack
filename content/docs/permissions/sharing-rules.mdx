@@ -77,9 +77,14 @@ Two things the bits do **not** override, regardless of the OWD:
   unless an app-authored `using` policy for the write applies to the caller.
   Then the write keeps the floor beside that policy: a row the floor admits
   (one the caller created) stays writable, and the policy still bounds every
-  other row. To hold the creator's own rows to a limit as well, give the
-  update policy a `check` (it judges the new image of every row); a delete
-  has no new image, so that limit goes in a `beforeDelete` lifecycle hook.
+  other row. The master check of a `controlled_by_parent` detail write
+  composes its master row the same way, so a master's creator can write its
+  details beside the master's authored update policy. To hold the creator's
+  own rows to a limit as well: a `check` on the update policy judges the
+  stored image of every row, but not the row as it stood before the write;
+  a `beforeUpdate` lifecycle hook sees that prior row as `ctx.previous`, and
+  a limit on deleting goes in a `beforeDelete` hook. For a master's details
+  the limit goes in a hook on the detail object.
   A write made on
   another user's behalf keeps the floor. Under
   `public_read_write` the sharing service abstains on a delete, so the

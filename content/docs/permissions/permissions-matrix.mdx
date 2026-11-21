@@ -59,10 +59,11 @@ record sharing enforces writes (an object with an `owner_id` whose OWD is
 the floor for that row: ownership at the caller's write depth or
 `modifyAllRecords`, and, for an update, an `edit` share. On an update, a row
 sitting in a queue the caller belongs to gets the same `allow` under any OWD. A
-by-id write takes that replacement, and so does a predicate write unless an
-app-authored `using` policy for the write applies to the caller (then it keeps
-the floor beside that policy). A write made on another user's behalf keeps the
-floor. A `controlled_by_parent` detail's by-id write is
+by-id write and a predicate write both take that replacement unless an
+app-authored `using` policy for the write applies to the caller; then the write
+keeps the floor beside that policy, so a row the caller created stays writable
+and the policy bounds every other row. A write made on another user's behalf
+keeps the floor. A `controlled_by_parent` detail's by-id write is
 judged by its master gate instead of the floor. An app-authored policy is never
 replaced. The Layer 0 tenant wall always ANDs on top. See
 [Sharing & OWD](/docs/permissions/sharing-rules#how-viewallrecords--modifyallrecords-interact-with-the-owd)

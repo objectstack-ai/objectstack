@@ -77,9 +77,16 @@ inside the caller's **readable** set, so when **no** write-class policy applies
 to a caller on an object, the `update` / `delete` scope is derived from that
 caller's `select` policies — a record they cannot read is one they cannot
 modify, by id or in bulk. Authoring a write-class policy switches the
-derivation off for that class: an authored `update` predicate then decides
-the `update` *filter* alone, widening past the platform's owner-scoped write
-floor exactly as written. Nothing is derived for `insert`
+derivation off for that class: an authored `update` predicate then joins
+the `update` *filter* as one more OR term, widening past the platform's
+owner-scoped write floor exactly as written. A write policy adds rows; it
+does not take away a row the floor admits (one the caller created), whether
+or not record sharing replaces the floor for that row. (A
+`controlled_by_parent` detail is the exception: its master gate judges the
+write instead of the floor, so a detail policy bounds every detail row.) To cap what a caller
+may do to rows they created, use a `check` (it judges the stored image) or a
+`beforeUpdate` / `beforeDelete` lifecycle hook (it sees the prior row as
+`ctx.previous`). Nothing is derived for `insert`
 (there is no pre-existing row to be visible), and a caller holding the
 read-side superuser bypass (`viewAllRecords` on a private or deployment-level
 object) is not narrowed, because their readable set is already unbounded.
