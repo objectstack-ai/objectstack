@@ -10,6 +10,7 @@ import * as React from 'react';
 import { Button, Textarea } from '@object-ui/components';
 import { Pencil, Trash2 } from 'lucide-react';
 import type { FeedItem } from '@object-ui/types';
+import { useDiscussionContext } from '@object-ui/react';
 import { useDetailTranslation } from './useDetailTranslation';
 
 /**
@@ -68,7 +69,11 @@ export const CommentBody: React.FC<CommentBodyProps> = ({
   const { t } = useDetailTranslation();
   const own = offersAuthorControls(item);
   const edit = own ? onEditComment : undefined;
-  const remove = own ? onDeleteComment : undefined;
+  // Where the host's Delete is the own-comment delete door
+  // (`ownCommentDeletesOnly`, objectstack#36191), a comment others replied
+  // under is kept by the door, so it offers no Delete.
+  const keptForReplies = useDiscussionContext()?.ownCommentDeletesOnly === true && (item.replyCount ?? 0) > 0;
+  const remove = own && !keptForReplies ? onDeleteComment : undefined;
   // `null` while the text is shown; the draft while the editor is open.
   const [draft, setDraft] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);

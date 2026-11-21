@@ -52,6 +52,7 @@ export interface RecordCommentThreadProps {
     | 'onResolveComment'
     | 'moderates'
     | 'updatesOthers'
+    | 'ownDeletesOnly'
     | 'mentionSuggestions'
     | 'onMentionSuggestionsWanted'
   >;
@@ -83,8 +84,19 @@ function editableComment(item: FeedItem, moderates: boolean | undefined, updates
   return ownComment(item) || (item.type === 'comment' && moderates === true && updatesOthers === true);
 }
 
-/** Whether the viewer may delete this comment: their own, or anyone's where they moderate. */
-function deletableComment(item: FeedItem, moderates: boolean | undefined): boolean {
+/**
+ * Whether the viewer may delete this comment: their own, or anyone's where
+ * they moderate. Where the host's Delete is the own-comment delete door
+ * (`ownDeletesOnly`, objectstack#36191), only their own, and only one with no
+ * reply under it: the door keeps a comment others replied to.
+ */
+function deletableComment(
+  item: FeedItem,
+  moderates: boolean | undefined,
+  ownDeletesOnly: boolean | undefined,
+  hasReplies: boolean,
+): boolean {
+  if (ownDeletesOnly === true) return ownComment(item) && !hasReplies;
   return ownComment(item) || (item.type === 'comment' && moderates === true);
 }
 
@@ -123,8 +135,16 @@ export const CommentThread: React.FC<RecordCommentThreadProps> = ({
   // on an open thread still lands it there.
   const [replyFocus, setReplyFocus] = React.useState(0);
   const [editingId, setEditingId] = React.useState<string | number | null>(null);
-  const { onAddReply, onToggleReaction, onEditComment, onDeleteComment, onResolveComment, moderates, updatesOthers } =
-    comments;
+  const {
+    onAddReply,
+    onToggleReaction,
+    onEditComment,
+    onDeleteComment,
+    onResolveComment,
+    moderates,
+    updatesOthers,
+    ownDeletesOnly,
+  } = comments;
   const resolvable = threadResolvable(thread);
   const resolved = threadResolved(thread);
   // The host names the resolver (a by-id read of the ids it could not name);
@@ -145,10 +165,11 @@ export const CommentThread: React.FC<RecordCommentThreadProps> = ({
     isRoot,
     onReply: onAddReply ? openReply : undefined,
     onReact: onToggleReaction ? (emoji: string) => void onToggleReaction(item.id, emoji) : undefined,
-    // ✓ writes the top-level row: on a thread the viewer started, or anyone's
-    // where the server admits their update of a row they did not write.
+    // ✓ resolves the thread by its top-level row, anyone's: the host hands
+    // the handler over only where its write admits every thread the viewer
+    // can read (the resolution door, objectstack#36186).
     onResolve:
-      isRoot && resolvable && onResolveComment && (ownComment(item) || updatesOthers === true)
+      isRoot && resolvable && onResolveComment
         ? () => {
             // A refused write changed nothing, and the host has said so.
             void Promise.resolve(onResolveComment(item.id, !resolved)).catch(() => undefined);
@@ -156,7 +177,16 @@ export const CommentThread: React.FC<RecordCommentThreadProps> = ({
         : undefined,
     resolved: isRoot && resolved,
     onEdit: onEditComment && editableComment(item, moderates, updatesOthers) ? () => setEditingId(item.id) : undefined,
-    onDelete: onDeleteComment && deletableComment(item, moderates) ? () => void onDeleteComment(item.id) : undefined,
+    onDelete:
+      onDeleteComment &&
+      deletableComment(
+        item,
+        moderates,
+        ownDeletesOnly,
+        (item.replyCount ?? 0) > 0 || replies.some((reply) => reply.parentId != null && String(reply.parentId) === String(item.id)),
+      )
+        ? () => void onDeleteComment(item.id)
+        : undefined,
   });
 
   const itemOf = (item: FeedItem, isRoot: boolean, footer?: React.ReactNode, itemClassName?: string) => (

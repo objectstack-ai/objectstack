@@ -715,6 +715,19 @@ const COMMENT_REACTION_OBJECT = 'sys_comment_reaction';
  */
 const COMMENT_REACTION_REMOVE_PATH = '/api/v1/comments/reactions';
 
+/**
+ * The comment doors (objectstack#36186, #36191), each `+ /:id` of a
+ * `sys_comment` row: `PUT …/resolution` with `{ resolved }` resolves or reopens
+ * the thread of a top-level comment for anyone who can read it, writing
+ * `is_resolved` alone; `DELETE` removes the caller's own comment, refuses
+ * anyone else's (`403 PERMISSION_DENIED`) and keeps one others replied under
+ * (`409 DELETE_RESTRICTED`). They exist because the data door cannot serve a
+ * rank-and-file member either write: the platform's row floor admits their
+ * update of their own rows alone, and no every-member set may carry the
+ * `delete` grant (ADR-0090 D5).
+ */
+const COMMENT_DOOR_PATH = '/api/v1/comments';
+
 /** The object the record feed's comments and replies are rows of. */
 const COMMENT_OBJECT = 'sys_comment';
 
@@ -765,6 +778,7 @@ function resolveFeedWriteGates(
   comment: boolean;
   commentEdit: boolean;
   commentDelete: boolean;
+  commentDeleteOwn: boolean;
   reactionAdd: boolean;
   reactionRemove: boolean;
   reactionColumn: boolean;
@@ -781,6 +795,9 @@ function resolveFeedWriteGates(
     // under its own grant on `sys_comment`.
     commentEdit: resolveAffordance('feedCommentEdit', source(COMMENT_OBJECT)).allowed,
     commentDelete: resolveAffordance('feedCommentDelete', source(COMMENT_OBJECT)).allowed,
+    // objectstack#36191: without the delete grant, the author's Delete is the
+    // own-comment delete door, asked under the grant the comment was posted under.
+    commentDeleteOwn: resolveAffordance('feedCommentDeleteOwn', source(COMMENT_OBJECT)).allowed,
     reactionAdd: resolveAffordance('feedReactionAdd', source(COMMENT_REACTION_OBJECT)).allowed,
     reactionRemove: resolveAffordance('feedReactionRemove', source(COMMENT_REACTION_OBJECT)).allowed,
     reactionColumn: resolveAffordance('feedReactionColumn', source(COMMENT_OBJECT)).allowed,
@@ -4183,7 +4200,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
 
   /**
    * The author's Delete on their own comment or reply (objectui#12268), offered
-   * on the same rows under the delete grant (`feedGates.commentDelete`).
+   * on the same rows under the delete grant (`feedGates.commentDelete`), and,
+   * for a viewer without it, under the comment grant through the own-comment
+   * delete door (`feedGates.commentDeleteOwn`, objectstack#36191): that door
+   * removes the viewer's own comment alone and keeps one others replied under,
+   * so the panel offers it on exactly those rows (`ownCommentDeletesOnly`).
+   * With the grant, the data door's delete is used as before, a moderator's
+   * delete of another member's comment included.
    *
    * It asks first, through the console's ordinary destructive-action confirm:
    * this page's own `confirmHandler`, the `ActionConfirmDialog` the record's
@@ -4211,8 +4234,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       );
       if (!confirmed) return;
       try {
-        if ((await dataSource.delete(COMMENT_OBJECT, String(itemId))) === false) {
-          throw new Error('The comment was not deleted.');
+        if (feedGates.commentDelete) {
+          if ((await dataSource.delete(COMMENT_OBJECT, String(itemId))) === false) {
+            throw new Error('The comment was not deleted.');
+          }
+        } else {
+          const res = await authFetch(
+            `${import.meta.env.VITE_SERVER_URL || ''}${COMMENT_DOOR_PATH}/${encodeURIComponent(String(itemId))}`,
+            { method: 'DELETE', credentials: 'include' },
+          );
+          if (!res.ok) throw new Error(`The comment was not deleted (HTTP ${res.status}).`);
         }
       } catch (err) {
         toast.error(
@@ -4237,17 +4268,21 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       // and the comment did not just scroll away (objectstack#36070).
       toast.success(t('detail.commentDeleted', { defaultValue: 'Comment deleted' }));
     },
-    [dataSource, feedRecordKey, feedItemsByRecord, confirmHandler, t],
+    [dataSource, feedRecordKey, feedItemsByRecord, confirmHandler, t, feedGates.commentDelete, authFetch],
   );
 
   /**
    * Resolve or reopen a thread (objectstack#36071, #36075 item 7), by its
-   * top-level comment: `{ is_resolved }` and nothing else, the one update
-   * whoever may comment on the record is admitted to (maintainer ruling
-   * record 7063285032). The platform stamps who and when; the row changes
-   * only once the server has stored it, from the stored record it answers
-   * with, and a refused write raises a localized error and leaves the thread
-   * as it was.
+   * top-level comment, through the platform's resolution door
+   * (`PUT /api/v1/comments/:id/resolution` with `{ resolved }`,
+   * objectstack#36186). The door admits whoever can read the thread
+   * (maintainer ruling record 7063285032) and writes `is_resolved` alone, so a
+   * rank-and-file member resolves a colleague's thread too: on the data door
+   * the platform's row floor refuses their update of a row they did not
+   * create. The platform stamps who and when; the row changes only once the
+   * server has stored it, from the stored resolution the door answers with,
+   * and a refused write raises a localized error and leaves the thread as it
+   * was.
    */
   const handleResolveComment = useCallback(
     async (itemId: string | number, resolved: boolean) => {
@@ -4257,7 +4292,18 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       if (!row || row.type !== 'comment' || row.parentId != null) return;
       let stored: Record<string, unknown> | null | undefined;
       try {
-        stored = await dataSource.update(COMMENT_OBJECT, String(itemId), { is_resolved: resolved });
+        const res = await authFetch(
+          `${import.meta.env.VITE_SERVER_URL || ''}${COMMENT_DOOR_PATH}/${encodeURIComponent(String(itemId))}/resolution`,
+          {
+            method: 'PUT',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ resolved }),
+          },
+        );
+        if (!res.ok) throw new Error(`The thread was not updated (HTTP ${res.status}).`);
+        const envelope = (await res.json().catch(() => null)) as { data?: unknown } | null;
+        stored = envelope && typeof envelope.data === 'object' ? (envelope.data as Record<string, unknown> | null) : null;
       } catch (err) {
         toast.error(
           t('detail.commentResolveFailed', { defaultValue: 'The thread was not updated. Please try again.' }),
@@ -4289,7 +4335,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         ),
       }));
     },
-    [currentUser, dataSource, feedRecordKey, feedItemsByRecord, t],
+    [currentUser, dataSource, feedRecordKey, feedItemsByRecord, t, authFetch],
   );
 
   // objectstack#36075 item 6 — may the viewer edit and delete OTHER people's
@@ -4314,12 +4360,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // objectstack#36075 — may the viewer update a comment they did NOT write?
   // The platform's row floor (`owner_only_writes`) lets a rank-and-file member
   // update only the rows they created, and it runs before the comment rules
-  // (the resolve rule of #36104 and the parent-editor rule above), so today a
-  // member's ✓ on a colleague's thread and Edit of a colleague's comment are
-  // refused. The explain engine answers the floor: ONE probe, `update` of the
-  // first top-level comment here the viewer did not write; the floor answers
-  // the same for every such row. ✓ and Edit on others' rows are offered only
-  // on its definite allow (pending, a refusal, an error, no explain service,
+  // (the parent-editor rule above), so a member's Edit of a colleague's
+  // comment is refused; ✓ goes through the resolution door instead
+  // (objectstack#36186) and does not ask this. The explain engine answers the
+  // floor: ONE probe, `update` of the first top-level comment here the viewer
+  // did not write; the floor answers the same for every such row. Edit on
+  // others' rows is offered only on its definite allow (pending, a refusal, an error, no explain service,
   // or a stale answer offer them on the viewer's own rows alone). Asked when
   // the reader first reaches into the open panel (pointer or focus), so
   // opening the record, and opening the panel, still read nothing more
@@ -6061,15 +6107,17 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           // grant; the panel offers them only on the rows the read marked
           // `authoredByViewer`.
           onEditComment={feedGates.commentEdit ? handleEditComment : undefined}
-          onDeleteComment={feedGates.commentDelete ? handleDeleteComment : undefined}
-          // objectstack#36071 / #36075 — resolve and reopen are an update of
-          // the top-level `sys_comment` row, under the same grant as Edit. The
-          // server's rule is any reader of the record (ruling 7063285032), but
-          // its row floor admits a member's update of their own rows alone, so
-          // the panel offers ✓ on a thread the viewer started, and on others'
-          // only where `updatesOthersComments` holds; and only where the rows
-          // say the deployment stores resolution.
-          onResolveComment={feedsEnabled && feedGates.commentEdit ? handleResolveComment : undefined}
+          // objectstack#36191: under the delete grant, the data door's delete;
+          // without it, the own-comment delete door, which removes the
+          // viewer's own comment alone and keeps one others replied under.
+          onDeleteComment={feedGates.commentDelete || feedGates.commentDeleteOwn ? handleDeleteComment : undefined}
+          ownCommentDeletesOnly={!feedGates.commentDelete}
+          // objectstack#36071 / #36075 / #36186 — resolve and reopen go
+          // through the resolution door, which admits whoever can read the
+          // thread (ruling 7063285032) and asks no grant, so the panel offers
+          // ✓ on every thread, the viewer's and others', wherever the rows say
+          // the deployment stores resolution.
+          onResolveComment={feedsEnabled ? handleResolveComment : undefined}
           moderatesComments={moderatesComments}
           updatesOthersComments={updatesOthersComments}
           onToggleReaction={
