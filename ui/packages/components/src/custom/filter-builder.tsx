@@ -16,7 +16,13 @@ import {
   normalizeFilterOperator,
   type ViewFilterRule,
 } from "@objectstack/spec/ui"
-import { DATE_RANGE_PRESETS, expandEmptyOperator, type DateRangePreset } from "@objectstack/spec/data"
+import {
+  DATE_RANGE_PRESETS,
+  STRUCTURED_JSON_TYPES,
+  expandEmptyOperator,
+  isMultiValueField,
+  type DateRangePreset,
+} from "@objectstack/spec/data"
 import { SchemaRendererContext, useSettledSchema } from "@object-ui/react"
 import {
   FILTER_DATE_LIKE_TYPES,
@@ -152,6 +158,12 @@ export interface FilterBuilderProps {
     label: string
     type?: string
     options?: Array<{ value: string; label: string }> // For select fields
+    /**
+     * The field's declared `multiple` flag. With the type it decides whether
+     * the field's value is a list, so which operators the row offers
+     * ({@link jsonColumnFilterOperators}).
+     */
+    multiple?: boolean
     /** For lookup/master_detail/user fields — referenced object name */
     referenceTo?: string
     /** Display field on the referenced object (defaults to "name") */
@@ -961,6 +973,7 @@ export function retypeFilterValue(
 /** The shape of a `fields` entry that the option-domain helpers below read. */
 type OptionBearingField = {
   type?: string
+  multiple?: boolean
   options?: ReadonlyArray<{ value: string; label: string }>
 }
 
@@ -1048,7 +1061,12 @@ function isOptionDrivenValueControl(
     case "pair":
       return false
     default:
-      return selectLikeTypes.includes(type) || lookupLikeTypes.includes(type)
+      // A multi-value option field's `contains` picks ONE of its options.
+      return (
+        selectLikeTypes.includes(type) ||
+        lookupLikeTypes.includes(type) ||
+        jsonColumnFilterOperators(field) !== undefined
+      )
   }
 }
 
@@ -1380,30 +1398,90 @@ export function operatorsForFieldType(
  */
 const NULLNESS_PAIR: ReadonlySet<string> = new Set(["is_null", "is_not_null"])
 
+/** The two facts of a field descriptor that decide what its value is stored as. */
+export interface FilterFieldStorageFacts {
+  type?: string
+  multiple?: boolean
+}
+
 /**
- * Which row of the spec's ruled 「is empty」 table a column of `fieldType`
- * takes — read from `@objectstack/spec`'s `expandEmptyOperator`, the one
- * function every server face expands `$empty` with, never from a local type
- * list (objectui#11810):
+ * Which row of the spec's ruled 「is empty」 table a column takes — read from
+ * `@objectstack/spec`'s `expandEmptyOperator`, the one function every server
+ * face expands `$empty` with, never from a local type list (objectui#11810):
  *
  *   - `text` — text-like types: `is_empty` matches null OR `''`;
- *   - `multi_value` — list-valued types: `is_empty` matches null OR `[]`;
+ *   - `multi_value` — list-valued fields: `is_empty` matches null OR `[]`;
  *   - `null_only` — every other type: `is_empty` matches null only, which is
  *     exactly what `is_null` matches.
  *
- * Keyed on the TYPE alone because that is all a field descriptor here carries:
- * a `lookup` / `user` / `select` declared `multiple: true` is `multi_value` on
- * the server and is judged `null_only` here. The pair it is then offered,
- * `is_empty` / `is_not_empty`, is the one whose server expansion counts `[]`.
+ * Keyed on the type AND `multiple`, as the spec function is: a `lookup` /
+ * `user` / `select` declared `multiple: true` is `multi_value`. A host that
+ * does not pass `multiple` gets the type's own row.
  */
-function emptyCheckArm(fieldType: string | undefined) {
-  return expandEmptyOperator({ type: fieldType || "text" }).arm
+function emptyCheckArm(field: FilterFieldStorageFacts | undefined) {
+  return expandEmptyOperator({ type: field?.type || "text", multiple: field?.multiple === true }).arm
+}
+
+/**
+ * The operators a field stored as a JSON column takes in a filter, or
+ * `undefined` for every other field (whose operators follow its type bucket).
+ *
+ * The server refuses the equality, membership-list, ordering and text-match
+ * operators on such a field with `400 INVALID_FILTER` — the set
+ * `JSON_COLUMN_INCOMPATIBLE_OPERATORS` in `@objectstack/core` — and accepts
+ * `$contains` / `$notContains` (membership) and the null predicates. The
+ * builder therefore offers only what the server answers:
+ *
+ *   - a MULTI-VALUE field (`isMultiValueField`: `multiselect` / `checkboxes` /
+ *     `tags`, or a multi-capable type with `multiple: true`) — `contains` /
+ *     `not_contains`, one member each (the spec's `$contains` takes ONE
+ *     comparand), and `is_empty` / `is_not_empty`, whose `$empty` expansion
+ *     counts `[]`;
+ *   - a STRUCTURED-JSON field (`STRUCTURED_JSON_TYPES`: `json`, `address`, …)
+ *     — `is_empty` / `is_not_empty` only: the server's membership test is
+ *     array-only, so a member picked for an object value matches nothing.
+ *
+ * Decided from the same two field facts the server's faces read (the
+ * engine's `declaredJsonStoredFields`: `STRUCTURED_JSON_TYPES` or
+ * `isMultiValueField`), through the spec's own sets — never a local type list.
+ * The driver's own JSON-column test and the spec predicate are related here,
+ * so the card that owns their divergence is cited: objectstack#17469
+ * (`multiple: true` on a type that cannot hold several values).
+ * Shared by every filter surface that offers operators per field, so the
+ * list's quick filter and this builder cannot disagree.
+ */
+export function jsonColumnFilterOperators(
+  field: FilterFieldStorageFacts | undefined,
+): readonly FilterBuilderOperator[] | undefined {
+  const type = field?.type || "text"
+  if (isMultiValueField({ type, multiple: field?.multiple === true })) return MULTI_VALUE_FIELD_OPERATORS
+  if (STRUCTURED_JSON_TYPES.has(type)) return STRUCTURED_JSON_FIELD_OPERATORS
+  return undefined
+}
+
+const MULTI_VALUE_FIELD_OPERATORS: readonly FilterBuilderOperator[] = ["contains", "not_contains", "is_empty", "is_not_empty"]
+const STRUCTURED_JSON_FIELD_OPERATORS: readonly FilterBuilderOperator[] = ["is_empty", "is_not_empty"]
+
+/**
+ * The operators a fresh choice on this FIELD is offered: the JSON-column set
+ * when the field is stored as one ({@link jsonColumnFilterOperators}),
+ * otherwise its type bucket ({@link operatorsForFieldType}).
+ *
+ * @internal exported for tests
+ */
+export function operatorsForField(
+  field: FilterFieldStorageFacts | undefined,
+  extraOperators: readonly string[] = [],
+): ReadonlyArray<{ value: string; label: string }> {
+  const json = jsonColumnFilterOperators(field)
+  if (!json) return operatorsForFieldType(field?.type, extraOperators)
+  return defaultOperators.filter((op) => json.includes(op.value))
 }
 
 /**
  * The operators the dropdown MOUNTS for one row (objectui#11810).
  *
- * {@link operatorsForFieldType}, minus `is_null` / `is_not_null` on a column
+ * {@link operatorsForField}, minus `is_null` / `is_not_null` on a column
  * whose type cannot tell empty from null (`null_only`, see
  * {@link emptyCheckArm}). There the two pairs are one predicate under two
  * labels — every dialect this builder writes expands `is_empty` on such a
@@ -1414,18 +1492,26 @@ function emptyCheckArm(fieldType: string | undefined) {
  *
  * The row's OWN operator is always mounted. A stored filter that already
  * reads `is_null` on a `select` column (a sharing rule's `$null`, a saved
- * view's `is_null` rule) must still load as what it is: an unmounted operator
- * draws a BLANK trigger (objectui#4768 / #7561), and nothing here rewrites a
- * stored spelling (objectui#9306 folds spellings, never predicates).
+ * view's `is_null` rule), or `equals` on a multi-value field the server
+ * refuses it on, must still load as what it is so the reader can change it:
+ * an unmounted operator draws a BLANK trigger (objectui#4768 / #7561), and
+ * nothing here rewrites a stored spelling (objectui#9306 folds spellings,
+ * never predicates).
  */
 function offeredOperatorsForRow(
-  fieldType: string | undefined,
+  field: FilterFieldStorageFacts | undefined,
   extraOperators: readonly string[] | undefined,
   rowOperator: string,
 ): ReadonlyArray<{ value: string; label: string }> {
-  const drawable = operatorsForFieldType(fieldType, extraOperators)
-  if (emptyCheckArm(fieldType) !== "null_only") return drawable
   const held = normalizeFilterBuilderOperator(rowOperator)
+  if (jsonColumnFilterOperators(field)) {
+    const offered = operatorsForField(field, extraOperators)
+    return defaultOperators.filter(
+      (op) => op.value === held || offered.some((o) => o.value === op.value),
+    )
+  }
+  const drawable = operatorsForFieldType(field?.type, extraOperators)
+  if (emptyCheckArm(field) !== "null_only") return drawable
   return drawable.filter((op) => !NULLNESS_PAIR.has(op.value) || op.value === held)
 }
 
@@ -1571,10 +1657,14 @@ function FilterBuilder({
   const pairsCurrency = filterGroup.conditions.some((c) => pairedCurrencyField(c, fields, needsValueInput))
 
   const addCondition = () => {
+    // A new row starts on `equals`, or on the first operator its field offers
+    // when that field does not take `equals` (a multi-value field, which the
+    // server refuses it on).
+    const seeded = reconcileOperatorForField("equals", operatorsForField(fields[0], extraOperators))
     const newCondition: FilterBuilderRow = {
       id: crypto.randomUUID(),
       field: fields[0]?.value || "",
-      operator: "equals",
+      operator: isFilterBuilderOperator(seeded) ? seeded : "equals",
       value: "",
     }
     handleChange({
@@ -1672,13 +1762,13 @@ function FilterBuilder({
 
   const getOperatorsForField = (fieldValue: string) => {
     const field = fields.find((f) => f.value === fieldValue)
-    return operatorsForFieldType(field?.type, extraOperators)
+    return operatorsForField(field, extraOperators)
   }
 
   // What the row's operator dropdown mounts — see `offeredOperatorsForRow`.
   const getOperatorsForRow = (condition: FilterBuilderRow) => {
     const field = fields.find((f) => f.value === condition.field)
-    return offeredOperatorsForRow(field?.type, extraOperators, condition.operator)
+    return offeredOperatorsForRow(field, extraOperators, condition.operator)
   }
 
   /**
@@ -1696,7 +1786,7 @@ function FilterBuilder({
       isEmpty: t("filterBuilder.operators.is_empty"),
       isNull: t("filterBuilder.operators.is_null"),
     }
-    const arm = emptyCheckArm(field?.type)
+    const arm = emptyCheckArm(field)
     // A stored `is_null` held on a `null_only` column mounts both, and on that
     // column they match the same records: there is no difference to explain.
     if (arm === "null_only") return null
@@ -2069,8 +2159,9 @@ function FilterBuilder({
       )
     }
 
-    // For select/lookup fields with options (single select)
-    if (field?.options && (selectLikeTypes.includes(field.type || "") || lookupLikeTypes.includes(field.type || ""))) {
+    // For select/lookup fields with options (single select), and the one
+    // member a multi-value option field's `contains` names.
+    if (field?.options && isOptionDrivenValueControl(field, condition.operator)) {
       // `displayScalarValue`, never `value || ""` (objectui#4873): an option
       // whose id is `0` — a status code, a level — is a real selection, and
       // `0 || ""` handed the trigger the same `""` an unfilled row gives it, so

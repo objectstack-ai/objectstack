@@ -120,6 +120,7 @@ export const zhCN: TranslationData = {
         nav_datasources: { label: '数据源' },
         nav_connector_credentials: { label: '连接器凭据' },
         nav_connector_connections: { label: '连接器连接' },
+        nav_slack: { label: 'Slack' },
 
         nav_oauth_apps: { label: 'OAuth 应用' },
       },

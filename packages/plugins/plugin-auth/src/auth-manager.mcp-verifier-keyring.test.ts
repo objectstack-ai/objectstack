@@ -37,6 +37,9 @@ import { SignJWT, exportJWK, generateKeyPair } from 'jose';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { AuthManager } from './auth-manager.js';
+// The SSO discovery egress guard the source loads with a dynamic import, paid
+// here, during collection (check-test-source-alias, "The source reach").
+import '@objectstack/core/egress';
 import { authIdentityObjects } from './manifest.js';
 import { retireHeldKeyrings, UNKNOWN_SIGNING_KEY_REREAD_FLOOR_MS } from './signing-key-read-cache.js';
 
@@ -271,6 +274,8 @@ describe('[#24186] the bound on the fresh read an unknown key earns', () => {
     const consent = { clientId: CLIENT, userId: USER, referenceId: null, createdAt: new Date(Date.now() - 60_000) };
     vi.spyOn(manager, 'getAuthContext').mockResolvedValue({
       adapter: { findMany: async () => [{ ...consent }], findOne: async () => ({ clientId: CLIENT, disabled: false }) },
+      // The password's clock the same read consults: no password row, never changed.
+      internalAdapter: { findCredentialAccount: async () => null },
     });
     const token = (privateKey: CryptoKey, kid: string) => {
       const now = Math.floor(Date.now() / 1000);

@@ -21,15 +21,35 @@
  *      either; "Reload latest" does read again.
  *   4. Control: without `cellSelection` the save bar's row save still
  *      re-reads the grid.
+ *   5. Undo (slice S2): the save toast's Undo button and Ctrl+Z / Cmd+Z on a
+ *      cell take a save back as a NEW guarded update of the prior value,
+ *      newest first, each once, guarded by the version the grid's own write
+ *      answered (a later change by someone else answers 409); an open editor
+ *      keeps Ctrl+Z for its text.
+ *   6. A grid without `cellSelection` inside a list's own-writes registry
+ *      (the related list in that list's record drawer) still re-reads on a
+ *      write the outer grid holds.
+ *   7. A move of a state-machine field (slice S3) opens a confirm naming the
+ *      field and both values and saying automation may run; Cancel writes
+ *      nothing, Change writes the move. A field no active machine governs
+ *      saves without asking.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, cleanup, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 
+// The grid's toast, to read the save toast's Undo button (the components
+// entry is the module the grid imports `toast` from).
+const toasts = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() }));
+vi.mock('@object-ui/components', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return { ...actual, toast: Object.assign(vi.fn(), toasts) };
+});
+
 import { ObjectGrid } from '../ObjectGrid';
 import { registerAllFields } from '@object-ui/fields';
-import { ActionProvider, notifyDataChanged } from '@object-ui/react';
+import { ActionProvider, notifyDataChanged, createOwnWrites, OwnWritesContext } from '@object-ui/react';
 import { __clearRecordCrudVerdictCache } from '../hooks/useRecordCrudVerdicts';
 import { __resetApprovalsServiceLatch } from '../hooks/useRowApprovalLocks';
 import { installExplainDouble } from './explainDouble';
@@ -42,6 +62,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  for (const fn of Object.values(toasts)) fn.mockClear();
 });
 
 registerAllFields();
@@ -229,5 +250,329 @@ describe('ObjectGrid autosave — control: without cellSelection the row save re
     fireEvent.click(saveAll);
     await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(ds.find.mock.calls.length).toBeGreaterThan(reads));
+  });
+});
+
+/** The Undo button of the `n`th success toast (0-based), as the grid handed it to the toast. */
+function undoOfToast(n: number): { label: string; onClick: () => void } | undefined {
+  return (toasts.success.mock.calls[n]?.[1] as { action?: { label: string; onClick: () => void } } | undefined)?.action;
+}
+
+/** Ctrl+Z on the selected cell (its typing catcher holds the focus). */
+function pressUndo(container: HTMLElement, init: Record<string, unknown> = { ctrlKey: true }) {
+  const catcher = container.querySelector<HTMLInputElement>('[data-slot="cell-type-catcher"]')!;
+  expect(catcher).toBeTruthy();
+  fireEvent.keyDown(catcher, { key: 'z', ...init });
+}
+
+describe('ObjectGrid autosave — Undo takes a save back as a new guarded update (objectstack#35685)', () => {
+  it("the save toast's Undo writes the prior value with the save's version, and reads nothing again", async () => {
+    const ds = makeDataSource();
+    const { container } = renderGrid(ds, true);
+    await screen.findByText('beta');
+    const reads = ds.find.mock.calls.length;
+    await editSelectFirst(container, dataCell(container, 0, '10'), '11');
+    await screen.findByText('11');
+    await waitFor(() => expect(toasts.success).toHaveBeenCalledTimes(1));
+    const undo = undoOfToast(0);
+    expect(undo?.label).toBe('Undo');
+    undo!.onClick();
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(2));
+    // One more write, guarded by the version the save answered with: the
+    // server's audit sees the save and its undo as two writes.
+    expect(ds.update.mock.calls[1].slice(1)).toEqual(['d1', { amount: 10 }, { ifMatch: '2026-11-20T11:00:01.000Z' }]);
+    expect(ds.store.d1.amount).toBe(10);
+    await screen.findByText('10');
+    expect(screen.queryByText('11')).toBeNull();
+    await waitFor(() => expect(toasts.success).toHaveBeenLastCalledWith('Change undone'));
+    expect(ds.find.mock.calls.length).toBe(reads);
+    // Taken back once: the same button again writes nothing.
+    undo!.onClick();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(ds.update).toHaveBeenCalledTimes(2);
+  });
+
+  it('Ctrl+Z and Cmd+Z on a cell undo the newest save first, each once', async () => {
+    const ds = makeDataSource();
+    const { container } = renderGrid(ds, true);
+    await screen.findByText('beta');
+    await editSelectFirst(container, dataCell(container, 0, '10'), '11');
+    await screen.findByText('11');
+    await editSelectFirst(container, dataCell(container, 1, '20'), '21');
+    await screen.findByText('21');
+    expect(ds.update).toHaveBeenCalledTimes(2);
+    pressUndo(container);
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(3));
+    expect(ds.update.mock.calls[2].slice(1, 3)).toEqual(['d2', { amount: 20 }]);
+    await screen.findByText('20');
+    pressUndo(container, { metaKey: true });
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(4));
+    expect(ds.update.mock.calls[3].slice(1, 3)).toEqual(['d1', { amount: 10 }]);
+    await screen.findByText('10');
+    // Nothing left to take back: the key writes nothing.
+    pressUndo(container);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(ds.update).toHaveBeenCalledTimes(4);
+    // The toast of a save Ctrl+Z already took back does nothing either.
+    undoOfToast(0)!.onClick();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(ds.update).toHaveBeenCalledTimes(4);
+  });
+
+  it("an earlier save's Undo is guarded by the newest version of its record", async () => {
+    const ds = makeDataSource();
+    const { container } = renderGrid(ds, true);
+    await screen.findByText('beta');
+    await editSelectFirst(container, dataCell(container, 0, '10'), '11');
+    await screen.findByText('11');
+    await editSelectFirst(container, dataCell(container, 0, 'alpha'), 'a2');
+    await screen.findByText('A2');
+    undoOfToast(0)!.onClick();
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(3));
+    expect(ds.update.mock.calls[2].slice(1)).toEqual(['d1', { amount: 10 }, { ifMatch: '2026-11-20T11:00:02.000Z' }]);
+    await screen.findByText('10');
+    expect(screen.getByText('A2')).toBeInTheDocument();
+  });
+
+  it("someone else's later change answers 409 on the undo, even after a re-read: Cancel keeps their value", async () => {
+    const ds = makeDataSource();
+    // The server refuses a write whose If-Match is not the record's version.
+    const land = ds.update.getMockImplementation();
+    ds.update.mockImplementation(async (object: string, id: string, changes: Record<string, any>, opts?: any) => {
+      if (opts?.ifMatch && opts.ifMatch !== ds.store[id].updated_at) {
+        throw Object.assign(new Error('Record changed since you read it'), {
+          code: 'CONCURRENT_UPDATE',
+          currentVersion: ds.store[id].updated_at,
+          currentRecord: { ...ds.store[id] },
+        });
+      }
+      return land(object, id, changes, opts);
+    });
+    const { container } = renderGrid(ds, true);
+    await screen.findByText('beta');
+    await editSelectFirst(container, dataCell(container, 0, '10'), '11');
+    await screen.findByText('11');
+    // Another user sets the amount; a change naming no record makes the grid read again.
+    ds.store.d1 = { ...ds.store.d1, amount: 50, updated_at: '2026-11-20T12:00:00.000Z' };
+    notifyDataChanged({ objectName: OBJECT });
+    await screen.findByText('50');
+    undoOfToast(0)!.onClick();
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(2));
+    // Guarded by the version this grid's own save answered, not the re-read's.
+    expect(ds.update.mock.calls[1][3]).toEqual({ ifMatch: '2026-11-20T11:00:01.000Z' });
+    fireEvent.click(await screen.findByRole('button', { name: /^Cancel$/ }));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(ds.update).toHaveBeenCalledTimes(2);
+    expect(ds.store.d1.amount).toBe(50);
+    expect(screen.getByText('50')).toBeInTheDocument();
+    expect(toasts.success).not.toHaveBeenCalledWith('Change undone');
+    // The cancelled undo is spent: the key has nothing left to send.
+    pressUndo(container);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(ds.update).toHaveBeenCalledTimes(2);
+  });
+
+  it('an open editor keeps Ctrl+Z for its own text: no undo is sent', async () => {
+    const ds = makeDataSource();
+    const { container } = renderGrid(ds, true);
+    await screen.findByText('beta');
+    await editSelectFirst(container, dataCell(container, 0, '10'), '11');
+    await screen.findByText('11');
+    fireEvent.click(dataCell(container, 1, 'beta'));
+    const catcher = container.querySelector<HTMLInputElement>('[data-slot="cell-type-catcher"]')!;
+    fireEvent.keyDown(catcher, { key: 'Enter' });
+    const input = await waitFor(() => {
+      const el = container.querySelector<HTMLInputElement>('td[data-editing-cell] input');
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    fireEvent.keyDown(input, { key: 'z', ctrlKey: true });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(ds.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('a refused undo keeps the row and says why on a toast', async () => {
+    const ds = makeDataSource();
+    const { container } = renderGrid(ds, true);
+    await screen.findByText('beta');
+    await editSelectFirst(container, dataCell(container, 0, '10'), '11');
+    await screen.findByText('11');
+    ds.update.mockImplementationOnce(async () => { throw new Error('Amount is locked'); });
+    pressUndo(container);
+    await waitFor(() => expect(toasts.error).toHaveBeenCalledWith('Save failed', { description: 'Amount is locked' }));
+    expect(screen.getByText('11')).toBeInTheDocument();
+  });
+
+  it('control: without cellSelection the save toast carries no Undo', async () => {
+    const ds = makeDataSource();
+    const { container } = renderGrid(ds, false);
+    await screen.findByText('beta');
+    const cell = dataCell(container, 0, 'alpha');
+    fireEvent.click(cell);
+    const input = await waitFor(() => {
+      const el = cell.querySelector('input') as HTMLInputElement;
+      expect(el).toBeTruthy();
+      return el;
+    });
+    fireEvent.change(input, { target: { value: 'alpha one' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    const saveAll = await waitFor(() => {
+      const btn = Array.from(container.querySelectorAll('button')).find((b) => /Save All/.test(b.textContent || ''));
+      expect(btn).toBeTruthy();
+      return btn as HTMLButtonElement;
+    });
+    fireEvent.click(saveAll);
+    await waitFor(() => expect(toasts.success).toHaveBeenCalledTimes(1));
+    expect(undoOfToast(0)).toBeUndefined();
+  });
+});
+
+describe("ObjectGrid — a grid without cellSelection re-reads on the host list's own write (objectstack#35685)", () => {
+  it("the record drawer's related grid reads again while the outer grid holds the record", async () => {
+    const ds = makeDataSource();
+    const registry = createOwnWrites();
+    const schema: any = {
+      type: 'object-grid',
+      objectName: OBJECT,
+      columns: [{ field: 'name', label: 'Name' }],
+      pagination: { pageSize: 50 },
+    };
+    render(
+      <ActionProvider>
+        <OwnWritesContext.Provider value={registry}>
+          <ObjectGrid schema={schema} dataSource={ds} />
+        </OwnWritesContext.Provider>
+      </ActionProvider>,
+    );
+    await screen.findByText('beta');
+    const reads = ds.find.mock.calls.length;
+    // The outer list grid is writing d1 and draws that write itself.
+    const release = registry.hold(OBJECT, 'd1');
+    ds.store.d1 = { ...ds.store.d1, name: 'outer write' };
+    notifyDataChanged({ objectName: OBJECT, recordId: 'd1' });
+    await screen.findByText('outer write');
+    expect(ds.find.mock.calls.length).toBeGreaterThan(reads);
+    release();
+  });
+});
+
+describe('ObjectGrid — a state-machine field is confirmed before a list cell saves it (objectstack#35685)', () => {
+  /** Deals whose `stage` a state machine governs, and whose `priority` none does. */
+  function makeMachineDataSource(rule: Record<string, unknown> = {}) {
+    const ds = makeDataSource();
+    ds.store.d1.stage = 'new';
+    ds.store.d1.priority = 'low';
+    ds.getObjectSchema = async (name: string) => ({
+      name,
+      fields: {
+        id: { type: 'text' },
+        name: { type: 'text', label: 'Name' },
+        stage: {
+          type: 'select',
+          label: 'Stage',
+          options: [
+            { value: 'new', label: 'New' },
+            { value: 'qualified', label: 'Qualified' },
+            { value: 'won', label: 'Won' },
+          ],
+        },
+        priority: { type: 'select', label: 'Priority', options: [{ value: 'low', label: 'Low' }, { value: 'high', label: 'High' }] },
+        updated_at: { type: 'datetime' },
+      },
+      validations: [{
+        name: 'stage_flow',
+        type: 'state_machine',
+        field: 'stage',
+        transitions: { new: ['qualified', 'won'], qualified: ['won'] },
+        ...rule,
+      }],
+    });
+    return ds;
+  }
+
+  function renderMachineGrid(ds: any) {
+    const schema: any = {
+      type: 'object-grid',
+      objectName: OBJECT,
+      editable: true,
+      columns: [
+        { field: 'name', label: 'Name' },
+        { field: 'stage', label: 'Stage' },
+        { field: 'priority', label: 'Priority' },
+      ],
+      pagination: { pageSize: 50 },
+    };
+    return render(
+      <ActionProvider>
+        <ObjectGrid schema={schema} dataSource={ds} cellSelection />
+      </ActionProvider>,
+    );
+  }
+
+  /** Select a cell and paste `text` into it (a commit made without an editor). */
+  function pasteInto(container: HTMLElement, cell: HTMLElement, text: string) {
+    fireEvent.click(cell);
+    const catcher = container.querySelector<HTMLInputElement>('[data-slot="cell-type-catcher"]')!;
+    fireEvent.paste(catcher, { clipboardData: { getData: () => text } });
+  }
+
+  it('names the field and both values, says automation may run, and Cancel saves nothing', async () => {
+    const ds = makeMachineDataSource();
+    const { container } = renderMachineGrid(ds);
+    await screen.findByText('beta');
+    pasteInto(container, dataCell(container, 0, 'New'), 'Won');
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dialog).toHaveTextContent('Change Stage?');
+    expect(dialog).toHaveTextContent('Stage changes from New to Won. Saving may trigger related automation.');
+    expect(ds.update).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    await act(async () => {});
+    expect(ds.update).not.toHaveBeenCalled();
+    expect(dataCell(container, 0, 'New')).toBeTruthy();
+  });
+
+  it('Change sends the move as one guarded update', async () => {
+    const ds = makeMachineDataSource();
+    const { container } = renderMachineGrid(ds);
+    await screen.findByText('beta');
+    pasteInto(container, dataCell(container, 0, 'New'), 'Won');
+    await screen.findByRole('alertdialog');
+    fireEvent.click(screen.getByRole('button', { name: 'Change' }));
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+    expect(ds.update).toHaveBeenCalledWith(OBJECT, 'd1', { stage: 'won' }, { ifMatch: '2026-11-20T10:00:00.000Z' });
+    await waitFor(() => expect(dataCell(container, 0, 'Won')).toBeTruthy());
+  });
+
+  it('a field no state machine governs, and an inactive machine, save without asking', async () => {
+    const ds = makeMachineDataSource({ active: false });
+    const { container } = renderMachineGrid(ds);
+    await screen.findByText('beta');
+    pasteInto(container, dataCell(container, 0, 'Low'), 'High');
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+    expect(ds.update.mock.calls[0][2]).toEqual({ priority: 'high' });
+    pasteInto(container, dataCell(container, 0, 'New'), 'Won');
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('a machine bound to insert alone does not govern an update: the move saves without asking', async () => {
+    const ds = makeMachineDataSource({ events: ['insert'] });
+    const { container } = renderMachineGrid(ds);
+    await screen.findByText('beta');
+    pasteInto(container, dataCell(container, 0, 'New'), 'Won');
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+    expect(ds.update.mock.calls[0][2]).toEqual({ stage: 'won' });
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('an advisory (warning-severity) machine still asks: the move is what automation listens for', async () => {
+    const ds = makeMachineDataSource({ severity: 'warning', events: ['update'] });
+    const { container } = renderMachineGrid(ds);
+    await screen.findByText('beta');
+    pasteInto(container, dataCell(container, 0, 'New'), 'Won');
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dialog).toHaveTextContent('Stage changes from New to Won.');
+    expect(ds.update).not.toHaveBeenCalled();
   });
 });

@@ -50,9 +50,9 @@ the authority on its arguments and its reply.
 ## 3. Load the type's domain skill
 
 Load the type's domain skill before you write it: its text is your contract.
-Follow its pointers into `node_modules` only where you can read files. Where
-you cannot, read a published item of the same type, and let the save check
-you (step 4). Never write a key none of these shows.
+Follow its `node_modules` pointers where you can read files. Else read the
+lean contract (`contract: true`), drill into your key with `contractPath`,
+and let the save check you. Write only keys these show.
 
 | You write | Skill |
 |:--|:--|

@@ -3,11 +3,10 @@
 /**
  * objectstack#26679 — the record drawer opens a related row or a lookup in
  * place, one level down, and goes back one level at a time; the record
- * header's 「Open as full page」 carries the path into the page and
- * 「Collapse to drawer」 brings the stack back. objectstack#27545: the bar's ⤢
- * maximizes in place and routes nowhere; the page is opened from the header
- * `⋯` (`useRecordPane`, below) and from the row's ↗, and 「Collapse to
- * drawer」 is drawn only on a page the ↗ opened.
+ * header's 「Open as full page」 carries the path into the page.
+ * objectstack#35854: the bar's one ⤢ is that same hop (the maximized state
+ * and the page's 「Collapse to drawer」 retired with the reader's open-mode
+ * setting).
  *
  * Every case mounts the real `RelatedRecordActionsBridge` the record body
  * mounts, under the real drawer stack, with a probe standing in for the
@@ -17,18 +16,16 @@
 
 import * as React from 'react';
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation, useSearchParams } from 'react-router-dom';
 import '@testing-library/jest-dom';
 import { useRelatedRecordActions } from '@object-ui/react';
 
 import { RelatedRecordActionsBridge } from '../RelatedRecordActionsBridge';
 import {
-  RecordDrawerReturnLink,
   RecordPageDrawerHost,
   RecordStackDrawer,
   expandedRecordPath,
-  recordDrawerReturnState,
   useRecordDrawerStack,
   useRecordPane,
   useTakenRestore,
@@ -168,9 +165,10 @@ describe('a related row opens in the same drawer, one level down (ruling 5)', ()
   it('pushes the task, shows ← and the path, and ← returns to the lead', () => {
     mountList();
     expect(body()).toBe('crm_lead/L-1');
-    // objectstack#27524, Target 7 — at the root the bar's left end is the
-    // breadcrumb 「对象 › 记录名」, not ← and a path.
-    expect(screen.getByTestId('record-drawer-crumb').textContent).toBe('Lead#L-1');
+    // objectstack#35853 — at the root with no list context the navigation
+    // row names the object, not ← and a path; the record row names the record.
+    expect(screen.getByTestId('record-drawer-crumb').textContent).toBe('Lead');
+    expect(document.querySelector('[data-record-drawer-title]')?.textContent).toBe('#L-1');
     expect(trail()).toBeNull();
 
     fireEvent.click(button('open task row'));
@@ -259,7 +257,7 @@ describe('each level keeps its own ?tab=', () => {
   });
 });
 
-describe('「Open as full page」 carries the path into the page; ⤢ maximizes in place', () => {
+describe('「Open as full page」 carries the path into the page', () => {
   it('hands the host the path from the root to the record shown', () => {
     const { onOpenAsPage } = mountList();
     fireEvent.click(button('open task row'));
@@ -272,20 +270,16 @@ describe('「Open as full page」 carries the path into the page; ⤢ maximizes 
     expect(path[0].title).toBe('Mira Costa');
   });
 
-  it('objectstack#27545 — the bar draws ⤢ and no page hop; ⤢ keeps the URL and the stack', () => {
+  it('objectstack#35854 — the bar\'s ⤢ is the same hop, and there is no maximized state', () => {
     const { onOpenAsPage } = mountList();
     fireEvent.click(button('open task row'));
-    expect(screen.queryByRole('button', { name: 'Open as full page' })).toBeNull();
-    fireEvent.click(button('Maximize'));
-    expect(onOpenAsPage).not.toHaveBeenCalled();
-    expect(where()).toBe(`/apps/${APP}/crm_lead?recordId=L-1`);
-    expect(body()).toBe('crm_task/T-1');
-    expect(trail()).toBe('Lead Mira CostaTask');
-    expect(screen.getByRole('dialog').hasAttribute('data-maximized')).toBe(true);
-    // Every level shares the maximize: ← keeps it.
-    fireEvent.click(button('Go back'));
-    expect(screen.getByRole('dialog').hasAttribute('data-maximized')).toBe(true);
-    fireEvent.click(button('Restore size'));
+    expect(screen.queryByRole('button', { name: 'Maximize' })).toBeNull();
+    fireEvent.click(button('Open as full page'));
+    const [path] = onOpenAsPage.mock.calls[0];
+    expect(path.map((l: RecordDrawerLevel) => `${l.objectName}/${l.recordId}`)).toEqual([
+      'crm_lead/L-1',
+      'crm_task/T-1',
+    ]);
     expect(screen.getByRole('dialog').hasAttribute('data-maximized')).toBe(false);
   });
 
@@ -306,7 +300,7 @@ describe('「Open as full page」 carries the path into the page; ⤢ maximizes 
   });
 });
 
-/** A record page: the page host, its body, and the 「Collapse to drawer」 link. */
+/** A record page: the page host and its body. */
 function RecordPage() {
   const location = useLocation();
   const [, objectName, , recordId] = location.pathname.split('/').slice(2);
@@ -321,7 +315,6 @@ function RecordPage() {
       renderRecord={(l) => <RecordBody level={l} />}
     >
       <div data-testid="page">
-        <RecordDrawerReturnLink />
         <RecordBody level={level} />
       </div>
     </RecordPageDrawerHost>
@@ -348,9 +341,11 @@ describe('on the record page, a related row opens a drawer over the page (target
     fireEvent.click(screen.getAllByRole('button', { name: 'open task row' })[0]);
     expect(dialogBody()).toBe('crm_task/T-1');
     expect(where()).toBe(`/apps/${APP}/crm_lead/record/L-1`);
-    // The drawer's root is the task: its breadcrumb on the left
-    // (objectstack#27524), ↑ ↓ over the rows.
-    expect(screen.getByTestId('record-drawer-crumb').textContent).toBe('Task#T-1');
+    // The drawer's root is the task, named in the record row; the navigation
+    // row steps ↑ ↓ over the rows and counts them (objectstack#35853).
+    expect(document.querySelector('[data-record-drawer-title]')?.textContent).toBe('#T-1');
+    expect(document.querySelector('[data-record-top-bar-position]')?.textContent).toBe('1 of 3');
+    expect(screen.queryByTestId('record-drawer-crumb')).toBeNull();
     fireEvent.click(button('Next record'));
     expect(dialogBody()).toBe('crm_task/T-2');
     fireEvent.click(screen.getByTitle('Close'));
@@ -365,7 +360,7 @@ describe('on the record page, a related row opens a drawer over the page (target
     expect(where()).toContain('tab=related');
   });
 
-  it('「Open as full page」 opens the page with the path, and that page offers no 「Collapse to drawer」', () => {
+  it('「Open as full page」 opens the page with the path', () => {
     mountPage(`/apps/${APP}/crm_lead/record/L-1`);
     fireEvent.click(screen.getAllByRole('button', { name: 'open task row' })[0]);
     // One more level: the task's owner — the drawer's own lookup.
@@ -382,33 +377,5 @@ describe('on the record page, a related row opens a drawer over the page (target
       { o: 'crm_task', i: 'T-1', t: 'Send quote' },
     ]);
     expect(screen.queryByRole('dialog')).toBeNull();
-    // objectstack#27545 — 「Collapse to drawer」 is drawn only for a ↗ arrival.
-    expect(screen.queryByTestId('record-drawer-return')).toBeNull();
-  });
-});
-
-describe('「Collapse to drawer」 on a page the row ↗ opened (objectstack#27545)', () => {
-  it('returns to the list with the record open', async () => {
-    const back = recordDrawerReturnState(
-      { pathname: `/apps/${APP}/crm_lead`, search: '?recordId=L-1', state: null },
-      [{ objectName: 'crm_lead', recordId: 'L-1' }],
-    );
-    render(
-      <MemoryRouter initialEntries={[{ pathname: `/apps/${APP}/crm_lead/record/L-1`, state: back }]}>
-        <Routes>
-          <Route path="/apps/:appName/:objectName/record/:recordId" element={<RecordPage />} />
-          <Route path="/apps/:appName/:objectName" element={<ListHost onClose={() => {}} onOpenAsPage={() => {}} />} />
-        </Routes>
-        <RouterLocation />
-      </MemoryRouter>,
-    );
-    expect(screen.getByTestId('page')).toBeTruthy();
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('record-drawer-return'));
-    });
-    expect(where()).toBe(`/apps/${APP}/crm_lead?recordId=L-1`);
-    expect(body()).toBe('crm_lead/L-1');
-    // The restore is consumed: the history entry no longer carries it.
-    expect(screen.getByTestId('router-state').textContent).not.toContain('recordDrawerRestore');
   });
 });

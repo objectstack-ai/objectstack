@@ -13385,7 +13385,14 @@ export const CONTAINER_MODEL_KEY_LINE = /^[ \t]*(?:>[ \t]*)?(?:[-*][ \t]+)?(?:\*
  * … · ceiling …`) names every tier without declaring any. A ceiling token owes
  * a citation ON THE SAME LINE: the word `MANDATORY` — which `--tier` prints,
  * and prints only for a mandated surface — or a `reason:` naming the per-card
- * ruling. The default and floor tiers owe nothing here: their exits are
+ * ruling. The citation is read inside the `model:` SLOT only — from the
+ * `model:` key up to the next `effort:` key, or to the end of the line when
+ * no `effort:` follows. The template's effort slot carries its own citations
+ * (an `xhigh` quotes its timing reading or standing order, spelled like a
+ * `reason:`), and a whole-line match let one of them satisfy the tier check
+ * by accident. The `model:` slot's reason may itself hold commas and
+ * parentheses, so the slot ends at the next key, never at a comma.
+ * The default and floor tiers owe nothing here: their exits are
  * recorded on the line by the skill's rule, and a reader that demanded them
  * would refuse every ordinary claim over a formatting preference.
  *
@@ -13403,14 +13410,18 @@ export function readContainerModelLine(body) {
   const value = String(m[1] ?? '');
   const model = /\bmodel[ \t]*:[ \t]*(?:\*\*|`|[ \t])*([A-Za-z0-9][A-Za-z0-9_.-]*)?/i.exec(value);
   const tier = model?.[1] ?? null;
+  // The `model:` slot: from its key to the next `effort:` key, or the line's end.
+  const afterModel = model ? value.slice(model.index) : '';
+  const effortKey = /\beffort[ \t]*:/i.exec(afterModel);
+  const slot = effortKey ? afterModel.slice(0, effortKey.index) : afterModel;
   const ceiling = tier !== null && ceilingTierSpellings().some((word) => word.toLowerCase() === tier.toLowerCase());
   return {
     present: true,
     line: m[0].trim(),
     tier,
     ceiling,
-    mandateCited: /\bMANDATORY\b/.test(value),
-    reasonCited: /\breason[ \t]*:/i.test(value),
+    mandateCited: /\bMANDATORY\b/.test(slot),
+    reasonCited: /\breason[ \t]*:/i.test(slot),
   };
 }
 

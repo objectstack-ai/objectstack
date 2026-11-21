@@ -231,6 +231,11 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   // [ADR-0144, ruling 6670707546 item B] The tenant-admin twin of the CLI backfill.
   { route: 'POST /api/v1/meta/_migrate-record-currency-codes', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.migrateRecordCurrencyCodes',
     note: 'ADR-0144 record-currency code backfill, the route form of `os migrate record-currency-codes`: writes the one given code into the codeless rows of a record-mode amount in the CALLER\'S CURRENT ORGANIZATION only (no environment-wide form, no organization in the body); gated on `setup.write`, preview unless { apply: true }, behind `metadata.endpoints.maintenance`. DELIBERATELY UNBOUND for `migrateStored`\'s reason — the report\'s named type, `RecordCurrencyBackfillReport`, lives in `@objectstack/objectql`, unreachable from the spec/api namespace this field resolves against. REST-only: the dispatcher has no twin. Answered in the shared envelope, the report as `data`' },
+  // [ADR-0158 U7 R1] The tenant-admin twin of `os migrate unit-codes`. `server-only`, and NOT `gap`, for the
+  // `/layers` row's reason: the gap ratchet is pinned at zero and a new `gap` row needs its own reviewed
+  // decision; whether the SDK should express this door, as it does the currency one, is a separate product call.
+  { route: 'POST /api/v1/meta/_migrate-unit-codes', family: 'metadata', source: 'route-manager', disposition: 'server-only',
+    note: 'ADR-0158 unit code backfill, the route form of `os migrate unit-codes`: rewrites the stored free text of a unit code field into unit codes from the caller\'s mapping, in the CALLER\'S CURRENT ORGANIZATION only; gated on `setup.write`, preview unless { apply: true }, behind `metadata.endpoints.maintenance`, as `_migrate-record-currency-codes` is. Not in the SDK yet. Answered in the shared envelope, the report as `data`' },
   { route: 'GET /api/v1/meta/:type', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getItems' },
   { route: 'GET /api/v1/meta/:type/:name/references', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getReferences',
     responseSchema: 'FindReferencesToMetaResponseSchema',

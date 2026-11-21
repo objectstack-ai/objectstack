@@ -57,9 +57,12 @@
 - 缺 `reach:` 且非例外 ⇒ 定 `priority:p3`,并入收口卡或清扫卡,⛔ 不单独派发、不因此关卡。
 - p3 首触标准:仅对已定 p3;`filing-gate.md` 定级判据胜之,⛔ 不及其〈读数判据〉半径外。
   关条中且留条不中 ⇒ 关 not_planned、写理由,胜本文与该文诸不关条;余皆留。关条:无客户/
-  用户影响(仅 pin、ADR/jsdoc 措辞、内部重构、测试标题改写);读数过时、已取代或已交付;
+  用户影响(仅 pin、jsdoc 措辞、内部重构、测试标题改写)、纯补记的 ADR 文本;读数过时、已取代或已交付;
   按 `reach:` 两形无一可测的边角(如双持有者边缘、路径段内换行)。留条:用户可见缺陷、
-  已发布文档/技能、安全项、维护者直派、open PR 承载或席位已接、不可逆或有硬时限。
+  已发布文档/技能、安全项、维护者直派、open PR 承载或席位已接、不可逆或有硬时限、
+  影响评测(场景卡、打分器、`skill-evals`、评测记录)。
+- 与 `main` 矛盾的 ADR 文本成周 ADR 卡一行,新立的单条 ADR 修订卡首触移入、照折叠关卡;出货 `skills/**` 文本说错或
+  漏写已落地规则是 `Bug`,照 `filing-gate.md` 出货面条定级,⛔ 不按无影响关。
 - 先修复:正文被 sanitizer 截断的卡不可派发,评论修复指令后跳过。
 - 停摆指令判据必须比其它分类更硬(双读取),事后证伪同处公开作废。
 - 首触复核 area、type(中继 `issue_patch` 写)、级与 `Source:`(核不出即 `fleet`),错即改并留原值。
@@ -74,12 +77,20 @@
 - 不算涉 cloud:修复与验收全在本仓,只在 cloud 测得或只缺其事实读数;仅引 cloud 卡作历史。
 - 父单已有子结构的:父单挂 `tracking`,分诊逐个展开子卡路由、补 `Blocked-by:` 排序。
 - 跨层功能点(≥2 层)的协调父单挂 `area:*`+`tracking`、⛔ 非 `pm:epic`;逐层子单各自定级。
-- 每张留一条英文审计评论(`Triage: lands in …; rationale: …`),可选带 `Size/model suggestion:` 行。
+- 每张留一条英文审计评论(`Triage: lands in …; rationale: …`),定级行后接 `· size XS|S|M|L`,
+  可选带 `Size/model suggestion:` 行。
+- size:XS 一句、常量或标签;S 一文件或一机制连其 pin;M 一模块内多文件,或模块连其测试与文档;
+  L 跨模块或包,或需设计裁定。
+- XS/S 合清扫卡准入(`filing-gate.md`)⇒ 首触与日巡写成本车道周清扫卡一行、照折叠关卡;M 留单卡;
+  L 派发前拆分或入专题/决策箱。size 是批次与派发 effort 的参考,认领可改,⛔ 永不改级。
+- 分诊开下周清扫卡时把未做到的行移入,旧卡关卡评论点名新卡。
 - 审计评论可另带 `Fold-with: #N` 行提议折叠;采纳与否照 `execution-duties.md` 折叠五门。
 - 改作者可写面(种类非 `none` 或带 `(narrowing)`)的卡,首触 done-when 写 skills + docs + eval 三项。
-- ADR/技能文本携带注记 ⛔ 不挂实施卡,每实施 PR 一 `domain:skills` 卡;ADR 由落地席合并后立。
+- ADR/技能文本携带注记 ⛔ 不挂实施卡;技能每实施 PR 一 `domain:skills` 卡,ADR 由落地席合并后追加周 ADR 卡。
 - 查重/shadow 检查先按文件/机制查本仓与姊妹仓 open 卡(含 `pm:dispatched`),再跟引用与关键词。
-- 同文件同机制 = 同一发现,不分车道即并:证据搬先卡,后卡经中继 `issue_patch` 关 `duplicate`。
+- 首触与每日一遍 `pm:queue`:修复与 open、无认领、未开工的卡同机制或同文件 ⇒ 不分车道成其一行(中继
+  `issue_patch`),本卡关 `duplicate`(`duplicate_of` 承载卡)、关卡行点名本卡诉求;同一发现则证据搬先卡。
+- ⛔ 永不折叠或移卡:维护者立或定级的、专题子卡、`needs-user-decision` 与 `security` 卡。
 - 同族发现并入收口卡,不开单点卡;在飞(assignee/open PR)永不并,`Blocked-by:` 不派;完工查过期。
 - 执行席 ⛔ 不并卡,疑重复挂 `pm:retriage` 写明哪两张同文件同机制;同 assignee 者自关后卡。
 - 关重复卡须目标具名且新读重叠;追踪父单子卡全关、表完成、无 open 工作 ⇒ `completed`。

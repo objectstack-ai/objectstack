@@ -718,7 +718,10 @@ drive this MCP server. Same word, different layer.
   client already holds on its next call (`401`), and the client gets no new
   ones: a refresh is refused `invalid_client`. Disabling is a pause, not an
   end: the grants and refresh tokens stay, so enabling the client again
-  serves them again. To end a grant, withdraw it.
+  serves them again. To end a grant, withdraw it. A completed password reset
+  of the account that registered a client (its owner) disables that client
+  the same way, and only a platform administrator enables it again
+  ([What a password reset ends](/docs/permissions/authentication#what-a-password-reset-ends-and-what-a-change-keeps)).
 - **Action bodies run as trusted app code** once invoked (the `ai.exposed`
   gate and `requiredPermissions` are checked at *invoke* time). Treat writing
   an action as a code-review-worthy act — that's the real security boundary.

@@ -97,6 +97,7 @@ import {
 import { ObjectQLStatics as ObjectQL } from './engine.js';
 import type { ObjectQL as ObjectQLClass } from './engine.js';
 import { refuseOrganizationUnitDelete } from './validation/unit-code-membership.js';
+import { isOrganizationUnitRemoval } from './engine-cascade-planning.js';
 
 /**
  * The `ObjectQL` members the bodies of {@link DeleteAndAggregateFacet} read — every one of
@@ -116,6 +117,7 @@ export interface DeleteAndAggregateHost {
   buildSession: ObjectQLClass['buildSession'];
   buildUser: ObjectQLClass['buildUser'];
   cascadeDeleteRelations: ObjectQLClass['cascadeDeleteRelations'];
+  readonly cascadeIssuedDeletes: ObjectQLClass['cascadeIssuedDeletes'];
   claimReferentialCascadeDelete: ObjectQLClass['claimReferentialCascadeDelete'];
   composeReadableIdsAtBoundary: ObjectQLClass['composeReadableIdsAtBoundary'];
   delete: ObjectQLClass['delete'];
@@ -155,7 +157,7 @@ export interface DeleteAndAggregateHost {
 /** The bodies of the "Delete, count, aggregate and execute" section of `ObjectQL`: a stateless facet, called by the class's stubs. */
 export class DeleteAndAggregateFacet {
   /** The body of `ObjectQL#delete`; the method's docblock there is its contract. */
-  static async delete(this: Pick<DeleteAndAggregateHost, '_registry' | 'assertBulkPerRowHookBudget' | 'assertWriteAllowed' | 'buildDriverOptions' | 'buildHookApi' | 'buildPerRowAfterContexts' | 'buildProvenance' | 'buildSession' | 'buildUser' | 'cascadeDeleteRelations' | 'claimReferentialCascadeDelete' | 'dispatchPerRowBeforeHooks' | 'dispatchUnscopedMultiWriteHooks' | 'enforceTransactionOrigin' | 'executeWithMiddleware' | 'facade' | 'getDriver' | 'getSummaryDescriptors' | 'hasHooksFor' | 'inAfterAbortUnit' | 'invalidateOrganizationProbe' | 'logger' | 'openRecycleBinCapture' | 'opensAfterAbortUnit' | 'planCascadeAtomicity' | 'publishBulkDataEvent' | 'publishDataEvent' | 'realtimeService' | 'recomputeSummaries' | 'relatedSchemaOf' | 'releaseSecretHandles' | 'resolveObjectName' | 'summaryForeignKeyColumns' | 'transaction' | 'triggerHooks' | 'warnCascadeNotAtomic' | 'withResolvedWhere'>, object: string, options?: EngineDeleteOptions & RecycleBinDeleteObservability): Promise<boolean | number> {
+  static async delete(this: Pick<DeleteAndAggregateHost, '_registry' | 'assertBulkPerRowHookBudget' | 'assertWriteAllowed' | 'buildDriverOptions' | 'buildHookApi' | 'buildPerRowAfterContexts' | 'buildProvenance' | 'buildSession' | 'buildUser' | 'cascadeDeleteRelations' | 'cascadeIssuedDeletes' | 'claimReferentialCascadeDelete' | 'dispatchPerRowBeforeHooks' | 'dispatchUnscopedMultiWriteHooks' | 'enforceTransactionOrigin' | 'executeWithMiddleware' | 'facade' | 'getDriver' | 'getSummaryDescriptors' | 'hasHooksFor' | 'inAfterAbortUnit' | 'invalidateOrganizationProbe' | 'logger' | 'openRecycleBinCapture' | 'opensAfterAbortUnit' | 'planCascadeAtomicity' | 'publishBulkDataEvent' | 'publishDataEvent' | 'realtimeService' | 'recomputeSummaries' | 'relatedSchemaOf' | 'releaseSecretHandles' | 'resolveObjectName' | 'summaryForeignKeyColumns' | 'transaction' | 'triggerHooks' | 'warnCascadeNotAtomic' | 'withResolvedWhere'>, object: string, options?: EngineDeleteOptions & RecycleBinDeleteObservability): Promise<boolean | number> {
     object = this.resolveObjectName(object);
     // [#22782, #34412] An aborting `afterDelete`, or a refusal after a `beforeDelete` hook's
     // `ctx.api` write, rolls this write back with it — see `opensAfterAbortUnit`.
@@ -170,10 +172,6 @@ export class DeleteAndAggregateFacet {
       ownUnit ? () => this.inAfterAbortUnit(body) : body;
     this.logger.debug('Delete operation starting', { object });
     this.assertWriteAllowed(object, 'delete');
-    // [ADR-0158 Open item 11] A unit of measure is retired, never deleted:
-    // refused here, before any middleware or hook, so the refusal holds for a
-    // system writer and an automation run as for a user, single and batched.
-    refuseOrganizationUnitDelete(object);
     // [#8844] See the insert face — deleting the install's only organization
     // must not leave the memo answering with it.
     if (object === ORGANIZATION_OBJECT) this.invalidateOrganizationProbe();
@@ -223,6 +221,16 @@ export class DeleteAndAggregateFacet {
     // [ruling 6893661036, F1] A predicate delete hands its `where` instead: a
     // cascade batch is claimed by the exact id set it names.
     const referentialCascadeDelete = this.claimReferentialCascadeDelete(object, id ?? options?.where);
+    // [ADR-0158 Open item 11] A unit of measure is retired, never deleted on its
+    // own: refused here, before any middleware or hook, so the refusal holds for
+    // a system writer and an automation run as for a user, single and batched.
+    // [ruling 7035627429, option B] The one exemption is the organization
+    // delete's own removal of its units, recognised by the cascade token THIS
+    // call just claimed, never by anything the caller hands in.
+    refuseOrganizationUnitDelete(
+      object,
+      referentialCascadeDelete === true && isOrganizationUnitRemoval(this.cascadeIssuedDeletes.getStore()),
+    );
 
     const opCtx: OperationContext = {
       object,
@@ -1188,7 +1196,10 @@ export class DeleteAndAggregateFacet {
               // bound in a `where` was refused 400 — measured on the base on
               // driver-memory and driver-sql, through the engine and REST.
               // Before the token resolver below, as there, so a `{placeholder}`
-              // is stepped around and resolved (or refused) a moment later.
+              // is judged by its kind as there: a date macro is stepped around
+              // and judged by its year once resolved, a period key or a context
+              // token is judged as written, and an unknown or record-context
+              // token is left to the resolver, which refuses it a moment later.
               // [#20334] Rooted at this position too: the refusal said
               // `at where.placed_on.$gt`.
               assertTemporalComparandsInterpretable(
@@ -1454,9 +1465,11 @@ export class DeleteAndAggregateFacet {
       // group with a 200). Both `applyHaving` doors below read `ast.having`, so
       // one call covers the native and the rows path, before any driver read.
       // After every `having` door above, as `where`'s resolution follows its
-      // doors: the temporal door steps around a `{placeholder}` exactly as
-      // `where`'s does (so, as there, the resolved value is judged only for
-      // its year, by the resolution stage — #20844), and the other doors
+      // doors: the temporal door judges a `{placeholder}` by its kind exactly
+      // as `where`'s does (a date macro stepped around, so, as there, its
+      // resolved value is judged only for its year, by the resolution stage —
+      // #20844; a period key or a context token judged as written; an unknown
+      // or record-context token left to this resolver), and the other doors
       // judged a string that resolves to a string.
       {
           const havingColumnTypes = aggregatedRowColumnTypes(query.groupBy, query.aggregations, declaredFields);

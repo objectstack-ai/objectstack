@@ -46,9 +46,8 @@ export default defineStack({
 | `fallbackLocale` | `string` | optional | Fallback when translation missing |
 
 An app authored in English for Chinese users declares `defaultLocale: 'zh-CN', sourceLocale: 'en'`,
-not an English `defaultLocale`. ⚠️ Validation and refusal messages still read labels through `t()`, which
-falls back to `fallbackLocale`, else `defaultLocale`: without `fallbackLocale: 'en'` an `en` refusal names
-a field by its zh-CN row.
+not an English `defaultLocale`. Validation, delete-restriction and permission-denial messages name fields
+and objects in the request's language, as label serving does: an `en` request reads the inline label.
 `sourceLanguage`, `authoringLocale` and `authoringLanguage` are refused, each naming `sourceLocale`.
 
 ---

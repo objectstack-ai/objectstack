@@ -28,6 +28,48 @@ const validateFieldConsumers: typeof validateFieldConsumersUnrecorded = (...args
 type AnyRec = Record<string, unknown>;
 
 /**
+ * objectstack#35889 (maintainer ruling B): a parent's form inlines a child's
+ * grid only where one of the PARENT's field groups names the child; the FK's
+ * `inlineEdit` only picks the form factor. The inline-grid fixtures below were
+ * written as "a relationship that sets `inlineEdit`", so this spells that the
+ * new way: every relationship whose `inlineEdit` is set (not `false`) gets a
+ * parent field group naming `child.field`, and a `lookup` one also declares
+ * `relatedList: 'primary'` (a group may place a lookup list only then). The
+ * fixtures that set no `inlineEdit` (or `false`) are the no-group controls.
+ */
+function placeInlineEdited(stack: AnyRec): AnyRec {
+  const objects = Array.isArray(stack.objects) ? (stack.objects as AnyRec[]) : [];
+  const groups = new Map<string, AnyRec[]>();
+  const next = objects.map((obj) => {
+    const fields = (obj.fields ?? {}) as Record<string, AnyRec>;
+    let changed = false;
+    const out: Record<string, AnyRec> = {};
+    for (const [name, def] of Object.entries(fields)) {
+      const relationship = def && (def.type === 'lookup' || def.type === 'master_detail') && typeof def.reference === 'string';
+      if (relationship && def.inlineEdit !== undefined && def.inlineEdit !== false) {
+        const list = groups.get(def.reference as string) ?? [];
+        list.push({ key: `lines_${String(obj.name)}_${name}`, relatedList: `${String(obj.name)}.${name}` });
+        groups.set(def.reference as string, list);
+        if (def.type === 'lookup' && def.relatedList === undefined) {
+          out[name] = { ...def, relatedList: 'primary' };
+          changed = true;
+          continue;
+        }
+      }
+      out[name] = def;
+    }
+    return changed ? { ...obj, fields: out } : obj;
+  });
+  return {
+    ...stack,
+    objects: next.map((obj) => {
+      const placed = groups.get(String(obj.name));
+      return placed ? { ...obj, fieldGroups: [...((obj.fieldGroups as AnyRec[]) ?? []), ...placed] } : obj;
+    }),
+  };
+}
+
+/**
  * The HotCRM shape, reduced: two objects sharing a field NAME (`tax_rate`),
  * consumed on one and merely carried on the other, plus one field of every
  * verdict the rule distinguishes and one of every exemption it derives.
@@ -678,7 +720,7 @@ describe('[#20929] validateFieldConsumers — an inline grid column names a fiel
   const data = { provider: 'object', object: 'inv' };
   const columns = [{ name: 'qty' }];
 
-  const stack = (relationship: AnyRec, view: AnyRec = {}, extra: AnyRec = {}): AnyRec => ({
+  const stack = (relationship: AnyRec, view: AnyRec = {}, extra: AnyRec = {}): AnyRec => placeInlineEdited({
     objects: [
       { name: 'inv', fields: { name: { type: 'text' }, qty: { type: 'number' } } },
       {
@@ -718,6 +760,28 @@ describe('[#20929] validateFieldConsumers — an inline grid column names a fiel
   it("each `formViews` entry's `subforms[].columns`, the same way", () => {
     const edit = { type: 'simple', data, subforms: [{ childObject: 'line', columns }] };
     expect(verdicts(stack({}, { formViews: { edit } }))).toEqual(CREDITED);
+  });
+
+  it('[#35889] `inlineEdit` with no parent field group naming the child draws no grid: its columns are a carrier', () => {
+    const unplaced: AnyRec = {
+      objects: [
+        { name: 'inv', fields: { name: { type: 'text' }, qty: { type: 'number' } } },
+        {
+          name: 'line',
+          fields: {
+            name: { type: 'text' },
+            invoice: { type: 'master_detail', reference: 'inv', inlineEdit: 'grid', inlineColumns: columns },
+            qty: { type: 'number' },
+            memo: { type: 'text' },
+          },
+        },
+      ],
+      views: [{ list: { type: 'grid', data, columns: [{ field: 'name' }] } }],
+    };
+    expect(verdicts(unplaced)).toEqual({ 'inv.qty': 'inert', 'line.qty': 'carrier-only', 'line.memo': 'inert' });
+    // Control: the parent's group naming the child draws the grid.
+    const placed = { ...unplaced, objects: [{ ...(unplaced.objects as AnyRec[])[0], fieldGroups: [{ key: 'lines', relatedList: 'line' }] }, (unplaced.objects as AnyRec[])[1]] };
+    expect(verdicts(placed)).toEqual(CREDITED);
   });
 
   it('`inlineColumns` on a field that does not set `inlineEdit` draws no grid: a carrier, listed for removal', () => {
@@ -764,7 +828,7 @@ describe('[#20951] validateFieldConsumers — a child collection credits its chi
   const data = { provider: 'object', object: 'inv' };
   const MASTER_DETAIL = { type: 'master_detail', reference: 'inv' };
 
-  const stack = (lineFields: AnyRec, view: AnyRec = {}, invoice: AnyRec = MASTER_DETAIL): AnyRec => ({
+  const stack = (lineFields: AnyRec, view: AnyRec = {}, invoice: AnyRec = MASTER_DETAIL): AnyRec => placeInlineEdited({
     objects: [
       { name: 'inv', fields: { name: { type: 'text' }, total: { type: 'number' }, line_total: { type: 'number' } } },
       { name: 'line', fields: { name: { type: 'text' }, invoice, ...lineFields } },
@@ -1034,7 +1098,7 @@ describe('[#21091] validateFieldConsumers — an inline collection reads its joi
     secret: { type: 'text', hidden: true },
   };
 
-  const stack = (relationship: AnyRec, extra: { form?: AnyRec; details?: unknown[] } = {}): AnyRec => ({
+  const stack = (relationship: AnyRec, extra: { form?: AnyRec; details?: unknown[] } = {}): AnyRec => placeInlineEdited({
     objects: [
       { name: 'ord', fields: { name: { type: 'text' }, notes: { type: 'textarea' } } },
       { name: 'itm', fields: { ...ITEM_FIELDS, ord: relationship } },
@@ -1630,7 +1694,7 @@ describe('[#32256] validateFieldConsumers — an inline grid reads its line-posi
     sort_order: { type: 'number' },
   };
 
-  const stack = (relationship: AnyRec, extra: AnyRec = {}, lineFields: AnyRec = LINE_FIELDS): AnyRec => ({
+  const stack = (relationship: AnyRec, extra: AnyRec = {}, lineFields: AnyRec = LINE_FIELDS): AnyRec => placeInlineEdited({
     objects: [
       { name: 'ord', fields: { name: { type: 'text' } } },
       { name: 'lin', fields: { ...lineFields, ord: relationship } },

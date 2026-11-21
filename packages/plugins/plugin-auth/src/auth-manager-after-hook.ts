@@ -52,6 +52,13 @@ import {
   RESET_DOOR_SUBJECT,
 } from './credential-change-ends-prior-access.js';
 import { narrowDirectoryForExternalCaller } from './external-directory-door.js';
+import {
+  accessAPasswordChangeKeeps,
+  endWhatTheAccountAddedBeforeAReset,
+  whatAResetKeeps,
+  type MountedOAuthGrants,
+  type ResetEndedAccess,
+} from './password-reset-ends-added-access.js';
 import { SESSION_SCOPING_REFUSAL } from './organization-access-policy.js';
 import { refuseIntrospectionForBannedSubject } from './oauth-token-read-ban-refusal.js';
 import { carryRefusalReasonOnCallback } from './oauth-callback-refusal-reason.js';
@@ -78,11 +85,14 @@ export interface AfterHookHost {
   auditRefusedSignIn: AuthManager['auditRefusedSignIn'];
   enforceConcurrentCap: AuthManager['enforceConcurrentCap'];
   externalDirectoryDoorDeps: AuthManager['externalDirectoryDoorDeps'];
+  getDataEngine: AuthManager['getDataEngine'];
   isEmailDeliveryLive: AuthManager['isEmailDeliveryLive'];
   logDurabilityDegradation: AuthManager['logDurabilityDegradation'];
   recordPasswordHistory: AuthManager['recordPasswordHistory'];
   roleChangeGrantDeps: AuthManager['roleChangeGrantDeps'];
   sendChangeEmailNotice: AuthManager['sendChangeEmailNotice'];
+  sendPasswordChangeReminder: AuthManager['sendPasswordChangeReminder'];
+  sendPasswordResetNotice: AuthManager['sendPasswordResetNotice'];
   settleSignInAttempt: AuthManager['settleSignInAttempt'];
   settleSsoProviderDelete: AuthManager['settleSsoProviderDelete'];
   settleSsoSignOutOfIdp: AuthManager['settleSsoSignOutOfIdp'];
@@ -222,6 +232,118 @@ async function endSessionsOnceThePasswordIsWritten(this: Pick<AfterHookHost, 'lo
     return;
   }
   await endSessionsAfterCredentialWrite(internal, subject, changeDoor ? (installed as string) : undefined);
+}
+
+/**
+ * The OAuth grant stores of the request: better-auth's storage adapter, and
+ * whether a plugin is mounted, read off the vendor's own plugin registry
+ * (`getPlugin`), so an arm runs only where its plugin is mounted.
+ */
+function mountedOAuthGrantsOf(ctx: any): MountedOAuthGrants {
+  const context = ctx?.context;
+  return {
+    store: context?.adapter,
+    mounted: (pluginId: string) => typeof context?.getPlugin === 'function' && Boolean(context.getPlugin(pluginId)),
+  };
+}
+
+/**
+ * Mail the account a completed self-service reset just ended for what it
+ * ended and what it kept (`auth.password_reset_notice`). Best-effort: a
+ * notice whose account or kept setup cannot be read, or that cannot be sent,
+ * is logged at warn and never fails the reset, which has already ended
+ * everything it ends.
+ */
+async function noticeWhatAResetEnded(
+  this: Pick<AfterHookHost, 'getDataEngine' | 'sendPasswordResetNotice'>,
+  ctx: any,
+  internal: { findUserById(id: string): Promise<unknown> },
+  userId: string,
+  ended: ResetEndedAccess,
+): Promise<void> {
+  try {
+    const user = (await internal.findUserById(userId)) as { email?: unknown; name?: unknown } | null | undefined;
+    if (typeof user?.email !== 'string' || !user.email) return;
+    const kept = await whatAResetKeeps(this.getDataEngine() as never, userId);
+    await this.sendPasswordResetNotice(
+      { email: user.email, id: userId, ...(typeof user.name === 'string' && user.name ? { name: user.name } : {}) },
+      ended,
+      kept,
+      ctx,
+    );
+  } catch (err) {
+    ctx?.context?.logger?.warn?.('AuthManager: the password-reset notice could not be read', {
+      error: (err as Error)?.message,
+    });
+  }
+}
+
+/**
+ * A completed self-service reset ends what the account added before it and
+ * tells the account so, and a password change reminds the account what it
+ * keeps (`password-reset-ends-added-access.ts`). A completed reset whose
+ * account cannot be named, and a reset's read or write that fails, reach the
+ * requester as an error; neither mail ever fails the reset or the change.
+ */
+async function endOrRemindWhatTheAccountAdded(
+  this: Pick<AfterHookHost, 'getDataEngine' | 'sendPasswordChangeReminder' | 'sendPasswordResetNotice'>,
+  ctx: any,
+): Promise<void> {
+  const resetDoor = RESET_DOOR_PATHS.has(ctx?.path);
+  const changeDoor = ctx?.path === '/change-password';
+  if (!resetDoor && !changeDoor) return;
+  if (!(await endpointSucceeded(ctx))) return;
+  const internal = ctx?.context?.internalAdapter;
+  if (resetDoor) {
+    const subject: unknown = ctx?.context?.[RESET_DOOR_SUBJECT];
+    // The password is written, and nothing it should end can be found: the
+    // requester is answered an error, and the next completed reset ends it.
+    if (typeof subject !== 'string' || !subject || !internal) {
+      throw new Error(
+        'a password reset completed, but the account it reset could not be named, so the API keys, linked '
+          + 'sign-in accounts, authorized apps, registered OAuth applications and minted SCIM credentials it '
+          + 'held before the reset were not ended; reset it again',
+      );
+    }
+    const engine = this.getDataEngine() as never;
+    const ended = await endWhatTheAccountAddedBeforeAReset(
+      {
+        accounts: internal,
+        apiKeys: engine,
+        oauth: mountedOAuthGrantsOf(ctx),
+        registrations: engine,
+        warn: (message) => ctx?.context?.logger?.warn?.(message),
+      },
+      subject,
+    );
+    await noticeWhatAResetEnded.call(this, ctx, internal, subject, ended);
+    return;
+  }
+  const user = ctx?.context?.session?.user as { id?: unknown; email?: unknown; name?: unknown } | undefined;
+  if (!internal || typeof user?.id !== 'string' || !user.id || typeof user.email !== 'string' || !user.email) return;
+  try {
+    const engine = this.getDataEngine() as never;
+    const kept = await accessAPasswordChangeKeeps(
+      { accounts: internal, apiKeys: engine, oauth: mountedOAuthGrantsOf(ctx), registrations: engine },
+      user.id,
+    );
+    if (
+      kept.apiKeys.length === 0
+      && kept.signInAccounts.length === 0
+      && kept.authorizedApps.length === 0
+      && kept.ownedApps.length === 0
+      && kept.scimCredentials.length === 0
+    ) return;
+    await this.sendPasswordChangeReminder(
+      { email: user.email, id: user.id, ...(typeof user.name === 'string' && user.name ? { name: user.name } : {}) },
+      kept,
+      ctx,
+    );
+  } catch (err) {
+    ctx?.context?.logger?.warn?.('AuthManager: the password-change reminder could not be read', {
+      error: (err as Error)?.message,
+    });
+  }
 }
 
 /** The body of `createAuthInstance`'s `hooks.after` arrow; the comments there and in it are its contract. */
@@ -390,10 +512,6 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
     }
   }
 
-  // ── A credential change ends access issued before it ──────────────
-  // Ahead of the password-change after-effects below, which return.
-  await endSessionsOnceThePasswordIsWritten.call(this, ctx);
-
   // ── ADR-0069 D1: on a successful change/reset — stamp
   //    password_changed_at (expiry) and commit password history.
   //
@@ -404,8 +522,12 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // the handler ran, the reading the change-email notice below takes — and
   // only when the before-hook's reuse and forced-change checks ran for that
   // same account. The history entry is the old hash those checks read, so it
-  // is appended only to the account it was read from.
-  if (ctx?.path === '/change-password' || ctx?.path === '/reset-password') {
+  // is appended only to the account it was read from. FIRST among the steps
+  // a password write sets off: neither write throws (each reports its own
+  // failure), so the endings below, which can, never leave a written
+  // password without its stamp or its history entry.
+  const passwordChangeDoor = ctx?.path === '/change-password' || ctx?.path === '/reset-password';
+  if (passwordChangeDoor) {
     let succeeded: boolean;
     try {
       const { isAPIError } = await import('better-auth/api');
@@ -438,8 +560,16 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
     }
     delete ctx.context.__osPwChangeUserId;
     delete ctx.context.__osPwHistory;
-    return;
   }
+
+  // ── A credential change ends access issued before it ──────────────
+  // Behind the password-change after-effects above, which never throw.
+  await endSessionsOnceThePasswordIsWritten.call(this, ctx);
+  // ── A password reset ends what the account added before it ────────
+  // And a password change reminds the account what it keeps. Behind the
+  // sessions above.
+  await endOrRemindWhatTheAccountAdded.call(this, ctx);
+  if (passwordChangeDoor) return;
 
   // ── #8019: tell the OLD address, without gating on it ──────────────
   // Maintainer ruling 2026-08-12 — 「notify the OLD address — do not

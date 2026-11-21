@@ -42,7 +42,7 @@ import {
 } from '@object-ui/components';
 import { referencedRecordTitle } from '@object-ui/core';
 import type { DataSource } from '@object-ui/types';
-import { ArrowDown, ArrowUp, Lock, Plus, RotateCcw, SlidersHorizontal, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, ListFilter, Lock, Plus, RotateCcw, SlidersHorizontal, X } from 'lucide-react';
 import { FieldList, type FieldListItem } from './FieldList';
 import { FilterValuePanel, isQuickRowApplied, quickDateWindowOf } from './FilterValuePanel';
 import {
@@ -50,14 +50,12 @@ import {
   chipsAreIndependent,
   defaultQuickOperator,
   isValuelessOperator,
-  moveSortItem,
   newConditionId,
   quickFilterFamily,
   readViewConditions,
   removeCondition,
   seedValueFor,
   sortWording,
-  toggleSortOrder,
   upsertCondition,
   type ConditionField,
   type ViewConditionChip,
@@ -457,7 +455,11 @@ export function SortPanel({
 export interface ConditionChipRowProps {
   sort: ReadonlyArray<SortItem>;
   sortFields: ReadonlyArray<ConditionField>;
-  onSortChange: (next: SortItem[]) => void;
+  /**
+   * Kept for hosts that pass it; the row writes no sort itself since
+   * objectstack#35878 — its one sort chip opens `renderSortPanel`, which writes.
+   */
+  onSortChange?: (next: SortItem[]) => void;
   filters: FilterBuilderRowGroup;
   filterFields: ReadonlyArray<ConditionField>;
   onFiltersChange: (next: FilterBuilderRowGroup) => void;
@@ -474,22 +476,52 @@ export interface ConditionChipRowProps {
   shownFields?: ReadonlyArray<string>;
   renderAdvanced: () => React.ReactNode;
   /**
+   * Every sort level in one panel, drawn by the host (the Sort panel's
+   * 「all sort levels」 step): a sort chip opens it (objectstack#35876). The
+   * chip itself never changes the sort.
+   */
+  renderSortLevels: () => React.ReactNode;
+  /**
    * Back to the view as saved. Drawn only when passed: the host passes it
    * only while the reader has something of their own to reset.
    */
   onReset?: () => void;
   /** Extra chips the host draws after the filter chips (its own quick filters). */
   trailing?: React.ReactNode;
+  /**
+   * The sort panel the one sort chip (or, with no sort, the 「Sort」 button)
+   * opens (objectstack#35878), as a function of the call that closes it.
+   * Absent ⇒ no sort chip and no 「Sort」 button: the row draws the filter
+   * half only.
+   */
+  renderSortPanel?: (close: () => void) => React.ReactNode;
+  /**
+   * The host's end of the row (objectstack#35878: 「Personalized · Reset」),
+   * drawn at the right in place of the row's own 「Reset」.
+   */
+  end?: React.ReactNode;
+  /** The reader may add a filter (`userActions.filter`); `false` ⇒ no 「Filter」 and no 「+」. */
+  filterOffered?: boolean;
   className?: string;
 }
 
 const CHIP_CLASS =
   'inline-flex h-6 max-w-[280px] shrink-0 items-center gap-1 rounded-full border px-2 text-[13px] leading-none';
 
+/**
+ * A control of the condition row below `sm`: 44 px on both sides (WCAG 2.5.5),
+ * as the bar's Filter and Sort triggers were before they moved here
+ * (objectstack#35878).
+ */
+const ROW_TOUCH_TARGET = 'max-sm:h-11 max-sm:min-w-11';
+
+/** 「Sort」, 「Filter」 and 「+」 before anything is set: dashed, so they do not read as a condition in force. */
+const EMPTY_BUTTON_CLASS =
+  'max-sm:h-11 max-sm:min-w-11 inline-flex h-6 shrink-0 items-center gap-1 rounded-full border border-dashed px-2 text-[13px] leading-none text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+
 export function ConditionChipRow({
   sort,
   sortFields,
-  onSortChange,
   filters,
   filterFields,
   onFiltersChange,
@@ -498,13 +530,16 @@ export function ConditionChipRow({
   dataSource,
   shownFields,
   renderAdvanced,
+  renderSortLevels,
   onReset,
   trailing,
+  renderSortPanel,
+  end,
+  filterOffered = true,
   className,
 }: ConditionChipRowProps) {
   const { t } = useListConditionTranslation();
   const [openChip, setOpenChip] = React.useState<string | null>(null);
-  const dragFrom = React.useRef<number | null>(null);
 
   // Keyed on the names, not on the array the host may rebuild every render.
   const hostDrawnKey = (hostDrawnFields ?? []).join('\u0000');
@@ -519,12 +554,12 @@ export function ConditionChipRow({
   ];
   const nameOf = useLookupValueNames(dataSource, filterFields, namedConditions);
   const independent = chipsAreIndependent(filters);
-  const hasChips = sort.length > 0 || viewChips.length > 0 || appliedRows.length > 0 || !!trailing;
-  if (!hasChips) return null;
+  // Nothing to show and nothing to offer: the row the host reserves stays empty.
+  if (!renderSortPanel && !filterOffered && !end && !trailing && sort.length === 0 && viewChips.length === 0 && appliedRows.length === 0) {
+    return null;
+  }
 
   const fieldOf = (list: ReadonlyArray<ConditionField>, name: string) => list.find((f) => f.value === name);
-
-  const moveSort = (from: number, to: number) => onSortChange(moveSortItem(sort, from, to));
 
   const filterPopover = (key: string, trigger: React.ReactNode, conditionId?: string) => (
     <Popover key={key} open={openChip === key} onOpenChange={(open) => setOpenChip(open ? key : null)}>
@@ -537,7 +572,9 @@ export function ConditionChipRow({
           onChange={onFiltersChange}
           renderAdvanced={renderAdvanced}
           conditionId={conditionId}
-          testId={`condition-panel-${key}`}
+          // The add-a-filter panel is the list's Filter panel (it was the
+          // bar's Filter popover before objectstack#35878): its own id.
+          testId={key === 'add' ? undefined : `condition-panel-${key}`}
         />
       </PopoverContent>
     </Popover>
@@ -547,72 +584,57 @@ export function ConditionChipRow({
     <div
       role="group"
       aria-label={t('listConditions.chips.region')}
-      className={cn('flex min-w-0 flex-1 flex-wrap items-center gap-1.5', className)}
+      // One line at every width: what does not fit scrolls sideways
+      // (objectstack#35878).
+      className={cn('flex min-w-0 flex-1 flex-nowrap items-center gap-1.5 overflow-x-auto', className)}
       data-testid="condition-chips"
     >
-      {sort.map((item, index) => {
-        const field = fieldOf(sortFields, item.field);
-        const label = field?.label ?? item.field;
-        const direction = sortDirectionLabel(field?.type, item.order === 'desc' ? 'desc' : 'asc', t);
-        const Arrow = item.order === 'desc' ? ArrowDown : ArrowUp;
-        return (
-          <span
-            key={item.id}
-            className={cn(CHIP_CLASS, 'cursor-grab border-primary/30 bg-primary/5 text-foreground')}
-            draggable={sort.length > 1}
-            title={sort.length > 1 ? t('listConditions.chips.dragSort') : undefined}
-            onDragStart={(event) => {
-              dragFrom.current = index;
-              event.dataTransfer?.setData('text/plain', String(index));
-            }}
-            onDragOver={(event) => {
-              if (dragFrom.current !== null) event.preventDefault();
-            }}
-            onDrop={(event) => {
-              event.preventDefault();
-              if (dragFrom.current !== null) moveSort(dragFrom.current, index);
-              dragFrom.current = null;
-            }}
-            onDragEnd={() => {
-              dragFrom.current = null;
-            }}
-            data-testid={`sort-chip-${item.field}`}
-            data-order={item.order}
-            data-priority={index + 1}
-          >
-            <button
-              type="button"
-              className="inline-flex min-w-0 items-center gap-1"
-              onClick={() => onSortChange(toggleSortOrder(sort, item.id))}
-              onKeyDown={(event) => {
-                if (!event.altKey) return;
-                if (event.key === 'ArrowLeft' && index > 0) {
-                  event.preventDefault();
-                  moveSort(index, index - 1);
-                } else if (event.key === 'ArrowRight' && index < sort.length - 1) {
-                  event.preventDefault();
-                  moveSort(index, index + 1);
-                }
-              }}
-              aria-label={t('listConditions.chips.toggleSort', { label: `${label} ${direction}` })}
-              title={direction}
-              data-testid={`sort-chip-toggle-${item.field}`}
-            >
-              <Arrow className="h-3 w-3 shrink-0" aria-hidden="true" />
-              <span className="truncate">{label}</span>
-            </button>
-            <button
-              type="button"
-              className="ml-0.5 rounded-full text-muted-foreground hover:text-foreground"
-              onClick={() => onSortChange(sort.filter((s) => s.id !== item.id))}
-              aria-label={t('listConditions.chips.remove', { label })}
-              data-testid={`sort-chip-remove-${item.field}`}
-            >
-              <X className="h-3 w-3" aria-hidden="true" />
-            </button>
-          </span>
-        );
-      })}
+      {/* objectstack#35878 — the sort, at any number of levels, is ONE chip:
+          「Sorted by X」, 「+N」 for the levels after the first. With no sort
+          it is the dashed 「Sort」 button, which opens the sort panel; the
+          chip opens every level at once (objectstack#35876). */}
+      {renderSortPanel && (
+        <Popover open={openChip === 'sort'} onOpenChange={(open) => setOpenChip(open ? 'sort' : null)}>
+          <PopoverTrigger asChild>
+            {sort.length > 0 ? (
+              <button
+                type="button"
+                className={cn(CHIP_CLASS, ROW_TOUCH_TARGET, 'border-primary/30 bg-primary/5 text-foreground hover:bg-primary/10')}
+                data-testid="condition-sort"
+                data-levels={sort.length}
+              >
+                <ArrowUpDown className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <span className="truncate">
+                  {t('listConditions.chips.sortedBy', {
+                    field: fieldOf(sortFields, sort[0].field)?.label ?? sort[0].field,
+                  })}
+                </span>
+                {sort.length > 1 && (
+                  <span className="rounded bg-muted px-1 text-[11px] tabular-nums text-muted-foreground" data-testid="sort-chip-more">
+                    +{sort.length - 1}
+                  </span>
+                )}
+              </button>
+            ) : (
+              <button type="button" className={EMPTY_BUTTON_CLASS} data-testid="condition-sort" data-levels={0}>
+                <ArrowUpDown className="h-3 w-3 shrink-0" aria-hidden="true" />
+                {t('listConditions.chips.sort')}
+              </button>
+            )}
+          </PopoverTrigger>
+          <PopoverContent align="start" className={POPOVER_CLASS} data-testid="condition-popover-sort">
+            {sort.length > 0 ? (
+              // objectstack#35876 — a sort in force opens every level in one
+              // panel; the chip never flips a direction itself.
+              <div className="w-[calc(100vw-2rem)] max-w-[600px] p-3 sm:w-[600px] sm:p-4" data-testid="sort-chip-panel">
+                {renderSortLevels()}
+              </div>
+            ) : (
+              renderSortPanel(() => setOpenChip(null))
+            )}
+          </PopoverContent>
+        </Popover>
+      )}
 
       {viewChips.map((chip) => {
         const text = viewChipText(chip, filterFields, t, nameOf);
@@ -684,21 +706,32 @@ export function ConditionChipRow({
 
       {trailing}
 
-      {filterPopover(
+      {/* With no filter of the reader's own, the dashed 「Filter」 button; with
+          one, a 「+」 after the chips (objectstack#35878). Either opens the
+          field list. */}
+      {filterOffered && filterPopover(
         'add',
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-6 shrink-0 gap-1 px-1.5 text-[13px] text-muted-foreground"
-          data-testid="condition-add-filter"
-        >
-          <Plus className="h-3 w-3" aria-hidden="true" />
-          {t('listConditions.chips.addFilter')}
-        </Button>,
+        appliedRows.length === 0 ? (
+          <button type="button" className={EMPTY_BUTTON_CLASS} data-testid="condition-add-filter" data-empty="true">
+            <ListFilter className="h-3 w-3 shrink-0" aria-hidden="true" />
+            {t('listConditions.chips.filter')}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className={cn(EMPTY_BUTTON_CLASS, 'w-6 justify-center px-0')}
+            aria-label={t('listConditions.chips.addFilter')}
+            title={t('listConditions.chips.addFilter')}
+            data-testid="condition-add-filter"
+          >
+            <Plus className="h-3 w-3" aria-hidden="true" />
+          </button>
+        ),
       )}
 
-      {onReset && (
+      {end ? (
+        <div className="ml-auto flex shrink-0 items-center gap-1 pl-2" data-testid="condition-row-end">{end}</div>
+      ) : onReset && (
         <Button
           type="button"
           variant="ghost"

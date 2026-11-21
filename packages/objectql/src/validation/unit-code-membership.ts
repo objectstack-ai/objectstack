@@ -62,7 +62,9 @@
  * anything derived from it — no spelling correction (`write 'KGM'` beside a
  * stored `kgm`, `'H87'` beside a stored `EA`) and no dimension, since either
  * would tell a caller who may edit the quantity but not read the code field
- * what the field holds.
+ * what the field holds. A resting code that is no unit code, and a resting
+ * blank, also name the run that converts stored free text
+ * ({@link unitCodeBackfillRemedy}, Open item 9 point 7).
  */
 
 import { standardUnitOf, UNIT_DIMENSION_BASE_CODES, type StandardUnit } from '@objectstack/spec/data';
@@ -345,7 +347,8 @@ export function assertUnitCodes(
         `${head}'${quantity}' holds a quantity in the unit its record names (unitMode: 'record'), and its unit code `
           + `field '${codeField}' is blank${also}. The row was not written. Write the record's unit code (for example `
           + `'${source.dimension ? exampleCodeOf(source.dimension) : 'KGM'}') into '${codeField}' in the same write, or `
-          + `leave '${quantity}' empty. The server never fills a unit in.`,
+          + `leave '${quantity}' empty. The server never fills a unit in.`
+          + (codeWritten ? '' : unitCodeBackfillRemedy(object, codeField, true)),
         object, codeField, quantity,
       );
     }
@@ -372,7 +375,8 @@ export function assertUnitCodes(
               ? `The piece is 'H87'; write 'H87'.`
               : `Codes are exact uppercase with no spaces; write '${verdict.hint}'.`
             : 'Write a standard code, or add the unit to the organization\'s Units of Measure first.')
-          + remedyTail,
+          + remedyTail
+          + (codeWritten ? '' : unitCodeBackfillRemedy(object, codeField, false)),
         object, codeField, quantity,
       );
     }
@@ -399,6 +403,22 @@ export function assertUnitCodes(
       );
     }
   }
+}
+
+/**
+ * [ADR-0158 Open item 9 point 7] The run that converts a field's stored free
+ * text into codes, named by the two refusals a resting value can cause: a
+ * quantity written beside a resting code that is no unit code, or beside a
+ * resting blank (`unit-code-backfill.ts`, `os migrate unit-codes` and its REST
+ * twin). Never a written code's remedy: that writer chose the value. The
+ * metadata save's `unit_code_field_declared` / `unit_mode_to_record` finding
+ * names the same run (`@objectstack/metadata-protocol`, `protocol-write-face.ts`).
+ */
+export function unitCodeBackfillRemedy(object: string, codeField: string, blank: boolean): string {
+  return ` Rows stored before '${codeField}' was a unit code field are converted all at once by an organization admin, `
+    + `from a mapping of each stored text to its code, with \`os migrate unit-codes --object ${object} --field ${codeField} `
+    + '--map-file <mapping file>`' + (blank ? ' (an entry "" gives a blank unit beside a quantity its code)' : '')
+    + ' or `POST /api/v1/meta/_migrate-unit-codes`: a dry run lists each stored value, and --apply (or "apply": true) writes.';
 }
 
 /** Does an update payload touch any unit code field, or a quantity pointing at one? */
@@ -452,12 +472,12 @@ export function organizationUnitRowsOf(
 export const UNIT_DELETE_REFUSED_CODE = 'ERR_UNIT_DELETE_REFUSED' as const;
 
 /**
- * [ADR-0158 Open item 11; L1] A `sys_unit` row is never deleted, in any
- * context. Retiring is the delete (the row's one-way `retired` flag): the row
- * keeps holding its organization-scoped unique `code`, so the code can never
- * be created again with another dimension, ratio or label, and a quantity
- * resting on it never takes a stranger's meaning. A removed row would free
- * that key.
+ * [ADR-0158 Open item 11; L1] A `sys_unit` row is never deleted on its own,
+ * in any context. Retiring is the delete (the row's one-way `retired` flag):
+ * the row keeps holding its organization-scoped unique `code`, so the code can
+ * never be created again with another dimension, ratio or label, and a
+ * quantity resting on it never takes a stranger's meaning. A removed row would
+ * free that key.
  *
  * The data API serves no `delete` on the object (`apiMethods`, 405
  * `OBJECT_API_METHOD_NOT_ALLOWED`) and Setup offers none (`userActions`); this
@@ -465,6 +485,12 @@ export const UNIT_DELETE_REFUSED_CODE = 'ERR_UNIT_DELETE_REFUSED' as const;
  * user, a system writer (`isSystem: true`, which the security middleware lets
  * through untouched) and an automation run. 405, the status the data door
  * answers the same verb on this object with.
+ *
+ * [ruling 7035627429, option B] The one exemption: an organization's own
+ * delete removes that organization's units,
+ * since a deleted organization can never create a code again. It is carried by
+ * the engine's cascade claim alone ({@link refuseOrganizationUnitDelete}),
+ * never by a caller's flag or a context bit.
  */
 export class UnitDeleteRefusedError extends Error {
   readonly code = UNIT_DELETE_REFUSED_CODE;
@@ -475,7 +501,7 @@ export class UnitDeleteRefusedError extends Error {
 
   constructor() {
     super(
-      `Delete on '${ORGANIZATION_UNIT_OBJECT}' was REFUSED: a unit of measure is never deleted. Retire it instead ` +
+      `Delete on '${ORGANIZATION_UNIT_OBJECT}' was REFUSED: a unit of measure is never deleted on its own, only with its organization. Retire it instead ` +
         '(set `retired: true`): a retired unit keeps its code, so the code is never created again with another ' +
         'meaning, and records already in that unit keep it. Nothing was deleted.',
     );
@@ -488,7 +514,14 @@ export class UnitDeleteRefusedError extends Error {
  * {@link UnitDeleteRefusedError}. Called by the engine's `delete()` before any
  * middleware or hook runs, for a by-id, a predicate (`multi`) and a permanent
  * delete alike.
+ *
+ * `removedWithItsOrganization` is the engine's own answer, never a caller's:
+ * `true` only when THIS delete claimed the token the organization delete's
+ * cascade issued for exactly this unit (`isOrganizationUnitRemoval`,
+ * `engine-cascade-planning.ts`). A token is claimed once, so a delete a hook
+ * or a middleware issues inside that removal, or anyone else's delete while
+ * the organization's delete is in flight, is refused like every other.
  */
-export function refuseOrganizationUnitDelete(object: string): void {
-  if (object === ORGANIZATION_UNIT_OBJECT) throw new UnitDeleteRefusedError();
+export function refuseOrganizationUnitDelete(object: string, removedWithItsOrganization: boolean): void {
+  if (object === ORGANIZATION_UNIT_OBJECT && !removedWithItsOrganization) throw new UnitDeleteRefusedError();
 }

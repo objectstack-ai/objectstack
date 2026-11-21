@@ -21,6 +21,9 @@
  *   5. A refusal naming a field the list cannot edit offers to open the record.
  *   6. A client-sorted row a save updated stays where it is until the rows load.
  *   7. Control: without the provider the save bar model is unchanged.
+ *   8. A commit the host asks to confirm (`confirmCommit`, slice S3) is held
+ *      with nothing staged: No leaves the cell as it was, Yes writes it; a
+ *      paste is asked too, an unchanged value is not.
  */
 import React from 'react';
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -307,6 +310,96 @@ describe('data-table autosave — Esc in the editor while the row is saving', ()
     // The typed-over text was never sent: the one save is the first commit.
     await act(async () => { calls[0].resolve(); });
     expect(onRowSave).toHaveBeenCalledTimes(1);
+    expect(onRowSave.mock.calls[0][1]).toEqual({ name: 'Alpha 2' });
+  });
+});
+
+describe('data-table autosave — a commit the host asks to confirm first (objectstack#35685)', () => {
+  /** A table whose host asks about every commit into `Stage`, each answer settled by hand. */
+  function renderConfirming(onRowSave: Save) {
+    const asks: Array<{ row: any; columnKey: string; value: unknown; answer: (yes: boolean) => void }> = [];
+    const confirmCommit = vi.fn((row: any, columnKey: string, value: unknown) => {
+      if (columnKey !== 'stage') return null;
+      return new Promise<boolean>((resolve) => { asks.push({ row, columnKey, value, answer: resolve }); });
+    });
+    const DataTable = ComponentRegistry.get('data-table')!;
+    const utils = render(
+      <GridCellSelectionProvider value={{ confirmCommit }}>
+        <DataTable schema={schemaOf(onRowSave)} />
+      </GridCellSelectionProvider>,
+    );
+    const cell = (row: number, col: number) =>
+      utils.container.querySelectorAll('tbody tr')[row].querySelectorAll('td[data-grid-cell]')[col] as HTMLElement;
+    const editor = () => utils.container.querySelector<HTMLInputElement>('td[data-editing-cell] input');
+    const catcher = () => utils.container.querySelector<HTMLInputElement>('[data-slot="cell-type-catcher"]');
+    const typeAndEnter = (row: number, col: number, value: string) => {
+      fireEvent.click(cell(row, col));
+      fireEvent.change(catcher()!, { target: { value: value.slice(0, 1) } });
+      fireEvent.change(editor()!, { target: { value } });
+      fireEvent.keyDown(editor()!, { key: 'Enter' });
+    };
+    return { ...utils, cell, editor, catcher, typeAndEnter, asks, confirmCommit };
+  }
+
+  it('No writes nothing: the editor closes, nothing is staged or sent, the cell shows what it had', async () => {
+    const { onRowSave } = deferredSave();
+    const t = renderConfirming(onRowSave);
+    t.typeAndEnter(0, 1, 'won');
+    await act(async () => {});
+    expect(t.confirmCommit).toHaveBeenCalledTimes(1);
+    expect(t.asks[0].row).toBe(ROWS[0]);
+    expect(t.asks[0].value).toBe('won');
+    // While the host asks: the editor is closed, the cell shows the stored
+    // value with no save state, and nothing went out.
+    expect(t.editor()).toBeNull();
+    expect(t.cell(0, 1).textContent).toContain('open');
+    expect(t.cell(0, 1).querySelector('[data-slot="cell-save-state"]')).toBeNull();
+    expect(onRowSave).not.toHaveBeenCalled();
+    await act(async () => { t.asks[0].answer(false); });
+    expect(onRowSave).not.toHaveBeenCalled();
+    expect(t.cell(0, 1).textContent).toContain('open');
+    expect(t.cell(0, 1).textContent).not.toContain('won');
+    // Focus is back on the selected cell, so the keys carry on.
+    expect(document.activeElement).toBe(t.catcher());
+  });
+
+  it('Yes writes the value as any commit is written: one update of that cell', async () => {
+    const { onRowSave } = deferredSave();
+    const t = renderConfirming(onRowSave);
+    t.typeAndEnter(0, 1, 'won');
+    await act(async () => {});
+    expect(onRowSave).not.toHaveBeenCalled();
+    await act(async () => { t.asks[0].answer(true); });
+    await waitFor(() => expect(onRowSave).toHaveBeenCalledTimes(1));
+    expect(onRowSave.mock.calls[0][1]).toEqual({ stage: 'won' });
+    expect(t.cell(0, 1).querySelector('[data-slot="cell-save-state"]')).toHaveAttribute('data-state', 'saving');
+  });
+
+  it('a paste is asked about as an editor commit is', async () => {
+    const { onRowSave } = deferredSave();
+    const t = renderConfirming(onRowSave);
+    fireEvent.click(t.cell(0, 1));
+    fireEvent.paste(t.catcher()!, { clipboardData: { getData: () => 'won' } });
+    await act(async () => {});
+    expect(t.confirmCommit).toHaveBeenCalledTimes(1);
+    expect(onRowSave).not.toHaveBeenCalled();
+    await act(async () => { t.asks[0].answer(false); });
+    expect(onRowSave).not.toHaveBeenCalled();
+    expect(t.cell(0, 1).textContent).toContain('open');
+  });
+
+  it('a commit that changes nothing, and a cell the host does not ask about, are not held', async () => {
+    const { onRowSave } = deferredSave();
+    const t = renderConfirming(onRowSave);
+    // The stored value again: nothing to ask, nothing to send.
+    t.typeAndEnter(0, 1, 'open');
+    await act(async () => {});
+    expect(t.confirmCommit).not.toHaveBeenCalled();
+    expect(onRowSave).not.toHaveBeenCalled();
+    // Another column: the host answers no question, and it saves at once.
+    t.typeAndEnter(0, 0, 'Alpha 2');
+    await waitFor(() => expect(onRowSave).toHaveBeenCalledTimes(1));
+    expect(t.confirmCommit).toHaveBeenCalledTimes(1);
     expect(onRowSave.mock.calls[0][1]).toEqual({ name: 'Alpha 2' });
   });
 });

@@ -48,9 +48,10 @@
  *     (#27627) and the qualified by-name read (ADR-0150 D5, #31691). A pin
  *     that only watched `GET {prefix}/:type/:name` would sit green through
  *     the others moving, which is the state #15854 measured.
- *   - `metadata.endpoints.maintenance` gates FOUR, two of them write doors:
- *     `POST {prefix}/_migrate-stored` and the record-currency code backfill
- *     `POST {prefix}/_migrate-record-currency-codes`.
+ *   - `metadata.endpoints.maintenance` gates FIVE, three of them write doors:
+ *     `POST {prefix}/_migrate-stored`, the record-currency code backfill
+ *     `POST {prefix}/_migrate-record-currency-codes` and the unit code
+ *     backfill `POST {prefix}/_migrate-unit-codes`.
  *
  * Asserting the difference is EXACTLY a named set catches a gate that grows a
  * route as loudly as one that loses a route.
@@ -199,6 +200,7 @@ const CASES: Array<{ path: string; removes: string[] }> = [
     //
     // [ADR-0144, ruling 6670707546 item B] FOUR: the record-currency code
     // backfill door joined it, behind this switch as `_migrate-stored` is.
+    // [ADR-0158 U7 R1] FIVE: the unit code backfill door, its twin.
     {
         path: 'metadata.endpoints.maintenance',
         removes: [
@@ -206,6 +208,7 @@ const CASES: Array<{ path: string; removes: string[] }> = [
             `GET ${META}/diagnostics`,
             `POST ${META}/_migrate-record-currency-codes`,
             `POST ${META}/_migrate-stored`,
+            `POST ${META}/_migrate-unit-codes`,
         ],
     },
     // [#15854] TWELVE routes (thirteen since #27627, below) — the WHOLE per-item face, which is what the
@@ -287,6 +290,7 @@ const CASES: Array<{ path: string; removes: string[] }> = [
             `POST ${META}/:type/:name/rollback`,
             `POST ${META}/_migrate-record-currency-codes`,
             `POST ${META}/_migrate-stored`,
+            `POST ${META}/_migrate-unit-codes`,
             `PUT ${META}/:type/:name`,
         ],
     },

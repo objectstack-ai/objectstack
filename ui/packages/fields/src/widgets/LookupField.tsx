@@ -45,6 +45,7 @@ import { useSafeFieldLabel, useDisplayLocale } from '@object-ui/i18n';
 import { SchemaRendererContext as ImportedSchemaRendererContext, useAction, useHasActionProvider } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { useFieldTranslation } from './useFieldTranslation.js';
+import { isImeKey } from './imeKey.js';
 import { ScanFieldButton, useFieldScanOffered } from './ScanFieldButton.js';
 
 /** The record a host that edits none hands `{ $record }` resolution: nothing to read. */
@@ -1670,6 +1671,9 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
   // Keyboard handler for the search input — arrow keys + Enter
   const handleSearchKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      // The input method owns a key pressed while it composes: Enter picks a
+      // candidate there, and the arrows move between candidates, not rows.
+      if (isImeKey(e)) return;
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         setActiveIndex(prev =>

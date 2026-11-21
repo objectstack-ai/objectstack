@@ -210,6 +210,8 @@ import {
   getOtpSendGuard,
   renderPhoneSmsBody,
   sendChangeEmailNotice,
+  sendPasswordChangeReminder,
+  sendPasswordResetNotice,
   sendPhoneInviteSms,
   storedRecipientLocale,
   type EmailSmsDeliveryHost,
@@ -1118,10 +1120,14 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
   /**
    * ADR-0093 D9 — default active-org on session create. When enabled
    * (default), a `session.create.before` hook stamps `activeOrganizationId`
-   * from the caller's `sys_member` row (owner-preferred) whenever the draft
-   * lacks one. A host-supplied `session.create.before` (see
-   * {@link databaseHooks}) chains FIRST and keeps precedence. Set `false`
-   * to restore the raw better-auth behaviour (sessions start org-less).
+   * from the caller's `sys_member` row (owner-preferred, else the oldest)
+   * whenever the draft lacks one and the host named no
+   * `activeOrganizationCandidates`. A host-supplied `session.create.before`
+   * (see {@link databaseHooks}) chains FIRST and keeps precedence: an
+   * organization it set, or a candidate list it returned, is its choice and
+   * the default stays out. Set `false` to restore the raw better-auth
+   * behaviour (sessions start org-less unless the host chooses; a host's
+   * candidate list is honoured either way).
    * @default true
    */
   autoActiveOrganization?: boolean;
@@ -1169,6 +1175,20 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * security, sharing, the ADR-0092 identity write guard — early-returns on
    * `isSystem` by design. A middleware that gates on `isSystem` therefore sees
    * nothing; one that does not, runs.
+   *
+   * **Session creation's organization, with fallbacks (#35829).** A host's
+   * `session.create.before` chooses the new session's organization and wins
+   * over the framework's default (see {@link autoActiveOrganization}); the
+   * framework then refuses the sign-in when that organization's own allowed
+   * IP ranges do not admit the request (`SESSION_SCOPING_REFUSAL`). To accept
+   * a fallback instead, the hook returns an ordered
+   * `activeOrganizationCandidates` list beside `data` (the package export
+   * `SessionCreateBeforeResult`): the session is scoped to the first of
+   * `data.activeOrganizationId`, then the list, that the scoping admits, and
+   * none admitted is refused as before. No list keeps the single choice.
+   * `data` stays required (a list-only hook returns `data: session`), and the
+   * host lists only organizations the user is a member of: membership is not
+   * judged here.
    */
   databaseHooks?: BetterAuthOptions['databaseHooks'];
 
@@ -2251,6 +2271,8 @@ export class AuthManager {
       resolvePasswordHasher: (...a) => this.resolvePasswordHasher(...a),
       roleChangeGrantDeps: (...a) => this.roleChangeGrantDeps(...a),
       sendChangeEmailNotice: (...a) => this.sendChangeEmailNotice(...a),
+      sendPasswordChangeReminder: (...a) => this.sendPasswordChangeReminder(...a),
+      sendPasswordResetNotice: (...a) => this.sendPasswordResetNotice(...a),
       sendExistingAccountSignUpNotice: (...a) => this.sendExistingAccountSignUpNotice(...a),
       settleSignInAttempt: (...a) => this.settleSignInAttempt(...a),
       settleSsoProviderDelete: (...a) => this.settleSsoProviderDelete(...a),
@@ -3939,6 +3961,79 @@ export class AuthManager {
   }
 
   /**
+   * Mail the account whose password just changed what the change left active:
+   * its API keys, its linked sign-in accounts, the apps it authorized, the
+   * OAuth applications it registered and the SCIM credentials it minted
+   * (`password-reset-ends-added-access.ts`). A password change, unlike a
+   * reset, ends none of them, so the account's owner is reminded of each. Sent
+   * only when there is something to list, to the account's own address, in
+   * its own stored language first (the ladder `sendChangeEmailNotice`
+   * follows).
+   *
+   * ⛔ Never throws: like the change-email notice, a reminder that cannot be
+   * sent — no transport, no template, a failed delivery — is logged at warn
+   * and never fails the change.
+   */
+  private sendPasswordChangeReminder(
+    to: { email: string; name?: string; id?: string },
+    kept: {
+      apiKeys: readonly string[];
+      signInAccounts: readonly string[];
+      authorizedApps: readonly string[];
+      ownedApps: readonly string[];
+      scimCredentials: readonly string[];
+    },
+    requestSource?: unknown,
+  ): Promise<void> {
+    const readConfig = () => this.config;
+    const host: Pick<EmailSmsDeliveryHost, 'config' | 'emailLocaleArg' | 'getAppName' | 'getEmailService' | 'storedRecipientLocale'> = {
+      get config() { return readConfig(); },
+      emailLocaleArg: (...a) => this.emailLocaleArg(...a),
+      getAppName: (...a) => this.getAppName(...a),
+      getEmailService: (...a) => this.getEmailService(...a),
+      storedRecipientLocale: (...a) => this.storedRecipientLocale(...a),
+    };
+    return sendPasswordChangeReminder.call(host, to, kept, requestSource);
+  }
+
+  /**
+   * Mail the account a completed self-service reset just ended for what the
+   * reset ended — counts of its API keys, linked sign-in accounts and
+   * authorized apps, and each OAuth application it disabled and each SCIM
+   * credential it revoked by name — and what it kept: the single sign-on
+   * providers the account registered and its second factor, so the owner can
+   * check them (`password-reset-ends-added-access.ts`). Sent after every
+   * completed self-service reset, to the account's own address, in its own
+   * stored language first (the ladder `sendChangeEmailNotice` follows).
+   *
+   * ⛔ Never throws: like the change reminder, a notice that cannot be sent —
+   * no transport, no template, a failed delivery — is logged at warn and
+   * never fails the reset.
+   */
+  private sendPasswordResetNotice(
+    to: { email: string; name?: string; id?: string },
+    ended: {
+      apiKeys: number;
+      signInAccounts: number;
+      authorizedApps: number;
+      ownedApps: readonly string[];
+      scimCredentials: readonly string[];
+    },
+    kept: { ssoProviders: readonly string[]; twoFactor: boolean },
+    requestSource?: unknown,
+  ): Promise<void> {
+    const readConfig = () => this.config;
+    const host: Pick<EmailSmsDeliveryHost, 'config' | 'emailLocaleArg' | 'getAppName' | 'getEmailService' | 'storedRecipientLocale'> = {
+      get config() { return readConfig(); },
+      emailLocaleArg: (...a) => this.emailLocaleArg(...a),
+      getAppName: (...a) => this.getAppName(...a),
+      getEmailService: (...a) => this.getEmailService(...a),
+      storedRecipientLocale: (...a) => this.storedRecipientLocale(...a),
+    };
+    return sendPasswordResetNotice.call(host, to, ended, kept, requestSource);
+  }
+
+  /**
    * Inject (or replace) the outbound SMS service used by the phone-number
    * OTP callbacks and the SMS invite path (#2780). Mirrors
    * {@link setEmailService}: resolved lazily per send, so it is safe to set
@@ -5501,7 +5596,9 @@ export class AuthManager {
    * (`mcp-token-revocation.ts` `mcpConsentAdmits`). A token is refused when
    * its consent is gone, when the consent was created after the token was
    * issued (revoked, then granted again), when it carries no `azp` to key the
-   * read, and when the read fails (fail closed). So revocation takes effect
+   * read, when it was issued before its subject's password last changed (the
+   * credential clock, `credential-change-ends-prior-access.ts`), and when the
+   * read fails (fail closed). So revocation takes effect
    * on the next request: `/oauth2/revoke` deletes the consent and the
    * client's refresh family for that user (`answerOAuthTokenRevocation`), and
    * the Console's withdraw (`authorized-clients-withdraw.ts`) revokes the same

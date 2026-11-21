@@ -18,6 +18,9 @@ export {
   reconcileOperatorForField,
   isFilterValueComplete,
   operatorsForFieldType,
+  operatorsForField,
+  jsonColumnFilterOperators,
+  type FilterFieldStorageFacts,
   type FilterBuilderRow,
   type FilterBuilderRowGroup,
   type FilterBuilderProps,
@@ -37,6 +40,13 @@ export * from './fullscreen-editor';
 export * from './input-group';
 export * from './item';
 export { Kbd } from './kbd';
+export {
+  ObjectIconTile,
+  OBJECT_COLOR_TILE_CLASS,
+  objectColorOrDefault,
+  type ObjectIconTileProps,
+  type ObjectIconTileSize,
+} from './object-icon-tile';
 export {
   recordOverlayWidthStorageKey,
   legacyRecordDrawerWidthKey,

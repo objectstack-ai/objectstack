@@ -8,14 +8,13 @@
 
 import React from 'react';
 import { Button } from '@object-ui/components';
-import { Trash2, CheckSquare, X } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import { LazyIcon, toKebabIconName } from '@object-ui/components';
 import { useObjectTranslation, usePredicateScope, useCapabilityGate } from '@object-ui/react';
 import { isActionSwitchedOff } from '@object-ui/core';
 import type { BulkActionDef } from '@object-ui/types';
 import { partitionBulkRows, hasVisibilityGate } from '../bulkEligibility';
 import { formatActionLabel } from './RowActionMenu';
-import { BULK_SELECT_ALL_MATCHING_CAP, exceedsBulkSelectAllMatchingCap } from '../bulkSelectAllMatchingCap';
 
 /**
  * Is this rich bulk def offered for this selection? `visible` is evaluated
@@ -54,7 +53,7 @@ export interface LegacyBulkActionItem {
   destructive: boolean;
 }
 
-/** What a selection is offered — the bar's buttons, and the selection's context menu. */
+/** What a selection is offered — the selection bar's buttons, and the selection's context menu. */
 export interface BulkActionItems {
   /** Rich defs that pass the capability gate, the switch-off and their per-record `visible`, in declared order. */
   defs: BulkActionDef[];
@@ -64,7 +63,7 @@ export interface BulkActionItems {
 
 /**
  * THE bulk-action resolver (objectstack#28434): what a selection is offered,
- * read by both of its entry points — {@link BulkActionBar} and the context
+ * read by both of its entry points — the selection bar (`./SelectionBar`) and the context
  * menu a right-click on a selected row opens (`./RowContextMenu`). Both call
  * this hook, so a bulk action shows in both or in neither.
  *
@@ -130,8 +129,8 @@ export type OrderedBulkItem =
  * objectstack#35554 — a selection's actions as one list: the rich defs, then
  * the legacy names, each in declared order, with every destructive entry moved
  * to the end (the order is otherwise kept). The selection's context menu and
- * the page bar's selection actions read this one order, so the actions the bar
- * exposes are the first entries of the menu, and Delete closes both.
+ * the selection bar read this one order, so the actions the bar exposes are the
+ * first entries of the menu, and Delete closes both.
  */
 export function orderSelectionMenuItems(items: BulkActionItems): OrderedBulkItem[] {
   const all: OrderedBulkItem[] = [
@@ -141,226 +140,28 @@ export function orderSelectionMenuItems(items: BulkActionItems): OrderedBulkItem
   return [...all.filter((e) => !e.destructive), ...all.filter((e) => e.destructive)];
 }
 
-/** One rich bulk-action button, offered per {@link useBulkActionItems}. */
+/** One rich bulk-action button, offered per {@link useBulkActionItems}, at the selection bar's size. */
 export const BulkActionButton: React.FC<{
   def: BulkActionDef;
   selectedRows: any[];
   onActionDef?: (def: BulkActionDef, selectedRows: any[]) => void;
-  /** `page-bar`: the list page bar's button size (objectstack#35554). */
-  size?: 'bar' | 'page-bar';
-}> = ({ def, selectedRows, onActionDef, size = 'bar' }) => {
+}> = ({ def, selectedRows, onActionDef }) => {
   const isDestructive = isDestructiveBulkDef(def);
   const iconName = def.icon ? toKebabIconName(def.icon) : null;
   return (
     <Button
       variant={isDestructive ? 'destructive' : 'outline'}
       size="sm"
-      className={size === 'page-bar' ? 'h-8 gap-1.5' : 'h-7 px-2.5 text-xs gap-1.5'}
+      className="h-8 shrink-0 gap-1.5"
       onClick={() => onActionDef?.(def, selectedRows)}
       data-testid={`bulk-action-${def.name}`}
     >
       {iconName ? (
-        <LazyIcon name={iconName} className="h-3 w-3" />
+        <LazyIcon name={iconName} className="h-4 w-4" />
       ) : isDestructive ? (
-        <Trash2 className="h-3 w-3" />
+        <Trash2 className="h-4 w-4" />
       ) : null}
       {def.label ?? formatActionLabel(def.name)}
     </Button>
-  );
-};
-
-export interface BulkActionBarProps {
-  /** Array of selected row records */
-  selectedRows: any[];
-  /**
-   * Bulk/batch action identifiers (legacy string list) that resolved to no
-   * declared action — dispatched by name for consumers that registered a
-   * runner handler under it. Names that DID resolve arrive in `actionDefs`
-   * instead (see `resolveBulkActions`), so the two lists never overlap.
-   */
-  actions: string[];
-  /** Rich action definitions — authored inline or derived from the object. */
-  actionDefs?: BulkActionDef[];
-  /**
-   * The object's field definitions (`objectSchema.fields`). Passed to each
-   * def's per-record `visible` so a relation field is bound as the FOREIGN KEY
-   * the server stores rather than the record `$expand` substituted for it — the
-   * selected rows come straight off the grid's expanded fetch, where every
-   * relational COLUMN is an object (see `toPredicateRecord`).
-   */
-  objectFields?: unknown;
-  /** Callback when a legacy string-id bulk action button is clicked */
-  onAction?: (action: string, selectedRows: any[]) => void;
-  /** Callback when a rich-def bulk action button is clicked. */
-  onActionDef?: (def: BulkActionDef, selectedRows: any[]) => void;
-  /** Callback to clear selection */
-  onClearSelection?: () => void;
-  /**
-   * Cross-page selection — number of rows currently loaded on the page.
-   * When `selectedRows.length === pageSize` and `totalMatching > pageSize`,
-   * we offer to extend the selection across the entire match set.
-   */
-  pageSize?: number;
-  /** Total matching record count from the most recent find. */
-  totalMatching?: number;
-  /** True when the user has opted into the cross-page selection. */
-  allMatchingSelected?: boolean;
-  /** Invoked when the user clicks "Select all N matching". */
-  onSelectAllMatching?: () => void;
-}
-
-export const BulkActionBar: React.FC<BulkActionBarProps> = ({
-  selectedRows,
-  actions,
-  actionDefs,
-  objectFields,
-  onAction,
-  onActionDef,
-  onClearSelection,
-  pageSize,
-  totalMatching,
-  allMatchingSelected,
-  onSelectAllMatching,
-}) => {
-  const { t } = useObjectTranslation();
-  // The one resolver the selection's context menu reads too (objectstack#28434).
-  const items = useBulkActionItems({ selectedRows, actions, actionDefs, objectFields });
-  // Render whenever rows are selected — this bar is the single, canonical
-  // selection indicator (count + Clear). Bulk-action buttons are optional: with
-  // none configured it still surfaces "N selected / Clear", so the embedded
-  // data-table needn't draw its own (unstyled, orphaned) selection toolbar.
-  if (selectedRows.length === 0) return null;
-
-  // Cross-page affordance: show banner when the user has selected the
-  // entire visible page AND there are more matching records off-screen.
-  const showCrossPageAffordance =
-    !allMatchingSelected
-    && typeof totalMatching === 'number'
-    && typeof pageSize === 'number'
-    && pageSize > 0
-    && selectedRows.length >= pageSize
-    && totalMatching > pageSize;
-  // Over the cap, every string that counts the match set says that only the
-  // first BULK_SELECT_ALL_MATCHING_CAP records are processed.
-  const overCap = exceedsBulkSelectAllMatchingCap(totalMatching);
-
-  return (
-    <div
-      className="border-t border-primary/30 px-4 py-2 flex flex-col gap-1.5 text-xs bg-primary/10 text-foreground shrink-0 shadow-sm motion-safe:animate-in motion-safe:slide-in-from-bottom-2 motion-safe:fade-in-0 motion-safe:duration-200"
-      role="region"
-      aria-label={t('grid.bulkActions', { defaultValue: 'Bulk actions' })}
-      data-testid="bulk-actions-bar"
-    >
-      {(showCrossPageAffordance || allMatchingSelected) && (
-        <div
-          className="flex items-center gap-2 text-[11px] text-muted-foreground"
-          data-testid="bulk-cross-page-banner"
-        >
-          {allMatchingSelected ? (
-            <>
-              <CheckSquare className="h-3 w-3 text-primary shrink-0" />
-              <span>
-                {overCap
-                  ? t('grid.bulkAllMatchingSelectedCapped', {
-                      cap: BULK_SELECT_ALL_MATCHING_CAP,
-                      total: totalMatching,
-                      defaultValue: 'Only the first {{cap}} of {{total}} matching records will be processed.',
-                    })
-                  : t('grid.bulkAllMatchingSelected', {
-                      count: totalMatching,
-                      defaultValue: 'All {{count}} matching records are selected.',
-                    })}
-              </span>
-            </>
-          ) : (
-            <>
-              <span>
-                {t('grid.bulkAllOnPage', {
-                  count: pageSize,
-                  defaultValue: 'All {{count}} on this page are selected.',
-                })}
-              </span>
-              <button
-                type="button"
-                className="font-medium text-primary underline-offset-2 hover:underline"
-                onClick={onSelectAllMatching}
-                data-testid="bulk-select-all-matching"
-              >
-                {overCap
-                  ? t('grid.bulkSelectAllMatchingCapped', {
-                      cap: BULK_SELECT_ALL_MATCHING_CAP,
-                      total: totalMatching,
-                      defaultValue: 'Select the first {{cap}} of {{total}} matching',
-                    })
-                  : t('grid.bulkSelectAllMatching', {
-                      count: totalMatching,
-                      defaultValue: 'Select all {{count}} matching',
-                    })}
-              </button>
-            </>
-          )}
-        </div>
-      )}
-      <div className="flex items-center gap-2">
-      <CheckSquare className="h-3.5 w-3.5 text-primary shrink-0" />
-      <span className="font-medium tabular-nums">
-        <span
-          key={allMatchingSelected ? `all-${totalMatching}` : selectedRows.length}
-          className="inline-block motion-safe:animate-in motion-safe:zoom-in-90 motion-safe:duration-150"
-        >
-          {allMatchingSelected
-            ? overCap
-              ? t('grid.bulkSelectedAllMatchesCapped', {
-                  cap: BULK_SELECT_ALL_MATCHING_CAP,
-                  total: totalMatching,
-                  defaultValue: '{{cap}} selected (of {{total}} matches)',
-                })
-              : t('grid.bulkSelectedAllMatches', {
-                  count: totalMatching,
-                  defaultValue: '{{count}} selected (all matches)',
-                })
-            : t('grid.bulkSelected', {
-                count: selectedRows.length,
-                defaultValue: '{{count}} selected',
-              })}
-        </span>
-      </span>
-      <div className="flex items-center gap-1.5 ml-3">
-        {items.defs.map(def => (
-          <BulkActionButton
-            key={def.name}
-            def={def}
-            selectedRows={selectedRows}
-            onActionDef={onActionDef}
-          />
-        ))}
-        {items.legacy.map(({ name: action, label, destructive: isDestructive }) => {
-          const Icon = isDestructive ? Trash2 : null;
-          return (
-            <Button
-              key={action}
-              variant={isDestructive ? 'destructive' : 'outline'}
-              size="sm"
-              className="h-7 px-2.5 text-xs gap-1.5"
-              onClick={() => onAction?.(action, selectedRows)}
-              data-testid={`bulk-action-${action}`}
-            >
-              {Icon && <Icon className="h-3 w-3" />}
-              {label}
-            </Button>
-          );
-        })}
-      </div>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-7 px-2 text-xs ml-auto gap-1"
-        onClick={onClearSelection}
-      >
-        <X className="h-3 w-3" />
-        {t('grid.bulkClear', { defaultValue: 'Clear' })}
-      </Button>
-      </div>
-    </div>
   );
 };

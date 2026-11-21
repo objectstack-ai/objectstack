@@ -14,8 +14,9 @@ export const Opportunity = ObjectSchema.create({
   pluralLabel: 'Opportunities',
   icon: 'trending-up',
   description: 'A potential sale tied to an account.',
-  // What the record page shows at a glance, under the title. The stage is
-  // not here: the record page already draws it as the stage path.
+  // The record's most important fields: the hover card, list columns and
+  // the record picker read them. The stage is not here: the record header
+  // already shows it as the status tag beside the name.
   highlightFields: ['account', 'amount', 'close_date', 'probability'],
   // Field history on the record page: the timeline shows each field change
   // with its before and after values, and offers the Changes filter. The audit
@@ -23,18 +24,31 @@ export const Opportunity = ObjectSchema.create({
   // record page show it.
   enable: { trackHistory: true },
 
+  // [#35889] The product lines are part of the opportunity: this group puts the
+  // `crm_opportunity_line_item` table in the record page after its fields,
+  // inlines it in the New / Edit Opportunity form (and the lead-conversion
+  // wizard's Opportunity step), and lets Edit on the record page save both
+  // together. A master-detail child no group names is only a tab.
+  fieldGroups: [
+    { key: 'opportunity', label: 'Opportunity' },
+    { key: 'lines', label: 'Products', relatedList: 'crm_opportunity_line_item' },
+  ],
+
   fields: {
     name: Field.text({
+      group: 'opportunity',
       label: 'Opportunity Name',
       required: true,
       searchable: true,
       maxLength: 200,
     }),
     account: Field.lookup('crm_account', {
+      group: 'opportunity',
       label: 'Account',
       required: true,
     }),
     stage: Field.select({
+      group: 'opportunity',
       label: 'Stage',
       required: true,
       options: [
@@ -46,10 +60,12 @@ export const Opportunity = ObjectSchema.create({
       ],
     }),
     amount: Field.currency({
+      group: 'opportunity',
       label: 'Amount',
       min: 0,
     }),
     probability: Field.percent({
+      group: 'opportunity',
       label: 'Probability',
       defaultValue: 50,
       min: 0,
@@ -59,20 +75,24 @@ export const Opportunity = ObjectSchema.create({
     // console reads `returnType` and never infers money from the expression,
     // and an undeclared formula draws the plain number face beside `amount`.
     expected_revenue: Field.formula({
+      group: 'opportunity',
       label: 'Expected Revenue',
       returnType: 'currency',
       expression: cel`(record.amount == null ? 0 : record.amount) * (record.probability == null ? 0 : record.probability) / 100`,
     }),
     close_date: Field.date({
+      group: 'opportunity',
       label: 'Close Date',
     }),
     // Exercises the newly-registered `daysBetween` stdlib function — the canonical
     // "days remaining" formula (negative once the close date has passed).
     days_to_close: Field.formula({
+      group: 'opportunity',
       label: 'Days to Close',
       expression: cel`record.close_date == null ? 0 : daysBetween(today(), record.close_date)`,
     }),
     discount_percent: Field.percent({
+      group: 'opportunity',
       label: 'Discount %',
       defaultValue: 0,
       min: 0,
@@ -85,6 +105,7 @@ export const Opportunity = ObjectSchema.create({
     // flows are examples/app-showcase/src/automation/flows/, and the
     // `approvalStatusField` wiring is shown in skills/objectstack-automation/SKILL.md.
     approval_status: Field.select({
+      group: 'opportunity',
       label: 'Approval Status',
       readonly: true,
       options: [
@@ -95,6 +116,7 @@ export const Opportunity = ObjectSchema.create({
       ],
     }),
     renewal_of: Field.lookup('crm_opportunity', {
+      group: 'opportunity',
       label: 'Renewal Of',
     }),
     // Roll-up of the opportunity's product line items — recomputed server-side
@@ -102,6 +124,7 @@ export const Opportunity = ObjectSchema.create({
     // crm_opportunity_line_item.opportunity). The line-item grid also shows a
     // live running total during entry (inlineAmountField: 'amount').
     line_total: Field.summary({
+      group: 'opportunity',
       label: 'Products Total',
       summaryOperations: { object: 'crm_opportunity_line_item', field: 'amount', function: 'sum' },
     }),

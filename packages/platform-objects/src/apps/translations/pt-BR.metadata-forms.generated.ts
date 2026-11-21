@@ -52,6 +52,10 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Ícone",
         helpText: "Nome do ícone Lucide (por exemplo \"building\", \"users\")"
       },
+      color: {
+        label: "Cor",
+        helpText: "Cor do quadrado em que o ícone é desenhado, da paleta fixa. Sem valor, usa cinza."
+      },
       description: {
         label: "Descrição",
         helpText: "Documentação para desenvolvedores"
@@ -70,7 +74,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       highlightFields: {
         label: "Campos em destaque",
-        helpText: "Nomes de campos deste objeto, os mais importantes primeiro — a primeira entrada vence onde só cabe uma (ADR-0085). Define as colunas padrão da lista, os cartões, as pré-visualizações de registros filhos e a faixa de destaque do detalhe. Um nome que não seja um campo deste objeto é recusado na publicação."
+        helpText: "Nomes de campos deste objeto, os mais importantes primeiro — a primeira entrada vence onde só cabe uma (ADR-0085). Define as colunas padrão das listas e das listas relacionadas, os cartões, as pré-visualizações de registros filhos, o cartão flutuante do registro e o seletor de registros. Um nome que não seja um campo deste objeto é recusado na publicação."
       },
       relatedLists: {
         label: "Listas relacionadas",
@@ -86,11 +90,15 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.key": {
         label: "Chave",
-        helpText: "Chave de máquina em snake_case, única dentro deste objeto — o esquema recusa qualquer outra coisa. Os campos entram no grupo ao nomear esta chave, portanto renomeá-la os deixa sem grupo."
+        helpText: "Chave de máquina em snake_case, única dentro deste objeto — o esquema recusa qualquer outra coisa. Os campos que o grupo lista em Campos continuam nele quando a chave é renomeada; um campo que entra ao nomear esta chave na sua própria configuração de grupo fica sem grupo."
       },
       "fieldGroups.label": {
         label: "Rótulo",
         helpText: "Texto do cabeçalho da seção do grupo."
+      },
+      "fieldGroups.fields": {
+        label: "Campos",
+        helpText: "Os campos que este grupo exibe, na ordem de exibição (nomes de campo). Preenchida, a lista define a ordem dentro do grupo sem mover nenhum campo. Um campo citado aqui não pode indicar outro grupo na sua própria configuração de grupo, e um campo só pode ser listado por um grupo. Não permitido junto com Lista relacionada."
       },
       "fieldGroups.icon": {
         label: "Ícone",
@@ -102,7 +110,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.relatedList": {
         label: "Lista relacionada",
-        helpText: "Faz desta entrada a tabela de uma lista relacionada em vez de uma seção de campos: nomeie o objeto filho (ou objeto.campo) cuja lista é desenhada nesta posição na coluna de detalhes do registro. Esse grupo não contém campos; um campo que o nomeia como seu grupo é recusado, assim como um nome que não corresponde a nenhum relacionamento que aponte para este objeto. A página do registro ainda não desenha este posicionamento."
+        helpText: "Faz desta entrada a tabela de uma lista relacionada em vez de uma seção de campos: nomeie o objeto filho (ou objeto.campo) cuja lista é desenhada nesta posição na coluna de detalhes do registro. Esse grupo não contém campos; um campo que o nomeia como seu grupo é recusado, assim como um nome que não corresponde a nenhum relacionamento que aponte para este objeto. Os formulários de criação e edição do pai também exibem a tabela embutida, e \"Editar\" na página do registro salva o registro e suas linhas juntos."
       },
       "fieldGroups.collapse": {
         label: "Recolher",
@@ -787,7 +795,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       inlineColumns: {
         label: "Colunas embutidas",
-        helpText: "Colunas da grade embutida no formulário do pai, na ordem de exibição; usadas apenas quando este campo define inlineEdit, que é escrito no código-fonte. Não definido: derivadas dos campos editáveis deste objeto, e a partir da sexta as demais começam no seletor de colunas da grade. Uma entrada que nomeia apenas um campo herda dele o tipo, as opções e as regras; as outras chaves de coluna, a começar por type, são escritas no código-fonte."
+        helpText: "Colunas da grade embutida no formulário do pai, na ordem de exibição; usadas apenas quando um grupo de campos do pai nomeia este objeto filho (fieldGroups[].relatedList). Não definido: derivadas dos campos editáveis deste objeto, e a partir da sexta as demais começam no seletor de colunas da grade. Uma entrada que nomeia apenas um campo herda dele o tipo, as opções e as regras; as outras chaves de coluna, a começar por type, são escritas no código-fonte."
       },
       "inlineColumns.name": {
         label: "Nome",
@@ -1350,7 +1358,8 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Configuração da navegação ao clicar em um item (painel lateral por padrão, page, new_window ou none)"
       },
       "navigation.mode": {
-        label: "Modo"
+        label: "Modo",
+        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
       },
       "navigation.preventNavigation": {
         label: "Impedir navegação",

@@ -124,6 +124,7 @@
     "EngineDatasourceDef (interface)",
     "EngineFilterJudgement (type)",
     "EngineFilterJudgementOptions (interface)",
+    "EngineFixedReadLeafClass (type)",
     "EngineSchemaRegistryView (interface)",
     "EngineTransactionInfo (interface)",
     "EngineTransactionOptions (interface)",

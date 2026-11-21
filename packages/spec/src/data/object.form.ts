@@ -38,6 +38,9 @@ export const objectForm = defineForm({
         { field: 'label', type: 'text', colSpan: 1, helpText: 'Singular display name (e.g. "Account")' },
         { field: 'pluralLabel', type: 'text', colSpan: 1, helpText: 'Plural display name (e.g. "Accounts")' },
         { field: 'icon', type: 'text', colSpan: 1, helpText: 'Lucide icon name (e.g. "building", "users")' },
+        // [#35985] The colour of the square the icon is drawn on: the swatch row
+        // (`color-picker`) reads its nine names off the closed enum.
+        { field: 'color', widget: 'color-picker', colSpan: 1, helpText: 'Color of the square the icon is drawn on, from the fixed palette. Unset draws gray.' },
         { field: 'description', type: 'textarea', colSpan: 2, helpText: 'Developer documentation' },
         // #19331 — `nameField` is declared by ObjectSchema and was offered by no
         // control, so the ADR-0079 record-title pointer could only be written
@@ -67,7 +70,7 @@ export const objectForm = defineForm({
         // it would offer an empty list. A misspelt entry is not dropped quietly:
         // the publish door refuses it (`object-field-ref-unknown`,
         // `searchable-field-unknown`, both at `error`), and so does `os validate`.
-        { field: 'highlightFields', widget: 'string-tags', colSpan: 2, helpText: 'Field names of this object, most important first — the first entry wins where only one fits (ADR-0085). Drives the default list columns, cards, child-record previews and the detail highlight strip. A name that is not a field of this object is refused at publish.' },
+        { field: 'highlightFields', widget: 'string-tags', colSpan: 2, helpText: 'Field names of this object, most important first — the first entry wins where only one fits (ADR-0085). Drives the default list and related-list columns, cards, child-record previews, the record hover card and the record picker. A name that is not a field of this object is refused at publish.' },
         // #27069 — the business order of the record page's related lists: a
         // list of inbound relationship names (child object, or `object.field`)
         // on the `highlightFields` row's face. A dangling name is refused at
@@ -98,19 +101,21 @@ export const objectForm = defineForm({
         // outranks it (the parse derives `collapse` from an alias only when
         // `collapse` is absent).
         //
-        // No field-name list lives here: a field joins a group through its own
-        // `group` key, so there is no name for a misspelling to hide in.
+        // `fields` is the group's own member list (field names, in display
+        // order), a `tags` row as `hook.form.ts` gives a list of names; a name
+        // no field declares is skipped by the layout and warned by `os lint`.
         {
           field: 'fieldGroups',
           type: 'repeater',
           colSpan: 2,
-          helpText: 'Ordered sections that group this object\'s fields on the entry form and the record detail page (ADR-0085); array order is display order. A field joins a group by naming its key in the field\'s own group setting. Fields in no group follow the groups, and a group no field joins is not drawn.',
+          helpText: 'Ordered sections that group this object\'s fields on the entry form and the record detail page (ADR-0085); array order is display order. A group lists its fields, in order, in its Fields setting; a group without that list holds the fields that name its key in their own group setting. Fields in no group follow the groups, and a group no field joins is not drawn.',
           fields: [
-            { field: 'key', label: 'Key', type: 'text', required: true, helpText: 'Machine key in snake_case, unique within this object — the schema refuses anything else. Fields join the group by naming this key, so renaming it leaves them ungrouped.' },
+            { field: 'key', label: 'Key', type: 'text', required: true, helpText: 'Machine key in snake_case, unique within this object — the schema refuses anything else. Fields the group lists in its Fields stay with it when the key is renamed; a field that joins by naming this key in its own group setting is left ungrouped.' },
             { field: 'label', label: 'Label', type: 'text', required: true, helpText: 'Header text of the group\'s section.' },
+            { field: 'fields', label: 'Fields', type: 'tags', helpText: 'The fields this group shows, in display order (field names). Written, it sets the order inside the group without moving any field. A field this list names may not name another group in its own group setting, and a field may be listed by one group only. Not allowed with Related List.' },
             { field: 'icon', label: 'Icon', type: 'text', helpText: 'Lucide icon name shown beside the header on the record detail page (e.g. "banknote"). The entry form does not show it.' },
             { field: 'description', label: 'Description', type: 'textarea', helpText: 'Text shown under the header, on the entry form and the record detail page.' },
-            { field: 'relatedList', label: 'Related List', type: 'text', helpText: 'Makes this entry a related list\'s table instead of a section of fields: name the child object (or object.field) whose list is drawn at this position in the record\'s details column. Such a group holds no fields; a field that names it as its group is refused, and so is a name that matches no relationship pointing at this object. The record page does not draw this placement yet.' },
+            { field: 'relatedList', label: 'Related List', type: 'text', helpText: 'Makes this entry a related list\'s table instead of a section of fields: name the child object (or object.field) whose list is drawn at this position in the record\'s details column. Such a group holds no fields; a field that names it as its group is refused, and so is a name that matches no relationship pointing at this object. The parent\'s create and edit forms inline the table too, and the record page\'s Edit saves the record and its rows together.' },
             { field: 'collapse', label: 'Collapse', type: 'select', helpText: 'Whether the section can be collapsed, on the entry form and the record detail page. Unset: none.', options: [
               { label: 'None — always open, no toggle', value: 'none' },
               { label: 'Expanded — collapsible, starts open', value: 'expanded' },

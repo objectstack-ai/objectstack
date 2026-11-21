@@ -45,6 +45,20 @@
 
 import type { FlowConfigField, FlowConfigColumn, FlowConfigFieldKind, FlowReferenceSpec, ReferenceKind, RefValueSource } from './flow-node-config.js';
 
+/**
+ * A nested group's field that a SIBLING gates, not the group's `enabled`
+ * switch: a JSON schema has no way to say it, so the rule is keyed by field id
+ * and read by both descriptor sources — this mapper for the engine-published
+ * `configSchema`, and the hand-written table in `flow-node-config.ts`.
+ *
+ * `escalation.calendar` is read only under `escalation.clock: 'working_time'`
+ * (ADR-0157 D5), so it shows only there. Its controller shows only while the
+ * escalation is on, so the calendar follows the switch through it.
+ */
+export const SIBLING_GATES: Readonly<Record<string, { field: string; equals: string[] }>> = {
+  'escalation.calendar': { field: 'escalation.clock', equals: ['working_time'] },
+};
+
 /** Loose JSON Schema node shape — we only read the keys we map. */
 interface JsonSchemaNode {
   type?: string | string[];
@@ -504,7 +518,9 @@ export function jsonSchemaToFlowFields(schema: unknown): FlowConfigField[] | nul
           ...(subRef ? { ref: subRef } : {}),
           ...(scalar?.refMode ? { refMode: scalar.refMode } : {}),
           ...(kind === 'select' && Array.isArray(sp.enum) ? { options: enumOptions(sp.enum, sp.xEnumDeprecated) } : {}),
-          ...(hasEnabled && !isGate ? { showWhen: { field: `${key}.enabled`, equals: ['true'] } } : {}),
+          ...(SIBLING_GATES[id]
+            ? { showWhen: SIBLING_GATES[id] }
+            : hasEnabled && !isGate ? { showWhen: { field: `${key}.enabled`, equals: ['true'] } } : {}),
         };
         fields.push(field);
       }

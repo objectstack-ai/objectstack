@@ -317,8 +317,12 @@ export function appStudioRoutePath(
   return appStudioDesignPath(app, isWorkspaceAdmin);
 }
 
-/** Shared guard: the owning package id usable by the Studio design surface. */
-function studioPackageId(app: AppRouteLike | null | undefined): string | null {
+/**
+ * Shared guard: the owning package id usable by the Studio design surface.
+ * Also the reading of a list's saved view row (objectstack#35933): the row
+ * carries its served `_packageId`, and the same id names the same package.
+ */
+export function studioPackageId(app: AppRouteLike | null | undefined): string | null {
   const packageId = app?._packageId;
   if (typeof packageId !== 'string' || !packageId || packageId === 'sys_metadata') return null;
   return packageId;

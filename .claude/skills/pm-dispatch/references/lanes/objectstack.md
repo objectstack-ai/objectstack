@@ -5,6 +5,7 @@
 ## 形态
 
 - 席位 `repo:objectstack#N`,可多席、多账号;签名、座位贴、信箱、坐席与收班同他席。
+- 一个项目在本车道默认一席(维护者明说开座位才加席);席接哪些 `area:*` 是该席的属性,写在座位贴说明段的接卡行。维护者再点一个 `area:*` 是改该席的接卡面并在席内分区,⛔ 不是加席(`coordinator.md` 一)。
 - 每席照 area-lease.md 分区运作:区线程、L1 线程、区内落地;本文只写全仓与多席特有者。
 - ⛔ 非单车道仓席:cross-repo-coordination.md 单车道仓条、seat-lifecycle.md 单车道仓行不适用。
 - 首触与 `domain:*` 归分诊(`triage-duties.md`);本车道立卡带 area/type/级,⛔ 不产、不改 `domain:*`。

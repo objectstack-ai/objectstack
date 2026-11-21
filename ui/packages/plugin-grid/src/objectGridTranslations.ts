@@ -59,6 +59,13 @@ const GRID_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'table.saved': '{{count}} row saved',
   'table.saved_one': '{{count}} row saved',
   'table.saved_other': '{{count}} rows saved',
+  // objectstack#35685 — a list cell save's Undo: the toast's button, the
+  // toast once it has run, and the toast when the server refuses it. The
+  // action runner's and the record page's own keys, byte-identical to the
+  // `en` pack.
+  'actions.undo': 'Undo',
+  'actions.undone': 'Change undone',
+  'table.saveFailed': 'Save failed',
   // The field rules an inline edit is checked against before it is sent
   // (objectstack-ai/objectstack#27520), worded as the record form words them.
   // Byte-identical to the `en` pack, which `defaults-maps-mirror-en-pack`
@@ -112,6 +119,12 @@ const GRID_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'grid.readOnlyReason.noPermission': 'You don\'t have permission to edit these records.',
   'grid.readOnlyReason.approvalLocked': 'This record is locked while it\'s in approval.',
   'grid.readOnlyReason.noRecordPermission': 'You don\'t have permission to edit this record.',
+  // objectstack#35685 — the confirm before a list cell moves a state-machine
+  // field (`objectGridStateConfirm`). Byte-identical to the `en` pack.
+  'grid.stateChange.title': 'Change {{field}}?',
+  'grid.stateChange.description': '{{field}} changes from {{from}} to {{to}}. Saving may trigger related automation.',
+  'grid.stateChange.confirm': 'Change',
+  'grid.stateChange.cancel': 'Cancel',
 };
 
 /**

@@ -52,6 +52,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Icon",
         helpText: "Lucide icon name (e.g. \"building\", \"users\")"
       },
+      color: {
+        label: "Color",
+        helpText: "Color of the square the icon is drawn on, from the fixed palette. Unset draws gray."
+      },
       description: {
         label: "Description",
         helpText: "Developer documentation"
@@ -70,7 +74,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       highlightFields: {
         label: "Highlight Fields",
-        helpText: "Field names of this object, most important first — the first entry wins where only one fits (ADR-0085). Drives the default list columns, cards, child-record previews and the detail highlight strip. A name that is not a field of this object is refused at publish."
+        helpText: "Field names of this object, most important first — the first entry wins where only one fits (ADR-0085). Drives the default list and related-list columns, cards, child-record previews, the record hover card and the record picker. A name that is not a field of this object is refused at publish."
       },
       relatedLists: {
         label: "Related Lists",
@@ -82,15 +86,19 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       fieldGroups: {
         label: "Field Groups",
-        helpText: "Ordered sections that group this object's fields on the entry form and the record detail page (ADR-0085); array order is display order. A field joins a group by naming its key in the field's own group setting. Fields in no group follow the groups, and a group no field joins is not drawn."
+        helpText: "Ordered sections that group this object's fields on the entry form and the record detail page (ADR-0085); array order is display order. A group lists its fields, in order, in its Fields setting; a group without that list holds the fields that name its key in their own group setting. Fields in no group follow the groups, and a group no field joins is not drawn."
       },
       "fieldGroups.key": {
         label: "Key",
-        helpText: "Machine key in snake_case, unique within this object — the schema refuses anything else. Fields join the group by naming this key, so renaming it leaves them ungrouped."
+        helpText: "Machine key in snake_case, unique within this object — the schema refuses anything else. Fields the group lists in its Fields stay with it when the key is renamed; a field that joins by naming this key in its own group setting is left ungrouped."
       },
       "fieldGroups.label": {
         label: "Label",
         helpText: "Header text of the group's section."
+      },
+      "fieldGroups.fields": {
+        label: "Fields",
+        helpText: "The fields this group shows, in display order (field names). Written, it sets the order inside the group without moving any field. A field this list names may not name another group in its own group setting, and a field may be listed by one group only. Not allowed with Related List."
       },
       "fieldGroups.icon": {
         label: "Icon",
@@ -102,7 +110,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.relatedList": {
         label: "Related List",
-        helpText: "Makes this entry a related list's table instead of a section of fields: name the child object (or object.field) whose list is drawn at this position in the record's details column. Such a group holds no fields; a field that names it as its group is refused, and so is a name that matches no relationship pointing at this object. The record page does not draw this placement yet."
+        helpText: "Makes this entry a related list's table instead of a section of fields: name the child object (or object.field) whose list is drawn at this position in the record's details column. Such a group holds no fields; a field that names it as its group is refused, and so is a name that matches no relationship pointing at this object. The parent's create and edit forms inline the table too, and the record page's Edit saves the record and its rows together."
       },
       "fieldGroups.collapse": {
         label: "Collapse",
@@ -787,7 +795,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       inlineColumns: {
         label: "Inline Columns",
-        helpText: "Columns of the inline grid on the parent's form, in display order; used only when this field sets inlineEdit, which is written in source. Unset: derived from this object's editable fields, and past six the rest start in the grid's column chooser. An entry that names only a field takes its type, options and rules from that field; the other column keys, type first, are written in source."
+        helpText: "Columns of the inline grid on the parent's form, in display order; used only when a field group of the parent names this child (fieldGroups[].relatedList). Unset: derived from this object's editable fields, and past six the rest start in the grid's column chooser. An entry that names only a field takes its type, options and rules from that field; the other column keys, type first, are written in source."
       },
       "inlineColumns.name": {
         label: "Name",
@@ -1347,10 +1355,11 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       navigation: {
         label: "Navigation",
-        helpText: "Configuration for item click navigation (drawer by default, page, new_window or none)"
+        helpText: "Configuration for item click navigation: the drawer size, and `preventNavigation` for a list whose rows open nothing (`mode` is deprecated — the record name opens the page, the hover icon the side panel)"
       },
       "navigation.mode": {
-        label: "Mode"
+        label: "Mode",
+        helpText: "[DEPRECATED] On an object's list (a list view, an object's `listViews`) no longer picks how a record opens: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing, so omit the key; `none` still means rows open nothing — prefer `preventNavigation: true`. A page block that carries `navigation` (a list block, the timeline, an embedded view) still honours every value."
       },
       "navigation.preventNavigation": {
         label: "Prevent Navigation",
@@ -1358,7 +1367,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "navigation.openNewTab": {
         label: "Open New Tab",
-        helpText: "Force open in new tab (applies to page mode)"
+        helpText: "Open the record's full page in a new browser tab when it is clicked; rows that open nothing stay that way, and a phone opens the page in place"
       },
       "navigation.size": {
         label: "Size",

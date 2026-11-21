@@ -82,6 +82,43 @@ describe('element:metadata_viewer', () => {
       expect(getItem).toHaveBeenCalledWith('object', 'showcase_task');
     });
 
+    it('paints a state dot from the theme grey when its option has no colour, and from the declared colour otherwise', async () => {
+      const object = {
+        name: 'ticket',
+        fields: {
+          stage: {
+            type: 'select',
+            options: [
+              { value: 'open', label: 'Open', default: true },
+              { value: 'closed', label: 'Closed', color: '#10B981' },
+            ],
+          },
+        },
+        validations: [
+          { type: 'state_machine', name: 'stage_flow', label: 'Stage Flow', field: 'stage', transitions: { open: ['closed'], closed: [] } },
+        ],
+      };
+      const getItem = vi.fn(async (type: string) => (type === 'object' ? object : null));
+      const { container } = render(<Viewer getItem={getItem} properties={{ type: 'state_machine', object: 'ticket', name: 'stage_flow' }} />);
+      await waitFor(() => expect(screen.getByText('Stage Flow')).toBeTruthy());
+
+      const open = [...container.querySelectorAll<HTMLElement>('[data-state-dot="open"]')];
+      expect(open.length).toBeGreaterThan(0);
+      for (const dot of open) {
+        // The muted grey is a utility, so the theme (light and .dark) decides it.
+        expect(dot.className).toContain('bg-muted-foreground');
+        expect(dot.getAttribute('style')).toBeNull();
+      }
+
+      const closed = [...container.querySelectorAll<HTMLElement>('[data-state-dot="closed"]')];
+      expect(closed.length).toBeGreaterThan(0);
+      for (const dot of closed) {
+        expect(dot.className).toContain('bg-[color:var(--os-state-dot)]');
+        expect(dot.style.getPropertyValue('--os-state-dot')).toBe('#10B981');
+        expect(dot.style.backgroundColor).toBe('');
+      }
+    });
+
     it('warns when the named rule is absent', async () => {
       const getItem = vi.fn(async () => ({ name: 'x', validations: [] }));
       render(<Viewer getItem={getItem} properties={{ type: 'state_machine', object: 'x', name: 'nope' }} />);

@@ -28,6 +28,7 @@ import {
   useRecordAttachmentCount,
 } from './RecordSummaryRail';
 import { RecordTimelineCountContext } from './recordTimelineStream';
+import { createRecordBodyFields, RecordBodyFieldsContext } from './recordBodyFields';
 import { RecordTimelineCountProbe } from './renderers/record-activity';
 import {
   editRelatedArrangement,
@@ -318,8 +319,10 @@ const COLUMN_STACK = 'flex min-w-0 flex-col gap-4 [&>*:has(>[hidden]:only-child)
  * there at first paint, an empty list muted with no number, the width the
  * row's only fold), then the open tab's face.
  *
- * 概览 draws the strip (`record:path`, `record:highlights`) across the whole
- * width, then the details and the right rail — the summary of the other tabs
+ * 概览 draws a strip the page places (`record:path`, `record:highlights`, a
+ * slotted page's `highlights`; the default page places none since
+ * objectstack#35891) across the whole width, then the details and the right
+ * rail — the summary of the other tabs
  * (`RecordSummaryRail`, objectstack#35596: 审批, 附件, 最近动态, then the
  * lists with records; a card with nothing to show is not drawn, and a rail
  * known to have none folds away). Every other tab draws its block in full in
@@ -357,6 +360,10 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   const { t } = useDetailTranslation();
   const ctx = useRecordContext();
   const bodyTableIds = React.useMemo(() => new Set(relatedListIdsIn(columns.details)), [columns.details]);
+  // objectstack#35941 — the details sections report the rows they draw, and
+  // the meta line closing the details column reads them: the owner is left
+  // off that line when a section already draws `owner_id`.
+  const [bodyFields] = React.useState(createRecordBodyFields);
   const hasTimeline = columns.timeline.length > 0;
   const wide = tier === 'wide';
   const besideDetails = tier !== 'stack';
@@ -605,12 +612,17 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   const template = sideBySide ? (wide ? GRID_TEMPLATE.wide : GRID_TEMPLATE.twoColumn) : GRID_TEMPLATE.oneColumn;
 
   return (
+    <RecordBodyFieldsContext.Provider value={bodyFields}>
     <DefaultRecordPageContext.Provider value>
     <RecordBodyTablesContext.Provider value={bodyTableIds}>
     <RelatedEnlargeContext.Provider value={onEnlargeRelated ?? null}>
     <DetailsColumnCapContext.Provider value={sideBySide && !wide ? 2 : 3}>
       <div
-        className={cn('w-full bg-background p-3 md:p-4 lg:p-6', className)}
+        // objectstack#35745 — the top is 12px at every width: the header sits
+        // right above, and the host's scroller adds no top padding of its own,
+        // so the tab row follows the header as a list's view bar follows its
+        // page bar. The sides and the foot keep the page's padding.
+        className={cn('w-full bg-background px-3 pb-3 pt-3 md:px-4 md:pb-4 lg:px-6 lg:pb-6', className)}
         data-page-type="record"
         data-record-page-tier={tier}
       >
@@ -646,5 +658,6 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
     </RelatedEnlargeContext.Provider>
     </RecordBodyTablesContext.Provider>
     </DefaultRecordPageContext.Provider>
+    </RecordBodyFieldsContext.Provider>
   );
 };

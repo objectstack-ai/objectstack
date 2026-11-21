@@ -52,6 +52,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Symbol",
         helpText: "Name des Lucide-Symbols (z. B. „building“, „users“)"
       },
+      color: {
+        label: "Farbe",
+        helpText: "Farbe des Quadrats, auf dem das Symbol gezeichnet wird, aus der festen Palette. Ohne Angabe wird Grau verwendet."
+      },
       description: {
         label: "Beschreibung",
         helpText: "Entwicklerdokumentation"
@@ -70,7 +74,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       highlightFields: {
         label: "Hervorgehobene Felder",
-        helpText: "Feldnamen dieses Objekts, das wichtigste zuerst – der erste Eintrag gewinnt, wo nur einer Platz hat (ADR-0085). Steuert die Standardspalten der Liste, Karten, Vorschauen untergeordneter Datensätze und die Hervorhebungsleiste der Detailansicht. Ein Name, der kein Feld dieses Objekts ist, wird bei der Veröffentlichung abgelehnt."
+        helpText: "Feldnamen dieses Objekts, das wichtigste zuerst – der erste Eintrag gewinnt, wo nur einer Platz hat (ADR-0085). Steuert die Standardspalten von Listen und Bezugslisten, Karten, Vorschauen untergeordneter Datensätze, die Hover-Karte des Datensatzes und die Datensatzauswahl. Ein Name, der kein Feld dieses Objekts ist, wird bei der Veröffentlichung abgelehnt."
       },
       relatedLists: {
         label: "Verknüpfte Listen",
@@ -86,11 +90,15 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.key": {
         label: "Schlüssel",
-        helpText: "Maschinenschlüssel in snake_case, eindeutig innerhalb dieses Objekts – das Schema lehnt alles andere ab. Felder treten der Gruppe bei, indem sie diesen Schlüssel nennen; eine Umbenennung lässt sie daher ohne Gruppe."
+        helpText: "Maschinenschlüssel in snake_case, eindeutig innerhalb dieses Objekts – das Schema lehnt alles andere ab. Felder, die die Gruppe in ihren Feldern aufführt, bleiben bei einer Umbenennung in der Gruppe; ein Feld, das über diesen Schlüssel in seiner eigenen Gruppeneinstellung beitritt, ist danach ohne Gruppe."
       },
       "fieldGroups.label": {
         label: "Bezeichnung",
         helpText: "Überschrift des Abschnitts der Gruppe."
+      },
+      "fieldGroups.fields": {
+        label: "Felder",
+        helpText: "Die Felder, die diese Gruppe anzeigt, in Anzeigereihenfolge (Feldnamen). Ausgefüllt legt die Liste die Reihenfolge innerhalb der Gruppe fest, ohne ein Feld zu verschieben. Ein hier genanntes Feld darf in seiner eigenen Gruppeneinstellung keine andere Gruppe nennen, und ein Feld darf nur von einer Gruppe aufgeführt werden. Nicht zulässig zusammen mit Verknüpfte Liste."
       },
       "fieldGroups.icon": {
         label: "Symbol",
@@ -102,7 +110,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.relatedList": {
         label: "Verknüpfte Liste",
-        helpText: "Macht diesen Eintrag zur Tabelle einer verknüpften Liste statt zu einem Feldabschnitt: Nennen Sie das untergeordnete Objekt (oder object.field), dessen Liste an dieser Position in der Detailspalte des Datensatzes gezeichnet wird. Eine solche Gruppe enthält keine Felder; ein Feld, das sie als seine Gruppe nennt, wird abgelehnt, ebenso ein Name, der keiner auf dieses Objekt zeigenden Beziehung entspricht. Die Datensatzseite zeichnet diese Platzierung noch nicht."
+        helpText: "Macht diesen Eintrag zur Tabelle einer verknüpften Liste statt zu einem Feldabschnitt: Nennen Sie das untergeordnete Objekt (oder object.field), dessen Liste an dieser Position in der Detailspalte des Datensatzes gezeichnet wird. Eine solche Gruppe enthält keine Felder; ein Feld, das sie als seine Gruppe nennt, wird abgelehnt, ebenso ein Name, der keiner auf dieses Objekt zeigenden Beziehung entspricht. Die Erstellungs- und Bearbeitungsformulare des übergeordneten Datensatzes betten die Tabelle ebenfalls ein, und „Bearbeiten“ auf der Datensatzseite speichert den Datensatz und seine Zeilen gemeinsam."
       },
       "fieldGroups.collapse": {
         label: "Einklappen",
@@ -787,7 +795,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       inlineColumns: {
         label: "Inline-Spalten",
-        helpText: "Spalten des Inline-Rasters im Formular des übergeordneten Datensatzes, in Anzeigereihenfolge; nur verwendet, wenn dieses Feld inlineEdit setzt, das im Quelltext geschrieben wird. Nicht gesetzt: von den bearbeitbaren Feldern dieses Objekts abgeleitet, und ab der siebten beginnen die übrigen in der Spaltenauswahl des Rasters. Ein Eintrag, der nur ein Feld nennt, übernimmt Typ, Optionen und Regeln von diesem Feld; die übrigen Spaltenschlüssel, allen voran type, werden im Quelltext geschrieben."
+        helpText: "Spalten des Inline-Rasters im Formular des übergeordneten Datensatzes, in Anzeigereihenfolge; nur verwendet, wenn eine Feldgruppe des übergeordneten Objekts dieses untergeordnete Objekt nennt (fieldGroups[].relatedList). Nicht gesetzt: von den bearbeitbaren Feldern dieses Objekts abgeleitet, und ab der siebten beginnen die übrigen in der Spaltenauswahl des Rasters. Ein Eintrag, der nur ein Feld nennt, übernimmt Typ, Optionen und Regeln von diesem Feld; die übrigen Spaltenschlüssel, allen voran type, werden im Quelltext geschrieben."
       },
       "inlineColumns.name": {
         label: "Spaltenname",
@@ -1350,7 +1358,8 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Konfiguration der Navigation beim Klick auf ein Element (standardmäßig Seitenleiste, page, new_window oder none)"
       },
       "navigation.mode": {
-        label: "Modus"
+        label: "Modus",
+        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
       },
       "navigation.preventNavigation": {
         label: "Navigation verhindern",

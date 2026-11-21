@@ -71,6 +71,7 @@ import {
   ChevronLeft,
 } from 'lucide-react';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
+import { isPhoneTabRoute } from './PhoneAppNavBar.js';
 
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, type RefObject } from 'react';
 import { useOffline } from '@object-ui/react';
@@ -412,7 +413,12 @@ function useGoHomeShortcut(enabled: boolean, homePath: string): void {
 // header doesn't ship phantom collaborators in production.
 const EMPTY_PRESENCE_USERS: PresenceUser[] = [];
 
-export type AppHeaderVariant = 'app' | 'home' | 'orgs' | 'studio';
+/**
+ * `docs` is the documentation portal's bar (`/docs/*`, objectstack#35424): the
+ * home bar — the product mark and name, the search in the middle, the
+ * utilities — with a 「/ Documentation」 crumb after the product name.
+ */
+export type AppHeaderVariant = 'app' | 'home' | 'orgs' | 'studio' | 'docs';
 
 export interface AppHeaderProps {
   variant?: AppHeaderVariant;
@@ -449,10 +455,15 @@ export function AppHeader({
   // landing, so the chrome cannot offer a second, contradicting "home".
   const homePath = useHomePath();
   useGoHomeShortcut(isApp, homePath);
-  // objectstack#34594 — on a phone inside an app the menu is the bottom bar
-  // (its 「More」 opens the drawer), so the bar's leftmost control goes back
-  // to the environment's home instead of opening the drawer.
+  // objectstack#35881 — on a phone inside an app the menu is the app's home
+  // page. On that page and the two inbox pages the bottom bar opens
+  // (`isPhoneTabRoute`), the bar's left is the app pill with the app's name,
+  // which switches apps, and the bottom bar carries the search and the inbox,
+  // so the top bar does not repeat them. On every page below them the bar's
+  // leftmost control is 「‹」 back to the app's home.
   const phone = usePhoneViewport();
+  const phoneTab = isApp && phone && isPhoneTabRoute(location.pathname);
+  const phoneAppHome = `/apps/${params.appName ?? activeAppName ?? ''}`;
   const { isOnline } = useOffline();
   // Idempotent, direct open of the ⌘K command palette (ADR-0054 C1). Replaces a
   // synthetic `⌘K` KeyboardEvent re-dispatch that did nothing under automation.
@@ -776,6 +787,10 @@ export function AppHeader({
             ?? reportLabel({ name: reportName, label: humanizeSlug(reportName) }),
         });
       }
+    } else if (routeType === 'docs') {
+      // objectstack#35424 — 「APP / Documentation」: the docs page names its
+      // book and article itself, above the article.
+      extraSegments.push({ label: t('help.documentation', { defaultValue: 'Documentation' }) });
     } else if (routeType === 'system') {
       extraSegments.push({ label: t('console.breadcrumb.system') });
       if (pathParts[3]) {
@@ -850,7 +865,8 @@ export function AppHeader({
   // search field and the utilities, so the field is the bar's middle, wider
   // than inside an app and named for what the palette finds. The `orgs` and
   // `studio` variants keep the search at the cluster's left edge.
-  const isHomeSearch = resolvedVariant === 'home' && hasCommandPalette;
+  // The docs portal's bar is the home bar with one crumb (objectstack#35424).
+  const isHomeSearch = (resolvedVariant === 'home' || resolvedVariant === 'docs') && hasCommandPalette;
   const centersSearch = (isApp && hasCommandPalette) || isHomeSearch;
   const searchLabel = isHomeSearch
     ? t('home.search', { defaultValue: 'Search apps, records, pages…' })
@@ -888,24 +904,27 @@ export function AppHeader({
             collapse/expand toggle for the sidebar and its icon rail from
             768 px up. It is the bar's leftmost control inside an app, so it
             never moves when the sidebar collapses; the sidebar itself carries
-            no trigger. On a phone that slot goes back to the environment's
-            home, and the drawer opens from the bottom menu bar's 「More」
-            (objectstack#34594). */}
+            no trigger. On a phone that slot goes back to the app's home, the
+            app's menu (objectstack#35881), and on the app's home and the two
+            inbox pages it is not drawn: the app pill comes first there. */}
         {isApp && phone ? (
+          phoneTab ? null : (
           <Link
-            to={homePath}
+            to={phoneAppHome}
             data-testid="app-bar-phone-home"
-            aria-label={t('layout.appSwitcher.backToHome', { defaultValue: 'Back to home' })}
-            title={t('layout.appSwitcher.backToHome', { defaultValue: 'Back to home' })}
+            aria-label={t('layout.appSwitcher.backToAppHome', { defaultValue: 'Back to the app menu' })}
+            title={t('layout.appSwitcher.backToAppHome', { defaultValue: 'Back to the app menu' })}
             className="inline-flex size-11 shrink-0 items-center justify-center rounded-md text-foreground hover:bg-accent transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <ChevronLeft className="h-5 w-5" aria-hidden />
           </Link>
-        ) : isApp ? (
+          )
+        ) : isApp && routeType !== 'docs' ? (
           <LocalizedSidebarTrigger className="shrink-0 mr-1 max-md:size-11 max-md:mr-0" aria-label={t('common.toggleSidebar', { defaultValue: 'Toggle sidebar' })} />
         ) : (
           // objectui#12605 — the product mark sits at the same x on every
-          // surface. Off an app there is no sidebar to toggle, so the
+          // surface. Off an app, and on an app's docs pages (objectstack#35424,
+          // which draw no app menu), there is no sidebar to toggle, so the
           // trigger's slot (its 28 px box and its gap) is held empty: the
           // mark does not jump left when the viewer goes home. Below `sm` the
           // mark is not drawn inside an app, so there is nothing to hold.
@@ -934,7 +953,7 @@ export function AppHeader({
           />
         )}
 
-        {resolvedVariant === 'home' && (
+        {(resolvedVariant === 'home' || resolvedVariant === 'docs') && (
           <span className="hidden sm:inline ml-2 text-sm font-semibold tracking-tight">
             {getProductName()}
           </span>
@@ -967,6 +986,19 @@ export function AppHeader({
           </>
         )}
 
+        {resolvedVariant === 'docs' && (
+          <>
+            <PathSep />
+            <Link
+              to="/docs"
+              data-testid="app-bar-docs-crumb"
+              className="text-sm font-medium text-foreground/80 px-1.5 hover:text-foreground"
+            >
+              {t('help.documentation', { defaultValue: 'Documentation' })}
+            </Link>
+          </>
+        )}
+
         {resolvedVariant === 'studio' && (
           <>
             <PathSep />
@@ -996,6 +1028,7 @@ export function AppHeader({
                   onAppChange={(segment) => confirmUnsavedLeave(() => onAppChange(segment))}
                   designInStudioPath={studioEntry?.path ?? null}
                   studioPosture={studioEntry?.posture}
+                  showNameOnPhone={phoneTab}
                 />
               </div>
             ) : appName ? (
@@ -1021,9 +1054,11 @@ export function AppHeader({
                 (objectstack#27058), so the bar draws no view dropdown. No
                 margin of its own: the pill's padding already parts the two,
                 and the width goes to the label (objectstack#34596). */}
-            <span className="text-sm font-medium sm:hidden truncate min-w-0" data-testid="app-bar-phone-title">
-              {lastSegmentLabel}
-            </span>
+            {!phoneTab && (
+              <span className="text-sm font-medium sm:hidden truncate min-w-0" data-testid="app-bar-phone-title">
+                {lastSegmentLabel}
+              </span>
+            )}
           </>
         )}
       </div>
@@ -1069,7 +1104,7 @@ export function AppHeader({
 
         {/* Group 1: Search */}
         {/* Only where a palette is mounted (objectui#11912) — see `hasCommandPalette`. */}
-        {hasCommandPalette && (
+        {hasCommandPalette && !phoneTab && (
           <div
             data-topbar-group
             data-topbar-search
@@ -1155,6 +1190,7 @@ export function AppHeader({
           {/* objectui#12980 — the open intent that starts the Activity read.
               `contents` keeps the wrapper out of the bar's flex layout; the
               events still reach it from the bell inside. */}
+          {!phoneTab && (
           <span
             className="contents"
             data-testid="inbox-bell-intent"
@@ -1174,6 +1210,7 @@ export function AppHeader({
               onApprovalDecided={refreshPendingApprovals}
             />
           </span>
+          )}
 
           {/* AI Assistant — only when the runtime serves AI (hidden on
               Community Edition so it can't dead-end on an agent-less chat).

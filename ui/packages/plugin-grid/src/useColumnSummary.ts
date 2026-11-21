@@ -9,9 +9,9 @@
 import { useMemo } from 'react';
 import type { ListColumn } from '@object-ui/types';
 import type { ColumnSummary, ListViewGroupHeaderRow } from '@objectstack/spec/ui';
-import { deriveColumnSummary } from '@objectstack/spec/ui';
+import { deriveColumnSummary, isColumnSummaryCompatibleWithFieldType } from '@objectstack/spec/ui';
 import type { CurrencyConfig } from '@objectstack/spec/data';
-import { resolveFieldScale } from '@objectstack/spec/data';
+import { resolveFieldScale, isAggregateCompatibleWithFieldType } from '@objectstack/spec/data';
 import { useLocalization, useDisplayLocale, resolveFieldCurrency, recordCurrencyField, createSafeTranslation } from '@object-ui/i18n';
 import { formatCurrency, formatPercent, percentCellScale, summaryDeclaresCurrency } from '@object-ui/fields';
 import { temporalCellFaceOf, temporalCellText, temporalExtreme, temporalInstant } from './temporalCellFace';
@@ -56,6 +56,13 @@ export interface ColumnSummaryResult {
    */
   value: number | null;
   label: string;
+  /**
+   * The two halves of `label`, for a footer that draws them apart: `name` is
+   * the calculation's word with its scope (「合计」, 「合计（本页）」), `text`
+   * the formatted figure (「¥1,234,500」).
+   */
+  name: string;
+  text: string;
 }
 
 /** A data row as the aggregations read it — cells are untyped until inspected. */
@@ -72,6 +79,8 @@ const NON_NUMERIC_TYPES = new Set<string>([
   'count_unique',
   'percent_empty',
   'percent_filled',
+  'count_true',
+  'count_false',
 ]);
 
 /** Aggregations whose result is a percentage (0-100), not a value in the column's unit. */
@@ -103,6 +112,9 @@ const TYPE_LABEL_KEYS: Record<ColumnSummaryType, string> = {
   // which is why the two families deliberately share a word in every pack.
   percent_empty: 'grid.summary.percentEmpty',
   percent_filled: 'grid.summary.percentFilled',
+  // A boolean column's yes / no counts read as the cell's own words.
+  count_true: 'grid.summary.countTrue',
+  count_false: 'grid.summary.countFalse',
   sum: 'grid.summary.sum',
   avg: 'grid.summary.avg',
   min: 'grid.summary.min',
@@ -131,15 +143,72 @@ const SUMMARY_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'grid.summary.avg': 'Avg',
   'grid.summary.min': 'Min',
   'grid.summary.max': 'Max',
+  'grid.summary.earliest': 'Earliest',
+  'grid.summary.latest': 'Latest',
+  'grid.summary.pageName': '{{label}} (this page)',
+  'grid.summary.calculate': 'Calculate',
+  'grid.summary.none': 'None',
+  'grid.summary.menuPercentEmpty': 'Percent empty',
+  'grid.summary.menuPercentFilled': 'Percent filled',
+  'grid.summary.countTrue': 'Yes',
+  'grid.summary.countFalse': 'No',
+  'grid.summary.menuCountTrue': 'Count of Yes',
+  'grid.summary.menuCountFalse': 'Count of No',
 };
 
-const useSummaryTranslation = createSafeTranslation(
+export const useSummaryTranslation = createSafeTranslation(
   SUMMARY_DEFAULT_TRANSLATIONS,
   'grid.summary.sum',
 );
 
+/**
+ * The calculations the footer's menu offers for a field type, in menu order.
+ * Each one the footer can draw for that type: an aggregate the spec allows on
+ * the type (`isAggregateCompatibleWithFieldType`), and the count family on
+ * any. ⛔ No `count`: the row's first cell already carries the record count.
+ * Booleans get their yes / no counts first, then the count family — never
+ * the arithmetic, which reads a boolean as 0 / 1 — and a record-currency
+ * amount (whose sum the footer withholds) gets the count family only. The
+ * yes / no counts are offered exactly where the spec's member table allows
+ * them (`isColumnSummaryCompatibleWithFieldType`).
+ */
+const MENU_AGGREGATES: ReadonlyArray<ColumnSummaryType> = ['sum', 'avg', 'min', 'max'];
+/** The spec's boolean class (`BOOLEAN_AGGREGATE_FIELD_TYPES`): `toggle` is a boolean too. */
+const BOOLEAN_FIELD_TYPES: ReadonlySet<string> = new Set(['boolean', 'toggle']);
+const MENU_COUNTS: ReadonlyArray<ColumnSummaryType> = [
+  'count_unique', 'count_filled', 'count_empty', 'percent_filled', 'percent_empty',
+];
+const MENU_BOOLEAN_COUNTS: ReadonlyArray<ColumnSummaryType> = ['count_true', 'count_false'];
+export function offeredColumnSummaries(
+  field: ({ type?: string } & NonNullable<Parameters<typeof recordCurrencyField>[0]>) | undefined,
+): ColumnSummaryType[] {
+  const type = field?.type;
+  const numeric = !!type && !BOOLEAN_FIELD_TYPES.has(type) && !recordCurrencyField(field);
+  return [
+    ...(type ? MENU_BOOLEAN_COUNTS.filter((m) => isColumnSummaryCompatibleWithFieldType(m, type)) : []),
+    ...(numeric ? MENU_AGGREGATES.filter((m) => isAggregateCompatibleWithFieldType(m, type!)) : []),
+    ...MENU_COUNTS.filter((m) => m !== 'count_unique' || (!!type && isAggregateCompatibleWithFieldType('count_distinct', type))),
+  ];
+}
+
+/** Is `field` drawn as a date or time, so its `min` / `max` read 「Earliest」 / 「Latest」? */
+export function isTemporalSummaryField(field: { type?: string; format?: string | null; widget?: string | null } | undefined): boolean {
+  return !!temporalCellFaceOf({ type: field?.type, format: field?.format, widget: field?.widget });
+}
+
+/** A calculation's name in the footer's menu. */
+export function summaryMenuLabel(type: ColumnSummaryType, temporal: boolean, t: SummaryTranslate): string {
+  if (temporal && type === 'min') return t('grid.summary.earliest');
+  if (temporal && type === 'max') return t('grid.summary.latest');
+  if (type === 'percent_empty') return t('grid.summary.menuPercentEmpty');
+  if (type === 'percent_filled') return t('grid.summary.menuPercentFilled');
+  if (type === 'count_true') return t('grid.summary.menuCountTrue');
+  if (type === 'count_false') return t('grid.summary.menuCountFalse');
+  return type === 'none' ? t('grid.summary.none') : t(TYPE_LABEL_KEYS[type]);
+}
+
 /** The translator shape `formatSummaryLabel` needs — i18next's `t`, narrowed. */
-type SummaryTranslate = (key: string, options?: Record<string, unknown>) => string;
+export type SummaryTranslate = (key: string, options?: Record<string, unknown>) => string;
 
 /**
  * Every aggregation name the renderer computes. A Set rather than an `in` check
@@ -267,6 +336,13 @@ function computeAggregation(type: string, rows: SummaryRow[], field: string): nu
         return (rows.filter((r) => !isEmptyValue(r[field])).length / total) * 100;
       case 'percent_empty':
         return (rows.filter((r) => isEmptyValue(r[field])).length / total) * 100;
+      // A boolean column's yes / no counts: only a real boolean is a value of
+      // the column (the cell's own reading), so a null cell is neither — it is
+      // `count_empty`'s, as on the server (`deriveColumnSummary`).
+      case 'count_true':
+        return rows.filter((r) => r[field] === true).length;
+      case 'count_false':
+        return rows.filter((r) => r[field] === false).length;
       default:
         return null;
     }
@@ -351,15 +427,28 @@ const WELL_FORMED_CURRENCY_CODE = /^[A-Za-z]{3}$/;
  * ordinary German number — for a value three orders of magnitude away — and
  * the arms below include a currency total.
  */
-function joinSummaryLabel(type: string, formatted: string, t: SummaryTranslate, pageOnly: boolean): string {
-  const labelKey = TYPE_LABEL_KEYS[type as ColumnSummaryType];
+/**
+ * The footer's label and its two halves. A `min` / `max` over a date reads
+ * 「Earliest」 / 「Latest」 (`temporal`); the scope rides on the word, so the
+ * figure stays the figure.
+ */
+function summaryLabelParts(
+  type: string, formatted: string, t: SummaryTranslate, pageOnly: boolean, temporal = false,
+): { label: string; name: string; text: string } {
+  const labelKey = temporal && (type === 'min' || type === 'max')
+    ? (type === 'min' ? 'grid.summary.earliest' : 'grid.summary.latest')
+    : TYPE_LABEL_KEYS[type as ColumnSummaryType];
   // `|| type` is the backstop for an aggregation with no key — it echoes the
   // raw kind, as before, never a half-resolved `grid.summary.<junk>`.
   const label = labelKey ? t(labelKey) : type;
   // The page scope is its own whole pattern, not a suffix glued onto the
   // label: where the scope sits, and its brackets, are the translator's, as
   // the separator is (objectui#4024).
-  return t(pageOnly ? 'grid.summary.pagePattern' : 'grid.summary.pattern', { label, value: formatted });
+  return {
+    label: t(pageOnly ? 'grid.summary.pagePattern' : 'grid.summary.pattern', { label, value: formatted }),
+    name: pageOnly ? t('grid.summary.pageName', { label }) : label,
+    text: formatted,
+  };
 }
 
 /**
@@ -428,9 +517,9 @@ function formatSummaryLabel(
   // Required for the reason the two above are: a dropped argument must not
   // type-check into a label that reads as the whole set's total.
   pageOnly: boolean,
-): string {
-  if (value === null) return '';
-  const join = (formatted: string): string => joinSummaryLabel(type, formatted, t, pageOnly);
+): { label: string; name: string; text: string } {
+  if (value === null) return { label: '', name: '', text: '' };
+  const join = (formatted: string) => summaryLabelParts(type, formatted, t, pageOnly);
 
   if (PERCENT_TYPES.has(type)) {
     return join(`${value.toLocaleString(displayLocale, { maximumFractionDigits: 1 })}%`);
@@ -711,7 +800,7 @@ export function useScopedColumnSummary(
         summaries.set(col.field, {
           field: col.field,
           value: temporalInstant(raw) ?? null,
-          label: joinSummaryLabel(config.type, text, t, scope === 'page' || (scope === 'whole' && !fromWhole)),
+          ...summaryLabelParts(config.type, text, t, scope === 'page' || (scope === 'whole' && !fromWhole), true),
         });
         continue;
       }
@@ -777,7 +866,7 @@ export function useScopedColumnSummary(
       summaries.set(col.field, {
         field: col.field,
         value: result,
-        label: formatSummaryLabel(
+        ...formatSummaryLabel(
           config.type,
           result,
           t,

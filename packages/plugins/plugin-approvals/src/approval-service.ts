@@ -12,7 +12,12 @@ import {
   // liveness classification below is checked against it member for member.
   type ExecutionStatus,
 } from '@objectstack/spec/automation';
-import { ExpressionEngine, collectCelRootIdentifiers } from '@objectstack/formula';
+import {
+  ExpressionEngine,
+  WorkCalendarUnresolvedError,
+  collectCelRootIdentifiers,
+  isWorkCalendarRefusal,
+} from '@objectstack/formula';
 // [#10101] The SHARED platform-row organization resolver — the cloud#1395
 // ruling ("A platform row's organization is the SUBJECT record's organization;
 // actor context is the fallback, never the primary"), implemented once in
@@ -64,6 +69,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { FlowInnerRefusalSchema } from '@objectstack/spec/api';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 import type { IOwnershipQueueService } from '@objectstack/spec/contracts';
+import type { IWorkCalendarService } from '@objectstack/spec/contracts';
 import {
   canServeApiOperation, isFileIdToken, referenceTargetOf, SINGLE_OPTION_TYPES, MULTI_OPTION_TYPES,
 } from '@objectstack/spec/data';
@@ -121,6 +127,7 @@ import {
   ADMIN_RESCUE_NOTE_SNAPSHOT_KEY,
   adminRescueNoteOf,
   adminRescueNoteText,
+  adminRescuePositions,
   adminRescueReason,
   type AdminRescueNote,
 } from './admin-rescue-note.js';
@@ -517,6 +524,13 @@ export interface ApprovalMessagingSurface {
    * notification's title and body alone.
    */
   registerBuiltinTemplates?(templates: readonly ApprovalBuiltinTemplate[]): void;
+  /**
+   * [#34730] The channel mounted under `id` right now
+   * (`MessagingService.getChannel`), or `undefined`. Read to ask for `slack`
+   * only while the composition mounts it. Optional — a messaging service
+   * without it is never asked for `slack`.
+   */
+  getChannel?(id: string): unknown;
 }
 
 /** [#30509] One code-declared notification template, as the messaging service takes it. */
@@ -1852,25 +1866,59 @@ function rowFromRequest(row: any): ApprovalRequestRow {
 }
 
 /**
- * `created_at + escalation.timeoutHours`, when the node declares an SLA.
+ * `created_at + escalation.timeoutHours`, when the node declares an SLA on the
+ * `wall_clock` clock (the default, and every snapshot stored before
+ * `escalation.clock` existed).
  *
- * Calendar (wall-clock) hours, by construction: the hours are added as elapsed
- * milliseconds, so the deadline does not skip nights, weekends or holidays —
- * the platform ships no business-hours calendar to count against. This is the
- * one runtime site that turns the declared number into a deadline; the sweep
- * below and the `sla_due_at` read projection both go through it, and
+ * Wall-clock hours, by construction: the hours are added as elapsed
+ * milliseconds, so the deadline does not skip nights, weekends or holidays.
+ * This is the one runtime site that turns the declared number into a
+ * wall-clock deadline; the sweep and the `sla_due_at` read projection both
+ * reach it through {@link ApprovalService.slaDeadline}, and
  * `approval-service-sla-calendar-clock.test.ts` pins the clock (a request
  * opened Friday 17:00 with `timeoutHours: 4` is due Friday 21:00; a 168-hour
  * deadline spans the weekend; a DST transition changes nothing, because the
  * arithmetic is elapsed time, not local calendar time). The same sentence
  * lives in the declaration's `describe` text on `ApprovalEscalationSchema`.
+ *
+ * A `working_time` escalation has no wall-clock deadline: it answers
+ * `undefined` here, and only the working calendar counts it (ADR-0157 D2 — no
+ * silent fallback to wall-clock time).
  */
 function slaDueAt(createdAt: unknown, cfg: any): string | undefined {
+  if (escalationCountsWorkingTime(cfg)) return undefined;
   const hours = cfg?.escalation?.timeoutHours;
   if (typeof hours !== 'number' || hours <= 0 || !createdAt) return undefined;
   const t = Date.parse(String(createdAt));
   if (Number.isNaN(t)) return undefined;
   return new Date(t + hours * 3600_000).toISOString();
+}
+
+/**
+ * [ADR-0157 D5] Does the escalation count its hours on a working calendar? Only
+ * an explicit `clock: 'working_time'`: a snapshot stored before the key existed
+ * carries none, and the schema default is `wall_clock`.
+ */
+function escalationCountsWorkingTime(cfg: any): boolean {
+  return cfg?.escalation?.clock === 'working_time';
+}
+
+/** [ADR-0157 D9] What a request's read serves when its calendar cannot count the deadline. */
+type SlaDueRefusal = NonNullable<ApprovalRequestRow['sla_due_refusal']>;
+
+/** The SLA deadline of one stored request, or why its working calendar cannot count it. */
+type SlaDeadline = { due: string } | { refusal: SlaDueRefusal };
+
+/** The served form of a calendar refusal (`isWorkCalendarRefusal`): its code and the facts it names. */
+function slaDueRefusalOf(err: { code: SlaDueRefusal['code']; message: string }): SlaDueRefusal {
+  const e = err as { reason?: unknown; calendar?: unknown; date?: unknown };
+  return {
+    code: err.code,
+    ...(typeof e.reason === 'string' ? { reason: e.reason as SlaDueRefusal['reason'] } : {}),
+    ...(typeof e.calendar === 'string' ? { calendar: e.calendar } : {}),
+    ...(typeof e.date === 'string' ? { date: e.date } : {}),
+    message: err.message,
+  };
 }
 
 /**
@@ -2028,6 +2076,17 @@ export interface ApprovalServiceOptions {
    */
   i18nServiceSource?: () => ReaderLabelI18n | undefined;
   /**
+   * [#35418] A position's declared `label`, by its name: what a timeline note
+   * names an unheld position by when the reader's language pack holds no
+   * `positions.<name>.label`. The plugin answers it from the `metadata`
+   * service (`get('position', name)`), read per call for the reason
+   * {@link ApprovalServiceOptions.i18nServiceSource} is.
+   *
+   * Absent, or answering `undefined`, the note names the position by its
+   * name, as before.
+   */
+  positionLabelSource?: (positionName: string) => Promise<string | undefined>;
+  /**
    * [ADR-0142 D6] The `ownership-queue` service, through which a `queue`
    * approver expands to the queue's members at node entry. Resolved LAZILY
    * per expansion, for the reason {@link ApprovalServiceOptions.tenancyPosture}
@@ -2038,6 +2097,18 @@ export interface ApprovalServiceOptions {
    * decides a slate it leaves empty.
    */
   ownershipQueues?: () => ApproverQueueSource | undefined;
+  /**
+   * [ADR-0157 D5] The working-calendar service (`WORK_CALENDAR_SERVICE`) a
+   * `clock: 'working_time'` escalation counts its hours through. Resolved
+   * LAZILY per deadline, for the reason {@link ApprovalServiceOptions.tenancyPosture}
+   * is: `@objectstack/objectql` registers it and may start after this plugin.
+   *
+   * Absent (or resolving to `undefined`), a `working_time` deadline is refused
+   * as an unresolved calendar, exactly as a kernel without the calendar object
+   * refuses it: the request does not escalate and its read says why (D9) —
+   * never a wall-clock answer (D2).
+   */
+  workCalendar?: () => Pick<IWorkCalendarService, 'addWorkingHours'> | undefined;
 }
 
 /** [ADR-0142 D6] The slice of the queue service a `queue` approver reads. */
@@ -2152,8 +2223,12 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
   private readonly platformAdminStandings = new WeakMap<object, Map<string, Promise<boolean>>>();
   /** [#24863] Lazily-resolved `i18n` service for the reader-locale display labels. */
   private i18nServiceSource?: () => ReaderLabelI18n | undefined;
+  /** [#35418] A position's declared label, for a note that names an unheld position. */
+  private positionLabelSource?: (positionName: string) => Promise<string | undefined>;
   /** [ADR-0142 D6] Lazily-resolved `ownership-queue` service a `queue` approver expands through. */
   private ownershipQueues?: () => ApproverQueueSource | undefined;
+  /** [ADR-0157 D5] Lazily-resolved working-calendar service a `working_time` escalation counts through. */
+  private workCalendar?: () => Pick<IWorkCalendarService, 'addWorkingHours'> | undefined;
   /**
    * [#8652] The HOST-named object set for the record-reader visibility tier
    * (the constructor option). EMPTY is the default, and the tier is then off
@@ -2194,7 +2269,9 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     this.fieldVisibility = opts.fieldVisibility;
     this.messageTranslator = opts.messageTranslator;
     this.i18nServiceSource = opts.i18nServiceSource;
+    this.positionLabelSource = opts.positionLabelSource;
     this.ownershipQueues = opts.ownershipQueues;
+    this.workCalendar = opts.workCalendar;
     this.recordReaderVisibleObjects = new Set(
       (Array.isArray(opts.recordReaderVisibleObjects) ? opts.recordReaderVisibleObjects : [])
         .map((n) => String(n ?? '').trim())
@@ -2491,8 +2568,19 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
           severity: 'info', ...event, payload, keyedText: part.keyedText, audience: part.audience,
           // [#30509] The approval lifecycle's own notices also go by e-mail;
           // every other approval topic stays inbox-only. Preferences filter as
-          // for any channel.
-          ...(EMAILED_APPROVAL_TOPICS.has(event.topic) ? { channels: [...APPROVAL_EMAIL_CHANNELS] } : {}),
+          // for any channel. [#34730] A request also goes by Slack DM to an
+          // approver who connected Slack (anyone else is skipped, not failed),
+          // asked only while the composition mounts the channel: without
+          // connector-slack, asking would log a refusal on every request.
+          ...(EMAILED_APPROVAL_TOPICS.has(event.topic)
+            ? {
+              channels: [
+                ...APPROVAL_EMAIL_CHANNELS,
+                ...(event.topic === 'approval.requested'
+                  && this.messaging.getChannel?.('slack') ? ['slack'] : []),
+              ],
+            }
+            : {}),
           ...(dedupKey ? { dedupKey } : {}),
           ...(person ? { actorId: person } : {}),
           ...(organization ? { organizationId: organization } : {}),
@@ -5563,7 +5651,9 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       });
     }
 
-    return rowFromRequest(row);
+    const opened = rowFromRequest(row);
+    await this.projectWorkingTimeDue([row], [opened]);
+    return opened;
   }
 
   /**
@@ -8182,6 +8272,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     }
 
     let escalated = 0;
+    let calendarRefused = 0;
     for (const raw of rows) {
       try {
         const cfg = parseJson<any>(raw.node_config_json, undefined);
@@ -8196,8 +8287,16 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
         // preserves them verbatim; see ESCALATION_ENABLED_FLIP_CUTOFF_MS.
         if (esc.enabled === false
           && Date.parse(raw.created_at ?? '') >= ESCALATION_ENABLED_FLIP_CUTOFF_MS) continue;
-        const due = slaDueAt(raw.created_at, cfg);
-        if (!due || Date.parse(due) > this.clock.now().getTime()) continue;
+        // ADR-0157 D9: a working calendar that cannot count the deadline
+        // escalates nothing, and the next sweep asks it again (D12: the
+        // deadline is recomputed every sweep, never stored).
+        const deadline = await this.slaDeadline(raw, cfg);
+        if (!deadline) continue;
+        if ('refusal' in deadline) {
+          calendarRefused++;
+          continue;
+        }
+        if (Date.parse(deadline.due) > this.clock.now().getTime()) continue;
 
         // Single-shot: a prior 'escalate' action means this request is done.
         const prior = await this.engine.find('sys_approval_action', {
@@ -8216,7 +8315,87 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     if (escalated > 0) {
       this.logger?.info?.('[approvals] SLA escalation sweep', { scanned: rows.length, escalated });
     }
+    if (calendarRefused > 0) {
+      this.logger?.warn?.(
+        '[approvals] SLA escalation sweep: a working calendar could not count the deadline of some pending ' +
+          'requests, so they were not escalated; each request read says why, and the next sweep tries again',
+        { calendarRefused },
+      );
+    }
     return { scanned: rows.length, escalated };
+  }
+
+  /**
+   * The SLA deadline of one stored request — the ONE function the sweep and
+   * the `sla_due_at` read projection share (ADR-0157 D12), so the displayed due
+   * time is the one the sweep acts on. `undefined` when the node declares no
+   * SLA.
+   *
+   * `wall_clock` (the default): {@link slaDueAt}, unchanged. `working_time`:
+   * `timeoutHours` working hours after `created_at` on the request
+   * organization's calendar, named by `escalation.calendar` or else its default
+   * (D2), recomputed on every call and never stored (D12). A calendar refusal
+   * (none resolves, or it is not maintained that far, D8) answers
+   * `{ refusal }` instead of a deadline (D9); every other failure throws, and
+   * each caller costs only that row its deadline: the sweep skips it until the
+   * next pass, {@link projectWorkingTimeDue} serves it with none.
+   */
+  private async slaDeadline(raw: any, cfg: any): Promise<SlaDeadline | undefined> {
+    if (!escalationCountsWorkingTime(cfg)) {
+      const due = slaDueAt(raw?.created_at, cfg);
+      return due ? { due } : undefined;
+    }
+    const esc = cfg.escalation;
+    const hours = esc.timeoutHours;
+    if (typeof hours !== 'number' || hours <= 0 || !raw?.created_at) return undefined;
+    const start = Date.parse(String(raw.created_at));
+    if (Number.isNaN(start)) return undefined;
+    const calendar = typeof esc.calendar === 'string' && esc.calendar.trim() !== '' ? esc.calendar.trim() : undefined;
+    try {
+      const service = this.workCalendar?.();
+      if (!service) throw new WorkCalendarUnresolvedError(calendar === undefined ? 'no_default' : 'not_found', calendar);
+      const due = await service.addWorkingHours(
+        { organizationId: raw.organization_id ? String(raw.organization_id) : undefined, calendar },
+        start,
+        hours,
+      );
+      return { due: new Date(due).toISOString() };
+    } catch (err) {
+      if (isWorkCalendarRefusal(err)) return { refusal: slaDueRefusalOf(err) };
+      throw err;
+    }
+  }
+
+  /**
+   * [ADR-0157 D9, D12] Serve each `working_time` row's deadline, or why its
+   * calendar cannot count it, through {@link slaDeadline}. `raws[i]` is the
+   * stored row `rows[i]` was mapped from; a `wall_clock` row already carries
+   * its deadline from the synchronous mapper and is left alone.
+   *
+   * A calendar read that errors (not a refusal) costs only its own row the
+   * deadline: it is logged and that row is served with none, never a
+   * wall-clock one (D2). Every caller serves a row that is already written —
+   * `openNodeRequest` after the insert and the approvers' notices, the list
+   * and single reads — so the error never fails the write or the other rows.
+   * The sweep reads {@link slaDeadline} itself and retries the row next pass.
+   */
+  private async projectWorkingTimeDue(raws: readonly any[], rows: ApprovalRequestRow[]): Promise<void> {
+    for (let i = 0; i < rows.length; i++) {
+      const cfg = parseJson<any>(raws[i]?.node_config_json, undefined);
+      if (!escalationCountsWorkingTime(cfg)) continue;
+      let deadline: SlaDeadline | undefined;
+      try {
+        deadline = await this.slaDeadline(raws[i], cfg);
+      } catch (err: any) {
+        this.logger?.warn?.('[approvals] working-time SLA deadline could not be computed; the request is served without one', {
+          request: raws[i]?.id, error: err?.message ?? String(err),
+        });
+        continue;
+      }
+      if (!deadline) continue;
+      if ('refusal' in deadline) rows[i]!.sla_due_refusal = deadline.refusal;
+      else rows[i]!.sla_due_at = deadline.due;
+    }
   }
 
   // ── Dead-run release (#3456) ──────────────────────────────────
@@ -10669,6 +10848,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
 
     const rows = await this.engine.find('sys_approval_request', findOpts);
     const list = Array.isArray(rows) ? rows.map(rowFromRequest) : [];
+    if (Array.isArray(rows)) await this.projectWorkingTimeDue(rows, list);
     // [#10749] Redact before enrichment — see `redactPayloads`. [#23594] The
     // snapshot and the subject title are narrowed by ONE answer for the reader;
     // [#23618] the lookup targets' titles by the same reader's answers for them.
@@ -10911,6 +11091,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     if (!read) return null;
     const { raw, caller } = read;
     const row = rowFromRequest(raw);
+    await this.projectWorkingTimeDue([raw], [row]);
     // [#10749] Redact before enrichment — see `redactPayloads`. [#23594] The
     // snapshot and the subject title are narrowed by ONE answer for the reader;
     // [#23618] the lookup targets' titles by the same reader's answers for them.
@@ -11197,11 +11378,39 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       if (row && text) row.comment = text;
     };
     const rescue = adminRescueNoteOf(snapshot);
-    if (rescue) overlay(rescue.action_id, () => adminRescueNoteText(rescue, labels.sentence));
+    if (rescue) {
+      const positionLabels = await this.notePositionLabels(adminRescuePositions(rescue), labels);
+      overlay(rescue.action_id, () => adminRescueNoteText(rescue, labels.sentence, (name) => positionLabels.get(name)));
+    }
     const exclusion = submitterExclusionNoteOf(snapshot);
     if (exclusion) overlay(exclusion.action_id, () => submitterExclusionNoteText(exclusion, labels.sentence));
     const noApprover = noApproverNoteOf(snapshot);
     if (noApprover) overlay(noApprover.action_id, () => noApproverNoteText(noApprover, labels.sentence));
+  }
+
+  /**
+   * [#35418] The label a reader reads each of `positions` by: the reader's
+   * language pack (`positions.<name>.label`), else the position's declared
+   * `label` ({@link ApprovalServiceOptions.positionLabelSource}). A position
+   * neither answers is left out, and the note names it by its name. Display
+   * only: a failed read leaves the name standing, never fails the read.
+   */
+  private async notePositionLabels(
+    positions: readonly string[],
+    labels: ReaderLabels,
+  ): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    for (const name of positions) {
+      let label = labels.positionLabel(name);
+      if (!label && this.positionLabelSource) {
+        try {
+          const declared = await this.positionLabelSource(name);
+          if (typeof declared === 'string' && declared.trim()) label = declared;
+        } catch { /* display-only — the name stands */ }
+      }
+      if (label) out.set(name, label);
+    }
+    return out;
   }
 
   /**

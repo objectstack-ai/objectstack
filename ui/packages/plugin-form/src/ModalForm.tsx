@@ -378,8 +378,10 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
   // The section navigation between the header and the scrolling body
   // (objectstack#34605): the form reports its visible sections, the dialog
   // draws them where they stay in view while the body scrolls.
+  // Drawn or not is the navigation's own decision: two or more sections that
+  // do not all fit the body (objectstack#35472).
   const sectionNav = useFormSectionNav();
-  const drawsSectionNav = (sectionNav.items?.length ?? 0) >= 2;
+  const [drawsSectionNav, setDrawsSectionNav] = useState(false);
   const previewMode = usePreviewMode();
   const perms = usePermissions();
   // ADR-0144 D8 rule 4 — the organization currency a record-currency code
@@ -1401,7 +1403,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
         )}
 
         <FormSectionNavContext.Provider value={sectionNav.sink}>
-        <FormSectionNav items={sectionNav.items} className="shrink-0 px-2 sm:px-4" />
+        <FormSectionNav items={sectionNav.items} onDrawnChange={setDrawsSectionNav} className="shrink-0 px-2 sm:px-4" />
         {/* `relative`: the absolutely positioned hidden inputs in the form (a
             Radix checkbox's or select's native stand-in) take this scroller as
             their containing block, so it clips them and they scroll with it,

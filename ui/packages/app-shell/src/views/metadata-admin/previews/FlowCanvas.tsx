@@ -1104,7 +1104,7 @@ export function FlowCanvas({
                 markerHeight="7"
                 orient="auto-start-reverse"
               >
-                <path d="M 0 0 L 10 5 L 0 10 z" className="fill-destructive" />
+                <path d="M 0 0 L 10 5 L 0 10 z" className="fill-current text-destructive" />
               </marker>
             </defs>
             {edges.map((edge, i) => {
@@ -1136,7 +1136,7 @@ export function FlowCanvas({
                         : selected
                           ? 'stroke-primary'
                           : invalid
-                            ? 'stroke-destructive'
+                            ? 'stroke-current text-destructive'
                             : back
                               ? 'stroke-amber-500/70'
                               : simRunning

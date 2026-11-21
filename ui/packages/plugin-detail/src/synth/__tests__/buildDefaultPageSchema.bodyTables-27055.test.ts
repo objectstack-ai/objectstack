@@ -21,11 +21,12 @@
  * list is a tab of its own (objectstack#35595, which retired the one `Related`
  * tab). A field group whose `relatedList` names a body table's
  * relationship places that table at the group's position instead
- * (objectstack#27069, objectstack#27241).
+ * (objectstack#27069, objectstack#27241), and the table keeps its tab too
+ * (objectstack#35889 item 4).
  */
 
 import { describe, expect, it } from 'vitest';
-import { BODY_TABLE_PAGE_SIZE, buildDefaultPageSchema, buildDefaultTabs } from '../buildDefaultPageSchema';
+import { BODY_TABLE_PAGE_SIZE, buildDefaultHighlights, buildDefaultPageSchema, buildDefaultTabs } from '../buildDefaultPageSchema';
 import { bodyTableIdsOf, buildDefaultPageColumns } from '../recordPageColumns';
 
 const quoteDef = {
@@ -173,6 +174,28 @@ describe('a field group places a body table at its position (objectstack#27069, 
     expect(tabOf(tabs, 'related:task.quote').children.map((n: any) => n.properties.objectName)).toEqual(['task']);
   });
 
+  it('a table a group MAKES a body table keeps its tab, with its count (objectstack#35889 item 4)', () => {
+    const tabs = buildDefaultTabs(placed('quote_line_item'), { related: [{ ...LINES, keepsTab: true }, SCHEDULE, TASKS] });
+    expect(items(tabs).map((i: any) => i.value)).toEqual([
+      'details',
+      'related:quote_line_item.quote',
+      'related:task.quote',
+      'timeline',
+    ]);
+    expect(tabOf(tabs, 'related:quote_line_item.quote').children.map((n: any) => n.properties.objectName)).toEqual(['quote_line_item']);
+    // The Overview still draws it at the group, and the page still counts it a body table.
+    expect(shape(items(tabs)[0].children)).toContain('table(quote_line_item)');
+    const page = buildDefaultPageSchema(placed('quote_line_item'), { related: [{ ...LINES, keepsTab: true }, TASKS] });
+    expect([...bodyTableIdsOf(page)]).toEqual(['quote_line_item.quote']);
+  });
+
+  it("CONTROL — a `'primary'` body table a group only positions keeps no tab, as before (objectstack#35889)", () => {
+    const primaryLines = { ...LINES, isBody: undefined, isPrimary: true };
+    const tabs = buildDefaultTabs(placed('quote_line_item'), { related: [primaryLines, TASKS] });
+    expect(items(tabs).map((i: any) => i.value)).toEqual(['details', 'related:task.quote', 'timeline']);
+    expect(shape(items(tabs)[0].children)).toEqual(['details(basic,terms)', 'table(quote_line_item)', 'details(notes)']);
+  });
+
   it('the host-passed sections place the same way (the `{ group }` sections RecordDetailView passes)', () => {
     const def = placed('quote_line_item');
     // The `{ group }` reference form, as the host writes it (the options type
@@ -208,13 +231,13 @@ describe("the record's own fields lead the Overview, its master-detail tables fo
     expect(shape(columns.details)).toEqual(['details(basic)', 'table(meeting_todo)']);
   });
 
-  it('with a key-fields strip the order is strip, then the field groups, then the body table', () => {
+  it('declared key fields draw no strip (objectstack#35891): the field groups, then the body table', () => {
     const columns = columnsOf({ ...meetingDef, highlightFields: ['owner', 'meeting_date'] }, { related: [TODOS] });
-    expect(stripShape(columns.strip)).toEqual(['record:highlights']);
+    expect(stripShape(columns.strip)).toEqual([]);
     expect(shape(columns.details)).toEqual(['details(basic)', 'table(meeting_todo)']);
   });
 
-  it('with a stage bar and key fields the order is the strip (key fields, stage), the field groups, the body table', () => {
+  it('a slotted strip (key fields, stage) still leads: the strip, the field groups, the body table', () => {
     const staged = {
       ...meetingDef,
       highlightFields: ['owner'],
@@ -228,7 +251,10 @@ describe("the record's own fields lead the Overview, its master-detail tables fo
         },
       },
     };
-    const columns = columnsOf(staged, { statusField: 'status', related: [TODOS] });
+    const columns = columnsOf(staged, {
+      related: [TODOS],
+      slots: { highlights: buildDefaultHighlights(staged, { statusField: 'status' }) },
+    });
     expect(stripShape(columns.strip)).toEqual(['record:highlights', 'record:path']);
     expect(shape(columns.details)).toEqual(['details(basic)', 'table(meeting_todo)']);
   });

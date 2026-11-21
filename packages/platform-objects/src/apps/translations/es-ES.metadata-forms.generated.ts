@@ -52,6 +52,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Icono",
         helpText: "Nombre de icono Lucide (p. ej. \"building\", \"users\")"
       },
+      color: {
+        label: "Color del icono",
+        helpText: "Color del cuadrado sobre el que se dibuja el icono, de la paleta fija. Si no se define, se usa gris."
+      },
       description: {
         label: "Descripción",
         helpText: "Documentación para desarrolladores"
@@ -70,7 +74,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       highlightFields: {
         label: "Campos destacados",
-        helpText: "Nombres de campo de este objeto, del más importante al menos; donde solo cabe uno, gana la primera entrada (ADR-0085). Determinan las columnas de lista predeterminadas, las tarjetas, las vistas previas de registros hijos y la franja destacada del detalle. Un nombre que no sea un campo de este objeto se rechaza al publicar."
+        helpText: "Nombres de campo de este objeto, del más importante al menos; donde solo cabe uno, gana la primera entrada (ADR-0085). Determinan las columnas predeterminadas de las listas y de las listas relacionadas, las tarjetas, las vistas previas de registros hijos, la tarjeta flotante del registro y el selector de registros. Un nombre que no sea un campo de este objeto se rechaza al publicar."
       },
       relatedLists: {
         label: "Orden de listas relacionadas",
@@ -86,11 +90,15 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.key": {
         label: "Clave",
-        helpText: "Clave de máquina en snake_case, única dentro de este objeto: el esquema rechaza cualquier otra cosa. Los campos se unen al grupo indicando esta clave, así que renombrarla los deja sin grupo."
+        helpText: "Clave de máquina en snake_case, única dentro de este objeto: el esquema rechaza cualquier otra cosa. Los campos que el grupo lista en Campos siguen en él al renombrar la clave; un campo que se une indicando esta clave en su propio ajuste de grupo queda sin grupo."
       },
       "fieldGroups.label": {
         label: "Etiqueta",
         helpText: "Texto del encabezado de la sección del grupo."
+      },
+      "fieldGroups.fields": {
+        label: "Campos",
+        helpText: "Los campos que muestra este grupo, en orden de visualización (nombres de campo). Si se rellena, fija el orden dentro del grupo sin mover ningún campo. Un campo que esta lista nombra no puede indicar otro grupo en su propio ajuste de grupo, y un campo solo puede figurar en un grupo. No se permite junto con Lista relacionada."
       },
       "fieldGroups.icon": {
         label: "Icono",
@@ -102,7 +110,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.relatedList": {
         label: "Lista relacionada",
-        helpText: "Convierte esta entrada en la tabla de una lista relacionada en lugar de una sección de campos: indica el objeto hijo (u objeto.campo) cuya lista se dibuja en esta posición de la columna de detalles del registro. Un grupo así no contiene campos; se rechaza un campo que lo indique como su grupo, y también un nombre que no coincide con ninguna relación que apunte a este objeto. La página de registro aún no dibuja esta ubicación."
+        helpText: "Convierte esta entrada en la tabla de una lista relacionada en lugar de una sección de campos: indica el objeto hijo (u objeto.campo) cuya lista se dibuja en esta posición de la columna de detalles del registro. Un grupo así no contiene campos; se rechaza un campo que lo indique como su grupo, y también un nombre que no coincide con ninguna relación que apunte a este objeto. Los formularios de creación y edición del registro padre también incluyen la tabla en línea, y «Editar» en la página de registro guarda el registro y sus filas a la vez."
       },
       "fieldGroups.collapse": {
         label: "Contraer",
@@ -787,7 +795,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       inlineColumns: {
         label: "Columnas en línea",
-        helpText: "Columnas de la cuadrícula en línea del formulario del registro padre, en orden de visualización; solo se usan cuando este campo define inlineEdit, que se escribe en el código fuente. Sin definir: se derivan de los campos editables de este objeto y, a partir de seis, el resto empieza en el selector de columnas de la cuadrícula. Una entrada que solo nombra un campo toma de ese campo su tipo, opciones y reglas; las demás claves de columna, empezando por type, se escriben en el código fuente."
+        helpText: "Columnas de la cuadrícula en línea del formulario del registro padre, en orden de visualización; solo se usan cuando un grupo de campos del objeto padre indica este objeto hijo (fieldGroups[].relatedList). Sin definir: se derivan de los campos editables de este objeto y, a partir de seis, el resto empieza en el selector de columnas de la cuadrícula. Una entrada que solo nombra un campo toma de ese campo su tipo, opciones y reglas; las demás claves de columna, empezando por type, se escriben en el código fuente."
       },
       "inlineColumns.name": {
         label: "Nombre",
@@ -1347,10 +1355,11 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       navigation: {
         label: "Navegación",
-        helpText: "Configuración de la navegación al hacer clic en un elemento (panel lateral por defecto; también page, new_window o none)"
+        helpText: "Configuración de la navegación al hacer clic en un elemento: el tamaño del panel lateral y `preventNavigation` para una lista cuyas filas no abren nada (`mode` está obsoleto: el nombre del registro abre la página completa; el icono al pasar el cursor, el panel lateral)"
       },
       "navigation.mode": {
-        label: "Modo"
+        label: "Modo",
+        helpText: "[OBSOLETO] En la lista de un objeto (una vista de lista, los `listViews` de un objeto) ya no decide cómo se abre un registro: en la consola, para todos los lectores, el nombre del registro abre la página completa y el icono que aparece junto a él al pasar el cursor abre el panel lateral. Ahí `drawer`, `page` y `new_window` se siguen analizando y no cambian nada, así que omite la clave; `none` sigue significando que las filas no abren nada (es preferible `preventNavigation: true`). Un bloque de página que lleva `navigation` (un bloque de lista, la línea de tiempo, una vista incrustada) sigue respetando todos los valores."
       },
       "navigation.preventNavigation": {
         label: "Impedir navegación",
@@ -1358,7 +1367,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "navigation.openNewTab": {
         label: "Abrir en pestaña nueva",
-        helpText: "Fuerza la apertura en una pestaña nueva (se aplica al modo page)"
+        helpText: "Abre la página completa del registro en una pestaña nueva del navegador al hacer clic en él; las filas que no abren nada siguen así, y en un teléfono la página se abre en la misma pestaña"
       },
       "navigation.size": {
         label: "Tamaño",

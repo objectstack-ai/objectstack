@@ -9,7 +9,10 @@
  * - ListView delegation for non-grid view types (kanban, calendar, chart, etc.)
  */
 
-import { useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
+import type { ColumnSummary } from '@objectstack/spec/ui';
+import type { ListColumn } from '@object-ui/types';
+import { columnsWithSummary, declaredColumnFields } from './columnSummaryWrite.js';
+import { useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense, type ReactNode } from 'react';
 import { useParams, useSearchParams, useNavigate, useLocation, useHref, createSearchParams } from 'react-router-dom';
 import { resolveAffordance, type FilterTokenScope, type SchemaLike } from '@object-ui/core';
 import { useObjectListPreferences } from '../context/ListPreferencesProvider.js';
@@ -52,11 +55,11 @@ import { IdentityImportOptions, IdentityImportResultExtra, identityImportFields 
 import { ManagedUsersInviteLine } from './managedEnvironmentUsers.js';
 import { importTargetFields } from './importTargetFields.js';
 import { resolveViewId } from '../utils/resolveViewId.js';
-import { useRecordOpenPreference } from '../utils/recordOpenPreference.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
+import { usePackageRefusesSaves } from '../hooks/useStudioDesignGate.js';
+import { studioPackageId } from '../utils/appRoute.js';
 import { LIST_PINNED_VIEW_PREFERENCE, objectPreferenceScope, useWorkspacePreference } from '../utils/workspacePreference.js';
-import type { ListViewProps } from '@object-ui/plugin-list';
-import { defaultListViewId, viewRowId } from '../utils/viewIdentity.js';
+import { defaultListViewId, isSavedViewId, viewRowId } from '../utils/viewIdentity.js';
 import { useObjectActions } from '../hooks/useObjectActions.js';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
@@ -83,7 +86,14 @@ import { useObjectViewListUrlState, useObjectViewUrlFilters } from './objectView
 import { useObjectViewTitleSwitcher } from './objectViewTitleSwitcher.js';
 import { useObjectViewPluginSchema } from './objectViewPluginSchema.js';
 import { useObjectViewHeaderChrome } from './objectViewHeaderChrome.js';
-import { ObjectViewPageHeader } from './objectViewPageHeader.js';
+import {
+    ListViewBarHostContext,
+    OBJECT_VIEW_PAGE_COLUMN_ATTR,
+    ObjectViewBarObjectName,
+    ObjectViewBarTrailing,
+    ObjectViewPageHeader,
+    type ObjectViewPageBarProps,
+} from './objectViewPageHeader.js';
 import { ObjectViewRecordOverlay } from './objectViewRecordOverlay.js';
 import { useObjectViewListRenderer } from './objectViewListRenderer.js';
 import { ListPersonalizedMarker } from './ListPersonalizedMarker.js';
@@ -821,6 +831,44 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         activeViewId,
         baseView,
     });
+    // objectstack#35702 — a footer pick saves the column's calculation and
+    // nothing else (L1 7048239634): the stored view's own columns are the
+    // base, so the reader's unsaved hides, order or added columns never ride
+    // along, and a column the view does not declare is not offered. Each
+    // resolves whether the pick was saved; on `false` the grid takes it back.
+    const personalViewRow = activeView ? personalViews.views.find((v) => v.id === activeView.id) : undefined;
+    // objectstack#35933 — the open saved shared view's own package (its row's
+    // served `_packageId`), and whether the server refuses saves into it: a
+    // view a read-only package ships is offered no save of its own. Read for
+    // an admin only, the one reader offered such a save; unknown offers it.
+    const activeSavedViewRow = activeView && isAdmin
+        ? savedViews.find((sv: any) => viewRowId(sv) === activeView.id)
+        : undefined;
+    const activeViewPackageRefusesSaves = usePackageRefusesSaves(studioPackageId(activeSavedViewRow));
+    const handlePickPersonalViewSummary = async (field: string, summary: ColumnSummary | null): Promise<boolean> => {
+        if (!personalViewRow) return false;
+        const columns = columnsWithSummary(personalViewRow.config.columns as ListColumn[] | string[] | undefined, field, summary);
+        if (!columns) return false;
+        try {
+            await personalViews.update(personalViewRow.id, { ...personalViewRow.config, columns });
+            return true;
+        } catch (err) {
+            console.error('[ObjectView] Failed to save a footer calculation:', err);
+            toast.error(t('form.saveError'), { description: err instanceof Error ? err.message : String(err) });
+            return false;
+        }
+    };
+    const handlePickSharedViewSummary = async (field: string, summary: ColumnSummary | null): Promise<boolean> => {
+        if (!activeView) return false;
+        const columns = columnsWithSummary(activeView.columns as ListColumn[] | string[] | undefined, field, summary);
+        if (!columns) return false;
+        const priorDraft = viewDraft;
+        const saved = await handleViewConfigSave({ ...activeView, columns });
+        // The panel's save keeps a refused draft on screen (the panel stays
+        // dirty); a refused pick is taken back instead.
+        if (!saved) setViewDraft(priorDraft);
+        return saved;
+    };
 
     // objectstack#29635 — creating one of the reader's own views, and Rename
     // and Delete on them. Creating is offered to any reader the server lets
@@ -928,19 +976,12 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
 
     // objectstack#25992 slice 6: the record navigation overlay (drawer state in the
     // URL, row click, open as page, record links) moved to `./objectViewRecordNavigation.ts`.
-    // objectstack#26677 — how a drawer-mode record opens is a READER's
-    // preference, not a `navigation.mode`: the drawer (the default) or the
-    // full page. Live state: the Display menu's Open records section writes it
-    // (objectstack#26681) and the next row click opens the new way. It applies
-    // only to a record that opens in the drawer: an object that declares
-    // `page` (or `new_window` / `none`) keeps its declaration. objectstack#28915
-    // — the pane beside the list retired, so the drawer is the default and the
-    // list under it keeps its full width.
-    const [recordOpenPreference, setRecordOpenPreference] = useRecordOpenPreference();
+    // objectstack#35854 — one rule, no setting: the record's name opens the
+    // full page, the name cell's hover icon the side drawer over the list.
     // objectstack#27058 — on a phone the record is always a page: a row tap
     // navigates to it, and no pane is mounted beside or over the list.
     const phone = usePhoneViewport();
-    const { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowAsPage, drawerRoot, drawerRestore, handleListRowsChange, handleRootStep, listLabel } = useObjectViewRecordNavigation({
+    const { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowInPanel, drawerRoot, drawerRestore, handleListRowsChange, handleListTotalChange, handleRootStep, listLabel } = useObjectViewRecordNavigation({
         activeView,
         objectDef,
         objects,
@@ -955,31 +996,16 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         viewLabel,
         unlabelledViewText,
         language,
-        recordOpenPreference,
         phone,
     });
-    // objectstack#26681 — the Display menu's Open records section: the mode this
-    // object and view resolved to, and the reader's preference with its setter:
-    // the drawer or the full page (objectstack#27545, objectstack#28915). A
-    // reader who prefers the page still gets the drawer for a `?recordId=`
-    // link. Not on a phone, where every record is a page (objectstack#27058).
-    const recordOpen = useMemo<ListViewProps['recordOpen']>(
-        () => (phone ? undefined : {
-            resolvedMode: navOverlay.mode,
-            preference: recordOpenPreference,
-            setPreference: setRecordOpenPreference,
-        }),
-        [phone, navOverlay.mode, recordOpenPreference, setRecordOpenPreference],
-    );
-    // objectstack#26681 — the name cell's ↗, "open as full page", for a row that
-    // opens the drawer. A `page` object's row
-    // already opens the page; a `new_window` / `none` one keeps its declaration.
-    const openAsPageLabel = t('console.objectView.openAsPage', { defaultValue: 'Open as full page' });
-    const openAsPage = useMemo(
-        () => (navOverlay.mode === 'drawer'
-            ? { objectName: objectDef.name, label: openAsPageLabel, open: handleOpenRowAsPage }
+    // objectstack#35854 — the name cell's 「在侧边打开」 icon, for a row with a
+    // record surface on a desktop; a phone opens every record as a page.
+    const openInPanelLabel = t('console.objectView.openInSidePanel', { defaultValue: 'Open in side panel' });
+    const openInPanel = useMemo(
+        () => (navOverlay.mode === 'drawer' && !phone
+            ? { label: openInPanelLabel, open: handleOpenRowInPanel }
             : null),
-        [navOverlay.mode, objectDef.name, openAsPageLabel, handleOpenRowAsPage],
+        [navOverlay.mode, phone, openInPanelLabel, handleOpenRowInPanel],
     );
 
     // objectstack#25992 slice 8: the `filter[...]` URL equality filters and the `uf_*`
@@ -1035,6 +1061,14 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         onDeletePersonalView: personalViewsReady ? (id: string) => { void handleDeletePersonalView(id); } : undefined,
     });
 
+    // objectstack#35878 — the page bar's props, for the view bar's right end
+    // (`viewBarTrailing` below). Filled on every render once the header chrome
+    // is known; the end reads it when it draws, after this render.
+    const pageBarPropsRef = useRef<ObjectViewPageBarProps | null>(null);
+    // Whether a list's view bar draws the page's name and acts: then the page
+    // bar above it is not drawn (`ListViewBarHostContext`).
+    const [listBarHosted, setListBarHosted] = useState(false);
+
     // objectstack#25992 slice 11a: the column-declaration flags, the held list refs and
     // `renderListView` moved to `./objectViewListRenderer.tsx`.
     const { renderListView } = useObjectViewListRenderer({
@@ -1063,20 +1097,31 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         actions,
         handleRowClick,
         handleListRowsChange,
-        recordOpen,
-        openAsPage,
+        handleListTotalChange,
+        openInPanel,
         // objectstack#33317 — the resolved mode: `none` for an authored
         // `none` and for a list-only object (`servesRecordRead`).
         rowOpensRecord: navOverlay.mode !== 'none',
         // objectstack#35548 — the view switcher leads the list's view bar at
         // every width (on a phone since objectstack#27058); the page bar only
         // names the object.
+        // objectstack#35878 — and from `sm` up the object's name leads it,
+        // 「Object / View ▾」: the page draws no page bar of its own above the
+        // list. The 「Personalized · Reset」 marker ends the condition row.
         phoneTitle: titleSwitcher ? (
             <span className="flex min-w-0 max-w-full items-center gap-1.5 max-sm:text-base max-sm:font-semibold" data-testid="list-phone-title">
+                <ObjectViewBarObjectName objectDef={objectDef} objectPluralLabel={listTitleOf} />
                 <span className="flex min-w-0">{titleSwitcher}</span>
-                {personalizedMarker}
             </span>
         ) : null,
+        // The page's acts, after the list's search: read from the ref the page
+        // fills once its header chrome is known (below).
+        viewBarTrailing: titleSwitcher
+            ? (tools: ReactNode) => (pageBarPropsRef.current
+                ? <ObjectViewBarTrailing tools={tools} {...pageBarPropsRef.current} />
+                : tools)
+            : null,
+        conditionRowEnd: personalizedMarker,
         handleListPersonalizationChange,
         urlFilters,
         initialUfSelections,
@@ -1089,11 +1134,36 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         listViewActions: {
             rename: activeView && activeIsPersonal && personalViewsReady && personalGrant('update')
                 ? (label: string) => handleRenamePersonalView(String(activeView.id), label)
-                : activeView && isAdmin && savedViews.some((sv: any) => viewRowId(sv) === activeView.id)
+                : activeView && isAdmin && !activeViewPackageRefusesSaves && savedViews.some((sv: any) => viewRowId(sv) === activeView.id)
                     ? async (label: string) => { await handleRenameView(String(activeView.id), label); return true; }
                     : undefined,
             save: !isEnvironmentList && canUpdatePersonalView && listPersonalizedParts.length > 0 ? () => { void handleSaveToPersonalView(); } : undefined,
             reset: !isEnvironmentList && listPersonalizedParts.length > 0 ? handleResetView : undefined,
+            // objectstack#35702 — the footer's calculation, saved on the open
+            // view (ruling 7045525672): a personal view at once; a shared one,
+            // by a reader who may edit it, as a draft through the view panel's
+            // save, which others see once published.
+            pickSummary: isEnvironmentList || !activeView
+                ? undefined
+                : activeIsPersonal
+                    ? (canUpdatePersonalView && personalViewRow ? handlePickPersonalViewSummary : undefined)
+                    // Only a view the metadata door stores (one the overlay
+                    // read lists), never the fallback tab an object with no
+                    // views is drawn with. Every stored view has a qualified,
+                    // dotted name, the console's own saved views included
+                    // (`object.key` in the custom package), so the name cannot
+                    // tell a view a read-only package ships: its row's package
+                    // does (objectstack#35933), and such a view is offered no
+                    // menu. While that is unknown the menu stays; the door
+                    // refuses that save by design (it goes to the custom
+                    // package) and the refused pick is taken back, as the
+                    // panel's save is.
+                    : isAdmin && !activeViewPackageRefusesSaves && isSavedViewId(savedViews, String(activeView.id))
+                        ? handlePickSharedViewSummary
+                        : undefined,
+            summaryPickFields: declaredColumnFields(
+                (activeIsPersonal ? personalViewRow?.config.columns : activeView?.columns) as ListColumn[] | string[] | undefined,
+            ),
         },
     });
 
@@ -1145,6 +1215,25 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         titleSwitcher,
     });
 
+    const pageBarProps: ObjectViewPageBarProps = {
+        objectDef,
+        objectPluralLabel: listTitleOf,
+        objectDesc,
+        createButton,
+        importShown,
+        setShowImport,
+        importDisabled,
+        t,
+        listActions,
+        isEnvironmentList,
+        headerToolbarActions,
+        environmentEntitlements,
+        toolbarBar,
+        listFavorite,
+        foldedHeaderActions,
+    };
+    pageBarPropsRef.current = pageBarProps;
+
     // The list itself: one element whether or not a record is open
     // (objectstack#27545), so a `?recordId=` change — a row click, a step —
     // hands React the same element and re-renders none of the list. Memoised
@@ -1179,7 +1268,8 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // The page column — header, list, panels — that the record drawer draws
     // over (objectstack#27545); it keeps its full width (objectstack#28915).
     const pageColumn = (
-        <div className="h-full flex flex-col bg-background min-w-0 overflow-hidden">
+        <ListViewBarHostContext.Provider value={setListBarHosted}>
+        <div className="h-full flex flex-col bg-background min-w-0 overflow-hidden" {...{ [OBJECT_VIEW_PAGE_COLUMN_ATTR]: '' }}>
              {/* 1. Header with breadcrumb + description.
                  The managed-by badge sits inline with the title so the
                  lifecycle bucket (system / config / append-only /
@@ -1199,23 +1289,9 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                  toolbar row, beside its filter / sort / display tools
                  (objectstack#27058). */}
              {/* objectstack#25992 slice 10: the header moved to `./objectViewPageHeader.tsx`. */}
-             <ObjectViewPageHeader
-                 objectDef={objectDef}
-                 objectPluralLabel={listTitleOf}
-                 objectDesc={objectDesc}
-                 createButton={createButton}
-                 importShown={importShown}
-                 setShowImport={setShowImport}
-                 importDisabled={importDisabled}
-                 t={t}
-                 listActions={listActions}
-                 isEnvironmentList={isEnvironmentList}
-                 headerToolbarActions={headerToolbarActions}
-                 environmentEntitlements={environmentEntitlements}
-                 toolbarBar={toolbarBar}
-                 listFavorite={listFavorite}
-                 foldedHeaderActions={foldedHeaderActions}
-             />
+             {/* objectstack#35878 — not drawn while the list's view bar
+                 names the object and carries its acts. */}
+             {!listBarHosted && <ObjectViewPageHeader {...pageBarProps} />}
 
              {/* Floating "+" action button — phone-only counterpart to the
                  PageHeader's primary create action we just hid. Positioned
@@ -1394,6 +1470,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 />
              </div>
         </div>
+        </ListViewBarHostContext.Provider>
     );
 
     return (

@@ -269,6 +269,12 @@ export type { DatasourceDef } from './engine.js';
 // refuses the filter rather than truncate it, and its words name this number.
 // Exported so a caller running the two-step route itself can page by it.
 export { RELATION_FILTER_ID_CAP } from './relation-filter-lowering.js';
+// [ADR-0155 D4, plan step 5] The seam's recognition of D4's two classes and
+// its reader of a driver's `fixedReadLeaves` declaration, so an evaluator that
+// declines before it compiles (the analytics native compiler) asks the seam
+// and restates neither.
+export { driverEvaluatesFixedReadLeaf, fixedReadLeafClassOfEngine } from './fixed-read-leaf-seam.js';
+export type { FixedReadLeafClass } from './fixed-read-leaf-seam.js';
 // Groups ordered by an aggregated column, cut and counted in the driver's own
 // statement: the engine-internal read option a door carries to `aggregate`,
 // and the request it carries. Carriers that do not import this package spell
@@ -693,6 +699,22 @@ export type {
     RecordCurrencyBackfillOrganization,
     RecordCurrencyBackfillOrganizationsRefusal,
 } from './record-currency-backfill.js';
+// [ADR-0158 U7 R1, Open item 12] The unit code backfill behind `os migrate
+// unit-codes`: stored free text rewritten into unit codes from the operator's mapping.
+export {
+    backfillUnitCodes,
+    formatUnitCodeBackfillReport,
+    unitCodeBackfillComplete,
+    unitCodeMappingOf,
+} from './unit-code-backfill.js';
+export type {
+    UnitCodeBackfillReport,
+    UnitCodeBackfillEngine,
+    UnitCodeBackfillOptions,
+    UnitCodeBackfillValue,
+    UnitCodeBackfillOrganization,
+    UnitCodeMapping,
+} from './unit-code-backfill.js';
 // [ADR-0144 D5, D7 parameter 1, Open item 8] The explicit recompute of stored
 // home amounts behind `os migrate recompute-home-amounts`: the write's own
 // projection over stored rows. Same split as the two backfills above.
