@@ -650,7 +650,7 @@ ComponentRegistry.register('details', RecordDetailsRenderer, {
     // The "hiding every field drops the section" sentence is read off
     // `DetailSection.tsx` (`visibleFields.length === 0 &&
     // emptyCount === section.fields.length` returns null), not assumed.
-    { name: 'hideFields', type: 'array', of: 'string', description: 'Field names to omit from the body — applied to the top-level `fields` list AND to every section\'s `fields`. Bare field names only. Authors rarely need it: the synth pipeline fills it with the fields already shown in `record:highlights`, and hand-authored pages get the same dedup live from HighlightFieldsContext, so its purpose is suppressing a field you do not want repeated (the page H1 title field is dropped for you too). Hiding every field of a section leaves that section out entirely.' },
+    { name: 'hideFields', type: 'array', of: 'string', description: 'Field names to omit from the body — applied to the top-level `fields` list AND to every section\'s `fields`. Bare field names only. Authors rarely need it: the default record page sets none and draws no highlight strip, and a page that places a `record:highlights` block gets the fields of that block dropped from the body live through HighlightFieldsContext, so its purpose is suppressing a field you do not want repeated (the page H1 title field is dropped for you too). Hiding every field of a section leaves that section out entirely.' },
     // `inlineEdit` and `showHeader` are DECLARED, not merely honoured
     // (objectui#4668) — the same reverse-direction defect `hideFields` above
     // records, on the two keys @objectstack/spec 17.0.0 GA added to this block.

@@ -14,7 +14,7 @@
  *    stageField: 'status', collapse enum).
  *  - `SemanticZooLegacy` carries `stageField: false` — `false` must survive
  *    serialization strictly (it is the only "stop guessing" signal; a
- *    falsy-check regression turns the stepper back on). It exercised the
+ *    falsy-check regression turns the header's stage tag back on). It exercised the
  *    deprecated `compactLayout` alias during the ADR-0085 window; the alias
  *    was retired by framework#2536.
  */
@@ -44,12 +44,12 @@ export const SemanticZoo = ObjectSchema.create({
       ],
       group: 'basics',
     }),
-    // `code`/`budget` are deliberately NOT in highlightFields: detail pages
-    // hide highlighted fields from the body, so a group whose every member is
-    // highlighted never renders there (the `field-group-shadowed` lint). Each
-    // group keeps one non-highlighted member so the grouped detail layout —
-    // including Money's `collapse: 'collapsed'` — is actually exercised
-    // in-browser (#2548 follow-up), not just at parse time.
+    // `code`/`budget` are deliberately NOT in highlightFields: the default
+    // record page keeps highlighted fields in their groups, but a page that
+    // places a `record:highlights` block drops them from the body. Each group
+    // keeps one non-highlighted member so the grouped detail layout —
+    // including Money's `collapse: 'collapsed'` — is exercised in-browser on
+    // either page (#2548 follow-up), not just at parse time.
     code: Field.text({ label: 'Code', group: 'basics' }),
     amount: Field.number({ label: 'Amount', group: 'money' }),
     // Explicit ISO currency (spec channel: `currencyConfig.defaultCurrency`,
@@ -95,7 +95,7 @@ export const SemanticZooLegacy = ObjectSchema.create({
 
   fields: {
     name: Field.text({ label: 'Name', required: true, group: 'details' }),
-    // Named `status` ON PURPOSE: the stepper heuristic would pick it up —
+    // Named `status` ON PURPOSE: the stage heuristic would pick it up —
     // `stageField: false` below is what keeps it suppressed. Option `color`
     // pins the badge tint (spec-typed; without it renderers fall back to a
     // value-hash palette, which colored "Green" amber).

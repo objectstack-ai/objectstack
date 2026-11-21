@@ -1250,7 +1250,7 @@ describe('[#22161] one-line verdicts — object-field-ref-unknown', () => {
     const text = explained();
     for (const fact of [
       'ADR-0078',
-      '`highlightFields` (the default list columns, record cards, previews and the detail highlight strip',
+      '`highlightFields` (the default list columns, record cards, previews, the hover card and the record picker',
       '`publicSharing.redactFields` (the redaction fails OPEN',
       '`indexes[].fields` (the SQL driver skips the WHOLE index at sync',
       '`compactLayout`',
