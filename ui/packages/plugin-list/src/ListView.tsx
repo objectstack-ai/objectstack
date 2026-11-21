@@ -528,6 +528,16 @@ export interface ListViewProps {
    */
   recordLinkAdornment?: (record: Record<string, unknown>) => React.ReactNode;
   /**
+   * Opens a record a lookup cell's chip names, in place (objectstack#36015),
+   * handed to `ObjectGrid`'s `openReferencedRecord`: in the grid a single
+   * click on such a chip opens its record here, and lookup cells draw an edit
+   * button. The console's object list opens it in its side drawer.
+   *
+   * A HOST prop, never a schema key, for the reason `rowAdornment` is one.
+   * Only the grid is handed it. Absent ⇒ a chip only selects its cell.
+   */
+  openReferencedRecord?: (objectName: string, recordId: string) => void;
+  /**
    * Whether a click on a row opens anything, as the host that owns the row
    * click (`onRowClick`) knows it (objectstack#33317), handed to the view's own
    * `rowOpensRecord`: the grid (its table and its phone cards), the gallery and
@@ -2346,6 +2356,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   conditionRowEnd,
   rowAdornment,
   recordLinkAdornment,
+  openReferencedRecord,
   rowOpensRecord,
   compact = false,
   capped = false,
@@ -8366,6 +8377,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               // objectstack#26681 — the host's node beside each row's record
               // link, on the grid's host channel (a React prop, never a node key).
               ? { recordLinkAdornment }
+              : {})}
+            {...(viewComponentSchema.type === 'object-grid' && openReferencedRecord
+              // objectstack#36015 — a lookup chip opens its record in the host's
+              // place, on the grid's host channel (a React prop, never a node key).
+              ? { openReferencedRecord }
               : {})}
             {...(viewComponentSchema.type === 'object-grid'
               // objectstack#35684 — the list page's grid selects a cell on a
