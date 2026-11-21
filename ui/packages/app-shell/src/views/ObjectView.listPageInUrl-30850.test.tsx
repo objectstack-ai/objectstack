@@ -86,6 +86,7 @@ import '@object-ui/plugin-grid';
 import '@objectstack/lint';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 import { LIST_PAGE_PARAM, LIST_SEARCH_PARAM } from './userFilterUrlState';
+import { resetListDraftStoreForTests } from './listDraftStore';
 
 const OBJ = 'paged_task_30850';
 const VIEW_ID = 'all';
@@ -219,6 +220,8 @@ afterEach(() => {
   vi.restoreAllMocks();
   setWidth(DESKTOP_WIDTH);
   window.localStorage.clear();
+  // objectstack#35955 — the list's draft lives in the module: one test's search is not the next one's.
+  resetListDraftStoreForTests();
   window.history.replaceState(null, '', '/');
 });
 

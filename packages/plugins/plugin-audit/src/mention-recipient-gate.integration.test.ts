@@ -396,6 +396,75 @@ describe('@mention notifications reach only mentioned users who can read the com
     });
   });
 
+  describe('[#36074] a reply notice asks the same gate of the thread\'s participants', () => {
+    /** The `collab.reply` emits in `list`, the e-mail shown to go to exactly the inbox notice's people. */
+    const replyEmits = (list: Array<Record<string, any>>) => {
+      const all = list.filter((e) => e.topic === 'collab.reply');
+      const inbox = all.filter((e) => e.channels === undefined);
+      const email = all.filter((e) => Array.isArray(e.channels) && e.channels.length === 1 && e.channels[0] === 'email');
+      expect(all.length).toBe(inbox.length + email.length);
+      expect(audiences(email)).toEqual(audiences(inbox));
+      return inbox;
+    };
+    /** A comment by `author` on `taskId`, written in system context (the author stamped as given). */
+    const by = async (author: { id: string }, taskId: string, parentId?: string): Promise<string> => {
+      seq += 1;
+      const row: any = await engine.insert(
+        'sys_comment',
+        {
+          thread_id: `${TASK}:${taskId}`,
+          body: `note ${seq}`,
+          author_id: author.id,
+          author_name: author.id,
+          organization_id: ORG_A,
+          ...(parentId ? { parent_id: parentId } : {}),
+        },
+        { context: SYS },
+      );
+      return String(row.id);
+    };
+    /** ALICE replies to `parentId` on `taskId` through the engine as herself; the reply emits it produced. */
+    const aliceReplies = async (taskId: string, parentId: string) => {
+      emits.length = 0;
+      seq += 1;
+      await engine.insert(
+        'sys_comment',
+        { thread_id: `${TASK}:${taskId}`, body: `note ${seq}`, parent_id: parentId, mentions: '[]' },
+        { context: authorContext() },
+      );
+      return replyEmits(emits);
+    };
+
+    it('notifies the participant who reads the record and the reply; withholds the other organization\'s and the one who cannot read comments', async () => {
+      const task = (await engine.insert(TASK, { name: 'reply', organization_id: ORG_A, owner_id: ALICE.id, confidential: false }, { context: SYS })).id;
+      const root = await by(CAROL, task);
+      await by(DAVE, task, root);
+      await by(BOB, task, root);
+      const events = await aliceReplies(task, root);
+      expect(audiences(events)).toEqual([[CAROL.id]]);
+      expect(events[0]).toMatchObject({ source: { object: TASK, id: task }, organizationId: ORG_A, payload: { body: `note ${seq}` } });
+    });
+
+    it('a starter who can no longer read the record is not notified', async () => {
+      const task = (await engine.insert(TASK, { name: 'reply', organization_id: ORG_A, owner_id: ALICE.id, confidential: false }, { context: SYS })).id;
+      const root = await by(CAROL, task);
+      expect(audiences(await aliceReplies(task, root))).toEqual([[CAROL.id]]);
+      await engine.update(TASK, { confidential: true }, { where: { id: task }, context: SYS } as any);
+      expect(audiences(await aliceReplies(task, root))).toEqual([]);
+    });
+
+    it('the withheld line names the reply notice', async () => {
+      const row = await post(openTask, []);
+      const warned: Array<{ message: string; meta?: Record<string, unknown> }> = [];
+      const admitted = await admitMentionRecipients(
+        { engine: engine as any, getTenancyPosture: () => 'isolated' as const, logger: { warn: (message: string, meta?: Record<string, unknown>) => warned.push({ message, meta }) } },
+        { mentions: [BOB.id, CAROL.id], threadId: `${TASK}:${openTask}`, actorId: ALICE.id, organizationId: ORG_A, commentId: String(row.id), notice: 'reply' },
+      );
+      expect(admitted).toEqual([CAROL.id]);
+      expect(warned.map((w) => w.message)).toEqual(['[audit] reply notification withheld']);
+    });
+  });
+
   describe('the withheld-recipient log', () => {
     const gate = (warned: Array<{ message: string; meta?: Record<string, unknown> }>) => ({
       engine: engine as any,

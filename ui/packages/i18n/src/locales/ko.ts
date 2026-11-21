@@ -530,6 +530,9 @@ const ko = {
     cancelChanges: "변경 취소",
     saveRow: "행 저장",
     cellReadOnly: "이 셀은 여기에서 편집할 수 없습니다.",
+    // objectstack#36023 — why a list cell's typed value was not saved, under the editor.
+    cellNotNumber: "숫자를 입력하세요.",
+    cellInvalid: "이 값은 유효하지 않습니다.",
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "저장 중…",
     cellSaved: "저장됨",
@@ -656,7 +659,7 @@ const ko = {
       earliest: "가장 이른",
       latest: "가장 늦은",
       pageName: "{{label}} (이 페이지)",
-      calculate: "계산",
+      calculate: "계산 추가",
       none: "없음",
       menuPercentEmpty: "빈 값 비율",
       menuPercentFilled: "입력된 값 비율",
@@ -1512,6 +1515,7 @@ const ko = {
     deleteCommentConfirm: "이 댓글을 삭제하시겠습니까?",
     commentEditFailed: "수정 내용이 저장되지 않았습니다. 댓글은 이전 내용을 유지합니다.",
     commentDeleteFailed: "댓글이 삭제되지 않았습니다. 다시 시도해 주세요.",
+    commentDeleted: "댓글이 삭제되었습니다",
     mentionsWithheld: "{{names}}에게는 이 댓글의 알림이 전송되지 않습니다.",
     linkCopyFailed: "링크 복사 실패",
     claim: "담당하기",
@@ -2660,11 +2664,25 @@ const ko = {
       viewNameInvalid: "소문자, 숫자, 밑줄을 사용하고 문자 또는 밑줄로 시작하세요.",
       systemViewReadonly: "시스템 보기는 코드에 정의되어 있어 읽기 전용입니다.",
       cannotEditMetaView: "이 보기는 코드에 정의된 기본 제공 보기이므로 변경할 수 없습니다.",
+      // The 「Personalized · Reset to view」 marker's words (objectstack#28950), no longer drawn
+      // since objectstack#35955: kept in every pack, so no published key goes away.
       resetView: "보기 설정으로 되돌리기",
       resetViewTitle: "이 보기 자체의 필터, 검색, 정렬, 그룹, 열 배치, 숨긴 필드, 밀도, 레이아웃, 행 색상, 행 번호, 인라인 편집으로 되돌립니다. 고정한 보기, 즐겨찾기, 레코드 열기 방식은 그대로 유지됩니다. 본인의 목록만 변경됩니다.",
-      linkFilterRefused: '이 링크의 필터가 적용되지 않았습니다. 여기서 필터링할 수 없는 필드가 포함되어 있어 뷰를 그대로 표시합니다.',
       personalized: "개인 설정됨",
       personalizedHeading: "이 보기와 다른 항목",
+      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      draft: {
+        discard: "변경 취소",
+        discardTitle: "목록을 보기에 정의된 상태로 되돌립니다: 필터, 정렬, 그룹, 열, 레이아웃. 열 너비와 행 높이는 그대로입니다.",
+        save: "저장",
+        heading: "저장되지 않은 변경",
+        partSeparator: ", ",
+        saveToView: "이 보기에 저장",
+        saveAsMyView: "내 보기로 저장",
+        copyName: "{{name}} 사본",
+        saved: "저장했습니다",
+      },
+      linkFilterRefused: '이 링크의 필터가 적용되지 않았습니다. 여기서 필터링할 수 없는 필드가 포함되어 있어 뷰를 그대로 표시합니다.',
       personalizedParts: {
         filters: "필터",
         search: "검색",

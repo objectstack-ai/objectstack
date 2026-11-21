@@ -530,6 +530,9 @@ const ja = {
     cancelChanges: "変更を取り消す",
     saveRow: "行を保存",
     cellReadOnly: "このセルはここでは編集できません。",
+    // objectstack#36023 — why a list cell's typed value was not saved, under the editor.
+    cellNotNumber: "数値を入力してください。",
+    cellInvalid: "この値は無効です。",
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "保存中…",
     cellSaved: "保存しました",
@@ -656,7 +659,7 @@ const ja = {
       earliest: "最も早い",
       latest: "最も遅い",
       pageName: "{{label}}（このページ）",
-      calculate: "計算",
+      calculate: "集計を追加",
       none: "なし",
       menuPercentEmpty: "空の割合",
       menuPercentFilled: "入力済みの割合",
@@ -1593,6 +1596,7 @@ const ja = {
     deleteCommentConfirm: "このコメントを削除してもよろしいですか？",
     commentEditFailed: "編集内容は保存されませんでした。コメントは以前の内容のままです。",
     commentDeleteFailed: "コメントは削除されませんでした。もう一度お試しください。",
+    commentDeleted: "コメントを削除しました",
     mentionsWithheld: "{{names}} にはこのコメントの通知が届きません。",
     linkCopyFailed: "リンクのコピーに失敗しました",
     claim: "担当する",
@@ -2662,11 +2666,25 @@ const ja = {
       viewNameInvalid: "英小文字、数字、アンダースコアを使用し、先頭は文字かアンダースコアにしてください。",
       systemViewReadonly: "システムビューはコードで定義されており、読み取り専用です。",
       cannotEditMetaView: "このビューはコードで定義された組み込みビューのため、変更できません。",
+      // The 「Personalized · Reset to view」 marker's words (objectstack#28950), no longer drawn
+      // since objectstack#35955: kept in every pack, so no published key goes away.
       resetView: "ビューの設定に戻す",
       resetViewTitle: "このビュー本来のフィルター、検索、並べ替え、グループ、列の配置、非表示フィールド、密度、レイアウト、行の色、行番号、インライン編集に戻します。ピン留めしたビュー、お気に入り、レコードの開き方は変わりません。変わるのはあなたのリストだけです。",
-      linkFilterRefused: 'このリンクのフィルターは適用されませんでした。ここでは絞り込めないフィールドが含まれているため、ビュー本来の内容を表示しています。',
       personalized: "個人設定あり",
       personalizedHeading: "このビューと異なる項目",
+      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      draft: {
+        discard: "破棄",
+        discardTitle: "一覧をビュー本来の状態に戻します：フィルター、並べ替え、グループ化、列、レイアウト。列幅と行の高さはそのままです。",
+        save: "保存",
+        heading: "未保存の変更",
+        partSeparator: "、",
+        saveToView: "このビューに保存",
+        saveAsMyView: "マイビューとして保存",
+        copyName: "{{name}} のコピー",
+        saved: "保存しました",
+      },
+      linkFilterRefused: 'このリンクのフィルターは適用されませんでした。ここでは絞り込めないフィールドが含まれているため、ビュー本来の内容を表示しています。',
       personalizedParts: {
         filters: "フィルター",
         search: "検索",

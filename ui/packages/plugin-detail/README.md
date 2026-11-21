@@ -759,6 +759,17 @@ affordances (View, Edit, Delete) are not governed by this key.
 }
 ```
 
+### Comments: author avatar, reply focus, mention menu
+
+Every comment and reply in `RecordActivityTimeline` leads with
+`CommentAuthorAvatar`: the author's 20 px image, or their initials on the round
+disc the person chips draw (`getPersonInitials` from `@object-ui/fields`).
+`ThreadedReplies` takes `focusReplyOnOpen`: each time its reply input opens it
+expands the replies and puts the caret in the input, so a host whose input opens
+behind its own Reply button lets the reader type straight away. In
+`RichTextCommentInput`, the `@` mention menu opens under the caret, or above it
+when the window has no room below.
+
 ### InlineEditSaveBar & InlineFieldInput
 
 The record-level inline-edit session (#2407): double-clicking a field (or its

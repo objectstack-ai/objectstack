@@ -55,7 +55,7 @@
       "source": "https://ui.shadcn.com/r/styles/default/badge.json",
       "dependencies": [],
       "registryDependencies": [],
-      "localEdits": "Adds `whitespace-nowrap`: a badge is a single-line pill by definition, and without it CJK labels (e.g. 待审批) break per-character inside a cramped table cell and stack vertically (objectui#2762 P0-1). The reasoning is also comment-documented in the file."
+      "localEdits": "Adds `whitespace-nowrap`: a badge is a single-line pill by definition, and without it CJK labels (e.g. 待审批) break per-character inside a cramped table cell and stack vertically (objectui#2762 P0-1). The reasoning is also comment-documented in the file. Declared patch `badge-medium-weight` (objectstack#36047, scripts/shadcn-local-patches.mjs) sets the weight to `font-medium` (500)."
     },
     "breadcrumb": {
       "source": "https://ui.shadcn.com/r/styles/default/breadcrumb.json",

@@ -3274,3 +3274,158 @@ describe('RecordDetailView.recordEditState-35599', () => {
     expect(view.container.querySelectorAll('[data-record-column="details"] [data-body-table-empty-add]').length).toBe(0);
   });
 });
+
+// ── RecordDetailView.approvalSubjectTitle-35415 ─────────────────────────────
+
+/**
+ * objectstack#35415 — an approval request's page is named by the business
+ * record the request asks a decision on, and the name opens that record.
+ *
+ * The request's own declared title is its flow's label (`process_label`, the
+ * object's `nameField`), which lists and search keep. On the request's page
+ * the H1 reads the subject's title the approvals get serves (`record_title`).
+ * Where the get serves none, or serves the bare record id, the H1 keeps the
+ * flow's label: the subject is never named by a raw id.
+ *
+ * The name links to the subject only once one of the page's own reads of it
+ * returned the record (`recordReadReport.ts`). This synthesized page draws no
+ * reader of the subject, so here the name is plain text; the link and its
+ * click are pinned on the served page, where the record card reads it
+ * (`approvalRequestsDataSource.servedPageRecordLink-12557.test.tsx`), and on
+ * the title itself (`approvalSubjectTitle.test.tsx`).
+ *
+ * Measured on the real `RecordDetailView` and the real `page:header` of the
+ * synthesized page, in the desktop top bar. Direction, written before the run:
+ * with the host's title not handed to the header, the subject case REDs
+ * (`Invoice Sign-off`), every other case GREEN.
+ */
+describe('RecordDetailView.approvalSubjectTitle-35415', () => {
+  restoreAfterBlock();
+
+  const REQUEST_OBJECT = 'sys_approval_request';
+  const REQ = 'req_35415';
+  const FLOW_LABEL = 'Invoice Sign-off';
+  const SUBJECT = 'Acceptance T-002 (mail thread link)';
+
+  const REQUEST_DEF = {
+    name: REQUEST_OBJECT,
+    label: 'Approval Request',
+    nameField: 'process_label',
+    fields: {
+      id: { label: 'Id', type: 'text' },
+      process_label: { label: 'Flow', type: 'text' },
+      object_name: { label: 'Object', type: 'text' },
+      record_id: { label: 'Record', type: 'text' },
+      status: { label: 'Status', type: 'text' },
+    },
+  };
+
+  const SERVED = {
+    id: REQ,
+    process_label: FLOW_LABEL,
+    object_name: 'purchase_request',
+    record_id: 'PR-2549',
+    status: 'pending',
+  };
+
+  function makeMetadata() {
+    const pages: any[] = [];
+    return {
+      objects: [], pages, loading: false, error: null,
+      refresh: async () => {}, invalidate: () => {},
+      ensureType: async () => pages, getItem: async () => null,
+      getItemsByType: () => pages,
+    } as any;
+  }
+
+  const h1 = () => document.querySelector('h1');
+
+  /** The subject's object, so the page's record route reaches it. */
+  const SUBJECT_DEF = {
+    name: 'purchase_request',
+    label: 'Purchase Request',
+    nameField: 'name',
+    fields: { id: { label: 'Id', type: 'text' }, name: { label: 'Name', type: 'text' } },
+  };
+
+  function renderRequestPage(row: Record<string, unknown>, objectDef: Record<string, unknown> = REQUEST_DEF) {
+    const objectName = objectDef.name as string;
+    const ds = {
+      find: vi.fn(async () => ({ data: [], total: 0, hasMore: false, pageSize: 50 })),
+      findOne: vi.fn(async () => ({ ...row })),
+      create: vi.fn(async (_o: string, r: any) => r),
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+      getObjectSchema: async () => objectDef,
+    } as Record<string, any>;
+    render(
+      <MemoryRouter initialEntries={[`/apps/demo/${objectName}/record/${REQ}`]}>
+        <MetadataCtx.Provider value={makeMetadata()}>
+          <NavigationProvider>
+            <Routes>
+              <Route
+                path="/apps/:appName/:objectName/record/:recordId"
+                element={(
+                  <RecordDetailView
+                    dataSource={ds as never}
+                    objects={[objectDef, SUBJECT_DEF] as never}
+                    onEdit={() => {}}
+                    objectNameOverride={objectName}
+                    recordIdOverride={REQ}
+                  />
+                )}
+              />
+            </Routes>
+          </NavigationProvider>
+        </MetadataCtx.Provider>
+      </MemoryRouter>,
+    );
+    return { ds };
+  }
+
+  beforeAll(() => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
+  });
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ allowed: true, data: [] }),
+      text: async () => '{}',
+    })) as never);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  describe('RecordDetailView — the approval request page is named by its record, which the name opens (objectstack#35415)', () => {
+    it('the H1 reads the served subject title, not the flow label; unread by the page, it links nowhere', async () => {
+      const { ds } = renderRequestPage({ ...SERVED, record_title: SUBJECT });
+      await waitFor(() => expect(h1()?.textContent).toBe(SUBJECT));
+      expect(h1()!.querySelector('a')).toBeNull();
+      // The title reads nothing itself.
+      expect(ds.findOne.mock.calls.some((call: unknown[]) => call[0] === 'purchase_request')).toBe(false);
+    });
+
+    it('no subject title served: the H1 keeps the flow label, with no link', async () => {
+      renderRequestPage({ ...SERVED });
+      await waitFor(() => expect(h1()?.textContent).toBe(FLOW_LABEL));
+      expect(h1()!.querySelector('a')).toBeNull();
+    });
+
+    it('a subject title that is the bare record id: the H1 keeps the flow label and never prints the id', async () => {
+      renderRequestPage({ ...SERVED, record_title: 'PR-2549' });
+      await waitFor(() => expect(h1()?.textContent).toBe(FLOW_LABEL));
+      expect(h1()!.textContent).not.toContain('PR-2549');
+    });
+
+    it('CONTROL — another object with the same fields keeps its own declared title', async () => {
+      const other = { ...REQUEST_DEF, name: 'flow_ticket_35415', label: 'Ticket' };
+      renderRequestPage({ ...SERVED, record_title: SUBJECT }, other);
+      await waitFor(() => expect(h1()?.textContent).toBe(FLOW_LABEL));
+    });
+  });
+});
