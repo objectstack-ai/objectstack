@@ -125,26 +125,32 @@ const docsDatasource = {
 type Call = { method: string; object?: string };
 
 /**
- * How the recording plugin hands its driver to the boot: as the `driver.NAME`
- * service `DriverPlugin` and `driver-odata` register (the default), as a
- * service under a key other than the driver's own name, or straight into the
- * engine from an `objectql:drivers-ready` handler.
+ * How the recording plugin hands its driver to the boot:
+ *
+ *  - `service`: as the `driver.NAME` service `DriverPlugin` and `driver-odata`
+ *    register (the default), or under another key (`serviceKey`);
+ *  - `drivers-ready`: straight into the engine from an `objectql:drivers-ready`
+ *    handler, before verify's stand-in is registered. `swallow` catches what
+ *    `registerDriver` throws and carries on, as a plugin wrapping its own call
+ *    would;
+ *  - `start`: straight into the engine from the plugin's own `start()`, which
+ *    runs after AppPlugin has registered verify's stand-in.
+ *
+ * `failStart` makes the plugin's `start()` throw that message, a boot failure
+ * of its own.
  */
 type RecordingRegistration =
   | { via: 'service'; serviceKey?: string }
-  | { via: 'drivers-ready' };
+  | { via: 'drivers-ready'; swallow?: boolean; failStart?: string }
+  | { via: 'start' };
 
-/** A driver this suite owns, named `datasource` and registered by a plugin. Every call is recorded. */
-function recordingDriverPlugin(
-  datasource: string,
-  calls: Call[],
-  registration: RecordingRegistration = { via: 'service' },
-): Plugin {
+/** A driver this suite owns, named `datasource`. Every call is recorded. */
+function recordingDriver(datasource: string, calls: Call[]): IDataDriver {
   const record = (method: string, answer: (n: number) => unknown = () => null) => async (object?: string) => {
     calls.push({ method, object });
     return answer(calls.length);
   };
-  const driver = {
+  return {
     name: datasource,
     version: '0.0.1',
     supports: { transactionsUnsupported: true },
@@ -170,19 +176,42 @@ function recordingDriverPlugin(
     syncSchema: record('syncSchema'),
     dropTable: record('dropTable'),
   } as unknown as IDataDriver;
+}
+
+/** A plugin that registers {@link recordingDriver} for `datasource` the way `registration` says. */
+function recordingDriverPlugin(
+  datasource: string,
+  calls: Call[],
+  registration: RecordingRegistration = { via: 'service' },
+): Plugin {
+  const driver = recordingDriver(datasource, calls);
+  type Engine = { registerDriver(d: IDataDriver): void };
   return {
     name: `com.objectstack.verify.managed-stand-in.${datasource}`,
     version: '1.0.0',
     init: async (ctx: PluginContext) => {
       calls.push({ method: 'plugin.init' });
       if (registration.via === 'drivers-ready') {
-        ctx.hook('objectql:drivers-ready', async (engine: { registerDriver(d: IDataDriver): void }) => {
+        ctx.hook('objectql:drivers-ready', async (engine: Engine) => {
           calls.push({ method: 'drivers-ready' });
-          engine.registerDriver(driver);
+          try {
+            engine.registerDriver(driver);
+          } catch (e) {
+            if (!registration.swallow) throw e;
+          }
         });
         return;
       }
-      ctx.registerService(registration.serviceKey ?? `driver.${datasource}`, driver);
+      if (registration.via === 'service') {
+        ctx.registerService(registration.serviceKey ?? `driver.${datasource}`, driver);
+      }
+    },
+    start: async (ctx: PluginContext) => {
+      if (registration.via === 'start') {
+        calls.push({ method: 'plugin.start' });
+        ctx.getService<Engine>('objectql').registerDriver(driver);
+      }
+      if (registration.via === 'drivers-ready' && registration.failStart) throw new Error(registration.failStart);
     },
   };
 }
@@ -645,6 +674,113 @@ describe("os verify refuses to boot when a plugin registers a driver under a man
     expect(refusal?.message).toContain('a driver of its own');
     expect(calls).toEqual([{ method: 'plugin.init' }, { method: 'drivers-ready' }]);
   }, BOOT_TIMEOUT);
+
+  it('a plugin that catches the refusal and carries on still gets the boot refused', async () => {
+    const calls: Call[] = [];
+    const { datasource, stack } = shadowedStack('vmw', calls, { via: 'drivers-ready', swallow: true });
+    const refusal = await refusalOf(stack);
+    expect(refusal).toBeInstanceOf(Error);
+    expect(refusal?.message.startsWith('verify: refusing to boot: ')).toBe(true);
+    expect(refusal?.message).toContain(`datasource "${datasource}" (driver "mongodb")`);
+    expect(calls).toEqual([{ method: 'plugin.init' }, { method: 'drivers-ready' }]);
+  }, BOOT_TIMEOUT);
+
+  it("CONTROL: a caught refusal followed by a boot failure of another cause reports that failure, not the guard's sentence", async () => {
+    const calls: Call[] = [];
+    const failure = 'vmf: a start failure of its own';
+    const { stack } = shadowedStack('vmf', calls, { via: 'drivers-ready', swallow: true, failStart: failure });
+    const refusal = await refusalOf(stack);
+    expect(refusal).toBeInstanceOf(Error);
+    expect(refusal?.message).toContain(failure);
+    expect(refusal?.message.startsWith('verify: refusing to boot: ')).toBe(false);
+  }, BOOT_TIMEOUT);
+});
+
+describe("os verify keeps its stand-in when a driver named after a managed datasource arrives after it", () => {
+  // The engine keeps the first driver registered under a name and discards a
+  // later one, so once verify's stand-in holds the name a late registration
+  // cannot take it: the boot runs on the stand-in and is not refused.
+  const lateStack = (ns: string, calls: Call[], late: 'start' | 'onEnable') => {
+    const datasource = `${ns}_docs_ds`;
+    const fixture = defineStack({
+      manifest: {
+        id: `com.objectstack.verify.managed-stand-in-late.${ns}`,
+        namespace: ns,
+        version: '0.0.0',
+        type: 'app',
+        name: 'Managed Name Late Fixture',
+        description: "An app that registers a driver under a managed mongodb datasource's name after verify's stand-in.",
+      },
+      datasources: [
+        { name: datasource, label: 'Docs (managed mongodb)', driver: 'mongodb', schemaMode: 'managed', config: { url: `mongodb://127.0.0.1:1/${ns}` } },
+      ],
+      objects: [
+        {
+          name: `${ns}_doc`,
+          label: 'Doc',
+          pluralLabel: 'Docs',
+          datasource,
+          sharingModel: 'public_read_write',
+          fields: { name: { type: 'text', label: 'Name' } },
+        },
+      ],
+      data: [{ object: `${ns}_doc`, mode: 'upsert', externalId: 'name', records: [{ name: 'SEED' }] }],
+      plugins: late === 'start' ? [recordingDriverPlugin(datasource, calls, { via: 'start' })] : [],
+    } as never);
+    if (late === 'start') return fixture;
+    // The app's runtime bridge: AppPlugin runs `onEnable` after it has connected
+    // the declared datasources, and its `drivers.register` calls the engine's.
+    const driver = recordingDriver(datasource, calls);
+    const onEnable = async (host: { drivers: { register(d: IDataDriver): void } }) => {
+      calls.push({ method: 'onEnable' });
+      host.drivers.register(driver);
+    };
+    return { ...(fixture as object), onEnable };
+  };
+
+  /** Boot, read the object's rows, write one through REST and read them again; the boot error if it is refused. */
+  const runOn = async (ns: string, fixture: unknown) => {
+    const object = `${ns}_doc`;
+    let stack: VerifyStack | undefined;
+    try {
+      stack = await bootStack(fixture as never, {});
+    } catch (e) {
+      return { error: e as Error };
+    }
+    try {
+      const token = await stack.signIn();
+      const names = async () => {
+        const res = await stack!.apiAs(token, 'GET', `/data/${object}?$top=200`);
+        const body = JSON.parse(await res.text()) as { data?: unknown; records?: unknown };
+        const data = body.data as { records?: unknown } | unknown[] | undefined;
+        const rows = (Array.isArray(data) ? data : (data as { records?: unknown })?.records ?? body.records ?? []) as Array<{ name?: unknown }>;
+        return rows.map((row) => String(row.name)).sort();
+      };
+      const seeded = await names();
+      const created = await stack.apiAs(token, 'POST', `/data/${object}`, { name: 'REST' });
+      return { seeded, created: created.status, after: await names() };
+    } finally {
+      await stack.stop();
+    }
+  };
+
+  it.each([
+    ['vml', 'start', [{ method: 'plugin.init' }, { method: 'plugin.start' }]],
+    ['vmo', 'onEnable', [{ method: 'onEnable' }]],
+  ] as const)(
+    "%s: registered from the app's %s, the boot runs on the stand-in, which takes the writes, and the driver receives no connect, schema sync or write",
+    async (ns, late, expectedCalls) => {
+      const calls: Call[] = [];
+      const run = await runOn(ns, lateStack(ns, calls, late));
+      expect(run.error?.message).toBeUndefined();
+      expect(run.seeded).toEqual(['SEED']);
+      expect(run.created).toBe(201);
+      expect(run.after).toEqual(['REST', 'SEED']);
+      // The registration was made (it is recorded) and the engine kept the stand-in.
+      expect(calls).toEqual(expectedCalls);
+    },
+    BOOT_TIMEOUT,
+  );
 });
 
 describe('unstandableManagedDatasources — which declarations refuse the boot', () => {
