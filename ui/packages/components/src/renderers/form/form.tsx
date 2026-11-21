@@ -3714,10 +3714,19 @@ ComponentRegistry.register('form',
       // A host slot (objectstack#35889): an empty full-width element the form's
       // host fills through a portal (`@object-ui/plugin-form` `formSlots.ts`,
       // a master-detail form's collection at its field group). It holds no
-      // value and registers no control; `slotRef` is the host's callback.
+      // value and registers no control; `slotRef` is the host's callback. A
+      // labelled slot is a stop of the section navigation, like a heading.
       if (type === 'form-slot') {
         const { slotRef } = fieldProps as { slotRef?: React.Ref<HTMLDivElement> };
-        return <div key={name} ref={slotRef} className="col-span-full min-w-0 space-y-4" data-form-slot={name} />;
+        return (
+          <div
+            key={name}
+            ref={slotRef}
+            id={label ? sectionAnchorId(formInstanceId, name) : undefined}
+            className="col-span-full min-w-0 scroll-mt-2 space-y-4"
+            data-form-slot={name}
+          />
+        );
       }
 
       // A field claimed by a HIDDEN section is not drawn (#6236) — the same
@@ -4485,7 +4494,7 @@ ComponentRegistry.register('form',
         // the section navigation lists exactly these, so a section a predicate
         // hides is absent from it by the same verdict that hid its row.
         block.forEach((f, j) => {
-          if (f?.type === 'section-divider' && nodes[j] != null && f.label && typeof f.name === 'string') {
+          if ((f?.type === 'section-divider' || f?.type === 'form-slot') && nodes[j] != null && f.label && typeof f.name === 'string') {
             drawnHeadings?.push({ key: f.name, label: String(f.label) });
           }
         });

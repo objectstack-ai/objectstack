@@ -39,7 +39,7 @@ function makeDataSource(parent: unknown, overrides: Record<string, unknown> = {}
 }
 
 const details = [
-  { childObject: 'po_line', relationshipField: 'po', title: 'Order lines', columns: [{ key: 'qty', label: 'Qty', type: 'number' } as any] },
+  { childObject: 'po_line', relationshipField: 'po', title: 'Order lines', columns: [{ name: 'qty', label: 'Qty', type: 'number' } as any] },
 ];
 
 /** Whether `a` comes before `b` in document order. */
@@ -100,6 +100,32 @@ describe('MasterDetailForm — a group-placed collection sits at its group (obje
     });
     const placed = await collection(container);
     expect(before(container.querySelector('[data-form-section="__section_totals"]')!, placed)).toBe(true);
+  });
+
+  it('edit form: the loaded record\'s lines are drawn at the group, and only there', async () => {
+    const parent = parentWith([HEADER_GROUP, LINES_GROUP, TOTALS_GROUP]);
+    const child = { name: 'po_line', fields: { qty: { type: 'number', label: 'Qty' }, po: { type: 'master_detail', label: 'PO', reference: 'po' } } };
+    const ds = makeDataSource(parent, {
+      getObjectSchema: vi.fn(async (object: string) => (object === 'po_line' ? child : parent)),
+      findOne: vi.fn().mockResolvedValue({ id: 'po1', ref: 'PO-7', memo: 'm' }),
+      find: vi.fn().mockImplementation((object: string) =>
+        Promise.resolve({ data: object === 'po_line' ? [{ id: 'l1', po: 'po1', qty: 3 }] : [] }),
+      ),
+    });
+    const { container } = render(
+      <MasterDetailForm schema={{ objectName: 'po', mode: 'edit', recordId: 'po1', details } as any} dataSource={ds} />,
+    );
+    await waitFor(() => {
+      const el = container.querySelector('[data-form-slot] [data-testid="md-collection"]');
+      const values = el ? [...el.querySelectorAll('input')].map((input) => (input as HTMLInputElement).value) : [];
+      if (!values.includes('3')) throw new Error('lines not placed');
+    });
+    const header = container.querySelector('[data-form-section="__section_header"]')!;
+    const totals = container.querySelector('[data-form-section="__section_totals"]')!;
+    const placed = container.querySelector('[data-form-slot] [data-testid="md-collection"]')!;
+    expect(before(header, placed)).toBe(true);
+    expect(before(placed, totals)).toBe(true);
+    expect(container.querySelectorAll('[data-testid="md-collection"]')).toHaveLength(1);
   });
 
   it('saves the record and its lines in one batch from the placed table', async () => {

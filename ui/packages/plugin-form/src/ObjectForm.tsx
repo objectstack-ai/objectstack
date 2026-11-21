@@ -49,7 +49,7 @@ import {
   sectionedGridLayout,
 } from './autoLayout';
 import { deriveFieldGroupSections, projectSectionDivider, resolveSectionCollapse, type FormFieldWithGroup } from './fieldGroups';
-import { formSlotRow, placeFormSlots, type FormSlotHandoff } from './formSlots';
+import { formSlotGroup, formSlotRow, placeFormSlots, type FormSlotHandoff } from './formSlots';
 import { FormSectionNav, useFormSectionNav } from './FormSectionNav';
 import { mergeCustomFields } from './customFieldsMerge';
 import { hasSectionGroupReference, resolveSectionGroupReferences } from './sectionGroups';
@@ -1691,9 +1691,18 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
       customFields: schema.customFields,
       pool: sourceFields,
     };
+    // A placed collection's row is named by its group, once per group, so the
+    // section navigation stops at it between the headings around it.
+    const namedSlotGroups = new Set<string>();
     slotPlacement.sequence.forEach((item) => {
       if ('slot' in item) {
-        if (slotHost) groupedFields.push(formSlotRow(item.slot, slotHost));
+        if (!slotHost) return;
+        const group = formSlotGroup(objectSchema?.fieldGroups, item.slot);
+        const label = group && !namedSlotGroups.has(group.key)
+          ? sectionLabel(schema.objectName, group.key, group.label || group.key)
+          : '';
+        if (group) namedSlotGroups.add(group.key);
+        groupedFields.push(formSlotRow(item.slot, slotHost, label));
         return;
       }
       const { section } = item;

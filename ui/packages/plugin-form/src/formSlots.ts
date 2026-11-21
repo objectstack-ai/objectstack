@@ -70,6 +70,17 @@ export function formSlotGroupIndex(fieldGroups: unknown, request: FormSlotReques
   return index === -1 ? null : index;
 }
 
+/**
+ * The declared group that places this collection (its key and authored
+ * label), the name a form gives the collection's place; `null` when none does.
+ */
+export function formSlotGroup(fieldGroups: unknown, request: FormSlotRequest): { key: string; label?: string } | null {
+  const index = formSlotGroupIndex(fieldGroups, request);
+  const group = index === null ? undefined : (fieldGroups as Array<{ key?: unknown; label?: unknown }>)[index];
+  if (typeof group?.key !== 'string') return null;
+  return { key: group.key, label: typeof group.label === 'string' ? group.label : undefined };
+}
+
 export type FormSlotSequenceItem<S> = { section: S } | { slot: FormSlotRequest };
 
 /**
@@ -128,11 +139,15 @@ export function placeFormSlots<S>(
  */
 export type FormSlotRow = FormField & { slotRef: (el: HTMLElement | null) => void };
 
-/** The row a placed collection takes in the header form's field list. */
-export function formSlotRow(request: FormSlotRequest, host: FormSlotHost): FormSlotRow {
+/**
+ * The row a placed collection takes in the header form's field list. A
+ * `label` (its group's) makes the row a stop of the form's section
+ * navigation, between the headings it sits between.
+ */
+export function formSlotRow(request: FormSlotRequest, host: FormSlotHost, label = ''): FormSlotRow {
   return {
     name: `__form_slot__${request.id}`,
-    label: '',
+    label,
     type: FORM_SLOT_ROW_TYPE,
     slotRef: host.refFor(request.id),
   } as FormSlotRow;

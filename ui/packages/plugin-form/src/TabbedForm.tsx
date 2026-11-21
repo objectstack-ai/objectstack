@@ -42,7 +42,7 @@ import { useRecordInvalidation } from './recordInvalidation';
 import { useReportedDirtyChange } from './formDirtyReport';
 import { useUploadGate, UploadGateProvider, UploadInFlightNotice } from './uploadGate';
 import { useFormChromeTranslation } from './formChrome';
-import { formSlotGroupIndex, formSlotRow, placeFormSlots, type FormSlotHandoff } from './formSlots';
+import { formSlotGroup, formSlotGroupIndex, formSlotRow, placeFormSlots, type FormSlotHandoff } from './formSlots';
 
 export interface FormSectionConfig {
   /**
@@ -682,9 +682,9 @@ export const TabbedForm: React.FC<TabbedFormProps> = ({
       slotTab.group.fields.push(row);
       return;
     }
-    const group = (objectSchema?.fieldGroups as Array<{ key?: string; label?: string }> | undefined)?.[at];
-    const key = typeof group?.key === 'string' ? group.key : `__form_slot_tab__${item.slot.id}`;
-    const label = typeof group?.key === 'string'
+    const group = formSlotGroup(objectSchema?.fieldGroups, item.slot);
+    const key = group ? group.key : `__form_slot_tab__${item.slot.id}`;
+    const label = group
       ? sectionLabel(schema.objectName, group.key, group.label || group.key)
       : item.slot.childObject;
     const tab: TabGroup = { key, label, fields: [row] };
