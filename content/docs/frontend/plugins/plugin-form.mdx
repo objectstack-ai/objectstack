@@ -101,6 +101,16 @@ Which fields an edit save sends, and which fields and line-item actions a caller
 
 A select governed by the object's blocking `state_machine` validation offers only the values the server accepts. On an edit form that is the stored value plus its declared next states; on a create form it is the machine's `initialStates`, plus the value the form opens with (a `default: true` option or a caller's pre-fill), which is never dropped. A machine that declares no `initialStates`, or a `warning`, inactive or update-only one, leaves a create form's options as they are. Every form layout, the master-detail header included, applies the same rule.
 
+## Editing in the line-item grid
+
+The child grid of a master-detail form (and of `record:line_items`) is typed into directly: click a cell or Tab to it and type, and Enter moves to the same column of the next line (on the last line it adds one). Choice cells open a panel under the cell, over the table, so the row keeps its height:
+
+- a **select** cell opens a searchable option list on a click, Enter, Space or a typed letter, and a pick writes the value;
+- a **date** or **date-time** cell keeps its typed control and shows a calendar under the cell, with Today, Tomorrow, Next week and Clear;
+- a **text** cell whose text is longer than the column floats right over its neighbours while you type.
+
+Esc in a cell takes back what you changed in that cell and goes no further: a form open in a dialog stays open, with its other lines.
+
 ## Field Types
 
 The plugin supports these field types:
