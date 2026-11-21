@@ -41,7 +41,7 @@
 
 import * as React from 'react';
 import { createPortal } from 'react-dom';
-import { HoverCard, HoverCardContent, HoverCardTrigger, LazyIcon, Skeleton } from '@object-ui/components';
+import { HoverCard, HoverCardContent, HoverCardTrigger, ObjectIconTile, Skeleton } from '@object-ui/components';
 import {
   buildExpandFields,
   getRecordDisplayName,
@@ -375,13 +375,12 @@ function RecordHoverCardBody({
       aria-busy={pending || undefined}
     >
       <div className="flex min-w-0 items-start gap-2">
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-          <LazyIcon
-            name={typeof objectSchema?.icon === 'string' ? objectSchema.icon : undefined}
-            className="h-4 w-4"
-            aria-hidden="true"
-          />
-        </span>
+        {/* The target object's tile, in its colour (objectstack#35985). */}
+        <ObjectIconTile
+          icon={typeof objectSchema?.icon === 'string' ? objectSchema.icon : undefined}
+          color={typeof objectSchema?.color === 'string' ? objectSchema.color : undefined}
+          size="lg"
+        />
         <div className="min-w-0 flex-1">
           <CardTitle objectName={objectName} recordId={recordId} onOpen={onOpen} onDone={onDone}>
             {name}

@@ -35,6 +35,7 @@ import {
   CommandItem,
   CommandList,
   CommandSeparator,
+  ObjectIconTile,
 } from '@object-ui/components';
 import {
   LayoutDashboard,
@@ -70,6 +71,7 @@ import { resolveHref, resolveNavItemLabel } from '@object-ui/layout';
 import type { NavigationItem } from '@object-ui/types';
 import { findByName, useNavTargetLabel, type NavTargetLabelOptions } from '../hooks/useNavTargetLabel.js';
 import { readObjectsByName } from '../hooks/useObjectPresence.js';
+import { useNavTargetColor } from '../hooks/useNavTargetIcon.js';
 
 import { useAuth } from '@object-ui/auth';
 import { matchesPaletteQuery } from './paletteMatch.js';
@@ -411,15 +413,19 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
    */
   const metadata = useMetadata();
   const recentTargetLabel = useNavTargetLabel(RECENT_ROW_LABELS);
-  const recentContext = (item: RecentItem): { type?: string; icon?: string } => {
+  const recentContext = (item: RecentItem): { objectName?: string; type?: string; icon?: string; color?: string } => {
     const objectName = recentItemObject(item);
     if (!objectName) return {};
-    const def = findByName(readObjectsByName(metadata, [objectName]), objectName) as { icon?: unknown } | undefined;
+    const def = findByName(readObjectsByName(metadata, [objectName]), objectName) as { icon?: unknown; color?: unknown } | undefined;
     return {
+      objectName,
       type: recentTargetLabel({ kind: 'object', objectName }) ?? objectName,
       icon: typeof def?.icon === 'string' && def.icon !== '' ? def.icon : undefined,
+      color: typeof def?.color === 'string' ? def.color : undefined,
     };
   };
+  // objectstack#35985 — an object entry draws the object's tile, in its colour.
+  const navTargetColor = useNavTargetColor();
 
   // Index object defs by name so group headings can resolve the object's
   // localized label (labels may be `{ key, defaultValue }` i18n objects, which
@@ -440,7 +446,7 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
     const order: string[] = [];
     const byObject = new Map<
       string,
-      { objectLabel: string; icon?: string; hits: typeof recordHits }
+      { objectLabel: string; icon?: string; color?: string; hits: typeof recordHits }
     >();
     for (const hit of recordHits) {
       let group = byObject.get(hit.objectName);
@@ -449,7 +455,12 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
         // label (already objectName when the def had no string label).
         const objDef = objectsByName.get(hit.objectName);
         const label = resolveKeyedI18nLabel(objDef?.label, t) || hit.objectLabel;
-        group = { objectLabel: label, icon: hit.icon, hits: [] };
+        group = {
+          objectLabel: label,
+          icon: hit.icon,
+          color: typeof objDef?.color === 'string' ? objDef.color : hit.color,
+          hits: [],
+        };
         byObject.set(hit.objectName, group);
         order.push(hit.objectName);
       }
@@ -503,7 +514,7 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
             heading={t('console.commandPalette.recentRecords', { defaultValue: 'Recently viewed' })}
           >
             {recentRecords.map((item) => {
-              const { type, icon } = recentContext(item);
+              const { objectName, type, icon, color } = recentContext(item);
               const Icon = icon ? getIcon(icon) : FileText;
               return (
                 <CommandItem
@@ -511,7 +522,11 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
                   value={`recent ${recentLabel(item)} ${item.id}`}
                   onSelect={() => leaveTo(item.href)}
                 >
-                  <Icon className="mr-2 h-4 w-4" />
+                  {objectName ? (
+                    <ObjectIconTile glyph={Icon} color={color} className="mr-2" />
+                  ) : (
+                    <Icon className="mr-2 h-4 w-4" />
+                  )}
                   <span className="truncate">{recentLabel(item)}</span>
                   {type && (
                     <span
@@ -556,7 +571,7 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
                   value={`record ${hit.display} ${hit.objectLabel} ${hit.objectName} ${hit.recordId}`}
                   onSelect={() => leaveTo(`${recordHitBaseUrl(hit.objectName)}/${hit.objectName}/record/${hit.recordId}`)}
                 >
-                  <Icon className="mr-2 h-4 w-4" />
+                  <ObjectIconTile glyph={Icon} color={group.color} className="mr-2" />
                   <span className="truncate">{hit.display}</span>
                   {hit.subtitle && (
                     <span className="ml-auto max-w-[45%] truncate text-xs text-muted-foreground">
@@ -574,13 +589,14 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
             {objectItems
               .map(item => {
                 const Icon = getIcon(item.icon);
+                const color = item.objectName ? navTargetColor({ kind: 'object', objectName: item.objectName }) : undefined;
                 return (
                   <CommandItem
                     key={item.id}
                     value={`object ${navLabel(item)} ${item.objectName}`}
                     onSelect={() => leaveTo(resolveHref(item, baseUrl, templateContext).href)}
                   >
-                    <Icon className="mr-2 h-4 w-4" />
+                    <ObjectIconTile glyph={Icon} color={color} className="mr-2" />
                     <span>{navLabel(item)}</span>
                   </CommandItem>
                 );

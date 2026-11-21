@@ -1,7 +1,7 @@
 /**
  * The page bar of the Console `ObjectView` (`./ObjectView.tsx`), 44px tall
- * (objectstack#35548, `PageHeader`'s list posture): the object's icon in one
- * colour and its plural name with the managed-by badge on the left; on the
+ * (objectstack#35548, `PageHeader`'s list posture): the object's icon tile
+ * (objectstack#35985) and its plural name with the managed-by badge on the left; on the
  * right the schema-driven toolbar, the ⋮ menu and the create button, or their
  * folded face. The view switcher is not here: it leads the list's view bar.
  * The ⋮ menu holds what is not used every time: the object's description,
@@ -10,7 +10,7 @@
  * value is passed in as a prop.
  */
 
-import { createContext, createElement, useCallback, useContext, useLayoutEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useLayoutEffect, useState } from 'react';
 import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import {
   Button,
@@ -21,12 +21,12 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  ObjectIconTile,
 } from '@object-ui/components';
 import { Upload, MoreVertical } from 'lucide-react';
 import type { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { FavoriteMenuItem } from '../layout/SidebarItemMenu.js';
 import type { useObjectListFavorite } from '../layout/SidebarItemMenu.js';
-import { getIcon } from '../utils/getIcon.js';
 import { PageHeader } from '../layout/PageHeader.js';
 import { ManagedByBadge } from '../components/ManagedByBadge.js';
 import { EnvironmentListToolbar } from '../environment/EnvironmentListToolbar.js';
@@ -207,10 +207,9 @@ export function ObjectViewPageHeader(props: ObjectViewPageBarProps) {
                  // The kind chip, in the header's own slot after the title
                  // (objectui#12606).
                  badge={<ManagedByBadge managedBy={(objectDef as any)?.managedBy} />}
-                 // `createElement`, not a JSX tag: the looked-up icon is a value,
-                 // which react-hooks/static-components refuses in tag position
-                 // (the convention ObjectDataPage set).
-                 icon={createElement(getIcon((objectDef as any)?.icon), { className: 'h-4 w-4' })}
+                 // The object's tile, in the colour the menu draws it in
+                 // (objectstack#35985).
+                 iconTile={<ObjectIconTile icon={(objectDef as any)?.icon} color={(objectDef as any)?.color} />}
                  actions={<ObjectViewPageBarActions {...actionProps} />}
                  foldedActions={foldedHeaderActions}
                  compactBelow={LIST_HEADER_COMPACT_WIDTH}
@@ -255,9 +254,7 @@ export function ObjectViewBarObjectName({
 }: Pick<ObjectViewPageBarProps, 'objectDef' | 'objectPluralLabel'>) {
     return (
         <span className={VIEW_BAR_OBJECT_NAME} data-testid="list-view-bar-object">
-            <span className="flex shrink-0 items-center text-muted-foreground" aria-hidden="true">
-                {createElement(getIcon((objectDef as any)?.icon), { className: 'h-4 w-4' })}
-            </span>
+            <ObjectIconTile icon={(objectDef as any)?.icon} color={(objectDef as any)?.color} />
             {/* The page's heading: the page bar that held the `h1` is not drawn. */}
             <h1 className="min-w-0 truncate text-[13px] font-medium leading-5 text-muted-foreground" data-testid="list-view-bar-object-name">
                 {objectPluralLabel(objectDef)}
