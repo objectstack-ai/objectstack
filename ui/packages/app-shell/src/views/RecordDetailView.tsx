@@ -56,6 +56,7 @@ import {
   type RecordPageStreamsAsk,
 } from './recordPagePayload.js';
 import { applySavedRecordEcho } from './recordSaveEcho.js';
+import { authoredRecordPageApplies } from './recordPageSurface.js';
 import { withPageTabsUrlSync } from '../utils/pageTabsUrlSync.js';
 import { RECORD_DETAIL_TAB_PARAM, RECORD_DRAWER_PARAM, RECORD_RELATED_ENLARGE_PARAM, RECORD_RELATED_ENLARGE_PUSHED_STATE as RELATED_ENLARGE_PUSHED, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
 import { resolveActionParams } from '@object-ui/fields';
@@ -1230,9 +1231,17 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     () => new Set<string>(objects.map((o: any) => o?.name).filter(Boolean)),
     [objects],
   );
+  // objectstack#36150 — an authored full record page is drawn on the desktop
+  // full page only; on a phone and in an embedded host (drawer, split pane)
+  // the record takes the standard page (`authoredRecordPageApplies`, which
+  // names the two exceptions: a page named in the URL, and the platform
+  // pages listed in `OBJECTS_KEEPING_AUTHORED_PAGE`). Slotted pages are the
+  // standard page already and keep their slots everywhere.
+  const phone = usePhoneViewport();
+  const authoredPageHere = authoredRecordPageApplies({ embedded, phone, objectName, requestedPageName });
   const assignedPage = useMemo(
-    () => (namedPageBlocked ? null : pruneUnregisteredRecordPageObjects(resolvedPage, registeredObjectNames)),
-    [namedPageBlocked, resolvedPage, registeredObjectNames],
+    () => (namedPageBlocked || !authoredPageHere ? null : pruneUnregisteredRecordPageObjects(resolvedPage, registeredObjectNames)),
+    [namedPageBlocked, authoredPageHere, resolvedPage, registeredObjectNames],
   );
   const assignedSlots = useMemo(
     () => (namedPageBlocked ? null : pruneUnregisteredRecordPageObjects(resolvedSlots, registeredObjectNames)),
@@ -4525,8 +4534,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // in a bar at the bottom of the page (the header draws them there, through
   // `PageHeaderPhoneContext`), its top bar is one way back, a page pushed from
   // a related row has a path row, and going back to a page restores where it
-  // was scrolled. A record drawn in a pane is never on a phone.
-  const phone = usePhoneViewport();
+  // was scrolled. A record drawn in a pane is never on a phone. (`phone` is
+  // read where the page is assigned, above.)
   const phonePage = phone && !embedded;
   const [phoneActionBarEl, setPhoneActionBarEl] = useState<HTMLDivElement | null>(null);
   const [pageScrollerEl, setPageScrollerEl] = useState<HTMLDivElement | null>(null);

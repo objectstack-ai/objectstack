@@ -3305,6 +3305,8 @@ const en = {
       new: 'New',
       import: 'Import',
       importTitle: 'Import from CSV',
+      newObject: 'New {{object}}',
+      importExport: 'Import / Export',
       select: 'Select',
       importedToast: 'Imported {{count}} row(s).',
       importedToast_one: 'Imported {{count}} row.',

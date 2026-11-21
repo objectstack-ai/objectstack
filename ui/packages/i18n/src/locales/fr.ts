@@ -2805,6 +2805,8 @@ const fr = {
       endDateField: "Champ de date de fin",
       import: "Importer",
       importTitle: "Importer depuis CSV",
+      newObject: 'Nouveau {{object}}',
+      importExport: 'Importer / Exporter',
       select: 'Sélectionner',
       importedToast: "{{count}} ligne(s) importée(s).",
       importedToast_one: "{{count}} ligne importée.",

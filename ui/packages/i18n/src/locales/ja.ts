@@ -2736,6 +2736,8 @@ const ja = {
       endDateField: "終了日フィールド",
       import: "インポート",
       importTitle: "CSVからインポート",
+      newObject: '{{object}}を新規作成',
+      importExport: 'インポート / エクスポート',
       select: '選択',
       importedToast: "{{count}} 行をインポートしました。",
       importedToast_one: "{{count}} 行をインポートしました。",

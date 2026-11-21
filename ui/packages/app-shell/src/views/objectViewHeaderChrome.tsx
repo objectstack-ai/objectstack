@@ -38,6 +38,7 @@ export function useObjectViewHeaderChrome({
     toolbarBar,
     viewAccess,
     titleSwitcher,
+    createLabel,
 }: {
     objectCanCreate: ReturnType<typeof useObjectViewToolbarAffordances>['objectCanCreate'];
     createVisible: ReturnType<typeof useObjectViewToolbarAffordances>['createVisible'];
@@ -61,6 +62,11 @@ export function useObjectViewHeaderChrome({
      * itself — the reader's way to another view.
      */
     titleSwitcher?: ReactNode;
+    /**
+     * objectstack#36113 — the create button's words, 「New Account」: the
+     * object's singular name, since the button names what it creates.
+     */
+    createLabel: string;
 }) {
     // The header's primary action, drawn the same in both of the header's
     // faces (below). [#5153] `objectCanCreate && createVisible` — the
@@ -83,7 +89,7 @@ export function useObjectViewHeaderChrome({
             data-testid="object-view-new-button"
         >
             <Plus className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">{t('console.objectView.new')}</span>
+            <span className="hidden sm:inline">{createLabel}</span>
         </Button>
     ) : null;
 
