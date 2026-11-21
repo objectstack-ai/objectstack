@@ -371,6 +371,20 @@ describe('data-table select-first — clearing, the panel under the cell, a refu
     expect(t.onCellChange).toHaveBeenCalledWith(0, 'amount', 5, ROWS[0]);
   });
 
+  it('an in-cell box that already says why it cannot read its text is refused without a second sentence', () => {
+    const t = renderTable();
+    t.select(0, 1);
+    fireEvent.change(t.catcher(), { target: { value: '5' } });
+    const input = t.editor() as HTMLInputElement;
+    // The in-cell number face marks its box and draws its own bad-input line.
+    input.setAttribute('aria-invalid', 'true');
+    Object.defineProperty(input, 'validity', { configurable: true, value: { badInput: true, typeMismatch: false } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(t.onCellChange).not.toHaveBeenCalled();
+    expect(t.editor()).not.toBeNull();
+    expect(t.cell(0, 1).querySelector('[data-testid="cell-edit-refusal"]')).toBeNull();
+  });
+
   it('a press outside an injected editor holding a refused value keeps the editor, and the click selects nothing', () => {
     const t = renderTable(
       {

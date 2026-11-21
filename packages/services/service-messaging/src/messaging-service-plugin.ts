@@ -29,6 +29,7 @@ import {
     type SlackTriggerEngine,
 } from './slack-links.js';
 import { SLACK_ACCOUNT_ROUTE, SLACK_LINK_ROUTE, registerSlackLinkRoutes } from './slack-link-routes.js';
+import { SLACK_SETUP_UI_BUNDLE } from './slack-setup-ui.js';
 import {
     NotificationTemplateStore,
     TEMPLATE_BUILTINS,
@@ -641,7 +642,9 @@ export class MessagingServicePlugin implements Plugin {
             // preference doors (`getKnownChannels`) answer as they do with no
             // Slack in the composition. It sends a DM to a recipient's
             // confirmed link with their organization's own install token
-            // (sys_channel_account).
+            // (sys_channel_account). [#34730 step 3] Setup's Slack entry
+            // (`slack-setup-ui.ts`) is registered on the same condition, so a
+            // composition without connector-slack lists no Slack page.
             ctx.hook('kernel:ready', async () => {
                 if (!getSlack()) return;
                 service.registerChannelProvider('slack', lazyChannelMount({
@@ -650,6 +653,11 @@ export class MessagingServicePlugin implements Plugin {
                     announce: '[messaging] slack channel registered (a DM to the recipient\'s confirmed sys_channel_user_link, with their organization\'s sys_channel_account token)',
                     logger: ctx.logger,
                 }));
+                try {
+                    ctx.getService<{ register(m: unknown): void }>('manifest').register(SLACK_SETUP_UI_BUNDLE);
+                } catch {
+                    /* no manifest service: no console to carry the entry */
+                }
             });
         }
 

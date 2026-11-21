@@ -102,9 +102,18 @@ import {
  * objectstack#35688 — how wide a built-in editor's layer starts (a host's
  * injected editor sizes its own). Never narrower than the cell.
  */
-function builtInEditorWidthClass(type: TableColumnType | undefined): string {
-  return type === 'date' || type === 'datetime' ? 'min-w-56' : 'min-w-40';
+function builtInEditorWidthClass(type: TableColumnType | undefined): string | undefined {
+  // A typed value (text, numbers) starts as wide as its cell (objectstack#36023).
+  return type === 'date' || type === 'datetime' ? 'min-w-56' : undefined;
 }
+
+/**
+ * The built-in typed editor at the cell's own size (objectstack#36023): one row
+ * tall inside the layer's 2px frame, square, with no border, fill or ring of
+ * its own. `data-in-cell-face="input"` on its box flattens the layer.
+ */
+const BUILT_IN_FLAT_INPUT_CLASS =
+  'h-[calc(var(--radix-popper-anchor-height,2rem)-4px)] rounded-none border-0 bg-transparent px-2.5 py-0 text-[13px] md:text-[13px] shadow-none focus-visible:ring-0 focus-visible:ring-offset-0';
 
 const NUMERIC_EDIT_TYPES = new Set<TableColumnType>(['number', 'currency', 'percent']);
 
@@ -2849,7 +2858,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     // objectstack#36023 — a value that fails its rules is not written: the
     // editor stays open with the reader's input, and says why.
     const refusal = selectFirst ? editRefusalOf(row, columnKey, valueToStage) : null;
-    if (refusal) {
+    if (refusal !== null) {
       setEditRefusal({ text: refusal, value: valueToStage });
       // A commit blurs the editor's control first (`flushInjectedEditor`): give it the caret back.
       const editor = tableRef.current?.querySelector<HTMLElement>('[data-slot="cell-editor-overlay"]');
@@ -3635,12 +3644,16 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
    * number box holding letters, an email box holding no address), then the
    * host's rules for the cell (`GridCellFacts.validate`).
    */
+  /** Why a committed value is refused (`''`: refused, and the editor already says why), or `null`. */
   const editRefusalOf = (row: any, columnKey: string, value: unknown): string | null => {
     const editor = tableRef.current?.querySelector<HTMLElement>('[data-slot="cell-editor-overlay"]');
     const unreadable = editor
       ? Array.from(editor.querySelectorAll('input')).find((input) => input.validity?.badInput || input.validity?.typeMismatch)
       : undefined;
     if (unreadable) {
+      // An in-cell face that already says why under its box (a number box's
+      // own bad-input line) is refused without a second sentence.
+      if (unreadable.getAttribute('aria-invalid') === 'true') return '';
       if (unreadable.type === 'number') return t('table.cellNotNumber');
       if (unreadable.type === 'email') return t('validation.email');
       if (unreadable.type === 'url') return t('validation.url');
@@ -3667,6 +3680,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       setCellNotice({ rowIndex, colIndex, text: reason });
       return;
     }
+    // A rating is set in place (digits, a click on a star); it opens no editor.
+    if (starsOf(row, col) !== null) return;
     setCellNotice(null);
     const preview = previewKey === `${rowIndex}:${colIndex}`
       ? tableRef.current?.querySelector<HTMLElement>('[data-slot="cell-preview-overlay"]')
@@ -3712,6 +3727,16 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   };
 
   const togglesCell = (row: any, col: TableColumn) => factsOf(row, col)?.toggles ?? col.type === 'boolean';
+  /** The star count of a rating cell set in place (objectstack#36023), or `null`. */
+  const starsOf = (row: any, col: TableColumn): number | null => {
+    const stars = factsOf(row, col)?.stars;
+    // Whole stars first, then the floor: a host's 0.5 is no scale at all.
+    const whole = typeof stars === 'number' && Number.isFinite(stars) ? Math.floor(stars) : 0;
+    return whole > 0 ? whole : null;
+  };
+  // No stars is a clear, refused like any clear on a required field (objectstack#36023).
+  const setStars = (rowIndex: number, colIndex: number, count: number) =>
+    count > 0 ? writeCell(rowIndex, colIndex, () => count) : clearCell(rowIndex, colIndex);
   const toggleCell = (rowIndex: number, colIndex: number) => writeCell(rowIndex, colIndex, (row, col) => {
     const staged = pendingChanges.get(pendingRowKeyOf(row))?.changes;
     const current = staged && col.accessorKey in staged ? staged[col.accessorKey] : row[col.accessorKey];
@@ -3825,9 +3850,15 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       // and opens the editor (the catcher reads it).
       e.preventDefault();
       toggleCell(rowIndex, colIndex);
+    } else if (bare && /^[0-9]$/.test(e.key) && starsOf(row, col) !== null) {
+      // objectstack#36023 — a digit on a rating sets that many stars, at most its
+      // scale; 0 clears it, as Backspace does.
+      e.preventDefault();
+      setStars(rowIndex, colIndex, Math.min(Number(e.key), starsOf(row, col)!));
     } else if ((e.key === 'Backspace' || e.key === 'Delete') && bare) {
       // objectstack#36023 — the cell is cleared and saved at once; a cell the
-      // host refuses to clear (a required field) says why and keeps its value.
+      // host refuses to clear (a required field, a required rating included)
+      // says why and keeps its value.
       e.preventDefault();
       clearCell(rowIndex, colIndex);
     }
@@ -5074,6 +5105,12 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                 const wasSelected = isSelectedCell;
                                 selectCell(rowIndex, colIndex);
                                 if (wasSelected && togglesCell(row, col)) toggleCell(rowIndex, colIndex);
+                                // objectstack#36023 — on a rating already selected, the star
+                                // clicked is the rating; the first click only selected it.
+                                const star = wasSelected && starsOf(row, col) !== null
+                                  ? (e.target as Element).closest?.('[data-rating-star]')
+                                  : null;
+                                if (star) setStars(rowIndex, colIndex, Number(star.getAttribute('data-rating-star')));
                                 return;
                               }
                               // objectstack#35688 — a click inside the open editor (an
@@ -5374,15 +5411,18 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
 
                                 if (editType && NUMERIC_EDIT_TYPES.has(editType)) {
                                   return (
-                                    <Input
-                                      ref={editInputRef}
-                                      type="number"
-                                      value={editValue ?? ''}
-                                      onChange={(e) => setEditValue(e.target.value)}
-                                      onKeyDown={handleEditKeyDown}
-                                      onBlur={handleEditBlur}
-                                      className="h-8 px-2 py-1"
-                                    />
+                                    <div data-in-cell-face="input">
+                                      <Input
+                                        ref={editInputRef}
+                                        type="number"
+                                        value={editValue ?? ''}
+                                        onChange={(e) => setEditValue(e.target.value)}
+                                        onKeyDown={handleEditKeyDown}
+                                        onBlur={handleEditBlur}
+                                        data-in-cell-input=""
+                                        className={cn(BUILT_IN_FLAT_INPUT_CLASS, 'text-right tabular-nums')}
+                                      />
+                                    </div>
                                   );
                                 }
 
@@ -5415,17 +5455,20 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                 // Fallback: plain text input (when no host editor matched and
                                 // the type isn't date/datetime/number).
                                 return (
-                                  <Input
-                                    ref={editInputRef}
-                                    value={editValue}
-                                    onChange={(e) => setEditValue(e.target.value)}
-                                    onKeyDown={handleEditKeyDown}
-                                    onBlur={handleEditBlur}
-                                    className="h-8 px-2 py-1"
-                                  />
+                                  <div data-in-cell-face="input">
+                                    <Input
+                                      ref={editInputRef}
+                                      value={editValue}
+                                      onChange={(e) => setEditValue(e.target.value)}
+                                      onKeyDown={handleEditKeyDown}
+                                      onBlur={handleEditBlur}
+                                      data-in-cell-input=""
+                                      className={BUILT_IN_FLAT_INPUT_CLASS}
+                                    />
+                                  </div>
                                 );
                               })()}</div>
-                                {editRefusal && isUnchangedCellValue(editValue, editRefusal.value) && (
+                                {editRefusal && editRefusal.text !== '' && isUnchangedCellValue(editValue, editRefusal.value) && (
                                   // objectstack#36023 — why the value was not saved, under the input.
                                   <p role="alert" data-testid="cell-edit-refusal" className="px-2 py-1 text-xs text-destructive">
                                     {editRefusal.text}

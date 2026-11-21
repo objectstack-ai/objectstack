@@ -121,18 +121,31 @@ export function adminRescueReason(
 }
 
 /**
+ * [#35418] A position's display label for the reader, or `undefined` when none
+ * is known (the position's name then stands).
+ */
+export type PositionLabelOf = (positionName: string) => string | undefined;
+
+/**
  * The note's text. With no `render`, the English the row stores; with one,
  * the reader's language, or `undefined` when the note sentence itself is not
  * rendered (the stored comment then stands).
+ *
+ * [#35418] With `positionLabel` too, an unheld position is named by the label
+ * it answers (`岗位「销售经理」无人任职`), never by its machine name
+ * (`crm_sales_manager`), wherever one is known. The stored English keeps the
+ * name: it is the audit text, and it identifies the position exactly.
  */
 export function adminRescueNoteText(note: Omit<AdminRescueNote, 'action_id'>): string;
 export function adminRescueNoteText(
   note: Omit<AdminRescueNote, 'action_id'>,
   render: ApprovalSentenceRender,
+  positionLabel?: PositionLabelOf,
 ): string | undefined;
 export function adminRescueNoteText(
   note: Omit<AdminRescueNote, 'action_id'>,
   render?: ApprovalSentenceRender,
+  positionLabel?: PositionLabelOf,
 ): string | undefined {
   const clauses = reasonClauses(note.abandoned, note.fallback, note.submitter_excluded);
   if (!render) {
@@ -142,9 +155,28 @@ export function adminRescueNoteText(
   const separator = render(approvalMessageKey('approvalAdminRescueReasonSeparator'), {})
     ?? enMessages.approvalAdminRescueReasonSeparator;
   const reason = clauses
+    .map((clause) => labelledPosition(clause, positionLabel))
     .map((clause) => render(approvalMessageKey(clause.id), clause.params) ?? english(clause))
     .join(separator);
   return render(approvalMessageKey('approvalAdminRescueNote'), { reason });
+}
+
+/** An unheld position's clause, its `value` the position's label where `positionLabel` knows one. */
+function labelledPosition(clause: Clause, positionLabel: PositionLabelOf | undefined): Clause {
+  if (clause.id !== 'approvalAdminRescuePositionUnheld' || !positionLabel) return clause;
+  const label = positionLabel(clause.params.value);
+  return label ? { ...clause, params: { ...clause.params, value: label } } : clause;
+}
+
+/** The position names an admin_rescue note's abandoned slate holds, each once. */
+export function adminRescuePositions(note: Pick<AdminRescueNote, 'abandoned'>): string[] {
+  const names = new Set<string>();
+  for (const slot of note.abandoned) {
+    if (typeof slot === 'string' && slot.startsWith('position:') && slot.length > 'position:'.length) {
+      names.add(slot.slice('position:'.length));
+    }
+  }
+  return [...names];
 }
 
 /**

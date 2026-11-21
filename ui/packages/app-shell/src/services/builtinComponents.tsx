@@ -136,6 +136,9 @@ const PermissionSetAssignmentPage = lazyPage('permission set assignments', () =>
 const RecycleBinPage = lazyPage('recycle bin', () =>
   import('../views/setup/RecycleBinPage.js').then((m) => m.RecycleBinPage),
 );
+const SlackSetupPage = lazyPage('slack', () =>
+  import('../views/setup/SlackSetupPage.js').then((m) => m.SlackSetupPage),
+);
 /**
  * The position list's two served cells (objectstack#33582): by value they held
  * `metadata-admin/i18n.ts`, and with it the Studio `en` string namespace, in the
@@ -273,6 +276,18 @@ registerAppComponent({
   label: 'Recycle Bin',
   source: '@object-ui/app-shell',
   component: RecycleBinPage,
+});
+
+/**
+ * Setup's Slack page (ADR-0013 addendum, step 3 of objectstack#34730): an
+ * organization administrator installs the organization's Slack app and manages
+ * people's Slack links. Its doors ask `setup.write`, and so does the page.
+ */
+registerAppComponent({
+  ref: 'messaging:slack',
+  label: 'Slack',
+  source: '@object-ui/app-shell',
+  component: SlackSetupPage,
 });
 
 /* -------------------------------------------------------------------------- */

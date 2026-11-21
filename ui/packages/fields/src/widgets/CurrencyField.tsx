@@ -2,6 +2,7 @@ import React from 'react';
 import { Input, EmptyValue, cn } from '@object-ui/components';
 import { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
+import { InCellTextInput } from './InCellTextInput.js';
 import { PHONE_TOUCH_HEIGHT } from './touchTarget.js';
 import { useLocalization, useDisplayLocale, readHomeAmountSource, formatDisplayNumber, type HomeAmountSource } from '@object-ui/i18n';
 import { formatDate } from '@object-ui/core';
@@ -12,7 +13,7 @@ import { formatCurrency, currencyDisplayWidth } from './number-format.js';
 import { HomeAmountPreview } from './homeAmountPreview.js';
 import { useFollowedParentRecord } from './followedParentRow.js';
 
-export function CurrencyField({ value, onChange, field, readonly, error, className, dependentValues, dataSource, ...props }: FieldWidgetComponentProps<number>) {
+export function CurrencyField({ value, onChange, field, readonly, error, className, dependentValues, dataSource, inCell, onCommit: _onCommit, ...props }: FieldWidgetComponentProps<number>) {
   const currencyField = field as any;
   // Shared precedence: field currency → currencyConfig → tenant default (ADR-0053).
   // A `record`-mode amount (ADR-0144 D2) reads the code its record holds —
@@ -196,6 +197,34 @@ export function CurrencyField({ value, onChange, field, readonly, error, classNa
   // can no longer disagree (they did: `JPY` in the adornment, `¥1,235` in the
   // readonly span). USD at the display-locale default is `$` either way.
   const symbol = currency ? currencySymbol(currency, locale) : '';
+
+  // objectstack#36023 — in a list cell the cell itself is the input: the
+  // currency's code, then the raw amount right-aligned (the cell formats it
+  // again once saved).
+  if (inCell) {
+    return (
+      <InCellTextInput
+        {...domProps}
+        type="number"
+        align="end"
+        leading={currency}
+        value={value ?? ''}
+        onChange={(e) => {
+          readBadInput(e.target);
+          const val = e.target.value === '' ? null : parseFloat(e.target.value);
+          onChange(val as any);
+        }}
+        onBlur={handleBlur}
+        placeholder={currencyField?.placeholder}
+        disabled={props.disabled}
+        min={typeof currencyField?.min === 'number' ? currencyField.min : undefined}
+        max={typeof currencyField?.max === 'number' ? currencyField.max : undefined}
+        step={Math.pow(10, -fractionDigits).toFixed(fractionDigits)}
+        aria-invalid={!!error || !!refusal}
+        below={refusal ? <div className="px-2.5 pb-1"><BadInputMessage refusal={refusal} /></div> : null}
+      />
+    );
+  }
 
   return (
     <div className="space-y-1">

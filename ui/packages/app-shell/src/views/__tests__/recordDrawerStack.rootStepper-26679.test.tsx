@@ -67,12 +67,12 @@ describe('the drawer root steps through the host\'s rows (objectstack#26679)', (
     fireEvent.keyDown(document.body, { key: 'k' });
     fireEvent.keyDown(document.body, { key: 'ArrowUp' });
     expect(body()).toBe('L-1');
-    // Still the root: the breadcrumb, no ← and no path (objectstack#27524) —
-    // the record names itself by its id until it reports a title.
-    expect(screen.getByTestId('record-drawer-crumb').textContent).toBe('Lead#L-1');
+    // Still the root: no ← and no path (objectstack#27524) — the record row
+    // names it by its id until it reports a title (objectstack#35853).
+    expect(document.querySelector('[data-record-drawer-title]')?.textContent).toBe('#L-1');
     expect(screen.queryByTestId('record-drawer-trail')).toBeNull();
     // objectstack#27524, Target 7 — the counter follows the step.
-    expect(screen.getByText('1 / 3')).toBeInTheDocument();
+    expect(screen.getByText('1 of 3')).toBeInTheDocument();
   });
 
   it('↑ at the first row and ↓ at the last are disabled, never wrapped', () => {

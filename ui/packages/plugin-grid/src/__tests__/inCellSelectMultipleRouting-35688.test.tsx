@@ -12,9 +12,12 @@
  * `multiple` draws the check list in the cell editor, and each check only
  * stages. The edit is saved when the user moves on, as for `multiselect`.
  * A single `select` still saves on the pick (CONTROL).
+ *
+ * S3: a lookup cell opens its candidate list in place and a pick ends the
+ * edit; on a select-first grid a rating is set by a digit, with no editor.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, cleanup, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 
@@ -59,10 +62,14 @@ const COLORS = [
 
 function makeDataSource() {
   const store: Record<string, any> = {
-    r1: { id: 'r1', title: 'Design system', priority: 'high', colors: ['blue'] },
+    r1: { id: 'r1', title: 'Design system', priority: 'high', colors: ['blue'], score: 2, tier: null },
   };
   return {
-    find: vi.fn(async () => {
+    find: vi.fn(async (objectName: string) => {
+      if (objectName === 'tier_35688') {
+        const tiers = [{ id: 'gold', name: 'Gold' }, { id: 'silver', name: 'Silver' }];
+        return { data: tiers, total: tiers.length, hasMore: false, pageSize: 50 };
+      }
       const data = Object.values(store).map((r) => ({ ...r }));
       return { data, total: data.length, hasMore: false, pageSize: 50 };
     }),
@@ -85,12 +92,22 @@ function makeDataSource() {
           ],
         },
         colors: { type: 'select', multiple: true, label: 'Colors', options: COLORS },
+        score: { type: 'rating', label: 'Score', max: 5 },
+        tier: {
+          type: 'lookup',
+          label: 'Tier',
+          reference: 'tier_35688',
+          options: [
+            { label: 'Gold', value: 'gold' },
+            { label: 'Silver', value: 'silver' },
+          ],
+        },
       },
     }),
   } as any;
 }
 
-function renderGrid() {
+function renderGrid(cellSelection = false) {
   const ds = makeDataSource();
   const schema: any = {
     type: 'object-grid',
@@ -101,6 +118,8 @@ function renderGrid() {
       { field: 'title', label: 'Title', type: 'text' },
       { field: 'priority', label: 'Priority', type: 'select' },
       { field: 'colors', label: 'Colors', type: 'select' },
+      { field: 'score', label: 'Score', type: 'rating' },
+      { field: 'tier', label: 'Tier', type: 'lookup' },
     ],
     pagination: { pageSize: 50 },
   };
@@ -109,7 +128,7 @@ function renderGrid() {
       <SchemaRendererProvider dataSource={ds}>
         <div>
           <button data-testid="outside">outside</button>
-          <ObjectGrid schema={schema} dataSource={ds} />
+          <ObjectGrid schema={schema} dataSource={ds} cellSelection={cellSelection || undefined} />
         </div>
       </SchemaRendererProvider>
     </ActionProvider>,
@@ -163,5 +182,55 @@ describe('ObjectGrid cell editor: a select declared multiple (objectstack#35688 
     await waitFor(() => expect(screen.queryByTestId('in-cell-option-low')).toBeNull());
     await waitFor(() => expect(screen.getByText(/1 row modified/)).toBeInTheDocument());
     expect(cellUnder(container, 'Priority').textContent).toContain('Low');
+  });
+});
+
+describe('ObjectGrid cell editor: lookups and ratings (objectstack#35688 S3)', () => {
+  it('a lookup cell opens its candidate list in place; a pick ends the edit', async () => {
+    const { container } = renderGrid();
+    await waitFor(() => expect(screen.getByText('Design system')).toBeInTheDocument());
+
+    fireEvent.click(cellUnder(container, 'Tier'));
+    await waitFor(() => expect(screen.getByTestId('lookup-in-cell')).toBeInTheDocument());
+    fireEvent.click(await screen.findByText('Silver'));
+
+    await waitFor(() => expect(screen.queryByTestId('lookup-in-cell')).toBeNull());
+    await waitFor(() => expect(screen.getByText(/1 row modified/)).toBeInTheDocument());
+  });
+
+  it('a single pick from Browse all ends the edit too, and saves the picked id', async () => {
+    const { container, ds } = renderGrid(true);
+    await waitFor(() => expect(screen.getByText('Design system')).toBeInTheDocument());
+
+    fireEvent.click(cellUnder(container, 'Tier'));
+    const catcher = container.querySelector<HTMLInputElement>('[data-slot="cell-type-catcher"]')!;
+    fireEvent.keyDown(catcher, { key: 'Enter' });
+    const panel = await screen.findByTestId('lookup-in-cell');
+    fireEvent.click(within(panel).getByTestId('browse-all-records'));
+
+    // The full picker (a portal dialog): one click on a row is a single pick.
+    const row = await waitFor(() => {
+      const r = Array.from(document.querySelectorAll('[role="dialog"] tbody tr')).find((tr) => /Silver/.test(tr.textContent ?? ''));
+      expect(r).toBeTruthy();
+      return r as HTMLElement;
+    });
+    fireEvent.click(row);
+
+    await waitFor(() => expect(container.querySelector('[data-slot="cell-editor-overlay"]')).toBeNull());
+    await waitFor(() => expect(ds.update).toHaveBeenCalled());
+    expect(ds.update.mock.calls[0].slice(0, 3)).toEqual([OBJECT, 'r1', { tier: 'silver' }]);
+  });
+
+  it('on a select-first grid a digit sets the rating and opens no editor', async () => {
+    const { container, ds } = renderGrid(true);
+    await waitFor(() => expect(screen.getByText('Design system')).toBeInTheDocument());
+
+    fireEvent.click(cellUnder(container, 'Score'));
+    const catcher = container.querySelector<HTMLInputElement>('[data-slot="cell-type-catcher"]')!;
+    fireEvent.keyDown(catcher, { key: 'Enter' });
+    expect(container.querySelector('[data-slot="cell-editor-overlay"]')).toBeNull();
+    fireEvent.keyDown(catcher, { key: '4' });
+    await waitFor(() => expect(ds.update).toHaveBeenCalled());
+    expect(ds.update.mock.calls[0].slice(0, 3)).toEqual([OBJECT, 'r1', { score: 4 }]);
   });
 });
