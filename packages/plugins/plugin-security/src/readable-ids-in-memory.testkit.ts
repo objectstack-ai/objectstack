@@ -27,6 +27,11 @@
  *  4. a parent the double holds no rows for answers `$in: []`, as a parent
  *     the registry does not hold does in the engine.
  *
+ * A share-grant leaf (`SharedRecordIds`, ADR-0155) in any scope, P's own or
+ * the read's, is replaced by its members over the double's share rows
+ * (`shared-record-ids-in-memory.testkit.ts`), as the driver's semi-join
+ * evaluates it inside the one statement.
+ *
  * ⛔ Not a second composer for production: D5's two classes (a master on
  * another datasource, a master an object-scoped read middleware narrows) are
  * refused at boot and are not modelled; the tenant wall is the driver's and a
@@ -38,8 +43,9 @@
  * the master's scope answered by the real security service.
  */
 
-import { RLS_DENY_FILTER, isComposedReadableIds, isReadableIds } from '@objectstack/spec/data';
+import { RLS_DENY_FILTER, isComposedReadableIds, isFixedReadLeaf, isReadableIds } from '@objectstack/spec/data';
 import { matchesFilterCondition } from '@objectstack/formula';
+import { fixedReadLeafMembers } from './shared-record-ids-in-memory.testkit.js';
 
 /** The engine's `READABLE_IDS_MAX_CHAIN_DEPTH`: scopes composed above the read's own `where`. */
 const MAX_CHAIN_DEPTH = 8;
@@ -128,7 +134,11 @@ export async function composeReadableIdsInMemory<T>(
       const item = (value as Record<string, unknown>)[key];
       const next = key === '$in' && isReadableIds(item)
         ? await resolve(item.object, ancestors)
-        : await rewrite(item, ancestors);
+        : key === '$in' && isFixedReadLeaf(item)
+          // [ADR-0155 plan step 6] The share arm of a scope, P's own or the
+          // read's: the leaf's members over the double's share rows.
+          ? fixedReadLeafMembers(item, security.rows)
+          : await rewrite(item, ancestors);
       if (next !== item) (out ??= { ...(value as Record<string, unknown>) })[key] = next;
     }
     return out ?? value;

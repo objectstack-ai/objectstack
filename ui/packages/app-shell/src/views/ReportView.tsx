@@ -8,6 +8,7 @@ import { Empty, EmptyTitle, EmptyDescription } from '@object-ui/components';
 // (lives in app-shell to avoid a circular dep on plugin-report).
 import { ReportConfigPanel } from './ReportConfigPanel.js';
 import { Pencil, BarChart3, Loader2 } from 'lucide-react';
+import { PageHeader } from '../layout/PageHeader.js';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
@@ -488,28 +489,28 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
   return (
     <DrillNavigationProvider value={drillNavigation}>
     <div className="flex flex-col h-full overflow-hidden bg-background">
-      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 sm:gap-4 p-4 sm:p-6 border-b shrink-0">
-        <div className="min-w-0 flex-1">
-           <h1 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight truncate">{heading}</h1>
-           {description && (
-             <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{description}</p>
-           )}
-        </div>
-        <div className="shrink-0 flex items-center gap-1.5">
-           {isAdmin && (
-           <button
-             type="button"
-             onClick={() => { void handleOpenConfigPanel(); }}
-             disabled={openingEditor}
-             className="inline-flex items-center gap-1.5 rounded-md border border-input bg-background px-2.5 py-1.5 text-xs font-medium text-muted-foreground shadow-sm hover:bg-accent hover:text-accent-foreground"
-             data-testid="report-edit-button"
-           >
-             <Pencil className="h-3.5 w-3.5" />
-             {t('common.edit')}
-           </button>
-           )}
-        </div>
-      </div>
+      {/* objectstack#36111 — the console page header every list and
+          dashboard draws: the report's name, its description behind the
+          hairline, and the report's own 「Edit」 (the inspector beside the
+          report, not Studio) as its action. The shell's top-right group
+          follows the action where the shell turns it on. */}
+      <PageHeader
+        title={heading}
+        subtitle={description || undefined}
+        icon={<BarChart3 className="h-4 w-4" />}
+        actions={isAdmin ? (
+          <button
+            type="button"
+            onClick={() => { void handleOpenConfigPanel(); }}
+            disabled={openingEditor}
+            className="inline-flex items-center gap-1.5 rounded-md border border-input bg-background px-2.5 py-1.5 text-xs font-medium text-muted-foreground shadow-sm hover:bg-accent hover:text-accent-foreground"
+            data-testid="report-edit-button"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            {t('common.edit')}
+          </button>
+        ) : undefined}
+      />
 
       <div className="flex-1 overflow-hidden flex flex-col sm:flex-row relative">
          <div className="flex-1 min-w-0 overflow-auto p-4 sm:p-6 lg:p-8 bg-muted/5">

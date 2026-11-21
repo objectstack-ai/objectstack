@@ -266,6 +266,18 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       edited_at: {
         label: "편집 일시"
       },
+      is_resolved: {
+        label: "해결됨",
+        help: "이 최상위 댓글로 시작하는 스레드가 해결되었는지 여부. 답글에는 설정할 수 없습니다"
+      },
+      resolved_by: {
+        label: "해결한 사용자",
+        help: "스레드를 해결한 사용자. 플랫폼이 기록하며 작성자는 입력할 수 없습니다"
+      },
+      resolved_at: {
+        label: "해결 일시",
+        help: "스레드가 해결된 시각. 플랫폼이 기록하며 작성자는 입력할 수 없습니다"
+      },
       created_at: {
         label: "생성 일시"
       },

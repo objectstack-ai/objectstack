@@ -28,6 +28,7 @@ import type { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { FavoriteMenuItem } from '../layout/SidebarItemMenu.js';
 import type { useObjectListFavorite } from '../layout/SidebarItemMenu.js';
 import { PageHeader } from '../layout/PageHeader.js';
+import { useShellPageActionsSlot } from '../layout/shellPageActionsSlot.js';
 import { ManagedByBadge } from '../components/ManagedByBadge.js';
 import { EnvironmentListToolbar } from '../environment/EnvironmentListToolbar.js';
 import { ListHeaderActionBar } from './objectViewHeaderLaunchGate.js';
@@ -291,6 +292,11 @@ export function ObjectViewBarObjectName({
  * page column is registered as a list page's scope (`useListPageScope`), so
  * its list draws no row-end controls. The page's acts are drawn from `sm` up;
  * a phone keeps its floating create button.
+ *
+ * objectstack#36111 — this bar is the list page's top row, so the shell's
+ * top-right button group ends it, after ⋮ behind a hairline, as it ends the
+ * console `PageHeader`; off (the default while the top bar stands), the bar is
+ * what it was.
  */
 export function ObjectViewBarTrailing({ tools, ...props }: ObjectViewPageBarProps & { tools: ReactNode }) {
     const setHosted = useContext(ListViewBarHostContext);
@@ -304,6 +310,7 @@ export function ObjectViewBarTrailing({ tools, ...props }: ObjectViewPageBarProp
         setPageColumn(el?.closest<HTMLElement>(`[${OBJECT_VIEW_PAGE_COLUMN_ATTR}]`) ?? null);
     }, []);
     useListPageScope(pageColumn);
+    const renderShellGroup = useShellPageActionsSlot();
     return (
         <div
             ref={rootRef}
@@ -316,6 +323,12 @@ export function ObjectViewBarTrailing({ tools, ...props }: ObjectViewPageBarProp
                     <ObjectViewPageBarActions {...props} />
                 </span>
             </div>
+            {renderShellGroup && (
+                <>
+                    <span aria-hidden="true" className="mx-1 h-4 w-px shrink-0 bg-border" data-testid="list-view-bar-shell-divider" />
+                    {renderShellGroup({})}
+                </>
+            )}
         </div>
     );
 }

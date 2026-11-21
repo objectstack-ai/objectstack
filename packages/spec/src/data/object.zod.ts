@@ -4082,9 +4082,9 @@ const ObjectSchemaBase = strictObject(
    * surfaces. Each flag overrides the default derived from
    * {@link managedBy} via {@link resolveCrudAffordances}. Useful for the
    * handful of objects whose lifecycle doesn't cleanly fit a single
-   * bucket — e.g. an `append-only` table that should still expose CSV
-   * Export, or a `config` table that admins legitimately want to bulk
-   * import via CSV.
+   * bucket — e.g. a `platform` table whose records the console should not
+   * offer for download (`exportCsv: false`), or a `config` table that
+   * admins legitimately want to bulk import via CSV.
    *
    * Omitting the block (or leaving individual flags `undefined`) keeps
    * the {@link managedBy}-derived default.
@@ -4162,10 +4162,10 @@ const ObjectSchemaBase = strictObject(
         '`clone` is a CAPABILITY, not a user action — write `enable: { clone: false }`. ' +
         'The `enable` block (ObjectCapabilities) is where record deep-cloning is governed.',
       read:
-        '`userActions` toggles WRITE affordances only; there is no read toggle. Read ' +
+        '`userActions` toggles the write affordances and the data Export entry; there is no read toggle. Read ' +
         'access is governed by permissions (`requiredPermissions`) and `access.default`.',
       view:
-        '`userActions` toggles WRITE affordances only; there is no view toggle. ' +
+        '`userActions` toggles the write affordances and the data Export entry; there is no view toggle. ' +
         'Visibility is governed by permissions (`requiredPermissions`) and `access.default`.',
     },
   }, {
@@ -4181,7 +4181,9 @@ const ObjectSchemaBase = strictObject(
     delete: z.union([z.boolean(), RowCrudActionOverrideSchema]).optional().describe(
       'Show row-level delete + bulk delete. Boolean, or an object adding per-record visibleWhen/disabledWhen CEL predicates.',
     ),
-    exportCsv: z.boolean().optional().describe('Show CSV export entry.'),
+    exportCsv: z.boolean().optional().describe(
+      "Show the Export entry that downloads this object's data as CSV, XLSX or JSON: the grid's Export menu and its table CSV button, the list view's Export, and a dataset report's Export over this object; false hides it. A view's export of the picture it draws (the Gantt chart's PNG / PDF) is not covered. Omitted: shown, in every managedBy bucket. It hides the entry and refuses no export request: who may export is the permission set's allowExport.",
+    ),
     transfer: z.union([z.boolean(), RowCrudActionOverrideSchema]).optional().describe(
       'Offer the Change Owner action (single and bulk) on records of this object. Boolean, or an object adding per-record visibleWhen/disabledWhen CEL predicates. Omitted: on, except off on a controlled_by_parent detail. Offered only where the platform injects a reassignable owner_id that is provable and not declared readonly (ownership user or omitted, no managedBy, not a sys_ object; an external object declares owner_id or maps a remote column onto it); enabled: true elsewhere is refused. Gates the action, not a plain owner_id write. Resolved by resolveUserActionTransfer.',
     ),
@@ -5798,7 +5800,11 @@ export interface CrudAffordances {
   edit: boolean;
   /** Row-level + bulk delete. */
   delete: boolean;
-  /** CSV / clipboard export. Allowed even on append-only audit tables by default. */
+  /**
+   * The console's data Export entry: a CSV, XLSX or JSON download of the
+   * object's data (not a view's picture export). On by default in every
+   * bucket, append-only audit tables included.
+   */
   exportCsv: boolean;
   /**
    * Per-record CEL predicates for the built-in row Edit action, present only

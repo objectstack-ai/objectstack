@@ -105,7 +105,13 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   `write_validation` probe that meets it leaves its platform half not measured (the agent
   half too when the agent's own write met it). Each is a Build finding naming persona,
   object and verb (`buildDenialFindings`). A declared 403 and `pending_confirmation` grade as
-  before.
+  before. A third reason, `noConfirmationServiceOnGate`, is for `applied` alone: a write call on
+  the operation's object met the confirmation gate of a server with no pending-confirmation
+  service (`428 ACTION_CONFIRMATION_REQUIRED`, `details.reason: 'no_confirmation_service'`,
+  `OperationObservation.metNoConfirmationService`). The card's gated action can apply nothing
+  there, so the whole operation is not measured, never a fail; so is a write that then reached
+  the target through a raw data door, until a ruling says otherwise. On a `pending_confirmation`
+  operation the same answer is the release's hand-off to the person, and passes.
   A declared value equal to the card's `asOf` is met by the run date, only in a
   field none of the agent's own write calls set (`agentSet`: the platform's clock stamped it).
   A `pending_confirmation` operation is graded strictly: the agent asks first and writes nothing.
@@ -245,6 +251,7 @@ pnpm --filter @objectstack/scenarios run-scenarios --effort medium           # t
 pnpm --filter @objectstack/scenarios run-scenarios --author-effort high --ask-effort low  # build and persona turns apart
 pnpm --filter @objectstack/scenarios run-scenarios --lang zh --prompt short  # the card's Chinese texts, and its short build prompt (default: en, else zh; detailed)
 pnpm --filter @objectstack/scenarios run-scenarios --packages workspace      # on this checkout's unreleased packages (default: published)
+pnpm --filter @objectstack/scenarios run-scenarios --modes ask --template dist/objectstack.json --schema-masking off  # a masking-off round (below)
 pnpm --filter @objectstack/scenarios run-scenarios --modes door --door-skills "$PWD/skills"  # build through the MCP draft door, no project (below)
 pnpm --filter @objectstack/scenarios run-scenarios --modes door --door-rules builtin  # the same, with the built-in authoring rules (below)
 ```
@@ -273,7 +280,7 @@ files only: no model, no network, and no score of its own — every figure is th
   `this run’s from-scratch build` takes that run's scratch author.
 - **Never summed silently**: a table's runs must share the prompt choice, the package source, the ask repeats and the
   driver (a replay is its own driver), the ask skills (`--ask-skills`: names and sha256; a record without them
-  reads `none`), the door arm (`--modes door`, below; a record without one reads `skills: none · rules: none`), and the card file they graded (`card`, below; a record without it reads `card: not recorded`).
+  reads `none`), the door arm (`--modes door`, below; a record without one reads `skills: none · rules: none`), the card file they graded (`card`, below; a record without it reads `card: not recorded`), and the schema masking of the apps they booted (`--schema-masking off`, below; a record without it reads `schema masking: on`).
   When they do not, that table is refused with a line naming each difference and
   the files on each side; the other tables print, and the command exits 1. Summarize each side apart.
 - **The card stamp**: every record names the card file it graded at its top level, `card: { id, sha256 }` (the sha256
@@ -289,6 +296,30 @@ files only: no model, no network, and no score of its own — every figure is th
   differ only in it share a row.
 - `--card ID[,ID]` and `--mode M[,M]` narrow the tables. Other JSON in a directory (recordings) is skipped and listed
   on stderr; a file named directly that is not a run record fails the command.
+
+### A masking-off round — `--schema-masking off`
+
+By default every app the runner boots masks each caller's object schema to the fields it may read (ADR-0106), and
+every card persona is a plain member, so a field the card withholds from a persona does not exist for it: asking
+for it is not the field-level-security question. `--schema-masking off` (`src/runner/schema-masking.ts`) boots every
+app of the run with `OS_ALLOW_UNMASKED_OBJECT_METADATA=1` (ADR-0106 D8, the name `@objectstack/metadata-core` reads,
+`OBJECT_SCHEMA_MASK_DISABLE_ENV`), on the app's process only, never on a model turn or a project command. Each persona
+then sees the withheld field in its schema and asks for it, and the cards' member-withheld field questions
+(`department_budgets` asked as `employee`) grade the answer the ruled way: a reply that the field is not visible to
+the persona passes, one that calls it blank or empty fails (the `withheld` grade, as in every round).
+
+- **Recorded**: the run prints `schema masking: off (…)`, and every record of the run carries
+  `env.schemaMasking: "off"`. A default round writes no such key, so its record keeps its bytes.
+- **Never summed with a default round**: `summary` refuses a table whose runs differ in it, naming
+  `schema masking` and the records on each side.
+- **The shell cannot turn it off unrecorded**: every child the runner spawns inherits its environment, so a run
+  started with `OS_ALLOW_UNMASKED_OBJECT_METADATA` set and no flag is a masking-off round, and is recorded as one: the
+  runner reads the variable with the metadata plane's own predicate (`isObjectSchemaMaskingEnabled`), prints
+  `schema masking: off (…) — set by the environment, not by --schema-masking` and stamps every record. A value the
+  platform reads as masked (`0`, `false`, blank) stamps nothing. `--schema-masking on` beside a value that turns
+  masking off is refused before any card runs.
+- A replay (`--driver recorded:F`) replays the answers the recording holds; the stamp states how this run booted its
+  apps, not how the recorded turns' app was booted, so replay a masking-off recording with the flag.
 
 ### Door mode — `--modes door`
 
@@ -540,6 +571,16 @@ npx @objectstack/scenarios help                                      # the comma
   them by object queries; the scorecard says what was measured, not why. `summary` has no column for them yet. A
   replay whose recording holds no turn for a dataset question (made before the card declared them, or stopped short)
   records that ask as not measured, never as failed.
+- **Ask kinds** (`ask-kinds.ts`, `orchestrate.ts`, `scorecard.ts`, `summary.ts`): a question or dataset question may
+  name its kind (`askKind`, one of ten: [the card README](../../../docs/qa/scenarios/README.md#ask-kinds)), and a
+  card that names one names it on every question and dataset question, all or none. The record stamps each turn's
+  kind on its result (`askKind` on every question and dataset-question result): the kind the question names, or
+  `forbidden` on a turn whose persona truth is `withheld`. The scorecard counts the half's asks kind by kind
+  (`HalfScores.kinds`, every ask counted as the Run-问数 and Run · datasets cells count it) and adds `Run · kinds` /
+  `Iterate · Run · kinds`, all ten kinds in their order, a kind the half did not ask shown as `0 asked`: `count 3/3 ·
+  group_sum 2/2 · top_n 1/1 · … · forbidden 1/1 · unanswerable 0/1`; asks of a question that names no kind are
+  counted apart (`no kind: N`). `summary` sums the row over a table's runs. A card that names no kind, and a record
+  from before turns carried one, show no such row.
 - **Ask, then confirm** (`orchestrate.ts`, `prompts.ts`, `driver.ts`, `scorecard.ts`): a `pending_confirmation`
   operation whose first turn asked first and wrote nothing gets a second turn as the same persona over the same MCP
   door. No driver resumes a session, so it is a fresh turn whose prompt (`confirmPrompt`) quotes the operation's ask
@@ -647,7 +688,10 @@ npx @objectstack/scenarios help                                      # the comma
 - **Observation** (`observe.ts`): the write grader is fed what the runner reads itself: the agent's write calls and
   the door's answer (a coded refusal), the object's rows before and after the turn, and the audit trail's actor. A turn
   that wrote nothing because the object refused the read it needed first (a persona that may not read it) grades as
-  that refusal's code; `(no write attempted)` is left for a turn whose object never refused it. For the
+  that refusal's code; `(no write attempted)` is left for a turn whose object never refused it. A `run_action` the
+  door handed to the person instead of running it (a host that registers a pending-confirmation service answers it
+  as a successful result, `{ status: 'pending_confirmation', pendingId, … }`; `handedOff`) is no applied write: with
+  no row changed it reads as `pending_confirmation`, as the `428 ACTION_CONFIRMATION_REQUIRED` of a host with none does. For the
   operation the card's `write_validation` guardrail names, the runner then sends the declared write itself
   (`values`, on `target`) as the same persona through the same MCP door (`POST /api/v1/mcp`, its own API key) and
   reads that answer as the **probe**: the app's validation is measured on every run, whether or not the agent sent

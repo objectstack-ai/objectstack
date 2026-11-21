@@ -9,7 +9,7 @@
  */
 
 import { isMcpServerEnabled } from '@objectstack/types';
-import { MCP_OAUTH_SCOPES, deriveAiFaceName } from '@objectstack/spec/ai';
+import { MCP_OAUTH_SCOPES, MCP_OAUTH_SCOPE_DATA_READ, deriveAiFaceName } from '@objectstack/spec/ai';
 import type { ErrorCode, MetadataProtocol } from '@objectstack/spec/api';
 import type { ISecurityService } from '@objectstack/spec/contracts';
 // [#32442] The ONE reading of `enable.aiReadable` (ruling A, #32865).
@@ -251,8 +251,14 @@ export async function handleMcpRequest(deps: DomainHandlerDeps, body: any, conte
     // service serves its dataset executor.
     const datasetTools = await resolveMcpDatasetToolsService(deps, context);
     // [#35442] The docs seam: the bridge carries `search_package_docs` /
-    // `read_package_doc` exactly where the protocol serves the `/meta` list read.
-    const packageDocs = await resolveMcpPackageDocsProtocol(deps, context);
+    // `read_package_doc` exactly where the protocol serves the `/meta` list read
+    // and [ADR-0090 D10] the grant reaches the docs tools. The MCP runtime's
+    // `packageDocToolsServed` (`data:read`, or no grant at all) stays the
+    // authority on listing them; it is read here too so a token that cannot
+    // reach them never has the delegating person's holdings read for them.
+    const packageDocs = !grantedScopes || grantedScopes.includes(MCP_OAUTH_SCOPE_DATA_READ)
+        ? await resolveMcpPackageDocsProtocol(deps, context)
+        : undefined;
     const bridge = buildMcpBridge(deps, context, { recordFiles, datasetTools, packageDocs });
     // [#34766] The open draft door (design `docs/design/mcp-local-first-door.md`,
     // Design A): resolved per request, so the user's own `manage_metadata` is
@@ -1605,7 +1611,9 @@ export function buildMcpBridge(
         // [#35442] The docs seam (`search_package_docs` / `read_package_doc`),
         // carried only where the protocol serves the `/meta` list read. Every
         // page is read through the `/meta/doc` docs-audience gate AS this
-        // request's caller (`mcp-package-docs.ts`), in this request's locale.
+        // request's caller (`mcp-package-docs.ts`), in this request's locale;
+        // [ADR-0090 D10] on a delegated agent envelope with the delegating
+        // person's own holdings, read through this request's data engine.
         ...(seams.packageDocs
             ? createPackageDocMembers(async () => ({
                 protocol: seams.packageDocs!,
@@ -1613,6 +1621,8 @@ export function buildMcpBridge(
                     seams.packageDocs!,
                     ec as Record<string, unknown> | undefined,
                     (name) => deps.resolveService(context, name),
+                    async () => (await deps.getObjectQL(context, envId))
+                        ?? (await deps.resolveService(context, 'objectql', envId)),
                 ),
                 locale: metaRequestLocale(mcpRequestHttp(context)),
             }))

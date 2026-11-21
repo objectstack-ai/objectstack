@@ -34,7 +34,7 @@
  * the ambiguous tokens against the field's own operator bucket (objectui#9382).
  */
 
-import { isFilterValueComplete, operatorsForFieldType } from '@object-ui/components';
+import { isFilterValueComplete, operatorsForField } from '@object-ui/components';
 
 /**
  * FilterBuilder operator → FilterCondition Mongo operator.
@@ -116,7 +116,17 @@ const MONGO_PREIMAGE: Record<string, readonly string[]> = (() => {
 })();
 
 /** A field as the inspector already describes it to the builder. */
-export interface BuilderFieldDef { value: string; label?: string; type?: string }
+export interface BuilderFieldDef {
+  value: string;
+  label?: string;
+  type?: string;
+  /**
+   * The field's declared `multiple: true`. With the type it decides the
+   * operators the builder offers the column (`operatorsForField`): a
+   * list-valued column takes membership and the empty checks only.
+   */
+  multiple?: boolean;
+}
 
 /**
  * Which builder operator a stored token reads back as, on a field of this type.
@@ -143,9 +153,9 @@ export interface BuilderFieldDef { value: string; label?: string; type?: string 
  *
  * Among the operators that write this token, pick the one THIS field's bucket
  * offers. The bucket table is asked rather than copied, so the answer cannot
- * disagree with what the dropdown actually lists; `operatorsForFieldType` is
- * called with no opt-in extras because that is how the inspector mounts the
- * builder.
+ * disagree with what the dropdown actually lists; `operatorsForField` (the
+ * type and `multiple`) is called with no opt-in extras because that is how the
+ * inspector mounts the builder.
  *
  * ⛔ Deliberately not a widening. When the type is unknown, or when the bucket
  * offers neither candidate or both, this falls back to {@link MONGO_TO_OP} —
@@ -155,10 +165,10 @@ export interface BuilderFieldDef { value: string; label?: string; type?: string 
  * Whether the fallback can then be drawn is not this function's question:
  * {@link builderHolds} asks it of every row, this one included.
  */
-function readBackOperator(mop: string, fieldType: string | undefined): string | undefined {
+function readBackOperator(mop: string, field: BuilderFieldDef | undefined): string | undefined {
   const candidates = MONGO_PREIMAGE[mop];
-  if (fieldType && candidates && candidates.length > 1) {
-    const offered = new Set(operatorsForFieldType(fieldType).map((o) => o.value));
+  if (field?.type && candidates && candidates.length > 1) {
+    const offered = new Set(operatorsForField(field).map((o) => o.value));
     const settled = candidates.filter((c) => offered.has(c));
     if (settled.length === 1) return settled[0];
   }
@@ -351,7 +361,9 @@ export function groupToCondition(group: BuilderGroup | undefined): FilterConditi
  *     reconciles it to `equals` and reshapes the value, committing a different
  *     filter than the one stored (the objectui#9382 defect). The bucket is
  *     asked exactly as the builder asks it for each row:
- *     `operatorsForFieldType` of the listed column's type, no opt-ins. A column
+ *     `operatorsForField` of the listed column's type and `multiple`, no
+ *     opt-ins, so a list-valued column holds only membership and the empty
+ *     checks — a stored `$in` / `$eq` on one goes to the Source tab. A column
  *     listed without a type, or not listed at all, gets the builder's default
  *     text bucket for both — the bucket the panel WOULD draw, not an unknown
  *     one. Only a read with NO field list skips this: no caller that draws a
@@ -364,8 +376,8 @@ export function groupToCondition(group: BuilderGroup | undefined): FilterConditi
 function builderHolds(row: BuilderCondition, fields: ReadonlyArray<BuilderFieldDef> | undefined): boolean {
   if (groupToCondition({ logic: 'and', conditions: [row] }) === undefined) return false;
   if (!fields) return true;
-  const fieldType = fields.find((f) => f.value === row.field)?.type;
-  return operatorsForFieldType(fieldType).some((o) => o.value === row.operator);
+  const field = fields.find((f) => f.value === row.field);
+  return operatorsForField(field).some((o) => o.value === row.operator);
 }
 
 /**
@@ -432,7 +444,7 @@ export function conditionToGroup(
         // builder can draw.
         row = { id: `c${i}`, field, operator: v.$null ? 'is_null' : 'is_not_null', value: '' };
       } else {
-        const op = readBackOperator(mop, fields?.find((f) => f.value === field)?.type);
+        const op = readBackOperator(mop, fields?.find((f) => f.value === field));
         if (!op) return { group: empty, representable: false };
         row = { id: `c${i}`, field, operator: op, value: v[mop] };
       }
