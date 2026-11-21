@@ -54,7 +54,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 import { RecordPageColumns } from '../RecordPageColumns';
 import { buildDefaultPageColumns } from '../synth/recordPageColumns';
-import { buildDefaultHighlights, buildDefaultPageSchema } from '../synth/buildDefaultPageSchema';
+import { buildDefaultPageSchema } from '../synth/buildDefaultPageSchema';
 import { DetailView } from '../DetailView';
 import { InlineEditProvider } from '@object-ui/react';
 

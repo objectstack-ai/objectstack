@@ -32,7 +32,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { act, render, screen, cleanup, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, cleanup, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { MetadataCtx } from '@object-ui/react';
 import { RelatedCountStore } from '@object-ui/components';
@@ -312,6 +312,27 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     expect(columnsStyle(container)).toBe('376px 24px minmax(0,1fr)');
     expectNoRail(container);
     await expectTabRowOnly('showcase_task.project', { pinned: true });
+  });
+
+  it('the dragged width is the reader\'s, per object: kept in the workspace preference and read again on the next open', async () => {
+    window.localStorage.clear();
+    const first = renderPage({ width: 1440 });
+    await screen.findAllByText('Tasks', undefined, { timeout: 5000 });
+    await waitFor(() => expect(shown(first.container)).toBe('details tabs'));
+    const handle = screen.getByRole('separator');
+    expect(handle.getAttribute('aria-valuenow')).toBe('400');
+    fireEvent.keyDown(handle, { key: 'ArrowRight' });
+    await waitFor(() => expect(columnsStyle(first.container)).toBe('416px 24px minmax(0,1fr)'));
+    expect(JSON.parse(window.localStorage.getItem(`os:pref:record.columns.details-width@object:${PARENT}`) ?? 'null')).toEqual({
+      width: 416,
+      v: 1,
+    });
+    first.unmount();
+
+    const again = renderPage({ width: 1440 });
+    await screen.findAllByText('Tasks', undefined, { timeout: 5000 });
+    await waitFor(() => expect(columnsStyle(again.container)).toBe('416px 24px minmax(0,1fr)'));
+    window.localStorage.clear();
   });
 
   it.each([

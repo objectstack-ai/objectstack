@@ -18,6 +18,7 @@ import { describe, it, expect } from 'vitest';
 import {
   RECORD_RELATED_ARRANGEMENT_PREFERENCE,
   APPROVAL_QUEUE_OPEN_NEXT_PREFERENCE,
+  RECORD_DETAILS_WIDTH_PREFERENCE,
   defineWorkspacePreference,
   objectPreferenceScope,
   readWorkspacePreference,
@@ -94,6 +95,26 @@ describe('the column switch — a versioned record (objectstack#27052)', () => {
   it('with no `window` (SSR — this file runs in the node project), the default storage is absent: no choice', () => {
     expect(typeof window).toBe('undefined');
     expect(readWorkspacePreference(APPROVAL_QUEUE_OPEN_NEXT_PREFERENCE, lead)).toBeUndefined();
+  });
+});
+
+describe('the pinned details\' width — per person, per object (objectstack#35890)', () => {
+  const lead = objectPreferenceScope('crm_lead');
+
+  it('stores `{ width, v: 1 }` per object and reads it back', () => {
+    const storage = memoryStorage();
+    writeWorkspacePreference(RECORD_DETAILS_WIDTH_PREFERENCE, lead, 520, storage);
+    expect(JSON.parse(storage.kept.get('os:pref:record.columns.details-width@object:crm_lead')!)).toEqual({ width: 520, v: 1 });
+    expect(readWorkspacePreference(RECORD_DETAILS_WIDTH_PREFERENCE, lead, storage)).toBe(520);
+    expect(readWorkspacePreference(RECORD_DETAILS_WIDTH_PREFERENCE, objectPreferenceScope('crm_product'), storage)).toBeUndefined();
+  });
+
+  it('reads no width from a value that is not a positive finite number', () => {
+    const key = 'os:pref:record.columns.details-width@object:crm_lead';
+    const storageWith = (value: string) => ({ getItem: (k: string) => (k === key ? value : null) });
+    for (const spelling of ['{"width":0,"v":1}', '{"width":-5,"v":1}', '{"width":"400","v":1}', '{"width":400,"v":2}', '{"width":null,"v":1}', '400']) {
+      expect(readWorkspacePreference(RECORD_DETAILS_WIDTH_PREFERENCE, lead, storageWith(spelling))).toBeUndefined();
+    }
   });
 });
 
