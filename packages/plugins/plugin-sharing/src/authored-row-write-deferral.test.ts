@@ -64,7 +64,6 @@ import { SharingService, type SharingSecurityProbe } from './sharing-service.js'
 import { buildSharingMiddleware } from './sharing-plugin.js';
 import { SharedRecordIds } from '@objectstack/spec/data';
 import { WRITE_ACCESS_LEVELS } from './access-level.js';
-import { inMembers } from './shared-record-ids.testkit.js';
 
 // ── metadata ───────────────────────────────────────────────────────────────
 
@@ -200,8 +199,7 @@ function makeEngine() {
     for (const [k, v] of Object.entries(filter)) {
       if (k === '$or' || k === '$and') continue;
       if (v != null && typeof v === 'object' && '$in' in (v as any)) {
-        // [ADR-0155] A share-grant leaf resolves over this double's own share rows.
-        if (!inMembers((v as any).$in, tables.sys_record_share).includes(row[k])) return false;
+        if (!(v as any).$in.includes(row[k])) return false;
         continue;
       }
       if (row[k] !== v) return false;
