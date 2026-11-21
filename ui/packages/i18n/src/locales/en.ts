@@ -1659,6 +1659,7 @@ const en = {
     deleteCommentConfirm: 'Are you sure you want to delete this comment?',
     commentEditFailed: 'Your edit was not saved. The comment keeps its previous text.',
     commentDeleteFailed: 'The comment was not deleted. Please try again.',
+    commentDeleted: 'Comment deleted',
     // objectstack#28218 — a comment write whose answer names mentioned users the
     // server will not notify (`withheldMentions`): one sentence naming them, no reason.
     mentionsWithheld: '{{names}} will not be notified of this comment.',

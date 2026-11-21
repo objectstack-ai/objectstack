@@ -22,6 +22,9 @@ export interface InCellOption {
  *   editor stays open and commits when the user moves on.
  * - `onAdd` (tags) — when the typed text matches no row, an "Add" row writes it.
  *
+ * - `initialQuery` — the search text it opens with: the line-item grid opens
+ *   the list on a typed letter, which becomes the first letter of the search.
+ *
  * Enter that picks is kept from the grid (`stopPropagation`): the grid's own
  * Enter would commit the value it held before the pick. With no active row,
  * Enter goes on to the grid, which commits and stays on the cell. Escape
@@ -36,6 +39,7 @@ export function InCellOptionList({
   placeholder,
   testId,
   inputProps,
+  initialQuery,
 }: {
   options: readonly InCellOption[];
   selected: readonly string[];
@@ -46,10 +50,12 @@ export function InCellOptionList({
   testId?: string;
   /** The host's DOM pass-through (id, aria-describedby, …), onto the search box. */
   inputProps?: React.InputHTMLAttributes<HTMLInputElement>;
+  /** The search text the list opens with; absent opens it unfiltered. */
+  initialQuery?: string;
 }) {
   const { t } = useFieldTranslation();
   const listId = React.useId();
-  const [query, setQuery] = React.useState('');
+  const [query, setQuery] = React.useState(initialQuery ?? '');
   const needle = query.trim().toLocaleLowerCase();
   const shown = needle ? options.filter((o) => o.label.toLocaleLowerCase().includes(needle)) : options;
   const addText = onAdd && query.trim() !== '' && !options.some((o) => o.label === query.trim()) ? query.trim() : null;
@@ -63,7 +69,7 @@ export function InCellOptionList({
   // list, which is the list shown again when the search box is cleared (an
   // index into the filtered list would land on another option then).
   const initialActive = multiple ? -1 : options.findIndex((o) => selected.includes(o.value));
-  const [active, setActive] = React.useState(initialActive);
+  const [active, setActive] = React.useState(() => (query.trim() ? 0 : initialActive));
   const listRef = React.useRef<HTMLUListElement | null>(null);
 
   React.useEffect(() => {

@@ -1510,6 +1510,7 @@ const de = {
     deleteCommentConfirm: "Möchten Sie diesen Kommentar wirklich löschen?",
     commentEditFailed: "Ihre Änderung wurde nicht gespeichert. Der Kommentar behält seinen bisherigen Text.",
     commentDeleteFailed: "Der Kommentar wurde nicht gelöscht. Bitte versuchen Sie es erneut.",
+    commentDeleted: "Kommentar gelöscht",
     mentionsWithheld: "Über diesen Kommentar wird keine Benachrichtigung an {{names}} gesendet.",
     linkCopyFailed: "Link konnte nicht kopiert werden",
     claim: "Übernehmen",

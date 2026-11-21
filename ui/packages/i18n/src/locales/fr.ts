@@ -1553,6 +1553,7 @@ const fr = {
     deleteCommentConfirm: "Êtes-vous sûr de vouloir supprimer ce commentaire ?",
     commentEditFailed: "Votre modification n'a pas été enregistrée. Le commentaire conserve son texte précédent.",
     commentDeleteFailed: "Le commentaire n'a pas été supprimé. Veuillez réessayer.",
+    commentDeleted: "Commentaire supprimé",
     mentionsWithheld: "Aucune notification de ce commentaire ne sera envoyée à {{names}}.",
     linkCopyFailed: "Impossible de copier le lien",
     claim: "Prendre en charge",

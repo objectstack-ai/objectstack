@@ -1556,6 +1556,7 @@ const es = {
     deleteCommentConfirm: "¿Está seguro de que desea eliminar este comentario?",
     commentEditFailed: "Tu edición no se ha guardado. El comentario conserva su texto anterior.",
     commentDeleteFailed: "El comentario no se ha eliminado. Inténtalo de nuevo.",
+    commentDeleted: "Comentario eliminado",
     mentionsWithheld: "No se enviará ninguna notificación de este comentario a {{names}}.",
     linkCopyFailed: "No se pudo copiar el enlace",
     claim: "Reclamar",

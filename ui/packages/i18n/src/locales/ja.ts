@@ -1591,6 +1591,7 @@ const ja = {
     deleteCommentConfirm: "このコメントを削除してもよろしいですか？",
     commentEditFailed: "編集内容は保存されませんでした。コメントは以前の内容のままです。",
     commentDeleteFailed: "コメントは削除されませんでした。もう一度お試しください。",
+    commentDeleted: "コメントを削除しました",
     mentionsWithheld: "{{names}} にはこのコメントの通知が届きません。",
     linkCopyFailed: "リンクのコピーに失敗しました",
     claim: "担当する",
