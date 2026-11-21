@@ -11,6 +11,11 @@
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
+// The CEL authoring helpers load these through dynamic imports; paying the first
+// load at module top keeps it out of every clocked window (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
+import '@object-ui/core';
 import { validateMetadataDraft } from './clientValidation';
 import { __setCelFormulaLoader, lintCelPredicate } from './celAuthoring';
 
