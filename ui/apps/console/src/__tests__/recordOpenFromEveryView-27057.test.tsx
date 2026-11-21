@@ -26,22 +26,19 @@
  * a second record through the drawer stack, as a related row or a lookup on
  * the real page does.
  *
- * Rows, one mount each:
- *   - calendar event, gantt bar (its open control), kanban card → the URL
- *     carries `?recordId=`, the record page opens `embedded` on that record,
- *     and the quick-look panel never mounts;
- *   - from the calendar, a link on the page → a second level, with the trail;
- *   - a calendar view that declares `page` → the page route, and no drawer.
+ * Since objectstack#35854 (maintainer ruling 「废弃」, 2026-11-20) that one way
+ * is the record's full page, for every view: the side drawer opens only from
+ * the grid name cell's hover icon, and a view's `navigation.mode` no longer
+ * picks. So each row below asserts the record route, no `?recordId=` drawer
+ * and no quick-look. The drawer-stack drill (a link on the page opening one
+ * level down with the trail) is pinned beside the drawer stack
+ * (`recordDrawerStack-26679`), no longer here.
  *
- * REVERSE VERIFICATION, run both ways: restore the calendar's suppression
- * (the host's `onRowClick` dropped whenever its mode is the drawer) and the
- * three calendar rows go red, 3 failed / 2 passed. The `page` row is one of
- * them, which was not predicted: `ListView` puts no `navigation` on the
- * calendar's node, so the calendar's own mode was always the drawer and the
- * old guard swallowed a view's authored `page` along with the host's click.
- * Drop the gantt registration's `onRowClick` and only the gantt row goes red,
- * 1 failed / 4 passed. The kanban row stays green in both: it is the CONTROL,
- * already the host's.
+ * Rows, one mount each:
+ *   - calendar event, gantt bar (its open control), kanban card → the record
+ *     route, and the quick-look panel never mounts;
+ *   - a calendar view that still declares the deprecated `drawer`, and one
+ *     that declares `page` → the record route as well.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -231,54 +228,48 @@ async function mountView(viewKey: string, navigation?: Record<string, unknown>) 
   await screen.findByTestId('list-view-switcher', undefined, { timeout: 5000 });
 }
 
-/** The record page is open, embedded, on record `id` — and the quick-look is not. */
-async function expectRecordPage(id: string) {
-  const page = await screen.findByTestId('record-page', undefined, { timeout: 5000 });
-  expect(page.getAttribute('data-object')).toBe(OBJECT_NAME);
-  expect(page.getAttribute('data-record-id')).toBe(id);
-  expect(page.getAttribute('data-embedded')).toBe('true');
-  expect(new URLSearchParams(screen.getByTestId('location').getAttribute('data-search') ?? '').get('recordId')).toBe(id);
+/**
+ * The record's page route is open on record `id` — no drawer, and no
+ * quick-look (objectstack#35854: every view of an object's list opens the
+ * record's full page; the side panel is the grid's hover icon only).
+ */
+async function expectRecordRoute(id: string) {
+  await waitFor(() => expect(screen.getByTestId('location').getAttribute('data-path')).toMatch(new RegExp(`/record/${id}$`)));
+  expect(new URLSearchParams(screen.getByTestId('location').getAttribute('data-search') ?? '').get('recordId')).toBeNull();
+  expect(screen.queryByTestId('record-page')).toBeNull();
   expect(screen.queryByTestId('quick-look-panel')).toBeNull();
 }
 
 describe('objectstack#27057 — every view opens the one record page on the console object page', () => {
-  it('a calendar event opens the record page in the drawer', async () => {
+  it('a calendar event opens the record page', async () => {
     await mountView('calendar');
     fireEvent.click(await screen.findByText('Ada onboarding', undefined, { timeout: 5000 }));
-    await expectRecordPage('1');
+    await expectRecordRoute('1');
   });
 
-  it('a gantt bar opens the record page in the drawer', async () => {
+  it('a gantt bar opens the record page', async () => {
     await mountView('gantt');
     // The bar's open control: a click on the bar itself only selects it.
     fireEvent.click(await screen.findByTestId('gantt-row-open-1', undefined, { timeout: 5000 }));
-    await expectRecordPage('1');
+    await expectRecordRoute('1');
   });
 
-  it('CONTROL: a kanban card opens the record page in the drawer, as it did before', async () => {
+  it('CONTROL: a kanban card opens the record page, as a grid row does', async () => {
     await mountView('kanban');
     fireEvent.click(await screen.findByText('Ada onboarding', undefined, { timeout: 5000 }));
-    await expectRecordPage('1');
+    await expectRecordRoute('1');
   });
 
-  it('from a calendar event, a record link on the page opens one level down, with the trail', async () => {
-    await mountView('calendar');
+  it('a calendar view that still declares the deprecated `drawer` opens the record page too', async () => {
+    await mountView('calendar', { mode: 'drawer' });
     fireEvent.click(await screen.findByText('Ada onboarding', undefined, { timeout: 5000 }));
-    await expectRecordPage('1');
-
-    fireEvent.click(screen.getByRole('button', { name: 'open related' }));
-    const trail = await screen.findByTestId('record-drawer-trail');
-    expect(trail.textContent).toContain('Ada onboarding');
-    await waitFor(() => expect(screen.getByTestId('record-page').getAttribute('data-record-id')).toBe('2'));
-    expect(screen.queryByTestId('quick-look-panel')).toBeNull();
+    await expectRecordRoute('1');
   });
 
   it('a calendar view that declares `page` opens the record route, and no drawer', async () => {
     await mountView('calendar', { mode: 'page' });
     fireEvent.click(await screen.findByText('Ada onboarding', undefined, { timeout: 5000 }));
-
-    await waitFor(() => expect(screen.getByTestId('location').getAttribute('data-path')).toMatch(/\/record\/1$/));
-    expect(screen.queryByTestId('record-page')).toBeNull();
-    expect(screen.queryByTestId('quick-look-panel')).toBeNull();
+    await expectRecordRoute('1');
   });
 });
+

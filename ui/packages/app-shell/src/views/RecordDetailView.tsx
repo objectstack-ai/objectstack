@@ -42,7 +42,7 @@ import { RecordEditStateController, bodyTablesSaveTogether, isMasterDetailChild,
 import { isRecordPagePushed, useRecordPageScrollMemory } from './recordPagePush.js';
 import { phoneRecordHeader } from './recordPhoneHeader.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
-import { PrefetchUpcomingRelatedCounts, RecordDrawerReturnLink, RecordDrawerUpcomingContext, RecordPageDrawerHost, RecordPaneBarToggles, useRecordPane, useRecordPaneBar, useRecordPageReturn } from './recordDrawerStack.js';
+import { PrefetchUpcomingRelatedCounts, RecordDrawerUpcomingContext, RecordPageDrawerHost, RecordPaneBarToggles, useRecordPane, useRecordPaneBar, useRecordPageReturn } from './recordDrawerStack.js';
 import {
   RECORD_PAGE_ACTIVITY_ROWS,
   RECORD_PAGE_ATTACHMENT_ROWS,
@@ -5328,13 +5328,6 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       {(() => {
         const plural = objectDef ? servedObjectPluralLabel(objectDef, language, objectPluralLabel) : objectName;
         const objectCrumbClass = cn(crumbClass, 'shrink-0');
-        if (pageReturn.toList) {
-          return (
-            <button type="button" onClick={pageReturn.toList} className={objectCrumbClass} title={originFromState?.label} data-record-crumb-object="">
-              {plural}
-            </button>
-          );
-        }
         if (originFromState?.pathname && originFromState?.label) {
           return (
             <Link
@@ -5420,7 +5413,6 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       stepper={pageStepper}
       actionSlotRef={setBarActionSlot}
       toggles={approvalQueueSwitch || panelToggles ? <>{approvalQueueSwitch}{panelToggles}</> : undefined}
-      frame={pageReturn.collapse ? <RecordDrawerReturnLink collapse={pageReturn.collapse} /> : undefined}
     />
   );
 

@@ -1351,10 +1351,11 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       navigation: {
         label: "Navegación",
-        helpText: "Configuración de la navegación al hacer clic en un elemento (panel lateral por defecto; también page, new_window o none)"
+        helpText: "Configuración de la navegación al hacer clic en un elemento: el tamaño del panel lateral y `preventNavigation` para una lista cuyas filas no abren nada (`mode` está obsoleto: el nombre del registro abre la página completa; el icono al pasar el cursor, el panel lateral)"
       },
       "navigation.mode": {
-        label: "Modo"
+        label: "Modo",
+        helpText: "[OBSOLETO] En la lista de un objeto (una vista de lista, los `listViews` de un objeto) ya no decide cómo se abre un registro: en la consola, para todos los lectores, el nombre del registro abre la página completa y el icono que aparece junto a él al pasar el cursor abre el panel lateral. Ahí `drawer`, `page` y `new_window` se siguen analizando y no cambian nada, así que omite la clave; `none` sigue significando que las filas no abren nada (es preferible `preventNavigation: true`). Un bloque de página que lleva `navigation` (un bloque de lista, la línea de tiempo, una vista incrustada) sigue respetando todos los valores."
       },
       "navigation.preventNavigation": {
         label: "Impedir navegación",
@@ -1362,7 +1363,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "navigation.openNewTab": {
         label: "Abrir en pestaña nueva",
-        helpText: "Fuerza la apertura en una pestaña nueva (se aplica al modo page)"
+        helpText: "Abre la página completa del registro en una pestaña nueva del navegador al hacer clic en él; las filas que no abren nada siguen así, y en un teléfono la página se abre en la misma pestaña"
       },
       "navigation.size": {
         label: "Tamaño",

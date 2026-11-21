@@ -24,7 +24,7 @@
  * Driven through the real `ObjectView`, `ListView`, gallery, board and grid,
  * and the real `MePermissionsProvider`: one differential per face, the same
  * object and rows, only the view's `navigation` or the served operations
- * differ. CONTROL: a list whose rows open (the default drawer) keeps its
+ * differ. CONTROL: a list whose rows open (the record page, objectstack#35854) keeps its
  * pointer and its taps, and a ⌘-click on its row opens a new tab.
  *
  * The record body is not what this file reads, so `RecordDetailView` is a
@@ -313,14 +313,15 @@ describe('objectstack#33548 — gallery cards on a list whose rows open nothing'
     expect(openSpy).not.toHaveBeenCalled();
   });
 
-  it('CONTROL — the default drawer: the card wears the pointer, a tap opens the drawer and a ⌘-click a new tab', async () => {
+  it('CONTROL — a list whose rows open: the card wears the pointer, a tap opens the record page and a ⌘-click a new tab', async () => {
     await mountList({ view: { type: 'gallery' } });
     const card = await galleryCard('Okta staging');
     expect(card.className).toMatch(/(^|\s)cursor-pointer(\s|$)/);
-    fireEvent.click(card);
-    await waitFor(() => expect(location()).toContain('recordId=c1'));
+    // The ⌘-click first: the tap leaves the list for the record page.
     fireEvent.click(card, { metaKey: true });
     expect(openSpy).toHaveBeenCalledTimes(1);
+    fireEvent.click(card);
+    await waitFor(() => expect(location()).toContain('/record/c1'));
   });
 });
 
@@ -369,21 +370,21 @@ describe('objectstack#33548 — board cards on a list whose rows open nothing', 
     expect(isBoardControl(control)).toBe(true);
   });
 
-  it('CONTROL — the default drawer, a card the reader may not drag: a control with the pointer and title hover; Enter opens the drawer', async () => {
+  it('CONTROL — a list whose rows open, a card the reader may not drag: a control with the pointer and title hover; Enter opens the record page', async () => {
     await mountList({ view: { type: 'kanban' }, allowEdit: false });
     const { control, face } = await boardCard('c1');
     expect(face.className).toMatch(/(^|\s)cursor-pointer(\s|$)/);
     expect(isBoardControl(control)).toBe(true);
     expect(hasTitleHover(face)).toBe(true);
     fireEvent.keyDown(control, { key: 'Enter' });
-    await waitFor(() => expect(location()).toContain('recordId=c1'));
+    await waitFor(() => expect(location()).toContain('/record/c1'));
   });
 
-  it('CONTROL — the default drawer: a tap on the card opens the drawer', async () => {
+  it('CONTROL — a list whose rows open: a tap on the card opens the record page', async () => {
     await mountList({ view: { type: 'kanban' }, allowEdit: false });
     const { control } = await boardCard('c1');
     fireEvent.click(control);
-    await waitFor(() => expect(location()).toContain('recordId=c1'));
+    await waitFor(() => expect(location()).toContain('/record/c1'));
   });
 });
 

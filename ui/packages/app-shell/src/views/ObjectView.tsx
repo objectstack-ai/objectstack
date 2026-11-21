@@ -55,10 +55,8 @@ import { IdentityImportOptions, IdentityImportResultExtra, identityImportFields 
 import { ManagedUsersInviteLine } from './managedEnvironmentUsers.js';
 import { importTargetFields } from './importTargetFields.js';
 import { resolveViewId } from '../utils/resolveViewId.js';
-import { useRecordOpenPreference } from '../utils/recordOpenPreference.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 import { LIST_PINNED_VIEW_PREFERENCE, objectPreferenceScope, useWorkspacePreference } from '../utils/workspacePreference.js';
-import type { ListViewProps } from '@object-ui/plugin-list';
 import { defaultListViewId, isSavedViewId, viewRowId } from '../utils/viewIdentity.js';
 import { useObjectActions } from '../hooks/useObjectActions.js';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
@@ -961,19 +959,12 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
 
     // objectstack#25992 slice 6: the record navigation overlay (drawer state in the
     // URL, row click, open as page, record links) moved to `./objectViewRecordNavigation.ts`.
-    // objectstack#26677 — how a drawer-mode record opens is a READER's
-    // preference, not a `navigation.mode`: the drawer (the default) or the
-    // full page. Live state: the Display menu's Open records section writes it
-    // (objectstack#26681) and the next row click opens the new way. It applies
-    // only to a record that opens in the drawer: an object that declares
-    // `page` (or `new_window` / `none`) keeps its declaration. objectstack#28915
-    // — the pane beside the list retired, so the drawer is the default and the
-    // list under it keeps its full width.
-    const [recordOpenPreference, setRecordOpenPreference] = useRecordOpenPreference();
+    // objectstack#35854 — one rule, no setting: the record's name opens the
+    // full page, the name cell's hover icon the side drawer over the list.
     // objectstack#27058 — on a phone the record is always a page: a row tap
     // navigates to it, and no pane is mounted beside or over the list.
     const phone = usePhoneViewport();
-    const { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowAsPage, drawerRoot, drawerRestore, handleListRowsChange, handleRootStep, listLabel } = useObjectViewRecordNavigation({
+    const { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowInPanel, drawerRoot, drawerRestore, handleListRowsChange, handleListTotalChange, handleRootStep, listLabel } = useObjectViewRecordNavigation({
         activeView,
         objectDef,
         objects,
@@ -988,31 +979,16 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         viewLabel,
         unlabelledViewText,
         language,
-        recordOpenPreference,
         phone,
     });
-    // objectstack#26681 — the Display menu's Open records section: the mode this
-    // object and view resolved to, and the reader's preference with its setter:
-    // the drawer or the full page (objectstack#27545, objectstack#28915). A
-    // reader who prefers the page still gets the drawer for a `?recordId=`
-    // link. Not on a phone, where every record is a page (objectstack#27058).
-    const recordOpen = useMemo<ListViewProps['recordOpen']>(
-        () => (phone ? undefined : {
-            resolvedMode: navOverlay.mode,
-            preference: recordOpenPreference,
-            setPreference: setRecordOpenPreference,
-        }),
-        [phone, navOverlay.mode, recordOpenPreference, setRecordOpenPreference],
-    );
-    // objectstack#26681 — the name cell's ↗, "open as full page", for a row that
-    // opens the drawer. A `page` object's row
-    // already opens the page; a `new_window` / `none` one keeps its declaration.
-    const openAsPageLabel = t('console.objectView.openAsPage', { defaultValue: 'Open as full page' });
-    const openAsPage = useMemo(
-        () => (navOverlay.mode === 'drawer'
-            ? { objectName: objectDef.name, label: openAsPageLabel, open: handleOpenRowAsPage }
+    // objectstack#35854 — the name cell's 「在侧边打开」 icon, for a row with a
+    // record surface on a desktop; a phone opens every record as a page.
+    const openInPanelLabel = t('console.objectView.openInSidePanel', { defaultValue: 'Open in side panel' });
+    const openInPanel = useMemo(
+        () => (navOverlay.mode === 'drawer' && !phone
+            ? { label: openInPanelLabel, open: handleOpenRowInPanel }
             : null),
-        [navOverlay.mode, objectDef.name, openAsPageLabel, handleOpenRowAsPage],
+        [navOverlay.mode, phone, openInPanelLabel, handleOpenRowInPanel],
     );
 
     // objectstack#25992 slice 8: the `filter[...]` URL equality filters and the `uf_*`
@@ -1096,8 +1072,8 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         actions,
         handleRowClick,
         handleListRowsChange,
-        recordOpen,
-        openAsPage,
+        handleListTotalChange,
+        openInPanel,
         // objectstack#33317 — the resolved mode: `none` for an authored
         // `none` and for a list-only object (`servesRecordRead`).
         rowOpensRecord: navOverlay.mode !== 'none',

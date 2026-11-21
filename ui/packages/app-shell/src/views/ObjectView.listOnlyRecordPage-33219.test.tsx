@@ -254,10 +254,10 @@ describe('objectstack#33219 — a list-only object\'s rows open no record page',
     expect(row.querySelector('a[href]')).toBeNull();
   });
 
-  it('the row draws no 「Open as full page」', async () => {
+  it('the row draws no 「Open in side panel」', async () => {
     await mountList(LIST_ONLY_OPERATIONS);
     await settle();
-    expect(screen.queryByTestId('record-open-as-page')).toBeNull();
+    expect(screen.queryByTestId('record-open-in-panel')).toBeNull();
   });
 
   it('a `?recordId=` link opens no drawer and reads no record', async () => {
@@ -272,9 +272,9 @@ describe('objectstack#33219 — a list-only object\'s rows open no record page',
     expect(await rowMenuItems('okta-staging')).toContain('Revoke');
   });
 
-  it('CONTROL — the same object served with no restriction: the name opens the drawer, and ⌘ on it is the browser\'s new tab', async () => {
+  it('CONTROL — the same object served with no restriction: the name opens the page, the icon beside it the drawer, and ⌘ on the name is the browser\'s new tab', async () => {
     await mountList(undefined);
-    expect(screen.getAllByTestId('record-open-as-page').length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId('record-open-in-panel').length).toBeGreaterThan(0);
     const anchor = screen.getByText('okta-staging').closest('tr')!.querySelector('a[href]') as HTMLElement;
     expect(anchor).not.toBeNull();
     // objectstack#35684: a ⌘-click on the name link keeps the browser's default
@@ -282,9 +282,12 @@ describe('objectstack#33219 — a list-only object\'s rows open no record page',
     expect(fireEvent.click(anchor, { metaKey: true })).toBe(true);
     fireEvent.click(screen.getByText('scim_ab12'), { metaKey: true });
     expect(openSpy).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByText('okta-staging'));
+    fireEvent.click(within(screen.getByText('okta-staging').closest('tr')!).getByTestId('record-open-in-panel'));
     await waitFor(() => expect(search()).toBe('?recordId=c1'));
     expect(await screen.findByRole('dialog', undefined, { timeout: 5000 })).toBeTruthy();
+    fireEvent.click(screen.getByText('okta-staging'));
+    await waitFor(() => expect(pathname()).not.toBe(LIST_PATH));
+    expect(screen.getByTestId('left-the-list')).toBeTruthy();
   });
 });
 
