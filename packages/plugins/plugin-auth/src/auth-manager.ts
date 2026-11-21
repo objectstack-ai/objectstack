@@ -4475,7 +4475,9 @@ export class AuthManager {
    * makes is sent as it was. A context whose adapter is not observed (a view
    * that does not hand its reads on through the observed one) is answered
    * `503 SERVICE_UNAVAILABLE` before the endpoint runs, so nothing is read or
-   * sent: its provider reads could not be judged.
+   * sent: its provider reads could not be judged. Reached only when the built
+   * instance mounts the vendor's `sso` plugin (`mountsSsoEndpoints`, judged in
+   * `handleRequest`): a kernel without SSO answers the vendor's own 404.
    */
   private async runSsoDiscoveryEgress(run: () => Promise<Response>): Promise<Response> {
     const [{ runInSsoDiscoveryEgressScope, observesSsoProviderReads }, guard, auth] = await Promise.all([
