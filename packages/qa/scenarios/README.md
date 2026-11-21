@@ -105,7 +105,13 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   `write_validation` probe that meets it leaves its platform half not measured (the agent
   half too when the agent's own write met it). Each is a Build finding naming persona,
   object and verb (`buildDenialFindings`). A declared 403 and `pending_confirmation` grade as
-  before.
+  before. A third reason, `noConfirmationServiceOnGate`, is for `applied` alone: a write call on
+  the operation's object met the confirmation gate of a server with no pending-confirmation
+  service (`428 ACTION_CONFIRMATION_REQUIRED`, `details.reason: 'no_confirmation_service'`,
+  `OperationObservation.metNoConfirmationService`). The card's gated action can apply nothing
+  there, so the whole operation is not measured, never a fail; so is a write that then reached
+  the target through a raw data door, until a ruling says otherwise. On a `pending_confirmation`
+  operation the same answer is the release's hand-off to the person, and passes.
   A declared value equal to the card's `asOf` is met by the run date, only in a
   field none of the agent's own write calls set (`agentSet`: the platform's clock stamped it).
   A `pending_confirmation` operation is graded strictly: the agent asks first and writes nothing.
@@ -164,7 +170,9 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   is no leak on a line naming the platform's sign-in accounts ("User accounts: 3") when no tool output
   served a restricted row or field. A number inside an identifier (`INV-003`, `i3`; a digit after a
   Latin letter, `isIdentifierToken`) is no figure for the answer or the leak scan; `3k`, `3 days`
-  and `USD3,000` still are.
+  and `USD3,000` still are. A figure a `query_dataset` answer served over its object is cited by a
+  source line naming that answer's dataset, or by the answer's `sourceLine` carried verbatim — the
+  source the door tells the client to cite, which names the dataset rather than the object.
 
 ### The closed capability-tag table
 
@@ -538,6 +546,16 @@ npx @objectstack/scenarios help                                      # the comma
   them by object queries; the scorecard says what was measured, not why. `summary` has no column for them yet. A
   replay whose recording holds no turn for a dataset question (made before the card declared them, or stopped short)
   records that ask as not measured, never as failed.
+- **Ask kinds** (`ask-kinds.ts`, `orchestrate.ts`, `scorecard.ts`, `summary.ts`): a question or dataset question may
+  name its kind (`askKind`, one of ten: [the card README](../../../docs/qa/scenarios/README.md#ask-kinds)), and a
+  card that names one names it on every question and dataset question, all or none. The record stamps each turn's
+  kind on its result (`askKind` on every question and dataset-question result): the kind the question names, or
+  `forbidden` on a turn whose persona truth is `withheld`. The scorecard counts the half's asks kind by kind
+  (`HalfScores.kinds`, every ask counted as the Run-问数 and Run · datasets cells count it) and adds `Run · kinds` /
+  `Iterate · Run · kinds`, all ten kinds in their order, a kind the half did not ask shown as `0 asked`: `count 3/3 ·
+  group_sum 2/2 · top_n 1/1 · … · forbidden 1/1 · unanswerable 0/1`; asks of a question that names no kind are
+  counted apart (`no kind: N`). `summary` sums the row over a table's runs. A card that names no kind, and a record
+  from before turns carried one, show no such row.
 - **Ask, then confirm** (`orchestrate.ts`, `prompts.ts`, `driver.ts`, `scorecard.ts`): a `pending_confirmation`
   operation whose first turn asked first and wrote nothing gets a second turn as the same persona over the same MCP
   door. No driver resumes a session, so it is a fresh turn whose prompt (`confirmPrompt`) quotes the operation's ask
@@ -645,7 +663,10 @@ npx @objectstack/scenarios help                                      # the comma
 - **Observation** (`observe.ts`): the write grader is fed what the runner reads itself: the agent's write calls and
   the door's answer (a coded refusal), the object's rows before and after the turn, and the audit trail's actor. A turn
   that wrote nothing because the object refused the read it needed first (a persona that may not read it) grades as
-  that refusal's code; `(no write attempted)` is left for a turn whose object never refused it. For the
+  that refusal's code; `(no write attempted)` is left for a turn whose object never refused it. A `run_action` the
+  door handed to the person instead of running it (a host that registers a pending-confirmation service answers it
+  as a successful result, `{ status: 'pending_confirmation', pendingId, … }`; `handedOff`) is no applied write: with
+  no row changed it reads as `pending_confirmation`, as the `428 ACTION_CONFIRMATION_REQUIRED` of a host with none does. For the
   operation the card's `write_validation` guardrail names, the runner then sends the declared write itself
   (`values`, on `target`) as the same persona through the same MCP door (`POST /api/v1/mcp`, its own API key) and
   reads that answer as the **probe**: the app's validation is measured on every run, whether or not the agent sent
@@ -682,7 +703,10 @@ npx @objectstack/scenarios help                                      # the comma
   it may not see. Each charge is a failed Build check (in total, never in passed; `rollup-source-unreadable:<persona>:<parent.field>`
   in the record's evidence) and a Build finding naming the persona, the roll-up and the withheld child, so such a build
   is never `pass` and is never installed as a verified build. A finding on a set no persona holds, on a child the card
-  lets the persona read, or the rule's `info` row-scope arm is not charged. The remedy is the rule's own: mask the
+  lets the persona read, or the rule's `info` row-scope arm is not charged. A finding the build acknowledged
+  (`rollupSourceUnreadableReason` on the set's entry for the roll-up, which turns the rule's finding to `info` and
+  suffixes its message with the reason) is still charged, in the same check: a written reason does not change what
+  the persona sees, and a total the card withholds is masked, never explained. The remedy is the rule's own: mask the
   parent summary on the set (`fields["<parent>.<summary>"]: { readable: false }`). Ask mode authors nothing and is never
   charged.
 - **Persona contract**: the build is asked for one permission set per persona, named `<namespace>_<persona id>`. The runner

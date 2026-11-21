@@ -16,6 +16,20 @@ import { createSafeTranslation } from '@object-ui/i18n';
  */
 export const LIST_CONDITION_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'listConditions.fieldList.search': 'Search fields',
+  'listConditions.phone.toolbar': 'List tools',
+  'listConditions.phone.sortCount_one': 'Sort, {{count}} level',
+  'listConditions.phone.sortCount_other': 'Sort, {{count}} levels',
+  'listConditions.phone.filterCount_one': 'Filter, {{count}} in use',
+  'listConditions.phone.filterCount_other': 'Filter, {{count}} in use',
+  'listConditions.phone.back': 'Back',
+  'listConditions.phone.discard': 'Discard changes',
+  'listConditions.phone.close': 'Close',
+  'listConditions.phone.apply': 'Apply',
+  'listConditions.phone.advancedNotice': 'This view uses an advanced filter. Change it on a computer.',
+  'listConditions.phone.filterEmpty': 'No filter yet. Add one to show only the records that match.',
+  'listConditions.phone.itemOptions': 'Options for {{label}}',
+  'listConditions.phone.edit': 'Edit',
+  'listConditions.phone.remove': 'Remove',
   'listConditions.fieldList.shown': 'In this view',
   'listConditions.fieldList.hidden': 'Hidden fields',
   'listConditions.fieldList.empty': 'No field matches',
@@ -80,6 +94,16 @@ export const LIST_CONDITION_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'dashboard.filters.range.this_week': 'This week',
   'dashboard.filters.range.this_month': 'This month',
   'dashboard.filters.range.last_30_days': 'Last 30 days',
+  // The phone sort sheet's level (objectstack#35884), in SortBuilder's words.
+  'sortBuilder.addSort': 'Add sort',
+  'sortBuilder.ascending': 'A → Z',
+  'sortBuilder.descending': 'Z → A',
+  'sortBuilder.oldestFirst': 'Oldest → Newest',
+  'sortBuilder.newestFirst': 'Newest → Oldest',
+  'sortBuilder.reorder': 'Drag to reorder',
+  'sortBuilder.removeSort': 'Remove sort',
+  'sortBuilder.levelOptions': 'Options for {{label}}',
+  'sortBuilder.changeField': 'Change field',
 };
 
 export const useListConditionTranslation = createSafeTranslation(

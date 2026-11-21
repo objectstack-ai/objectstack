@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 import { UploadProvider } from './UploadProvider';
+import { Dialog, DialogContent, DialogTitle } from '@object-ui/components';
 import { formatDate, formatDateTime } from '@object-ui/core';
 import { GridField, LineItemsField, sumColumn, lookupAutofillPatch, UNTOUCHED_NEW_ROW, isUntouchedNewRow, columnHelpByField } from './GridField';
 
@@ -995,5 +996,299 @@ describe('column header help (objectstack#35804)', () => {
       }),
     ).toEqual({ unit_price: 'Inline help wins.', quantity: 'The served description.' });
     expect(columnHelpByField(undefined)).toEqual({});
+  });
+});
+
+describe('cell faces that open under the cell (objectstack#36023)', () => {
+  const STATUS = [
+    { label: 'To Do', value: 'todo' },
+    { label: 'Done', value: 'done' },
+    { label: 'Doing', value: 'doing' },
+  ];
+  const cols = {
+    columns: [
+      { name: 'description', label: 'Description', type: 'text' as const },
+      { name: 'status', label: 'Status', type: 'select' as const, options: STATUS },
+      { name: 'due_on', label: 'Due On', type: 'date' as const },
+      { name: 'at', label: 'At', type: 'datetime' as const },
+      { name: 'qty', label: 'Qty', type: 'number' as const },
+    ],
+  } as any;
+
+  function Stateful({ initial, onChange }: { initial: any[]; onChange?: (v: any[]) => void }) {
+    const [rows, setRows] = React.useState(initial);
+    return (
+      <GridField
+        value={rows}
+        onChange={(v: any[]) => {
+          setRows(v);
+          onChange?.(v);
+        }}
+        field={cols}
+      />
+    );
+  }
+
+  describe('a select cell', () => {
+    it('shows the option label, and a click opens a searchable list under it; a pick writes and closes', async () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ description: 'A', status: 'todo' }]} onChange={onChange} />);
+      const cell = screen.getByRole('combobox', { name: 'Status' });
+      expect(cell.textContent).toBe('To Do');
+      fireEvent.click(cell);
+      const panel = await screen.findByTestId('line-items-select-panel');
+      // The cell keeps its value while the list is open.
+      expect(cell.textContent).toBe('To Do');
+      const search = panel.querySelector('input') as HTMLInputElement;
+      await waitFor(() => expect(document.activeElement).toBe(search));
+      fireEvent.change(search, { target: { value: 'do' } });
+      expect(Array.from(panel.querySelectorAll('[role="option"]')).map((o) => o.textContent)).toEqual(['To Do', 'Done', 'Doing']);
+      fireEvent.change(search, { target: { value: 'don' } });
+      fireEvent.click(screen.getByRole('option', { name: 'Done' }));
+      expect(onChange.mock.calls.at(-1)![0][0].status).toBe('done');
+      await waitFor(() => expect(screen.queryByTestId('line-items-select-panel')).toBeNull());
+      expect(screen.getByRole('combobox', { name: 'Status' }).textContent).toBe('Done');
+    });
+
+    it('a typed letter opens the list with that letter as its search; Enter picks the first match', async () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ description: 'A', status: 'todo' }]} onChange={onChange} />);
+      const cell = screen.getByRole('combobox', { name: 'Status' });
+      cell.focus();
+      fireEvent.keyDown(cell, { key: 'g' });
+      const panel = await screen.findByTestId('line-items-select-panel');
+      const search = panel.querySelector('input') as HTMLInputElement;
+      expect(search.value).toBe('g');
+      expect(Array.from(panel.querySelectorAll('[role="option"]')).map((o) => o.textContent)).toEqual(['Doing']);
+      fireEvent.keyDown(search, { key: 'Enter' });
+      expect(onChange.mock.calls.at(-1)![0][0].status).toBe('doing');
+    });
+
+    it('Esc in the list closes it and writes nothing', async () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ description: 'A', status: 'todo' }]} onChange={onChange} />);
+      fireEvent.click(screen.getByRole('combobox', { name: 'Status' }));
+      const panel = await screen.findByTestId('line-items-select-panel');
+      fireEvent.keyDown(panel.querySelector('input')!, { key: 'Escape' });
+      await waitFor(() => expect(screen.queryByTestId('line-items-select-panel')).toBeNull());
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it('Tab in the list closes it and moves on to the next cell', async () => {
+      render(<Stateful initial={[{ description: 'A', status: 'todo' }]} />);
+      fireEvent.click(screen.getByRole('combobox', { name: 'Status' }));
+      const panel = await screen.findByTestId('line-items-select-panel');
+      fireEvent.keyDown(panel.querySelector('input')!, { key: 'Tab' });
+      await waitFor(() => expect(screen.queryByTestId('line-items-select-panel')).toBeNull());
+      expect(document.activeElement).toBe(screen.getAllByLabelText('Due On')[0]);
+    });
+
+    it('the arrows still move between lines from a select cell', () => {
+      render(<Stateful initial={[{ status: 'todo' }, { status: 'done' }]} />);
+      const [first, second] = screen.getAllByRole('combobox', { name: 'Status' });
+      first.focus();
+      fireEvent.keyDown(first, { key: 'ArrowDown' });
+      expect(document.activeElement).toBe(second);
+      expect(screen.queryByTestId('line-items-select-panel')).toBeNull();
+    });
+  });
+
+  describe('a date cell', () => {
+    it('stays the native control, typed into as before, and opens its calendar under the cell on arrival', async () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ description: 'A', due_on: '2026-06-17' }]} onChange={onChange} />);
+      const input = screen.getAllByLabelText('Due On')[0] as HTMLInputElement;
+      expect(input.type).toBe('date');
+      fireEvent.focus(input);
+      expect(await screen.findByTestId('line-items-date-panel')).toBeTruthy();
+      // The caret stays in the cell: keyboard entry is unchanged.
+      fireEvent.change(input, { target: { value: '2026-06-20' } });
+      expect(onChange.mock.calls.at(-1)![0][0].due_on).toBe('2026-06-20');
+    });
+
+    it('a calendar day writes the value and closes the calendar; the cell keeps the focus', async () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ description: 'A', due_on: '2026-06-17' }]} onChange={onChange} />);
+      const input = screen.getAllByLabelText('Due On')[0] as HTMLInputElement;
+      input.focus();
+      const panel = await screen.findByTestId('line-items-date-panel');
+      const day = Array.from(panel.querySelectorAll('button')).find((b) => b.textContent === '24')!;
+      fireEvent.click(day);
+      expect(onChange.mock.calls.at(-1)![0][0].due_on).toBe('2026-06-24');
+      await waitFor(() => expect(screen.queryByTestId('line-items-date-panel')).toBeNull());
+      expect(document.activeElement).toBe(screen.getAllByLabelText('Due On')[0]);
+    });
+
+    it('Clear empties the cell; Today writes today', async () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ description: 'A', due_on: '2026-06-17' }]} onChange={onChange} />);
+      let input = screen.getAllByLabelText('Due On')[0] as HTMLInputElement;
+      input.focus();
+      fireEvent.click(await screen.findByTestId('line-items-date-clear'));
+      expect(onChange.mock.calls.at(-1)![0][0].due_on).toBe('');
+      input = screen.getAllByLabelText('Due On')[0] as HTMLInputElement;
+      fireEvent.click(input);
+      const panel = await screen.findByTestId('line-items-date-panel');
+      fireEvent.click(Array.from(panel.querySelectorAll('button')).find((b) => b.textContent === 'Today')!);
+      const d = new Date();
+      const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      expect(onChange.mock.calls.at(-1)![0][0].due_on).toBe(today);
+    });
+
+    it('a date-time day keeps the time of day', async () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ description: 'A', at: '2026-06-17T09:45' }]} onChange={onChange} />);
+      const input = screen.getAllByLabelText('At')[0] as HTMLInputElement;
+      expect(input.type).toBe('datetime-local');
+      input.focus();
+      const panel = await screen.findByTestId('line-items-date-panel');
+      fireEvent.click(Array.from(panel.querySelectorAll('button')).find((b) => b.textContent === '24')!);
+      const stored = onChange.mock.calls.at(-1)![0][0].at as string;
+      const back = new Date(stored);
+      expect([back.getFullYear(), back.getMonth() + 1, back.getDate(), back.getHours(), back.getMinutes()]).toEqual([2026, 6, 24, 9, 45]);
+    });
+
+    it('leaving the cell closes the calendar, and Enter still moves down', async () => {
+      render(<Stateful initial={[{ due_on: '2026-06-17' }, { due_on: '2026-06-18' }]} />);
+      const [first, second] = screen.getAllByLabelText('Due On');
+      first.focus();
+      await screen.findByTestId('line-items-date-panel');
+      fireEvent.keyDown(first, { key: 'Enter' });
+      expect(document.activeElement).toBe(second);
+    });
+  });
+
+  describe('Esc in a cell', () => {
+    it('takes back what this visit to the cell typed, and only that line', () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ description: 'A', qty: 1 }, { description: 'B', qty: 2 }]} onChange={onChange} />);
+      const input = screen.getAllByLabelText('Description')[0] as HTMLInputElement;
+      input.focus();
+      fireEvent.change(input, { target: { value: 'Abc' } });
+      fireEvent.keyDown(input, { key: 'Escape' });
+      const last = onChange.mock.calls.at(-1)![0];
+      expect(last[0]).toEqual({ description: 'A', qty: 1 });
+      expect(last[1]).toEqual({ description: 'B', qty: 2 });
+      expect((screen.getAllByLabelText('Description')[0] as HTMLInputElement).value).toBe('A');
+    });
+
+    it('keeps the untouched mark of a new line it takes back', () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ description: null, [UNTOUCHED_NEW_ROW]: true }]} onChange={onChange} />);
+      const input = screen.getAllByLabelText('Description')[0] as HTMLInputElement;
+      input.focus();
+      fireEvent.change(input, { target: { value: 'x' } });
+      fireEvent.keyDown(input, { key: 'Escape' });
+      expect(isUntouchedNewRow(onChange.mock.calls.at(-1)![0][0])).toBe(true);
+    });
+
+    /**
+     * The snapshot is held by line index. A change to the lines during the
+     * visit (the row's own Delete / Duplicate buttons are inside the table, so
+     * focus going to them keeps the visit) makes the same index draw another
+     * line; Esc there must not write the removed or shifted line back.
+     */
+    const lines = () => [
+      { description: 'A', qty: 1 },
+      { description: 'B', qty: 2 },
+      { description: 'C', qty: 3 },
+    ];
+    const descriptions = () =>
+      (screen.getAllByLabelText('Description') as HTMLInputElement[]).map((el) => el.value);
+    const viaButton = (label: string, index: number) => {
+      const button = screen.getAllByLabelText(label)[index] as HTMLButtonElement;
+      button.focus();
+      fireEvent.click(button);
+    };
+
+    it.each([
+      ['the visited line removed by its own button', 'Remove row', 1, ['A', 'C']],
+      ['a line above removed', 'Remove row', 0, ['B', 'C']],
+      ['a line above duplicated', 'Duplicate row', 0, ['A', 'A', 'B', 'C']],
+    ] as const)('writes no stale line after %s, then back to the same cell', (_name, label, index, after) => {
+      const onChange = vi.fn();
+      render(<Stateful initial={lines()} onChange={onChange} />);
+      const input = screen.getAllByLabelText('Description')[1] as HTMLInputElement;
+      input.focus();
+      viaButton(label, index);
+      expect(descriptions()).toEqual(after);
+      const calls = onChange.mock.calls.length;
+      const again = screen.getAllByLabelText('Description')[1] as HTMLInputElement;
+      again.focus();
+      fireEvent.keyDown(again, { key: 'Escape' });
+      expect(onChange.mock.calls.length).toBe(calls);
+      expect(descriptions()).toEqual(after);
+    });
+
+    it('still takes back a change made after the lines changed, from that new visit', () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={lines()} onChange={onChange} />);
+      (screen.getAllByLabelText('Description')[1] as HTMLInputElement).focus();
+      viaButton('Remove row', 0);
+      const input = screen.getAllByLabelText('Description')[1] as HTMLInputElement;
+      input.focus();
+      fireEvent.change(input, { target: { value: 'Cx' } });
+      fireEvent.keyDown(input, { key: 'Escape' });
+      expect(descriptions()).toEqual(['B', 'C']);
+    });
+
+    it('in a date cell, the first Esc closes the calendar and the second takes back the typed day', async () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ description: 'A', due_on: '2026-06-17' }]} onChange={onChange} />);
+      const date = screen.getAllByLabelText('Due On')[0] as HTMLInputElement;
+      date.focus();
+      await screen.findByTestId('line-items-date-panel');
+      fireEvent.change(date, { target: { value: '2026-06-20' } });
+      expect(onChange.mock.calls.at(-1)![0][0].due_on).toBe('2026-06-20');
+      fireEvent.keyDown(date, { key: 'Escape' });
+      await waitFor(() => expect(screen.queryByTestId('line-items-date-panel')).toBeNull());
+      expect((screen.getAllByLabelText('Due On')[0] as HTMLInputElement).value).toBe('2026-06-20');
+      fireEvent.keyDown(date, { key: 'Escape' });
+      expect(onChange.mock.calls.at(-1)![0][0].due_on).toBe('2026-06-17');
+      expect((screen.getAllByLabelText('Due On')[0] as HTMLInputElement).value).toBe('2026-06-17');
+    });
+
+    it('does not reach a dialog the form is open in: the dialog and every line stay', async () => {
+      const onOpenChange = vi.fn();
+      render(
+        <Dialog open onOpenChange={onOpenChange}>
+          <DialogContent>
+            <DialogTitle>Lines</DialogTitle>
+            <Stateful initial={[{ description: 'A', due_on: '2026-06-17' }]} />
+          </DialogContent>
+        </Dialog>,
+      );
+      const input = screen.getAllByLabelText('Description')[0] as HTMLInputElement;
+      input.focus();
+      fireEvent.change(input, { target: { value: 'Abc' } });
+      fireEvent.keyDown(input, { key: 'Escape' });
+      fireEvent.keyDown(input, { key: 'Escape' });
+      expect(onOpenChange).not.toHaveBeenCalled();
+      expect((screen.getAllByLabelText('Description')[0] as HTMLInputElement).value).toBe('A');
+      // A cell's open calendar takes the Esc itself: it closes, the dialog stays.
+      const date = screen.getAllByLabelText('Due On')[0] as HTMLInputElement;
+      date.focus();
+      await screen.findByTestId('line-items-date-panel');
+      fireEvent.keyDown(date, { key: 'Escape' });
+      await waitFor(() => expect(screen.queryByTestId('line-items-date-panel')).toBeNull());
+      expect(onOpenChange).not.toHaveBeenCalled();
+    });
+
+    it('control: Esc outside the grid still reaches the dialog', () => {
+      const onOpenChange = vi.fn();
+      render(
+        <Dialog open onOpenChange={onOpenChange}>
+          <DialogContent>
+            <DialogTitle>Lines</DialogTitle>
+            <button type="button">outside</button>
+            <Stateful initial={[{ description: 'A' }]} />
+          </DialogContent>
+        </Dialog>,
+      );
+      const outside = screen.getByRole('button', { name: 'outside' });
+      outside.focus();
+      fireEvent.keyDown(outside, { key: 'Escape' });
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+    });
   });
 });
