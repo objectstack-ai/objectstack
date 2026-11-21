@@ -873,7 +873,17 @@ interface MasterDetailLinesProps {
  * element through a portal, in place when no drawn layout claims it, and
  * nowhere while a claimed slot's element is not mounted (objectstack#35889).
  * Its own component, so a slot landing re-renders only what it moves.
+ *
+ * The slot element sits inside the header's `<form>`, so a portaled collection
+ * is wrapped in a form of its own: its controls then belong to that form, not
+ * the header's, exactly as they belonged to none below the form. The header's
+ * `requestSubmit()` validates only its own fields (a line cell's bad input
+ * never blocks Save with a browser bubble), a line button without a `type`
+ * submits only the wrapper, which does nothing, and Enter in a cell finds the
+ * wrapper's disabled default button and submits nothing.
  */
+const preventSubmit = (event: React.FormEvent) => event.preventDefault();
+
 const FormSlotPlacement: React.FC<{ store: FormSlotStore; id: string; children: React.ReactNode }> = ({
   store,
   id,
@@ -882,7 +892,14 @@ const FormSlotPlacement: React.FC<{ store: FormSlotStore; id: string; children: 
   useSyncExternalStore(store.subscribe, store.getVersion, store.getVersion);
   const at = store.placement(id);
   if (at === 'inline') return <>{children}</>;
-  return at ? createPortal(children, at) : null;
+  if (!at) return null;
+  return createPortal(
+    <form noValidate onSubmit={preventSubmit} data-form-slot-owner="">
+      <button type="submit" disabled hidden aria-hidden="true" tabIndex={-1} />
+      {children}
+    </form>,
+    at,
+  );
 };
 
 /**

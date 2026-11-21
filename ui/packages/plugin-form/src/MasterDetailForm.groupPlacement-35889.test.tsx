@@ -70,7 +70,7 @@ describe('MasterDetailForm — a group-placed collection sits at its group (obje
     const totals = container.querySelector('[data-form-section="__section_totals"]')!;
     expect(header).toBeTruthy();
     expect(totals).toBeTruthy();
-    expect(placed.closest('form')).toBe(header.closest('form'));
+    expect(placed.closest('[data-form-slot]')!.closest('form')).toBe(header.closest('form'));
     expect(before(header, placed)).toBe(true);
     expect(before(placed, totals)).toBe(true);
     expect(placed.textContent).toContain('Order lines');
@@ -126,6 +126,28 @@ describe('MasterDetailForm — a group-placed collection sits at its group (obje
     expect(before(header, placed)).toBe(true);
     expect(before(placed, totals)).toBe(true);
     expect(container.querySelectorAll('[data-testid="md-collection"]')).toHaveLength(1);
+  });
+
+  it('a placed collection\'s controls are not the header form\'s: no native validation, no submit from a line button', async () => {
+    const ds = makeDataSource(parentWith([HEADER_GROUP, LINES_GROUP, TOTALS_GROUP]));
+    const { container } = render(
+      <MasterDetailForm schema={{ objectName: 'po', mode: 'create', details } as any} dataSource={ds} />,
+    );
+    await waitFor(() => {
+      if (!container.querySelector('[data-form-slot] [data-testid="md-collection"] button')) throw new Error('not placed');
+    });
+    const header = container.querySelector('[data-form-section="__section_header"]')!.closest('form')!;
+    const slot = container.querySelector('[data-form-slot]')!;
+    const controls = [...slot.querySelectorAll('input, select, textarea, button')] as HTMLInputElement[];
+    expect(controls.length).toBeGreaterThan(0);
+    // `requestSubmit()` validates, and a submit button submits, only the
+    // controls the form owns.
+    for (const control of controls) expect(control.form).not.toBe(header);
+
+    const submitted = vi.fn();
+    header.addEventListener('submit', submitted);
+    for (const button of slot.querySelectorAll('button')) fireEvent.click(button);
+    expect(submitted).not.toHaveBeenCalled();
   });
 
   it('saves the record and its lines in one batch from the placed table', async () => {

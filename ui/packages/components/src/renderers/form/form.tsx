@@ -3317,7 +3317,15 @@ ComponentRegistry.register('form',
         typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
           ? CSS.escape(name)
           : name.replace(/["\\]/g, '\\$&');
-      return root.querySelector<HTMLElement>(`[data-field="${escaped}"]`);
+      // Not a field a host drew into one of THIS form's `form-slot` rows (an
+      // expanded line editor there is a form of its own, objectstack#35889);
+      // that editor, inside a slot, still finds its own fields.
+      return (
+        [...root.querySelectorAll<HTMLElement>(`[data-field="${escaped}"]`)].find((el) => {
+          const slot = el.closest('[data-form-slot]');
+          return !slot || !(root as Node).contains(slot);
+        }) ?? null
+      );
     };
     const revealField = (name: string) => {
       const target = fieldWrapper(name);

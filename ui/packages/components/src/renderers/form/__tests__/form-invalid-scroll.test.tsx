@@ -63,6 +63,29 @@ function renderForm(fields: any[], defaultValues?: Record<string, unknown>) {
 const submit = () => fireEvent.click(screen.getByRole('button', { name: /create/i }));
 
 describe('form renderer — invalid-submit feedback (#2793)', () => {
+  it('reveals its own field, not a same-named field a host drew into a form-slot row (objectstack#35889)', async () => {
+    // What a host draws there (an expanded line editor) is a form of its own.
+    const slotRef = (el: HTMLElement | null) => {
+      if (el && !el.firstChild) el.innerHTML = '<div data-field="title"><input data-testid="line-title" /></div>';
+    };
+    const { container } = renderForm([
+      { name: '__form_slot__d0', label: '', type: 'form-slot', slotRef },
+      { name: 'title', label: 'Title', type: 'input', required: true },
+    ]);
+    const own = [...container.querySelectorAll<HTMLElement>('[data-field="title"]')].find((el) => !el.closest('[data-form-slot]'))!;
+    const ownScroll = vi.fn();
+    own.scrollIntoView = ownScroll;
+    const slotted = container.querySelector<HTMLElement>('[data-form-slot] [data-field="title"]')!;
+    const slottedScroll = vi.fn();
+    slotted.scrollIntoView = slottedScroll;
+
+    submit();
+
+    await waitFor(() => expect(ownScroll).toHaveBeenCalled());
+    expect(slottedScroll).not.toHaveBeenCalled();
+    expect(document.activeElement).not.toBe(screen.getByTestId('line-title'));
+  });
+
   it('scrolls+focuses the first errored field on a missing required field, with no toast', async () => {
     const { container } = renderForm([
       { name: 'title', label: 'Title', type: 'input', required: true },
