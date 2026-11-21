@@ -269,17 +269,17 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    */
   summaryRowLead?: (count: number) => React.ReactNode;
   /**
-   * [objectstack#35702] Wired only for a reader who may change the view: each
-   * footer cell becomes the menu that picks the column's calculation (`null` =
-   * None). The grid draws the pick at once; the host saves it on the view and
-   * hands it back as the column's `summary`. A host that answers `false`
+   * [objectstack#35702] Each footer cell becomes the menu that picks the
+   * column's calculation (`null` = None). The grid draws the pick at once; the
+   * host keeps it (on the view, or in a draft, objectstack#36194) and hands it
+   * back as the column's `summary`. A host that answers `false`
    * (or a promise of it, or one that rejects) did not save it, and the grid
    * takes the pick back.
    */
   onColumnSummaryPick?: (field: string, summary: ColumnSummaryType | null) => void | boolean | Promise<void | boolean>;
   /**
    * [objectstack#35702] The fields whose calculation `onColumnSummaryPick` can
-   * save (the columns the view itself declares); every other footer cell draws
+   * keep (the columns a saved view would carry); every other footer cell draws
    * its figure with no menu. Absent ⇒ every field column is offered.
    */
   summaryPickFields?: readonly string[];

@@ -397,17 +397,17 @@ export interface ListViewProps {
   onColumnStateChange?: (state: { order?: string[]; widths?: Record<string, number> }) => void;
   /**
    * objectstack#35702 — the grid's footer calculation picked by the reader
-   * (`null` = None). Wired only for a reader who may change the open view;
-   * absent ⇒ the footer draws its figures and offers no menu. The host saves
-   * the pick as the column's `summary` on the view and resolves whether it
-   * did; on `false` the grid takes the pick back. A HOST prop, never a schema
-   * key.
+   * (`null` = None). Absent ⇒ the footer draws its figures and offers no
+   * menu. The host keeps the pick as the column's `summary` (on the view, or
+   * in an unsaved draft it hands back in `columns`, objectstack#36194) and
+   * resolves whether it did; on `false` the grid takes the pick back. A HOST
+   * prop, never a schema key.
    */
   onColumnSummaryPick?: (field: string, summary: ColumnSummary | null) => void | boolean | Promise<void | boolean>;
   /**
-   * objectstack#35702 — the fields whose calculation the host can save (the
-   * columns the open view itself declares); the menu is offered on those
-   * only. Absent ⇒ every field column. A HOST prop, never a schema key.
+   * objectstack#35702 — the fields whose calculation the host can keep (the
+   * columns a saved view would carry); the menu is offered on those only.
+   * Absent ⇒ every field column. A HOST prop, never a schema key.
    */
   columnSummaryPickFields?: readonly string[];
   /**
