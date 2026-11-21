@@ -491,8 +491,7 @@ describe('[#34774] the restriction profile when the spec manifest is unreadable'
     const res: any = { json: (b: any) => { body = b; }, status: (s: number) => { status = s; return res; } };
     await rest.getRouteManager().get('GET', '/api/v1/discovery/restriction-profile')!.handler({} as any, res);
     expect(status).toBe(503);
-    expect(body.success).toBe(false);
+    expect(body.code).toBe('SERVICE_UNAVAILABLE'); // `sendDeclaredFault`'s flat dialect
     expect(body.data).toBeUndefined();
-    expect(body.code ?? body.error?.code).toBe('SERVICE_UNAVAILABLE');
   });
 });
