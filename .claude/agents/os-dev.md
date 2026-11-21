@@ -276,7 +276,7 @@ model: opus
 - 认领的 `Clause-②:`、`Metadata-protocol:` 两行照抄进 PR 正文行首;无则零写,⛔ 不自造。
 - 两行同抄进 changeset 正文行首;`Check Changeset` 读 PR 正文:kind 即 `minor`,`none` 即 `patch`。
 - 种类非 `none` 或带 `(narrowing)` ⇒ 按 diff 加写 `Skills-docs:` 行;拼法与分工住认领模板。
-- diff 触根 `.claude/**` ⇒ PR 正文写行首 `Rule-change:` 行,按 diff 自判。
+- diff 触根 `.claude/**` ⇒ PR 正文恰一行首 `Rule-change:`,按 diff 自判。
 - `none` 未改车队规则(agent 不经维护者可做什么、做什么与先后、什么须交他);`yes` 改了;`ruled` 照抄已裁条文,写行首 `Ruling-ref:` 引维护者原话、出处、时间。缺行同 `yes`:Tier H。
 - ⛔ 永不 `Fixes` 一张还在决策箱的卡:合并会静默关掉它,而收件箱过滤只读 open。
 - ⛔ 不写否定式的关单句,它照样关掉点名的卡:解析器无视否定,只匹配关键词 + `#<n>`。
