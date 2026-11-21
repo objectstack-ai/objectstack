@@ -1,6 +1,7 @@
 ---
 '@objectstack/plugin-sharing': patch
 '@objectstack/plugin-security': patch
+'@objectstack/spec': patch
 ---
 
 fix(plugin-sharing)!: every share grant counts; the sharing scopes carry the share-grant leaf instead of a list capped at 5,000 grants (ADR-0155 plan step 6)
