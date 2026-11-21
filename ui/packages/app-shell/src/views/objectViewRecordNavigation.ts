@@ -421,14 +421,18 @@ export function useObjectViewRecordNavigation({
      * in the side drawer over the list, which stays — the same drawer and the
      * same URL state as the name cell's icon, its object beside `?recordId=`
      * when it is not the listed object. A chip clicked while the drawer is
-     * open swaps its root record.
+     * open swaps its root record. The record the drawer already shows is not
+     * pushed again, so one Back still closes it after a double-click.
      */
     const handleOpenReferencedRecord = useCallback((targetObjectName: string, recordId: string) => {
-        if (targetObjectName === objectDef.name) {
+        const { searchParams: params, setSearchParams: setParams, mode } = panelInputs.current;
+        const own = targetObjectName === objectDef.name;
+        const shownObject = params.get(RECORD_DRAWER_OBJECT_PARAM);
+        if (params.get(RECORD_DRAWER_PARAM) === recordId && (own ? !shownObject || shownObject === objectDef.name : shownObject === targetObjectName)) return;
+        if (own) {
             handleOpenRowInPanel(recordId);
             return;
         }
-        const { searchParams: params, setSearchParams: setParams, mode } = panelInputs.current;
         if (mode !== 'drawer') return;
         const next = new URLSearchParams(params);
         next.set(RECORD_DRAWER_PARAM, recordId);

@@ -5219,7 +5219,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                               selectCell(rowIndex, colIndex);
                               // A reference cell's chip opens its record in place: the
                               // list's side drawer, with the list and its selection kept.
-                              const chip = isReferenceColumn(col) ? recordChipAt(e.target, e.currentTarget) : null;
+                              // A double-click's second click opens it no second time.
+                              const chip = isReferenceColumn(col) && e.detail <= 1 ? recordChipAt(e.target, e.currentTarget) : null;
                               if (chip && referenceCells) referenceCells.openRecord(chip.objectName, chip.recordId);
                             } : undefined}
                             onMouseDown={selectFirst ? (e) => {

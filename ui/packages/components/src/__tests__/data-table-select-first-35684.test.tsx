@@ -431,6 +431,17 @@ describe('data-table select-first — a reference chip opens its record in place
     expect(t.editor()).toBeNull();
   });
 
+  it('a double-click on the chip opens its record once', () => {
+    const t = renderReferences();
+    const chipText = screen.getByText('Account acc_1');
+    fireEvent.click(chipText, { detail: 1 });
+    fireEvent.click(chipText, { detail: 2 });
+    fireEvent.doubleClick(chipText, { detail: 2 });
+    expect(t.openRecord).toHaveBeenCalledTimes(1);
+    expect(t.openRecord).toHaveBeenCalledWith('crm_account', 'acc_1');
+    expect(t.editor()).toBeNull();
+  });
+
   it('a click beside the chip only selects; a Ctrl or Cmd click follows the link', () => {
     const t = renderReferences();
     fireEvent.click(t.cell(1, 1));
