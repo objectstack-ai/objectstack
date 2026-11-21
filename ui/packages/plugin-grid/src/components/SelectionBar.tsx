@@ -159,6 +159,9 @@ const SingleRecordActions: React.FC<{ menu: RowActionMenuProps; fit: number; onC
   const all = singleRecordEntries(plan);
   const { exposed, rest } = planExposedEntries(
     all,
+    // Over the budget, only declared actions and Edit become buttons: a legacy
+    // `rowActions` name has no declared label (the menu title-cases its id),
+    // so it stays in 「更多」 with Delete.
     (entry) => entry.kind === 'def' || entry.kind === 'edit',
     SELECTION_EXPOSED_ACTIONS,
     fit,

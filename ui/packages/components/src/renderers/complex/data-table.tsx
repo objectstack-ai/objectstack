@@ -5482,6 +5482,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
           <div
             className={cn(
               "absolute inset-x-0 flex justify-center px-4",
+              // 2.0625rem is the summary row's h-8 plus its 1px border-t:
+              // the bar sits 1rem above the row instead of over it.
               summaryRow ? "bottom-[calc(2.0625rem+1rem)]" : "bottom-3",
             )}
           >

@@ -26,7 +26,10 @@
 
 import React from 'react';
 
-const scopes = new Set<HTMLElement>();
+// Counted, not a set: two registrants may hold one page column (the page
+// header and the view bar's trailing end both do, and one unmounts as the
+// other mounts), so the scope goes only when its last registrant does.
+const scopes = new Map<HTMLElement, number>();
 const listeners = new Set<() => void>();
 
 function emit(): void {
@@ -44,10 +47,12 @@ function subscribe(listener: () => void): () => void {
 export function useListPageScope(scope: HTMLElement | null): void {
   React.useLayoutEffect(() => {
     if (!scope) return undefined;
-    scopes.add(scope);
+    scopes.set(scope, (scopes.get(scope) ?? 0) + 1);
     emit();
     return () => {
-      scopes.delete(scope);
+      const left = (scopes.get(scope) ?? 1) - 1;
+      if (left > 0) scopes.set(scope, left);
+      else scopes.delete(scope);
       emit();
     };
   }, [scope]);
@@ -55,7 +60,7 @@ export function useListPageScope(scope: HTMLElement | null): void {
 
 function inScope(el: HTMLElement | null): boolean {
   if (!el) return false;
-  for (const scope of scopes) if (scope.contains(el)) return true;
+  for (const scope of scopes.keys()) if (scope.contains(el)) return true;
   return false;
 }
 
