@@ -49,6 +49,8 @@ import { fileURLToPath } from 'node:url';
 import type { DataSource } from '@object-ui/types';
 import * as dataObjectstack from '@object-ui/data-objectstack';
 import { ObjectStackAdapter } from '@object-ui/data-objectstack';
+// Paid at collection, not in a case's clock: the source reaches `@objectstack/lint` on demand.
+import '@objectstack/lint';
 import { buildViewTabs, loadViewOverrides, sanitizeViewOverride } from './ObjectView';
 import { answerObjectViewRead } from './__tests__/objectViewRoute';
 // @ts-expect-error — plain-JS shared helper, intentionally untyped (`allowJs: false`)
@@ -347,9 +349,9 @@ describe('objectui#12504 census — the toolbar-to-view write family is retired'
         expect(objectViewCode).toMatch(/await persistRuntimeMetadata\('view', vid, buildViewConfigSaveBody\(objectName, draft\)/);
     });
 
-    it('CONTROL: the doors objectui#12474 moved still write the user\'s own list state', () => {
+    it('CONTROL: the doors objectui#12474 moved write the reader\'s state, never the view (density kept, hidden fields a draft since objectstack#35955)', () => {
         expect(objectViewCode).toMatch(/onDensityChange:\s*\(mode\)\s*=>\s*\{\s*listPrefs\.patchView\(/);
-        expect(objectViewCode).toMatch(/const persistHiddenFields = \(hidden: string\[\]\) => \{[\s\S]{0,120}?listPrefs\.patchView\(viewDef\.id, \{ hiddenFields: hidden \}\)/);
+        expect(objectViewCode).toMatch(/const persistHiddenFields = \(hidden: string\[\]\) => \{[\s\S]{0,120}?listDraft\.patch\(\{ hiddenFields: hidden \}\)/);
     });
 
     it('`DataSource` declares no `updateViewConfig` (@object-ui/types)', () => {

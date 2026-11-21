@@ -34,7 +34,8 @@
       ],
       "registryDependencies": [
         "button"
-      ]
+      ],
+      "localEdits": "objectstack#35980 shared dialog surface: the overlay and the content each append one class token (`DIALOG_OVERLAY_SURFACE` / `DIALOG_CONTENT_SURFACE`, `packages/components/src/lib/dialog-surface.ts`), so a confirmation draws the same faint overlay and white two-layer card as every other dialog. Declared as data in `scripts/shadcn-local-patches.mjs` and re-applied on every `--update`; the vendored registry fixture regenerates the file byte for byte (`roundTrip: true`)."
     },
     "aspect-ratio": {
       "source": "https://ui.shadcn.com/r/styles/default/aspect-ratio.json",
@@ -54,7 +55,7 @@
       "source": "https://ui.shadcn.com/r/styles/default/badge.json",
       "dependencies": [],
       "registryDependencies": [],
-      "localEdits": "Adds `whitespace-nowrap`: a badge is a single-line pill by definition, and without it CJK labels (e.g. 待审批) break per-character inside a cramped table cell and stack vertically (objectui#2762 P0-1). The reasoning is also comment-documented in the file."
+      "localEdits": "Adds `whitespace-nowrap`: a badge is a single-line pill by definition, and without it CJK labels (e.g. 待审批) break per-character inside a cramped table cell and stack vertically (objectui#2762 P0-1). The reasoning is also comment-documented in the file. Declared patch `badge-medium-weight` (objectstack#36047, scripts/shadcn-local-patches.mjs) sets the weight to `font-medium` (500)."
     },
     "breadcrumb": {
       "source": "https://ui.shadcn.com/r/styles/default/breadcrumb.json",
@@ -131,7 +132,7 @@
         "radix-ui"
       ],
       "registryDependencies": [],
-      "localEdits": "objectstack#5505 i18n close patch: `DialogContent` auto-renders an icon-only close button whose `sr-only` span IS its accessible name, and upstream hardcodes the English literal — so under zh/ja/es every modal in the console announced \"Close\" in English. The span is replaced by `<CloseSrLabel />` (`packages/components/src/lib/close-label.tsx`), which resolves `common.close` for the session locale and falls back to English with no I18nProvider mounted. It also carries the objectstack#29107 phone close touch-target patch: below `sm` the close button is a 44 px box with the 16 px glyph centred, and from `sm` up its classes are upstream's. Both edits are DECLARED as data in `scripts/shadcn-local-patches.mjs` and re-applied on every `--update`, and `pnpm shadcn:check` exits non-zero if either is ever missing from the file or can no longer be re-applied to upstream."
+      "localEdits": "objectstack#5505 i18n close patch: `DialogContent` auto-renders an icon-only close button whose `sr-only` span IS its accessible name, and upstream hardcodes the English literal — so under zh/ja/es every modal in the console announced \"Close\" in English. The span is replaced by `<CloseSrLabel />` (`packages/components/src/lib/close-label.tsx`), which resolves `common.close` for the session locale and falls back to English with no I18nProvider mounted. It also carries the objectstack#29107 phone close touch-target patch: below `sm` the close button is a 44 px box with the 16 px glyph centred, and from `sm` up its classes are upstream's. Both edits are DECLARED as data in `scripts/shadcn-local-patches.mjs` and re-applied on every `--update`, and `pnpm shadcn:check` exits non-zero if either is ever missing from the file or can no longer be re-applied to upstream. objectstack#35980 adds the shared dialog surface: one import and one class token each on the overlay and the content, naming `DIALOG_OVERLAY_SURFACE` / `DIALOG_CONTENT_SURFACE` (`packages/components/src/lib/dialog-surface.ts`), declared in the same file."
     },
     "drawer": {
       "source": "https://ui.shadcn.com/r/styles/default/drawer.json",

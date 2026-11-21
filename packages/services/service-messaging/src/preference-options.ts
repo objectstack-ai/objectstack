@@ -45,7 +45,7 @@
 /**
  * The platform's fixed notification topics, measured from their send and
  * template sites: `plugin-approvals` (`approval.*`), `plugin-audit`
- * (`collab.mention`), `plugin-security` (`security.access_upgrade`,
+ * (`collab.mention`, `collab.reply`), `plugin-security` (`security.access_upgrade`,
  * `system.upgrade_impact`), `plugin-auth` (the two phone SMS template
  * topics) and this package's Slack link store (`messaging.slack_link_removed`).
  * Kept sorted; a feature that starts sending a new fixed topic adds
@@ -65,6 +65,7 @@ export const PLATFORM_NOTIFICATION_TOPICS: readonly string[] = [
     'auth.phone_invite',
     'auth.phone_otp',
     'collab.mention',
+    'collab.reply',
     'messaging.slack_link_removed',
     'security.access_upgrade',
     'system.upgrade_impact',

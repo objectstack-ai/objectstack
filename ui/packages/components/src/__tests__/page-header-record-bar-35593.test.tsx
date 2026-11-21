@@ -167,6 +167,37 @@ describe('page:header in the host bar (objectstack#35593)', () => {
   });
 });
 
+// objectstack#35415 — the host's name for the record (`RecordHeaderState.title`)
+// is the heading in both faces, its node drawn inside the H1; absent or empty,
+// the header's own title stands.
+describe('the record state\'s title (objectstack#35415)', () => {
+  const HOST_TITLE = { text: 'Acceptance T-002', node: <a href="/subject" data-testid="host-title-node">Acceptance T-002</a> };
+
+  it('in the host bar: the H1 draws the host\'s node in place of the record\'s own name', async () => {
+    renderHeader({ bar: vi.fn(), state: { title: HOST_TITLE } });
+    const titleSlot = screen.getByTestId('title-slot');
+    await waitFor(() => expect(titleSlot.querySelector('h1')?.textContent).toBe('Acceptance T-002'));
+    expect(titleSlot.querySelector('h1 [data-testid="host-title-node"]')?.getAttribute('href')).toBe('/subject');
+    expect(titleSlot.textContent).not.toContain('Mira Costa');
+  });
+
+  it('without a host bar: the header row\'s H1 is the host\'s name too', async () => {
+    renderHeader({ state: { title: HOST_TITLE } });
+    await waitFor(() => expect(document.querySelector('header h1')?.textContent).toBe('Acceptance T-002'));
+    expect(document.querySelector('header h1 [data-testid="host-title-node"]')).toBeTruthy();
+  });
+
+  it('a host title with no node draws its text', async () => {
+    renderHeader({ state: { title: { text: 'Acceptance T-002' } } });
+    await waitFor(() => expect(document.querySelector('header h1')?.textContent).toBe('Acceptance T-002'));
+  });
+
+  it('CONTROL — an empty host title leaves the record\'s own name', async () => {
+    renderHeader({ state: { title: { text: '  ', node: <span>ignored</span> } } });
+    await waitFor(() => expect(document.querySelector('header h1')?.textContent).toBe('Mira Costa'));
+  });
+});
+
 describe('the record state\'s ONE group (objectstack#35593)', () => {
   it('hands the group the record\'s row and the record\'s actions as ⋯ items, and draws what it returns', async () => {
     const seen: RecordHeaderGroupParts[] = [];

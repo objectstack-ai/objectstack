@@ -121,6 +121,14 @@ export const ADMIN_FULL_ACCESS_CAPABILITIES: Pick<PermissionSet, 'objects' | 'sy
       allowDelete: true,
       viewAllRecords: true,
       modifyAllRecords: true,
+      // [Field-axis split, ruling of record 6912661484, letter A] The
+      // read-only "every field" vote, said explicitly. Today it duplicates the
+      // vote the two record bits already cast on every field, so nothing
+      // answers differently; it keeps the platform administrator reading every
+      // field once those bits stop voting on fields. A field vote only: the
+      // PLATFORM_ADMIN posture (ADR-0095 D3) still derives from the two record
+      // bits, never from this one.
+      viewAllFields: true,
       // [#3544] Export is an OPT-IN grant and is deliberately NOT implied by
       // the super-user bits — "may see all data" and "may take a bulk copy of
       // it" are separable on purpose (SAP S_GUI 61 / segregation of duties).

@@ -4,8 +4,8 @@
 > `pnpm --filter @objectstack/spec gen:skill-refs`
 > (not runnable in an installed app). Names come from `@objectstack/spec`.
 
-Read this before adding an object, a field or a flow (objectstack-project §0,
-question 3). `list_objects` over MCP hides system objects, so look here.
+Read this before adding an object, a field or a flow. `list_objects` over MCP
+hides system objects, so look here.
 
 ## Platform objects an app would otherwise build
 
@@ -50,6 +50,7 @@ a seed) without declaring it.
 | Object | Mounted by | What you would otherwise build | How the app reaches it |
 |:--|:--|:--|:--|
 | `sys_exchange_rate` | every boot | an exchange-rate table | `currencyConfig.homeAmount` converts at write; Setup edits rates; data API |
+| `sys_unit` | every boot | a unit table or picklist | `unitConfig` on a `number` field (`unitMode: 'fixed'` with `unit`, `'record'` with `unitField`) or a `text` field (`'code'`); a stored code is standard (UN/ECE Rec 20: `KGM`, `H87`) or a row added here in Setup; data API, no delete |
 | `sys_work_calendar` | every boot | a business-hours calendar | kept per organization in Setup; an approval's `escalation.clock: 'working_time'` reads it; data API |
 | `sys_work_calendar_exception` | every boot | a holiday table | a calendar's holidays and make-up workdays, kept in Setup; data API |
 | `sys_import_job` | every boot | a bulk-import job table | `POST /api/v1/data/OBJECT/import/jobs`; data API read |
@@ -126,10 +127,10 @@ whether or not the stack lists it. Declare what the app uses
 | `settings` | the settings store | open | every boot |
 | `webhooks` | outbound webhooks | open | on `requires` |
 | `hierarchy-security` | hierarchy-relative permission scopes | enterprise | on `requires` |
-| `ai-seat` | the cloud AI-seat tier | cloud | on `requires` |
-| `governance` | the cloud governance tier | cloud | on `requires` |
-| `audit-compliance` | the cloud audit-compliance tier | cloud | on `requires` |
-| `access-policy-console` | the cloud access-policy console | cloud | on `requires` |
+| `ai-seat` | the AI-seat tier | cloud | on `requires` |
+| `governance` | the governance tier | cloud | on `requires` |
+| `audit-compliance` | the audit-compliance tier | cloud | on `requires` |
+| `access-policy-console` | the access-policy console | cloud | on `requires` |
 
 ## Not owned by the platform
 
@@ -143,12 +144,10 @@ platform" here.
 
 ## Planned: carded, not shipped
 
-Each row is **not available**: nothing below can be declared or installed.
-The app may build its own meanwhile, marked `// PLATFORM-CANDIDATE:` with
-the link; an interim unit field stores the contract's UN/ECE Rec 20 codes
-(`H87`, `KGM`) as option values, the business's spellings as labels.
+Nothing below can be declared or installed. The app may build its own
+meanwhile, marked `// PLATFORM-CANDIDATE:` with the link.
 
 | Concept | State | Contract |
 |:--|:--|:--|
-| Units of measure (a standard unit table, organization units, a quantity field with its unit) | **not available** (contract accepted, nothing shipped) | https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0158-units-of-measure-standard-unit-table-org-units-quantity-unit-declaration-base-quantity.md |
+| Unit display, totals and conversion | **not available** (contract accepted; a quantity shows and sums as a bare number) | https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0158-units-of-measure-standard-unit-table-org-units-quantity-unit-declaration-base-quantity.md |
 | Working-day formulas | **not available** (contract accepted; no formula reads a calendar yet) | https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0157-working-calendars-are-org-editable-runtime-data-resolved-by-code-or-refused.md |

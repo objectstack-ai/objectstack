@@ -64,7 +64,7 @@ export class DistinctFacet {
     await primeFixedReadLeafKeyTypes(this, object, filters, options);
     // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
     // the remote catalog before a comparand or a written value is bound.
-    if (this.isOracle) await this.primeOracleRawUuidColumns(object);
+    if (this.isOracle) await this.primeOracleRawUuidColumns(object, filters);
     const builder = this.getBuilder(object, options);
     // The third read door that skipped the chokepoint, and the one #6792 does
     // NOT name — the card asserts the opposite ("called at 13 sites — …,

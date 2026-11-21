@@ -1628,3 +1628,31 @@ describe('findHierarchyScopeGrants', () => {
     }
   });
 });
+
+describe('[field-axis split, ruling 6912661484] ObjectPermission.viewAllFields', () => {
+  it('parses on an object entry and on the wildcard, with no unrecognized_keys', () => {
+    const parsed = PermissionSetSchema.safeParse({
+      name: 'field_reader',
+      objects: { crm_account: { allowRead: true, viewAllFields: true }, '*': { allowRead: true, viewAllFields: true } },
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.objects?.crm_account?.viewAllFields).toBe(true);
+    expect(parsed.data?.objects?.['*']?.viewAllFields).toBe(true);
+  });
+
+  it('is optional with no default: an entry that omits it parses without the key', () => {
+    const entry = ObjectPermissionSchema.parse({ allowRead: true, viewAllRecords: true });
+    expect('viewAllFields' in entry).toBe(false);
+  });
+
+  it('is a boolean, and grants no object verb on its own', () => {
+    expect(ObjectPermissionSchema.safeParse({ viewAllFields: 'yes' }).success).toBe(false);
+    const entry = ObjectPermissionSchema.parse({ viewAllFields: true });
+    expect(objectPermissionGrants(entry, 'allowRead')).toBe(false);
+    expect(objectPermissionGrants(entry, 'allowEdit')).toBe(false);
+  });
+
+  it('rides the wire shape too (EffectiveObjectPermission)', () => {
+    expect(EffectiveObjectPermissionSchema.parse({ allowRead: true, viewAllFields: true }).viewAllFields).toBe(true);
+  });
+});

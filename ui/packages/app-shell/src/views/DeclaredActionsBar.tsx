@@ -338,9 +338,16 @@ const DeclaredActionButton: React.FC<{
    * header row.
    */
   headerTone?: 'primary' | 'secondary';
+  /**
+   * A declared `danger` lever drawn as an outline button in the destructive
+   * text colour, the header group's secondary face, instead of a filled one
+   * (objectstack#35415): beside a filled `primary` decision, the approval
+   * must read as the page's strongest button, not the rejection.
+   */
+  outlineDanger?: boolean;
   /** The reject dialog requires its `comment` (`requireRejectReason`). */
   requireReason?: boolean;
-}> = ({ action, objectName, record, asMenuItem = false, onDrawn, fill = false, headerTone, requireReason = false }) => {
+}> = ({ action, objectName, record, asMenuItem = false, onDrawn, fill = false, headerTone, outlineDanger = false, requireReason = false }) => {
   const { execute } = useAction();
   const [loading, setLoading] = useState(false);
   // Localize the SERVER-DECLARED strings through the `_actions.<name>.*`
@@ -657,9 +664,10 @@ const DeclaredActionButton: React.FC<{
   // one. Overrides take one warning treatment instead, the SAME for approve /
   // reject / reassign — the point being that it reads as "override", not as
   // "the decision you were assigned".
+  const secondaryDanger = declaredVariant === 'danger' && (headerTone === 'secondary' || outlineDanger);
   const variant = isOverride
     ? 'outline'
-    : headerTone === 'secondary'
+    : headerTone === 'secondary' || secondaryDanger
       ? 'outline'
       : declaredVariant === 'primary'
         ? 'default'
@@ -758,9 +766,9 @@ const DeclaredActionButton: React.FC<{
       // the record header's spelling (`PageHeaderActions`).
       // Below `sm` a 44 px touch target (objectstack#29071).
       className={cn(
-        headerTone ? 'h-11 sm:h-8' : 'h-11 sm:h-9',
+        headerTone ? 'h-11 sm:h-7' : 'h-11 sm:h-9',
         fill && (disabledReason ? 'w-full sm:w-auto' : 'flex-1 sm:flex-none'),
-        headerTone === 'secondary' && declaredVariant === 'danger' && !isOverride
+        secondaryDanger && !isOverride
           && 'text-destructive hover:text-destructive',
         isOverride
           && 'border-amber-500/60 text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:text-amber-400 dark:hover:bg-amber-500/10 dark:hover:text-amber-300',
@@ -1112,7 +1120,7 @@ const DeclaredActionsToolbar: React.FC<
                 size="sm"
                 className={cn(
                   'gap-1 px-2 border-amber-500/60 text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:text-amber-400 dark:hover:bg-amber-500/10 dark:hover:text-amber-300',
-                  barFace ? 'h-11 shrink-0' : 'h-8',
+                  barFace ? 'h-11 shrink-0' : 'h-8 sm:h-7',
                 )}
                 aria-label={overrideMenuLabel}
                 title={overrideMenuLabel}
@@ -1168,7 +1176,7 @@ const DeclaredActionsToolbar: React.FC<
                 type="button"
                 variant="outline"
                 size="sm"
-                className={barFace ? 'h-11 w-11 shrink-0 px-0' : 'h-8 gap-1 px-2'}
+                className={barFace ? 'h-11 w-11 shrink-0 px-0' : 'h-8 gap-1 px-2 sm:h-7'}
                 aria-label={moreLabel}
                 data-testid="declared-actions-header-menu"
               >
@@ -1223,6 +1231,7 @@ const DeclaredActionsToolbar: React.FC<
                 record={record}
                 onDrawn={reportDrawn}
                 fill
+                outlineDanger
               />
             ))}
             {decisionOthers.map((action) => (foldDecisionOthers ? (

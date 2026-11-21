@@ -282,27 +282,49 @@ describe('the served request page links a readable target to its record (objectu
     expect(PageSchema.safeParse(SERVED_PAGE).success).toBe(true);
   });
 
-  it('readable: one link to the app-scoped record path, named by the card title, inside the card', async () => {
+  it('readable: one link to the app-scoped record path inside the card, named by the card title; the page H1 is the other (objectstack#35415)', async () => {
     const id = 'Rd4bl3RecordQQQQ';
     targetAnswer = async (rid) => ({ id: rid, name: TARGET_TITLE, amount: 12500 });
     const { container } = openServedPage({ record_id: id, status: 'pending', record_title: TARGET_TITLE });
     const card = await settledCard(container);
 
     expect(card.getAttribute('data-record-preview')).toBe('readable');
+    // The card's link, and the page H1, which names the request by its
+    // record and links to it once the page has read it (objectstack#35415).
+    await waitFor(() => expect(linksTo(recordPath(id))).toHaveLength(2), { timeout: 8000 });
     const links = linksTo(recordPath(id));
-    expect(links).toHaveLength(1);
-    expect(card.contains(links[0])).toBe(true);
-    expect(screen.getByRole('link', { name: TARGET_TITLE })).toBe(links[0]);
+    const inCard = links.filter((a) => card.contains(a));
+    expect(inCard).toHaveLength(1);
+    expect(within(card).getByRole('link', { name: TARGET_TITLE })).toBe(inCard[0]);
+    const h1 = screen.getByRole('heading', { level: 1 });
+    expect(h1.textContent).toBe(TARGET_TITLE);
+    expect(links.filter((a) => h1.contains(a))).toHaveLength(1);
   });
 
-  it('readable: a plain click opens the record in a drawer over the page, and the page stays put', async () => {
+  it('readable: a plain click on the page H1 opens the record in the same drawer, and the page stays put (objectstack#35415)', async () => {
     const id = 'Rd4bl3RecordQQQQ';
     targetAnswer = async (rid) => ({ id: rid, name: TARGET_TITLE, amount: 12500 });
     const { container } = openServedPage({ record_id: id, status: 'pending', record_title: TARGET_TITLE });
     await settledCard(container);
     const requestPath = `/apps/${APP}/${APPROVAL_REQUEST_OBJECT}/record/${REQ}`;
 
-    const notPrevented = fireEvent.click(screen.getByRole('link', { name: TARGET_TITLE }), { button: 0 });
+    const h1 = screen.getByRole('heading', { level: 1 });
+    const titleLink = await waitFor(() => within(h1).getByRole('link', { name: TARGET_TITLE }), { timeout: 8000 });
+    const notPrevented = fireEvent.click(titleLink, { button: 0 });
+    expect(notPrevented).toBe(false);
+    const drawer = await screen.findByRole('dialog', undefined, { timeout: 8000 });
+    await waitFor(() => expect(within(drawer).getAllByText(TARGET_TITLE).length).toBeGreaterThan(0), { timeout: 8000 });
+    expect(screen.getByTestId('router-pathname').textContent).toBe(requestPath);
+  });
+
+  it('readable: a plain click opens the record in a drawer over the page, and the page stays put', async () => {
+    const id = 'Rd4bl3RecordQQQQ';
+    targetAnswer = async (rid) => ({ id: rid, name: TARGET_TITLE, amount: 12500 });
+    const { container } = openServedPage({ record_id: id, status: 'pending', record_title: TARGET_TITLE });
+    const card = await settledCard(container);
+    const requestPath = `/apps/${APP}/${APPROVAL_REQUEST_OBJECT}/record/${REQ}`;
+
+    const notPrevented = fireEvent.click(within(card).getByRole('link', { name: TARGET_TITLE }), { button: 0 });
     expect(notPrevented).toBe(false);
     // The drawer opens with the target record in it …
     const drawer = await screen.findByRole('dialog', undefined, { timeout: 8000 });
@@ -311,16 +333,16 @@ describe('the served request page links a readable target to its record (objectu
     // … over the request page: the router did not move.
     expect(screen.getByTestId('router-pathname').textContent).toBe(requestPath);
     // The href still names the record path, for a new tab or a copied link.
-    expect(linksTo(recordPath(id))).toHaveLength(1);
+    expect(linksTo(recordPath(id)).filter((a) => card.contains(a))).toHaveLength(1);
   });
 
   it('readable: a modified click is the browser\'s — not intercepted, no drawer', async () => {
     const id = 'Rd4bl3RecordQQQQ';
     targetAnswer = async (rid) => ({ id: rid, name: TARGET_TITLE, amount: 12500 });
     const { container } = openServedPage({ record_id: id, status: 'pending', record_title: TARGET_TITLE });
-    await settledCard(container);
+    const card = await settledCard(container);
 
-    const link = screen.getByRole('link', { name: TARGET_TITLE });
+    const link = within(card).getByRole('link', { name: TARGET_TITLE });
     const notPrevented = fireEvent.click(link, { button: 0, metaKey: true });
     expect(notPrevented).toBe(true);
     expect(new URL(link.getAttribute('href') as string, 'http://test.local').pathname).toBe(recordPath(id));
@@ -336,6 +358,10 @@ describe('the served request page links a readable target to its record (objectu
     expect(card.getAttribute('data-record-preview')).toBe('unreadable');
     expect(card.querySelectorAll('a[href]')).toHaveLength(0);
     expect(linksTo(recordPath(id))).toHaveLength(0);
+    // The H1 names the record by the title the get served, as plain text (objectstack#35415).
+    const h1 = screen.getByRole('heading', { level: 1 });
+    expect(h1.textContent).toBe('INV-2020');
+    expect(h1.querySelectorAll('a[href]')).toHaveLength(0);
   });
 
   it('CONTROL: unresolvable (the target read resolves with no record) draws no link to the target anywhere', async () => {
