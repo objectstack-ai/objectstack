@@ -57,9 +57,13 @@ describe('an embedded date macro is a literal (objectstack#35754)', () => {
     expect(resolveDateMacros('{7_days_ago}', now)).toBe('2026-05-18');
   });
 
+  it('leaves a macro wrapped in a second pair of braces as written', () => {
+    // `{{x}}` is not one wrapped token (spec), so the `{today}` inside is text.
+    expect(resolveDateMacros('{{today}}', now)).toBe('{{today}}');
+  });
+
   it('CONTROL: a value with braces that is not one wrapped token is untouched', () => {
     expect(resolveDateMacros('acme {x} deal', now)).toBe('acme {x} deal');
     expect(resolveDateMacros('{a}{b}', now)).toBe('{a}{b}');
-    expect(resolveDateMacros('{{today}}', now)).toBe('{{today}}');
   });
 });
