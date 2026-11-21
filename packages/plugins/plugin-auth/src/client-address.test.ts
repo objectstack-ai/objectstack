@@ -113,6 +113,29 @@ describe('the trusted-network form reads the client from the right, past the dec
   });
 });
 
+describe('the authored form reaches the rule as written, and is held to it there', () => {
+  it('a form with no header reads X-Forwarded-For', () => {
+    expect(resolveClientAddress({
+      headers: { 'x-forwarded-for': `${OTHER}, ${CLIENT}`, 'x-real-ip': OTHER },
+      remoteAddress: PROXY_HOP,
+      trustProxy: { networks: [PROXY_NETWORK] },
+    })).toBe(CLIENT);
+  });
+
+  it('a header outside the closed list, or a prefix-length-0 network, believes nothing', () => {
+    expect(resolveClientAddress({
+      headers: { forwarded: `for=${OTHER}`, 'x-forwarded-for': OTHER },
+      remoteAddress: PROXY_HOP,
+      trustProxy: { networks: [PROXY_NETWORK], header: 'forwarded' } as never,
+    })).toBe(PROXY_HOP);
+    expect(resolveClientAddress({
+      headers: { 'x-forwarded-for': OTHER },
+      remoteAddress: CLIENT,
+      trustProxy: { networks: ['0.0.0.0/0', '::/0'] },
+    })).toBe(CLIENT);
+  });
+});
+
 describe('a forwarded header sent as several lines is read as one list', () => {
   it('the trusted-network form walks every line, the last line rightmost', () => {
     expect(resolveClientAddress({
@@ -211,6 +234,8 @@ describe('readTrustProxy is the one reading of the declaration', () => {
       [{ networks: ['10.0.0.0/33'] }, /"10\.0\.0\.0\/33"/],
       [{ networks: [PROXY_NETWORK], header: 'forwarded' }, /"forwarded"/],
       [{ networks: [PROXY_NETWORK], hops: 1 }, /"hops"/],
+      [{ networks: ['0.0.0.0/0'] }, /"0\.0\.0\.0\/0"/],
+      [{ networks: [PROXY_NETWORK, '::/0'] }, /"::\/0"/],
     ];
     for (const [value, message] of cases) {
       expect(() => readTrustProxy(value), JSON.stringify(value)).toThrow(message);

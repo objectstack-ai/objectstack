@@ -71,18 +71,21 @@ export const TRUSTED_PROXY_HEADERS = Object.freeze(['x-forwarded-for', 'x-real-i
 export type TrustedProxyHeader = (typeof TRUSTED_PROXY_HEADERS)[number];
 
 /**
- * The trusted-network form of `server.trustProxy`: the proxies this deployment
- * runs, and the one header they set.
+ * The trusted-network form of `server.trustProxy`, as authored: the proxies
+ * this deployment runs, and the one header they set.
  */
 export interface TrustedProxyNetworks {
   /**
    * The transport peers whose forwarded header is believed, and the hops the
    * walk of that header skips: each an address or a CIDR range, IPv4 or IPv6,
    * read as the ADR-0069 D5 allow-list reads its entries (`./ip-range.ts`).
+   * EVERY address inside them is taken for a proxy hop, so they name the
+   * proxies' own addresses, never a range clients connect from. A range of
+   * prefix length 0 is refused: it would stand in for `true`.
    */
   readonly networks: readonly string[];
-  /** The header those proxies set. */
-  readonly header: TrustedProxyHeader;
+  /** The header those proxies set; `x-forwarded-for` when absent. */
+  readonly header?: TrustedProxyHeader;
 }
 
 /**
@@ -117,7 +120,7 @@ export const LEGACY_TRUST_PROXY_WARNING =
   '[server.trustProxy] an X-Forwarded-For header with more than one entry arrived while `server.trustProxy: true` '
   + 'is declared. `true` believes the leftmost entry from any peer, which is sound only behind a reverse proxy that '
   + 'OVERWRITES X-Forwarded-For on every request, never one that appends to it. Declare the proxies instead: '
-  + "`server.trustProxy: { networks: ['10.0.0.0/8'] }` with your proxies' addresses or ranges believes the header "
+  + "`server.trustProxy: { networks: ['10.20.0.0/28'] }` with your proxies' own addresses believes the header "
   + 'only from those peers and reads it from the right, past them. `server.trustProxy: true` is refused at boot '
   + 'from the next major. Logged once per process.';
 
@@ -146,7 +149,8 @@ function warnLegacyTrustProxyOnce(warn: ((message: string) => void) | undefined)
  *
  * An object that is not a well-formed trusted-network form is REFUSED, loudly,
  * naming what is wrong: `networks` must be a non-empty list whose every entry
- * is an address or a CIDR range, `header` (default `x-forwarded-for`) one of
+ * is an address or a CIDR range other than one of prefix length 0 (which would
+ * stand in for `true`), `header` (default `x-forwarded-for`) one of
  * {@link TRUSTED_PROXY_HEADERS}, and no other key is read. A dropped entry
  * would trust fewer hops than declared, and a dropped form would trust none,
  * and neither would say so.
@@ -157,9 +161,10 @@ export function readTrustProxy(value: unknown): ClientAddressTrust {
   const refuse = (problem: string): never => {
     throw new Error(
       `[server.trustProxy] invalid trusted-network form: ${problem}. Write it as `
-        + "{ networks: ['10.0.0.0/8', '2001:db8::/32'], header: 'x-forwarded-for' }: `networks` lists the "
-        + "addresses or CIDR ranges of the proxies this deployment runs, and `header` is 'x-forwarded-for' "
-        + "(the default) or 'x-real-ip', the one header those proxies set.",
+        + "{ networks: ['10.20.0.0/28', '2001:db8::10'], header: 'x-forwarded-for' }: `networks` lists the "
+        + "addresses or CIDR ranges of the proxies this deployment runs, and nothing else (every address inside "
+        + "them is taken for a proxy), and `header` is 'x-forwarded-for' (the default) or 'x-real-ip', the one "
+        + 'header those proxies set.',
     );
   };
   if (Array.isArray(value)) refuse('it is a list, not an object carrying `networks`');
@@ -173,6 +178,14 @@ export function readTrustProxy(value: unknown): ClientAddressTrust {
     refuse(
       `${unreadable.map((entry) => JSON.stringify(entry) ?? String(entry)).join(', ')} `
         + `${unreadable.length === 1 ? 'is' : 'are'} not an IP address or a CIDR range`,
+    );
+  }
+  const everyAddress = (networks as unknown[]).filter((entry) => parseIpRange(entry)?.bits === 0);
+  if (everyAddress.length > 0) {
+    refuse(
+      `${everyAddress.map((entry) => JSON.stringify(entry)).join(', ')} `
+        + `${everyAddress.length === 1 ? 'matches' : 'match'} every address (prefix length 0), which would trust `
+        + 'every connection as a proxy; name the proxies, or declare `true` if that is what you mean',
     );
   }
   const header = form.header === undefined ? 'x-forwarded-for' : form.header;
@@ -209,8 +222,13 @@ function isAddress(entry: string): boolean {
   return !entry.includes('/') && parseIpRange(entry) !== null;
 }
 
+/**
+ * Is `address` inside one of `networks`? A range of prefix length 0 counts for
+ * nothing here, whoever handed it over: {@link readTrustProxy} refuses it, and
+ * a value that skipped that reading must not stand in for `true` either.
+ */
 function insideNetworks(address: string, networks: readonly string[]): boolean {
-  return networks.some((range) => ipMatchesRange(address, range));
+  return networks.some((range) => parseIpRange(range)?.bits !== 0 && ipMatchesRange(address, range));
 }
 
 /** `server.trustProxy: true`: the leftmost `X-Forwarded-For` entry, then `X-Real-IP`, from any peer. */
@@ -231,7 +249,11 @@ function believedFromAnyPeer(input: ClientAddressInput): string | undefined {
 function believedFromTrustedNetworks(input: ClientAddressInput, trust: TrustedProxyNetworks): string | undefined {
   const peer = input.remoteAddress ? input.remoteAddress : undefined;
   if (!peer || !Array.isArray(trust.networks) || !insideNetworks(peer, trust.networks)) return peer;
-  const entries = headerEntries(input.headers, trust.header);
+  // The header defaults as authored, and is held to the closed list: a value
+  // that skipped `readTrustProxy` and names any other header believes none.
+  const header = trust.header ?? 'x-forwarded-for';
+  if (!(TRUSTED_PROXY_HEADERS as readonly unknown[]).includes(header)) return peer;
+  const entries = headerEntries(input.headers, header);
   if (entries.length === 0) return peer;
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i]!;

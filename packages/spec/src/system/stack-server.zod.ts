@@ -162,15 +162,18 @@ export type StackServerSecurityParsed = z.infer<typeof StackServerSecuritySchema
 
 /**
  * One `server.trustProxy.networks` entry: an IP address or a CIDR range, IPv4
- * or IPv6 — the spelling an ADR-0069 D5 `allowed_ip_ranges` entry takes. This
- * is the authoring-time shape check; the runtime's own reading of a range
+ * or IPv6 — the spelling an ADR-0069 D5 `allowed_ip_ranges` entry takes — and
+ * never a range of prefix length 0, which would stand in for `true`. This is
+ * the authoring-time SHAPE check; the runtime's own reading of a range
  * (`readTrustProxy` in `@objectstack/plugin-auth/client-address`) refuses at
- * boot anything it cannot read, so an entry is never silently dropped.
+ * boot what passes the shape but names no range (an address with a port, an
+ * IPv4-mapped prefix wider than the mapping), so an entry is never silently
+ * dropped.
  */
 const IPV4_OCTET = '(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])';
 const TRUSTED_NETWORK_ENTRY = new RegExp(
-  `^(?:${IPV4_OCTET}(?:\\.${IPV4_OCTET}){3}(?:/(?:3[0-2]|[12]?[0-9]))?`
-  + '|[0-9A-Fa-f.]*:[0-9A-Fa-f:.]*(?:/(?:12[0-8]|1[01][0-9]|[1-9]?[0-9]))?)$',
+  `^(?:${IPV4_OCTET}(?:\\.${IPV4_OCTET}){3}(?:/(?:3[0-2]|[12][0-9]|[1-9]))?`
+  + '|[0-9A-Fa-f.]*:[0-9A-Fa-f:.]*(?:/(?:12[0-8]|1[01][0-9]|[1-9][0-9]|[1-9]))?)$',
 );
 
 /**
@@ -197,12 +200,14 @@ export const TrustedProxyNetworksSchema = lazySchema(() => strictObject(
       z.string().regex(TRUSTED_NETWORK_ENTRY, {
         message:
           'is not an IP address or a CIDR range. Each entry is an address, or an address, "/" and a prefix length: '
-          + '0 to 32 for IPv4, 0 to 128 for IPv6 (e.g. "10.0.0.0/8", "192.0.2.7", "2001:db8::/32").',
+          + '1 to 32 for IPv4, 1 to 128 for IPv6 (e.g. "10.20.0.0/28", "192.0.2.7", "2001:db8::10"). A prefix '
+          + 'length of 0 would trust every connection as a proxy: name the proxies, or declare `true`.',
       }),
     ).min(1, { message: 'lists at least one proxy address or range' }).describe(
-      'The addresses or CIDR ranges (IPv4 or IPv6) of the reverse proxies this deployment runs. A forwarded header '
-      + 'is believed only when the connection comes from inside these networks, and the walk of `X-Forwarded-For` '
-      + 'skips every hop inside them.',
+      'The addresses or CIDR ranges (IPv4 or IPv6) of the reverse proxies this deployment runs, and nothing else. A '
+      + 'forwarded header is believed only when the connection comes from inside these networks, and the walk of '
+      + '`X-Forwarded-For` skips every hop inside them: EVERY address inside them is taken for a proxy, so a range '
+      + 'clients connect from does not belong here. A prefix length of 0 is refused.',
     ),
     header: z.enum(['x-forwarded-for', 'x-real-ip']).default('x-forwarded-for').describe(
       'The one header those proxies set. `x-forwarded-for` (the default) is read right to left past the trusted '
@@ -281,8 +286,9 @@ export const StackServerConfigSchema = lazySchema(() => strictObject(
      */
     trustProxy: z.union([z.boolean(), TrustedProxyNetworksSchema]).default(false).describe(
       'Believe `X-Forwarded-For` / `X-Real-IP` when identifying a caller. Prefer the trusted-network form, '
-      + "`{ networks: ['10.0.0.0/8'], header: 'x-forwarded-for' }`: the header is believed only from a connection "
-      + 'inside `networks` (your proxies) and `X-Forwarded-For` is read from the right, past them, so it stays sound '
+      + "`{ networks: ['10.20.0.0/28'], header: 'x-forwarded-for' }`: the header is believed only from a connection "
+      + 'inside `networks` — your proxies\' own addresses, never a range clients connect from, since every address '
+      + 'inside it is taken for a proxy — and `X-Forwarded-For` is read from the right, past them, so it stays sound '
       + 'behind a proxy that appends to the header. `true` believes the header from any connection and is sound ONLY '
       + 'when a reverse proxy you control OVERWRITES those headers on every inbound request, never appends to them. '
       + "Left `false` (the default) the caller IP is the transport's own peer address, which a client cannot forge. "

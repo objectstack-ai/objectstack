@@ -180,7 +180,7 @@ describe('server.trustProxy accepts a trusted-network form', () => {
   });
 
   it('refuses an entry that is not an address or a CIDR range', () => {
-    for (const entry of ['proxy.internal', '10.0.0.0/33', '256.0.0.1', '2001:db8::/129', '10.0.0.0/8 ', '']) {
+    for (const entry of ['proxy.internal', '10.0.0.0/33', '256.0.0.1', '2001:db8::/129', '10.0.0.0/8 ', '', '0.0.0.0/0', '::/0']) {
       const result = TrustedProxyNetworksSchema.safeParse({ networks: [entry] });
       expect(result.success, JSON.stringify(entry)).toBe(false);
       expect(result.error!.issues[0]!.path, JSON.stringify(entry)).toEqual(['networks', 0]);

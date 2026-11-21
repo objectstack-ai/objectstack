@@ -275,6 +275,29 @@ describe('ADR-0069 D5/D7 — under the trusted-network form the client is read f
     expect(d.userRow()?.last_login_ip).toBe(OUTSIDE);
   });
 
+  it('the header-less form is accepted by the auth manager as authored', () => {
+    const manager = new AuthManager({ secret: SECRET, baseUrl: ORIGIN, trustProxy: { networks: ['10.0.0.0/8'] } });
+    expect(manager.resolveClientAddress({
+      headers: { 'x-forwarded-for': `${INSIDE}, ${OUTSIDE}` },
+      remoteAddress: PROXY_HOP,
+    })).toBe(OUTSIDE);
+  });
+
+  it('an auth manager without a logger does not spend the once-per-process warning', () => {
+    const latch = globalThis as unknown as Record<symbol, unknown>;
+    const WARNED = Symbol.for('@objectstack/plugin-auth/client-address:legacy-trust-proxy-warned');
+    delete latch[WARNED];
+    const quiet = new AuthManager({ secret: SECRET, baseUrl: ORIGIN, trustProxy: true });
+    const multi = { headers: { 'x-forwarded-for': `${INSIDE}, ${PROXY_HOP}` }, remoteAddress: PROXY_HOP };
+    quiet.resolveClientAddress(multi);
+    expect(latch[WARNED]).toBeUndefined();
+    const warn = vi.fn();
+    const logged = new AuthManager({ secret: SECRET, baseUrl: ORIGIN, trustProxy: true, logger: { warn } });
+    logged.resolveClientAddress(multi);
+    expect(warn).toHaveBeenCalledTimes(1);
+    delete latch[WARNED];
+  });
+
   it('the auth manager reads the form as a declared trust and refuses a malformed one at construction', () => {
     const managerWith = (trustProxy: unknown) =>
       new AuthManager({ secret: SECRET, baseUrl: ORIGIN, trustProxy } as any);

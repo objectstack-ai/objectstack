@@ -77,7 +77,7 @@ export default defineStack({
                 maxRequests: 300,      // requests per caller per window
             },
         },
-        trustProxy: { networks: ['10.0.0.0/8'] },  // your proxies (see below)
+        trustProxy: { networks: ['10.20.0.0/28'] },  // your proxies' own addresses (see below)
     },
 });
 ```
@@ -123,8 +123,13 @@ no who:
 | Anonymous, no address can be established | one shared `ip:unknown` bucket, with a warning logged once — it over-throttles rather than failing open |
 
 Behind reverse proxies, declare the **trusted-network form**, naming them:
-`server.trustProxy: { networks: ['10.0.0.0/8', '2001:db8::/32'] }` (each
-entry an address or a CIDR range, IPv4 or IPv6). The header is believed only
+`server.trustProxy: { networks: ['10.20.0.0/28', '2001:db8::10'] }` (each
+entry an address or a CIDR range, IPv4 or IPv6). **Every address inside
+`networks` is taken for one of your proxies**, so list the proxies' own
+addresses or the narrow range they sit in, never a range your clients
+connect from (a whole `10.0.0.0/8` that also holds office clients makes
+those clients proxy hops). A prefix length of 0 is refused: it would stand
+in for `true`. The header is believed only
 on a connection from one of those proxies, and it is read from the right,
 past them, so it holds behind a proxy that *appends* to `X-Forwarded-For`
 (`$proxy_add_x_forwarded_for`, most load balancers) as well as one that

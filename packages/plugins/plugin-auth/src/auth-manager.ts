@@ -7862,7 +7862,9 @@ export class AuthManager {
       ...(transport.headers ? { headers: transport.headers } : {}),
       ...(transport.remoteAddress ? { remoteAddress: transport.remoteAddress } : {}),
       trustProxy: readTrustProxy(this.config.trustProxy),
-      warn: (message) => this.config.logger?.warn?.(message),
+      // Only a manager with a logger takes the warning: without one it would
+      // spend the once-per-process latch and say nothing.
+      ...(this.config.logger?.warn ? { warn: (message: string) => this.config.logger?.warn(message) } : {}),
     });
   }
 

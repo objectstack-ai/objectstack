@@ -413,6 +413,26 @@ describe('createInboundRateLimitMiddleware reads server.trustProxy in either for
         await expect(store.get('ip:198.51.100.1')).resolves.toBeUndefined();
     });
 
+    it('takes the authored form with no header, as a door typed for it', async () => {
+        const { store } = memoryStore();
+        const middleware = createInboundRateLimitMiddleware({
+            budget,
+            trustProxy: { networks: ['10.0.0.0/8'] },
+            resolveCache: async () => store,
+        })!;
+        const exchange = fakeExchange({
+            remoteAddress: '10.0.0.5',
+            headers: { 'x-forwarded-for': '198.51.100.1, 203.0.113.9' },
+        });
+        await middleware(exchange.req, exchange.res, exchange.next);
+        await expect(store.get('ip:203.0.113.9')).resolves.toBeDefined();
+        expect(resolveRateLimitKey({
+            remoteAddress: '10.0.0.5',
+            headers: { 'x-forwarded-for': '198.51.100.1, 203.0.113.9' },
+            trustProxy: { networks: ['10.0.0.0/8'] },
+        }).key).toBe('ip:203.0.113.9');
+    });
+
     it('refuses a malformed trusted-network form when it is built', () => {
         expect(() => createInboundRateLimitMiddleware({
             budget,

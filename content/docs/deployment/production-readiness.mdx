@@ -107,9 +107,10 @@ export default defineStack({
     security: {
       rateLimit: { enabled: true, windowMs: 60_000, maxRequests: 300 },
     },
-    // Your reverse proxies' addresses or ranges: X-Forwarded-For is believed
-    // only from them, and read from the right, past them.
-    trustProxy: { networks: ['10.0.0.0/8'] },
+    // Your reverse proxies' own addresses (never a range clients connect
+    // from): X-Forwarded-For is believed only from them, and read from the
+    // right, past them.
+    trustProxy: { networks: ['10.20.0.0/28'] },
   },
 });
 ```
@@ -122,7 +123,9 @@ address is the connection's peer address unless `server.trustProxy` is
 declared. Its trusted-network form, `{ networks: [...] }`, believes
 `X-Forwarded-For` only on a connection from inside `networks` (your proxies),
 and reads it from the right: every entry inside `networks` is a hop of yours,
-and the first entry outside them is the client. `header: 'x-real-ip'` reads
+and the first entry outside them is the client. Every address inside
+`networks` is taken for a proxy, so list only your proxies' addresses, never
+a range your clients connect from; a prefix length of 0 is refused. `header: 'x-real-ip'` reads
 `X-Real-IP` instead, for a proxy that sets that header. `true` believes the
 leftmost `X-Forwarded-For` entry (else `X-Real-IP`) from any connection, so
 it is sound only when a reverse proxy you control overwrites that header on
