@@ -237,6 +237,7 @@ const zhHant = {
       noChildObject: '此面板未配置子物件：請將 {{property}} 設為其所列行所屬的物件。',
     },
     keepEditing: '繼續編輯',
+    createMore: '連續建立',
     discard: '放棄',
     conflictTitle: '儲存衝突',
     conflictMessage: '您編輯期間，這條記錄已被其他人修改。覆蓋儲存將用您的內容替換對方的修改。',

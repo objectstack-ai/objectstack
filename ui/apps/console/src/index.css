@@ -448,8 +448,10 @@ header.sticky {
   background-color: hsl(var(--background) / 0.6) !important;
 }
 
-/* Soft, diffuse iOS elevation on floating surfaces (dialogs, menus, popovers). */
-[role="dialog"],
+/* Soft, diffuse iOS elevation on floating surfaces (drawers, menus, popovers).
+   A modal dialog draws its own two-layer card (`dialog-surface`,
+   `packages/components/src/lib/dialog-surface.ts`) and is skipped here. */
+[role="dialog"]:not(.dialog-surface),
 [role="menu"],
 [data-radix-popper-content-wrapper] > * {
   box-shadow:
@@ -513,11 +515,14 @@ header.sticky {
   background-color: hsl(135 59% 49%) !important;
 }
 
-/* iOS sheet/dialog: extra-rounded corners, for surfaces that float or rise from
-   the bottom. A full-height edge drawer (the left/right Sheet, whose variant
-   pins it with `inset-y-0`) meets the viewport on three edges, so it keeps
-   square corners. */
-[role="dialog"]:not(.inset-y-0) {
+/* iOS popover / bottom drawer: extra-rounded corners on the surfaces that float
+   beside a control or rise from the bottom. Keyed on their own containers —
+   a popover inside the floating layer's wrapper, the bottom drawer by its own
+   attribute — and no longer on every `[role="dialog"]`: a modal dialog carries
+   its own corner (`dialog-surface`), and a full-height edge drawer meets the
+   viewport on three edges, so it keeps square corners. */
+[data-radix-popper-content-wrapper] > [role="dialog"],
+[data-vaul-drawer] {
   border-radius: 1.25rem !important;
 }
 
@@ -551,8 +556,10 @@ header.sticky {
  * (CSS-only overrides; shadcn ui components not edited)
  * ------------------------------------------------------------ */
 
-/* iOS "spotlight"-style backdrop: blur + lighten the dim behind any
-   dialog / sheet / command palette overlay instead of a flat 80% black. */
+/* iOS "spotlight"-style backdrop for drawers: blur + lighten the dim behind a
+   sheet or a bottom drawer instead of a flat 80% black. A modal dialog's
+   overlay no longer carries `bg-black/80` (its faint, unblurred dim is
+   `DIALOG_OVERLAY_SURFACE`), so this rule reaches drawers only. */
 .fixed.inset-0.z-50.bg-black\/80 {
   background-color: rgb(0 0 0 / 0.35) !important;
   -webkit-backdrop-filter: blur(8px) saturate(140%);

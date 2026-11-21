@@ -225,6 +225,7 @@ const ja = {
       noChildObject: "このパネルには子オブジェクトが設定されていません。{{property}} に、行を一覧表示するオブジェクトを設定してください。",
     },
     keepEditing: "編集を続ける",
+    createMore: "続けて作成",
     discard: "破棄",
     conflictTitle: "保存の競合",
     conflictMessage: "編集中にこのレコードが他のユーザーによって変更されました。上書きすると、相手の変更はあなたの内容で置き換えられます。",

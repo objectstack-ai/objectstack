@@ -962,7 +962,7 @@
       "title": "Form-view gallery: every FormViewSchema layout type renders and submits",
       "since": "v15",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -991,7 +991,7 @@
         "overlay the default form with the tabbed variant (type tabbed + the sections of formViews.tabbed, through the fixtures.requires[0] recipe with item-level isDefault:true); reopen the page form; verify the three tabs (Overview / Schedule / Details) and that switching tabs preserves entered values",
         "overlay the default form with the wizard variant; open the PAGE form (…/showcase_task/new, or the record's /edit route — RecordFormPage passes the type in both modes); walk Basics → Assignment → Schedule with next/back; verify back preserves values and submit happens ONCE at the end. The New/Edit MODAL renders a wizard as a stacked section list by design (resolveFormViewLayout), so the steps are walked on the page route",
         "RETIRED-TYPE refusal: put the default-form overlay of fixtures.requires[0] with type 'split', then 'drawer', then 'modal' (any sections), and capture each refusal: a 422 whose message names the retired value with its prescription (FORM_VIEW_TYPE_RETIRED). Record whether the draft PUT or its publish answered it. Then re-read GET /api/v1/meta/view/showcase_task.form and confirm none of the three landed. There is no split pane to look for: the showcase's formViews.split is now a two-tab tabbed form",
-        "drawer and modal: open task-desk.page.ts; click a task row — ObjectForm formType=\"drawer\" opens as a side panel over the list with the task's fields; click New task — ObjectForm formType=\"modal\" opens as a dialog. These are the React block's containers, which ADR-0050 keeps (the block is the caller that opens the form); a form view can no longer name either (steps[3])",
+        "drawer and modal: open task-desk.page.ts; click a task's title (or select one of its cells and press Space) — ObjectForm formType=\"drawer\" opens as a side panel over the list with the task's fields; click New task — ObjectForm formType=\"modal\" opens as a dialog. These are the React block's containers, which ADR-0050 keeps (the block is the caller that opens the form); a form view can no longer name either (steps[3])",
         "on the simple form, set priority to 'urgent' and verify the notes field appears (FormField.visibleWhen CEL); set it back and verify notes hides",
         "save an edit through each rendered variant; capture each save request; re-read via GET /api/v1/data/showcase_task/<id>. The page form's /new and /edit routes are reached by URL only: the record page's Edit opens the form as a modal (?form=ID, footer 'Update'), not the page (QA run #33861). A deep-linked page form saves and stays in the app: RecordFormPage's goBack goes back one entry only when the console pushed one (history.state.idx above 0) and otherwise replaces to the record page (edit) or the list (create) (ui/packages/app-shell/src/views/RecordFormPage.tsx)",
         "revert the default-form overlay so the stock simple form is back — DELETE /api/v1/meta/view/showcase_task.form, the reset door, which restores the artifact default byte-identically (QA run #24572) — and confirm it with a re-read of the view"
@@ -1097,6 +1097,12 @@
           "date": "2026-11-15",
           "change": "steps[6] re-pointed: the record page's Edit opens a modal (?form=ID), so the page routes are reached by URL (QA run #33861, ledger row 140), and a deep-linked page form no longer leaves the document on save (RecordFormPage goBack replaces to the record or the list when nothing was pushed). No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
           "ref": "#33990"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-21",
+          "change": "steps[4] opens the edit drawer from a task's title link, or Space on a selected cell: the list is select-first since #35684, so a click on an assignee, status or priority cell only selects it. No clause changed. Read at base c00be39b",
+          "ref": "#35794"
         }
       ]
     },
@@ -6510,7 +6516,7 @@
       "title": "Defaults that changed meaning on v18 (ADR-0087 D3 18.* entries): an omitted list-view page size is 50 (was 25), an omitted editInline means editable in place, an autonumber with no `unique` is unique per organization, and a field-heavy form opens as a bounded modal on desktop",
       "since": "v18",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -6530,8 +6536,8 @@
         ]
       },
       "steps": [
-        "GET /api/v1/meta/view/VIEW to confirm the view declares no pagination and no userActions block — the meta read serves the authored view, so nothing resolved can be read there; the defaults show only in the renderer (the list request's top=50, the Edit inline switch). Seed more than 50 rows on the object whose list you count first (fixtures.requires[2]: no stock object holds that many), then open the list in the console and count the first page",
-        "as a member who may update, open the list and confirm the inline-edit affordance — the 'Edit inline' switch in the list's Display / view-settings popover at desktop width; as a read-only member confirm it is absent. The edit mode itself is session state that starts OFF (objectui app-shell ObjectView.tsx: 'The edit mode is now session state'), so cells are not editable on load until the switch is turned on — a click on a cell opens the record before then",
+        "GET /api/v1/meta/view/VIEW to confirm the view declares no pagination and no userActions block — the meta read serves the authored view, so nothing resolved can be read there; the defaults show only in the renderer (the list request's top=50, cells editable in place). Seed more than 50 rows on the object whose list you count first (fixtures.requires[2]: no stock object holds that many), then open the list in the console and count the first page",
+        "as a member who may update, open the list and confirm the inline-edit affordance — the list is editable in place with no switch and no mode: a click on a data cell selects it, and a double-click, Enter or typing opens its editor; as a read-only member select a cell and press Enter — the cell says why it cannot be edited and no editor opens",
         "create two rows of an autonumber object in the same org and read their numbers",
         "open New on a field-heavy object on a desktop viewport, then on a mobile viewport"
       ],
@@ -6549,7 +6555,7 @@
           "evidence": "row count + one-line screenshot description"
         },
         {
-          "clause": "inline edit is offered to an updater and absent for a read-only member with editInline omitted — 'offered' means the Edit inline switch is present (the edit mode starts off for the session, steps[1])",
+          "clause": "inline edit is offered to an updater and absent for a read-only member with editInline omitted — 'offered' means a selected cell opens its editor on Enter or a double-click, and 'absent' means the cell says why instead (steps[1])",
           "oracle": "screenshot",
           "verify": "per-persona affordance",
           "evidence": "two one-line descriptions"
@@ -6623,6 +6629,12 @@
           "date": "2026-11-19",
           "change": "acceptance[1] reads 'first window' for 'first page': since #35554 a list view with no declared `pagination` draws no pager and loads its next 50 as it scrolls; the 50-row default it pins is unchanged. Read at base 93fa4f97",
           "ref": "#35554"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-21",
+          "change": "steps[0], steps[1] and acceptance[2].clause follow #35684: the list is editable in place with no Edit inline switch and no session mode; a click selects a cell, a double-click, Enter or typing edits it, and for a read-only member the cell says why it cannot be edited. The 50-row and form-shape clauses are unchanged. Read at base c00be39b",
+          "ref": "#35794"
         }
       ]
     },
