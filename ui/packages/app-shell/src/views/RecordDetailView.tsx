@@ -4876,10 +4876,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // same `icon` key the app's actions use, so every row draws one kind
         // of entry. `page:header` keeps this CTA a labelled button in the row
         // at every width: it takes none of the app's `maxVisible` slots and
-        // never folds into the `⋯` (objectui#12617). It is the filled primary
-        // button only when the record has no app action ahead of it; next to
-        // app actions it is an outline button, which `page:header` decides —
-        // no `variant` is declared here for it to read.
+        // never folds into the `⋯` (objectui#12617). It is an outline button
+        // in the header row whether or not the record has app actions
+        // (objectstack#36049; before, it drew filled when it had none);
+        // `page:header` decides that — no `variant` is declared here for it
+        // to read. The phone's bottom bar still draws it filled.
         icon: 'pencil',
         type: 'script',
         locations: ['record_header'],

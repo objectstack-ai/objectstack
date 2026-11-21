@@ -543,6 +543,9 @@ const zhHant = {
     cancelChanges: '取消更改',
     saveRow: '儲存行',
     cellReadOnly: '此單元格不能在這裡編輯。',
+    // objectstack#36023 — why a list cell's typed value was not saved, under the editor.
+    cellNotNumber: '請輸入數字。',
+    cellInvalid: '這個值無效。',
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: '儲存中…',
     cellSaved: '已儲存',
@@ -636,7 +639,7 @@ const zhHant = {
       earliest: '最早',
       latest: '最晚',
       pageName: '{{label}}（本頁）',
-      calculate: '計算',
+      calculate: '新增統計',
       none: '無',
       menuPercentEmpty: '空值佔比',
       menuPercentFilled: '非空佔比',
@@ -1255,6 +1258,7 @@ const zhHant = {
   },
   view: {
     editViewConfig: '編輯檢視配置',
+    showViewConfig: '查閱檢視配置',
     rename: '重新命名',
     duplicateView: '複製檢視',
     shareView: '共享檢視',
@@ -2741,11 +2745,25 @@ const zhHant = {
       },
       systemViewReadonly: '系統檢視由程式碼定義，只讀。',
       cannotEditMetaView: '該檢視為內建檢視，由程式碼定義，無法修改。',
+      // The 「Personalized · Reset to view」 marker's words (objectstack#28950), no longer drawn
+      // since objectstack#35955: kept in every pack, so no published key goes away.
       resetView: '恢復為檢視設定',
       resetViewTitle: '恢復此檢視自身的篩選、搜尋、排序、分組、列布局、隱藏欄位、密度、佈局、行顏色、行號和行內編輯。固定的檢視、收藏和記錄的開啟方式保持不變。只影響你自己的列表。',
-      linkFilterRefused: '此連結的篩選條件未應用：其中包含你在此處無法篩選的欄位，因此列表按檢視本身顯示。',
       personalized: '已個性化',
       personalizedHeading: '你的列表與此檢視不同之處',
+      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      draft: {
+        discard: '放棄',
+        discardTitle: '把列表恢復成檢視本來的樣子：篩選、排序、分組、列和佈局。列寬和行高不變。',
+        save: '儲存',
+        heading: '未儲存的改動',
+        partSeparator: '、',
+        saveToView: '儲存到這個檢視',
+        saveAsMyView: '另存為我的檢視',
+        copyName: '{{name}} 副本',
+        saved: '已儲存',
+      },
+      linkFilterRefused: '此連結的篩選條件未應用：其中包含你在此處無法篩選的欄位，因此列表按檢視本身顯示。',
       personalizedParts: {
         filters: '篩選',
         search: '搜尋',

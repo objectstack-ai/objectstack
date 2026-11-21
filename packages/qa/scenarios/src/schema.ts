@@ -466,10 +466,10 @@ export const OutcomeSchema = z.discriminatedUnion('kind', [
     code: ErrorCode,
   }),
   /**
-   * The agent asks first and writes nothing until confirmed. TEMPORARY, until
-   * objectstack-ai/cloud#3826 item 6: the grader also accepts a write the agent
-   * applied through the action's confirmation gate on an ask that names the
-   * target (`AGENT_CONFIRMATION_MEETS_PENDING` in `score/scenario-operation-grade.ts`).
+   * The agent asks first and writes nothing until confirmed, graded strictly: a
+   * write the agent applied itself fails, whatever route it took. (The temporary
+   * relaxation, `AGENT_CONFIRMATION_MEETS_PENDING` in
+   * `score/scenario-operation-grade.ts`, is off and deprecated.)
    */
   z.strictObject({ kind: z.literal('pending_confirmation') }),
 ]);

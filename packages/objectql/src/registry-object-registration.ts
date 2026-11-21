@@ -54,6 +54,7 @@ import { SEARCH_COMPANION_FIELD, provisionSearchCompanion } from './search-compa
 import { applyProtection } from '@objectstack/spec/shared';
 import { isObjectLessActionKey, standaloneActionOwnerKey } from './action-governance.js';
 import { recordCurrencyFollowRefusal, recordCurrencySummaryRefusal } from './record-currency-aggregate-door.js';
+import { recordUnitSummaryRefusal } from './record-unit-aggregate-door.js';
 import type { RecordCurrencyFollowRefusedError } from './record-currency-aggregate-door.js';
 import {
   DEFAULT_EXTENDER_PRIORITY, DEFAULT_OVERLAY_PRIORITY, DEFAULT_OWNER_PRIORITY, NO_PACKAGE_REFERRER,
@@ -263,6 +264,15 @@ export class ObjectRegistrationFacet {
       () => this.getAllObjects(),
     );
     if (recordCurrencySummary) return { refusal: recordCurrencySummary };
+    // [ADR-0158 U7 R1, L3] Beside it, its twin over a `record`-mode quantity:
+    // every such roll-up is refused in R1, whichever end registers second.
+    // See `record-unit-aggregate-door.ts`.
+    const recordUnitSummary = recordUnitSummaryRefusal(
+      schema,
+      (name) => this.getObject(name),
+      () => this.getAllObjects(),
+    );
+    if (recordUnitSummary) return { refusal: recordUnitSummary };
     // [ADR-0144 D2 and D6, amended] Beside it, for the same reason: a
     // following amount whose parent holds no code field under that name, and a
     // `record` roll-up over a child amount that follows nothing — the halves

@@ -72,7 +72,7 @@ export class QueryPlanFacet {
     await primeFixedReadLeafKeyTypes(this, object, query.where, options);
     // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
     // the remote catalog before a comparand or a written value is bound.
-    if (this.isOracle) await this.primeOracleRawUuidColumns(object);
+    if (this.isOracle) await this.primeOracleRawUuidColumns(object, query.where);
     const builder = this.getBuilder(object, options);
     // A PLAN, not rows — so this is a smaller fix than the one above, and it is
     // made on its own merits rather than riding in on that one (#6792). It is
