@@ -1,16 +1,22 @@
 ---
 '@object-ui/app-shell': patch
+'@object-ui/console': patch
 '@object-ui/plugin-view': patch
 '@object-ui/i18n': patch
 ---
 
-fix(ui): a view a read-only package ships opens a read-only view panel and offers no Manage views writes
+fix(ui): a view a read-only package ships hides only Delete in Manage views and opens its view panel read-only
 
 Clause-②: yes (widening)
 Metadata-protocol: none
 
-On a list view that ships inside a read-only package (a code or installed package), the admin's view panel now opens read-only. It shows the view's configuration with every control disabled and relays no edit to the list. It offers no Save and no way to publish or discard a draft, only Close. In Manage views the same view's row is read-only: no pin, no set as default, no rename and no delete, each of which the server refused ("save it into the customization package"). Its menu keeps one entry, "View config", which opens that read-only panel. A shared view the console saved into the customization package and the reader's own view are unchanged. The toolbar's personal list changes keep saving to the reader's preferences.
+This applies to a list view that ships inside a read-only package (a code or installed package). The console no longer offers that view the two writes the server refuses:
 
-`@object-ui/plugin-view`: `ViewTabItem` gains an optional `readonlyConfigViewable` field. It is read on a `readonly` row only: `ManageViewsDialog` then keeps the row's configuration entry, labelled "View config" (`view.showViewConfig`, a new key in every locale of `@object-ui/i18n`), and leaves every other mutation hidden. Without the field a read-only row offers no configuration entry, as before, and a mutable row ignores it. `ViewTabBar` does not read it.
+- Manage views hides Delete on its row.
+- The row's configuration entry reads "View config". It opens the admin's view panel read-only: the configuration is shown read-only, no edit reaches the list, and there is nothing to save. The panel has no Save, no draft bar to publish or discard, and only Close.
 
-The read-only verdict is the one the footer calculation menu and Rename already use. The console takes the package the view row was served under and reads the server's `writable` verdict for it from the package list it holds for the session. While that list is unread, or when the read fails or does not name the package, everything stays offered as before and the server's refusal still applies.
+Rename, pin and set as default stay offered. They land in that package's customization (the console creates it on first use), so no lock icon is drawn on the row. The list's options menu offers Rename on such a view again. A shared view the console saved into the customization package, and the reader's own view, are unchanged. The toolbar's personal list changes keep saving to the reader's preferences.
+
+`@object-ui/plugin-view`: `ViewTabItem` gains an optional `definitionReadonly` field. When it is `true`, `ManageViewsDialog` hides Delete and labels the configuration entry "View config" (`view.showViewConfig`, a new key in every locale of `@object-ui/i18n`). Rename, pin, set as default and the configuration entry stay. `readonly` still wins when both are set. Without the field a row behaves as before. `ViewTabBar` does not read it.
+
+The read-only verdict is the one the footer calculation menu already uses. The console takes the package the view row was served under and reads the server's `writable` verdict for it from the package list it holds for the session. While that list is unread, or when the read fails or does not name the package, everything stays offered as before and the server's refusal still applies.
