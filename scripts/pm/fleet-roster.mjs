@@ -26,9 +26,11 @@
  *   3  finding — the bare `finding` label count (= the ungraded count: a held card has changed label), median age.
  *   4  裸卡 — first-touch-sweep's disjunction ① from the sweep's OWN walk (no separate query, the runbook's bare-card
  *      exception), median age = first-touch debt; the ungraded count apart, from disjunction ④.
- *   5  发版阻塞 — open `priority:p0` issues summed over the repos read. Which three repos the rule means and what
- *      窗内 bounds are not machine-readable from the rule text, so both are named unread legs and the reading used
- *      is printed. The total open count is deliberately not an indicator.
+ *   5  发版阻塞 — open `priority:p0` issues summed over the two release boards the rule names, the main repo and
+ *      cloud (`RELEASE_BOARD_REPOS`), whatever `--repos` holds: a board in `--repos` is read off its walk, a board
+ *      outside it by its platform count alone, and a board that does not answer is a named gap. What 窗内 bounds is
+ *      not machine-readable from the rule text, so it stays a named unread leg. The total open count is
+ *      deliberately not an indicator.
  *
  * One walk per repo: `first-touch-sweep.mjs`'s `sweep()` runs with an injected reader that also keeps the rows it
  * walked, so ①/④ and every other indicator come off one enumeration that already equals the platform's open count.
@@ -649,7 +651,7 @@ export const HEALTH_RULE_FILES = Object.freeze({
     'M = open `pm:awaiting-merge` PR,两数 ⛔ 不合计;决策卡点名有开放下游者(`Blocked-by:` 反查现算)',
     'finding 数与中位年龄:裸标签数即未定级数,hold 已换标不在内',
     '裸卡数与中位年龄:sweep 析取①,未定级数另计析取④;老化 = 首触欠账',
-    '发版阻塞 = 窗内三仓 open `priority:p0` 之和,归零 = 三张板都空;总 open 数刻意不在指标内',
+    '发版阻塞 = 窗内主仓、cloud open `priority:p0` 之和,归零 = 两张板都空;总 open 数刻意不计',
     '`fleet-roster.mjs --health`',
   ],
   '.claude/skills/pm-dispatch/references/dispatch-runbook.md': [
@@ -658,9 +660,12 @@ export const HEALTH_RULE_FILES = Object.freeze({
     '每条枚举比对返回数与 `totalCount`',
     '`fleet-roster.mjs --health`',
   ],
-  // The release-board neighbour the 「三仓」 leg quotes: it names TWO boards, so the rule's three are unread.
-  '.claude/skills/pm-dispatch/references/seat-post-protocol.md': ['两仓两条查询 `label:priority:p0 is:open`'],
+  // The release list's definition: the two producers, the two queries and the zero condition `RELEASE_BOARD_REPOS` encodes.
+  '.claude/skills/pm-dispatch/references/seat-post-protocol.md': ['主仓归总监席,cloud 归其整仓座位', '两仓两条查询 `label:priority:p0 is:open`', '归零 = 可发版指两张板都空'],
 });
+
+/** The two release boards 发版阻塞 sums — the main repo and cloud, as both rule files name them. `--repos` never changes this set. */
+export const RELEASE_BOARD_REPOS = Object.freeze(['objectstack-ai/objectstack', 'objectstack-ai/cloud']);
 
 export const QUEUE_LABEL = 'pm:queue';
 export const FINDING_LABEL = 'finding';
@@ -685,7 +690,6 @@ export const searchPath = (repo, q, perPage = 1) => `/search/issues?q=${encodeUR
 /** The legs `--health` cannot read, printed under every run so an absent leg never reads as clean. */
 export const HEALTH_UNREAD_LEGS = Object.freeze([
   "the inventory's trend (可派发库存 …及趋势) — a trend needs an earlier reading of the same count and none is durable: the roster body carries the inbox line only and the round report lives in the chat channel; compare with the previous round's line by hand",
-  "发版阻塞's 「三仓」 — the rule names no repos and its neighbour (`seat-post-protocol.md` 发版板运维) names two boards, the main repo and cloud; this run sums the repos it read (`--repos`; the default list holds no cloud board)",
   "the release window (窗内) — the rule names no machine reading of it; every open p0 counts, main-red anchors included, as the maintainer's own query lists them",
   "a `Blocked-by:` line in a comment of a card that is not `pm:blocked` — the body line is read on every open card, the thread only on `pm:blocked` cards",
   'a downstream card in a repository outside `--repos` — the reverse read sees only the repos read',
@@ -704,9 +708,10 @@ const shortRepo = (r) => r.split('/')[1];
 
 /**
  * The five indicators from the per-repo readings (`readHealthRepo`'s shape, or `{ repo, unreadable }`). Pure.
- * Every gap a reading carries, and every repo that did not answer, is a gap of the whole run.
+ * Every gap a reading carries, and every repo that did not answer, is a gap of the whole run. `boards` carries
+ * `readReleaseBoard`'s answer for each release board outside `readings`; a board in neither is a gap, never a zero.
  */
-export function judgeHealth(readings, { nowMs }) {
+export function judgeHealth(readings, { nowMs, boards = [] }) {
   const read = readings.filter((r) => !r.unreadable);
   const gaps = [
     ...readings.filter((r) => r.unreadable).map((r) => `${r.repo} could not be read — ${r.unreadable}`),
@@ -724,7 +729,14 @@ export function judgeHealth(readings, { nowMs }) {
   const findings = read.flatMap((r) => r.counts.finding.walk);
   const bare = read.flatMap((r) => r.sweep.found[1]);
   const queue = perRepo((r) => r.counts.queue.walk.length);
-  const p0 = perRepo((r) => r.counts.p0.walk.length);
+  const p0 = RELEASE_BOARD_REPOS.map((repo) => {
+    const walked = readings.find((r) => r.repo === repo);
+    if (walked) return walked.unreadable ? { repo, n: null, via: 'walk' } : { repo, n: walked.counts.p0.walk.length, via: 'walk' };
+    const b = boards.find((x) => x.repo === repo);
+    if (typeof b?.n === 'number') return { repo, n: b.n, via: 'count' };
+    gaps.push(`${repo} (release board): ${b?.unreadable ?? `open ${P0_LABEL} was not read`}`);
+    return { repo, n: null, via: 'count' };
+  });
   return {
     repos: readings.map((r) => r.repo),
     walks: readings.map((r) => (r.unreadable ? { repo: r.repo, unreadable: r.unreadable } : { repo: r.repo, enumerated: r.sweep.enumerated, pages: r.sweep.pages, totalCount: r.sweep.totalCount })),
@@ -744,7 +756,7 @@ export const healthExit = (h) => (h.unanswered ? EXIT_PREREQUISITE : h.complete 
 
 /** The text `--health` prints: a header, one line per indicator, the unread legs, the verdict. Pure. */
 export function renderHealth(h, { now }) {
-  const split = (list) => list.map((x) => `${shortRepo(x.repo)} ${x.n}`).join(' · ');
+  const split = (list) => list.map((x) => `${shortRepo(x.repo)} ${x.n ?? 'UNREAD'}${x.via === 'count' && x.n !== null ? ' (platform count alone: outside --repos)' : ''}`).join(' · ');
   const ageOf = (hrs) => (hrs === null ? 'no card' : relAge(hrs));
   const ref = (key) => key.replace(/^[^/]+\//, '');
   // An INCOMPLETE run marks every indicator line, so a line copied out of it never reads clean; a run no repository
@@ -755,7 +767,7 @@ export function renderHealth(h, { now }) {
     `2 决策箱 — 决策卡 ${h.inbox.decisionCards} · 待您审合 PR ${h.inbox.awaitingMergePulls} (two inboxes, never summed) · decision cards an open card names on a Blocked-by: line (reverse read, now): ${h.inbox.downstream.length} of ${h.inbox.decisionCards}${h.inbox.downstream.length ? ` — ${h.inbox.downstream.map((d) => `${ref(d.card)} ← ${d.dependents.map(ref).join(', ')}`).join('; ')}` : ''}`,
     `3 finding — ${h.findings.total} open (the bare label is the ungraded count; a held card has changed label), median age ${ageOf(h.findings.medianAgeHours)} (${split(h.findings.perRepo)})`,
     `4 裸卡 — ${h.bare.total} bare (${split(h.bare.perRepo)}; first-touch-sweep ①, off the sweep's own walk), median age ${ageOf(h.bare.medianAgeHours)} = first-touch debt · ungraded (④) ${h.bare.ungraded}`,
-    `5 发版阻塞 — open ${P0_LABEL} issues summed over the repos read: ${h.releaseBlockers.total} (${split(h.releaseBlockers.perRepo)}); zero means every board read is empty · the total open count is deliberately not an indicator`,
+    `5 发版阻塞 — open ${P0_LABEL} issues summed over the two release boards, the main repo and cloud: ${h.releaseBlockers.total} (${split(h.releaseBlockers.perRepo)}); zero means both boards are empty · the total open count is deliberately not an indicator`,
   ];
   const lines = [
     `fleet-roster --health — read ${now} · repos ${h.repos.join(', ')} · read-only, nothing written`,
@@ -894,11 +906,23 @@ export function pacedSearch(get, sleep) {
 }
 const sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
-/** Read every repo and judge: the whole `--health` run as data. */
+/**
+ * A release board outside `--repos`: its open `priority:p0` count as the platform answers it (runbook 之三,
+ * `per_page=1` → `total_count`), `{ repo, n }`, or `{ repo, unreadable }` naming why. No walk is made for it.
+ */
+export function readReleaseBoard(repo, { get }) {
+  const t = get(searchPath(repo, HEALTH_COUNTS.p0.q));
+  if (!t.ok || typeof t.value?.total_count !== 'number') return { repo, unreadable: `the platform count of open ${P0_LABEL} did not answer (${t.ok ? 'no total_count' : t.error})` };
+  if (t.value.incomplete_results === true) return { repo, unreadable: `the platform count of open ${P0_LABEL} answered incomplete_results` };
+  return { repo, n: t.value.total_count };
+}
+
+/** Read every repo, then each release board outside them, and judge: the whole `--health` run as data. */
 export async function readHealth(repos, { get, nowMs, sweepFn = null }) {
   const readings = [];
   for (const repo of repos) readings.push(await readHealthRepo(repo, { get, nowMs, sweepFn }));
-  return judgeHealth(readings, { nowMs });
+  const boards = RELEASE_BOARD_REPOS.filter((b) => !repos.includes(b)).map((b) => readReleaseBoard(b, { get }));
+  return judgeHealth(readings, { nowMs, boards });
 }
 
 // ---------------------------------------------------------------------------
@@ -1074,7 +1098,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the CLI: fixture runs offline, usage errors are exit 2': 6,
   'paging: a three-page read through the loop equals the slurped array': 4,
   'the health rule text: every phrase --health is built from is in the file that writes it': 4,
-  '--health: five indicators off one walk, every count checked, every gap named': 25,
+  // 25 → 28: 发版阻塞 reads the two release boards whatever `--repos` holds; a board that does not answer is a gap.
+  '--health: five indicators off one walk, every count checked, every gap named': 28,
 });
 const SELF_TEST_BATTERY_FLOOR = 12;
 
@@ -1334,12 +1359,14 @@ async function selfTest() {
 
   battery('--health: five indicators off one walk, every count checked, every gap named');
   {
-    const H = fixture.health;
-    const nowMs = Date.parse(H.now);
     const OS = 'objectstack-ai/objectstack';
     const CRM = 'objectstack-ai/hotcrm';
+    const CLOUD = 'objectstack-ai/cloud';
+    // The fixture file holds no cloud board; the second release board is added here, read by its platform count alone.
+    const H = { ...fixture.health, repos: { ...fixture.health.repos, [CLOUD]: { totals: { p0: 4 } } } };
+    const nowMs = Date.parse(H.now);
     const withRepo = (repo, over) => ({ ...H, repos: { ...H.repos, [repo]: { ...H.repos[repo], ...over } } });
-    const run = (health, repos = Object.keys(health.repos), extra = {}) => readHealth(repos, { get: healthFixtureGet(health), nowMs, ...extra });
+    const run = (health, repos = Object.keys(fixture.health.repos), extra = {}) => readHealth(repos, { get: healthFixtureGet(health), nowMs, ...extra });
     const h = await run(H);
     const two = await run(H, [OS, CRM]);
     t('⭐ 可派发库存: open pm:queue with no assignee, per repo and total — the trend is never a number', [h.inventory.total, h.inventory.perRepo.map((x) => x.n), h.inventory.trend], [3, [2, 1], null]);
@@ -1349,7 +1376,13 @@ async function selfTest() {
     const { classify } = await import('./first-touch-sweep.mjs');
     const sweepBare = H.repos[OS].issues.filter((i) => classify(i, { repo: OS, nowMs }).includes(1)).map((i) => `${OS}#${i.number}`);
     t('⭐ 裸卡 is first-touch-sweep ① off the sweep\'s own walk — imported, never re-spelled — with its median age and ④ apart', [h.bare.cards, h.bare.cards, h.bare.medianAgeHours, h.bare.ungraded], [sweepBare, [`${OS}#108`, `${OS}#109`, `${OS}#110`], 24, 1]);
-    t('发版阻塞: open priority:p0 summed over the repos read', [h.releaseBlockers.total, h.releaseBlockers.perRepo.map((x) => x.n)], [2, [1, 1]]);
+    t('⭐ 发版阻塞: open priority:p0 summed over the two release boards, the main repo and cloud — a p0 on another repo read (hotcrm holds one) is not in it', [RELEASE_BOARD_REPOS, h.releaseBlockers.total, h.releaseBlockers.perRepo, H.repos[CRM].issues.filter(HEALTH_COUNTS.p0.of).length], [[OS, CLOUD], 5, [{ repo: OS, n: 1, via: 'walk' }, { repo: CLOUD, n: 4, via: 'count' }], 1]);
+    const bothWalked = await run(withRepo(CLOUD, { issues: [{ number: 1, created_at: H.now, labels: [{ name: P0_LABEL }] }], totals: {} }), [OS, CLOUD]);
+    const crmOnly = await run(H, [CRM]);
+    t('--repos never changes the set: both boards walked, or neither walked, the same two are summed', [bothWalked.gaps, bothWalked.releaseBlockers.perRepo, crmOnly.gaps, crmOnly.releaseBlockers.perRepo], [[], [{ repo: OS, n: 1, via: 'walk' }, { repo: CLOUD, n: 1, via: 'walk' }], [], [{ repo: OS, n: 1, via: 'count' }, { repo: CLOUD, n: 4, via: 'count' }]]);
+    const noCloud = await run(fixture.health, [OS, CRM]);
+    const partialBoard = await run(withRepo(CLOUD, {}), [OS, CRM], { get: (p) => { const r = healthFixtureGet(H)(p); return p.includes(encodeURIComponent(`repo:${CLOUD} `)) && r.ok ? { ok: true, value: { ...r.value, incomplete_results: true } } : r; } });
+    t('⭐ a release board that does not answer is a named gap and prints UNREAD: INCOMPLETE, exit 4, never a sum that reads whole', [healthExit(noCloud), noCloud.gaps, noCloud.releaseBlockers.perRepo.map((x) => x.n), /^5 [^\n]*cloud UNREAD\); zero means both boards are empty[^\n]*INCOMPLETE run/m.test(renderHealth(noCloud, { now: H.now })), partialBoard.gaps, judgeHealth([], { nowMs }).gaps], [EXIT_INCOMPLETE, [`${CLOUD} (release board): the platform count of open ${P0_LABEL} did not answer (HTTP 422)`], [1, null], true, [`${CLOUD} (release board): the platform count of open ${P0_LABEL} answered incomplete_results`], [`${OS} (release board): open ${P0_LABEL} was not read`, `${CLOUD} (release board): open ${P0_LABEL} was not read`]]);
     t('⭐ an unreadable repo is a named gap: INCOMPLETE, exit 4, never a clean number', [healthExit(h), h.gaps.some((g) => g.startsWith('objectstack-ai/objectui could not be read') && g.includes('HTTP 403')), renderHealth(h, { now: H.now }).includes('COMPLETE — five')], [EXIT_INCOMPLETE, true, false]);
     t('the repos that answer, read alone, are COMPLETE, exit 0', [healthExit(two), two.gaps, renderHealth(two, { now: H.now }).split('\n').at(-1).startsWith('fleet-roster --health COMPLETE')], [EXIT_OK, [], true]);
     const queueGap = await run(withRepo(OS, { totals: { queue: 5 } }), [OS, CRM]);
@@ -1371,7 +1404,8 @@ async function selfTest() {
     t('⭐ a CAN\'T READ run prints no indicator line — no `0 ()`, no "every board read is empty" — and an INCOMPLETE run marks each of the five', [noneText.includes('0 ()'), noneText.includes('every board read is empty'), /^[1-5] /m.test(noneText), renderHealth(h, { now: H.now }).split('\n').filter((l) => /^[1-5] /.test(l) && l.endsWith('(gaps below)')).length, renderHealth(two, { now: H.now }).includes('INCOMPLETE run')], [false, false, false, 5, false]);
     const text = renderHealth(h, { now: H.now });
     t('⭐ every run names the legs it cannot read, and the trend reads "unread", never a number', [HEALTH_UNREAD_LEGS.every((l) => text.includes(l)), /可派发库存 — [^\n]*trend unread/.test(text)], [true, true]);
-    t('the five indicator lines print in the rule\'s order, the two inboxes apart', ['1 可派发库存', '2 决策箱 — 决策卡 3 · 待您审合 PR 1', '3 finding — 2 open', '4 裸卡 — 3 bare', '5 发版阻塞 — open priority:p0 issues summed over the repos read: 2'].map((s) => text.includes(s)), [true, true, true, true, true]);
+    t('⭐ the repo set of 发版阻塞 is read, not an unread leg: no leg names the repo count, the window leg stays', [HEALTH_UNREAD_LEGS.length, HEALTH_UNREAD_LEGS.filter((l) => /仓|board/.test(l)), HEALTH_UNREAD_LEGS.filter((l) => l.includes('窗内')).length], [4, [], 1]);
+    t('the five indicator lines print in the rule\'s order, the two inboxes apart', ['1 可派发库存', '2 决策箱 — 决策卡 3 · 待您审合 PR 1', '3 finding — 2 open', '4 裸卡 — 3 bare', '5 发版阻塞 — open priority:p0 issues summed over the two release boards, the main repo and cloud: 5 (objectstack 1 · cloud 4 (platform count alone: outside --repos)); zero means both boards are empty'].map((s) => text.includes(s)), [true, true, true, true, true]);
     const waits = [];
     const paced = pacedSearch((p) => ({ ok: true, value: p }), (ms) => waits.push(ms));
     ['/search/issues?q=a', '/repos/o/r/issues?page=1', '/search/issues?q=b'].forEach(paced);
@@ -1386,14 +1420,16 @@ async function selfTest() {
     const hcli = (args) => spawnSync(process.execPath, [SELF_PATH, '--health', ...args], { encoding: 'utf8', env: { ...process.env, PATH: '/nonexistent' } });
     const offline = hcli(['--fixture', FIXTURE_PATH]);
     t('⭐ --health --fixture runs offline (no gh on PATH) and exits 4 on the unreadable fixture repo', [offline.status, offline.stdout.split('\n').filter((l) => /^[1-5] /.test(l)).length], [EXIT_INCOMPLETE, 5]);
-    const jsonRun = hcli(['--fixture', FIXTURE_PATH, '--repos', `${OS},${CRM}`, '--json']);
-    let jsonOut = null;
-    try {
-      jsonOut = JSON.parse(jsonRun.stdout);
-    } catch {}
-    t('--repos narrows a fixture run; --json carries the exit and every unread leg', [jsonRun.status, jsonOut?.exit, jsonOut?.unreadLegs?.length], [EXIT_OK, EXIT_OK, HEALTH_UNREAD_LEGS.length]);
     const dir = mkdtempSync(join(tmpdir(), 'fleet-roster-health-'));
     try {
+      const withCloud = join(dir, 'with-cloud.json');
+      writeFileSync(withCloud, JSON.stringify({ health: H }));
+      const jsonRun = hcli(['--fixture', withCloud, '--repos', `${OS},${CRM}`, '--json']);
+      let jsonOut = null;
+      try {
+        jsonOut = JSON.parse(jsonRun.stdout);
+      } catch {}
+      t('--repos narrows a fixture run; --json carries the exit, every unread leg and both release boards', [jsonRun.status, jsonOut?.exit, jsonOut?.unreadLegs?.length, jsonOut?.releaseBlockers?.perRepo?.map((x) => x.repo)], [EXIT_OK, EXIT_OK, HEALTH_UNREAD_LEGS.length, [OS, CLOUD]]);
       const noHealth = join(dir, 'roster-only.json');
       writeFileSync(noHealth, JSON.stringify({ now: H.now, repos: fixture.repos }));
       t('a fixture with no health section is exit 3, never an empty reading', [hcli(['--fixture', noHealth]).status, hcli(['--write', '3']).status], [EXIT_PREREQUISITE, EXIT_USAGE]);

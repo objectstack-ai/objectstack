@@ -235,8 +235,6 @@ const NOT_CONTROLS: Array<[file: string, key: string, reason: string]> = [
   ['packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx', 'div · setRailOpen', SCRIM],
   ['packages/app-shell/src/views/studio-design/StudioRightSlot.tsx', 'div · onOverlayDismiss', SCRIM],
   ['packages/components/src/renderers/complex/data-table.tsx', 'div · stopPropagation', DRAG],
-  // The column header's context menu: its entries are buttons.
-  ['packages/components/src/renderers/complex/data-table.tsx', 'div · stopPropagation', GUARD],
   ['packages/plugin-dashboard/src/DashboardRenderer.tsx', 'div · handleBackgroundClick', CANVAS],
   ['packages/plugin-dashboard/src/DashboardRenderer.tsx', 'div · handleBackgroundClick', CANVAS],
   ['packages/plugin-designer/src/ProcessDesigner.tsx', 'div · handleCanvasClick', CANVAS],

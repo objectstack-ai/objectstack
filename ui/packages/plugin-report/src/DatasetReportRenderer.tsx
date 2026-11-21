@@ -869,14 +869,15 @@ function drillFilterOrRefusal(
 
 /**
  * The drill filter of a bucket whose dimensions cross a relationship
- * (`relationship.field` paths in `dimensionFields`), handed to `emit` once the
- * related ids are read — `resolveDatasetDrillFilter` in `@object-ui/core`.
- * The data API refuses the dotted path itself, so the filter names the
- * relationship field `$in` the related ids matching the clicked value.
+ * (`relationship.field` paths in `dimensionFields`), handed to `emit` once each
+ * hop's schema is read — `resolveDatasetDrillFilter` in `@object-ui/core`.
+ * The data API refuses the dotted path itself, so the filter is one
+ * nested-relation condition (`{ account: { owner: VALUE } }`), which the server
+ * matches in the database; no related id is read here.
  *
  * A bucket it cannot resolve (a path past ADR-0071's hop limit, an unknown
- * relationship, the empty bucket, more related records than the drill may
- * list) or a read that fails emits no drill and logs why: the host builds its
+ * relationship, the empty bucket) or a read that fails emits no drill and logs
+ * why (the `too-many` branch below is no longer produced): the host builds its
  * own fallback from an absent `objectFilter`, which would drop the scope, so
  * there is no drill rather than a wider one — the posture
  * {@link drillFilterOrRefusal} takes for a refused filter.

@@ -83,11 +83,11 @@ describe('relatedLists — the declared business order (objectstack#27069)', () 
       fields: { lead_id: { type: 'lookup', reference: 'lead', relatedList: 'primary' } },
     };
     const out = deriveRelatedLists({ ...lead, relatedLists: ['task'] }, [lead, note, task, primaryCampaign]);
-    // `note` is an owned child with no relatedList: a body table by default
-    // since objectstack#35597, and still in its derived position.
+    // `note` is an owned child with no relatedList: a tab since
+    // objectstack#35889 (no group of the lead places it), in its derived position.
     expect(out.map((r) => [r.childObject, r.isPrimary])).toEqual([
       ['task', false],
-      ['note', true],
+      ['note', false],
       ['campaign_member', true],
     ]);
   });
@@ -113,24 +113,36 @@ describe("relatedList: 'primary' as body placement (objectstack#27069)", () => {
   const primaryOf = (fk: Record<string, unknown>) =>
     deriveRelatedLists(quote, [quote, lineOf(fk)])[0].isPrimary;
 
-  it('a master_detail FK that sets inlineEdit is primary by default, on every inlineEdit arm', () => {
-    expect(primaryOf({ inlineEdit: true })).toBe(true);
-    expect(primaryOf({ inlineEdit: 'grid' })).toBe(true);
-    expect(primaryOf({ inlineEdit: 'form' })).toBe(true);
+  // objectstack#35889 — a master_detail FK with no relatedList is a tab by
+  // default, inlineEdit or not; a field group of the PARENT naming it makes it
+  // a body table.
+  const placedQuote = (entry: string) => ({ ...quote, fieldGroups: [{ key: 'main' }, { key: 'lines', relatedList: entry }] });
+  const placedPrimaryOf = (fk: Record<string, unknown>, entry = 'quote_line_item') =>
+    deriveRelatedLists(placedQuote(entry), [placedQuote(entry), lineOf(fk)])[0].isPrimary;
+
+  it('a master_detail FK with no relatedList is not primary by default, on every inlineEdit arm (objectstack#35889)', () => {
+    for (const inlineEdit of [undefined, false, true, 'grid', 'form']) {
+      expect(primaryOf(inlineEdit === undefined ? {} : { inlineEdit }), String(inlineEdit)).toBe(false);
+    }
   });
 
-  it('an explicit relatedList: true keeps an inline-edited child a side card', () => {
+  it('a parent field group naming it makes it primary, by child name or object.field, on every inlineEdit arm', () => {
+    for (const inlineEdit of [undefined, false, true, 'grid', 'form']) {
+      const fk = inlineEdit === undefined ? {} : { inlineEdit };
+      expect(placedPrimaryOf(fk), String(inlineEdit)).toBe(true);
+      expect(placedPrimaryOf(fk, 'quote_line_item.quote'), String(inlineEdit)).toBe(true);
+      expect(placedPrimaryOf(fk, 'quote_line_item.other'), String(inlineEdit)).toBe(false);
+    }
+  });
+
+  it('an explicit relatedList: true keeps it a tab even when a group names it', () => {
     expect(primaryOf({ inlineEdit: true, relatedList: true })).toBe(false);
+    expect(placedPrimaryOf({ relatedList: true })).toBe(false);
   });
 
-  it('no inlineEdit, or inlineEdit: false, is primary by default too (objectstack#35597: the relation type decides)', () => {
-    expect(primaryOf({})).toBe(true);
-    expect(primaryOf({ inlineEdit: false })).toBe(true);
-  });
-
-  it("relatedList: true keeps a plain master_detail a side card; 'primary' is unchanged (objectstack#35597)", () => {
-    expect(primaryOf({ relatedList: true })).toBe(false);
+  it("'primary' is primary with or without a group (objectstack#27069)", () => {
     expect(primaryOf({ relatedList: 'primary' })).toBe(true);
+    expect(placedPrimaryOf({ relatedList: 'primary' })).toBe(true);
   });
 
   it('relatedList: false hides a plain master_detail: no list at all (objectstack#35597)', () => {

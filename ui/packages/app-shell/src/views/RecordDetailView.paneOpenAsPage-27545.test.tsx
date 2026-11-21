@@ -10,11 +10,11 @@
  * objectstack#27545 — the record in a record pane (maintainer rulings of
  * 2026-10-29):
  *
- * - Target 4: the full page opens from the row's ↗ and from the record
- *   header's `⋯`, whose last host item is 「Open as full page」 (the
- *   destructive band stays below it, objectui#12529). The bar's ⤢ maximizes
- *   in place; it routes nowhere. A record that is not in a pane — the page
- *   itself, or an embedded view no pane hosts — draws no such item.
+ * - Target 4: the full page opens from the record header's `⋯`, whose last
+ *   host item is 「Open as full page」 (the destructive band stays below it,
+ *   objectui#12529), and from the bar's ⤢ (objectstack#35854: the maximized
+ *   state retired, ⤢ is the same hop). A record that is not in a pane — the
+ *   page itself, or an embedded view no pane hosts — draws no such item.
  * - Target 5: stepping never blanks. A step to the next record keeps the
  *   record on screen until the next one arrives; the page route, a real
  *   navigation, still resets (the control).

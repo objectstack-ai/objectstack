@@ -8,6 +8,7 @@
  * passed in; the component reads the returned callback.
  */
 
+import type { ColumnSummary } from '@objectstack/spec/ui';
 import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore, lazy, Suspense, type ReactNode } from 'react';
 import { DENSITY_MODE_TO_ROW_HEIGHT, columnIdentity, normalizeListViewSchema, servedPackageId, type FilterTokenScope } from '@object-ui/core';
 import { buildListFilterKey, writeListFilterState } from './listFilterStorage.js';
@@ -15,7 +16,7 @@ import type { useObjectListPreferences, ListViewPreference, ListViewPreferencePa
 const ObjectChart = lazy(() =>
   import('@object-ui/plugin-charts').then((m) => ({ default: m.ObjectChart })),
 );
-import { ListView, type ListViewProps } from '@object-ui/plugin-list';
+import { ListView } from '@object-ui/plugin-list';
 import type { ListViewSchema, TreeViewConfig } from '@object-ui/types';
 import type { FilterBuilderRowGroup } from '@object-ui/components';
 import type { useAuth } from '@object-ui/auth';
@@ -41,7 +42,7 @@ import {
 } from './objectViewOptions.js';
 import { useViewTabsFit } from './objectViewChrome.js';
 import { ListRecordCountContext } from './objectViewTitleSwitcher.js';
-import { OpenAsPageLink } from './objectViewOpenAsPage.js';
+import { OpenInSidePanelButton } from './objectViewOpenAsPage.js';
 import type { useObjectViewIdentity } from './objectViewIdentity.js';
 import type { useObjectViewRecordNavigation } from './objectViewRecordNavigation.js';
 import type { useObjectViewToolbarAffordances } from './objectViewToolbarAffordances.js';
@@ -97,8 +98,8 @@ export function useObjectViewListRenderer({
     actions,
     handleRowClick,
     handleListRowsChange,
-    recordOpen,
-    openAsPage,
+    handleListTotalChange,
+    openInPanel,
     rowOpensRecord,
     phoneTitle,
     handleListPersonalizationChange,
@@ -135,10 +136,10 @@ export function useObjectViewListRenderer({
     handleRowClick: ReturnType<typeof useObjectViewRecordNavigation>['handleRowClick'];
     /** objectstack#26679 — the rows the list shows, for the drawer's root `↑` `↓`. */
     handleListRowsChange: ReturnType<typeof useObjectViewRecordNavigation>['handleListRowsChange'];
-    /** objectstack#26681 — the Display menu's Open records section; none on a phone (objectstack#27058). */
-    recordOpen: ListViewProps['recordOpen'];
-    /** objectstack#26681 — the name cell's ↗ (`./objectViewOpenAsPage.tsx`), or `null` for none. */
-    openAsPage: { objectName: string; label: string; open: (recordId: string | number) => void } | null;
+    /** objectstack#35853 — the count the list matched, the M of the record's 「第 N 条，共 M 条」. */
+    handleListTotalChange: ReturnType<typeof useObjectViewRecordNavigation>['handleListTotalChange'];
+    /** objectstack#35854 — the name cell's 「在侧边打开」 (`./objectViewOpenAsPage.tsx`), or `null` for none. */
+    openInPanel: { label: string; open: (recordId: string | number) => void } | null;
     /** objectstack#33317 — whether a row click opens the record: `false` for the `none` mode. */
     rowOpensRecord: boolean;
     /**
@@ -169,6 +170,13 @@ export function useObjectViewListRenderer({
         rename?: (label: string) => boolean | Promise<boolean>;
         save?: () => void;
         reset?: () => void;
+        /**
+         * objectstack#35702 — save a footer calculation on the open view (wired
+         * only for a reader who may change it); resolves whether it was saved.
+         */
+        pickSummary?: (field: string, summary: ColumnSummary | null) => boolean | Promise<boolean>;
+        /** objectstack#35702 — the columns the view declares: the only ones a pick may change. */
+        summaryPickFields?: readonly string[];
     };
 }) {
     // objectstack#35551 — the host hands fresh closures every render; the list
@@ -178,6 +186,9 @@ export function useObjectViewListRenderer({
     const offersRename = !!listViewActions?.rename;
     const offersSave = !!listViewActions?.save;
     const offersReset = !!listViewActions?.reset;
+    const offersSummaryPick = !!listViewActions?.pickSummary;
+    // Keyed on content, never the array's identity (a fresh one every render).
+    const summaryPickKey = (listViewActions?.summaryPickFields ?? []).join('\n');
     // objectstack#27058 — below `sm` the title switcher is the phone's one
     // view control, so the list offers no layout switcher of its own there.
     const wideViewport = useViewTabsFit();
@@ -1043,6 +1054,10 @@ export function useObjectViewListRenderer({
                 onRenameView={offersRename ? (label: string) => listViewActionsRef.current?.rename?.(label) ?? false : undefined}
                 onSaveView={offersSave ? () => listViewActionsRef.current?.save?.() : undefined}
                 onResetView={offersReset ? () => listViewActionsRef.current?.reset?.() : undefined}
+                onColumnSummaryPick={offersSummaryPick
+                    ? (field: string, summary: ColumnSummary | null) => listViewActionsRef.current?.pickSummary?.(field, summary) ?? false
+                    : undefined}
+                columnSummaryPickFields={offersSummaryPick ? summaryPickKey.split('\n').filter(Boolean) : undefined}
                 className={className}
                 onEdit={editHandler}
                 // objectui#13089 — the view's Add button is the header New:
@@ -1071,6 +1086,7 @@ export function useObjectViewListRenderer({
                     handleRowClick(record, event);
                 }}
                 onRowsChange={handleListRowsChange}
+                onTotalChange={handleListTotalChange}
                 // objectstack#30850 — the page lives in the address (`uf__page`,
                 // replace): the list reads it and reports every move back.
                 page={listPage}
@@ -1115,13 +1131,13 @@ export function useObjectViewListRenderer({
                 // marks a user who holds nothing beyond the baseline. A host
                 // prop the grid draws beside the row's title.
                 rowAdornment={managedUsers ? managedUserMarker : undefined}
-                // objectstack#26681 — for a row that opens the drawer, the ↗
-                // beside its record link that opens the record as the full page.
-                recordLinkAdornment={openAsPage
+                // objectstack#35854 — the name opens the full page; the icon
+                // beside it, on hover, opens the record in the side drawer.
+                recordLinkAdornment={openInPanel
                     ? (row: Record<string, unknown>) => {
                         const id = row?.id ?? row?._id;
                         return (typeof id === 'string' && id !== '') || typeof id === 'number'
-                            ? <OpenAsPageLink objectName={openAsPage.objectName} recordId={id} label={openAsPage.label} onOpen={openAsPage.open} />
+                            ? <OpenInSidePanelButton recordId={id} label={openInPanel.label} onOpen={openInPanel.open} />
                             : null;
                     }
                     : undefined}
@@ -1129,8 +1145,6 @@ export function useObjectViewListRenderer({
                 // authored `navigation.mode: 'none'`, or a list-only object)
                 // draws no record link and no Open in its context menu.
                 rowOpensRecord={rowOpensRecord}
-                // objectstack#26681 — the Display menu's Open records section.
-                recordOpen={recordOpen}
                 // The toolbar row is the view bar: the view switcher, then the
                 // filter / sort / options tools (objectstack#27058,
                 // objectstack#35548). The switcher shows the list's own record
@@ -1143,7 +1157,7 @@ export function useObjectViewListRenderer({
                 dataSource={ds}
             />
         );
-    }, [activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, managedUsers, managedUserMarker, recordOpen, openAsPage, rowOpensRecord, handleListRowsChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, offersRename, offersSave, offersReset, previewDrafts, previewDataSource, unpublishedObjects]);
+    }, [activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, managedUsers, managedUserMarker, openInPanel, rowOpensRecord, handleListRowsChange, handleListTotalChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, offersRename, offersSave, offersReset, offersSummaryPick, summaryPickKey, previewDrafts, previewDataSource, unpublishedObjects]);
 
     return { renderListView };
 }

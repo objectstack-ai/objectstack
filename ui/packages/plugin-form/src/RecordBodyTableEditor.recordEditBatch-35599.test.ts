@@ -13,6 +13,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { UNTOUCHED_NEW_ROW } from '@object-ui/fields';
 import { attributeRecordEditRefusal, buildRecordEditBatch } from './RecordBodyTableEditor';
 
 const childSchema = {
@@ -76,6 +77,58 @@ describe('buildRecordEditBatch — one batch for the record and all its body tab
   it('an untouched table emits no ops', () => {
     const { ops } = buildRecordEditBatch('order', 'o1', {}, [{ ...lines, rows: lines.original }]);
     expect(ops).toHaveLength(1);
+  });
+});
+
+describe('buildRecordEditBatch — a new line nobody edited since Add started it on its defaults (objectstack#35816)', () => {
+  const tasks = {
+    id: 'meeting_task.meeting',
+    childObject: 'meeting_task',
+    relationshipField: 'meeting',
+    childSchema: {
+      fields: {
+        id: { type: 'text' },
+        name: { type: 'text' },
+        status: { type: 'select', defaultValue: 'pending' },
+        meeting: { type: 'master_detail' },
+      },
+    },
+    original: [],
+    rows: [
+      { name: null, status: 'pending', [UNTOUCHED_NEW_ROW]: true }, // added, left as it came: no op
+      { name: 'Book the room', status: 'pending' }, // typed a name: created with the default
+      { name: null, status: 'done' }, // changed the default: that is input
+    ] as Record<string, any>[],
+  };
+
+  it('is skipped like a blank line; a line with input is created, its default included, traced to its position', () => {
+    const { ops, owners } = buildRecordEditBatch('meeting', 'm1', {}, [tasks]);
+    expect(ops.map((o) => [o.object, o.action])).toEqual([
+      ['meeting', 'update'],
+      ['meeting_task', 'create'],
+      ['meeting_task', 'create'],
+    ]);
+    expect(ops[1].data).toMatchObject({ name: 'Book the room', status: 'pending', meeting: 'm1' });
+    expect(ops[2].data).toMatchObject({ status: 'done', meeting: 'm1' });
+    expect(owners.slice(1)).toEqual([
+      { kind: 'row', table: 'meeting_task.meeting', row: 1 },
+      { kind: 'row', table: 'meeting_task.meeting', row: 2 },
+    ]);
+  });
+
+  it('a line the user edited back to exactly its defaults is input, and is created', () => {
+    // Same values as the untouched line above, but an edit took the mark off.
+    const { ops } = buildRecordEditBatch('meeting', 'm1', {}, [{ ...tasks, rows: [{ name: null, status: 'pending' }] }]);
+    expect(ops.map((o) => [o.object, o.action])).toEqual([
+      ['meeting', 'update'],
+      ['meeting_task', 'create'],
+    ]);
+    expect(ops[1].data).toMatchObject({ status: 'pending', meeting: 'm1' });
+  });
+
+  it('the mark never reaches a write payload', () => {
+    const { ops } = buildRecordEditBatch('meeting', 'm1', {}, [tasks]);
+    for (const op of ops) expect(Object.getOwnPropertySymbols(op.data ?? {})).toEqual([]);
   });
 });
 

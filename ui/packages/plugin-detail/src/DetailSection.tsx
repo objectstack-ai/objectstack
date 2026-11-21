@@ -751,6 +751,9 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
               // "Oct 2" in a section was two formats on one page. Grid cells
               // keep the shared face that drops it.
               alwaysShowYear
+              // A business date reads as the date, as the list writes it, with
+              // the relative phrase as its tooltip (objectstack#35745).
+              absoluteDate
             />
           );
         }

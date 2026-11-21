@@ -51,9 +51,10 @@
  *
  * ## A field group names body tables only (#27478)
  *
- * A field group's `relatedList` positions a BODY TABLE; it never promotes a
- * side card (ruling B on #27055: body-ness is the FK's own keys,
- * `isBodyTableRelationship` in `@objectstack/spec/data`). So a group whose
+ * A field group's `relatedList` places a BODY TABLE: it positions a `'primary'`
+ * list, or makes a plain `master_detail` list one (#35889); it never promotes a
+ * side card (ruling B on #27055, `isGroupPlaceableRelationship` in
+ * `@objectstack/spec/data`). So a group whose
  * entry names a relationship that is not one — a side card, or a list hidden by
  * `relatedList: false` — is `related-list-group-not-body` at `error`: the
  * record page would draw nothing at the group. Judged on the same children as

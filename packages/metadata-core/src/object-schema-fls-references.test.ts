@@ -291,6 +291,30 @@ describe('[ADR-0106 D1] references to a denied field — object level', () => {
         expect(served.fields.title.group).toBe('secret_score');
     });
 
+    it('[#35900] filters the denied field out of a group\'s own fields list and keeps the readable rest in order', () => {
+        const served = mask({
+            name: 'thing',
+            fields: fieldsWith({}),
+            fieldGroups: [
+                { key: 'main', label: 'Main', fields: ['secret_score', 'title', 'id'] },
+                { key: 'other', label: 'Other', fields: ['id'] },
+            ],
+        });
+        expect(served.fieldGroups).toEqual([
+            { key: 'main', label: 'Main', fields: ['title', 'id'] },
+            { key: 'other', label: 'Other', fields: ['id'] },
+        ]);
+    });
+
+    it('[#35900] CONTROL: a fields list naming only readable fields is served as written', () => {
+        const served = mask({
+            name: 'thing',
+            fields: fieldsWith({}),
+            fieldGroups: [{ key: 'main', label: 'Main', fields: ['title', 'id'] }],
+        });
+        expect(served.fieldGroups).toEqual([{ key: 'main', label: 'Main', fields: ['title', 'id'] }]);
+    });
+
     it('[#27069] serves relatedLists and a group relatedList naming a child that shares the denied field\'s name', () => {
         // The entries name CHILD objects (or `object.field`), never a field of
         // this object, so a child called like the denied field is still served.

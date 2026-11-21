@@ -61,6 +61,9 @@ vi.mock('../previews/useObjectFields', () => ({
 import { FlowNodeInspector } from './FlowNodeInspector';
 import type { MetadataSelection } from '../preview-registry';
 import { ApprovalNodeConfigSchema, getApprovalNodeConfigJsonSchema } from '@objectstack/spec/automation';
+// The inspector's CEL authoring reaches `@objectstack/lint` by a dynamic import;
+// paying its first load here, at collection, keeps it out of a clocked case.
+import '@objectstack/lint';
 
 /* ── The `meta/*` double (objectui#7307), as the sibling inspector files
  * serve it: an empty registry in the `{ type, items: [] }` envelope, and an
@@ -343,7 +346,8 @@ for (const source of SOURCES) {
       expect(onConfig.escalation, 'the inspector stored exactly what the author entered').toEqual(authored);
       const on = ApprovalNodeConfigSchema.safeParse(onConfig);
       expect(on.success, on.success ? '' : JSON.stringify(on.error.issues)).toBe(true);
-      expect((on.data as { escalation?: unknown }).escalation, 'and the contract keeps every value').toEqual(authored);
+      // The parse adds the one default the author left unset, `clock` (ADR-0157 D5).
+      expect((on.data as { escalation?: unknown }).escalation, 'and the contract keeps every value').toEqual({ ...authored, clock: 'wall_clock' });
 
       // OFF, values retained.
       gateBox(l)!.click();
@@ -352,7 +356,7 @@ for (const source of SOURCES) {
       expect(JSON.stringify(offConfig.escalation), 'every value identical, the switch false').toBe(JSON.stringify(retained));
       const off = ApprovalNodeConfigSchema.safeParse(offConfig);
       expect(off.success, off.success ? '' : JSON.stringify(off.error.issues)).toBe(true);
-      expect((off.data as { escalation?: unknown }).escalation, 'and the contract keeps them, switched off').toEqual(retained);
+      expect((off.data as { escalation?: unknown }).escalation, 'and the contract keeps them, switched off').toEqual({ ...retained, clock: 'wall_clock' });
     });
   });
 
@@ -390,6 +394,44 @@ for (const source of SOURCES) {
       expect(retainedNotices(), 'premise: both stored values are retained').toHaveLength(2);
       fireEvent.change(escalateToInput(l), { target: { value: '' } });
       expect(configOf(latest())!.escalation).toEqual({ enabled: false, timeoutHours: 24 });
+    });
+  });
+}
+
+/* ── ADR-0157 D5: the escalation's clock, and the working calendar it reads.
+ * The calendar is read only under `clock: 'working_time'`, so it is on screen
+ * only there, from both descriptor sources (`SIBLING_GATES`). ── */
+const CLOCK_LABELS: Record<'offline' | 'engine', { clock: string; calendar: string }> = {
+  offline: { clock: 'Count hours as', calendar: 'Working calendar' },
+  engine: { clock: 'Clock', calendar: 'Calendar' },
+};
+
+for (const source of SOURCES) {
+  const l = CLOCK_LABELS[source.name];
+
+  describe(`${source.name} descriptors: the working calendar shows only under working time (ADR-0157 D5)`, () => {
+    beforeEach(() => source.install());
+
+    it('an escalation on the default clock shows the clock and hides the calendar', () => {
+      mount(draftWith({ approvers: APPROVERS, escalation: { timeoutHours: 4 } }));
+      expect(screen.queryByText(l.clock)).not.toBeNull();
+      expect(screen.queryByText(l.calendar)).toBeNull();
+    });
+
+    it("an explicit 'wall_clock' hides the calendar too", () => {
+      mount(draftWith({ approvers: APPROVERS, escalation: { timeoutHours: 4, clock: 'wall_clock' } }));
+      expect(screen.queryByText(l.calendar)).toBeNull();
+    });
+
+    it("'working_time' shows the calendar, and a code typed there round-trips through ApprovalNodeConfigSchema", () => {
+      const { latest } = mount(draftWith({ approvers: APPROVERS, escalation: { timeoutHours: 4, clock: 'working_time' } }));
+      expect(screen.queryByText(l.calendar)).not.toBeNull();
+      const calendarInput = screen.getByText(l.calendar).parentElement?.querySelector('input');
+      if (!calendarInput) throw new Error(`no input beside '${l.calendar}'`);
+      fireEvent.change(calendarInput, { target: { value: 'cn_standard' } });
+      const after = configOf(latest())!;
+      expect(after.escalation).toEqual({ timeoutHours: 4, clock: 'working_time', calendar: 'cn_standard' });
+      expect(ApprovalNodeConfigSchema.safeParse(after).success).toBe(true);
     });
   });
 }

@@ -33,7 +33,7 @@
  * declaration is the source of truth.)
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import {
   useMetadata,
@@ -41,6 +41,8 @@ import {
   RedirectWithSplash,
   SETUP_APP_PACKAGE_ID,
   SETUP_APP_NAME,
+  useLastApp,
+  usePhoneViewport,
 } from '@object-ui/app-shell';
 import type { MetadataTypeStatus } from '@object-ui/app-shell';
 
@@ -137,6 +139,39 @@ export function resolveLandingPath(apps: readonly LandingApp[] | null | undefine
 }
 
 /**
+ * The path `/` redirects to on a phone (objectstack#35881): the app this
+ * person last had open, when it is still an active, visible app; otherwise
+ * the three rules of {@link resolveLandingPath} (the declared default, the one
+ * app, the app list at `/home`).
+ *
+ * The order is the maintainer's ruling (record 7045309332 on #35881, Sales
+ * 2026-11-20 16:50Z, 「上次用的优先」): the last app beats a declared default,
+ * which decides only a first sign-in with no last app yet. From 768 px up `/`
+ * resolves as before, through {@link resolveLandingPath} alone.
+ */
+export function resolvePhoneLandingPath(
+  apps: readonly LandingApp[] | null | undefined,
+  lastApp: string | null | undefined,
+): string {
+  const list = apps ?? [];
+  const last = lastApp
+    ? list.find(
+        (a): a is LandingApp & { name: string } =>
+          a?.name === lastApp && a.active !== false && a.hidden !== true,
+      )
+    : undefined;
+  if (last) return `/apps/${landingSegment(list, last)}`;
+  return resolveLandingPath(apps);
+}
+
+/**
+ * How long a phone's `/` waits for the person's last app to be read before it
+ * resolves without it (objectstack#35881). The row rides the console's one
+ * preference read, which is normally in by the time the app list is.
+ */
+const LAST_APP_WAIT_MS = 2000;
+
+/**
  * Is the app list this resolver was handed an ANSWER, or an unknown standing
  * in for one? (objectui#4233)
  *
@@ -183,6 +218,15 @@ const APP_LIST_RETRY_DELAY_MS = 1500;
 export function RootLandingRedirect() {
   const { apps, loading, getTypeStatus, refresh } = useMetadata();
   const location = useLocation();
+  // objectstack#35881 — a phone lands in the person's last app.
+  const phone = usePhoneViewport();
+  const { lastApp, settled: lastAppSettled } = useLastApp();
+  const [lastAppWaitOver, setLastAppWaitOver] = useState(false);
+  useEffect(() => {
+    if (!phone || lastAppSettled) return;
+    const id = setTimeout(() => setLastAppWaitOver(true), LAST_APP_WAIT_MS);
+    return () => clearTimeout(id);
+  }, [phone, lastAppSettled]);
 
   // "Not yet" (`loading`) and "asked and failed" (`status === 'error'`) are
   // both "no answer" — they differ only in whether waiting will help.
@@ -207,6 +251,7 @@ export function RootLandingRedirect() {
   }, [unresolved, refresh]);
 
   if (loading || unresolved) return <LoadingFallback />;
+  if (phone && !lastAppSettled && !lastAppWaitOver) return <LoadingFallback />;
   // `RedirectWithSplash`, not a bare `<Navigate>` (objectui#6378). This is the
   // widest measured instance of the boot blank: the line above holds the splash
   // while the app list loads, and handing off to a null-rendering redirect left
@@ -217,6 +262,8 @@ export function RootLandingRedirect() {
   // overlays (`?palette=1`, `?recordId=`) live in the query, and the landing is
   // a bare `/apps/<segment>` or `/home`, so there is nothing to merge with. The
   // app root it lands on carries them on to the app's own landing in turn.
-  const landing = resolveLandingPath(apps as LandingApp[] | undefined);
+  const landing = phone
+    ? resolvePhoneLandingPath(apps as LandingApp[] | undefined, lastApp)
+    : resolveLandingPath(apps as LandingApp[] | undefined);
   return <RedirectWithSplash to={`${landing}${location.search}${location.hash}`} replace />;
 }

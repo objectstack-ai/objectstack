@@ -287,7 +287,14 @@ function StateMachineView({ object, name }: ViewerProps) {
     const color = colorOf(value);
     return (
       <span className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-xs font-medium">
-        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color ?? 'var(--muted-foreground)' }} />
+        {/* An option's declared colour reaches the DOM only as a custom property a
+            static utility consumes; with none, the theme's muted grey paints the
+            dot through its utility, so it follows light and dark. */}
+        <span
+          data-state-dot={value}
+          className={cn('h-2 w-2 rounded-full', color ? 'bg-[color:var(--os-state-dot)]' : 'bg-muted-foreground')}
+          style={color ? ({ '--os-state-dot': color } as React.CSSProperties) : undefined}
+        />
         {labelOf(value)}
       </span>
     );

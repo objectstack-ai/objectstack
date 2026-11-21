@@ -72,6 +72,25 @@ export interface RecordHeaderGroupParts {
 export interface RecordHeaderState {
   tags?: React.ReactNode;
   group?: (parts: RecordHeaderGroupParts) => React.ReactNode;
+  /**
+   * The record's stage tag (objectstack#35891): called with the tag the
+   * header draws for the object's stage field, it returns what the header
+   * draws in its place — the tag as a menu that moves the record to another
+   * stage, for a reader who may. Absent: the tag as it is.
+   */
+  stage?: (parts: RecordHeaderStageParts) => React.ReactNode;
+}
+
+/**
+ * What the header hands a host's `stage` (objectstack#35891).
+ */
+export interface RecordHeaderStageParts {
+  /** The stage field the tag reads (`detectStatusField`). */
+  field: string;
+  /** The current stage's option label, as the tag shows it. */
+  label: string;
+  /** The tag exactly as the header draws it without a host. */
+  tag: React.ReactNode;
 }
 
 export const RecordHeaderStateContext = React.createContext<RecordHeaderState | null>(null);

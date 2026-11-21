@@ -350,4 +350,44 @@ describe('changing chainField on an object that already has checkpoints (ADR-015
     expect(scoped.rows.map((r) => [r.chain, r.row, r.verdict, r.sealed])).toEqual([['org:org_b', 'r1', 'late', false]]);
     expect(scoped.ok).toBe(false);
   });
+
+  it('removing the chain column from valueFields changes no chain: nothing is re-sealed and the check stays ok', async () => {
+    // The fix the spec's default-chain-column refusal gives for `tenant_id` listed in `valueFields`. The chain key
+    // reads the row's chain value only, never the column set, and each checkpoint is checked against its own
+    // signed columns, so the earlier checkpoints stay valid under the set they were signed with.
+    const object = {
+      name: 'ledger_probe',
+      fields: { id: { type: 'text' }, created_at: { type: 'datetime' }, action: { type: 'text' }, tenant_id: { type: 'text' }, payload: { type: 'textarea' } },
+      lifecycle: { class: 'audit', retention: { maxAge: '90d' }, seal: { valueFields: ['payload', 'tenant_id'] } as Record<string, unknown> },
+    };
+    const store = memoryEngine([object, { name: 'sys_audit_amendment', fields: {} }] as never);
+    const crypto = bindingCrypto();
+    const signer = new LocalCheckpointSigner({ engine: store.engine, crypto });
+    const clock = { now: DAY0 + 12 * H + 30 * 60_000 };
+    const run = () => new AuditSealer({ engine: store.engine, crypto, signer: () => signer, logger: recordingLogger(), now: () => clock.now }).runPass();
+    const ledger = store.hot.table('ledger_probe');
+    ledger.push(
+      { id: 'r1', created_at: at(8, 10), action: 'update', tenant_id: 'org_a', payload: 'one' },
+      { id: 'r2', created_at: at(10, 5), action: 'update', tenant_id: 'org_a', payload: 'two' },
+    );
+    await run();
+    const sealed = () => store.hot.table('sys_audit_checkpoint').map((r) => {
+      const body = checkpointBodyFromRow(r);
+      return [r.chain_key, body.kind, body.row_ids.join(',')].join(' ');
+    });
+    const before = sealed();
+
+    object.lifecycle.seal = { valueFields: ['payload'] };
+    ledger.push({ id: 'r3', created_at: at(13, 10), action: 'update', tenant_id: 'org_a', payload: 'three' });
+    clock.now = DAY0 + 14 * H + 30 * 60_000;
+    await run();
+
+    expect(before).toEqual(['org:org_a window r1', 'org:org_a window r2']);
+    expect(sealed()).toEqual([...before, 'org:org_a window r3']);
+    const report = await verifyAuditLedger({ engine: store.engine, crypto, now: () => clock.now });
+    expect(report.faults).toEqual([]);
+    expect(report.ok).toBe(true);
+    const scoped = await verifyAuditLedger({ engine: store.engine, crypto, now: () => clock.now, orgs: ['org_a'] });
+    expect(scoped.ok).toBe(true);
+  });
 });

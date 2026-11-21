@@ -28,13 +28,14 @@
  * are different questions, and only one of them moved.
  */
 
-import { RECORD_HIGHLIGHTS_MAX } from '@objectstack/spec/ui';
+import { readFieldGroupMembership } from '@objectstack/spec/data';
 import { injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fields.js';
 import { recordsOf } from './object-graph.js';
 
 export const FIELD_GROUP_UNDECLARED = 'field-group-undeclared';
 export const FIELD_GROUP_EMPTY = 'field-group-empty';
 export const FIELD_GROUP_SHADOWED = 'field-group-shadowed';
+export const FIELD_GROUP_MEMBER_UNKNOWN = 'field-group-member-unknown';
 export const SEMANTIC_ROLE_FIELD_UNKNOWN = 'semantic-role-field-unknown';
 export const SEMANTIC_ROLE_FIELD_UNPROVISIONED = 'semantic-role-field-unprovisioned';
 
@@ -138,11 +139,46 @@ export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
         .map((g) => g.key)
         .filter((k): k is string => typeof k === 'string' && k.length > 0),
     );
-    const referencedGroups = new Set<string>();
+    // Membership as the layout resolves it: a group's own `fields` list first,
+    // else the older `Field.group` (`readFieldGroupMembership`, the same
+    // resolution `deriveFieldGroupLayout` places sections from).
+    // Injected columns count as fields a list may name (they exist at render
+    // time); declared ones keep their own definitions.
+    const membership = readFieldGroupMembership({
+      fieldGroups: obj.fieldGroups,
+      fields: { ...Object.fromEntries([...injectedColumnsFor(obj)].map((n) => [n, {}])), ...fields },
+    });
+    const referencedGroups = new Set<string>(
+      [...membership.members].filter(([, names]) => names.length > 0).map(([key]) => key),
+    );
+    // ── (e) a group's `fields` list names a field the object does not declare ──
+    // The parse skips such a name (removing a field must not make the object
+    // unparseable), so the layout places nothing for it: almost always a typo
+    // or a field removed without editing the list.
+    (Array.isArray(obj.fieldGroups) ? obj.fieldGroups : []).forEach((g: unknown, gi: number) => {
+      if (!g || typeof g !== 'object') return;
+      const grp = g as AnyRec;
+      if (!Array.isArray(grp.fields) || typeof grp.relatedList === 'string') return;
+      grp.fields.forEach((name: unknown, fi: number) => {
+        // `fieldNames`: declared fields AND the system columns the platform
+        // injects here — a list may place `owner_id` without redeclaring it.
+        if (typeof name !== 'string' || fieldNames.has(name)) return;
+        findings.push({
+          severity: 'warning',
+          rule: FIELD_GROUP_MEMBER_UNKNOWN,
+          where,
+          path: `${path}.fieldGroups[${gi}].fields[${fi}]`,
+          message:
+            `${objName}: field group "${String(grp.key)}" lists "${name}", which is not a field on this ` +
+            `object — the group places nothing for it`,
+          hint:
+            `Fix the name to one of ${objName}'s fields, or remove it from the group's fields list.`,
+        });
+      });
+    });
     for (const [fname, f] of Object.entries(fields)) {
       const g = f?.group;
       if (typeof g !== 'string' || g.length === 0) continue;
-      referencedGroups.add(g);
       if (!declaredGroups.has(g)) {
         findings.push({
           severity: 'warning',
@@ -172,7 +208,7 @@ export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
             `${objName}: fieldGroups declares "${key}" but no field references it — ` +
             `the group never renders`,
           hint:
-            `Assign at least one field via group: '${key}', or remove the unused ` +
+            `List at least one field in its fields (fields: ['…']), or remove the unused ` +
             `group declaration.`,
         });
       }
@@ -215,17 +251,19 @@ export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
       if (unprovisioned.has(entry)) findings.push(unprovisionedPointer('highlightFields', entry));
     }
 
-    // ── (d) declared group fully shadowed by the detail highlight strip ──
-    // Detail pages render the first RECORD_HIGHLIGHTS_MAX highlightFields
-    // (after the title leaves the list) as the top strip and HIDE those
-    // fields from the details body. The count is the spec constant the record
-    // page synthesizer cuts with, so the verdict and the screen cannot drift
-    // apart; a literal here once judged 4 while the page drew 6, so a group
-    // emptied by the 5th or 6th highlight passed. The record's title field is
-    // the page H1 and never renders in the body either. A group whose every
-    // visible member is covered by strip ∪ title therefore renders on FORMS
-    // but silently never on detail pages — legal, but almost never what the
-    // author pictured when they declared the group.
+    // ── (d) declared group fully shadowed on the detail page ──
+    // The record's title field is the page H1 and never renders in the
+    // details body. A group whose every visible member is the title therefore
+    // renders on FORMS but silently never on detail pages — legal, but almost
+    // never what the author pictured when they declared the group.
+    //
+    // The highlight strip no longer counts (objectstack#35849): the default
+    // record page draws no strip and leaves every grouped field in its group
+    // (objectstack#35891), so a highlighted field is drawn in the body like
+    // any other. The rule used to hide the first six (RECORD_HIGHLIGHTS_MAX)
+    // highlights from the body too, and judging that now would warn about
+    // groups the page draws. Its reach is unchanged: objects that declare
+    // `highlightFields`.
     const declaredStrings = highlights.filter(
       (h): h is string => typeof h === 'string' && h.length > 0,
     );
@@ -243,17 +281,13 @@ export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
         .find((v): v is string => typeof v === 'string' && v.length > 0 && fieldNames.has(v));
       const titleField = declaredTitle
         ?? ['name', 'full_name', 'title', 'subject', 'display_name'].find((c) => fieldNames.has(c));
-      const stripSet = new Set(
-        declaredStrings.filter((h) => h !== titleField).slice(0, RECORD_HIGHLIGHTS_MAX),
-      );
-      const hiddenFromBody = new Set(stripSet);
+      const hiddenFromBody = new Set<string>();
       if (titleField) hiddenFromBody.add(titleField);
 
       for (const key of declaredGroups) {
         if (relatedListGroups.has(key)) continue;
-        const members = Object.entries(fields)
-          .filter(([, f]) => f?.group === key && f?.hidden !== true)
-          .map(([fname]) => fname);
+        const members = (membership.members.get(key) ?? [])
+          .filter((fname) => fields[fname]?.hidden !== true);
         if (members.length === 0) continue; // rule (b) already covers empty groups
         if (!members.every((m) => hiddenFromBody.has(m))) continue;
         findings.push({
@@ -263,12 +297,10 @@ export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
           path: `${path}.fieldGroups`,
           message:
             `${objName}: every field in group "${key}" (${members.join(', ')}) is ` +
-            `hoisted into the detail highlight strip (or is the record title) — ` +
-            `the group renders on forms but never on detail pages`,
+            `the record title — the group renders on forms but never on detail pages`,
           hint:
-            `Keep at least one non-highlighted field in "${key}", or remove the ` +
-            `group if the strip already covers it. (Detail pages show the first ` +
-            `${RECORD_HIGHLIGHTS_MAX} highlightFields as the top strip and hide them from the body.)`,
+            `Add another field to "${key}", or remove the group. (Detail pages show ` +
+            `the record title as the page heading and leave it out of the body.)`,
         });
       }
     }

@@ -245,3 +245,48 @@ describe('InlineEditSaveBar — Cancel', () => {
     expect(update).not.toHaveBeenCalled();
   });
 });
+
+describe('InlineEditSaveBar — the record changed elsewhere during the edit (objectstack#35685)', () => {
+  function renderBar(data: Record<string, unknown>, update = vi.fn().mockResolvedValue({})) {
+    const bar = (record: Record<string, unknown>) => (
+      <InlineEditProvider canEdit>
+        <Harness />
+        <InlineEditSaveBar
+          dataSource={{ update }}
+          objectName="proj"
+          recordId="p1"
+          data={record}
+          refresh={vi.fn()}
+        />
+      </InlineEditProvider>
+    );
+    const utils = render(bar(data));
+    return { ...utils, update, reread: (record: Record<string, unknown>) => utils.rerender(bar(record)) };
+  }
+  const notice = () => document.querySelector('[data-inline-record-changed]');
+
+  it('keeps the draft, says so, and Save writes the draft over the version now read', async () => {
+    const t = renderBar({ updated_at: 'v1', status: 'draft' });
+    stageTwoFields();
+    expect(notice()).toBeNull();
+    // A list cell beside the drawer saved the record; the drawer read it again.
+    t.reread({ updated_at: 'v2', status: 'review' });
+    expect(notice()).toHaveTextContent('This record was changed elsewhere while you were editing.');
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(t.update).toHaveBeenCalledTimes(1));
+    expect(t.update).toHaveBeenCalledWith('proj', 'p1', { status: 'active', budget: 100 }, { ifMatch: 'v2' });
+  });
+
+  it('says nothing while the record is the one the edit began on, nor in the next session', () => {
+    const t = renderBar({ updated_at: 'v1' });
+    stageTwoFields();
+    t.reread({ updated_at: 'v1' });
+    expect(notice()).toBeNull();
+    t.reread({ updated_at: 'v2' });
+    expect(notice()).not.toBeNull();
+    // Cancel ends the session; the next one begins on v2.
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    stageTwoFields();
+    expect(notice()).toBeNull();
+  });
+});

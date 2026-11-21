@@ -86,11 +86,15 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.key": {
         label: "키",
-        helpText: "이 객체 안에서 고유한 snake_case 머신 키입니다. 스키마는 다른 형식을 거부합니다. 필드는 이 키를 지정해 그룹에 들어가므로, 이름을 바꾸면 필드가 그룹에서 빠집니다."
+        helpText: "이 객체 안에서 고유한 snake_case 머신 키입니다. 스키마는 다른 형식을 거부합니다. 그룹의 필드 목록에 나열된 필드는 키 이름을 바꿔도 그룹에 남고, 자체 그룹 설정에서 이 키를 지정해 들어온 필드는 그룹에서 빠집니다."
       },
       "fieldGroups.label": {
         label: "레이블",
         helpText: "그룹 섹션의 헤더 텍스트입니다."
+      },
+      "fieldGroups.fields": {
+        label: "필드",
+        helpText: "이 그룹이 표시하는 필드와 표시 순서(필드 이름)입니다. 입력하면 어떤 필드도 옮기지 않고 그룹 안의 순서를 정합니다. 여기에 나열한 필드는 자체 그룹 설정에서 다른 그룹을 지정할 수 없으며, 한 필드는 한 그룹에만 나열할 수 있습니다. 관련 목록과 함께 사용할 수 없습니다."
       },
       "fieldGroups.icon": {
         label: "아이콘",
@@ -1350,7 +1354,8 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "항목 클릭 탐색 구성(기본값 drawer, page, new_window 또는 none)"
       },
       "navigation.mode": {
-        label: "모드"
+        label: "모드",
+        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
       },
       "navigation.preventNavigation": {
         label: "탐색 방지",

@@ -123,14 +123,16 @@
     {
       "id": 8,
       "prompt": "Our ObjectStack app's case SLA must count business hours only. Add a `business_hours_calendar` object (weekday ranges per organization) and a `holiday` table, and make the SLA formula read them.",
-      "expected_output": "Checks the platform catalog first: working calendars are in its Planned section, marked not available, so there is nothing to declare today. This is a missing capability, not a defect, so §3 does not apply: the app is not blocked and no workaround language is used. A second app would copy a calendar, so it files or links the platform card at objectstack-ai/objectstack, and may build the smallest calendar the SLA needs meanwhile, with the objects and the formula marked `// PLATFORM-CANDIDATE: <link to the card>` so the bump sweep (§5 step 4) replaces them when the platform ships calendars. It does not present the app's calendar as the platform's.",
+      "expected_output": "Does not create `business_hours_calendar` or `holiday`: the platform catalog lists `sys_work_calendar` (weekly working periods, per organization) and `sys_work_calendar_exception` (dated holidays and make-up workdays) as what the platform ships, and each organization keeps its own rows in Setup. The formula half is different: working-day formulas are in the catalog's Planned section, marked not available, so no formula reads a calendar today. That is a missing capability, not a defect, so §3 does not apply: the app is not blocked and no workaround language is used. It links the contract at objectstack-ai/objectstack and may compute the business-hours due time in the app meanwhile, reading the platform's calendar rows and marked `// PLATFORM-CANDIDATE: <link>` so the bump sweep (§5 step 4) replaces it when the platform ships the formulas. Where the SLA is an approval step's deadline, it sets `escalation.clock: 'working_time'` instead, which reads the calendar today.",
       "files": [],
       "assertions": {
         "must_contain": [
-          "PLATFORM-CANDIDATE",
-          "objectstack-ai/objectstack"
+          "sys_work_calendar",
+          "PLATFORM-CANDIDATE"
         ],
         "must_not_contain": [
+          "name: 'business_hours_calendar'",
+          "name: 'holiday'",
           "Blocked by",
           "PLATFORM-GAP"
         ]

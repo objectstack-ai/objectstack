@@ -511,6 +511,9 @@ export const HeaderHighlight: React.FC<HeaderHighlightProps> = ({
                             // ("Start Date Sep 15, 2025") read as next month.
                             // Grid cells keep the shared face that drops it.
                             alwaysShowYear
+                            // The date itself, not "6 days ago"
+                            // (objectstack#35745).
+                            absoluteDate
                           />
                         </span>
                       )}

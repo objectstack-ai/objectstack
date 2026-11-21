@@ -254,6 +254,7 @@ describe('MessagingServicePlugin — boot provisioning honours skipSchemaSync (#
     const OBJECTS = [
         'sys_notification', 'sys_inbox_message', 'sys_notification_receipt', 'sys_notification_delivery',
         'sys_notification_preference', 'sys_notification_template', 'sys_http_delivery', 'sys_user_device',
+        'sys_channel_account', 'sys_channel_user_link',
     ];
     const SKIP = 'NOT provisioned at boot';
 
@@ -381,6 +382,7 @@ describe('MessagingServicePlugin — a failed provision is an error, once per ob
     const OBJECTS = [
         'sys_notification', 'sys_inbox_message', 'sys_notification_receipt', 'sys_notification_delivery',
         'sys_notification_preference', 'sys_notification_template', 'sys_http_delivery', 'sys_user_device',
+        'sys_channel_account', 'sys_channel_user_link',
     ];
 
     /** Every DDL succeeds except the named object's, which the driver refuses. */

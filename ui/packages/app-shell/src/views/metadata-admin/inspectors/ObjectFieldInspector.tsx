@@ -53,7 +53,6 @@ import {
   COMPUTED_VALUE_TYPES,
   FieldSchema,
   isAggregateCompatibleWithFieldType,
-  isBodyTableRelationship,
   MULTI_OPTION_TYPES,
   NUMERIC_VALUE_TYPES,
   SelectOptionSchema,
@@ -123,6 +122,10 @@ import {
   toFieldNameLoose,
   toFieldNameOrEmpty,
   indexOfField,
+  readGroups,
+  groupMembership,
+  currentGroupLayout,
+  writeGroupLayout,
   type FieldsView,
   type FieldEntry,
 } from '../previews/object-fields-io.js';
@@ -1079,6 +1082,29 @@ export function ObjectFieldInspector({
 
   const writeView = (next: FieldsView) => {
     onPatch({ fields: writeFields(next) });
+  };
+
+  /**
+   * Move this field to another group (or out of every group). Where no list
+   * is involved — the field is listed nowhere and the target lists nothing —
+   * the older `group` key is all there is to write, as before. Otherwise the
+   * move goes through `writeGroupLayout`, which keeps a group's `fields` list
+   * and the field's own `group` from contradicting each other
+   * (objectstack#35900): the field joins the end of the target group.
+   */
+  const moveToGroup = (target: string | null) => {
+    const groups = readGroups(fieldGroups);
+    const listsIt = groups.some((g) => Array.isArray(g.fields) && g.fields.includes(entry.name));
+    const targetLists = target !== null && groups.some((g) => g.key === target && Array.isArray(g.fields));
+    if (!listsIt && !targetLists) {
+      patchDef({ group: target ?? undefined });
+      return;
+    }
+    const layout = currentGroupLayout(view, groups);
+    for (const [key, names] of layout) layout.set(key, names.filter((n) => n !== entry.name));
+    layout.set(target, [...(layout.get(target) ?? []), entry.name]);
+    const patch = writeGroupLayout(view, groups, layout);
+    if (patch.fields !== undefined || patch.fieldGroups !== undefined) onPatch(patch);
   };
 
   const patchDef = (patch: Record<string, unknown>) => {
@@ -2094,14 +2120,14 @@ export function ObjectFieldInspector({
           <DisplayPatchLock>
             <InspectorSelectField
               label={tr('designer.field.group')}
-              value={typeof def.group === 'string' ? (def.group as string) : ''}
+              value={groupMembership(view, fieldGroups).groupOf.get(entry.name) ?? ''}
               options={[
                 { value: '', label: tr('designer.field.noGroup') },
                 ...fieldGroups
                   .filter((g) => typeof g.key === 'string')
                   .map((g) => ({ value: g.key as string, label: String(g.label ?? g.key) })),
               ]}
-              onCommit={(v) => patchDef({ group: v || undefined })}
+              onCommit={(v) => moveToGroup(v || null)}
               disabled={locked}
             />
           </DisplayPatchLock>
@@ -3029,21 +3055,15 @@ function DeleteBehaviorField({
 type RelatedListMode = 'shown' | 'hidden' | 'primary';
 
 /**
- * The stored `relatedList` as one of the control's three states. `true` reads
- * as `shown`. ABSENT reads as the relationship's default, which the record
- * page's own predicate decides (`@objectstack/spec`'s `isBodyTableRelationship`,
- * objectstack#27069 / objectstack#27478): a
- * `master_detail` FK that sets `inlineEdit` is primary by default, every other
- * FK is shown. Without `field` an absent value reads as `shown`.
+ * The stored `relatedList` as one of the control's three states. `true` and
+ * ABSENT read as `shown`: since objectstack#35889 every FK with no
+ * `relatedList` is a tab by default, a `master_detail` one included (a field
+ * group of the parent may still make that one a body table; the field
+ * inspector does not see the parent's groups).
  */
-export function readRelatedListMode(
-  value: unknown,
-  field?: { type?: unknown; inlineEdit?: unknown },
-): RelatedListMode {
+export function readRelatedListMode(value: unknown): RelatedListMode {
   if (value === false) return 'hidden';
   if (value === 'primary') return 'primary';
-  if (value === undefined && field && typeof field.type === 'string'
-    && isBodyTableRelationship({ type: field.type, inlineEdit: field.inlineEdit })) return 'primary';
   return 'shown';
 }
 
@@ -3059,8 +3079,8 @@ const RELATED_LIST_MODES: ReadonlyArray<{ mode: RelatedListMode; labelKey: strin
  *
  *  - The three-state `relatedList` control: shown, hidden (`false`), and
  *    primary (`'primary'`), a core relationship. The relationship's default
- *    state leaves the key ABSENT: shown, or primary on a `master_detail` FK
- *    that sets `inlineEdit` (objectstack#27069); the other states write it. The primary state's wording,
+ *    state leaves the key ABSENT: shown (objectstack#35889, every FK type);
+ *    the other states write it. The primary state's wording,
  *    "Primary (in body)", follows the record-page v3 ruling that a primary
  *    related list is drawn in the record body as a full-width table (the
  *    rendering half is the record-page card objectstack#27069).
@@ -3085,11 +3105,11 @@ function RelatedListFields({
   locale?: string;
 }) {
   const tr = (key: string) => t(key, locale);
-  const mode = readRelatedListMode(def.relatedList, def);
+  const mode = readRelatedListMode(def.relatedList);
   // The state an absent key already means here. Picking it clears the key;
-  // picking another writes it, so "Show" on an inline-edited `master_detail`
-  // (primary by default) is an explicit `true`.
-  const defaultMode = readRelatedListMode(undefined, def);
+  // picking another writes it. "Show" leaves a `master_detail` FK's key absent,
+  // so a field group of the parent can still place it (objectstack#35889).
+  const defaultMode = readRelatedListMode(undefined);
   const reference = typeof def.reference === 'string' && def.reference ? (def.reference as string) : '';
   const setMode = (next: RelatedListMode) => {
     if (next === mode) return;
