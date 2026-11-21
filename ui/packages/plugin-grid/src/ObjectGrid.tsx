@@ -4107,8 +4107,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
               ))}
               {exportError && (
                 <div
-                  className="px-2 py-1 text-xs"
-                  style={{ color: 'var(--destructive, #ef4444)' }}
+                  className="px-2 py-1 text-xs text-destructive"
                   role="alert"
                 >
                   {exportError}
