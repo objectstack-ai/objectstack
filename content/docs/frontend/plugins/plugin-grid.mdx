@@ -412,10 +412,20 @@ object and the view does not declare `userActions.editInline: false`, and
   into the editor in the same place and at the same size.
 - **Editing** starts on a double-click, Enter or F2 (the value kept, caret at
   its end), or by typing, which replaces the value; an input method's
-  composition is kept whole. Backspace or Delete opens an empty editor and
-  saves nothing yet.
-- **While editing**, Enter commits and moves down, Tab / Shift+Tab commit and
-  move right / left, and Escape cancels and keeps the cell selected. In a
+  composition is kept whole. Backspace or Delete clears the cell and saves at
+  once; a required field keeps its value and says it is required.
+- **Where the editor draws** (objectstack#36023): a picker (single and multi
+  select, status, tags, date, date-time, time, colour, a lookup or a user)
+  opens as a panel under the cell, which keeps showing its value; the date
+  panel has the typeable box on top and the calendar beneath. Typed input,
+  long text and an address edit in place over the cell.
+- **A value that fails its rules is not saved**: the field's required, length,
+  range, email or URL rule, or text a number box cannot read. The editor stays
+  open with what was typed and says why under it; correct it and commit again,
+  or press Escape to discard. A click elsewhere does nothing meanwhile.
+- **While editing**, Enter commits and keeps the same cell selected, Tab /
+  Shift+Tab commit and move right / left, and Escape cancels and keeps the cell
+  selected. In a
   multi-line editor Enter is a new line and Ctrl/Cmd+Enter commits. A click
   elsewhere commits.
 - **Selected cell keys:** the arrows and Tab move the selection; Space is typed

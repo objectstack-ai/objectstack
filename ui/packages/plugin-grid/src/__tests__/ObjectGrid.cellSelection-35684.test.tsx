@@ -22,6 +22,9 @@
  *   4. A single click on a cell's email link or referenced record's chip only
  *      selects it, the title link still opens the record, and the email cell
  *      draws its copy button as the one the table hides (objectstack#36015).
+ *   5. objectstack#36023: a select cell's editor opens under the cell, which
+ *      keeps its value drawn; a required cell refuses Backspace in the form's
+ *      words; a value over the field's declared length stays in the editor.
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -272,5 +275,72 @@ describe('ObjectGrid cellSelection — a click on a link a cell draws only selec
     const g = await renderLinked();
     expect(g.cell(1).querySelector('button[data-cell-copy]')).not.toBeNull();
     expect(g.cell(1).className).toContain('[&_[data-cell-copy]]:hidden');
+  });
+});
+
+describe('ObjectGrid cellSelection — the panel, Backspace and the rules (objectstack#36023)', () => {
+  const RULES = {
+    name: { type: 'text', label: 'Name', required: true, maxLength: 5 },
+    stage: { type: 'select', label: 'Stage', options: [{ value: 'open', label: 'Open' }, { value: 'won', label: 'Won' }] },
+    notes: { type: 'text', label: 'Notes' },
+  };
+  async function renderRules() {
+    const utils = render(
+      <ObjectGridRenderer
+        schema={{
+          type: 'object-grid',
+          objectName: 'probe',
+          columns: ['name', 'stage', 'notes'],
+          data: { provider: 'value', items: [{ id: '1', name: 'Alpha', stage: 'open', notes: 'n' }] },
+          editable: true,
+        }}
+        objectFields={RULES}
+        cellSelection
+      />,
+    );
+    await screen.findByText('Alpha', {}, { timeout: 5000 });
+    const cell = (col: number) => utils.container.querySelectorAll<HTMLElement>('tbody tr td[data-grid-cell]')[col];
+    const catcher = () => utils.container.querySelector<HTMLInputElement>('[data-slot="cell-type-catcher"]')!;
+    return { ...utils, cell, catcher };
+  }
+
+  it('a select cell opens its list under the cell, and the cell keeps showing its value', async () => {
+    const g = await renderRules();
+    fireEvent.click(g.cell(1));
+    fireEvent.keyDown(g.catcher(), { key: 'Enter' });
+    const overlay = await waitFor(() => {
+      const el = g.cell(1).querySelector('[data-slot="cell-editor-overlay"]');
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    expect(overlay).toHaveAttribute('data-placement', 'below');
+    expect(g.cell(1).querySelector('[data-slot="cell-display"]')).toHaveTextContent('Open');
+    // CONTROL: a text cell's editor covers its cell.
+    fireEvent.keyDown(overlay.querySelector('input')!, { key: 'Escape' });
+    fireEvent.click(g.cell(2));
+    fireEvent.keyDown(g.catcher(), { key: 'Enter' });
+    await waitFor(() => expect(g.cell(2).querySelector('[data-slot="cell-editor-overlay"]')).toHaveAttribute('data-placement', 'cover'));
+  });
+
+  it('Backspace on a required cell keeps its value and says it is required', async () => {
+    const g = await renderRules();
+    fireEvent.click(g.cell(0));
+    fireEvent.keyDown(g.catcher(), { key: 'Backspace' });
+    expect(await screen.findByTestId('cell-readonly-reason')).toHaveTextContent('Name is required');
+    expect(g.cell(0)).toHaveTextContent('Alpha');
+  });
+
+  it('a name longer than the field allows stays in the editor with the reason', async () => {
+    const g = await renderRules();
+    fireEvent.click(g.cell(0));
+    fireEvent.change(g.catcher(), { target: { value: 'Alphabet' } });
+    const input = await waitFor(() => {
+      const el = g.cell(0).querySelector<HTMLInputElement>('[data-slot="cell-editor-overlay"] input');
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(await screen.findByTestId('cell-edit-refusal')).toHaveTextContent('Name must be at most 5 characters');
+    expect(g.cell(0).querySelector('[data-slot="cell-editor-overlay"] input')).toHaveValue('Alphabet');
   });
 });

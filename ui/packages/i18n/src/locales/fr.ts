@@ -537,6 +537,9 @@ const fr = {
     cancelChanges: "Annuler les modifications",
     saveRow: "Enregistrer la ligne",
     cellReadOnly: "Cette cellule ne peut pas être modifiée ici.",
+    // objectstack#36023 — why a list cell's typed value was not saved, under the editor.
+    cellNotNumber: "Saisissez un nombre.",
+    cellInvalid: "Cette valeur n'est pas valide.",
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "Enregistrement…",
     cellSaved: "Enregistré",
@@ -669,7 +672,7 @@ const fr = {
       earliest: "Plus ancienne",
       latest: "Plus récente",
       pageName: "{{label}} (cette page)",
-      calculate: "Calculer",
+      calculate: "Ajouter un calcul",
       none: "Aucun",
       menuPercentEmpty: "Pourcentage vide",
       menuPercentFilled: "Pourcentage rempli",
@@ -1260,6 +1263,7 @@ const fr = {
   },
   view: {
     editViewConfig: "Modifier la configuration de la vue",
+    showViewConfig: "Voir la configuration de la vue",
     rename: "Renommer",
     duplicateView: "Dupliquer la vue",
     shareView: "Partager la vue",
@@ -2723,11 +2727,25 @@ const fr = {
       viewNameInvalid: "Utilisez des minuscules, des chiffres et des tirets bas ; commencez par une lettre ou un tiret bas.",
       systemViewReadonly: "Vue système définie dans le code — en lecture seule.",
       cannotEditMetaView: "Cette vue est intégrée et définie dans le code — elle ne peut pas être modifiée.",
+      // The 「Personalized · Reset to view」 marker's words (objectstack#28950), no longer drawn
+      // since objectstack#35955: kept in every pack, so no published key goes away.
       resetView: "Revenir à la vue",
       resetViewTitle: "Rétablit les filtres, la recherche, le tri, le regroupement, la disposition des colonnes, les champs masqués, la densité, la disposition, la couleur de ligne, les numéros de ligne et l’édition en ligne propres à cette vue. Les vues épinglées, les favoris et le mode d’ouverture des enregistrements ne changent pas. Seule votre liste change.",
-      linkFilterRefused: 'Le filtre de ce lien n’a pas été appliqué. Il cite un champ sur lequel vous ne pouvez pas filtrer ici, la liste affiche donc la vue sans ce filtre.',
       personalized: "Personnalisée",
       personalizedHeading: "Votre liste diffère de cette vue par",
+      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      draft: {
+        discard: "Abandonner",
+        discardTitle: "Remet la liste telle que la vue la définit : filtres, tri, regroupement, colonnes et disposition. La largeur des colonnes et la hauteur des lignes restent.",
+        save: "Enregistrer",
+        heading: "Modifications non enregistrées",
+        partSeparator: ", ",
+        saveToView: "Enregistrer dans cette vue",
+        saveAsMyView: "Enregistrer comme ma vue",
+        copyName: "{{name}} (copie)",
+        saved: "Enregistré",
+      },
+      linkFilterRefused: 'Le filtre de ce lien n’a pas été appliqué. Il cite un champ sur lequel vous ne pouvez pas filtrer ici, la liste affiche donc la vue sans ce filtre.',
       personalizedParts: {
         filters: "Filtres",
         search: "Recherche",

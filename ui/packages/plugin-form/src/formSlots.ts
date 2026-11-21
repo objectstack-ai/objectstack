@@ -47,10 +47,17 @@ export interface FormSlotRequest {
  * is called once per drawn layout (`[]` when it places none), never while the
  * form is still loading — so a remounting header keeps the previous claim and
  * the collections do not jump below the form and back.
+ *
+ * `refusedKey()` names the collections the last refused save was refused on
+ * (one id per line, `''` for none), and `subscribe` tells a layout that it
+ * moved: a tabbed form marks the tab that holds such a collection, as it
+ * marks the tab of a refused field.
  */
 export interface FormSlotHost {
   refFor(id: string): (el: HTMLElement | null) => void;
   claim(ids: readonly string[]): void;
+  refusedKey(): string;
+  subscribe(listener: () => void): () => void;
 }
 
 /** The hand-off key a host sets on the header form's schema. */
@@ -137,7 +144,11 @@ export function placeFormSlots<S>(
  * by the form renderer's `form-slot` branch; like a divider row's `onToggle`
  * it is written by the host and never authored, so it stays off `FormField`.
  */
-export type FormSlotRow = FormField & { slotRef: (el: HTMLElement | null) => void };
+export type FormSlotRow = FormField & {
+  slotRef: (el: HTMLElement | null) => void;
+  /** The last save was refused on this collection: its tab is marked. */
+  slotRefused?: true;
+};
 
 /**
  * The row a placed collection takes in the header form's field list. A
@@ -145,11 +156,13 @@ export type FormSlotRow = FormField & { slotRef: (el: HTMLElement | null) => voi
  * navigation, between the headings it sits between.
  */
 export function formSlotRow(request: FormSlotRequest, host: FormSlotHost, label = ''): FormSlotRow {
+  const refused = host.refusedKey().split('\n').includes(request.id);
   return {
     name: `__form_slot__${request.id}`,
     label,
     type: FORM_SLOT_ROW_TYPE,
     slotRef: host.refFor(request.id),
+    ...(refused ? { slotRefused: true } : {}),
   } as FormSlotRow;
 }
 
@@ -163,6 +176,7 @@ export class FormSlotStore implements FormSlotHost {
   private readonly elements = new Map<string, HTMLElement>();
   private readonly refs = new Map<string, (el: HTMLElement | null) => void>();
   private claimed: ReadonlySet<string> | null = null;
+  private refused = '';
   private readonly listeners = new Set<() => void>();
   private version = 0;
 
@@ -186,6 +200,20 @@ export class FormSlotStore implements FormSlotHost {
     this.claimed = new Set(ids);
     this.emit();
   }
+
+  /**
+   * The collections the last refused save was refused on; `[]` when a save
+   * gets past validation, so a mark lasts exactly as long as a refused
+   * field's.
+   */
+  refuse(ids: readonly string[]): void {
+    const key = [...new Set(ids)].sort().join('\n');
+    if (key === this.refused) return;
+    this.refused = key;
+    this.emit();
+  }
+
+  refusedKey = (): string => this.refused;
 
   /**
    * Where the host draws collection `id`: `'inline'` (no layout has claimed

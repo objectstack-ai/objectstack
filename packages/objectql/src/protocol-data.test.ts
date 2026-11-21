@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ObjectStackProtocolImplementation, recordNotFoundError } from '@objectstack/metadata-protocol';
+import { RAW_FILE_VALUES_CONTEXT_KEY } from '@objectstack/spec/data';
 
 /**
  * Tests for the Protocol Implementation's data methods (findData, getData).
@@ -686,7 +687,18 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
             const { protocol, insert, findOne } = makeProtocol();
             const ctx = { userId: 'u1' };
             await protocol.cloneData({ object: 'account', id: 'src-1', context: ctx });
-            expect(findOne).toHaveBeenCalledWith('account', expect.objectContaining({ context: ctx }));
+            // [#35721] The source is read as the caller reads it, with file
+            // fields in their STORED form: the caller's context plus
+            // `RAW_FILE_VALUES_CONTEXT_KEY`, so a file field reaches the insert
+            // as its `sys_file` id, never as the expanded file object.
+            expect(findOne).toHaveBeenCalledWith('account', {
+                where: { id: 'src-1' },
+                context: { userId: 'u1', [RAW_FILE_VALUES_CONTEXT_KEY]: true },
+            });
+            // The key is added to a copy: the caller's own context is untouched,
+            // so the insert assertion below (deep equality against `ctx`) holds
+            // the insert to the caller's context WITHOUT the key.
+            expect(ctx).toEqual({ userId: 'u1' });
             // [#15703] The insert options carry the context AND the
             // `onFieldsDropped` listener `createData` wires — the clone reports
             // the engine's readonly-strip verdict on its 201 body since #15703.

@@ -24,8 +24,8 @@ export interface InCellOption {
  *
  * Enter that picks is kept from the grid (`stopPropagation`): the grid's own
  * Enter would commit the value it held before the pick. With no active row,
- * Enter goes on to the grid, which commits and moves down. Escape always goes
- * on to the grid, which cancels.
+ * Enter goes on to the grid, which commits and stays on the cell. Escape
+ * always goes on to the grid, which cancels.
  */
 export function InCellOptionList({
   options,

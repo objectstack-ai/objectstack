@@ -202,12 +202,14 @@ export const MODEL_NOT_REPORTED = '(not reported)';
 /**
  * How the passing `pending_confirmation` operations were met
  * (`OperationGrade.confirmation`): the agent asked the person first, or it
- * sent `confirm: true` itself through the action's gate, accepted only until
- * objectstack-ai/cloud#3826 item 6 (`AGENT_CONFIRMATION_MEETS_PENDING`).
+ * sent `confirm: true` itself through the action's gate, which only a grade
+ * opted in to the deprecated temporary rule accepts
+ * (`AGENT_CONFIRMATION_MEETS_PENDING`, off since #33691).
  * Absent ⇒ none passed.
  */
 export interface ConfirmationTally {
   askedFirst: number;
+  /** @deprecated Counted only under the temporary rule, which is off; deleted in the next major (#36057). */
   confirmedByAgent: number;
 }
 
@@ -897,7 +899,7 @@ export function renderScorecard(sc: CardScorecard): string {
     `ask cost: ${askCostText(sc.askSpend)}`,
     `ask time: ${askTimeText(sc.askSpend)}`,
     '',
-    ...(sc.confirmation ? [`irreversible operations: ${confirmationText(sc.confirmation)} (accepted until real human confirmation lands)`, ''] : []),
+    ...(sc.confirmation ? [`irreversible operations: ${confirmationText(sc.confirmation)}${sc.confirmation.confirmedByAgent > 0 ? ' (confirmed by the agent: met only under the retired relaxed grade, off by default)' : ''}`, ''] : []),
     ...(sc.confirmedWrite ? [`irreversible operations, the write after the person confirmed: ${cell(sc.confirmedWrite)} (graded apart from the ask, and in the operations score)`, ''] : []),
     `| Half | ${sc.modes.map((m) => m.mode).join(' | ')} |`,
     `|:---|${sc.modes.map(() => ':---').join('|')}|`,
