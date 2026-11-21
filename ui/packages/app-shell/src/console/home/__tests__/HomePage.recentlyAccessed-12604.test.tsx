@@ -22,6 +22,8 @@
 
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+// Pays the lint package's first load during collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 import React from 'react';
 import { render, screen, cleanup, within } from '@testing-library/react';
 import { useDisplayLocale } from '@object-ui/i18n';
@@ -151,6 +153,7 @@ const ACCOUNT = {
   label: 'Account',
   pluralLabel: 'Accounts',
   icon: 'building',
+  color: 'orange',
   listViews: { 'crm_account.all_accounts': { name: 'crm_account.all_accounts', label: 'All Accounts' } },
 };
 
@@ -274,6 +277,14 @@ describe('Home "Recently accessed" (objectui#12604)', () => {
     renderPage();
     rows()[1].click();
     expect(navigateMock).toHaveBeenCalledWith('/apps/crm/crm_account/view/crm_account.all_accounts');
+  });
+});
+
+describe('a record row draws its object\'s tile (objectstack#35985)', () => {
+  it('in the object\'s palette colour; the other kinds keep their muted kind icon', () => {
+    renderPage();
+    const tiles = rows().map((row) => row.querySelector('[data-object-icon-tile]')?.getAttribute('data-object-icon-tile') ?? null);
+    expect(tiles).toEqual(['orange', null, null, null]);
   });
 });
 

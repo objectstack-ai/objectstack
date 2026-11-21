@@ -2840,9 +2840,28 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       // Shadcn's `default`; a destructive action shown inline is Shadcn's
       // `destructive` (objectui#12764); every other inline button is an
       // outline button (objectui#12617).
+      //
+      // objectstack#36049 — the host's Edit is never filled in the header
+      // row. On a record whose object declares no header action, Edit was
+      // the pick and drew as the page's one solid button, louder than the
+      // record's name, though the record's fields edit in place. It now
+      // draws outline there too; the page's own actions keep their pick and
+      // their faces, and a host button DECLARING `variant: 'primary'` (the
+      // edit state's Save, objectstack#35816) stays filled. The phone's
+      // bottom bar keeps its filled Edit: there it is the bar's one big
+      // target.
+      const hostEditPick =
+        action === primaryAction && !barFace && isHostAction(action) && action?.variant !== 'primary';
       const variant =
-        action === primaryAction ? 'default' : isDestructiveAction(action) ? 'destructive' : 'outline';
+        action === primaryAction && !hostEditPick
+          ? 'default'
+          : isDestructiveAction(action) ? 'destructive' : 'outline';
       const size = action.size || 'sm';
+      // objectstack#36049 — the desktop header row is one height, 28 (`h-7`):
+      // its buttons, the `⋯`, the trailing panel toggles. An action that
+      // declares its own `size` keeps it; the phone's rows keep `sm`'s 36,
+      // and its bottom bar its 44.
+      const rowHeight = !barFace && !action.size ? 'sm:h-7' : undefined;
       const actionKey = action.name || action.id || `header-action-${idx}`;
       const pending = pendingActionKeys.has(actionKey);
       const disabled = isActionDisabled(action);
@@ -2865,6 +2884,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
           // same spelling as `PanelToggles` and `DeclaredActionsBar`).
           className={cn(
             'gap-2',
+            rowHeight,
             barFace && 'h-11 min-w-0 flex-1',
             pending && 'cursor-progress opacity-50',
             pressed !== undefined && 'aria-pressed:bg-accent aria-pressed:text-accent-foreground hover:aria-pressed:bg-accent',
@@ -2977,7 +2997,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
               <Button
                 variant="outline"
                 size="sm"
-                className={barFace ? 'h-11 w-11 shrink-0 px-0' : 'gap-1 px-2'}
+                className={barFace ? 'h-11 w-11 shrink-0 px-0' : 'gap-1 px-2 sm:h-7'}
                 aria-label={tt('detail.moreActions', 'More actions')}
               >
                 <MoreHorizontal className="h-4 w-4" />
@@ -3452,6 +3472,11 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
         ? (titleCandidate.trim() ? titleCandidate : '')
         : (recordDisplayValueAt({ value: titleCandidate }, 'value') ?? '')) ||
       placeholderTitle;
+    // The host's name for the record (`RecordHeaderState.title`), in both
+    // faces below, over every rung above; an empty one leaves them deciding.
+    const hostTitle = headerState?.title?.text?.trim() ? headerState.title : undefined;
+    const chipTitle = hostTitle ? hostTitle.text : resolvedTitle;
+    const chipTitleNode = hostTitle ? hostTitle.node : declaredFace;
     // The record's picture (objectui#11383, ruling A on hotcrm#1199). The
     // object names the field in its object-level `imageField`, and that
     // declaration is the ONLY channel: ⛔ no `page:header` prop, and no field
@@ -3535,8 +3560,8 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
       const title = headerBar.titleSlot ? createPortal(
         <span className="flex min-w-0 items-center gap-2" data-record-header-title="" {...headerAria}>
           <RecordTitleChip
-            title={resolvedTitle}
-            titleNode={declaredFace}
+            title={chipTitle}
+            titleNode={chipTitleNode}
             icon={recordPicture}
             // The bar's crumb names the object; a host note on it (how a
             // Setup record's object is managed) keeps its label beside the
@@ -3579,8 +3604,8 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
       >
         <div className="flex flex-col min-w-0 sm:min-w-48 flex-1 w-full sm:w-auto">
           <RecordTitleChip
-            title={resolvedTitle}
-            titleNode={declaredFace}
+            title={chipTitle}
+            titleNode={chipTitleNode}
             icon={recordPicture}
             objectLabel={objectLabel}
             // Host-injected (objectui#13385): the note a host attaches to the
@@ -3700,7 +3725,7 @@ ComponentRegistry.register('header', PageHeaderRenderer, {
     // express the domain: `ComponentInput.type` has no integer/min/max slot, so
     // `description` stays the only authoring-time expression of it, and spec
     // stays the sole judge of values.)
-    { name: 'maxVisible', type: 'number', description: 'How many header actions render as inline buttons on desktop before the rest fold into the overflow menu. A positive integer, defaulting to 3 — the contract rejects 0 and fractional values. In a record page\'s header bar, actions that do not fit its width fold too, so a narrow drawer shows fewer. Two kinds of action are routed to the overflow menu regardless of this budget and never occupy an inline slot: an action whose locations declare record_more without record_header, and any action with component action:menu. The host\'s own buttons (the record page\'s Edit) take no slot and never fold. The first inline action, or the one declaring variant primary, is the one filled primary button; the others are outline buttons. An action declaring variant danger is never the primary: inline it is a destructive button, and in the overflow menu it is a red row below a separator.' },
+    { name: 'maxVisible', type: 'number', description: 'How many header actions render as inline buttons on desktop before the rest fold into the overflow menu. A positive integer, defaulting to 3 — the contract rejects 0 and fractional values. In a record page\'s header bar, actions that do not fit its width fold too, so a narrow drawer shows fewer. Two kinds of action are routed to the overflow menu regardless of this budget and never occupy an inline slot: an action whose locations declare record_more without record_header, and any action with component action:menu. The host\'s own buttons (the record page\'s Edit) take no slot and never fold. The first inline action, or the one declaring variant primary, is the one filled primary button; the others are outline buttons. The host\'s Edit is always an outline button: on a record with no header action of its own the row has no filled button. An action declaring variant danger is never the primary: inline it is a destructive button, and in the overflow menu it is a red row below a separator.' },
     { name: 'mobileMaxVisible', type: 'number', description: 'The same inline-button budget on mobile viewports, where horizontal room is scarce. A positive integer, defaulting to 1, or 2 in a record page\'s bottom action bar on a phone, where the host\'s Edit counts as one; the desktop half is Max Inline Actions, and the overflow routing rules stated there apply unchanged.' },
   ],
 });

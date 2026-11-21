@@ -8,7 +8,7 @@
  * component reads the returned handlers.
  */
 
-import { useCallback, useMemo, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from 'react';
 import { useParams, type useNavigate } from 'react-router-dom';
 import { formatMetadataError } from '@object-ui/data-objectstack';
 import { toast } from 'sonner';
@@ -168,6 +168,25 @@ export function useObjectViewViewCrud({
             return false;
         }
     }, [metadataClient, dataSource, objectName, t]);
+
+    /**
+     * objectstack#35932 — the draft bar's Publish or Discard changed what is
+     * stored. The saved views are read again, and the local copy of the draft
+     * (`viewDraft`, what a save put on screen) goes once that read has landed,
+     * so the list shows what is now stored without first falling back to the
+     * read from before. The list stays mounted across a draft save, so this
+     * copy is not dropped by anything else.
+     */
+    const dropViewDraftOnRead = useRef(false);
+    const handleDraftBarChange = useCallback(() => {
+        dropViewDraftOnRead.current = true;
+        setRefreshKey(k => k + 1);
+    }, [setRefreshKey]);
+    useEffect(() => {
+        if (!dropViewDraftOnRead.current) return;
+        dropViewDraftOnRead.current = false;
+        setViewDraft(null);
+    }, [savedViews, setViewDraft]);
 
     /**
      * Create a new view: the Create View dialog's door and the view-config
@@ -446,6 +465,7 @@ export function useObjectViewViewCrud({
 
     return {
         handleViewConfigSave,
+        handleDraftBarChange,
         handleViewCreate,
         handleViewUpdate,
         handleViewChange,

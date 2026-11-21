@@ -180,6 +180,7 @@ import '@objectstack/lint';
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 import { localListStateKey } from '../context/ListPreferencesProvider';
+import { listDraftScope, patchListDraft, readListDraft, resetListDraftStoreForTests } from './listDraftStore';
 
 const OBJECT_NAME = 'duly_task';
 
@@ -316,13 +317,16 @@ const viewWrites = (dataSource: any): unknown[][] => [
 ];
 
 /**
- * objectui#12474 — the hidden fields this user stored for `viewId`, read off
- * their list state. This harness mounts no preference provider, so the state
- * is this browser's cache (the provider-less fallback).
+ * objectui#12474 — the hidden fields this user chose for `viewId`. Since
+ * objectstack#35955 the choice is the list's DRAFT (`./listDraftStore.ts`):
+ * kept while the reader opens a record and comes back (a remount here), never
+ * stored. The second half reads that nothing reaches the reader's stored
+ * state either.
  */
 function storedHiddenFields(viewId: string): unknown {
   const raw = localStorage.getItem(localListStateKey('u1', OBJECT_NAME));
-  return raw ? JSON.parse(raw)?.perView?.[viewId]?.hiddenFields : undefined;
+  expect(raw ? JSON.parse(raw)?.perView?.[viewId]?.hiddenFields : undefined).toBeUndefined();
+  return readListDraft(listDraftScope('u1', OBJECT_NAME, viewId)).hiddenFields;
 }
 
 /** Longer than the old view write's 300ms debounce, with room to spare. */
@@ -381,6 +385,7 @@ async function expectSessionOnlyToggle(dataSource: any): Promise<void> {
 beforeEach(() => {
   storedViews = {};
   localStorage.clear();
+  resetListDraftStoreForTests();
   unreadable.clear();
   vi.stubGlobal(
     'fetch',
@@ -442,7 +447,7 @@ describe('an unprojected view applies neither hiddenFields nor fieldOrder on the
     expect(storedHiddenFields(PROBE_ID)).toBeUndefined();
   });
 
-  it('CONTROL: on a system view that declares `columns`, the toggle is stored as the user\'s own, and the view is not written (objectui#12474)', async () => {
+  it('CONTROL: on a system view that declares `columns`, the toggle is the reader\'s draft, and the view is not written (objectui#12474, objectstack#35955)', async () => {
     const dataSource = makeDataSource(viewWriteSpies());
     const listViews = {
       [PROBE_ID]: {
@@ -458,12 +463,13 @@ describe('an unprojected view applies neither hiddenFields nor fieldOrder on the
     expect(viewWrites(dataSource)).toEqual([]);
     cleanup();
 
-    // Reload: the user's choice is applied over the view's own `columns`.
+    // Back to the list (objectstack#35955: the draft outlives a record open):
+    // the choice is applied over the view's own `columns`.
     await mountRoute(listViews, PROBE_ID, makeDataSource());
     await waitFor(() => expect(drawn).toEqual(['name', 'stage']));
   });
 
-  it('THE FIX (objectui#12505): on a saved view with no `columns`, the hide is this user\'s own and survives a reload; the row is not written', async () => {
+  it('THE FIX (objectui#12505): on a saved view with no `columns`, the hide is this reader\'s draft and survives coming back to the list; the row is not written', async () => {
     // objectui#12474 made the hide session-only here (it used to persist only
     // through a whole-view write that declared the drawn defaults as `columns`
     // for every user). It is now stored on the user's own list state and
@@ -480,7 +486,7 @@ describe('an unprojected view applies neither hiddenFields nor fieldOrder on the
     expect(viewWrites(first)).toEqual([]);
     cleanup();
 
-    // Reload: the stored list is applied over the drawn defaults.
+    // Back to the list: the draft is applied over the drawn defaults.
     await mountRoute(SAVED_BESIDE, SAVED_ID, savedViewSource());
     await waitFor(() => expect(drawn).toEqual(defaults.filter((f) => f !== 'region')), { timeout: 5000 });
   });
@@ -494,10 +500,7 @@ describe('an unprojected view applies neither hiddenFields nor fieldOrder on the
     const defaults = drawn!;
     cleanup();
 
-    localStorage.setItem(
-      localListStateKey('u1', OBJECT_NAME),
-      JSON.stringify({ perView: { [SAVED_ID]: { hiddenFields: ['amount'] } } }),
-    );
+    patchListDraft(listDraftScope('u1', OBJECT_NAME, SAVED_ID), { hiddenFields: ['amount'] });
     await mountRoute(SAVED_BESIDE, SAVED_ID, savedViewSource({ hiddenFields: ['stage'] }));
     await waitFor(() => expect(drawn).toEqual(defaults.filter((f) => f !== 'amount')), { timeout: 5000 });
   });
@@ -510,10 +513,7 @@ describe('an unprojected view applies neither hiddenFields nor fieldOrder on the
     expect(defaults).not.toContain('id');
     cleanup();
 
-    localStorage.setItem(
-      localListStateKey('u1', OBJECT_NAME),
-      JSON.stringify({ perView: { [SAVED_ID]: { hiddenFields: ['ghost', 'id', 'region'] } } }),
-    );
+    patchListDraft(listDraftScope('u1', OBJECT_NAME, SAVED_ID), { hiddenFields: ['ghost', 'id', 'region'] });
     await mountRoute(SAVED_BESIDE, SAVED_ID, savedViewSource());
     await waitFor(() => expect(drawn).toEqual(defaults.filter((f) => f !== 'region')), { timeout: 5000 });
   });
@@ -535,10 +535,7 @@ describe('an unprojected view applies neither hiddenFields nor fieldOrder on the
 
   it('CONTROL (objectui#12505): a stored list on a SYSTEM view with no `columns` is still not applied (ruling 5839344270, B)', async () => {
     const defaults = await drawView({ columns: [] });
-    localStorage.setItem(
-      localListStateKey('u1', OBJECT_NAME),
-      JSON.stringify({ perView: { [PROBE_ID]: { hiddenFields: ['region'] } } }),
-    );
+    patchListDraft(listDraftScope('u1', OBJECT_NAME, PROBE_ID), { hiddenFields: ['region'] });
     expect(await drawView({ columns: [] })).toEqual(defaults);
   });
 
@@ -556,10 +553,7 @@ describe('an unprojected view applies neither hiddenFields nor fieldOrder on the
     await waitFor(() => expect(drawn).toEqual(['name', 'owner']));
     cleanup();
 
-    localStorage.setItem(
-      localListStateKey('u1', OBJECT_NAME),
-      JSON.stringify({ perView: { [PROBE_ID]: { hiddenFields: ['region'] } } }),
-    );
+    patchListDraft(listDraftScope('u1', OBJECT_NAME, PROBE_ID), { hiddenFields: ['region'] });
     await mountRoute(listViews, PROBE_ID, makeDataSource());
     // `stage` is back (it is in `columns`); `region` is in no `columns`, so
     // naming it hides nothing and adds nothing.
@@ -569,10 +563,7 @@ describe('an unprojected view applies neither hiddenFields nor fieldOrder on the
     // On a view that declares no projection the stored list is not applied.
     const unprojected = { [PROBE_ID]: { name: PROBE_ID, label: 'Probe', type: 'grid', columns: [] } };
     const defaults = await drawView({ columns: [] });
-    localStorage.setItem(
-      localListStateKey('u1', OBJECT_NAME),
-      JSON.stringify({ perView: { [PROBE_ID]: { hiddenFields: ['stage'] } } }),
-    );
+    patchListDraft(listDraftScope('u1', OBJECT_NAME, PROBE_ID), { hiddenFields: ['stage'] });
     await mountRoute(unprojected, PROBE_ID, makeDataSource());
     await waitFor(() => expect(drawn).toEqual(defaults));
   });
@@ -641,5 +632,19 @@ describe('an unprojected view applies neither hiddenFields nor fieldOrder on the
     fireEvent.click(screen.getByTestId('inspector-edit-columns'));
     // [name, stage, owner] projected; `stage` hidden; `owner` sorted first.
     await waitFor(() => expect(drawn).toEqual(['owner', 'name']));
+  });
+  it('objectstack#35955: hidden fields an earlier console stored for the reader no longer apply', async () => {
+    const listViews = {
+      [PROBE_ID]: {
+        name: PROBE_ID, label: 'Probe', type: 'grid',
+        columns: ['name', 'stage', 'owner'], userActions: { hideFields: true },
+      },
+    };
+    localStorage.setItem(
+      localListStateKey('u1', OBJECT_NAME),
+      JSON.stringify({ perView: { [PROBE_ID]: { hiddenFields: ['stage'] } } }),
+    );
+    await mountRoute(listViews, PROBE_ID, makeDataSource());
+    await waitFor(() => expect(drawn).toEqual(['name', 'stage', 'owner']));
   });
 });

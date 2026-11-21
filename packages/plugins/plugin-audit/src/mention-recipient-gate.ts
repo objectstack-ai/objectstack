@@ -120,6 +120,13 @@ export interface MentionGateInput {
    * id to pass. A callback that throws never changes the verdict.
    */
   onWithheld?: (userId: string) => void;
+  /**
+   * [#36074] Which notice is being judged, for the withheld log line only:
+   * the reply notice (`audit-writers.ts`, `writeCommentReplyNotices`) asks
+   * this same gate of the thread's participants, and its line says `reply`.
+   * The verdict does not depend on it. Absent → `mention`.
+   */
+  notice?: 'mention' | 'reply';
 }
 
 const SYSTEM_CONTEXT = { isSystem: true } as const;
@@ -142,7 +149,7 @@ export async function admitMentionRecipients(
 ): Promise<string[]> {
   const withhold = (reason: MentionWithheldReason, userId?: string): void => {
     try {
-      deps.logger?.warn?.('[audit] mention notification withheld', {
+      deps.logger?.warn?.(`[audit] ${input.notice === 'reply' ? 'reply' : 'mention'} notification withheld`, {
         reason,
         ...(userId ? { userId } : {}),
         ...(input.commentId ? { commentId: input.commentId } : {}),
