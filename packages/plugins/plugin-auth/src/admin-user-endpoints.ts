@@ -74,6 +74,13 @@ export interface AuthContextLike {
       password: string;
     }): Promise<unknown>;
   };
+  /**
+   * better-auth's storage adapter and plugin registry: where the forced
+   * reset's revocation ends the user's OAuth grants, and only for the plugins
+   * mounted (`forced-reset-revocation.ts`). Absent, no grant is read.
+   */
+  adapter?: OAuthGrantRows;
+  getPlugin?(pluginId: string): unknown;
 }
 
 export interface AdminUserEndpointDeps {
@@ -238,6 +245,7 @@ export interface EndpointResult {
 import { generatePlaceholderEmail } from './placeholder-email.js';
 import { authSystemWriteContext, runAttributedToUser } from './auth-actor-attribution.js';
 import { revokeSessionsAndApiKeys, type ForcedResetRevocationOutcome } from './forced-reset-revocation.js';
+import type { MountedOAuthGrants, OAuthGrantRows } from './password-reset-ends-added-access.js';
 import { reconcileMembership, type MembershipPolicy } from './reconcile-membership.js';
 import { resolveDefaultOrgId } from './tenancy-service.js';
 import type { AddMemberCapableApi } from './organization-add-member.js';
@@ -573,6 +581,14 @@ export type AdminAuditDecisions =
       /** What the revocation landed (present only when it was asked for) — counts, never a credential. */
       revokedSessions?: number;
       revokedApiKeys?: number;
+      /** The linked sign-in accounts (other than the password) the revocation unlinked. */
+      revokedSignInAccounts?: number;
+      /** The apps the user had authorized whose consent the revocation deleted. */
+      revokedAuthorizedApps?: number;
+      /** The OAuth applications the user registered that the revocation disabled. */
+      revokedOwnedApps?: number;
+      /** The SCIM connection credentials the user minted that the revocation revoked. */
+      revokedScimCredentials?: number;
       revocationComplete?: boolean;
     };
 
@@ -1176,7 +1192,12 @@ export async function runAdminSetUserPassword(
   }
   const mustChangePassword = body.mustChangePassword !== false; // default true
   // [#23287 — ruling C′ item 2] The forced reset's explicit revocation switch:
-  // revoke the user's sessions and API keys. ON by default, because the act
+  // revoke the user's sessions and API keys, unlink the sign-in accounts
+  // linked to it other than its password, end the apps authorized to it
+  // and its approved device sign-ins where their plugins are mounted, disable
+  // the OAuth applications it registered and revoke the SCIM credentials it
+  // minted, as a self-service reset does
+  // (`password-reset-ends-added-access.ts`). ON by default, because the act
   // records no reason and the ruling sets the default for a suspected
   // compromise — the case where a surviving key is the hole the reset was meant
   // to close. An administrator doing a routine reset turns it off explicitly
@@ -1263,8 +1284,12 @@ export async function runAdminSetUserPassword(
   // opened cannot outlive the reset, and never before it: a revocation that
   // ran and then a failed password write would sign the user out with their
   // old password still the valid one.
+  const oauth: MountedOAuthGrants = {
+    store: authCtx.adapter,
+    mounted: (pluginId) => typeof authCtx.getPlugin === 'function' && Boolean(authCtx.getPlugin(pluginId)),
+  };
   const revocation: ForcedResetRevocationOutcome | undefined = revokeSessionsAndKeys
-    ? await revokeSessionsAndApiKeys(deps.getDataEngine(), userId, { logger: deps.logger })
+    ? await revokeSessionsAndApiKeys(deps.getDataEngine(), userId, { logger: deps.logger, oauth, auditActorId: actor.id })
     : undefined;
 
   await writeAdminAudit(deps, {
@@ -1283,6 +1308,10 @@ export async function runAdminSetUserPassword(
         ? {
             revokedSessions: revocation.sessions,
             revokedApiKeys: revocation.apiKeys,
+            revokedSignInAccounts: revocation.signInAccounts,
+            revokedAuthorizedApps: revocation.authorizedApps,
+            revokedOwnedApps: revocation.ownedApps,
+            revokedScimCredentials: revocation.scimCredentials,
             revocationComplete: revocation.complete,
           }
         : {}),

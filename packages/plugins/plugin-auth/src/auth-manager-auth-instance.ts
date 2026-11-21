@@ -179,6 +179,8 @@ export interface AuthInstanceHost {
   resolvePasswordHasher: AuthManager['resolvePasswordHasher'];
   roleChangeGrantDeps: AuthManager['roleChangeGrantDeps'];
   sendChangeEmailNotice: AuthManager['sendChangeEmailNotice'];
+  sendPasswordChangeReminder: AuthManager['sendPasswordChangeReminder'];
+  sendPasswordResetNotice: AuthManager['sendPasswordResetNotice'];
   sendExistingAccountSignUpNotice: AuthManager['sendExistingAccountSignUpNotice'];
   settleSignInAttempt: AuthManager['settleSignInAttempt'];
   settleSsoProviderDelete: AuthManager['settleSsoProviderDelete'];
@@ -888,11 +890,14 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
           auditRefusedSignIn: (...a) => this.auditRefusedSignIn(...a),
           enforceConcurrentCap: (...a) => this.enforceConcurrentCap(...a),
           externalDirectoryDoorDeps: (...a) => this.externalDirectoryDoorDeps(...a),
+          getDataEngine: (...a) => this.getDataEngine(...a),
           isEmailDeliveryLive: (...a) => this.isEmailDeliveryLive(...a),
           logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
           recordPasswordHistory: (...a) => this.recordPasswordHistory(...a),
           roleChangeGrantDeps: (...a) => this.roleChangeGrantDeps(...a),
           sendChangeEmailNotice: (...a) => this.sendChangeEmailNotice(...a),
+          sendPasswordChangeReminder: (...a) => this.sendPasswordChangeReminder(...a),
+          sendPasswordResetNotice: (...a) => this.sendPasswordResetNotice(...a),
           settleSignInAttempt: (...a) => this.settleSignInAttempt(...a),
           settleSsoProviderDelete: (...a) => this.settleSsoProviderDelete(...a),
           settleSsoSignOutOfIdp: (...a) => this.settleSsoSignOutOfIdp(...a),

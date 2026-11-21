@@ -48,6 +48,7 @@ import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
 import { render, waitFor, cleanup, screen, act, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, BrowserRouter } from 'react-router-dom';
+import { toast } from 'sonner';
 import { RelatedCountStore } from '@object-ui/components';
 import { ComponentRegistry } from '@object-ui/core';
 import { I18nProvider, LocalizationProvider, createI18n } from '@object-ui/i18n';
@@ -1957,12 +1958,11 @@ describe('RecordDetailView.relatedListsOrder-27241', () => {
  * record page draws as BODY TABLES is `@objectstack/spec`'s
  * `isBodyTableRelationship`, the predicate the spec's refusal of a field group
  * naming a side card reads too: `relatedList: 'primary'`, or a `master_detail`
- * FK that sets `inlineEdit` and declares no `relatedList`.
+ * FK declaring no `relatedList` that a field group of the parent names
+ * (objectstack#35889: unnamed, it is a tab; `inlineEdit` plays no part).
  *
- * Behaviour change pinned here: an inline-edited `master_detail` FK that
- * declares `relatedList: true` is a SIDE CARD, as the key's description says
- * ("write true to keep it a side card"). The page used to draw it as a body
- * table, because its own copy of the rule ignored `relatedList`.
+ * objectstack#35889 item 4: a body table a group places keeps its tab, with
+ * its count. `relatedList: true` keeps a list a tab even when a group names it.
  *
  * Measured from a real `RecordDetailView` mount at 1440 px, details beside
  * the right column (the `relatedListsOrder-27241` harness).
@@ -1975,7 +1975,7 @@ describe('RecordDetailView.bodyTablePredicate-27478', () => {
   const RECORD_ID = 'q-1';
   const BASE_FIELDS = { id: { type: 'text', label: 'Id' }, name: { type: 'text', label: 'Name' } };
 
-  const objectsWith = (taskFk: Record<string, unknown>) => [
+  const objectsWith = (taskFk: Record<string, unknown>, { placeTask = false }: { placeTask?: boolean } = {}) => [
     {
       name: PARENT,
       label: 'Quote',
@@ -1985,6 +1985,7 @@ describe('RecordDetailView.bodyTablePredicate-27478', () => {
       fieldGroups: [
         { key: 'basic', label: 'Basic' },
         { key: 'lines', label: 'Lines', relatedList: 'showcase_line' },
+        ...(placeTask ? [{ key: 'tasks', label: 'Tasks', relatedList: 'showcase_task' }] : []),
       ],
     },
     {
@@ -2075,46 +2076,67 @@ describe('RecordDetailView.bodyTablePredicate-27478', () => {
   const detailsText = (container: HTMLElement) =>
     container.querySelector('[data-record-column="details"]')?.textContent ?? '';
 
-  describe('RecordDetailView — body tables are the spec predicate\'s verdict (objectstack#27478)', () => {
-    it('an inline-edited master_detail with no relatedList is a body table; one with relatedList: true is a side card', async () => {
-      const { container } = renderPage(objectsWith({ relatedList: true }));
-      await waitFor(() => expect(cardOrder(container)).toHaveLength(2), { timeout: 5000 });
-      expect(cardOrder(container)).toEqual(['showcase_task.quote', 'showcase_note.quote']);
+  describe('RecordDetailView — body tables are the spec predicate\'s verdict (objectstack#27478, objectstack#35889)', () => {
+    it('a group-placed master_detail is a body table that keeps its tab; one with relatedList: true is a tab only, even named by a group', async () => {
+      const { container } = renderPage(objectsWith({ relatedList: true }, { placeTask: true }));
+      await waitFor(() => expect(cardOrder(container)).toHaveLength(3), { timeout: 5000 });
+      expect(cardOrder(container)).toEqual(['showcase_line.quote', 'showcase_task.quote', 'showcase_note.quote']);
       expect(detailsText(container)).toContain('Lines');
       expect(detailsText(container)).not.toContain('Tasks');
     });
 
-    it('control: the same FK with no relatedList is a body table, not a card', async () => {
-      const { container } = renderPage(objectsWith({}));
-      await waitFor(() => expect(cardOrder(container)).toHaveLength(1), { timeout: 5000 });
-      expect(cardOrder(container)).toEqual(['showcase_note.quote']);
+    it('control: the same FK with no relatedList, named by a group, is a body table and keeps its tab', async () => {
+      const { container } = renderPage(objectsWith({}, { placeTask: true }));
+      await waitFor(() => expect(cardOrder(container)).toHaveLength(3), { timeout: 5000 });
+      expect(cardOrder(container)).toEqual(['showcase_line.quote', 'showcase_task.quote', 'showcase_note.quote']);
       await waitFor(() => expect(detailsText(container)).toContain('Tasks'), { timeout: 5000 });
       expect(detailsText(container)).toContain('Lines');
     });
   });
 
-  describe('RecordDetailView — the relation type decides, not inlineEdit (objectstack#35597)', () => {
-    it('a master_detail with NO inlineEdit and no relatedList is a body table: drawn in the details, no card', async () => {
-      const { container } = renderPage(objectsWith({ inlineEdit: undefined }));
-      await waitFor(() => expect(cardOrder(container)).toHaveLength(1), { timeout: 5000 });
-      expect(cardOrder(container)).toEqual(['showcase_note.quote']);
-      // Drawn even with no rows (the data source answers every list empty).
-      await waitFor(() => expect(detailsText(container)).toContain('Tasks'), { timeout: 5000 });
-      expect(container.querySelector('[data-record-column="details"] [data-body-table-empty]')).not.toBeNull();
+  describe('RecordDetailView — the parent field group decides, not the relation type or inlineEdit (objectstack#35889)', () => {
+    it('a master_detail no group names is a tab with its count, not a body table — inlineEdit or not', async () => {
+      for (const taskFk of [{ inlineEdit: undefined }, {}]) {
+        cleanup();
+        RelatedCountStore._reset();
+        const { container } = renderPage(objectsWith(taskFk));
+        await waitFor(() => expect(cardOrder(container)).toHaveLength(3), { timeout: 5000 });
+        expect(cardOrder(container)).toEqual(['showcase_line.quote', 'showcase_task.quote', 'showcase_note.quote']);
+        await waitFor(() => expect(detailsText(container)).toContain('Lines'), { timeout: 5000 });
+        expect(detailsText(container)).not.toContain('Tasks');
+      }
     });
 
-    it('relatedList: false hides it: neither a body table nor a card', async () => {
-      const { container } = renderPage(objectsWith({ inlineEdit: undefined, relatedList: false }));
-      await waitFor(() => expect(cardOrder(container)).toHaveLength(1), { timeout: 5000 });
-      expect(cardOrder(container)).toEqual(['showcase_note.quote']);
+    it('CONTROL — the same FK with NO inlineEdit, named by a group, is drawn in the details even with no rows', async () => {
+      const { container } = renderPage(objectsWith({ inlineEdit: undefined }, { placeTask: true }));
+      await waitFor(() => expect(cardOrder(container)).toHaveLength(3), { timeout: 5000 });
+      await waitFor(() => expect(detailsText(container)).toContain('Tasks'), { timeout: 5000 });
+      expect(container.querySelectorAll('[data-record-column="details"] [data-body-table-empty]').length).toBe(2);
+    });
+
+    it('relatedList: false hides it: neither a body table nor a tab, even named by a group', async () => {
+      const { container } = renderPage(objectsWith({ inlineEdit: undefined, relatedList: false }, { placeTask: true }));
+      await waitFor(() => expect(cardOrder(container)).toHaveLength(2), { timeout: 5000 });
+      expect(cardOrder(container)).toEqual(['showcase_line.quote', 'showcase_note.quote']);
       await waitFor(() => expect(detailsText(container)).toContain('Lines'), { timeout: 5000 });
       expect(detailsText(container)).not.toContain('Tasks');
     });
 
-    it('relatedList: true keeps it a side card', async () => {
+    it("CONTROL — relatedList: 'primary' is a body table with no tab, as before, whether or not a group positions it", async () => {
+      for (const placeTask of [false, true]) {
+        cleanup();
+        RelatedCountStore._reset();
+        const { container } = renderPage(objectsWith({ inlineEdit: undefined, relatedList: 'primary' }, { placeTask }));
+        await waitFor(() => expect(cardOrder(container)).toHaveLength(2), { timeout: 5000 });
+        expect(cardOrder(container)).toEqual(['showcase_line.quote', 'showcase_note.quote']);
+        await waitFor(() => expect(detailsText(container)).toContain('Tasks'), { timeout: 5000 });
+      }
+    });
+
+    it('relatedList: true keeps it a tab', async () => {
       const { container } = renderPage(objectsWith({ inlineEdit: undefined, relatedList: true }));
-      await waitFor(() => expect(cardOrder(container)).toHaveLength(2), { timeout: 5000 });
-      expect(cardOrder(container)).toEqual(['showcase_task.quote', 'showcase_note.quote']);
+      await waitFor(() => expect(cardOrder(container)).toHaveLength(3), { timeout: 5000 });
+      expect(cardOrder(container)).toEqual(['showcase_line.quote', 'showcase_task.quote', 'showcase_note.quote']);
       expect(detailsText(container)).not.toContain('Tasks');
     });
   });
@@ -2878,7 +2900,18 @@ describe('RecordDetailView.recordEditState-35599', () => {
       name: PARENT,
       label: 'Quote',
       pluralLabel: 'Quotes',
-      fields: { id: { type: 'text', label: 'Id' }, name: { type: 'text', label: 'Name' }, summary: { type: 'text', label: 'Summary' } },
+      fields: {
+        id: { type: 'text', label: 'Id', group: 'basic' },
+        name: { type: 'text', label: 'Name', group: 'basic' },
+        summary: { type: 'text', label: 'Summary', group: 'basic' },
+      },
+      // objectstack#35889: a master-detail child is a body table only where a
+      // field group of the parent names it.
+      fieldGroups: [
+        { key: 'basic', label: 'Basic' },
+        { key: 'lines', label: 'Lines', relatedList: 'showcase_line' },
+        { key: 'tasks', label: 'Tasks', relatedList: 'showcase_task' },
+      ],
     },
     {
       name: 'showcase_line',
@@ -2909,7 +2942,8 @@ describe('RecordDetailView.recordEditState-35599', () => {
     showcase_task: [{ id: 't1', subject: 'Call', quote: RECORD_ID }],
   };
 
-  function renderPage(objects: ReturnType<typeof objectsWith>, opts: { emptyTables?: boolean } = {}) {
+  /** `i18n`: under the real English provider, so a notice reads as the pack writes it. */
+  function renderPage(objects: ReturnType<typeof objectsWith>, opts: { emptyTables?: boolean; i18n?: boolean } = {}) {
     const metadata = {
       objects, pages: [], loading: false, error: null,
       refresh: async () => {}, invalidate: () => {},
@@ -2928,7 +2962,7 @@ describe('RecordDetailView.recordEditState-35599', () => {
       batchTransaction: vi.fn(async (ops: unknown[]) => ({ results: ops.map(() => ({})) })),
     };
     const onEdit = vi.fn();
-    const view = render(
+    const page = (
       <MemoryRouter initialEntries={[`/apps/demo/${PARENT}/record/${RECORD_ID}`]}>
         <MetadataCtx.Provider value={metadata}>
           <NavigationProvider>
@@ -2941,7 +2975,12 @@ describe('RecordDetailView.recordEditState-35599', () => {
             </Routes>
           </NavigationProvider>
         </MetadataCtx.Provider>
-      </MemoryRouter>,
+      </MemoryRouter>
+    );
+    const view = render(
+      opts.i18n
+        ? <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }} persistLanguage={false}>{page}</I18nProvider>
+        : page,
     );
     return { ...view, dataSource, onEdit };
   }
@@ -3004,6 +3043,8 @@ describe('RecordDetailView.recordEditState-35599', () => {
     const lines = editor(container, 'showcase_line.quote')!;
     fireEvent.change(cells(lines, 'Quantity')[0], { target: { value: '5' } });
     fireEvent.click(lines.querySelectorAll('button[aria-label="Remove row"]')[1] as HTMLElement);
+    // The new line comes from Add: the grid draws no blank entry line beside it (objectstack#35507).
+    fireEvent.click(lines.querySelector('[data-testid="line-items-add"]') as HTMLElement);
     const products = cells(lines, 'Product');
     fireEvent.change(products[products.length - 1], { target: { value: 'Crate' } });
     const tasks = editor(container, 'showcase_task.quote')!;
@@ -3160,6 +3201,36 @@ describe('RecordDetailView.recordEditState-35599', () => {
     expect(cells(again, 'Product').map((i) => i.value)).toEqual(expect.arrayContaining(['Anvil', 'Bolt']));
     expect(cells(again, 'Product').map((i) => i.value)).not.toContain('Crate');
     expect(summaryInput(view.container)).not.toBeNull();
+  });
+
+  it('objectstack#35940 (ruling 7056413638): a line Add started and nobody edited is not written, and the save says so', async () => {
+    const view = renderPage(objectsWith(), { i18n: true });
+    await enterEditState(view);
+    vi.mocked(toast.info).mockClear();
+    fireEvent.change(summaryInput(view.container)!, { target: { value: 'Second' } });
+    const lines = editor(view.container, 'showcase_line.quote')!;
+    const before = cells(lines, 'Product').length;
+    fireEvent.click(lines.querySelector('[data-testid="line-items-add"]') as HTMLElement);
+    await waitFor(() => expect(cells(lines, 'Product').length).toBe(before + 1), { timeout: 5000 });
+    await act(async () => { fireEvent.click(headerButton('Save')!); });
+    await waitFor(() => expect(view.dataSource.batchTransaction).toHaveBeenCalledTimes(1), { timeout: 5000 });
+    // The record's update alone: the untouched line is not created.
+    const ops = view.dataSource.batchTransaction.mock.calls[0][0] as Array<Record<string, any>>;
+    expect(ops.map((o) => [o.object, o.action])).toEqual([[PARENT, 'update']]);
+    await waitFor(() => expect(headerButton('Edit')).not.toBeNull(), { timeout: 5000 });
+    expect(toast.info).toHaveBeenCalledTimes(1);
+    expect(toast.info).toHaveBeenCalledWith('1 blank line was not saved');
+  });
+
+  it('CONTROL — a save that skips no untouched line says nothing more', async () => {
+    const view = renderPage(objectsWith());
+    await enterEditState(view);
+    vi.mocked(toast.info).mockClear();
+    editEverything(view.container);
+    await act(async () => { fireEvent.click(headerButton('Save')!); });
+    await waitFor(() => expect(view.dataSource.batchTransaction).toHaveBeenCalledTimes(1), { timeout: 5000 });
+    await waitFor(() => expect(headerButton('Edit')).not.toBeNull(), { timeout: 5000 });
+    expect(toast.info).not.toHaveBeenCalled();
   });
 
   it('item 5: a child without bulk keeps its table read-only in the edit state, with the notice', async () => {

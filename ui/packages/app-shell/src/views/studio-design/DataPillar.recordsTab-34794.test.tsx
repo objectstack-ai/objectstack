@@ -181,7 +181,7 @@ describe('Data pillar Records tab (objectstack#34794)', () => {
     const caret = within(header('title')).getByRole('button', { name: COLUMN_MENU });
     await userEvent.click(caret);
     const menu = screen.getByTestId('column-context-menu');
-    expect(within(menu).getAllByRole('button')).toHaveLength(3);
+    expect(within(menu).getAllByRole('menuitem')).toHaveLength(3);
     // The caret's click selected nothing else and did not sort either.
     expect(firstTitles()).toEqual(before);
   });

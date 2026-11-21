@@ -68,7 +68,7 @@ import { getCellRenderer, pickRecordDisplayName, resolveCellRendererType } from 
 const OPEN_DELAY_MS = 400;
 /** How long the card stays after the pointer leaves (time to reach it). */
 const CLOSE_DELAY_MS = 200;
-/** The record header's six (`RECORD_HIGHLIGHTS_MAX` in `@object-ui/plugin-detail`). */
+/** The six a synthesized highlight strip draws (`RECORD_HIGHLIGHTS_MAX` in `@objectstack/spec/ui`). */
 const HIGHLIGHTS_MAX = 6;
 /** Records whose read the module keeps; the oldest goes first. */
 const READS_MAX = 200;

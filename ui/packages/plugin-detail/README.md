@@ -857,7 +857,7 @@ read no child schema first; `prefetchRelatedCounts` and
 `relatedCountTargetsIn` warm another record's counts, which the console's
 drawer does for the record `↑` / `↓` would show next.
 
-One header (title, actions, highlights, stage path) serves every tier, and
+One header (title, stage tag, actions) serves every tier, and
 the page description stays the tabbed one: its blocks are read off it by each
 tab's stable `value` (`buildDefaultPageColumns`), so Studio's page-create
 seed, a slotted page and the running page never disagree, and no metadata key

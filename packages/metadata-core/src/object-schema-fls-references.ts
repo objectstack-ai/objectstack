@@ -85,9 +85,11 @@
  *   well as whole, so a dotted path through a denied lookup (`owner.city`
  *   with `owner` denied) is a reference to it.
  * - A `fieldGroups[].key` is a group name, not a field reference — the
- *   readable fields join a group through their own `group: <key>` — so a group
- *   keyed like a denied field is served; dropping it would regroup fields the
- *   caller IS entitled to. A `listViews` key, by contrast, is the view's whole
+ *   readable fields join a group through the group's own `fields` list or
+ *   their own `group: <key>` — so a group keyed like a denied field is served;
+ *   dropping it would regroup fields the caller IS entitled to. The `fields`
+ *   list is a name list: a denied name is filtered out of it, and the readable
+ *   names keep their place and order. A `listViews` key, by contrast, is the view's whole
  *   identity and nothing else points at it, so a view keyed like a denied field
  *   is dropped.
  *
@@ -764,7 +766,7 @@ const LIST_VIEW_NAME_LISTS: Readonly<Record<string, Scrub>> = {
  */
 export const OBJECT_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     // Identity and posture — no field names.
-    name: keep, label: keep, pluralLabel: keep, description: keep, icon: keep, isSystem: keep,
+    name: keep, label: keep, pluralLabel: keep, description: keep, icon: keep, color: keep, isSystem: keep,
     managedBy: keep, ownership: keep, systemFields: keep, datasource: keep, access: keep,
     requiredPermissions: keep, fileAccessDelegate: keep, schemaReadDelegate: keep, editMode: keep, enable: keep,
     sharingModel: keep, externalSharingModel: keep, protection: keep,
@@ -819,6 +821,9 @@ export const OBJECT_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
         // [#27069] A child relationship (child object, or `object.field`), as a
         // `relatedLists` entry is: no field of this object.
         relatedList: keep,
+        // [#35900] The group's own member list: field names of this object, so
+        // a denied one is filtered out and the readable rest keep their order.
+        fields: names,
     })),
     tenancy: block({ enabled: keep, tenantField: pointer }),
     lifecycle: block({

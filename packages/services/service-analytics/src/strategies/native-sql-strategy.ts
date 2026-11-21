@@ -37,7 +37,7 @@ import {
   numberComparandRefusalMessage,
 } from '@objectstack/spec/data';
 import { findCrossFieldComparand, findUninterpretableTemporalMember } from '../comparand-shape.js';
-import { assertReadScopeCannotVacate, compileScopedFilterToSql, findReadableIdsLeaf } from '../read-scope-sql.js';
+import { assertReadScopeCannotVacate, compileScopedFilterToSql, findReadableIdsLeaf, fixedReadLeavesIn } from '../read-scope-sql.js';
 import { nonTextColumnResolver, textOperatorPolarity } from '../non-text-column.js';
 import { declaredValueShapeResolver, whereEmptyLeafSql } from '../empty-operator-sql.js';
 // [#20986] The one resolver of the object a relationship-path hop reads.
@@ -912,6 +912,22 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // reason: one owner of the composition, no second copy here. Every object
     // the statement scopes is read, as the cross-field decline reads them.
     if (this.readScopeCarriesReadableIds(query, ctx)) return false;
+    // ── [ADR-0155 D4, Q2 as ruled] DECLINE a share-grant leaf of D4's classes ─
+    //
+    // A read scope may carry the engine-internal fixed-read leaf
+    // (`SharedRecordIds`) as the `$in` comparand of `id`, and Q2 ruled that
+    // this strategy compiles it (`compileScopedFilterToSql` emits its
+    // subquery). Where either of D4's two classes applies (the object bound to
+    // another datasource than the leaf's inner table, or a middleware or find
+    // hook registered for that table by name), the subquery would read the
+    // wrong database or read around the registration, so the query declines
+    // to the ObjectQL strategy before anything compiles, and the engine's seam
+    // gives the class its answer. The class is the seam's recognition, asked
+    // through the host (`fixedReadLeafClassOf`); ⛔ no second copy here. It
+    // FAILS CLOSED like the middleware decline: no hook, an `undefined`
+    // answer, a throw, and a dialect this compiler cannot name decline too.
+    // See {@link readScopeCarriesUncompilableFixedReadLeaf}.
+    if (this.readScopeCarriesUncompilableFixedReadLeaf(query, ctx)) return false;
     // ── [#25778] DECLINE a duration measure on a dialect nobody named ──────
     //
     // A dataset duration measure is the time between two `datetime` columns of
@@ -957,6 +973,40 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       ? [...scoped]
       : [this.extractObjectName(cube), ...Object.keys(cube.joins ?? {}).map((alias) => cube.joins?.[alias]?.name ?? alias)];
     return objects.some((object) => findReadableIdsLeaf(ctx.getReadScope!(object)) !== null);
+  }
+
+  /**
+   * [ADR-0155 D4] Does the read scope of any object this statement scopes carry
+   * a fixed-read leaf this strategy may not compile? See the decline at
+   * {@link canHandle}. The objects are the ones {@link readScopeCarriesReadableIds}
+   * reads. Every leaf in a scope is asked about, wherever it sits: one out of
+   * position is not declined here, and `compileScopedFilterToSql` refuses it in
+   * ADR-0139 D3's envelope, as the engine would.
+   */
+  private readScopeCarriesUncompilableFixedReadLeaf(query: AnalyticsQuery, ctx: StrategyContext): boolean {
+    if (typeof ctx.getReadScope !== 'function') return false;
+    const cube = query.cube ? ctx.getCube(query.cube) : undefined;
+    if (!cube) return false;
+    const scoped = (ctx as DatasetScopedStrategyContext).readScopedObjects;
+    const objects = scoped
+      ? [...scoped]
+      : [this.extractObjectName(cube), ...Object.keys(cube.joins ?? {}).map((alias) => cube.joins?.[alias]?.name ?? alias)];
+    const classOf = (ctx as DatasetScopedStrategyContext).fixedReadLeafClassOf;
+    return objects.some((object) => {
+      const leaves = fixedReadLeavesIn(ctx.getReadScope!(object));
+      if (leaves.length === 0) return false;
+      // The subquery's blank-id guard is spelled per dialect (Oracle stores
+      // `''` as NULL); a dialect this compiler cannot name is declined.
+      if (sqlDialectFor(ctx, object) === 'unknown') return true;
+      if (typeof classOf !== 'function') return true;
+      return leaves.some((leaf) => {
+        try {
+          return classOf.call(ctx, leaf) !== null;
+        } catch {
+          return true;
+        }
+      });
+    });
   }
 
   /**
@@ -1750,7 +1800,13 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // D-A1 / D-A2), bound to the OBJECT (never the alias), so a temporal
     // comparand binds in the column's storage form and the scope admits the
     // rows the engine admits.
+    // [ADR-0155 D2, D4] …and the object and this service's refusal sink, so a
+    // share-grant leaf compiles to its subquery in the scope of the object it
+    // names, and a leaf out of position is refused in D4's envelope, logged
+    // once. `canHandle` declined D4's two classes before this point.
     const { sql, params: scopeParams } = compileScopedFilterToSql(filter, alias, {
+      object: objectName,
+      fixedReadLeafRefusal: (ctx as DatasetScopedStrategyContext).fixedReadLeafRefusal,
       nonTextColumn: nonTextColumnResolver(ctx, objectName),
       dialect: sqlDialectFor(ctx, objectName),
       context: ctx.context,

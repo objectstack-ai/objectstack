@@ -3396,13 +3396,16 @@ jobs:
           run_self_test node scripts/ci/nightly-tiers-card.mjs --self-test
           run_self_test node scripts/ci/docker-rolling-tags.mjs --self-test
           run_self_test bash scripts/ci/board-snapshot-r2-upload.selftest.sh
+          # Not a moved body: the weekly queue-duration reading and its card
+          # writer, whose write fires only on an OVER week on main (#35322).
+          run_self_test node scripts/ci/queue-duration.mjs --self-test
           if [ -n "$failed" ]; then
             echo ""
             echo "Moved workflow step bodies self-tests — the following FAILED:"
             printf "%s" "$failed"
             exit 1
           fi
-          echo "Moved workflow step bodies self-tests — all four ran and passed"
+          echo "Moved workflow step bodies self-tests — all five ran and passed"
 
       # Gate-family selection self-test (#16496). The "Select the gate families
       # this run pays for" step at the top of this job is a thin call into

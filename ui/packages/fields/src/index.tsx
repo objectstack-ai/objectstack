@@ -456,10 +456,26 @@ export interface CellRendererProps {
    * tooltip. A declared `format` still wins, `'relative'` included.
    *
    * `ObjectGrid` passes it on every column cell it builds. Absent or `false`
-   * changes nothing, so the record detail body, the highlights strip and the
-   * card surfaces keep the relative default.
+   * changes nothing; the record page asks for the same face through
+   * `absoluteDate` below.
    */
   inGridColumn?: boolean;
+  /**
+   * The cell shows a business date on a record page (objectstack#35745). Read
+   * by the `date` cell only, with exactly `inGridColumn`'s effect: a `date`
+   * field that declares no `format` paints `formatDate`'s absolute face, and
+   * the relative phrase becomes the cell's tooltip.
+   *
+   * The relative default made a record page read "6 days ago" for a meeting
+   * date the list beside it wrote as "Nov 13", and the reader had to work out
+   * the day. A declared `format` still wins, `'relative'` included.
+   *
+   * The record page's field sections and its highlights strip pass it; the
+   * record footer's system times (created, modified) do not, and keep their
+   * relative wording. Absent or `false` changes nothing, so the card surfaces
+   * keep the relative default.
+   */
+  absoluteDate?: boolean;
 }
 
 // `coerceToSafeValue` lives in `./coerceToSafeValue.ts` (objectui#8580) so
@@ -1264,7 +1280,7 @@ function isOverdueInstant(date: Date, dueLike: boolean): boolean {
 /**
  * Date field cell renderer
  */
-export function DateCellRenderer({ value, field, deadlineSettled, alwaysShowYear, inGridColumn }: CellRendererProps): React.ReactElement {
+export function DateCellRenderer({ value, field, deadlineSettled, alwaysShowYear, inGridColumn, absoluteDate }: CellRendererProps): React.ReactElement {
   // `useDisplayLocale()`, NOT `useLocalization().locale` (objectui#4468). The
   // raw tenant locale is `undefined` on any workspace that never configured
   // one, and `Intl` reads the MACHINE's locale from `undefined` — so a `zh`
@@ -1328,10 +1344,13 @@ export function DateCellRenderer({ value, field, deadlineSettled, alwaysShowYear
   const declaredStyle: string | undefined = dateField.format || undefined;
   // objectstack#25884 — in a grid column the undeclared default is the
   // absolute face (`formatDate`'s default, `undefined`), one face per column;
-  // everywhere else it stays `'relative'`. ⚠️ `ObjectGrid`'s
+  // a record page's field asks for the same (`absoluteDate`); everywhere else
+  // it stays `'relative'`. ⚠️ `ObjectGrid`'s
   // `temporalGroupHeading` restates this selection for its group headings,
   // and `groupDateHeading-13234.test.tsx` holds the two equal.
-  const style = declaredStyle ?? (inGridColumn ? undefined : 'relative');
+  // objectstack#35745 — a record page's business date reads the same way.
+  const absoluteByDefault = inGridColumn || absoluteDate;
+  const style = declaredStyle ?? (absoluteByDefault ? undefined : 'relative');
 
   // Both halves of the affordance come from the shared reads above, so the
   // `datetime` sibling one function down answers this question identically
@@ -1344,7 +1363,7 @@ export function DateCellRenderer({ value, field, deadlineSettled, alwaysShowYear
   // The relative phrase the grid default no longer paints ("Yesterday",
   // "Overdue 3d") is the tooltip instead. Outside the ±7-day window the phrase
   // IS the absolute face, which says nothing new, so the ISO `title` stays.
-  const relative = inGridColumn && declaredStyle === undefined
+  const relative = absoluteByDefault && declaredStyle === undefined
     ? formatDate(safe as string | Date, 'relative', options)
     : undefined;
   const title = relative !== undefined && relative !== formatted ? relative : date.toISOString();
@@ -2889,8 +2908,9 @@ export function FormulaCellRenderer({ value, field, dependentValues }: CellRende
   // A roll-up that declares its currency is money (ADR-0144 D6 as amended):
   // the currency cell draws it, with the parent row as its record, so a
   // `record` roll-up reads the parent's code as its children's amounts do, and
-  // a `dynamic` one (a roll-up of a stored home amount, objectstack#33659)
-  // reads the tenant default, as its home field's own cells do.
+  // a `dynamic` one (a roll-up of a child `currency` field in `dynamic` mode,
+  // a stored home amount included) reads the tenant default, as that child
+  // field's own cells do.
   const declaresMoney = (field as { type?: unknown } | undefined)?.type === 'summary' && summaryDeclaresCurrency(field);
   const valueType = declaresMoney && typeof value === 'number'
     ? 'currency'
@@ -5335,6 +5355,21 @@ export {
 } from './widgets/file-value.js';
 export type { FileValueView, UploadResultLike } from './widgets/file-value.js';
 export * from './FieldEditWidget.js';
+// objectstack#35956 — the in-place fill-in a change opens when it makes other
+// fields required: the pre-evaluation and the dialog, shared by the kanban
+// drop, the list cell and the record page's inline edit.
+export {
+  collectRequiredWhenPromptFields,
+  requiredWhenPromptReads,
+  type RequiredWhenPromptField,
+  type RequiredWhenPromptOptions,
+} from './requiredWhenPrompt.js';
+export {
+  RequiredFieldsDialog,
+  type RequiredFieldsDialogField,
+  type RequiredFieldsDialogChange,
+  type RequiredFieldsDialogProps,
+} from './RequiredFieldsDialog.js';
 export * from './widgets/TextField.js';
 export * from './widgets/NumberField.js';
 export * from './widgets/BooleanField.js';
@@ -5397,8 +5432,8 @@ export * from './widgets/AutoNumberField.js';
 export * from './widgets/UserField.js';
 export * from './widgets/ObjectField.js';
 export * from './widgets/VectorField.js';
-export { evalArith, lookupAutofillPatch, computeRow, GridField, LineItemsField } from './widgets/GridField.js';
-export type { ColumnCurrencies } from './widgets/GridField.js';
+export { evalArith, lookupAutofillPatch, computeRow, GridField, LineItemsField, UNTOUCHED_NEW_ROW, isUntouchedNewRow, columnHelpByField } from './widgets/GridField.js';
+export type { ColumnCurrencies, ColumnHelp } from './widgets/GridField.js';
 export type { GridColumn } from './widgets/GridField.js';
 export * from './widgets/lookupAutofill.js';
 // objectstack#32770 (ADR-0150 D8 R1) — the grant's set-name column and the

@@ -23,6 +23,13 @@
       "status": "live",
       "note": "objectui."
     },
+    "color": {
+      "status": "live",
+      "verifiedAt": "2026-11-21",
+      "evidenceScope": "in-repo",
+      "evidence": "ui/packages/layout/src/NavigationRenderer.tsx#NavigationItemRenderer (an `object` navigation entry draws an ObjectIconTile coloured by `resolveTargetColor`); ui/packages/app-shell/src/hooks/useNavTargetIcon.ts#useNavTargetColor (reads the object's `color` from the metadata cache for the sidebar and the app-home menu); ui/packages/components/src/custom/object-icon-tile.tsx#ObjectIconTile (maps the palette name to the square's colour); ui/packages/app-shell/src/views/metadata-admin/inspectors/ObjectDefaultInspector.tsx#ObjectDefaultInspector (the designer writes it)",
+      "note": "objectstack#35985: the colour of the rounded square the object's icon is drawn on, from the closed palette `OBJECT_COLORS`. Unset draws the neutral gray. The navigation (sidebar, app-home menu, phone menu) reads it; the other places that draw an object icon follow in the card's second PR."
+    },
     "displayNameField": {
       "status": "live",
       "note": "Deprecated alias of nameField (ADR-0079); still read by objectui RecordDetailView + resolveDisplayField back-compat."
@@ -45,7 +52,7 @@
     "highlightFields": {
       "status": "live",
       "proof": "packages/qa/dogfood/test/semantic-roles.dogfood.test.ts#semantic-roles-served",
-      "note": "ADR-0085 semantic role (renamed from compactLayout): objectui default list/grid columns (ObjectGrid/ObjectView/InterfaceListPage), child-record previews (first entry), record:details auto layout, detail highlight strip (first RECORD_HIGHLIGHTS_MAX = 6, after the title)."
+      "note": "ADR-0085 semantic role (renamed from compactLayout): objectui default list/grid columns (ObjectGrid/ObjectView/InterfaceListPage), child-record previews (first entry), record:details auto layout, the record hover card, related-list default columns and the record picker. The default record page draws no key-field strip from it; a page that places one in its highlights slot draws the first RECORD_HIGHLIGHTS_MAX, after the title."
     },
     "relatedLists": {
       "status": "live",
@@ -81,6 +88,13 @@
           "evidenceScope": "in-repo",
           "evidence": "packages/spec/src/data/field-group-layout.ts#deriveFieldGroupLayout (`label ?? key`); ui/packages/plugin-form/src/fieldGroups.ts#deriveFieldGroupSections (the form section title); ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts#deriveFieldGroupDetailEntries (the detail section label)",
           "note": "The group heading on forms and detail pages."
+        },
+        "fields": {
+          "status": "live",
+          "verifiedAt": "2026-11-20",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/spec/src/data/field-group-layout.ts#readGroup (reads the list, not on a relatedList group); packages/spec/src/data/field-group-layout.ts#resolveFieldGroupMembership (listed fields join the group in list order, before any field whose own `group` names it); ui/packages/plugin-form/src/fieldGroups.ts#deriveFieldGroupSections and ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts (both pass `fieldGroups` through to deriveFieldGroupLayout)",
+          "note": "A group's own member list and order. Absent, membership is the older `Field.group` plus declaration order. Read by the one shared derivation every form, drawer and detail surface consumes; the Studio designer writes it on a drag (writeGroupLayout)."
         },
         "icon": {
           "status": "live",

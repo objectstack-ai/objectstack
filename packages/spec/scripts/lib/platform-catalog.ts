@@ -118,6 +118,8 @@ export const APP_FACING_OBJECT_GROUPS: readonly { readonly title: string; readon
     title: 'Money, imports and approvals',
     rows: [
       { name: 'sys_exchange_rate', builds: 'an exchange-rate table', reach: '`currencyConfig.homeAmount` converts at write; Setup edits rates; data API' },
+      { name: 'sys_work_calendar', builds: 'a business-hours calendar', reach: 'kept per organization in Setup; an approval\'s `escalation.clock: \'working_time\'` reads it; data API' },
+      { name: 'sys_work_calendar_exception', builds: 'a holiday table', reach: 'a calendar\'s holidays and make-up workdays, kept in Setup; data API' },
       { name: 'sys_import_job', builds: 'a bulk-import job table', reach: '`POST /api/v1/data/OBJECT/import/jobs`; data API read' },
       { name: 'sys_approval_request', builds: 'an approvals table', reach: 'a flow approval node opens it; `/api/v1/approvals` routes decide; data API read' },
       { name: 'sys_approval_action', builds: 'an approval decision trail', reach: 'written per decision; data API read' },
@@ -190,8 +192,8 @@ export const CAPABILITY_ROWS: Readonly<Record<string, string>> = Object.freeze({
 
 /** Master data each suite keeps, matched across suites by key contract. */
 export const NOT_PLATFORM_ROWS: readonly { readonly concept: string; readonly rule: string }[] = [
-  { concept: 'Party master data: customers, suppliers, contacts', rule: 'one app owns each entity; another app matches its records by the key contract (country plus credit code or registration number), one way, with no platform party object' },
-  { concept: 'Item master data: materials, products, plants', rule: 'the owning app\'s object is reused by key (material number, plant code); the platform ships no item object' },
+  { concept: 'Party master data: customers, suppliers, contacts', rule: 'one app owns each entity; another app matches its records by the key contract (country plus credit code or registration number), one way' },
+  { concept: 'Item master data: materials, products, plants', rule: 'the owning app\'s object is reused by key (material number, plant code)' },
 ];
 
 /** Carded, not shipped. Each row is **not available**; the shipping PR moves it into the main table. Capped at a few rows. */
@@ -202,9 +204,9 @@ export const PLANNED_ROWS: readonly { readonly concept: string; readonly state: 
     link: 'https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0158-units-of-measure-standard-unit-table-org-units-quantity-unit-declaration-base-quantity.md',
   },
   {
-    concept: 'Working calendars (business days, holidays, SLA clocks)',
-    state: 'carded, contract in design',
-    link: 'https://github.com/objectstack-ai/objectstack/issues/35340',
+    concept: 'Working-day formulas',
+    state: 'contract accepted; no formula reads a calendar yet',
+    link: 'https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0157-working-calendars-are-org-editable-runtime-data-resolved-by-code-or-refused.md',
   },
 ];
 
@@ -218,13 +220,11 @@ export const PROSE = Object.freeze({
   banner: [
     '> **Auto-generated** — do not edit. Regenerate in the framework repo with',
     '> `pnpm --filter @objectstack/spec gen:skill-refs`',
-    '> (not runnable in an installed app). Names come from `@objectstack/spec`;',
-    '> the prose columns are authored beside the generator.',
+    '> (not runnable in an installed app). Names come from `@objectstack/spec`.',
   ],
   intro: [
     'Read this before adding an object, a field or a flow (objectstack-project §0,',
-    'question 3). `list_objects` over MCP hides system objects, so look here, not',
-    'at the runtime.',
+    'question 3). `list_objects` over MCP hides system objects, so look here.',
   ],
   objects: [
     '"Data API" means the generic `/api/v1/data/OBJECT` routes, as the object',
@@ -252,8 +252,7 @@ export const PROSE = Object.freeze({
     'Each row is **not available**: nothing below can be declared or installed.',
     'The app may build its own meanwhile, marked `// PLATFORM-CANDIDATE:` with',
     'the link; an interim unit field stores the contract\'s UN/ECE Rec 20 codes',
-    '(`H87`, `KGM`) as option values, the business\'s spellings as labels. The PR',
-    'that ships a row moves it into the tables above.',
+    '(`H87`, `KGM`) as option values, the business\'s spellings as labels.',
   ],
 });
 

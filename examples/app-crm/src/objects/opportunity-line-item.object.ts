@@ -8,8 +8,9 @@ import { cel } from '@objectstack/spec';
  *
  * This is the canonical master-detail "header + line items" shape (mirrors the
  * showcase Invoice ↔ InvoiceLine pair): an opportunity is quoted together with
- * the products on it, entered in ONE atomic transaction. So the back-pointer
- * `opportunity` field declares `inlineEdit: 'grid'` — every standard New/Edit
+ * the products on it, entered in ONE atomic transaction. So the opportunity's
+ * `lines` field group names this object (and the back-pointer `opportunity`
+ * picks the grid form factor with `inlineEdit: 'grid'`) — every standard New/Edit
  * Opportunity form (and the lead-conversion wizard's Opportunity step) renders
  * an editable line-item grid, and the parent `Opportunity.line_total` rolls the
  * line amounts up server-side.

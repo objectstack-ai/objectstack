@@ -2569,7 +2569,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
         hint: f.fix ?? '',
       })),
   },
-  // An inline-edited relationship whose parent or child declares
+  // A relationship a parent field group places in the parent's form, whose parent or child declares
   // `enable.apiMethods` without `bulk` (`relationship/inline-edit-needs-bulk`).
   // The parent's form saves the rows in one cross-object `/api/v1/batch`, which
   // asks every object in it for `bulk`, so the form fills and then 405s on save.

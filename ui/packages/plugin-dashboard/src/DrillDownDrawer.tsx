@@ -74,8 +74,10 @@ export interface DrillDownDrawerProps {
    * none can be read (a dataset drill across a relationship,
    * `resolveDatasetDrillFilter` in `@object-ui/core`):
    *
-   * - `'resolving'` — the related ids are still being read;
-   * - `'too-many'` — more related records match than the drill may list;
+   * - `'resolving'` — the relationship path is still being checked (one
+   *   schema read per hop; no related id is read);
+   * - `'too-many'` — kept for compatibility: a relationship drill no longer
+   *   produces it, because it reads no related ids to count;
    * - `'unavailable'` — the relationship cannot be resolved from here;
    * - `'failed'` — a read on the way failed.
    *

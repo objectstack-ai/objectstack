@@ -63,7 +63,7 @@ import { resolveFieldReadFace } from '../../lib/field-face';
 import { PageDescriptionContext } from './page-description-context';
 import { PageHeaderTrailingContext } from './page-header-trailing-context';
 import { PageHeaderPhoneContext } from './page-header-phone-context';
-import { RecordHeaderBarContext, RecordHeaderStateContext } from './record-header-bar-context';
+import { RecordHeaderBarContext, RecordHeaderStateContext, type RecordHeaderState } from './record-header-bar-context';
 import { renderBlockChildren } from './page-block-grid';
 import { isFileIdToken } from '@objectstack/spec/data';
 import { readActionEntryParamValues } from '../action/static-params';
@@ -1944,9 +1944,9 @@ export interface PageHeaderActionsProps {
    * live, in place of an `actions` list. Only the boolean `true` opts in.
    */
   placedActions?: unknown;
-  /** The inline-button budget on desktop, as `page:header`'s `maxVisible`; an out-of-contract value falls back to 3. */
+  /** The inline-button budget on desktop, as `page:header`'s `maxVisible`; an out-of-contract value falls back to the unset default, 3 on every header. In a record page's header bar (`fitWidth`) the number is an upper bound: what does not fit the bar's width folds as well. */
   maxVisible?: unknown;
-  /** The inline-button budget on mobile, as `page:header`'s `mobileMaxVisible`; an out-of-contract value falls back to 1. */
+  /** The inline-button budget on mobile, as `page:header`'s `mobileMaxVisible`; an out-of-contract value falls back to the unset default: 2 in a record page's phone bottom bar (`face: 'bar'`, the host's Edit included), 1 on any other header. */
   mobileMaxVisible?: unknown;
   /** Drawn in place of the action row when no action survives the gates. */
   emptySlot?: React.ReactNode;
@@ -1974,12 +1974,21 @@ export interface PageHeaderActionsProps {
    */
   face?: 'row' | 'bar';
   /**
-   * The desktop inline budget when the page declares no `maxVisible`
-   * (objectstack#35593): the record's one-row header passes 1, so a record
-   * draws Edit, ONE primary action and the `⋯`. An authored `maxVisible`
-   * still wins. Absent: 3, as before.
+   * The desktop inline budget when the page declares no `maxVisible`. An
+   * authored `maxVisible` still wins. Absent: 3. (objectstack#35593 had the
+   * record's header bar pass 1; objectstack#35853 gave the bar 3 back, folded
+   * by width instead — see {@link fitWidth}.)
    */
   defaultMaxVisible?: number;
+  /**
+   * Fold by width as well as by count (objectstack#35853): while the row's
+   * buttons wrap past one line in the room the host gives it, the page's own
+   * actions fold into the `⋯` one at a time, down to the primary. The record
+   * header's bar passes it, so a narrow drawer shows fewer than 3. The budget
+   * comes back when the host's bar (`[data-record-top-bar]`, else the row's
+   * parent) changes width. The host's buttons (Edit) still never fold.
+   */
+  fitWidth?: boolean;
 }
 
 /** The refresh entry of the header's `⋯` menu — see {@link PageHeaderActionsProps.refresh}. */
@@ -2013,8 +2022,37 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
   trailing,
   face = 'row',
   defaultMaxVisible,
+  fitWidth = false,
 }) => {
   const ctx = useRecordContext();
+  // objectstack#35853 — the width fold ({@link PageHeaderActionsProps.fitWidth}):
+  // the cap the row's wrapping has lowered the budget to, the row itself, and
+  // the budget the last render drew (read after it lays out).
+  const [widthCap, setWidthCap] = React.useState<number | null>(null);
+  const [fitRow, setFitRow] = React.useState<HTMLDivElement | null>(null);
+  const fitDrawn = React.useRef({ inline: 0, floor: 0 });
+  React.useLayoutEffect(() => {
+    if (!fitWidth || !fitRow) return;
+    const items = Array.from(fitRow.children) as HTMLElement[];
+    if (items.length < 2) return;
+    const wrapped = items[items.length - 1].offsetTop > items[0].offsetTop + 1;
+    const { inline, floor } = fitDrawn.current;
+    if (wrapped && inline > floor) setWidthCap(inline - 1);
+  });
+  React.useEffect(() => {
+    if (!fitWidth || !fitRow || typeof ResizeObserver === 'undefined') return;
+    const host = (fitRow.closest('[data-record-top-bar]') as HTMLElement | null) ?? fitRow.parentElement;
+    if (!host) return;
+    let width = host.getBoundingClientRect().width;
+    const observer = new ResizeObserver(() => {
+      const next = host.getBoundingClientRect().width;
+      if (Math.abs(next - width) < 1) return;
+      width = next;
+      setWidthCap(null);
+    });
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, [fitWidth, fitRow]);
   // The record's state (objectstack#35593): when the host hands a `group`,
   // the row is what that group draws — the record's row unchanged, or the
   // state's own levers with the record's actions in their `⋯`.
@@ -2572,8 +2610,9 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     //   4. a host button (the record page's Edit) is not one of the page's
     //      actions: it takes no slot and never folds (objectui#12617).
     // `maxVisible` / `mobileMaxVisible` are overridable on the page:header
-    // schema and default to 3 / 1. This keeps the header from drowning in 4–5
-    // buttons on every record page.
+    // schema and default to 3 / 1 (2 in a phone's bottom bar). This keeps the
+    // header from drowning in 4–5 buttons on every record page. In the record
+    // header's bar the row also folds by width (`fitWidth`, objectstack#35853).
     //
     // `readMax` enforces the SPEC's value domain rather than a laxer renderer
     // tolerance (objectui#5006). Measured on `ComponentPropsMap['page:header']`
@@ -2647,9 +2686,17 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     const isHostButton = (a: unknown): boolean => isHostAction(a) && !isDestructiveAction(a);
     const rowEligible = buttonable.filter((a) => !isHostAction(a) || isHostButton(a));
     const primaryCandidates = rowEligible.filter((a) => !isDestructiveAction(a));
+    // A HOST button declaring `variant: 'primary'` is the primary whatever the
+    // page declares, and keeps the place the host gave it (objectstack#35816):
+    // the record page's edit state draws Cancel then Save, as a form's footer
+    // does, and Save is the one filled button. Before this the edit state's
+    // Cancel came first in `order` and drew as the primary, so the hand fell
+    // on the button that throws the edit away. No other host button declares
+    // a variant of `primary`, so every other row is unchanged.
+    const hostPrimary = primaryCandidates.find((a) => isHostButton(a) && a?.variant === 'primary');
     const primaryIdx = primaryCandidates.findIndex((a) => a?.variant === 'primary');
-    const primaryAction: unknown = primaryCandidates[primaryIdx >= 0 ? primaryIdx : 0];
-    const ranked = primaryAction
+    const primaryAction: unknown = hostPrimary ?? primaryCandidates[primaryIdx >= 0 ? primaryIdx : 0];
+    const ranked = primaryAction && !hostPrimary
       ? [primaryAction, ...buttonable.filter((a) => a !== primaryAction)]
       : buttonable;
     // The page's own actions share the `maxVisible` budget; what does not fit
@@ -2674,7 +2721,13 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       ? [...ranked.filter(isHostButton), ...(primaryAction ? [primaryAction] : []), ...authoredButtons]
           .filter((a, i, all) => all.indexOf(a) === i)
       : [];
-    const inlineAuthored = new Set<unknown>(authoredButtons.slice(0, maxVisible));
+    // The width fold lowers the desktop row's budget, never below the primary.
+    const fitsWidth = fitWidth && !barFace && !isMobile;
+    const rowBudget = fitsWidth && widthCap != null ? Math.min(maxVisible, widthCap) : maxVisible;
+    if (fitsWidth) {
+      fitDrawn.current = { inline: Math.min(rowBudget, authoredButtons.length), floor: authoredButtons.length > 0 ? 1 : 0 };
+    }
+    const inlineAuthored = new Set<unknown>(authoredButtons.slice(0, rowBudget));
     const inlineActions = barFace
       ? barQueue.slice(0, maxVisible)
       : ranked.filter((a) => isHostButton(a) || inlineAuthored.has(a));
@@ -2684,7 +2737,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
           ...ranked.filter((a) => isHostAction(a) && !isHostButton(a)),
         ]
       : [
-          ...authoredButtons.slice(maxVisible),
+          ...authoredButtons.slice(rowBudget),
           ...ranked.filter((a) => isHostAction(a) && !isHostButton(a)),
         ];
     // The overflow reads as one list in three bands (objectui#12529): the
@@ -2983,6 +3036,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     if (!barFace) {
       return (
         <div
+          ref={fitsWidth ? setFitRow : undefined}
           className="flex flex-wrap items-center gap-2 shrink-0 max-w-full"
           role="toolbar"
           aria-label={toolbarLabel}
@@ -3015,10 +3069,19 @@ function disableRecordChromeOf(schema: any): boolean {
 /**
  * The record's current stage as a short tag (objectstack#35593): the option
  * label of the object's stage field (`detectStatusField`, the field
- * `record:path` steps through) on this record. A field with no options, or no
- * value on the record, draws nothing.
+ * `record:path` steps through, or a plain status field) on this record. A
+ * field with no options, or no value on the record, draws nothing.
+ *
+ * The tag is where the stage is read and moved (objectstack#35891: the default
+ * record page draws no stage bar). A host that can move the stage hands
+ * `RecordHeaderState.stage`, which draws the tag as its menu; without one the
+ * tag is a readout.
  */
-function recordStageTag(objSchema: any, labelledData: any): React.ReactNode {
+function recordStageTag(
+  objSchema: any,
+  labelledData: any,
+  stage: RecordHeaderState['stage'],
+): React.ReactNode {
   const stageField = detectStatusField(objSchema);
   if (!stageField) return null;
   const options = (declaredFieldDef(objSchema, stageField) as any)?.options;
@@ -3026,7 +3089,7 @@ function recordStageTag(objSchema: any, labelledData: any): React.ReactNode {
   const raw = labelledData?.[stageField];
   const text = typeof raw === 'string' ? raw.trim() : typeof raw === 'number' ? String(raw) : '';
   if (!text) return null;
-  return (
+  const tag = (
     <span
       className="inline-flex h-5 shrink-0 items-center rounded-md border bg-muted px-1.5 text-xs font-medium text-foreground"
       data-record-stage-tag={stageField}
@@ -3034,6 +3097,7 @@ function recordStageTag(objSchema: any, labelledData: any): React.ReactNode {
       {text}
     </span>
   );
+  return stage ? stage({ field: stageField, label: text, tag }) : tag;
 }
 
 const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
@@ -3080,7 +3144,8 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
   const phoneFace = React.useContext(PageHeaderPhoneContext);
   // The host's one-row bar (objectstack#35593) and the record state's tags.
   const headerBar = React.useContext(RecordHeaderBarContext);
-  const headerStateTags = React.useContext(RecordHeaderStateContext)?.tags;
+  const headerState = React.useContext(RecordHeaderStateContext);
+  const headerStateTags = headerState?.tags;
   const headerObjectSchema: any = (ctx as any)?.objectSchema;
   const headerObjectName: string | undefined = ctx?.objectName || headerObjectSchema?.name;
   const explicitTitle = interpolate(
@@ -3150,7 +3215,9 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
         // In the host's bar the bar draws its own panel switches.
         trailing={phoneFace || inBar ? undefined : headerTrailing}
         face={phoneFace ? 'bar' : 'row'}
-        defaultMaxVisible={inBar ? 1 : undefined}
+        // objectstack#35853 — the bar's budget is 3, as anywhere else, and
+        // what does not fit the bar's width folds into the `⋯`.
+        fitWidth={inBar}
       />
     );
     if (!phoneFace) return row;
@@ -3248,6 +3315,7 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
     // (objectui#13103): a select `nameField` heads the page with its option
     // label, exactly as the same field does through the template.
     const labelledData = withOptionLabels(data, objSchema, fieldOptionLabel, rawObjectName);
+    const stageTag = recordStageTag(objSchema, labelledData, headerState?.stage);
     const interpolatedTitleFormat = formatTitleTemplate(objSchema?.titleFormat, labelledData);
     // Unified resolver (ADR-0079): honours the object's declared
     // `nameField`/`displayNameField` and falls back to type-aware field
@@ -3459,8 +3527,10 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
     // `e2e/record-header-title-width.spec.ts`.
     // objectstack#35593 — in the host's bar: the record's name, its stage and
     // the state's tags in the title slot, the button group in the action
-    // slot. The object's label is the bar's own crumb, so the chip does not
-    // repeat it. Nothing is drawn until the host's slots exist.
+    // slot. Since objectstack#35853 both slots are the bar's second row, the
+    // record row, under its navigation row, and the name is one size up
+    // (`text-base`). The navigation row names the object or the list, so the
+    // chip does not repeat it. Nothing is drawn until the host's slots exist.
     if (drawsInBar && headerBar) {
       const title = headerBar.titleSlot ? createPortal(
         <span className="flex min-w-0 items-center gap-2" data-record-header-title="" {...headerAria}>
@@ -3481,9 +3551,9 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
                 ? () => ctx.onToggleFavorite?.()
                 : undefined
             }
-            className="text-foreground [&_h1]:text-sm [&_h1]:font-semibold [&_h1]:sm:text-sm [&>div]:flex-nowrap [&>div]:items-center"
+            className="text-foreground [&_h1]:text-base [&_h1]:font-semibold [&_h1]:sm:text-base [&>div]:flex-nowrap [&>div]:items-center"
           />
-          {recordStageTag(objSchema, labelledData)}
+          {stageTag}
           {headerStateTags}
         </span>,
         headerBar.titleSlot,
@@ -3526,9 +3596,12 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
             }
           />
           {/* objectstack#35593 — the record state's tags (an approval's
-              status) where no host bar takes the record's header. */}
-          {headerStateTags && (
+              status) where no host bar takes the record's header; with them
+              the stage tag (objectstack#35891), which a phone otherwise never
+              showed once the default page stopped drawing the stage bar. */}
+          {(stageTag || headerStateTags) && (
             <div className="mt-1 flex flex-wrap items-center gap-2" data-record-header-tags="">
+              {stageTag}
               {headerStateTags}
             </div>
           )}
@@ -3627,8 +3700,8 @@ ComponentRegistry.register('header', PageHeaderRenderer, {
     // express the domain: `ComponentInput.type` has no integer/min/max slot, so
     // `description` stays the only authoring-time expression of it, and spec
     // stays the sole judge of values.)
-    { name: 'maxVisible', type: 'number', description: 'How many header actions render as inline buttons on desktop before the rest fold into the overflow menu. A positive integer — the contract rejects 0 and fractional values. Two kinds of action are routed to the overflow menu regardless of this budget and never occupy an inline slot: an action whose locations declare record_more without record_header, and any action with component action:menu. The host\'s own buttons (the record page\'s Edit) take no slot and never fold. The first inline action, or the one declaring variant primary, is the one filled primary button; the others are outline buttons. An action declaring variant danger is never the primary: inline it is a destructive button, and in the overflow menu it is a red row below a separator.' },
-    { name: 'mobileMaxVisible', type: 'number', description: 'The same inline-button budget on mobile viewports, where horizontal room is scarce. A positive integer, defaulting to 1; the desktop half is Max Inline Actions, and the overflow routing rules stated there apply unchanged.' },
+    { name: 'maxVisible', type: 'number', description: 'How many header actions render as inline buttons on desktop before the rest fold into the overflow menu. A positive integer, defaulting to 3 — the contract rejects 0 and fractional values. In a record page\'s header bar, actions that do not fit its width fold too, so a narrow drawer shows fewer. Two kinds of action are routed to the overflow menu regardless of this budget and never occupy an inline slot: an action whose locations declare record_more without record_header, and any action with component action:menu. The host\'s own buttons (the record page\'s Edit) take no slot and never fold. The first inline action, or the one declaring variant primary, is the one filled primary button; the others are outline buttons. An action declaring variant danger is never the primary: inline it is a destructive button, and in the overflow menu it is a red row below a separator.' },
+    { name: 'mobileMaxVisible', type: 'number', description: 'The same inline-button budget on mobile viewports, where horizontal room is scarce. A positive integer, defaulting to 1, or 2 in a record page\'s bottom action bar on a phone, where the host\'s Edit counts as one; the desktop half is Max Inline Actions, and the overflow routing rules stated there apply unchanged.' },
   ],
 });
 

@@ -16,6 +16,9 @@ import type { ResolvedBook } from './book-nav';
  * alongside the single-doc reader so a reader can move within the book
  * without losing their place.
  *
+ * A long title wraps rather than truncating, so every entry is readable in
+ * full (objectstack#35424).
+ *
  * Routing is delegated: the parent supplies `docHref` so the same sidebar
  * works under the top-level `/docs/:name` route and the package-scoped
  * `/apps/:appName/docs/:name` route.
@@ -24,22 +27,31 @@ export function BookSidebar({
   book,
   activeDoc,
   docHref,
+  showLabel = true,
+  groupHeadings = 'always',
 }: {
   book: ResolvedBook;
   activeDoc?: string;
   docHref: (docName: string) => string;
+  /** Draw the book's label above its groups; off where a parent already names the book (the docs column). */
+  showLabel?: boolean;
+  /** `multi`: a book of one group lists its entries under no heading, the book's name being the heading. */
+  groupHeadings?: 'always' | 'multi';
 }) {
+  const headings = groupHeadings === 'always' || book.groups.length > 1;
   return (
     <nav aria-label={book.label ?? book.name} className="text-sm">
-      {book.label ? (
+      {showLabel && book.label ? (
         <div className="mb-3 px-2 text-sm font-semibold text-foreground">{book.label}</div>
       ) : null}
-      <div className="space-y-5">
+      <div className={headings ? 'space-y-5' : undefined}>
         {book.groups.map((group) => (
           <div key={group.key}>
-            <div className="mb-1 px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              {group.label}
-            </div>
+            {headings ? (
+              <div className="mb-1 px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {group.label}
+              </div>
+            ) : null}
             <ul className="space-y-0.5">
               {group.entries.map((entry, i) => {
                 if (entry.separator) {
@@ -54,7 +66,7 @@ export function BookSidebar({
                         rel="noreferrer"
                         className="flex items-center gap-1.5 rounded px-2 py-1 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                       >
-                        <span className="truncate">{entry.label ?? entry.href}</span>
+                        <span className="break-words">{entry.label ?? entry.href}</span>
                         <ExternalLink className="h-3 w-3 shrink-0 opacity-60" />
                       </a>
                     </li>
@@ -67,9 +79,9 @@ export function BookSidebar({
                     <Link
                       to={docHref(entry.doc)}
                       aria-current={active ? 'page' : undefined}
-                      className={`block truncate rounded px-2 py-1 transition ${
+                      className={`block break-words rounded px-2 py-1.5 leading-snug transition ${
                         active
-                          ? 'bg-primary/10 font-medium text-foreground'
+                          ? 'bg-primary/10 font-medium text-primary'
                           : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
                       }`}
                     >

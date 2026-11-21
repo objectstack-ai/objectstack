@@ -891,8 +891,9 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
   const [state, setState] = useState<{ status: 'idle' | 'loading' | 'ok' | 'error'; rows: Row[]; fields?: DatasetResultField[]; object?: string; dimensionFields?: Record<string, string>; drillRawRows?: Array<Record<string, unknown>>; drillRanges?: Array<Record<string, DatasetDrillRange>>; totals?: DatasetResultTotals[]; drillScopes?: unknown; error?: string; forbidden?: boolean; signature?: string; refreshing?: boolean }>({ status: 'idle', rows: [] });
   // Drill-through (ADR-0021 D2): the clicked bucket's record-list filter + title.
   // A bucket on a relationship-path dimension opens the drawer on a `notice`
-  // while its related ids are read, and keeps one when they cannot be
-  // (`resolveDatasetDrillFilter`); `filter` is set once there is a list to read.
+  // while each hop's schema is read, and keeps one when the path cannot be
+  // drilled (`resolveDatasetDrillFilter`); `filter` is set once there is a list
+  // to read.
   const [drill, setDrill] = useState<{ filter?: Record<string, unknown>; title: string; notice?: DrillDownNotice } | null>(null);
   // The click a pending relationship resolution answers: a later click, or the
   // drawer closing, makes an earlier answer stale.
@@ -1331,11 +1332,13 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
     const drillTitle = title || String(widget?.title ?? '');
     const request = ++drillRequest.current;
     const scopedFilter = scopeDrillFilter(runtimeFilter, scope);
-    // A dimension whose field is a `relationship.field` path is filtered on the
-    // relationship field `$in` the related ids matching the clicked value, read
-    // through this widget's data source first: the data API refuses the dotted
-    // path itself. The drawer opens at once on a notice and lists once the
-    // ids are in; a path it cannot resolve, or too many ids, keeps a notice.
+    // A dimension whose field is a `relationship.field` path drills as one
+    // nested-relation condition (`{ account: { owner: VALUE } }`), which the
+    // server matches in the database; no related id is read here. Each hop's
+    // schema is read through this widget's data source first, to confirm it is
+    // a single-valued relationship, so the drawer opens at once on a notice and
+    // lists once the filter is built; a path it cannot drill keeps a notice.
+    // `too-many` is no longer produced and stays mapped for compatibility.
     if (datasetDrillHasRelationshipPath(drillDims, dimensionFields)) {
       setDrill({ title: drillTitle, notice: 'resolving' });
       resolveDatasetDrillFilter({

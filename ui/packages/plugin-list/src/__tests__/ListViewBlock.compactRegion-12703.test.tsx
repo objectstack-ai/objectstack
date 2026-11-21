@@ -172,7 +172,7 @@ describe('a list block in a region narrower than half the page is compact (objec
 
     // (a) No object-list chrome: no toolbar control, no tab strip, no grid
     // (the `#` column is the grid's), no record-count bar.
-    expect(within(aside).queryByTestId('toolbar-filter-trigger')).toBeNull();
+    expect(within(aside).queryByTestId('condition-add-filter')).toBeNull();
     expect(within(aside).queryByRole('tablist')).toBeNull();
     expect(within(aside).queryByTestId('grid-spy')).toBeNull();
     expect(within(aside).queryByTestId('record-count-bar')).toBeNull();
@@ -199,7 +199,7 @@ describe('a list block in a region narrower than half the page is compact (objec
     expect(within(main).queryByTestId('list-compact-rows')).toBeNull();
     // The capped posture (objectstack#26613) is not the full list either: no
     // toolbar, and no grid anywhere on the page.
-    expect(within(main).queryByTestId('toolbar-filter-trigger')).toBeNull();
+    expect(within(main).queryByTestId('condition-add-filter')).toBeNull();
     expect(container.querySelectorAll('[data-testid="grid-spy"]')).toHaveLength(0);
   });
 
@@ -238,7 +238,7 @@ describe('a list outside any page region is unchanged (objectui#12703)', () => {
       />,
     );
     await waitFor(() => expect(view.getByTestId('grid-spy')).toBeTruthy());
-    expect(view.getByTestId('toolbar-filter-trigger')).toBeTruthy();
+    expect(view.getByTestId('condition-add-filter')).toBeTruthy();
     expect(view.queryByTestId('list-compact-rows')).toBeNull();
     expect(gridProps.length).toBeGreaterThan(0);
   });

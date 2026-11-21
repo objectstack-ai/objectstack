@@ -20,6 +20,12 @@
  * - `delegatorOwnWriteFloorOptions`, the composition knobs the delegator's
  *   own direct by-id write would get.
  *
+ * One function here is NOT a moved method body: `predicateWriteFloorDropIds`
+ * ([#35802]), the predicate write's per-row floor decision, which asks
+ * `resolvePreImageFloorDrop` once per row and adds nothing of its own. No
+ * class method wraps it; the authz middleware calls it on its own host, which
+ * carries the one member it reads.
+ *
  * A MOVE, not a redesign. Each function below is the body of the
  * `SecurityPlugin` method of the same name as it stood, re-indented one level
  * and otherwise unedited: the same service methods asked in the same order,
@@ -296,6 +302,59 @@ export async function resolvePreImageFloorDrop(
   // ownership gate's claim admission), so it is asked once per write.
   onVerdict?.(verdict);
   return verdict === 'allow';
+}
+
+/**
+ * How many rows' floor decisions {@link predicateWriteFloorDropIds} asks at
+ * once. Each decision is one `ISharingService.checkEdit` / `checkDelete` call,
+ * which reads the store (the row's owner, its shares, the bypass), so the
+ * batch bounds how many of those reads one write keeps in flight.
+ */
+const PREDICATE_WRITE_FLOOR_DECISION_BATCH = 25;
+
+/**
+ * [#35802] The PREDICATE write's floor decision, made per row: the ids among
+ * `candidateIds` whose by-id write would have its platform ownership floor
+ * replaced.
+ *
+ * The decision for each row is {@link resolvePreImageFloorDrop} itself, asked
+ * exactly as the by-id write pre-image gate (step 2.7) asks it for that row:
+ * the same write class, the same sets, the same `delegated` exclusion. So a row
+ * is in the answer if and only if a by-id write of it would drop the floor —
+ * the floor in play and an `allow` from the declared write authority — and
+ * the verb boundary (ADR-0111 D3) comes with it: `delete` asks `checkDelete`,
+ * which an `edit` share never answers `allow`.
+ *
+ * `candidateIds` is the caller's to bound. The middleware hands over only the
+ * rows its predicate matches that the caller can read and the floor does not
+ * already admit, so the list is at most `PREDICATE_WRITE_READABLE_ID_CAP` long
+ * and the write was refused before this ran when the read was longer. Asked in
+ * batches of {@link PREDICATE_WRITE_FLOOR_DECISION_BATCH}; a row whose verdict
+ * cannot be resolved is a `deny` there, so it keeps its floor.
+ */
+export async function predicateWriteFloorDropIds(
+  this: Pick<SharingVerdictsHost, 'resolvePreImageFloorDrop'>,
+  rlsOperation: string,
+  object: string,
+  candidateIds: readonly (string | number | bigint)[],
+  context: any,
+  permissionSets: PermissionSet[],
+  delegated: boolean,
+): Promise<(string | number | bigint)[]> {
+  if (delegated) return [];
+  const dropped: (string | number | bigint)[] = [];
+  for (let start = 0; start < candidateIds.length; start += PREDICATE_WRITE_FLOOR_DECISION_BATCH) {
+    const batch = candidateIds.slice(start, start + PREDICATE_WRITE_FLOOR_DECISION_BATCH);
+    const decisions = await Promise.all(
+      batch.map((id) =>
+        this.resolvePreImageFloorDrop(rlsOperation, object, String(id), context, permissionSets, false),
+      ),
+    );
+    batch.forEach((id, i) => {
+      if (decisions[i] === true) dropped.push(id);
+    });
+  }
+  return dropped;
 }
 
 /** The body of `SecurityPlugin#delegatorOwnWriteFloorOptions`; the method's docblock there is its contract. */

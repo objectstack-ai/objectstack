@@ -28,7 +28,11 @@
  *     alike. The scorecard leaves a not-measured turn (one that reads a seed
  *     row the app refused) out of both passed and total, so its half can still
  *     read `pass`; the gallery is trust-first, and a turn nobody measured is a
- *     claim nobody proved. Each one is a reason of its own.
+ *     claim nobody proved. Each one is a reason of its own. A confirmation
+ *     turn whose confirmed write was not measured (`OperationResult.confirmTurn`:
+ *     an ambiguous ask, or a server with no pending-confirmation service) is
+ *     not one: its operation was measured and judged on the ask, and the
+ *     transcript shows questions only, so it states nothing about that write.
  */
 
 import type { ScenarioRunRecord, Verdict } from './record.js';

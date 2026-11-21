@@ -63,13 +63,13 @@ const D3_ID = 'ui-form-view-type-layout-only';
 const TYPE_FIRST_SENTENCE = {
   split:
     "'split' was removed from the form view `type` enum in @objectstack/spec 18.3.0 (ADR-0050) — `type` is the "
-    + "form's layout, and a side-by-side split is not one: whether a record opens beside its list is each "
-    + "reader's own preference in the list's Display menu, not metadata.",
+    + "form's layout, and a side-by-side split is not one: a record opens from its list in the drawer or as "
+    + 'the full page, never beside the list.',
   drawer:
     "'drawer' was removed from the form view `type` enum in @objectstack/spec 18.3.0 (ADR-0050) — `type` is the "
-    + "form's layout, and where a form opens is decided by whoever opens it: a list opens a clicked record in "
-    + "the drawer (`navigation.mode`, the default), and the console's New and Edit entries open the record form "
-    + 'themselves.',
+    + "form's layout, and where a form opens is decided by whoever opens it: an object's list opens a clicked "
+    + "record's full page, or its drawer from the hover icon, and the console's New and Edit entries open the "
+    + 'record form themselves.',
   modal:
     "'modal' was removed from the form view `type` enum in @objectstack/spec 18.3.0 (ADR-0050) — `type` is the "
     + "form's layout, and where a form opens is decided by whoever opens it: the console's New and Edit dialogs "

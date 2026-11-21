@@ -450,8 +450,9 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // created, relabelled, re-rated and retired here, never deleted.
       // Retiring is the delete, and a removed row would free its code to be
       // created again with another meaning, so the effective map offers no
-      // delete, and the engine refuses one in every context
-      // (`ERR_UNIT_DELETE_REFUSED`, `@objectstack/objectql`). WITHOUT the
+      // delete, and the engine refuses a direct one in every context
+      // (`ERR_UNIT_DELETE_REFUSED`, `@objectstack/objectql`); only the
+      // organization's own delete removes its units (#35812). WITHOUT the
       // superuser bits: `modifyAllRecords` grants delete on its own, and the
       // derived no-bypass variant inherits this line. Units carry no owner
       // scope for an administrator (the owner-only floor binds `org_member`),

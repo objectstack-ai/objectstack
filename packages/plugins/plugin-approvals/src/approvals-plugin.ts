@@ -7,7 +7,8 @@ import type {
   IJobService,
   IObjectQLEngine,
 } from '@objectstack/spec/contracts';
-import { OWNERSHIP_QUEUE_SERVICE } from '@objectstack/spec/contracts';
+import { OWNERSHIP_QUEUE_SERVICE, WORK_CALENDAR_SERVICE } from '@objectstack/spec/contracts';
+import type { IWorkCalendarService } from '@objectstack/spec/contracts';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
 import { SysApprovalAction } from './sys-approval-action.object.js';
 import { SysApprovalApprover } from './sys-approval-approver.object.js';
@@ -291,6 +292,18 @@ export class ApprovalsServicePlugin implements Plugin {
       // object labels in the reader's locale (`reader-locale-labels.ts`).
       // Without one, the door serves the labels as stored.
       i18nServiceSource: i18nService,
+      // [#35418] A position's declared label, for the timeline note that names
+      // an unheld position when the reader's pack holds no translation of it.
+      // Resolved LAZILY for the reason the providers above are; absent, the
+      // note names the position by its name.
+      positionLabelSource: async (positionName) => {
+        let metadata: { get?(type: string, name: string): Promise<unknown> } | undefined;
+        try { metadata = ctx.getService('metadata'); } catch { return undefined; }
+        if (typeof metadata?.get !== 'function') return undefined;
+        const item = await metadata.get('position', positionName);
+        const label = (item as { label?: unknown } | undefined)?.label;
+        return typeof label === 'string' && label.trim() ? label : undefined;
+      },
       // [ADR-0142 D6] The queue service a `queue` approver expands through.
       // Resolved LAZILY for the reason the providers above are: plugin-sharing
       // registers it and may start after this one. Absent, a queue approver
@@ -298,6 +311,17 @@ export class ApprovalsServicePlugin implements Plugin {
       ownershipQueues: () => {
         try {
           return ctx.getService<ApproverQueueSource>(OWNERSHIP_QUEUE_SERVICE);
+        } catch {
+          return undefined;
+        }
+      },
+      // [ADR-0157 D5] The working-calendar service a `clock: 'working_time'`
+      // escalation counts through. Resolved LAZILY for the reason the
+      // providers above are: objectql registers it and may start after this
+      // one. Absent, a working-time deadline is refused, never wall-clock.
+      workCalendar: () => {
+        try {
+          return ctx.getService<IWorkCalendarService>(WORK_CALENDAR_SERVICE);
         } catch {
           return undefined;
         }

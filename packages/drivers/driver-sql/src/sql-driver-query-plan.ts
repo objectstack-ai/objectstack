@@ -31,6 +31,7 @@
 import type { DriverOptions } from '@objectstack/spec/data';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import type { SqlDriver } from './sql-driver.js';
+import { primeFixedReadLeafKeyTypes } from './fixed-read-leaf-key-type.js';
 
 /**
  * The `SqlDriver` members the bodies of {@link QueryPlanFacet} read — every one of
@@ -67,6 +68,8 @@ export class QueryPlanFacet {
   static async analyzeQuery(this: Pick<QueryPlanHost, 'applyFilters' | 'applyTenantScope' | 'config' | 'getBuilder' | 'isMssql' | 'isMysql' | 'isOracle' | 'isPostgres' | 'isSqlite' | 'knex' | 'mapSortField' | 'primeMssqlGuidColumns' | 'primeOracleRawUuidColumns'>, object: string, query: DriverQuery, options?: DriverOptions): Promise<any> {
     // [#31395] SQL Server: which columns are GUIDs, before a text operator compiles.
     if (this.isMssql) await this.primeMssqlGuidColumns(object, query.where);
+    // [ADR-0155 O2] PostgreSQL: the key type a fixed-read leaf's inner read is cast to.
+    await primeFixedReadLeafKeyTypes(this, object, query.where, options);
     // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
     // the remote catalog before a comparand or a written value is bound.
     if (this.isOracle) await this.primeOracleRawUuidColumns(object);

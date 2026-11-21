@@ -55,6 +55,7 @@ import {
   recordUnlinkTombstone,
 } from './implicit-account-linking.js';
 import { withSystemReadContext } from './objectql-adapter.js';
+import { firstPasswordMark, noteAccountCreatedInRequest } from './credential-change-ends-prior-access.js';
 import { emitAuthSessionAuditEvent, loginEventFor, logoutEventFor, signInClientFingerprint } from './auth-session-audit.js';
 import { ipAllowListRefusalEventFor, ipRefusalAuditBoundFor } from './ip-allow-list-refusal-audit.js';
 import { sessionPolicyHoldFor, withSessionPolicyHold } from './session-policy-hold.js';
@@ -62,6 +63,7 @@ import { holdPrincipalSessionExpiry } from './principal-session-mint.js';
 import { canonicalClientAddress } from './client-address-canonical.js';
 import { readRequestClientAddress } from './request-client-address.js';
 import { SESSION_SCOPING_REFUSAL } from './organization-access-policy.js';
+import { orderActiveOrganizationCandidates, readActiveOrganizationCandidates } from './session-organization-candidates.js';
 import { readSessionUserRow, refuseAgentAccountCredential } from './service-account-identity.js';
 import { refuseInactiveUserSession, SESSION_ADMISSION_ROW_FIELDS } from './user-session-admission.js';
 import { LOCKED_ACCOUNT_ROW_FIELDS, refuseLockedAccountSession } from './auth-manager-sign-in-lockout.js';
@@ -131,10 +133,19 @@ export function composeDatabaseHooks(
   // [ADR-0151 D2] An AI service account holds no password and no sign-in
   // provider link. Asked FIRST, before the host's own `create.before`, for
   // every writer of a credential row. See service-account-identity.ts.
+  // An account's first password — the credential row created in the request
+  // that created the account — is born with an id derived from the account's
+  // (`firstPasswordRowId`), the mark the credential clock reads (credential-change-ends-prior-access.ts, "An
+  // account's first password"). Asked after the host's hook, whose `false`
+  // (refuse the row) is honoured first and whose fields it keeps.
   const hostAccountBefore = (host as any)?.account?.create?.before;
   const accountBefore = async (account: any, ctx: any) => {
     await refuseAgentAccountCredential(this.config.dataEngine, account);
-    return hostAccountBefore ? hostAccountBefore(account, ctx) : undefined;
+    const hostResult = hostAccountBefore ? await hostAccountBefore(account, ctx) : undefined;
+    if (hostResult === false) return false;
+    const hostData = hostResult && typeof hostResult === 'object' && 'data' in hostResult ? (hostResult as any).data : undefined;
+    const mark = await firstPasswordMark({ ...account, ...(hostData ?? {}) }, ctx);
+    return mark ? { data: { ...(hostData ?? {}), ...mark } } : hostResult;
   };
   const hostAccountAfter = (host as any)?.account?.create?.after;
   const after = hostAccountAfter
@@ -306,8 +317,17 @@ export function composeDatabaseHooks(
             if (hostResult && typeof hostResult === 'object' && 'data' in hostResult) {
               draft = (hostResult as any).data;
             }
+            // [#35829] The host's ordered fallbacks ride beside `data`, to the
+            // scoping judgement in `sessionBefore` below
+            // (`session-organization-candidates.ts`). A host that names
+            // candidates has chosen, so the framework's default stays out.
+            const candidates = hostResult && typeof hostResult === 'object' && 'activeOrganizationCandidates' in hostResult
+              ? { activeOrganizationCandidates: (hostResult as any).activeOrganizationCandidates }
+              : undefined;
             // The host hook fully handled it → keep its result shape.
-            if (draft?.activeOrganizationId) return { data: draft };
+            if (draft?.activeOrganizationId || readActiveOrganizationCandidates(candidates)) {
+              return { data: draft, ...candidates };
+            }
           }
           return (await defaultActiveOrg(draft, ctx)) ?? (draft === session ? undefined : { data: draft });
         }
@@ -366,6 +386,22 @@ export function composeDatabaseHooks(
     const { APIError } = await import('better-auth/api');
     throw new APIError('FORBIDDEN', { code: SESSION_SCOPING_REFUSAL.code, message: SESSION_SCOPING_REFUSAL.message });
   };
+  // [#35829] Of the host's ordered candidates (`session-organization-candidates.ts`),
+  // the first the creation's scoping admits — judged by the same judge, from
+  // the same established address, under the same conditions as
+  // `refuseUnadmittedScoping` above, so a candidate chosen here is one that
+  // refusal admits. None admitted, or no request through the HTTP door to
+  // judge ⇒ the first candidate, which the refusal then judges as the single
+  // choice it would have been: refused (with its audit row) or, unjudged,
+  // kept as before.
+  const firstAdmittedOrganization = async (userId: unknown, ordered: readonly string[], ctx: any) => {
+    if (!ctx?.request || typeof userId !== 'string' || !userId || ordered.length < 2) return ordered[0];
+    const address = await readRequestClientAddress();
+    for (const organizationId of ordered) {
+      if ((await this.judgeSessionScoping(userId, organizationId, address)) === 'admitted') return organizationId;
+    }
+    return ordered[0];
+  };
   // [ADR-0151 D2] An AI service account never holds a session. Asked FIRST,
   // before the host's hook and every step below, so no sign-in method,
   // impersonation or minted session gets a session for one, whatever runs
@@ -393,11 +429,18 @@ export function composeDatabaseHooks(
     const captured = await captureSessionAddress(session);
     const result = sessionActiveOrgBefore ? await sessionActiveOrgBefore(captured, ctx) : undefined;
     if (result === false) return false;
-    const final = result && typeof result === 'object' && 'data' in result
-      ? { ...captured, ...(result as any).data }
-      : captured;
+    const hasData = !!result && typeof result === 'object' && 'data' in result;
+    let final = hasData ? { ...captured, ...(result as any).data } : captured;
+    // [#35829] The host's ordered candidates: the session is scoped to the
+    // first one the scoping admits, and only when none is does the refusal
+    // below run — against the host's first choice, as with no list at all.
+    const candidates = readActiveOrganizationCandidates(result);
+    if (candidates) {
+      const ordered = orderActiveOrganizationCandidates(final?.activeOrganizationId, candidates);
+      final = { ...final, activeOrganizationId: await firstAdmittedOrganization(final?.userId, ordered, ctx) };
+    }
     await refuseUnadmittedScoping(final?.userId, final?.activeOrganizationId, ctx, final);
-    if (result && typeof result === 'object' && 'data' in result) return { data: final };
+    if (hasData || candidates) return { data: final };
     return captured === session ? result : { data: captured };
   };
 
@@ -548,6 +591,7 @@ export function composeDatabaseHooks(
       }
     }
     const email = typeof draft?.email === 'string' ? draft.email : '';
+    noteAccountCreatedInRequest(ctx, email);
     if (email && this.takeOwnerVerifiedStamp(email)) {
       return { data: { ...draft, emailVerified: true } };
     }

@@ -10,13 +10,16 @@
  * objectstack#27524, Target 7 — the record's top bar on each face, from a real
  * `RecordDetailView` mount (the `panelToggles-27052` harness).
  *
- *  - the page opened directly: the breadcrumb 「对象 › 记录名」 (the object goes
- *    to the object's list), ⊟ where the tier has a right column, nothing else
- *    — no counter, no ↓ ↑, no ⤡; the crumb row is gone;
- *  - the page the list row's ↗ opened: the counter (its tooltip naming the
- *    list's view), ↓ ↑ and `j` / `k` over the list's rows — a step replaces the
- *    page with the sibling's — ⤡ 「Collapse to drawer」 back to the list with
- *    the record stepped to open, and the object crumb back to the list;
+ * Two rows on a desktop since objectstack#35853 (figure 40): the navigation
+ * row over the record row.
+ *
+ *  - the page opened directly: the navigation row names the object (a link to
+ *    the object's list) and ends in ✕, which goes there too; no counter, no
+ *    ↑ ↓; the record row holds the header's name and ⊟;
+ *  - the page the list's record name opened (objectstack#35854): ↑ ↓ and
+ *    「N of M · view」 over the list's matched total — a step replaces the page
+ *    with the sibling's, `j` / `k` step too — and ✕ or the view's name back to
+ *    the list as it was left; no ⤡ (the 「Collapse to drawer」 hop retired);
  *  - the page under a `?from=` trail: ← and the path, each ancestor a link;
  *  - the record in a pane: the pane's bar names it at the root, and its ⊟ sits
  *    in that bar, not in the header's action row.
@@ -24,7 +27,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { MetadataCtx } from '@object-ui/react';
 import { RelatedCountStore } from '@object-ui/components';
@@ -62,7 +65,7 @@ vi.mock('./MetadataInspector', () => ({
 }));
 
 import { RecordDetailView } from './RecordDetailView';
-import { RecordStackDrawer, recordDrawerReturnState, useRecordDrawerStack } from './recordDrawerStack';
+import { RecordStackDrawer, useRecordDrawerStack } from './recordDrawerStack';
 
 const APP = 'demo';
 const LEAD = 'crm_lead';
@@ -153,74 +156,72 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('the page\'s top bar (objectstack#27524, Target 7)', () => {
-  it('opened directly: 「对象 / 记录名」 and ⊟, nothing else; the crumb row is gone', async () => {
+describe('the page\'s top bar (objectstack#27524, Target 7; two rows since objectstack#35853)', () => {
+  it('opened directly: the navigation row names the object, ✕ at its right; the record row holds the name and ⊟', async () => {
     mountPage(`/apps/${APP}/${LEAD}/record/r-1`);
     await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
     const bar = pageBar()!;
     expect(bar).not.toBeNull();
-    // objectstack#35593 — the record's header holds the bar: the crumb names
-    // the object, then 「/」 and the header's own H1.
-    await waitFor(() => expect(bar.querySelector('[data-record-bar-title] h1')?.textContent).toBe('Record r-1'));
-    expect(screen.getByTestId('record-page-crumb').textContent).toBe('Leads');
-    expect(bar.querySelector('[data-record-bar-separator]')?.textContent).toBe('/');
-    const object = bar.querySelector('[data-record-crumb-object]') as HTMLAnchorElement;
+    // objectstack#35853 — two rows: navigation over the record.
+    const nav = bar.querySelector('[data-record-top-bar-nav]') as HTMLElement;
+    const record = bar.querySelector('[data-record-top-bar-record]') as HTMLElement;
+    await waitFor(() => expect(record.querySelector('[data-record-bar-title] h1')?.textContent).toBe('Record r-1'));
+    expect(nav.querySelector('[data-record-bar-title]')).toBeNull();
+    // No list: the object's name, a link to the object's list, and no ↑ ↓.
+    expect(within(nav).getByTestId('record-page-crumb').textContent).toBe('Leads');
+    const object = nav.querySelector('[data-record-crumb-object]') as HTMLAnchorElement;
     expect(object.getAttribute('href')).toBe(`/apps/${APP}/${LEAD}`);
     expect(bar.querySelector('[data-record-top-bar-step]')).toBeNull();
     expect(bar.querySelector('[data-record-top-bar-position]')).toBeNull();
-    expect(screen.queryByTestId('record-drawer-return')).toBeNull();
-    expect(bar.querySelector('[role="group"][aria-label="Panels"]')).not.toBeNull();
+    expect(bar.querySelector('[data-record-bar-separator]')).toBeNull();
+    // ✕ is the navigation row's last control, and goes to the object's list.
+    const frame = nav.querySelector('[data-record-top-bar-frame]') as HTMLElement;
+    expect(frame.lastElementChild?.getAttribute('data-testid')).toBe('record-page-close');
+    expect(record.querySelector('[role="group"][aria-label="Panels"]')).not.toBeNull();
     expect(document.querySelector('[data-record-crumb-row]')).toBeNull();
+    fireEvent.click(screen.getByTestId('record-page-close'));
+    await waitFor(() => expect(where()).toBe(`/apps/${APP}/${LEAD}`));
   });
 
-  it('opened from the list row\'s ↗: the counter, ↓ ↑ and j / k over the list\'s rows, ⤡ and the object crumb back to the list', async () => {
-    const back = recordDrawerReturnState(
-      { pathname: `/apps/${APP}/${LEAD}`, search: '?recordId=r-2', state: null },
-      [{ objectName: LEAD, recordId: 'r-2', siblings: ROWS }],
-    );
-    mountPage({
-      pathname: `/apps/${APP}/${LEAD}/record/r-2`,
-      state: { ...back, from: { pathname: `/apps/${APP}/${LEAD}`, label: 'All leads' } },
-    });
+  it('opened by the list\'s record name: 「N of M · view」 over the list\'s matched total, ↑ ↓ and j / k over its rows', async () => {
+    const from = { pathname: `/apps/${APP}/${LEAD}`, label: 'All leads', siblings: ROWS, total: 40 };
+    mountPage({ pathname: `/apps/${APP}/${LEAD}/record/r-2`, state: { from } });
     await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
-    const position = () => pageBar()!.querySelector('[data-record-top-bar-position]');
-    expect(position()?.textContent).toBe('2 / 3');
-    expect(position()?.getAttribute('title')).toBe('2 of 3 in All leads');
-    // ⊟ after the step group, ⤡ at the end.
-    const controls = Array.from(pageBar()!.querySelector('[data-record-top-bar-controls]')!.children);
-    expect(controls.at(-1)?.getAttribute('data-testid')).toBe('record-drawer-return');
+    const nav = () => pageBar()!.querySelector('[data-record-top-bar-nav]') as HTMLElement;
+    const position = () => nav().querySelector('[data-record-top-bar-position]');
+    expect(position()?.textContent).toBe('2 of 40');
+    expect(position()?.getAttribute('title')).toBe('2 of 40 in All leads');
+    expect(nav().querySelector('[data-record-top-bar-scope]')?.textContent).toBe('All leads');
+    // The figure's order: ↑ then ↓, then the count; no object crumb beside them.
+    const steps = Array.from(nav().querySelectorAll('[data-record-top-bar-step]')).map((el) => el.getAttribute('data-record-top-bar-step'));
+    expect(steps).toEqual(['previous', 'next']);
+    expect(nav().querySelector('[data-record-crumb-object]')).toBeNull();
+    expect(screen.queryByTestId('record-drawer-return')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Next record' }));
     await waitFor(() => expect(where()).toBe(`/apps/${APP}/${LEAD}/record/r-3`));
-    await waitFor(() => expect(position()?.textContent).toBe('3 / 3'));
+    await waitFor(() => expect(position()?.textContent).toBe('3 of 40'));
+    // The end of the rows the list loaded: ↓ stops there, even short of the total.
     expect((screen.getByRole('button', { name: 'Next record' }) as HTMLButtonElement).disabled).toBe(true);
     // `k` steps back; the arrow keys are the page's scroll, not the bar's.
     fireEvent.keyDown(document.body, { key: 'ArrowUp' });
     expect(where()).toBe(`/apps/${APP}/${LEAD}/record/r-3`);
     fireEvent.keyDown(document.body, { key: 'k' });
     await waitFor(() => expect(where()).toBe(`/apps/${APP}/${LEAD}/record/r-2`));
-
-    // ⤡ returns to the list with the record stepped to open in its pane.
-    fireEvent.click(screen.getByTestId('record-drawer-return'));
-    await waitFor(() => expect(where()).toBe(`/apps/${APP}/${LEAD}?recordId=r-2`));
-    expect(screen.getByTestId('where-state').textContent).toContain('"recordDrawerRestore":[{"objectName":"crm_lead","recordId":"r-2"');
   });
 
-  it('opened by a list whose rows open as pages: the counter and ↓ ↑ over its rows, and no ⤡', async () => {
+  it('control: with no total reported the counter counts the rows handed along; the first has no ↑', async () => {
     const from = { pathname: `/apps/${APP}/${LEAD}`, label: 'All leads', siblings: ROWS };
     mountPage({ pathname: `/apps/${APP}/${LEAD}/record/r-1`, state: { from } });
     await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
     const position = () => pageBar()!.querySelector('[data-record-top-bar-position]');
-    expect(position()?.textContent).toBe('1 / 3');
+    expect(position()?.textContent).toBe('1 of 3');
     expect(position()?.getAttribute('title')).toBe('1 of 3 in All leads');
-    // That list opens no pane: there is nothing to collapse to.
-    expect(screen.queryByTestId('record-drawer-return')).toBeNull();
-    // The object crumb is the list it came from.
-    expect(pageBar()!.querySelector('[data-record-crumb-object]')?.getAttribute('href')).toBe(`/apps/${APP}/${LEAD}`);
+    expect((screen.getByRole('button', { name: 'Previous record' }) as HTMLButtonElement).disabled).toBe(true);
 
     fireEvent.keyDown(document.body, { key: 'j' });
     await waitFor(() => expect(where()).toBe(`/apps/${APP}/${LEAD}/record/r-2`));
-    await waitFor(() => expect(position()?.textContent).toBe('2 / 3'));
+    await waitFor(() => expect(position()?.textContent).toBe('2 of 3'));
     // The next page keeps the same list.
     expect(JSON.parse(screen.getByTestId('where-state').textContent!)).toEqual({ from });
     fireEvent.click(screen.getByRole('button', { name: 'Previous record' }));
@@ -234,21 +235,18 @@ describe('the page\'s top bar (objectstack#27524, Target 7)', () => {
     expect(pageBar()!.querySelector('[data-record-top-bar-step]')).toBeNull();
   });
 
-  it('the object crumb of a ↗ page returns to the list with no record open', async () => {
-    const back = recordDrawerReturnState(
-      { pathname: `/apps/${APP}/${LEAD}`, search: '?view=all&recordId=r-1', state: null },
-      [{ objectName: LEAD, recordId: 'r-1', siblings: ROWS }],
-    );
-    mountPage({ pathname: `/apps/${APP}/${LEAD}/record/r-1`, state: { ...back, from: { pathname: `/apps/${APP}/${LEAD}?view=all`, label: 'All leads' } } });
-    const object = await waitFor(() => {
-      const el = pageBar()?.querySelector('[data-record-crumb-object]');
-      expect(el).toBeTruthy();
-      return el as HTMLElement;
-    });
-    expect(object.textContent).toBe('Leads');
-    fireEvent.click(object);
-    await waitFor(() => expect(where()).toBe(`/apps/${APP}/${LEAD}?view=all`));
-  });
+  it.each([['✕', 'record-page-close'], ['the view\'s name', 'scope']])(
+    '%s returns to the list the page came from, as it was left, with no record open',
+    async (_name, control) => {
+      mountPage({ pathname: `/apps/${APP}/${LEAD}/record/r-1`, state: { from: { pathname: `/apps/${APP}/${LEAD}?view=all`, label: 'All leads', siblings: ROWS } } });
+      await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
+      const target = control === 'scope'
+        ? pageBar()!.querySelector('[data-record-top-bar-scope]') as HTMLElement
+        : screen.getByTestId('record-page-close');
+      fireEvent.click(target);
+      await waitFor(() => expect(where()).toBe(`/apps/${APP}/${LEAD}?view=all`));
+    },
+  );
 
   it('under a ?from= trail: ← and the path, each ancestor a link to its page', async () => {
     const trail = encodeURIComponent(JSON.stringify([{ o: LEAD, i: 'L-1', t: 'Mira Costa' }]));
@@ -278,14 +276,14 @@ describe('the breadcrumb while the record is read (objectstack#35412)', () => {
   // bar (objectstack#35593), the crumb's own name until then.
   const crumbName = () =>
     document.querySelector('[data-record-bar-title]:not([hidden]) h1')?.textContent
-    ?? screen.getByTestId('record-page-crumb').querySelector('[aria-current="page"]')?.textContent;
+    ?? document.querySelector('[data-record-page-title]')?.textContent;
 
   it('names the record by its object until the read lands, never by its id', async () => {
     const read = deferredRead('r-1');
     mountPage(`/apps/${APP}/${LEAD}/record/r-1`, read.dataSource);
     await waitFor(() => expect(read.dataSource.findOne).toHaveBeenCalled(), { timeout: 5000 });
     expect(crumbName()).toBe('Lead');
-    expect(screen.getByTestId('record-page-crumb').textContent).not.toContain('#');
+    expect(crumbName()).not.toContain('#');
     read.answer();
     await waitFor(() => expect(crumbName()).toBe('Record r-1'));
   });
@@ -343,7 +341,8 @@ describe('the pane\'s top bar names the record (objectstack#27524)', () => {
       </MemoryRouter>,
     );
     // objectstack#35593 — the record's header holds the pane's bar: its H1 is
-    // the bar's name, with no object crumb, counter or ↓ ↑ beside it.
+    // the bar's name. objectstack#35853 — the pane's navigation row draws ↑ ↓
+    // and 「N of M · view」 over the list beside it.
     const paneTitle = () => document.querySelector('[data-record-bar-title] h1')?.textContent;
     await waitFor(() => expect(paneTitle()).toBe('Record r-1'), { timeout: 5000 });
     expect(screen.queryByTestId('record-drawer-crumb')).toBeNull();
@@ -353,8 +352,9 @@ describe('the pane\'s top bar names the record (objectstack#27524)', () => {
     expect(document.querySelector('[data-page-header-trailing]')).toBeNull();
     // The pane draws its own bar; the record inside draws none.
     expect(document.querySelectorAll('[data-record-top-bar]')).toHaveLength(1);
-    expect(document.querySelector('[data-record-top-bar-position]')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Next record' })).toBeNull();
+    expect(document.querySelector('[data-record-top-bar-position]')?.textContent).toBe('1 of 3');
+    expect(document.querySelector('[data-record-top-bar-scope]')?.textContent).toBe('All leads');
+    expect(screen.getByRole('button', { name: 'Next record' })).toBeTruthy();
 
     // The step keys stay: j names the next record once its header draws.
     fireEvent.keyDown(document.body, { key: 'j' });

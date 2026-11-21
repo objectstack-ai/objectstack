@@ -289,11 +289,19 @@ export const viewForm = defineForm({
         {
           field: 'navigation',
           type: 'composite',
-          helpText: 'Configuration for item click navigation (drawer by default, page, new_window or none)',
+          helpText: 'Configuration for item click navigation: the drawer size, and `preventNavigation` for a list whose rows open nothing (`mode` is deprecated — the record name opens the page, the hover icon the side panel)',
           fields: [
-            { field: 'mode' },
+            {
+              field: 'mode',
+              helpText: '[DEPRECATED] On an object\'s list (a list view, an object\'s `listViews`) no longer picks how a '
+                + 'record opens: in the console the record name opens the full page and the hover icon beside it '
+                + 'opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and '
+                + 'change nothing, so omit the key; `none` still means rows open nothing — prefer '
+                + '`preventNavigation: true`. A page block that carries `navigation` (a list block, the timeline, '
+                + 'an embedded view) still honours every value.',
+            },
             { field: 'preventNavigation', helpText: 'Disable standard navigation entirely' },
-            { field: 'openNewTab', helpText: 'Force open in new tab (applies to page mode)' },
+            { field: 'openNewTab', helpText: 'Open the record\'s full page in a new browser tab when it is clicked; rows that open nothing stay that way, and a phone opens the page in place' },
             { field: 'size', helpText: 'Overlay size bucket for the drawer detail: \'auto\' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it.' },
             { field: 'width', helpText: '[DEPRECATED → size] Pixel/percent width of the drawer (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket.' },
           ],

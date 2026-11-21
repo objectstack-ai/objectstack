@@ -49,6 +49,7 @@ import {
   useDataInvalidation,
   useFilterScope,
   useResolvedFilter,
+  classifyLoadError,
 } from '@object-ui/react';
 import {
   RECORD_OVERLAY_DEFAULT_WIDTH,
@@ -56,7 +57,7 @@ import {
   deriveRecordPageHref,
 } from '@object-ui/plugin-detail';
 import { usePermissions } from '@object-ui/permissions';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, Lock } from 'lucide-react';
 import {
   cn,
   useIsMobile,
@@ -70,6 +71,7 @@ import {
   Input,
   Label,
   NavigationOverlay,
+  DataEmptyState,
   legacyRecordDrawerWidthKey,
   recordOverlayWidthStorageKey,
   toast,
@@ -1504,6 +1506,31 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
         <div className="flex items-center justify-center h-96">
           <div className="text-muted-foreground">{tt('calendar.loading', 'Loading calendar…')}</div>
         </div>
+      </div>
+    );
+  }
+
+  // A refused read (403 / PERMISSION_DENIED, by the shared `classifyLoadError`
+  // verdict the list page, the related list and the gantt use) is not a
+  // failure of anything the reader did: they may open the page without being
+  // granted the records this calendar reads. It is drawn as the calm no-access
+  // state (`role="status"`, the shared `list.loadErrorForbidden*` sentence in
+  // the reader's language), never the server's text. Every other failure
+  // keeps the error screen below.
+  // This package has no default-translation table: the `defaultValue`s are the
+  // provider-less fallback and say exactly what the `en` pack says.
+  if (error && classifyLoadError(error) === 'forbidden') {
+    return (
+      <div className={className}>
+        <DataEmptyState
+          data-testid="calendar-no-access"
+          className="h-96"
+          icon={<Lock className="size-5 text-muted-foreground" aria-hidden />}
+          title={t('list.loadErrorForbiddenTitle', { defaultValue: 'You don’t have access' })}
+          description={t('list.loadErrorForbiddenMessage', {
+            defaultValue: 'You don’t have permission to view these records. Contact your administrator if you think you should have access.',
+          })}
+        />
       </div>
     );
   }

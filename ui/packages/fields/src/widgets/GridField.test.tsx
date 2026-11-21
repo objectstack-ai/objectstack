@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 import { UploadProvider } from './UploadProvider';
 import { formatDate, formatDateTime } from '@object-ui/core';
-import { GridField, LineItemsField, sumColumn, lookupAutofillPatch } from './GridField';
+import { GridField, LineItemsField, sumColumn, lookupAutofillPatch, UNTOUCHED_NEW_ROW, isUntouchedNewRow, columnHelpByField } from './GridField';
 
 const columns = [
   { name: 'description', label: 'Description', type: 'text' as const },
@@ -102,7 +102,7 @@ describe('GridField / LineItemsField — editable line items', () => {
   it('editing a text cell emits the raw string', () => {
     const onChange = vi.fn();
     render(<GridField value={[{ description: '', amount: null }]} onChange={onChange} field={field} />);
-    // [0] = the data row ([1] would be the always-present trailing ghost row).
+    // [0] = the data row.
     fireEvent.change(screen.getAllByLabelText('Description')[0], { target: { value: 'Taxi' } });
     expect(onChange).toHaveBeenCalledWith([{ description: 'Taxi', amount: null }]);
   });
@@ -369,24 +369,23 @@ describe('GridField / LineItemsField — editable line items', () => {
     });
   });
 
-  describe('trailing ghost row (start-with-one + auto-append)', () => {
-    it('renders a trailing empty row so an empty grid still has one input line', () => {
-      render(<GridField value={[]} onChange={() => {}} field={field} />);
-      // No "No items" empty-state in grid mode — the ghost row IS the first line.
-      expect(screen.getByText('Description')).toBeTruthy();
-      expect(screen.getAllByLabelText('Description')).toHaveLength(1); // just the ghost
+  // objectstack#35507 — the always-present trailing entry line is gone (see
+  // the top-level `no trailing entry row beside Add` pins). It is drawn only
+  // for an empty grid the form refused (objectui#3318), and there typing
+  // into it still materialises the line.
+  describe('the entry line of an empty grid the form refused', () => {
+    it('is drawn only once the form reports the failure', () => {
+      const { rerender } = render(<GridField value={[]} onChange={() => {}} field={field} />);
+      expect(screen.queryAllByLabelText('Description')).toHaveLength(0);
+      rerender(<GridField value={[]} onChange={() => {}} field={field} error="Lines is required" />);
+      expect(screen.getAllByLabelText('Description')).toHaveLength(1);
     });
 
-    it('typing in the ghost row materialises a new row (no Add click needed)', () => {
+    it('typing into it materialises a new line', () => {
       const onChange = vi.fn();
-      render(<GridField value={[{ description: 'A', amount: 1 }]} onChange={onChange} field={field} />);
-      const inputs = screen.getAllByLabelText('Description');
-      expect(inputs).toHaveLength(2); // data row + ghost
-      fireEvent.change(inputs[1], { target: { value: 'B' } }); // type in the ghost
-      expect(onChange).toHaveBeenCalledWith([
-        { description: 'A', amount: 1 },
-        { description: 'B', amount: null },
-      ]);
+      render(<GridField value={[]} onChange={onChange} field={field} error="Lines is required" />);
+      fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'B' } });
+      expect(onChange).toHaveBeenCalledWith([{ description: 'B', amount: null }]);
     });
   });
 
@@ -508,12 +507,12 @@ describe('GridField / LineItemsField — editable line items', () => {
       ]);
     });
 
-    it('flags a required, empty cell on a real row (not the ghost row)', () => {
+    it('flags a required, empty cell on a real row', () => {
       const reqField = { columns: [{ name: 'description', label: 'Description', type: 'text' as const, required: true }] } as any;
       render(<GridField value={[{ description: '' }]} onChange={() => {}} field={reqField} />);
       // The data row's required-empty cell is flagged...
       expect(screen.getByTestId('line-items-invalid-0-description')).toBeTruthy();
-      // ...but the trailing ghost row (index 1) is not.
+      // ...and no line below it is drawn to flag (objectstack#35507).
       expect(screen.queryByTestId('line-items-invalid-1-description')).toBeNull();
     });
   });
@@ -528,7 +527,7 @@ describe('GridField / LineItemsField — editable line items', () => {
 
     it('renders a real upload control in the cell, not a text input', () => {
       render(<GridField value={[{ description: 'Taxi', receipt: null }]} onChange={() => {}} field={fileField} />);
-      // One upload button per row (data row + ghost), backed by a native file input.
+      // One upload button per row, backed by a native file input.
       expect(screen.getAllByRole('button', { name: 'Receipt' }).length).toBeGreaterThan(0);
       expect(document.querySelector('input[type="file"]')).toBeTruthy();
       expect(screen.queryByRole('textbox', { name: 'Receipt' })).toBeNull();
@@ -591,14 +590,14 @@ describe('GridField / LineItemsField — editable line items', () => {
       expect(cell.getAttribute('aria-invalid')).toBeNull();
     });
 
-    it('does not announce invalid on an optional empty file cell or on the ghost row', () => {
+    it('does not announce invalid on an optional empty file cell', () => {
       const optFileField = {
         columns: [{ name: 'receipt', label: 'Receipt', type: 'file' as const }],
       } as any;
       const { container } = render(
         <GridField value={[{ receipt: null }]} onChange={() => {}} field={optFileField} />,
       );
-      // Data row and ghost row each render a picker; none may announce invalid.
+      // The data row renders a picker; it may not announce invalid.
       expect(container.querySelector('[aria-invalid="true"]')).toBeNull();
     });
 
@@ -621,7 +620,7 @@ describe('GridField / LineItemsField — editable line items', () => {
       const withAccept = {
         columns: [{ name: 'receipt', label: 'Receipt', type: 'file' as const, accept: ['image/*', '.pdf'] }],
       } as any;
-      render(<GridField value={[]} onChange={() => {}} field={withAccept} />);
+      render(<GridField value={[{ receipt: null }]} onChange={() => {}} field={withAccept} />);
       const input = document.querySelector('input[type="file"]') as HTMLInputElement;
       expect(input.getAttribute('accept')).toBe('image/*,.pdf');
     });
@@ -778,5 +777,223 @@ describe('GridField — a boolean column read as a boolean by the cell rules (ob
     );
     expect(screen.getByTestId('line-items-invalid-0-reason')).toBeTruthy();
     expect(screen.queryByTestId('line-items-invalid-1-reason')).toBeNull();
+  });
+});
+
+describe('GridField — a new line starts on its defaults and waits to read red (objectstack#35816)', () => {
+  const taskColumns = {
+    columns: [
+      { name: 'name', label: 'Name', type: 'text' as const, required: true },
+      { name: 'status', label: 'Status', type: 'text' as const, required: true },
+    ],
+  } as any;
+
+  it('Add and the entry line both start a line on the host\'s values', () => {
+    const onChange = vi.fn();
+    // The entry line is drawn for an empty grid the form refused
+    // (objectstack#35507), so the failure is handed in.
+    const { container } = render(
+      <GridField value={[]} onChange={onChange} field={taskColumns} newRowValues={{ status: 'pending' }} error="Tasks is required" />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Add line/i }));
+    expect(onChange).toHaveBeenLastCalledWith([{ name: null, status: 'pending', [UNTOUCHED_NEW_ROW]: true }]);
+    const entryName = container.querySelector('[data-cell="0-0"]') as HTMLInputElement;
+    fireEvent.change(entryName, { target: { value: 'Book the room' } });
+    expect(onChange).toHaveBeenLastCalledWith([{ name: 'Book the room', status: 'pending' }]);
+  });
+
+  it('a line Add started is marked untouched until its first edit, even an edit back to its default', () => {
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <GridField value={[]} onChange={onChange} field={taskColumns} newRowValues={{ status: 'pending' }} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Add line/i }));
+    const added = onChange.mock.lastCall![0] as Record<string, unknown>[];
+    expect(isUntouchedNewRow(added[0])).toBe(true);
+    // The mark is a symbol key: no write payload or key walk sees it.
+    expect(Object.keys(added[0])).toEqual(['name', 'status']);
+    expect(JSON.stringify(added[0])).toBe('{"name":null,"status":"pending"}');
+    rerender(<GridField value={added} onChange={onChange} field={taskColumns} newRowValues={{ status: 'pending' }} />);
+    const status = screen.getAllByDisplayValue('pending')[0] as HTMLInputElement;
+    fireEvent.change(status, { target: { value: 'done' } });
+    rerender(<GridField value={onChange.mock.lastCall![0]} onChange={onChange} field={taskColumns} newRowValues={{ status: 'pending' }} />);
+    fireEvent.change(screen.getAllByDisplayValue('done')[0], { target: { value: 'pending' } });
+    const edited = onChange.mock.lastCall![0] as Record<string, unknown>[];
+    expect(edited[0]).toMatchObject({ status: 'pending' });
+    expect(isUntouchedNewRow(edited[0])).toBe(false);
+  });
+
+  it('CONTROL: with no `newRowValues` an added line carries no mark, as before', () => {
+    const onChange = vi.fn();
+    render(<GridField value={[]} onChange={onChange} field={taskColumns} />);
+    fireEvent.click(screen.getByRole('button', { name: /Add line/i }));
+    expect(isUntouchedNewRow(onChange.mock.lastCall![0][0])).toBe(false);
+  });
+
+  it('a new line\'s empty required cell is not flagged until the host says so; a stored line is', () => {
+    const rows = [{ id: 't1', name: null, status: 'open' }, { name: null, status: 'pending' }];
+    const { rerender } = render(
+      <GridField value={rows} onChange={() => {}} field={taskColumns} newRowRequiredShown={false} />,
+    );
+    expect(screen.getByTestId('line-items-invalid-0-name')).toBeTruthy();
+    expect(screen.queryByTestId('line-items-invalid-1-name')).toBeNull();
+    rerender(<GridField value={rows} onChange={() => {}} field={taskColumns} newRowRequiredShown />);
+    expect(screen.getByTestId('line-items-invalid-1-name').getAttribute('title')).toBe('Name is required');
+  });
+
+  it('CONTROL: without the host\'s word a new line is flagged at once, as before', () => {
+    render(<GridField value={[{ name: null, status: 'pending' }]} onChange={() => {}} field={taskColumns} />);
+    expect(screen.getByTestId('line-items-invalid-0-name')).toBeTruthy();
+  });
+});
+
+describe('GridField — a line Add started on its defaults and nobody edited never reads red (objectstack#35940)', () => {
+  const taskColumns = {
+    columns: [
+      { name: 'name', label: 'Name', type: 'text' as const, required: true },
+      { name: 'status', label: 'Status', type: 'text' as const, required: true },
+    ],
+  } as any;
+
+  it('stays unflagged after the host says a save was refused, while an edited new line is flagged', () => {
+    const rows = [
+      { name: null, status: 'pending', [UNTOUCHED_NEW_ROW]: true },
+      { name: null, status: 'done' },
+    ];
+    render(<GridField value={rows} onChange={() => {}} field={taskColumns} newRowValues={{ status: 'pending' }} newRowRequiredShown />);
+    expect(screen.queryByTestId('line-items-invalid-0-name')).toBeNull();
+    expect(screen.getByTestId('line-items-invalid-1-name')).toBeTruthy();
+  });
+
+  it('a line Enter appends on the last line starts on the defaults and is marked untouched, as Add\'s is', () => {
+    const onChange = vi.fn();
+    render(<GridField value={[{ name: 'A', status: 'done' }]} onChange={onChange} field={taskColumns} newRowValues={{ status: 'pending' }} />);
+    fireEvent.keyDown(screen.getByDisplayValue('done'), { key: 'Enter' });
+    const appended = onChange.mock.lastCall![0][1];
+    expect(appended).toMatchObject({ status: 'pending' });
+    expect(isUntouchedNewRow(appended)).toBe(true);
+  });
+
+  it('its first edit makes it input, and from then on it is flagged like any new line', () => {
+    const onChange = vi.fn();
+    const field = { columns: [...taskColumns.columns, { name: 'note', label: 'Note', type: 'text' as const }] } as any;
+    const rows = [{ name: null, status: 'pending', note: null, [UNTOUCHED_NEW_ROW]: true }];
+    const { rerender } = render(
+      <GridField value={rows} onChange={onChange} field={field} newRowValues={{ status: 'pending' }} newRowRequiredShown />,
+    );
+    fireEvent.change(screen.getAllByDisplayValue('pending')[0], { target: { value: 'done' } });
+    rerender(<GridField value={onChange.mock.lastCall![0]} onChange={onChange} field={field} newRowValues={{ status: 'pending' }} newRowRequiredShown />);
+    expect(screen.getByTestId('line-items-invalid-0-name')).toBeTruthy();
+  });
+});
+
+/**
+ * objectstack#35507 — no blank entry row beside "Add line". The grid used to
+ * append an always-present empty "ghost" line under the data rows; it carried
+ * no actions, produced no write, and sat directly above the Add button that
+ * does the same job, so users read it as a broken line they could not delete.
+ * It was drawn only when Add was drawn (both follow `allowAdd`), so dropping it
+ * leaves no grid without a way to add a line. The keyboard path it carried
+ * (Tab or Enter into an empty line and type) is kept by Add moving focus into
+ * the new line and by Enter on the last line appending one.
+ */
+describe('no trailing entry row beside Add (objectstack#35507)', () => {
+  function Stateful({ initial, f = field }: { initial: Record<string, unknown>[]; f?: any }) {
+    const [rows, setRows] = React.useState(initial);
+    return <GridField value={rows} onChange={setRows} field={f} />;
+  }
+
+  it('a grid with lines draws exactly its lines, and the Add button', () => {
+    render(<GridField value={[{ description: 'A', amount: 1 }]} onChange={() => {}} field={field} />);
+    expect(screen.getAllByLabelText('Description')).toHaveLength(1);
+    expect(screen.getByTestId('line-items-add')).toBeTruthy();
+  });
+
+  it('an empty grid draws no entry row, and names the Add button in its empty state', () => {
+    render(<GridField value={[]} onChange={() => {}} field={field} />);
+    expect(screen.queryAllByLabelText('Description')).toHaveLength(0);
+    expect(screen.getByText('No items yet — click “Add line” to begin.')).toBeTruthy();
+  });
+
+  it('CONTROL: with `allowAdd: false` there is neither an Add button nor an entry row, as before', () => {
+    render(<GridField value={[{ description: 'A', amount: 1 }]} onChange={() => {}} field={{ ...field, allowAdd: false }} />);
+    expect(screen.queryByTestId('line-items-add')).toBeNull();
+    expect(screen.getAllByLabelText('Description')).toHaveLength(1);
+  });
+
+  it('CONTROL: an edit emits exactly the lines, with no blank line appended, as before', () => {
+    const onChange = vi.fn();
+    render(<GridField value={[{ description: 'A', amount: 1 }]} onChange={onChange} field={field} />);
+    // `[0]`: the data line's cell, whatever else the grid draws below it.
+    fireEvent.change(screen.getAllByLabelText('Description')[0], { target: { value: 'B' } });
+    expect(onChange).toHaveBeenLastCalledWith([{ description: 'B', amount: 1 }]);
+  });
+
+  it('Add moves focus into the new line, so the keyboard keeps typing', async () => {
+    render(<Stateful initial={[{ description: 'A', amount: 1 }]} />);
+    fireEvent.click(screen.getByTestId('line-items-add'));
+    await waitFor(() => expect(screen.getAllByLabelText('Description')).toHaveLength(2));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getAllByLabelText('Description')[1]));
+  });
+
+  it('Enter in the last line appends a line and moves to the same column in it', async () => {
+    render(<Stateful initial={[{ description: 'A', amount: 1 }]} />);
+    fireEvent.keyDown(screen.getByLabelText('Amount'), { key: 'Enter' });
+    await waitFor(() => expect(screen.getAllByLabelText('Amount')).toHaveLength(2));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getAllByLabelText('Amount')[1]));
+  });
+
+  it('CONTROL: Enter in the last line appends nothing when adding is off', () => {
+    const onChange = vi.fn();
+    render(<GridField value={[{ description: 'A', amount: 1 }]} onChange={onChange} field={{ ...field, allowAdd: false }} />);
+    fireEvent.keyDown(screen.getByLabelText('Amount'), { key: 'Enter' });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * objectstack#35804 — each column header shows its field's help. A grid column
+ * carries no field definition, so the host that holds the child object's
+ * served definition (the one the record form reads, with other packages'
+ * `fieldPatches` applied and the help in the reader's language) hands the
+ * texts over through `columnHelpByField`, which reads each field through the
+ * form's own `fieldHelpText`.
+ */
+describe('column header help (objectstack#35804)', () => {
+  const help = { amount: 'Enter the tax-inclusive amount.' };
+
+  it('a column with help draws an info button whose accessible name is the help', () => {
+    render(<GridField value={[]} onChange={() => {}} field={field} columnHelp={help} />);
+    const button = screen.getByRole('button', { name: 'Enter the tax-inclusive amount.' });
+    expect(button.closest('th')!.textContent).toContain('Amount');
+  });
+
+  it('focusing the info button shows the help', async () => {
+    render(<GridField value={[]} onChange={() => {}} field={field} columnHelp={help} />);
+    fireEvent.focus(screen.getByRole('button', { name: 'Enter the tax-inclusive amount.' }));
+    expect((await screen.findByRole('tooltip')).textContent).toBe('Enter the tax-inclusive amount.');
+  });
+
+  it('the read-only table draws the same help', () => {
+    render(<GridField value={[{ description: 'A', amount: 1 }]} onChange={() => {}} field={field} readonly columnHelp={help} />);
+    expect(screen.getByRole('button', { name: 'Enter the tax-inclusive amount.' })).toBeTruthy();
+  });
+
+  it('CONTROL: a column without help draws no info button', () => {
+    render(<GridField value={[]} onChange={() => {}} field={field} columnHelp={help} />);
+    const descriptionHeader = screen.getByText('Description').closest('th')!;
+    expect(descriptionHeader.querySelector('button')).toBeNull();
+  });
+
+  it('columnHelpByField reads each field the way the record form does', () => {
+    expect(
+      columnHelpByField({
+        unit_price: { inlineHelpText: 'Inline help wins.', description: 'Not this.' },
+        quantity: { description: 'The served description.' },
+        notes: { inlineHelpText: '' },
+        bad: null,
+      }),
+    ).toEqual({ unit_price: 'Inline help wins.', quantity: 'The served description.' });
+    expect(columnHelpByField(undefined)).toEqual({});
   });
 });

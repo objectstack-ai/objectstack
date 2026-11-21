@@ -101,7 +101,9 @@ driver layer. See [indexing.md](./indexing.md) for index options.
 ## State Machine Validation
 
 A `validations[]` entry. `initialStates` holds the one state a record may be
-CREATED in; `[]` marks a terminal state:
+CREATED in; publish refuses a machine without it
+(`state-machine-no-initial-states`) unless it is update-only
+(`events: ['update']`). `[]` marks a terminal state:
 
 ```json
 {
@@ -110,16 +112,12 @@ CREATED in; `[]` marks a terminal state:
   "field": "status",
   "initialStates": ["draft"],
   "transitions": {
-    "draft": ["submitted", "cancelled"],
-    "submitted": ["in_review", "cancelled"],
-    "in_review": ["approved", "rejected"],
-    "approved": ["published"],
-    "rejected": ["draft"],
-    "published": [],
-    "cancelled": []
+    "draft": ["submitted"],
+    "submitted": ["approved", "rejected"],
+    "approved": [],
+    "rejected": ["draft"]
   },
-  "message": "Invalid status transition",
-  "severity": "error"
+  "message": "Invalid status transition"
 }
 ```
 

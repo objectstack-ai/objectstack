@@ -101,9 +101,12 @@ const VALUE: Record<ClassName, string | null> = { masked: SUBJECT.role, gated: n
  *
  * The password set (#23287, ruling C′ item 2, with the revocation ON by default):
  * `revokeSessionsAndKeys` is the administrator's switch, written on every forced
- * reset. `revokedSessions`, `revokedApiKeys` and `revocationComplete` are what the
- * revocation landed, counts only, written only when the switch was on. This
- * fixture's reset leaves the switch at its default, so its row carries all three.
+ * reset. `revokedSessions`, `revokedApiKeys`, `revokedSignInAccounts`,
+ * `revokedAuthorizedApps`, `revokedOwnedApps` (the OAuth applications the user
+ * registered, disabled), `revokedScimCredentials` (the SCIM credentials the user
+ * minted, revoked) and `revocationComplete` are what the revocation landed,
+ * counts only, written only when the switch was on. This fixture's reset leaves
+ * the switch at its default, so its row carries all seven.
  */
 const CREATE_EVENT = 'user.admin_created';
 const PASSWORD_SET_EVENT = 'user.admin_password_set';
@@ -111,7 +114,15 @@ const DECISIONS: Record<string, { required: string[]; optional: string[] }> = {
   [CREATE_EVENT]: { required: ['event', 'membershipCreated', 'passwordGenerated', 'placeholderEmail'], optional: ['organizationId'] },
   [PASSWORD_SET_EVENT]: {
     required: ['event', 'passwordGenerated', 'revokeSessionsAndKeys'],
-    optional: ['revokedSessions', 'revokedApiKeys', 'revocationComplete'],
+    optional: [
+      'revokedSessions',
+      'revokedApiKeys',
+      'revokedSignInAccounts',
+      'revokedAuthorizedApps',
+      'revokedOwnedApps',
+      'revokedScimCredentials',
+      'revocationComplete',
+    ],
   },
 };
 

@@ -56,8 +56,11 @@ describe('lifecycle.seal.chainField — a column the object has parses, as autho
     expect(sealOf(input)).toEqual({ valueFields: [], chainField: 'tenant_id' });
   });
 
-  it('leaves a seal that names no chain column exactly as before: no key added, no new refusal', () => {
-    expect(sealOf(ledger({ valueFields: ['payload'] }))).toEqual({ valueFields: ['payload'] });
+  it('leaves a seal that names no chain column, on an object that declares tenant_id, as authored: no key added', () => {
+    // The default chain column is judged too (object-lifecycle-seal-default-chain-column-34352.test.ts).
+    const input = ledger({ valueFields: ['payload'] });
+    (input.fields as Record<string, unknown>).tenant_id = { type: 'text', label: 'Organization' };
+    expect(sealOf(input)).toEqual({ valueFields: ['payload'] });
   });
 });
 

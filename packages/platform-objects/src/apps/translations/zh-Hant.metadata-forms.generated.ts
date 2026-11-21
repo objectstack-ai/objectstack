@@ -52,6 +52,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "圖示",
         helpText: "Lucide 圖示名稱（如：\"building\"、\"users\"）"
       },
+      color: {
+        label: "顏色",
+        helpText: "圖示所在圓角方塊的顏色，從固定色板中選擇。未設定時為灰色。"
+      },
       description: {
         label: "描述",
         helpText: "開發文件說明"
@@ -70,7 +74,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       highlightFields: {
         label: "重點欄位",
-        helpText: "本物件的欄位名，依重要性從高到低排列——只能放下一個時取第一項（ADR-0085）。決定預設清單欄、卡片、子記錄預覽和詳細資料頁面的重點資訊條。不是本物件欄位的名稱會在發布時被拒絕。"
+        helpText: "本物件的欄位名，依重要性從高到低排列——只能放下一個時取第一項（ADR-0085）。決定預設清單欄和相關清單欄、卡片、子記錄預覽、記錄懸停卡片和記錄選擇器。不是本物件欄位的名稱會在發布時被拒絕。"
       },
       relatedLists: {
         label: "相關清單順序",
@@ -86,11 +90,15 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "fieldGroups.key": {
         label: "鍵",
-        helpText: "snake_case 格式的機器鍵，在本物件內唯一——其他寫法會被 schema 拒絕。欄位透過填寫此鍵加入分組，因此重新命名它會使這些欄位變為未分組。"
+        helpText: "snake_case 格式的機器鍵，在本物件內唯一——其他寫法會被 schema 拒絕。分組在「欄位」中列出的欄位，重新命名此鍵後仍留在分組裡；透過自身分組設定填寫此鍵加入的欄位會變為未分組。"
       },
       "fieldGroups.label": {
         label: "顯示名稱",
         helpText: "該分組所在分割區的標題文字。"
+      },
+      "fieldGroups.fields": {
+        label: "欄位",
+        helpText: "此分組顯示的欄位及其順序（欄位名稱）。填寫後，它決定分組內的順序，不移動任何欄位。此處列出的欄位，其自身的分組設定不能指向其他分組；一個欄位只能被一個分組列出。不能與相關清單同時使用。"
       },
       "fieldGroups.icon": {
         label: "圖示",
@@ -102,7 +110,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "fieldGroups.relatedList": {
         label: "相關清單",
-        helpText: "讓該條目代表一個相關清單的表格，而不是一組欄位：填寫子物件（或 object.field），其清單就顯示在記錄詳細資料欄的這個位置。這樣的分組不包含欄位；把它填為自身分組的欄位會被拒絕，不對應任何指向本物件的關係的名稱也會被拒絕。記錄頁目前還不會繪製這種位置。"
+        helpText: "讓該條目代表一個相關清單的表格，而不是一組欄位：填寫子物件（或 object.field），其清單就顯示在記錄詳細資料欄的這個位置。這樣的分組不包含欄位；把它填為自身分組的欄位會被拒絕，不對應任何指向本物件的關係的名稱也會被拒絕。父記錄的新增和編輯表單也會內嵌這張表，在記錄頁點「編輯」時主記錄和這些列一起儲存。"
       },
       "fieldGroups.collapse": {
         label: "摺疊",
@@ -787,7 +795,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       inlineColumns: {
         label: "內嵌表格欄",
-        helpText: "父記錄表單上內嵌表格的欄，依顯示順序排列；僅當本欄位設定了 inlineEdit（在原始碼中編寫）時才使用。未設定：從本物件的可編輯欄位推導，超過六欄時其餘欄起初收在表格的欄選擇器中。只寫欄位名的條目會從該欄位取得類型、選項和規則；其他欄設定（首先是 type）在原始碼中編寫。"
+        helpText: "父記錄表單上內嵌表格的欄，依顯示順序排列；僅當父物件的某個欄位分組指向這張子表（fieldGroups[].relatedList）時才使用。未設定：從本物件的可編輯欄位推導，超過六欄時其餘欄起初收在表格的欄選擇器中。只寫欄位名的條目會從該欄位取得類型、選項和規則；其他欄設定（首先是 type）在原始碼中編寫。"
       },
       "inlineColumns.name": {
         label: "名稱",
@@ -1350,7 +1358,8 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         helpText: "點選條目時的導覽設定（預設為抽屜，也可為 page、new_window 或 none）"
       },
       "navigation.mode": {
-        label: "模式"
+        label: "模式",
+        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
       },
       "navigation.preventNavigation": {
         label: "禁止導覽",

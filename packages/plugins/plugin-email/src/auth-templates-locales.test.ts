@@ -569,3 +569,227 @@ describe('#25060 — auth.existing_account_sign_up renders its own text in each 
     expect(transport.sent).toEqual([]);
   });
 });
+
+// ── auth.password_changed_notice, in all four locales ──────────────────────
+
+/**
+ * The reminder an account is sent when its password was CHANGED and it still
+ * holds API keys, linked sign-in accounts or authorized apps, which a change,
+ * unlike a reset, does not end (`plugin-auth`'s `password-reset-ends-added-access.test.ts`
+ * owns the sender half). Same discipline as above: every expectation is an
+ * independent literal.
+ */
+const PASSWORD_CHANGED = 'auth.password_changed_notice';
+const PASSWORD_CHANGED_DATA = {
+  user: { name: 'Ada', email: 'ada@acme.test', id: 'u1' },
+  apiKeyCount: 2,
+  apiKeys: 'ci-deploy, laptop',
+  signInAccountCount: 1,
+  signInAccounts: 'github',
+  authorizedAppCount: 1,
+  authorizedApps: 'Claude Desktop',
+  ownedAppCount: 1,
+  ownedApps: 'Desk Assistant',
+  scimCredentialCount: 1,
+  scimCredentials: 'okta-prod (rotation)',
+  appName: 'Acme',
+};
+
+const PASSWORD_CHANGED_SUBJECT: Record<Locale, string> = {
+  'en-US': 'Your Acme password was changed: your API keys, linked sign-ins and authorized apps stay active',
+  'zh-CN': '您的 Acme 密码已修改：API 密钥、已关联的登录方式与已授权的应用仍然有效',
+  'ja-JP': 'Acme のパスワードが変更されました: API キー、連携済みのサインイン、承認済みのアプリは引き続き有効です',
+  'es-ES': 'Se ha cambiado tu contraseña de Acme: tus claves de API, inicios de sesión vinculados y aplicaciones autorizadas siguen activos',
+};
+
+/** What stays active, and the road that ends it — the reader who did not change the password needs both. */
+const PASSWORD_CHANGED_PHRASES: Record<Locale, string[]> = {
+  'en-US': [
+    'API keys (2): ci-deploy, laptop',
+    'Linked sign-in accounts (1): github',
+    'Authorized apps (1): Claude Desktop',
+    'OAuth applications you registered (1): Desk Assistant',
+    'SCIM provisioning credentials you minted (1): okta-prod (rotation)',
+    'A password reset ends every API key',
+    'disables the OAuth applications it registered and revokes the SCIM credentials it minted',
+  ],
+  'zh-CN': [
+    'API 密钥（2）：ci-deploy, laptop',
+    '已关联的登录账号（1）：github',
+    '已授权的应用（1）：Claude Desktop',
+    '您注册的 OAuth 应用（1）：Desk Assistant',
+    '您生成的 SCIM 同步凭据（1）：okta-prod (rotation)',
+    '重置密码会结束账号的全部 API 密钥',
+    '停用账号注册的 OAuth 应用',
+  ],
+  'ja-JP': [
+    'API キー（2）: ci-deploy, laptop',
+    '連携済みのサインイン アカウント（1）: github',
+    '承認済みのアプリ（1）: Claude Desktop',
+    '登録した OAuth アプリケーション（1）: Desk Assistant',
+    '発行した SCIM プロビジョニング資格情報（1）: okta-prod (rotation)',
+    'すべての API キー',
+    'OAuth アプリケーションは無効化され',
+  ],
+  'es-ES': [
+    'Claves de API (2): ci-deploy, laptop',
+    'Cuentas de inicio de sesión vinculadas (1): github',
+    'Aplicaciones autorizadas (1): Claude Desktop',
+    'Aplicaciones OAuth que registraste (1): Desk Assistant',
+    'Credenciales SCIM de aprovisionamiento que emitiste (1): okta-prod (rotation)',
+    'se cierran todas las claves de API',
+    'se desactivan las aplicaciones OAuth que registró',
+  ],
+};
+
+describe('auth.password_changed_notice is a registered built-in in all four locales', () => {
+  it('has exactly one row per supported locale, each a valid EmailTemplateDefinition', () => {
+    const rows = BUILTIN_AUTH_TEMPLATES.filter((t) => t.name === PASSWORD_CHANGED);
+    expect(rows.map((t) => t.locale).sort()).toEqual([...SUPPORTED_LOCALES].sort());
+    for (const t of rows) {
+      const parsed = EmailTemplateDefinitionSchema.safeParse(t);
+      expect(parsed.success, `${t.locale}: ${parsed.error?.message}`).toBe(true);
+    }
+  });
+
+  for (const locale of SUPPORTED_LOCALES) {
+    it(`${locale}: subject, what stays active and the reset road, in its own language`, async () => {
+      const transport = new CaptureTransport();
+      const svc = new EmailService({ transport, defaultFrom: { address: 'no-reply@acme.test' }, templateLoader: seededLoader });
+      await svc.sendTemplate({ template: PASSWORD_CHANGED, to: 'ada@acme.test', locale, data: PASSWORD_CHANGED_DATA });
+      const sent = transport.sent[0]!;
+      expect(sent.subject).toBe(PASSWORD_CHANGED_SUBJECT[locale]);
+      const prose = [sent.subject, String(sent.html), String(sent.text)].join('\n');
+      for (const phrase of PASSWORD_CHANGED_PHRASES[locale]) expect(prose, phrase).toContain(phrase);
+      expect(prose).toContain('ada@acme.test');
+      expect(prose, 'a change the owner did not make is never "safe to ignore"').not.toContain(EXPECTED_FOOTER[locale]);
+      expect(prose).not.toContain('{{');
+    });
+  }
+
+  it('a zh-CN, ja-JP or es-ES send carries none of the en-US text', async () => {
+    for (const locale of ['zh-CN', 'ja-JP', 'es-ES'] as const) {
+      const transport = new CaptureTransport();
+      const svc = new EmailService({ transport, defaultFrom: { address: 'no-reply@acme.test' }, templateLoader: seededLoader });
+      await svc.sendTemplate({ template: PASSWORD_CHANGED, to: 'ada@acme.test', locale, data: PASSWORD_CHANGED_DATA });
+      const sent = transport.sent[0]!;
+      const prose = [sent.subject, sent.html, sent.text].join('\n');
+      expect(prose, locale).not.toContain(PASSWORD_CHANGED_SUBJECT['en-US']);
+      for (const phrase of PASSWORD_CHANGED_PHRASES['en-US']) expect(prose, `${locale}: ${phrase}`).not.toContain(phrase);
+    }
+  });
+});
+
+// ── auth.password_reset_notice, in all four locales ────────────────────────
+
+/**
+ * The notice an account is sent once a self-service password reset completed:
+ * what the reset ended, each OAuth application it disabled and each SCIM
+ * credential it revoked by name, and what it kept (the single sign-on
+ * providers and the second factor), so the owner can check them
+ * (`plugin-auth`'s `password-reset-ends-added-access.test.ts` owns the sender
+ * half). Same discipline as above: every expectation is an independent
+ * literal.
+ */
+const PASSWORD_RESET = 'auth.password_reset_notice';
+const PASSWORD_RESET_DATA = {
+  user: { name: 'Ada', email: 'ada@acme.test', id: 'u1' },
+  apiKeyCount: 2,
+  signInAccountCount: 1,
+  authorizedAppCount: 3,
+  ownedAppCount: 2,
+  ownedApps: 'Desk Assistant, Report Sync',
+  scimCredentialCount: 1,
+  scimCredentials: 'okta-prod (rotation)',
+  ssoProviderCount: 1,
+  ssoProviders: 'acme-okta',
+  twoFactorCount: 1,
+  appName: 'Acme',
+};
+
+const PASSWORD_RESET_SUBJECT: Record<Locale, string> = {
+  'en-US': 'Your Acme password was reset',
+  'zh-CN': '您的 Acme 密码已重置',
+  'ja-JP': 'Acme のパスワードがリセットされました',
+  'es-ES': 'Se ha restablecido tu contraseña de Acme',
+};
+
+/** What the reset ended, by name where it names, and what it kept: the reader who did not reset needs both. */
+const PASSWORD_RESET_PHRASES: Record<Locale, string[]> = {
+  'en-US': [
+    'API keys revoked (2)',
+    'Linked sign-in accounts unlinked (1)',
+    'Authorized apps ended (3)',
+    'OAuth applications you registered, disabled (2): Desk Assistant, Report Sync',
+    'SCIM provisioning credentials you minted, revoked (1): okta-prod (rotation)',
+    'Single sign-on providers you registered (1): acme-okta',
+    'Two-factor authentication enrolments (1)',
+    'A platform administrator can enable a disabled OAuth application again',
+  ],
+  'zh-CN': [
+    '已吊销的 API 密钥（2）',
+    '已解除关联的登录账号（1）',
+    '已结束授权的应用（3）',
+    '已停用的、您注册的 OAuth 应用（2）：Desk Assistant, Report Sync',
+    '已吊销的、您生成的 SCIM 同步凭据（1）：okta-prod (rotation)',
+    '您注册的单点登录提供方（1）：acme-okta',
+    '双重验证登记（1）',
+    '平台管理员可以重新启用已停用的 OAuth 应用',
+  ],
+  'ja-JP': [
+    '失効した API キー（2）',
+    '連携を解除したサインイン アカウント（1）',
+    '承認を終了したアプリ（3）',
+    '無効化した、登録済みの OAuth アプリケーション（2）: Desk Assistant, Report Sync',
+    '失効した、発行済みの SCIM プロビジョニング資格情報（1）: okta-prod (rotation)',
+    '登録したシングル サインオン プロバイダー（1）: acme-okta',
+    '2 要素認証の登録（1）',
+  ],
+  'es-ES': [
+    'Claves de API revocadas (2)',
+    'Cuentas de inicio de sesión desvinculadas (1)',
+    'Aplicaciones autorizadas cerradas (3)',
+    'Aplicaciones OAuth que registraste, desactivadas (2): Desk Assistant, Report Sync',
+    'Credenciales SCIM de aprovisionamiento que emitiste, revocadas (1): okta-prod (rotation)',
+    'Proveedores de inicio de sesión único que registraste (1): acme-okta',
+    'Inscripciones de autenticación en dos pasos (1)',
+  ],
+};
+
+describe('auth.password_reset_notice is a registered built-in in all four locales', () => {
+  it('has exactly one row per supported locale, each a valid EmailTemplateDefinition', () => {
+    const rows = BUILTIN_AUTH_TEMPLATES.filter((t) => t.name === PASSWORD_RESET);
+    expect(rows.map((t) => t.locale).sort()).toEqual([...SUPPORTED_LOCALES].sort());
+    for (const t of rows) {
+      const parsed = EmailTemplateDefinitionSchema.safeParse(t);
+      expect(parsed.success, `${t.locale}: ${parsed.error?.message}`).toBe(true);
+    }
+  });
+
+  for (const locale of SUPPORTED_LOCALES) {
+    it(`${locale}: subject, what the reset ended and what it kept, in its own language`, async () => {
+      const transport = new CaptureTransport();
+      const svc = new EmailService({ transport, defaultFrom: { address: 'no-reply@acme.test' }, templateLoader: seededLoader });
+      await svc.sendTemplate({ template: PASSWORD_RESET, to: 'ada@acme.test', locale, data: PASSWORD_RESET_DATA });
+      const sent = transport.sent[0]!;
+      expect(sent.subject).toBe(PASSWORD_RESET_SUBJECT[locale]);
+      const prose = [sent.subject, String(sent.html), String(sent.text)].join('\n');
+      for (const phrase of PASSWORD_RESET_PHRASES[locale]) expect(prose, phrase).toContain(phrase);
+      expect(prose).toContain('ada@acme.test');
+      expect(prose, 'a reset the owner did not make is never "safe to ignore"').not.toContain(EXPECTED_FOOTER[locale]);
+      expect(prose).not.toContain('{{');
+    });
+  }
+
+  it('a zh-CN, ja-JP or es-ES send carries none of the en-US text', async () => {
+    for (const locale of ['zh-CN', 'ja-JP', 'es-ES'] as const) {
+      const transport = new CaptureTransport();
+      const svc = new EmailService({ transport, defaultFrom: { address: 'no-reply@acme.test' }, templateLoader: seededLoader });
+      await svc.sendTemplate({ template: PASSWORD_RESET, to: 'ada@acme.test', locale, data: PASSWORD_RESET_DATA });
+      const sent = transport.sent[0]!;
+      const prose = [sent.subject, sent.html, sent.text].join('\n');
+      expect(prose, locale).not.toContain(PASSWORD_RESET_SUBJECT['en-US']);
+      for (const phrase of PASSWORD_RESET_PHRASES['en-US']) expect(prose, `${locale}: ${phrase}`).not.toContain(phrase);
+    }
+  });
+});

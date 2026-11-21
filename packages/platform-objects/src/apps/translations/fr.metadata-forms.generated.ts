@@ -52,6 +52,10 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Icône",
         helpText: "Nom d’icône Lucide (par ex. « building », « users »)"
       },
+      color: {
+        label: "Couleur",
+        helpText: "Couleur du carré sur lequel l’icône est dessinée, choisie dans la palette fixe. Sans valeur, le gris est utilisé."
+      },
       description: {
         label: "Description",
         helpText: "Documentation pour les développeurs"
@@ -70,7 +74,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       highlightFields: {
         label: "Champs mis en avant",
-        helpText: "Noms des champs de cet objet, du plus important au moins important — la première entrée l’emporte là où une seule peut figurer (ADR-0085). Détermine les colonnes de liste par défaut, les cartes, les aperçus d’enregistrements enfants et la bande de mise en avant du détail. Un nom qui n’est pas un champ de cet objet est refusé à la publication."
+        helpText: "Noms des champs de cet objet, du plus important au moins important — la première entrée l’emporte là où une seule peut figurer (ADR-0085). Détermine les colonnes par défaut des listes et des listes associées, les cartes, les aperçus d’enregistrements enfants, la carte de survol de l’enregistrement et le sélecteur d’enregistrements. Un nom qui n’est pas un champ de cet objet est refusé à la publication."
       },
       relatedLists: {
         label: "Listes associées",
@@ -86,11 +90,15 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.key": {
         label: "Clé",
-        helpText: "Clé technique en snake_case, unique au sein de cet objet — le schéma refuse tout autre format. Les champs rejoignent le groupe en indiquant cette clé : la renommer les laisse donc sans groupe."
+        helpText: "Clé technique en snake_case, unique au sein de cet objet — le schéma refuse tout autre format. Les champs que le groupe liste dans Champs y restent quand la clé est renommée ; un champ qui rejoint le groupe en indiquant cette clé dans son propre réglage de groupe se retrouve sans groupe."
       },
       "fieldGroups.label": {
         label: "Libellé",
         helpText: "Texte de l’en-tête de la section du groupe."
+      },
+      "fieldGroups.fields": {
+        label: "Champs",
+        helpText: "Les champs que ce groupe affiche, dans l'ordre d'affichage (noms de champ). Renseignée, la liste fixe l'ordre à l'intérieur du groupe sans déplacer aucun champ. Un champ nommé ici ne peut pas indiquer un autre groupe dans son propre réglage de groupe, et un champ ne peut être listé que par un seul groupe. Non autorisé avec Liste associée."
       },
       "fieldGroups.icon": {
         label: "Icône",
@@ -102,7 +110,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.relatedList": {
         label: "Liste associée",
-        helpText: "Fait de cette entrée le tableau d’une liste associée au lieu d’une section de champs : indiquez l’objet enfant (ou object.field) dont la liste est dessinée à cette position dans la colonne de détails de l’enregistrement. Un tel groupe ne contient aucun champ ; un champ qui le désigne comme groupe est refusé, de même qu’un nom qui ne correspond à aucune relation pointant vers cet objet. La page de l’enregistrement ne dessine pas encore cet emplacement."
+        helpText: "Fait de cette entrée le tableau d’une liste associée au lieu d’une section de champs : indiquez l’objet enfant (ou object.field) dont la liste est dessinée à cette position dans la colonne de détails de l’enregistrement. Un tel groupe ne contient aucun champ ; un champ qui le désigne comme groupe est refusé, de même qu’un nom qui ne correspond à aucune relation pointant vers cet objet. Les formulaires de création et de modification du parent intègrent aussi le tableau en ligne, et « Modifier » sur la page de l’enregistrement sauvegarde l’enregistrement et ses lignes en une seule fois."
       },
       "fieldGroups.collapse": {
         label: "Réduire",
@@ -787,7 +795,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       inlineColumns: {
         label: "Colonnes en ligne",
-        helpText: "Colonnes de la grille en ligne sur le formulaire du parent, dans l’ordre d’affichage ; utilisées uniquement lorsque ce champ définit inlineEdit, qui s’écrit dans la source. Non défini : dérivées des champs modifiables de cet objet, et au-delà de six, les suivantes démarrent dans le sélecteur de colonnes de la grille. Une entrée qui ne désigne qu’un champ reprend le type, les options et les règles de ce champ ; les autres clés de colonne, à commencer par type, s’écrivent dans la source."
+        helpText: "Colonnes de la grille en ligne sur le formulaire du parent, dans l’ordre d’affichage ; utilisées uniquement lorsqu’un groupe de champs du parent désigne cet objet enfant (fieldGroups[].relatedList). Non défini : dérivées des champs modifiables de cet objet, et au-delà de six, les suivantes démarrent dans le sélecteur de colonnes de la grille. Une entrée qui ne désigne qu’un champ reprend le type, les options et les règles de ce champ ; les autres clés de colonne, à commencer par type, s’écrivent dans la source."
       },
       "inlineColumns.name": {
         label: "Nom",
@@ -1350,7 +1358,8 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Configuration de la navigation au clic sur un élément (tiroir par défaut, page, new_window ou none)"
       },
       "navigation.mode": {
-        label: "Mode"
+        label: "Mode",
+        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
       },
       "navigation.preventNavigation": {
         label: "Empêcher la navigation",

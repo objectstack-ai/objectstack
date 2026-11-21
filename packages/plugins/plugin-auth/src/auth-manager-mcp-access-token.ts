@@ -72,6 +72,7 @@
 import type { JSONWebKeySet } from 'jose';
 import { OAUTH_ORGANIZATION_CLAIM, type AuthManager } from './auth-manager.js';
 import { mcpConsentAdmits, type OAuthGrantStore } from './mcp-token-revocation.js';
+import type { CredentialClockReader } from './credential-change-ends-prior-access.js';
 import {
   retireHeldKeyrings,
   UNKNOWN_SIGNING_KEY_REREAD_FLOOR_MS,
@@ -208,8 +209,10 @@ export async function verifyMcpAccessTokenClaims(
  * (`mcpConsentAdmits`), read through better-auth's storage adapter, the one
  * the provider writes clients and consents through.
  * The read is keyed by `azp`, the client the provider mints into every
- * access token, so a token without one is refused. A store error, or no
- * adapter at all, is a refusal: fail closed.
+ * access token, so a token without one is refused. The same read refuses a
+ * token issued before its subject's password last changed, on the clock
+ * better-auth's internal adapter answers (`findCredentialAccount`). A store
+ * error, or no adapter at all, is a refusal: fail closed.
  */
 export async function verifyMcpAccessToken(
   this: McpAccessTokenClaimsHost & Pick<McpAccessTokenHost, 'getAuthContext'>,
@@ -219,13 +222,16 @@ export async function verifyMcpAccessToken(
   if (!verified?.principal.clientId) return null;
   const { principal, issuedAt } = verified;
   try {
-    const store = ((await this.getAuthContext()) as { adapter?: OAuthGrantStore } | null | undefined)?.adapter;
+    const authContext = (await this.getAuthContext()) as
+      | { adapter?: OAuthGrantStore; internalAdapter?: CredentialClockReader }
+      | null
+      | undefined;
     const grant = {
       clientId: principal.clientId!,
       userId: principal.userId,
       ...(principal.organizationId ? { organizationId: principal.organizationId } : {}),
     };
-    return (await mcpConsentAdmits(store, grant, issuedAt)) ? principal : null;
+    return (await mcpConsentAdmits(authContext?.adapter, grant, issuedAt, authContext?.internalAdapter)) ? principal : null;
   } catch {
     return null; // the consent store could not answer → no principal (fail closed)
   }

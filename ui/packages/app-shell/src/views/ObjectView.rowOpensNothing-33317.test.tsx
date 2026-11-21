@@ -418,16 +418,18 @@ describe('objectstack#33549 — the console object list: `navigation.preventNavi
     expect(screen.queryByTestId('left-the-list')).toBeNull();
   });
 
-  it('CONTROL — the same `drawer` view with `preventNavigation: false`: a touch tap on a cell writes `?recordId=`, and the name cell is the record link', async () => {
+  // objectstack#35854: a row that opens, opens the record's page (the
+  // deprecated `drawer` mode no longer picks the side panel).
+  it('CONTROL — the same `drawer` view with `preventNavigation: false`: a touch tap on a cell opens the record, and the name cell is the record link', async () => {
     await mountList({ navigation: { mode: 'drawer', preventNavigation: false } });
     expect(looksLikeALink('okta-staging')).toBe(true);
     openWithTap('scim_ab12');
-    await waitFor(() => expect(drawerRecordId()).toBe('c1'));
+    await waitFor(() => expect(screen.getByTestId('left-the-list')).toBeTruthy());
   });
 
-  it('CONTROL — the same `drawer` view with the flag absent: the record link writes `?recordId=`', async () => {
+  it('CONTROL — the same `drawer` view with the flag absent: the record link opens the record page', async () => {
     await mountList({ navigation: { mode: 'drawer' } });
     fireEvent.click(within(nameCell('okta-staging')).getByTestId('primary-field-link'));
-    await waitFor(() => expect(drawerRecordId()).toBe('c1'));
+    await waitFor(() => expect(screen.getByTestId('left-the-list')).toBeTruthy());
   });
 });

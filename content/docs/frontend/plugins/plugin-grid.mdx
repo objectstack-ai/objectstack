@@ -111,6 +111,27 @@ is no top-level `sortable` switch.
 }
 ```
 
+A click on a sortable column header sorts by that column; another click on it
+changes the direction.
+
+**On an object's list page** the header opens a menu instead
+(objectstack#35876), which its host turns on (the `headerMenu` component
+prop, not a schema key): **Sort ascending**, **Sort descending** and **Hide
+column**. A column that does not sort offers **Hide column** alone. The
+header itself never changes the sort. Enter, Space or ArrowDown
+on the focused header opens the same menu; the arrows move through it, Enter
+chooses and Escape closes it without touching the sort.
+
+- With no sort, or a single level, the column picked in the menu replaces the
+  sort.
+- With two levels or more it becomes the first level and every other level
+  keeps its place after it; a column already in the sort moves up with the
+  picked direction. No level is dropped.
+- The ↑1 / ↓2 marks on the headers show each level's place.
+- A sort chip under the view bar opens every level in one panel (it does not
+  reverse the direction). Each level's handle reorders it: drag it to another
+  row, or press ArrowUp / ArrowDown on the focused handle.
+
 ### Filtering and search
 
 There is no per-column filter key and no top-level `filterable` switch. A grid
@@ -346,6 +367,22 @@ through the host's data source (`dataSource.update`) with no callback to wire.
   editor. There is no `editable` key on `ListColumn`.
 - **Visual feedback**: editable cells show a hover state, and the input is
   focused and selected when editing begins
+- **The editor floats over its cell** (objectstack#35688): it opens on a layer
+  anchored to the cell's top-left corner, at least as wide as the column and
+  wider where its field type needs it (an address form, a record picker), so
+  the row keeps its height and no other column moves. Near the bottom of the
+  window the layer opens upward, near the right edge it shifts left, and a
+  cell half hidden behind a frozen column or the header is scrolled into view
+  first. Scrolling the cell out of sight commits the edit.
+- **Pickers open ready to pick** (objectstack#35688): a single select or
+  status shows its option list at once, with a search box that filters as you
+  type; the arrow keys and Enter (or a click) pick, and the pick is saved. A
+  multi-select is the same list with check marks, and tags list the field's
+  tags with an "Add" row for new text; both save when you move on. A date or
+  date-time opens its calendar while the value stays typeable in its box, with
+  Today, Tomorrow, Next week (seven days from today) and Clear; on a date, a
+  day or a quick pick saves. A time opens the browser's time picker, and a
+  colour offers swatches beside its hex box (a swatch saves, Escape leaves).
 
 To own persistence in a React host, supply `onCellChange` as a **component
 prop** — it is not a schema key.
@@ -362,6 +399,11 @@ object and the view does not declare `userActions.editInline: false`, and
 - **A click selects** a cell (a ring around it); it neither edits nor opens the
   record. A link a cell draws (the name, a lookup, a phone or an email) keeps
   its own click. On a touch screen a tap opens the record.
+- **A cut-off value shows in full** when its cell is selected: a long text, a
+  multi-line text or a list of tags that the column truncates opens on a
+  layer over the cell, wrapped, scrolling inside past a few lines. Escape, an
+  arrow key or a click elsewhere closes it; Enter or a double-click turns it
+  into the editor in the same place and at the same size.
 - **Editing** starts on a double-click, Enter or F2 (the value kept, caret at
   its end), or by typing, which replaces the value; an input method's
   composition is kept whole. Backspace or Delete opens an empty editor and
@@ -372,7 +414,7 @@ object and the view does not declare `userActions.editInline: false`, and
   elsewhere commits.
 - **Selected cell keys:** the arrows and Tab move the selection; Space is typed
   like any other key and opens the editor (a checkbox cell flips instead, as
-  does a second click on it); Ctrl/Cmd+C copies; Ctrl/Cmd+V converts the text
+  do Enter and a second click on it); Ctrl/Cmd+C copies; Ctrl/Cmd+V converts the text
   to the field's type and commits it; Escape clears the selection. The record
   opens from the name link, or a tap on a touch screen.
 - **A cell that opens no editor says why** on the cell: the field is read-only,
@@ -395,6 +437,56 @@ row whose new value would sort it elsewhere stays in place until the next load
 - **A newer version** (409) still opens the conflict dialog: "Reload latest"
   re-reads the list, "Overwrite anyway" writes over it and keeps the row in
   place.
+- **Undo** takes a save back: the save toast's Undo button, or Ctrl+Z (Cmd+Z on
+  macOS) on a cell of the grid, newest save first. An undo is a new update that
+  writes the value the record held before the save, guarded by the version
+  this grid's own newest write of the record answered: if someone else changed
+  the record since, the 409 dialog opens instead of their change being
+  overwritten. The record's history shows the save and its undo as two
+  changes. Each save is taken back once, and a refused or cancelled undo is
+  used up too, so the next Ctrl+Z undoes the save before it. A toast's Undo
+  takes back that toast's save, while Ctrl+Z always goes newest first. Inside
+  an open editor Ctrl+Z stays the editor's own text undo. A save of a field the
+  row did not read offers no Undo.
+- **A state-machine field asks first.** When the object's `state_machine`
+  validation rule governs the field (an active rule whose events cover an
+  update), picking a new value — in the cell's editor, or by pasting — opens a
+  confirm that names the field and both values and says saving may trigger
+  related automation ("Status changes from On Hold to Active. Saving may
+  trigger related automation."). Cancel writes nothing and the cell keeps the
+  value it had; Change saves it as any commit is saved. The confirm does not
+  list the flows. A host asks this through `GridCellSelection.confirmCommit`.
+- **A change that makes other fields required asks for them** (objectstack#35956).
+  When the new value makes a field's `requiredWhen` true while that field is
+  still empty (a win reason on "Won", say), nothing is written yet: a dialog
+  names the record and the change and asks for those fields, with the editors
+  the record form uses, whether or not the view draws them as columns. A value
+  typed there that makes one more field required adds it. Save writes the cell
+  and the typed values as one update; Cancel writes nothing and the cell keeps
+  its value. A refusal of that update stays in the dialog, under the field it
+  names. That dialog is the confirmation, so a state-machine field does not ask
+  twice. A field that has a value, is hidden or read-only, the reader may not
+  write, or has no in-place editor (a file, rich text) is not asked for: the
+  change is saved and refused as before. The kanban drop and the record page's
+  inline Save open the same dialog (`RequiredFieldsDialog` in `@object-ui/fields`).
+- **The record drawer follows.** A record open in the list's drawer is read
+  again when a list cell saves it. If the drawer holds unsaved edits of its own,
+  those stay as typed, the drawer's save bar says the record was changed
+  elsewhere, and Save writes the drawer's edits over the latest version.
+
+### Footer calculations
+
+A column's `summary` draws its calculation in the table's last row, under the
+column. A host that passes `residentSummaryRow` draws that row on a flat table
+even when nothing is declared, led by the record count. With
+`onColumnSummaryPick` as well (wired only for a reader who may change the view),
+clicking a cell opens one menu of the calculations its field type allows, the
+current one ticked and None last; the grid draws the pick at once and the host
+saves it as the column's `summary` (an answer of `false` takes the pick back).
+`summaryPickFields` limits the menu to the columns the host can save. The
+console's list offers it on the columns the view declares and saves only the
+calculation: on a personal view at once, and on a shared view as a draft, which
+the list draws, for the editor and everyone else, once it is published.
 
 ### Keyboard navigation
 

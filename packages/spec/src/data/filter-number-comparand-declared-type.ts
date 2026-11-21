@@ -178,10 +178,13 @@
  *
  * ## A `{placeholder}` against a number field is refused, not stepped around
  *
- * The temporal door steps around `{tokens}` because for a temporal field a
- * token IS the platform's correct spelling. For a numeric field none is: every
- * token in the filter vocabulary resolves to a user or organization id, a
- * `YYYY-MM-DD` day or an ISO instant (`resolveFilterToken`,
+ * The temporal door steps around a date macro (`{30_days_ago}`) because for a
+ * temporal field that token IS the platform's correct spelling; it judges a
+ * period key and a context token as written, and leaves an unknown or
+ * record-context token to the resolver. For a numeric field no token is a
+ * correct spelling: every token in the filter vocabulary resolves to a user or
+ * organization id, an ISO week key (`2026-W47`), a `YYYY-MM-DD` day or an ISO
+ * instant (`resolveFilterToken`,
  * `@objectstack/core`), none of which is numeric — so a resolved token reaches
  * PostgreSQL as the same 500. The engine's field-aware doors run BEFORE the
  * token resolver (the temporal door records why), so this door meets the

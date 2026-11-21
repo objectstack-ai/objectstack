@@ -351,10 +351,33 @@ The accepted values are `ColumnSummarySchema` from `@objectstack/spec`:
 | `count_unique` | distinct non-empty values | raw values |
 | `percent_filled` | share of rows that are non-empty | raw values |
 | `percent_empty` | share of rows that are empty | raw values |
+| `count_true` | rows whose boolean cell is true (Yes) — boolean / toggle only | raw values |
+| `count_false` | rows whose boolean cell is false (No); an empty cell is neither — boolean / toggle only | raw values |
 | `sum` | total | numeric values |
 | `avg` | mean | numeric values |
 | `min` | smallest | numeric values |
 | `max` | largest | numeric values |
+
+#### The resident footer row and its calculation menu
+
+A host that passes `residentSummaryRow` gets the footer row on a flat table
+even when no column declares a `summary`: the record count in its first cell,
+each column's calculation, if any, under it, drawn as the calculation's name in
+the secondary text colour and the figure in the normal one (`Sum 1,234.00`).
+A grouped grid and the phone's card list draw no such row; the grid reports
+whether it drew one through `onResidentSummaryRowChange`.
+
+A host that also passes `onColumnSummaryPick(field, summary)`
+(wire it only for a reader who may change the view) turns each cell into a
+menu of the calculations the column's field type allows — `sum`/`avg` on
+numbers and amounts, `min`/`max` on numbers and dates (named Earliest and
+Latest on a date), Count of Yes / Count of No first on a boolean, the count
+family on any field, the current one ticked and
+None last. `summaryPickFields` limits the menu to the columns the host can
+save (the console passes the columns the view itself declares); the other cells
+draw their figure only. The grid draws a pick at once; the host saves it as the
+column's `summary` and hands the view back, or answers `false` (or a promise of
+it) when it did not, and the grid takes the pick back.
 
 A cell counts as empty when it is `null`, `undefined`, `""` or an empty array,
 so an unset multi-select or lookup reads as empty rather than as a filled `[]`.
@@ -567,6 +590,15 @@ const schema: ObjectGridBlockNode = {
 `selection.type` is the canonical spelling; the boolean `selectable` is a
 deprecated legacy alias, read only when `selection` is absent. Declaring bulk
 actions auto-enables multi-select, so the two keys agree by construction.
+
+Selected rows get one bar floating at the bottom centre of the grid
+(`BulkActionBar`, objectstack#35678): the count and ×, up to three labelled
+actions and the rest under More (Delete last), and "Select all N" when every
+loaded row is selected and more match. × or Esc clears the selection. The bar
+floats above the summary row, and the grid keeps room after its last row so
+that row scrolls clear of it. A host that draws the object list page registers
+its page column with `useListPageScope(element)`: there rows draw no actions of their
+own, and one selected record offers that record's actions in the bar.
 
 To react to a selection in React, pass the `onRowSelect` **component prop** —
 see [Row callbacks are component props](#row-callbacks-are-component-props).

@@ -581,8 +581,11 @@ interface LanguageCardProps {
  * ## What is offered, and what happens when the write route is not there
  *
  * The option list is `offerableLanguages` — the i18n provider's own answer
- * (the platform locale table ∩ the deployment's published locales, as table
- * tags), which is what `LocaleSwitcher` renders too. ⛔ No second list is introduced here.
+ * (every platform locale table language, as table tags, objectstack#35425),
+ * which is what `LocaleSwitcher` renders too. ⛔ No second list is introduced here.
+ * A chosen language the deployment's own content is not translated into
+ * (outside the provider's `appContentLanguages`, when that is known) carries
+ * the same one-line hint the globe menu shows on that row.
  * A stored tag that is not in that set is prepended so the control shows the
  * truth rather than rendering blank.
  *
@@ -598,7 +601,7 @@ interface LanguageCardProps {
  * card's own "hidden ... rather than rendering a control that answers 403".
  */
 function LanguageCard({ userId }: LanguageCardProps) {
-  const { t, offerableLanguages } = useObjectTranslation();
+  const { t, offerableLanguages, appContentLanguages } = useObjectTranslation();
   const adapter = useAdapter();
   const perms = usePermissions();
 
@@ -645,7 +648,7 @@ function LanguageCard({ userId }: LanguageCardProps) {
   }, [adapter, userId]);
 
   const codes = useMemo(() => {
-    const offered = offerableLanguages ?? [];
+    const offered = offerableLanguages;
     // A stored tag the deployment no longer publishes is still this account's
     // truth; showing it beats a select whose value matches no option.
     return stored && stored.length > 0 && !offered.includes(stored)
@@ -653,7 +656,16 @@ function LanguageCard({ userId }: LanguageCardProps) {
       : [...offered];
   }, [offerableLanguages, stored]);
 
-  if (!adapter || !rowRead || offerableLanguages === null) return null;
+  if (!adapter || !rowRead) return null;
+
+  // The globe menu's hint, for the language chosen here: only when the app's
+  // list is known and leaves that language out. "Use the deployment default"
+  // is never marked — it IS the default language — and neither is a stored
+  // tag outside the table (`th`), which the app list is never read for.
+  const choiceInDefault =
+    offerableLanguages.includes(choice) &&
+    appContentLanguages !== null &&
+    !appContentLanguages.includes(choice);
 
   const writable = resolveFieldAffordance('editFormFields', perms, 'sys_user', 'locale');
   const dirty = choice !== (stored ?? USE_DEPLOYMENT_DEFAULT);
@@ -753,6 +765,13 @@ function LanguageCard({ userId }: LanguageCardProps) {
               invalid={!!fieldError}
               describedBy={fieldError ? 'profile-language-error' : undefined}
             />
+            {choiceInDefault && (
+              <p className="text-xs text-muted-foreground" data-testid="profile-language-app-content-default">
+                {t('console.localeSwitcher.appContentDefault', {
+                  defaultValue: 'App content shows in the default language',
+                })}
+              </p>
+            )}
             {fieldError && (
               <p id="profile-language-error" className="text-sm text-destructive">
                 {fieldError}

@@ -1,12 +1,16 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `ApprovalEscalation.timeoutHours` is CALENDAR (wall-clock) hours — pinned
- * through the real code path, not restated.
+ * `ApprovalEscalation.timeoutHours` counts on the escalation's `clock` —
+ * wall-clock hours by default, working hours on a working calendar under
+ * `'working_time'` (ADR-0157 D5) — pinned through the real code path, not
+ * restated.
  *
  * The declaration's `describe` text on `ApprovalEscalationSchema` says the
  * clock out loud; `slaDueAt` in `approval-service.ts` is the one runtime site
- * that turns the declared number into a deadline; the escalation sweep compares
+ * that turns the declared number into a wall-clock deadline, reached with the
+ * working-time count through `ApprovalService.slaDeadline`, the one function
+ * the read projection and the sweep share; the escalation sweep compares
  * that deadline against the injected clock. This file drives all three through
  * `openNodeRequest` → `getRequest` → `runEscalations`, so the sentence in the
  * schema and the arithmetic in the service cannot drift apart without a red
@@ -23,7 +27,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { WorkCalendarService } from '@objectstack/objectql';
+import { AutomationEngine } from '@objectstack/service-automation';
 import { ApprovalService } from './approval-service.js';
+import { registerApprovalNode } from './approval-node.js';
 
 interface Row { [k: string]: any }
 
@@ -125,7 +132,7 @@ const utcDay = (iso: string) => new Date(iso).getUTCDay(); // 0 = Sunday … 5 =
 const FRIDAY_1700 = '2026-01-16T17:00:00.000Z';
 const MONDAY_0900 = '2026-01-19T09:00:00.000Z';
 
-describe('ApprovalEscalation.timeoutHours is calendar (wall-clock) hours', () => {
+describe('ApprovalEscalation.timeoutHours on the default clock is wall-clock hours', () => {
   it('the fixture dates are the weekdays the assertions name', () => {
     expect(utcDay(FRIDAY_1700)).toBe(5);
     expect(utcDay(MONDAY_0900)).toBe(1);
@@ -205,5 +212,295 @@ describe('ApprovalEscalation.timeoutHours is calendar (wall-clock) hours', () =>
     const row = await svc.getRequest(req.id, SYS);
     expect(row?.sla_due_at).toBe('2026-11-01T09:00:00.000Z');
     expect(Date.parse(row!.sla_due_at!) - Date.parse(created)).toBe(4 * HOUR);
+  });
+});
+
+// ── escalation.clock: 'working_time' (ADR-0157 D5, D9, D12) ─────────────────
+//
+// The REAL calendar service (`@objectstack/objectql`) over a read double of the
+// two calendar objects, so the D2 resolution (the named code, else the
+// organization default, else a refusal) is the shipped one, not restated here.
+// Calendar instants are written in Asia/Shanghai (+08:00), the calendar's own
+// zone; the assertions compare UTC instants, so no runner `TZ` matters.
+
+const WEEKDAY = '09:00-12:00, 13:00-18:00';
+const CN_CALENDAR: Row = {
+  id: 'cal_cn', organization_id: 't1', code: 'cn_standard', name: 'China', timezone: 'Asia/Shanghai',
+  is_default: true, maintained_from: '2026-01-01', maintained_through: '2026-12-31',
+  monday_periods: WEEKDAY, tuesday_periods: WEEKDAY, wednesday_periods: WEEKDAY,
+  thursday_periods: WEEKDAY, friday_periods: WEEKDAY, saturday_periods: '', sunday_periods: '',
+};
+// A Monday holiday (2026-04-06), the National Day week (2026-10-01..07, off)
+// and its 调休 make-up Saturday (2026-10-10, on).
+const CN_EXCEPTIONS: Row[] = [
+  { id: 'ex_0406', calendar: 'cal_cn', organization_id: 't1', date: '2026-04-06', kind: 'off' },
+  ...['01', '02', '03', '04', '05', '06', '07'].map((d) => ({
+    id: `ex_10${d}`, calendar: 'cal_cn', organization_id: 't1', date: `2026-10-${d}`, kind: 'off',
+  })),
+  { id: 'ex_1010', calendar: 'cal_cn', organization_id: 't1', date: '2026-10-10', kind: 'on', periods: WEEKDAY },
+];
+const sh = (day: string, hm: string) => new Date(`${day}T${hm}:00+08:00`).toISOString();
+
+/** A read double over the two calendar objects: equality `where`s, scoped by the read's tenant. */
+function calendarReads(calendars: Row[], exceptions: Row[]) {
+  return {
+    async find(object: string, query: Row) {
+      const src = object === 'sys_work_calendar' ? calendars : exceptions;
+      const tenant = query.context?.tenantId;
+      const hits = src
+        .filter((r) => tenant === undefined || r.organization_id === tenant)
+        .filter((r) => Object.entries(query.where ?? {}).every(([k, v]) => {
+          // Equality only: a combinator or an operator object is refused, never answered wrong.
+          if (k.startsWith('$') || (v !== null && typeof v === 'object')) throw new Error(`calendarReads answers equality only, not ${k}`);
+          return r[k] === v;
+        }));
+      const from = query.offset ?? 0;
+      return hits.slice(from, from + (query.limit ?? hits.length));
+    },
+  };
+}
+
+/** A service on the real calendar service; `ttlMs: 0` so every computation reads the rows (D12). */
+function workingTimeServiceAt(iso: string, calendars: Row[] = [CN_CALENDAR], exceptions: Row[] = CN_EXCEPTIONS) {
+  let nowMs = Date.parse(iso);
+  const engine = makeEngine();
+  const reads = calendarReads(calendars, exceptions);
+  const calendar = new WorkCalendarService({ getEngine: () => reads, posture: () => 'isolated', ttlMs: 0 });
+  const svc = new ApprovalService({
+    engine: engine as any,
+    clock: { now: () => new Date(nowMs) },
+    workCalendar: () => calendar,
+  });
+  return { svc, engine, setNow: (at: string) => { nowMs = Date.parse(at); } };
+}
+
+function workingTimeInput(nodeId: string, timeoutHours: number, extra: Row = {}) {
+  const base = input(nodeId, timeoutHours);
+  return { ...base, config: { ...base.config, escalation: { ...base.config.escalation, clock: 'working_time' as const, ...extra } } };
+}
+
+describe("ApprovalEscalation.clock 'working_time' counts the hours on a working calendar", () => {
+  it('Friday 17:00 + 4 working hours, Monday a holiday: due Tuesday 12:00, and the sweep fires then, not earlier', async () => {
+    const created = sh('2026-04-03', '17:00'); // a Friday
+    expect(utcDay(created)).toBe(5);
+    const { svc, setNow } = workingTimeServiceAt(created);
+    const req = await openPending(svc, workingTimeInput('wt_holiday', 4));
+    expect(req.sla_due_at).toBe(sh('2026-04-07', '12:00'));
+
+    const row = await svc.getRequest(req.id, SYS);
+    // One hour on Friday (17:00-18:00), the weekend and the Monday holiday
+    // skipped, three hours on Tuesday morning (09:00-12:00).
+    expect(row?.sla_due_at).toBe(sh('2026-04-07', '12:00'));
+    expect(row?.sla_due_refusal).toBeUndefined();
+
+    // The wall-clock deadline (Friday 21:00) and the Monday that would be the
+    // next working day without the holiday both pass without an escalation.
+    for (const at of [sh('2026-04-03', '21:00'), sh('2026-04-06', '12:00'), sh('2026-04-07', '11:59')]) {
+      setNow(at);
+      expect(await svc.runEscalations()).toMatchObject({ escalated: 0 });
+    }
+    setNow(sh('2026-04-07', '12:00'));
+    expect(await svc.runEscalations()).toMatchObject({ escalated: 1 });
+    expect((await svc.listActions(req.id, SYS)).at(-1)).toMatchObject({ action: 'escalate' });
+  });
+
+  it('Friday 17:00 + 4 working hours before a 调休 make-up Saturday: due that Saturday 12:00', async () => {
+    const created = sh('2026-10-09', '17:00'); // the Friday after National Day week
+    expect(utcDay(created)).toBe(5);
+    const { svc, setNow } = workingTimeServiceAt(created);
+    const req = await openPending(svc, workingTimeInput('wt_makeup', 4, { calendar: 'cn_standard' }));
+    expect((await svc.getRequest(req.id, SYS))?.sla_due_at).toBe(sh('2026-10-10', '12:00'));
+
+    setNow(sh('2026-10-10', '11:59'));
+    expect(await svc.runEscalations()).toMatchObject({ escalated: 0 });
+    setNow(sh('2026-10-10', '12:00'));
+    expect(await svc.runEscalations()).toMatchObject({ escalated: 1 });
+  });
+
+  it('the deadline is recomputed on every read and sweep, never stored: a holiday entered later moves it (D12)', async () => {
+    const created = sh('2026-04-03', '17:00');
+    const exceptions = [...CN_EXCEPTIONS];
+    const { svc, setNow } = workingTimeServiceAt(created, [CN_CALENDAR], exceptions);
+    const req = await openPending(svc, workingTimeInput('wt_moves', 4));
+    expect((await svc.getRequest(req.id, SYS))?.sla_due_at).toBe(sh('2026-04-07', '12:00'));
+
+    exceptions.push({ id: 'ex_0407', calendar: 'cal_cn', organization_id: 't1', date: '2026-04-07', kind: 'off' });
+    expect((await svc.getRequest(req.id, SYS))?.sla_due_at).toBe(sh('2026-04-08', '12:00'));
+    setNow(sh('2026-04-07', '12:00'));
+    expect(await svc.runEscalations()).toMatchObject({ escalated: 0 });
+    setNow(sh('2026-04-08', '12:00'));
+    expect(await svc.runEscalations()).toMatchObject({ escalated: 1 });
+  });
+
+  it('a calendar that cannot answer: no escalation, the reason is served, and the next sweep retries (D9)', async () => {
+    const created = sh('2026-04-03', '17:00');
+    const calendars: Row[] = [];
+    const { svc, setNow } = workingTimeServiceAt(created, calendars);
+    const req = await openPending(svc, workingTimeInput('wt_missing', 4, { calendar: 'cn_standard' }));
+
+    const row = await svc.getRequest(req.id, SYS);
+    expect(row?.sla_due_at).toBeUndefined();
+    expect(row?.sla_due_refusal).toMatchObject({
+      code: 'ERR_WORK_CALENDAR_UNRESOLVED', reason: 'not_found', calendar: 'cn_standard',
+    });
+    expect(row?.sla_due_refusal?.message).toEqual(expect.any(String));
+
+    // Long past any deadline: still no escalation, and no wall-clock fallback.
+    setNow(sh('2026-04-20', '12:00'));
+    expect(await svc.runEscalations()).toMatchObject({ escalated: 0 });
+    expect((await svc.listActions(req.id, SYS)).some((a) => a.action === 'escalate')).toBe(false);
+
+    // The administrator fixes the calendar; the next sweep recovers with no other step.
+    calendars.push(CN_CALENDAR);
+    expect(await svc.runEscalations()).toMatchObject({ escalated: 1 });
+    const fixed = await svc.getRequest(req.id, SYS);
+    expect(fixed?.sla_due_at).toBe(sh('2026-04-07', '12:00'));
+    expect(fixed?.sla_due_refusal).toBeUndefined();
+  });
+
+  it('no named calendar and no organization default refuses no_default; a calendar not maintained that far names the date', async () => {
+    const { svc } = workingTimeServiceAt(sh('2026-04-03', '17:00'), [{ ...CN_CALENDAR, is_default: false }]);
+    const req = await openPending(svc, workingTimeInput('wt_no_default', 4));
+    expect((await svc.getRequest(req.id, SYS))?.sla_due_refusal).toMatchObject({
+      code: 'ERR_WORK_CALENDAR_UNRESOLVED', reason: 'no_default',
+    });
+
+    const short = workingTimeServiceAt(sh('2026-10-09', '17:00'), [{ ...CN_CALENDAR, maintained_through: '2026-10-09' }]);
+    const late = await openPending(short.svc, workingTimeInput('wt_unmaintained', 4));
+    const read = await short.svc.getRequest(late.id, SYS);
+    expect(read?.sla_due_at).toBeUndefined();
+    expect(read?.sla_due_refusal).toMatchObject({ code: 'ERR_WORK_CALENDAR_NOT_MAINTAINED', calendar: 'cn_standard', date: '2026-10-10' });
+    short.setNow(sh('2026-12-31', '12:00'));
+    expect(await short.svc.runEscalations()).toMatchObject({ escalated: 0 });
+  });
+
+  it("a service with no calendar service refuses too: 'working_time' never falls back to wall-clock hours", async () => {
+    const { svc, setNow } = serviceAt(sh('2026-04-03', '17:00'));
+    const req = await openPending(svc, workingTimeInput('wt_no_service', 4));
+    const row = await svc.getRequest(req.id, SYS);
+    expect(row?.sla_due_at).toBeUndefined();
+    expect(row?.sla_due_refusal).toMatchObject({ code: 'ERR_WORK_CALENDAR_UNRESOLVED', reason: 'no_default' });
+    setNow(sh('2026-04-03', '21:00'));
+    expect(await svc.runEscalations()).toMatchObject({ escalated: 0 });
+  });
+
+  it("an explicit 'wall_clock' is the default clock: Friday 17:00 + 4 is due Friday 21:00 with a calendar present", async () => {
+    const { svc } = workingTimeServiceAt(FRIDAY_1700);
+    const req = await openPending(svc, workingTimeInput('wc_explicit', 4, { clock: 'wall_clock' }));
+    const row = await svc.getRequest(req.id, SYS);
+    expect(row?.sla_due_at).toBe('2026-01-16T21:00:00.000Z');
+    expect(row?.sla_due_refusal).toBeUndefined();
+  });
+});
+
+// ── a calendar read that ERRORS, as opposed to one that refuses ─────────────
+//
+// A refusal (`isWorkCalendarRefusal`) is served as `sla_due_refusal` (D9). Any
+// other error — a driver failure reading `sys_work_calendar` — leaves that one
+// row with no deadline served: it never fails a request open that has already
+// written the row and told the approvers, never fails the rest of a list, and
+// never falls back to wall-clock hours (D2). The sweep skips the row and asks
+// again next pass.
+
+const CN_BACKUP: Row = { ...CN_CALENDAR, id: 'cal_cn_backup', code: 'cn_backup', is_default: false };
+
+/** The real calendar service, except that a read for a calendar code in `failing` throws a plain Error. */
+function erroringCalendarServiceAt(iso: string, failing: Set<string>) {
+  let nowMs = Date.parse(iso);
+  const engine = makeEngine();
+  const reads = calendarReads([CN_CALENDAR, CN_BACKUP], CN_EXCEPTIONS);
+  const real = new WorkCalendarService({ getEngine: () => reads, posture: () => 'isolated', ttlMs: 0 });
+  const warned: Array<{ msg: string; meta: any }> = [];
+  const logger = { info() {}, debug() {}, error() {}, warn: (msg: string, meta: any) => { warned.push({ msg, meta }); } };
+  const svc = new ApprovalService({
+    engine: engine as any,
+    logger: logger as any,
+    clock: { now: () => new Date(nowMs) },
+    workCalendar: () => ({
+      async addWorkingHours(scope, start, hours) {
+        if (typeof scope.calendar === 'string' && failing.has(scope.calendar)) {
+          throw new Error('sys_work_calendar read failed: connection reset');
+        }
+        return real.addWorkingHours(scope, start, hours);
+      },
+    }),
+  });
+  return { svc, engine, warned, setNow: (at: string) => { nowMs = Date.parse(at); } };
+}
+
+describe("ApprovalEscalation.clock 'working_time': a calendar read that errors costs only that row its deadline", () => {
+  const created = sh('2026-04-03', '17:00');
+
+  it('the open still returns the request it wrote and told the approvers about, with no deadline served', async () => {
+    const { svc, engine, warned } = erroringCalendarServiceAt(created, new Set(['cn_standard']));
+    const req = await openPending(svc, workingTimeInput('wt_error_open', 4, { calendar: 'cn_standard' }));
+
+    expect(engine._tables.sys_approval_request?.map((r) => r.id)).toEqual([req.id]);
+    expect(req.status).toBe('pending');
+    expect(req.sla_due_at).toBeUndefined();
+    expect(req.sla_due_refusal).toBeUndefined();
+    expect(warned.some((w) => w.meta?.request === req.id)).toBe(true);
+  });
+
+  it('the approval node suspends its run instead of failing it', async () => {
+    const { svc } = erroringCalendarServiceAt(created, new Set(['cn_standard']));
+    const automation = new AutomationEngine({ info() {}, warn() {}, error() {}, debug() {} } as any);
+    svc.attachAutomation(automation);
+    registerApprovalNode(automation, svc);
+    automation.registerFlow('wt_flow', {
+      name: 'wt_flow',
+      label: 'Working-time approval',
+      type: 'autolaunched',
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'approve_step', type: 'approval', label: 'Approve', config: workingTimeInput('approve_step', 4, { calendar: 'cn_standard' }).config },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'approve_step' },
+        { id: 'e2', source: 'approve_step', target: 'end', label: 'approve' },
+      ],
+    } as any);
+
+    const result = await automation.execute('wt_flow', { object: 'opportunity', record: { id: 'opp1' }, userId: 'u1' });
+    expect(result.status).toBe('paused');
+    expect(automation.listSuspendedRuns()).toHaveLength(1);
+  });
+
+  it('a list and a single read keep every other row and its deadline', async () => {
+    const failing = new Set<string>();
+    const { svc } = erroringCalendarServiceAt(created, failing);
+    const good = await openPending(svc, workingTimeInput('wt_good', 4, { calendar: 'cn_standard' }));
+    const bad = await openPending(svc, { ...workingTimeInput('wt_bad', 4, { calendar: 'cn_backup' }), recordId: 'opp2', record: { id: 'opp2', amount: 100 } });
+    failing.add('cn_backup');
+
+    const list = await svc.listRequests({ status: 'pending' }, SYS);
+    expect(list.map((r) => r.id).sort()).toEqual([good.id, bad.id].sort());
+    expect(list.find((r) => r.id === good.id)?.sla_due_at).toBe(sh('2026-04-07', '12:00'));
+    const listedBad = list.find((r) => r.id === bad.id);
+    expect(listedBad?.sla_due_at).toBeUndefined();
+    expect(listedBad?.sla_due_refusal).toBeUndefined();
+
+    const read = await svc.getRequest(bad.id, SYS);
+    expect(read?.id).toBe(bad.id);
+    expect(read?.sla_due_at).toBeUndefined();
+  });
+
+  it('the sweep skips the row, asks again next pass, and still escalates it once', async () => {
+    const failing = new Set<string>();
+    const { svc, setNow } = erroringCalendarServiceAt(created, failing);
+    const good = await openPending(svc, workingTimeInput('wt_sweep_good', 4, { calendar: 'cn_standard' }));
+    const bad = await openPending(svc, { ...workingTimeInput('wt_sweep_bad', 4, { calendar: 'cn_backup' }), recordId: 'opp2', record: { id: 'opp2', amount: 100 } });
+    failing.add('cn_backup');
+
+    setNow(sh('2026-04-20', '12:00'));
+    expect(await svc.runEscalations()).toMatchObject({ escalated: 1 });
+    expect((await svc.listActions(good.id, SYS)).some((a) => a.action === 'escalate')).toBe(true);
+    expect((await svc.listActions(bad.id, SYS)).some((a) => a.action === 'escalate')).toBe(false);
+
+    failing.delete('cn_backup');
+    expect(await svc.runEscalations()).toMatchObject({ escalated: 1 });
+    expect((await svc.listActions(bad.id, SYS)).filter((a) => a.action === 'escalate')).toHaveLength(1);
+    expect(await svc.runEscalations()).toMatchObject({ escalated: 0 });
   });
 });

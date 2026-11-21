@@ -113,6 +113,7 @@ export const jaJP: TranslationData = {
         nav_datasources: { label: 'データソース' },
         nav_connector_credentials: { label: 'コネクタ認証情報' },
         nav_connector_connections: { label: 'コネクタ接続' },
+        nav_slack: { label: 'Slack' },
 
         nav_oauth_apps: { label: 'OAuth アプリケーション' },
       },

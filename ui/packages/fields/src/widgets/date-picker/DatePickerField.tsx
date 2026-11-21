@@ -118,13 +118,17 @@ function TemporalPicker({
   error,
   onInvalidInputChange,
   withTime,
+  inCell,
+  onCommit,
   ...props
 }: FieldWidgetComponentProps<string> & { withTime: boolean }) {
   const locale = useDisplayLocale();
   const { t } = useFieldTranslation();
   const noticeId = React.useId();
-  const [open, setOpen] = React.useState(false);
+  // The grid's cell editor opens with its calendar showing (objectstack#35688).
+  const [open, setOpen] = React.useState(!!inCell && !readonly);
   const hourRef = React.useRef<HTMLButtonElement>(null);
+  const rootRef = React.useRef<HTMLDivElement>(null);
 
   // The value in the native control's shape: `YYYY-MM-DD`, or the local wall
   // clock `YYYY-MM-DDTHH:mm`. `''` for an empty value and for a stored day that
@@ -203,6 +207,8 @@ function TemporalPicker({
     if (!withTime) {
       write(toLocalDay(day));
       setOpen(false);
+      // In a grid cell the pick is the whole edit: the grid commits it.
+      onCommit?.();
       return;
     }
     const time = nativeValue.slice(11, 16) || '00:00';
@@ -218,6 +224,13 @@ function TemporalPicker({
   const pickTime = (nextHour: string, nextMinute: string) => {
     const day = nativeValue.slice(0, 10) || toLocalDay(new Date());
     write(`${day}T${nextHour}:${nextMinute}`);
+  };
+
+  /** The in-cell face's clear pick: empties the value and ends the edit. */
+  const clearAndCommit = () => {
+    write('');
+    setOpen(false);
+    onCommit?.();
   };
 
   const shortcut = (offsetDays: number) => {
@@ -239,7 +252,7 @@ function TemporalPicker({
     : domProps['aria-describedby'];
 
   return (
-    <div className="space-y-1" data-slot="date-picker">
+    <div ref={rootRef} className="space-y-1" data-slot="date-picker">
       <div className="relative">
         <Input
           {...domProps}
@@ -297,7 +310,18 @@ function TemporalPicker({
                 <CalendarDays className="h-4 w-4" />
               </Button>
             </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="end">
+            <PopoverContent
+              className="w-auto p-0"
+              align={inCell ? 'start' : 'end'}
+              // In a grid cell the text box keeps the caret while the calendar
+              // shows, and a press on the box does not close the calendar.
+              onOpenAutoFocus={inCell ? (e) => e.preventDefault() : undefined}
+              onInteractOutside={inCell
+                ? (e) => {
+                    if (rootRef.current?.contains(e.target as Node)) e.preventDefault();
+                  }
+                : undefined}
+            >
               {/* Opens on the value's month, and on today's with no value. */}
               {/* Below `sm` each day and month arrow is a 44 px cell: seven fit a 375 px screen. */}
               <Calendar
@@ -305,7 +329,7 @@ function TemporalPicker({
                 defaultMonth={selected}
                 selected={selected}
                 onSelect={pickDay}
-                autoFocus
+                autoFocus={!inCell}
                 className="[--cell-size:2.75rem] sm:[--cell-size:2rem]"
               />
               {withTime ? (
@@ -362,6 +386,17 @@ function TemporalPicker({
                 <Button type="button" variant="outline" size="sm" className={PHONE_TOUCH_HEIGHT} onClick={() => shortcut(1)}>
                   {t('fields.datePicker.tomorrow')}
                 </Button>
+                {inCell ? (
+                  <>
+                    {/* Seven days from today (ruling of record 7057128455). */}
+                    <Button type="button" variant="outline" size="sm" className={PHONE_TOUCH_HEIGHT} onClick={() => shortcut(7)} data-testid="date-picker-next-week">
+                      {t('fields.datePicker.nextWeek')}
+                    </Button>
+                    <Button type="button" variant="ghost" size="sm" className={PHONE_TOUCH_HEIGHT} onClick={clearAndCommit} data-testid="date-picker-clear-pick">
+                      {t('fields.datePicker.clearPick')}
+                    </Button>
+                  </>
+                ) : null}
               </div>
             </PopoverContent>
           </Popover>

@@ -37,6 +37,24 @@
  * on (objectstack#30075), which is why an always-refused button would reach
  * every app with a machine on its stage field. A field without such a rule
  * offers every stage, and the server still judges each write.
+ *
+ * ## The fields a stage needs (`collectFields`, objectstack#35891, #35956)
+ *
+ * The header's stage menu (`RecordStageMenu`) asks for more than a yes: a
+ * stage that makes other fields required — a field whose `requiredWhen` holds
+ * once the record stands on it and is empty now, such as a loss reason on
+ * 「失败」 — asks for just those fields, and the move and their values go in
+ * ONE write. Both halves are the shared in-place fill-in of `@object-ui/fields`
+ * (objectstack#35956): `collectRequiredWhenPromptFields` picks the fields and
+ * `RequiredFieldsDialog` collects them, the same pair the list cell, the
+ * record page's inline Save and the board use, so this surface keeps no copy
+ * of its own. Which fields to ask for is presentation; the server still judges
+ * the write (objectui#6868: it is the only validation authority on this
+ * surface). A refusal stays in the dialog and the stage does not move: a
+ * reason that names a field shown is drawn under it, one that names a field
+ * the reader may fill adds that field, any other reads at the dialog's foot.
+ * A stage that needs nothing opens the same dialog as the move's confirmation.
+ * `record:path` leaves the option off and keeps its plain confirmation.
  */
 
 import React from 'react';
@@ -50,7 +68,18 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@object-ui/components';
-import { resolveFieldAffordance, stateMachineNextValues } from '@object-ui/core';
+import {
+  getRecordDisplayName,
+  resolveFieldAffordance,
+  stateMachineNextValues,
+} from '@object-ui/core';
+import {
+  collectRequiredWhenPromptFields,
+  hasFieldEditWidget,
+  RequiredFieldsDialog,
+  type RequiredFieldsDialogField,
+  type RequiredWhenPromptField,
+} from '@object-ui/fields';
 import { usePermissions } from '@object-ui/permissions';
 import {
   declaredUserMessage,
@@ -114,7 +143,15 @@ export function stageRefusalLines(
 }
 
 /** The members of an object definition's field entry this module reads. */
-type FieldDef = { type?: unknown; readonly?: unknown; label?: unknown };
+type FieldDef = {
+  type?: unknown;
+  readonly?: unknown;
+  required?: unknown;
+  label?: unknown;
+  visibleWhen?: any;
+  readonlyWhen?: any;
+  requiredWhen?: any;
+};
 
 const fieldDefOf = (objectSchema: unknown, field: string): FieldDef | undefined =>
   (objectSchema as { fields?: Record<string, FieldDef | undefined> } | null | undefined)?.fields?.[field];
@@ -143,21 +180,39 @@ export interface StageChange {
   dialog: React.ReactNode;
 }
 
-export function useStageChange(allowStageChange: boolean, statusField: string | undefined): StageChange {
+export interface StageChangeOptions {
+  /**
+   * Ask, in the confirmation, for the fields the target stage needs filled
+   * (see "The fields a stage needs" above). Off for `record:path`.
+   */
+  collectFields?: boolean;
+}
+
+/** A pending move: the stage, and the fields its dialog asks for. */
+type StageTarget = { value: unknown; label: string; fields: RequiredWhenPromptField[] };
+
+export function useStageChange(
+  allowStageChange: boolean,
+  statusField: string | undefined,
+  options: StageChangeOptions = {},
+): StageChange {
+  const collectFields = options.collectFields === true;
   const ctx = useRecordContext();
   const inline = useInlineEdit();
   const perms = usePermissions();
   const { t } = useDetailTranslation();
-  const { fieldLabel } = useSafeFieldLabel();
+  const { fieldLabel, translateOptions } = useSafeFieldLabel();
   const { language } = useObjectTranslation();
-  const [target, setTarget] = React.useState<{ value: unknown; label: string } | null>(null);
+  const [target, setTarget] = React.useState<StageTarget | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [refusal, setRefusal] = React.useState<string[] | null>(null);
 
   const objectName = ctx?.objectName;
   const recordId = ctx?.recordId;
   const dataSource = ctx?.dataSource;
-  const fieldDef = statusField ? fieldDefOf(ctx?.objectSchema, statusField) : undefined;
+  const objectSchema = ctx?.objectSchema;
+  const objectFields = (objectSchema as { fields?: Record<string, unknown> } | null | undefined)?.fields;
+  const fieldDef = statusField ? fieldDefOf(objectSchema, statusField) : undefined;
   const pressable =
     allowStageChange
     && !!statusField
@@ -172,30 +227,54 @@ export function useStageChange(allowStageChange: boolean, statusField: string | 
     && !NON_EDITABLE_SYSTEM_FIELDS.has(statusField)
     && resolveFieldAffordance('recordEdit', perms, objectName, statusField);
 
-  const stored = statusField ? (ctx?.data as Record<string, unknown> | undefined)?.[statusField] : undefined;
-  const reachable = statusField ? stateMachineNextValues(ctx?.objectSchema, statusField, stored) : null;
+  const record = (ctx?.data ?? {}) as Record<string, unknown>;
+  const stored = statusField ? record[statusField] : undefined;
+  const reachable = statusField ? stateMachineNextValues(objectSchema, statusField, stored) : null;
   const admits = (value: unknown): boolean => reachable === null || reachable.has(String(value));
 
-  const request = React.useCallback((stage: { value: unknown; label: string }) => {
+  // A field this reader may fill in the stage dialog: the question the record
+  // page's other in-place editors ask of a field (`InlineEditSaveBar`'s
+  // fill-in asks the same one).
+  const fillable = (name: string, def: Record<string, unknown>): boolean =>
+    name !== statusField
+    && def.readonly !== true
+    && !isComputedDetailField(undefined, def as FieldDef)
+    && !NON_EDITABLE_SYSTEM_FIELDS.has(name)
+    && !!objectName
+    && resolveFieldAffordance('recordEdit', perms, objectName, name);
+
+  // The empty fields the move makes required, judged by the shared prompt
+  // (`@object-ui/fields`, objectstack#35956): the evaluator the form and the
+  // server share, as the engine's transition gate judges the write.
+  const fieldsNeededAt = (value: unknown): RequiredWhenPromptField[] =>
+    collectFields && statusField
+      ? collectRequiredWhenPromptFields(objectFields, record, { [statusField]: value }, { fillable })
+      : [];
+
+  const request = (stage: { value: unknown; label: string }) => {
     setRefusal(null);
-    setTarget(stage);
-  }, []);
+    setTarget({ value: stage.value, label: stage.label, fields: fieldsNeededAt(stage.value) });
+  };
 
   const labelOf = (field: string): string => {
-    const declared = fieldDefOf(ctx?.objectSchema, field)?.label;
+    const declared = fieldDefOf(objectSchema, field)?.label;
     const fallback = declared == null ? field : String(pickLocalized(declared as Parameters<typeof pickLocalized>[0], language) ?? field);
     return objectName ? fieldLabel(objectName, field, fallback) : fallback;
   };
 
+  const ifMatchOf = (): { ifMatch: string } | undefined => {
+    const updatedAt = record.updated_at;
+    return typeof updatedAt === 'string' ? { ifMatch: updatedAt } : undefined;
+  };
+
+  // `record:path`: a yes, then the move alone; a refusal reads under the rail.
   const confirm = async () => {
     const stage = target;
     setTarget(null);
     if (!stage || !pressable || !admits(stage.value)) return;
     setBusy(true);
-    const updatedAt = (ctx?.data as Record<string, unknown> | undefined)?.updated_at;
-    const ifMatch = typeof updatedAt === 'string' ? updatedAt : undefined;
     try {
-      await updateVia(dataSource, objectName!, recordId!, { [statusField!]: stage.value }, ifMatch ? { ifMatch } : undefined);
+      await updateVia(dataSource, objectName!, recordId!, { [statusField!]: stage.value }, ifMatchOf());
       await ctx?.refresh?.();
     } catch (err) {
       setRefusal(stageRefusalLines(err, statusField!, labelOf, t));
@@ -207,24 +286,105 @@ export function useStageChange(allowStageChange: boolean, statusField: string | 
     }
   };
 
-  const dialog = (
-    <AlertDialog open={target !== null} onOpenChange={(open) => { if (!open) setTarget(null); }}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{t('detail.pathStageChangeTitle')}</AlertDialogTitle>
-          <AlertDialogDescription>
-            {t('detail.pathStageChangeDescription', { stage: target?.label ?? '' })}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>{t('detail.cancel')}</AlertDialogCancel>
-          <AlertDialogAction onClick={() => { void confirm(); }}>
-            {t('detail.pathStageChangeConfirm')}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
+  // `collectFields`: the move and the typed values in ONE write, from the
+  // shared dialog. A rejection keeps the dialog open: a refusal that names
+  // fields goes to the dialog as it came (each reason under its field, a
+  // fillable field it names joins the dialog); every other refusal reads as
+  // this surface's own line at the dialog's foot. The stage does not move.
+  const submitWithFields = async (stage: StageTarget, values: Record<string, unknown>) => {
+    if (!pressable || !admits(stage.value)) {
+      setTarget(null);
+      return;
+    }
+    setBusy(true);
+    try {
+      await updateVia(dataSource, objectName!, recordId!, { ...values, [statusField!]: stage.value }, ifMatchOf());
+    } catch (err) {
+      const concurrent = isConcurrentUpdateError(err);
+      if (concurrent) await ctx?.refresh?.();
+      const named = concurrent ? [] : (extractFieldErrors(err) ?? []).filter((e) => !!e.message);
+      if (named.length > 0 && !declaredUserMessage(err)) throw err;
+      const line = stageRefusalLines(err, statusField!, labelOf, t).join(' ');
+      throw Object.assign(new Error(line), { userMessage: line });
+    } finally {
+      setBusy(false);
+    }
+    setTarget(null);
+    await ctx?.refresh?.();
+  };
+
+  const dialog = collectFields
+    ? renderFieldsDialog()
+    : (
+      <AlertDialog open={target !== null} onOpenChange={(open) => { if (!open) setTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('detail.pathStageChangeTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('detail.pathStageChangeDescription', { stage: target?.label ?? '' })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('detail.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { void confirm(); }}>
+              {t('detail.pathStageChangeConfirm')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    );
+
+  /**
+   * The header menu's dialog: the shared `RequiredFieldsDialog` the list cell,
+   * the record page's inline Save and the board open (objectstack#35956). It
+   * names the record and the move, then the fields the move needs — none for
+   * most stages, when it is the move's confirmation and opens on its button,
+   * so Enter confirms (objectstack#35891).
+   */
+  function renderFieldsDialog(): React.ReactNode {
+    if (!target || !statusField) return null;
+    const stage = target;
+    const objectKey = objectName ?? '';
+    const label = (f: RequiredWhenPromptField): RequiredFieldsDialogField => {
+      const opts = f.def.options;
+      const localized = objectKey && Array.isArray(opts) ? translateOptions(objectKey, f.name, opts) : opts;
+      return { ...f, def: { ...f.def, ...(localized ? { options: localized } : {}) }, label: labelOf(f.name) };
+    };
+    const exclude = [statusField];
+    return (
+      <RequiredFieldsDialog
+        // A new pick is a new collection: the dialog's typed values reset.
+        key={String(stage.value)}
+        open
+        fields={stage.fields.map(label)}
+        submitting={busy}
+        recordName={getRecordDisplayName(objectSchema, record)}
+        changes={[{ name: statusField, label: labelOf(statusField), value: stage.label }]}
+        moreFields={(values) => collectRequiredWhenPromptFields(
+          objectFields,
+          record,
+          { ...values, [statusField]: stage.value },
+          { exclude, fillable },
+        ).map(label)}
+        refusalField={(name) => {
+          const def = objectFields?.[name] as Record<string, unknown> | undefined;
+          if (!def || typeof def !== 'object' || name === statusField) return null;
+          if (!hasFieldEditWidget(def.type as string | undefined) || !fillable(name, def)) return null;
+          return label({ name, def: { name, ...def } });
+        }}
+        // The stage field and an object-level (`_record`) reason read alone,
+        // as `stageRefusalLines` reads them; another field by its label.
+        labelOf={(name) => (name !== statusField && objectFields?.[name] ? labelOf(name) : undefined)}
+        title={t('detail.pathStageChangeTitle')}
+        description={stage.fields.length > 0
+          ? t('detail.stageMenuFieldsDescription', { stage: stage.label })
+          : t('detail.pathStageChangeDescription', { stage: stage.label })}
+        submitLabel={t('detail.pathStageChangeConfirm')}
+        onCancel={() => setTarget(null)}
+        onSubmit={(values) => submitWithFields(stage, values)}
+      />
+    );
+  }
 
   return { pressable, admits, busy, refusal, request, dialog };
 }

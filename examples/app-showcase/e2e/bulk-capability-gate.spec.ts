@@ -44,16 +44,16 @@ test('selection bar hides capability-gated inline defs from a caller without the
   await selectAll.waitFor({ state: 'visible', timeout: 25_000 });
   await selectAll.click();
 
-  // The bar offers the ungated defs: it draws the first two as buttons and
-  // the rest behind its "⋮" (`SELECTION_EXPOSED_ACTIONS`, ui plugin-grid
-  // `SelectionPageBar.tsx`, citing #35554 「露出一到两个，其余进⋮」), where a
-  // def is a `row-context-bulk-NAME` menu item instead of a
+  // The bar offers the ungated defs: it draws the first three as buttons and
+  // the rest behind its More (`SELECTION_EXPOSED_ACTIONS`, ui plugin-grid
+  // `SelectionBar.tsx`, objectstack#35678: up to three labelled actions, the rest behind More),
+  // where a def is a `row-context-bulk-NAME` menu item instead of a
   // `bulk-action-NAME` button. All four ungated defs are read, so none of
   // them can drop out of the bar unnoticed.
   await expect(page.getByTestId('bulk-action-set_labels')).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId('bulk-action-assign_team')).toBeVisible();
+  await expect(page.getByTestId('bulk-action-reassign_account')).toBeVisible();
   await page.getByTestId('selection-actions-more').click();
-  await expect(page.getByTestId('row-context-bulk-reassign_account')).toBeVisible();
   await expect(page.getByTestId('row-context-bulk-reschedule')).toBeVisible();
 
   // …and neither gated def, as a button or as an item of the open "⋮" — the

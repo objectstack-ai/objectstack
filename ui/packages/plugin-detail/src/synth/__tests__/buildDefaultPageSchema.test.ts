@@ -213,33 +213,20 @@ describe('buildDefaultPageSchema', () => {
     expect(page.regions[0].name).toBe('main');
   });
 
-  it('emits page:header, record:highlights, record:path, page:tabs — no discussion footer (objectstack#27055)', () => {
+  it('emits page:header, page:tabs — no strip, no discussion footer (objectstack#35891, objectstack#27055)', () => {
+    // A stage field and declared highlights: the default page still draws no
+    // stage bar and no highlight strip (the maintainer, 2026-11-20:
+    // 「把阶段条和关键字段条去掉」). The stage is the header's status tag.
     const types = buildDefaultPageSchema(declaredLeadDef).regions[0].components.map(
       (c: any) => c.type,
     );
     // The discussion is part of the timeline stream, the Timeline tab.
-    expect(types).toEqual([
-      'page:header',
-      'record:highlights',
-      'record:path',
-      'page:tabs',
-    ]);
+    expect(types).toEqual(['page:header', 'page:tabs']);
   });
 
-  it('omits record:path when no status field', () => {
-    const def: ObjectDefLike = { name: 'note', fields: { body: {} } };
-    const types = buildDefaultPageSchema(def).regions[0].components.map(
-      (c: any) => c.type,
-    );
-    expect(types).not.toContain('record:path');
-  });
-
-  it('omits record:highlights when no fields derivable', () => {
-    const def: ObjectDefLike = { name: 'empty', fields: {} };
-    const types = buildDefaultPageSchema(def).regions[0].components.map(
-      (c: any) => c.type,
-    );
-    expect(types).not.toContain('record:highlights');
+  it('control: buildDefaultHighlights, for a page that places the strip itself, still emits both blocks', () => {
+    const types = buildDefaultHighlights(declaredLeadDef).map((c: any) => c.type);
+    expect(types).toEqual(['record:highlights', 'record:path']);
   });
 
   it('hideDiscussion drops the timeline stream (objectstack#27055)', () => {
@@ -248,14 +235,14 @@ describe('buildDefaultPageSchema', () => {
     expect(tabItems(tabs).map((t: any) => t.value)).toEqual(['details']);
   });
 
-  it('options override auto-derivation', () => {
-    const page = buildDefaultPageSchema(leadDef, {
+  it('options override auto-derivation (the strip sub-builder)', () => {
+    const strip = buildDefaultHighlights(leadDef, {
       highlightFields: ['email'],
       statusField: 'rating',
       stages: [{ value: 'hot', label: 'Hot' }],
     });
-    const hl = page.regions[0].components.find((c: any) => c.type === 'record:highlights');
-    const path = page.regions[0].components.find((c: any) => c.type === 'record:path');
+    const hl = strip.find((c: any) => c.type === 'record:highlights');
+    const path = strip.find((c: any) => c.type === 'record:path');
     expect(props(hl).fields).toEqual(['email']);
     expect(props(path).statusField).toBe('rating');
     expect(props(path).stages).toEqual([{ value: 'hot', label: 'Hot' }]);
@@ -471,7 +458,7 @@ describe('buildDefaultPageSchema', () => {
       expect(hasCustom).toBe(true);
     });
 
-    it('highlights slot replaces the entire chips+path strip', () => {
+    it('highlights slot places the strip the page draws (the default page draws none, objectstack#35891)', () => {
       const page = buildDefaultPageSchema(leadDef, {
         slots: { highlights: { type: 'div', id: 'custom-strip' } },
       });
@@ -533,11 +520,10 @@ describe('buildDefaultPageSchema', () => {
       const page = buildDefaultPageSchema(declaredLeadDef, {
         slots: { header: { type: 'div', id: 'h' } },
       });
-      // header replaced, but tabs (with the timeline stream) + highlights still default
+      // header replaced, tabs (with the timeline stream) still default; no
+      // strip is the default too (objectstack#35891)
       const types = page.regions[0].components.map((c: any) => c.type);
-      expect(types).toContain('record:highlights');
-      expect(types).toContain('record:path');
-      expect(types).toContain('page:tabs');
+      expect(types).toEqual(['div', 'page:tabs']);
       const tabs = page.regions[0].components.find((c: any) => c.type === 'page:tabs');
       expect(tabItems(tabs).some((t: any) => t.value === 'timeline')).toBe(true);
     });

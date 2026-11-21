@@ -392,6 +392,8 @@ import {
     registerMetaRecordCurrencyBackfillRoute,
     type MetaRecordCurrencyBackfillRouteHost,
 } from './meta-record-currency-backfill-route.js';
+// [ADR-0158 U7 R1, Open item 12] The unit code backfill door, its twin — see its header.
+import { registerMetaUnitCodeBackfillRoute, type MetaUnitCodeBackfillRouteHost } from './meta-unit-code-backfill-route.js';
 import { loadExcelJs, type Worksheet } from './xlsx-module.js';
 // [#18386] `?template=true` on the export door: the import template's column
 // rule, request reading and workbook. See the module header.
@@ -5760,6 +5762,15 @@ export class RestServer {
             resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
         };
         registerMetaRecordCurrencyBackfillRoute.call(recordCurrencyBackfillHost, scope);
+        // [ADR-0158 U7 R1] …and its twin for unit codes (`POST {metaPath}/_migrate-unit-codes`),
+        // in `meta-unit-code-backfill-route.ts`, built the same way.
+        const unitCodeBackfillHost: MetaUnitCodeBackfillRouteHost = {
+            routeManager: this.routeManager,
+            resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            get objectQLProvider() { return readObjectQLProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
+        };
+        registerMetaUnitCodeBackfillRoute.call(unitCodeBackfillHost, scope);
 
         // [#23050 slice 13e] The published read (`GET {metaPath}/:type/:name/published`)
         // moved to `meta-item-history-routes.ts`, beside the history family, and is registered

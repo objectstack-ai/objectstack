@@ -203,6 +203,13 @@ type SummaryRowShapeWithoutLead = Omit<SummaryRowShape, 'lead'>;
 // @ts-expect-error objectstack#35548 — the shape without `lead` must NOT read as equal to the declared one; if it did, the pin above could not see a member go.
 type _SummaryRowShapeWithoutLeadIsRefused = Expect<Equal<Declared<DataTableSchema>['summaryRow'], SummaryRowShapeWithoutLead | undefined>>;
 
+/**
+ * objectstack#35678 — the sixth schema-level runtime slot, `floatingBar`: the
+ * selection bar `ObjectGrid` hands the table to float over its rows.
+ */
+type _FloatingBarIsDeclared = Expect<IsDeclaredOn<'floatingBar'>>;
+type _FloatingBarShape = Expect<Equal<Declared<DataTableSchema>['floatingBar'], React.ReactNode>>;
+
 describe('objectui#6882 — DataTableSchema declares the two keys data-table reads', () => {
   /**
    * The runtime half exists only so the compile-time pins above have a file

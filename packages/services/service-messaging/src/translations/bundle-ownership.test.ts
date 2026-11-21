@@ -24,6 +24,8 @@ const OWNED_OBJECTS = new Set([
   'sys_notification_template',
   'sys_http_delivery',
   'sys_user_device',
+  'sys_channel_account',
+  'sys_channel_user_link',
 ]);
 
 describe('objects translation bundle ownership (ADR-0029 D8)', () => {

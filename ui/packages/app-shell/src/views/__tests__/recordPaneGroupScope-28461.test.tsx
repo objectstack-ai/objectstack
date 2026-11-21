@@ -78,7 +78,7 @@ const previous = () => screen.queryByRole('button', { name: 'Previous record' })
 describe('the record pane steps within the opened row\'s group (objectstack#28461)', () => {
   it('grouped grid: the counter counts the group, and its tooltip names it', () => {
     mountPane('c-1', ROWS, GROUPS);
-    expect(counter()!.textContent).toBe('1 / 3');
+    expect(counter()!.textContent).toBe('1 of 3');
     expect(counter()!.getAttribute('title')).toBe('1 of 3 in Acme Corporation');
   });
 
@@ -86,7 +86,7 @@ describe('the record pane steps within the opened row\'s group (objectstack#2846
     mountPane('c-2', ROWS, GROUPS);
     fireEvent.click(next()!);
     expect(body()).toBe('c-3');
-    expect(counter()!.textContent).toBe('3 / 3');
+    expect(counter()!.textContent).toBe('3 of 3');
     // c-4 follows in the list, but in another group.
     expect(next()!.disabled).toBe(true);
     fireEvent.keyDown(document.body, { key: 'j' });
@@ -109,7 +109,7 @@ describe('the record pane steps within the opened row\'s group (objectstack#2846
 
   it('control: an ungrouped list steps through every row, named by the list\'s view', () => {
     mountPane('c-3', ROWS);
-    expect(counter()!.textContent).toBe('3 / 5');
+    expect(counter()!.textContent).toBe('3 of 5');
     expect(counter()!.getAttribute('title')).toBe('3 of 5 in All contacts');
     fireEvent.click(next()!);
     expect(body()).toBe('c-4');
@@ -143,7 +143,6 @@ describe('the object page hands the opened row\'s group along (objectstack#28461
         viewLabel: (_object: string, _view: string, fallback: string) => fallback,
         unlabelledViewText: 'Untitled view',
         language: 'en',
-        recordOpenPreference: 'object' as never,
         // A desktop console: on a phone every record opens as a page.
         phone: false,
       }),
@@ -173,14 +172,14 @@ describe('the object page hands the opened row\'s group along (objectstack#28461
     });
   });
 
-  it('the row\'s ↗: the page steps within the group and its counter names it', () => {
+  it('the record\'s name: the page steps within the group and its counter names it', () => {
     const { result, navigate } = mountNavigation('view=all');
     act(() => result.current.handleListRowsChange(ROWS, GROUPS));
-    act(() => result.current.handleOpenRowAsPage('c-2'));
+    act(() => result.current.handleRowClick({ id: 'c-2' }));
     const state = navigate.mock.calls.at(-1)![1].state;
-    expect(state.recordDrawerReturn.path).toEqual([
-      { objectName: 'crm_contact', recordId: 'c-2', siblings: ['c-1', 'c-2', 'c-3'], scope: 'Acme Corporation' },
-    ]);
+    expect(state.from).toEqual({
+      pathname: '/apps/crm/crm_contact?view=all', label: 'All contacts', siblings: ['c-1', 'c-2', 'c-3'], scope: 'Acme Corporation',
+    });
     const page = renderHook(() => useRecordPageReturn('c-2'), {
       wrapper: ({ children }: { children: React.ReactNode }) => (
         <MemoryRouter initialEntries={[{ pathname: '/apps/crm/crm_contact/record/c-2', state }]}>{children}</MemoryRouter>

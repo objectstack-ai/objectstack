@@ -72,7 +72,13 @@ vi.mock('@object-ui/plugin-list', async (importOriginal) => ({
   ListView: (props: any) => {
     // objectstack#35548 — the view switcher leads the list's view bar: draw the slot.
     const lead = props.toolbarLeading;
-    return typeof lead === 'function' ? lead({ recordCount: null, layout: 'grid' }) : lead ?? null;
+    // objectstack#35878 — the condition row's end (the 「Personalized」 marker) draws too.
+    return (
+      <>
+        {typeof lead === 'function' ? lead({ recordCount: null, layout: 'grid' }) : lead ?? null}
+        {props.conditionRowEnd ?? null}
+      </>
+    );
   },
 }));
 // The list area, reduced to the view it was handed.
@@ -96,7 +102,6 @@ vi.mock('./RecordDetailView', () => ({ RecordDetailView: () => null }));
 
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
-import { RECORD_OPEN_PREFERENCE_KEY } from '../utils/recordOpenPreference';
 
 const OBJECT_NAME = 'clm_contract';
 const LEGAL_CAP = 'clm_legal_workbench.view';
@@ -154,7 +159,6 @@ function makeDataSource() {
 function openView(viewId: string, access: Record<string, unknown>, opts: { recordOpen?: boolean } = {}) {
   const probeMetaItemAccess = vi.fn(async () => access);
   const objects = OBJECTS;
-  window.localStorage.removeItem(RECORD_OPEN_PREFERENCE_KEY);
   render(
     <I18nProvider instance={createI18n({ defaultLanguage: 'en', detectBrowserLanguage: false })}>
       <AdapterCtx.Provider value={{ probeMetaItemAccess } as never}>
@@ -184,7 +188,6 @@ async function settle() {
 describe('objectui#12112 — a refused list view, opened by name, says it was refused', () => {
   afterEach(() => {
     cleanup();
-    window.localStorage.removeItem(RECORD_OPEN_PREFERENCE_KEY);
   });
 
   it('a view the server refuses: a permission refusal in the server\'s words, not the default view', async () => {
