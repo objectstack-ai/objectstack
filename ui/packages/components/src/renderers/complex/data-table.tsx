@@ -19,7 +19,8 @@ import { caretToEnd, defaultTyping, defaultValueFromText, firstEditorControl, is
 import { useHorizontalOverflow, HOVER_SCROLLBAR_CLASSES } from '../../custom/use-horizontal-overflow';
 import { ActiveListRow, listRecordIdOf } from '../../custom/record-list-face';
 import { describeIgnoredBind, describeNonArrayData } from './dataTableBindDiagnostic';
-import { CellOverlay, CELL_OVERLAY_HOST_CLASS, isCellContentTruncated, type CellOverlaySize } from './dataTableCellOverlay';
+import { CellOverlay } from './dataTableCellOverlay';
+import { CELL_OVERLAY_HOST_CLASS, isCellContentTruncated, type CellOverlaySize } from './dataTableCellOverlayDom';
 import { ComponentRegistry, compareSortValues, csvBlob, evalRowPredicate, formatDate, hasDeclaredPredicate, isActionSwitchedOff, formatDateTime, fromDateTimeInputValue, getSortValue, isEmptyValue, isImpossibleStoredDay, toDateInputValue, toDateTimeInputValue } from '@object-ui/core';
 import type { DataTableSchema, TableColumn, TableSortItem, TableColumnType } from '@object-ui/types';
 import type { SortDirection } from '@objectstack/spec/shared';
@@ -3561,7 +3562,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     setPreviewKey(isCellContentTruncated(display ?? null) ? selectedPosKey : null);
   }, [selectedPosKey, editingCell]);
   // The preview's size, taken as the editor replaces it, so the layer does not jump.
-  const editorSeedSizeRef = useRef<CellOverlaySize | null>(null);
+  const [editorSeedSize, setEditorSeedSize] = useState<CellOverlaySize | null>(null);
   const focusSelectionRef = useRef(false);
   useEffect(() => {
     if (!focusSelectionRef.current || editingCell) return;
@@ -3618,7 +3619,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       ? tableRef.current?.querySelector<HTMLElement>('[data-slot="cell-preview-overlay"]')
       : null;
     const rect = preview?.getBoundingClientRect();
-    editorSeedSizeRef.current = rect ? { width: rect.width, height: rect.height } : null;
+    setEditorSeedSize(rect ? { width: rect.width, height: rect.height } : null);
     setSelectedCell({ rowIndex, colIndex });
     startEdit(row, col.accessorKey, seed);
   };
@@ -4886,6 +4887,10 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         // objectstack#35684 — the selected cell of the select-first model.
                         const isSelectedCell = selectFirst && selectedPos?.rowIndex === rowIndex && selectedPos.colIndex === colIndex;
                         const showsPreview = isSelectedCell && !isEditing && previewKey === `${rowIndex}:${colIndex}`;
+                        // What the cell draws; the preview layer draws the same, unclipped.
+                        const drawCell = (): React.ReactNode => (typeof col.cell === 'function'
+                          ? col.cell(cellValue, row)
+                          : (cellValue != null && typeof cellValue === 'object' ? String(cellValue) : formatCellValue(cellValue) as any));
                         const frozenOffset = isFrozen
                           ? measuredStickyLefts?.[leadingCellCount + colIndex]
                             ?? columns.slice(0, colIndex).reduce((sum, c, i) => {
@@ -5080,7 +5085,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                               <CellOverlay
                                 kind="editor"
                                 className={typeof schema.renderCellEditor === 'function' ? undefined : builtInEditorWidthClass(col.type)}
-                                minSize={editorSeedSizeRef.current}
+                                minSize={editorSeedSize}
                                 // Scrolled out of sight: commit, as a click outside does.
                                 onHidden={() => { flushInjectedEditor(); saveEditRef.current(true); }}
                               >{(() => {
@@ -5319,17 +5324,13 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                 data-auto-width-key={autoWidthKey(col)}
                                 data-slot="cell-display"
                               >
-                                {typeof col.cell === 'function'
-                                  ? col.cell(cellValue, row)
-                                  : (cellValue != null && typeof cellValue === 'object' ? String(cellValue) : formatCellValue(cellValue) as any)}
+                                {drawCell()}
                               </div>
                             )}
                             {showsPreview && (
                               // objectstack#35688 — the whole content of a cut-off cell, in place.
                               <CellOverlay kind="preview" onHidden={() => setPreviewKey(null)}>
-                                {typeof col.cell === 'function'
-                                  ? col.cell(cellValue, row)
-                                  : (cellValue != null && typeof cellValue === 'object' ? String(cellValue) : formatCellValue(cellValue) as any)}
+                                {drawCell()}
                               </CellOverlay>
                             )}
                           </TableCell>
