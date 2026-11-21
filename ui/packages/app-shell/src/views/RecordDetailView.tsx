@@ -5696,7 +5696,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     <>
       {objectIcon}
       {!barNamesRecord && (
-        <span className="min-w-0 truncate text-base font-semibold text-foreground" aria-current="page" data-record-page-title="">
+        <span className="min-w-0 truncate text-base font-medium text-foreground" aria-current="page" data-record-page-title="">
           {recordCrumbName}
         </span>
       )}

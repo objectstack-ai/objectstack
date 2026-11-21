@@ -116,7 +116,7 @@ export const GroupRow: React.FC<GroupRowProps> = ({
           ? <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           : <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
         {fieldLabel && (
-          <span className="text-[11px] font-medium text-muted-foreground tracking-wide group-label-caption">
+          <span className="text-xs font-medium text-muted-foreground tracking-wide group-label-caption">
             {fieldLabel}
           </span>
         )}

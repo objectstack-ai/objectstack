@@ -12,8 +12,8 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  *   view bar 40 (the object's name as the page's heading, the switcher and
  *   View settings on the left; search, New and ⋮ on the right) · condition
  *   row 40, resident · header 36 · row 36, its line included
- *   (objectstack#36048; 32 and 33 before it), 13px on the heading, the header,
- *   the cells and the bar buttons, the view switcher as one trigger (type
+ *   (objectstack#36048; 32 and 33 before it), 14px on the heading, the cells
+ *   and the bar buttons and 12px on the header (objectstack#36047), the view switcher as one trigger (type
  *   icon → name → count → caret), and each column total under its own
  *   column, right edge on the column's right edge. No page bar is drawn
  *   above the view bar. A line of the row lines' colour and weight runs
@@ -93,15 +93,15 @@ function carrying(cls: string, want: string[], where: string): string {
 const PAGE_BAR = carrying(pick('pageHeader', /className=\{cn\(\s*'(relative shrink-0 border-b[^']*)'/, 'the page header'), ['border-b'], 'page header');
 const PAGE_BAR_LIST = carrying(pick('pageHeader', /list && '([^']+)'/, "the page header's list height"), ['h-11'], 'list page header');
 const PAGE_BAR_ROW = carrying(pick('pageHeader', /\{list \? \(\s*<div className="([^"]+)"/, "the list page header's row"), ['h-full', 'items-center'], 'list page header row');
-const OBJECT_NAME = carrying(pick('pageHeader', /<h1 className="(min-w-0 max-w-full shrink-0 truncate text-\[13px\][^"]*)"/, "the list page header's object name"), ['text-[13px]', 'truncate'], 'object name');
+const OBJECT_NAME = carrying(pick('pageHeader', /<h1 className="(min-w-0 max-w-full shrink-0 truncate text-sm[^"]*)"/, "the list page header's object name"), ['text-sm', 'truncate'], 'object name');
 // ── the page's acts, at the view bar's end (objectstack#35878, objectstack#36113) ──
-const NEW_BUTTON = carrying(pick('chrome', /className="(shadow-none gap-1 h-7[^"]*)"/, 'the create button'), ['h-7', 'text-[13px]'], 'create button');
-const IO_BUTTON = carrying(pick('pageBar', /className="(shadow-none h-7 [^"]*)"\s*data-testid="object-view-import-export"/, 'the Import / Export button'), ['h-7', 'text-[13px]'], 'Import / Export button');
+const NEW_BUTTON = carrying(pick('chrome', /className="(shadow-none gap-1 h-7[^"]*)"/, 'the create button'), ['h-7', 'text-sm'], 'create button');
+const IO_BUTTON = carrying(pick('pageBar', /className="(shadow-none h-7 [^"]*)"\s*data-testid="object-view-import-export"/, 'the Import / Export button'), ['h-7', 'text-sm'], 'Import / Export button');
 
 // ── view bar ────────────────────────────────────────────────────────────────
 const TOOLBAR_ROW = constant('row', 'TOOLBAR_ROW');
 const TOOLBAR_CLUSTER = constant('row', 'TOOLBAR_CLUSTER');
-const TEXT_TRIGGER = carrying(constant('row', 'TOOLBAR_TEXT_TRIGGER'), ['h-7', 'text-[13px]'], 'TOOLBAR_TEXT_TRIGGER');
+const TEXT_TRIGGER = carrying(constant('row', 'TOOLBAR_TEXT_TRIGGER'), ['h-7', 'text-sm'], 'TOOLBAR_TEXT_TRIGGER');
 const CONDITION_ROW = carrying(
   pick('list', /data-slot="list-condition-row"[\s\S]*?className="([^"]+)"/, 'the condition row'),
   ['min-h-10', 'flex-nowrap'],
@@ -109,7 +109,7 @@ const CONDITION_ROW = carrying(
 );
 const SWITCHER_TRIGGER = carrying(
   pick('switcher', /data-testid="list-view-switcher"[\s\S]*?className=\{cn\(\s*(?:\/\/[^\n]*\n\s*)*'([^']+)'/, 'the switcher trigger'),
-  ['h-7', 'text-[13px]', 'items-center'],
+  ['h-7', 'text-sm', 'items-center'],
   'switcher trigger',
 );
 /** The trigger's children in source order, read off their test ids. */
@@ -123,14 +123,14 @@ const DENSITY = (() => {
   const block = pick('grid', /export const OBJECT_GRID_TABLE_DENSITY = \[([\s\S]*?)\]\.join/, 'OBJECT_GRID_TABLE_DENSITY');
   return [...block.matchAll(/'([^']+)'/g)].map((m) => m[1]).join(' ');
 })();
-const ROW_CELL = carrying(pick('grid', /rowHeightMode === 'compact'\s*\?\s*'([^']+)'/, 'the default (compact) row arm'), ['h-9', 'text-[13px]'], 'row arm');
+const ROW_CELL = carrying(pick('grid', /rowHeightMode === 'compact'\s*\?\s*'([^']+)'/, 'the default (compact) row arm'), ['h-9', 'text-sm'], 'row arm');
 const ROW_ACTION = (() => {
   const at = SRC.rowAction.indexOf('data-testid="row-action-trigger"');
   const cls = [...SRC.rowAction.slice(0, at).matchAll(/className="([^"]+)"/g)].pop()?.[1];
   if (!cls) throw new Error(`${FILES.rowAction}: the row ⋮ trigger's class was not found`);
   return cls;
 })();
-const HEADER_LABEL = carrying(pick('dataTable', /<span className="([^"]+)" title=\{col\.header/, 'the column header label'), ['text-[13px]'], 'header label');
+const HEADER_LABEL = carrying(pick('dataTable', /<span className="([^"]+)" title=\{col\.header/, 'the column header label'), ['text-xs'], 'header label');
 const SUMMARY_CELL = carrying(pick('dataTable', /"(h-8 px-\S+ py-0 [^"]+)",\s*\n\s*col\.align === 'right'/, 'the summary cell'), ['h-8', 'tabular-nums'], 'summary cell');
 /** What the summary cell adds for a right-aligned column, read off its own arm. */
 const SUMMARY_RIGHT = pick('dataTable', /"h-8 px-\S+ py-0 [^"]+",\s*\n\s*col\.align === 'right' && '([^']+)'/, "the summary cell's right-aligned arm");
@@ -333,13 +333,13 @@ test.describe('the list page frame (objectstack#35548)', () => {
     expect(r.overflowX).toBe(0);
   });
 
-  test('13px on the object name, the header, the cells and every bar button', async ({ page }) => {
+  test('14px on the object name, the cells and every bar button; 12px on the header (objectstack#36047)', async ({ page }) => {
     const { fonts } = await measure(page);
-    expect(fonts.title).toBe('13px');
-    expect(fonts.header).toBe('13px');
-    expect(fonts.cell).toBe('13px');
+    expect(fonts.title).toBe('14px');
+    expect(fonts.header).toBe('12px');
+    expect(fonts.cell).toBe('14px');
     expect(fonts.bar.length).toBe(4);
-    for (const f of fonts.bar) expect(f).toBe('13px');
+    for (const f of fonts.bar) expect(f).toBe('14px');
   });
 
   test('a line between columns in the header, the rows and the footer, the row lines\' colour and weight, none after the last cell (objectstack#36048)', async ({ page }) => {

@@ -452,7 +452,7 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({
       data-testid="bulk-actions-bar"
     >
       <span
-        className="shrink-0 text-[13px] font-medium tabular-nums"
+        className="shrink-0 text-xs font-medium tabular-nums"
         // objectstack#28552 — the whole sentence, cap named, where the chip is short.
         title={allMatchingSelected
           ? overCap
@@ -489,7 +489,7 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({
       {offerAll && (
         <button
           type="button"
-          className="shrink-0 rounded px-1.5 text-[13px] font-medium text-primary underline-offset-2 hover:underline"
+          className="shrink-0 rounded px-1.5 text-sm font-medium text-primary underline-offset-2 hover:underline"
           onClick={onSelectAllMatching}
           data-testid="bulk-select-all-matching"
         >

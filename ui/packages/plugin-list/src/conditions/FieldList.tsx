@@ -305,7 +305,7 @@ export function FieldList({
       </>
     );
     const rowClass = cn(
-      'flex h-8 min-w-0 flex-1 items-center gap-2 rounded-sm px-2 text-left text-[13px] text-foreground',
+      'flex h-8 min-w-0 flex-1 items-center gap-2 rounded-sm px-2 text-left text-sm text-foreground',
       'disabled:cursor-not-allowed disabled:opacity-50',
       isActive && 'bg-accent text-accent-foreground',
     );
@@ -432,7 +432,7 @@ export function FieldList({
     list.length === 0 ? null : (
       <div key={key} data-testid={`${testId}-${key}`}>
         {headed && (
-          <div className="px-2 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          <div className="px-2 pb-1 pt-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
             {heading}
           </div>
         )}
@@ -457,7 +457,7 @@ export function FieldList({
           placeholder={placeholder}
           aria-label={placeholder}
           aria-controls={`${testId}-options`}
-          className="h-8 border-0 pl-7 text-[13px] shadow-none focus-visible:ring-0"
+          className="h-8 border-0 pl-7 text-sm shadow-none focus-visible:ring-0"
           data-testid={`${testId}-search`}
         />
       </div>
@@ -467,7 +467,7 @@ export function FieldList({
         {section(hiddenMatches, t('listConditions.fieldList.hidden'), 'hidden')}
         {section(addableMatches, t('listConditions.fieldList.addable'), 'addable')}
         {empty && (
-          <p className="px-2 py-3 text-center text-[13px] text-muted-foreground" data-testid={`${testId}-empty`}>
+          <p className="px-2 py-3 text-center text-xs text-muted-foreground" data-testid={`${testId}-empty`}>
             {t('listConditions.fieldList.empty')}
           </p>
         )}

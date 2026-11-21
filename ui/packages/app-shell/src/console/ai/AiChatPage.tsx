@@ -2791,7 +2791,7 @@ export function ChatPane({
                       {localizeAgentLabel(t, agent.name, agent.label)}
                     </span>
                     {agent.description ? (
-                      <span className="block text-muted-foreground text-[10px] truncate max-w-[260px]">
+                      <span className="block text-muted-foreground text-xs truncate max-w-[260px]">
                         {agent.description}
                       </span>
                     ) : null}
@@ -2900,7 +2900,7 @@ export function ChatPane({
       )}
       {agentsError ? (
         <span
-          className="basis-full text-[10px] text-amber-700 dark:text-amber-400"
+          className="basis-full text-xs text-amber-700 dark:text-amber-400"
           title={agentsError.message}
         >
           {t('console.ai.offlineDemoMode')}

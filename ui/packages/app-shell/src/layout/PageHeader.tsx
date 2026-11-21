@@ -328,7 +328,7 @@ export function PageHeader({
                 {icon}
               </span>
             ))}
-            <h1 className="min-w-0 max-w-full shrink-0 truncate text-[13px] font-semibold leading-5 text-foreground">
+            <h1 className="min-w-0 max-w-full shrink-0 truncate text-sm font-medium leading-5 text-foreground">
               {title}
             </h1>
             {badge}
@@ -351,7 +351,7 @@ export function PageHeader({
                   every other Setup page's does. */}
               <p
                 ref={descriptionRef}
-                className="min-h-[18px] truncate text-[13px] leading-[18px] text-muted-foreground"
+                className="min-h-[18px] truncate text-xs leading-[18px] text-muted-foreground"
                 data-testid="page-header-description"
               >
                 {breadcrumb}

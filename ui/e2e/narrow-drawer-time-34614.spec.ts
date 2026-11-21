@@ -82,7 +82,7 @@ const CLS = {
   stripCell: grab(STRIP, /className=\{gridFace \? '([^']+)' : cn\(/, ['min-w-0']),
   stripValueRow: grab(STRIP, /cn\(\s*'(flex items-start justify-between gap-1)'/, ['flex']),
   stripValueBox: grab(STRIP, /<div className="(min-w-0 flex-1)">\s*\{isBoolean/, ['flex-1']),
-  stripValue: grab(STRIP, /'(block min-w-0 truncate text-sm font-semibold)'/, ['truncate']),
+  stripValue: grab(STRIP, /'(block min-w-0 truncate text-sm font-medium)'/, ['truncate']),
 };
 
 /** A meta line whose second entry cannot fit one 380/400 px line. */
