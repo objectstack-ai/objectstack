@@ -1218,7 +1218,8 @@ const PAGE_AUDIENCE_WRONG_LAYER =
  * page out of the record page's column tiers, so it stayed tabbed at every
  * width. The record page is composed from the object's roles and relationship
  * flags (ADR-0085), so a page that needs its own strip is a `kind: 'full'`
- * page, which is drawn as authored. Carried by a `retiredKey()` tombstone on
+ * page, which is drawn as authored on the desktop full record page (a phone
+ * and the side preview draw the standard record page). Carried by a `retiredKey()` tombstone on
  * the slot map, the `page.assignedProfiles` precedent above.
  */
 const PAGE_SLOTS_TABS_REMEDY =
@@ -1226,7 +1227,8 @@ const PAGE_SLOTS_TABS_REMEDY =
   + "flags: to change which related lists appear or their order, set `relatedList` / "
   + "`relatedList: 'primary'` on the child's reference field; to replace the Details body, "
   + "author `slots.details`; a page that needs its own strip is `kind: 'full'`, drawn as "
-  + 'authored. ';
+  + 'authored on the desktop full record page (a phone and the side preview draw the standard '
+  + 'record page, with the composed strip). ';
 
 const PAGE_SLOTS_TABS_RETIRED =
   '`page.slots.tabs` was removed in @objectstack/spec 18.3.0 (ADR-0085) — an authored strip '
@@ -2040,7 +2042,9 @@ export const PageSchema = lazySchema(() => strictObject({
   
   /**
    * Activation — whether this page is the DEFAULT RECORD PAGE of its `object`:
-   * the page the record view of that object opens.
+   * the page the record view of that object opens on the desktop full record
+   * page. On a phone and in the side preview the standard record page is
+   * drawn instead (see `kind`; the console's `authoredRecordPageApplies`).
    *
    * **At most one default record page per object per deployment.** A record
    * page (`type: 'record'`, the default) bound to an `object` and declared
@@ -2067,13 +2071,15 @@ export const PageSchema = lazySchema(() => strictObject({
    * refusal `misplacedDefaultPageRefusal` ({@link checkPageDefaultPlacement}).
    */
   isDefault: z.boolean().default(false)
-    .describe('Whether this record page is the default record page of its `object` — the page the record view opens. At most one `isDefault: true` record page may exist for an object in a deployment: a second is refused (by defineStack / os validate, at package registration and at metadata save), naming both pages. Saving a page under the existing default\'s own name is that page, not a second default. Refused on any other page — a page that is not a record page bound to an object: nothing reads it there. An app opens on its first navigation item, and the root landing follows the app\'s own isDefault.'),
+    .describe('Whether this record page is the default record page of its `object` — the page its records open on, on the desktop full record page; on a phone and in the side preview the standard record page is drawn instead (see `kind`). At most one `isDefault: true` record page may exist for an object in a deployment: a second is refused (by defineStack / os validate, at package registration and at metadata save), naming both pages. Saving a page under the existing default\'s own name is that page, not a second default. Refused on any other page — a page that is not a record page bound to an object: nothing reads it there. An app opens on its first navigation item, and the root landing follows the app\'s own isDefault.'),
   /**
    * App scope — the apps whose routes open this record page for its `object`
    * (maintainer ruling A on objectstack#28979, record 6573557633).
    *
    * Inside an app this list names, the record view of the page's object
-   * (`/apps/<app>/<object>/record/<id>`) opens this page. Everywhere else —
+   * (`/apps/<app>/<object>/record/<id>`) opens this page, on the desktop full
+   * record page only — a phone and the side preview draw the standard record
+   * page, as for the default (see `kind`). Everywhere else —
    * every other app, Setup included — the deployment's one `isDefault` record
    * page still opens: ruling A on objectstack#23015 (one default per object per
    * deployment) is unchanged, and no precedence ladder is added. The default
@@ -2095,7 +2101,7 @@ export const PageSchema = lazySchema(() => strictObject({
    * app's NAME here, never the segment itself.
    */
   apps: z.array(SnakeCaseIdentifierSchema).min(1).superRefine(checkPageAppsUnique).optional()
-    .describe("The apps whose routes open this record page for its `object`: inside an app named here, the object's record view (`/apps/<app>/<object>/record/<id>`) opens this page; everywhere else, Setup included, the object's one `isDefault` record page still opens, so the default and an app's page coexist. App names, non-empty and unique. At most one record page per object per app: a second page naming the same app for the same object is refused (by defineStack / os validate, at package registration and at metadata save), naming both pages. Refused on any page that is not a record page bound to an object."),
+    .describe("The apps whose routes open this record page for its `object`: inside an app named here, the object's record view (`/apps/<app>/<object>/record/<id>`) opens this page on the desktop full record page (on a phone and in the side preview the standard record page is drawn, see `kind`); everywhere else, Setup included, the object's one `isDefault` record page still opens, so the default and an app's page coexist. App names, non-empty and unique. At most one record page per object per app: a second page naming the same app for the same object is refused (by defineStack / os validate, at package registration and at metadata save), naming both pages. Refused on any page that is not a record page bound to an object."),
   // `assignedProfiles` REMOVED (ADR-0090 D2 / ADR-0049) — it named the concept
   // D2 deleted and nothing anywhere enforced it, so a page that "assigned
   // profiles" was open to everyone who could reach it. Page audience is the
@@ -2155,7 +2161,8 @@ export const PageSchema = lazySchema(() => strictObject({
       "turned on server-side via the OS_PAGE_REACT_ENABLED=true env toggle. " +
       "Do not author Tailwind classes in page source in either tier: `source` is " +
       "runtime metadata the build-time Tailwind never scans, so utility classNames " +
-      "silently produce no CSS (ADR-0065; ADR-0080).",
+      "silently produce no CSS (ADR-0065; ADR-0080). " +
+      "Where it is drawn: an object's assigned `kind: 'full'` record page (its `isDefault` page, or an app's page named by `apps`) is drawn on the desktop full record page only. On a phone and in the side preview (the drawer a list opens, a split pane, an interface page's preview) the record opens on the standard record page, built from the object's own metadata, so the page's layout and what lives only on it (its own blocks, tabs and sections, and `record_section` actions, which the standard page does not draw; give such an action `record_more` as well) do not appear there. A page named in the URL (a print page and other named page routes) is drawn wherever that route opens, the platform's own approval request and user pages keep their page on every surface, and a `kind: 'slotted'` page is the standard page with its slots filled, on every surface.",
     ),
 
   /**
@@ -2175,7 +2182,8 @@ export const PageSchema = lazySchema(() => strictObject({
    * relationship flags (ADR-0085); `details` replaces the body of the Details
    * tab inside it. The `tabs` slot that replaced the whole strip is a
    * `retiredKey()` tombstone ({@link PAGE_SLOTS_TABS_RETIRED}); a page that
-   * needs its own strip is a `kind: 'full'` page, drawn as authored.
+   * needs its own strip is a `kind: 'full'` page, drawn as authored on the
+   * desktop full record page.
    *
    * Only honored when `kind === 'slotted'`.
    */
