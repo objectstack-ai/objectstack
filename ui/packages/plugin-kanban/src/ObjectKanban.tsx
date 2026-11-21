@@ -22,14 +22,17 @@ import {
   useFilterScope,
   useResolvedFilter,
   usePredicateScope,
+  classifyLoadError,
 } from '@object-ui/react';
 import {
   NavigationOverlay,
+  DataEmptyState,
   legacyRecordDrawerWidthKey,
   recordOverlayWidthStorageKey,
   toast,
 } from '@object-ui/components';
 import { createSafeTranslation } from '@object-ui/i18n';
+import { Lock } from 'lucide-react';
 import {
   RECORD_OVERLAY_DEFAULT_WIDTH,
   RecordDetailPanel,
@@ -91,6 +94,12 @@ import { lanesFromOptions, type LaneLifecycleKind } from './kanbanLaneLifecycle'
 const KANBAN_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'detail.recordDetail': 'Record Detail',
   'detail.recordDetailWithLabel': '{{label}} Detail',
+  // The refused-read state reuses the shared no-access sentence the list page
+  // and the related list draw, so a host pack that translates them translates
+  // this board too; these rows are the provider-less fallback and say exactly
+  // what the `en` pack says.
+  'list.loadErrorForbiddenTitle': 'You don’t have access',
+  'list.loadErrorForbiddenMessage': 'You don’t have permission to view these records. Contact your administrator if you think you should have access.',
 };
 
 /**
@@ -1953,6 +1962,25 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
 
   // Error branch renders only after every hook above has run, so hook order
   // stays stable across renders (no early return before the hooks).
+  // A refused read (403 / PERMISSION_DENIED, by the shared `classifyLoadError`
+  // verdict the list page, the related list and the gantt use) is not a
+  // failure of anything the reader did: they may open the page without being
+  // granted the records this board reads. It is drawn as the calm no-access
+  // state (`role="status"`, the shared `list.loadErrorForbidden*` sentence in
+  // the reader's language), never the server's text. Every other failure
+  // keeps the error screen below.
+  if (error && classifyLoadError(error) === 'forbidden') {
+    return (
+      <DataEmptyState
+        data-testid="kanban-no-access"
+        className="h-96"
+        icon={<Lock className="size-5 text-muted-foreground" aria-hidden />}
+        title={t('list.loadErrorForbiddenTitle')}
+        description={t('list.loadErrorForbiddenMessage')}
+      />
+    );
+  }
+
   if (error) {
     return (
       <div className="p-4 border border-destructive/50 rounded bg-destructive/10 text-destructive">
