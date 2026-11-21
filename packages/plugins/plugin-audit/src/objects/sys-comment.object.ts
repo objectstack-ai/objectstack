@@ -181,8 +181,11 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *   their defaults and mean nothing.
  * - **A reply reopens its thread.** A reply written into a resolved thread
  *   sets the top-level comment back to unresolved, as the platform.
- * - **Who may resolve** is who may update the comment: its author, or a user
- *   who can edit the record the thread is on.
+ * - **Who may resolve** (maintainer ruling record 7063285032, option A): whoever
+ *   may comment on the record. An update that changes nothing but
+ *   `is_resolved` is admitted for a caller who can read the record the thread
+ *   is on; any other change still needs the comment's author or an editor of
+ *   that record.
  * - **Stored rows.** None to migrate: the column's declared default `false`
  *   is the SQL column default, so a row written before it reads unresolved,
  *   and a reader asking `is_resolved: { $ne: true }` matches a row that

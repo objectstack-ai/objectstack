@@ -155,6 +155,7 @@ import {
 import {
   clearClientResolution,
   installCommentReplyReopens,
+  isResolutionOnlyUpdate,
   namesResolution,
   refuseResolutionOnReply,
   stampCommentResolution,
@@ -1120,6 +1121,44 @@ export function installCommentAccessHooks(
     }
   };
 
+  /**
+   * [#36071, maintainer ruling record 7063285032, option A] Who may resolve
+   * or reopen a thread: whoever may comment on the record it is on — the
+   * insert rule above ({@link callerCanRead} on the parent), not the
+   * author-or-parent-editor rule. Reached only for an update that changes
+   * nothing but `is_resolved`. Every matched row must pass. The author of a
+   * top-level comment passes, as on every update. A thread naming no record
+   * has no parent to read, so only its author passes; anyone else, and a
+   * caller who cannot read the parent, gets the not-visible refusal, which
+   * names nothing the read door hides.
+   */
+  const authorizeResolution = async (ctx: any, rows: Array<Record<string, unknown>>): Promise<void> => {
+    const userId = ctx.session.userId as string | undefined;
+    const readable = new Map<string, boolean>();
+    for (const row of rows) {
+      if (userId && row.author_id === userId) continue;
+      const target = parseCommentThreadId(row.thread_id);
+      let canRead = false;
+      if (target) {
+        const key = `${target.object}:${target.recordId}`;
+        let verdict = readable.get(key);
+        if (verdict === undefined) {
+          verdict = await callerCanRead(ctx, target);
+          readable.set(key, verdict);
+        }
+        canRead = verdict;
+      }
+      if (!canRead) {
+        logger.warn(
+          `[audit] comment access: cannot resolve or reopen comment ${String(row.id)} — the caller cannot read the ` +
+            'record its thread is on (answered not-visible)',
+          { operation: 'update', object: COMMENT_OBJECT, recordId: row.id, userId: userId ?? 'unknown' },
+        );
+        refuseNotVisible(callerContext(ctx), messageTranslator);
+      }
+    }
+  };
+
   // ── Update: author or parent editor (+ the insert rule on a re-point) ──
   engine.registerHook(
     'beforeUpdate',
@@ -1129,8 +1168,15 @@ export function installCommentAccessHooks(
       const rows = await resolveTargetRows(ctx, 'update');
       // [#36071] A thread is resolved on its top-level comment, never on a
       // reply — refused for every non-system caller, the reply's author too.
-      if (namesResolution(ctx?.input?.data)) refuseResolutionOnReply(rows);
-      if (rows.length) await authorizeRows(ctx, rows, 'update');
+      const data: unknown = ctx?.input?.data;
+      if (namesResolution(data)) refuseResolutionOnReply(rows);
+      if (rows.length) {
+        // [#36071, ruling record 7063285032] Resolving or reopening a thread,
+        // and nothing else, is collaboration: the rule that admits a new
+        // comment admits it.
+        if (isResolutionOnlyUpdate(data)) await authorizeResolution(ctx, rows);
+        else await authorizeRows(ctx, rows, 'update');
+      }
 
       // Moving a comment to another thread is an insert into that thread: the
       // NEW parent must be readable, or an authorized edit of your own comment

@@ -19,11 +19,15 @@
  *  - **The stamp** ({@link stampCommentResolution}, `beforeUpdate`, every
  *    caller): `is_resolved` turning `true` records the session's user and the
  *    server clock; turning `false` clears both.
- *  - **Who may resolve**: an update of `is_resolved` is an update of the
- *    comment, so it meets the rule every update of a comment meets — the
- *    top-level comment's author, or a user who can edit the record the thread
- *    is on (`comment-access-hooks.ts`, "Parent EDIT"). Reopening is the same
- *    write and the same rule.
+ *  - **Who may resolve** ({@link isResolutionOnlyUpdate}; maintainer ruling
+ *    record 7063285032, option A): whoever may comment on the record may
+ *    resolve and reopen its threads. An update that changes nothing but
+ *    `is_resolved` is authorized by the rule that admits a new comment — the
+ *    caller can read the record the thread is on — instead of the
+ *    author-or-parent-editor rule every other update meets. It is a narrow,
+ *    deliberate widening: a reader may flip `is_resolved` on another user's
+ *    top-level comment and nothing else; an update that changes any other
+ *    field beside it keeps the stricter rule.
  *  - **Only a thread is resolved** ({@link refuseResolutionOnReply}): an
  *    update naming `is_resolved` on a reply is refused, `VALIDATION_ERROR` /
  *    400, its author included.
@@ -63,6 +67,31 @@ const hasOwn = (o: object, k: string): boolean => Object.prototype.hasOwnPropert
 /** Whether an update's payload names `is_resolved`. */
 export function namesResolution(data: unknown): data is Record<string, unknown> {
   return !!data && typeof data === 'object' && !Array.isArray(data) && hasOwn(data, COMMENT_RESOLVED_FIELD);
+}
+
+/**
+ * The keys an update may carry beside `is_resolved` and still be a
+ * resolution-only update: the row's address and the platform's own stamps
+ * (the engine's `updated_at` / `updated_by`, this module's `resolved_by` /
+ * `resolved_at`). A caller's value for any of the stamps never lands either
+ * way: the engine strips a non-system caller's `readonly` values.
+ */
+const RESOLUTION_ONLY_COMPANION_KEYS: ReadonlySet<string> = new Set([
+  'id',
+  'updated_at',
+  'updated_by',
+  COMMENT_RESOLVED_BY_FIELD,
+  COMMENT_RESOLVED_AT_FIELD,
+]);
+
+/**
+ * Whether an update changes nothing but a thread's resolution: it names
+ * `is_resolved`, and every other key it carries is the row's address or a
+ * platform stamp ({@link RESOLUTION_ONLY_COMPANION_KEYS}).
+ */
+export function isResolutionOnlyUpdate(data: unknown): boolean {
+  if (!namesResolution(data)) return false;
+  return Object.keys(data).every((k) => k === COMMENT_RESOLVED_FIELD || RESOLUTION_ONLY_COMPANION_KEYS.has(k));
 }
 
 /** Whether a stored comment row is a reply (it names a parent comment). */
