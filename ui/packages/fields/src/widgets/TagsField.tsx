@@ -18,12 +18,11 @@ export function TagsField({ value, onChange, field, readonly, className, error, 
   const { t } = useFieldTranslation();
   // The in-cell list's rows (see the `inCell` branch): every tag the field has
   // held since the editor opened, so an unchecked tag stays on offer.
+  // Adjusted while rendering, as React's "storing information from previous
+  // renders" does, rather than in an effect.
   const [offered, setOffered] = React.useState<string[]>(tags);
-  const tagsKey = tags.join('\u0000');
-  React.useEffect(() => {
-    setOffered((prev) => (tags.every((v) => prev.includes(v)) ? prev : [...prev, ...tags.filter((v) => !prev.includes(v))]));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tagsKey]);
+  const unseen = tags.filter((v) => !offered.includes(v));
+  if (unseen.length > 0) setOffered([...offered, ...unseen]);
 
   if (readonly) {
     if (tags.length === 0) return <EmptyValue />;
