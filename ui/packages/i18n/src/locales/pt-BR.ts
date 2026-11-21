@@ -2721,11 +2721,25 @@ const pt = {
       viewNameInvalid: "Use letras minúsculas, números e sublinhados; comece com uma letra ou sublinhado.",
       systemViewReadonly: "Exibição do sistema definida no código — somente leitura.",
       cannotEditMetaView: "Esta exibição é integrada e definida no código — não é possível alterá-la.",
+      // The 「Personalized · Reset to view」 marker's words (objectstack#28950), no longer drawn
+      // since objectstack#35955: kept in every pack, so no published key goes away.
       resetView: "Voltar à exibição",
       resetViewTitle: "Restaura os filtros, a pesquisa, a ordenação, o agrupamento, a disposição das colunas, os campos ocultos, a densidade, o layout, a cor da linha, os números de linha e a edição em linha próprios desta exibição. Exibições fixadas, favoritos e a forma de abrir registros não mudam. Apenas a sua lista muda.",
-      linkFilterRefused: 'O filtro deste link não foi aplicado. Ele cita um campo pelo qual você não pode filtrar aqui, então a lista mostra a visualização sem ele.',
       personalized: "Personalizada",
       personalizedHeading: "Sua lista difere desta exibição em",
+      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      draft: {
+        discard: "Descartar",
+        discardTitle: "Devolve a lista ao que a exibição define: filtros, ordenação, agrupamento, colunas e layout. A largura das colunas e a altura das linhas continuam.",
+        save: "Salvar",
+        heading: "Alterações não salvas",
+        partSeparator: ", ",
+        saveToView: "Salvar nesta exibição",
+        saveAsMyView: "Salvar como minha exibição",
+        copyName: "{{name}} (cópia)",
+        saved: "Salvo",
+      },
+      linkFilterRefused: 'O filtro deste link não foi aplicado. Ele cita um campo pelo qual você não pode filtrar aqui, então a lista mostra a visualização sem ele.',
       personalizedParts: {
         filters: "Filtros",
         search: "Pesquisa",

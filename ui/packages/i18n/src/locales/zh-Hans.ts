@@ -2740,11 +2740,25 @@ const zh = {
       },
       systemViewReadonly: '系统视图由代码定义，只读。',
       cannotEditMetaView: '该视图为内置视图，由代码定义，无法修改。',
+      // The 「Personalized · Reset to view」 marker's words (objectstack#28950), no longer drawn
+      // since objectstack#35955: kept in every pack, so no published key goes away.
       resetView: '恢复为视图设置',
       resetViewTitle: '恢复此视图自身的筛选、搜索、排序、分组、列布局、隐藏字段、密度、布局、行颜色、行号和行内编辑。固定的视图、收藏和记录的打开方式保持不变。只影响你自己的列表。',
-      linkFilterRefused: '此链接的筛选条件未应用：其中包含你在此处无法筛选的字段，因此列表按视图本身显示。',
       personalized: '已个性化',
       personalizedHeading: '你的列表与此视图不同之处',
+      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      draft: {
+        discard: '放弃',
+        discardTitle: '把列表恢复成视图本来的样子：筛选、排序、分组、列和布局。列宽和行高不变。',
+        save: '保存',
+        heading: '未保存的改动',
+        partSeparator: '、',
+        saveToView: '保存到这个视图',
+        saveAsMyView: '另存为我的视图',
+        copyName: '{{name}} 副本',
+        saved: '已保存',
+      },
+      linkFilterRefused: '此链接的筛选条件未应用：其中包含你在此处无法筛选的字段，因此列表按视图本身显示。',
       personalizedParts: {
         filters: '筛选',
         search: '搜索',
