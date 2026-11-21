@@ -2704,11 +2704,19 @@ const fr = {
       viewNameInvalid: "Utilisez des minuscules, des chiffres et des tirets bas ; commencez par une lettre ou un tiret bas.",
       systemViewReadonly: "Vue système définie dans le code — en lecture seule.",
       cannotEditMetaView: "Cette vue est intégrée et définie dans le code — elle ne peut pas être modifiée.",
-      resetView: "Revenir à la vue",
-      resetViewTitle: "Rétablit les filtres, la recherche, le tri, le regroupement, la disposition des colonnes, les champs masqués, la densité, la disposition, la couleur de ligne, les numéros de ligne et l’édition en ligne propres à cette vue. Les vues épinglées, les favoris et le mode d’ouverture des enregistrements ne changent pas. Seule votre liste change.",
+      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      draft: {
+        discard: "Abandonner",
+        discardTitle: "Remet la liste telle que la vue la définit : filtres, tri, regroupement, colonnes et disposition. La largeur des colonnes et la hauteur des lignes restent.",
+        save: "Enregistrer",
+        heading: "Modifications non enregistrées",
+        partSeparator: ", ",
+        saveToView: "Enregistrer dans cette vue",
+        saveAsMyView: "Enregistrer comme ma vue",
+        copyName: "{{name}} (copie)",
+        saved: "Enregistré",
+      },
       linkFilterRefused: 'Le filtre de ce lien n’a pas été appliqué. Il cite un champ sur lequel vous ne pouvez pas filtrer ici, la liste affiche donc la vue sans ce filtre.',
-      personalized: "Personnalisée",
-      personalizedHeading: "Votre liste diffère de cette vue par",
       personalizedParts: {
         filters: "Filtres",
         search: "Recherche",

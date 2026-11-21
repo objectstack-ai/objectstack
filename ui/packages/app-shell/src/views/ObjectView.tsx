@@ -96,10 +96,12 @@ import {
 } from './objectViewPageHeader.js';
 import { ObjectViewRecordOverlay } from './objectViewRecordOverlay.js';
 import { useObjectViewListRenderer } from './objectViewListRenderer.js';
-import { ListPersonalizedMarker } from './ListPersonalizedMarker.js';
+import { ListDraftActions } from './ListDraftActions.js';
+import { listDraftPreference, listDraftScope, useListDraft } from './listDraftStore.js';
 import { useObjectViewViewCrud } from './objectViewViewCrud.js';
 import {
     PERSONAL_VIEW_OBJECT,
+    buildInPlaceViewConfig,
     buildPersonalViewConfig,
     personalViewEntry,
     personalViewPanelFilters,
@@ -724,6 +726,13 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         localizedToolbarActions,
         isEnvironmentList,
     });
+    // objectstack#35955 — the open list's DRAFT: what the reader changed and
+    // has not saved (`./listDraftStore.ts`). It outlives this page while a
+    // record is open as a page, and goes when another view or object opens.
+    const listDraft = useListDraft(listDraftScope(user?.id, objectName ?? '', activeView?.id ? String(activeView.id) : ''));
+    /** The list on screen in the reader-state shape the view builders read (draft + kept widths and row height). */
+    const draftPreferenceOf = (id: string | undefined) =>
+        id ? listDraftPreference(listDraft.draft, listPrefs.preference.perView?.[id]) : undefined;
     // objectstack#25992 slice 8: the list's toolbar state in the URL (seed, write-back,
     // "Reset view") moved to `./objectViewListUrlState.ts`.
     const {
@@ -732,7 +741,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         ownListParamsRef,
         writeListUrlState,
         handleListPersonalizationChange,
-        listPersonalizedParts,
+        listDraftParts,
         handleResetView,
         clearSourceListState,
         readPanelFilters,
@@ -743,6 +752,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         activeView,
         viewResolving: awaitingPersonalViews,
         listPrefs,
+        listDraft: listDraft.draft,
         perms,
         user,
         searchParams,
@@ -767,7 +777,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
             // The panel's group is the one the list shows (an emptied panel
             // included), not the address's copy of it.
             url: { ...parseListStateParams(searchParams, acceptListField), filters: readPanelFilters() },
-            preference: listPrefs.preference.perView?.[activeView.id],
+            preference: draftPreferenceOf(activeView.id),
             panelFilters: viewPanelFilters,
         });
         if (!built.ok) {
@@ -776,7 +786,11 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         }
         try {
             await personalViews.update(activeView.id, built.config);
+            // objectstack#35955 — the draft is the view now: Discard and Save
+            // go, and the list opens again on the saved view (its sort and
+            // filter chips stay, the view carries them).
             handleResetView();
+            toast.success(t('console.objectView.draft.saved'));
         } catch (err) {
             console.error('[ObjectView] Failed to save a personal view:', err);
             toast.error(t('form.saveError'), {
@@ -785,11 +799,17 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
             });
         }
     };
-    const personalizedMarker = !isEnvironmentList && listPersonalizedParts.length > 0 ? (
-        <ListPersonalizedMarker
-            parts={listPersonalizedParts}
-            onReset={handleResetView}
-            onSave={canUpdatePersonalView ? () => { void handleSaveToPersonalView(); } : undefined}
+    // objectstack#35955 — Discard and Save while the list holds a draft, at
+    // the end of the condition row (the phone draws the same slot). 「Save to
+    // this view」 writes one of the reader's own views here; a shared view's
+    // save is not offered on the list yet. 「Save as my view」 asks a name.
+    const canSaveAsMyView = personalViewsReady && personalGrant('create') && !!activeView;
+    const draftActions = !isEnvironmentList && listDraftParts.length > 0 ? (
+        <ListDraftActions
+            parts={listDraftParts}
+            onDiscard={handleResetView}
+            onSaveToView={canUpdatePersonalView ? () => { void handleSaveToPersonalView(); } : undefined}
+            onSaveAsMyView={canSaveAsMyView ? () => setPersonalViewDialog({ mode: 'saveAs' }) : undefined}
         />
     ) : null;
 
@@ -878,7 +898,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // `PersonalViewNameDialog`. A reader who cannot read the list's own object
     // is offered no create: there is no list to keep.
     const listReadable = !perms.isLoaded || perms.can(objectDef.name, 'read');
-    const [personalViewDialog, setPersonalViewDialog] = useState<{ mode: 'rename'; viewId: string } | null>(null);
+    const [personalViewDialog, setPersonalViewDialog] = useState<{ mode: 'rename'; viewId: string } | { mode: 'saveAs' } | null>(null);
     const openPersonalView = (id: string) => {
         if (viewId) navigate(`../${id}`, { relative: 'path' });
         else navigate(`view/${id}`);
@@ -926,6 +946,44 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     const renamingPersonalView = personalViewDialog?.mode === 'rename'
         ? personalViews.views.find((v) => v.id === personalViewDialog.viewId)
         : undefined;
+    /**
+     * objectstack#35955 — 「Save as my view」: the list on screen (the open
+     * view's body with the draft laid over it, `buildInPlaceViewConfig` as
+     * the switcher's create card builds it) becomes one of the reader's own
+     * views under the name they gave, and opens. The view it came from loses
+     * the draft and opens as its own next time.
+     */
+    const handleSaveAsMyView = async (label: string): Promise<boolean> => {
+        if (!activeView) return false;
+        const built = buildInPlaceViewConfig(
+            objectDef.name,
+            activeView,
+            { type: String((activeView as any).type ?? 'grid') },
+            {
+                url: { ...parseListStateParams(searchParams, acceptListField), filters: readPanelFilters() },
+                preference: draftPreferenceOf(activeView.id),
+                panelFilters: viewPanelFilters,
+            },
+        );
+        if (!built.ok) {
+            toast.error(t('form.saveError'), { description: t(FILTER_FOLD_REFUSAL_KEYS[built.reason]) });
+            return false;
+        }
+        try {
+            const id = await personalViews.save(label, built.config);
+            clearSourceListState(String(activeView.id));
+            toast.success(t('console.objectView.draft.saved'));
+            openPersonalView(id);
+            return true;
+        } catch (err) {
+            console.error('[ObjectView] Failed to save a personal view:', err);
+            toast.error(t('form.saveError'), {
+                description: err instanceof Error ? err.message : String(err),
+                classNames: { description: 'whitespace-pre-line' },
+            });
+            return false;
+        }
+    };
 
     // Current user — also used below for `{current_user_id}` filter-token
     // substitution. The schema-action handlers (toast/navigate/api/flow/server)
@@ -1044,7 +1102,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
             activeView,
             readListState: () => ({
                 url: { ...parseListStateParams(searchParams, acceptListField), filters: readPanelFilters() },
-                preference: activeView ? listPrefs.preference.perView?.[activeView.id] : undefined,
+                preference: draftPreferenceOf(activeView?.id),
                 panelFilters: viewPanelFilters,
             }),
             savePersonal: personalViews.save,
@@ -1053,7 +1111,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
             clearSourceListState,
             canCreatePersonal: personalViewsReady && personalGrant('create') && listReadable && !!activeView && !viewAccess.refusal,
             canCreateShared: isAdmin,
-            hasUnsavedConditions: listPersonalizedParts.some((part) => part === 'filters' || part === 'sort'),
+            hasUnsavedConditions: listDraftParts.some((part) => part === 'filters' || part === 'sort'),
         },
         onRenamePersonalView: personalViewsReady && personalGrant('update')
             ? (id: string) => setPersonalViewDialog({ mode: 'rename', viewId: id })
@@ -1086,6 +1144,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         managedUserMarker,
         savedViews,
         listPrefs,
+        listDraft,
         derivedColumnViewIds,
         baseView,
         activeView,
@@ -1121,7 +1180,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 ? <ObjectViewBarTrailing tools={tools} {...pageBarPropsRef.current} />
                 : tools)
             : null,
-        conditionRowEnd: personalizedMarker,
+        conditionRowEnd: draftActions,
         handleListPersonalizationChange,
         urlFilters,
         initialUfSelections,
@@ -1137,8 +1196,8 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 : activeView && isAdmin && !activeViewPackageRefusesSaves && savedViews.some((sv: any) => viewRowId(sv) === activeView.id)
                     ? async (label: string) => { await handleRenameView(String(activeView.id), label); return true; }
                     : undefined,
-            save: !isEnvironmentList && canUpdatePersonalView && listPersonalizedParts.length > 0 ? () => { void handleSaveToPersonalView(); } : undefined,
-            reset: !isEnvironmentList && listPersonalizedParts.length > 0 ? handleResetView : undefined,
+            save: !isEnvironmentList && canUpdatePersonalView && listDraftParts.length > 0 ? () => { void handleSaveToPersonalView(); } : undefined,
+            reset: !isEnvironmentList && listDraftParts.length > 0 ? handleResetView : undefined,
             // objectstack#35702 — the footer's calculation, saved on the open
             // view (ruling 7045525672): a personal view at once; a shared one,
             // by a reader who may edit it, as a draft through the view panel's
@@ -1461,11 +1520,17 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 <PersonalViewNameDialog
                     open={!!personalViewDialog}
                     onOpenChange={(open) => { if (!open) setPersonalViewDialog(null); }}
-                    title={t('view.rename', { defaultValue: 'Rename' })}
-                    initialName={renamingPersonalView?.label ?? ''}
-                    onSubmit={(name) => (personalViewDialog
+                    title={personalViewDialog?.mode === 'saveAs'
+                        ? t('console.objectView.draft.saveAsMyView')
+                        : t('view.rename', { defaultValue: 'Rename' })}
+                    initialName={personalViewDialog?.mode === 'saveAs'
+                        ? t('console.objectView.draft.copyName', { name: activeView?.label ?? '' })
+                        : renamingPersonalView?.label ?? ''}
+                    onSubmit={(name) => (personalViewDialog?.mode === 'rename'
                         ? handleRenamePersonalView(personalViewDialog.viewId, name)
-                        : Promise.resolve(false))}
+                        : personalViewDialog?.mode === 'saveAs'
+                            ? handleSaveAsMyView(name)
+                            : Promise.resolve(false))}
                     t={t}
                 />
              </div>

@@ -2636,11 +2636,19 @@ const de = {
       viewNameInvalid: "Verwenden Sie Kleinbuchstaben, Ziffern und Unterstriche; beginnen Sie mit einem Buchstaben oder Unterstrich.",
       systemViewReadonly: "Systemansicht — im Code definiert, schreibgeschützt.",
       cannotEditMetaView: "Diese Ansicht ist integriert und im Code definiert – sie kann nicht geändert werden.",
-      resetView: "Auf Ansicht zurücksetzen",
-      resetViewTitle: "Stellt die eigenen Filter, Suche, Sortierung, Gruppierung, Spaltenanordnung, ausgeblendeten Felder, Dichte, Layout, Zeilenfarbe, Zeilennummern und Inline-Bearbeitung dieser Ansicht wieder her. Angeheftete Ansichten, Favoriten und die Art, wie Datensätze geöffnet werden, bleiben unverändert. Nur Ihre Liste ändert sich.",
+      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      draft: {
+        discard: "Verwerfen",
+        discardTitle: "Setzt die Liste auf den Stand der Ansicht zurück: Filter, Sortierung, Gruppierung, Spalten und Layout. Spaltenbreiten und Zeilenhöhe bleiben.",
+        save: "Speichern",
+        heading: "Ungespeicherte Änderungen",
+        partSeparator: ", ",
+        saveToView: "In dieser Ansicht speichern",
+        saveAsMyView: "Als meine Ansicht speichern",
+        copyName: "{{name}} (Kopie)",
+        saved: "Gespeichert",
+      },
       linkFilterRefused: 'Der Filter dieses Links wurde nicht angewendet. Er nennt ein Feld, nach dem Sie hier nicht filtern können, daher zeigt die Liste die Ansicht ohne ihn.',
-      personalized: "Personalisiert",
-      personalizedHeading: "Ihre Liste weicht von dieser Ansicht ab bei",
       personalizedParts: {
         filters: "Filter",
         search: "Suche",
