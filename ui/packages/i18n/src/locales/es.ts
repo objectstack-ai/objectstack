@@ -2849,6 +2849,7 @@ const es = {
     },
     localeSwitcher: {
       label: "Idioma",
+      appContentDefault: "El contenido de la app se muestra en el idioma predeterminado",
     },
     system: {
       aiApprovals: {

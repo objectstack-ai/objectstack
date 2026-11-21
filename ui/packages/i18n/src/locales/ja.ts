@@ -2774,6 +2774,7 @@ const ja = {
     },
     localeSwitcher: {
       label: "言語",
+      appContentDefault: "アプリの内容は既定の言語で表示されます",
     },
     system: {
       aiApprovals: {

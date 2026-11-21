@@ -2772,6 +2772,7 @@ const ko = {
     },
     localeSwitcher: {
       label: "언어",
+      appContentDefault: "앱 콘텐츠는 기본 언어로 표시됩니다",
     },
     system: {
       aiApprovals: {

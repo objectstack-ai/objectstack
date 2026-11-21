@@ -3075,6 +3075,7 @@ const ar = {
     },
     localeSwitcher: {
       label: "اللغة",
+      appContentDefault: "يظهر محتوى التطبيق باللغة الافتراضية",
     },
     system: {
       aiApprovals: {

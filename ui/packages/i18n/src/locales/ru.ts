@@ -2931,6 +2931,7 @@ const ru = {
     },
     localeSwitcher: {
       label: "Язык",
+      appContentDefault: "Содержимое приложения показывается на языке по умолчанию",
     },
     system: {
       aiApprovals: {

@@ -7,9 +7,9 @@ import { test, expect, type Page } from '@playwright/test';
  * The record's name opens the full page; the icon shown beside the name while
  * the row is hovered (「在侧边打开」) opens the side drawer over the list, which
  * stays. The page remembers the list it came from (its view, its order, the
- * loaded window) in the history entry, so ↑ / ↓ walk that list, the counter
- * names the view, and a reload keeps all of it. On a phone (a coarse pointer,
- * no hover) there is no icon: the name opens the page.
+ * loaded window) in the history entry, so ↑ / ↓ walk that list, 「第 N 条，共 M
+ * 条 · 视图名」 names it, and a reload keeps all of it. On a phone (a coarse
+ * pointer, no hover) there is no icon: the name opens the page.
  *
  * The unit pins of each path are beside the code
  * (`ObjectView.recordOpenPath-35854.test.tsx`, `recordDrawerStack-26679`); this
@@ -24,7 +24,7 @@ const NAME = '[data-testid="primary-field-link"]';
 const ICON = '[data-testid="record-open-in-panel"]';
 const CARD = '[data-record-drawer-card]';
 const POSITION = '[data-record-top-bar-position]';
-const TITLE = '[data-record-top-bar] h1';
+const SCOPE = '[data-record-top-bar-scope]';
 
 async function openList(page: Page) {
   await page.goto(LIST);
@@ -45,23 +45,24 @@ test.describe('record open path at 1280 px', () => {
 
     await expect(page).toHaveURL(recordPath);
     await expect(page.locator(CARD)).toHaveCount(0);
-    await expect(page.locator(TITLE)).toContainText(name);
-    await expect(page.locator(POSITION)).toHaveText(`2 / ${total}`);
-    await expect(page.locator(POSITION)).toHaveAttribute('aria-label', `2 of ${total} in All Records`);
+    await expect(page.locator('[data-record-top-bar-title]')).toContainText(name);
+    await expect(page.locator(POSITION)).toHaveText(`2 of ${total}`);
+    await expect(page.locator(SCOPE)).toHaveText('All Records');
 
     // The provenance lives in the history entry: a reload keeps it.
     await page.reload();
-    await expect(page.locator(TITLE)).toContainText(name);
-    await expect(page.locator(POSITION)).toHaveText(`2 / ${total}`);
-    await expect(page.locator(POSITION)).toHaveAttribute('aria-label', `2 of ${total} in All Records`);
+    await expect(page.locator('[data-record-top-bar-title]')).toContainText(name);
+    await expect(page.locator(POSITION)).toHaveText(`2 of ${total}`);
+    await expect(page.locator(SCOPE)).toHaveText('All Records');
 
-    // ↓ walks the list in its order.
+    // ↓ walks the list in its order, still named.
+    const third = (await page.evaluate(() => (history.state?.usr?.from?.siblings ?? [])[2]?.label ?? null)) as string | null;
     await page.locator('[data-record-top-bar-step="next"]').click();
-    await expect(page.locator(POSITION)).toHaveText(`3 / ${total}`);
-    await expect(page.locator(TITLE)).not.toContainText(name);
+    await expect(page.locator(POSITION)).toHaveText(`3 of ${total}`);
+    if (third) await expect(page.locator('[data-record-top-bar-title]')).toContainText(third);
 
-    // The object crumb goes back to the list.
-    await page.getByTestId('record-page-crumb').click();
+    // The view's name goes back to the list, as it was left.
+    await page.locator(SCOPE).click();
     await expect(page).toHaveURL(new RegExp(`${LIST.replace(/\./g, '\\.')}(/view/[^/?#]+)?([?#].*)?$`));
     await expect(page.locator(NAME).nth(2)).toBeVisible();
   });
@@ -83,7 +84,7 @@ test.describe('record open path at 1280 px', () => {
     await expect(page).toHaveURL(/[?&]recordId=/);
     const card = page.locator(CARD);
     await expect(card).toBeVisible();
-    await expect(card.locator(TITLE)).toContainText(name);
+    await expect(card.locator('[data-record-top-bar-title]')).toContainText(name);
     // The list stays under it.
     await expect(page.locator(NAME).first()).toBeVisible();
 
@@ -95,17 +96,18 @@ test.describe('record open path at 1280 px', () => {
     expect(Math.round(vp.height - (box.y + box.height))).toBe(8);
     expect(parseFloat(await card.evaluate((e) => getComputedStyle(e).borderTopLeftRadius))).toBeGreaterThanOrEqual(8);
 
-    // No full-width state: 「整页打开」 and close, no maximize toggle.
+    // No full-width state: the frame holds 「整页打开」 and close, nothing else.
+    const frame = card.locator('[data-record-top-bar-frame] button');
+    await expect(frame).toHaveCount(2);
     await expect(card.getByTestId('record-pane-open-page')).toBeVisible();
-    await expect(card.getByRole('button', { name: /full width|maximi[sz]e|restore/i })).toHaveCount(0);
 
     // 「整页打开」 leaves for the page, which still knows its list.
     await card.getByTestId('record-pane-open-page').click();
     await expect(page).toHaveURL(recordPath);
-    await expect(page.locator(POSITION)).toHaveAttribute('aria-label', /in All Records$/);
+    await expect(page.locator(SCOPE)).toHaveText('All Records');
   });
 
-  test('a page opened with no list behind it has no stepper; its object crumb goes to the object list', async ({ page }) => {
+  test('a page opened with no list behind it has no stepper; its close goes to the object list', async ({ page }) => {
     await openList(page);
     const href = await page.locator(NAME).nth(1).getAttribute('href');
     expect(href).toBeTruthy();
@@ -113,12 +115,12 @@ test.describe('record open path at 1280 px', () => {
     // A direct visit: a pasted link, a notification, a search hit.
     await page.goto(href!);
 
-    await expect(page.locator(TITLE)).toBeVisible();
-    await expect(page.locator('[data-record-top-bar-step]')).toHaveCount(0);
+    await expect(page.locator('[data-record-top-bar-rows="2"]')).toBeVisible();
+    await expect(page.locator('[data-record-top-bar-stepper]')).toHaveCount(0);
     await expect(page.locator(POSITION)).toHaveCount(0);
     await expect(page.getByTestId('record-page-crumb')).toBeVisible();
 
-    await page.getByTestId('record-page-crumb').click();
+    await page.getByTestId('record-page-close').click();
     await expect(page.locator(NAME).nth(2)).toBeVisible();
   });
 });
