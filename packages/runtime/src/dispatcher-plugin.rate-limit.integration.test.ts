@@ -25,6 +25,9 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { LiteKernel, Plugin, PluginContext } from '@objectstack/core';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import type { IHttpServer } from '@objectstack/spec/contracts';
+// Paid at collection, not inside a clocked case: the dispatcher's package
+// store reaches this dependency through a dynamic import.
+import '@objectstack/metadata';
 
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 

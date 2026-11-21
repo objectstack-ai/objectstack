@@ -27,6 +27,9 @@ import { AuthPlugin } from './auth-plugin';
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import { inviteForAudienceGate } from './audience-gate-test-support';
 import type { PluginContext } from '@objectstack/core';
+// Paid at collection, not inside a clocked case: SSO discovery reaches this
+// entry through a dynamic import.
+import '@objectstack/core/egress';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const PASSWORD = 'S3cure!Passw0rd-24739';
