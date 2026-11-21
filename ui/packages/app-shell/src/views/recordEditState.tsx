@@ -41,6 +41,7 @@ import {
   type BodyTableEditHandle,
   type RecordEditSession,
 } from '@object-ui/plugin-form';
+import { isUntouchedNewRow } from '@object-ui/fields';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -50,6 +51,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  toast,
 } from '@object-ui/components';
 import { useInlineEdit, type RelatedRecordActionsValue } from '@object-ui/react';
 import { RecordBodyTableEditorSlotContext, type RecordBodyTableEditorSlot } from '@object-ui/plugin-detail';
@@ -175,6 +177,11 @@ export interface RecordEditStateControllerProps {
   readOnlyNotice: string;
   /** The question asked before unsaved edits are dropped. */
   unsavedMessage: string;
+  /**
+   * The notice after a save that skipped `count` lines Add started on their
+   * defaults and nobody edited (objectstack#35940, ruling 7056413638).
+   */
+  untouchedNotSaved: (count: number) => string;
   children: React.ReactNode;
 }
 
@@ -198,6 +205,7 @@ export const RecordEditStateController: React.FC<RecordEditStateControllerProps>
   bodyTablesReadOnly,
   readOnlyNotice,
   unsavedMessage,
+  untouchedNotSaved,
   children,
 }) => {
   const inline = useInlineEdit();
@@ -294,12 +302,19 @@ export const RecordEditStateController: React.FC<RecordEditStateControllerProps>
         })
       : [];
     const built = buildRecordEditBatch(objectName, String(recordId), draft, tables);
+    // objectstack#35940 — the lines the batch skips untouched: never written,
+    // and said so once the save has landed (or had nothing else to write).
+    const skipped = tables.reduce((n, table) => n + table.rows.filter(isUntouchedNewRow).length, 0);
+    const sayWhatWasSkipped = () => {
+      if (skipped > 0) toast.info(untouchedNotSaved(skipped));
+    };
     // An untouched record writes no update of its own: op 0 goes when the draft is empty.
     const hasDraft = Object.keys(draft).length > 0;
     const ops = hasDraft ? built.ops : built.ops.slice(1);
     const owners = hasDraft ? built.owners : built.owners.slice(1);
     if (ops.length === 0) {
       await finish();
+      sayWhatWasSkipped();
       return;
     }
     setSaving(true);
@@ -312,6 +327,7 @@ export const RecordEditStateController: React.FC<RecordEditStateControllerProps>
         await runBatchTransaction(dataSource, ops);
       }
       await finish();
+      sayWhatWasSkipped();
     } catch (err) {
       const refusal = attributeRecordEditRefusal(err, ops, owners);
       inline.setFieldErrors(refusal.fieldErrors);
@@ -323,7 +339,7 @@ export const RecordEditStateController: React.FC<RecordEditStateControllerProps>
       inline.setSaving(false);
       setSaving(false);
     }
-  }, [inline, saving, dataSource, objectName, recordId, bodyTablesEditable, finish]);
+  }, [inline, saving, dataSource, objectName, recordId, bodyTablesEditable, finish, untouchedNotSaved]);
 
   const cancel = useCallback(() => {
     inline?.cancel();

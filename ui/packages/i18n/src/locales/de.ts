@@ -219,6 +219,9 @@ const de = {
       notLoaded: "Die Positionen dieses Datensatzes wurden nicht geladen.",
       loadFailed: "Positionen konnten nicht geladen werden",
       saveFailed: "Positionen konnten nicht gespeichert werden",
+      untouchedNotSaved: "{{count}} leere Position wurde nicht gespeichert",
+      untouchedNotSaved_one: "{{count}} leere Position wurde nicht gespeichert",
+      untouchedNotSaved_other: "{{count}} leere Positionen wurden nicht gespeichert",
       noChildObject: "Für dieses Panel ist kein untergeordnetes Objekt konfiguriert: Setzen Sie {{property}} auf das Objekt, dessen Zeilen es auflistet.",
     },
     keepEditing: "Weiter bearbeiten",
@@ -257,6 +260,10 @@ const de = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: 'Pflichtfelder ausfüllen',
+    requiredPromptDescription: 'Durch diese Änderung werden die folgenden Felder zu Pflichtfeldern. Füllen Sie sie aus, um die Änderung zu speichern.',
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: '{{name}} öffnen',
@@ -328,6 +335,8 @@ const de = {
     options: {
       empty: "Keine Optionen verfügbar",
       selectFirst: "Zuerst {{fields}} auswählen",
+      search: "Suchen…",
+      noMatches: "Keine passenden Optionen",
     },
     objectRef: {
       loading: "Objekte werden geladen…",
@@ -412,6 +421,8 @@ const de = {
     datePicker: {
       today: "Heute",
       tomorrow: "Morgen",
+      nextWeek: "Nächste Woche",
+      clearPick: "Leeren",
       clear: "Datum löschen",
       openCalendar: "Kalender öffnen",
       time: "Uhrzeit",
@@ -426,6 +437,11 @@ const de = {
     },
     tags: {
       placeholder: "Tippen und mit der Eingabetaste hinzufügen…",
+      add: "„{{value}}“ hinzufügen",
+    },
+    color: {
+      swatches: "Farben",
+      custom: "Eigene Farbe",
     },
     // objectui#4028 — `AddressField`'s five sub-labels.
     address: {
@@ -2426,6 +2442,7 @@ const de = {
       progress: "{{done}} von {{total}} erledigt",
       dismiss: "Checkliste ausblenden",
       showDone: "Erledigte anzeigen ({{done}})",
+      showDoneSplit: "Erledigte anzeigen ({{required}} Pflicht · {{optional}} optional)",
       hideDone: "Erledigte ausblenden",
       optional: "Optional",
       set: "Festlegen",
@@ -3296,6 +3313,18 @@ const de = {
     docConflictCandidates: 'Pakete, die dieses Dokument bereitstellen',
     documentation: 'Dokumentation',
     uncategorized: 'Nicht kategorisiert',
+    backToApp: 'Zurück zu {{app}}',
+    searchDocs: 'Dokumentation durchsuchen',
+    noDocsMatch: 'Keine passenden Artikel.',
+    docsNavigation: 'Dokumentationsnavigation',
+    docsBreadcrumb: 'Dokumentationspfad',
+    articlePager: 'Vorheriger und nächster Artikel',
+    previousArticle: 'Zurück',
+    nextArticle: 'Weiter',
+    firstInBook: 'Dies ist der erste Artikel dieses Handbuchs',
+    lastInBook: 'Dies ist der letzte Artikel dieses Handbuchs',
+    enlargeDiagram: 'Vergrößern',
+    diagram: 'Diagramm',
     about: 'Über',
     aboutTitle: 'Über diese Konsole',
     aboutDescription: 'Der Build, aus dem diese Konsole kompiliert wurde.',

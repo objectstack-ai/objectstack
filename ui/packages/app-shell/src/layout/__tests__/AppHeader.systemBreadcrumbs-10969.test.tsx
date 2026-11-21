@@ -199,3 +199,29 @@ describe('AppHeader — the console app\'s system/* breadcrumbs (objectui#10969)
     expect(screen.getAllByText('Some Host Page').length).toBeGreaterThan(0);
   });
 });
+
+describe('AppHeader — an app\'s docs pages read 「APP / Documentation」 (objectstack#35424)', () => {
+  it.each(['/apps/setup/docs', '/apps/setup/docs/manual', '/apps/setup/docs/manual/intro'])(
+    'zh: %s reads 文档 after the app, in the session language',
+    (path) => {
+      renderAt(path, ZH);
+      expect(screen.getAllByText('文档').length).toBeGreaterThan(0);
+      expect(screen.queryAllByText('Documentation')).toHaveLength(0);
+    },
+  );
+
+  it('en: a docs article reads Documentation', () => {
+    renderAt('/apps/setup/docs/manual/intro', EN);
+    expect(screen.getAllByText('Documentation').length).toBeGreaterThan(0);
+  });
+
+  it('a docs page draws no sidebar toggle (there is no app menu): its slot is held empty', () => {
+    renderAt('/apps/setup/docs/manual/intro', EN);
+    expect(screen.getByTestId('app-bar-trigger-slot')).toBeInTheDocument();
+  });
+
+  it('control: a system page keeps the toggle, not the empty slot', () => {
+    renderAt('/apps/setup/system/settings', EN);
+    expect(screen.queryByTestId('app-bar-trigger-slot')).toBeNull();
+  });
+});

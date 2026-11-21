@@ -24,7 +24,7 @@ import '@testing-library/jest-dom';
 import React from 'react';
 
 import { ObjectGrid } from '../ObjectGrid';
-import { requestListSelection } from '../listPageBarSlot';
+import { requestListSelection } from '../listPageScope';
 import { ActionProvider, SchemaRendererProvider } from '@object-ui/react';
 import { registerAllFields } from '@object-ui/fields';
 
@@ -136,6 +136,25 @@ describe('card list selection on a phone (objectstack#35883)', () => {
     for (const card of screen.getAllByTestId('grid-mobile-card')) {
       expect(card).toHaveAttribute('aria-pressed', 'false');
     }
+    // The selection bar (objectstack#35678) shows 「0 selected」 and its 「×」,
+    // with no action to run on nothing; 「×」 ends the selection.
+    const bar = screen.getByTestId('bulk-actions-bar');
+    expect(within(bar).getByTestId('bulk-selection-count')).toHaveTextContent('0');
+    expect(within(bar).queryAllByRole('button').map((b) => b.getAttribute('data-testid'))).toEqual(['bulk-selection-clear']);
+    fireEvent.click(within(bar).getByTestId('bulk-selection-clear'));
+    expect(screen.queryAllByTestId('grid-card-check')).toHaveLength(0);
+    expect(screen.queryByTestId('bulk-actions-bar')).toBeNull();
+  });
+
+  it('a long press shows the selection bar at the bottom of the cards with 「1 selected」', async () => {
+    renderCards();
+    const acme = await cardOf('Acme');
+    fireEvent.pointerDown(acme, { clientX: 10, clientY: 10 });
+    await hold(600);
+    fireEvent.pointerUp(acme);
+    const anchor = screen.getByTestId('floating-selection-bar');
+    expect(within(anchor).getByTestId('bulk-selection-count')).toHaveTextContent('1');
+    expect(screen.getByTestId('object-grid-card-scroller').nextElementSibling).toBe(anchor);
   });
 
   it('a keyboard reaches the card: Enter opens it, and while selecting Space toggles it', async () => {

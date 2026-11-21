@@ -233,6 +233,13 @@ const ar = {
       notLoaded: "لم يتم تحميل بنود هذا السجل.",
       loadFailed: "تعذّر تحميل البنود",
       saveFailed: "تعذّر حفظ البنود",
+      untouchedNotSaved: "لم يُحفظ {{count}} سطر فارغ",
+      untouchedNotSaved_zero: "لم يُحفظ {{count}} سطر فارغ",
+      untouchedNotSaved_one: "لم يُحفظ {{count}} سطر فارغ",
+      untouchedNotSaved_two: "لم يُحفظ سطران فارغان ({{count}})",
+      untouchedNotSaved_few: "لم تُحفظ {{count}} أسطر فارغة",
+      untouchedNotSaved_many: "لم يُحفظ {{count}} سطرًا فارغًا",
+      untouchedNotSaved_other: "لم يُحفظ {{count}} سطر فارغ",
       noChildObject: "لم يُكوَّن كائن فرعي لهذه اللوحة: عيّن {{property}} إلى الكائن الذي تسرد صفوفه.",
     },
     keepEditing: "متابعة التحرير",
@@ -271,6 +278,10 @@ const ar = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: 'أكمل الحقول المطلوبة',
+    requiredPromptDescription: 'هذا التغيير يجعل الحقول أدناه مطلوبة. املأها لحفظه.',
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: 'فتح {{name}}',
@@ -346,6 +357,8 @@ const ar = {
     options: {
       empty: "لا توجد خيارات متاحة",
       selectFirst: "اختر {{fields}} أولاً",
+      search: "بحث…",
+      noMatches: "لا توجد خيارات مطابقة",
     },
     objectRef: {
       loading: "جارٍ تحميل الكائنات…",
@@ -430,6 +443,8 @@ const ar = {
     datePicker: {
       today: "اليوم",
       tomorrow: "غدًا",
+      nextWeek: "الأسبوع القادم",
+      clearPick: "مسح",
       clear: "مسح التاريخ",
       openCalendar: "فتح التقويم",
       time: "الوقت",
@@ -444,6 +459,11 @@ const ar = {
     },
     tags: {
       placeholder: "اكتب واضغط Enter للإضافة…",
+      add: "إضافة «{{value}}»",
+    },
+    color: {
+      swatches: "الألوان",
+      custom: "لون مخصص",
     },
     // objectui#4028 — `AddressField`'s five sub-labels.
     address: {
@@ -2702,10 +2722,11 @@ const ar = {
     },
     firstRunChecklist: {
       title: "جهّز نظامك",
-      description: "ما ينبغي إعداده قبل أن يبدأ زملاؤك. يمكن تغيير كل عنصر لاحقًا في Setup.",
+      description: "ما ينبغي إعداده قبل أن يبدأ زملاؤك. يمكن تغيير كل عنصر لاحقًا في الإعداد.",
       progress: "اكتمل {{done}} من {{total}}",
       dismiss: "إخفاء القائمة",
       showDone: "عرض العناصر المكتملة ({{done}})",
+      showDoneSplit: "عرض العناصر المكتملة (إلزامية {{required}} · اختيارية {{optional}})",
       hideDone: "إخفاء العناصر المكتملة",
       optional: "اختياري",
       set: "تعيين",
@@ -2750,13 +2771,13 @@ const ar = {
       aiProvider: {
         title: 'إعداد الذكاء الاصطناعي المدمج',
         todo: 'لا يوجد مزوّد ذكاء اصطناعي قيد الاستخدام بعد. اختر مزوّدًا وأضف مفتاحه.',
-        doneSettings: '{{provider}}، مُعيَّن في Setup.',
+        doneSettings: '{{provider}}، مُعيَّن في الإعداد.',
         doneEnvironment: '{{provider}}، تم اكتشافه من بيئة الخادم.',
         action: 'إعداد',
       },
       connectAssistant: {
         title: 'ربط مساعد ذكاء اصطناعي خارجي',
-        todo: 'استخدم هذا النظام باسمك أنت من Claude وDoubao والمساعدين المشابهين عبر MCP. يُعدّ الذكاء الاصطناعي المدمج بشكل منفصل، في Setup ← الذكاء الاصطناعي والتضمين (Embedder).',
+        todo: 'استخدم هذا النظام باسمك أنت من Claude وDoubao والمساعدين المشابهين عبر MCP. يُعدّ الذكاء الاصطناعي المدمج بشكل منفصل، في الإعداد ← الذكاء الاصطناعي والتضمين (Embedder).',
         done: 'تم ربط مساعد ذكاء اصطناعي أو مفتاح API خاص بك.',
         action: 'ربط',
       },
@@ -3595,6 +3616,18 @@ const ar = {
     docConflictCandidates: 'الحزم التي توفّر هذا المستند',
     documentation: 'الوثائق',
     uncategorized: 'غير مصنف',
+    backToApp: 'العودة إلى {{app}}',
+    searchDocs: 'البحث في المستندات',
+    noDocsMatch: 'لا توجد مقالات مطابقة.',
+    docsNavigation: 'التنقل في المستندات',
+    docsBreadcrumb: 'مسار المستندات',
+    articlePager: 'المقالة السابقة والتالية',
+    previousArticle: 'السابق',
+    nextArticle: 'التالي',
+    firstInBook: 'هذه أول مقالة في هذا الدليل',
+    lastInBook: 'هذه آخر مقالة في هذا الدليل',
+    enlargeDiagram: 'تكبير',
+    diagram: 'مخطط',
     about: 'حول',
     aboutTitle: 'حول وحدة التحكم هذه',
     aboutDescription: 'الإصدار الذي بُنيت منه وحدة التحكم هذه.',

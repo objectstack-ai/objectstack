@@ -11,7 +11,7 @@
  * picker for a `date` / `datetime` field, through `FieldEditWidget`, and the
  * typed value reaches the submit.
  *
- * The dialog is a form-shaped host: the user types, then presses "Move card",
+ * The dialog is a form-shaped host: the user types, then presses "Save",
  * which takes focus — and that blur is where the picker reads its text, as on
  * the action-param and bulk dialogs. Nothing in the dialog changed; this pins
  * that the inline factory's new face rides the dialog's existing seam.
@@ -33,12 +33,12 @@ async function pickerBox(): Promise<HTMLInputElement> {
   });
 }
 
-/** Type into the box, then press "Move card" the way a pointer does: focus leaves the box first. */
+/** Type into the box, then press "Save" the way a pointer does: focus leaves the box first. */
 function typeThenMove(input: HTMLInputElement, text: string) {
   input.focus();
   fireEvent.change(input, { target: { value: text } });
   fireEvent.blur(input);
-  fireEvent.click(screen.getByText('Move card'));
+  fireEvent.click(screen.getByText('Save'));
 }
 
 describe('RequiredFieldsDialog — date / datetime draw the platform picker (objectui#12664)', () => {

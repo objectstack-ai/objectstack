@@ -367,6 +367,22 @@ through the host's data source (`dataSource.update`) with no callback to wire.
   editor. There is no `editable` key on `ListColumn`.
 - **Visual feedback**: editable cells show a hover state, and the input is
   focused and selected when editing begins
+- **The editor floats over its cell** (objectstack#35688): it opens on a layer
+  anchored to the cell's top-left corner, at least as wide as the column and
+  wider where its field type needs it (an address form, a record picker), so
+  the row keeps its height and no other column moves. Near the bottom of the
+  window the layer opens upward, near the right edge it shifts left, and a
+  cell half hidden behind a frozen column or the header is scrolled into view
+  first. Scrolling the cell out of sight commits the edit.
+- **Pickers open ready to pick** (objectstack#35688): a single select or
+  status shows its option list at once, with a search box that filters as you
+  type; the arrow keys and Enter (or a click) pick, and the pick is saved. A
+  multi-select is the same list with check marks, and tags list the field's
+  tags with an "Add" row for new text; both save when you move on. A date or
+  date-time opens its calendar while the value stays typeable in its box, with
+  Today, Tomorrow, Next week (seven days from today) and Clear; on a date, a
+  day or a quick pick saves. A time opens the browser's time picker, and a
+  colour offers swatches beside its hex box (a swatch saves, Escape leaves).
 
 To own persistence in a React host, supply `onCellChange` as a **component
 prop** — it is not a schema key.
@@ -383,6 +399,11 @@ object and the view does not declare `userActions.editInline: false`, and
 - **A click selects** a cell (a ring around it); it neither edits nor opens the
   record. A link a cell draws (the name, a lookup, a phone or an email) keeps
   its own click. On a touch screen a tap opens the record.
+- **A cut-off value shows in full** when its cell is selected: a long text, a
+  multi-line text or a list of tags that the column truncates opens on a
+  layer over the cell, wrapped, scrolling inside past a few lines. Escape, an
+  arrow key or a click elsewhere closes it; Enter or a double-click turns it
+  into the editor in the same place and at the same size.
 - **Editing** starts on a double-click, Enter or F2 (the value kept, caret at
   its end), or by typing, which replaces the value; an input method's
   composition is kept whole. Backspace or Delete opens an empty editor and
@@ -393,7 +414,7 @@ object and the view does not declare `userActions.editInline: false`, and
   elsewhere commits.
 - **Selected cell keys:** the arrows and Tab move the selection; Space is typed
   like any other key and opens the editor (a checkbox cell flips instead, as
-  does a second click on it); Ctrl/Cmd+C copies; Ctrl/Cmd+V converts the text
+  do Enter and a second click on it); Ctrl/Cmd+C copies; Ctrl/Cmd+V converts the text
   to the field's type and commits it; Escape clears the selection. The record
   opens from the name link, or a tap on a touch screen.
 - **A cell that opens no editor says why** on the cell: the field is read-only,
@@ -435,6 +456,19 @@ row whose new value would sort it elsewhere stays in place until the next load
   trigger related automation."). Cancel writes nothing and the cell keeps the
   value it had; Change saves it as any commit is saved. The confirm does not
   list the flows. A host asks this through `GridCellSelection.confirmCommit`.
+- **A change that makes other fields required asks for them** (objectstack#35956).
+  When the new value makes a field's `requiredWhen` true while that field is
+  still empty (a win reason on "Won", say), nothing is written yet: a dialog
+  names the record and the change and asks for those fields, with the editors
+  the record form uses, whether or not the view draws them as columns. A value
+  typed there that makes one more field required adds it. Save writes the cell
+  and the typed values as one update; Cancel writes nothing and the cell keeps
+  its value. A refusal of that update stays in the dialog, under the field it
+  names. That dialog is the confirmation, so a state-machine field does not ask
+  twice. A field that has a value, is hidden or read-only, the reader may not
+  write, or has no in-place editor (a file, rich text) is not asked for: the
+  change is saved and refused as before. The kanban drop and the record page's
+  inline Save open the same dialog (`RequiredFieldsDialog` in `@object-ui/fields`).
 - **The record drawer follows.** A record open in the list's drawer is read
   again when a list cell saves it. If the drawer holds unsaved edits of its own,
   those stay as typed, the drawer's save bar says the record was changed

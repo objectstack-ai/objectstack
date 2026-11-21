@@ -231,6 +231,9 @@ const zhHant = {
       notLoaded: '此記錄的明細行尚未載入。',
       loadFailed: '明細行載入失敗',
       saveFailed: '明細行儲存失敗',
+      untouchedNotSaved: '{{count}} 行空白明細未儲存',
+      untouchedNotSaved_one: '{{count}} 行空白明細未儲存',
+      untouchedNotSaved_other: '{{count}} 行空白明細未儲存',
       noChildObject: '此面板未配置子物件：請將 {{property}} 設為其所列行所屬的物件。',
     },
     keepEditing: '繼續編輯',
@@ -267,6 +270,10 @@ const zhHant = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: '補填必填欄位',
+    requiredPromptDescription: '這次改動讓下面的欄位變成必填，填好後和改動一起儲存。',
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: '開啟 {{name}}',
@@ -338,6 +345,8 @@ const zhHant = {
     options: {
       empty: '暫無可選項',
       selectFirst: '請先選擇{{fields}}',
+      search: '搜尋…',
+      noMatches: '沒有匹配的選項',
     },
     objectRef: {
       loading: '正在載入物件…',
@@ -422,6 +431,8 @@ const zhHant = {
     datePicker: {
       today: '今天',
       tomorrow: '明天',
+      nextWeek: '下週',
+      clearPick: '清空',
       clear: '清除日期',
       openCalendar: '開啟日曆',
       time: '時間',
@@ -436,6 +447,11 @@ const zhHant = {
     },
     tags: {
       placeholder: '輸入後回車新增…',
+      add: '新增“{{value}}”',
+    },
+    color: {
+      swatches: '顏色',
+      custom: '自定義顏色',
     },
     // objectui#4028 — `AddressField`'s five sub-labels. These were English
     // string literals with no key, and this pack is the one the issue was
@@ -2162,10 +2178,11 @@ const zhHant = {
     },
     firstRunChecklist: {
       title: '完成初始設定',
-      description: '同事開始使用之前，先設定好這幾項。每一項之後都可以在 Setup 中修改。',
+      description: '同事開始使用之前，先設定好這幾項。每一項之後都可以在系統設定中修改。',
       progress: '已完成 {{done}}/{{total}}',
       dismiss: '隱藏清單',
       showDone: '顯示已完成的項（{{done}}）',
+      showDoneSplit: '顯示已完成的項（必做 {{required}} · 可選 {{optional}}）',
       hideDone: '收起已完成的項',
       optional: '可選',
       set: '設定',
@@ -2210,13 +2227,13 @@ const zhHant = {
       aiProvider: {
         title: '設定內建 AI',
         todo: '尚未啟用 AI 服務商。請選擇一個並填寫其金鑰。',
-        doneSettings: '{{provider}}，在 Setup 中設定。',
+        doneSettings: '{{provider}}，已在系統設定中配置。',
         doneEnvironment: '{{provider}}，從伺服器環境中檢測到。',
         action: '去設定',
       },
       connectAssistant: {
         title: '連線外部 AI 助手',
-        todo: '通過 MCP，在 Claude、豆包等助手裡以你自己的身份使用本系統。內建 AI 需另行在 Setup → AI 與向量化 中設定。',
+        todo: '通過 MCP，在 Claude、豆包等助手裡以你自己的身份使用本系統。內建 AI 需另行在「系統設定 → AI 與向量化」中設定。',
         done: '你已連線了 AI 助手或 API 金鑰。',
         action: '連線',
       },
@@ -3377,6 +3394,18 @@ const zhHant = {
     docConflictCandidates: '提供此文件的包',
     documentation: '文件',
     uncategorized: '未分類',
+    backToApp: '返回{{app}}',
+    searchDocs: '搜尋文件',
+    noDocsMatch: '沒有匹配的篇目。',
+    docsNavigation: '文件導航',
+    docsBreadcrumb: '文件路徑',
+    articlePager: '上一篇和下一篇',
+    previousArticle: '上一篇',
+    nextArticle: '下一篇',
+    firstInBook: '這是本手冊第一篇',
+    lastInBook: '這是本手冊最後一篇',
+    enlargeDiagram: '放大',
+    diagram: '圖示',
     about: '關於',
     aboutTitle: '關於此控制台',
     aboutDescription: '此控制台編譯所用的構建。',

@@ -226,6 +226,10 @@ const es = {
       notLoaded: "Las líneas de detalle de este registro no se han cargado.",
       loadFailed: "No se pudieron cargar las líneas de detalle",
       saveFailed: "No se pudieron guardar las líneas de detalle",
+      untouchedNotSaved: "{{count}} línea vacía no se guardó",
+      untouchedNotSaved_one: "{{count}} línea vacía no se guardó",
+      untouchedNotSaved_many: "{{count}} de líneas vacías no se guardaron",
+      untouchedNotSaved_other: "{{count}} líneas vacías no se guardaron",
       noChildObject: "Este panel no tiene configurado ningún objeto secundario: establezca {{property}} en el objeto cuyas filas enumera.",
     },
     keepEditing: "Seguir editando",
@@ -264,6 +268,10 @@ const es = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: 'Completa los campos obligatorios',
+    requiredPromptDescription: 'Este cambio hace obligatorios los campos de abajo. Rellénalos para guardarlo.',
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: 'Abrir {{name}}',
@@ -336,6 +344,8 @@ const es = {
     options: {
       empty: "No hay opciones disponibles",
       selectFirst: "Seleccione primero {{fields}}",
+      search: "Buscar…",
+      noMatches: "No hay opciones coincidentes",
     },
     objectRef: {
       loading: "Cargando objetos…",
@@ -420,6 +430,8 @@ const es = {
     datePicker: {
       today: "Hoy",
       tomorrow: "Mañana",
+      nextWeek: "Próxima semana",
+      clearPick: "Borrar",
       clear: "Borrar fecha",
       openCalendar: "Abrir calendario",
       time: "Hora",
@@ -434,6 +446,11 @@ const es = {
     },
     tags: {
       placeholder: "Escriba y pulse Intro para añadir…",
+      add: "Añadir «{{value}}»",
+    },
+    color: {
+      swatches: "Colores",
+      custom: "Color personalizado",
     },
     // objectui#4028 — `AddressField`'s five sub-labels.
     address: {
@@ -2494,10 +2511,11 @@ const es = {
     },
     firstRunChecklist: {
       title: "Prepare su sistema",
-      description: "Lo que conviene configurar antes de que empiecen sus compañeros. Cada elemento se puede cambiar más tarde en Setup.",
+      description: "Lo que conviene configurar antes de que empiecen sus compañeros. Cada elemento se puede cambiar más tarde en Configuración.",
       progress: "{{done}} de {{total}} completados",
       dismiss: "Ocultar lista",
       showDone: "Mostrar completados ({{done}})",
+      showDoneSplit: "Mostrar completados ({{required}} obligatorios · {{optional}} opcionales)",
       hideDone: "Ocultar completados",
       optional: "Opcional",
       set: "Configurar",
@@ -2542,13 +2560,13 @@ const es = {
       aiProvider: {
         title: 'Configurar la IA integrada',
         todo: 'Todavía no hay ningún proveedor de IA en uso. Elija uno y añada su clave.',
-        doneSettings: '{{provider}}, configurado en Setup.',
+        doneSettings: '{{provider}}, definido en Configuración.',
         doneEnvironment: '{{provider}}, detectado en el entorno del servidor.',
         action: 'Configurar',
       },
       connectAssistant: {
         title: 'Conectar un asistente de IA externo',
-        todo: 'Trabaja en este sistema como tú mismo desde Claude, Doubao y asistentes similares, mediante MCP. La IA integrada se configura aparte, en Setup → IA y Embedder.',
+        todo: 'Trabaja en este sistema como tú mismo desde Claude, Doubao y asistentes similares, mediante MCP. La IA integrada se configura aparte, en Configuración → IA y Embedder.',
         done: 'Tienes conectado un asistente de IA o una clave de API.',
         action: 'Conectar',
       },
@@ -3372,6 +3390,18 @@ const es = {
     docConflictCandidates: 'Paquetes que proporcionan este documento',
     documentation: 'Documentación',
     uncategorized: 'Sin categoría',
+    backToApp: 'Volver a {{app}}',
+    searchDocs: 'Buscar en la documentación',
+    noDocsMatch: 'Ningún artículo coincide.',
+    docsNavigation: 'Navegación de la documentación',
+    docsBreadcrumb: 'Ruta de la documentación',
+    articlePager: 'Artículo anterior y siguiente',
+    previousArticle: 'Anterior',
+    nextArticle: 'Siguiente',
+    firstInBook: 'Este es el primer artículo de este manual',
+    lastInBook: 'Este es el último artículo de este manual',
+    enlargeDiagram: 'Ampliar',
+    diagram: 'Diagrama',
     about: 'Acerca de',
     aboutTitle: 'Acerca de esta consola',
     aboutDescription: 'La compilación a partir de la cual se generó esta consola.',

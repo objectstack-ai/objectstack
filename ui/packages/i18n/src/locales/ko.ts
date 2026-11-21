@@ -219,6 +219,9 @@ const ko = {
       notLoaded: "이 레코드의 라인 항목을 불러오지 않았습니다.",
       loadFailed: "라인 항목을 불러오지 못했습니다",
       saveFailed: "라인 항목을 저장하지 못했습니다",
+      untouchedNotSaved: "빈 명세 행 {{count}}개는 저장되지 않았습니다",
+      untouchedNotSaved_one: "빈 명세 행 {{count}}개는 저장되지 않았습니다",
+      untouchedNotSaved_other: "빈 명세 행 {{count}}개는 저장되지 않았습니다",
       noChildObject: "이 패널에 하위 개체가 구성되지 않았습니다. {{property}}을(를) 행을 나열할 개체로 설정하세요.",
     },
     keepEditing: "계속 편집",
@@ -257,6 +260,10 @@ const ko = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: '필수 필드 입력',
+    requiredPromptDescription: '이 변경으로 아래 필드가 필수가 됩니다. 입력하면 변경 내용과 함께 저장됩니다.',
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: '{{name}} 열기',
@@ -328,6 +335,8 @@ const ko = {
     options: {
       empty: "선택할 수 있는 옵션이 없습니다",
       selectFirst: "먼저 {{fields}}을(를) 선택하세요",
+      search: "검색…",
+      noMatches: "일치하는 옵션이 없습니다",
     },
     objectRef: {
       loading: "객체를 불러오는 중…",
@@ -412,6 +421,8 @@ const ko = {
     datePicker: {
       today: "오늘",
       tomorrow: "내일",
+      nextWeek: "다음 주",
+      clearPick: "지우기",
       clear: "날짜 지우기",
       openCalendar: "달력 열기",
       time: "시간",
@@ -426,6 +437,11 @@ const ko = {
     },
     tags: {
       placeholder: "입력 후 Enter 키로 추가…",
+      add: "“{{value}}” 추가",
+    },
+    color: {
+      swatches: "색상",
+      custom: "사용자 지정 색상",
     },
     // objectui#4028 — `AddressField`'s five sub-labels.
     address: {
@@ -2422,10 +2438,11 @@ const ko = {
     },
     firstRunChecklist: {
       title: "시스템 준비하기",
-      description: "동료가 사용을 시작하기 전에 설정해 둘 항목입니다. 모든 항목은 나중에 Setup에서 변경할 수 있습니다.",
+      description: "동료가 사용을 시작하기 전에 설정해 둘 항목입니다. 모든 항목은 나중에 설정에서 변경할 수 있습니다.",
       progress: "{{total}}개 중 {{done}}개 완료",
       dismiss: "체크리스트 숨기기",
       showDone: "완료된 항목 보기({{done}})",
+      showDoneSplit: "완료된 항목 보기(필수 {{required}} · 선택 {{optional}})",
       hideDone: "완료된 항목 접기",
       optional: "선택 사항",
       set: "설정",
@@ -2470,13 +2487,13 @@ const ko = {
       aiProvider: {
         title: '내장 AI 설정',
         todo: '아직 사용 중인 AI 제공자가 없습니다. 제공자를 선택하고 키를 추가하세요.',
-        doneSettings: '{{provider}}, Setup에서 설정됨.',
+        doneSettings: '{{provider}}, 설정에서 지정됨.',
         doneEnvironment: '{{provider}}, 서버 환경에서 감지됨.',
         action: '설정',
       },
       connectAssistant: {
         title: '외부 AI 어시스턴트 연결',
-        todo: 'MCP를 통해 Claude, Doubao 같은 어시스턴트에서 본인으로서 이 시스템을 사용하세요. 내장 AI는 Setup → AI 및 Embedder에서 따로 설정합니다.',
+        todo: 'MCP를 통해 Claude, Doubao 같은 어시스턴트에서 본인으로서 이 시스템을 사용하세요. 내장 AI는 설정 → AI 및 Embedder에서 따로 설정합니다.',
         done: 'AI 어시스턴트 또는 API 키가 연결되어 있습니다.',
         action: '연결',
       },
@@ -3296,6 +3313,18 @@ const ko = {
     docConflictCandidates: '이 문서를 제공하는 패키지',
     documentation: '문서',
     uncategorized: '미분류',
+    backToApp: '{{app}}(으)로 돌아가기',
+    searchDocs: '문서 검색',
+    noDocsMatch: '일치하는 문서가 없습니다.',
+    docsNavigation: '문서 탐색',
+    docsBreadcrumb: '문서 경로',
+    articlePager: '이전 및 다음 문서',
+    previousArticle: '이전 문서',
+    nextArticle: '다음 문서',
+    firstInBook: '이 책의 첫 번째 문서입니다',
+    lastInBook: '이 책의 마지막 문서입니다',
+    enlargeDiagram: '확대',
+    diagram: '다이어그램',
     about: '정보',
     aboutTitle: '이 콘솔 정보',
     aboutDescription: '이 콘솔이 컴파일된 빌드입니다.',

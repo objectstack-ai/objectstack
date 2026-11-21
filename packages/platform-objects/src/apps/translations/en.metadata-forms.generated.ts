@@ -52,6 +52,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Icon",
         helpText: "Lucide icon name (e.g. \"building\", \"users\")"
       },
+      color: {
+        label: "Color",
+        helpText: "Color of the square the icon is drawn on, from the fixed palette. Unset draws gray."
+      },
       description: {
         label: "Description",
         helpText: "Developer documentation"
@@ -70,7 +74,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       highlightFields: {
         label: "Highlight Fields",
-        helpText: "Field names of this object, most important first — the first entry wins where only one fits (ADR-0085). Drives the default list columns, cards, child-record previews and the detail highlight strip. A name that is not a field of this object is refused at publish."
+        helpText: "Field names of this object, most important first — the first entry wins where only one fits (ADR-0085). Drives the default list and related-list columns, cards, child-record previews, the record hover card and the record picker. A name that is not a field of this object is refused at publish."
       },
       relatedLists: {
         label: "Related Lists",
