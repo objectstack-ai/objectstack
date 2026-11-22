@@ -489,6 +489,13 @@ export interface SsoProviderDependentsRemoved {
   removedGrants: number;
 }
 
+/**
+ * A write that reports the rows it matched as a number; one that reports none is read as `fallback`.
+ * The id set is always spelled `$in`, even for one row: a scalar `where.id` is a by-id write, which
+ * throws when another writer removed the row first, where a predicate write simply matches nothing.
+ */
+const countOf = (result: unknown, fallback: number): number => (typeof result === 'number' ? result : fallback);
+
 /** A session row a request could still authenticate with: not revoked, not past its expiry. */
 function isLiveSession(row: Record<string, unknown>, now: number): boolean {
   if (row.revoked_at) return false;
@@ -497,38 +504,52 @@ function isLiveSession(row: Record<string, unknown>, now: number): boolean {
   return true;
 }
 
-/**
- * Revoke the live ones of `sessions` in place, in the shape every other
- * revocation writes (`expires_at` a second in the past, `revoked_at`,
- * `revoke_reason`), which `session-tombstone.ts` hides from better-auth's
- * session reads. Throws on the first failed write.
- */
-async function revokeSessions(engine: IDataEngine, sessions: Record<string, unknown>[], now: number): Promise<number> {
-  const writer: IDataEngine = withSystemContext(engine);
-  let revoked = 0;
-  for (const session of sessions) {
-    if (!text(session.id) || !isLiveSession(session, now)) continue;
-    await writer.update(SESSION_OBJECT, {
-      id: text(session.id),
-      expires_at: new Date(now - 1000),
-      revoked_at: new Date(now),
-      revoke_reason: SSO_PROVIDER_DELETED_REVOKE_REASON,
-    }, { context: { isSystem: true } });
-    revoked++;
-  }
-  return revoked;
-}
-
 const SESSION_ROW_FIELDS = ['id', 'expires_at', 'revoked_at', SESSION_SSO_PROVIDER_FIELD];
 
-/** Each projected grant deleted with its own organization as the write's tenant, as the sign-in that projected it wrote it. */
+/**
+ * Revoke the live ones of `sessions` (not revoked, not past their expiry) in
+ * one predicate write, in the shape every other revocation writes
+ * (`expires_at` a second in the past, `revoked_at`, `revoke_reason`), which
+ * `session-tombstone.ts` hides from better-auth's session reads. The write
+ * matches only rows still unrevoked, so a session another writer revoked first
+ * (a second sweep on another node) is not matched and keeps its own reason.
+ * Answers how many rows the write matched. Throws when the write fails.
+ */
+async function revokeSessions(engine: IDataEngine, sessions: Record<string, unknown>[], now: number): Promise<number> {
+  const ids = [...new Set(sessions.filter((row) => isLiveSession(row, now)).map((row) => text(row.id)).filter(Boolean))];
+  if (ids.length === 0) return 0;
+  const result: unknown = await withSystemContext(engine).update(
+    SESSION_OBJECT,
+    { expires_at: new Date(now - 1000), revoked_at: new Date(now), revoke_reason: SSO_PROVIDER_DELETED_REVOKE_REASON },
+    { where: { id: { $in: ids }, revoked_at: null }, multi: true, context: { isSystem: true } } as never,
+  );
+  return countOf(result, ids.length);
+}
+
+/**
+ * Delete `grants` by predicate, one write per organization with that
+ * organization as the write's tenant, as the sign-in that projected them wrote
+ * them. A row another writer removed first (a second sweep on another node) is
+ * simply not matched. Answers how many rows the writes matched. Throws when a
+ * write fails.
+ */
 async function deleteGrants(engine: IDataEngine, grants: Record<string, unknown>[]): Promise<number> {
+  const byTenant = new Map<string, string[]>();
+  for (const grant of grants) {
+    const id = text(grant.id);
+    if (!id) continue;
+    const tenant = text(grant.organization_id);
+    byTenant.set(tenant, [...(byTenant.get(tenant) ?? []), id]);
+  }
   const writer: IDataEngine = withSystemContext(engine);
   let removed = 0;
-  for (const grant of grants) {
-    const tenantId = text(grant.organization_id) || undefined;
-    await writer.delete(GRANT_OBJECT, { where: { id: text(grant.id) }, context: { isSystem: true, tenantId } });
-    removed++;
+  for (const [tenant, ids] of byTenant) {
+    const result: unknown = await writer.delete(GRANT_OBJECT, {
+      where: { id: { $in: ids } },
+      multi: true,
+      context: { isSystem: true, tenantId: tenant || undefined },
+    } as never);
+    removed += countOf(result, ids.length);
   }
   return removed;
 }
@@ -625,10 +646,11 @@ export async function settleSsoProviderDelete(
     logError(
       `[auth] SSO provider '${impact.providerId}' was DELETED, but ending the sessions signed in through it and removing `
         + 'its IdP group mappings and the permission-set grants they projected FAILED; what was not done is still in place. '
-        + 'Remedy: restart the server, whose boot removes what a provider that no longer exists left behind; or revoke the '
-        + `sys_session rows whose sso_provider_id is '${impact.providerId}', and delete the sys_user_permission_set rows whose `
-        + `reason is "${ssoGroupProjectionReason(impact.providerId)}" and the sys_idp_group_mapping rows of source_id `
-        + `'${impact.providerId}' (POST /admin/scim/delete-group-mapping). Cause: ${failure}`,
+        + 'Remedy: restart the server; its boot sweep ends the live sessions recording this provider and removes the grants '
+        + `whose reason is "${ssoGroupProjectionReason(impact.providerId)}". The sweep does NOT remove the provider's IdP group `
+        + `mappings: delete each sys_idp_group_mapping row of source_id '${impact.providerId}' with `
+        + 'POST /api/v1/auth/admin/scim/delete-group-mapping { "mappingId": "…" } (Setup: Delete Mapping on the row). '
+        + `Cause: ${failure}`,
     );
   }
   const done: SsoProviderDeleteImpact = {
@@ -736,11 +758,7 @@ export async function sweepDeletedSsoProviderAccess(
 
   const after = await storedProviderIds(reader);
   const gone = (providerId: string | undefined) => !!providerId && !before.has(providerId) && !after.has(providerId);
-  const revokedSessions = await revokeSessions(
-    engine,
-    sessions.filter((row) => gone(text(row[SESSION_SSO_PROVIDER_FIELD]))),
-    now,
-  );
+  const revokedSessions = await revokeSessions(engine, sessions.filter((row) => gone(text(row[SESSION_SSO_PROVIDER_FIELD]))), now);
   const removedGrants = await deleteGrants(engine, grants.filter((row) => gone(markerProvider(row.reason))));
   return { removedGrants, revokedSessions };
 }

@@ -34,9 +34,6 @@
  * session works as any other. It is said at `error`, once per sign-in, because
  * nothing else would show it: the session looks like every other SSO session,
  * while deleting its provider would leave it live.
- *
- * A session minted before this record existed names no provider, so a delete
- * does not end it; it ends at its own expiry, as before.
  */
 
 import type { IDataEngine } from '@objectstack/core';

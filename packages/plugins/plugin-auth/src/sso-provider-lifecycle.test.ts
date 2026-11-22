@@ -60,7 +60,7 @@ import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit';
 import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 import { ssoGroupProjectionReason } from './scim-group-projection.js';
 import { createEngineSsoProviderConfigReader } from './register-sso-provider.js';
-import { providerDomains, sweepDeletedSsoProviderAccess } from './sso-provider-lifecycle.js';
+import { providerDomains, reportSsoProviderAccessSweep, sweepDeletedSsoProviderAccess } from './sso-provider-lifecycle.js';
 
 const BASE = 'http://localhost:3000';
 const AUTH = `${BASE}/api/v1/auth`;
@@ -598,6 +598,80 @@ describe('a projected grant whose provider no longer exists is removed at boot',
       spy.mockRestore();
     }
     expect((await rows(s, 'sys_user_permission_set', { id: 'ups_late' })).length).toBe(1);
+  });
+
+  it('a second sweep over the same candidates (two nodes booting) settles them without reporting a failure', async () => {
+    const s = await stage();
+    const mia = await ssoOnlyUser(s, 'mia@acme.example');
+    const later = new Date(Date.now() + 3_600_000);
+    await residue(s.engine, 'sys_user_permission_set', { id: 'ups_both', user_id: mia, permission_set: 'sales_reader', organization_id: ORG, reason: MARKER });
+    await residue(s.engine, 'sys_session', { id: 'ses_both', user_id: mia, token: 'tok_both', expires_at: later, sso_provider_id: PROVIDER });
+    await residue(s.engine, 'sys_session', { id: 'ses_signed_out', user_id: mia, token: 'tok_out', expires_at: later, sso_provider_id: PROVIDER });
+    // The other node's sweep finishes between this sweep's candidate reads and its writes, after the
+    // user signed one session out themselves.
+    const engine = s.engine as any;
+    const realFind = engine.find.bind(engine);
+    let providerReads = 0;
+    const spy = vi.spyOn(engine, 'find').mockImplementation(async (object: unknown, ...rest: unknown[]) => {
+      if (object === 'sys_sso_provider' && ++providerReads === 2) {
+        spy.mockImplementation(realFind);
+        await engine.getDriver('sys_session').update('sys_session', 'ses_signed_out', { revoked_at: new Date(), revoke_reason: 'user_revoked' });
+        expect(await sweepDeletedSsoProviderAccess(s.engine as never)).toEqual({ removedGrants: 1, revokedSessions: 1 });
+      }
+      return realFind(object, ...rest);
+    });
+    const error = vi.fn();
+    const warn = vi.fn();
+    try {
+      const outer = await reportSsoProviderAccessSweep(s.engine as never, { warn, error });
+      expect(error.mock.calls).toEqual([]);
+      expect(outer).toEqual({ removedGrants: 0, revokedSessions: 0 });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(error.mock.calls).toEqual([]);
+    expect(warn).not.toHaveBeenCalled();
+    expect(await rows(s, 'sys_user_permission_set', { id: 'ups_both' })).toEqual([]);
+    expect((await rows(s, 'sys_session', { id: 'ses_both' }))[0]?.revoke_reason).toBe('sso_provider_deleted');
+    expect((await rows(s, 'sys_session', { id: 'ses_signed_out' }))[0]?.revoke_reason).toBe('user_revoked');
+  });
+
+  it('a sweep that cannot read is said once at error, naming what stays; boot goes on', async () => {
+    const s = await stage();
+    const engine = s.engine as any;
+    const spy = vi.spyOn(engine, 'find').mockRejectedValue(new Error('driver unavailable'));
+    const error = vi.fn();
+    const warn = vi.fn();
+    try {
+      await expect(reportSsoProviderAccessSweep(s.engine as never, { warn, error })).resolves.toBeUndefined();
+    } finally {
+      spy.mockRestore();
+    }
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error.mock.calls[0]![0]).toContain('driver unavailable');
+    // A host sink with no `error` gets the same line on `warn`.
+    const spy2 = vi.spyOn(engine, 'find').mockRejectedValue(new Error('driver unavailable'));
+    try {
+      await reportSsoProviderAccessSweep(s.engine as never, { warn });
+    } finally {
+      spy2.mockRestore();
+    }
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('with no provider object registered, the sweep judges nothing and removes nothing', async () => {
+    const s = await stage();
+    const mia = await ssoOnlyUser(s, 'mia@acme.example');
+    await residue(s.engine, 'sys_user_permission_set', { id: 'ups_kept', user_id: mia, permission_set: 'sales_reader', organization_id: ORG, reason: MARKER });
+    const engine = s.engine as any;
+    const realGetSchema = engine.getSchema.bind(engine);
+    const spy = vi.spyOn(engine, 'getSchema').mockImplementation((name: unknown) => (name === 'sys_sso_provider' ? undefined : realGetSchema(name)));
+    try {
+      expect(await sweepDeletedSsoProviderAccess(s.engine as never)).toBeUndefined();
+    } finally {
+      spy.mockRestore();
+    }
+    expect((await rows(s, 'sys_user_permission_set', { id: 'ups_kept' })).length).toBe(1);
   });
 
   it('what a delete whose cleanup failed left behind is removed at the next boot', async () => {
