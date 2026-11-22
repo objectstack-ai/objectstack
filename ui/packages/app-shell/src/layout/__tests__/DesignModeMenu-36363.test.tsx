@@ -76,6 +76,7 @@ vi.mock('../../utils/getIcon', () => ({ getIcon: () => () => null }));
 import { DesignModeProvider, useDesignMode, useDesignModeController } from '../designMode';
 import { DesignModeBar } from '../DesignModeBar';
 import DesignModeMenu from '../DesignModeMenu';
+import { confirmUnsavedLeave } from '../../chrome/unsavedEdits';
 
 const NAVIGATION = [
   { id: 'home', type: 'report', reportName: 'pipeline', label: 'Home' },
@@ -100,6 +101,7 @@ function Harness() {
     <DesignModeProvider value={mode}>
       {mode.active && <DesignModeBar mode={mode} />}
       <Enter />
+      <SwitchApp />
       <SidebarProvider>
         {mode.active && (
           <DesignModeMenu
@@ -118,6 +120,16 @@ function Enter() {
   return (
     <button type="button" onClick={mode?.enter}>
       enter
+    </button>
+  );
+}
+
+/** The app menu's switch, as the sidebar wires it: `confirmUnsavedLeave` around the change of app. */
+const switchedTo = vi.hoisted(() => [] as string[]);
+function SwitchApp() {
+  return (
+    <button type="button" onClick={() => confirmUnsavedLeave(() => switchedTo.push('hr'))}>
+      switch to hr
     </button>
   );
 }
@@ -149,9 +161,13 @@ async function act_on(id: string, item: string) {
 
 beforeEach(() => {
   written.length = 0;
+  switchedTo.length = 0;
   toastError.mockReset();
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 function start() {
   render(
@@ -268,5 +284,52 @@ describe('the menu under the design mode (objectstack#36363)', () => {
     fireEvent.click(screen.getByText('enter'));
     expect(order()).toEqual(['home', ['sales', ['leads', 'accounts']], ['insights', []]]);
     expect(written).toEqual([]);
+  });
+
+  // Card comment 7079728193: unsaved menu changes ask before the app is left,
+  // in the shell's one unsaved-changes prompt (stay, or leave and drop them).
+  it('a moved entry not yet saved: switching app asks first; staying keeps the change, leaving goes on', async () => {
+    const confirmSpy = vi.fn((_message?: string): boolean => false);
+    vi.stubGlobal('confirm', confirmSpy);
+    start();
+    await act_on('accounts', 'Move up');
+    expect(order()).toEqual(['home', ['sales', ['accounts', 'leads']], ['insights', []]]);
+
+    fireEvent.click(screen.getByText('switch to hr'));
+    expect(confirmSpy).toHaveBeenCalledWith('Leave design mode? Your unsaved changes will be lost.');
+    expect(switchedTo).toEqual([]);
+    expect(screen.getByTestId('design-mode-bar')).toBeInTheDocument();
+    expect(order()).toEqual(['home', ['sales', ['accounts', 'leads']], ['insights', []]]);
+    expect(written).toEqual([]);
+
+    confirmSpy.mockReturnValue(true);
+    fireEvent.click(screen.getByText('switch to hr'));
+    expect(switchedTo).toEqual(['hr']);
+    expect(written).toEqual([]);
+  });
+
+  it('a reload or a tab close is held while a menu change is unsaved, and not once it is saved', async () => {
+    const held = () => {
+      const unload = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(unload);
+      return unload.defaultPrevented;
+    };
+    start();
+    expect(held()).toBe(false);
+    await act_on('accounts', 'Move up');
+    expect(held()).toBe(true);
+    fireEvent.click(screen.getByTestId('design-mode-save'));
+    await flush();
+    await flush();
+    expect(held()).toBe(false);
+  });
+
+  it('with nothing changed, switching app asks nothing', () => {
+    const confirmSpy = vi.fn((_message?: string): boolean => false);
+    vi.stubGlobal('confirm', confirmSpy);
+    start();
+    fireEvent.click(screen.getByText('switch to hr'));
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(switchedTo).toEqual(['hr']);
   });
 });
