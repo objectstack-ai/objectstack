@@ -6,10 +6,8 @@ import { contentDispositionValue } from './content-disposition.js';
  * How stored bytes are answered — one rule, stated once, for every door that
  * hands them out.
  *
- * A stored file's type is whatever its uploader declared. Bytes answered on
- * the app's own origin under a declared type a browser renders as an active
- * document would run in that origin, so the type alone never decides how a
- * browser treats them:
+ * A stored file's type is the one recorded for it at upload; it is never on
+ * its own the deciding word on how a browser treats the bytes:
  *
  *  1. **Inline only for the allow-list.** {@link INLINE_CONTENT_TYPES} names
  *     the types a browser may render in place — raster images, PDF, plain
