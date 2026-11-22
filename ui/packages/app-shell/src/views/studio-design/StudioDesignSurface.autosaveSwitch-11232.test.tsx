@@ -37,13 +37,16 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The surface's reach loads `@objectstack/lint` lazily; pay that load during
+// collection, not inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // Module scope as well as in the `vi.mock` factory below: the cold transform is paid
 // during collection, which no test or hook timeout clocks (AGENTS.md, flaky-test discipline).
 import '@object-ui/components';
 import { render, screen, fireEvent, cleanup, waitFor, within, act } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 
 const PKG = 'com.acme.app';
 const PKG_B = 'com.beta.app';
@@ -216,6 +219,25 @@ import { PagePreview } from '../metadata-admin/previews/PagePreview';
 import { PageBlockInspector } from '../metadata-admin/inspectors/PageBlockInspector';
 import { PageDefaultInspector } from '../metadata-admin/inspectors/PageDefaultInspector';
 import { readFields } from '../metadata-admin/previews/object-fields-io';
+import { confirmUnsavedLeave } from '../../chrome/unsavedEdits';
+
+/**
+ * A door to another package that leaves the surface mounted, asking first
+ * when a pillar holds unsaved work: the shell seam's question, the one the
+ * contributed rows' doors ask (`useOpenContributor`). The package switcher
+ * was these tests' door until objectstack#36501 removed it.
+ */
+function PackageDoor({ to }: { to: string }) {
+  const navigate = useNavigate();
+  return (
+    <button
+      type="button"
+      aria-label="test door: other package"
+      data-testid="package-door"
+      onClick={() => confirmUnsavedLeave(() => navigate(to))}
+    />
+  );
+}
 
 const dataSource = createEmptyDataSource();
 
@@ -470,6 +492,7 @@ describe('Studio surface — a package switch over an unsaved nav edit (objectui
   function surfaceTree() {
     return (
       <MemoryRouter initialEntries={[`/studio/${PKG}/interfaces`]}>
+        <PackageDoor to={`/studio/${PKG_B}/interfaces`} />
         <Routes>
           <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
         </Routes>
@@ -491,10 +514,9 @@ describe('Studio surface — a package switch over an unsaved nav edit (objectui
     fireEvent.keyDown(screen.getByTestId('nav-link-object'), { key: 'ArrowDown' });
     fireEvent.click(await screen.findByRole('option', { name: new RegExp(`\\(${objectName}\\)$`) }));
   };
-  async function switchTo(name: RegExp, confirmed: boolean): Promise<void> {
-    fireEvent.click(await screen.findByTestId('studio-pkg-chip', undefined, SLOW));
+  async function switchTo(confirmed: boolean): Promise<void> {
     confirmSpy.mockReturnValueOnce(confirmed);
-    fireEvent.click(await screen.findByRole('button', { name }, SLOW));
+    fireEvent.click(screen.getByTestId('package-door'));
   }
   const savedNav = (body: Record<string, unknown>) =>
     (body.navigation as Array<Record<string, unknown>>).map((n) =>
@@ -510,7 +532,7 @@ describe('Studio surface — a package switch over an unsaved nav edit (objectui
     await addItem();
     expect(addedItems()).toBe(1);
 
-    await switchTo(/Beta/, true);
+    await switchTo(true);
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     await screen.findByRole('button', { name: /Board menu/ }, SLOW);
     await pastDebounce(3500);
@@ -535,7 +557,7 @@ describe('Studio surface — a package switch over an unsaved nav edit (objectui
     await addItem();
 
     const release = holdLoad('app', 'beta_app');
-    await switchTo(/Beta/, true);
+    await switchTo(true);
     await pastDebounce();
     expect(server.saves).toEqual([]);
 
@@ -550,7 +572,7 @@ describe('Studio surface — a package switch over an unsaved nav edit (objectui
     await screen.findByRole('button', { name: 'Select hello' }, SLOW);
 
     // No nav edit, so no prompt: page edits are not what the guard holds.
-    await switchTo(/Beta/, true);
+    await switchTo(true);
     expect(confirmSpy).not.toHaveBeenCalled();
     await screen.findByRole('button', { name: /Board menu/ }, SLOW);
     // The previous package's page does not stay open on the new package.
@@ -573,9 +595,10 @@ describe('Studio surface — a package switch over an unsaved nav edit (objectui
     await openEditing();
     await addItem();
 
-    await switchTo(/Beta/, false);
+    await switchTo(false);
     expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(screen.getByTestId('studio-pkg-chip')).toHaveTextContent('Acme');
+    // Still package A: its own nav entry is on the rail.
+    expect(screen.getByRole('button', { name: /Landing menu/ })).toBeInTheDocument();
     expect(addedItems()).toBe(1);
 
     await waitFor(() => expect(server.saves).toHaveLength(1), SLOW);
@@ -724,11 +747,12 @@ describe("the load window: nothing of the previous item is offered, shown or sav
 });
 
 describe('a package switch: Automations and Data open nothing of the previous package (objectui#11272)', () => {
-  // Through the real surface and its `PackageSwitcher`: the route keeps the
+  // Through the real surface and a door to package B: the route keeps the
   // surface mounted across `:packageId`, as the console's does.
   function surfaceTree(tab: string) {
     return (
       <MemoryRouter initialEntries={[`/studio/${PKG}/${tab}`]}>
+        <PackageDoor to={`/studio/${PKG_B}/${tab}`} />
         <Routes>
           <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
         </Routes>
@@ -736,10 +760,8 @@ describe('a package switch: Automations and Data open nothing of the previous pa
     );
   }
   async function switchToBeta(): Promise<void> {
-    fireEvent.click(await screen.findByTestId('studio-pkg-chip', undefined, SLOW));
     confirmSpy.mockReturnValue(true);
-    fireEvent.click(await screen.findByRole('button', { name: /Beta/ }, SLOW));
-    await waitFor(() => expect(screen.getByTestId('studio-pkg-chip')).toHaveTextContent('Beta'), SLOW);
+    fireEvent.click(screen.getByTestId('package-door'));
   }
 
   it("Automations: package A's open flow is not kept; an edit saves package B's own flow, in B", async () => {

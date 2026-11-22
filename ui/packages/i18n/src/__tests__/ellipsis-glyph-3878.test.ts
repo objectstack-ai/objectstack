@@ -336,7 +336,8 @@ const LOADING_GROUP_EN = 'Loading…';
  * The group as measured on `main` @ `22ba9271f`, plus `home.loading`, which
  * joined when objectui#12956 dropped the cloud noun from its `en` value
  * (`Loading environment…` became `Loading…`); every pack now renders it the
- * way it renders the rest of the group. Pinned by name so the
+ * way it renders the rest of the group, and `designMode.menu.loading`, the
+ * design mode's menu picker (objectstack#36363). Pinned by name so the
  * uniformity rule below cannot go green by the group quietly emptying out —
  * a uniformity assertion over nothing passes, which is this pin's failure mode.
  */
@@ -345,6 +346,7 @@ const LOADING_GROUP = [
   'auth.device.loading',
   'common.loading',
   'dashboard.loading',
+  'designMode.menu.loading',
   'detail.loading',
   'fields.recipient.loading',
   'grid.bulk.loading',
@@ -373,7 +375,7 @@ describe('objectui#5972 — each pack renders the merged `Loading…` group exac
     // this file reasons about is no longer the group it names, and the rule
     // below would be silently measuring something else.
     const derived = PACKS.en.filter(([, value]) => value === LOADING_GROUP_EN).map(([key]) => key);
-    expect(derived.length, 'the group emptied or changed size — re-measure before editing the list').toBe(11);
+    expect(derived.length, 'the group emptied or changed size — re-measure before editing the list').toBe(12);
     expect([...derived].sort()).toEqual([...LOADING_GROUP].sort());
 
     // And every pack must actually define every member. An absent key is a key-set
