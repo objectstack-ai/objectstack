@@ -263,3 +263,23 @@ describe('RecordAttachmentsPanel — write affordances follow the sys_attachment
     expect(await rowMenuItems('others.pdf')).toContain('Delete attachment');
   });
 });
+
+describe('RecordAttachmentsPanel — Rename is offered to the reader who may delete (objectstack#35724)', () => {
+  // The server renames by the attachment delete rule (uploader or parent
+  // editor), so the row menu offers Rename exactly where it offers Delete.
+  it('a reader who may not delete sees no Rename, on the own row and on another\'s', async () => {
+    renderWithGrant({ allowCreate: true });
+    await rowsLoaded();
+
+    expect(await rowMenuItems('mine.pdf')).not.toContain('Rename');
+    expect(await rowMenuItems('others.pdf')).not.toContain('Rename');
+  });
+
+  it('a reader who may delete sees Rename beside Delete on every row', async () => {
+    renderWithGrant({ allowDelete: true });
+    await rowsLoaded();
+
+    expect(await rowMenuItems('mine.pdf')).toEqual(['Download', 'Rename', 'Delete attachment']);
+    expect(await rowMenuItems('others.pdf')).toEqual(['Download', 'Rename', 'Delete attachment']);
+  });
+});
