@@ -39,15 +39,22 @@
  *    the record page knows which lists exist for the reader. The lists the
  *    arrangement hides (`{ list, hidden: true }`) travel the same way: a
  *    served `relatedLists` cannot hide another package's list by leaving it
- *    out.
+ *    out. Where the arrangement hides every tab of a declared list, nothing
+ *    is left to serve: the served `relatedLists` is empty, and
+ *    `unlisted: 'hidden'` beside it says it is still a declared list, so a
+ *    list the owner hid by leaving it out stays hidden.
  *
- * Only a `.custom` package's extension is read (`isCustomizationPackage`,
- * the `__c` judge's predicate). The doors refuse any other writer at publish,
- * `os validate` / `os build` and install; a manifest's body reaches the
- * registry unparsed, so the fold skips such a key too and names it. Where
- * more than one `.custom` package writes a key for one object, the pair of
- * the object's owner is served, else the one folded last, and the others are
- * named.
+ * Only the object's own pair is served: the customization package of the App
+ * the object's owner belongs to, as `@objectstack/metadata-core`'s pair lookup
+ * answers it (`pairsOf` over the installed manifests: the App's pair, then a
+ * per-package pair an earlier version created, while one is installed; where
+ * both write a key the App's pair is served and the other is named). The
+ * choice is by role, never by fold order (ADR-0146 D2): a `.custom` package
+ * that is not the object's pair is skipped and named, whether it writes the
+ * key alone or beside the pair. The doors refuse a writer that is not a
+ * `.custom` package (`isCustomizationPackage`, the `__c` judge's predicate) at
+ * publish, `os validate` / `os build` and install; a manifest's body reaches
+ * the registry unparsed, so the fold skips such a key too and names it.
  *
  * Nothing here is stored: disabling or uninstalling the `.custom` package,
  * or removing the key, leaves its contribution out of the fold, and the
@@ -61,7 +68,7 @@ import {
   relatedListNameCovers,
 } from '@objectstack/spec/data';
 import type { CustomArrangementKey, RelatedListsArrangement, ServiceObject } from '@objectstack/spec/data';
-import { isCustomizationPackage, isCustomizationPairOf } from '@objectstack/spec/kernel';
+import { isCustomizationPackage } from '@objectstack/spec/kernel';
 import type { ExtensionPlacementNote } from './registry-extension-placement.js';
 import type { ObjectContributor } from './registry-top-level.js';
 
@@ -78,8 +85,15 @@ function isRecord(value: unknown): value is AnyRecord {
 export interface CustomArrangementContext {
   /** The extended object's name, for the notes. */
   readonly objectName: string;
-  /** The package that owns the extended object (`undefined` when it is registered with none). */
-  readonly ownerPackageId: string | undefined;
+  /**
+   * The packages whose rows are this object's customizations, the one served
+   * first: `pairsOf(owner, installed)` of `@objectstack/metadata-core` over the
+   * registry's installed manifests (the pair of the owner's App, then a
+   * per-package pair an earlier version created). Empty when the object has
+   * no pair (it is registered with no package). Asked only when an extension
+   * writes an arrangement key.
+   */
+  readonly customizationPairs: () => readonly string[];
 }
 
 /** What {@link applyCustomArrangement} answers. */
@@ -153,26 +167,39 @@ export function applyCustomArrangement(
     notes.push({ key: `arrangement|${key}|${text}`, packageId: writer.packageId, message: text });
   };
 
+  // By role, never by fold order (ADR-0146 D2): the object's own pairs, the
+  // App's first.
+  const pairs = context.customizationPairs();
+
   /** The one writer of `key` the fold serves, the others named. */
   const servedWriter = (key: CustomArrangementKey): ArrangementWriter | undefined => {
-    const admitted: ArrangementWriter[] = [];
+    const admitted: Array<ArrangementWriter & { readonly packageId: string }> = [];
     for (const writer of writers.get(key) ?? []) {
-      if (!isCustomizationPackage(writer.packageId)) {
+      const packageId = writer.packageId;
+      if (typeof packageId !== 'string' || !isCustomizationPackage(packageId)) {
         note(writer, key,
           `declares \`${key}\`, which is not applied: only the object extension of a base's paired \`.custom\` ` +
           'package declares the whole arrangement of an object. An extension places the fields, groups and ' +
           'child lists it brings with `place`.');
         continue;
       }
+      if (!pairs.includes(packageId)) {
+        note(writer, key,
+          `declares \`${key}\`, which is not applied: it is not the customization package of this object` +
+          (pairs.length > 0 ? ` (that is "${pairs[0]}")` : ', which has none') +
+          '. Only the paired `.custom` package of the App an object belongs to declares its arrangement.');
+        continue;
+      }
       if (!Array.isArray(writer.body[key])) {
         note(writer, key, `declares \`${key}\` that is not a list, so it is not applied.`);
         continue;
       }
-      admitted.push(writer);
+      admitted.push({ ...writer, packageId });
     }
     if (admitted.length === 0) return undefined;
-    const served = admitted.find((writer) => isCustomizationPairOf(writer.packageId, context.ownerPackageId))
-      ?? admitted[admitted.length - 1];
+    // Every admitted writer is one of `pairs`; the one listed first there is served.
+    const served = admitted.reduce((best, writer) =>
+      (pairs.indexOf(writer.packageId) < pairs.indexOf(best.packageId) ? writer : best));
     for (const writer of admitted) {
       if (writer === served) continue;
       note(writer, key,

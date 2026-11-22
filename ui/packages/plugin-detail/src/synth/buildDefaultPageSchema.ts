@@ -115,7 +115,8 @@ export interface ObjectDefLike {
    * The served read's `_relatedListsArrangement` decoration (ADR-0146 D10),
    * present when the base's paired `.custom` package arranges this object's
    * tabs. Read only through the spec's `readRelatedListsArrangement`, for
-   * `unlisted` (whether an unlisted attachments tab is still drawn).
+   * `unlisted` (whether an unlisted attachments tab is still drawn, and
+   * whether an empty `relatedLists` is a declared list with every tab hidden).
    */
   _relatedListsArrangement?: unknown;
   // NOTE: the per-surface `detail` hints block was REMOVED from the spec by
@@ -1100,7 +1101,7 @@ function synthTabs(
   // objectstack#34590 — the 动态 tab closes the strip.
   if (timeline.length > 0) items.push({ label: 'Activity stream', value: 'timeline', children: timeline });
   return componentNode('page:tabs', {
-    items: arrangeDeclaredTabs(def?.relatedLists, items, readRelatedListsArrangement(def)?.unlisted === 'shown'),
+    items: arrangeDeclaredTabs(def?.relatedLists, items, readRelatedListsArrangement(def)?.unlisted),
   });
 }
 
@@ -1114,7 +1115,8 @@ const BUILTIN_TAB_VALUES: Readonly<Record<RecordPageBuiltinTab, string>> = {
 /**
  * objectstack#35897 — the object's declared `relatedLists` arranges the tabs
  * after the overview. Absent or empty: `items` exactly as built (every list,
- * then attachments, approvals, the stream). Declared:
+ * then attachments, approvals, the stream), unless `unlistedTabs` is
+ * `'hidden'`, which says the empty list is a declared one. Declared:
  *
  *  - each tab sits at the first entry naming it: a related tab at the entry
  *    naming its relationship (`related:<object>.<field>`), a built-in at its
@@ -1128,20 +1130,26 @@ const BUILTIN_TAB_VALUES: Readonly<Record<RecordPageBuiltinTab, string>> = {
  *    the end of the tabs: after the listed tabs, before a trailing run of
  *    listed approvals / stream tabs, in the order passed.
  *
- * `unlistedShown` (ADR-0146 D10): the list is the base's paired `.custom`
- * package's, laid over an object that declared none, so every tab the
- * automatic list showed still shows. The one difference here: an unlisted
- * attachments tab is drawn too, at the end of the tabs after the unlisted
- * related ones (the served read's `_relatedListsArrangement` decoration,
- * `unlisted: 'shown'`). `false` for every object without that decoration.
+ * `unlistedTabs` (ADR-0146 D10, `unlisted` of the served read's
+ * `_relatedListsArrangement` decoration; `undefined` for every object
+ * without it). `'shown'`: the list is the base's paired `.custom` package's,
+ * laid over an object that declared none, so every tab the automatic list
+ * showed still shows. The one difference here: an unlisted attachments tab is
+ * drawn too, at the end of the tabs after the unlisted related ones.
+ * `'hidden'`: the list is laid over a declared one, and stays a declared list
+ * when it is EMPTY (the environment hid every tab of it): the tabs follow the
+ * declared rules above with no entry naming any, so an unlisted attachments
+ * tab is not drawn.
  *
  * Which related lists exist is the host's: `deriveRelatedLists` drops the
  * unlisted side lists. A pure, stable reorder of the tabs already built.
  */
-function arrangeDeclaredTabs(declared: readonly unknown[] | undefined, items: any[], unlistedShown = false): any[] {
-  if (!Array.isArray(declared) || declared.length === 0) return items;
+function arrangeDeclaredTabs(declared: readonly unknown[] | undefined, items: any[], unlistedTabs?: 'shown' | 'hidden'): any[] {
+  const entries = Array.isArray(declared) ? declared : [];
+  if (entries.length === 0 && unlistedTabs !== 'hidden') return items;
+  const unlistedShown = unlistedTabs === 'shown';
   const [overview, ...tabs] = items;
-  const names = declared.map((entry) => relatedListEntryName(entry));
+  const names = entries.map((entry) => relatedListEntryName(entry));
   const unlisted = names.length;
   // objectstack#35901 — the end of the tabs, for a related tab no entry names
   // (a list another package brings and does not place): before a trailing run

@@ -358,15 +358,27 @@ vendor's, another package's extension's, the pair's own `__c` fields. A group's
 - **Taking it away restores the page.** Remove a key, or uninstall or disable the pair,
   and the owner's arrangement with the placements is served again. Nothing is rewritten in
   the base or in another package.
-- **Only the pair writes these keys.** In any other package's extension they are refused
-  at save and publish, by `os validate` and `os build`, and at install, with the
-  prescription to use `place`. Within one extension, a `place` entry beside the key that
-  would replace it is refused too: list the item in the arrangement instead.
+- **Only the pair writes these keys.** In a package that is not a `.custom` package they
+  are refused at save and publish, by `os validate` and `os build`, and at install, with
+  the prescription to use `place`. Within one extension, a `place` entry beside the key
+  that would replace it is refused too: list the item in the arrangement instead.
+- **The pair is the App's.** An object's pair is the `.custom` package of the App the
+  object belongs to: for an object a module of an App owns, that is the App's pair. A
+  `.custom` package an earlier version created for the module itself is still read while
+  it is installed; where both write a key, the App's pair is served. What any other
+  `.custom` package writes under these keys is not refused at those doors; it is not
+  applied, alone or beside the pair, and the boot log names the package and the object.
 - **Hiding a field is written in the arrangement.** `hidden` is not a display property a
   `fieldPatches` entry may set: a hidden field is also left out of the search index and
   out of a form's required check, so it is more than display. To keep a vendor field off
   the record page and the forms, list it in a group whose `visibleWhen` is false:
   `{ key: 'off_page', label: 'Not shown', fields: ['fax'], visibleWhen: 'false' }`.
+  Two limits:
+  - **It is presentation only, not access control.** The field stays readable and writable
+    through the API.
+  - **Do not use it for a `required` field that has no default.** The create form no
+    longer shows the field while the save still requires it, so the form cannot be
+    submitted: the save is refused naming a field the user cannot see.
 
 ---
 

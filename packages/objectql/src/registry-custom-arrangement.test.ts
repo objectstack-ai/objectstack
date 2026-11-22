@@ -262,6 +262,24 @@ describe('ADR-0146 D10 — `.custom` relatedLists replaces the tab list whole', 
     expect(reg.getRelatedListsArrangement(OBJ)).toEqual({ packageId: PAIR, hidden: ['crm_note'], unlisted: 'shown' });
   });
 
+  it('every tab of a declared list hidden: nothing is left to serve, and the read says the list is still a declared one', () => {
+    // The owner lists two of its three child lists: `crm_note` is hidden by being left out.
+    const base = vendorLead({ relatedLists: ['crm_task', 'crm_event'] });
+    const reg = customize(withBase(base), {
+      relatedLists: [{ list: 'crm_task', hidden: true }, { list: 'crm_event', hidden: true }],
+    });
+    expect(served(reg).relatedLists).toEqual([]);
+    // An empty list alone reads as "none declared, every list shows". `unlisted: 'hidden'` is what keeps
+    // `crm_note` hidden: the record page reads the empty list beside it as a declared one.
+    expect(reg.getRelatedListsArrangement(OBJ)).toEqual({ packageId: PAIR, hidden: ['crm_task', 'crm_event'], unlisted: 'hidden' });
+  });
+
+  it('…and a one-entry list whose entry is hidden is the same case', () => {
+    const reg = customize(withBase(vendorLead({ relatedLists: ['crm_task'] })), { relatedLists: [{ list: 'crm_task', hidden: true }] });
+    expect(served(reg).relatedLists).toEqual([]);
+    expect(reg.getRelatedListsArrangement(OBJ)).toEqual({ packageId: PAIR, hidden: ['crm_task'], unlisted: 'hidden' });
+  });
+
   it('an empty list hides nothing and reorders nothing', () => {
     const declared = customize(withBase(), { relatedLists: [] });
     expect(served(declared).relatedLists).toEqual(['crm_task', 'crm_event', 'crm_note']);
@@ -360,18 +378,110 @@ describe('ADR-0146 D10 — only a `.custom` package\'s arrangement is applied', 
     }
   });
 
-  it('two `.custom` packages writing one key: the pair of the object\'s owner is served, the other named', () => {
+  it('a `.custom` package that is not the object\'s pair is skipped and named, beside the pair and alone', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const OTHER = 'com.acme.tax.custom';
+    // Beside the pair, and folded after it: the pair is served.
     const reg = withBase();
     customize(reg, { relatedLists: ['crm_note'] }, { fields: {} });
     customize(reg, { relatedLists: ['crm_event'] }, { pkg: OTHER, fields: {} });
     expect(served(reg).relatedLists).toEqual(['crm_note', 'crm_task', 'crm_event']);
     expect(reg.getRelatedListsArrangement(OBJ)?.packageId).toBe(PAIR);
-    const lines = warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('one arrangement is served'));
+    // Alone: nothing is applied, as for any package that is not the pair.
+    const before = served(withBase());
+    const alone = customize(withBase(), {
+      fieldGroups: [{ key: 'contact', label: 'Reach', fields: ['email'] }],
+      relatedLists: ['crm_event'],
+    }, { pkg: OTHER, fields: {} });
+    expect(served(alone).fieldGroups).toEqual(before.fieldGroups);
+    expect(served(alone).relatedLists).toEqual(before.relatedLists);
+    expect(alone.getRelatedListsArrangement(OBJ)).toBeUndefined();
+    const lines = warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('is not the customization package of this object'));
+    expect(lines).toHaveLength(3);
+    for (const line of lines) {
+      expect(line).toContain(`from package "${OTHER}"`);
+      expect(line).toContain(`(that is "${PAIR}")`);
+    }
+  });
+});
+
+describe('ADR-0146 D10 — the pair is the App\'s, chosen by role (an object a module owns)', () => {
+  const APP = 'com.hotcrm';
+  const MODULE = 'com.hotcrm.sales';
+  const APP_PAIR = 'com.hotcrm.custom';
+  const MEMBER_PAIR = 'com.hotcrm.sales.custom';
+  const OTHER_PAIR = 'com.acme.custom';
+
+  /** The App and the module of it that owns the lead, as the registry holds two installed packages. */
+  function hotcrm(): SchemaRegistry {
+    const reg = registry();
+    reg.installPackage({ id: APP, name: APP, version: '1.0.0', type: 'app', namespace: 'hotcrm' } as never, 'code');
+    reg.installPackage({ id: MODULE, name: MODULE, version: '1.0.0', type: 'module', namespace: 'crm', dependencies: { [APP]: '^1.0.0' } } as never, 'code');
+    reg.registerObject(vendorLead(), MODULE, undefined, 'own');
+    for (const [name, label] of [['crm_task', 'Task'], ['crm_event', 'Event'], ['crm_note', 'Note']]) {
+      reg.registerObject(child(name, label) as any, MODULE, undefined, 'own');
+    }
+    return reg;
+  }
+
+  it.each([
+    ['the App\'s pair folded first', [APP_PAIR, OTHER_PAIR]],
+    ['the App\'s pair folded last', [OTHER_PAIR, APP_PAIR]],
+  ])('two writers, %s: the App\'s pair is served and the other is named', (_label, order) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const lists: Record<string, unknown[]> = { [APP_PAIR]: ['crm_note'], [OTHER_PAIR]: ['crm_event'] };
+    const reg = hotcrm();
+    for (const pkg of order) customize(reg, { relatedLists: lists[pkg] }, { pkg, fields: {} });
+    expect(served(reg).relatedLists).toEqual(['crm_note', 'crm_task', 'crm_event']);
+    expect(reg.getRelatedListsArrangement(OBJ)).toEqual({ packageId: APP_PAIR, hidden: [], unlisted: 'hidden' });
+    const lines = warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('is not applied'));
     expect(lines).toHaveLength(1);
-    expect(lines[0]).toContain(`from package "${OTHER}"`);
-    expect(lines[0]).toContain(`package "${PAIR}"`);
+    expect(lines[0]).toContain(`from package "${OTHER_PAIR}"`);
+    expect(lines[0]).toContain(`(that is "${APP_PAIR}")`);
+  });
+
+  it('a `.custom` id named after the module is not the pair of the module\'s object: the unit is the App', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const before = served(hotcrm());
+    const reg = customize(hotcrm(), { relatedLists: ['crm_event'] }, { pkg: MEMBER_PAIR, fields: {} });
+    expect(served(reg).relatedLists).toEqual(before.relatedLists);
+    expect(reg.getRelatedListsArrangement(OBJ)).toBeUndefined();
+    const lines = warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('is not applied'));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain(`from package "${MEMBER_PAIR}"`);
+    expect(lines[0]).toContain(`(that is "${APP_PAIR}")`);
+  });
+
+  it('a per-package pair an earlier version created is still read while installed, and the App\'s pair comes first', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const legacy = (): SchemaRegistry => {
+      const reg = hotcrm();
+      reg.installPackage({ id: MEMBER_PAIR, name: MEMBER_PAIR, version: '1.0.0' } as never, 'code');
+      return reg;
+    };
+    // Alone, the installed per-package pair is served as it is.
+    const alone = customize(legacy(), { relatedLists: ['crm_event'] }, { pkg: MEMBER_PAIR, fields: {} });
+    expect(served(alone).relatedLists).toEqual(['crm_event', 'crm_task', 'crm_note']);
+    expect(alone.getRelatedListsArrangement(OBJ)?.packageId).toBe(MEMBER_PAIR);
+    // Beside the App's pair, whichever folds first, the App's pair is served and the other is named.
+    for (const order of [[APP_PAIR, MEMBER_PAIR], [MEMBER_PAIR, APP_PAIR]]) {
+      warn.mockClear();
+      const lists: Record<string, unknown[]> = { [APP_PAIR]: ['crm_note'], [MEMBER_PAIR]: ['crm_event'] };
+      const reg = legacy();
+      for (const pkg of order) customize(reg, { relatedLists: lists[pkg] }, { pkg, fields: {} });
+      expect(served(reg).relatedLists).toEqual(['crm_note', 'crm_task', 'crm_event']);
+      expect(reg.getRelatedListsArrangement(OBJ)?.packageId).toBe(APP_PAIR);
+      const lines = warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('one arrangement is served'));
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain(`from package "${MEMBER_PAIR}"`);
+      expect(lines[0]).toContain(`package "${APP_PAIR}"`);
+    }
+  });
+
+  it('the App\'s pair alone arranges the module\'s object', () => {
+    const reg = customize(hotcrm(), { relatedLists: ['crm_event', { list: 'crm_note', hidden: true }] }, { pkg: APP_PAIR, fields: {} });
+    expect(served(reg).relatedLists).toEqual(['crm_event', 'crm_task']);
+    expect(reg.getRelatedListsArrangement(OBJ)).toEqual({ packageId: APP_PAIR, hidden: ['crm_note'], unlisted: 'hidden' });
   });
 });
 
@@ -380,7 +490,7 @@ describe('ADR-0146 D10 — the pure step', () => {
     const object = vendorLead();
     const result = applyCustomArrangement(object, [
       { packageId: EXT, ownership: 'extend', priority: 200, definition: { name: OBJ, fields: {} } } as never,
-    ], { objectName: OBJ, ownerPackageId: BASE });
+    ], { objectName: OBJ, customizationPairs: () => { throw new Error('the pairs are asked only when a key is written'); } });
     expect(result.object).toBe(object);
     expect(result.notes).toEqual([]);
     expect(result.relatedLists).toBeUndefined();

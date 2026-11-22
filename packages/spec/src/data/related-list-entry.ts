@@ -143,14 +143,18 @@ export const RELATED_LISTS_ARRANGEMENT_DECORATION = '_relatedListsArrangement' a
  *    list's own rule (a list of the object's own package shows only when
  *    named, another package's shows at the end); set where the arrangement
  *    replaced a DECLARED tab list, whose unnamed entries the fold already
- *    appended.
+ *    appended. The rule holds for an EMPTY served list too: where the
+ *    arrangement hides every tab of a declared list, nothing is left to
+ *    serve, and an empty `relatedLists` on its own reads as "none declared,
+ *    every list shows". Beside `'hidden'` it is a declared list that names
+ *    nothing, so a list the owner hid by leaving it out stays hidden.
  */
 export interface RelatedListsArrangement {
   /** The `.custom` package whose object extension declares the tab list. */
   readonly packageId: string;
   /** The lists the arrangement hides, as entry names (a child object, or object.field). */
   readonly hidden: readonly string[];
-  /** Whether a related list no served entry names is shown after the listed tabs, or follows the served list's own rule. */
+  /** Whether a related list no served entry names is shown after the listed tabs, or follows the served list's own rule (also where that list is empty). */
   readonly unlisted: 'shown' | 'hidden';
 }
 

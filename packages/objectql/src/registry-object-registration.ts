@@ -47,7 +47,7 @@
 
 import { BASE_FIELD_DISPLAY_WHITELIST, isInjectedColumnDefinition, materializeTreeSelfReferences, provisionPrimary, resolveInjectedSystemColumns } from '@objectstack/spec/data';
 import type { ObjectOwnership, RelatedListsArrangement, ServiceObject } from '@objectstack/spec/data';
-import { QUEUE_FIELD_DEF, applyAuditFieldGovernance, fieldPatchTargetMisses, isCodeArtifactBody, isTenantAuthored } from '@objectstack/metadata-core';
+import { QUEUE_FIELD_DEF, applyAuditFieldGovernance, fieldPatchTargetMisses, installedManifestsOf, isCodeArtifactBody, isTenantAuthored, pairsOf } from '@objectstack/metadata-core';
 import type { FieldPatchTargetMiss } from '@objectstack/metadata-core';
 import { scalarOverridesPackagedBase } from '@objectstack/spec/system';
 import { SEARCH_COMPANION_FIELD, provisionSearchCompanion } from './search-companion.js';
@@ -108,6 +108,7 @@ export interface ObjectRegistrationHost {
   getObject: SchemaRegistry['getObject'];
   getObjectContributors: SchemaRegistry['getObjectContributors'];
   getObjectOwner: SchemaRegistry['getObjectOwner'];
+  getPackage: SchemaRegistry['getPackage'];
   hasDisabledPackage: SchemaRegistry['hasDisabledPackage'];
   isActionWithheldByDisabledPackage: SchemaRegistry['isActionWithheldByDisabledPackage'];
   isPackageDisabled: SchemaRegistry['isPackageDisabled'];
@@ -891,7 +892,7 @@ export class ObjectRegistrationFacet {
    * {@link foldObjectExtendersOnto} can apply it to a body that never came
    * from this registry without growing a second copy of the merge.
    */
-  static foldExtendersOntoDefinition(this: Pick<ObjectRegistrationHost, 'finishServedObject' | 'getObjectOwner' | 'reportChangedRuleCopies' | 'reportExtensionPlacements' | 'reportFieldPatchMisses' | 'reportRedeclaredFields' | 'resolveObjectKey' | 'tenantAuthoredScalars' | 'tenantPatchedDisplayKeys' | 'tenantRuleSettings' | 'withPackagedOwnerRules' | 'withoutExtensionQueueField'>, contributors: ObjectContributor[], baseDefinition: ServiceObject, layer: ServedObjectLayer = 'served'): ServiceObject {
+  static foldExtendersOntoDefinition(this: Pick<ObjectRegistrationHost, 'finishServedObject' | 'getObjectOwner' | 'getPackage' | 'reportChangedRuleCopies' | 'reportExtensionPlacements' | 'reportFieldPatchMisses' | 'reportRedeclaredFields' | 'resolveObjectKey' | 'tenantAuthoredScalars' | 'tenantPatchedDisplayKeys' | 'tenantRuleSettings' | 'withPackagedOwnerRules' | 'withoutExtensionQueueField'>, contributors: ObjectContributor[], baseDefinition: ServiceObject, layer: ServedObjectLayer = 'served'): ServiceObject {
     // [ADR-0029 D9.2a] Computed ONCE, over the base the fold starts from — never
     // re-derived from the running `merged`, which would make an extender's own
     // scalar look "authored" to the next extender and silently invert
@@ -988,10 +989,11 @@ export class ObjectRegistrationFacet {
     }
     // [ADR-0146 D10] The third layer, last: where the base's paired `.custom`
     // package writes `fieldGroups` or `relatedLists`, that key replaces the
-    // arrangement the owner and the placements above gave, whole.
+    // arrangement the owner and the placements above gave, whole. The pair is
+    // the owner's App's, asked of the one pair lookup (ADR-0146 D3).
     const arranged = applyCustomArrangement(merged, contributors, {
       objectName: String(merged.name ?? baseDefinition.name ?? ''),
-      ownerPackageId: contributors.find((c) => c.ownership === 'own')?.packageId,
+      customizationPairs: () => pairsOf(contributors.find((c) => c.ownership === 'own')?.packageId, installedManifestsOf(this)),
     });
     merged = arranged.object;
     this.reportExtensionPlacements(arranged.notes);

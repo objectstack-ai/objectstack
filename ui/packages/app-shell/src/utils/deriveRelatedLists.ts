@@ -87,6 +87,9 @@
  *     `isUnlisted`); a body table stays at its group and loses the tab it
  *     keeps. `unlisted: 'shown'`: a list no entry names is kept after the
  *     listed ones, as the automatic list the arrangement replaced showed it.
+ *     `unlisted: 'hidden'`: the served list is a DECLARED one even when it is
+ *     empty (the environment hid every tab of it), so a list no entry names
+ *     follows the declared rule and a list the owner left out stays hidden.
  *     With no decoration, nothing in this derivation changes.
  *   - An entry's own TITLE and COLUMNS (objectstack#35899): the object form
  *     `{ list, label, columns }` wins over the FK's `relatedListTitle` /
@@ -597,7 +600,11 @@ export function deriveRelatedLists(
     arrangement !== undefined && arrangement.hidden.some((name) => relatedListEntryNames(name, list));
   const unlistedShown = arrangement?.unlisted === 'shown';
   const derived = [...owned, ...referenced];
-  const naming = relatedListNamingEntries(derived, objectDef.relatedLists);
+  // An empty `relatedLists` reads as "none declared". Beside `unlisted:
+  // 'hidden'` it is a declared list whose every tab the environment hid: no
+  // entry names a list, so the declared rule decides each one.
+  const naming = relatedListNamingEntries(derived, objectDef.relatedLists)
+    ?? (arrangement?.unlisted === 'hidden' ? new Map<Working, unknown>() : null);
   const all: Working[] = [];
   for (const list of resolveRelatedListOrder(derived, objectDef.relatedLists)) {
     if (hiddenByArrangement(list)) {

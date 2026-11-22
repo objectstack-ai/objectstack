@@ -6826,9 +6826,12 @@ function refusePlacementsTheArrangementReplaces(
 
 /** [ADR-0146 D10] The words every key of the paired `.custom` arrangement shares: who may write it, and what refuses anyone else. */
 const CUSTOM_ARRANGEMENT_WRITER =
-  'Written only by the object extension of a base\'s paired `.custom` package (ADR-0146 D10): an extension in any ' +
-  'other package is refused at publish, by `os validate` / `os build` and at install, with the prescription to ' +
-  'place what it brings with `place`, and the registry merge skips it with a warning.';
+  'Written only by the object extension of the paired `.custom` package of the App the object belongs to ' +
+  '(ADR-0146 D10). An extension in a package that is not a `.custom` package is refused at publish, by ' +
+  '`os validate` / `os build` and at install, with the prescription to place what it brings with `place`, and ' +
+  'the registry merge skips it with a warning. A `.custom` package that is not this object\'s pair is not ' +
+  'refused at those doors: the registry merge does not apply what it writes here, alone or beside the pair, ' +
+  'and the boot log names it.';
 
 /** [ADR-0146 D10] The extension's `fieldGroups` description. */
 function objectExtensionFieldGroupsDescription(): string {
@@ -6847,7 +6850,10 @@ function objectExtensionFieldGroupsDescription(): string {
     'the owner and the `place` entries give it, and removing this key, or uninstalling or disabling the package, ' +
     'restores that. To keep a field off the record page and the forms, list it in a group whose `visibleWhen` ' +
     'is false: `hidden` is not a display property a `fieldPatches` entry may set, because it also changes what ' +
-    'search indexes and what a form requires. Example: `fieldGroups: [{ key: \'contact\', label: \'Contact\', ' +
+    'search indexes and what a form requires. Such a group is presentation only, not access control: the field ' +
+    'stays readable and writable through the API. Do not use it for a `required` field that has no default: ' +
+    'the create form no longer shows the field while the save still requires it, so the form cannot be ' +
+    'submitted. Example: `fieldGroups: [{ key: \'contact\', label: \'Contact\', ' +
     'fields: [\'email\', \'phone\', \'region__c\'] }, { key: \'basic\', label: \'Basics\', fields: [\'name\', ' +
     '\'company\'] }]`.'
   );

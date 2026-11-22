@@ -21,8 +21,10 @@
  *    继承软件包 我记得已经有一套标准，只能申明插入位置，原始软件包、环境管理员 应该可以申明完整的配置」).
  *    {@link CUSTOM_ARRANGEMENT_KEYS} are the two keys its object extension
  *    writes, in an object's own shape; any other package's extension places
- *    what it brings with `place`, and is refused these keys at publish, at
- *    `os validate` and at the install door.
+ *    what it brings with `place`, and outside a `.custom` package is refused
+ *    these keys at publish, at `os validate` and at the install door. The
+ *    pair is the `.custom` package of the App the object belongs to; what
+ *    another `.custom` package writes under these keys is not applied.
  *
  * Constants and pure predicates, imports nothing. The shape that carries a
  * per-field patch is `ObjectExtensionSchema.fieldPatches`
@@ -86,7 +88,14 @@ export function isExtensionFieldName(name: unknown): boolean {
  * default `search` and export columns drop it. The environment keeps a base
  * field off the record page and the forms in its arrangement instead: the
  * paired `.custom` extension's `fieldGroups` lists the field in a group whose
- * `visibleWhen` is false ({@link CUSTOM_ARRANGEMENT_KEYS}).
+ * `visibleWhen` is false ({@link CUSTOM_ARRANGEMENT_KEYS}). Two limits of
+ * that recipe, which the key's description states too:
+ *
+ *  - it is presentation only, not access control: the field stays readable
+ *    and writable through the API;
+ *  - it is not for a `required` field that has no default: the create form
+ *    no longer shows the field while the save still requires it, so the form
+ *    cannot be submitted.
  */
 export const BASE_FIELD_DISPLAY_WHITELIST = Object.freeze({
   /** Keys of the base field itself. */

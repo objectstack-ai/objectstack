@@ -9,7 +9,9 @@
  *    list another package brings included, which a served `relatedLists`
  *    never hides by leaving it out;
  *  - `unlisted: 'shown'`: the arrangement replaced the AUTOMATIC tab list, so
- *    a list no entry names still shows, after the listed ones.
+ *    a list no entry names still shows, after the listed ones;
+ *  - `unlisted: 'hidden'`: it replaced a DECLARED one, and the served list is
+ *    still a declared one when it is empty (every tab of it hidden).
  *
  * With no decoration this derivation answers exactly what it answered before
  * the decoration existed (the last block pins that against literal values).
@@ -116,6 +118,32 @@ describe('a tab the environment\'s list does not name still shows (`unlisted`)',
     expect(kept.keepsTab).toBe(true);
     const control = deriveRelatedLists(parent, [lead, task, line] as never).find((r) => r.childObject === 'line')!;
     expect(control.keepsTab).toBeUndefined();
+  });
+});
+
+describe('every tab of a declared list hidden: the served list is empty, and still a declared one', () => {
+  // The owner listed `task` and `event` and left its own `note` out; the
+  // environment hid both, so the server has no entry left to serve.
+  const served = { ...lead, relatedLists: [], ...arranged(['task', 'event'], 'hidden') };
+
+  it('the list the owner left out stays hidden; another package\'s still shows, as under any declared list', () => {
+    expect(ids(served)).toEqual(['audit.lead_id']);
+  });
+
+  it('control: the same empty list with no decoration is the automatic one, where every list shows', () => {
+    expect(ids({ ...lead, relatedLists: [] })).toEqual([
+      'task.lead_id', 'note.lead_id', 'event.who_id', 'event.related_to', 'audit.lead_id',
+    ]);
+  });
+
+  it('control — `shown`: an empty list over the AUTOMATIC one keeps every list but the hidden ones', () => {
+    expect(ids({ ...lead, relatedLists: [], ...arranged(['task', 'event'], 'shown') })).toEqual(['note.lead_id', 'audit.lead_id']);
+  });
+
+  it('the authoring surface keeps the hidden and the left-out lists, flagged `isUnlisted`', () => {
+    const lists = deriveRelatedLists(served, registry as never, { includeHidden: true });
+    expect(lists.filter((r) => r.isUnlisted).map((r) => r.childObject)).toEqual(['task', 'note', 'event', 'event']);
+    expect(lists.filter((r) => !r.isUnlisted).map((r) => r.childObject)).toEqual(['audit']);
   });
 });
 

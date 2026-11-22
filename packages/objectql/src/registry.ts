@@ -2956,8 +2956,7 @@ export class SchemaRegistry {
     return ObjectRegistrationFacet.getWithheldExtensionFields.call(objectRegistrationHost.of(this), name);
   }
 
-  /** [ADR-0146 D10] What the served `relatedLists` of `name` cannot say; contract: `ObjectRegistrationFacet.getRelatedListsArrangement`. */
-  getRelatedListsArrangement(name: string): RelatedListsArrangement | undefined {
+  getRelatedListsArrangement(name: string): RelatedListsArrangement | undefined { // [ADR-0146 D10] contract: `ObjectRegistrationFacet.getRelatedListsArrangement`
     return ObjectRegistrationFacet.getRelatedListsArrangement.call(objectRegistrationHost.of(this), name);
   }
 
@@ -6160,6 +6159,7 @@ export class SchemaRegistry {
       getObject: (...a) => registry.getObject(...a),
       getObjectContributors: (...a) => registry.getObjectContributors(...a),
       getObjectOwner: (...a) => registry.getObjectOwner(...a),
+      getPackage: (...a) => registry.getPackage(...a),
       hasDisabledPackage: (...a) => registry.hasDisabledPackage(...a),
       isActionWithheldByDisabledPackage: (...a) => registry.isActionWithheldByDisabledPackage(...a),
       isPackageDisabled: (...a) => registry.isPackageDisabled(...a),
