@@ -536,6 +536,7 @@ const de = {
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "Wird gespeichert…",
     cellSaved: "Gespeichert",
+    cellSavedAnnouncement: "Gespeichert: {{fields}}",
     openRecordToFinish: "Datensatz öffnen, um die Änderung abzuschließen",
   },
   grid: {
@@ -1659,6 +1660,7 @@ const de = {
     updatedTime: "Geändert am",
     recordNumber: "Datensatz-ID",
     clickToEdit: "Zum Bearbeiten klicken",
+    setField: "{{field}} festlegen",
     // objectui#3863 — base key. de's categories are exactly `one`/`other`, so this
     // slot is unreachable here and equals `_other` for key-set parity.
     showEmptyRelated: "+ {{count}} leer",
@@ -2614,6 +2616,14 @@ const de = {
       systemTheme: "Systemdesign",
       actions: "Aktionen",
       openFullSearch: "Vollständige Suchseite öffnen",
+      create: "Erstellen",
+      createAs: "„{{query}}“ als {{object}} erstellen",
+      previewEmpty: "Wählen Sie einen Datensatz, um seine Details zu sehen.",
+      enterOpenRecord: "Datensatz öffnen",
+      enterCreate: "Erstellen",
+      enterSwitchApp: "App wechseln",
+      enterApplyTheme: "Design anwenden",
+      enterOpen: "Öffnen",
       searching: "Suche…",
       records: "Datensätze",
       recentRecords: "Zuletzt angesehen",
@@ -3438,6 +3448,11 @@ const de = {
     allReports: "Alle Berichte",
     collapse: 'Seitenleiste einklappen',
     expand: 'Seitenleiste ausklappen',
+  },
+  designMode: {
+    title: 'Designmodus',
+    leaveUnsaved: 'Designmodus verlassen? Nicht gespeicherte Änderungen gehen verloren.',
+    saveFailed: 'Einige Änderungen wurden nicht gespeichert: {{reason}}',
   },
   topbar: {
     openAssistant: "Assistent {{name}} öffnen",
@@ -5569,9 +5584,7 @@ const de = {
     digestNone: "Keine Zusammenfassung",
     digestDaily: "Täglich",
     digestWeekly: "Wöchentlich",
-    digestNoOff: "Die Zusammenfassung lässt sich hier nicht abschalten: Das Speichern ohne Zusammenfassung schaltet eine von Ihrer Organisation festgelegte Zusammenfassung nicht ab und wirkt daher möglicherweise nicht.",
     quietHours: "Ruhezeiten",
-    quietHoursNoClear: "Ein leeres Zeitfenster kann nicht gespeichert werden: Es schaltet von Ihrer Organisation festgelegte Ruhezeiten nicht ab und wirkt daher möglicherweise nicht. Legen Sie stattdessen eine Start- und eine Endzeit fest.",
     save: "Speichern",
     matrix: "Themen und Kanäle",
     topic: "Thema",

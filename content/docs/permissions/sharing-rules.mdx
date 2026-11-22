@@ -61,8 +61,13 @@ Two things the bits do **not** override, regardless of the OWD:
   `org_member`). Under `public_read_write` the update policy does not apply
   (that OWD opens row updates) and the delete policy does; under every other
   OWD both apply, and record sharing can replace them row by row, as below.
-  A `controlled_by_parent` detail's by-id write is judged by its master gate
-  instead. The super-user bits short-circuit RLS **only
+  A `controlled_by_parent` detail's write is judged by its master gate
+  instead, by id and by predicate alike: a caller who may edit the master (or
+  read it, where the detail declares `writeRequiresMasterRead`) updates and
+  deletes the detail rows under it whoever created them. A predicate
+  (`multi: true`) update or delete writes the rows a by-id write of each
+  would, and is refused whole, with nothing written, when it reaches a master
+  the caller may not write under. The super-user bits short-circuit RLS **only
   where the object's access posture permits it** — `access: { default:
   'private' }`, `tenancy.enabled: false` (deployment-level: no organization column), or better-auth
   managed objects (ADR-0066 D2 ①). On an ordinary tenant business object,

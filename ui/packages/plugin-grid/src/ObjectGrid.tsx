@@ -32,7 +32,7 @@ import { SchemaRenderer, isPermissionError, useDataScope, useNavigationOverlay, 
 // what stops a seventh site picking a convention of its own.
 import { resolveGridCellRendering } from './cellRendererResolution';
 import { isMaskedGridColumn } from './maskedColumn';
-import { formatCurrency, formatDate, getBadgeColorClasses, getBadgeHexAppearance, FieldEditWidget, hasFieldEditWidget, DISCRETE_EDIT_TYPES, coerceToSafeValue, MaskedCellRenderer, withKnownObjects, RICH_TEXT_FIELD_TYPES } from '@object-ui/fields';
+import { formatCurrency, formatDate, getBadgeColorClasses, getBadgeHexAppearance, FieldEditWidget, hasFieldEditWidget, hasInCellPanelEditWidget, DISCRETE_EDIT_TYPES, coerceToSafeValue, MaskedCellRenderer, withKnownObjects, RICH_TEXT_FIELD_TYPES } from '@object-ui/fields';
 import { useLocalization, useDisplayLocale } from '@object-ui/i18n';
 // Two resolvers, two vocabularies — the repo spells the distinction into the
 // NAMES (objectui#4167). `resolveInlineI18nLabel` is the spec's own
@@ -408,6 +408,17 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    * key reaches it.
    */
   headerMenu?: boolean;
+  /**
+   * [objectstack#35955] Hears the column menu's "Hide column" with the
+   * column's field, as the HOST that keeps the columns shown asks for it (the
+   * list page holds the hidden fields in its draft, as its hide-fields eye
+   * does). The table hides the column either way. Absent ⇒ the hide lives in
+   * the table's own state alone, as before this prop existed.
+   *
+   * A RUNTIME prop, never authored metadata: the host decides it, and no node
+   * key reaches it.
+   */
+  onColumnHide?: (field: string) => void;
   /**
    * [objectstack#36015] Opens a record that a lookup cell's chip names, in
    * place, as the HOST that owns the page does it (the list page opens it in
@@ -818,12 +829,13 @@ function opensReferenceInPlace(fieldDef: { type?: unknown; reference?: unknown }
  * is never narrower than its cell and grows to fit this; the editor fills it.
  */
 function cellEditorWidthClass(type: string): string {
+  // objectstack#36023 — a rich-content field's text box, as wide as a textarea's.
+  if ((RICH_TEXT_FIELD_TYPES as readonly string[]).includes(type)) return 'w-full min-w-80';
   switch (type) {
     case 'address':
     case 'location':
       return 'w-full min-w-[22rem]';
     case 'textarea':
-    case 'markdown':
     case 'code':
     case 'json':
       return 'w-full min-w-80';
@@ -866,6 +878,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   rowOpensRecord,
   cellSelection: cellSelectionProp,
   headerMenu: hostHeaderMenu,
+  onColumnHide: hostOnColumnHide,
   openReferencedRecord,
   onBulkDelete,
   onRowSelect,
@@ -1396,7 +1409,19 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         }
       : undefined,
   });
-  const gridCellSelection: GridCellSelection | null = hostCellSelection
+  // objectstack#35689 — the value is new only when what `describeCell`
+  // answers from changed (the object, its fields, the reader's permissions,
+  // a verdict or an approval lock landing, the language): the table asks the
+  // selected cell's facts again on a new value, so one new on every render
+  // would ask on every render. The commit question and the chip opener read
+  // what this render holds through `latestCellHooks`.
+  const gridEditable = schema.editable ?? false;
+  const latestCellHooks = React.useRef({ requiredPrompt, askStateMove, openReferencedRecord });
+  React.useLayoutEffect(() => {
+    latestCellHooks.current = { requiredPrompt, askStateMove, openReferencedRecord };
+  });
+  const opensReferencedRecords = !!openReferencedRecord;
+  const gridCellSelection = useMemo((): GridCellSelection | null => (hostCellSelection
     ? {
         describeCell: (row, columnKey) => {
           const fieldDef = objectFields?.[columnKey];
@@ -1408,9 +1433,13 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
           const kind = cellReadOnlyKind({
             fieldDef,
             fieldWritable: !objectName || resolveFieldAffordance('listInlineEdit', perms, objectName, columnKey),
-            gridEditable: schema.editable ?? false,
+            gridEditable,
             objectEditable: objectInlineEditable,
-            canUpdate: resolveAffordanceGrant('listInlineEdit', affordanceSource),
+            canUpdate: resolveAffordanceGrant('listInlineEdit', {
+              objectSchema: objectSchema as SchemaLike | null | undefined,
+              objectName,
+              perms,
+            }),
             approvalLocked: approvalLocks.isLocked(recordId, row),
             recordUpdate,
           });
@@ -1447,19 +1476,25 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         // before anything is written (`./objectGridStateConfirm`). A move that
         // needs fields filled asks for them first; that dialog is the
         // confirmation, so a state-machine move does not ask twice.
-        confirmCommit: (row, columnKey, value) =>
-          requiredPrompt.ask(row, columnKey, value, () => askStateMove(row, columnKey, value)),
+        confirmCommit: (row, columnKey, value) => {
+          const { requiredPrompt: prompt, askStateMove: askMove } = latestCellHooks.current;
+          return prompt.ask(row, columnKey, value, () => askMove(row, columnKey, value));
+        },
         // objectstack#36015 — a lookup cell's chip opens its record in place.
-        ...(openReferencedRecord
+        ...(opensReferencedRecords
           ? {
               referenceCells: {
                 isReferenceColumn: (columnKey: string) => opensReferenceInPlace(objectFields?.[columnKey]),
-                openRecord: openReferencedRecord,
+                openRecord: (target: string, recordId: string) =>
+                  latestCellHooks.current.openReferencedRecord?.(target, recordId),
               },
             }
           : {}),
       }
-    : null;
+    : null), [
+    hostCellSelection, opensReferencedRecords, objectFields, objectSchema, objectName, perms,
+    gridEditable, objectInlineEditable, approvalLocks, recordVerdict, pageRecordIds, t,
+  ]);
   // objectstack#35685 — the state-machine confirm, the grid's next question
   // when the required-fields prompt has nothing to ask.
   function askStateMove(row: any, columnKey: string, value: unknown): Promise<boolean> | null {
@@ -3652,7 +3687,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     renderCellEditor: inlineEditable
       ? (ctx: { column: any; row: any; pendingRow: any; value: any; stage: (v: any) => void; commit: (v?: any) => void }) => {
           const fieldDef = (objectSchema as any)?.fields?.[ctx.column?.accessorKey];
-          if (!fieldDef || !hasFieldEditWidget(fieldDef.type)) return null;
+          // objectstack#36023 — a rich-content field edits in a panel under the cell.
+          if (!fieldDef || !(hasFieldEditWidget(fieldDef.type) || hasInCellPanelEditWidget(fieldDef.type))) return null;
           // objectstack#35688 — a `select` declared `multiple` draws the multi-select
           // check list (`SelectField` hands it to `MultiSelectField`): each check
           // stages, and the edit is saved when the user moves on.
@@ -3806,6 +3842,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // on `DataTableSchema` and stays unwired, exactly as the RuntimeOnlyDeclared
     // ledger records it. Which of the two declared spellings survives is still an
     // open ruling and is deliberately NOT settled here.
+    // objectstack#35955 — the column menu's "Hide column", to the host that
+    // keeps the columns shown.
+    ...(hostOnColumnHide ? { onColumnHide: hostOnColumnHide } : {}),
     onColumnsReorder: (newColumns: any[]) => {
       const order = newColumns
         .map((c) => c?.accessorKey)

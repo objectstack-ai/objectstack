@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { Plugin, PluginContext, IHttpServer, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS, AuthzStoreUnavailableError } from '@objectstack/core';
+import { Plugin, PluginContext, IHttpServer, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS, AuthzStoreUnavailableError, resolveEnvironmentMembershipEnforcement } from '@objectstack/core';
 import { looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, serverFaultProvenance, declaredRefusalMessage, demotedDeclaredCode, logServerFault, describeFaultRequest, inProcessSessionReadInput } from '@objectstack/types';
 import { DispatcherErrorCode } from '@objectstack/spec/api';
 import type { IAuthService, IMetadataService, Logger } from '@objectstack/spec/contracts';
@@ -968,8 +968,12 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             const kernel = ctx.getKernel();
             // Default: enable membership enforcement iff environment-scoping is on.
             // Tests / single-tenant deploys can opt out via the explicit flag.
-            const enforceMembership =
-                config.enforceProjectMembership ?? (config.scoping?.enableProjectScoping ?? false);
+            // The ONE reading of the switch — the REST plugin reads it through
+            // the same function, so one host's doors are on or off together.
+            const enforceMembership = resolveEnvironmentMembershipEnforcement({
+                enforceProjectMembership: config.enforceProjectMembership,
+                enableProjectScoping: config.scoping?.enableProjectScoping,
+            });
             // [#3963] Anonymous callers are denied unconditionally on every
             // surface that reaches object data — the deployment-wide opt-out is
             // retired, so there is nothing to resolve or warn about here. The
