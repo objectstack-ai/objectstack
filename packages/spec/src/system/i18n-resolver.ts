@@ -523,7 +523,7 @@ interface LabelCatalogs {
  *
  * [#36373] For a report `label` / `description` and a widget `title`, an
  * inline locale map whose entry for the requested locale differs from the
- * base's also counts as changed ({@link slotChanged}).
+ * base's also counts as changed ({@link slotRead}).
  */
 function labelCatalogs(
   bundle: TranslationBundle | undefined,
@@ -2543,7 +2543,7 @@ function lookupWidgetAttr(
  *
  * [#36373] A widget `title` written as an inline locale map whose entry for
  * the requested locale differs from the base's counts as changed too
- * ({@link slotChanged}), so the base's translation never replaces it.
+ * ({@link slotRead}), so the base's translation never replaces it.
  */
 export function translateDashboard<T extends DashboardLike>(
   doc: T,
@@ -2588,11 +2588,10 @@ export function translateDashboard<T extends DashboardLike>(
         const packagedWidget = packagedPart(base, 'widgets', (candidate) => candidate.id === w.id);
         // A widget title's inline entry for the requested locale, where it is
         // the customer's text, counts as changed (`translateReport`'s rule):
-        // the pair's translation still answers first, the base's never.
-        const title = lookupWidgetAttr(
-          catalogFor(catalogs, slotChanged(packagedWidget, 'title', w.title, opts?.locale)),
-          name, w.id, 'title', opts,
-        );
+        // the pair's translation for that locale still answers first, the
+        // base's never.
+        const titleRead = slotRead(catalogs, packagedWidget, 'title', w.title, opts);
+        const title = lookupWidgetAttr(titleRead.bundle, name, w.id, 'title', titleRead.opts);
         if (title) next.title = title;
         const desc = lookupWidgetAttr(
           catalogFor(catalogs, valueOverridesPackagedBase(packagedWidget, 'description', w.description)),
@@ -3178,9 +3177,9 @@ function translateReportBlocks(
  * either may be an inline locale map; a key the bundle does not carry leaves
  * that map intact rather than flattening it to one language. [#36373] A map
  * whose entry for the requested locale differs from the base's counts as
- * changed, as a re-authored string does ({@link slotChanged}): the pair's
- * translation still answers first, the base's translation never, and with
- * neither the reader shows that entry. With no packaged base nothing counts
+ * changed, as a re-authored string does ({@link slotRead}): the pair's
+ * translation for that locale still answers first, the base's translation
+ * never, and with neither the reader shows that entry. With no packaged base nothing counts
  * as changed, so the bundle answers ahead of the entry.
  */
 export function translateReport<T extends ReportLike>(
@@ -3195,17 +3194,15 @@ export function translateReport<T extends ReportLike>(
 
   const base = asRecord(opts?.packagedBase);
   // An inline map's own entry for the requested locale, where it is the
-  // customer's text, counts as changed ({@link inlineEntryOverridesPackagedBase}):
-  // the slot reads the pair's own translations only, so a translation the
-  // paired `.custom` package ships still answers first (ruling record
-  // 6631250894, rank 1) and only the base's translation is skipped. No pair
-  // answer leaves the map as served, and the reader picks that entry.
-  const label = lookupReportAttr(
-    catalogFor(catalogs, slotChanged(base, 'label', doc.label, opts?.locale)), name, 'label', opts,
-  );
-  const description = lookupReportAttr(
-    catalogFor(catalogs, slotChanged(base, 'description', doc.description, opts?.locale)), name, 'description', opts,
-  );
+  // customer's text, counts as changed ({@link slotRead}): the slot reads the
+  // pair's translation for that locale only, so a translation the paired
+  // `.custom` package ships for it still answers first (ruling record
+  // 6631250894, rank 1) and the base's translation never does. No pair answer
+  // for that locale leaves the map as served, and the reader picks that entry.
+  const labelRead = slotRead(catalogs, base, 'label', doc.label, opts);
+  const label = lookupReportAttr(labelRead.bundle, name, 'label', labelRead.opts);
+  const descriptionRead = slotRead(catalogs, base, 'description', doc.description, opts);
+  const description = lookupReportAttr(descriptionRead.bundle, name, 'description', descriptionRead.opts);
   const blocks = translateReportBlocks(doc.blocks, catalogs, name, base, opts);
   if (label === undefined && description === undefined && blocks === undefined) return doc;
   return {
@@ -5036,7 +5033,7 @@ function inlineEntryKeyFor(
  * locale the map has no entry for keeps reading the catalog, so a third
  * language still reads its bundle translation, never another locale's entry.
  *
- * Read through {@link slotChanged} by {@link translateReport} (name,
+ * Read through {@link slotRead} by {@link translateReport} (name,
  * description) and {@link translateDashboard} (a widget's title), the label
  * slots the console's report and dashboard panels edit in the current
  * language.
@@ -5054,16 +5051,41 @@ function inlineEntryOverridesPackagedBase(
 }
 
 /**
- * [#36373] Whether a report `label` / `description` or a widget `title`
- * changed against the packaged base, for {@link catalogFor}: a plain string
- * the override changed ({@link valueOverridesPackagedBase}), or an inline
- * map whose entry for the requested locale is the customer's own
- * ({@link inlineEntryOverridesPackagedBase}). Changed reads the pair's own
- * translations only — rank 1 of ruling record 6631250894 kept — and never the
- * base's.
+ * [#36373] What a report `label` / `description` or a widget `title` is read
+ * from, and along which locales:
+ *
+ *  - a plain string the override changed ({@link valueOverridesPackagedBase}):
+ *    the pair's own translations along the whole locale chain, as every
+ *    changed string reads ({@link catalogFor}); the override's text has no
+ *    locale, so any translation of it is a better answer;
+ *  - an inline map whose entry for the requested locale is the customer's own
+ *    ({@link inlineEntryOverridesPackagedBase}): the pair's translation for
+ *    the REQUESTED locale only (the same tag, case aside), with no fallback
+ *    chain and no regional variant. The map states its text for that locale,
+ *    so a pair translation for another one (`en` down the chain, `zh-TW` for
+ *    a `zh-CN` request) is no better answer than it. Rank 1 of ruling record
+ *    6631250894 is kept for the locale it speaks about; the base's
+ *    translation never answers;
+ *  - otherwise: the unchanged catalog, as before.
  */
-function slotChanged(base: unknown, key: string, value: unknown, locale: string | undefined): boolean {
-  return valueOverridesPackagedBase(base, key, value) || inlineEntryOverridesPackagedBase(base, key, value, locale);
+function slotRead(
+  catalogs: LabelCatalogs,
+  base: unknown,
+  key: string,
+  value: unknown,
+  opts: TranslateDocumentOptions | undefined,
+): { bundle: TranslationBundle | undefined; opts: TranslateDocumentOptions | undefined } {
+  if (valueOverridesPackagedBase(base, key, value)) return { bundle: catalogs.changed, opts };
+  if (!inlineEntryOverridesPackagedBase(base, key, value, opts?.locale)) return { bundle: catalogs.unchanged, opts };
+  const locale = opts?.locale;
+  const pair = catalogs.changed;
+  const own = pair && locale
+    ? Object.keys(pair).find((code) => code.toLowerCase() === locale.toLowerCase())
+    : undefined;
+  return {
+    bundle: own === undefined ? undefined : ({ [locale as string]: pair![own] } as TranslationBundle),
+    opts: { ...opts, fallbackChain: [] },
+  };
 }
 
 /**

@@ -282,6 +282,38 @@ describe('an inline locale map entry for the requested locale beats the catalog 
     expect(noEntry.widgets[0].title).toEqual(edited.widgets[0].title);
   });
 
+  // ─── L2 7079950960 S3: the pair speaks for the requested locale only ─────
+  it('a pair translation for a fallback locale does not outrank the map\'s own entry', () => {
+    const pairBundle: TranslationBundle = { en: { reports: { opps_by_stage: { label: 'Pipeline by stage (pair)' } } } };
+    const out = translateReport(editedInZh(), multi, {
+      locale: 'zh-CN', fallbackChain: ['en'], packagedBase: packagedBase(), pairBundle,
+    }) as any;
+    expect(out.label).toEqual(editedInZh().label);
+    expect(resolveI18nLabel(out.label, 'zh-CN')).toBe('各阶段商机（本公司）');
+  });
+
+  it('a pair translation for a sibling region (zh-TW) does not answer a zh-CN request over the zh-CN entry', () => {
+    const pairBundle: TranslationBundle = { 'zh-TW': { reports: { opps_by_stage: { label: '各階段商機（成對包）' } } } };
+    const out = translateReport(editedInZh(), multi, { locale: 'zh-CN', packagedBase: packagedBase(), pairBundle }) as any;
+    expect(out.label).toEqual(editedInZh().label);
+  });
+
+  it('a widget title: a fallback-locale pair translation leaves the zh-CN entry', () => {
+    const bundle: TranslationBundle = { 'zh-CN': { dashboards: { exec: { widgets: { rev: { title: '按行业收入' } } } } } };
+    const base = { name: 'exec', label: 'Executive', widgets: [{ id: 'rev', title: 'Revenue by Industry' }] };
+    const edited = { ...base, widgets: [{ id: 'rev', title: { default: 'Revenue by Industry', 'zh-CN': '各行业收入（本公司）' } }] };
+    const pairBundle: TranslationBundle = { en: { dashboards: { exec: { widgets: { rev: { title: 'Revenue (pair)' } } } } } };
+    const out = translateDashboard(edited as any, bundle, { locale: 'zh-CN', fallbackChain: ['en'], packagedBase: base, pairBundle }) as any;
+    expect(out.widgets[0].title).toEqual(edited.widgets[0].title);
+  });
+
+  it('control: a re-authored plain string still reads the pair along the chain, as before', () => {
+    const pairBundle: TranslationBundle = { en: { reports: { opps_by_stage: { label: 'Pipeline by stage (pair)' } } } };
+    const edited = { ...report(), label: 'Pipeline by stage (ours)' };
+    const out = translateReport(edited, multi, { locale: 'zh-CN', fallbackChain: ['en'], packagedBase: packagedBase(), pairBundle }) as any;
+    expect(out.label).toBe('Pipeline by stage (pair)');
+  });
+
   // ─── L2 7078881267 S1: the gate picks the entry the writer and reader pick ─
   describe('the entry for a locale is the one the panel writes and the reader shows', () => {
     const scripts: TranslationBundle = {
