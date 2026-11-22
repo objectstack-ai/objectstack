@@ -21,10 +21,20 @@
  *  - WRITE an edit to the session language only. When the box was showing a
  *    translation of a plain-string label, the label becomes the inline locale
  *    map `{ default: SOURCE, LANG: EDIT }`: the source text stays byte-identical
- *    for every other language, and the server's resolver lets the map's entry
- *    for the requested language beat the bundle (`translateReport`). A map
- *    label, or a box that showed the source itself, writes through
- *    `setLocalized` as before.
+ *    for every other language. A map label, or a box that showed the source
+ *    itself, writes through `setLocalized` as before.
+ *
+ * Whether the stored entry is what the page then serves is the server's call,
+ * and it is not always yes (`translateReport`, `translateDashboard`; pinned in
+ * `packages/spec/src/system/i18n-report.test.ts`):
+ *
+ *  - an item installed from a package (one with a packaged base): the entry
+ *    beats the base's translation, and a translation the paired `.custom`
+ *    package ships for that language still answers ahead of it;
+ *  - an item with no packaged base: the bundle answers ahead of the entry, so
+ *    where the bundle has a translation for this language the box shows that
+ *    translation again after save. The panel does not say so yet — an owed
+ *    follow-up (L2 7078881267 S2), not a rule.
  *
  * ⛔ The served text is never written back as the source: an untouched box
  * commits nothing, and an edit lands in its own language's entry.

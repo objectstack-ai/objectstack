@@ -12,7 +12,8 @@
  *  - An edit typed over a translation of a plain-string label stores the inline
  *    locale map `{ default: SOURCE, LANG: EDIT }`: the source is byte-identical,
  *    so every other language reads what it read before (the server half of that
- *    promise is `packages/spec/src/system/i18n-report.test.ts`).
+ *    promise is `packages/spec/src/system/i18n-report.test.ts`, which also pins
+ *    that an item with no packaged base serves its bundle ahead of the entry).
  *  - A map label writes its own language's entry and keeps every other one.
  *  - The clear removes this language's own entry; a borrowed translation has
  *    no entry, so clearing it leaves the label as authored.
