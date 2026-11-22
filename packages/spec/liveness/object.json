@@ -30,6 +30,29 @@
       "evidence": "ui/packages/layout/src/NavigationRenderer.tsx#NavigationItemRenderer (an `object` navigation entry draws an ObjectIconTile coloured by `resolveTargetColor`); ui/packages/app-shell/src/hooks/useNavTargetIcon.ts#useNavTargetColor (reads the object's `color` from the metadata cache for the sidebar and the app-home menu); ui/packages/components/src/custom/object-icon-tile.tsx#ObjectIconTile (maps the palette name to the square's colour); ui/packages/app-shell/src/views/metadata-admin/inspectors/ObjectDefaultInspector.tsx#ObjectDefaultInspector (the designer writes it)",
       "note": "objectstack#35985: the colour of the rounded square the object's icon is drawn on, from the closed palette `OBJECT_COLORS`. Unset draws the neutral gray. The navigation (sidebar, app-home menu, phone menu) reads it; the other places that draw an object icon follow in the card's second PR."
     },
+    "pinnedActions": {
+      "status": "live",
+      "verifiedAt": "2026-11-22",
+      "evidenceScope": "in-repo",
+      "evidence": "ui/packages/types/src/ui-action.ts#pinnedHeaderActions (the ONE reader: pinned actions become the header's buttons in pin order, every other placed action goes to the overflow); ui/packages/app-shell/src/views/RecordDetailView.tsx#RecordDetailView (the synthesized record header reads `pinnedActions.record`, staged pins included); ui/packages/components/src/renderers/layout/containers.tsx#PageHeaderActions (an authored `page:header` with `placedActions: true` reads the same arm); ui/packages/app-shell/src/views/objectViewPageHeader.tsx#PinnedListHeaderActions (the list header reads `pinnedActions.list`, `$import` and `$export` among the actions); packages/objectql/src/registry.ts#mergeObjectDefinitions (an `object_extension`'s pins fold onto the object, arm by arm); ui/packages/app-shell/src/layout/DesignModeHeaderPins.tsx#DesignModeHeaderPins (the design mode writes it)",
+      "note": "objectstack#36366: the page header's buttons per page type, at most three in order; every other action the page places is in 「More」. Absent (or an arm absent): the header's own choice, as before. An installed object is pinned through its customization package's `object_extension`.",
+      "children": {
+        "list": {
+          "status": "live",
+          "verifiedAt": "2026-11-22",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/app-shell/src/views/objectViewPageHeader.tsx#PinnedListHeaderActions (the list header draws the pinned toolbar actions and `$import` / `$export` as its buttons, in pin order); ui/packages/types/src/ui-action.ts#pinnedHeaderActions (the unpinned toolbar actions go to the bar's overflow)",
+          "note": "objectstack#36366: the list page header's buttons."
+        },
+        "record": {
+          "status": "live",
+          "verifiedAt": "2026-11-22",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/app-shell/src/views/RecordDetailView.tsx#RecordDetailView (the synthesized record header reads the arm); ui/packages/components/src/renderers/layout/containers.tsx#PageHeaderActions (an authored `page:header` with `placedActions: true` reads it); ui/packages/types/src/ui-action.ts#pinnedHeaderActions (pinned actions placed at `record_header` in pin order, the rest at `record_more`)",
+          "note": "objectstack#36366: the record page header's buttons."
+        }
+      }
+    },
     "displayNameField": {
       "status": "live",
       "note": "Deprecated alias of nameField (ADR-0079); still read by objectui RecordDetailView + resolveDisplayField back-compat."

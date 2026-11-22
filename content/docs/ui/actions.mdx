@@ -375,6 +375,34 @@ is collected, then the body runs with those values as its `input`.
 | `record_related` | Each row of a related list inside a parent record — there only, never on the object's own list views (unlike `list_item`). Declared, not yet placed: the console does not draw it on those rows yet |
 | `record_section` | Named action bars on record pages |
 
+### Choose the header's buttons
+
+A page header draws at most three of its actions as buttons and puts the rest in its
+「More」 menu. By default it picks the first three by each action's `order`. An object
+chooses them itself with `pinnedActions`, one list per page type, in the order drawn:
+
+```typescript
+ObjectSchema.create({
+  name: 'crm_opportunity',
+  // ...
+  pinnedActions: {
+    list: ['mass_assign', '$export'],          // the list page: actions at list_toolbar
+    record: ['mark_won', 'mark_lost', 'clone'], // the record page: actions at record_header or record_more
+  },
+});
+```
+
+- At most three per page, each named once. Every other action the page places goes to
+  「More」, including one placed at `record_header`.
+- The list page also pins its built-in Import and Export as `$import` and `$export`.
+  The record page has no built-ins.
+- Leave a list out (or `pinnedActions` out) and that header keeps its own choice.
+- `os validate`, `os build` and `os lint` refuse a name that is no action of the
+  object, or one not placed on that page. Such a name draws no button.
+- An administrator sets the same lists in the running app: 「Edit app」, then
+  「Header buttons」 at the end of the page header. For an installed object the
+  change is saved as this environment's customization (an `object_extension`).
+
 Surfaces can also reference actions **by name**:
 
 ```typescript

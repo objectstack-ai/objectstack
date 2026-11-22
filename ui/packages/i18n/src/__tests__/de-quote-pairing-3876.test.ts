@@ -462,7 +462,10 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 124 once objectstack-ai/objectstack#36363 added `designMode.menu.iconHint`,
     // the menu editor's icon field naming an example icon („briefcase“) — one
     // literal span.
-    expect(okSpans, 'correctly paired spans').toBe(124);
+    // 128 once objectstack-ai/objectstack#36366 added `designMode.pins`: the
+    // header-buttons panel naming the 「More」 menu („Mehr“, twice) and the
+    // pinned action a save refuses („{{name}}“, twice), four spans.
+    expect(okSpans, 'correctly paired spans').toBe(128);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -584,8 +587,9 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 123 / 123 / 0 after objectstack-ai/objectstack#36011 added
     // `console.objectView.restoreFactoryConfirm` and `restoreFactoryDone`, two
     // more matched pairs. 124 / 124 / 0 after objectstack-ai/objectstack#36363
-    // added `designMode.menu.iconHint`, one more matched pair.
-    expect({ open, close, rdq }).toEqual({ open: 124, close: 124, rdq: 0 });
+    // added `designMode.menu.iconHint`, one more matched pair. 128 / 128 / 0
+    // after objectstack-ai/objectstack#36366 added `designMode.pins`, four more.
+    expect({ open, close, rdq }).toEqual({ open: 128, close: 128, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);

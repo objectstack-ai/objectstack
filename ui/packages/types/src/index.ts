@@ -1294,6 +1294,7 @@ export {
   ACTION_PARAM_FIELD_TYPES,
   actionRendersAt,
   placedHeaderActions,
+  pinnedHeaderActions,
   resolveDeclaredActionIds,
 } from './ui-action.js';
 
