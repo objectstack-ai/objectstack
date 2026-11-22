@@ -36,6 +36,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as formCore from '@object-ui/plugin-form/core';
 import * as viewCore from '@object-ui/plugin-view/core';
+import * as detailCore from '@object-ui/plugin-detail/core';
 // @ts-expect-error — plain-JS shared helper, intentionally untyped (`allowJs: false`)
 import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
 
@@ -48,6 +49,9 @@ const CONSOLE_SRC = path.resolve(here, '../../../../apps/console/src');
 const ENTRIES = {
   '@object-ui/plugin-form': new Set(Object.keys(formCore)),
   '@object-ui/plugin-view': new Set(Object.keys(viewCore)),
+  '@object-ui/plugin-detail': new Set(Object.keys(detailCore)),
+  // No `/core` subpath: listed so the eager-module pin below sees its entry.
+  '@object-ui/plugin-grid': new Set<string>(),
 } as const;
 type Entry = keyof typeof ENTRIES;
 
