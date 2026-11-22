@@ -105,7 +105,8 @@ import { useGridTranslation } from './objectGridTranslations';
 import { inlineEditRuleRefusals, inlineRuleRefusalError } from './objectGridInlineRules';
 import { DEFAULT_DISPLAY_PAGE_SIZE, DEFAULT_SELECTION_TYPE, type RowHeightMode, resolvePageSize, resolveRowHeightMode } from './objectGridDefaults';
 import { type BatchSaveOutcome, type RowConflictChoice, type WrittenRowVersion, rowVersionOf, rowVersionToSend } from './objectGridRowVersion';
-import { type RowPatch, mergeSavedRow } from './objectGridRowPatch';
+import { type RowPatch, mergeSavedRow, rowsAsSaved } from './objectGridRowPatch';
+import { usableGroupingFields } from './useGroupedData';
 import { type CellSaveUndo, createCellUndoStack, isCellUndoKey, undoKeyCellOf } from './objectGridCellUndo';
 import { type ObjectGridExternalPaginationProps, type ObjectGridFooterSummary, type ObjectGridRowGroup } from './objectGridProps';
 import { FooterSummaryReport } from './objectGridFooterSummaryReport';
@@ -874,6 +875,9 @@ function cellEditorWidthClass(type: string): string {
   }
 }
 
+/** objectstack#35689 — no record waits in its group. */
+const NO_HELD_RECORDS: ReadonlySet<string> = new Set();
+
 export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   schema,
   dataSource,
@@ -986,6 +990,25 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // which `writeRowInPlace` sets together with the state it renders from.
   const cellUndoRef = React.useRef(createCellUndoStack());
   const rowPatchesRef = React.useRef(rowPatches);
+  // objectstack#35689 — the records a select-first save moved to another
+  // group while the reader is still on their row: each stays in the group it
+  // was read in, counted and summed there, until a cell of another row is
+  // selected. Then the groups are read again (`regroupNonce`), and a grid
+  // that buckets in the browser buckets the saved row. Any other save is in
+  // the figures at once (`savedFigureNonce` re-asks the server's headers).
+  const [heldInGroup, setHeldInGroup] = useState<ReadonlySet<string>>(NO_HELD_RECORDS);
+  const heldInGroupRef = React.useRef(heldInGroup);
+  const [regroupNonce, setRegroupNonce] = useState(0);
+  const [savedFigureNonce, setSavedFigureNonce] = useState(0);
+  const leaveHeldRows = useCallback((selectedRecordId: unknown) => {
+    const held = heldInGroupRef.current;
+    const stay = selectedRecordId === undefined || selectedRecordId === null ? undefined : String(selectedRecordId);
+    if (held.size === 0 || (held.size === 1 && stay !== undefined && held.has(stay))) return;
+    const next = stay !== undefined && held.has(stay) ? new Set([stay]) : NO_HELD_RECORDS;
+    heldInGroupRef.current = next;
+    setHeldInGroup(next);
+    setRegroupNonce((n) => n + 1);
+  }, []);
   const [showExport, setShowExport] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -1470,6 +1493,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
           };
         },
         onCellSelect: (row) => {
+          // objectstack#35689 — a row held in its group is left. Keyed as
+          // the save keys it (`resolveRecordId`).
+          leaveHeldRows(row?._id ?? row?.id);
           recordVerdict.requestVerdicts();
           // objectstack#35795 — one lock read for the page, not one per row selected.
           approvalLocks.probe([rowRecordId(row), ...pageRecordIds]);
@@ -1495,7 +1521,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       }
     : null), [
     hostCellSelection, opensReferencedRecords, objectFields, objectSchema, objectName, perms,
-    gridEditable, objectInlineEditable, approvalLocks, recordVerdict, pageRecordIds, t,
+    gridEditable, objectInlineEditable, approvalLocks, recordVerdict, pageRecordIds, t, leaveHeldRows,
   ]);
   // objectstack#35685 — the state-machine confirm, the grid's next question
   // when the required-fields prompt has nothing to ask.
@@ -1885,13 +1911,18 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
 
   // The grouping: the group value formatter and date faces, the server group
   // headers and rows, and the grouped data, in hook order (`./objectGridGrouping`).
+  // objectstack#35689 — the rows the figures read: each saved row in place of
+  // the row read (the footer), and, for the groups, a row still held in its
+  // group (`heldInGroup`) as it was read.
+  const savedData = useMemo(() => rowsAsSaved(data, rowPatches), [data, rowPatches]);
+  const groupedData = useMemo(() => rowsAsSaved(data, rowPatches, heldInGroup), [data, rowPatches, heldInGroup]);
   const {
     temporalGroupFaces, groupWhere, groupHeaders, groups, isGrouped, toggleGroup, groupRows,
   } = useObjectGridGrouping({
-    schema, dataSource, objectName, objectFields, objectTypesPending, data, setData,
+    schema, dataSource, objectName, objectFields, objectTypesPending, data: groupedData, setData,
     setTotalMatching, t, translateOptions, groupedPage, setGroupedPage, groupedPageSize, refreshKey,
     serverPageSize, groupRowQuery, groupingKeyReadable, groupingRefusesNothing,
-    unmaskedGroupingFields, serverGroupedFetch, invalidationNonce,
+    unmaskedGroupingFields, serverGroupedFetch, invalidationNonce, savedFigureNonce, regroupNonce,
   });
   // objectstack#35685 — the rows the grid read, as an undo finds its record
   // among them when it runs: the page's rows, and a server-grouped group's.
@@ -1908,7 +1939,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const {
     bulkFanoutParams, resolvedTotalMatching, summaries, hasSummary, summaryTypes,
   } = useObjectGridSummaries({
-    schema, dataSource, objectName, objectSchema, objectFields, objectTypesPending, data, hasInlineData,
+    schema, dataSource, objectName, objectSchema, objectFields, objectTypesPending, data: savedData, hasInlineData,
     externalManualPagination, hostFindParams, hostRowCount, lastFindParamsRef, totalMatching, refreshKey, serverPage,
     fetchWindow, serverGroupedFetch, isGrouped, summaryPicks,
   });
@@ -3100,10 +3131,34 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       next.set(id, { base: held && held.row === row ? held.base : row, row: mergeSavedRow(row, shown, answer) });
       rowPatchesRef.current = next;
       setRowPatches(next);
+      noteSavedPlace(id, Object.keys(changes));
       return { outcome: 'saved', result: answer };
     } finally {
       releaseOwnWrite();
     }
+  };
+
+  /**
+   * objectstack#35689 — where a landed select-first save of `fields` on
+   * record `id` leaves it in a grouped grid: a save that wrote a grouping
+   * field, or any save on a row already held, keeps the row in the group it
+   * was read in until the reader leaves the row (`leaveHeldRows`); any other
+   * save is in its group's figures at once, which a server-grouped grid asks
+   * its headers for again.
+   */
+  const noteSavedPlace = (id: string, fields: readonly string[]): void => {
+    if (!isGrouped) return;
+    const groupingFields = usableGroupingFields(schema.grouping?.fields).map((gf) => gf.field);
+    const held = heldInGroupRef.current;
+    if (held.has(id)) return;
+    if (fields.some((field) => groupingFields.includes(field))) {
+      const next = new Set(held);
+      next.add(id);
+      heldInGroupRef.current = next;
+      setHeldInGroup(next);
+      return;
+    }
+    if (serverGroupedFetch) setSavedFigureNonce((n) => n + 1);
   };
 
   /**

@@ -632,6 +632,9 @@ export const FIELD_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     // the way `unitConfig.unitField` does.
     unitConfig: keep,
     group: keep, widget: keep, hidden: keep, internal: keep, readonly: keep,
+    // A boolean facet: whether a create surface asks for this field (#36425);
+    // it names no field.
+    showOnCreate: keep,
     requiredPermissions: keep, maskingRule: keep, ackPlaintextMasking: keep, system: keep,
     sortable: keep, inlineHelpText: keep, placeholder: keep, externalId: keep,
     // A boolean facet of this date field: it declares the field a deadline

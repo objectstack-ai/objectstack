@@ -38,6 +38,7 @@ import {
 } from '@object-ui/components';
 import { useDisplayLocale, useSafeTranslate } from '@object-ui/i18n';
 import { useSafeFieldLabel } from '@object-ui/react';
+import { getPersonInitials } from '@object-ui/fields';
 import { Cog } from 'lucide-react';
 import { hasCellValue } from './emptiness';
 
@@ -163,19 +164,6 @@ function formatRelative(value: HistoryEntry['created_at'], locale: string): stri
   return formatAbsolute(value, locale);
 }
 
-function initialsFromName(name?: string | null): string {
-  if (!name) return '?';
-  const parts = name
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2);
-  if (parts.length === 0) return '?';
-  return parts
-    .map((p) => p.charAt(0).toUpperCase())
-    .join('');
-}
-
 /**
  * An audit value as the timeline shows it, or the `'—'` that means "nothing".
  *
@@ -276,7 +264,7 @@ export function HistoryTimeline({
                       data-testid="history-system-actor-glyph"
                     />
                   ) : (
-                    initialsFromName(entry.user_name)
+                    getPersonInitials(entry.user_name ?? '')
                   )}
                 </AvatarFallback>
               </Avatar>

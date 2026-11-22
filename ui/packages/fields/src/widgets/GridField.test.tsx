@@ -4,6 +4,8 @@ import React from 'react';
 import { UploadProvider } from './UploadProvider';
 import { Dialog, DialogContent, DialogTitle } from '@object-ui/components';
 import { formatDate, formatDateTime } from '@object-ui/core';
+import { I18nProvider } from '@object-ui/i18n';
+import { en, zh } from '@object-ui/i18n/locales';
 import { GridFieldWidget as GridField } from './grid-field/GridFieldWidget';
 import { GridField as GridFieldFace, LineItemsField, sumColumn, lookupAutofillPatch, UNTOUCHED_NEW_ROW, isUntouchedNewRow, columnHelpByField } from './GridField';
 
@@ -964,21 +966,21 @@ describe('no trailing entry row beside Add (objectstack#35507)', () => {
 describe('column header help (objectstack#35804)', () => {
   const help = { amount: 'Enter the tax-inclusive amount.' };
 
-  it('a column with help draws an info button whose accessible name is the help', () => {
+  it('a column with help draws an info button named Help and described by the help', () => {
     render(<GridField value={[]} onChange={() => {}} field={field} columnHelp={help} />);
-    const button = screen.getByRole('button', { name: 'Enter the tax-inclusive amount.' });
+    const button = screen.getByRole('button', { name: 'Help', description: 'Enter the tax-inclusive amount.' });
     expect(button.closest('th')!.textContent).toContain('Amount');
   });
 
   it('focusing the info button shows the help', async () => {
     render(<GridField value={[]} onChange={() => {}} field={field} columnHelp={help} />);
-    fireEvent.focus(screen.getByRole('button', { name: 'Enter the tax-inclusive amount.' }));
+    fireEvent.focus(screen.getByRole('button', { name: 'Help' }));
     expect((await screen.findByRole('tooltip')).textContent).toBe('Enter the tax-inclusive amount.');
   });
 
   it('the read-only table draws the same help', () => {
     render(<GridField value={[{ description: 'A', amount: 1 }]} onChange={() => {}} field={field} readonly columnHelp={help} />);
-    expect(screen.getByRole('button', { name: 'Enter the tax-inclusive amount.' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Help', description: 'Enter the tax-inclusive amount.' })).toBeTruthy();
   });
 
   it('CONTROL: a column without help draws no info button', () => {
@@ -997,6 +999,58 @@ describe('column header help (objectstack#35804)', () => {
       }),
     ).toEqual({ unit_price: 'Inline help wins.', quantity: 'The served description.' });
     expect(columnHelpByField(undefined)).toEqual({});
+  });
+});
+
+/**
+ * objectstack#36004 — a cell's column is announced by its header's accessible
+ * name, so the help must not join it. The header is named by the field label
+ * and the info button's short Help word; the help itself is the button's
+ * description, which a screen reader reads on reaching the button. Computed
+ * through jest-dom's accname matchers (dom-accessibility-api), on the editable
+ * grid and on the read-only table alike.
+ *
+ * dom-accessibility-api treats a button nested in the header as an embedded
+ * control and leaves its `aria-label` out of the header's name, so it reads the
+ * label alone whatever the button is named. A browser following accname folds
+ * that `aria-label` in, so the pin also holds every `aria-label` inside the
+ * header to the Help word: that is the text a browser adds to the column name.
+ */
+describe('column header help stays out of the column name (objectstack#36004)', () => {
+  const help = { amount: 'Enter the tax-inclusive amount.' };
+  const inLocale = (language: 'en' | 'zh', node: React.ReactNode) => (
+    <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false }} persistLanguage={false}>
+      {node}
+    </I18nProvider>
+  );
+
+  it.each([
+    ['editable grid', false],
+    ['read-only table', true],
+  ])('%s: the header is named by the label and Help; the button is described by the help', (_face, readonly) => {
+    render(
+      inLocale(
+        'en',
+        <GridField value={[{ description: 'A', amount: 1 }]} onChange={() => {}} field={field} readonly={readonly} columnHelp={help} />,
+      ),
+    );
+    const button = screen.getByTestId('line-items-column-help');
+    const header = button.closest('th')!;
+    expect(header).toHaveAccessibleName('Amount');
+    expect(Array.from(header.querySelectorAll('[aria-label]'), (el) => el.getAttribute('aria-label'))).toEqual([
+      en.fields.grid.columnHelp,
+    ]);
+    expect(button).toHaveAccessibleName(en.fields.grid.columnHelp);
+    expect(button).toHaveAccessibleDescription('Enter the tax-inclusive amount.');
+  });
+
+  it('the Help word is read from the pack in the reader\'s language', () => {
+    expect(zh.fields.grid.columnHelp).not.toBe(en.fields.grid.columnHelp);
+    render(inLocale('zh', <GridField value={[]} onChange={() => {}} field={field} columnHelp={help} />));
+    const button = screen.getByTestId('line-items-column-help');
+    expect(button).toHaveAccessibleName(zh.fields.grid.columnHelp);
+    expect(button).toHaveAccessibleDescription('Enter the tax-inclusive amount.');
+    expect(button.closest('th')).toHaveAccessibleName('Amount');
   });
 });
 

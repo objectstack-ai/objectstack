@@ -477,28 +477,45 @@ export type GridFieldWidgetProps = FieldWidgetComponentProps<Row[]> & {
 
 /**
  * The info button beside a column's header label (objectstack#35804): the
- * column's help on hover and on keyboard focus, and the button's accessible
- * name is the help itself, so a screen reader hears it on reaching the button.
- * Its own provider, so the grid draws it under any host.
+ * column's help on hover and on keyboard focus.
+ *
+ * The button sits inside the `<th>`, so its accessible name joins the column
+ * header's, which a screen reader announces with every cell of the column
+ * (objectstack#36004). The help is therefore NOT the button's name: the button
+ * is named by a short Help word from the pack (`fields.grid.columnHelp`), and
+ * the help is its DESCRIPTION, through `aria-describedby` on a `hidden` copy
+ * beside it. A hidden node takes no part in the header's name from content,
+ * and a description reads a node it references even when it is hidden, so a
+ * screen reader hears "Help" and then the help on reaching the button, while
+ * the column stays named by its label. The text is the host's, already in the
+ * reader's language. Its own provider, so the grid draws it under any host.
  */
 function ColumnHeaderHelp({ help }: { help: string | undefined }) {
+  const { t } = useFieldTranslation();
+  const descriptionId = React.useId();
   if (!help) return null;
   return (
-    <TooltipProvider delayDuration={200}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            aria-label={help}
-            className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-sm align-middle text-muted-foreground/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            data-testid="line-items-column-help"
-          >
-            <Info className="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent className="max-w-xs whitespace-normal text-xs font-normal">{help}</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <>
+      <TooltipProvider delayDuration={200}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label={t('fields.grid.columnHelp', { defaultValue: 'Help' })}
+              aria-describedby={descriptionId}
+              className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-sm align-middle text-muted-foreground/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              data-testid="line-items-column-help"
+            >
+              <Info className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-xs whitespace-normal text-xs font-normal">{help}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+      <span id={descriptionId} hidden>
+        {help}
+      </span>
+    </>
   );
 }
 

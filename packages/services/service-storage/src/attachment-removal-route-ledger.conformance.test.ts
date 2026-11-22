@@ -3,8 +3,9 @@
 /**
  * Attachment-removal route-ledger conformance — the package-local guard every
  * `*-route-ledger.ts` pairs with. `registerAttachmentRemovalRoutes` is a
- * standalone, synchronous function that calls `http.delete` and touches neither
- * argument before a request arrives, so a capturing mock `IHttpServer`
+ * standalone, synchronous function that calls `http.delete` and `http.patch`
+ * (the removal and rename doors) and touches neither argument before a request
+ * arrives, so a capturing mock `IHttpServer`
  * enumerates its real surface (the seam the comment-reaction, personal-view,
  * print, storage and settings ledgers use), and the two directions fail here by
  * name on every `pnpm test` of this package.

@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { isFederatedObject } from '@objectstack/core';
+import { isFederatedObject, registryObjectPackageDisabled } from '@objectstack/core';
 import type { Cube, FilterCondition } from '@objectstack/spec/data';
 import { AggregationFunction, referenceCarrierOf } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -1760,6 +1760,14 @@ export class AnalyticsServicePlugin implements Plugin {
         }
         return engine.getObject?.(objectName) as { enable?: unknown; fields?: unknown } | undefined;
       },
+      // [#35525] The registry's disabled-package predicate — the ONE the data
+      // route asks (`isObjectOfDisabledPackage`) before it answers `404
+      // OBJECT_PACKAGE_DISABLED` — read through core's accessor over the SAME
+      // engine's registry, per call (a disable is reversible and nothing is
+      // cached). An engine or registry that cannot answer hides nothing, as on
+      // the data route. Every object a query reads is asked, for every caller.
+      isObjectPackageDisabled: (objectName: string) =>
+        registryObjectPackageDisabled((dataEngine() as { registry?: unknown } | undefined)?.registry)(objectName),
       draftRowsResolver,
     };
 
