@@ -360,7 +360,8 @@ import { StudioMetadataArea } from './StudioMetadataArea.js';
 import { useMetadataRefreshNonce } from './useMetadataRefreshNonce.js';
 import { resolveSurface, findSurfaceInTree, isSameSurface, type NavNode, type Surface } from './navSurface.js';
 import { servedNavTextOf, displayNavTree, displayAppLabel, type ServedNavText } from './servedNavText.js';
-import { ServedWidgetTextContext, servedWidgetTextOf } from './servedDashboardText.js';
+import { ServedWidgetTextContext, servedWidgetTextOf, shownWidgetTitle } from './servedDashboardText.js';
+import { useLabelLanguage } from '../metadata-admin/inspectors/servedLabel.js';
 import { ServedReportTextContext, servedReportTextOf } from './servedReportText.js';
 import {
   useSurfaceDeepLink,
@@ -3350,6 +3351,9 @@ export function InterfacesPillar({
         : null,
     [currentType, leafPublished, leafKey, servedDashboard],
   );
+  // objectstack#36480 — the language the widget panel's Title box reads in,
+  // which the canvas selection strip names a selected widget in too.
+  const labelLanguage = useLabelLanguage(locale);
   const servedReportText = React.useMemo(
     () =>
       currentType === 'report' && leafPublished.key === leafKey && leafPublished.read
@@ -4412,9 +4416,20 @@ export function InterfacesPillar({
   // objectui#12725 — one status line above the canvas instead of the canvas's
   // own tabs: what the canvas shows, and (beside the right slot) what a click
   // on it does. An object entry's canvas is the running list; its line keeps
-  // saying where the structure is edited (objectui#12455).
+  // saying where the structure is edited (objectui#12455). objectstack#36480 —
+  // a selected dashboard widget is named by the text its panel's Title box
+  // shows (the served, current-language title), never the authored source the
+  // canvas put in `selection.label`.
   const selectionLabel =
-    editNav && navSel ? (navInspectorHead?.title ?? navSel.id) : selection ? (selection.label || selection.id) : null;
+    editNav && navSel
+      ? (navInspectorHead?.title ?? navSel.id)
+      : selection
+        ? ((currentType === 'dashboard' && selection.kind === 'widget'
+            ? shownWidgetTitle(draft, selection.id, servedWidgets, labelLanguage)
+            : undefined) ||
+          selection.label ||
+          selection.id)
+        : null;
   const canvasHint = !inSlot
     ? null
     : selectionLabel !== null
