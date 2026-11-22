@@ -152,6 +152,25 @@ export default class MigrateListPreferences extends Command {
       printWarning(`Could not check whether the database is in use — ${occupancy.detail}`);
     }
 
+    // The `os migrate` family's gate, before the boot: a run that did not give
+    // its confirmation reads nothing, deletes nothing and exits 1, naming `--yes`;
+    // an operator who declines at the prompt made a choice, and exits 0.
+    if (apply && !flags.yes) {
+      if (json) { await emitJson({ error: 'confirmation_required', hint: 'pass --yes' }, 1, { compact: true }); return; }
+      if (!process.stdin.isTTY) {
+        printWarning('Apply mode deletes rows. Re-run with --yes to confirm, or run without --apply to preview.');
+        this.exit(1);
+        return;
+      }
+      const ok = await confirm(chalk.bold(
+        `\nDelete every sys_user_preference row keyed ui.list.* after writing the export to ${exportPath}? [y/N] `,
+      ));
+      if (!ok) {
+        printInfo('Aborted — nothing was read, written or deleted.');
+        return;
+      }
+    }
+
     if (!json) printStep(apply ? 'Booting (APPLY mode)…' : 'Booting (dry run)…');
 
     // Loaded at the point of use, never at module load: oclif `import()`s every
@@ -223,13 +242,8 @@ export default class MigrateListPreferences extends Command {
       if (!json) {
         renderPlan(plan);
         printWarning(
-          `About to permanently delete ${rows.length} ${LIST_PREFERENCE_OBJECT} row(s). The export below is the only copy that survives.`,
+          `Deleting ${rows.length} ${LIST_PREFERENCE_OBJECT} row(s). The export below is the only copy that survives.`,
         );
-      }
-      if (!flags.yes) {
-        if (json) { await emitJson({ error: 'confirmation_required', hint: 'pass --yes' }, 1, { compact: true }); return; }
-        const ok = await confirm(chalk.yellow(`  Delete ${rows.length} row(s) after writing the export? [y/N] `));
-        if (!ok) { printInfo(`Aborted — no export was written and no row was deleted.${journalNote}`); return; }
       }
 
       // ── The export, written and READ BACK before anything is deleted ──────

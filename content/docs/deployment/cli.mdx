@@ -2420,7 +2420,8 @@ its key starts with `ui.list.`, compared exactly, dot and case included:
 - `--apply` — delete the listed rows (default off: a read-only dry run)
 - `--export <path>` — **mandatory with `--apply`**: every row the run deletes, as stored, written
   owner-only (`0600`) and read back before the first delete; refuses to overwrite an existing file
-- `-y, --yes` — skip the confirmation prompt (required with `--json`)
+- `-y, --yes` — skip the confirmation prompt; without it, a run whose stdin is not a terminal (or `--json`) reads
+  nothing, deletes nothing and exits `1`
 - `--force` — apply even when another process is using the SQLite file
 - `--database-url <url>`, `--json`
 
