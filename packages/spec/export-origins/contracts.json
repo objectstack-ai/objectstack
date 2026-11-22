@@ -175,6 +175,7 @@
     "ICacheService": "src/contracts/cache-service.ts#ICacheService (interface)",
     "ICloudBindingService": "src/contracts/cloud-binding-service.ts#ICloudBindingService (interface)",
     "IClusterService": "src/contracts/cluster-service.ts#IClusterService (interface)",
+    "ICommentDoorsService": "src/contracts/comment-doors-service.ts#ICommentDoorsService (interface)",
     "ICounter": "src/contracts/cluster-service.ts#ICounter (interface)",
     "ICryptoProvider": "src/contracts/crypto-provider.ts#ICryptoProvider (interface)",
     "IDataDriver": "src/contracts/data-driver.ts#IDataDriver (interface)",
