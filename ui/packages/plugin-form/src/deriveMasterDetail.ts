@@ -124,8 +124,9 @@ export function fieldTypeToColumnType(type: string | undefined): GridColumn['typ
  *
  * The declared value type is then a field type like any other, so
  * {@link fieldTypeToColumnType} maps it with no second table: `number` →
- * `number`, `currency` → `currency`, `date` → `date`, `boolean` → `select`
- * (with the two option labels {@link optionsFor} draws for a boolean field),
+ * `number`, `currency` → `currency`, `date` → `date`, `boolean` → `boolean`
+ * (a check cell, carrying the two option labels {@link optionsFor} draws for a
+ * boolean field, objectstack#36043),
  * `text` → `text`. A currency column's code is resolved where every currency
  * column's is (`GridField`'s `columnCurrencies`, filled from the child field's
  * own `currencyConfig` by `parentCurrencyFieldsOf`, whatever the field's type).
@@ -193,11 +194,12 @@ function optionsFor(def: any, booleanLabel: BooleanValueLabel): GridColumn['opti
 
 /**
  * The column types that carry the child field's options (objectstack#36043):
- * the choices of a select or multi-select cell, the tags a tags cell offers,
- * and the two words a check cell is read as.
+ * the choices of a select or multi-select cell, and the two words a check cell
+ * is read as. A tags cell carries none: like the list view's tags cell, it
+ * offers the tags it holds plus free text, and reads no option list.
  */
 function takesOptions(type: GridColumn['type']): boolean {
-  return type === 'select' || type === 'multiselect' || type === 'tags' || type === 'boolean';
+  return type === 'select' || type === 'multiselect' || type === 'boolean';
 }
 
 /**
@@ -395,7 +397,8 @@ function reportCurrencyColumnScale(
  *
  * `booleanLabel` is required for the same reason as on {@link deriveColumns}:
  * an untyped column over a `boolean` / `toggle` child field hydrates into a
- * select whose two option labels it draws (objectui#12924).
+ * check cell whose two option labels it draws (objectui#12924; a check cell
+ * since objectstack#36043).
  */
 export function hydrateColumns(
   columns: GridColumn[] | undefined,

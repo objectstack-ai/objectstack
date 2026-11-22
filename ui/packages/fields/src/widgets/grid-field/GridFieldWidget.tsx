@@ -130,6 +130,11 @@ const isEmptyCell = (value: unknown) =>
 
 /** The star count of a `rating` column: its `max`, else `Field.rating`'s own 5 (objectstack#36043). */
 const ratingMax = (c: GridColumn) => c.max ?? 5;
+/** A list cell emptied by the user writes `null`, not `[]` (objectstack#36043):
+ *  the field contract stores a cleared multi-value field as `null`, and the
+ *  save path's blank-line check (`isBlankRow`) reads only `null` / `''` as
+ *  empty, so a `[]` would send a line the user emptied as a child record. */
+const emptyListAsNull = <V,>(next: V): V | null => (Array.isArray(next) && next.length === 0 ? null : next);
 
 /** Comfortable minimum widths per column type so cells never get crushed; the
  *  grid scrolls horizontally instead. Authors can still pin a `width`. */
@@ -1341,7 +1346,7 @@ function GridFieldBody({
       return (
         <GridPanelCell<string[]>
           value={held}
-          onWrite={(next) => setCellValue(rowIdx, c.name, next)}
+          onWrite={(next) => setCellValue(rowIdx, c.name, emptyListAsNull(next))}
           display={
             <span className={cn('truncate', held.length === 0 && 'text-muted-foreground')}>
               {displayText(c, held, displayLocale)}
@@ -1370,7 +1375,7 @@ function GridFieldBody({
       return (
         <GridPanelCell<any>
           value={val ?? null}
-          onWrite={(next) => setCellValue(rowIdx, c.name, next)}
+          onWrite={(next) => setCellValue(rowIdx, c.name, emptyListAsNull(next))}
           display={readOnlyFace(c, val) ?? <span className="text-muted-foreground">—</span>}
           disabled={locked}
           invalid={invalid}

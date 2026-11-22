@@ -1412,6 +1412,19 @@ describe('the cells that edit as in the main list: people, multi-select, tags, c
       expect(screen.getByRole('button', { name: 'Colors' }).textContent).toBe('Red');
     });
 
+    // A cleared multi-value field stores `null`, and the save path counts only
+    // `null` / `''` as blank: a `[]` would send a line the user emptied.
+    it('emptied, it writes null rather than an empty list', async () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ colors: ['red'] }]} onChange={onChange} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Colors' }));
+      const panel = await screen.findByTestId('line-items-multiselect-panel');
+      fireEvent.click(within(panel).getByRole('option', { name: /Red/ }));
+      fireEvent.keyDown(panel.querySelector('input')!, { key: 'Tab' });
+      await waitFor(() => expect(screen.queryByTestId('line-items-multiselect-panel')).toBeNull());
+      expect(onChange.mock.calls.at(-1)![0][0].colors).toBeNull();
+    });
+
     it('a required multi-select holding no option reads invalid', () => {
       const field = { columns: [{ name: 'colors', label: 'Colors', type: 'multiselect', options: COLORS, required: true }] };
       render(<GridField value={[{ id: 'r1', colors: [] }]} onChange={() => {}} field={field as any} />);
@@ -1434,6 +1447,17 @@ describe('the cells that edit as in the main list: people, multi-select, tags, c
       await waitFor(() => expect(screen.queryByTestId('line-items-tags-panel')).toBeNull());
       expect(onChange.mock.calls.at(-1)![0][0].labels).toEqual(['urgent', 'export']);
       expect(document.activeElement).toBe(screen.getByRole('checkbox', { name: 'Done' }));
+    });
+
+    it('emptied, it writes null rather than an empty list', async () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ labels: ['urgent'] }]} onChange={onChange} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Labels' }));
+      const panel = await screen.findByTestId('line-items-tags-panel');
+      fireEvent.click(within(panel).getByRole('option', { name: /urgent/ }));
+      fireEvent.keyDown(panel.querySelector('input')!, { key: 'Tab' });
+      await waitFor(() => expect(screen.queryByTestId('line-items-tags-panel')).toBeNull());
+      expect(onChange.mock.calls.at(-1)![0][0].labels).toBeNull();
     });
   });
 

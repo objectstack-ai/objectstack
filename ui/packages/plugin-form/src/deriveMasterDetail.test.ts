@@ -594,6 +594,7 @@ describe('people, multi-select, tags, check and rating columns take their extras
       colors: { type: 'multiselect', label: 'Colors', options: [{ label: 'Red', value: 'red' }, 'green'] },
       sizes: { type: 'checkboxes', label: 'Sizes', options: [{ label: 'S', value: 's' }] },
       labels: { type: 'tags', label: 'Labels' },
+      topics: { type: 'tags', label: 'Topics', options: ['ops', 'sales'] },
       done: { type: 'boolean', label: 'Done' },
       score: { type: 'rating', label: 'Score' },
       stars: { type: 'rating', label: 'Stars', max: 10 },
@@ -611,11 +612,14 @@ describe('people, multi-select, tags, check and rating columns take their extras
     }
   });
 
-  it('multi-select and checkboxes columns carry their options; a tags column has none to carry', () => {
-    for (const byName of [derived(), hydrated(['colors', 'sizes', 'labels'])]) {
+  it('multi-select and checkboxes columns carry their options; a tags column carries none, even from a field that declares some', () => {
+    for (const byName of [derived(), hydrated(['colors', 'sizes', 'labels', 'topics'])]) {
       expect(byName.colors).toMatchObject({ type: 'multiselect', options: [{ label: 'Red', value: 'red' }, { label: 'green', value: 'green' }] });
       expect(byName.sizes).toMatchObject({ type: 'multiselect', options: [{ label: 'S', value: 's' }] });
       expect(byName.labels).toEqual({ name: 'labels', label: 'Labels', type: 'tags', required: false });
+      // The tags cell reads no option list (TagsField offers the tags it holds
+      // plus free text), so a carried list would be a promise nothing keeps.
+      expect(byName.topics).toEqual({ name: 'topics', label: 'Topics', type: 'tags', required: false });
     }
   });
 
