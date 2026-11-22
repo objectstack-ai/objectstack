@@ -399,6 +399,8 @@ export function automationRouteAllow(parts: readonly string[]): string[] {
     switch (parts.length) {
         case 1:
             for (const verb of ['GET', 'PUT', 'DELETE']) allow.add(verb);
+            // [#35928] The record-update preview, a literal a flow name never spells.
+            if (a === '_record-starts') allow.add('POST');
             break;
         case 2:
             if (a === 'trigger') allow.add('POST');

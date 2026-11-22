@@ -925,7 +925,7 @@ export type RecordUpdateStartsRequestParsed = z.infer<typeof RecordUpdateStartsR
  */
 export const RecordUpdateStartSchema = lazySchema(() => z.object({
   name: z.string().describe('The flow\'s machine name — the key a client translates its label by (`flows.<name>.label`).'),
-  label: z.string().describe('The flow\'s display label as authored; the flow\'s name when it declares none.'),
+  label: z.string().describe('The flow\'s display label as authored (a client translates it by `name`).'),
   startsApproval: z.boolean().describe('Whether the flow contains an approval node, so the update starts an approval.'),
 }));
 export type RecordUpdateStart = z.input<typeof RecordUpdateStartSchema>;

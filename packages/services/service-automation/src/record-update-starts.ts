@@ -84,9 +84,8 @@ export function listRecordUpdateStarts(
             holds = false;
         }
         if (!holds) continue;
-        const name = this.flowSlotName(key);
-        const label = typeof flow.label === 'string' && flow.label.trim() !== '' ? flow.label : name;
-        starts.push({ name, label, startsApproval: flowStartsApproval(flow) });
+        // `label` is required by `FlowSchema`, so every registered flow carries one.
+        starts.push({ name: this.flowSlotName(key), label: flow.label, startsApproval: flowStartsApproval(flow) });
     }
     return starts;
 }
