@@ -8395,6 +8395,7 @@ export type GanttConfig = z.input<typeof GanttConfigSchema>;
 export type GanttQuickFilter = z.input<typeof GanttQuickFilterSchema>;
 export type KanbanConfig = z.input<typeof KanbanConfigSchema>;
 export type KanbanLaneSummary = z.input<typeof KanbanLaneSummarySchema>;
+export type KanbanLaneSummaryParsed = z.infer<typeof KanbanLaneSummarySchema>;
 export type ListMapConfig = z.input<typeof ListMapConfigSchema>;
 export type NavigationMode = z.input<typeof NavigationModeSchema>;
 export type TreeConfig = z.input<typeof TreeConfigSchema>;

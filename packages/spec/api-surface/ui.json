@@ -273,6 +273,7 @@
     "KanbanConfig (type)",
     "KanbanConfigSchema (const)",
     "KanbanLaneSummary (type)",
+    "KanbanLaneSummaryParsed (type)",
     "KanbanLaneSummarySchema (const)",
     "LIST_VIEW_GROUP_COUNT_ALIAS (const)",
     "ListChartConfig (type)",

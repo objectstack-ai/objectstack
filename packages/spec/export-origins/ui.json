@@ -267,6 +267,7 @@
     "KanbanConfig": "src/ui/view.zod.ts#KanbanConfig (type)",
     "KanbanConfigSchema": "src/ui/view.zod.ts#KanbanConfigSchema (const)",
     "KanbanLaneSummary": "src/ui/view.zod.ts#KanbanLaneSummary (type)",
+    "KanbanLaneSummaryParsed": "src/ui/view.zod.ts#KanbanLaneSummaryParsed (type)",
     "KanbanLaneSummarySchema": "src/ui/view.zod.ts#KanbanLaneSummarySchema (const)",
     "LIST_VIEW_GROUP_COUNT_ALIAS": "src/ui/view-grouping-query.ts#LIST_VIEW_GROUP_COUNT_ALIAS (const)",
     "ListChartConfig": "src/ui/view.zod.ts#ListChartConfig (type)",
