@@ -140,6 +140,9 @@ import {
   EnsureCustomizationPackageResponse,
   CloneFlowRequest,
   CloneFlowResponse,
+  // [#35928] The record-update preview's request and its payload.
+  RecordUpdateStartsRequest,
+  RecordUpdateStartsResponse,
   ValidateDataIssue,
 } from '@objectstack/spec/api';
 // [#17536] The element the two `/packages` READ doors are declared to serve.
@@ -6376,6 +6379,23 @@ export class ObjectStackClient {
       getRuntimeStatus: async (): Promise<{ flows: FlowRuntimeState[]; total: number }> => {
           const route = this.getRoute('automation');
           const res = await this.fetch(`${this.baseUrl}${route}/_status`);
+          return this.unwrapResponse(res);
+      },
+
+      /**
+       * [#35928] Which flows a proposed update of one record would start —
+       * `POST /automation/_record-starts`, the preview a stage-change confirm
+       * shows before the reader confirms the save. Answered to a caller who
+       * can read the record (an unreadable or absent record is 404
+       * `RECORD_NOT_FOUND`); each flow is its name, authored label and
+       * whether it starts an approval. Nothing runs and nothing is written.
+       */
+      listRecordUpdateStarts: async (request: RecordUpdateStartsRequest): Promise<RecordUpdateStartsResponse['data']> => {
+          const route = this.getRoute('automation');
+          const res = await this.fetch(`${this.baseUrl}${route}/_record-starts`, {
+              method: 'POST',
+              body: JSON.stringify(request),
+          });
           return this.unwrapResponse(res);
       },
 

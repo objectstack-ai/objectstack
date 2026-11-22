@@ -1894,6 +1894,18 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                     }
                 });
 
+                // [#35928] The record-update preview the stage-change confirms
+                // read; a literal, registered with `/_status` ahead of
+                // `/automation/:name` for the reason above.
+                server!.post(`${base}/automation/_record-starts`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch('POST', '/automation/_record-starts', deferRequestBody(req), req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+
                 server!.get(`${base}/automation/:name`, async (req: any, res: any) => {
                     try {
                         const result = await dispatcher.dispatch('GET', `/automation/${req.params.name}`, undefined, req.query, { request: req });

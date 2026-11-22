@@ -10,9 +10,9 @@ import type {
     FlowFunctionEffect,
     FlowRunSummary,
 } from '@objectstack/spec/automation';
-import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, RunListResult, ScreenSpec, ScreenFieldSpec, ConnectorSourcePullRequest, ConnectorSourcePullResult, ConnectorCredentialRef, ConnectorCredentialSetRequest, ConnectorCredentialClearRequest, ConnectorConnectionState, ConnectorConnectionRequest, ConnectorConnectionBegin, ConnectorConnectionCallbackRequest, FlowDryRunOptions, FlowDryRunResult } from '@objectstack/spec/contracts';
+import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, RunListResult, ScreenSpec, ScreenFieldSpec, ConnectorSourcePullRequest, ConnectorSourcePullResult, ConnectorCredentialRef, ConnectorCredentialSetRequest, ConnectorCredentialClearRequest, ConnectorConnectionState, ConnectorConnectionRequest, ConnectorConnectionBegin, ConnectorConnectionCallbackRequest, FlowDryRunOptions, FlowDryRunResult, RecordUpdateStartsInput } from '@objectstack/spec/contracts';
 import type { MetadataActivationWriteOptions } from '@objectstack/core';
-import type { FlowRegistration, FlowRegistrationRefusal, FlowInnerRefusal } from '@objectstack/spec/api';
+import type { FlowRegistration, FlowRegistrationRefusal, FlowInnerRefusal, RecordUpdateStart } from '@objectstack/spec/api';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 import {
     validateScreenInputs,
@@ -132,6 +132,8 @@ import {
     type ValueEnvelopeRefusal,
 } from './dag-traversal.js';
 import { activeDryRunExecuteNode, dryRun as dryRunBody, type DryRunHost } from './dry-run.js';
+// [#35928] The record-update preview's body.
+import { listRecordUpdateStarts, type RecordUpdateStartsHost } from './record-update-starts.js';
 // [#25222] The run history's bodies: recording a run's log entry, finishing a
 // refused run, and reading runs and suspended runs back. Each
 // `AutomationEngine` method of the same name calls its body.
@@ -5962,6 +5964,26 @@ export class AutomationEngine implements IAutomationService {
             flowSlotName: (...a) => this.flowSlotName(...a),
         };
         return getFlowRuntimeStates.call(host);
+    }
+
+    /**
+     * [#35928] Which flows a proposed update of one record would start — the
+     * preview the stage-change confirms show. The contract is
+     * `IAutomationService.listRecordUpdateStarts`; the body lives in
+     * ./record-update-starts.ts, over this engine's own arming state and its
+     * one start-condition gate.
+     */
+    listRecordUpdateStarts(input: RecordUpdateStartsInput): RecordUpdateStart[] {
+        const host: RecordUpdateStartsHost = {
+            flows: this.flows,
+            boundFlowTriggers: this.boundFlowTriggers,
+            isFlowEnabled: (...a) => this.isFlowEnabled(...a),
+            resolveTriggerBinding: (...a) => this.resolveTriggerBinding(...a),
+            seedRunVariables: (...a) => this.seedRunVariables(...a),
+            evaluateCondition: (...a) => this.evaluateCondition(...a),
+            flowSlotName: (...a) => this.flowSlotName(...a),
+        };
+        return listRecordUpdateStarts.call(host, input);
     }
 
     /**

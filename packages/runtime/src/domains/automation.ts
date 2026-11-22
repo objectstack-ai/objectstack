@@ -58,7 +58,7 @@ import {
 } from '../validation-failure.js';
 import { ExecutionStatus, collectFlowGraphs, type FlowNodeParsed } from '@objectstack/spec/automation';
 import { nearestName } from '@objectstack/formula';
-import { ListRunsRequestSchema, standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
+import { ListRunsRequestSchema, RecordUpdateStartsRequestSchema, standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 import type { ResumeFailureDetails } from '@objectstack/spec/api';
 import { parseEnumParam, parseIntegerParam, parseStringParam } from '../query-param.js';
 import { capabilityUnavailable } from './unavailable.js';
@@ -3719,6 +3719,70 @@ export async function classifyResumeResult(
     };
 }
 
+/** [#35928] The record-update preview's literal segment (`NAMESPACE_POSITION_LITERALS.automation`). */
+const RECORD_UPDATE_STARTS_SEGMENT = '_record-starts';
+
+/** [#35928] The preview's closed query set: it reads none, so any parameter is refused. */
+const RECORD_UPDATE_STARTS_QUERY_PARAMS: readonly string[] = [];
+
+/**
+ * [#35928] `POST /automation/_record-starts` — which flows a proposed update of
+ * one record would start, for the stage-change confirms (ruling record
+ * 7073655354: a caller who can read the record sees the flows' labels; hooks
+ * are never listed; no new capability).
+ *
+ * Order: the closed query set, the body (`RecordUpdateStartsRequestSchema`,
+ * `400 VALIDATION_FAILED` located on the member), then the record, read AS
+ * THE CALLER through the `/data` door's own read (`callData` `get`): an object
+ * the caller may not address, or a record they cannot read, answers that
+ * read's refusal (`404 RECORD_NOT_FOUND` for an unreadable or absent record),
+ * so this door tells a caller nothing the record read would not. Only then the
+ * engine, handed the record as read (`previous`) and with the proposed fields
+ * applied (`record`), and the caller as the writer. An engine without the
+ * optional member answers 501, never a guess.
+ */
+async function respondToRecordUpdateStarts(
+    deps: DomainHandlerDeps,
+    automationService: unknown,
+    body: unknown,
+    query: unknown,
+    context: HttpProtocolContext,
+): Promise<HttpDispatcherResult> {
+    const queryRefusal = unknownQueryParamRefusalMessage(query, RECORD_UPDATE_STARTS_QUERY_PARAMS);
+    if (queryRefusal !== undefined) {
+        return { handled: true, response: deps.error(queryRefusal, 400, { code: 'VALIDATION_ERROR' }) };
+    }
+    const parsed = RecordUpdateStartsRequestSchema.safeParse(body);
+    if (!parsed.success) {
+        const fields = fieldsFromZodIssues(parsed.error.issues, body);
+        const message = `Invalid record-update preview request: ${fields.map((f) => `${f.field}: ${f.message}`).join('; ')}`;
+        return { handled: true, response: deps.errorFromThrown(validationFailure(message, fields), VALIDATION_FAILED_STATUS) };
+    }
+    const { object, recordId, changes } = parsed.data;
+    const svc = automationService as Pick<IAutomationService, 'listRecordUpdateStarts'>;
+    if (typeof svc.listRecordUpdateStarts !== 'function') return capabilityUnavailable(deps, 'automation');
+    let stored: Record<string, unknown>;
+    try {
+        const read = await callData(
+            deps, context, 'get', { object, id: recordId },
+            context?.dataDriver, context?.environmentId, context?.executionContext,
+        );
+        const row = (read as { record?: unknown } | null | undefined)?.record;
+        stored = row && typeof row === 'object' ? (row as Record<string, unknown>) : {};
+    } catch (err) {
+        return { handled: true, response: deps.errorFromThrown(err, 500) };
+    }
+    const ec: any = (context as any)?.executionContext;
+    const flows = svc.listRecordUpdateStarts({
+        object,
+        previous: stored,
+        record: { ...stored, ...changes },
+        ...(typeof ec?.userId === 'string' ? { userId: ec.userId } : {}),
+        ...(typeof ec?.tenantId === 'string' ? { tenantId: ec.tenantId } : {}),
+    });
+    return { handled: true, response: deps.success({ flows }) };
+}
+
 /**
  * Handles Automation requests
  * path: sub-path after /automation/
@@ -4344,6 +4408,13 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         }
         // Service present but older / does not implement the method.
         return { handled: true, response: deps.success({ flows: [], total: 0 }) };
+    }
+
+    // [#35928] POST /_record-starts → which flows a proposed update of one
+    // record would start (`listRecordUpdateStarts`). Underscore-prefixed so no
+    // flow name can shadow it; ahead of the `/:name` arms for that reason.
+    if (parts[0] === RECORD_UPDATE_STARTS_SEGMENT && parts.length === 1 && m === 'POST') {
+        return respondToRecordUpdateStarts(deps, automationService, body, query, context);
     }
 
     // Routes with :name
