@@ -23,6 +23,7 @@ import { SysMigration } from '@objectstack/platform-objects/system';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { NotificationPreference } from './objects/notification-preference.object.js';
 import { bindPreferenceDigestUnset } from './preference-digest-unset.js';
+import { PreferenceResolver } from './preference-resolver.js';
 import { convertLegacyNoneDigestsOnce, PREFERENCE_DIGEST_NONE_CONVERSION_ID } from './preference-digest-conversion.js';
 
 const SYS_ORGANIZATION = { name: 'sys_organization', label: 'Organization', managedBy: 'better-auth', fields: { name: { type: 'text', label: 'Name' } } };
@@ -57,11 +58,11 @@ function dbFile(): string {
     return join(dir, 'store.db');
 }
 
-async function boot(file: string, preference: unknown, opts: { seed?: boolean; hook?: boolean } = {}): Promise<ObjectQL> {
+async function boot(file: string, preference: unknown, opts: { seed?: boolean; hook?: boolean; ledger?: boolean } = {}): Promise<ObjectQL> {
     const ql = new ObjectQL({ logger: silent });
     ql.registerDriver(new SqlDriver({ client: 'better-sqlite3', connection: { filename: file }, useNullAsDefault: true }), true);
     await ql.init();
-    for (const def of [SYS_ORGANIZATION, SYS_USER, SysMigration, preference]) {
+    for (const def of [SYS_ORGANIZATION, SYS_USER, ...(opts.ledger === false ? [] : [SysMigration]), preference]) {
         ql.registry.registerObject(def as any, '@objectstack/service-messaging');
     }
     await ql.syncSchemas();
@@ -151,17 +152,35 @@ describe('the one-time conversion of the legacy none', () => {
         expect(await digestOf(second, 'org_a', fresh)).toBe('none');
     });
 
-    it('without a ledger on the kernel it does not run, so nothing it cannot record is rewritten', async () => {
-        const writes: string[] = [];
-        const engine = {
-            getObject: () => undefined,
-            find: async () => [{ id: 'r1' }],
-            findOne: async () => null,
-            insert: async () => { writes.push('insert'); return {}; },
-            update: async () => { writes.push('update'); return {}; },
-        };
-        const out = await convertLegacyNoneDigestsOnce(engine as never, silent);
-        expect(out.status).toBe('ledger-unavailable');
-        expect(writes).toEqual([]);
+    it('without a ledger on the kernel it does not run, so nothing it could not record is rewritten', async () => {
+        const file = dbFile();
+        const legacy = await boot(file, LEGACY_PREFERENCE, { seed: true, ledger: false });
+        const row = await insert(legacy, 'org_a', { user_id: 'u1', topic: '*', channel: '*', enabled: true });
+        await close(legacy);
+
+        const ql = await boot(file, NotificationPreference, { hook: true, ledger: false });
+        const warnings: string[] = [];
+        const out = await convertLegacyNoneDigestsOnce(ql as never, { ...silent, warn: (m: string) => warnings.push(m) });
+        expect(out).toEqual({ status: 'ledger-unavailable', converted: 0, failed: [] });
+        expect(warnings).toHaveLength(1);
+        expect(await digestOf(ql, 'org_a', row)).toBe('none');
+    });
+});
+
+describe("the door answers a member's explicit off as their own", () => {
+    it('digest none and quiet hours { off: true } on the member row beat the organization default', async () => {
+        const ql = await boot(dbFile(), NotificationPreference, { seed: true, hook: true });
+        await insert(ql, 'org_a', { topic: '*', channel: '*', enabled: true, digest: 'daily', quiet_hours: { start: '22:00', end: '07:00' } });
+        await insert(ql, 'org_a', { user_id: 'u1', topic: '*', channel: '*', enabled: true, digest: 'none', quiet_hours: { off: true } });
+        await insert(ql, 'org_a', { user_id: 'u2', topic: '*', channel: '*', enabled: true });
+        const resolver = new PreferenceResolver({ getData: () => ql as never, logger: silent });
+
+        const member = await resolver.effectiveFor('u1', 'org_a', ['*'], ['inbox']);
+        expect(member.general.digest).toEqual({ value: 'none', source: 'own' });
+        expect(member.general.quietHours).toEqual({ value: null, source: 'own' });
+        // CONTROL: a member row that leaves both unset follows the organization.
+        const follower = await resolver.effectiveFor('u2', 'org_a', ['*'], ['inbox']);
+        expect(follower.general.digest).toEqual({ value: 'daily', source: 'default' });
+        expect(follower.general.quietHours).toEqual({ value: { start: '22:00', end: '07:00' }, source: 'default' });
     });
 });

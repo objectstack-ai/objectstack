@@ -365,12 +365,4 @@ describe('PreferenceResolver — a member’s explicit off beats the organizatio
         expect(await run(rows, { organizationId: 'org_a' })).toEqual({ recipient: 'u1', channels: ['inbox'] });
         expect((await run(rows, { organizationId: 'org_b' })).digest).toEqual({ window: '2026-01-01' });
     });
-
-    it("effectiveFor answers the member's explicit off as their own", async () => {
-        const rows = [row({ digest: 'daily', quiet_hours: ORG_WINDOW }), row({ id: 'own', user_id: 'u1', digest: 'none', quiet_hours: { off: true } })];
-        const engine = { async find(_o: string, q: any) { return rows.filter((r) => r.user_id === q.where.user_id && r.organization_id === q.where.organization_id); } };
-        const out = await resolver(() => engine).effectiveFor('u1', 'org_a', ['*'], ['inbox']);
-        expect(out.general.digest).toEqual({ value: 'none', source: 'own' });
-        expect(out.general.quietHours).toEqual({ value: null, source: 'own' });
-    });
 });
