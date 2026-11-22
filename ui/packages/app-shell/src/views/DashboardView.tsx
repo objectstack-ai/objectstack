@@ -515,6 +515,8 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
               onSelectionChange={edit.select}
               revealFilters={edit.revealFilters}
               onFiltersRevealed={edit.filtersRevealed}
+              served={dashboard as Record<string, unknown> | undefined}
+              published={edit.published}
             />
          )}
 

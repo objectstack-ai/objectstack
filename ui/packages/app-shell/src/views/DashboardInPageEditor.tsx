@@ -50,6 +50,7 @@ import { appendArray, uniqueId } from './metadata-admin/inspectors/_shared.js';
 import { getDashboardForm } from './metadata-admin/dashboard-schema.js';
 import { useMetadataLocale, type SupportedLocale } from './metadata-admin/i18n.js';
 import type { MetadataSelection } from './metadata-admin/preview-registry.js';
+import { ServedWidgetTextContext, servedWidgetTextOf } from './studio-design/servedDashboardText.js';
 
 /** Where the editor would save, as read at open (nothing is written to open). */
 export type WritableDashboardEditTarget = Exclude<DashboardEditTarget, { kind: 'refused' }>;
@@ -259,6 +260,12 @@ export function DashboardEditActions({
  * The right panel while editing: Studio's card panel for the selected card,
  * its dashboard panel (label, cards, filters, layout) otherwise. `revealFilters`
  * opens and scrolls to the filters section, the "Add filter" path.
+ *
+ * objectstack#36373: the panels read a card title in the session's language
+ * through {@link ServedWidgetTextContext}, as in Studio: `served` is the page's
+ * served dashboard, `published` the stored document the edit opened, paired
+ * widget by widget ({@link servedWidgetTextOf}). Without the pair the title box
+ * shows the stored source and an edit there replaces it.
  */
 export function DashboardEditPanel({
   name,
@@ -268,9 +275,15 @@ export function DashboardEditPanel({
   onSelectionChange,
   revealFilters,
   onFiltersRevealed,
+  served,
+  published,
 }: {
   name: string;
   draft: Record<string, unknown>;
+  /** The dashboard as the page serves it, in the session's language. */
+  served?: Record<string, unknown> | null;
+  /** The stored document the edit state opened, before any change. */
+  published?: Record<string, unknown> | null;
   selection: MetadataSelection | null;
   onPatch: (patch: Record<string, unknown>) => void;
   onSelectionChange: (next: MetadataSelection | null) => void;
@@ -280,6 +293,7 @@ export function DashboardEditPanel({
   const locale = useMetadataLocale();
   const tt = useSafeTranslate();
   const ref = React.useRef<HTMLElement | null>(null);
+  const servedWidgets = React.useMemo(() => servedWidgetTextOf(published, served), [published, served]);
 
   React.useEffect(() => {
     if (!revealFilters || selection) return;
@@ -303,6 +317,7 @@ export function DashboardEditPanel({
       className="w-full shrink-0 overflow-auto border-t bg-background p-3 sm:w-80 sm:border-l sm:border-t-0"
       data-testid="dashboard-edit-panel"
     >
+      <ServedWidgetTextContext.Provider value={servedWidgets}>
       {selection?.kind === 'widget' ? (
         <DashboardWidgetInspector
           type="dashboard"
@@ -326,6 +341,7 @@ export function DashboardEditPanel({
           locale={locale}
         />
       )}
+      </ServedWidgetTextContext.Provider>
     </aside>
   );
 }
@@ -341,6 +357,8 @@ export type DashboardEditClient = DashboardEditReader & {
 export interface DashboardInPageEdit {
   /** The document being edited, `null` outside the edit state. */
   draft: Record<string, unknown> | null;
+  /** The stored document as the edit state opened it, before any change; `null` outside it. */
+  published: Record<string, unknown> | null;
   opening: boolean;
   saving: boolean;
   dirty: boolean;
@@ -380,6 +398,7 @@ export function useDashboardInPageEdit({
   const [session, setSession] = React.useState<{
     target: WritableDashboardEditTarget;
     draft: Record<string, unknown>;
+    published: Record<string, unknown>;
     dirty: boolean;
   } | null>(null);
   const [opening, setOpening] = React.useState(false);
@@ -402,7 +421,7 @@ export function useDashboardInPageEdit({
     try {
       const opened = await openDashboardForEdit(name, ownerPackageId, client, { doors, walled });
       if (opened.kind === 'refused') return opened;
-      setSession({ target: opened.target, draft: opened.doc, dirty: false });
+      setSession({ target: opened.target, draft: opened.doc, published: opened.doc, dirty: false });
       setSelection(null);
       return null;
     } finally {
@@ -450,6 +469,7 @@ export function useDashboardInPageEdit({
 
   return {
     draft: session?.draft ?? null,
+    published: session?.published ?? null,
     opening,
     saving,
     dirty: session?.dirty ?? false,

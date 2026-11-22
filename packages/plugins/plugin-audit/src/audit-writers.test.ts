@@ -619,7 +619,8 @@ describe('audit writers — declarative trackHistory activity (ADR-0052 §5b)', 
     crm_opportunity: {
       id: { type: 'text' },
       name: { type: 'text', label: 'Name' },
-      amount: { type: 'currency', label: 'Amount' },
+      // [#36290] Values are on unless turned off: this one is turned off.
+      amount: { type: 'currency', label: 'Amount', fieldHistory: false },
       stage: {
         type: 'select',
         label: 'Stage',
@@ -662,8 +663,143 @@ describe('audit writers — declarative trackHistory activity (ADR-0052 §5b)', 
     });
 
     const activity = created.find((c) => c.object === 'sys_activity');
-    // The label, never the value: `amount` is not `trackHistory`'d.
+    // The label, never the value: `amount` turns its values off (`fieldHistory: false`).
     expect(activity?.row.summary).toBe('Updated crm_opportunity "Acme Renewal": Amount');
+  });
+});
+
+describe('[#36290] a changed field shows old → new unless the object or the field turns it off', () => {
+  const DEAL_FIELDS: Record<string, any> = {
+    id: { type: 'text' },
+    name: { type: 'text', label: 'Name' },
+    amount: { type: 'currency', label: 'Amount' },
+    note: { type: 'textarea', label: 'Note' },
+    quiet: { type: 'text', label: 'Quiet', fieldHistory: false },
+    // What the field designer wrote on every save while the key meant nothing.
+    designer_saved: { type: 'text', label: 'Designer Saved', trackHistory: false },
+    api_token: { type: 'secret', label: 'API Token' },
+    payload: { type: 'json', label: 'Payload' },
+    payload_opted: { type: 'json', label: 'Payload Opted', trackHistory: true },
+    payload_on: { type: 'json', label: 'Payload On', fieldHistory: true },
+    insisted: { type: 'text', label: 'Insisted', fieldHistory: true },
+  };
+  const schemaWith = (summary: Record<string, any> = { type: 'text' }) => ({
+    sys_audit_log: SINGLE_TENANT.sys_audit_log,
+    sys_activity: {
+      ...Object.fromEntries(SINGLE_TENANT.sys_activity.map((f) => [f, { type: 'text' }])),
+      summary,
+    },
+    deal: DEAL_FIELDS,
+  });
+
+  async function updateDeal(
+    previous: Record<string, any>,
+    result: Record<string, any>,
+    { objectDef = {}, summary }: { objectDef?: Record<string, any>; summary?: Record<string, any> } = {},
+  ) {
+    const { engine, fire, created } = makeEngine(schemaWith(summary), { deal: { label: 'Deal', ...objectDef } });
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterUpdate', {
+      object: 'deal',
+      input: { id: 'deal-1' },
+      result: { id: 'deal-1', name: 'D-1', ...result },
+      previous: { id: 'deal-1', name: 'D-1', ...previous },
+      session: {},
+    });
+    const activity = created.find((c) => c.object === 'sys_activity');
+    expect(activity).toBeDefined();
+    return { summary: activity!.row.summary as string, metadata: JSON.parse(activity!.row.metadata) };
+  }
+
+  it('an object and a field that say nothing show the values', async () => {
+    const { summary, metadata } = await updateDeal({ amount: 100 }, { amount: 200 });
+    expect(summary).toBe('Amount: 100 → 200');
+    expect(metadata.summary_message).toEqual({
+      key: 'fieldChanges',
+      object: 'deal',
+      changes: [{ field: 'amount', from: { text: '100' }, to: { text: '200' } }],
+    });
+  });
+
+  it('an object that sets enable.fieldHistory: false names the field, never its values', async () => {
+    const { summary, metadata } = await updateDeal({ amount: 100 }, { amount: 200 }, { objectDef: { enable: { fieldHistory: false } } });
+    expect(summary).toBe('Updated Deal "D-1": Amount');
+    expect(metadata.summary_message.key).toBe('activityUpdatedFields');
+  });
+
+  it('enable.trackHistory: false alone no longer turns the values off', async () => {
+    // A parsed body writes it on every object with an `enable` block.
+    const { summary } = await updateDeal({ amount: 100 }, { amount: 200 }, { objectDef: { enable: { trackHistory: false } } });
+    expect(summary).toBe('Amount: 100 → 200');
+  });
+
+  it('a field that sets trackHistory: false still shows its values: that false is not an off switch', async () => {
+    const { summary } = await updateDeal({ designer_saved: 'd-before' }, { designer_saved: 'd-after' });
+    expect(summary).toBe('Designer Saved: d-before → d-after');
+  });
+
+  it('enable.fieldHistory: false wins over a field that sets fieldHistory: true', async () => {
+    const { summary } = await updateDeal({ insisted: 'i1' }, { insisted: 'i2' }, { objectDef: { enable: { fieldHistory: false } } });
+    expect(summary).toBe('Updated Deal "D-1": Insisted');
+  });
+
+  it('a field that sets fieldHistory: false is named by label only, beside a field that shows its values', async () => {
+    const quietOnly = await updateDeal({ quiet: 'q-before' }, { quiet: 'q-after' });
+    expect(quietOnly.summary).toBe('Updated Deal "D-1": Quiet');
+    expect(quietOnly.summary).not.toContain('q-after');
+    const mixed = await updateDeal({ quiet: 'q-before', amount: 1 }, { quiet: 'q-after', amount: 2 });
+    expect(mixed.summary).toBe('Amount: 1 → 2');
+    expect(JSON.stringify(mixed.metadata.summary_message)).not.toContain('q-after');
+  });
+
+  it('a credential field is named by label only, never by its mask', async () => {
+    const { summary, metadata } = await updateDeal({ api_token: 'tok-before' }, { api_token: 'tok-after' });
+    expect(summary).toBe('Updated Deal "D-1": API Token');
+    expect(JSON.stringify(metadata.summary_message)).not.toContain('•');
+    expect(JSON.stringify({ summary, metadata })).not.toContain('tok-after');
+  });
+
+  it('a structured-JSON field shows values only when it opts in with trackHistory: true or fieldHistory: true', async () => {
+    const plain = await updateDeal({ payload: { a: 1 } }, { payload: { a: 2 } });
+    expect(plain.summary).toBe('Updated Deal "D-1": Payload');
+    const opted = await updateDeal({ payload_opted: 'p1' }, { payload_opted: 'p2' });
+    expect(opted.summary).toBe('Payload Opted: p1 → p2');
+    const on = await updateDeal({ payload_on: 'p1' }, { payload_on: 'p2' });
+    expect(on.summary).toBe('Payload On: p1 → p2');
+  });
+
+  it('a long value still fits a bounded summary column, and the code keeps a bounded copy of each side', async () => {
+    const before = 'b'.repeat(3000);
+    const after = 'a'.repeat(3000);
+    const { summary, metadata } = await updateDeal({ note: before }, { note: after }, { summary: { type: 'text', maxLength: 500 } });
+    expect(summary.length).toBeLessThanOrEqual(500);
+    expect(summary.startsWith('Note: ')).toBe(true);
+    const [change] = metadata.summary_message.changes;
+    expect(change.field).toBe('note');
+    expect(change.to.text.length).toBe(1000);
+    expect(change.to.text.endsWith('…')).toBe(true);
+  });
+
+  it('many changes fit a bounded summary column by leaving trailing changes out of the stored sentence only', async () => {
+    const fields = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`f${i}`, { type: 'text', label: `Field ${i}` }]));
+    const { engine, fire, created } = makeEngine(
+      { ...schemaWith({ type: 'text', maxLength: 500 }), many: { id: { type: 'text' }, name: { type: 'text' }, ...fields } },
+      { many: { label: 'Many' } },
+    );
+    installAuditWriters(engine as any, 'test.audit');
+    const prev = Object.fromEntries(Object.keys(fields).map((k) => [k, `old-value-of-${k}`]));
+    const next = Object.fromEntries(Object.keys(fields).map((k) => [k, `new-value-of-${k}`]));
+    await fire('afterUpdate', {
+      object: 'many',
+      input: { id: 'm-1' },
+      result: { id: 'm-1', name: 'M', ...next },
+      previous: { id: 'm-1', name: 'M', ...prev },
+      session: {},
+    });
+    const row = created.find((c) => c.object === 'sys_activity')!.row;
+    expect(row.summary.length).toBeLessThanOrEqual(500);
+    expect(row.summary.endsWith('; …')).toBe(true);
+    expect(JSON.parse(row.metadata).summary_message.changes).toHaveLength(30);
   });
 });
 
@@ -693,7 +829,8 @@ describe('audit writers — the generic update summary names the changed fields 
     previous: Record<string, any>,
     result: Record<string, any>,
   ) {
-    const { engine, fire, created } = makeEngine(schema, { campaign: { label: 'Campaign' } });
+    // [#36290] Values off for the object: this describe pins the label-only branch.
+    const { engine, fire, created } = makeEngine(schema, { campaign: { label: 'Campaign', enable: { fieldHistory: false } } });
     installAuditWriters(engine as any, 'test.audit');
     await fire('afterUpdate', {
       object: 'campaign',
@@ -1306,7 +1443,10 @@ describe('audit writers — localized activity summaries (framework#3039)', () =
       result[`f${i}`] = 1;
     }
     const i18n = makeI18n();
-    const { engine, fire, created } = setup('zh-CN', i18n, {}, { ...SINGLE_TENANT, person_qualification: fields });
+    // [#36290] Values off for the object, so the named-field list is what is written.
+    const { engine, fire, created } = setup(
+      'zh-CN', i18n, { person_qualification: { enable: { fieldHistory: false } } }, { ...SINGLE_TENANT, person_qualification: fields },
+    );
     await fire('afterUpdate', { ...insertCtx(), previous, result });
     const [activity] = activityRows(created);
     expect(activity.summary).toBe('Updated person_qualification "OC-00001": F1, F2, F3, F4, F5, and 2 more');

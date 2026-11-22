@@ -383,6 +383,10 @@ function applyCollectionItemOwnerStampGate(
  * that no body declares is registered under `manifest.id` and its stamp is
  * judged at both doors, like every other residual item.
  * A package BODY's items of these collections are still judged, at both doors.
+ * This is the owner-stamp mirror only: the composition's duplicate-entry door
+ * still judges two top-level `jobs` no body declares as one package's
+ * ({@link residualEntryPredicate}), since the boot's job binder schedules
+ * neither of two enabled jobs of one name.
  *
  * Mirrored, because `@objectstack/spec` cannot import the rule it mirrors; a
  * `@objectstack/metadata` test holds the two equal, collection by collection.
@@ -3289,6 +3293,12 @@ function collectDuplicateFunctionNameErrors(config: ObjectStackDefinition): stri
  * - `docs`: `os validate` and `os build` refused the pair (`docs/duplicate-name`)
  *   while a source boot kept the last.
  *
+ * `jobs` left the first bullet since: the boot's job binder now refuses a name
+ * two enabled jobs share and schedules none of them (re-measured on main
+ * `c30ce97cd7` through `os serve`, two `'preserve'` inputs with no manifest:
+ * `NOT SCHEDULED` at `error`, neither job armed; a stack without `packages[]`
+ * takes the same binder judgement), so its row says that.
+ *
  * The identity is the string the registrars key an entry by: `name` for 26
  * collections, the `(name, locale)` pair for `emailTemplates` (an i18n bundle
  * is one name across several locales), the extended object (`extend`) for
@@ -3347,7 +3357,7 @@ function readEntryName(entry: unknown): string | undefined {
 
 const RENAME_OR_MERGE = (): string => 'Rename one of them, or merge them into a single entry.';
 
-/** The 23 collections whose boot keeps the last entry under a name, on both paths. */
+/** The 22 collections whose boot keeps the last entry under a name, on both paths. */
 function lastWinsByName(noun: string, plural: string): SameStackEntryIdentity {
   return {
     identity: readEntryName,
@@ -3375,7 +3385,14 @@ const SAME_STACK_ENTRY_IDENTITY = Object.freeze({
   reports: lastWinsByName('Report', 'reports'),
   datasets: lastWinsByName('Dataset', 'datasets'),
   flows: lastWinsByName('Flow', 'flows'),
-  jobs: lastWinsByName('Job', 'jobs'),
+  jobs: {
+    identity: readEntryName,
+    subject: (name) => `Job '${name}'`,
+    consequence: () =>
+      'The runtime keys jobs by name: the metadata keeps only the last of these entries, and the job ' +
+      'scheduler refuses a name two enabled jobs share, so when both are enabled neither runs.',
+    remedy: RENAME_OR_MERGE,
+  },
   // An i18n bundle is one `name` across several `locale` tags, so the identity
   // is the pair — the registry's `ITEM_KEY_DISCRIMINATORS` entry, keyed as
   // `name@locale` with an untagged entry keyed as the floor tag (the schema's
@@ -3568,7 +3585,16 @@ function collectPackageBodyDuplicateEntryErrors(
  *   (ADR-0048 §3.4). What is left — a manifest-less input's entries, and the
  *   own collections of an input that carries `packages[]` — is one package,
  *   and two of its entries under one identity are refused with the one-stack
- *   wording.
+ *   wording. That includes two of its `jobs` of one name: the boot reads jobs
+ *   off the stack whole and its binder schedules neither.
+ *
+ * The residual registers under `manifest.id`, and under `'preserve'` that id
+ * is also a body's: the last input with a manifest. The registry keeps one
+ * extension of a target per package, so a residual `objectExtensions` entry
+ * for a target THAT body extends too shares its slot, and that body's entries
+ * for the target are judged here with the residual's, first, in the order the
+ * boot registers them ({@link ownerBodyExtensionEntries}): only the last
+ * entry's fields register, as the finding says.
  *
  * `objects` is skipped: two inputs declaring one object name is the
  * `objectConflict` strategy's to refuse or fold, and what that step composed
@@ -3590,6 +3616,8 @@ function collectPackageBodyDuplicateEntryErrors(
 function collectComposedResidualDuplicateEntryErrors(
   stacks: readonly ObjectStackDefinition[],
   composedPackages: unknown,
+  ownerId: unknown,
+  preserve: boolean,
 ): string[] {
   const isResidual = residualEntryPredicate(composedPackages);
   return duplicateEntryFindings(
@@ -3610,6 +3638,18 @@ function collectComposedResidualDuplicateEntryErrors(
           entries.push(item);
         }
       }
+      // An extension registers under its package id, and the residual's id is
+      // the body that carries `manifest.id` when one does: that body's entries
+      // for a target the residual extends too come first, as the boot
+      // registers that body before the residual. Only those: the body's own
+      // pairs are its own door's.
+      if (key === 'objectExtensions' && entries.length > 0) {
+        const identity = SAME_STACK_ENTRY_IDENTITY.objectExtensions.identity;
+        const targets = new Set(entries.map((e) => identity(e.entry)));
+        const owned = ownerBodyExtensionEntries(stacks, composedPackages, ownerId, preserve)
+          .filter((e) => identity(e.entry) !== undefined && targets.has(identity(e.entry)));
+        entries.unshift(...owned);
+      }
       return declared ? entries : undefined;
     },
     new Set(['objects']),
@@ -3617,23 +3657,85 @@ function collectComposedResidualDuplicateEntryErrors(
 }
 
 /**
+ * The `objectExtensions` entries of the package body that carries the composed
+ * artifact's `manifest.id` — the id the boot registers the residual under —
+ * labelled as the input that carries the body: a body a nested artifact
+ * carries at its `packages[p].manifest`, or, under `manifest: 'preserve'`, the
+ * body assembled from an input with that manifest and no `packages[]`. The
+ * registry keeps one extension of a target per package, so a residual entry
+ * for a target that body extends shares its slot. Empty when the artifact
+ * carries no body, or none under that id.
+ */
+function ownerBodyExtensionEntries(
+  stacks: readonly ObjectStackDefinition[],
+  composedPackages: unknown,
+  ownerId: unknown,
+  preserve: boolean,
+): PackageCollectionEntry[] {
+  if (typeof ownerId !== 'string' || composedPackageBodies(composedPackages).length === 0) return [];
+  for (const [i, stack] of stacks.entries()) {
+    const label = stackLabel(stack, i);
+    const carried: unknown = (stack as Record<string, unknown>).packages;
+    if (Array.isArray(carried)) {
+      for (const [p, entry] of carried.entries()) {
+        const body: unknown = isRecord(entry) ? entry.manifest : undefined;
+        if (isRecord(body) && body.id === ownerId) {
+          return labelledCollection(body, 'objectExtensions', `${label} packages[${p}].manifest.`) ?? [];
+        }
+      }
+      continue;
+    }
+    if (preserve && stack.manifest?.id === ownerId) {
+      return labelledCollection(stack as Record<string, unknown>, 'objectExtensions', `${label} `) ?? [];
+    }
+  }
+  return [];
+}
+
+/** The `packages[i].manifest` bodies a composed artifact carries, in order. */
+function composedPackageBodies(composedPackages: unknown): Record<string, unknown>[] {
+  return Array.isArray(composedPackages)
+    ? composedPackages.flatMap((p: unknown) => (isRecord(p) && isRecord(p.manifest) ? [p.manifest] : []))
+    : [];
+}
+
+/**
  * Whether a top-level entry of a composed artifact is in the package the boot
  * registers under the artifact's `manifest.id`. With no `packages[]` (or an
  * empty one) every entry is. With bodies, the boot's residual rule decides
  * ({@link isResidualTopLevelItem}, the mirror of `unclaimedTopLevel`), for the
- * collections that rule walks by slot. The two table collections it does not
- * walk by a slot of its own — `datasources` and `objectExtensions` (an
- * extension is keyed by `extend`) — count an entry as claimed when a body
- * carries one under the same identity ({@link SAME_STACK_ENTRY_IDENTITY}), so
- * a body's flattened copy is never read as a second entry of the residual.
+ * collections that rule walks by slot. `objectExtensions` mirrors that rule's
+ * own reading of an extension, which has no slot: an entry is claimed when a
+ * body carries an entry EQUAL to it ({@link deepEqualAuthored}) — the copy a
+ * body's flattened top level repeats — so an entry extending a target some body
+ * also extends, with other fields, is the residual's own and registers under
+ * `manifest.id`. The two table collections judged here that the rule does not
+ * walk by a slot — `datasources`, and `jobs`, which it never files as residual
+ * ({@link TOP_LEVEL_COLLECTIONS_NEVER_RESIDUAL}) because the boot reads them off
+ * the stack whole — count an entry as claimed when a body carries one under the
+ * same identity ({@link SAME_STACK_ENTRY_IDENTITY}), so a body's flattened copy
+ * is never read as a second entry of the residual, while two entries that no
+ * body declares are judged as one package's: the boot's job binder schedules
+ * neither of two enabled jobs of one name.
+ *
+ * ⚠ Known gap, left to the binder and NOT judged here: the claim is by NAME, so
+ * a residual job whose name a package body's job also carries is read as that
+ * body's copy even when the two differ, and composes. The boot reads jobs off
+ * the stack whole, so it holds two enabled jobs of that name and its binder
+ * (`jobNameCollisions`, `@objectstack/runtime`) schedules neither — read from
+ * code, not driven. Two package bodies each declaring the name meet the same
+ * binder outcome and compose too (cross-package reuse, ADR-0048 §3.4). Whether
+ * composition should refuse a job name shared across packages is #36431's
+ * question, not this door's.
  */
 function residualEntryPredicate(composedPackages: unknown): (key: string, entry: unknown) => boolean {
-  const bodies: Record<string, unknown>[] = Array.isArray(composedPackages)
-    ? composedPackages.flatMap((p: unknown) => (isRecord(p) && isRecord(p.manifest) ? [p.manifest] : []))
-    : [];
+  const bodies = composedPackageBodies(composedPackages);
   if (bodies.length === 0) return () => true;
   const bySlot = isResidualTopLevelItem(bodies);
-  const walkedBySlot: ReadonlySet<string> = new Set(OWNER_STAMP_JUDGED_COLLECTIONS);
+  const walkedBySlot: ReadonlySet<string> = new Set(
+    OWNER_STAMP_JUDGED_COLLECTIONS.filter((key) => !TOP_LEVEL_COLLECTIONS_NEVER_RESIDUAL.has(key)),
+  );
+  const bodyExtensions = bodies.flatMap((body) => (Array.isArray(body.objectExtensions) ? body.objectExtensions : []));
   const claimedByIdentity = new Map<string, Set<string>>();
   const claimed = (key: keyof typeof SAME_STACK_ENTRY_IDENTITY): Set<string> => {
     let set = claimedByIdentity.get(key);
@@ -3652,6 +3754,7 @@ function residualEntryPredicate(composedPackages: unknown): (key: string, entry:
   };
   return (key, entry) => {
     if (walkedBySlot.has(key)) return bySlot(key, entry);
+    if (key === 'objectExtensions') return !bodyExtensions.some((held) => held === entry || deepEqualAuthored(held, entry));
     if (!(key in SAME_STACK_ENTRY_IDENTITY)) return true;
     const typed = key as keyof typeof SAME_STACK_ENTRY_IDENTITY;
     const identity = SAME_STACK_ENTRY_IDENTITY[typed].identity(entry);
@@ -9739,7 +9842,7 @@ function composeBuiltStacks(
     ...collectComposedExternalBindingDatasourceErrors(stacks, objects),
     ...collectComposedDatasourceConnectorErrors(stacks, opts.manifest === 'preserve'),
     ...collectArtifactFlowClaimErrors(stacks),
-    ...collectComposedResidualDuplicateEntryErrors(stacks, composed.packages),
+    ...collectComposedResidualDuplicateEntryErrors(stacks, composed.packages, (composed.manifest as { id?: unknown } | undefined)?.id, opts.manifest === 'preserve'),
     ...collectComposedPackageBodyDuplicateEntryErrors(stacks, opts.manifest === 'preserve'),
   ];
   if (artifactCrossRefErrors.length > 0) {

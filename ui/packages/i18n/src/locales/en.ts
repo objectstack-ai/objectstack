@@ -746,6 +746,10 @@ const en = {
     // one key, read by both its `aria-label` and its `title`. The chooser's
     // button reads `table.columns`, the footer `form.masterDetail.total` and
     // the drag handle `view.dragToReorder`.
+    //
+    // objectstack#36004 — `columnHelp` names a column header's info button
+    // with one short word; the help itself is the button's description, so it
+    // stays out of the column name a screen reader reads with every cell.
     grid: {
       addLine: 'Add line',
       noItems: 'No items',
@@ -755,6 +759,7 @@ const en = {
       openRow: 'Open row',
       duplicateRow: 'Duplicate row',
       removeRow: 'Remove row',
+      columnHelp: 'Help',
     },
   },
   table: {

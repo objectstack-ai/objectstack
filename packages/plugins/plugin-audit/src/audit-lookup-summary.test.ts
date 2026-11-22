@@ -127,7 +127,8 @@ const bizDeal = {
       label: 'Owner', reference: 'sys_user', trackHistory: true,
     }),
     // An UNTRACKED reference: it must never cost a read, whatever it holds.
-    referrer_id: f('referrer_id', 'lookup', { label: 'Referrer', reference: 'crm_account' }),
+    // [#36290] Values off: the UNTRACKED reference field of the read-cost pins.
+    referrer_id: f('referrer_id', 'lookup', { label: 'Referrer', reference: 'crm_account', fieldHistory: false }),
   },
 };
 
