@@ -965,8 +965,8 @@ describe('ConditionChipRow — a view condition on a related record\'s field (ob
       </I18nProvider>,
     );
     const chip = await screen.findByTestId('view-condition-chip');
-    await vi.waitFor(() => expect(chip.textContent).toBe('所属客户 › 行业：科技'));
-    expect(chip.getAttribute('aria-label')).toContain('所属客户 › 行业：科技');
+    await vi.waitFor(() => expect(chip.textContent).toBe('所属客户的行业：科技'));
+    expect(chip.getAttribute('aria-label')).toContain('所属客户的行业：科技');
   });
 
   it('falls back to the raw names when the lookup is not among the list\'s fields', async () => {

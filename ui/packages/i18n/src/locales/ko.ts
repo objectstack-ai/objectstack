@@ -5236,7 +5236,7 @@ const ko = {
       dragSort: '드래그하여 정렬 우선순위 변경',
       viewOwn: '이 보기의 조건이므로 여기서 제거할 수 없음',
       viewFilter: '보기 필터',
-      relationPath: '{{lookup}} › {{field}}',
+      relationPath: '{{lookup}}의 {{field}}',
     },
   },
   sortBuilder: {

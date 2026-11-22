@@ -5556,7 +5556,7 @@ const ru = {
       dragSort: 'Перетащите, чтобы изменить приоритет сортировки',
       viewOwn: 'Условие этого представления; удалить здесь нельзя',
       viewFilter: 'Фильтр представления',
-      relationPath: '{{lookup}} › {{field}}',
+      relationPath: '{{field}} ({{lookup}})',
     },
   },
   sortBuilder: {
