@@ -22,6 +22,9 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { signUpEmail } from 'better-auth/api';
 import { AuthManager } from './auth-manager.js';
+// The SSO discovery egress guard the source loads with a dynamic import, paid
+// here, during collection (check-test-source-alias, "The source reach").
+import '@objectstack/core/egress';
 import { authIdentityObjects } from './manifest.js';
 import { SELF_REGISTRATION_CLOSED } from './audience-posture.js';
 import { createCopyInvitationLinkHandler } from './invitation-link-action.js';
