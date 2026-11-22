@@ -1,13 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import {
   validateExpression,
+  type ExprSchemaHint,
   introspectScope,
   expectedDialect,
   inferExpressionType,
   nearestName,
   CEL_STDLIB_FUNCTIONS,
 } from './validate';
-import { buildEnv, firstUndeclaredReference, SCOPE_ROOTS } from './cel-engine';
+import { buildEnv, celEngine, firstUndeclaredReference, SCOPE_ROOTS } from './cel-engine';
 
 describe('validateExpression (ADR-0032)', () => {
   describe('predicates (CEL)', () => {
@@ -1326,5 +1327,83 @@ describe('inferExpressionType — coarse value-type of a formula', () => {
     expect(inferExpressionType('undeclared_field == "x"')).toBe('unknown');
     // And a root alone is still not a provable type: `dyn` maps to `'unknown'`.
     expect(inferExpressionType('record')).toBe('unknown');
+  });
+});
+
+// [#34946] A flow condition reads the run's row bare AND through `record.` /
+// `previous.` (#29959), and the date-arithmetic verdict (#3306) judged only the
+// bare name: `due_date + 1 > 5` was refused while `record.due_date + 1 > 5`
+// passed with no finding, and both fault on the `YYYY-MM-DD` text on every run.
+// The root read now takes the bare name's verdict, code and arm, naming the
+// read as written.
+describe('a flow condition\'s record.<field> / previous.<field> read takes the date-arithmetic verdict as its bare name does (#34946)', () => {
+  /** A record-triggered flow's condition over a loan: the hint `@objectstack/lint` hands a start, edge or decision condition. */
+  const fieldTypes = { title: 'text', borrow_date: 'date', due_date: 'date', picked_up_at: 'datetime' };
+  const CONDITION: ExprSchemaHint = { scope: 'flattened', fields: Object.keys(fieldTypes), fieldTypes, faultOutcome: 'run-fails' };
+  const errorsOf = (source: string, hint: ExprSchemaHint = CONDITION) => validateExpression('predicate', source, hint).errors;
+  const codes = (source: string, hint: ExprSchemaHint = CONDITION) => errorsOf(source, hint).map((e) => e.code);
+  const verdicts = (source: string, hint: ExprSchemaHint = CONDITION) =>
+    errorsOf(source, hint).map((e) => ({ code: e.code, params: e.params }));
+  /** What the run binds: the row under `record` (and `previous`), and its fields flattened bare. */
+  const ROW = { title: 'Dune', borrow_date: '2026-11-16', due_date: '2026-11-30', picked_up_at: '2026-11-16T09:30:00.000Z' };
+  const run = (source: string) => celEngine.evaluate({ dialect: 'cel', source }, { ...ROW, record: ROW, previous: ROW });
+
+  it('refuses date arithmetic on a date field through record. and previous. under the bare name\'s code, naming the read', () => {
+    expect(verdicts('due_date + 1 > 5')).toEqual([{
+      code: 'date-arithmetic-run-fails',
+      params: { operands: 'google.protobuf.Timestamp + int', reference: 'due_date' },
+    }]);
+    expect(run('due_date + 1 > 5')).toMatchObject({ ok: false });
+    for (const root of ['record', 'previous'] as const) {
+      const source = `${root}.due_date + 1 > 5`;
+      const errors = errorsOf(source);
+      expect(errors.map((e) => ({ code: e.code, params: e.params })), source).toEqual([{
+        code: 'date-arithmetic-run-fails',
+        params: { operands: 'google.protobuf.Timestamp + int', reference: `${root}.due_date` },
+      }]);
+      expect(errors[0].message, source).toContain(`date arithmetic \`google.protobuf.Timestamp + int\` — \`${root}.due_date\` is a date`);
+      expect(errors[0].message, source).toContain('a flow condition that cannot be evaluated fails the run');
+      // The run faults on the date-only text, exactly as the bare spelling does.
+      expect(run(source), source).toMatchObject({ ok: false });
+    }
+  });
+
+  it('CONTROL: a datetime field\'s root reads take exactly the bare name\'s verdict', () => {
+    const [bare] = verdicts('picked_up_at + 1 > 5');
+    expect(bare).toEqual({
+      code: 'date-arithmetic-run-fails',
+      params: { operands: 'google.protobuf.Timestamp + int', reference: 'picked_up_at' },
+    });
+    for (const root of ['record', 'previous'] as const) {
+      const source = `${root}.picked_up_at + 1 > 5`;
+      expect(verdicts(source), source).toEqual([{ ...bare, params: { ...bare.params, reference: `${root}.picked_up_at` } }]);
+    }
+  });
+
+  it('takes the row\'s outcome arm: run-may-fail where none is declared, run-fails kept when bare names are unproven or shadowed', () => {
+    const undeclared: ExprSchemaHint = { ...CONDITION, faultOutcome: undefined };
+    expect(codes('due_date + 1 > 5', undeclared)).toEqual(['date-arithmetic-run-may-fail']);
+    expect(codes('record.due_date + 1 > 5', undeclared)).toEqual(['date-arithmetic-run-may-fail']);
+    expect(errorsOf('record.due_date + 1 > 5', undeclared)[0].message)
+      .toContain('this faults wherever `record.due_date` holds the date when the condition runs');
+    // A node that can bind a name no reader sees moves a bare name's arm, never a root read's.
+    const unproven: ExprSchemaHint = { ...CONDITION, bareNamesUnproven: true };
+    expect(codes('due_date + 1 > 5', unproven)).toEqual(['date-arithmetic-run-may-fail']);
+    expect(codes('record.due_date + 1 > 5', unproven)).toEqual(['date-arithmetic-run-fails']);
+    // A flow variable holding the bare name is not the field; the root read still is.
+    const shadowed: ExprSchemaHint = { ...CONDITION, flowVariables: ['due_date'] };
+    expect(codes('due_date + 1 > 5', shadowed)).toEqual([]);
+    expect(codes('previous.due_date + 1 > 5', shadowed)).toEqual(['date-arithmetic-run-fails']);
+  });
+
+  it('CONTROL: an ordering against today() and the date-text shapes keep their verdicts, with no second finding', () => {
+    for (const source of ['record.due_date < today()', 'previous.due_date < today()', 'date(record.due_date) < now()']) {
+      expect(validateExpression('predicate', source, CONDITION), source).toEqual({ ok: true, errors: [], warnings: [] });
+    }
+    expect(codes('timestamp(record.borrow_date) < now()')).toEqual(['date-text-call-run-fails']);
+    expect(codes('record.due_date - record.borrow_date > 3')).toEqual(['date-text-arithmetic-run-fails']);
+    expect(codes("record.due_date - record.borrow_date > duration('24h')")).toEqual(['date-text-arithmetic-run-fails']);
+    // The text/boolean mismatch the record-root pass already reported is unchanged.
+    expect(codes('record.title > 5')).toEqual(['type-mismatch-run-fails']);
   });
 });
