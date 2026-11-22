@@ -27,6 +27,7 @@
  *      ceiling with a full last page is INCOMPLETE too.
  *   3. for ⑤ only, each candidate's label events (`GET /repos/{repo}/issues/{n}/events`, every page); a card whose
  *      events cannot be read is UNJUDGED, which makes the run INCOMPLETE.
+ *   4. on a board `docs/NORTH-STAR.md` governs, that file from this checkout: its area table is the area list.
  *
  * ## The five disjunctions — the rule text's, nothing narrower
  *
@@ -67,11 +68,28 @@
  * is owed through that disjunction already; the two rows add no debt of their own, so old cards still missing a type
  * do not turn every fire's sweep into FOUND.
  *
+ * ## The North Star area list — one more row, and IN the verdict
+ *
+ * `docs/NORTH-STAR.md` (`NORTH_STAR_PATH`) says every public card carries exactly one `area:*`
+ * (`NORTH_STAR_AREA_RULE`), from the labels its *Product areas* table names. ①–④ and the area backstop ask only
+ * whether a card has AN `area:*`, so a card filed with a retired label (`area:studio`) or with two areas passed every
+ * row as touched, and triage's own first touch accepted it. This row lists every open card whose `area:*` set is
+ * non-empty and is not exactly one of the table's labels. The labels are READ from that table on every run
+ * (`northStarAreas`) — ⛔ never copied here — so a ninth area, or a renamed one, needs no edit to this file; a
+ * table this file cannot read is PREREQUISITE NOT MET (exit 3), never a row that silently passes everything.
+ *
+ * It is a first-touch debt (triage-duties.md: the first touch re-checks the area and corrects it), so its cards join
+ * the `owed` set and the verdict names how many of them it found; the exit code keeps its meaning (0 = a whole sweep).
+ * It takes the sweep's exclusions, `security` (a security card carries no area at all) and the ~2 min settle (a
+ * relabel is two writes, and the card carries both labels in between). A card with no `area:*` is not on it: that
+ * card is ①/② and the area backstop's. Asked only on the boards this North Star governs (`NORTH_STAR_REPOS`): cloud
+ * follows the same rule with its own areas (`NORTH_STAR_OTHER_REPOS_PHRASE`), which this table does not list.
+ *
  * ## Exit codes — capture them BEFORE any pipe
  *
  *   0  the walk is complete and all five ran; the lines say what each disjunction found (zero or more)
  *   2  usage
- *   3  PREREQUISITE NOT MET — a read refused or unanswered
+ *   3  PREREQUISITE NOT MET — a read refused or unanswered, or the North Star area table unreadable
  *   4  not a whole sweep: INCOMPLETE — the walk's count is not the platform's, a page ceiling was hit, or a ⑤ card
  *      went unread — or PARTIAL — no `--since`, so ⑤ did not run
  *
@@ -124,6 +142,17 @@ export const EPIC_LABEL = 'pm:epic';
 export const MULTI_LANE_REPOS = Object.freeze(['objectstack-ai/objectstack']);
 export const MULTI_LANE_RULE_PATH = '.claude/skills/pm-dispatch/references/cross-repo-coordination.md';
 export const MULTI_LANE_RULE = '多车道仓 `objectstack`';
+
+/**
+ * The North Star's area table: where the labels live, the sentence that makes them the only ones (the self-test pins
+ * both), the boards it governs, and the sentence that leaves cloud's areas to cloud. The labels themselves are read.
+ */
+export const NORTH_STAR_PATH = 'docs/NORTH-STAR.md';
+export const NORTH_STAR_AREA_RULE = 'every public card carries exactly one `area:*` label';
+export const NORTH_STAR_TABLE_HEADER = '| Area |';
+export const NORTH_STAR_REPOS = Object.freeze(['objectstack-ai/objectstack']);
+export const NORTH_STAR_OTHER_REPOS_PHRASE = 'The cloud repository follows these rules with its own areas';
+export const AREA_LIST_ROW = 'an area:* set that is not exactly one of the North Star areas';
 
 export const EXCLUDED_LABELS = Object.freeze(['tracking', 'status:parked', 'pm:seat', ...RUN_RECORD_LABELS]);
 export const SETTLE_MS = 2 * 60 * 1000;
@@ -179,6 +208,46 @@ export function lacksArea(issue) {
   return !labels.some((l) => l.startsWith('area:'));
 }
 
+/**
+ * The `area:*` labels of the North Star's *Product areas* table, in table order: the table opens at the line that
+ * starts `NORTH_STAR_TABLE_HEADER` and ends at the first line that is not a table row; a row whose first cell opens
+ * with a backticked `area:*` names one, and a row without one (Security carries no label) names none. Pure.
+ * Answers `{ ok: true, areas }` or `{ ok: false, error }` — no table, no labelled row, or a label named twice.
+ */
+export function northStarAreas(text) {
+  const lines = String(text ?? '').split('\n');
+  const start = lines.findIndex((l) => l.startsWith(NORTH_STAR_TABLE_HEADER));
+  if (start < 0) return { ok: false, error: `${NORTH_STAR_PATH} has no line starting \`${NORTH_STAR_TABLE_HEADER}\` (the Product areas table)` };
+  const areas = [];
+  for (const line of lines.slice(start + 1)) {
+    if (!line.startsWith('|')) break;
+    const m = /^\|\s*`(area:[^`\s]+)`/i.exec(line);
+    if (!m) continue;
+    const name = lower(m[1]);
+    if (areas.includes(name)) return { ok: false, error: `${NORTH_STAR_PATH}'s area table names \`${name}\` twice` };
+    areas.push(name);
+  }
+  if (!areas.length) return { ok: false, error: `${NORTH_STAR_PATH}'s area table names no \`area:*\` label` };
+  return { ok: true, areas: Object.freeze(areas) };
+}
+
+/** An open card's `area:*` labels, lower-cased, in the order the row carries them. Pure. */
+export const areasOf = (issue) => labelsOf(issue).filter((l) => l.startsWith('area:'));
+
+/**
+ * The area-list row: a settled open card whose `area:*` set is non-empty and is not exactly one of `areas` — a
+ * retired label, two areas, or both. The sweep's exclusions apply, and a `security` card carries no area by rule.
+ * A card with no `area:*` is not this row's (①/② and the area backstop list it). Pure.
+ */
+export function offListArea(issue, { areas, nowMs }) {
+  const labels = labelsOf(issue);
+  if (labels.some((l) => EXCLUDED_LABELS.includes(l) || l === 'security')) return false;
+  if (!(Date.parse(issue?.updated_at ?? '') < nowMs - SETTLE_MS)) return false;
+  const own = areasOf(issue);
+  if (own.length === 0) return false;
+  return !(own.length === 1 && areas.includes(own[0]));
+}
+
 /** The issue type's name as the REST row carries it (`type.name`; a bare string is read the same), or `null`. Pure. */
 export function issueTypeOf(issue) {
   const t = issue?.type;
@@ -218,11 +287,13 @@ export function sameMinuteLabelled(issue, events) {
 }
 
 /** The verdict line, from the counts. Pure. */
-export function verdictLine({ complete, why = [], hits, fifthRun }) {
+export function verdictLine({ complete, why = [], hits, fifthRun, offListRun = false, offList = [] }) {
   if (!complete) return `sweep INCOMPLETE — ${why.join('; ')}. ⛔ Not a clean sweep: re-run when the reads answer.`;
   const n = hits.size;
-  if (!fifthRun) return `sweep PARTIAL — ⑤ NOT RUN: no --since window; ①–④ found ${n} card(s) owed a first touch. ⛔ Not a clean sweep: re-run with --since=ISO.`;
-  return n === 0 ? 'sweep CLEAN — no card owed a first touch' : `sweep FOUND ${n} card(s) owed a first touch`;
+  const k = offList.length;
+  const ofThem = k ? ` — ${k} of them off the North Star area list` : '';
+  if (!fifthRun) return `sweep PARTIAL — ⑤ NOT RUN: no --since window; ①–④${offListRun ? ' and the area list' : ''} found ${n} card(s) owed a first touch${ofThem}. ⛔ Not a clean sweep: re-run with --since=ISO.`;
+  return n === 0 ? 'sweep CLEAN — no card owed a first touch' : `sweep FOUND ${n} card(s) owed a first touch${ofThem}`;
 }
 
 /** The exit a patrol reads: 0 only for a complete walk on which all five ran. Pure. */
@@ -234,11 +305,27 @@ export function sweepExit({ complete, fifthRun }) {
 // The walk — `get` is injected so the self-test drives every branch
 // ---------------------------------------------------------------------------
 
+/** The North Star as this checkout carries it; `sweep` takes another reader so the self-test drives each answer. */
+export const readNorthStarFile = () => readFileSync(new URL(NORTH_STAR_PATH, REPO_ROOT), 'utf8');
+
 /**
  * The sweep. `get(path)` answers `{ status, json }`. Returns the report object; never throws on a platform answer.
  */
-export async function sweep({ repo, nowMs, sinceMs = NaN, get }) {
+export async function sweep({ repo, nowMs, sinceMs = NaN, get, readNorthStar = readNorthStarFile }) {
   const why = [];
+  const offListRun = NORTH_STAR_REPOS.includes(lower(repo));
+  let areas = null;
+  if (offListRun) {
+    let text;
+    try {
+      text = readNorthStar();
+    } catch (e) {
+      return { prerequisite: `${NORTH_STAR_PATH} could not be read (${e?.message ?? 'read threw'}), so the area list is unknown` };
+    }
+    const parsed = northStarAreas(text);
+    if (!parsed.ok) return { prerequisite: `${parsed.error}, so the area list is unknown` };
+    areas = parsed.areas;
+  }
   const issues = [];
   let pages = 0;
   let exhausted = false;
@@ -289,10 +376,11 @@ export async function sweep({ repo, nowMs, sinceMs = NaN, get }) {
     if (unjudged.length) why.push(`⑤ could not read the label events of ${unjudged.map((n) => `#${n}`).join(', ')}`);
   }
 
-  const hits = new Set(Object.values(found).flat().map((i) => i.number));
+  const offList = offListRun ? issues.filter((i) => offListArea(i, { areas, nowMs })) : [];
+  const hits = new Set([...Object.values(found).flat(), ...offList].map((i) => i.number));
   const noArea = issues.filter(lacksArea);
   const noType = issues.filter(lacksType);
-  return { repo, nowMs, sinceMs, pages, enumerated: issues.length, totalCount, complete: why.length === 0, why, found, fifthRun, hits, unjudged, noArea, noType };
+  return { repo, nowMs, sinceMs, pages, enumerated: issues.length, totalCount, complete: why.length === 0, why, found, fifthRun, hits, unjudged, noArea, noType, offListRun, areas, offList };
 }
 
 export function renderText(r) {
@@ -312,6 +400,12 @@ export function renderText(r) {
     const cards = [...r.found[d]].sort((a, b) => a.number - b.number);
     lines.push(`${marks[d]} ${DISJUNCTIONS[d]}: ${cards.length}`);
     for (const c of cards) lines.push(`    #${c.number} · updated ${String(c.updated_at ?? '').slice(0, 16)}Z · ${String(c.title ?? '').slice(0, 100)}`);
+  }
+  if (!r.offListRun) lines.push(`area list — ${AREA_LIST_ROW}: not asked — ${r.repo}'s areas are not ${NORTH_STAR_PATH}'s`);
+  else {
+    const cards = [...r.offList].sort((a, b) => a.number - b.number);
+    lines.push(`area list (${NORTH_STAR_PATH}: ${r.areas.length} areas) — ${AREA_LIST_ROW}: ${cards.length}`);
+    for (const c of cards) lines.push(`    #${c.number} · ${areasOf(c).join(', ')} · ${String(c.title ?? '').slice(0, 100)}`);
   }
   const backstop = (what, rows) => {
     const bare = (rows ?? []).map((i) => i.number).sort((a, b) => a - b);
@@ -336,6 +430,8 @@ export function renderJson(r) {
     owed: [...r.hits].sort((a, b) => a - b),
     no_area: (r.noArea ?? []).map((i) => i.number).sort((a, b) => a - b),
     no_type: (r.noType ?? []).map((i) => i.number).sort((a, b) => a - b),
+    north_star_areas: r.offListRun ? [...r.areas] : null,
+    off_list_area: (r.offList ?? []).map((i) => i.number).sort((a, b) => a - b),
     verdict: verdictLine(r),
   };
 }
@@ -447,8 +543,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the walk: every page, pull requests dropped, the count checked — INCOMPLETE on any gap, never clean': 10,
   'the CLI: what a typo must never mean, and the exits a patrol reads': 9,
   'the area and type backstop: an open card with no area:* or no issue type is listed daily, and never moves the first-touch verdict': 17,
+  'the North Star area list: the labels are read from its table, and a retired or a second area:* is owed a first touch in the verdict': 16,
 });
-const SELF_TEST_BATTERY_FLOOR = 6;
+const SELF_TEST_BATTERY_FLOOR = 7;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 const batteryCases = new Map();
 let openBattery = null;
@@ -541,7 +638,7 @@ export async function selfTest() {
     t('pull requests are dropped from the count', r.enumerated, 131);
     t('a count equal to the platform\'s is complete', r.complete);
     t('⭐ ③ found the stateless card on page two — no cut at twelve', r.found[3].map((i) => i.number), [500]);
-    t('⭐ …and with no window the verdict is PARTIAL, never FOUND or CLEAN, ⑤ NOT RUN named', verdictLine(r), 'sweep PARTIAL — ⑤ NOT RUN: no --since window; ①–④ found 1 card(s) owed a first touch. ⛔ Not a clean sweep: re-run with --since=ISO.');
+    t('⭐ …and with no window the verdict is PARTIAL, never FOUND or CLEAN, ⑤ NOT RUN named', verdictLine(r), 'sweep PARTIAL — ⑤ NOT RUN: no --since window; ①–④ and the area list found 1 card(s) owed a first touch. ⛔ Not a clean sweep: re-run with --since=ISO.');
     const short = await sweep({ repo: REPO, nowMs: NOW, get: board(two, 140).get });
     t('⭐ a walk short of the platform\'s count is INCOMPLETE, naming both numbers', [short.complete, short.why[0]], [false, 'the walk returned 131 open issue(s) and the platform counts 140']);
     t('…and its verdict is never clean', verdictLine(short).startsWith('sweep INCOMPLETE'));
@@ -579,6 +676,39 @@ export async function selfTest() {
     t('the walk lists exactly the card with no area and exactly the cards with no type — a security card among them', [r.noArea.map((i) => i.number), renderJson(r).no_area, r.noType.map((i) => i.number), renderJson(r).no_type], [[42], [42], [43, 44], [43, 44]]);
     t('⭐ …and neither is a first-touch debt beyond ②: only the domain-only card is owed, and the verdict counts it alone', [[...r.hits], verdictLine(r), sweepExit(r)], [[42], 'sweep FOUND 1 card(s) owed a first touch', EXIT_OK]);
     t('the text names each count and card, after the five rows and before the verdict', renderText(r).split('\n').slice(-3, -1), ['area:* backstop (daily, not part of the verdict) — open cards with no area:*: 1 · all of them: #42', 'issue type backstop (daily, not part of the verdict) — open cards with no issue type: 2 · all of them: #43 #44']);
+  }
+
+  battery('the North Star area list: the labels are read from its table, and a retired or a second area:* is owed a first touch in the verdict');
+  {
+    const northStar = readNorthStarFile();
+    t('the one-area sentence is a substring of the North Star (a reworded rule reds here)', northStar.includes(NORTH_STAR_AREA_RULE));
+    t('…and so is the sentence that leaves cloud\'s areas to cloud, which is why the row is asked on this board alone', [northStar.includes(NORTH_STAR_OTHER_REPOS_PHRASE), NORTH_STAR_REPOS], [true, [REPO]]);
+    const live = northStarAreas(northStar);
+    t('⭐ the live table reads: at least one label, every one an area:* — read, never copied into this file', [live.ok, live.ok && live.areas.length > 0, live.ok && live.areas.every((a) => /^area:[a-z0-9-]+$/.test(a))], [true, true, true]);
+    const code = readFileSync(SELF_PATH, 'utf8').split('\n// Self-test — floor')[0];
+    t('⛔ the code above the self-test spells no area label at all — the list lives only in the table', [code.length < readFileSync(SELF_PATH, 'utf8').length, code.match(/'area:[a-z]/gi)], [true, null]);
+    const table = ['intro', '| Area | What | Status |', '|:--|:--|:--|', '| `area:alpha` Alpha | a | stable |', '| Security (no label) | private | — |', '| `Area:Beta` Beta | b | stable |', '', '| `area:gamma` | another table | — |'].join('\n');
+    t('a synthetic table: labels in table order, lower-cased, the unlabelled row skipped, the table ending at its first non-row line', northStarAreas(table), { ok: true, areas: ['area:alpha', 'area:beta'] });
+    t('⛔ no table, no labelled row, or a label named twice is an error, never an empty list', [northStarAreas('no table here').ok, northStarAreas('| Area | x |\n|:--|:--|\n| Security | x |').ok, northStarAreas('| Area | x |\n| `area:alpha` | 1 |\n| `area:alpha` | 2 |').ok], [false, false, false]);
+    const AREAS = ['area:alpha', 'area:beta'];
+    const off = (labels, extra) => offListArea(card(1, labels, extra), { areas: AREAS, nowMs: NOW });
+    t('⭐ a legacy area is off the list', off(['area:studio', 'pm:queue', 'priority:p2']));
+    t('⭐ two areas are off the list, even when both are on it', off(['area:alpha', 'area:beta', 'pm:queue', 'priority:p2']));
+    t('…a listed area beside a legacy one is off it too', off(['area:alpha', 'area:studio']));
+    t('⭐ control: exactly one listed area is clean, case-insensitively', [off(['area:alpha', 'pm:queue', 'priority:p2']), off(['Area:Beta'])], [false, false]);
+    t('a card with no area:* is not this row\'s (①/② and the area backstop list it)', off(['pm:queue', 'priority:p2']), false);
+    t('the sweep\'s exclusions and a security card are not on the row; a card mid-relabel is not yet', [...['tracking', 'status:parked', 'pm:seat', 'qa-run', 'eval-run', 'security'].map((x) => off(['area:studio', x])), off(['area:alpha', 'area:beta'], { updated_at: FRESH })], [false, false, false, false, false, false, false]);
+    const [first, second] = live.ok ? live.areas : [];
+    const rows = [card(61, ['area:studio', 'pm:queue', 'priority:p2']), card(62, [first, second, 'pm:queue', 'priority:p2'].filter(Boolean)), card(63, [first, 'pm:queue', 'priority:p2'].filter(Boolean))];
+    const boardOf = (list) => async (p) => (p.startsWith('/search') ? { status: 200, json: { total_count: list.length, incomplete_results: false } } : { status: 200, json: p.endsWith('page=1') ? list : [] });
+    const r = await sweep({ repo: REPO, nowMs: NOW, sinceMs: Date.parse('2026-11-14T20:00:00Z'), get: boardOf(rows) });
+    t('⭐ against the live table: the legacy-area card and the two-area card are listed, the one-area control is not, and the verdict counts them', [live.ok && !live.areas.includes('area:studio'), r.offList.map((i) => i.number), [...r.hits].sort(), verdictLine(r), sweepExit(r)], [true, [61, 62], [61, 62], 'sweep FOUND 2 card(s) owed a first touch — 2 of them off the North Star area list', EXIT_OK]);
+    t('the text prints the row with each card\'s areas, before the backstops; the JSON carries the list read and the cards', [renderText(r).split('\n').filter((l) => l.startsWith('area list') || l.startsWith('    #61')), renderJson(r).off_list_area, renderJson(r).owed, renderJson(r).north_star_areas], [[`area list (${NORTH_STAR_PATH}: ${live.ok ? live.areas.length : 0} areas) — ${AREA_LIST_ROW}: 2`, '    #61 · area:studio · card 61'], [61, 62], [61, 62], live.ok ? [...live.areas] : null]);
+    const elsewhere = await sweep({ repo: 'objectstack-ai/cloud', nowMs: NOW, sinceMs: Date.parse('2026-11-14T20:00:00Z'), get: boardOf(rows), readNorthStar: () => { throw new Error('must not be read'); } });
+    t('⛔ another board\'s areas are its own: the row is not asked, the North Star not read, and its cards owe nothing here', [elsewhere.prerequisite, elsewhere.offListRun, elsewhere.offList, [...elsewhere.hits], renderJson(elsewhere).north_star_areas, renderText(elsewhere).includes('area list — ' + AREA_LIST_ROW + ': not asked')], [undefined, false, [], [], null, true]);
+    const unread = await sweep({ repo: REPO, nowMs: NOW, get: boardOf(rows), readNorthStar: () => { throw new Error('ENOENT'); } });
+    const tableless = await sweep({ repo: REPO, nowMs: NOW, get: boardOf(rows), readNorthStar: () => 'a North Star with no area table' });
+    t('⭐ a North Star that cannot be read, or carries no table, is PREREQUISITE NOT MET — never a row that passes every card', [typeof unread.prerequisite, typeof tableless.prerequisite, String(tableless.prerequisite).includes(NORTH_STAR_TABLE_HEADER)], ['string', 'string', true]);
   }
 
   battery('the CLI: what a typo must never mean, and the exits a patrol reads');
