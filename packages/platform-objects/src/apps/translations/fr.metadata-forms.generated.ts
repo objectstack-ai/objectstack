@@ -469,15 +469,15 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Changer de propriétaire",
         helpText: "L’action Changer de propriétaire, unitaire et en masse : activée, elle est proposée ; désactivée, elle est masquée. Non défini : activée, sauf désactivée sur un objet de détail controlled_by_parent. Proposée uniquement sur un objet dont les enregistrements ont un propriétaire réattribuable (ownership user ou non défini, sans managedBy, pas un objet sys_, owner_id non en lecture seule et, sur un objet externe, déclaré ou mappé) ; l’activer sur tout autre objet est refusé. Elle ne contrôle que l’action, pas une simple modification de owner_id. Un objet {enabled, visibleWhen, disabledWhen} enregistré se modifie clé par clé ; écrivez-en un dans le source pour conditionner l’action à chaque enregistrement."
       },
-      pinnedActions: {
+      actionLayout: {
         label: "Actions épinglées",
         helpText: "Les actions que chaque en-tête de page affiche en boutons, dans l'ordre, 3 au plus par page ; toute autre action de l'en-tête va dans son menu Plus. Non défini : chaque en-tête choisit ses boutons selon l'ordre des actions, comme avant."
       },
-      "pinnedActions.list": {
+      "actionLayout.list": {
         label: "Page de liste",
         helpText: "Noms d'actions placées dans la barre d'outils de la liste, ou $import / $export, dans l'ordre d'affichage. 3 au plus. os validate refuse un nom qui n'est pas une action de cet objet ou qui n'est pas placé dans la barre de la liste ; un tel nom n'affiche aucun bouton."
       },
-      "pinnedActions.record": {
+      "actionLayout.record": {
         label: "Page d'enregistrement",
         helpText: "Noms d'actions placées dans l'en-tête de l'enregistrement ou dans son menu Plus, dans l'ordre d'affichage. 3 au plus. os validate refuse un nom qui n'est pas une action de cet objet ou qui n'est pas placé sur la page d'enregistrement ; un tel nom n'affiche aucun bouton."
       },

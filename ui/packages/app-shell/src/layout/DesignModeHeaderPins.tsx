@@ -2,8 +2,8 @@
 
 /**
  * 「Header buttons」, the design mode's control at the right end of a page
- * header's button group (objectstack#36366), and the pins a page header
- * draws.
+ * header's button group (objectstack#36366), and the action arrangement a
+ * page header draws.
  *
  * The control is drawn only while the mode is on, and its panel
  * (`DesignModeHeaderPinsPanel.tsx`: the drag-and-drop list and the save
@@ -21,12 +21,12 @@ import { pinsChangeKey, servedPins, type ObjectPins, type PinCandidate, type Pin
 
 const HeaderPinsPanel = React.lazy(() => import('./DesignModeHeaderPinsPanel.js'));
 
-type ServedObject = { readonly name?: unknown; readonly _packageId?: unknown; readonly pinnedActions?: unknown };
+type ServedObject = { readonly name?: unknown; readonly _packageId?: unknown; readonly actionLayout?: unknown };
 
 /**
- * The object's pins as the page's header draws them: the change staged under
- * the design mode, else the object's `pinnedActions` as served. `undefined`
- * for an arm neither sets (the header's own choice).
+ * The object's action arrangement as the page's header draws it: the change
+ * staged under the design mode, else the object's `actionLayout` as served.
+ * `undefined` for an arm neither sets (the header's own choice).
  */
 export function useObjectPins(objectDef: ServedObject | null | undefined): ObjectPins {
   const name = typeof objectDef?.name === 'string' ? objectDef.name : '';
@@ -35,9 +35,9 @@ export function useObjectPins(objectDef: ServedObject | null | undefined): Objec
 }
 
 export interface DesignModeHeaderPinsProps {
-  /** The object as served: its name, package, actions and `pinnedActions`. */
+  /** The object as served: its name, package, actions and `actionLayout`. */
   readonly objectDef: ServedObject & { readonly actions?: unknown };
-  /** The page type the header is: the object's list page or its record page. */
+  /** The action scope the header draws: the object's list page toolbar or its record header. */
   readonly page: PinPage;
   /** The page's actions as its header has them (labels localized), in any order. */
   readonly actions: readonly Record<string, unknown>[];

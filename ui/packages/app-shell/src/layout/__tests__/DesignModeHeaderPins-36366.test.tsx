@@ -2,10 +2,11 @@
 
 /**
  * The design mode's 「Header buttons」 (objectstack#36366): drawn only while
- * the mode is on; it shows what the header pins (the object's arm, else the
- * header's own first three), moves an action between 「Pinned to header」 and
- * 「Other」, refuses a fourth with a toast, stages the change so the header
- * draws it, and 「Save」 writes it.
+ * the mode is on; it shows the scope's arrangement (the object's arm, else the
+ * header's own first three pinned and the rest in their default order), moves
+ * an action between 「Pinned to header」 and 「Other」, refuses a fourth with a
+ * toast, lists a name the scope no longer offers, stages the change so the
+ * header draws it, and 「Save」 writes the arm whole (`{ pinned, more }`).
  *
  * Real subjects: `DesignModeHeaderPins` (and the panel it loads), `useObjectPins`,
  * `useDesignModeController`, `DesignModeProvider`, `DesignModeBar`,
@@ -137,9 +138,9 @@ afterEach(cleanup);
 
 describe('「Header buttons」 under the design mode (objectstack#36366)', () => {
   it('is not drawn outside the mode, and the header draws the object as served', () => {
-    start({ ...SERVED, pinnedActions: { record: ['clone'] } }, false);
+    start({ ...SERVED, actionLayout: { record: { pinned: ['clone'] } } }, false);
     expect(screen.queryByTestId('design-header-pins')).toBeNull();
-    expect(screen.getByTestId('header-pins').textContent).toBe('{"record":["clone"]}');
+    expect(screen.getByTestId('header-pins').textContent).toBe('{"record":{"pinned":["clone"]}}');
   });
 
   it("with no pins set it shows the header's own first three as pinned, the rest under Other, 3/3", async () => {
@@ -159,13 +160,17 @@ describe('「Header buttons」 under the design mode (objectstack#36366)', () =>
     expect(screen.getByTestId('design-mode-save')).toBeDisabled();
   });
 
-  it('moving an action is staged, the header draws it at once, and 「Save」 writes the object with the new pins', async () => {
+  it('moving an action is staged, the header draws it at once, and 「Save」 writes the arm whole', async () => {
     start();
     await openPanel();
     toggle('mark_won');
+    expect(listed('other')).toEqual(['mark_won', 'log_call']);
     toggle('log_call');
     expect(listed('pinned')).toEqual(['convert', 'clone', 'log_call']);
-    expect(screen.getByTestId('header-pins').textContent).toBe('{"record":["convert","clone","log_call"]}');
+    expect(listed('other')).toEqual(['mark_won']);
+    expect(screen.getByTestId('header-pins').textContent).toBe(
+      '{"record":{"pinned":["convert","clone","log_call"],"more":["mark_won"]}}',
+    );
     expect(written).toEqual([]);
 
     fireEvent.click(screen.getByTestId('design-mode-save'));
@@ -176,16 +181,17 @@ describe('「Header buttons」 under the design mode (objectstack#36366)', () =>
       'save',
       'object',
       'crm_lead',
-      { name: 'crm_lead', label: 'Lead', pinnedActions: { record: ['convert', 'clone', 'log_call'] } },
+      { name: 'crm_lead', label: 'Lead', actionLayout: { record: { pinned: ['convert', 'clone', 'log_call'], more: ['mark_won'] } } },
       { mode: 'draft', packageId: 'com.acme.crm', ifNoneMatch: '*' },
     ]);
     expect(publish).toEqual(['publish', 'object', 'crm_lead', { packageId: 'com.acme.crm' }]);
   });
 
   it("an object's own pins are what the panel starts from; unpinning back to them stages nothing", async () => {
-    start({ ...SERVED, pinnedActions: { record: ['log_call'] } });
+    start({ ...SERVED, actionLayout: { record: { pinned: ['log_call'] } } });
     await openPanel();
     expect(listed('pinned')).toEqual(['log_call']);
+    expect(listed('other')).toEqual(['convert', 'mark_won', 'clone']);
     expect(screen.getByTestId('design-header-pins-pinned')).toHaveTextContent('1/3');
     toggle('convert');
     expect(screen.getByTestId('design-mode-save')).toBeEnabled();
@@ -194,13 +200,46 @@ describe('「Header buttons」 under the design mode (objectstack#36366)', () =>
   });
 
   it('「Cancel」 drops the change: the header draws the object as served again', async () => {
-    start({ ...SERVED, pinnedActions: { record: ['log_call'] } });
+    start({ ...SERVED, actionLayout: { record: { pinned: ['log_call'] } } });
     await openPanel();
     toggle('log_call');
-    expect(screen.getByTestId('header-pins').textContent).toBe('{"record":[]}');
+    expect(screen.getByTestId('header-pins').textContent).toBe(
+      '{"record":{"pinned":[],"more":["log_call","convert","mark_won","clone"]}}',
+    );
     fireEvent.click(screen.getByTestId('design-mode-cancel'));
     await flush();
-    expect(screen.getByTestId('header-pins').textContent).toBe('{"record":["log_call"]}');
+    expect(screen.getByTestId('header-pins').textContent).toBe('{"record":{"pinned":["log_call"]}}');
     expect(written).toEqual([]);
+  });
+
+  it("「Other」 starts from the object's `more`, in its order, then the rest in the default order", async () => {
+    start({ ...SERVED, actionLayout: { record: { pinned: ['convert'], more: ['log_call', 'clone'] } } });
+    await openPanel();
+    expect(listed('pinned')).toEqual(['convert']);
+    expect(listed('other')).toEqual(['log_call', 'clone', 'mark_won']);
+  });
+
+  it('a name the arrangement sets that the scope no longer offers is listed as left out, and a save writes without it', async () => {
+    start({ ...SERVED, actionLayout: { record: { pinned: ['gone_action', 'convert'], more: ['clone'] } } });
+    await openPanel();
+    expect(screen.getByTestId('design-header-pins-stale')).toHaveTextContent(
+      'No longer offered here, left out when you save: gone_action',
+    );
+    expect(listed('pinned')).toEqual(['convert']);
+    toggle('mark_won');
+    fireEvent.click(screen.getByTestId('design-mode-save'));
+    await flush();
+    await flush();
+    expect(written[0]?.[3]).toEqual({
+      name: 'crm_lead',
+      label: 'Lead',
+      actionLayout: { record: { pinned: ['convert', 'mark_won'], more: ['clone', 'log_call'] } },
+    });
+  });
+
+  it('control: an arrangement every name of which is offered lists nothing as left out', async () => {
+    start({ ...SERVED, actionLayout: { record: { pinned: ['convert'] } } });
+    await openPanel();
+    expect(screen.queryByTestId('design-header-pins-stale')).toBeNull();
   });
 });

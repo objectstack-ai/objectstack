@@ -162,8 +162,8 @@
         "manifest.objects.element.lifecycle",
         "manifest.objects.element.membershipKeys",
         "manifest.objects.element.membershipKeys.valueType",
-        "manifest.objects.element.pinnedActions.list",
-        "manifest.objects.element.pinnedActions.record",
+        "manifest.objects.element.actionLayout.list",
+        "manifest.objects.element.actionLayout.record",
         "manifest.pages.element",
         "manifest.pages.element.apps",
         "manifest.pages.element.slots.header.options[0].type",
@@ -353,8 +353,8 @@
         "data.options[1].manifest.objects.element.lifecycle",
         "data.options[1].manifest.objects.element.membershipKeys",
         "data.options[1].manifest.objects.element.membershipKeys.valueType",
-        "data.options[1].manifest.objects.element.pinnedActions.list",
-        "data.options[1].manifest.objects.element.pinnedActions.record",
+        "data.options[1].manifest.objects.element.actionLayout.list",
+        "data.options[1].manifest.objects.element.actionLayout.record",
         "data.options[1].manifest.pages.element",
         "data.options[1].manifest.pages.element.apps",
         "data.options[1].manifest.pages.element.slots.header.options[0].type",
@@ -510,8 +510,8 @@
         "options[1].manifest.objects.element.lifecycle",
         "options[1].manifest.objects.element.membershipKeys",
         "options[1].manifest.objects.element.membershipKeys.valueType",
-        "options[1].manifest.objects.element.pinnedActions.list",
-        "options[1].manifest.objects.element.pinnedActions.record",
+        "options[1].manifest.objects.element.actionLayout.list",
+        "options[1].manifest.objects.element.actionLayout.record",
         "options[1].manifest.pages.element",
         "options[1].manifest.pages.element.apps",
         "options[1].manifest.pages.element.slots.header.options[0].type",
@@ -611,8 +611,8 @@
         "data.packages.element.options[1].manifest.objects.element.lifecycle",
         "data.packages.element.options[1].manifest.objects.element.membershipKeys",
         "data.packages.element.options[1].manifest.objects.element.membershipKeys.valueType",
-        "data.packages.element.options[1].manifest.objects.element.pinnedActions.list",
-        "data.packages.element.options[1].manifest.objects.element.pinnedActions.record",
+        "data.packages.element.options[1].manifest.objects.element.actionLayout.list",
+        "data.packages.element.options[1].manifest.objects.element.actionLayout.record",
         "data.packages.element.options[1].manifest.pages.element",
         "data.packages.element.options[1].manifest.pages.element.apps",
         "data.packages.element.options[1].manifest.pages.element.slots.header.options[0].type",
@@ -693,8 +693,8 @@
         "data.listViews.valueType.timeline.groupByField",
         "data.membershipKeys",
         "data.membershipKeys.valueType",
-        "data.pinnedActions.list",
-        "data.pinnedActions.record"
+        "data.actionLayout.list",
+        "data.actionLayout.record"
       ]
     },
     "api/PackageInstallBody": {
@@ -1208,8 +1208,8 @@
         "listViews.valueType.timeline.groupByField",
         "membershipKeys",
         "membershipKeys.valueType",
-        "pinnedActions.list",
-        "pinnedActions.record"
+        "actionLayout.list",
+        "actionLayout.record"
       ]
     },
     "data/ObjectExtension": {
@@ -1221,8 +1221,8 @@
         "fields.out.valueType.lookupFilters.element",
         "fields.out.valueType.relatedListFilter.lazy",
         "fields.out.valueType.summaryOperations",
-        "pinnedActions.list",
-        "pinnedActions.record"
+        "actionLayout.list",
+        "actionLayout.record"
       ]
     },
     "data/OracleConfig": {
@@ -1578,8 +1578,8 @@
         "operations.element.options[3].object.listViews.valueType.timeline.groupByField",
         "operations.element.options[3].object.membershipKeys",
         "operations.element.options[3].object.membershipKeys.valueType",
-        "operations.element.options[3].object.pinnedActions.list",
-        "operations.element.options[3].object.pinnedActions.record"
+        "operations.element.options[3].object.actionLayout.list",
+        "operations.element.options[3].object.actionLayout.record"
       ]
     },
     "system/CreateObjectOperation": {
@@ -1613,8 +1613,8 @@
         "object.listViews.valueType.timeline.groupByField",
         "object.membershipKeys",
         "object.membershipKeys.valueType",
-        "object.pinnedActions.list",
-        "object.pinnedActions.record"
+        "object.actionLayout.list",
+        "object.actionLayout.record"
       ]
     },
     "system/CronSchedule": {
@@ -1670,8 +1670,8 @@
         "options[3].object.listViews.valueType.timeline.groupByField",
         "options[3].object.membershipKeys",
         "options[3].object.membershipKeys.valueType",
-        "options[3].object.pinnedActions.list",
-        "options[3].object.pinnedActions.record"
+        "options[3].object.actionLayout.list",
+        "options[3].object.actionLayout.record"
       ]
     },
     "system/ObjectStorageConfig": {

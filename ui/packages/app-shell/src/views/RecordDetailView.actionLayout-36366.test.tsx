@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectstack#36366 — the object's record-page pins (`pinnedActions.record`)
+ * objectstack#36366 — the object's record-page pins (`actionLayout.record`)
  * choose the record header's buttons, in order; every other placed action is
  * in the header's ⋯. Both record headers read them: the synthesized default
  * page's (`RecordDetailView`'s header list) and an authored `page:header` with
@@ -67,7 +67,7 @@ type HeaderKind = 'synthesized' | 'placed' | 'own';
 /** The design mode, on, with nothing staged: the store's surface the header reads. */
 const DESIGN_MODE_ON = { active: true, changes: new Map(), stage: () => {}, unstage: () => {} } as any;
 
-function mount(pinnedActions: unknown, header: HeaderKind | boolean, designMode = false) {
+function mount(actionLayout: unknown, header: HeaderKind | boolean, designMode = false) {
   const kind: HeaderKind = header === true ? 'placed' : header === false ? 'synthesized' : header;
   const objects = [
     {
@@ -75,7 +75,7 @@ function mount(pinnedActions: unknown, header: HeaderKind | boolean, designMode 
       label: 'Deal',
       fields: { id: { type: 'text', label: 'Id' }, name: { type: 'text', label: 'Name' } },
       actions: ACTIONS,
-      ...(pinnedActions ? { pinnedActions } : {}),
+      ...(actionLayout ? { actionLayout } : {}),
     },
   ];
   const pages = kind !== 'synthesized'
@@ -191,7 +191,7 @@ describe.each([
   });
 
   it('the pinned actions are the buttons, in pin order (a record_more one too); the rest are in ⋯', async () => {
-    mount({ record: ['log_call', 'share'] }, authored);
+    mount({ record: { pinned: ['log_call', 'share'] } }, authored);
     const { inline, menu } = await headerFaces();
     expect(inline).toEqual(['Log Call', 'Share']);
     expect(menu).toEqual(expect.arrayContaining(['Convert', 'Mark Won']));
@@ -199,7 +199,7 @@ describe.each([
   });
 
   it('a list-page arm alone leaves the record header as it was', async () => {
-    mount({ list: ['$export'] }, authored);
+    mount({ list: { pinned: ['$export'] } }, authored);
     const { inline, menu } = await headerFaces();
     expect(inline).toEqual(['Convert', 'Mark Won', 'Share']);
     expect(menu).toEqual(['Log Call']);
@@ -208,7 +208,7 @@ describe.each([
 
 describe('#36366 a record header authored with its own actions list', () => {
   it('keeps its list: the pins do not choose its buttons', async () => {
-    mount({ record: ['mark_won'] }, 'own');
+    mount({ record: { pinned: ['mark_won'] } }, 'own');
     const { inline } = await headerFaces();
     expect(inline).toEqual(['Convert', 'Share']);
     expect(inline).not.toContain('Mark Won');

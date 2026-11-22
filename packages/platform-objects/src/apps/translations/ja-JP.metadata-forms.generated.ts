@@ -469,15 +469,15 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "所有者の変更",
         helpText: "所有者の変更アクション（単一および一括）。オンで提供、オフで非表示。未設定の場合はオンですが、controlled_by_parent の詳細オブジェクトではオフです。レコードに再割り当て可能な所有者があるオブジェクト（ownership が user または未設定、managedBy なし、sys_ オブジェクトでない、owner_id が読み取り専用でなく、外部オブジェクトでは宣言またはマッピングされている）でのみ提供されます。それ以外のオブジェクトでオンにすると拒否されます。制御するのはアクションのみで、owner_id の通常の編集は対象外です。保存済みの {enabled, visibleWhen, disabledWhen} オブジェクトはキーごとに編集されます。各レコードでアクションを制御するにはソースに記述してください。"
       },
-      pinnedActions: {
+      actionLayout: {
         label: "固定アクション",
         helpText: "各ページのヘッダーにボタンとして順に表示するアクション。1 ページ最大 3 個で、ヘッダーに配置されたその他のアクションは「その他」メニューに入ります。未設定の場合、各ヘッダーは従来どおりアクションの順序でボタンを選びます。"
       },
-      "pinnedActions.list": {
+      "actionLayout.list": {
         label: "一覧ページ",
         helpText: "一覧ツールバーに配置されたアクション名、または $import / $export を表示順に指定します。最大 3 個。このオブジェクトのアクションでない名前や一覧ツールバーに配置されていない名前は os validate が拒否し、その名前のボタンは表示されません。"
       },
-      "pinnedActions.record": {
+      "actionLayout.record": {
         label: "レコードページ",
         helpText: "レコードヘッダーまたはその「その他」メニューに配置されたアクション名を表示順に指定します。最大 3 個。このオブジェクトのアクションでない名前やレコードページに配置されていない名前は os validate が拒否し、その名前のボタンは表示されません。"
       },

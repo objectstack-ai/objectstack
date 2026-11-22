@@ -129,22 +129,42 @@ export function placedHeaderActions<T extends { name?: unknown; locations?: read
 }
 
 /**
- * The order a pinned header action is drawn at (objectstack#36366): far below
- * any authored `order`, so the pins lead the header's sort, in pin order.
+ * The orders an arranged header action is drawn at (objectstack#36366): far
+ * below any authored `order`, so the pinned actions lead the header's sort in
+ * pin order, and the actions `more` names lead its overflow in that order,
+ * ahead of the ones it does not name.
  */
 const PINNED_HEADER_ACTION_ORDER = -1_000_000;
+const MORE_HEADER_ACTION_ORDER = -500_000;
+
+/** One scope's arm of an object's `actionLayout`, as a header reads it. */
+export interface ActionLayoutArm {
+  readonly pinned: readonly string[];
+  readonly more?: readonly string[];
+}
+
+/** `value` as an action layout arm, or `undefined` when it is none (the scope draws as before). */
+export function readActionLayoutArm(value: unknown): ActionLayoutArm | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const { pinned, more } = value as { pinned?: unknown; more?: unknown };
+  if (!Array.isArray(pinned)) return undefined;
+  const names = (list: readonly unknown[]) => list.filter((v): v is string => typeof v === 'string' && v !== '');
+  return Array.isArray(more) ? { pinned: names(pinned), more: names(more) } : { pinned: names(pinned) };
+}
 
 /**
- * An object's pinned header actions (`pinnedActions.list` / `.record`,
- * objectstack#36366) applied to the actions one page header places, for that
- * header's own sort and inline/overflow split to draw.
+ * An object's action layout arm (`actionLayout.list` / `.record`,
+ * objectstack#36366) applied to the actions one header of that scope places,
+ * for the header's own sort and inline/overflow split to draw.
  *
- * `pins` names, in order, the actions the header draws as buttons; every other
- * action it places goes to its overflow menu. `undefined` (the object pins
- * nothing for this page) answers `actions` itself: the header draws exactly
- * as before. A pin naming none of `actions` (an action not placed there, one
- * hidden from this reader, or a page built-in such as `$export`, which the
- * host draws itself) is skipped: it draws nothing.
+ * `arm.pinned` names, in order, the actions the header draws as buttons;
+ * every other action it places goes to its overflow menu, the ones
+ * `arm.more` names first, in that order, then the rest in their own order.
+ * No arm (`undefined`, or a value that is no arm) answers `actions` itself:
+ * the header draws exactly as before. A name naming none of `actions` (an
+ * action not placed there, one hidden from this reader, or a built-in such as
+ * `$export`, which the host draws itself) is skipped: it draws nothing, and
+ * no other action takes a pinned one's place.
  *
  * - `record`: a pinned action is placed at `record_header` and leads the sort;
  *   an unpinned one is placed at `record_more` only, the header's
@@ -152,41 +172,55 @@ const PINNED_HEADER_ACTION_ORDER = -1_000_000;
  * - `list`: a pinned action leads the `action:bar`'s sort; an unpinned one is
  *   `component: 'action:menu'`, which the bar places in its overflow without
  *   spending an inline slot.
- *
- * Pinned actions come first, in pin order, then the rest in their own order.
  */
-export function pinnedHeaderActions<
+export function arrangedHeaderActions<
   T extends { name?: unknown; locations?: readonly string[]; order?: unknown; component?: unknown },
->(actions: readonly T[], pins: readonly unknown[] | null | undefined, page: 'list' | 'record'): T[] {
-  if (!Array.isArray(pins)) return [...actions];
-  const rank = new Map<string, number>();
-  pins.forEach((pin, index) => {
-    if (typeof pin === 'string' && pin !== '' && !rank.has(pin)) rank.set(pin, index);
-  });
+>(actions: readonly T[], layoutArm: unknown, scope: 'list' | 'record'): T[] {
+  const arm = readActionLayoutArm(layoutArm);
+  if (!arm) return [...actions];
+  const rankOf = (names: readonly string[]) => {
+    const rank = new Map<string, number>();
+    names.forEach((name, index) => {
+      if (!rank.has(name)) rank.set(name, index);
+    });
+    return rank;
+  };
+  const pinRank = rankOf(arm.pinned);
+  const moreRank = rankOf((arm.more ?? []).filter((name) => !pinRank.has(name)));
   const pinned: T[] = [];
+  const named: T[] = [];
   const rest: T[] = [];
+  const seen = new Set<string>();
   for (const action of actions) {
     const name = typeof action?.name === 'string' ? action.name : '';
-    const at = rank.get(name);
-    if (at === undefined) {
-      if (page === 'list') {
-        rest.push({ ...action, component: 'action:menu' });
-      } else {
-        const locations = (action.locations ?? []).filter((l) => l !== 'record_header');
-        rest.push({ ...action, locations: locations.includes('record_more') ? locations : [...locations, 'record_more'] });
-      }
+    const at = name && !seen.has(name) ? pinRank.get(name) : undefined;
+    if (at !== undefined) {
+      seen.add(name);
+      const component = action.component === 'action:menu' ? undefined : action.component;
+      const locations =
+        scope === 'record' && !(action.locations ?? []).includes('record_header')
+          ? [...(action.locations ?? []), 'record_header']
+          : action.locations;
+      pinned.push({ ...action, locations, order: PINNED_HEADER_ACTION_ORDER + at, component } as T);
       continue;
     }
-    rank.delete(name);
-    const component = action.component === 'action:menu' ? undefined : action.component;
-    const locations =
-      page === 'record' && !(action.locations ?? []).includes('record_header')
-        ? [...(action.locations ?? []), 'record_header']
-        : action.locations;
-    pinned.push({ ...action, locations, order: PINNED_HEADER_ACTION_ORDER + at, component } as T);
+    let overflow: T;
+    if (scope === 'list') {
+      overflow = { ...action, component: 'action:menu' };
+    } else {
+      const locations = (action.locations ?? []).filter((l) => l !== 'record_header');
+      overflow = { ...action, locations: locations.includes('record_more') ? locations : [...locations, 'record_more'] };
+    }
+    const moreAt = name && !seen.has(name) ? moreRank.get(name) : undefined;
+    if (moreAt !== undefined) {
+      seen.add(name);
+      named.push({ ...overflow, order: MORE_HEADER_ACTION_ORDER + moreAt } as T);
+    } else {
+      rest.push(overflow);
+    }
   }
-  pinned.sort((a, b) => (a.order as number) - (b.order as number));
-  return [...pinned, ...rest];
+  const byOrder = (a: T, b: T) => (a.order as number) - (b.order as number);
+  return [...pinned.sort(byOrder), ...named.sort(byOrder), ...rest];
 }
 
 // ============================================================================

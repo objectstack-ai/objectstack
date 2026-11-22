@@ -1324,7 +1324,7 @@ export class ObjectRegistrationFacet {
    * SAME comparison-based mechanism the #8284 fix applies one layer up — the
    * predicate is literally `scalarOverridesPackagedBase`, imported from
    * `@objectstack/spec`, not a second copy of the shape ([#36366] the
-   * structured scalar `pinnedActions` asks the same question by its structure,
+   * structured scalar `actionLayout` asks the same question by its structure,
    * `foldScalarOverridesPackagedBase`). One sentence at both
    * layers: *an explicit override beats a packaged default.*
    *
