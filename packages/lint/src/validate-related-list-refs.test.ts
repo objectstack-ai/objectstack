@@ -190,6 +190,17 @@ describe('validateRelatedListRefs — built-in tabs and an entry\'s columns', ()
     expect(finding.message).toContain("'nope' is not a field of 'rlo_task'");
   });
 
+  it("walks a dotted column as a relationship path, as the FK's relatedListColumns is walked (#35923 review S1)", () => {
+    // `lead_id.name` resolves through the task's lookup to the lead; the same spelling on the FK passes too.
+    expect(findings(stackOf(lead({ relatedLists: [{ list: 'rlo_task', columns: ['lead_id.name'] }] })))).toEqual([]);
+    expect(findings(stackOf(lead({ relatedLists: [{ list: 'rlo_task', columns: ['lead_id.nope', 'nope_id.name'] }] })))).toEqual([
+      ['error', RELATED_LIST_COLUMN_UNKNOWN, 'objects[0].relatedLists[0].columns[0]'],
+      ['error', RELATED_LIST_COLUMN_UNKNOWN, 'objects[0].relatedLists[0].columns[1]'],
+    ]);
+    const [leaf] = validateRelatedListRefs(stackOf(lead({ relatedLists: [{ list: 'rlo_task', columns: ['lead_id.nope'] }] })));
+    expect(leaf.message).toContain('"lead_id.nope" is not a field on object "rlo_lead"');
+  });
+
   it('judges the columns against every child a bare child name names, and leaves a child outside the stack unjudged', () => {
     expect(findings(stackOf(lead({ relatedLists: [{ list: 'rlo_event', columns: ['who_id'] }] })))).toEqual([]);
     expect(findings(stackOf(lead({ relatedLists: [{ list: 'rlo_elsewhere', columns: ['nope'] }] })))).toEqual([]);

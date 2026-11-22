@@ -84,7 +84,11 @@
  *    authored fields and the registry-injected columns, as
  *    `relatedListColumns` is judged in `validate-object-field-refs`), and a
  *    miss is `related-list-column-unknown` at `error`: the list would draw an
- *    empty column. A child left unjudged above is left unjudged here.
+ *    empty column. A child left unjudged above is left unjudged here. A
+ *    dotted column (`account.industry`) keeps that family's path resolution
+ *    (`resolveFieldPath`, relationship hops from the child), so a column the
+ *    FK's `relatedListColumns` accepts is accepted here too; a path the graph
+ *    cannot answer is left unjudged, as there.
  */
 
 import {
@@ -94,7 +98,15 @@ import {
   RELATED_LIST_BUILTIN_PART_OF,
   type NamedInboundRelationship,
 } from '@objectstack/spec/data';
-import { objectsAsServed, recordsOf } from './object-graph.js';
+import {
+  describeFieldPathVerdict,
+  indexServedObjectGraph,
+  isUnjudgeable,
+  objectsAsServed,
+  recordsOf,
+  resolveFieldPath,
+  type ObjectGraph,
+} from './object-graph.js';
 import { injectedColumnsFor } from './system-fields.js';
 
 /** A related-list entry that matches no inbound relationship of its object. */
@@ -183,6 +195,8 @@ export function validateRelatedListRefs(stack: AnyRec, options?: RelatedListRefO
     for (const f of fields) if (typeof f.name === 'string') byName.set(f.name, f);
     fieldsByObject.set(child, byName);
   };
+  // The graph a dotted column's relationship hops are walked on (built on first need).
+  let graph: ObjectGraph | undefined;
   for (const obj of objectsAsServed(stack).objects) {
     if (typeof obj.name !== 'string') continue;
     merge(obj.name, recordsOf(obj.fields));
@@ -285,14 +299,24 @@ export function validateRelatedListRefs(stack: AnyRec, options?: RelatedListRefO
           const injected = injectedByObject.get(child) ?? new Set<string>();
           entry.columns.forEach((column, c) => {
             if (typeof column !== 'string' || fields.has(column) || injected.has(column)) return;
+            let message =
+              `Object '${parentName}' relatedLists[${i}].columns[${c}] '${column}' is not a field of '${child}', ` +
+              `the child whose rows the list '${name}' shows, so the column would draw empty.`;
+            if (column.includes('.')) {
+              // A relationship path from the child, judged as `relatedListColumns` judges one.
+              graph ??= indexServedObjectGraph(stack);
+              const verdict = resolveFieldPath(graph, child, column);
+              if (!verdict || isUnjudgeable(verdict)) return;
+              const account = describeFieldPathVerdict(verdict, column, `Object '${parentName}' relatedLists[${i}].columns[${c}]`);
+              if (!account) return; // the path resolves
+              message = `${account.message} The path is walked from '${child}', the child whose rows the list '${name}' shows, so the column would draw empty.`;
+            }
             findings.push({
               severity: 'error',
               rule: RELATED_LIST_COLUMN_UNKNOWN,
               where: `object "${parentName}" › relatedLists`,
               path: `${path}.columns[${c}]`,
-              message:
-                `Object '${parentName}' relatedLists[${i}].columns[${c}] '${column}' is not a field of '${child}', ` +
-                `the child whose rows the list '${name}' shows, so the column would draw empty.`,
+              message,
               hint:
                 `Name a field of '${child}' (a related-list column is a field of the child object), ` +
                 'or drop the entry\'s columns and let them derive.',

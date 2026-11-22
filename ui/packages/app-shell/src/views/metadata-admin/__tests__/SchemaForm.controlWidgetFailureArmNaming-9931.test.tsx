@@ -163,6 +163,7 @@ const CASES: ControlCase[] = [
   { key: 'icon', schema: { type: 'string' }, value: 'check', banner: null },
   { key: 'color-input', schema: { type: 'string' }, value: '#112233', banner: null },
   { key: 'string-tags', schema: { type: 'array', items: { type: 'string' } }, value: ['a'], banner: null },
+  { key: 'related-list-entries', schema: { type: 'array' }, value: ['task'], banner: null },
   { key: 'secret', schema: { type: 'string' }, value: 's3cr3t', banner: null },
 ];
 

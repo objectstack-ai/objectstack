@@ -169,6 +169,7 @@ const CASES: Case[] = [
   { key: 'master-detail', schema: { type: 'array', title: TITLE, items: { type: 'object', properties: { name: { type: 'string' } } } }, value: [{ name: 'a' }] },
   { key: 'master-detail', variant: 'untyped-items', schema: { type: 'array', title: TITLE, items: {} }, value: [] },
   { key: 'string-tags', schema: { type: 'array', title: TITLE, items: { type: 'string' } }, value: ['a'] },
+  { key: 'related-list-entries', schema: { type: 'array', title: TITLE }, value: ['task', { list: 'quote_line', label: 'Lines', columns: ['product'] }] },
   { key: 'multiselect', schema: { type: 'array', title: TITLE, items: { type: 'string', enum: ['grid', 'kanban'] } }, value: ['grid'] },
   { key: 'multiselect', variant: 'no-options', schema: { type: 'array', title: TITLE, items: { type: 'string' } }, value: ['a'] },
   { key: 'code', schema: { type: 'string', title: TITLE }, spec: { language: 'javascript' }, value: 'x = 1' },

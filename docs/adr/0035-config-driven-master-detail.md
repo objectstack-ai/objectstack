@@ -177,7 +177,10 @@ a self-referential FK surfaces a "children" list.
 > list is now the record page's tab list (the maintainer on the epic:
 > 「删除tab就是不现实」, meaning removing a tab is not showing it; 「其实除了
 > overview，我们直接用 relatedLists 是不是就可以」). A side list no entry names
-> shows no tab; the listed ones show in the listed order. The record page's
+> shows no tab; the listed ones show in the listed order. That includes a child
+> list another package adds: it is hidden until the parent names it, and a build
+> accepts that name only when the package is in the parent's stack (an extension
+> package placing its own list is the epic's child card #35901). The record page's
 > three built-in tabs are entries too, by the platform object each draws
 > (「三个内置项，是不是可以直接用对应的对象名」): `sys_attachment` (shown only
 > when listed, and still only with `enable.files`), `sys_approval_request`

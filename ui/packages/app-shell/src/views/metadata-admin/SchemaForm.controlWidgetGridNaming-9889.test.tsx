@@ -104,6 +104,7 @@ const CONTROL_CASES: WidgetCase[] = [
   { widget: 'icon', control: (c) => c.querySelector('[aria-haspopup="dialog"]'), faceName: 'the icon picker trigger' },
   { widget: 'color-input', control: (c) => c.querySelector('input[type="color"]'), faceName: 'the native colour input' },
   { widget: 'string-tags', control: (c) => c.querySelector('input[type="text"]'), faceName: 'the tag entry box' },
+  { widget: 'related-list-entries', control: (c) => c.querySelector('input[type="text"]'), faceName: 'the related-list entry box' },
   { widget: 'secret', control: (c) => c.querySelector('input[type="password"]'), faceName: 'the masked credential box' },
 ];
 

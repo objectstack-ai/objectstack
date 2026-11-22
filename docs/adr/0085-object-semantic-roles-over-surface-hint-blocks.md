@@ -98,7 +98,11 @@ Keys that merely hide/re-arrange correct information (`hideRelatedTab`, `showRef
 > than a page toggle. The guard keeps its force for every other key: no per-page show/hide
 > switch (`hideRelatedTab`, `showReferenceRail`) returns, and an undeclared `relatedLists`
 > shows every list as before. Body tables stay the field groups' to place (`fieldGroups[]
-> .relatedList`); the FK's `relatedList: false` still hides a list everywhere.
+> .relatedList`); the FK's `relatedList: false` still hides a list everywhere. A child list
+> another package adds is no exception: once `relatedLists` is declared it shows no tab until
+> the parent names it, and a build accepts that name only when the package is in the parent's
+> stack. Letting an extension package place its own list is the epic's child card
+> [#35901](https://github.com/objectstack-ai/objectstack/issues/35901).
 
 ### 3. Deletions (all evidenced zero-author)
 
