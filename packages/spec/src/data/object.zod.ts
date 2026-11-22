@@ -1433,7 +1433,7 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
     expanded:
       '`expanded` is not a group key — use the `collapse` enum: ' +
       "`collapse: 'expanded'` (collapsible, starts open), `'collapsed'` (starts closed), " +
-      "or `'none'` (always open, no toggle).",
+      "or `'none'` (always open, no toggle; the default record page still lets the reader fold it).",
     visibleOn:
       '`visibleOn` is not a field-group key — the section predicate slot is `visibleWhen` ' +
       '(ADR-0089 canonical spelling; re-added with its enforcement under ADR-0085 §5). ' +
@@ -1567,15 +1567,18 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
   ).meta({ title: 'Requires Feature' }),
 
   /**
-   * [ADR-0085] Collapse behaviour of the group's rendered section, on every
-   * surface (form, detail, drawer). One enum, three valid states — replaces
+   * [ADR-0085] Collapse behaviour of the group's rendered section. Forms and
+   * the designer preview honour all three states as written; the synthesized
+   * (default) record page lets the reader fold every titled group, so there
+   * only the first state is read (`'collapsed'` closed, `'none'` and
+   * `'expanded'` open). One enum, three valid states — replaces
    * the old `defaultExpanded` flag AND the UI-dialect `collapsible`/`collapsed`
    * boolean pair, which could express contradictions and had drifted between
    * spec and renderer (spec declared a key no renderer read; renderers read
    * keys the spec rejected).
    */
   collapse: z.enum(['none', 'expanded', 'collapsed']).optional().default('none')
-    .describe("[ADR-0085] Section collapse behaviour: 'none' (always open, no toggle), 'expanded' (collapsible, starts open), 'collapsed' (collapsible, starts closed).").meta({ title: 'Collapse' }),
+    .describe("[ADR-0085] Section collapse behaviour: 'none' (always open, no toggle), 'expanded' (collapsible, starts open), 'collapsed' (collapsible, starts closed). On the synthesized (default) record page the reader can fold every titled group, so there 'none' and 'expanded' both start open and only 'collapsed' starts closed.").meta({ title: 'Collapse' }),
 
   /**
    * @deprecated [ADR-0085 → `collapse`] Accepted as a parse-time alias:

@@ -317,7 +317,7 @@ export const Account = ObjectSchema.create({
 | `label` | `string` | Human-readable group header |
 | `icon` | `string?` | Lucide/Material icon name for the group header |
 | `description` | `string?` | Optional description under the header |
-| `collapse` | `'none' \| 'expanded' \| 'collapsed'` (default `'none'`) | Collapse behaviour on every surface: `'none'` = always open (no toggle), `'expanded'` = collapsible and starts open, `'collapsed'` = collapsible and starts closed (ADR-0085; replaces the deprecated `defaultExpanded` flag, which is still accepted as an alias) |
+| `collapse` | `'none' \| 'expanded' \| 'collapsed'` (default `'none'`) | Collapse behaviour: `'none'` = always open (no toggle), `'expanded'` = collapsible and starts open, `'collapsed'` = collapsible and starts closed. Forms and the designer preview follow it as written; the synthesized (default) record page lets the reader fold every titled group, so there only `'collapsed'` starts closed (ADR-0085; replaces the deprecated `defaultExpanded` flag, which is still accepted as an alias) |
 | `visibleWhen` | `Expression?` (CEL) | Section visibility predicate — the whole group, header included, is shown only when it evaluates TRUE, else hidden (fail-closed). Same spelling and CEL vocabulary as field and action predicates (ADR-0089); write a bare string (`visibleWhen: "record.type == 'invoice'"`) or the full expression envelope (ADR-0085 §5) |
 
 ### Supported Migrations (MVP)
