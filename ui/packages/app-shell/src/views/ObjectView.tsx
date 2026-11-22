@@ -58,7 +58,7 @@ import { importTargetFields } from './importTargetFields.js';
 import { resolveViewId } from '../utils/resolveViewId.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 import { studioPackageId } from '../utils/appRoute.js';
-import { LIST_PINNED_VIEW_PREFERENCE, objectPreferenceScope, useWorkspacePreference } from '../utils/workspacePreference.js';
+import { usePinnedListView } from './pinnedListView.js';
 import { defaultListViewId, isSavedViewId, viewRowId } from '../utils/viewIdentity.js';
 import { usePackageSaveRead } from '../hooks/useStudioDesignGate.js';
 import { useObjectActions } from '../hooks/useObjectActions.js';
@@ -651,11 +651,9 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // objectstack#27594 — the view this reader pinned for the object (📌 in the
     // title's view switcher), kept per object in the reader's workspace
     // preferences. A pin naming a view the list no longer offers is no pin.
-    const [pinnedViewChoice, setPinnedViewChoice] = useWorkspacePreference(
-        LIST_PINNED_VIEW_PREFERENCE,
-        objectPreferenceScope(objectDef.name),
-        null,
-    );
+    // Kept per organization (objectstack#36244): the pin can name a personal
+    // view, which exists in one organization only.
+    const [pinnedViewChoice, setPinnedViewChoice] = usePinnedListView(objectDef.name);
     const pinnedViewId = useMemo(
         () => resolveViewId(pinnedViewChoice, views.map((v: any) => v.id), objectDef.name) ?? null,
         [pinnedViewChoice, views, objectDef.name],

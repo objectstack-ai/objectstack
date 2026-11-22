@@ -98,6 +98,7 @@ vi.mock('../LocalizedSidebarTrigger', () => ({
 import { SidebarProvider } from '@object-ui/components';
 import { UnifiedSidebar } from '../UnifiedSidebar';
 import { FavoritesProvider, type FavoriteItem } from '../../context/FavoritesProvider';
+import { DesignModeProvider, useDesignMode, useDesignModeController } from '../designMode';
 
 const entry = (id: string, objectName: string, label: string): NavigationItem =>
   ({ id, type: 'object', objectName, label }) as NavigationItem;
@@ -419,5 +420,55 @@ describe('objectstack#36141 — Favorites, Recent and the menu draw one tile per
     const [deals, acme] = within(favoritesSection()!).getAllByRole('link');
     expect(deals.querySelector('[data-object-icon-tile]')?.getAttribute('data-object-icon-tile')).toBe('gray');
     expect(acme.querySelector('[data-object-icon-tile]')?.getAttribute('data-object-icon-tile')).toBe('teal');
+  });
+});
+
+describe('UnifiedSidebar: no Favorites while the design mode is on (objectstack#36362)', () => {
+  /** The shell's hold on the mode, as `ConsoleLayout` keeps it, with a switch for the test. */
+  function Shell({ children }: { children: React.ReactNode }) {
+    const mode = useDesignModeController({ appName: 'crm', appBasePath: '/apps/crm', enabled: true });
+    return <DesignModeProvider value={mode}>{children}</DesignModeProvider>;
+  }
+  function Switch() {
+    const mode = useDesignMode();
+    return (
+      <>
+        <button type="button" onClick={mode?.enter}>enter design</button>
+        <button type="button" onClick={mode?.cancel}>leave design</button>
+      </>
+    );
+  }
+
+  it('the section (pinned entries and stored favorites) goes while the mode is on, and comes back after', async () => {
+    seed([
+      RECORD_FAVORITE,
+      { id: 'nav:nav_accounts', label: 'nav_accounts', href: '', type: 'nav', navId: 'nav_accounts', pinned: true, favoritedAt: '2026-10-03T00:00:00.000Z' },
+    ]);
+    metadataState = {
+      apps: [{ name: 'crm', label: 'CRM', active: true, _packageId: 'com.acme.crm', navigation: NAVIGATION }],
+      objects: [],
+    };
+    render(
+      <MemoryRouter initialEntries={['/apps/crm']}>
+        <FavoritesProvider>
+          <Shell>
+            <Switch />
+            <SidebarProvider>
+              <UnifiedSidebar activeAppName="crm" />
+            </SidebarProvider>
+          </Shell>
+        </FavoritesProvider>
+      </MemoryRouter>,
+    );
+    await tick();
+    expect(favoriteLabels()).toEqual(['Accounts', 'Acme']);
+
+    fireEvent.click(screen.getByText('enter design'));
+    expect(favoritesSection()).toBeNull();
+    // The app's own entries stay, the pinned one included, in the menu.
+    expect(menuRows().map((row) => row.textContent)).toEqual(expect.arrayContaining([expect.stringContaining('Accounts')]));
+
+    fireEvent.click(screen.getByText('leave design'));
+    expect(favoriteLabels()).toEqual(['Accounts', 'Acme']);
   });
 });

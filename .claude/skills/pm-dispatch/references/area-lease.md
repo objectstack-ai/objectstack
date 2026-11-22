@@ -56,11 +56,11 @@
 - 席位每轮照 `execution-duties.md` 四件套行复查全部已 PASS 受管 PR,各区转来的一并在内。
 - 性能卡与 PR 的提速数字只引已过 L1 的 bench PR 读数;⛔ 不引估算或未过 L1 的本地测量。
 - 席只裁路由(拆并延、归区);改可见行为或解读 ADR 照 SKILL.md〈升级与决策〉呈维护者。
-- 仅呈维护者选项组过独立 `CONTRACT_REVIEW_TIER` 评审,多卡一批;席自裁 ⛔ 不起评审,自读码。
+- 仅呈维护者选项组过独立评审,多卡一批;席自裁 ⛔ 不起评审,自读码。
   均带 `Prior rulings read:` 行,开工前呈 ⛔ 不在施工中途。
 - 席信箱只收:待裁、待落地受管 PR、跨区冲突、阻塞、交接完成;安全照 `security-findings.md`。
 - 线程约 150k 即在干净点轮换,⛔ 不在 L1/L2 中途;交接写 `/mnt/project-files/<席>/handover-<区>.md`。
-- 省耗:dev 推前照 os-dev.md〈本地验证范围〉;跨线程只传指针;线程 effort high;⛔ 不减 dev。
+- 省耗:dev 推前照 os-dev.md〈本地验证范围〉;跨线程只传指针;档位与 effort 照 `execution-duties.md`;⛔ 不减 dev。
 - 每读一次用量,在座位贴评论记一行:用量 %、关卡数、合并 PR 数。
 
 ## 交接与换号
