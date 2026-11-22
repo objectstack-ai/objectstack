@@ -457,6 +457,47 @@ describe('ObjectGrid autosave — Undo takes a save back as a new guarded update
   });
 });
 
+describe('ObjectGrid autosave — an Undo pressed the moment a reload lands draws over the new load (objectstack#36080)', () => {
+  it("the reload's row is what the Undo's answer is drawn over, so the undone value shows", async () => {
+    // The Undo runs in the very turn the reload's rows reach the DOM, before
+    // React's effects for that render have run. It must find its record among
+    // the rows the new load brought: drawn over the previous load's row, its
+    // answer no longer applies once the new row is on screen, and the cell
+    // keeps the value the Undo took back.
+    const ds = makeDataSource();
+    const { container } = renderGrid(ds, true);
+    await screen.findByText('beta');
+    await editSelectFirst(container, dataCell(container, 0, '10'), '11');
+    await screen.findByText('11');
+    await waitFor(() => expect(toasts.success).toHaveBeenCalledTimes(1));
+    // Another user renames the other record; a change naming no record makes
+    // the grid read again, and the new load hands it a new object for d1 too.
+    ds.store.d2 = { ...ds.store.d2, name: 'delta' };
+    const reads = ds.find.mock.calls.length;
+    let pressed = false;
+    const observer = new MutationObserver(() => {
+      if (pressed || !container.textContent?.includes('delta')) return;
+      pressed = true;
+      undoOfToast(0)!.onClick();
+    });
+    observer.observe(container, { subtree: true, childList: true, characterData: true });
+    try {
+      notifyDataChanged({ objectName: OBJECT });
+      await waitFor(() => expect(pressed).toBe(true));
+    } finally {
+      observer.disconnect();
+    }
+    expect(ds.find.mock.calls.length).toBeGreaterThan(reads);
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(2));
+    expect(ds.update.mock.calls[1].slice(1)).toEqual(['d1', { amount: 10 }, { ifMatch: '2026-11-20T11:00:01.000Z' }]);
+    await waitFor(() => expect(toasts.success).toHaveBeenLastCalledWith('Change undone'));
+    await screen.findByText('10');
+    expect(screen.queryByText('11')).toBeNull();
+    expect(screen.getByText('delta')).toBeInTheDocument();
+    expect(screen.getByText('alpha')).toBeInTheDocument();
+  });
+});
+
 describe("ObjectGrid — a grid without cellSelection re-reads on the host list's own write (objectstack#35685)", () => {
   it("the record drawer's related grid reads again while the outer grid holds the record", async () => {
     const ds = makeDataSource();

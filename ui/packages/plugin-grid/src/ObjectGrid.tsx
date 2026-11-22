@@ -1808,10 +1808,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   });
   // objectstack#35685 — the rows the grid read, as an undo finds its record
   // among them when it runs: the page's rows, and a server-grouped group's.
+  // Set while rendering, where both arrive, not in an effect: an undo pressed
+  // once a reload's rows are drawn, before React ran that render's effects,
+  // reads the new load's row and not the one it replaced.
   const loadedRowsRef = React.useRef<{ data: any[]; pages: Record<string, { rows?: any[] } | undefined> }>({ data, pages: {} });
-  useEffect(() => {
-    loadedRowsRef.current = { data, pages: (groupRows.pages ?? {}) as Record<string, { rows?: any[] } | undefined> };
-  });
+  loadedRowsRef.current = { data, pages: (groupRows.pages ?? {}) as Record<string, { rows?: any[] } | undefined> };
 
   // The fan-out query, the resolved match total and the column summaries, in
   // hook order (`./objectGridSummaries`).
