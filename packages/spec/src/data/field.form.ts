@@ -450,6 +450,10 @@ export const fieldForm = defineForm({
         // UI & Visibility
         { field: 'readonly', colSpan: 1, helpText: 'Field is read-only in forms' },
         { field: 'hidden', colSpan: 1, helpText: 'Hide field from default UI views' },
+        // #36425 — whether a create asks for the field; read by every create
+        // surface of the Console (the create dialog, the full-page create, an
+        // action-opened create). The parse refuses it off on a required field.
+        { field: 'showOnCreate', colSpan: 1, helpText: 'Ask for this field when a record is created. Off: the create dialog, the full-page create and an action-opened create leave it out; editing, the record page and lists still show it. A required field is always asked for, so it cannot be turned off.' },
         { field: 'searchable', colSpan: 1, helpText: 'Include in global search results' },
         { field: 'sortable', colSpan: 1, helpText: 'Allow sorting lists by this field' },
         // #19332 G1b — the three field-level predicates. Same keys, same node, as

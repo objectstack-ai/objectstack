@@ -865,6 +865,10 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Masqué",
         helpText: "Masquer le champ dans les vues d’interface par défaut"
       },
+      showOnCreate: {
+        label: "Afficher à la création",
+        helpText: "Demander ce champ à la création d’un enregistrement. Désactivé : la boîte de création, la création en pleine page et une création ouverte par une action l’omettent ; la modification, la page de l’enregistrement et les listes l’affichent toujours. Un champ obligatoire est toujours demandé et ne peut donc pas être désactivé."
+      },
       searchable: {
         label: "Recherchable",
         helpText: "Inclure dans les résultats de la recherche globale"

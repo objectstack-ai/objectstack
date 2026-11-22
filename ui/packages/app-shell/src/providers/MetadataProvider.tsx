@@ -631,8 +631,8 @@ function viewItemBody(view: any): Record<string, any> {
  * `bucket.form` is set ONLY from a form item that carries `isDefault`
  * (objectui#11539). No record create or edit reads it any more
  * (objectstack-ai/objectstack#36425): those lay out by the object's field
- * groups. It stays merged so the served object still says what it declares. `@objectstack/spec` `ViewSchema`
- * calls a container's `form` its "Default form view" and `formViews`
+ * groups. It stays merged so the served object still says what it declares.
+ * `@objectstack/spec` `ViewSchema` calls a container's `form` its "Default form view" and `formViews`
  * "Additional named form views", and the served rows say which one is default:
  * `OBJECT.form` alone carries `isDefault`. There is no "first form wins"
  * fallback, so arrival order decides nothing: a default arriving after a named

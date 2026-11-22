@@ -394,6 +394,8 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.readonly': 'Read-only',
   'designer.field.hidden': 'Hidden',
   'designer.field.trackHistory': 'Track history',
+  'designer.field.showOnCreate': 'Show on create',
+  'designer.field.showOnCreateRequired': 'A required field is always asked for when a record is created, so Show on create stays on.',
   'designer.field.placeholder': 'Placeholder',
   // objectstack#28575 — a read-only base's own field: only the spec's display-property whitelist is editable.
   'designer.field.basePatchOnly': 'This field belongs to the installed package: you can change only its {properties}, saved as your customization, and everything else stays as the package defines it.',

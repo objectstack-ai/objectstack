@@ -865,6 +865,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "숨김",
         helpText: "기본 UI 뷰에서 필드 숨김"
       },
+      showOnCreate: {
+        label: "생성 시 표시",
+        helpText: "레코드를 생성할 때 이 필드를 입력받습니다. 끄면 생성 대화상자, 전체 페이지 생성, 액션으로 여는 생성에서 표시되지 않으며, 편집·레코드 페이지·목록에는 계속 표시됩니다. 필수 필드는 생성 시 항상 입력받으므로 끌 수 없습니다."
+      },
       searchable: {
         label: "검색 가능",
         helpText: "전역 검색 결과에 포함"

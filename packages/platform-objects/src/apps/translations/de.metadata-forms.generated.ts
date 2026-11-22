@@ -865,6 +865,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Ausgeblendet",
         helpText: "Feld in den Standardansichten der Oberfläche ausblenden"
       },
+      showOnCreate: {
+        label: "Beim Anlegen anzeigen",
+        helpText: "Dieses Feld beim Anlegen eines Datensatzes abfragen. Aus: Der Anlegen-Dialog, das Anlegen auf ganzer Seite und ein von einer Aktion geöffnetes Anlegen lassen es weg; Bearbeiten, die Datensatzseite und Listen zeigen es weiterhin. Ein Pflichtfeld wird immer abgefragt und kann daher nicht ausgeschaltet werden."
+      },
       searchable: {
         label: "Durchsuchbar",
         helpText: "In die Ergebnisse der globalen Suche einbeziehen"

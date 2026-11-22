@@ -57,6 +57,13 @@ export interface PackageSurface {
    */
   object?: string;
   viewKind?: string;
+  /**
+   * objectstack-ai/objectstack#36425 — a `form` view row whose body turns on
+   * public sharing (`sharing.enabled === true`): a public form, which keeps
+   * loading at its own link. Every other form view is an internal create /
+   * edit form, which the console no longer loads.
+   */
+  publicForm?: boolean;
 }
 
 /**
@@ -157,11 +164,24 @@ function mergeSurfaces(
  * declares them as strings: the members {@link PackageSurface} carries for a
  * `view` row. Used for a published row and for a draft-overlaid one alike.
  */
-export function viewBindingOf(item: Record<string, unknown>): Pick<PackageSurface, 'object' | 'viewKind'> {
+export function viewBindingOf(item: Record<string, unknown>): Pick<PackageSurface, 'object' | 'viewKind' | 'publicForm'> {
   return {
     ...(typeof item.object === 'string' && item.object ? { object: item.object } : {}),
     ...(typeof item.viewKind === 'string' && item.viewKind ? { viewKind: item.viewKind } : {}),
+    ...(item.viewKind === 'form' && isPublicFormBody(item) ? { publicForm: true } : {}),
   };
+}
+
+/**
+ * objectstack-ai/objectstack#36425 — whether a form view item is a public
+ * form. The one test is the card's: `sharing.enabled === true`, on the item's
+ * `config` (a stored view item) or on the item itself (a flat overlay).
+ */
+function isPublicFormBody(item: Record<string, unknown>): boolean {
+  const config = item.config;
+  const body = config && typeof config === 'object' && !Array.isArray(config) ? (config as Record<string, unknown>) : item;
+  const sharing = body.sharing;
+  return !!sharing && typeof sharing === 'object' && (sharing as Record<string, unknown>).enabled === true;
 }
 
 /** The draft-overlaid read {@link withDraftViewBindings} asks: the metadata client's preview door. */

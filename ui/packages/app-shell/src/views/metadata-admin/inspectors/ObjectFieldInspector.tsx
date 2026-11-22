@@ -2010,7 +2010,22 @@ export function ObjectFieldInspector({
               onCommit={(v) => patchDef({ trackHistory: v || undefined })}
               disabled={locked}
             />
+            {/* objectstack-ai/objectstack#36425 — whether a create asks for the
+                field. On is the default and is written as no key (removed, not
+                set to `undefined`); off writes `showOnCreate: false`. A required field is always asked for (the
+                parse refuses it off), so its box stays ticked and locked. */}
+            <InspectorCheckboxField
+              label={tr('designer.field.showOnCreate')}
+              value={def.showOnCreate !== false}
+              onCommit={(v) => (v ? unsetDefKey('showOnCreate') : patchDef({ showOnCreate: false }))}
+              disabled={locked || (def.required === true && def.showOnCreate !== false)}
+            />
           </div>
+          {def.required === true && (
+            <p data-testid="field-show-on-create-required" className="text-[11px] leading-snug text-muted-foreground">
+              {tr('designer.field.showOnCreateRequired')}
+            </p>
+          )}
         </DisplayPatchLock>
         <InspectorTextField
           label={tr('designer.field.placeholder')}

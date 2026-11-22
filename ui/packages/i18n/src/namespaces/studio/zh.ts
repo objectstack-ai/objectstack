@@ -316,6 +316,8 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.readonly': '只读',
   'designer.field.hidden': '隐藏',
   'designer.field.trackHistory': '记录历史',
+  'designer.field.showOnCreate': '新建时显示',
+  'designer.field.showOnCreateRequired': '必填字段新建时总要填写，所以「新建时显示」保持开启。',
   'designer.field.placeholder': '占位符',
   'designer.field.basePatchOnly': '此字段属于已安装的包：你只能修改它的{properties}，修改会保存为你的定制，其余属性保持包中的定义。',
   'designer.field.basePatchOnly.optionLabels': '选项标签',

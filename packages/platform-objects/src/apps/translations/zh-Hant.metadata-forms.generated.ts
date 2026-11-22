@@ -865,6 +865,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "隱藏",
         helpText: "在預設介面檢視中隱藏"
       },
+      showOnCreate: {
+        label: "新建時顯示",
+        helpText: "新建記錄時是否填寫此欄位。關閉後，新建彈窗、整頁新建和動作開啟的新建都不顯示它；編輯、記錄頁和清單仍然顯示。必填欄位新建時總要填寫，不能關閉。"
+      },
       searchable: {
         label: "可搜尋",
         helpText: "納入全域搜尋結果"

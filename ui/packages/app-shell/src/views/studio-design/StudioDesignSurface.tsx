@@ -117,6 +117,7 @@ import {
   offNavViewHeading,
   offNavViewLabel,
   offNavViewReachedByEntry,
+  offNavViewIsInternalForm,
   type OffNavType,
 } from './InterfacesNavRail.js';
 import {
@@ -5126,13 +5127,16 @@ export function InterfacesPillar({
   // objectstack#30046 — under 视图: a list view an entry's header dropdown
   // reaches is not listed again (Scope 7); a form view reads a readable name,
   // and the heading says what the group holds (Scope 8).
+  // objectstack-ai/objectstack#36425 — an internal form view is not listed
+  // (the console no longer loads one); a public form is.
   const offNavSections = OFF_NAV_TYPES.map((type) => {
     const items = listOnlyCustomized
       ? markedOf(type)
       : itemsRead
         ? (packageItems?.byType[type] ?? []).filter(
             (item) =>
-              !navOpened.has(itemKeyOf(type, item.name)) && !(type === 'view' && offNavViewReachedByEntry(item, navOpened)),
+              !navOpened.has(itemKeyOf(type, item.name))
+              && !(type === 'view' && (offNavViewReachedByEntry(item, navOpened) || offNavViewIsInternalForm(item))),
           )
         : [];
     if (type !== 'view') return { type, items };
