@@ -113,6 +113,58 @@ export function listSiblingSetOf(
     return rows.ids.includes(recordId) ? { siblings: rows.ids } : undefined;
 }
 
+/**
+ * The list a record page knows it came from (objectstack#35854): the page's
+ * history-state `from`, which `useRecordPageReturn` and the page's top bar
+ * read — the list's URL for the ✕, its name, the rows it showed for ↑ ↓ and
+ * the count it matched.
+ */
+export interface ListOriginState {
+    pathname: string;
+    label: string;
+    siblings?: readonly string[];
+    scope?: string;
+    total?: number;
+}
+
+/**
+ * The `from` state of the page a list opens for `recordId` (objectstack#35854),
+ * one builder for every list that opens a record's page: the console's object
+ * list (`useObjectViewRecordNavigation`) and the bare data page
+ * (`ObjectDataPage`, objectstack#35875). `search` is the list's own search;
+ * the side drawer's `?recordId=` / `?recordObject=` are no part of the list
+ * the page returns to. The matched count goes along with an ungrouped set
+ * only: on a grouped list the set is the record's group, counted by itself.
+ */
+export function listOriginOf({
+    pathname,
+    search,
+    label,
+    rows,
+    total,
+    recordId,
+}: {
+    pathname: string;
+    search: string | URLSearchParams;
+    label: string;
+    rows: ListShownRows;
+    total: number | undefined;
+    recordId: string;
+}): ListOriginState {
+    const params = new URLSearchParams(search);
+    params.delete(RECORD_DRAWER_PARAM);
+    params.delete(RECORD_DRAWER_OBJECT_PARAM);
+    const originSearch = params.toString();
+    const set = listSiblingSetOf(rows, recordId);
+    const matched = set && !set.scope && total != null && total >= set.siblings.length ? total : undefined;
+    return {
+        pathname: pathname + (originSearch ? `?${originSearch}` : ''),
+        label,
+        ...(set ?? {}),
+        ...(matched !== undefined ? { total: matched } : {}),
+    };
+}
+
 /** The URL parameters the record-form overlay reads (`AppContent`, `urlParams.ts`). */
 const RECORD_FORM_PARAMS = [RECORD_FORM_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_LINK_PARAM] as const;
 
@@ -278,15 +330,6 @@ export function useObjectViewRecordNavigation({
             // already treated the name and the token identically, which is
             // exactly what made the substitution inaudible on this surface.
             const { pathname, search, state } = locationRef.current;
-            // The rows the list shows go along when the record is one of
-            // them: the page's top bar counts and steps through them
-            // (objectstack#27524, Target 7).
-            const set = listSiblingSetOf(listRowsRef.current, String(recordId));
-            // The list's matched count goes along with an ungrouped set: on a
-            // grouped list the set is the record's group, counted by itself.
-            const total = set && !set.scope && listTotalRef.current != null && listTotalRef.current >= set.siblings.length
-                ? listTotalRef.current
-                : undefined;
             // The drawer link a phone answers moves the record form it
             // carries onto the record's page, where the form opens over the
             // page as it opens over the drawer on a desktop (objectstack#32750),
@@ -300,18 +343,19 @@ export function useObjectViewRecordNavigation({
                 : undefined;
             // The list as the page's origin, without the drawer's
             // `?recordId=` a phone redirect leaves behind (objectstack#27058).
-            const originParams = split?.form ? split.origin : new URLSearchParams(search);
-            originParams.delete(RECORD_DRAWER_PARAM);
-            originParams.delete(RECORD_DRAWER_OBJECT_PARAM);
-            const originSearch = originParams.toString();
+            // The rows the list shows go along when the record is one of
+            // them: the page's top bar counts and steps through them
+            // (objectstack#27524, Target 7), with the list's matched count.
             const originState = {
               ...extraState,
-              from: {
-                pathname: pathname + (originSearch ? `?${originSearch}` : ''),
+              from: listOriginOf({
+                pathname,
+                search: split?.form ? split.origin : search,
                 label: listLabel,
-                ...(set ?? {}),
-                ...(total !== undefined ? { total } : {}),
-              },
+                rows: listRowsRef.current,
+                total: listTotalRef.current,
+                recordId: String(recordId),
+              }),
               // A phone pushes the page over its list, so the page's 「‹」
               // goes back in the history to that list entry, as a page a
               // related row pushes does (objectstack#29074). Not on a

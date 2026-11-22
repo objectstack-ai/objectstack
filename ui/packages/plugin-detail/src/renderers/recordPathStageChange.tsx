@@ -55,6 +55,15 @@
  * the reader may fill adds that field, any other reads at the dialog's foot.
  * A stage that needs nothing opens the same dialog as the move's confirmation.
  * `record:path` leaves the option off and keeps its plain confirmation.
+ *
+ * The fields asked are judged against the record AS IT STANDS, on every
+ * render, not frozen at the pick (objectstack#36036). A 409 re-reads the
+ * record, and the re-read row reaches this hook later through the record
+ * context (the page's refresh is a bus notice, not a fetch it can await), so
+ * the list follows that row when it lands: a field another writer filled in
+ * the meantime leaves the dialog, the move no longer sends it, and a value the
+ * reader typed for it stops counting toward the fields it would chain in. When
+ * nothing is left, the dialog is the move's confirmation again.
  */
 
 import React from 'react';
@@ -188,7 +197,11 @@ export interface StageChangeOptions {
   collectFields?: boolean;
 }
 
-/** A pending move: the stage, and the fields its dialog asks for. */
+/**
+ * A pending move: the stage, and the fields its dialog asked for at the pick.
+ * The dialog asks what the CURRENT record needs (`fieldsNeededAt` at render);
+ * the pick-time list only names the fields a re-read has since filled.
+ */
 type StageTarget = { value: unknown; label: string; fields: RequiredWhenPromptField[] };
 
 export function useStageChange(
@@ -351,19 +364,32 @@ export function useStageChange(
       return { ...f, def: { ...f.def, ...(localized ? { options: localized } : {}) }, label: labelOf(f.name) };
     };
     const exclude = [statusField];
+    // What the record as it stands needs. After a 409 re-read this is the
+    // re-read row's answer: a field another writer filled is gone, so the
+    // dialog neither shows nor sends it (it sends only the fields it shows).
+    const asked = fieldsNeededAt(stage.value);
+    // A value the reader typed for a field asked at the pick and no longer
+    // asked is not sent, so it must not ask for the fields it would chain in
+    // either: the write leaves the stored value standing, and the chain is
+    // judged against what the write leaves.
+    const noLongerAsked = new Set(
+      stage.fields.filter((f) => !asked.some((a) => a.name === f.name)).map((f) => f.name),
+    );
+    const sendable = (values: Record<string, unknown>) =>
+      noLongerAsked.size === 0 ? values : Object.fromEntries(Object.entries(values).filter(([k]) => !noLongerAsked.has(k)));
     return (
       <RequiredFieldsDialog
         // A new pick is a new collection: the dialog's typed values reset.
         key={String(stage.value)}
         open
-        fields={stage.fields.map(label)}
+        fields={asked.map(label)}
         submitting={busy}
         recordName={getRecordDisplayName(objectSchema, record)}
         changes={[{ name: statusField, label: labelOf(statusField), value: stage.label }]}
         moreFields={(values) => collectRequiredWhenPromptFields(
           objectFields,
           record,
-          { ...values, [statusField]: stage.value },
+          { ...sendable(values), [statusField]: stage.value },
           { exclude, fillable },
         ).map(label)}
         refusalField={(name) => {
@@ -376,7 +402,7 @@ export function useStageChange(
         // as `stageRefusalLines` reads them; another field by its label.
         labelOf={(name) => (name !== statusField && objectFields?.[name] ? labelOf(name) : undefined)}
         title={t('detail.pathStageChangeTitle')}
-        description={stage.fields.length > 0
+        description={asked.length > 0
           ? t('detail.stageMenuFieldsDescription', { stage: stage.label })
           : t('detail.pathStageChangeDescription', { stage: stage.label })}
         submitLabel={t('detail.pathStageChangeConfirm')}

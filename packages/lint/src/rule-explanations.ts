@@ -4803,6 +4803,8 @@ const RELATED_LIST_COLUMN_UNKNOWN_EXPLANATION: RuleExplanation = {
       '`os validate`, `os build` and at the runtime publish gate. Judged against every child the entry ' +
       'names whose fields this rule can see (the authored fields and the registry-injected columns); a ' +
       'child outside the stack is not judged here.',
+    'An object extension\'s list placement (`place: [{ list, columns }]`) carries its columns the same way, ' +
+      'and they are judged the same way, against the child the placement names.',
   ],
 };
 
@@ -4827,6 +4829,35 @@ const RELATED_LIST_STREAM_PART_EXPLANATION: RuleExplanation = {
       'stream, not tabs of their own, so an entry naming one places nothing.',
     "A warning, prescribing `'sys_activity'`. Which parts the stream shows is still the object's own " +
       'switches (`enable.feeds`, `enable.activities`, `trackHistory`).',
+  ],
+};
+
+const EXTENSION_PLACEMENT_NOT_APPLIED_EXPLANATION: RuleExplanation = {
+  rule: 'extension-placement-not-applied',
+  covers: 'an object extension placement the target does not arrange',
+  paragraphs: [
+    "An object extension's `place` arranges what the extended object declares: a list placement applies when " +
+      'it declares `relatedLists`, a group or field placement when it declares `fieldGroups`. Where it declares ' +
+      'none, its automatic arrangement stays: the list shows in the automatic tab order and the field among the ' +
+      'fields, after the object\'s own. Nothing is dropped.',
+    "A list entry's `label` and `columns` are not applied either. To title the list and choose its columns on " +
+      "every parent, write `relatedListTitle` / `relatedListColumns` on the child object's lookup field.",
+    'A warning: the placement applies, unchanged, once the extended object declares its tab list or groups. ' +
+      'This check sees the extended object only when it is in the same stack; the boot log names the same ' +
+      'placement wherever the object comes from.',
+  ],
+};
+
+const EXTENSION_PLACEMENT_ANCHOR_MISSING_EXPLANATION: RuleExplanation = {
+  rule: 'extension-placement-anchor-missing',
+  covers: 'an object extension placement whose anchor is missing',
+  paragraphs: [
+    "A placement's `after` / `before` names a tab, group or group member of the extended object. One the " +
+      'object does not have (and no extension of it in the stack places) puts the item at the end of the tabs ' +
+      '(before the approvals and activity-stream tabs), of the groups, or of the group. A field placed in a ' +
+      'group the object does not have shows among the ungrouped fields.',
+    'A warning: the item still shows. Name an anchor the object has, or drop the anchor to place the item at ' +
+      'the end on purpose.',
   ],
 };
 
@@ -6692,6 +6723,8 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [RELATED_LIST_COLUMN_UNKNOWN_EXPLANATION.rule]: RELATED_LIST_COLUMN_UNKNOWN_EXPLANATION,
   [RELATED_LIST_ATTACHMENTS_OFF_EXPLANATION.rule]: RELATED_LIST_ATTACHMENTS_OFF_EXPLANATION,
   [RELATED_LIST_STREAM_PART_EXPLANATION.rule]: RELATED_LIST_STREAM_PART_EXPLANATION,
+  [EXTENSION_PLACEMENT_NOT_APPLIED_EXPLANATION.rule]: EXTENSION_PLACEMENT_NOT_APPLIED_EXPLANATION,
+  [EXTENSION_PLACEMENT_ANCHOR_MISSING_EXPLANATION.rule]: EXTENSION_PLACEMENT_ANCHOR_MISSING_EXPLANATION,
   [OBJECT_REFERENCE_UNKNOWN_EXPLANATION.rule]: OBJECT_REFERENCE_UNKNOWN_EXPLANATION,
   [OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION.rule]: OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION,
   [CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION.rule]: CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION,

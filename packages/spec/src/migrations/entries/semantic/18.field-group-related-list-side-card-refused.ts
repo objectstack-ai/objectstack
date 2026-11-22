@@ -2,10 +2,10 @@
 
 import type { SemanticMigration } from '../../types.js';
 
-// #27478 (ruling B on #27055) — a field group's `relatedList` only POSITIONS a
-// body table among the field sections; whether a related list is a body table
-// is decided once, by the relationship's own FK keys
-// (`isBodyTableRelationship`, `data/related-list-body-table.ts`). A group that
+// #27478 (ruling B on #27055) — a field group's `relatedList` places only what
+// the relationship's own FK keys let it place: a `'primary'` list, or (since
+// #35597) a plain master_detail with no relatedList, whatever its inlineEdit
+// (`isGroupPlaceableRelationship`, `data/related-list-body-table.ts`). A group that
 // names a side card or a hidden list is refused at `defineStack` and at the
 // runtime object publish door (`related-list-group-not-body`). Semantic only,
 // with no D2 conversion: which of the two remedies the author meant (promote
@@ -15,21 +15,21 @@ export const entry: SemanticMigration = {
   surface:
     'objects[].fieldGroups[].relatedList (data.ObjectFieldGroupSchema.relatedList) naming an inbound '
     + 'relationship that is not a body table — a lookup or master_detail FK on the child declaring '
-    + 'relatedList true or false, a plain master_detail with no inlineEdit, a lookup with no relatedList, '
+    + 'relatedList true or false, a lookup with no relatedList, '
     + 'or a bare child name one of whose FKs is any of those',
   replacement:
     'one of two edits, the author\'s choice. To keep the table at the group: make the relationship a '
-    + 'body table on the child\'s FK — `relatedList: \'primary\'`, or for an inline-edited master_detail '
+    + 'body table on the child\'s FK — `relatedList: \'primary\'`, or for a master_detail '
     + 'remove an explicit `relatedList: true` — or, for a bare child name whose other FK is a side card, '
     + 'name the body table\'s FK as `object.field`. To keep the list a side card: remove the group\'s '
     + '`relatedList` (and the group itself, if it holds nothing else)',
   reason:
     'A field group\'s `relatedList` was described as placing a related list\'s body table at the '
-    + 'group, but the record page draws only lists that ARE body tables by the FK\'s own keys '
-    + '(`relatedList: \'primary\'`, or a master_detail FK that sets inlineEdit and declares no '
-    + 'relatedList), so a group naming a side card or a hidden list parsed, published and drew nothing '
+    + 'group, but the record page draws at a group only a list the FK\'s own keys let it place '
+    + '(`relatedList: \'primary\'`, or a master_detail FK that declares no relatedList, which the '
+    + 'group makes a body table), so a group naming a side card or a hidden list parsed, published and drew nothing '
     + 'at the group — silently; Studio\'s group inspector offered every inbound relationship, so the '
-    + 'public door produced it. Ruling B keeps body-ness in one place (the FK) instead of giving the '
+    + 'public door produced it. Ruling B keeps the FK\'s declared relatedList authoritative instead of giving the '
     + 'group a second, disagreeing source, so the group is refused rather than honoured. The '
     + 'refusal is a cross-object judgement, not a parse: `defineStack` (os validate, os build) and the '
     + 'object publish door refuse it, naming each FK that is not a body table and the remedy. There is '

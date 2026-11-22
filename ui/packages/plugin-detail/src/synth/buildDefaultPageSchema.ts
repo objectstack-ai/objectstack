@@ -1114,8 +1114,10 @@ const BUILTIN_TAB_VALUES: Readonly<Record<RecordPageBuiltinTab, string>> = {
  *    `enable.files`, decided above);
  *  - an unlisted approvals tab follows every listed tab, and an unlisted
  *    stream closes the strip, so leaving either out never hides it;
- *  - a related tab no entry names (a host that did not filter it) follows
- *    the listed tabs, in the order passed.
+ *  - a related tab no entry names (a list another package brings and does
+ *    not place, objectstack#35901, or a host that did not filter it) sits at
+ *    the end of the tabs: after the listed tabs, before a trailing run of
+ *    listed approvals / stream tabs, in the order passed.
  *
  * Which related lists exist is the host's: `deriveRelatedLists` drops the
  * unlisted side lists. A pure, stable reorder of the tabs already built.
@@ -1125,6 +1127,12 @@ function arrangeDeclaredTabs(declared: readonly unknown[] | undefined, items: an
   const [overview, ...tabs] = items;
   const names = declared.map((entry) => relatedListEntryName(entry));
   const unlisted = names.length;
+  // objectstack#35901 — the end of the tabs, for a related tab no entry names
+  // (a list another package brings and does not place): before a trailing run
+  // of listed approvals / stream tabs, which close the strip.
+  let tail = names.length;
+  while (tail > 0 && (names[tail - 1] === 'sys_approval_request' || names[tail - 1] === 'sys_activity')) tail -= 1;
+  const unlistedRelated = tail < names.length ? tail - 0.5 : unlisted;
   const rank = (tab: any): number | null => {
     const value = typeof tab?.value === 'string' ? tab.value : '';
     const builtin = (Object.keys(BUILTIN_TAB_VALUES) as RecordPageBuiltinTab[])
@@ -1140,7 +1148,7 @@ function arrangeDeclaredTabs(declared: readonly unknown[] | undefined, items: an
       const dot = id.indexOf('.');
       const list = { childObject: id.slice(0, dot), referenceField: id.slice(dot + 1) };
       const at = names.findIndex((name) => name !== undefined && !isRecordPageBuiltinTab(name) && relatedListEntryNames(name, list));
-      return at === -1 ? unlisted : at;
+      return at === -1 ? unlistedRelated : at;
     }
     return unlisted;
   };

@@ -39,7 +39,6 @@ import {
   ChevronRight,
   LayoutGrid,
   Layers,
-  Pin,
   Search,
 } from 'lucide-react';
 import { NavigationRenderer, hasVisibleNavigationItems, type NavItemActionContext } from '@object-ui/layout';
@@ -56,6 +55,7 @@ import { useNavTargetColor, useNavTargetIcon } from '../hooks/useNavTargetIcon.j
 import { ContentItemTile, favoriteItemObject } from './contentItemTile.js';
 import { recentItemObject } from '../console/home/recentItemTypeLabel.js';
 import { readRecentObjects } from '../console/home/readRecentObjects.js';
+import { appSegmentOf } from '../console/home/appLastOpened.js';
 import { useNavDocTargetCheck } from '../hooks/useNavDocTargetCheck.js';
 import { useNavMemberGates } from '../hooks/useNavMemberGates.js';
 import { matchAppBySegment } from '../utils/index.js';
@@ -200,12 +200,12 @@ export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false
   const resolveNavTargetIcon = useNavTargetIcon();
   const resolveNavTargetColor = useNavTargetColor();
   // Collapsed, the console's sidebar is hidden and its menu floats over the
-  // content (objectstack#35062); below the fold width it collapses on its own
-  // (objectstack#27593), and `useResponsiveSidebar` folds and unfolds it.
+  // content (objectstack#35062); a window starts in the reader's choice for
+  // its side of the threshold, else expanded from 1280 px and collapsed below
+  // (objectstack#36112), and `useResponsiveSidebar` gives it that state.
   const rail = useConsoleSidebarRail({ enabled: railOverlay });
   const sidebarRef = React.useRef<HTMLDivElement | null>(null);
   const railPanel = useConsoleSidebarRailPanel(rail, sidebarRef);
-  const keepOpenLabel = t('sidebar.keepOpen', { defaultValue: 'Keep sidebar open' });
   // objectstack#36112 — from 768 px up the console draws no top bar: the
   // sidebar starts at the top of the window and carries the app menu, the
   // search and the bell in its head, and the account at its foot.
@@ -249,10 +249,6 @@ export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false
   }, [routeKey, isMobile, setOpenMobile]);
 
   const { recentItems: allRecentItems } = useRecentItems();
-  // A Studio package entry is labelled from the package list (objectui#11863),
-  // which this sidebar does not load, so it is left out here rather than drawn
-  // as its id. The Studio landing lists the recent packages.
-  const recentItems = allRecentItems.filter(item => item.type !== 'package');
   // A recent entry's text is the item's own, resolved on this render
   // (objectui#11678); the entry stores identity only.
   const recentLabel = useRecentItemLabel();
@@ -268,7 +264,19 @@ export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false
   // direct navigation to /apps/account still renders.
   const activeApps = apps.filter((a: any) => a.active !== false && a.hidden !== true);
   // ADR-0048 (A) — route segment may be a package id; match by it (name fallback).
-  const activeApp = matchAppBySegment(apps.filter((a: any) => a.active !== false), activeAppName || currentAppName) || activeApps[0];
+  const enabledApps = apps.filter((a: any) => a.active !== false);
+  const activeApp = matchAppBySegment(enabledApps, activeAppName || currentAppName) || activeApps[0];
+  // A Studio package entry is labelled from the package list (objectui#11863),
+  // which this sidebar does not load, so it is left out here rather than drawn
+  // as its id. The Studio landing lists the recent packages. From 768 px up
+  // the list is this app's own (objectstack#36112, 「这个应用里的最近使用」):
+  // an entry was opened in the app its address names, resolved as the router
+  // resolves it; Home lists every app's. The phone drawer is unchanged.
+  const recentItems = allRecentItems.filter(
+    (item) =>
+      item.type !== 'package' &&
+      (isMobile || (!!activeApp && matchAppBySegment(enabledApps, appSegmentOf(item.href)) === activeApp)),
+  );
   // `type: 'action'` nav items dispatch through here (framework#4509). The
   // sidebar renders inside ConsoleShell's GlobalActionRuntimeProvider, so this
   // resolves to the fully-wired console runner — confirm/param/result dialogs
@@ -910,29 +918,9 @@ export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false
          )}
         </nav>
       </SidebarContent>
-      {/* "Keep sidebar open": in the floated menu it puts the sidebar back
-          beside the content and keeps it there (on the fold, for this
-          browser); in a sidebar kept open on a narrow window it is pressed,
-          and turns the fold back on (objectstack#35062). */}
-      {(railPanel.keepOpenControl || shellChrome) && (
+      {shellChrome && (
         <SidebarFooter className="gap-1 border-t border-sidebar-border p-2">
-          {railPanel.keepOpenControl && (
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  data-testid="sidebar-keep-open"
-                  aria-pressed={railPanel.keepOpenControl.pressed}
-                  isActive={railPanel.keepOpenControl.pressed}
-                  tooltip={keepOpenLabel}
-                  onClick={railPanel.keepOpenControl.onPress}
-                >
-                  <Pin className="h-4 w-4" />
-                  <span>{keepOpenLabel}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          )}
-          {shellChrome && <AccountMenu trigger="sidebar" />}
+          <AccountMenu trigger="sidebar" />
         </SidebarFooter>
       )}
       {/* No footer trigger: from 768 px up the trigger is the head's collapse
