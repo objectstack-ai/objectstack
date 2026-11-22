@@ -33,10 +33,6 @@ class-2-shaped door ([the dated note under D2's table](#d2--the-closed-list-of-d
 recorded on the card in [`7043884056`](https://github.com/objectstack-ai/objectstack/issues/35848#issuecomment-7043884056))
 — D2: the restriction profile `os validate --target` reads is admitted to the control-plane discovery role
 ([the dated note under D2's table](#d2--the-closed-list-of-doors)).
-· **Amended** (2026-11-22, ruling C on [#36198](https://github.com/objectstack-ai/objectstack/issues/36198),
-recorded on the card in [`7077639745`](https://github.com/objectstack-ai/objectstack/issues/36198#issuecomment-7077639745),
-maintainer 「C」) — D2: the restriction profile is served on the unscoped route only; its environment-scoped twin is
-not mounted ([the dated note under D2's table](#d2--the-closed-list-of-doors)).
 **Decided by**: the maintainer's ruling on [#22146](https://github.com/objectstack-ai/objectstack/issues/22146)
 (comment [`6054113537`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6054113537),
 decision batch #290 item 1, 2026-10-08, 「22146 同意」): **A on all eight questions, and G2 on the
@@ -360,7 +356,8 @@ until that approval it binds nothing. The vendor accept route is unchanged by th
 (recorded on the card in [`7043884056`](https://github.com/objectstack-ai/objectstack/issues/35848#issuecomment-7043884056);
 the review record it answers is [`7038862149`](https://github.com/objectstack-ai/objectstack/pull/35838#issuecomment-7038862149),
 finding F1) admits one more route into the **discovery** role of the control-plane family below, not a door class:
-`GET {basePath}/discovery/restriction-profile`. What
+`GET {basePath}/discovery/restriction-profile`, and its environment-scoped twin
+`GET {basePath}/environments/:environmentId/discovery/restriction-profile` where environment scoping mounts it. What
 it serves: a constant open profile, a `RestrictionProfileSchema` value that restricts nothing, with
 `versions { spec, skills }`. Its `allowedFlowNodeTypes` is the profile's whole node-type vocabulary, the approvals
 plugin's `approval` / `approval_revise` included; it is not a statement of which plugins this kernel runs, so
@@ -376,16 +373,6 @@ carrier is the anonymous-door sweep's `discovery` row alone, as for the REST roo
 the handler (`packages/rest/src/discovery-routes.ts#registerDiscoveryEndpoints`) never calls `enforceAuth`, so a row in
 `isAuthGateAllowlisted` would change no answer and would only add a standing exemption, on every mount base, from the
 ADR-0069 held-user gate and from `shouldDenyAnonymous`. Ledgered in `packages/rest/src/rest-route-ledger.ts`.
-
-**Amended 2026-11-22 — the restriction profile is served on the unscoped route only.** Ruling C on
-[#36198](https://github.com/objectstack-ai/objectstack/issues/36198)
-(recorded on the card in [`7077639745`](https://github.com/objectstack-ai/objectstack/issues/36198#issuecomment-7077639745))
-withdraws the environment-scoped twin the 2026-11-20 note first admitted beside that route,
-`GET {basePath}/environments/:environmentId/discovery/restriction-profile`. Its handler reads no host input, so the
-twin answered the constant open profile for any environment id, including on a host that enforces a narrower profile
-and serves that one through its own route on the unscoped path. Nothing read the twin. It is not mounted: a request to
-it gets the host's ordinary not-found answer, and the unscoped route is unchanged. A server that mounts the scoped base
-alone (`projectResolution: 'required'`) therefore serves no restriction profile.
 
 **Outside the guest model by construction**, and not on the list:
 
