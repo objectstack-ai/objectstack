@@ -455,7 +455,10 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 121 once objectstack-ai/objectstack#35955 added
     // `console.objectView.draft.saveToViewConfirm`, the shared-view save's
     // question naming the view („{{name}}“) — one interpolated span, view data.
-    expect(okSpans, 'correctly paired spans').toBe(121);
+    // 122 once objectstack-ai/objectstack#36286 added
+    // `console.commandPalette.createAs`, the palette's row creating a record
+    // from the typed words („{{query}}“) — one interpolated span, user input.
+    expect(okSpans, 'correctly paired spans').toBe(122);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -574,7 +577,9 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // after objectstack-ai/objectstack#35688 added `fields.tags.add`, one more
     // matched pair. 121 / 121 / 0 after objectstack-ai/objectstack#35955 added
     // `console.objectView.draft.saveToViewConfirm`, one more matched pair.
-    expect({ open, close, rdq }).toEqual({ open: 121, close: 121, rdq: 0 });
+    // 122 / 122 / 0 after objectstack-ai/objectstack#36286 added
+    // `console.commandPalette.createAs`, one more matched pair.
+    expect({ open, close, rdq }).toEqual({ open: 122, close: 122, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);
