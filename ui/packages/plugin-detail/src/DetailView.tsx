@@ -1457,8 +1457,17 @@ export const DetailView: React.FC<DetailViewProps> = ({
                         // `50%`. Text and bar take the one answer.
                         const percentScale = percentCellScale({ type: armType, max: percentField.max });
                         display = formatPercent(num, percentScale, scale, displayLocale);
-                        const points = summaryChipPercentPoints(num, percentScale);
-                        percentValue = Math.max(0, Math.min(100, points));
+                        // The field's read-only face, `percentDisplay` in
+                        // `@objectstack/spec`: `plain` is a rate or a
+                        // probability, not progress, so the chip states the
+                        // percentage alone and draws no bar; absent or `bar`
+                        // keeps it. The same literal test `PercentCellRenderer`
+                        // applies, read off the same merged bag (view over
+                        // object), so a percent formula's own key counts too.
+                        if (percentField.percentDisplay !== 'plain') {
+                          const points = summaryChipPercentPoints(num, percentScale);
+                          percentValue = Math.max(0, Math.min(100, points));
+                        }
                       }
                     } else if (ftype === 'select' || ftype === 'status' || ftype === 'multiselect') {
                       // Resolve raw option label from field metadata as
