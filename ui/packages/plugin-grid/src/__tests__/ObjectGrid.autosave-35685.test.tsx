@@ -570,127 +570,6 @@ describe("ObjectGrid — a grid without cellSelection re-reads on the host list'
   });
 });
 
-describe('ObjectGrid — a state-machine field is confirmed before a list cell saves it (objectstack#35685)', () => {
-  /** Deals whose `stage` a state machine governs, and whose `priority` none does. */
-  function makeMachineDataSource(rule: Record<string, unknown> = {}) {
-    const ds = makeDataSource();
-    ds.store.d1.stage = 'new';
-    ds.store.d1.priority = 'low';
-    ds.getObjectSchema = async (name: string) => ({
-      name,
-      fields: {
-        id: { type: 'text' },
-        name: { type: 'text', label: 'Name' },
-        stage: {
-          type: 'select',
-          label: 'Stage',
-          options: [
-            { value: 'new', label: 'New' },
-            { value: 'qualified', label: 'Qualified' },
-            { value: 'won', label: 'Won' },
-          ],
-        },
-        priority: { type: 'select', label: 'Priority', options: [{ value: 'low', label: 'Low' }, { value: 'high', label: 'High' }] },
-        updated_at: { type: 'datetime' },
-      },
-      validations: [{
-        name: 'stage_flow',
-        type: 'state_machine',
-        field: 'stage',
-        transitions: { new: ['qualified', 'won'], qualified: ['won'] },
-        ...rule,
-      }],
-    });
-    return ds;
-  }
-
-  function renderMachineGrid(ds: any) {
-    const schema: any = {
-      type: 'object-grid',
-      objectName: OBJECT,
-      editable: true,
-      columns: [
-        { field: 'name', label: 'Name' },
-        { field: 'stage', label: 'Stage' },
-        { field: 'priority', label: 'Priority' },
-      ],
-      pagination: { pageSize: 50 },
-    };
-    return render(
-      <ActionProvider>
-        <ObjectGrid schema={schema} dataSource={ds} cellSelection />
-      </ActionProvider>,
-    );
-  }
-
-  /** Select a cell and paste `text` into it (a commit made without an editor). */
-  function pasteInto(container: HTMLElement, cell: HTMLElement, text: string) {
-    fireEvent.click(cell);
-    const catcher = container.querySelector<HTMLInputElement>('[data-slot="cell-type-catcher"]')!;
-    fireEvent.paste(catcher, { clipboardData: { getData: () => text } });
-  }
-
-  it('names the field and both values, says automation may run, and Cancel saves nothing', async () => {
-    const ds = makeMachineDataSource();
-    const { container } = renderMachineGrid(ds);
-    await screen.findByText('beta');
-    pasteInto(container, dataCell(container, 0, 'New'), 'Won');
-    const dialog = await screen.findByRole('alertdialog');
-    expect(dialog).toHaveTextContent('Change Stage?');
-    expect(dialog).toHaveTextContent('Stage changes from New to Won. Saving may trigger related automation.');
-    expect(ds.update).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
-    await act(async () => {});
-    expect(ds.update).not.toHaveBeenCalled();
-    expect(dataCell(container, 0, 'New')).toBeTruthy();
-  });
-
-  it('Change sends the move as one guarded update', async () => {
-    const ds = makeMachineDataSource();
-    const { container } = renderMachineGrid(ds);
-    await screen.findByText('beta');
-    pasteInto(container, dataCell(container, 0, 'New'), 'Won');
-    await screen.findByRole('alertdialog');
-    fireEvent.click(screen.getByRole('button', { name: 'Change' }));
-    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
-    expect(ds.update).toHaveBeenCalledWith(OBJECT, 'd1', { stage: 'won' }, { ifMatch: '2026-11-20T10:00:00.000Z' });
-    await waitFor(() => expect(dataCell(container, 0, 'Won')).toBeTruthy());
-  });
-
-  it('a field no state machine governs, and an inactive machine, save without asking', async () => {
-    const ds = makeMachineDataSource({ active: false });
-    const { container } = renderMachineGrid(ds);
-    await screen.findByText('beta');
-    pasteInto(container, dataCell(container, 0, 'Low'), 'High');
-    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
-    expect(ds.update.mock.calls[0][2]).toEqual({ priority: 'high' });
-    pasteInto(container, dataCell(container, 0, 'New'), 'Won');
-    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(2));
-    expect(screen.queryByRole('alertdialog')).toBeNull();
-  });
-
-  it('a machine bound to insert alone does not govern an update: the move saves without asking', async () => {
-    const ds = makeMachineDataSource({ events: ['insert'] });
-    const { container } = renderMachineGrid(ds);
-    await screen.findByText('beta');
-    pasteInto(container, dataCell(container, 0, 'New'), 'Won');
-    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
-    expect(ds.update.mock.calls[0][2]).toEqual({ stage: 'won' });
-    expect(screen.queryByRole('alertdialog')).toBeNull();
-  });
-
-  it('an advisory (warning-severity) machine still asks: the move is what automation listens for', async () => {
-    const ds = makeMachineDataSource({ severity: 'warning', events: ['update'] });
-    const { container } = renderMachineGrid(ds);
-    await screen.findByText('beta');
-    pasteInto(container, dataCell(container, 0, 'New'), 'Won');
-    const dialog = await screen.findByRole('alertdialog');
-    expect(dialog).toHaveTextContent('Stage changes from New to Won.');
-    expect(ds.update).not.toHaveBeenCalled();
-  });
-});
-
 describe('ObjectGrid — groups, subtotals and the footer total after a cell save (objectstack#35689)', () => {
   /**
    * Deals by stage (Prospect / Won) with an amount: Prospect holds Acme 100
@@ -917,5 +796,126 @@ describe('ObjectGrid — groups, subtotals and the footer total after a cell sav
     await editSelectFirst(container, cellIn(container, 'Bolt', '50'), '70');
     await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(footerOf('amount')).toMatch(/200/));
+  });
+});
+
+describe('ObjectGrid — a state-machine field is confirmed before a list cell saves it (objectstack#35685)', () => {
+  /** Deals whose `stage` a state machine governs, and whose `priority` none does. */
+  function makeMachineDataSource(rule: Record<string, unknown> = {}) {
+    const ds = makeDataSource();
+    ds.store.d1.stage = 'new';
+    ds.store.d1.priority = 'low';
+    ds.getObjectSchema = async (name: string) => ({
+      name,
+      fields: {
+        id: { type: 'text' },
+        name: { type: 'text', label: 'Name' },
+        stage: {
+          type: 'select',
+          label: 'Stage',
+          options: [
+            { value: 'new', label: 'New' },
+            { value: 'qualified', label: 'Qualified' },
+            { value: 'won', label: 'Won' },
+          ],
+        },
+        priority: { type: 'select', label: 'Priority', options: [{ value: 'low', label: 'Low' }, { value: 'high', label: 'High' }] },
+        updated_at: { type: 'datetime' },
+      },
+      validations: [{
+        name: 'stage_flow',
+        type: 'state_machine',
+        field: 'stage',
+        transitions: { new: ['qualified', 'won'], qualified: ['won'] },
+        ...rule,
+      }],
+    });
+    return ds;
+  }
+
+  function renderMachineGrid(ds: any) {
+    const schema: any = {
+      type: 'object-grid',
+      objectName: OBJECT,
+      editable: true,
+      columns: [
+        { field: 'name', label: 'Name' },
+        { field: 'stage', label: 'Stage' },
+        { field: 'priority', label: 'Priority' },
+      ],
+      pagination: { pageSize: 50 },
+    };
+    return render(
+      <ActionProvider>
+        <ObjectGrid schema={schema} dataSource={ds} cellSelection />
+      </ActionProvider>,
+    );
+  }
+
+  /** Select a cell and paste `text` into it (a commit made without an editor). */
+  function pasteInto(container: HTMLElement, cell: HTMLElement, text: string) {
+    fireEvent.click(cell);
+    const catcher = container.querySelector<HTMLInputElement>('[data-slot="cell-type-catcher"]')!;
+    fireEvent.paste(catcher, { clipboardData: { getData: () => text } });
+  }
+
+  it('names the field and both values, says automation may run, and Cancel saves nothing', async () => {
+    const ds = makeMachineDataSource();
+    const { container } = renderMachineGrid(ds);
+    await screen.findByText('beta');
+    pasteInto(container, dataCell(container, 0, 'New'), 'Won');
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dialog).toHaveTextContent('Change Stage?');
+    expect(dialog).toHaveTextContent('Stage changes from New to Won. Saving may trigger related automation.');
+    expect(ds.update).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    await act(async () => {});
+    expect(ds.update).not.toHaveBeenCalled();
+    expect(dataCell(container, 0, 'New')).toBeTruthy();
+  });
+
+  it('Change sends the move as one guarded update', async () => {
+    const ds = makeMachineDataSource();
+    const { container } = renderMachineGrid(ds);
+    await screen.findByText('beta');
+    pasteInto(container, dataCell(container, 0, 'New'), 'Won');
+    await screen.findByRole('alertdialog');
+    fireEvent.click(screen.getByRole('button', { name: 'Change' }));
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+    expect(ds.update).toHaveBeenCalledWith(OBJECT, 'd1', { stage: 'won' }, { ifMatch: '2026-11-20T10:00:00.000Z' });
+    await waitFor(() => expect(dataCell(container, 0, 'Won')).toBeTruthy());
+  });
+
+  it('a field no state machine governs, and an inactive machine, save without asking', async () => {
+    const ds = makeMachineDataSource({ active: false });
+    const { container } = renderMachineGrid(ds);
+    await screen.findByText('beta');
+    pasteInto(container, dataCell(container, 0, 'Low'), 'High');
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+    expect(ds.update.mock.calls[0][2]).toEqual({ priority: 'high' });
+    pasteInto(container, dataCell(container, 0, 'New'), 'Won');
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('a machine bound to insert alone does not govern an update: the move saves without asking', async () => {
+    const ds = makeMachineDataSource({ events: ['insert'] });
+    const { container } = renderMachineGrid(ds);
+    await screen.findByText('beta');
+    pasteInto(container, dataCell(container, 0, 'New'), 'Won');
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+    expect(ds.update.mock.calls[0][2]).toEqual({ stage: 'won' });
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('an advisory (warning-severity) machine still asks: the move is what automation listens for', async () => {
+    const ds = makeMachineDataSource({ severity: 'warning', events: ['update'] });
+    const { container } = renderMachineGrid(ds);
+    await screen.findByText('beta');
+    pasteInto(container, dataCell(container, 0, 'New'), 'Won');
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dialog).toHaveTextContent('Stage changes from New to Won.');
+    expect(ds.update).not.toHaveBeenCalled();
   });
 });
