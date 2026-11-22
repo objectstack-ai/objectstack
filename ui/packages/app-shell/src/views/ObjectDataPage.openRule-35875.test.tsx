@@ -305,3 +305,45 @@ describe('objectstack#35875 — the bare data page opens a record by the list\'s
     expect(screen.queryByTestId('record-page')).toBeNull();
   });
 });
+
+describe('objectstack#36300 — the data page\'s side drawer draws ⤢ 「Open as full page」', () => {
+  /** The name cell's hover icon, then the drawer it opens. */
+  async function openDrawer(text: string, id: string): Promise<HTMLElement> {
+    fireEvent.click(within(rowOf(text)).getByTestId('record-open-in-panel'));
+    await waitFor(() => expect(new URLSearchParams(search() ?? '').get('recordId')).toBe(id));
+    return screen.findByRole('dialog', undefined, { timeout: 5000 });
+  }
+
+  it('the drawer\'s ⤢ opens the full page with the origin a name click carries, and the drawer closes', async () => {
+    await mountDataPage();
+    const drawer = await openDrawer('Globex', 'a2');
+    const expand = within(drawer).getByRole('button', { name: 'Open as full page' });
+    expect(expand.getAttribute('data-testid')).toBe('record-pane-open-page');
+    fireEvent.click(expand);
+    await screen.findByTestId('record-page', undefined, { timeout: 5000 });
+    expect(pathname()).toBe(`/apps/sales/${OBJECT_NAME}/record/a2`);
+    // The origin is the data page with its conditions, without the drawer's `?recordId=`.
+    expect(JSON.parse(screen.getByTestId('record-from').textContent ?? 'null')).toEqual({
+      pathname: `${DATA_PATH}?${new URLSearchParams(DATA_SEARCH).toString()}`,
+      label: 'Accounts',
+      siblings: ['a1', 'a2'],
+      total: MATCHED,
+    });
+    expect(screen.getByTestId('record-position').textContent).toBe(`2/${MATCHED}`);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('the full page\'s ✕ after ⤢ returns to the data page with its conditions and no drawer', async () => {
+    await mountDataPage();
+    const drawer = await openDrawer('Acme', 'a1');
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Open as full page' }));
+    fireEvent.click(await screen.findByTestId('record-close', undefined, { timeout: 5000 }));
+    await screen.findByText('Globex', undefined, { timeout: 5000 });
+    expect(pathname()).toBe(DATA_PATH);
+    const params = new URLSearchParams(search() ?? '');
+    expect(params.get('filter[status]')).toBe('active');
+    expect(params.get('recordId')).toBeNull();
+    await settle();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+});
