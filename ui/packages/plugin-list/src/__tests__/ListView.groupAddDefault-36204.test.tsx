@@ -205,6 +205,22 @@ describe('"Add group field" opens the field dropdown and groups only on a pick (
     expect(onGroupingChange).toHaveBeenLastCalledWith({ fields: [level('industry')] });
   });
 
+  it('View settings labels a field picked outside the columns, on its level and on the menu\'s Group row', async () => {
+    // `columns` holds neither Parent account nor Record owner: both are the
+    // object's own fields, offered after the columns.
+    const { dataSource, onGroupingChange } = mount({ columns, compactToolbar: true });
+    await definitionRead(dataSource);
+    const content = await openDisplayGroup();
+    fireEvent.click(within(content).getByTestId('grouping-add'));
+    fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name: 'Record owner' }));
+    expect(onGroupingChange).toHaveBeenLastCalledWith({ fields: [level('owner_id')] });
+    expect(await within(content).findByTestId('grouping-field-0')).toHaveTextContent('Record owner');
+    fireEvent.click(within(content).getByTestId('options-back'));
+    const row = await within(content).findByTestId('options-row-group');
+    expect(row).toHaveTextContent('Record owner');
+    expect(row).not.toHaveTextContent('owner_id');
+  });
+
   it('while the definition is being read the button waits, disabled, without a reason', async () => {
     let answer: (value: unknown) => void = () => {};
     const { dataSource } = mount({ columns }, new Promise((resolve) => { answer = resolve; }));

@@ -7306,6 +7306,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       setGroupingConfig={changeGrouping}
       groupOptions={groupOptions}
       groupOptionsLoading={groupOptionsLoading}
+      groupFieldLabel={groupFieldLabel}
       showColor={toolbarFlags.showColor}
       rowColorConfig={offeredRowColorConfig}
       setRowColorConfig={setRowColorConfig}

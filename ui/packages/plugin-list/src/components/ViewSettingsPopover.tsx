@@ -219,6 +219,13 @@ export interface ViewSettingsPopoverProps {
    */
   groupOptions?: Array<{ value: string; label: string }>;
   groupOptionsLoading?: boolean;
+  /**
+   * objectstack#36204 — the label of a field a grouping level holds, as the
+   * host knows it: `groupOptions` reach past the columns, so a level can hold
+   * a field `allFields` does not carry. Absent, or answering `undefined`,
+   * the column's label, else the field's name.
+   */
+  groupFieldLabel?: (field: string) => string | undefined;
 
   showColor?: boolean;
   rowColorConfig?: { field: string; colors?: Record<string, string> } | undefined;
@@ -553,6 +560,7 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
     setGroupingConfig,
     groupOptions,
     groupOptionsLoading,
+    groupFieldLabel,
     showColor,
     rowColorConfig,
     setRowColorConfig,
@@ -582,6 +590,7 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
   const hasFooter = !!onSave || !!onReset || hasExport;
 
   const fieldLabel = (name: string) => allFields.find((f) => f.name === name)?.label || name;
+  const groupLevelLabel = (name: string) => groupFieldLabel?.(name) || fieldLabel(name);
   const none = t('list.none', { defaultValue: 'None' });
   const groupFields: string[] = Array.isArray(groupingConfig?.fields)
     ? groupingConfig.fields.map((f: { field?: string }) => f?.field).filter((f: unknown): f is string => typeof f === 'string' && !!f)
@@ -654,7 +663,7 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
         {showGroup && setGroupingConfig && (
           <MenuRow
             label={titles.group}
-            value={groupFields.length > 0 ? groupFields.map(fieldLabel).join(' › ') : none}
+            value={groupFields.length > 0 ? groupFields.map(groupLevelLabel).join(' › ') : none}
             onOpen={() => setPage('group')}
             testId="options-row-group"
           />
@@ -750,7 +759,7 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
             fieldOptions={groupOptions ?? groupFieldOptions(allFields, fieldOrder)}
             askFieldOnAdd
             fieldOptionsLoading={groupOptionsLoading}
-            fieldLabel={fieldLabel}
+            fieldLabel={groupLevelLabel}
             maxLevels={3}
             labels={{
               addGroup: t('list.addGroup', 'Add group field'),

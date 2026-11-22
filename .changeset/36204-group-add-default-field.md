@@ -4,7 +4,7 @@
 '@object-ui/i18n': patch
 ---
 
-feat(list): "Add group field" asks which field, and offers only fields that can group
+fix(list): "Add group field" asks which field, and offers only fields that can group
 
 Clause-②: yes (widening) — `@object-ui/components`'s `GroupingEditor` gains the optional props `askFieldOnAdd`, `fieldOptionsLoading` and `fieldLabel`, and its `labels` the optional `noFields`; `@object-ui/i18n` gains the key `list.noGroupableFields` in every locale; nothing removed or renamed
 Metadata-protocol: none
