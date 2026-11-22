@@ -119,7 +119,8 @@ import {
 } from './recordActivityFeed';
 import { useRecordAriaProps } from './recordComponentAria';
 import { useDefaultRecordPage } from '../defaultRecordPage';
-import { RecordFieldChangesContext, RecordFieldHistoryContext, mergeFieldHistoryIntoFeed } from '../recordTimelineStream';
+import { RecordCommentsInPanelContext, RecordFieldChangesContext, RecordFieldHistoryContext, mergeFieldHistoryIntoFeed } from '../recordTimelineStream';
+import { useDetailTranslation } from '../useDetailTranslation';
 
 /** Dev mode, read per call — the guard `record-activity.tsx` puts on the same diagnostic. */
 const isDevBuild = (): boolean =>
@@ -257,10 +258,23 @@ export const RecordChatterRenderer: React.FC<RecordChatterRendererProps> = ({
   const onDefaultPage = useDefaultRecordPage();
   const fieldHistoryShown =
     React.useContext(RecordFieldHistoryContext) && !onDefaultPage && feed?.unifiedTimeline !== false;
+  // objectstack#36193 — a slotted page's chatter is drawn on the record page's
+  // 动态 tab. While the comment panel beside the record holds the comments
+  // (objectstack#36075), this block draws the system entries alone, as the
+  // platform's own stream does there: no comment and no reply, no composer,
+  // no Comments-only filter, a count without the comments, and the 动态
+  // heading rather than 「讨论」. Off the default page (an authored page), and
+  // on the phone (no panel), the block is as it was.
+  const commentsInPanel = React.useContext(RecordCommentsInPanelContext) && onDefaultPage;
+  const { t } = useDetailTranslation();
+  const sourceItems = React.useMemo(
+    () => (commentsInPanel ? (discussionItems ?? []).filter((item) => item.type !== 'comment') : discussionItems ?? []),
+    [commentsInPanel, discussionItems],
+  );
   const applied = React.useMemo(
     () =>
       applyFeedConfig(
-        onDefaultPage ? discussionItems ?? [] : mergeFieldHistoryIntoFeed(discussionItems ?? [], fieldChanges),
+        onDefaultPage ? sourceItems : mergeFieldHistoryIntoFeed(sourceItems, fieldChanges),
         {
           types: feed?.types,
           showCompleted: feed?.showCompleted,
@@ -269,7 +283,7 @@ export const RecordChatterRenderer: React.FC<RecordChatterRendererProps> = ({
         pageSize,
         blockName,
       ),
-    [discussionItems, onDefaultPage, fieldChanges, feed?.types, feed?.showCompleted, feed?.unifiedTimeline, pageSize, blockName],
+    [sourceItems, onDefaultPage, fieldChanges, feed?.types, feed?.showCompleted, feed?.unifiedTimeline, pageSize, blockName],
   );
 
   // `record-activity.tsx` writes its own `handleLoadMore` with an empty
@@ -288,8 +302,9 @@ export const RecordChatterRenderer: React.FC<RecordChatterRendererProps> = ({
   // predicate and the same block name `applyFeedConfig` filters by
   // (objectstack#34525). Where the composer would have been offered, the
   // author is told why once, in development.
-  const commentsShown = feedTypesAdmitComments(feed?.types, blockName);
-  const composerWithheld = !commentsShown && feed?.showCommentInput !== false;
+  const typesAdmitComments = feedTypesAdmitComments(feed?.types, blockName);
+  const commentsShown = typesAdmitComments && !commentsInPanel;
+  const composerWithheld = !typesAdmitComments && feed?.showCommentInput !== false;
   const nodeId: string | undefined = typeof schema.id === 'string' ? schema.id : undefined;
   const typesKey = JSON.stringify(feed?.types ?? null);
   React.useEffect(() => {
@@ -328,7 +343,7 @@ export const RecordChatterRenderer: React.FC<RecordChatterRendererProps> = ({
         // renderer was the only missing end of the wire.
         filterMode={filterMode}
         onFilterChange={setFilterMode}
-        onAddComment={discussion?.onAddComment as any}
+        onAddComment={commentsInPanel ? undefined : (discussion?.onAddComment as any)}
         commentsShown={commentsShown}
         onAddReply={discussion?.onAddReply as any}
         onToggleReaction={discussion?.onToggleReaction as any}
@@ -343,11 +358,15 @@ export const RecordChatterRenderer: React.FC<RecordChatterRendererProps> = ({
         // REFUSED. The host that owns the fetch decides it, the same way it
         // decides `loading` above; the panel only renders it.
         activityDenied={discussion?.activityDenied}
-        commentsDenied={discussion?.commentsDenied}
+        // A refused or failed comment read is the comment panel's to say.
+        commentsDenied={!commentsInPanel && discussion?.commentsDenied}
         // objectstack#29188: which of them FAILED (5xx, network), and the
         // host's re-read of those; the panel only renders it.
         activityFailed={discussion?.activityFailed}
-        commentsFailed={discussion?.commentsFailed}
+        commentsFailed={!commentsInPanel && discussion?.commentsFailed}
+        {...(commentsInPanel
+          ? { titleLabel: t('detail.timeline', { defaultValue: 'Activity' }), emptyLabel: t('detail.noActivity', { defaultValue: 'No activity recorded' }) }
+          : {})}
         onRetryFeed={discussion?.onRetryFeed}
       />
       </RecordFieldHistoryContext.Provider>

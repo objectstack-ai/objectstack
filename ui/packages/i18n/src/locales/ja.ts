@@ -994,6 +994,7 @@ const ja = {
     layout: "レイアウト",
     resetToViewDefault: "ビューの既定に戻す",
     addGroup: "グループフィールドを追加",
+    noGroupableFields: "グループ化に使えるフィールドがありません",
     collapsedByDefault: "デフォルトで折りたたむ",
     removeGroup: "削除",
     groupingUnstoredNotice: "{{fields}} ではこの一覧をグループ化できません。値は表示時に計算され、保存されていません。このグループ化を除いて一覧を表示しています。",
@@ -1449,6 +1450,10 @@ const ja = {
     threadResolved: "解決済み",
     threadResolvedBy: "{{name}} が解決",
     filterComments: "コメントを絞り込む",
+    addReactionEmoji: "{{emoji}} でリアクション",
+    commentThread: "スレッド",
+    formatBold: "太字",
+    formatItalic: "斜体",
     showResolvedComments: "解決済みを表示",
     commentsInvolvingMe: "自分が参加しているもののみ",
     noUnresolvedComments: "未解決のコメントはありません",
@@ -1645,6 +1650,12 @@ const ja = {
     updatedBy: "更新者",
     created: "作成",
     updated: "更新",
+    // Record page field list (objectstack#36147).
+    systemInfo: "システム情報",
+    createdTime: "作成日時",
+    updatedTime: "更新日時",
+    recordNumber: "レコード ID",
+    clickToEdit: "クリックで編集",
     // objectui#3863 — base key. ja has a single plural category (`other`), so this
     // slot is unreachable here and equals `_other` for key-set parity.
     showEmptyRelated: "+ {{count}} 件（空）",

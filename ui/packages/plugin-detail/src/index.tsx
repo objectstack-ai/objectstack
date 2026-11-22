@@ -268,7 +268,7 @@ export {
 } from './recordTimelineStream';
 export type { AuditEntryLike, TimelineStreamFilter } from './recordTimelineStream';
 // objectstack#36075 — the record's comment panel and the parts the phone's
-// comment page shares with it.
+// comment page (objectstack#36076) shares with it.
 export {
   useRecordComments,
   buildCommentThreads,
@@ -285,6 +285,7 @@ export {
   CommentHoverActions,
   CommentsPanel,
   CommentsButton,
+  CommentsPage,
 } from './comments';
 export type {
   RecordCommentsData,
@@ -297,6 +298,7 @@ export type {
   CommentHoverActionsProps,
   CommentsPanelProps,
   CommentsButtonProps,
+  CommentsPageProps,
 } from './comments';
 // objectstack#27055 — the reader's arrangement of the related cards: the pure
 // merge rule and the stored record's codec halves, for the host's

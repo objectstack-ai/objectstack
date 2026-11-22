@@ -27,3 +27,7 @@ export { CommentComposer, type CommentComposerProps } from './CommentComposer';
 export { CommentHoverActions, type CommentHoverActionsProps } from './CommentHoverActions';
 export { CommentsPanel, type CommentsPanelProps } from './CommentsPanel';
 export { CommentsButton, type CommentsButtonProps } from './CommentsButton';
+export { CommentsFilterMenu, type CommentsFilterMenuProps } from './CommentsFilterMenu';
+export { CommentActionSheet, type CommentActionSheetProps } from './CommentActionSheet';
+export { CommentsPage, type CommentsPageProps } from './CommentsPage';
+export { useCommentPress, COMMENT_LONG_PRESS_MS, COMMENT_PRESS_SLOP, type CommentPress, type CommentPressOptions } from './useCommentPress';

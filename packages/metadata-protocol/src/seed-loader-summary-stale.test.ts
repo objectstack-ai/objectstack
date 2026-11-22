@@ -455,13 +455,12 @@ describe('a seed never hands the engine a roll-up value (#35655)', () => {
 
 /**
  * [#35655] A roll-up an object EXTENSION contributes is never seeded either.
- * The loader resolves a definition from the metadata service first and uses
- * that copy whenever it has `fields`; the metadata service stores the object
- * as registered, with no extension merged in, so its copy can lack a roll-up
- * the engine's merged schema declares and computes. The strip therefore reads
- * both the resolved definition and the engine's own schema. These pins hand
- * the loader a metadata copy WITHOUT the extension's roll-up and an engine
- * schema WITH it.
+ * The metadata service can store the object as registered, with no extension
+ * merged in, so its copy can lack a roll-up the engine's merged schema
+ * declares and computes. The strip reads the resolved definition, which is
+ * the engine's merged schema whenever the engine has one ([#35254]
+ * `resolveObjectDefinition`). These pins hand the loader a metadata copy
+ * WITHOUT the extension's roll-up and an engine schema WITH it.
  */
 describe('a roll-up an object extension contributes is never seeded either (#35655)', () => {
   const METADATA_COPY = {

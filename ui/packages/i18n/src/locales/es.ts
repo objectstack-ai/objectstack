@@ -1027,6 +1027,7 @@ const es = {
     layout: "Diseño",
     resetToViewDefault: "Restablecer los valores predeterminados de la vista",
     addGroup: "Agregar campo de grupo",
+    noGroupableFields: "Ningún campo sirve para agrupar",
     collapsedByDefault: "Contraído por defecto",
     removeGroup: "Eliminar",
     groupingUnstoredNotice: "Esta lista no se puede agrupar por {{fields}}: su valor se calcula al mostrarse y no se almacena. La lista se muestra sin esa agrupación.",
@@ -1404,6 +1405,10 @@ const es = {
     threadResolved: "Resuelto",
     threadResolvedBy: "Resuelto por {{name}}",
     filterComments: "Filtrar comentarios",
+    addReactionEmoji: "Reaccionar con {{emoji}}",
+    commentThread: "Conversación",
+    formatBold: "Negrita",
+    formatItalic: "Cursiva",
     showResolvedComments: "Mostrar resueltos",
     commentsInvolvingMe: "Solo en los que participo",
     noUnresolvedComments: "No hay comentarios sin resolver",
@@ -1699,6 +1704,12 @@ const es = {
     updatedBy: "Actualizado por",
     created: "Creado",
     updated: "Actualizado",
+    // Record page field list (objectstack#36147).
+    systemInfo: "Información del sistema",
+    createdTime: "Fecha de creación",
+    updatedTime: "Fecha de modificación",
+    recordNumber: "ID del registro",
+    clickToEdit: "Haga clic para editar",
     // objectui#3863 — base key, answering only a call made without a count. es's
     // `many` (exact millions) has its own slot since objectui#11432; it repeats
     // `_other` here because the count governs no noun complement.

@@ -53,6 +53,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 });
 
 import { RecordPageColumns } from '../RecordPageColumns';
+import { useReportEmptyFields } from '../recordFieldList';
 import { buildDefaultPageColumns } from '../synth/recordPageColumns';
 import { buildDefaultPageSchema } from '../synth/buildDefaultPageSchema';
 import { DetailView } from '../DetailView';
@@ -100,8 +101,8 @@ describe('RecordPageColumns — no right rail at any width (objectstack#35890 re
       expect(container.querySelector('[data-record-summary-card]')).toBeNull();
       expect(nodesIn(column(container, 'details'))).toEqual(['record:details']);
       expect(column(container, 'details')!.lastElementChild?.getAttribute('data-testid')).toBe('meta-footer');
-      // The details alone take the row: a section's own width decides, up to three.
-      expect(column(container, 'details')!.querySelector('[data-node="record:details"]')!.getAttribute('data-cap')).toBe('3');
+      // A drawer or pane (no `fullPage`): one field a row (objectstack#36147).
+      expect(column(container, 'details')!.querySelector('[data-node="record:details"]')!.getAttribute('data-cap')).toBe('1');
     });
   }
 
@@ -426,5 +427,86 @@ describe('RecordPageColumns — the approval band is drawn once per page (object
     );
     expect(screen.queryByText('Locked for approval')).toBeNull();
     expect(screen.getAllByText('In approval · editable')).toHaveLength(1);
+  });
+});
+
+/**
+ * objectstack#36147 — the field area is one list wherever it sits beside other
+ * tabs or is one of them: the drawer, the phone, the narrow page and the
+ * pinned left column draw it one field a row. Only a full page whose details
+ * are its only face (objectstack#35890 item 4) lays them out by width. The
+ * list ends in one row folding every empty field of its groups.
+ */
+describe('RecordPageColumns — the field area is one list (objectstack#36147)', () => {
+  beforeEach(() => RelatedCountStore._reset());
+  const find = vi.fn(async () => ({ data: [], total: 0 }));
+  let draws = 0;
+  const drawPage = (cols: typeof columns, extra: Record<string, unknown> = {}) =>
+    render(
+      <RecordContextProvider
+        objectName="lead"
+        recordId={`lead-1-${++draws}`}
+        dataSource={{ find, getObjectSchema: vi.fn(async () => ({ fields: {} })) } as any}
+      >
+        <RecordPageColumns tier="wide" columns={cols} onEnlargeRelated={vi.fn()} {...extra} />
+      </RecordContextProvider>,
+    );
+  const capOf = (container: HTMLElement) =>
+    container.querySelector('[data-record-column="details"] [data-node="record:details"]')?.getAttribute('data-cap');
+
+  it('one column in a drawer at any width, on a narrow page with tabs, and pinned', () => {
+    harness.width = 1600;
+    const drawer = drawPage(columns, { fullPage: false });
+    expect(capOf(drawer.container)).toBe('1');
+    drawer.unmount();
+    harness.width = 600;
+    const narrow = drawPage(columns, { fullPage: true });
+    expect(narrow.container.querySelector('[data-record-page-pinned]')).toBeNull();
+    expect(capOf(narrow.container)).toBe('1');
+    narrow.unmount();
+    harness.width = 1184;
+    const pinned = drawPage(columns, { fullPage: true });
+    expect(pinned.container.querySelector('[data-record-page-pinned]')).not.toBeNull();
+    expect(capOf(pinned.container)).toBe('1');
+  });
+
+  it('a full page whose details are its only face keeps laying them out by width', () => {
+    const bare = buildDefaultPageColumns(buildDefaultPageSchema({ name: 'thing', fields: {} }, { hideDiscussion: true }))!;
+    harness.width = 1600;
+    const { container } = drawPage(bare, { fullPage: true });
+    expect(capOf(container)).toBe('3');
+  });
+
+  it('the details end in one row folding every empty field the groups report, after the footer', () => {
+    const Reporter = ({ count }: { count: number }) => {
+      useReportEmptyFields(count);
+      return null;
+    };
+    harness.width = 600;
+    const { container } = drawPage(columns, {
+      footer: (
+        <>
+          <Reporter count={2} />
+          <Reporter count={3} />
+          <p data-testid="meta-footer">meta</p>
+        </>
+      ),
+    });
+    const details = column(container, 'details')!;
+    const row = details.lastElementChild as HTMLElement;
+    expect(row.hasAttribute('data-empty-fields-row')).toBe(true);
+    expect(row.getAttribute('data-empty-fields-count')).toBe('5');
+    expect(row.previousElementSibling?.getAttribute('data-testid')).toBe('meta-footer');
+    const button = within(row).getByRole('button');
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    expect(button.textContent).toMatch(/5/);
+    fireEvent.click(button);
+    expect(within(column(container, 'details')!.lastElementChild as HTMLElement).getByRole('button').getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('no empty field, no row', () => {
+    harness.width = 600;
+    const { container } = drawPage(columns, { footer: <p data-testid="meta-footer">meta</p> });
+    expect(container.querySelector('[data-empty-fields-row]')).toBeNull();
   });
 });
