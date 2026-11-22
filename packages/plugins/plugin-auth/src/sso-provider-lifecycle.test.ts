@@ -39,12 +39,15 @@
  */
 
 import { describe, it, expect, afterEach, vi, beforeAll } from 'vitest';
+// The egress guard the SSO discovery reaches is loaded at module top, never inside a clocked case.
+import '@objectstack/core/egress';
 import { generateKeyPairSync, sign, X509Certificate, type KeyObject } from 'node:crypto';
 import { Hono } from 'hono';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
 import { ADMIN_FULL_ACCESS_CAPABILITIES } from '@objectstack/spec';
+import { MAX_BULK_PER_ROW_HOOK_ROWS } from '@objectstack/spec/data';
 import { SysSecret } from '@objectstack/platform-objects';
 import { SysSsoProvider } from '@objectstack/platform-objects/identity';
 import type { PluginContext } from '@objectstack/core';
@@ -58,7 +61,8 @@ import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit';
 import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 import { ssoGroupProjectionReason } from './scim-group-projection.js';
 import { createEngineSsoProviderConfigReader } from './register-sso-provider.js';
-import { providerDomains } from './sso-provider-lifecycle.js';
+import { providerDomains, reportSsoProviderAccessSweep, sweepDeletedSsoProviderAccess } from './sso-provider-lifecycle.js';
+import { registerIdentityWriteGuard } from './identity-write-guard.js';
 
 const BASE = 'http://localhost:3000';
 const AUTH = `${BASE}/api/v1/auth`;
@@ -408,12 +412,13 @@ describe('deleting an SSO provider names what it removes, and removes what the p
         providerId: PROVIDER,
         unlinkedUsers: 2,
         usersWithoutOtherSignIn: 1,
+        revokedSessions: 0,
         removedGroupMappings: 2,
         removedGrants: 2,
         dependentsRemoved: true,
         message:
           "Deleting SSO provider 'acme-okta' unlinked 2 users from it; 1 of them had no other sign-in method linked (no password, no other provider). "
-          + 'It removed 2 IdP group mappings and the 2 permission-set grants they gave.',
+          + 'It removed 2 IdP group mappings and the 2 permission-set grants they gave. It ended 0 live sessions signed in through it.',
       },
     });
 
@@ -478,6 +483,293 @@ describe('deleting an SSO provider names what it removes, and removes what the p
     expect(body.data.message).toContain('could NOT be removed');
     expect(s.error).toHaveBeenCalledTimes(1);
     expect(String(s.error.mock.calls[0][0])).toContain(MARKER);
+  }, 30_000);
+});
+
+describe('deleting an SSO provider ends the live sessions signed in through it', () => {
+  it("revokes them; an ended one keeps its own reason, and another provider's and a password session stay", async () => {
+    const s = await stage();
+    await storeProvider(s, { providerId: PROVIDER, domain: 'acme.example' });
+    await storeProvider(s, { providerId: OTHER, domain: 'globex.example' });
+    const mia = await ssoOnlyUser(s, 'mia@acme.example');
+    await link(s, mia, PROVIDER, 'idp-sub-mia');
+    const later = new Date(Date.now() + 3_600_000);
+    const session = (id: string, provider: string | null, extra: Record<string, unknown> = {}) =>
+      residue(s.engine, 'sys_session', { id, user_id: mia, token: `tok_${id}`, expires_at: later, sso_provider_id: provider, ...extra });
+    await session('ses_acme_1', PROVIDER);
+    await session('ses_acme_2', PROVIDER);
+    await session('ses_acme_ended', PROVIDER, { revoked_at: new Date(0), revoke_reason: 'user_revoked' });
+    // Already past its expiry: not live, so not revoked (it stays an ordinary expired row the TTL sweep reaps).
+    await session('ses_acme_expired', PROVIDER, { expires_at: new Date(Date.now() - 60_000) });
+    await session('ses_globex', OTHER);
+    await session('ses_password', null);
+
+    const res = await postJson(s, '/sso/delete-provider', { providerId: PROVIDER });
+    const body = await res.json();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body.data).toMatchObject({ revokedSessions: 2, dependentsRemoved: true });
+
+    const byId = new Map((await rows(s, 'sys_session', { user_id: mia })).map((r) => [r.id, r]));
+    for (const id of ['ses_acme_1', 'ses_acme_2']) expect(byId.get(id)?.revoke_reason, id).toBe('sso_provider_deleted');
+    expect(byId.get('ses_acme_ended')?.revoke_reason).toBe('user_revoked');
+    for (const id of ['ses_globex', 'ses_password', 'ses_acme_expired']) expect(byId.get(id)?.revoked_at ?? null, id).toBeNull();
+  });
+});
+
+// ── 1b. A projected grant whose provider no longer exists ──────────────────
+
+describe('a projected grant whose provider no longer exists is removed at boot', () => {
+  /** Run every `kernel:ready` hook `AuthPlugin.start()` registers, over `engine`, each on its own. */
+  async function boot(engine: ObjectQL): Promise<ReturnType<typeof vi.fn>> {
+    const handlers = new Map<string, Array<() => Promise<void>>>();
+    const error = vi.fn();
+    const ctx = {
+      ...mockCtx(),
+      getService: vi.fn((name: string) => (name === 'manifest' ? { register: vi.fn() } : name === 'objectql' ? engine : undefined)),
+      hook: vi.fn((name: string, handler: () => Promise<void>) => {
+        if (!handlers.has(name)) handlers.set(name, []);
+        handlers.get(name)!.push(handler);
+      }),
+      logger: { info: vi.fn(), error, warn: vi.fn(), debug: vi.fn() },
+    } as unknown as PluginContext;
+    const plugin = new AuthPlugin({ secret: SECRET, baseUrl: BASE, registerRoutes: false });
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    for (const handler of handlers.get('kernel:ready') ?? []) {
+      try { await handler(); } catch { /* a sibling hook this harness cannot serve */ }
+    }
+    return error;
+  }
+
+  it("removes the grants of a provider deleted earlier; a live provider's, one by hand and SCIM's stay", async () => {
+    const s = await stage();
+    await storeProvider(s, { providerId: OTHER, domain: 'globex.example' });
+    const mia = await ssoOnlyUser(s, 'mia@acme.example');
+    const grant = (id: string, set: string, reason: string | null) =>
+      residue(s.engine, 'sys_user_permission_set', { id, user_id: mia, permission_set: set, organization_id: ORG, reason });
+    // `acme-okta` has no provider row: it was deleted before its grants were removed with it.
+    await grant('ups_gone_sales', 'sales_reader', MARKER);
+    await grant('ups_gone_support', 'support_agent', MARKER);
+    await grant('ups_live_globex', 'sales_reader', ssoGroupProjectionReason(OTHER));
+    await grant('ups_by_hand', 'support_agent', null);
+    await grant('ups_scim', 'sales_reader', "scim-group-projection: provisioning domain 'acme-okta'");
+
+    await boot(s.engine);
+
+    const left = (await rows(s, 'sys_user_permission_set', { user_id: mia })).map((r) => r.id).sort();
+    expect(left).toEqual(['ups_by_hand', 'ups_live_globex', 'ups_scim']);
+  });
+
+  it("revokes the live sessions signed in through a provider that is gone; another provider's, an unstamped one and an ended one stay as they are", async () => {
+    const s = await stage();
+    await storeProvider(s, { providerId: OTHER, domain: 'globex.example' });
+    const mia = await ssoOnlyUser(s, 'mia@acme.example');
+    const later = new Date(Date.now() + 3_600_000);
+    const session = (id: string, provider: string | null, extra: Record<string, unknown> = {}) =>
+      residue(s.engine, 'sys_session', { id, user_id: mia, token: `tok_${id}`, expires_at: later, sso_provider_id: provider, ...extra });
+    await session('ses_gone', PROVIDER);
+    await session('ses_live_globex', OTHER);
+    await session('ses_password', null);
+    await session('ses_gone_ended', PROVIDER, { revoked_at: new Date(0), revoke_reason: 'user_revoked' });
+
+    await boot(s.engine);
+
+    const byId = new Map((await rows(s, 'sys_session', { user_id: mia })).map((r) => [r.id, r]));
+    expect(byId.get('ses_gone')?.revoke_reason).toBe('sso_provider_deleted');
+    expect(byId.get('ses_gone')?.revoked_at).toBeTruthy();
+    for (const id of ['ses_live_globex', 'ses_password']) expect(byId.get(id)?.revoked_at ?? null, id).toBeNull();
+    expect(byId.get('ses_gone_ended')?.revoke_reason).toBe('user_revoked');
+  });
+
+  it('a provider registered while the sweep runs keeps what its sign-ins wrote', async () => {
+    const s = await stage();
+    const mia = await ssoOnlyUser(s, 'mia@acme.example');
+    await residue(s.engine, 'sys_user_permission_set', { id: 'ups_late', user_id: mia, permission_set: 'sales_reader', organization_id: ORG, reason: MARKER });
+    // The provider row lands between the sweep's first provider read and its candidate read.
+    const engine = s.engine as any;
+    const realFind = engine.find.bind(engine);
+    const spy = vi.spyOn(engine, 'find').mockImplementation(async (object: unknown, ...rest: unknown[]) => {
+      const answer = await realFind(object, ...rest);
+      if (object === 'sys_user_permission_set') {
+        spy.mockImplementation(realFind);
+        await storeProvider(s, { providerId: PROVIDER, domain: 'acme.example' });
+      }
+      return answer;
+    });
+    try {
+      expect(await sweepDeletedSsoProviderAccess(s.engine as never)).toEqual({ removedGrants: 0, revokedSessions: 0 });
+    } finally {
+      spy.mockRestore();
+    }
+    expect((await rows(s, 'sys_user_permission_set', { id: 'ups_late' })).length).toBe(1);
+  });
+
+  it('rows another node settled first (two nodes booting) are not reported as a failure, and keep their own reason', async () => {
+    const s = await stage();
+    const mia = await ssoOnlyUser(s, 'mia@acme.example');
+    const later = new Date(Date.now() + 3_600_000);
+    await residue(s.engine, 'sys_user_permission_set', { id: 'ups_both', user_id: mia, permission_set: 'sales_reader', organization_id: ORG, reason: MARKER });
+    await residue(s.engine, 'sys_session', { id: 'ses_both', user_id: mia, token: 'tok_both', expires_at: later, sso_provider_id: PROVIDER });
+    await residue(s.engine, 'sys_session', { id: 'ses_signed_out', user_id: mia, token: 'tok_out', expires_at: later, sso_provider_id: PROVIDER });
+    // Between each page read and its write, the other node's sweep (and, for one session,
+    // the user signing out) settles the rows first: the provider re-read after the grant
+    // page is the 2nd provider read, after the session page the 3rd.
+    const engine = s.engine as any;
+    const realFind = engine.find.bind(engine);
+    let providerReads = 0;
+    const spy = vi.spyOn(engine, 'find').mockImplementation(async (object: unknown, ...rest: unknown[]) => {
+      if (object === 'sys_sso_provider') {
+        providerReads++;
+        if (providerReads === 2) await engine.getDriver('sys_user_permission_set').delete('sys_user_permission_set', 'ups_both');
+        if (providerReads === 3) {
+          const sessions = engine.getDriver('sys_session');
+          await sessions.update('sys_session', 'ses_both', { revoked_at: new Date(), revoke_reason: 'sso_provider_deleted' });
+          await sessions.update('sys_session', 'ses_signed_out', { revoked_at: new Date(), revoke_reason: 'user_revoked' });
+        }
+      }
+      return realFind(object, ...rest);
+    });
+    const error = vi.fn();
+    const warn = vi.fn();
+    try {
+      const outer = await reportSsoProviderAccessSweep(s.engine as never, { warn, error });
+      expect(error.mock.calls).toEqual([]);
+      expect(outer).toEqual({ removedGrants: 0, revokedSessions: 0 });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(providerReads).toBe(3);
+    expect(warn).not.toHaveBeenCalled();
+    expect(await rows(s, 'sys_user_permission_set', { id: 'ups_both' })).toEqual([]);
+    expect((await rows(s, 'sys_session', { id: 'ses_both' }))[0]?.revoke_reason).toBe('sso_provider_deleted');
+    expect((await rows(s, 'sys_session', { id: 'ses_signed_out' }))[0]?.revoke_reason).toBe('user_revoked');
+  });
+
+  it('a sweep that cannot read is said once at error, naming what stays; boot goes on', async () => {
+    const s = await stage();
+    const engine = s.engine as any;
+    const spy = vi.spyOn(engine, 'find').mockRejectedValue(new Error('driver unavailable'));
+    const error = vi.fn();
+    const warn = vi.fn();
+    try {
+      await expect(reportSsoProviderAccessSweep(s.engine as never, { warn, error })).resolves.toBeUndefined();
+    } finally {
+      spy.mockRestore();
+    }
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error.mock.calls[0]![0]).toContain('driver unavailable');
+    // A host sink with no `error` gets the same line on `warn`.
+    const spy2 = vi.spyOn(engine, 'find').mockRejectedValue(new Error('driver unavailable'));
+    try {
+      await reportSsoProviderAccessSweep(s.engine as never, { warn });
+    } finally {
+      spy2.mockRestore();
+    }
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('with no provider object registered, the sweep judges nothing and removes nothing', async () => {
+    const s = await stage();
+    const mia = await ssoOnlyUser(s, 'mia@acme.example');
+    await residue(s.engine, 'sys_user_permission_set', { id: 'ups_kept', user_id: mia, permission_set: 'sales_reader', organization_id: ORG, reason: MARKER });
+    const engine = s.engine as any;
+    const realGetSchema = engine.getSchema.bind(engine);
+    const spy = vi.spyOn(engine, 'getSchema').mockImplementation((name: unknown) => (name === 'sys_sso_provider' ? undefined : realGetSchema(name)));
+    try {
+      expect(await sweepDeletedSsoProviderAccess(s.engine as never)).toBeUndefined();
+    } finally {
+      spy.mockRestore();
+    }
+    expect((await rows(s, 'sys_user_permission_set', { id: 'ups_kept' })).length).toBe(1);
+  });
+
+  it('what a delete whose cleanup failed left behind is removed at the next boot', async () => {
+    const s = await stage();
+    await storeProvider(s, { providerId: PROVIDER, domain: 'acme.example' });
+    const mia = await ssoOnlyUser(s, 'mia@acme.example');
+    await link(s, mia, PROVIDER, 'idp-sub-mia');
+    await residue(s.engine, 'sys_user_permission_set', { id: 'ups_mia', user_id: mia, permission_set: 'sales_reader', organization_id: ORG, reason: MARKER });
+    // The cleanup after the vendor's delete fails: the provider is gone, its grant is not.
+    const engine = s.engine as any;
+    const realDelete = engine.delete.bind(engine);
+    const spy = vi.spyOn(engine, 'delete').mockImplementation(async (object: unknown, ...rest: unknown[]) => {
+      if (object === 'sys_user_permission_set') throw new Error('driver unavailable');
+      return realDelete(object, ...rest);
+    });
+    const res = await postJson(s, '/sso/delete-provider', { providerId: PROVIDER });
+    expect(res.status).toBe(200);
+    expect((await res.json()).data).toMatchObject({ dependentsRemoved: false });
+    spy.mockRestore();
+    expect((await rows(s, 'sys_user_permission_set', { id: 'ups_mia' })).length).toBe(1);
+
+    await boot(s.engine);
+
+    expect(await rows(s, 'sys_user_permission_set', { id: 'ups_mia' })).toEqual([]);
+  });
+});
+
+// ── 1c. Above the engine's one-write row ceiling ───────────────────────────
+
+describe('a provider with more sessions and grants than one write may touch still has every one ended', () => {
+  /** One past the engine's ceiling on rows a single predicate write may touch on an object with per-row hooks. */
+  const PAST_CEILING = MAX_BULK_PER_ROW_HOOK_ROWS + 1;
+
+  /** `count` live sessions and projected grants of `provider`, written beneath the engine in driver-sized chunks. */
+  async function seed(s: Stage, userId: string, provider: string, count: number) {
+    const later = new Date(Date.now() + 3_600_000);
+    const sessions = (s.engine as any).getDriver('sys_session');
+    const grants = (s.engine as any).getDriver('sys_user_permission_set');
+    for (let start = 0; start < count; start += 500) {
+      const n = Math.min(500, count - start);
+      await sessions.bulkCreate('sys_session', Array.from({ length: n }, (_, k) => ({
+        id: `ses_many_${start + k}`, user_id: userId, token: `tok_many_${start + k}`, expires_at: later, sso_provider_id: provider,
+      })));
+      await grants.bulkCreate('sys_user_permission_set', Array.from({ length: n }, (_, k) => ({
+        id: `ups_many_${start + k}`, user_id: userId, permission_set: 'sales_reader', organization_id: ORG, reason: ssoGroupProjectionReason(provider),
+      })));
+    }
+  }
+  /**
+   * A served deployment binds per-row write hooks on every object (the ADR-0092 identity write guard's
+   * unfiltered beforeUpdate / beforeDelete), which is what puts a predicate write under the ceiling.
+   */
+  const servedHooks = (s: Stage) => registerIdentityWriteGuard(s.engine, { packageId: 'test.sso-provider-past-ceiling' });
+
+  const liveCount = async (s: Stage, provider: string) =>
+    (await rows(s, 'sys_session', { sso_provider_id: provider })).filter((r) => !r.revoked_at).length;
+  const grantCount = async (s: Stage, provider: string) =>
+    (await rows(s, 'sys_user_permission_set', { reason: ssoGroupProjectionReason(provider) })).length;
+
+  it('the delete ends every live session and removes every projected grant', async () => {
+    const s = await stage();
+    await storeProvider(s, { providerId: PROVIDER, domain: 'acme.example' });
+    const mia = await ssoOnlyUser(s, 'mia@acme.example');
+    await seed(s, mia, PROVIDER, PAST_CEILING);
+    servedHooks(s);
+
+    const res = await postJson(s, '/sso/delete-provider', { providerId: PROVIDER });
+    const body = await res.json();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body.data).toMatchObject({ revokedSessions: PAST_CEILING, removedGrants: PAST_CEILING, dependentsRemoved: true });
+    expect(await liveCount(s, PROVIDER)).toBe(0);
+    expect(await grantCount(s, PROVIDER)).toBe(0);
+  }, 30_000);
+
+  it('the boot sweep ends every live session and removes every projected grant of a provider that is gone', async () => {
+    const s = await stage();
+    const mia = await ssoOnlyUser(s, 'mia@acme.example');
+    await seed(s, mia, PROVIDER, PAST_CEILING);
+    servedHooks(s);
+    const error = vi.fn();
+    const warn = vi.fn();
+
+    expect(await reportSsoProviderAccessSweep(s.engine as never, { warn, error })).toEqual({
+      removedGrants: PAST_CEILING,
+      revokedSessions: PAST_CEILING,
+    });
+    expect(error.mock.calls).toEqual([]);
+    expect(await liveCount(s, PROVIDER)).toBe(0);
+    expect(await grantCount(s, PROVIDER)).toBe(0);
   }, 30_000);
 });
 

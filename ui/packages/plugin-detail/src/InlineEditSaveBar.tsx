@@ -109,7 +109,11 @@ export interface InlineEditSaveBarProps {
   data?: any;
   /** Re-fetch the record after a successful save / reload. */
   refresh?: () => void | Promise<void>;
-  /** Map a field machine name to a user-facing label (for the conflict dialog). */
+  /**
+   * Map a field machine name to a user-facing label. Optional: without it (or
+   * where it resolves none) the bar labels a field from the record context's
+   * object — see `labelForField`.
+   */
   fieldLabelFor?: (name: string) => string | undefined;
   /**
    * Callback-persistence mode (drawer): when provided, the save loops this
@@ -324,11 +328,6 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
   const inline = useInlineEdit();
   const [conflict, setConflict] = React.useState<ConcurrentUpdateConflict | null>(null);
   const [conflictBusy, setConflictBusy] = React.useState(false);
-  /** User-facing name for a rejected field; the machine name when the host resolves none. */
-  const labelForField = React.useCallback(
-    (name: string) => fieldLabelFor?.(name) || name,
-    [fieldLabelFor],
-  );
 
   const canAtomic = !!dataSource && !!objectName && recordId != null;
 
@@ -345,6 +344,24 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
   const { fieldLabel, translateOptions, fieldOptionLabel } = useSafeFieldLabel();
   const objectSchema = recordCtx?.objectName === objectName ? recordCtx?.objectSchema : undefined;
   const objectFields = (objectSchema as { fields?: Record<string, unknown> } | undefined)?.fields;
+  /**
+   * The ONE rule this bar names a field by — the refusal lines, the conflict
+   * rows and the fill-in dialog all read it: the host's label when it gives
+   * one, otherwise the field's translated label, falling back to its declared
+   * label and only then to the machine name. That fallback is the rule the
+   * record body (`DetailSection`) labels the same input by, so a host that
+   * passes no `fieldLabelFor` (the record overlay) reads alike.
+   */
+  const labelForField = React.useCallback(
+    (name: string): string => {
+      const hosted = fieldLabelFor?.(name);
+      if (hosted) return hosted;
+      const declared = (objectFields?.[name] as { label?: unknown } | undefined)?.label;
+      const fallback = typeof declared === 'string' && declared.length > 0 ? declared : name;
+      return objectName ? fieldLabel(objectName, name, fallback) : fallback;
+    },
+    [fieldLabelFor, objectFields, objectName, fieldLabel],
+  );
   const [requiredAsk, setRequiredAsk] = React.useState<RequiredAsk | null>(null);
   // The write a conflict raised from that dialog was making (the draft AND the
   // typed values), so the conflict dialog's overwrite sends all of it rather
@@ -375,11 +392,10 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
 
   /**
    * Whether `name` is a field of the record this bar is editing — the only
-   * names that may carry a label and a per-field hint (objectui#13292). This
-   * surface holds no object schema, so it accepts what it can see: a key the
-   * user staged, a key of the server record, or a name the host resolves to a
-   * label of its own (a host that echoes the machine name back resolves
-   * nothing).
+   * names that may carry a label and a per-field hint (objectui#13292). It
+   * accepts what it can see: a key the user staged, a key of the server
+   * record, or a name `labelForField` resolves to a label of its own (a name
+   * that only echoes back as itself resolves nothing).
    */
   const isRecordField = React.useCallback(
     (name: string) => {
@@ -387,10 +403,9 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
       if (data && typeof data === 'object' && Object.prototype.hasOwnProperty.call(data, name)) {
         return true;
       }
-      const label = fieldLabelFor?.(name);
-      return !!label && label !== name;
+      return labelForField(name) !== name;
     },
-    [inline, data, fieldLabelFor],
+    [inline, data, labelForField],
   );
 
   /**
@@ -424,12 +439,11 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
         inline.setError(cleanError(err));
         return;
       }
-      const labelOf = (name: string) => fieldLabelFor?.(name) || name;
       const { fieldLevel, recordLevel } = splitRefusal(attributed, isRecordField);
       // objectui#13292: an object-level rule's refusal names no field, so its
       // message reads alone — no label prefix, and no per-field hint.
       const lines = [
-        ...fieldLevel.map((r) => `${labelOf(r.field)}: ${r.message}`),
+        ...fieldLevel.map((r) => `${labelForField(r.field)}: ${r.message}`),
         ...recordLevel,
       ];
       const error = lines.length > 0 ? lines.join('; ') : cleanError(err);
@@ -439,7 +453,7 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
       );
       inline.setError(error);
     },
-    [inline, fieldLabelFor, isRecordField, t],
+    [inline, labelForField, isRecordField, t],
   );
 
   /**
@@ -459,7 +473,7 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
         const f = keys[0];
         return {
           field: f,
-          label: fieldLabelFor?.(f),
+          label: labelForField(f),
           pendingValue: draft[f],
           currentValue: current ? current[f] : undefined,
           currentVersion: err?.currentVersion,
@@ -478,13 +492,13 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
         currentRecord: current,
         fields: keys.map((k) => ({
           field: k,
-          label: fieldLabelFor?.(k),
+          label: labelForField(k),
           pendingValue: draft[k],
           currentValue: current ? current[k] : undefined,
         })),
       };
     },
-    [fieldLabelFor, t],
+    [labelForField, t],
   );
 
   // objectstack#35685 — the record's version when this edit session began. A
@@ -655,15 +669,10 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
   /** The fill-in dialog for a draft that needs fields filled (objectstack#35956). */
   const renderRequiredAsk = (ask: RequiredAsk) => {
     const objectKey = objectName ?? '';
-    const labelOf = (name: string): string => {
-      const declared = (objectFields?.[name] as { label?: unknown } | undefined)?.label;
-      const fallback = typeof declared === 'string' && declared.length > 0 ? declared : name;
-      return fieldLabelFor?.(name) || (objectKey ? fieldLabel(objectKey, name, fallback) : fallback);
-    };
     const label = (f: RequiredWhenPromptField): RequiredFieldsDialogField => {
       const options = f.def.options;
       const localized = objectKey && Array.isArray(options) ? translateOptions(objectKey, f.name, options) : options;
-      return { ...f, def: { ...f.def, ...(localized ? { options: localized } : {}) }, label: labelOf(f.name) };
+      return { ...f, def: { ...f.def, ...(localized ? { options: localized } : {}) }, label: labelForField(f.name) };
     };
     const shownValue = (name: string, value: unknown): string => {
       if (value === undefined || value === null || value === '') return '—';
@@ -684,7 +693,7 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
         open
         fields={ask.fields.map(label)}
         recordName={data ? getRecordDisplayName(objectSchema, data) : undefined}
-        changes={exclude.map((name) => ({ name, label: labelOf(name), value: shownValue(name, ask.draft[name]) }))}
+        changes={exclude.map((name) => ({ name, label: labelForField(name), value: shownValue(name, ask.draft[name]) }))}
         moreFields={(values) => collectRequiredWhenPromptFields(
           objectFields,
           data,
@@ -697,7 +706,7 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
           if (!hasFieldEditWidget(def.type as string | undefined) || !fillable(name, def)) return null;
           return label({ name, def: { name, ...def } });
         }}
-        labelOf={(name) => (objectFields?.[name] ? labelOf(name) : undefined)}
+        labelOf={(name) => (objectFields?.[name] ? labelForField(name) : undefined)}
         // Cancel writes nothing and leaves the edit session as it was: the
         // draft is still the reader's to change or cancel.
         onCancel={() => setRequiredAsk(null)}

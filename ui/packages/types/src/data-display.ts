@@ -1537,6 +1537,19 @@ export interface DataTableSchema extends BaseSchema {
    */
   onColumnsReorder?: (columns: TableColumn[]) => void;
   /**
+   * Column hide handler (objectstack#35955): called with the column's
+   * `accessorKey` when the reader picks "Hide column" in the column menu. The
+   * table hides the column in its own state either way; a host that keeps the
+   * columns shown (the list's hidden fields) hears the choice here and owns it
+   * from then on. Absent ⇒ the hide lives in the table's state alone.
+   *
+   * RUNTIME SLOT (the objectui#6124 shape) — a host-supplied function, NOT
+   * authorable metadata: JSON has no function value, so the zod twin refuses
+   * this key by name. Called by `renderers/complex/data-table.tsx`; supplied by
+   * `ObjectGrid` (`@object-ui/plugin-grid`) from its `onColumnHide` prop.
+   */
+  onColumnHide?: (columnKey: string) => void;
+  /**
    * Enable inline cell editing
    * When true, cells become editable on double-click or Enter key
    *
