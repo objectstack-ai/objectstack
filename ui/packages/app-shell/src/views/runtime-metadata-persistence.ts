@@ -42,12 +42,8 @@ import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { emitMetadataRefresh } from '../assistant/assistantBus.js';
 import { slugify } from './metadata-admin/createDerive.js';
 import { isDraftVersionConflict } from './metadata-admin/DraftConflictDialog.js';
-import {
-  ensureCustomizationPackage,
-  fetchListedPackageManifests,
-  listedPackageVersion,
-  type ListedPackageManifest,
-} from './studio-design/packages-io.js';
+import { ensureCustomizationPackage, fetchListedPackageManifests } from './studio-design/packages-io.js';
+import { listedPackageVersion, type ListedPackageManifest } from './studio-design/packages-io.js';
 import { overrideDraftBody } from './studio-design/StudioCustomizeControls.js';
 
 /** The runtime-editable artifact types ADR-0034 unifies. `page` (a record
