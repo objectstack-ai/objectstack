@@ -1189,6 +1189,7 @@ beneath an action entry are judged the same way under either.
 | `hooks.{hook}.refusals.{code}.reasons.{reason}` | a reason that code declares under `reasons` |
 | `flows.{flow}.screens.{node}` | the `id` of a `type: 'screen'` node in that flow, nodes nested in loop, parallel and try/catch regions included |
 | `flows.{flow}.screens.{node}.fields.{field}` | a `config.fields[].name` on that screen — an object-form screen (`config.objectName`) declares none, and its input labels live under `objects.{objectName}.fields` |
+| `flows.{flow}.nodes.{node}` | the `id` of a node in that flow that is neither a `screen` nor an `approval` (those two are keyed under `screens` and `approvals`), nodes nested in loop, parallel and try/catch regions included |
 
 An unresolvable key is an **error**, not a warning: `os validate`, `os lint` and
 `os compile` each report it as `translation-target-unknown` and exit non-zero, so

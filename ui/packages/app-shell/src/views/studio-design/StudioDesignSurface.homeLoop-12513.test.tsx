@@ -2,8 +2,9 @@
 
 /**
  * objectui#12513 — the Studio home loop. Inside a package the header's first
- * button and the package switcher's first row both return to the Studio
- * landing (`/studio`). The Organization flows empty block's way out to
+ * button and the package switcher's first row both returned to the Studio
+ * landing (`/studio`); objectstack#36501 replaced both with 「‹ Back to app」,
+ * and the first case below now says so. The Organization flows empty block's way out to
  * Setup › Packaged automation retired with that page's flows half (objectstack
  * ADR-0146 D11, N-28): the block now says where a packaged flow is changed,
  * and links nowhere.
@@ -17,7 +18,7 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
+import { render, screen, cleanup, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 const SHOWCASE = 'com.example.showcase';
@@ -210,39 +211,16 @@ function renderAt(url: string) {
   );
 }
 
-const location = () => screen.getByTestId('location').textContent ?? '';
-
 describe('Studio home loop (objectui#12513)', () => {
-  it('the header’s first button returns to the Studio landing', async () => {
+  it('the header’s first button is 「‹ Back to app」 now, not Studio home (objectstack#36501)', async () => {
+    // The Studio-home button and the switcher's Studio-home row were removed
+    // with the switcher: the landing is reached from the app.
     renderAt(`/studio/${SHOWCASE}/automations`);
 
-    const home = await screen.findByTestId('studio-home');
-    expect(home).toHaveAccessibleName('Studio home');
-    // It is the header's first control.
+    const back = await screen.findByTestId('studio-back-to-app');
     const header = screen.getByTestId('studio-shell-header');
-    expect(within(header).getAllByRole('button')[0]).toBe(home);
-
-    fireEvent.click(home);
-    expect(await screen.findByTestId('studio-landing')).toBeInTheDocument();
-    expect(location()).toBe('/studio');
-  });
-
-  it('the package switcher’s first row is Studio home, above the package list', async () => {
-    renderAt(`/studio/${SHOWCASE}/automations`);
-
-    fireEvent.click(await screen.findByRole('button', { name: /Showcase/ }));
-    const pkgRow = await screen.findByRole('button', { name: new RegExp(SHOWCASE.replace(/\./g, '\\.')) });
-    const panel = pkgRow.closest('[role="dialog"]') as HTMLElement;
-    expect(panel).not.toBeNull();
-    const row = within(panel).getByTestId('studio-switcher-home');
-    expect(within(panel).getAllByRole('button')[0]).toBe(row);
-    expect(row).toHaveAccessibleName('Studio home');
-    // Control: the package row is in the same panel, after it.
-    expect(row.compareDocumentPosition(pkgRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-
-    fireEvent.click(row);
-    expect(await screen.findByTestId('studio-landing')).toBeInTheDocument();
-    expect(location()).toBe('/studio');
+    expect(within(header).getAllByRole('button')[0]).toBe(back);
+    expect(within(header).queryByRole('button', { name: 'Studio home' })).toBeNull();
   });
 
   it('the Organization flows empty block says how to change a packaged flow, links nowhere, and creates nothing', async () => {

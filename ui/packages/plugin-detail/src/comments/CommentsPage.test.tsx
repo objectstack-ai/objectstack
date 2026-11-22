@@ -328,3 +328,24 @@ describe('CommentsPage — the filter', () => {
     expect(document.querySelector('[data-comments-filter]')).not.toBeNull();
   });
 });
+
+describe('CommentsPage — the top bar', () => {
+  // jsdom lays nothing out, so the pin is the structure that keeps a long
+  // record name off the centred title: the back button capped at its column,
+  // the label truncating inside it, and the two side columns equal.
+  it('holds a long record name inside the left column, truncated, on the list and in a thread', () => {
+    const name = 'A record name long enough to reach the centred title';
+    renderPage({ backLabel: name });
+    const header = page().querySelector('header') as HTMLElement;
+    expect(header).toHaveClass('grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]');
+    const back = page().querySelector('[data-comments-page-back]') as HTMLElement;
+    expect(back).toHaveClass('max-w-full', 'justify-self-start');
+    expect(within(back).getByText(name)).toHaveClass('truncate');
+    cleanup();
+
+    renderPage({ threadId: 'c1', backLabel: name });
+    const threadBack = page().querySelector('[data-comments-page-back]') as HTMLElement;
+    expect(threadBack).toHaveClass('max-w-full');
+    expect(within(threadBack).getByText('Comments')).toHaveClass('truncate');
+  });
+});

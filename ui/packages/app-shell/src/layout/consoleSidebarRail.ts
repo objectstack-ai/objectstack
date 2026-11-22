@@ -62,12 +62,12 @@ import {
 export const CONSOLE_EXPANDED_SIDEBAR_WIDTH = 256;
 
 /**
- * The record drawer's width in CSS pixels: a list record opens in the drawer
- * at plugin-view's `md` overlay bucket, `overlayWidthFor('md', …)` =
- * `min(92vw, 720px)` (objectstack#27545). `consoleSidebarRail.width-27593.test.tsx`
+ * The record drawer's width in CSS pixels: a list record opens in the side
+ * preview at `RECORD_PREVIEW_DEFAULT_WIDTH` = `min(92vw, 460px)`
+ * (objectstack#36149; 720 before). `consoleSidebarRail.width-27593.test.tsx`
  * reads that value and holds this equal to it.
  */
-export const RECORD_DRAWER_WIDTH = 720;
+export const RECORD_DRAWER_WIDTH = 460;
 
 /**
  * The narrowest list that still draws its columns, in CSS pixels: the 440 px
@@ -84,13 +84,15 @@ export const LIST_MIN_COLUMNS_WIDTH = 440;
  * wide and the narrow choice are kept on either side of it.
  *
  * Chosen, not derived. The record drawer beside the narrowest list that still
- * draws its columns, next to an expanded sidebar, needs 440 + 720 + 256 =
- * 1416 px, the threshold before; the ruling accepts the cost below that. A
- * 1280 px window with the sidebar expanded leaves the list beside an open
- * record drawer 1280 − 256 − 720 = 304 px (560 with the sidebar collapsed),
- * and on 1280 to 1415 px with the sidebar expanded, opening the record page's
- * comment panel returns its fields to the tab row; collapsing the sidebar
- * gives the content the width back. The record page's own column tiers are
+ * draws its columns, next to an expanded sidebar, needed 440 + 720 + 256 =
+ * 1416 px when the drawer was 720, the threshold before; the ruling accepted
+ * the cost below that. Since the side preview opens at 460
+ * (objectstack#36149), a 1280 px window with the sidebar expanded leaves the
+ * list beside it 1280 − 256 − 460 = 564 px (820 with the sidebar collapsed),
+ * so the cost is gone at the preview's default width; a reader who drags it
+ * wider pays it again. On 1280 to 1415 px with the sidebar expanded, opening
+ * the record page's comment panel returns its fields to the tab row;
+ * collapsing the sidebar gives the content the width back. The record page's own column tiers are
  * measured on the container it gets, so they follow either way.
  */
 export const CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH = 1280;

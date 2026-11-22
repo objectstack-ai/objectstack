@@ -856,7 +856,7 @@ export const PageHeaderProps = strictObject({
     'How many header actions render as inline buttons before the rest fold into the overflow menu. Renderer default when unset: 3 on every header. In a record page\'s header bar the number, authored or not, is an upper bound: actions that do not fit the bar\'s width fold as well, so a narrow drawer shows fewer.',
   ),
   mobileMaxVisible: z.number().int().positive().optional().describe(
-    'The `maxVisible` budget on mobile viewports. Renderer default when unset: 2 in a record page\'s bottom action bar on a phone, where the host\'s Edit counts as one, 1 on any other header.',
+    'The `maxVisible` budget on mobile viewports. Renderer default when unset: 2 in a record page\'s bottom action bar on a phone, 1 on any other header. The phone bar holds the page\'s own actions: the record\'s Edit is not one of them, it is in the overflow menu at the top bar\'s right end.',
   ),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
@@ -2582,7 +2582,7 @@ const RECORD_LINE_ITEMS_HISTORY =
  * field's `inlineColumns`, a form view's `subforms[].columns` and an
  * `object-master-detail-form` detail entry's `columns` take, not a copy: the
  * panel hands its columns to the same objectui grid (`GridField`, whose
- * `GridColumn` declares exactly that schema's twenty keys and IS the spec's
+ * `GridColumn` declares exactly that schema's twenty-one keys and IS the spec's
  * type by reference). The column also means here what it means on those
  * carriers (#24140, route B), because the column schema's own `label` describe
  * — "defaults to the child field's label via hydration" — governs every
@@ -5006,7 +5006,7 @@ const GridOperationsSchema = lazySchema(() => strictObject({
  * `searchableFields`/`showSearch`, `rowHeight`, `grouping`/`aggregations`,
  * `rowColor`, `conditionalFormatting`, `selection`/`selectable`,
  * `rowActions`, `batchActions`/`bulkActions`, `bulkActionDefs`, `navigation`,
- * `editable`/`singleClickEdit`, `resizable`/`resizableColumns`,
+ * `editable` (`singleClickEdit` RETIRED #36270, tombstoned below), `resizable`/`resizableColumns`,
  * `reorderableColumns`, `frozenColumns`, `showColumnTypeIcons`,
  * `exportOptions`/`operations`, `label`/`title`, `data`/`staticData`.
  *
@@ -5445,7 +5445,28 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   navigation: NavigationConfigSchema.optional()
     .describe('Row-click navigation config — the same block `ListViewSchema.navigation` declares ({ mode, size, openNewTab, preventNavigation })'),
   editable: z.boolean().optional().describe('Enable inline cell editing'),
-  singleClickEdit: z.boolean().optional().describe('Enter cell edit on single click (default true when editable)'),
+  /**
+   * REMOVED (#36270, ADR-0049 enforce-or-remove; the maintainer's ruling A,
+   * one editing model). A grid that renders editable — `editable` set and the
+   * viewer allowed to edit — now selects a cell first: a click selects it,
+   * and double-click, Enter, F2 or typing opens its editor. That model has no
+   * single-click entry, so neither value of this key could be honoured any
+   * longer: `true` (the renderer's default) would open the editor on the
+   * selecting click, and `false` named the double-click entry the model
+   * already has. A grid that renders read-only edits nothing, so the key
+   * never had an effect there.
+   *
+   * The live mechanism is `editable` (with the viewer's write verdict). The
+   * protocol-18 conversion `object-grid-single-click-edit-removed` deletes the
+   * key from authored grids.
+   */
+  singleClickEdit: retiredKey(
+    '`object-grid` property `singleClickEdit` was removed in @objectstack/spec 18.7.0 (ADR-0049) — '
+    + 'a grid that renders editable now selects a cell on a click and opens its editor on double-click, '
+    + 'Enter, F2 or typing, so a single-click entry no longer exists for this key to switch. '
+    + 'Delete the key; `editable` (with the viewer\'s write verdict) decides whether the grid edits. '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
+  ),
   /**
    * [#20694] Declared AHEAD of its reader, deliberately: objectui#11068 chose
    * to BUILD arrow-key cell navigation for the grid, and this row is the spec
@@ -5463,9 +5484,12 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * objectui `154075ab1`, objectui#11068): the grid hands the data table
    * `keyboardNavigation: schema.keyboardNavigation ?? inlineEditable`, where
    * `inlineEditable` is the authored `editable` AND the viewer's write verdict
-   * — so an absent key follows whether the grid RENDERS editable, `true` turns
-   * the navigation on for a read-only grid, and `false` turns it off on an
-   * editable one. The data table (`keyboardNavigation = false` by default)
+   * — so an absent key follows whether the grid RENDERS editable and `true`
+   * turns the navigation on for a read-only grid. Since #36270 a grid that
+   * renders editable selects a cell first, and that model moves its selection
+   * with these keys, so the data table forces the navigation on there and
+   * `false` is no longer honoured on an editable grid (ruling A narrowed the
+   * describe to what is enforced). The data table (`keyboardNavigation = false` by default)
    * then gives the table `role="grid"` and makes the data cells one roving
    * Tab stop (`tabIndex` 0 on one cell and -1 on the rest) that the arrow
    * keys, Home / End and Ctrl+Home / Ctrl+End move (`navigationTarget`;
@@ -5473,7 +5497,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * every data cell is its own Tab stop, as before.
    */
   keyboardNavigation: z.boolean().optional()
-    .describe('Arrow-key cell navigation on the WAI-ARIA grid pattern: the grid\'s data cells become one Tab stop that the arrow keys, Home / End and Ctrl+Home / Ctrl+End move between. Defaults to on when the grid renders editable — `editable` set and the viewer allowed to edit; a grid that renders read-only keeps every cell its own Tab stop unless this is `true`, and `false` turns it off on an editable grid'),
+    .describe('Arrow-key cell navigation on the WAI-ARIA grid pattern: the grid\'s data cells become one Tab stop that the arrow keys, Home / End and Ctrl+Home / Ctrl+End move between. Always on when the grid renders editable — `editable` set and the viewer allowed to edit — because that grid selects a cell first and moves the selection with these keys; a grid that renders read-only keeps every cell its own Tab stop unless this is `true`'),
   resizable: z.boolean().optional().describe('Allow column resize (the renderer default is on)'),
   /**
    * REMOVED (#21445, ADR-0049 enforce-or-remove; objectui#6152 ruling A,

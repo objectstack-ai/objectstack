@@ -141,17 +141,12 @@
         {
           "name": "editable",
           "type": "boolean",
-          "description": "Enable inline cell editing (double-click or Enter opens a cell)."
-        },
-        {
-          "name": "singleClickEdit",
-          "type": "boolean",
-          "description": "With `editable`, a single click opens the cell instead of a double-click. Has no effect on a non-editable grid."
+          "description": "Enable inline cell editing where the viewer may edit. A click selects a cell; double-click, Enter, F2 or typing opens its editor, Esc cancels, and each committed cell is saved on its own. A grid that renders read-only keeps click-to-open."
         },
         {
           "name": "keyboardNavigation",
           "type": "boolean",
-          "description": "Arrow-key cell navigation on the WAI-ARIA grid pattern: the grid's data cells take one place in the Tab order instead of one each (a link or button inside a cell keeps its own), and the arrow keys move focus between them (Home / End to the ends of the row, Ctrl+Home / Ctrl+End to the ends of the page). Enter still opens an editable cell, and an edit ended with Enter or Escape returns focus to its cell. Defaults to on when the grid renders editable; a read-only grid keeps every cell its own Tab stop unless this is `true`, and `false` turns it off on an editable grid."
+          "description": "Arrow-key cell navigation on the WAI-ARIA grid pattern: the grid's data cells take one place in the Tab order instead of one each (a link or button inside a cell keeps its own), and the arrow keys move focus between them (Home / End to the ends of the row, Ctrl+Home / Ctrl+End to the ends of the page). Enter still opens an editable cell, and an edit ended with Enter or Escape returns focus to its cell. Always on when the grid renders editable, because that grid selects a cell first and moves the selection with these keys; a read-only grid keeps every cell its own Tab stop unless this is `true`."
         },
         {
           "name": "navigation",
@@ -1618,7 +1613,7 @@
         {
           "name": "inlineEdit",
           "type": "boolean",
-          "description": "Offer the per-field double-click / pencil inline-edit affordances in the detail body. On by default, and an OPT-OUT only: the value is combined with the object's own editability (system, engine-owned, append-only and better-auth objects are not user-editable unless they opened userActions.edit) and with the server's effective API operation set for the object, so `false` always wins while `true` cannot open editing the platform refuses. The edit session and the atomic Save bar are hosted by the page, so one draft spans the highlights strip and this body."
+          "description": "Offer the per-field edit affordances in the detail body. On the default record page a click on a value (or its pencil) edits that field alone in place and saves it on Enter or a click elsewhere; on a page an author laid out a double-click (or the pencil) enters the page's whole-record edit session, saved together by its Save bar. On by default, and an OPT-OUT only: the value is combined with the object's own editability (system, engine-owned, append-only and better-auth objects are not user-editable unless they opened userActions.edit) and with the server's effective API operation set for the object, so `false` always wins while `true` cannot open editing the platform refuses. The whole-record session and its atomic Save bar are hosted by the page, so that one draft spans the highlights strip and this body."
         },
         {
           "name": "showHeader",
@@ -3544,7 +3539,7 @@
         {
           "name": "mobileMaxVisible",
           "type": "number",
-          "description": "The same inline-button budget on mobile viewports, where horizontal room is scarce. A positive integer, defaulting to 1, or 2 in a record page's bottom action bar on a phone, where the host's Edit counts as one; the desktop half is Max Inline Actions, and the overflow routing rules stated there apply unchanged."
+          "description": "The same inline-button budget on mobile viewports, where horizontal room is scarce. A positive integer, defaulting to 1, or 2 in a record page's bottom action bar on a phone, which holds the page's actions (the record's Edit is in the top bar's overflow menu there); the desktop half is Max Inline Actions, and the overflow routing rules stated there apply unchanged."
         }
       ]
     },

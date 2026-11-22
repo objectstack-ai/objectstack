@@ -331,6 +331,18 @@ const OBJECT_GRID_RESIZABLE_COLUMNS_RETIRED =
   + '`{ "type": "object-grid", "properties": { "resizable": false } }`.';
 
 /**
+ * objectstack#36270 — the same one-string shape for `singleClickEdit`, retired
+ * with the select-first editing model (the maintainer's ruling A): `ObjectGrid`
+ * no longer reads it, and `@objectstack/spec` refuses it by name on `object-grid`.
+ */
+const OBJECT_GRID_SINGLE_CLICK_EDIT_RETIRED =
+  'RETIRED (objectstack#36270, ADR-0049) — `singleClickEdit` switched between opening a cell editor on a '
+  + 'single click and on a double click. A grid that renders editable now selects a cell on a click and '
+  + 'opens its editor on double-click, Enter, F2 or typing, so `ObjectGrid` no longer reads the key and an '
+  + 'authored value would change nothing; `@objectstack/spec` refuses it by name on `object-grid` too. '
+  + 'Delete the key: `editable` (with the viewer\'s write verdict) decides whether the grid edits.';
+
+/**
  * objectui#11070 — ONE `.describe()` string for every object-bound arm that declares
  * the spec's per-element binding as `dataSource` (by reference to
  * `ElementDataSourceSchema`, spelled inline at each crossing — see `./imported-defaults.ts`
@@ -804,7 +816,8 @@ export const ObjectGridSchema = BaseSchema.extend({
   // the source of the `object-view` `table` slot, so each member takes the type the
   // twin declares. Where the twin takes a spec schema by name, the member is that
   // schema BY REFERENCE (`grouping`, `navigation`, `rowColor`, `rowHeight`) or the
-  // row's own member (`reorderableColumns`, `singleClickEdit`), and
+  // row's own member (`reorderableColumns`; `singleClickEdit` was one until
+  // objectstack#36270 retired it to the tombstone below), and
   // `conditionalFormatting` is the spec list view's own rule BY REFERENCE (the shared
   // `ConditionalFormattingRuleSchema` above, objectui#11533); the rest restate the
   // twin's local shapes, except `operations`, which round 8 moved onto the row's own
@@ -820,7 +833,12 @@ export const ObjectGridSchema = BaseSchema.extend({
   reorderableColumns: stripImportedDefaults(SpecObjectGridPropsSchema).shape.reorderableColumns,
   rowColor: stripImportedDefaults(SpecRowColorConfigSchema).optional().describe('Row colour rules: the spec RowColorConfig, by reference'),
   rowHeight: stripImportedDefaults(SpecRowHeightSchema).optional().describe('Row height preset: the spec RowHeight, by reference'),
-  singleClickEdit: stripImportedDefaults(SpecObjectGridPropsSchema).shape.singleClickEdit,
+  // objectstack#36270 — RETIRED under ADR-0049, in lockstep with the `?: never`
+  // twin on the interface: the select-first editing model has no single-click
+  // entry, so `ObjectGrid` no longer reads it. A tombstone rather than a
+  // deletion, as for `resizableColumns`: `BaseSchema` is `.passthrough()`. The
+  // `object-view` `table` slot inherits it unchanged, as it does `defaultSort`.
+  singleClickEdit: retirementTombstone(OBJECT_GRID_SINGLE_CLICK_EDIT_RETIRED),
   // ⭐ `8d50bc2bf` — one key the REGISTERED `object-grid` renderer reads off
   // the authored document while this arm declared none. `BaseSchema` is
   // `.passthrough()`, so an undeclared key is NOT refused: it stops being

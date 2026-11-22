@@ -1364,7 +1364,10 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
 }, {
   name: z.string().min(1).describe('Child field this column shows — the key the grid reads and writes on each row object (objectui GridColumn.name). The retired `field` spelling is refused.').meta({ title: 'Name' }),
   label: z.string().optional().describe("Column header; defaults to the child field's label via hydration.").meta({ title: 'Label' }),
-  type: z.enum(['text', 'number', 'currency', 'date', 'datetime', 'time', 'select', 'lookup', 'file']).optional().describe("Cell control, derived from the child field's type when omitted. Declaring it opts the column out of schema hydration — supply the extras (options / reference / …) yourself.").meta({ title: 'Type' }),
+  // #36043 — `user` (people), `multiselect`, `tags`, `boolean` (check) and
+  // `rating` joined the nine. Each member is spelled as its namesake field
+  // type, which the renderer's derivation maps to that same column type.
+  type: z.enum(['text', 'number', 'currency', 'date', 'datetime', 'time', 'select', 'lookup', 'file', 'user', 'multiselect', 'tags', 'boolean', 'rating']).optional().describe("Cell control, derived from the child field's type when omitted: `user` is a person picker, `multiselect` a list holding several of the column's options, `tags` a list of free-form tags, `boolean` a checkbox and `rating` a row of stars. Declaring it opts the column out of schema hydration — supply the extras (options / reference / …) yourself.").meta({ title: 'Type' }),
   width: z.number().positive().optional().describe('Fixed column width in px; omitted columns use type-based role sizing (text flexes, numeric/date/select stay fixed).').meta({ title: 'Width' }),
   required: z.boolean().optional().describe('Cell is flagged inline-invalid while empty. Computed columns are never required.').meta({ title: 'Required' }),
   options: z.array(strictObject({
@@ -1374,7 +1377,7 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
   }, {
     label: z.string().describe('Option label shown in the select cell.'),
     value: z.string().min(1).describe("Stored option value; must match the child select field's option values."),
-  })).optional().describe("Select-cell options for `type: 'select'`; derived from the child field's options when the column declares no `type`.").meta({ title: 'Options' }),
+  })).optional().describe("Options of a `select` or `multiselect` cell, and the words a `boolean` cell reads as (values `true` / `false`); derived from the child field's options when the column declares no `type`. A `tags` cell reads none: it holds free-form tags.").meta({ title: 'Options' }),
   // #20045 — no default symbol: the grid shows the resolved currency's own
   // symbol when this is omitted (objectui GridField `currencyAdornment`,
   // objectui#10355), so the former 「(default '¥')」 described a fallback the
@@ -1384,7 +1387,8 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
   reference: z.string().optional().describe("Referenced object for `type: 'lookup'` cells; derived from the child lookup field when the column declares no `type`.").meta({ title: 'Reference' }),
   displayField: z.string().optional().describe('Label field shown for a picked lookup record.').meta({ title: 'Display Field' }),
   idField: z.string().optional().describe('Id field stored for a picked lookup record.').meta({ title: 'ID Field' }),
-  multiple: z.boolean().optional().describe('Multi-value column: multi-record lookup, or multi-file upload cell.').meta({ title: 'Multiple' }),
+  multiple: z.boolean().optional().describe('Multi-value column: multi-record lookup, several people in a `user` cell, or multi-file upload cell.').meta({ title: 'Multiple' }),
+  max: z.number().int().positive().optional().describe("Star count of a `rating` cell (default 5); derived from the child field's `max` when the column declares no `type`.").meta({ title: 'Max' }),
   accept: z.array(z.string()).optional().describe("Accepted MIME types / extensions for a `file` cell's picker (e.g. ['image/*', '.pdf']); omit to accept anything.").meta({ title: 'Accept' }),
   defaultHidden: z.boolean().optional().describe("Collapsed into the grid's column chooser by default (not dropped); required columns are never default-hidden.").meta({ title: 'Default Hidden' }),
   computed: z.boolean().optional().describe('Read-only computed column, recomputed live from sibling cells via `expr` and written back into the row.').meta({ title: 'Computed' }),
@@ -2723,18 +2727,33 @@ export const FieldSchema = lazySchema(() => {
   dimensions: z.number().int().min(1).max(10000).optional().describe('Vector dimensionality (e.g., 1536 for OpenAI embeddings)'),
 
   /**
-   * Track this field's value changes on the record **activity timeline**. When
-   * TRUE, the platform's activity writer renders each change as a human-readable
-   * entry ("<label>: <old> → <new>") instead of a generic "Updated <object>"
-   * row — no app code required. Opt-in per field (cf. Salesforce Feed Tracking,
-   * ServiceNow field auditing, Dataverse column auditing). The writer already
-   * captures the field diff; this flag controls whether it is surfaced legibly.
+   * Opt a no-line field into old → new values on the record **activity
+   * timeline** (ADR-0052 §5b). Since #36290 values show by default for every
+   * field, so `true` matters only for a media or structured-JSON type (image,
+   * file, json, …), which shows them only when asked. `false` and absent read
+   * the same — values show. ⛔ `false` is NOT an off switch: the field
+   * designer wrote it on every save while it meant nothing, so a stored
+   * `false` cannot be told from a choice. The off switch is
+   * {@link FieldSchema.fieldHistory} `false`.
    *
    * Unlike the pruned `auditTrail` below, this flag HAS a runtime consumer
    * (`@objectstack/plugin-audit` audit-writers), satisfying enforce-or-remove
-   * (ADR-0049). See ADR-0052 §5b.
+   * (ADR-0049).
    */
-  trackHistory: z.boolean().optional().describe("Render this field's value changes as human-readable entries on the record activity timeline (ADR-0052 §5b). Opt-in per field."),
+  trackHistory: z.boolean().optional().describe("Opt a media or structured-JSON field into old → new values on the record activity timeline (ADR-0052 §5b). Every other field shows them already, so true changes nothing there. false and absent read the same: values show. false is not an off switch; turn a field's values off with fieldHistory: false."),
+
+  /**
+   * [#36290, ruling 7076513167 point 1] This field's off switch for old → new
+   * values on the record activity timeline. No default on purpose: a parsed
+   * field never carries the key, so only an author who wrote it turns values
+   * off. Absent: values show (a media or structured-JSON type only with an
+   * explicit `true`). `false`: the change is named by the field's label only.
+   * `true`: values show, a no-line type included. Under an object that writes
+   * `enable.fieldHistory: false`, values stay off whatever the field says. A
+   * credential field never shows values. Who reads a value is the field's read
+   * rule.
+   */
+  fieldHistory: z.boolean().optional().describe("This field's old → new values on the record activity timeline. Absent: they show (a media or structured-JSON type only with true). false: off, the change names the field's label only. true: on, a media or JSON type included. Off whatever this says when the object sets enable.fieldHistory: false; a credential field never shows values. Who reads a value is this field's read rule."),
 
   // Pruned 2026-06 (dead in both layers — aspirational governance with no runtime
   // consumer; encryption/masking implied at-rest protection that never happened —

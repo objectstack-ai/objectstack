@@ -26,7 +26,12 @@ import { useFieldTranslation } from '../useFieldTranslation.js';
 import { toDomProps } from '../toDomProps.js';
 import { PHONE_TOUCH_HEIGHT, PHONE_TOUCH_SQUARE } from '../touchTarget.js';
 import { toHostGroupProps } from '../toHostGroupProps.js';
-import { GRID_CELL_CONTROL_CLASS, GridDateCell, GridSelectCell, GrowingCellInput } from '../gridCellPanels.js';
+import { GRID_CELL_CONTROL_CLASS, GridDateCell, GridPanelCell, GridSelectCell, GrowingCellInput } from '../gridCellPanels.js';
+import { MultiSelectField } from '../MultiSelectField.js';
+import { TagsField } from '../TagsField.js';
+import { UserField } from '../UserField.js';
+import { RatingField } from '../RatingField.js';
+import { useBooleanValueLabel } from '../booleanValueLabel.js';
 import { isImeKey } from '../imeKey.js';
 import { GRID_FIELD_RETIRED_KEYS, type GridFieldMetadata, type GridFieldRetiredKey } from '@object-ui/types';
 // The grid's pure half: the column type, the computed-cell evaluator, the
@@ -119,6 +124,18 @@ type Row = Record<string, any>;
 
 const isNumeric = (t?: string) => t === 'number' || t === 'currency';
 
+/** A cell holding nothing: no value, an empty string, or an empty list (multi-select, tags, people). */
+const isEmptyCell = (value: unknown) =>
+  value == null || value === '' || (Array.isArray(value) && value.length === 0);
+
+/** The star count of a `rating` column: its `max`, else `Field.rating`'s own 5 (objectstack#36043). */
+const ratingMax = (c: GridColumn) => c.max ?? 5;
+/** A list cell emptied by the user writes `null`, not `[]` (objectstack#36043):
+ *  the field contract stores a cleared multi-value field as `null`, and the
+ *  save path's blank-line check (`isBlankRow`) reads only `null` / `''` as
+ *  empty, so a `[]` would send a line the user emptied as a child record. */
+const emptyListAsNull = <V,>(next: V): V | null => (Array.isArray(next) && next.length === 0 ? null : next);
+
 /** Comfortable minimum widths per column type so cells never get crushed; the
  *  grid scrolls horizontally instead. Authors can still pin a `width`. */
 const MIN_WIDTH_BY_TYPE: Record<string, number> = {
@@ -133,6 +150,12 @@ const MIN_WIDTH_BY_TYPE: Record<string, number> = {
   datetime: 200,
   time: 116,
   file: 168,
+  // objectstack#36043 — the five cells that edit as in the main list.
+  user: 168,
+  multiselect: 168,
+  tags: 168,
+  boolean: 72,
+  rating: 120,
 };
 const minWidthFor = (c: GridColumn): number => c.width ?? MIN_WIDTH_BY_TYPE[c.type ?? 'text'] ?? 132;
 
@@ -282,17 +305,20 @@ function currencyText(c: GridColumn, n: number, currency: string | undefined, lo
 }
 
 /**
- * The session-language words a file cell's text is made of (objectui#12924),
- * read by the component from the packs and handed to {@link cellDisplayText}:
- * the count a cell holding several files states (`detail.fileCount`, the count
- * family `FileCellRenderer` states a file count with), and the name a file
- * whose value carries none is shown by (`fields.file.fileFallback`, the name
- * `FileField` and `FileCellRenderer` give it). Both used to be the English
- * literals `N files` / `File` here, on every locale.
+ * The session-language words a cell's text is made of (objectui#12924), read
+ * by the component from the packs and handed to {@link cellDisplayText}: the
+ * count a cell holding several files states (`detail.fileCount`, the count
+ * family `FileCellRenderer` states a file count with), the name a file whose
+ * value carries none is shown by (`fields.file.fileFallback`, the name
+ * `FileField` and `FileCellRenderer` give it), and a check cell's word for its
+ * value. The first two used to be the English literals `N files` / `File`
+ * here, on every locale.
  */
-interface FileCellText {
+interface CellText {
   count: (count: number) => string;
   nameless: string;
+  /** The session's word for a check cell's value (objectstack#36043). */
+  booleanWord: (value: boolean) => string;
 }
 
 /** Read-only display text for a cell in list mode (select → option label,
@@ -300,8 +326,9 @@ interface FileCellText {
  *  name or a count of its files, empty → em dash). Lookups render separately.
  *  `currency` is the column's resolved currency, read only by the currency
  *  branch. The component binds `fileText` once, as its `displayText`. */
-function cellDisplayText(c: GridColumn, value: any, locale: string, fileText: FileCellText, currency?: string): string {
-  if (value === null || value === undefined || value === '') return '—';
+function cellDisplayText(c: GridColumn, value: any, locale: string, fileText: CellText, currency?: string): string {
+  // An emptied multi-value cell (a tags list) reads as empty too, like multi-select.
+  if (value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) return '—';
   if (isTemporal(c.type)) return temporalText(c.type, value, locale);
   if (c.type === 'file') {
     const files = Array.isArray(value) ? value : [value];
@@ -313,6 +340,17 @@ function cellDisplayText(c: GridColumn, value: any, locale: string, fileText: Fi
   if (c.type === 'select' && Array.isArray(c.options)) {
     const opt = c.options.find((o) => String(o.value) === String(value));
     return opt ? opt.label : String(value);
+  }
+  // A multi-select cell names each value by its option's label (objectstack#36043).
+  if (c.type === 'multiselect' && Array.isArray(value)) {
+    if (value.length === 0) return '—';
+    return value.map((v) => c.options?.find((o) => String(o.value) === String(v))?.label ?? String(v)).join(', ');
+  }
+  // A check cell reads as its option's word (the session's, from the derive),
+  // else the session's word itself (objectstack#36043).
+  if (c.type === 'boolean') {
+    const on = value === true || BOOLEAN_READINGS.get(value) === true;
+    return c.options?.find((o) => o.value === String(on))?.label ?? fileText.booleanWord(on);
   }
   if (isNumeric(c.type)) {
     const n = Number(value);
@@ -634,12 +672,29 @@ function GridFieldBody({
   // several files and the name of a nameless one. Bound into `displayText`
   // here, so every cell that draws its text through it — the list-mode cell,
   // the computed cell and the read-only table — takes the same words.
-  const fileText: FileCellText = {
+  const booleanWord = useBooleanValueLabel();
+  const fileText: CellText = {
     count: (count) => t('detail.fileCount', { count, defaultValue: '{{count}} files' }),
     nameless: t('fields.file.fileFallback', { defaultValue: 'File' }),
+    booleanWord,
   };
   const displayText = (c: GridColumn, value: any, locale: string, cellCurrency?: string) =>
     cellDisplayText(c, value, locale, fileText, cellCurrency);
+  /**
+   * The read-only face of a cell that is not text (objectstack#36043): people
+   * by name, a rating as its stars; `null` for every other cell, which reads
+   * through `displayText`. Shared by the read-only table and list mode.
+   */
+  const readOnlyFace = (c: GridColumn, value: any): React.ReactNode | null => {
+    if (isEmptyCell(value)) return null;
+    if (c.type === 'user') {
+      return <UserField value={value} onChange={() => {}} readonly field={{ type: 'user', multiple: c.multiple } as any} />;
+    }
+    if (c.type === 'rating') {
+      return <RatingField value={Number(value)} onChange={() => {}} readonly field={{ type: 'rating', max: ratingMax(c) } as any} />;
+    }
+    return null;
+  };
   const cellIdBase = React.useId();
   // The tenant default currency (ADR-0053) — the resolver's last step, and in
   // practice the currency of every `currency` column (objectui#10355, see
@@ -656,7 +711,7 @@ function GridFieldBody({
   // the row's boolean cells read as booleans (`ruleRecordOf`). Every column,
   // shown or not, since a predicate may read any cell of the row.
   const booleanColumns = React.useMemo(
-    () => allColumns.filter(isBooleanSelectColumn).map((c) => c.name),
+    () => allColumns.filter((c) => c.type === 'boolean' || isBooleanSelectColumn(c)).map((c) => c.name),
     [allColumns],
   );
   const cellRules = useCallback(
@@ -1110,7 +1165,7 @@ function GridFieldBody({
                         // (objectui#3569), a select's stored value instead of
                         // its option label, and an amount ungrouped and in no
                         // locale (objectui#12915).
-                        displayText(c, row[c.name], displayLocale, currencyOf(c))
+                        readOnlyFace(c, row[c.name]) ?? displayText(c, row[c.name], displayLocale, currencyOf(c))
                       )}
                     </td>
                   ))}
@@ -1212,6 +1267,8 @@ function GridFieldBody({
             field={{ reference: c.reference, displayField: c.displayField, idField: c.idField } as any} />
         );
       }
+      const face = readOnlyFace(c, val);
+      if (face) return face;
       return (
         <span className={cn('px-2 text-sm text-foreground', isNumeric(c.type) && 'tabular-nums', (val == null || val === '') && 'text-muted-foreground')}>
           {displayText(c, val, displayLocale, currencyOf(c))}
@@ -1279,6 +1336,106 @@ function GridFieldBody({
           onNavKeyDown={(e) => onCellKeyDown(e, rowIdx, colIdx)}
           data-cell={`${rowIdx}-${colIdx}`}
         />
+      );
+    }
+    // objectstack#36043 — multi-select, tags and people open the face the
+    // main list's cell editor draws, in a panel under the cell; the cell keeps
+    // drawing its value meanwhile.
+    if (c.type === 'multiselect' || c.type === 'tags') {
+      const held: string[] = Array.isArray(val) ? val.map(String) : isEmptyCell(val) ? [] : [String(val)];
+      const Face = c.type === 'multiselect' ? MultiSelectField : TagsField;
+      return (
+        <GridPanelCell<string[]>
+          value={held}
+          onWrite={(next) => setCellValue(rowIdx, c.name, emptyListAsNull(next))}
+          display={
+            <span className={cn('truncate', held.length === 0 && 'text-muted-foreground')}>
+              {displayText(c, held, displayLocale)}
+            </span>
+          }
+          disabled={locked}
+          invalid={invalid}
+          label={c.label || c.name}
+          onNavKeyDown={(e) => onCellKeyDown(e, rowIdx, colIdx)}
+          data-cell={`${rowIdx}-${colIdx}`}
+          panelTestId={`line-items-${c.type}-panel`}
+        >
+          {({ draft, setDraft }) => (
+            <Face
+              inCell
+              value={draft}
+              onChange={(next: string[]) => setDraft(next)}
+              field={{ name: c.name, type: c.type, options: c.options } as any}
+            />
+          )}
+        </GridPanelCell>
+      );
+    }
+    if (c.type === 'user') {
+      const field = { name: c.name, type: 'user', label: c.label, multiple: c.multiple } as any;
+      return (
+        <GridPanelCell<any>
+          value={val ?? null}
+          onWrite={(next) => setCellValue(rowIdx, c.name, emptyListAsNull(next))}
+          display={readOnlyFace(c, val) ?? <span className="text-muted-foreground">—</span>}
+          disabled={locked}
+          invalid={invalid}
+          label={c.label || c.name}
+          onNavKeyDown={(e) => onCellKeyDown(e, rowIdx, colIdx)}
+          data-cell={`${rowIdx}-${colIdx}`}
+          panelTestId="line-items-user-panel"
+        >
+          {({ draft, setDraft, commit }) => (
+            <UserField inCell value={draft} onChange={(next: any) => setDraft(next)} onCommit={commit} field={field} />
+          )}
+        </GridPanelCell>
+      );
+    }
+    // A check cell is a checkbox: a click or Space toggles it (objectstack#36043).
+    if (c.type === 'boolean') {
+      return (
+        <div className="flex h-8 items-center justify-center">
+          <Checkbox
+            data-cell={`${rowIdx}-${colIdx}`}
+            aria-label={c.label || c.name}
+            aria-invalid={invalid || undefined}
+            checked={val === true || BOOLEAN_READINGS.get(val) === true}
+            onCheckedChange={(checked) => setCellValue(rowIdx, c.name, checked === true)}
+            onKeyDown={(e) => onCellKeyDown(e, rowIdx, colIdx)}
+            disabled={locked}
+          />
+        </div>
+      );
+    }
+    // A rating is set in place: a click on a star, or a digit key on the
+    // cell (0 clears), as in the main list (objectstack#36023, #36043).
+    if (c.type === 'rating') {
+      const max = ratingMax(c);
+      return (
+        <div
+          data-cell={`${rowIdx}-${colIdx}`}
+          tabIndex={-1}
+          aria-label={c.label || c.name}
+          aria-invalid={invalid || undefined}
+          className="flex h-8 items-center outline-none focus-visible:ring-1 focus-visible:ring-ring/60"
+          onKeyDown={(e) => {
+            if (!locked && /^[0-9]$/.test(e.key) && Number(e.key) <= max) {
+              e.preventDefault();
+              setCellValue(rowIdx, c.name, e.key === '0' ? null : Number(e.key));
+              return;
+            }
+            onCellKeyDown(e, rowIdx, colIdx);
+          }}
+        >
+          <RatingField
+            inCell
+            value={isEmptyCell(val) ? 0 : Number(val)}
+            onChange={(next: number) => setCellValue(rowIdx, c.name, next)}
+            field={{ type: 'rating', max } as any}
+            disabled={locked}
+            error={invalid ? requiredCellText(c) : undefined}
+          />
+        </div>
       );
     }
     // The editable currency cell shows the SAME symbol its display face does
@@ -1490,7 +1647,7 @@ function GridFieldBody({
                         !isList &&
                         required &&
                         !c.computed &&
-                        (row[c.name] == null || row[c.name] === '');
+                        isEmptyCell(row[c.name]);
                       return (
                         <td
                           key={c.name}

@@ -612,17 +612,21 @@ describe('FlowCanvas — a node press on a read-only design canvas selects, and 
 
 /**
  * The flow designer reads a package's `flows` translations: the flow's label
- * (`flows.<flow>.label`) and an approval node's step label
- * (`flows.<flow>.approvals.<node_id>.label`), in the viewer's language, from
- * the bundle `FlowRunner` reads. A decision node and an edge have no key, so
- * they stay authored; with no translation everything is authored, as before.
+ * (`flows.<flow>.label`) and each step's label by the one key the spec gives
+ * it — `approvals.<node_id>.label` for an approval, `screens.<node_id>.title`
+ * for an untitled screen, `nodes.<node_id>.label` for any other node (ruling
+ * 7076440876), nested nodes included — in the viewer's language, from the
+ * bundle `FlowRunner` reads. An edge has no key, so it stays authored; with no
+ * translation everything is authored, as before.
  */
-describe('Flow designer — package label translations (flows.<flow>.label, approvals.<step>.label)', () => {
+describe('Flow designer — package label translations (flows.<flow>.label, approvals / screens / nodes)', () => {
   const ZH_CN: TranslationData = {
     flows: {
       opportunity_approval: {
         label: '大额商机审批',
         approvals: { manager_review: { label: '经理审核' }, director_signoff: { label: '总监签批' } },
+        nodes: { big: { label: '超过一百万？' }, tell_signer: { label: '通知签署人' } },
+        screens: { confirm: { title: '确认' }, review_deal: { title: '审阅交易' } },
       },
     },
   };
@@ -634,7 +638,15 @@ describe('Flow designer — package label translations (flows.<flow>.label, appr
       id: 'each',
       type: 'loop',
       label: 'For each signer',
-      config: { body: { nodes: [{ id: 'director_signoff', type: 'approval', label: 'Director sign-off' }], edges: [] } },
+      config: {
+        body: {
+          nodes: [
+            { id: 'director_signoff', type: 'approval', label: 'Director sign-off' },
+            { id: 'tell_signer', type: 'notify', label: 'Tell signer' },
+          ],
+          edges: [{ source: 'director_signoff', target: 'tell_signer' }],
+        },
+      },
     },
   ];
   const EDGES = [
@@ -655,14 +667,25 @@ describe('Flow designer — package label translations (flows.<flow>.label, appr
     return t!;
   };
 
-  it('resolves the flow label and approval-step labels out of the loaded resource tree, and nothing else', () => {
+  it('resolves the flow label and each step label by its node type out of the loaded resource tree', () => {
     const t = zh();
     expect(t.flowLabel).toBe('大额商机审批');
     expect(t.stepLabel({ id: 'manager_review', type: 'approval' })).toBe('经理审核');
     expect(t.stepLabel({ id: 'director_signoff', type: 'approval' })).toBe('总监签批');
-    // No key for any other node type, even under an approval's id.
+    // Any other node by `nodes.<node_id>.label`, nested ones included.
+    expect(t.stepLabel({ id: 'big', type: 'decision' })).toBe('超过一百万？');
+    expect(t.stepLabel({ id: 'tell_signer', type: 'notify' })).toBe('通知签署人');
+    // An untitled screen by `screens.<node_id>.title`, the key its run-time title already uses.
+    expect(t.stepLabel({ id: 'confirm', type: 'screen' })).toBe('确认');
+    // A titled screen's label has no key: its `screens` title overlays the heading, read apart.
+    expect(t.stepLabel({ id: 'review_deal', type: 'screen', config: { title: 'Review the deal' } })).toBeUndefined();
+    expect(t.screenTitle({ id: 'review_deal', type: 'screen' })).toBe('审阅交易');
+    // One string, one key: a type reads its own group only, whatever the id.
     expect(t.stepLabel({ id: 'manager_review', type: 'decision' })).toBeUndefined();
+    expect(t.stepLabel({ id: 'big', type: 'approval' })).toBeUndefined();
+    expect(t.stepLabel({ id: 'big', type: 'screen' })).toBeUndefined();
     expect(t.stepLabel({ id: 'unknown_step', type: 'approval' })).toBeUndefined();
+    expect(t.stepLabel({ type: 'decision' })).toBeUndefined();
     // No bundle for the flow: nothing to translate with.
     expect(flowLabelTranslations(activeFlowsBundle(zhInstance(), 'zh-CN', 'other_flow'), 'other_flow', 'zh-CN')).toBeUndefined();
   });
@@ -682,7 +705,7 @@ describe('Flow designer — package label translations (flows.<flow>.label, appr
     expect(seen?.stepLabel({ id: 'manager_review', type: 'approval' })).toBe('经理审核');
   });
 
-  it('draws the translated approval-step labels on the canvas, nested ones included; decision and branch-edge labels stay authored', () => {
+  it('draws every translated step label on the canvas, nested ones included; branch-edge labels stay authored', () => {
     const { container } = render(
       <FlowLabelTranslationsProvider value={zh()}>
         <FlowCanvas nodes={NODES} edges={EDGES} editable={false} designMode={false} selectedId={null} onSelect={() => {}} />
@@ -691,13 +714,18 @@ describe('Flow designer — package label translations (flows.<flow>.label, appr
     const card = (id: string) => container.querySelector(`[data-node-id="${id}"]`) as HTMLElement;
     expect(card('manager_review').textContent).toContain('经理审核');
     expect(card('manager_review').textContent).not.toContain('Manager review');
-    expect(card('big').textContent).toContain('Over 1M?');
+    expect(card('big').textContent).toContain('超过一百万？');
+    expect(card('big').textContent).not.toContain('Over 1M?');
+    // A node with no translation keeps its authored label.
+    expect(card('start').textContent).toContain('Start');
     // A decision branch's authored edge label has no package key, so it stays as written. (An approval's
     // `approve` / `reject` outcome pills are the designer's own vocabulary, not the package bundle's.)
     expect(screen.getByText('Yes, over 1M')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Expand nested regions' }));
     expect(card('each').textContent).toContain('总监签批');
     expect(card('each').textContent).not.toContain('Director sign-off');
+    expect(card('each').textContent).toContain('通知签署人');
+    expect(card('each').textContent).not.toContain('Tell signer');
   });
 
   it('with no translation the canvas draws the authored labels, as before', () => {
@@ -724,10 +752,12 @@ describe('Flow designer — package label translations (flows.<flow>.label, appr
     render(<FlowSelectionTitle heading={top} />);
     expect(screen.getByText('经理审核')).toBeInTheDocument();
     expect(screen.getByTestId('flow-selection-source').textContent).toContain('Manager review');
-    // A decision node has no key: authored title, no source line.
-    const decision = flowSelectionHeading(DRAFT, { kind: 'node', id: 'big' }, undefined, t);
-    expect(decision.title).toBe('Over 1M?');
-    expect(decision).not.toHaveProperty('source');
+    // A decision step by its `nodes` key, the same way.
+    expect(flowSelectionHeading(DRAFT, { kind: 'node', id: 'big' }, undefined, t)).toMatchObject({ title: '超过一百万？', source: 'Over 1M?' });
+    // A step the bundle does not translate: authored title, no source line.
+    const start = flowSelectionHeading(DRAFT, { kind: 'node', id: 'start' }, undefined, t);
+    expect(start.title).toBe('Start');
+    expect(start).not.toHaveProperty('source');
     // No translations: exactly as before.
     expect(flowSelectionHeading(DRAFT, { kind: 'node', id: 'manager_review' })).not.toHaveProperty('source');
     expect(flowSelectionHeading(DRAFT, { kind: 'node', id: 'manager_review' }).title).toBe('Manager review');

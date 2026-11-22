@@ -140,6 +140,7 @@ export const SysAttachment = ObjectSchema.create({
 
   enable: {
     trackHistory: false,
+    fieldHistory: false, // [#36290] keeps this object's "no history": values off in the activity stream
     searchable: true,
     apiEnabled: true,
     // [#2970 item 5 / ADR-0049] `trash` is `dead` in the liveness ledger (no

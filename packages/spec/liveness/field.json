@@ -465,7 +465,7 @@
       "verifiedAt": "2026-08-17",
       "evidenceScope": "in-repo",
       "evidence": "ui/packages/app-shell/src/providers/MetadataProvider.tsx (attachInlineSubforms passes d.inlineColumns as the subform's columns) → plugin-form/MasterDetailForm.tsx (hydrateColumns) → fields/GridField.tsx (the name-keyed GridColumn renderer, objectui#3951)",
-      "note": "LIVE via objectui renderer. #9227 closed the element shape (strict, name-keyed InlineGridColumnSchema): the child keys below are exactly the GridColumn keys the widget has a live read for, measured against objectui main 2026-08-17. NOTE the .objectui-sha pin (665661ab) predates objectui#3951 — the PINNED console still reads the retired field spelling; the drilled evidence below cites objectui main, which is the contract this schema mirrors. Renderer read points moved out of spec source (#23434). Column-type hydration (packages/spec/src/stack.zod.ts HYDRATED_INLINE_COLUMN_TYPE; packages/spec/src/inline-grid-column-carriers.test.ts): objectui @db11afd4967c packages/plugin-form/src/deriveMasterDetail.ts#hydrateColumns leaves a column that declares a `type` alone and otherwise sets `type: fieldTypeToColumnType(childField.type)`; objectui @db11afd4967c packages/plugin-form/src/deriveMasterDetail.ts#fieldTypeToColumnType maps each of the column schema's nine types' namesake field type to that same column type, and its only `currency` arm is the `currency` field type. Line-position field (packages/spec/src/data/inline-grid-sort-fields.ts INLINE_GRID_SORT_FIELDS): objectui @89cad75d5570 packages/plugin-form/src/deriveMasterDetail.ts#SORT_FIELD_NAMES, the same six names in the same order. Per-row expand form (packages/spec/src/data/inline-grid-columns.ts deriveInlineRowFormFields and its test): objectui @31971ff1e28f packages/plugin-form/src/deriveMasterDetail.ts#deriveFormFields is the derivation rule, and the first two test fixtures are its own cases in objectui @31971ff1e28f packages/plugin-form/src/deriveMasterDetail.test.ts (describe \"deriveFormFields (per-row expand form)\"); the offer condition (isInlineRowFormOffered) is the one objectui @31971ff1e28f packages/plugin-form/src/MasterDetailForm.tsx#MasterDetailLines applies — `inlineMode === 'form'`, or more `formFields` than `columns`.",
+      "note": "LIVE via objectui renderer. #9227 closed the element shape (strict, name-keyed InlineGridColumnSchema): the child keys below are exactly the GridColumn keys the widget has a live read for, measured against objectui main 2026-08-17. NOTE the .objectui-sha pin (665661ab) predates objectui#3951 — the PINNED console still reads the retired field spelling; the drilled evidence below cites objectui main, which is the contract this schema mirrors. Renderer read points moved out of spec source (#23434). Column-type hydration (packages/spec/src/stack.zod.ts HYDRATED_INLINE_COLUMN_TYPE; packages/spec/src/inline-grid-column-carriers.test.ts): objectui @db11afd4967c packages/plugin-form/src/deriveMasterDetail.ts#hydrateColumns leaves a column that declares a `type` alone and otherwise sets `type: fieldTypeToColumnType(childField.type)`; objectui @db11afd4967c packages/plugin-form/src/deriveMasterDetail.ts#fieldTypeToColumnType maps each of the column schema's types' namesake field type to that same column type, and its only `currency` arm is the `currency` field type; since objectstack#36043 the in-repo ui/packages/plugin-form/src/deriveMasterDetail.ts#fieldTypeToColumnType does the same for all fourteen, `user`, `multiselect`, `tags`, `boolean` and `rating` included. Line-position field (packages/spec/src/data/inline-grid-sort-fields.ts INLINE_GRID_SORT_FIELDS): objectui @89cad75d5570 packages/plugin-form/src/deriveMasterDetail.ts#SORT_FIELD_NAMES, the same six names in the same order. Per-row expand form (packages/spec/src/data/inline-grid-columns.ts deriveInlineRowFormFields and its test): objectui @31971ff1e28f packages/plugin-form/src/deriveMasterDetail.ts#deriveFormFields is the derivation rule, and the first two test fixtures are its own cases in objectui @31971ff1e28f packages/plugin-form/src/deriveMasterDetail.test.ts (describe \"deriveFormFields (per-row expand form)\"); the offer condition (isInlineRowFormOffered) is the one objectui @31971ff1e28f packages/plugin-form/src/MasterDetailForm.tsx#MasterDetailLines applies — `inlineMode === 'form'`, or more `formFields` than `columns`.",
       "children": {
         "name": {
           "status": "live",
@@ -477,7 +477,7 @@
         },
         "type": {
           "status": "live",
-          "note": "objectui GridField.tsx — selects the cell control (text/number/currency/date/datetime/time/select/lookup/file) and drives type-based min widths (minWidthFor/widthStyle); hydrateColumns derives it from the child field type when absent."
+          "note": "objectui GridField.tsx — selects the cell control (text/number/currency/date/datetime/time/select/lookup/file/user/multiselect/tags/boolean/rating) and drives type-based min widths (minWidthFor/widthStyle); hydrateColumns derives it from the child field type when absent."
         },
         "width": {
           "status": "live",
@@ -489,7 +489,7 @@
         },
         "options": {
           "status": "live",
-          "note": "objectui GridField.tsx select cells — SelectItem per {label,value}; display formatting resolves the stored value to its label."
+          "note": "ui/packages/fields/src/widgets/grid-field/GridFieldWidget.tsx — a select cell's choices, a multiselect cell's choices (several held) and a boolean cell's two words (values `true` / `false`); display formatting resolves the stored value to its label. A tags cell reads none (objectstack#36043)."
         },
         "prefix": {
           "status": "live",
@@ -513,7 +513,11 @@
         },
         "multiple": {
           "status": "live",
-          "note": "objectui GridField.tsx — multi-record lookup cells and multi-file upload cells."
+          "note": "objectui GridField.tsx — multi-record lookup cells, multi-person user cells and multi-file upload cells."
+        },
+        "max": {
+          "status": "live",
+          "note": "objectui grid-field/GridFieldWidget.tsx — the star count of a rating cell (RatingField's `max`, default 5); hydrateColumns copies the child rating field's `max` when the column declares no type."
         },
         "accept": {
           "status": "live",
@@ -585,7 +589,12 @@
     "trackHistory": {
       "status": "live",
       "evidence": "packages/plugins/plugin-audit/src/audit-writers.ts",
-      "note": "ADR-0052 §5b — the audit-writer renders tracked-field diffs as human-readable activity summaries (renderTrackedChangeSummary + getFieldDefs read field.trackHistory). Reintroduces the pruned auditTrail concept WITH a runtime consumer, satisfying enforce-or-remove (ADR-0049)."
+      "note": "ADR-0052 §5b — the audit-writer renders changed-field diffs as human-readable activity summaries (renderTrackedChangeSummary + changeValuesShownFor read field.trackHistory). Since #36290 values are on by default; `true` opts a media or structured-JSON field in, and `false` reads like absent (the field designer wrote it on every save while it meant nothing, so it is not an off switch; the off switch is `fieldHistory: false`). Reintroduces the pruned auditTrail concept WITH a runtime consumer, satisfying enforce-or-remove (ADR-0049)."
+    },
+    "fieldHistory": {
+      "status": "live",
+      "evidence": "packages/plugins/plugin-audit/src/audit-writers.ts#changeValuesShownFor",
+      "note": "#36290 (ruling 7076513167 point 1): the field's off switch for old → new values on the record activity stream. The writer reads `field.fieldHistory === false` (off) and `=== true` (on, a media or JSON type included); absent is on. No .default() on purpose, so only an author who wrote it turns values off. Who reads a value is the per-reader field redaction (packages/plugins/plugin-audit/src/activity-field-redaction.ts)."
     },
     "accept": {
       "status": "live",

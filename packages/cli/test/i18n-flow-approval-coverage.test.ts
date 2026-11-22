@@ -27,6 +27,13 @@ import { collectExpectedEntries, extractTranslations } from '../src/utils/i18n-b
 import { computeI18nCoverage } from '../src/utils/i18n-coverage.js';
 import { TranslationDataSchema } from '@objectstack/spec/system';
 
+/**
+ * The `flows.<flow>.nodes.<node_id>.label` family (ruling 7076440876) is
+ * demanded beside this file's own and pinned by `i18n-flow-node-coverage.test.ts`;
+ * these pins measure their family, so they read every key but that one.
+ */
+const notNodeLabel = (key: string) => !/^flows\.[^.]+\.nodes\./.test(key);
+
 /** An approval-only flow: record-triggered, two approval steps, no screen. */
 const expenseApproval = {
   name: 'expense_approval',
@@ -67,11 +74,13 @@ const nightlyDigest = {
 };
 
 const flowKeys = (config: any) =>
-  collectExpectedEntries(config).filter((e) => e.path[0] === 'flows').map((e) => e.path.join('.'));
+  collectExpectedEntries(config).filter((e) => e.path[0] === 'flows').map((e) => e.path.join('.')).filter(notNodeLabel);
 
 describe('what the walker harvests from an approval flow (#24916)', () => {
   it('emits the flow label and each approval step label, seeded with the authored text', () => {
-    const entries = collectExpectedEntries({ flows: [expenseApproval] }).filter((e) => e.path[0] === 'flows');
+    const entries = collectExpectedEntries({ flows: [expenseApproval] }).filter(
+      (e) => e.path[0] === 'flows' && notNodeLabel(e.path.join('.')),
+    );
 
     expect(entries.map((e) => e.path.join('.'))).toEqual([
       'flows.expense_approval.label',
@@ -99,7 +108,7 @@ describe('the coverage gate demands the approval flow and its steps (#24916)', (
     translations: [{ 'zh-CN': { ...(flows ? { flows } : {}) } }],
   });
   const zhFlowIssues = (config: any) =>
-    computeI18nCoverage(config).issues.filter((i) => i.locale === 'zh-CN' && i.source === 'flow');
+    computeI18nCoverage(config).issues.filter((i) => i.locale === 'zh-CN' && i.source === 'flow' && notNodeLabel(i.key));
 
   it('lists the untranslated approval flow label and step labels in the flow bucket', () => {
     const keys = zhFlowIssues(tree()).map((i) => i.key).filter((k) => k.startsWith('flows.expense_approval.'));
@@ -154,11 +163,11 @@ describe('the skeleton `os i18n extract` writes for an approval flow (#24916)', 
   const result = extractTranslations({ flows: [expenseApproval] }, { locales: ['en', 'zh-CN'] });
 
   it('writes the authored labels into the default locale and empty slots into the others', () => {
-    expect((result.bundles.en as any).flows.expense_approval).toEqual({
+    expect((result.bundles.en as any).flows.expense_approval).toMatchObject({
       label: 'Expense Approval',
       approvals: { manager_review: { label: 'Manager Review' }, finance_review: { label: 'Finance Review' } },
     });
-    expect((result.bundles['zh-CN'] as any).flows.expense_approval).toEqual({
+    expect((result.bundles['zh-CN'] as any).flows.expense_approval).toMatchObject({
       label: '',
       approvals: { manager_review: { label: '' }, finance_review: { label: '' } },
     });

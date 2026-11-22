@@ -436,7 +436,6 @@ export const OBJECT_VIEW_TABLE_RELAY_KEYS = [
   'showColumnTypeIcons',
   'showPagination',
   'showSearch',
-  'singleClickEdit',
 ] as const satisfies readonly (keyof NonNullable<ObjectViewSchema['table']>)[];
 
 type TableRelayKey = (typeof OBJECT_VIEW_TABLE_RELAY_KEYS)[number];

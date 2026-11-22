@@ -111,7 +111,6 @@ function renderGrid(perms: MePermissionsResponse | null) {
     type: 'object-grid',
     objectName: OBJECT,
     editable: true,
-    singleClickEdit: true,
     columns: [
       { field: 'name', label: 'Name', type: 'text' },
       { field: 'annual_revenue', label: 'Annual revenue', type: 'text' },
@@ -122,7 +121,7 @@ function renderGrid(perms: MePermissionsResponse | null) {
   const grid = (
     <ActionProvider>
       <SchemaRendererProvider dataSource={ds}>
-        <ObjectGrid schema={schema} dataSource={ds} onEdit={() => {}} onDelete={() => {}} />
+        <ObjectGrid cellSelection={false} schema={schema} dataSource={ds} onEdit={() => {}} onDelete={() => {}} />
       </SchemaRendererProvider>
     </ActionProvider>
   );

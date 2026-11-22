@@ -39,6 +39,7 @@ import '@objectstack/runtime';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 import { LocalManifestSource } from './local-manifest-source.js';
+import { mapDataError } from '@objectstack/types';
 
 const APP_ID = 'com.example.tasksapp';
 const OWNER = `app:${APP_ID}`;
@@ -84,7 +85,7 @@ function flattened(bundle: ReturnType<typeof artifact>) {
  */
 function recordingEngine() {
     const actions = new Map<string, { handler: unknown; package?: string }>();
-    let hooks: Array<{ name: string; packageId?: string }> = [];
+    let hooks: Array<{ name: string; packageId?: string; def?: unknown; bodyRunner?: unknown }> = [];
     const unregisterHooksByPackage = (packageId: string): number => {
         const before = hooks.length;
         hooks = hooks.filter((h) => h.packageId !== packageId);
@@ -113,7 +114,7 @@ function recordingEngine() {
                 if (!Array.isArray(list) || list.length === 0) return;
                 if (opts?.packageId) unregisterHooksByPackage(opts.packageId);
                 expect(typeof opts?.bodyRunner, 'a body hook needs the sandbox runner').toBe('function');
-                for (const h of list) hooks.push({ name: h.name, packageId: opts?.packageId });
+                for (const h of list) hooks.push({ name: h.name, packageId: opts?.packageId, def: h, bodyRunner: opts?.bodyRunner });
             },
         },
     };
@@ -167,12 +168,13 @@ let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'mil-handlers-')); });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); vi.restoreAllMocks(); });
 
-async function bootPlugin(engine: Record<string, unknown>) {
+async function bootPlugin(engine: Record<string, unknown>, extraServices: Record<string, unknown> = {}) {
     const rawApp = makeRawApp();
     const { ctx, fire, logger } = makeCtx(rawApp, {
         manifest: { register: vi.fn() },
         auth: installerAuthService(),
         objectql: withInstallerGrants(engine),
+        ...extraServices,
     });
     const plugin = new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: dir });
     await plugin.start(ctx as any);
@@ -242,5 +244,178 @@ describe('#21321: install-local binds an installed package’s handlers', () => 
 
         expect(rec.engine.listRegisteredActions().filter((r) => r.package === OWNER)).toEqual([]);
         expect(rec.hooksFor(OWNER), 'a hook the new version dropped must stop firing').toEqual([]);
+    });
+});
+
+// An installed package's declared refusals answer in the caller's language.
+//
+// The defect: the install route and the `kernel:ready` rehydrate bound an
+// installed package's body hooks and script actions WITHOUT the `i18n` service
+// (and without the kernel's service lookup) that `AppPlugin.start` hands the
+// same binder for a boot artifact. A refusal the catalogue answers then always
+// took its declared sentence, so every user of an installed package read hook
+// and action refusals in the authored language, whatever pack the package
+// shipped, while the same package booted as an artifact answered in theirs.
+// Every door that runs a hook (`/batch`, a record update, an action that
+// writes) reaches it through this one binding, so it is pinned here, at the
+// seam they all share.
+describe('install-local: an installed package answers its declared refusals in the caller\'s language', () => {
+    const ORDER_OBJECT = 'tasks_app_order';
+    const GATE_HOOK = 'tasks_app_order_gate';
+    const CONFIRM_ACTION = 'confirm_order';
+    const GATE_DECLARED = 'The order cannot be confirmed: {{ count }} line(s) have no delivery date.';
+    const GATE_ZH = '订单不能确认：有 {{ count }} 行明细没有填交期。';
+    const CONFIRM_DECLARED = 'Only a draft order can be confirmed.';
+    const CONFIRM_ZH = '只有草稿订单可以确认。';
+
+    const GATE = {
+        name: GATE_HOOK,
+        object: ORDER_OBJECT,
+        events: ['beforeUpdate'],
+        body: {
+            language: 'js',
+            source: "throw { code: 'ORDER_NOT_READY', reason: 'missing_delivery', params: { count: 1 }, message: 'internal' };",
+        },
+        refusals: {
+            ORDER_NOT_READY: {
+                message: 'The order cannot be confirmed.',
+                params: ['count'],
+                reasons: { missing_delivery: { message: GATE_DECLARED } },
+            },
+        },
+    };
+    const CONFIRM = {
+        name: CONFIRM_ACTION,
+        label: 'Confirm',
+        objectName: ORDER_OBJECT,
+        type: 'script',
+        body: { language: 'js', capabilities: [], source: "throw Object.assign(new Error('internal'), { code: 'NOT_DRAFT' });" },
+        refusals: { NOT_DRAFT: { message: CONFIRM_DECLARED, status: 409 } },
+    };
+
+    /** The package's zh-CN pack, at the keys the refusal catalogues read. */
+    const ZH_PACK = {
+        hooks: {
+            [GATE_HOOK]: {
+                refusals: { ORDER_NOT_READY: { reasons: { missing_delivery: { message: GATE_ZH } } } },
+            },
+        },
+        objects: {
+            [ORDER_OBJECT]: {
+                _actions: { [CONFIRM_ACTION]: { refusals: { NOT_DRAFT: { message: CONFIRM_ZH } } } },
+            },
+        },
+    };
+
+    function orderArtifact() {
+        return {
+            manifest: { id: APP_ID, namespace: 'tasks_app', version: '0.1.0', type: 'app', name: 'Tasks App' },
+            objects: [{
+                name: ORDER_OBJECT,
+                label: 'Order',
+                fields: { name: { type: 'text', label: 'Name' } },
+                actions: [CONFIRM],
+            }],
+            actions: [CONFIRM],
+            hooks: [GATE],
+            translations: [{ 'zh-CN': ZH_PACK }],
+        };
+    }
+
+    /**
+     * The i18n service as the production one (`FileI18nAdapter`,
+     * service-i18n) answers: `t()` looks a key up in EXACTLY the locale it is
+     * handed and echoes the key on a miss — it negotiates nothing — and
+     * `getLocales()` reports the loaded locales. So a `zh-Hans` caller reaches
+     * the `zh-CN` pack only through the catalogue's own negotiation.
+     */
+    function i18nService() {
+        const loaded = new Map<string, Record<string, unknown>>();
+        const lookup = (bag: unknown, key: string): unknown =>
+            key.split('.').reduce<unknown>((node, part) => (node && typeof node === 'object' ? (node as any)[part] : undefined), bag);
+        return {
+            loadTranslations: (locale: string, data: Record<string, unknown>) => { loaded.set(locale, data); },
+            getLocales: () => ['en', ...[...loaded.keys()].filter((l) => l !== 'en')],
+            getTranslations: (locale: string) => loaded.get(locale) ?? {},
+            t: (key: string, locale: string) => {
+                const value = lookup(loaded.get(locale), key);
+                return typeof value === 'string' ? value : key;
+            },
+        };
+    }
+
+    async function hookRefusal(rec: ReturnType<typeof recordingEngine>, locale: string) {
+        const [bound] = rec.hooksFor(OWNER).filter((h) => h.name === GATE_HOOK);
+        expect(bound, 'the installed body hook was not bound').toBeDefined();
+        const handler = (bound!.bodyRunner as (hook: unknown) => ((c: unknown) => Promise<void>) | undefined)(bound!.def);
+        expect(handler, 'the installed body hook has no sandboxed handler').toBeTypeOf('function');
+        const err = await handler!({
+            object: ORDER_OBJECT,
+            event: 'beforeUpdate',
+            input: {},
+            session: { userId: 'u1', locale },
+        }).then(() => null, (e: unknown) => e);
+        expect(err, 'the gate hook must refuse').not.toBeNull();
+        return mapDataError(err, ORDER_OBJECT);
+    }
+
+    async function actionRefusal(rec: ReturnType<typeof recordingEngine>, locale: string) {
+        const entry = rec.actions.get(`${ORDER_OBJECT}:${CONFIRM_ACTION}`);
+        expect(entry, 'the installed script action was not bound').toBeDefined();
+        const err = await (entry!.handler as (c: unknown) => Promise<unknown>)({
+            input: {},
+            executionContext: { userId: 'u1', locale },
+        }).then(() => null, (e: unknown) => e);
+        expect(err, 'the action must refuse').not.toBeNull();
+        return mapDataError(err, ORDER_OBJECT);
+    }
+
+    it('install — a zh-Hans caller reads the hook refusal from the package\'s zh-CN pack, its code and status unchanged', async () => {
+        const rec = recordingEngine();
+        const { install } = await bootPlugin(rec.engine, { i18n: i18nService() });
+        await install(orderArtifact());
+
+        const wire = await hookRefusal(rec, 'zh-Hans');
+        expect(wire.status).toBe(400);
+        expect(wire.body.code).toBe('VALIDATION_ERROR');
+        expect(wire.body.declaredCode).toBe('ORDER_NOT_READY');
+        expect(wire.body.userMessage).toBe('订单不能确认：有 1 行明细没有填交期。');
+        // CONTROL: the same binding answers an English caller with the declared sentence.
+        expect((await hookRefusal(rec, 'en')).body.userMessage)
+            .toBe('The order cannot be confirmed: 1 line(s) have no delivery date.');
+    });
+
+    it('install — a zh-Hans caller reads the action refusal from the package\'s zh-CN pack, its code and status unchanged', async () => {
+        const rec = recordingEngine();
+        const { install } = await bootPlugin(rec.engine, { i18n: i18nService() });
+        await install(orderArtifact());
+
+        const wire = await actionRefusal(rec, 'zh-Hans');
+        expect(wire.status).toBe(409);
+        expect(wire.body.declaredCode).toBe('NOT_DRAFT');
+        expect(wire.body.userMessage).toBe(CONFIRM_ZH);
+        expect((await actionRefusal(rec, 'en')).body.userMessage).toBe(CONFIRM_DECLARED);
+    });
+
+    it('rehydrate — a package installed by an earlier process answers in the caller\'s language too', async () => {
+        const i18n = i18nService();
+        // The rehydrate loads the pack the way the install does; seeded here
+        // because this double stands in for the kernel's i18n service.
+        i18n.loadTranslations('zh-CN', ZH_PACK);
+        new LocalManifestSource(dir).write({
+            packageId: APP_ID,
+            versionId: 'local',
+            manifestId: APP_ID,
+            version: '0.1.0',
+            manifest: flattened(orderArtifact() as any),
+            installedAt: '2026-01-01T00:00:00.000Z',
+            installedBy: 'admin',
+            withSampleData: false,
+        });
+        const rec = recordingEngine();
+        await bootPlugin(rec.engine, { i18n });
+
+        expect((await hookRefusal(rec, 'zh-Hans')).body.userMessage).toBe('订单不能确认：有 1 行明细没有填交期。');
+        expect((await actionRefusal(rec, 'zh-Hans')).body.userMessage).toBe(CONFIRM_ZH);
     });
 });

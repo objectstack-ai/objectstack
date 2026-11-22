@@ -193,29 +193,34 @@ describe('2 — the drawer is a floating card with one ⤢, which opens the page
   });
 });
 
-describe('the drag range: 360 px to 60vw, remembered per object, a remembered width clamped', () => {
+describe('the drag range: 380 px to 900 px (objectstack#36149), remembered under the key, a remembered width clamped', () => {
   const drawerWidth = () => drawer()!.style.getPropertyValue('--ov-w').trim();
 
-  it('a remembered 1300 is drawn inside the range', () => {
+  it('a remembered 1300 is drawn at 900', () => {
     window.localStorage.setItem('ov:drawer-width:lead', '1300');
     render(overlay({ storageKey: 'drawer-width:lead' }));
-    expect(drawerWidth()).toBe('min(1300px, 60vw)');
+    expect(drawerWidth()).toBe('900px');
   });
 
-  it('a drag stops at 60vw and at 360 px, and the width is remembered under the key', () => {
+  it('a remembered width below 380 is not used', () => {
+    window.localStorage.setItem('ov:drawer-width:lead', '370');
+    render(overlay({ storageKey: 'drawer-width:lead', width: 'min(92vw, 460px)' }));
+    expect(drawerWidth()).toBe('min(92vw, 460px)');
+  });
+
+  it('a drag stops at 900 px and at 380 px, and the width is remembered under the key', () => {
     render(overlay({ storageKey: 'drawer-width:lead' }));
     const handle = screen.getByRole('separator');
-    const maxPx = Math.floor((window.innerWidth * 60) / 100);
     act(() => {
       fireEvent.mouseDown(handle);
       fireEvent.mouseMove(window, { clientX: -5000 });
     });
-    expect(drawerWidth()).toBe(`min(${maxPx}px, 60vw)`);
+    expect(drawerWidth()).toBe('900px');
     act(() => {
       fireEvent.mouseMove(window, { clientX: 5000 });
       fireEvent.mouseUp(window);
     });
-    // The drawer's right edge is the viewport's: the handle's parent measures 0 in jsdom.
-    expect(Number(window.localStorage.getItem('ov:drawer-width:lead'))).toBeGreaterThanOrEqual(360);
+    expect(drawerWidth()).toBe('380px');
+    expect(window.localStorage.getItem('ov:drawer-width:lead')).toBe('380');
   });
 });
