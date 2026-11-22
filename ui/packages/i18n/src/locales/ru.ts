@@ -1374,6 +1374,7 @@ const ru = {
     updatedTime: "Дата изменения",
     recordNumber: "ID записи",
     clickToEdit: "Нажмите, чтобы изменить",
+    setField: "Указать «{{field}}»",
     back: "Назад",
     edit: "Редактировать",
     editInline: "Редактировать",

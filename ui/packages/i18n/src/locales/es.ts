@@ -1713,6 +1713,7 @@ const es = {
     updatedTime: "Fecha de modificación",
     recordNumber: "ID del registro",
     clickToEdit: "Haga clic para editar",
+    setField: "Establecer {{field}}",
     // objectui#3863 — base key, answering only a call made without a count. es's
     // `many` (exact millions) has its own slot since objectui#11432; it repeats
     // `_other` here because the count governs no noun complement.

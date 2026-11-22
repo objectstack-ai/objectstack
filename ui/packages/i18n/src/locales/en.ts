@@ -1906,6 +1906,7 @@ const en = {
     updatedTime: 'Updated on',
     recordNumber: 'Record ID',
     clickToEdit: 'Click to edit',
+    setField: 'Set {{field}}',
     // Attachments
     dropFilesToUpload: 'Drop files here or click to upload',
     attachmentCount: '{{count}} attachment',

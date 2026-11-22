@@ -1659,6 +1659,7 @@ const de = {
     updatedTime: "Geändert am",
     recordNumber: "Datensatz-ID",
     clickToEdit: "Zum Bearbeiten klicken",
+    setField: "{{field}} festlegen",
     // objectui#3863 — base key. de's categories are exactly `one`/`other`, so this
     // slot is unreachable here and equals `_other` for key-set parity.
     showEmptyRelated: "+ {{count}} leer",

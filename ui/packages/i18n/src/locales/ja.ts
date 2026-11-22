@@ -1659,6 +1659,7 @@ const ja = {
     updatedTime: "更新日時",
     recordNumber: "レコード ID",
     clickToEdit: "クリックで編集",
+    setField: "{{field}}を設定",
     // objectui#3863 — base key. ja has a single plural category (`other`), so this
     // slot is unreachable here and equals `_other` for key-set parity.
     showEmptyRelated: "+ {{count}} 件（空）",

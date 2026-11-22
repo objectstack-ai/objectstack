@@ -1606,6 +1606,7 @@ const zh = {
     updatedTime: '修改时间',
     recordNumber: '记录编号',
     clickToEdit: '点击编辑',
+    setField: '设置{{field}}',
     // Attachments
     dropFilesToUpload: '拖拽文件到此处或点击上传',
     attachmentCount: '{{count}} 个附件',

@@ -1336,6 +1336,7 @@ const pt = {
     updatedTime: "Atualizado em",
     recordNumber: "ID do registro",
     clickToEdit: "Clique para editar",
+    setField: "Definir {{field}}",
     back: "Voltar",
     edit: "Editar",
     editInline: "Editar",
