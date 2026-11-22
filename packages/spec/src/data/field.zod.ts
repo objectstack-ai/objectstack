@@ -1397,7 +1397,7 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
   // mirror); the describe names the one type set it still applies to.
   scale: z.number().int().nonnegative().max(MAX_RENDERABLE_SCALE, { message: SCALE_UPPER_BOUND_MESSAGE }).optional()
     .describe('Decimal places to round a computed numeric result to (integer 0-100). REFUSED on a column declaring `type: \'currency\'` — delete it there: the currency\'s CLDR fraction digits decide. The upper bound is the renderer\'s: the grid rounds with `toFixed`, which throws a RangeError above 100.').meta({ title: 'Scale' }),
-  autofill: z.boolean().optional().describe("For `lookup` columns: picking a record copies its same-named fields into sibling columns (a product's unit_price/description). On by default; set false to disable.").meta({ title: 'Autofill' }),
+  autofill: z.boolean().optional().describe("For `lookup` columns: picking a record copies its same-named fields into sibling columns (a product's unit_price/description). On by default; set false to disable. An amount of money is copied only into a cell in the same currency: a picked amount in another currency than its cell (the home currency, or the code a line follows from its header) is not copied, the cell stays empty and the grid says why. Nothing is converted.").meta({ title: 'Autofill' }),
   readonlyWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — the cell is read-only when TRUE, evaluated per row against the row as `record` plus the header as `parent` (e.g. P`parent.status == 'paid'`).").meta({ title: 'Read-only When' }),
   requiredWhen: EvaluatedExpressionInputSchema.optional().describe('Predicate (CEL) — the cell is required when TRUE. Same `record` + `parent` scope as `readonlyWhen`. PRESENTATION ONLY: this flags the cell inline-invalid in the grid; nothing on the write path reads it. The server-enforced contract is the child FIELD\'s own `requiredWhen` — a transition gate, see `Field.requiredWhen` — which hydration copies onto an identity-only column, so declaring the requirement here alone enforces nothing.').meta({ title: 'Required When' }),
 }).superRefine((column, ctx) => {
@@ -2566,11 +2566,18 @@ export const FieldSchema = lazySchema(() => {
    * pick never replaces a value somebody wrote unless the pair says
    * `overwrite: true`.
    *
-   * ⭐ Relation to the grid column key `autofill` (`InlineGridColumnSchema`),
-   * which is unchanged: that key governs only the grid's implicit SAME-NAMED
-   * copy (on by default, overwriting). A declared pair applies in the grid too,
-   * under this key's own overwrite rule, and takes its target out of the
-   * same-named copy, so one target never has two writers on one pick.
+   * ⭐ Relation to the grid column key `autofill` (`InlineGridColumnSchema`):
+   * that key governs only the grid's implicit SAME-NAMED copy (on by default,
+   * overwriting). A declared pair applies in the grid too, under this key's
+   * own overwrite rule, and takes its target out of the same-named copy, so
+   * one target never has two writers on one pick.
+   *
+   * ⭐ The currency rule binds both copies (maintainer ruling 「B 币种不同就不填并说明」,
+   * record 7075336705 on objectstack-ai/objectstack#36249): an amount of money
+   * is copied only into a target in the same currency, else the target is left
+   * as it is and the form says why. Nothing is converted (ADR-0144 D5 refuses
+   * an implied rate of 1). The rule is the client's, like the fill itself: the
+   * line's currency is known only at run time, so no build-time door judges it.
    *
    * Three doors judge it: the parse (this field's superRefine — a single-value
    * relationship only), the object's parse (`refuseDishonestLookupAutofill` in
@@ -2594,8 +2601,9 @@ export const FieldSchema = lazySchema(() => {
   })).min(1).optional().describe(
     "Fields a pick in this lookup fills on the record being edited: each `{ target, source }` pair copies the picked record's `source` field (a field of the `reference` object) into this object's `target` field — e.g. `[{ target: 'unit_price', source: 'list_price' }]` on a quote line's product lookup. Read wherever this field is picked: the record form, and a line-item grid column over it. "
     + "OVERWRITE RULE — the default, `overwrite` absent or false: a pick never replaces a value somebody wrote. The target is filled only while it is empty or still holds the value an earlier pick filled in; a value the user typed, or one the record already stored, stays. Only a pair that declares `overwrite: true` replaces the target on every pick, whatever it holds. "
+    + "CURRENCY RULE: an amount of money (a `currency` field, or a `formula` returning `currency`) is copied only into a target in the same currency, both in the home currency or both naming the same ISO 4217 code (a `fixed` code, or the code the record or its `master_detail` parent holds). Otherwise the target is left as it is and the form says why, naming both currencies and the picked amount; nothing is converted. A `number` carries no currency and copies as before. "
     + 'Client-side only: it fills the form, and nothing on the write path reads it — the filled value is saved as an ordinary write, and an import or API write that sets the lookup fills nothing. '
-    + "Only on a single-value `lookup` / `master_detail`. Each target is a field of this object other than this one, written by its author — not `readonly`, not computed (`formula`, `summary`, `autonumber`, or an `expression`) — and named once. Each source is a field of the referenced object that the record carries (not `internal`) and whose value the target can hold; `os validate` / `os build` judge the source. In a line-item grid the column key `autofill` still governs only the same-named copy and is unchanged; a declared pair takes its target out of that copy.",
+    + "Only on a single-value `lookup` / `master_detail`. Each target is a field of this object other than this one, written by its author — not `readonly`, not computed (`formula`, `summary`, `autonumber`, or an `expression`) — and named once. Each source is a field of the referenced object that the record carries (not `internal`) and whose value the target can hold; `os validate` / `os build` judge the source. In a line-item grid the column key `autofill` still governs only the same-named copy, under the same currency rule; a declared pair takes its target out of that copy.",
   ),
 
   /**
