@@ -47,3 +47,10 @@ export function resolveCardOwner(
   const image = typeof person.image === 'string' && person.image ? person.image : undefined;
   return image ? { name, image } : { name };
 }
+
+/**
+ * Up to two initials of a name, for the avatar with no picture: the one
+ * letters-only rule every initials face shares (objectstack#36346), so
+ * "Alice (Sales)" gives "AS", never "A(".
+ */
+export { getPersonInitials as ownerInitials } from '@object-ui/fields';

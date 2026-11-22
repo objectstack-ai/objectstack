@@ -34,8 +34,7 @@ import { Plus, Sigma } from "lucide-react"
 import { useKanbanRecordsSettled } from './KanbanRecordsSettled'
 import { useKanbanColumnSummary, sumLaneField } from './KanbanColumnSummary'
 import { laneCount, useKanbanLanePaging } from './KanbanLanePaging'
-import { getPersonInitials } from '@object-ui/fields'
-import type { KanbanCardOwner } from './KanbanCardOwner'
+import { ownerInitials, type KanbanCardOwner } from './KanbanCardOwner'
 import { createKanbanDndAnnouncer } from './kanbanDndAnnouncements'
 
 // Utility function to merge class names (inline to avoid external dependency)
@@ -420,7 +419,7 @@ function SortableCard({ card, onCardClick, conditionalFormatting, objectFields }
               <Avatar className="size-6 shrink-0" title={owner.name} aria-label={owner.name} data-kanban-card-owner="">
                 {owner.image && <AvatarImage src={owner.image} alt={owner.name} />}
                 <AvatarFallback className="bg-primary/10 text-primary text-[10px] font-medium">
-                  {getPersonInitials(owner.name)}
+                  {ownerInitials(owner.name)}
                 </AvatarFallback>
               </Avatar>
             </div>
