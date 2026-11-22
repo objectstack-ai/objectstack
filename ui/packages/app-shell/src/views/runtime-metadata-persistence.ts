@@ -43,7 +43,7 @@ import { emitMetadataRefresh } from '../assistant/assistantBus.js';
 import { slugify } from './metadata-admin/createDerive.js';
 import { isDraftVersionConflict } from './metadata-admin/DraftConflictDialog.js';
 import { ensureCustomizationPackage, fetchListedPackageManifests } from './studio-design/packages-io.js';
-import { listedPackageVersion, type ListedPackageManifest } from './studio-design/packages-io.js';
+import { listedCustomizationPairOf, listedPackageVersion, type ListedPackageManifest } from './studio-design/packages-io.js';
 import { overrideDraftBody } from './studio-design/StudioCustomizeControls.js';
 
 /** The runtime-editable artifact types ADR-0034 unifies. `page` (a record
@@ -567,23 +567,34 @@ export async function saveAndPublishRuntimeMetadata(
 }
 
 /**
- * objectstack#36372 — where a dashboard edited on its own page is saved: the
- * package that owns it when that package is writable, else the app's
- * customization package `<base>.custom` (ADR-0146 D2/D3), asked of the ensure
- * door, the layer Studio's Customize writes. `refused` when neither can be
- * had (the owner is not listed, the ensure door refuses, or the pair it
- * answers is not writable): the editor then offers no save.
+ * objectstack#36372 — where a dashboard edited on its own page would be
+ * saved, as read when the edit state opens: the package that owns it when
+ * that package is writable, else the app's customization package
+ * `<base>.custom` (ADR-0146 D2/D3), the layer Studio's Customize writes.
+ * `refused` when the owner is not listed (or the list cannot be read).
+ *
+ * Read only: opening writes nothing. A customization target names the pair
+ * only when the package list already lists it (`listedCustomizationPairOf`,
+ * the read Studio makes of a pair); the pair is asked of the ensure door,
+ * which creates it on first use, at Save and never before
+ * ({@link ensureDashboardSaveTarget}).
  *
  * `unbound` is a dashboard that names no package: it is saved where it lives,
  * naming none.
  */
+export type DashboardEditTarget =
+  | { kind: 'unbound' }
+  | { kind: 'package'; packageId: string }
+  | { kind: 'customization'; base: string; basedOn: string | null; pair: string | null }
+  | { kind: 'refused'; reason: string };
+
+/** Where a save lands, once the ensure door has answered for a customization. */
 export type DashboardSaveTarget =
   | { kind: 'unbound' }
   | { kind: 'package'; packageId: string }
-  | { kind: 'customization'; packageId: string; base: string; basedOn: string | null }
-  | { kind: 'refused'; reason: string };
+  | { kind: 'customization'; packageId: string; base: string; basedOn: string | null };
 
-/** The two package doors {@link resolveDashboardSaveTarget} asks. */
+/** The two package doors the in-page editor asks: the list to read, the ensure door to write. */
 export interface DashboardSaveTargetDoors {
   listPackages: () => Promise<ReadonlyMap<string, Pick<ListedPackageManifest, 'writable' | 'manifest'>>>;
   ensureCustomization: (basePackageId: string) => Promise<{ packageId: string; writable: boolean }>;
@@ -594,11 +605,11 @@ const DASHBOARD_TARGET_DOORS: DashboardSaveTargetDoors = {
   ensureCustomization: ensureCustomizationPackage,
 };
 
-/** {@link DashboardSaveTarget} for a dashboard `ownerPackageId` owns. */
-export async function resolveDashboardSaveTarget(
+/** {@link DashboardEditTarget} for a dashboard `ownerPackageId` owns. Reads the package list only. */
+export async function resolveDashboardEditTarget(
   ownerPackageId: string | null | undefined,
-  doors: DashboardSaveTargetDoors = DASHBOARD_TARGET_DOORS,
-): Promise<DashboardSaveTarget> {
+  doors: Pick<DashboardSaveTargetDoors, 'listPackages'> = DASHBOARD_TARGET_DOORS,
+): Promise<DashboardEditTarget> {
   if (!ownerPackageId) return { kind: 'unbound' };
   let listed: ReadonlyMap<string, Pick<ListedPackageManifest, 'writable' | 'manifest'>>;
   try {
@@ -609,18 +620,30 @@ export async function resolveDashboardSaveTarget(
   const owner = listed.get(ownerPackageId);
   if (!owner) return { kind: 'refused', reason: `The package '${ownerPackageId}' is not listed.` };
   if (owner.writable) return { kind: 'package', packageId: ownerPackageId };
-  try {
-    const pair = await doors.ensureCustomization(ownerPackageId);
-    if (!pair.writable) return { kind: 'refused', reason: `The customization package '${pair.packageId}' is not writable.` };
-    return {
-      kind: 'customization',
-      packageId: pair.packageId,
-      base: ownerPackageId,
-      basedOn: listedPackageVersion(listed as ReadonlyMap<string, ListedPackageManifest>, ownerPackageId),
-    };
-  } catch (err) {
-    return { kind: 'refused', reason: err instanceof Error ? err.message : String(err) };
-  }
+  const manifests = listed as ReadonlyMap<string, ListedPackageManifest>;
+  return {
+    kind: 'customization',
+    base: ownerPackageId,
+    basedOn: listedPackageVersion(manifests, ownerPackageId),
+    pair: listedCustomizationPairOf(manifests, ownerPackageId),
+  };
+}
+
+/**
+ * The {@link DashboardSaveTarget} a save writes to. A customization asks the
+ * ensure door for the pair here, at Save, the first write of the edit (the
+ * door creates the pair on first use, as Studio's first saved customization
+ * does). Throws the door's refusal, or when the pair it answers is not
+ * writable: nothing has been written then.
+ */
+export async function ensureDashboardSaveTarget(
+  target: Exclude<DashboardEditTarget, { kind: 'refused' }>,
+  doors: Pick<DashboardSaveTargetDoors, 'ensureCustomization'> = DASHBOARD_TARGET_DOORS,
+): Promise<DashboardSaveTarget> {
+  if (target.kind !== 'customization') return target;
+  const pair = await doors.ensureCustomization(target.base);
+  if (!pair.writable) throw new Error(`The customization package '${pair.packageId}' is not writable.`);
+  return { kind: 'customization', packageId: pair.packageId, base: target.base, basedOn: target.basedOn };
 }
 
 /**
@@ -628,11 +651,12 @@ export async function resolveDashboardSaveTarget(
  * keys (the read's decorations belong to the served item), and, into a
  * customization package, declaring the override of its base
  * (`overrideDraftBody`, the body Studio's Customize writes). `null` when an
- * override is owed and there is no version to declare it at.
+ * override is owed and there is no version to declare it at: the edit state
+ * is refused up front for that (`'no-version'`), as Studio's Customize is.
  */
 export function dashboardSaveBody(
   doc: Record<string, unknown>,
-  target: Exclude<DashboardSaveTarget, { kind: 'refused' }>,
+  target: Exclude<DashboardEditTarget, { kind: 'refused' }> | DashboardSaveTarget,
 ): Record<string, unknown> | null {
   if (target.kind === 'customization') return overrideDraftBody(doc, target.base, target.basedOn);
   const body: Record<string, unknown> = {};
@@ -654,7 +678,7 @@ export function dashboardSaveBody(
 export async function saveDashboardInPlace(
   name: string,
   body: Record<string, unknown>,
-  target: Exclude<DashboardSaveTarget, { kind: 'refused' }>,
+  target: DashboardSaveTarget,
   ctx: RuntimePersistCtx,
 ): Promise<SaveAndPublishOutcome> {
   if (target.kind === 'unbound') return saveAndPublishRuntimeMetadata('dashboard', name, body, ctx);

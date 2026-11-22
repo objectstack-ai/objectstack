@@ -11,11 +11,15 @@
  * change applies to everyone at once without the app's package being
  * published; Discard drops every change.
  *
- * Where a save lands is {@link resolveDashboardSaveTarget}'s answer: the
+ * Where a save lands is {@link resolveDashboardEditTarget}'s answer: the
  * owning package when it is writable, else the app's customization package
- * `<base>.custom` (ADR-0146), so an installed app is edited too. Over a draft
- * already pending there (a Studio edit not yet published) the edit state is
- * not entered: that draft is its saver's, and is never published on their
+ * `<base>.custom` (ADR-0146), so an installed app is edited too. Opening
+ * writes nothing: the pair is read from the package list, and asked of the
+ * ensure door (which creates it on first use) only at Save. The edit state is
+ * not entered where Studio's Customize is refused up front (the ensure door
+ * walled for this caller, or the base listing no version to declare the
+ * override at), nor over a draft already pending there (a Studio edit not yet
+ * published): that draft is its saver's, and is never published on their
  * behalf.
  *
  * Out of scope here: undo, a business user's own copy, a new dashboard, chart
@@ -29,10 +33,11 @@ import { completeWidgetLayout, defaultWidgetPlacement, type DashboardWidgetSchem
 import { useSafeTranslate } from '@object-ui/i18n';
 import {
   dashboardSaveBody,
-  resolveDashboardSaveTarget,
+  ensureDashboardSaveTarget,
+  resolveDashboardEditTarget,
   saveDashboardInPlace,
   unwrapDraftBody,
-  type DashboardSaveTarget,
+  type DashboardEditTarget,
   type DashboardSaveTargetDoors,
   type SaveAndPublishOutcome,
 } from './runtime-metadata-persistence.js';
@@ -46,13 +51,16 @@ import { getDashboardForm } from './metadata-admin/dashboard-schema.js';
 import { useMetadataLocale, type SupportedLocale } from './metadata-admin/i18n.js';
 import type { MetadataSelection } from './metadata-admin/preview-registry.js';
 
-/** A save target the editor can write to. */
-export type WritableDashboardSaveTarget = Exclude<DashboardSaveTarget, { kind: 'refused' }>;
+/** Where the editor would save, as read at open (nothing is written to open). */
+export type WritableDashboardEditTarget = Exclude<DashboardEditTarget, { kind: 'refused' }>;
+
+/** Why the edit state is not entered. */
+export type DashboardEditRefusal = 'no-package' | 'walled' | 'no-version' | 'pending-draft' | 'load-failed';
 
 /** What opening a dashboard for editing found. */
 export type DashboardEditOpening =
-  | { kind: 'ready'; target: WritableDashboardSaveTarget; doc: Record<string, unknown> }
-  | { kind: 'refused'; reason: 'no-package' | 'pending-draft' | 'load-failed'; detail?: string };
+  | { kind: 'ready'; target: WritableDashboardEditTarget; doc: Record<string, unknown> }
+  | { kind: 'refused'; reason: DashboardEditRefusal; detail?: string };
 
 /** The metadata client calls {@link openDashboardForEdit} makes. */
 export interface DashboardEditReader {
@@ -69,31 +77,58 @@ function authoredDoc(layers: { code: unknown; effective: unknown } | null): Reco
   return doc && typeof doc === 'object' && !Array.isArray(doc) ? (doc as Record<string, unknown>) : null;
 }
 
+/** What {@link openDashboardForEdit} is told besides the item. */
+export interface DashboardEditOpenOptions {
+  doors?: Pick<DashboardSaveTargetDoors, 'listPackages'>;
+  /**
+   * The ensure door refuses this caller on this deployment
+   * (`useCustomizeDoorWalled`): an installed app's dashboard is then not
+   * opened, as Studio's Customize is disabled for it.
+   */
+  walled?: boolean;
+}
+
 /**
  * Open `name` for editing: where a save would land, and the document as
  * authored there (its layered read's `effective`, the buffer Studio edits; a
- * customization package that does not hold the item yet starts from its
- * base's). Refused when there is no package to save into, when a draft is
- * already pending there, or when the item cannot be read.
+ * customization package that does not list the pair or hold the item yet
+ * starts from its base's). Reads only: the customization pair is never
+ * created here. Refused when there is no package to save into, where Studio's
+ * Customize would be (the ensure door walled for this caller; no listed base
+ * version to declare the override at), when a draft is already pending
+ * there, or when the item cannot be read.
  */
 export async function openDashboardForEdit(
   name: string,
   ownerPackageId: string | null | undefined,
   client: DashboardEditReader,
-  doors?: DashboardSaveTargetDoors,
+  options: DashboardEditOpenOptions = {},
 ): Promise<DashboardEditOpening> {
-  const target = await resolveDashboardSaveTarget(ownerPackageId, doors);
+  const target = await resolveDashboardEditTarget(ownerPackageId, options.doors);
   if (target.kind === 'refused') return { kind: 'refused', reason: 'no-package', detail: target.reason };
-  const at = target.kind === 'unbound' ? {} : { packageId: target.packageId };
+  if (target.kind === 'customization' && options.walled) return { kind: 'refused', reason: 'walled' };
+  // A pair not listed yet holds nothing: no draft to find, the base's document opens.
+  const at =
+    target.kind === 'unbound'
+      ? {}
+      : target.kind === 'package'
+        ? { packageId: target.packageId }
+        : target.pair
+          ? { packageId: target.pair }
+          : null;
   try {
-    if (unwrapDraftBody(await client.getDraft('dashboard', name, at))) {
+    if (at && unwrapDraftBody(await client.getDraft('dashboard', name, at))) {
       return { kind: 'refused', reason: 'pending-draft' };
     }
-    let doc = authoredDoc(await client.layered('dashboard', name, at));
+    let doc = at ? authoredDoc(await client.layered('dashboard', name, at)) : null;
     if (!doc && target.kind === 'customization') {
       doc = authoredDoc(await client.layered('dashboard', name, { packageId: target.base }));
     }
     if (!doc) return { kind: 'refused', reason: 'load-failed' };
+    // Studio's `noVersion`: no override declared yet, and no version to declare it at.
+    if (target.kind === 'customization' && dashboardSaveBody(doc, target) === null) {
+      return { kind: 'refused', reason: 'no-version', detail: target.base };
+    }
     return { kind: 'ready', target, doc };
   } catch (err) {
     return { kind: 'refused', reason: 'load-failed', detail: err instanceof Error ? err.message : String(err) };
@@ -332,15 +367,18 @@ export function useDashboardInPageEdit({
   client,
   dataSource,
   doors,
+  walled = false,
 }: {
   name: string;
   ownerPackageId: string | null | undefined;
   client: DashboardEditClient;
   dataSource?: object | null;
   doors?: DashboardSaveTargetDoors;
+  /** `useCustomizeDoorWalled()` for this session: see {@link DashboardEditOpenOptions.walled}. */
+  walled?: boolean;
 }): DashboardInPageEdit {
   const [session, setSession] = React.useState<{
-    target: WritableDashboardSaveTarget;
+    target: WritableDashboardEditTarget;
     draft: Record<string, unknown>;
     dirty: boolean;
   } | null>(null);
@@ -362,7 +400,7 @@ export function useDashboardInPageEdit({
   const open = React.useCallback(async () => {
     setOpening(true);
     try {
-      const opened = await openDashboardForEdit(name, ownerPackageId, client, doors);
+      const opened = await openDashboardForEdit(name, ownerPackageId, client, { doors, walled });
       if (opened.kind === 'refused') return opened;
       setSession({ target: opened.target, draft: opened.doc, dirty: false });
       setSelection(null);
@@ -370,7 +408,7 @@ export function useDashboardInPageEdit({
     } finally {
       setOpening(false);
     }
-  }, [name, ownerPackageId, client, doors]);
+  }, [name, ownerPackageId, client, doors, walled]);
 
   const discard = React.useCallback(() => {
     setSession(null);
@@ -384,7 +422,9 @@ export function useDashboardInPageEdit({
     if (!body) return 'invalid-body';
     setSaving(true);
     try {
-      const outcome = await saveDashboardInPlace(name, body, session.target, {
+      // The first write of the edit: an installed app's pair is asked for (and made) here.
+      const target = await ensureDashboardSaveTarget(session.target, doors);
+      const outcome = await saveDashboardInPlace(name, body, target, {
         metadataClient: client,
         dataSource: (dataSource ?? null) as any,
       });
@@ -396,7 +436,7 @@ export function useDashboardInPageEdit({
     } finally {
       setSaving(false);
     }
-  }, [session, name, client, dataSource]);
+  }, [session, name, client, dataSource, doors]);
 
   const addCard = React.useCallback(
     (type: string) => {

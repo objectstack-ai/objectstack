@@ -1789,6 +1789,8 @@ const pt = {
       loadFailed: "Não foi possível abrir o painel para edição",
       pendingDraft: "Este painel tem alterações não publicadas no Studio. Publique ou descarte-as lá e depois edite-o aqui.",
       noPackage: "Este painel não pode ser salvo aqui: o aplicativo dele não tem um pacote que esta conta possa personalizar.",
+      walled: "Nesta implantação, somente o operador da plataforma pode personalizar o painel de um aplicativo instalado.",
+      noVersion: "A lista de pacotes não informa qual versão deste aplicativo está instalada, então o painel dele não pode ser personalizado aqui.",
       resizeCard: "Redimensionar cartão",
       panelTitle: "Propriedades",
     },

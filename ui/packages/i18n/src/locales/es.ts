@@ -1794,6 +1794,8 @@ const es = {
       loadFailed: "No se pudo abrir el panel de control para editarlo",
       pendingDraft: "Este panel de control tiene cambios sin publicar en Studio. Publícalos o descártalos allí y luego edítalo aquí.",
       noPackage: "Este panel de control no se puede guardar aquí: su aplicación no tiene un paquete que esta cuenta pueda personalizar.",
+      walled: "En esta implementación, solo el operador de la plataforma puede personalizar el panel de control de una aplicación instalada.",
+      noVersion: "La lista de paquetes no indica qué versión de esta aplicación está instalada, así que su panel de control no se puede personalizar aquí.",
       resizeCard: "Cambiar el tamaño de la tarjeta",
       panelTitle: "Propiedades",
     },

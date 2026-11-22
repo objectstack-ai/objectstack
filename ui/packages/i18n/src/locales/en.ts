@@ -2270,6 +2270,8 @@ const en = {
       loadFailed: 'The dashboard could not be opened for editing',
       pendingDraft: 'This dashboard has unpublished changes in Studio. Publish or discard them there, then edit it here.',
       noPackage: 'This dashboard cannot be saved here: its app has no package this account can customize.',
+      walled: "On this deployment, only the platform operator can customize an installed app's dashboard.",
+      noVersion: 'The package list does not say which version of this app is installed, so its dashboard cannot be customized here.',
       resizeCard: 'Resize card',
       panelTitle: 'Properties',
     },

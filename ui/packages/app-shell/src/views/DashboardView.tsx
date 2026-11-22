@@ -50,6 +50,7 @@ import {
   useDashboardInPageEdit,
 } from './DashboardInPageEditor.js';
 import { useInSetupApp } from '../console/setupApp.js';
+import { useCustomizeDoorWalled } from './studio-design/StudioCustomizeControls.js';
 
 /**
  * One refresh of this dashboard's data: the `onRefresh` handed to
@@ -266,17 +267,21 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
     (dashboard as any)?._packageId ?? (activeApp as any)?._packageId ?? null;
   const editOffered = useDashboardEditOffered(ownerPackageId);
   const metadataClient = useMetadataClient();
+  const customizeWalled = useCustomizeDoorWalled();
   const edit = useDashboardInPageEdit({
     name: dashboardName ?? '',
     ownerPackageId,
     client: metadataClient as any,
     dataSource: adapter as any,
+    walled: customizeWalled,
   });
   const editing = edit.draft !== null;
   const startEdit = async () => {
     const refused = await edit.open();
     if (!refused) return;
     if (refused.reason === 'pending-draft') toast.error(tt('dashboard.inPageEdit.pendingDraft', 'This dashboard has unpublished changes in Studio. Publish or discard them there, then edit it here.'));
+    else if (refused.reason === 'walled') toast.error(tt('dashboard.inPageEdit.walled', "On this deployment, only the platform operator can customize an installed app's dashboard."));
+    else if (refused.reason === 'no-version') toast.error(tt('dashboard.inPageEdit.noVersion', 'The package list does not say which version of this app is installed, so its dashboard cannot be customized here.'));
     else if (refused.reason === 'no-package') toast.error(tt('dashboard.inPageEdit.noPackage', "This dashboard cannot be saved here: its app has no package this account can customize."), refused.detail ? { description: refused.detail } : undefined);
     else toast.error(tt('dashboard.inPageEdit.loadFailed', 'The dashboard could not be opened for editing'), refused.detail ? { description: refused.detail } : undefined);
   };
@@ -303,6 +308,15 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
     if (filtered.length === widgets.length) return dashboard;
     return { ...dashboard, widgets: filtered };
   }, [dashboard, unregistered]);
+
+  // The edit buffer is the stored document, which carries none of the read's
+  // decorations: it is drawn with the served `_packageId` beside it, so its
+  // cards' dataset queries keep naming the dashboard's package as their reader
+  // (`callerPackage`, ADR-0150 D3), as in view mode. A save drops `_` keys.
+  const editSchema = useMemo(
+    () => (edit.draft ? { ...edit.draft, _packageId: (dashboard as { _packageId?: unknown } | undefined)?._packageId } : null),
+    [edit.draft, dashboard],
+  );
 
   // ---- Loading / not-found guards -----------------------------------------
   if (isLoading) {
@@ -466,7 +480,7 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
                   The edit state draws the stored document instead, every card
                   of it, so it resolves its own labels and prunes nothing. */}
               <DashboardRenderer
-                schema={editing ? (edit.draft as any) : previewSchema}
+                schema={editing ? (editSchema as any) : previewSchema}
                 localized={!editing}
                 dataSource={dataSource}
                 modalHandler={modalHandler}

@@ -518,7 +518,9 @@ Notes:
 Every widget, in every mode, carries a small mark naming the dashboard
 filters that do not reach it, for example "Not filtered by Region": a filter
 it opts out of (`filterBindings[name]: false`) or one whose `targetWidgets`
-leaves it out. A widget every filter reaches carries none. The list is
+leaves it out. An explicit string binding (`filterBindings[name]: 'field'`)
+wins over `targetWidgets`, so a widget that names its field is reached even
+when the list leaves it out. A widget every filter reaches carries none. The list is
 `dashboardFiltersNotApplied(widget, defs)` from `@object-ui/core`, which asks
 `resolveBoundField`, the binding the widget's query is built from, so the
 mark and the data cannot disagree.

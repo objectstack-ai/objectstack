@@ -1734,6 +1734,8 @@ const de = {
       loadFailed: "Das Dashboard konnte nicht zum Bearbeiten geöffnet werden",
       pendingDraft: "Dieses Dashboard hat unveröffentlichte Änderungen in Studio. Veröffentlichen oder verwerfen Sie sie dort und bearbeiten Sie es dann hier.",
       noPackage: "Dieses Dashboard kann hier nicht gespeichert werden: Seine App hat kein Paket, das dieses Konto anpassen kann.",
+      walled: "In dieser Bereitstellung kann nur der Plattformbetreiber das Dashboard einer installierten App anpassen.",
+      noVersion: "Die Paketliste gibt nicht an, welche Version dieser App installiert ist, daher kann ihr Dashboard hier nicht angepasst werden.",
       resizeCard: "Kartengröße ändern",
       panelTitle: "Eigenschaften",
     },

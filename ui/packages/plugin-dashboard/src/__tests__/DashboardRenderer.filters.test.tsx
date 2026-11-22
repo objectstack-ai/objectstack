@@ -260,6 +260,26 @@ describe('DashboardRenderer — the not-filtered mark agrees with the query (obj
     expect(screen.queryByTestId('dashboard-widget-filter-mark-w1')).not.toBeInTheDocument();
   });
 
+  it('names the built-in date filter "Date range", never its reserved name', async () => {
+    const queryDataset = makeQueryDataset();
+    const schema: DashboardComponentSchema = {
+      type: 'dashboard',
+      dateRange: { field: 'created_at', defaultRange: 'last_90_days' },
+      widgets: [
+        { id: 'w1', type: 'bar', dataset: 'invoices', values: ['count'] },
+        { id: 'w2', type: 'pie', dataset: 'accounts', values: ['count'], filterBindings: { dateRange: false } },
+      ],
+    } as DashboardComponentSchema;
+    render(<DashboardRenderer schema={schema} dataSource={{ queryDataset }} />);
+
+    await waitFor(() => expect(lastRuntimeFilter(queryDataset, 'invoices')).toHaveProperty('created_at'));
+    expect(lastRuntimeFilter(queryDataset, 'accounts')).toBeUndefined();
+    const mark = screen.getByTestId('dashboard-widget-filter-mark-w2');
+    expect(mark).toHaveAttribute('data-filters', 'dateRange');
+    expect(mark).toHaveTextContent('Not filtered by Date range');
+    expect(screen.queryByTestId('dashboard-widget-filter-mark-w1')).not.toBeInTheDocument();
+  });
+
   it('draws no mark on a dashboard that declares no filters', async () => {
     const queryDataset = makeQueryDataset();
     const schema: DashboardComponentSchema = {

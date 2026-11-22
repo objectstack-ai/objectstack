@@ -22,7 +22,11 @@
  *     the first-write pin and publishes that one item, and the page leaves
  *     the edit state;
  *   - an installed (read-only) package saves into its customization pair,
- *     declaring the override of its base;
+ *     declaring the override of its base, and the pair is asked of the
+ *     ensure door (which creates it) at Save only: Edit then Discard there
+ *     creates no pair and writes nothing;
+ *   - where Studio's Customize is walled for the caller, an installed app's
+ *     dashboard is not opened;
  *   - a draft already pending there refuses the edit state and writes nothing;
  *   - Discard drops every change and writes nothing.
  *
@@ -39,11 +43,12 @@ import { MetadataCtx } from '@object-ui/react';
 import '@objectstack/lint';
 
 const meta = vi.hoisted(() => ({ value: null as unknown }));
-const gate = vi.hoisted(() => ({ entry: null as null | { path: string; posture: 'edit' | 'view' } }));
+const gate = vi.hoisted(() => ({ entry: null as null | { path: string; posture: 'edit' | 'view' }, walled: false }));
 const client = vi.hoisted(() => ({ value: null as any }));
 const packages = vi.hoisted(() => ({
   listed: new Map<string, any>(),
   ensure: null as null | ((base: string) => Promise<{ packageId: string; writable: boolean }>),
+  ensured: [] as string[],
 }));
 const toasts = vi.hoisted(() => ({ success: [] as unknown[], error: [] as unknown[] }));
 
@@ -67,7 +72,14 @@ vi.mock('./metadata-admin/useMetadata', () => ({ useMetadataClient: () => client
 vi.mock('./studio-design/packages-io', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   fetchListedPackageManifests: async () => packages.listed,
-  ensureCustomizationPackage: (base: string) => packages.ensure!(base),
+  ensureCustomizationPackage: (base: string) => {
+    packages.ensured.push(base);
+    return packages.ensure!(base);
+  },
+}));
+vi.mock('./studio-design/StudioCustomizeControls', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useCustomizeDoorWalled: () => gate.walled,
 }));
 vi.mock('sonner', () => ({
   toast: {
@@ -102,12 +114,11 @@ const served = {
   widgets: [{ id: 'widget_total', type: 'kpi', title: 'Total (served)', options: { value: 42 } }],
 };
 
-/** The same dashboard as stored: what the edit state opens. */
+/** The same dashboard as stored: what the edit state opens (the layered read carries no `_packageId`). */
 const stored = {
   name: 'ops_board',
   label: 'Operations (stored)',
   widgets: [{ id: 'widget_total', type: 'kpi', title: 'Total (stored)', options: { value: 42 } }],
-  _packageId: 'crm',
 };
 
 function makeClient(over: Partial<Record<'getDraft' | 'layered', any>> = {}) {
@@ -121,11 +132,11 @@ function makeClient(over: Partial<Record<'getDraft' | 'layered', any>> = {}) {
   };
 }
 
-function mount() {
+function mount(dashboard: Record<string, unknown> = served, dataSource?: object) {
   meta.value = {
     apps: [],
     objects: [],
-    dashboards: [served],
+    dashboards: [dashboard],
     reports: [],
     pages: [],
     loading: false,
@@ -139,7 +150,7 @@ function mount() {
   };
   return render(
     <MetadataCtx.Provider value={meta.value as React.ContextType<typeof MetadataCtx>}>
-      <DashboardView />
+      <DashboardView dataSource={dataSource} />
     </MetadataCtx.Provider>,
   );
 }
@@ -151,9 +162,11 @@ async function openEdit() {
 
 beforeEach(() => {
   gate.entry = { path: '/studio/crm', posture: 'edit' };
+  gate.walled = false;
   client.value = makeClient();
   packages.listed = new Map([['crm', { id: 'crm', writable: true, manifest: { id: 'crm', version: '1.4.0' } }]]);
   packages.ensure = async (base) => ({ packageId: `${base}.custom`, writable: true });
+  packages.ensured = [];
   toasts.success = [];
   toasts.error = [];
 });
@@ -207,6 +220,21 @@ describe('DashboardView in-page edit (objectstack#36372)', () => {
     expect(toasts.success).toHaveLength(1);
   });
 
+  it('in the edit state, a dataset card still queries as the dashboard\'s package', async () => {
+    const queryDataset = vi.fn(async () => ({ rows: [], fields: [] }));
+    const dsWidget = { id: 'widget_ds', type: 'bar', title: 'By stage', dataset: 'ops_metrics', values: ['n'] };
+    client.value = makeClient({
+      layered: vi.fn(async () => ({ code: null, overlay: null, effective: { ...stored, widgets: [dsWidget] } })),
+    });
+    mount({ ...served, widgets: [dsWidget] }, { queryDataset });
+    await waitFor(() => expect(queryDataset).toHaveBeenCalled());
+    expect(queryDataset.mock.calls.every((c: unknown[]) => (c[2] as { callerPackage?: string })?.callerPackage === 'crm')).toBe(true);
+    queryDataset.mockClear();
+    await openEdit();
+    await waitFor(() => expect(queryDataset).toHaveBeenCalled());
+    expect(queryDataset.mock.calls.every((c: unknown[]) => (c[2] as { callerPackage?: string })?.callerPackage === 'crm')).toBe(true);
+  });
+
   it('Add card appends a card and selects it', async () => {
     mount();
     await openEdit();
@@ -226,15 +254,48 @@ describe('DashboardView in-page edit (objectstack#36372)', () => {
     });
     mount();
     await openEdit();
+    // Opening wrote nothing: the pair is asked for at Save.
+    expect(packages.ensured).toEqual([]);
     fireEvent.click(screen.getByText('stub-rename'));
     await act(async () => {
       fireEvent.click(screen.getByTestId('dashboard-edit-save'));
     });
 
+    expect(packages.ensured).toEqual(['crm']);
     const [, , body, options] = client.value.save.mock.calls[0];
     expect(options).toEqual({ mode: 'draft', ifNoneMatch: '*', packageId: 'crm.custom' });
     expect(body).toMatchObject({ label: 'Renamed (36372)', overrides: { package: 'crm', basedOn: '1.4.0' } });
     expect(client.value.publish).toHaveBeenCalledWith('dashboard', 'ops_board', { packageId: 'crm.custom' });
+  });
+
+  it('Edit then Discard on an installed app creates no customization package and writes nothing', async () => {
+    packages.listed = new Map([['crm', { id: 'crm', writable: false, manifest: { id: 'crm', version: '1.4.0' } }]]);
+    gate.entry = { path: '/studio/crm', posture: 'view' };
+    mount();
+    await openEdit();
+    fireEvent.click(screen.getByText('stub-rename'));
+    fireEvent.click(screen.getByTestId('dashboard-edit-discard'));
+    expect(screen.queryByTestId('dashboard-editing-badge')).not.toBeInTheDocument();
+    expect(packages.ensured).toEqual([]);
+    expect(client.value.save).not.toHaveBeenCalled();
+    expect(client.value.publish).not.toHaveBeenCalled();
+    expect(client.value.reset).not.toHaveBeenCalled();
+  });
+
+  it('where the customization door is walled for this caller, an installed app\'s dashboard is not opened', async () => {
+    packages.listed = new Map([['crm', { id: 'crm', writable: false, manifest: { id: 'crm', version: '1.4.0' } }]]);
+    gate.entry = { path: '/studio/crm', posture: 'view' };
+    gate.walled = true;
+    mount();
+    const edit = await screen.findByTestId('dashboard-edit');
+    await act(async () => {
+      fireEvent.click(edit);
+    });
+    await waitFor(() => expect(toasts.error).toHaveLength(1));
+    expect(String((toasts.error[0] as unknown[])[0])).toContain('only the platform operator');
+    expect(screen.queryByTestId('dashboard-editing-badge')).not.toBeInTheDocument();
+    expect(packages.ensured).toEqual([]);
+    expect(client.value.layered).not.toHaveBeenCalled();
   });
 
   it('a draft already pending in the package refuses the edit state and writes nothing', async () => {

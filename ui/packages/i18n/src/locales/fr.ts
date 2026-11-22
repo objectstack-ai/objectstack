@@ -1790,6 +1790,8 @@ const fr = {
       loadFailed: "Le tableau de bord n’a pas pu être ouvert pour modification",
       pendingDraft: "Ce tableau de bord a des modifications non publiées dans Studio. Publiez-les ou abandonnez-les là-bas, puis modifiez-le ici.",
       noPackage: "Ce tableau de bord ne peut pas être enregistré ici : son application n’a aucun paquet que ce compte peut personnaliser.",
+      walled: "Sur ce déploiement, seul l’opérateur de la plateforme peut personnaliser le tableau de bord d’une application installée.",
+      noVersion: "La liste des paquets n’indique pas quelle version de cette application est installée : son tableau de bord ne peut donc pas être personnalisé ici.",
       resizeCard: "Redimensionner la carte",
       panelTitle: "Propriétés",
     },

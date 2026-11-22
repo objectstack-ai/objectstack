@@ -53,7 +53,17 @@ export function WidgetFilterMark({
   const { t, language } = useObjectTranslation();
   const labelOf = useDashboardFilterLabeler();
   if (defs.length === 0) return null;
-  const names = listOf(defs.map((def) => labelOf(def) || def.name), language);
+  // The bar's fallbacks: an unlabelled built-in date filter reads the
+  // translated "Date range" (never its reserved name `dateRange`), any other
+  // filter its `name`.
+  const names = listOf(
+    defs.map(
+      (def) =>
+        labelOf(def) ||
+        (def.type === 'dateRange' ? t('dashboard.filters.dateRange', { defaultValue: 'Date range' }) : def.name),
+    ),
+    language,
+  );
   const text = t('dashboard.filters.notApplied', { filters: names, defaultValue: 'Not filtered by {{filters}}' });
   return (
     <span
