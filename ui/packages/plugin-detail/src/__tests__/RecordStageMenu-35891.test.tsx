@@ -120,7 +120,7 @@ function mount(opts: MountOptions = {}) {
       data={{ id: 'o1', name: 'Wayne deal', stage, loss_reason: null, updated_at: VERSION }}
       objectSchema={opts.schema ?? OPPORTUNITY}
       dataSource={dataSource as any}
-      refresh={refresh}
+      reread={refresh}
     >
       <InlineEditProvider canEdit={opts.canEdit ?? true}>
         <RecordStageMenu field="stage" label={label} tag={tag} />
@@ -423,7 +423,7 @@ describe('#36036 after a 409 re-read, the stage dialog asks what the re-read rec
   } as unknown as typeof OPPORTUNITY;
 
   /**
-   * The page's refresh as the record page wires it: a notice that returns at
+   * The page's re-read as the record page wires it: a notice that returns at
    * once, the re-read row landing in the record context afterwards.
    */
   function mountReRead(reread: Record<string, unknown>, schema: typeof OPPORTUNITY = OPPORTUNITY) {
@@ -444,7 +444,7 @@ describe('#36036 after a 409 re-read, the stage dialog asks what the re-read rec
           data={row}
           objectSchema={schema}
           dataSource={dataSource as any}
-          refresh={refresh}
+          reread={refresh}
         >
           <InlineEditProvider canEdit>
             <RecordStageMenu field="stage" label="Prospecting" tag={<span>Prospecting</span>} />

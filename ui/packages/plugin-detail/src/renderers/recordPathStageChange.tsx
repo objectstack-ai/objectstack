@@ -58,8 +58,9 @@
  *
  * The fields asked are judged against the record AS IT STANDS, on every
  * render, not frozen at the pick (objectstack#36036). A 409 re-reads the
- * record, and the re-read row reaches this hook later through the record
- * context (the page's refresh is a bus notice, not a fetch it can await), so
+ * record (`RecordContextValue.reread`, which every host provides, a drawer
+ * included), and the re-read row reaches this hook later through the record
+ * context (the page's re-read is a bus notice, not a fetch it can await), so
  * the list follows that row when it lands: a field another writer filled in
  * the meantime leaves the dialog, the move no longer sends it, and a value the
  * reader typed for it stops counting toward the fields it would chain in. When
@@ -288,12 +289,12 @@ export function useStageChange(
     setBusy(true);
     try {
       await updateVia(dataSource, objectName!, recordId!, { [statusField!]: stage.value }, ifMatchOf());
-      await ctx?.refresh?.();
+      await ctx?.reread?.();
     } catch (err) {
       setRefusal(stageRefusalLines(err, statusField!, labelOf, t));
       // A stale token means the reader is looking at an old record: show the
       // current one, so a second press is judged against what is stored.
-      if (isConcurrentUpdateError(err)) await ctx?.refresh?.();
+      if (isConcurrentUpdateError(err)) await ctx?.reread?.();
     } finally {
       setBusy(false);
     }
@@ -314,7 +315,7 @@ export function useStageChange(
       await updateVia(dataSource, objectName!, recordId!, { ...values, [statusField!]: stage.value }, ifMatchOf());
     } catch (err) {
       const concurrent = isConcurrentUpdateError(err);
-      if (concurrent) await ctx?.refresh?.();
+      if (concurrent) await ctx?.reread?.();
       const named = concurrent ? [] : (extractFieldErrors(err) ?? []).filter((e) => !!e.message);
       if (named.length > 0 && !declaredUserMessage(err)) throw err;
       const line = stageRefusalLines(err, statusField!, labelOf, t).join(' ');
@@ -323,7 +324,7 @@ export function useStageChange(
       setBusy(false);
     }
     setTarget(null);
-    await ctx?.refresh?.();
+    await ctx?.reread?.();
   };
 
   const dialog = collectFields
