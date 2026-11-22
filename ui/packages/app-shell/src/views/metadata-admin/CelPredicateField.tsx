@@ -75,6 +75,7 @@ import {
   type CelValueType,
 } from './celAuthoring.js';
 import { useServerHoldAt, type ServerDiagnosticEntry } from './draftVerdict.js';
+import { isMultiValueField } from '@objectstack/spec/data';
 
 const LINT_DEBOUNCE_MS = 250;
 
@@ -110,6 +111,15 @@ export interface CelPredicateFieldProps {
    * `record.<name>` in `record` scope, the bare name otherwise.
    */
   fieldOptions?: ReadonlyArray<{ name: string; label: string }>;
+  /**
+   * The object's field definitions — each field's `type` and `multiple`. The
+   * editor reads them through `isMultiValueField` (`@objectstack/spec/data`),
+   * as the object draft check does, and hands the list-valued ones to the lint
+   * as `multiValueFields`, so `record.<list field> == 'a'` is refused
+   * (`list-equality`) while the author types, not first on save. Omitted: no
+   * field is judged a list, the hint is exactly what it was before this prop.
+   */
+  fieldDefs?: ReadonlyArray<CelFieldDef>;
   /** Which RLS clause this is (turns on the blocking verdicts of `@objectstack/lint`'s RLS rule). */
   clause?: 'using' | 'check';
   /**
@@ -185,7 +195,21 @@ export interface CelPredicateFieldProps {
   id?: string;
 }
 
+/** One field definition {@link CelPredicateFieldProps.fieldDefs} reads. */
+export interface CelFieldDef {
+  name: string;
+  type?: unknown;
+  multiple?: unknown;
+}
+
 const EMPTY_FIELDS: string[] = [];
+
+/** The list-valued fields among `defs`, by `isMultiValueField`. */
+export function multiValueFieldsOf(defs: ReadonlyArray<CelFieldDef>): string[] {
+  return defs
+    .filter((d) => typeof d.type === 'string' && isMultiValueField({ type: d.type, multiple: d.multiple === true }))
+    .map((d) => d.name);
+}
 
 /**
  * A finding's words: the producer's own message as written, or — for an
@@ -208,6 +232,7 @@ export function CelPredicateField({
   objectName,
   fieldNames = EMPTY_FIELDS,
   fieldOptions,
+  fieldDefs,
   clause,
   scope,
   roots,
@@ -257,6 +282,8 @@ export function CelPredicateField({
 
   // Stable deps for the identifier arrays (parent may pass fresh arrays each render).
   const fieldsKey = fieldNames.join(',');
+  const multiValueFields = React.useMemo(() => (fieldDefs ? multiValueFieldsOf(fieldDefs) : undefined), [fieldDefs]);
+  const multiKey = multiValueFields?.join(',');
   const rootsKey = roots ? roots.join(',') : '';
 
   // objectstack#27482 — the server's errors at this editor's path while the
@@ -299,7 +326,7 @@ export function CelPredicateField({
   React.useEffect(() => {
     let cancelled = false;
     const handle = setTimeout(() => {
-      const hint = { objectName, fields: fieldNames, clause, scope, slot, role };
+      const hint = { objectName, fields: fieldNames, multiValueFields, clause, scope, slot, role };
       lintCelPredicate(value, hint).then((res) => {
         if (cancelled) return;
         setIssues(res);
@@ -319,7 +346,7 @@ export function CelPredicateField({
       clearTimeout(handle);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, objectName, fieldsKey, clause, scope, slot, role]);
+  }, [value, objectName, fieldsKey, multiKey, clause, scope, slot, role]);
 
   /* Report "clean" upward when the field empties (no debounce needed). */
   React.useEffect(() => {
