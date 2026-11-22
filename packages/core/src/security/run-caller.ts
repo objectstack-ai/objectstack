@@ -22,10 +22,13 @@
  *
  * ## Where it is set
  *
- * Only by service-automation's system arm (`resolveRunDataContext`), on a
- * segment a decision switched to its decider. Read by plugin-security's
- * organization wall and nothing else. It grants nothing: it names whose wall
- * judges the run, or that none does.
+ * By service-automation's system arm (`resolveRunDataContext`), on a segment a
+ * decision switched to its decider. When the run began for no caller (`null`),
+ * objectql's hook session of the segment's writes carries it too
+ * (`buildSession`), and the record-change trigger reads it there, so a run
+ * such a write starts begins for no caller as well. Read by plugin-security's
+ * organization wall and that trigger, and nothing else. It grants nothing: it
+ * names whose wall judges the run, or that none does.
  *
  * ## Why a symbol
  *
@@ -34,6 +37,11 @@
  * of the context (a hook the run's write fires, a cascade leg), as the
  * app-automation elevation mark does. `Symbol.for`, so an ESM and a CJS build
  * agree on it.
+ *
+ * Being undeclared, the mark does not survive `ExecutionContextSchema.parse`,
+ * which keeps declared keys only, and `ObjectQL.createContext` carries only
+ * the app-automation elevation mark across. No path parses a marked context
+ * today; a producer that comes to parse one carries the mark across itself.
  */
 
 /** The context key of the mark. See the module header. */

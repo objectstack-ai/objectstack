@@ -86,10 +86,8 @@ export interface RecycleBinRemovalHost {
  * is `deny`. The verdict is the one the security layer recorded on the
  * dispatch when there is one (`recordedVerdict`, read as the driver reads it:
  * a value that does not parse is absent), and otherwise the engine's own
- * (`engineLayer0Verdict`), the verdict the driver options fall back to. A
- * system context with no recorded verdict is never denied; one the security
- * layer recorded a verdict for (an app-authored elevation held to its
- * caller's wall) is answered by it.
+ * (`engineLayer0Verdict`), the verdict the driver options fall back to. The
+ * system is never denied.
  *
  * An entry carries no predicate a wall could compose a `deny` sentinel into,
  * and `deny` with no active organization projects to NO driver scope
@@ -100,13 +98,9 @@ export function recycleBinWallDenies(
   context: ExecutionContext | undefined,
   recordedVerdict?: unknown,
 ): boolean {
-  // A verdict recorded on the dispatch is the wall's answer for whoever the
-  // context is: the security layer records one for a system context only
-  // where it holds that context to its caller's wall (an app-authored
-  // elevation, plugin-security), and never for the platform's own.
+  if (context?.isSystem === true) return false;
   const recorded = recordedVerdict === undefined ? undefined : TenantLayer0VerdictSchema.safeParse(recordedVerdict);
   if (recorded?.success) return recorded.data.kind === 'deny';
-  if (context?.isSystem === true) return false;
   const activeOrganization =
     context?.tenantId !== undefined && context.tenantId !== null && String(context.tenantId) !== ''
       ? String(context.tenantId)

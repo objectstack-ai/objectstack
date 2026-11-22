@@ -6,10 +6,13 @@
  *
  * App-authored automation elevates by declaration: an action body always, a
  * hook by `runAs: 'system'` (or a system context it inherits, or its
- * `ctx.api.sudo()`), a flow by `runAs: 'system'`. Each runs
- * `{ ...the caller's envelope, isSystem: true }`, and the data middleware
- * returns `next()` for `isSystem` ahead of every gate below it, the Layer 0
- * tenant wall among them. Elevation lifts the caller's business rules (Layer
+ * `ctx.api.sudo()`), a flow by `runAs: 'system'`. An action body and a hook
+ * run `{ ...the caller's envelope, isSystem: true }`; a flow run's data nodes
+ * run the envelope the automation engine builds from the run's own context
+ * (`resolveRunDataContext`, service-automation: the user it runs for, that
+ * user's active organization, membership set and posture rung). The data
+ * middleware returns `next()` for `isSystem` ahead of every gate below it, the
+ * Layer 0 tenant wall among them. Elevation lifts the caller's business rules (Layer
  * 1: object and field permissions, ownership, sharing); it does not lift the
  * organization wall. So the wall that judges the elevation's operation is the
  * caller's own, the one the caller's plain door composes, and the elevation
@@ -30,11 +33,15 @@
  *   recorded on the operation, so the engine's own driver scope follows it;
  * - a predicate write takes the same filter, so it matches only rows the
  *   caller's wall admits;
- * - a by-id write is checked against the row it names first: a row the
- *   caller's wall does not admit answers as a row that is not there;
+ * - a by-id write is checked against the row it names first, read inside the
+ *   transaction the write carries: a row the caller's wall does not admit
+ *   answers as a row that is not there;
  * - an insert lands only where the caller's wall lets a new row land: never
  *   without an active organization on a walled tenant object, and never in an
  *   organization the wall does not admit;
+ * - a write that names an organization names one the wall admits, and an
+ *   update never empties the organization of a row — judged for every caller,
+ *   since the engine keeps an elevated payload's organization as sent;
  * - a caller the wall DENIES — no active organization under `isolated`, an
  *   empty membership set under `group`, a person outside every organization
  *   under `single` (ADR-0093 D8.1, as amended) — reads nothing (zero rows, no
@@ -56,11 +63,18 @@
  *   one (the states the wall can deny);
  * - the caller is a platform operator (the crossing the engine does not grant);
  * - the object is federated: the engine withholds every driver scope there, so
- *   Layer 0's predicate is the only wall it has.
+ *   Layer 0's predicate is the only wall it has;
+ * - the operation is a decided segment's: its own facts are its decider's, so
+ *   the engine's projection of them is not its caller's wall;
+ * - the write names or empties the organization column (above).
  *
- * When the context lacks the door's facts (a flow run's envelope carries no
- * permission sets), they are resolved for the caller by the one resolver the
- * request path uses (`resolveUserAuthzGrants`), so the verdict is the door's.
+ * The wall asks Layer 0 alone: the permission sets are loaded only where they
+ * decide a platform operator's crossing. When the context lacks the facts the
+ * wall reads (a decided segment, a hook under a platform write that names a
+ * user), they are resolved for the caller by the one resolver the request
+ * path uses (`resolveUserAuthzGrants`), once per flow run
+ * ({@link RunCallerFactsMemo}). A system run's own context carries its
+ * caller's membership set and rung from run setup.
  *
  * ## Which elevations: the predicate the identity refusal reads
  *
@@ -78,11 +92,12 @@
  * by a write that carried no user — has no door and no active organization to
  * miss, and is unchanged, in every segment: a run that began for no caller
  * stays unjudged after a human decision too, though the decider is then its
- * attribution user, and a run that began for a caller goes on being judged by
- * that caller's wall (`runCallerOf`, `@objectstack/core`).
+ * attribution user, and so does a run a write of such a segment starts; a run
+ * that began for a caller goes on being judged by that caller's wall
+ * (`runCallerOf`, `@objectstack/core`).
  */
 
-import { isOutsideEveryOrganization, rlsOperationForVerb, runCallerOf } from '@objectstack/core';
+import { isOutsideEveryOrganization, POSTURE_LADDER, rlsOperationForVerb, runCallerOf } from '@objectstack/core';
 import type { TenancyPosture, TenantLayer0Verdict } from '@objectstack/spec/security';
 
 import { PermissionDeniedError } from './errors.js';
@@ -96,9 +111,6 @@ const WRITE_CLASS: ReadonlySet<string> = new Set(['insert', 'update', 'delete'])
 
 /** The removal class (`delete`, and `purge` mapped onto it): answered by the read rule when the wall denies. */
 const REMOVAL = 'delete';
-
-/** The recycle bin's verbs, which its doors dispatch with neither a predicate nor a row id. */
-const BIN_VERBS: ReadonlySet<string> = new Set(['purge', 'restore']);
 
 /** The organization column the wall's filters and a payload name. */
 const ORGANIZATION_FIELD = 'organization_id';
@@ -178,7 +190,8 @@ export function callerMayLackOrganization(callerContext: Record<string, unknown>
 export function carriesDoorFacts(callerContext: Record<string, unknown>): boolean {
   if (!Array.isArray(callerContext.accessible_org_ids)) return false;
   if (Array.isArray(callerContext.permissions)) return true;
-  return typeof callerContext.posture === 'string' && callerContext.posture !== '' && callerContext.posture !== 'PLATFORM_ADMIN';
+  const rung = callerContext.posture;
+  return typeof rung === 'string' && rung !== 'PLATFORM_ADMIN' && (POSTURE_LADDER as readonly string[]).includes(rung);
 }
 
 /** The refusal: the standard catalog's `PERMISSION_DENIED`, naming what is missing. */
@@ -443,19 +456,10 @@ export async function applyAppAutomationOrganizationWall(
       // caller's wall admits it; a row it does not admit answers as absent.
       // Read where the write runs: inside the transaction it carries.
       const id = extractSingleId(opCtx);
-      if (id === null) {
-        // The recycle bin's own verbs (`purge(entryId)`, `empty(object)`,
-        // `restore(entryId)`) name an entry, not a row, and carry no predicate:
-        // the bin scopes them by the verdict recorded on the dispatch, as it
-        // scopes the plain door's (a denied caller sees no entry: `purge`
-        // answers `false`, `empty` `0`). Every other write that names neither
-        // is refused rather than run past the wall.
-        if (BIN_VERBS.has(operation)) {
-          opCtx.tenantLayer0Verdict = tenantLayer0Verdict;
-          return;
-        }
-        throw appAutomationOrganizationWallRefusal(caller.source, object, operation, callerContext);
-      }
+      // A write that names neither a row nor a predicate (the recycle bin's
+      // entry verbs) is refused rather than run past the wall: the bin exempts
+      // a system context from the verdict a dispatch records.
+      if (id === null) throw appAutomationOrganizationWallRefusal(caller.source, object, operation, callerContext);
       if (denied || !(await deps.rowInScope(object, id, layer0, opCtx.context))) throw deps.notFound(object, id, opCtx.context);
       return;
     }

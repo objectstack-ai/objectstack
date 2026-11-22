@@ -8,7 +8,10 @@
  * are the acting user's, so they carry that user's set: the one the launch
  * door handed the run (an empty set included), or the one run setup resolves
  * through the same resolver the request path uses. A `runAs:'system'` run
- * carries none.
+ * that names a user carries that user's set and posture rung too, seeded once
+ * at run setup: the organization wall it meets is the user's (ADR-0095 D1),
+ * and its operations are judged on them with no resolution of their own. It
+ * carries no grants.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -75,11 +78,38 @@ describe('[ADR-0093 D8.1] a runAs:\'user\' run carries the acting user\'s member
         expect(resolveRunDataContext(run)).toMatchObject({ accessible_org_ids: ['org_1'] });
     });
 
-    it('a runAs:\'system\' run carries no set', async () => {
+    it('a runAs:\'system\' run that names a user carries that user\'s set and rung, and no grants', async () => {
         const run: any = { userId: 'u_mia', tenantId: 'org_1', runAs: 'system' };
-        const h = host(MEMBER_GRANTS);
+        const h = host({ ...MEMBER_GRANTS, accessible_org_ids: ['org_1', 'org_2'], posture: 'MEMBER' });
         await seedRunGrants.call(h, 'lead_triage', run, 'triggering');
+        expect(h.userGrantsResolver).toHaveBeenCalledTimes(1);
+        const data = resolveRunDataContext(run) as Record<string, unknown>;
+        expect(data).toMatchObject({ isSystem: true, userId: 'u_mia', accessible_org_ids: ['org_1', 'org_2'], posture: 'MEMBER' });
+        expect(data.permissions).toBeUndefined();
+        expect(data.positions).toBeUndefined();
+    });
+
+    it('a runAs:\'system\' run that names no user resolves nothing and carries no set', async () => {
+        const run: any = { tenantId: 'org_1', runAs: 'system' };
+        const h = host(MEMBER_GRANTS);
+        await seedRunGrants.call(h, 'nightly', run, 'triggering');
+        expect(h.userGrantsResolver).not.toHaveBeenCalled();
         expect('accessible_org_ids' in (resolveRunDataContext(run) as object)).toBe(false);
+    });
+
+    it('a runAs:\'system\' run\'s decided segment seeds nothing: the wall judges it by the run\'s caller', async () => {
+        const run: any = { userId: 'u_decider', tenantId: 'org_1', runAs: 'system', triggerUserId: 'u_mia' };
+        const h = host(MEMBER_GRANTS);
+        await seedRunGrants.call(h, 'lead_triage', run, 'deciding');
+        expect(h.userGrantsResolver).not.toHaveBeenCalled();
+    });
+
+    it('a runAs:\'system\' run whose user\'s set cannot be resolved carries an empty one, and says so', async () => {
+        const run: any = { userId: 'u_mia', tenantId: 'org_1', runAs: 'system' };
+        const h = { ...host(MEMBER_GRANTS), userGrantsResolver: vi.fn(async () => { throw new Error('grants store unreachable'); }) };
+        await seedRunGrants.call(h as any, 'lead_triage', run, 'triggering');
+        expect(resolveRunDataContext(run)).toMatchObject({ accessible_org_ids: [] });
+        expect(h.logger.warn).toHaveBeenCalledTimes(1);
     });
 
     it('only an array is read as a set', () => {

@@ -381,7 +381,11 @@ export function runPrincipalKind(context: AutomationContext | undefined): 'agent
  *    PLUS the trigger's `userId` / `tenantId` when the trigger resolved them
  *    (#5494; after an approval decision `userId` is the decider, the run's
  *    elevation unchanged) — the security middleware short-circuits on `isSystem`, so the
- *    run reads/writes with full access, bypassing RLS — save its writes to the
+ *    run bypasses RLS (its business rules: object and field permissions,
+ *    ownership, sharing) — but not the organization wall, which judges a run
+ *    for a user as that user's own request is judged (plugin-security's
+ *    app-automation wall; a run that began for no user is not judged by it) —
+ *    and save its writes to the
  *    identity-assignment objects (`sys_user_position`, `sys_user_permission_set`,
  *    `sys_invitation`, `sys_member`), which plugin-security refuses for a system
  *    context that carries a `flowRunId` (#25251), so assigning authority from a
@@ -498,7 +502,9 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
       // hotcrm#548-family fix): the tenant wall survives elevation for an
       // org-triggered run.
       // A run that must genuinely cross orgs is a user-less one (a schedule
-      // carries no org, nothing narrows) or sets explicit fields.
+      // carries no org, nothing narrows). A run for a user does not: naming
+      // another organization in a written row is judged against that user's
+      // organization wall (plugin-security), as the user's own request is.
       ...(context.tenantId ? { tenantId: context.tenantId } : {}),
       // Elevation grants this run everything, so no `positions` /
       // `permissions` are read for its own operations. They matter only to a

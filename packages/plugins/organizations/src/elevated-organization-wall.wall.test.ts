@@ -4,8 +4,9 @@
  * An app-authored elevation sees through the organization wall exactly what
  * its caller's plain door sees (ADR-0095 D1, ADR-0123 D1/D2).
  *
- * An action body, a hook that runs as system and a flow that runs as system
- * each run `{ ...the caller's envelope, isSystem: true }`. Elevation lifts the
+ * An action body and a hook that runs as system run `{ ...the caller's
+ * envelope, isSystem: true }`, and a flow that runs as system runs the envelope
+ * the automation engine builds for the user it runs for. Elevation lifts the
  * caller's business rules; it does not lift the organization wall. So for a
  * caller with no active organization, such an elevation reads nothing of a
  * tenant-scoped object, its delete there is answered by that read rule (a

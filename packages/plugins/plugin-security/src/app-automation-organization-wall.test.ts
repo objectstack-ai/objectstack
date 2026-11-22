@@ -16,6 +16,8 @@ import {
   appAutomationWallCaller,
   applyAppAutomationOrganizationWall,
   callerMayLackOrganization,
+  carriesDoorFacts,
+  RunCallerFactsMemo,
   type AppAutomationWallDeps,
   type CallerLayer0Answer,
 } from './app-automation-organization-wall.js';
@@ -169,7 +171,7 @@ describe('an app-authored elevation sees through the organization wall what its 
         applyAppAutomationOrganizationWall({ object: 'task', operation: 'update', context: actionBody(), data: { id: 't_9', status: 'x' } }, deps),
       );
       expect([e.code, e.status]).toEqual(['RECORD_NOT_FOUND', 404]);
-      expect(deps.rowInScope).toHaveBeenCalledWith('task', 't_9', { organization_id: { $in: ['org_a', 'org_b'] } });
+      expect(deps.rowInScope).toHaveBeenCalledWith('task', 't_9', { organization_id: { $in: ['org_a', 'org_b'] } }, expect.anything());
     });
 
     it('control: a by-id write of a row the wall admits passes on', async () => {
@@ -283,6 +285,115 @@ describe('an app-authored elevation sees through the organization wall what its 
     });
   });
 
+  describe('a write that names or empties the organization, for every judged caller', () => {
+    // A member with an active organization and its membership set: the
+    // engine's projection already scopes its reads, so only its payload is asked.
+    const member = () => actionBody({ tenantId: 'org_a' });
+
+    it('an insert naming another organization is refused 403, though the caller has an active organization', async () => {
+      const deps = depsFor(ORG_A);
+      const e = await refusalOf(() =>
+        applyAppAutomationOrganizationWall({ object: 'task', operation: 'insert', context: member(), data: { name: 'x', organization_id: 'org_b' } }, deps),
+      );
+      expect([e.code, e.status]).toEqual(['PERMISSION_DENIED', 403]);
+      expect(deps.callerLayer0).toHaveBeenCalledOnce();
+    });
+
+    it('an update moving a row into another organization, or into none, is refused 403', async () => {
+      for (const organization_id of ['org_b', null, '']) {
+        const e = await refusalOf(() =>
+          applyAppAutomationOrganizationWall(
+            { object: 'task', operation: 'update', context: member(), data: { id: 't_1', organization_id } },
+            depsFor(ORG_A),
+          ),
+        );
+        expect([e.code, e.status]).toEqual(['PERMISSION_DENIED', 403]);
+      }
+    });
+
+    it('control: a write naming the caller’s own organization passes, and one naming none asks nothing', async () => {
+      await expect(
+        applyAppAutomationOrganizationWall(
+          { object: 'task', operation: 'insert', context: member(), data: { name: 'x', organization_id: 'org_a' } },
+          depsFor(ORG_A),
+        ),
+      ).resolves.toBeUndefined();
+      const quiet = depsFor(ORG_A);
+      await applyAppAutomationOrganizationWall({ object: 'task', operation: 'insert', context: member(), data: { name: 'x' } }, quiet);
+      expect(quiet.callerLayer0).not.toHaveBeenCalled();
+    });
+
+    it('control: an object outside the wall admits any organization the payload names', async () => {
+      await expect(
+        applyAppAutomationOrganizationWall(
+          { object: 'catalog', operation: 'insert', context: member(), data: { organization_id: 'org_b' } },
+          depsFor(NONE),
+        ),
+      ).resolves.toBeUndefined();
+    });
+  });
+
+  describe('the by-id check is read where the write runs', () => {
+    it('the write’s own context, transaction included, is handed to the check', async () => {
+      const deps = depsFor(ORG_A, { inScope: true });
+      const context = { ...actionBody({ tenantId: 'org_a', posture: 'PLATFORM_ADMIN' }), transaction: { handle: 'trx_1' } };
+      await applyAppAutomationOrganizationWall({ object: 'task', operation: 'update', context, data: { id: 't_1', touched: 'x' } }, deps);
+      expect(vi.mocked(deps.rowInScope).mock.calls[0]?.[3]).toBe(context);
+    });
+  });
+
+  describe('an external object that states no organization scope', () => {
+    it('the refusal names the undeclared scope, not an active organization the caller has', async () => {
+      const deps = depsFor(DENY, {
+        isFederated: vi.fn(() => true),
+        callerLayer0: vi.fn(async () => ({ layer0: RLS_DENY_FILTER, tenantLayer0Verdict: DENY, undeclaredExternalScopePosture: 'isolated' as const })),
+      });
+      const e = await refusalOf(() =>
+        applyAppAutomationOrganizationWall({ object: 'remote', operation: 'update', context: actionBody({ tenantId: 'org_a' }), data: { id: 'r_1' } }, deps),
+      );
+      expect([e.code, e.status]).toEqual(['PERMISSION_DENIED', 403]);
+      expect(e.message).toContain('states none the organization wall can enforce');
+      expect(e.message).not.toContain('no active organization');
+    });
+  });
+
+  describe('the caller’s facts, once per run', () => {
+    it('a run’s caller is resolved once, a different run or user resolves again, and an operation of no run is never memoised', async () => {
+      const memo = new RunCallerFactsMemo<string>();
+      const load = vi.fn(async () => 'facts');
+      await memo.resolve('run_1', 'u_a', 'org_a', load);
+      await memo.resolve('run_1', 'u_a', 'org_a', load);
+      expect(load).toHaveBeenCalledTimes(1);
+      await memo.resolve('run_2', 'u_a', 'org_a', load);
+      await memo.resolve('run_1', 'u_b', 'org_a', load);
+      await memo.resolve(undefined, 'u_a', 'org_a', load);
+      await memo.resolve(undefined, 'u_a', 'org_a', load);
+      expect(load).toHaveBeenCalledTimes(5);
+    });
+
+    it('a failed resolution is not kept, and an entry expires', async () => {
+      let t = 0;
+      const memo = new RunCallerFactsMemo<string>(256, 1_000, () => t);
+      const failing = vi.fn(async () => {
+        throw new Error('store down');
+      });
+      await expect(memo.resolve('run_1', 'u_a', undefined, failing)).rejects.toThrow('store down');
+      const load = vi.fn(async () => 'facts');
+      await memo.resolve('run_1', 'u_a', undefined, load);
+      t = 2_000;
+      await memo.resolve('run_1', 'u_a', undefined, load);
+      expect(load).toHaveBeenCalledTimes(2);
+    });
+
+    it('a context carrying the membership set and a rung below the operator’s needs no resolution', () => {
+      expect(carriesDoorFacts({ accessible_org_ids: ['org_a'], posture: 'MEMBER' })).toBe(true);
+      expect(carriesDoorFacts({ accessible_org_ids: ['org_a'], permissions: [] })).toBe(true);
+      expect(carriesDoorFacts({ accessible_org_ids: ['org_a'], posture: 'PLATFORM_ADMIN' })).toBe(false);
+      expect(carriesDoorFacts({ accessible_org_ids: ['org_a'] })).toBe(false);
+      expect(carriesDoorFacts({ permissions: [] })).toBe(false);
+    });
+  });
+
   describe('which contexts the rule reads', () => {
     it('platform system work that runs for no caller, or carries neither a run nor the mark, is unchanged', async () => {
       const deps = depsFor(DENY);
@@ -306,6 +417,21 @@ describe('an app-authored elevation sees through the organization wall what its 
       expect(appAutomationWallCaller(decided)).toBeUndefined();
       await expect(applyAppAutomationOrganizationWall({ object: 'task', operation: 'update', context: decided, data: { id: 't' } }, deps)).resolves.toBeUndefined();
       expect(deps.callerLayer0).not.toHaveBeenCalled();
+    });
+
+    it('a decided segment is always asked, though the caller’s own facts would leave it to the engine', async () => {
+      const decided = markRunCaller(
+        systemFlow({ userId: 'u_decider', tenantId: 'org_a', accessible_org_ids: ['org_c'], posture: 'MEMBER' }),
+        'u_alice',
+      );
+      const deps = depsFor(UNION, {
+        completeCaller: vi.fn(async (c: Record<string, unknown>) => ({ ...c, permissions: [], accessible_org_ids: ['org_a', 'org_b'] })),
+      });
+      const opCtx: any = { object: 'task', operation: 'find', context: decided, ast: { object: 'task' } };
+      await applyAppAutomationOrganizationWall(opCtx, deps);
+      expect(deps.callerLayer0).toHaveBeenCalledOnce();
+      expect(vi.mocked(deps.callerLayer0).mock.calls[0]?.[0]).toMatchObject({ userId: 'u_alice' });
+      expect(opCtx.ast.where).toEqual({ organization_id: { $in: ['org_a', 'org_b'] } });
     });
 
     it('a decided segment of a run that began for a caller is judged as that caller, with none of the segment’s own facts', () => {
