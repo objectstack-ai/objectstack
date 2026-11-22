@@ -31,7 +31,7 @@ vi.mock('@object-ui/components', async (importOriginal) => {
 
 import { ObjectGrid } from '../ObjectGrid';
 import { registerAllFields } from '@object-ui/fields';
-import { ActionProvider } from '@object-ui/react';
+import { ActionProvider, SchemaRendererProvider } from '@object-ui/react';
 import { __clearRecordCrudVerdictCache } from '../hooks/useRecordCrudVerdicts';
 import { __resetApprovalsServiceLatch } from '../hooks/useRowApprovalLocks';
 import { installExplainDouble } from './explainDouble';
@@ -121,7 +121,10 @@ function renderGrid(ds: any) {
   };
   return render(
     <ActionProvider>
-      <ObjectGrid schema={schema} dataSource={ds} cellSelection />
+      {/* The console's provider: the cell's picker reads its data source here. */}
+      <SchemaRendererProvider dataSource={ds}>
+        <ObjectGrid schema={schema} dataSource={ds} cellSelection />
+      </SchemaRendererProvider>
     </ActionProvider>,
   );
 }
