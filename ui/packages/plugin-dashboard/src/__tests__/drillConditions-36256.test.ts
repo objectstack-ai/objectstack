@@ -45,6 +45,18 @@ describe('drillListConditions', () => {
     ]);
   });
 
+  it("words a date field's open bounds as the list's date filter does", () => {
+    const { chips } = drillListConditions(
+      { close_date: { $gt: '2026-09-30', $lt: '2027-01-01' }, amount: { $lt: 5 } },
+      { dateFields: new Set(['close_date']) },
+    );
+    expect(chips.conditions.map((c) => [c.field, c.operator])).toEqual([
+      ['close_date', 'after'],
+      ['close_date', 'before'],
+      ['amount', 'less_than'],
+    ]);
+  });
+
   it('answers no rows and no rest for no filter', () => {
     expect(drillListConditions(undefined)).toEqual({ chips: { logic: 'and', conditions: [] }, rest: undefined });
   });

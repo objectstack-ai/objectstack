@@ -28,6 +28,7 @@
 import React from 'react';
 import { ComponentRegistry, resolveFilterPlaceholders, resolveNameField } from '@object-ui/core';
 import { SchemaRenderer, SchemaRendererContext, useDrillNavigation, useFilterScope } from '@object-ui/react';
+import { FILTER_DATE_LIKE_TYPES } from '@object-ui/types';
 import { Loader2 } from 'lucide-react';
 import { drillListConditions } from './drillConditions';
 
@@ -56,6 +57,9 @@ export interface DrillRecordListProps {
 
 type Summary = string | Record<string, unknown>;
 
+/** The types the list's filter draws as dates (its own set). */
+const DATE_TYPES: ReadonlySet<string> = new Set<string>(FILTER_DATE_LIKE_TYPES);
+
 const rowId = (row: Record<string, unknown>): string | undefined => {
   const id = row?.id ?? row?._id;
   return id == null || id === '' ? undefined : String(id);
@@ -75,25 +79,32 @@ export const DrillRecordList: React.FC<DrillRecordListProps> = ({
   const { openRecord } = useDrillNavigation();
   const scope = useFilterScope();
   // One resolution per mount: a chip shows the value the query compares.
-  const conditions = React.useMemo(
-    () => drillListConditions(resolveFilterPlaceholders(filter, scope) as Record<string, unknown> | undefined),
+  const resolved = React.useMemo(
+    () => resolveFilterPlaceholders(filter, scope) as Record<string, unknown> | undefined,
     // The drill's filter is fixed for the life of this mount (the dialog keys it).
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
 
-  // The object's name field leads the default columns, as on the list page.
-  const [nameField, setNameField] = React.useState<string | null | undefined>(
-    columns?.length || typeof dataSource?.getObjectSchema !== 'function' ? null : undefined,
+  // The object's definition: its name field leads the default columns, as on
+  // the list page, and its date fields word their bounds as the list does.
+  const [definition, setDefinition] = React.useState<unknown>(
+    typeof dataSource?.getObjectSchema !== 'function' ? null : undefined,
   );
   React.useEffect(() => {
-    if (nameField !== undefined) return;
+    if (definition !== undefined) return;
     let live = true;
     Promise.resolve(dataSource.getObjectSchema(objectName))
-      .then((def: unknown) => { if (live) setNameField(resolveNameField(def) ?? null); })
-      .catch(() => { if (live) setNameField(null); });
+      .then((def: unknown) => { if (live) setDefinition(def ?? null); })
+      .catch(() => { if (live) setDefinition(null); });
     return () => { live = false; };
-  }, [dataSource, objectName, nameField]);
+  }, [dataSource, objectName, definition]);
+  const nameField = definition === undefined ? undefined : columns?.length ? null : resolveNameField(definition) ?? null;
+  const conditions = React.useMemo(() => {
+    const fields = (definition as { fields?: Record<string, { type?: string }> } | null)?.fields ?? {};
+    const dateFields = new Set(Object.keys(fields).filter((f) => DATE_TYPES.has(fields[f]?.type ?? '')));
+    return drillListConditions(resolved, { dateFields });
+  }, [definition, resolved]);
 
   const [added, setAdded] = React.useState<string[]>([]);
   const [summaries, setSummaries] = React.useState<Record<string, Summary>>({});

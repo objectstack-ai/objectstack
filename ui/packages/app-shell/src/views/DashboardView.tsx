@@ -213,6 +213,12 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
   const missedName = !dashboard && dashboardsSettled && !previewDrafts && dashboardName ? dashboardName : null;
   const access = useMetaItemRefusal('dashboard', missedName);
 
+  // Drill navigation: the drill list's 「Open in list」 and its record pages,
+  // which name this dashboard as their way back (objectstack-ai/objectstack#36256).
+  const drillNavigation = useRecordListDrillNavigation(
+    dashboard ? resolveKeyedI18nLabel(dashboard.label, t) || dashboard.name : undefined,
+  );
+
   // ---- Runtime capability gate --------------------------------------------
   // Hide widgets whose `requiresObject` is not registered (mirrors
   // NavigationItem.requiresObject for nav entries). Defaults to widget.object
@@ -251,12 +257,6 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
     if (filtered.length === widgets.length) return dashboard;
     return { ...dashboard, widgets: filtered };
   }, [dashboard, unregistered]);
-
-  // Drill navigation: the drill list's 「Open in list」 and its record pages,
-  // which name this dashboard as their way back (objectstack-ai/objectstack#36256).
-  const drillNavigation = useRecordListDrillNavigation(
-    dashboard ? resolveKeyedI18nLabel(dashboard.label, t) || dashboard.name : undefined,
-  );
 
   // ---- Loading / not-found guards -----------------------------------------
   if (isLoading) {

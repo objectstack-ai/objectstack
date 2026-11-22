@@ -91,8 +91,27 @@ export interface DrillListConditions {
   rest: Record<string, unknown> | undefined;
 }
 
+/**
+ * The words the list's chips give a date bound: `before` / `after` lower to
+ * the same `<` / `>` as `less_than` / `greater_than`, and are the operators
+ * the list's date filter draws, so a half-open date bucket reads 「before
+ * 2027-01-01」, not an operator id.
+ */
+const DATE_ROW_OPERATOR: Readonly<Record<string, FilterBuilderRow['operator']>> = {
+  less_than: 'before',
+  greater_than: 'after',
+};
+
+export interface DrillListConditionOptions {
+  /** The fields that hold a date or a date-time (read from the object's definition). */
+  dateFields?: ReadonlySet<string>;
+}
+
 /** Split a resolved drill filter into chip rows and the rest (see the file header). */
-export function drillListConditions(filter: Record<string, unknown> | undefined): DrillListConditions {
+export function drillListConditions(
+  filter: Record<string, unknown> | undefined,
+  { dateFields }: DrillListConditionOptions = {},
+): DrillListConditions {
   const conditions: FilterBuilderRow[] = [];
   const rest: Record<string, unknown>[] = [];
   const seen = new Set<string>();
@@ -105,7 +124,9 @@ export function drillListConditions(filter: Record<string, unknown> | undefined)
     }
     // A condition stated twice (the widget filter's range and the clicked
     // bucket's) ANDs to itself: one chip says it.
-    for (const row of rows) {
+    for (const stated of rows) {
+      const dated = dateFields?.has(stated.field) ? DATE_ROW_OPERATOR[stated.operator] : undefined;
+      const row = dated ? { ...stated, operator: dated } : stated;
       const key = JSON.stringify([row.field, row.operator, row.value]);
       if (seen.has(key)) continue;
       seen.add(key);
