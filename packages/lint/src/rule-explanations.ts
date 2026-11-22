@@ -3641,6 +3641,52 @@ const TITLE_UNRESOLVABLE_EXPLANATION: RuleExplanation = {
   ],
 };
 
+/** What `validate-record-page-header.ts` cannot read (both of its entries write it out). */
+const RECORD_PAGE_HEADER_LIMITS =
+  'What it cannot see: an action\'s `visible` / `enabled` predicates and the user\'s permissions, which can ' +
+  'hide the first action on one record and not another; actions another installed package attaches to the ' +
+  'object, which the standard page draws and this stack does not declare; and the served declaration order ' +
+  'itself, estimated as the object\'s own `actions` and then the stack\'s `actions` bound to it by ' +
+  '`objectName`, in source order. So it can miss a disagreement, and can name one the runtime would hide. A ' +
+  'header naming an action this stack does not declare on the object is not judged. Print pages, slotted ' +
+  'pages, html and react pages, and record pages bound to no declared object are not judged either.';
+
+const RECORD_PAGE_HEADER_TITLE_DIFFERS_EXPLANATION: RuleExplanation = {
+  rule: 'record-page-header-title-differs',
+  covers: 'why one record shows two titles',
+  paragraphs: [
+    'An object\'s hand-written full record page (`type: \'record\'`, `kind: \'full\'`) is drawn on the ' +
+      'desktop full page only. On a phone, in the side drawer a list opens, in a split pane and in an ' +
+      'interface page\'s preview the record draws the platform\'s standard page, built from the object, and ' +
+      'that page titles the record by the object\'s name field (`nameField`, else the derived title field), ' +
+      'the name every list, search result and lookup shows too. A `page:header` `title` that is anything but ' +
+      'exactly that field\'s `{field}` token titles the same record differently on the full page.',
+    'The title has one declaration point, the object. Delete the header\'s `title` (it then derives from ' +
+      'the record), or change `nameField` to rename the record everywhere. A header that should read ' +
+      'differently on every surface belongs in a `kind: \'slotted\'` page\'s `header` slot, which the ' +
+      'standard page draws everywhere. A warning: the page renders as written.',
+    RECORD_PAGE_HEADER_LIMITS,
+  ],
+};
+
+const RECORD_PAGE_HEADER_ACTIONS_DIFFER_EXPLANATION: RuleExplanation = {
+  rule: 'record-page-header-actions-differ',
+  covers: 'why one record shows two primary buttons',
+  paragraphs: [
+    'Both record headers sort their actions with one rule: `order` ascending (unset is 0), then ' +
+      '`variant: \'primary\'`, then their incoming order; the primary button is the first action declaring ' +
+      '`variant: \'primary\'`, else the first button. The incoming order is where the two pages differ: the ' +
+      'full page takes it from the header\'s `actions` list, the standard page (phone, drawer, preview) from ' +
+      'the object\'s action declaration order, and the standard page draws every action placed at ' +
+      '`record_header` or `record_more`, listed or not. This finding means the two give a different primary ' +
+      'button, or the listed actions in a different order.',
+    'The order has one declaration point, the actions. Give each an `order` (lower first) and the main one ' +
+      '`variant: \'primary\'`, and both pages sort alike; the header\'s list then only chooses which actions ' +
+      'the full page draws. A warning: the page renders as written.',
+    RECORD_PAGE_HEADER_LIMITS,
+  ],
+};
+
 // ── Data-model rules (`data-model-rules.ts`) ───────────────────────────────
 // The three ADR-0120 uniqueness ids run on `os validate` and `os build` as
 // registry entries and on `os lint` through `lintDataModel`; the sweep ids
@@ -6604,6 +6650,8 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [APPROVAL_EXPRESSION_NO_EMPTY_POLICY_EXPLANATION.rule]: APPROVAL_EXPRESSION_NO_EMPTY_POLICY_EXPLANATION,
   [TITLE_FORMAT_RETIRED_EXPLANATION.rule]: TITLE_FORMAT_RETIRED_EXPLANATION,
   [TITLE_UNRESOLVABLE_EXPLANATION.rule]: TITLE_UNRESOLVABLE_EXPLANATION,
+  [RECORD_PAGE_HEADER_TITLE_DIFFERS_EXPLANATION.rule]: RECORD_PAGE_HEADER_TITLE_DIFFERS_EXPLANATION,
+  [RECORD_PAGE_HEADER_ACTIONS_DIFFER_EXPLANATION.rule]: RECORD_PAGE_HEADER_ACTIONS_DIFFER_EXPLANATION,
   [UNIQUE_LEGACY_ORGANIZATION_COMPOSITE_EXPLANATION.rule]: UNIQUE_LEGACY_ORGANIZATION_COMPOSITE_EXPLANATION,
   [UNIQUE_UNSCOPED_DECLARED_INDEX_EXPLANATION.rule]: UNIQUE_UNSCOPED_DECLARED_INDEX_EXPLANATION,
   [UNIQUE_DOUBLE_DECLARATION_EXPLANATION.rule]: UNIQUE_DOUBLE_DECLARATION_EXPLANATION,
