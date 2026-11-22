@@ -4572,6 +4572,9 @@ export class SchemaRegistry {
    */
   private readonly packageBodyItems = new Map<string, ReadonlySet<string>>();
 
+  /** [#35609] Package id → the extension layers its last body wrote, by object key (see `ItemsFacet`). */
+  private readonly packageBodyExtensions = new Map<string, ReadonlyMap<string, ObjectContributor>>();
+
   /** The body registration {@link replacingPackageBody} has open, while it runs. */
   private openPackageBody: { readonly packageId: string; readonly written: Set<string> } | undefined;
 
@@ -4600,8 +4603,12 @@ export class SchemaRegistry {
    * claim recorded before it is removed, so a refusal later in the run (a later
    * member of the artifact, the run-end record-currency door) puts them back
    * with the rest of the installed version. `register` throwing withdraws
-   * nothing. Objects and object extensions are not items and are not touched
-   * here.
+   * nothing. Owned objects are not items and are not touched here.
+   *
+   * [#35609] An extension the previous body registered for a target the new
+   * body no longer extends is withdrawn (`withdrawObjectExtension`), the whole
+   * layer with it; stored column data is not touched, and a layer another door
+   * put under the package id is kept.
    */
   replacingPackageBody<T>(packageId: string | undefined, manifest: ObjectStackManifest, register: () => T): T {
     // [#33949 codemod] The body moved to `registry-items.ts` (see `ItemsHost`).
@@ -6096,13 +6103,16 @@ export class SchemaRegistry {
       noteItem: (...a) => registry.noteItem(...a),
       noteItemOrder: (...a) => registry.noteItemOrder(...a),
       noteSecurityCatalogClaim: (...a) => registry.noteSecurityCatalogClaim(...a),
+      get objectContributors() { return registry.objectContributors; },
       get openPackageBody() { return registry.openPackageBody; },
       set openPackageBody(v) { registry.openPackageBody = v; },
       orderedOverlayTier: (...a) => registry.orderedOverlayTier(...a),
+      get packageBodyExtensions() { return registry.packageBodyExtensions; },
       get packageBodyItems() { return registry.packageBodyItems; },
       get restorePoint() { return registry.restorePoint; },
       get securityCatalogClaims() { return registry.securityCatalogClaims; },
       unregisterPicklistExtensionsByPackage: (...a) => registry.unregisterPicklistExtensionsByPackage(...a),
+      withdrawObjectExtension: (...a) => registry.withdrawObjectExtension(...a),
       withdrawPackageBodyItemsNotShipped: (...a) => registry.withdrawPackageBodyItemsNotShipped(...a),
       withdrawPackageClaimsNotDeclared: (...a) => registry.withdrawPackageClaimsNotDeclared(...a),
     }));
@@ -6242,6 +6252,7 @@ export class SchemaRegistry {
       noteItem: (...a) => registry.noteItem(...a),
       noteItemType: (...a) => registry.noteItemType(...a),
       get objectContributors() { return registry.objectContributors; },
+      get packageBodyExtensions() { return registry.packageBodyExtensions; },
       get packageBodyItems() { return registry.packageBodyItems; },
       recordBareNameClaims: (...a) => registry.recordBareNameClaims(...a),
       recordDefaultRecordPageClaims: (...a) => registry.recordDefaultRecordPageClaims(...a),
@@ -6320,6 +6331,7 @@ export class SchemaRegistry {
       get multiTenant() { return registry.multiTenant; },
       get objectContributors() { return registry.objectContributors; },
       get objectKeysByShortName() { return registry.objectKeysByShortName; },
+      noteObjectEntry: (...a) => registry.noteObjectEntry(...a),
       packagedRules: (...a) => registry.packagedRules(...a),
       registerObject: (...a) => registry.registerObject(...a),
       resolveObject: (...a) => registry.resolveObject(...a),
