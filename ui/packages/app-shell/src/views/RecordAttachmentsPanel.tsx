@@ -548,7 +548,8 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
           const code = body?.error?.code;
           throw Object.assign(new Error(body?.error?.message ?? `Rename failed (${res.status})`), { code });
         }
-        const stored = body?.data?.file_name ?? fileName;
+        const stored = body?.data?.file_name;
+        if (typeof stored !== 'string') throw new Error('The server renamed the attachment but did not answer its stored name');
         setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, file_name: stored } : r)));
         return true;
       } catch (err: any) {
