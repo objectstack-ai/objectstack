@@ -535,7 +535,8 @@ const DATE_FAIL_CLOSED_CLAUSE =
  *    (`date − date + 1`, `today() + 30`) — always faults at runtime and never
  *    recovers, so it blocks the build. A formula reads that fault as null; a
  *    flattened (flow) condition's fault fails the run, under the
- *    `date-arithmetic-run-fails` / `-run-may-fail` codes (#30016), a
+ *    `date-arithmetic-run-fails` / `-run-may-fail` codes (#30016) — its
+ *    `record.<field>` / `previous.<field>` read as its bare name (#34946) — a
  *    fail-closed site's refuses the write, under `date-arithmetic-fail-closed`
  *    (#30250), and an advisory rule's skips the rule, under
  *    `date-arithmetic-fail-open` (#30494, {@link dateArm}).
@@ -612,7 +613,10 @@ function typeSoundnessIssue(
     const use =
       `Use \`daysBetween(a, b)\` for the span in whole days, and \`daysFromNow(n)\` / ` +
       `\`addDays(d, n)\` / \`addMonths(d, n)\` to shift a date.`;
-    const arm = dateArm(scope, faultOutcome, bareNamesUnproven);
+    // [#34946] A `record.<field>` / `previous.<field>` read keeps the row's
+    // outcome whatever binds the bare names (#30025), as its type mismatch and
+    // its date-text verdicts do ({@link recordRootDateTextIssue}).
+    const arm = dateArm(scope, faultOutcome, mismatch.root !== undefined ? false : bareNamesUnproven);
     return {
       severity: 'error',
       issue: arm
