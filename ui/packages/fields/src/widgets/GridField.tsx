@@ -21,6 +21,7 @@ import { resolveFieldCurrency, currencyFractionDigits, currencySymbol } from '..
 import { LookupField } from './LookupField.js';
 import {
   planDeclaredLookupAutofill,
+  amountCurrencyOf,
   pickedAmountCurrencyOf,
   crossCurrencyRefusal,
   type AmountCurrency,
@@ -346,9 +347,13 @@ export function lookupAutofillPatch(
  *   of unknown currency when it is a number.
  * - A cell's currency is its column's: a `currency` column the host resolved
  *   (`columnCurrencies`, a line amount following its header's currency) is in
- *   that code, or in none while the header holds no code; any other
- *   `currency` column is in the home currency (see `columnCurrency`). A column
- *   of any other type holds no amount of money.
+ *   that code, or in none while the header holds no code. Any other `currency`
+ *   column whose child field definition the host handed over (`columnFields`)
+ *   is in that definition's currency, read on the line as the record form
+ *   reads it (`amountCurrencyOf`): a `fixed` code, the code a sibling field on
+ *   the line holds, or the home currency. A `currency` column the host named
+ *   nothing for is in the home currency (see `columnCurrency`). A column of
+ *   any other type holds no amount of money.
  */
 function gridAutofillCurrency(
   columns: readonly GridColumn[],
@@ -356,6 +361,8 @@ function gridAutofillCurrency(
   picked: Row | null | undefined,
   columnCurrencies: ColumnCurrencies | undefined,
   home: string | undefined,
+  columnFields?: Readonly<Record<string, unknown>>,
+  line?: Row,
 ): AutofillCurrencyContext {
   return {
     home,
@@ -368,6 +375,8 @@ function gridAutofillCurrency(
         const code = columnCurrencies[c.name];
         return code ? { kind: 'code', code } : { kind: 'unset' };
       }
+      const def = columnFields?.[c.name];
+      if (def && typeof def === 'object') return amountCurrencyOf(def as never, line) ?? { kind: 'home' };
       return { kind: 'home' };
     },
   };
@@ -757,6 +766,15 @@ type GridFieldProps = FieldWidgetComponentProps<Row[]> & {
    *  so the master-detail host that holds the header and the child schema
    *  hands it over. A column it does not name is in the tenant currency. */
   columnCurrencies?: ColumnCurrencies;
+  /** The child field definition behind each `currency` column, by column
+   *  name (objectstack#36249): a grid column carries no `currencyConfig`, so
+   *  the host that holds the child schema hands the definitions over. A pick
+   *  copies an amount into a column only in the same currency, and a column
+   *  named here is in its definition's currency (a `fixed` code, or the code
+   *  a sibling field on the line holds), read as the record form reads it.
+   *  {@link columnCurrencies} still decides a column it names. Absent: such a
+   *  column counts as being in the tenant currency, as before. */
+  columnFields?: Readonly<Record<string, unknown>>;
   /** The values a new line starts with (objectstack#35816): the child
    *  object's static field defaults, by field name. A grid column carries no
    *  default (the spec's inline column refuses `defaultValue`), so the host
@@ -966,6 +984,7 @@ function GridFieldBody({
   onAdd,
   lookupAutofill,
   columnCurrencies,
+  columnFields,
   newRowValues,
   newRowRequiredShown,
   columnHelp,
@@ -1178,7 +1197,7 @@ function GridFieldBody({
       const pickKey = (id: unknown) => `${col.name}\u0000${String(id)}`;
       const heldId = row[col.name];
       const previous = heldId == null || heldId === '' ? null : pickedLookupRecords.current.get(pickKey(heldId)) ?? null;
-      const currency = gridAutofillCurrency(columns, picked?.sourceFields, record, columnCurrencies, tenantCurrency);
+      const currency = gridAutofillCurrency(columns, picked?.sourceFields, record, columnCurrencies, tenantCurrency, columnFields, row);
       const { patch, withheld } = planLookupAutofill(columns, col, record, { pairs: lookupAutofill?.[col.name], row, previous }, currency);
       if (record && typeof record === 'object' && patch[col.name] != null) {
         pickedLookupRecords.current.set(pickKey(patch[col.name]), record);
@@ -1192,7 +1211,7 @@ function GridFieldBody({
       });
       applyPatch(rowIdx, patch);
     },
-    [columns, rows, blankRow, lookupAutofill, applyPatch, columnCurrencies, tenantCurrency],
+    [columns, rows, blankRow, lookupAutofill, applyPatch, columnCurrencies, tenantCurrency, columnFields],
   );
 
   /** Set a cell to an already-typed value (lookup ids, etc.) without coercion. */

@@ -34,7 +34,7 @@ import { usePermissions } from '@object-ui/permissions';
 import { buildMasterDetailEditBatch, sumRows } from './masterDetailTx';
 import { applyColumnPermissions } from './fieldWriteGate';
 import { hydrateColumns } from './deriveMasterDetail';
-import { parentCurrencyFieldsOf, followedColumnCurrencies } from './parentCurrencyColumns';
+import { currencyFieldDefsOf, parentCurrencyFieldsOf, followedColumnCurrencies } from './parentCurrencyColumns';
 import {
   runBatchTransaction,
   mergeFilterNodes,
@@ -761,6 +761,12 @@ export const LineItemsPanel: React.FC<{ schema: LineItemsPanelSchema }> = ({ sch
     ),
     [childSchema, schema.relationshipField, parentRow, tenantCurrency],
   );
+  // Each currency column's child field, so a pick copies an amount only into
+  // a column in the same currency (objectstack#36249).
+  const lineCurrencyFields = useMemo(
+    () => currencyFieldDefsOf(childSchema?.fields as Record<string, unknown> | undefined),
+    [childSchema],
+  );
   const lineLookupAutofill = useMemo(
     () => lookupAutofillByField(childSchema?.fields as Record<string, unknown> | undefined),
     [childSchema],
@@ -918,6 +924,7 @@ export const LineItemsPanel: React.FC<{ schema: LineItemsPanelSchema }> = ({ sch
               // targets in the row. Empty until that schema arrives.
               lookupAutofill={lineLookupAutofill}
               columnCurrencies={lineColumnCurrencies}
+              columnFields={lineCurrencyFields}
               columnHelp={lineColumnHelp}
               readonly={schema.readonly}
               // No input while the save is in flight (objectui#10631): `save`

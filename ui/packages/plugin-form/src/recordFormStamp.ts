@@ -29,7 +29,9 @@
  * - A lookup declaring `lookupAutofill` also carries the definitions of its
  *   targets (`withLookupAutofillTargets`), read off the same field map: a
  *   pick copies an amount only into a target in the same currency
- *   (objectstack#36249), and a target's currency is its definition's.
+ *   (objectstack#36249), and a target's currency is its definition's. A
+ *   target the form draws carries the name the form shows for it, so the
+ *   note about a target it did not fill names it the same way.
  */
 import { RECORD_BEING_EDITED_KEY, withLookupAutofillTargets, withRecordBeingEdited } from '@object-ui/fields';
 
@@ -38,13 +40,17 @@ type Def = Record<string, unknown>;
 const isDef = (v: unknown): v is Def => !!v && typeof v === 'object' && !Array.isArray(v);
 
 /** `face` without an authored stamp, then stamped by the form. */
-function restamp(face: Def, objectFields: Readonly<Record<string, unknown>> | null | undefined): Def {
+function restamp(
+  face: Def,
+  objectFields: Readonly<Record<string, unknown>> | null | undefined,
+  labels: Readonly<Record<string, string>>,
+): Def {
   let clean = face;
   if (Object.prototype.hasOwnProperty.call(face, RECORD_BEING_EDITED_KEY)) {
     const { [RECORD_BEING_EDITED_KEY]: _authored, ...rest } = face;
     clean = rest;
   }
-  return withLookupAutofillTargets(withRecordBeingEdited(clean, objectFields), objectFields);
+  return withLookupAutofillTargets(withRecordBeingEdited(clean, objectFields), objectFields, labels);
 }
 
 /**
@@ -59,11 +65,17 @@ export function stampRecordFormFields<T extends Record<string, any>>(
   objectFields: Readonly<Record<string, unknown>> | null | undefined,
 ): T[] | undefined {
   if (!Array.isArray(fields)) return fields;
+  // Each drawn field's name as the form shows it (already translated), for a
+  // lookup's note about a target it did not fill (objectstack#36249).
+  const labels: Record<string, string> = {};
+  for (const f of fields) {
+    if (isDef(f) && typeof f.name === 'string' && typeof f.label === 'string' && f.label !== '') labels[f.name] = f.label;
+  }
   return fields.map((f) => {
     if (!isDef(f)) return f;
-    const outer = restamp(f, objectFields);
+    const outer = restamp(f, objectFields, labels);
     const inner = outer.field;
-    const field = isDef(inner) ? restamp(inner, objectFields) : inner;
+    const field = isDef(inner) ? restamp(inner, objectFields, labels) : inner;
     if (outer === f && field === inner) return f;
     return (field === inner ? outer : { ...outer, field }) as T;
   });

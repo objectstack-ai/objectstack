@@ -7,7 +7,7 @@
 
 fix(fields): a lookup pick no longer copies an amount into a field in another currency; the field stays empty and the form says why
 
-Clause-②: no (narrowing) — a cross-currency price copy that happens today stops and the line is left empty with a stated reason (ruled B); the new `@object-ui/i18n` keys widen the typed locale surface
+Clause-②: yes (narrowing) — a cross-currency price copy that happens today stops and the line is left empty with a stated reason (ruled B); widened: three new `@object-ui/i18n` `lookup.autofill*` keys in every locale pack, new `@object-ui/fields` exports from `lookupAutofill.ts` (`planDeclaredLookupAutofill`, `crossCurrencyRefusal`, `amountCurrencyOf`, `pickedAmountCurrencyOf`, `withheldAutofillMessage`, `withLookupAutofillTargets`, `readLookupAutofillTargets`, `LOOKUP_AUTOFILL_TARGETS_KEY` and their types), an optional second argument on `onSelectRecord`, and the optional `columnFields` prop on `GridField`
 Metadata-protocol: semantic
 
 <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: what moved is what a pick copies in the browser. The fix for an author is in the body: the price on a line in another currency is entered by hand. -->
@@ -25,8 +25,8 @@ Nothing is converted at any rate, and no build-time check is added: the line's c
 
 **`@objectstack/spec`.** The describes of `FieldSchema.lookupAutofill` and of the inline grid column key `autofill` state the rule.
 
-**`@object-ui/fields`.** `planDeclaredLookupAutofill` and the grid's `planLookupAutofill` return the writes and the withheld values of a pick; `declaredLookupAutofillPatch` and `lookupAutofillPatch` keep returning the writes alone. `LookupField` hands a host that owns the pick (`onSelectRecord`) the referenced object's field map as a second argument.
+**`@object-ui/fields`.** `planDeclaredLookupAutofill` returns the writes and the withheld values of a pick; `declaredLookupAutofillPatch` and `lookupAutofillPatch` keep returning the writes alone. `LookupField` hands a host that owns the pick (`onSelectRecord`) the referenced object's field map as a second argument. `GridField` takes `columnFields`, the child field behind each currency column, so a `fixed` code or a code on the line decides that column's currency as on the record form.
 
-**`@object-ui/plugin-form`.** The record form stamps the definitions of a lookup's `lookupAutofill` targets on the lookup's field metadata, so the lookup can read each target's currency.
+**`@object-ui/plugin-form`.** The record form stamps the definitions of a lookup's `lookupAutofill` targets on the lookup's field metadata, each with the name the form shows for it, so the lookup can read each target's currency and names it as the form does. The line-item hosts hand their grid each currency column's child field.
 
 **`@object-ui/i18n`.** Three new `lookup.autofill*` sentences, in every locale pack.

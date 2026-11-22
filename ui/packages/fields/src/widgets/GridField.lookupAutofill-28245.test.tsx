@@ -21,7 +21,7 @@
  */
 
 import * as React from 'react';
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, waitFor, act, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { SchemaRendererContext } from '@object-ui/react';
@@ -258,8 +258,13 @@ describe('a pick does not copy an amount across currencies (objectstack#36249)',
 
   describe('through the grid', () => {
     const ROWS = [{ id: 'p1', name: 'Widget', description: 'Standard widget', unit_price: 100 }];
+    // The product's price field; a test may give it a `fixed` code.
+    let productPrice: Record<string, unknown> = { type: 'currency', label: 'Unit Price' };
+    beforeEach(() => {
+      productPrice = { type: 'currency', label: 'Unit Price' };
+    });
     const ds = {
-      getObjectSchema: vi.fn(async () => ({ name: 'product', fields: { name: { type: 'text' }, description: { type: 'text' }, unit_price: { type: 'currency', label: 'Unit Price' } } })),
+      getObjectSchema: vi.fn(async () => ({ name: 'product', fields: { name: { type: 'text' }, description: { type: 'text' }, unit_price: productPrice } })),
       find: vi.fn(async (_o: string, params?: { $filter?: { id?: { $in?: unknown[] } } }) => {
         const wanted = params?.$filter?.id?.$in;
         const rows = ROWS.filter((r) => !wanted || wanted.includes(r.id));
@@ -276,16 +281,27 @@ describe('a pick does not copy an amount across currencies (objectstack#36249)',
       { name: 'unit_price', type: 'currency' as const, label: 'Unit Price' },
     ];
 
-    function Line({ currency }: { currency?: Record<string, string | undefined> }) {
-      const [rows, setRows] = React.useState<Record<string, unknown>[]>([{ product: null, description: null, unit_price: null }]);
+    function Line({
+      currency,
+      columnFields,
+      home = 'USD',
+      line,
+    }: {
+      currency?: Record<string, string | undefined>;
+      columnFields?: Record<string, unknown>;
+      home?: string;
+      line?: Record<string, unknown>;
+    }) {
+      const [rows, setRows] = React.useState<Record<string, unknown>[]>([{ product: null, description: null, unit_price: null, ...line }]);
       return (
-        <LocalizationProvider value={{ currency: 'USD' }}>
+        <LocalizationProvider value={{ currency: home || undefined }}>
           <SchemaRendererContext.Provider value={{ dataSource: ds } as never}>
             <GridField
               value={rows}
               onChange={(next: Record<string, unknown>[]) => setRows(next)}
               field={{ columns: lineColumns } as never}
               columnCurrencies={currency}
+              columnFields={columnFields}
             />
             <output data-testid="rows">{JSON.stringify(rows)}</output>
           </SchemaRendererContext.Provider>
@@ -329,6 +345,51 @@ describe('a pick does not copy an amount across currencies (objectstack#36249)',
       await pickWidget();
       await waitFor(() => expect(rowsNow()[0]).toMatchObject({ product: 'p1', description: 'Standard widget', unit_price: 100 }));
       expect(screen.queryByTestId('line-items-autofill-withheld-0')).toBeNull();
+    });
+
+    // A line column carries no `currencyConfig`: the host hands the grid the
+    // child field behind it (`columnFields`), and the column is in that
+    // field's currency, as on the record form.
+    const FIXED_EUR = { unit_price: { type: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'EUR' } } };
+
+    it('a fixed EUR price into a fixed EUR column fills, under a USD home currency', async () => {
+      productPrice = { type: 'currency', label: 'Unit Price', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'EUR' } };
+      render(<Line columnFields={FIXED_EUR} />);
+      await pickWidget();
+      await waitFor(() => expect(rowsNow()[0]).toMatchObject({ product: 'p1', unit_price: 100 }));
+      expect(screen.queryByTestId('line-items-autofill-withheld-0')).toBeNull();
+    });
+
+    it('a fixed EUR price into a fixed EUR column fills with no home currency configured', async () => {
+      productPrice = { type: 'currency', label: 'Unit Price', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'EUR' } };
+      render(<Line columnFields={FIXED_EUR} home="" />);
+      await pickWidget();
+      await waitFor(() => expect(rowsNow()[0]).toMatchObject({ product: 'p1', unit_price: 100 }));
+      expect(screen.queryByTestId('line-items-autofill-withheld-0')).toBeNull();
+    });
+
+    it('a home-currency price into a fixed EUR column is withheld, and the line says why', async () => {
+      render(<Line columnFields={FIXED_EUR} />);
+      await pickWidget();
+      await waitFor(() => expect(rowsNow()[0]).toMatchObject({ product: 'p1', description: 'Standard widget' }));
+      expect(rowsNow()[0].unit_price).toBeNull();
+      const note = await screen.findByTestId('line-items-autofill-withheld-0');
+      expect(note.textContent).toContain('$100.00');
+      expect(note.textContent).toContain('EUR');
+    });
+
+    it("a home-currency price onto a line whose own code is JPY is withheld", async () => {
+      render(
+        <Line
+          columnFields={{ unit_price: { type: 'currency', currencyConfig: { currencyMode: 'record', currencyField: 'line_currency' } } }}
+          line={{ line_currency: 'JPY' }}
+        />,
+      );
+      await pickWidget();
+      await waitFor(() => expect(rowsNow()[0]).toMatchObject({ product: 'p1', description: 'Standard widget' }));
+      expect(rowsNow()[0].unit_price).toBeNull();
+      const note = await screen.findByTestId('line-items-autofill-withheld-0');
+      expect(note.textContent).toContain('JPY');
     });
   });
 });

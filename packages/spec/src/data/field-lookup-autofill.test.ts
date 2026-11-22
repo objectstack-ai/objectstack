@@ -263,7 +263,7 @@ describe('control: the grid column key `autofill` keeps its contract', () => {
     expect(InlineGridColumnSchema.safeParse({ name: 'crm_product' }).success).toBe(true);
     const shape = (InlineGridColumnSchema as unknown as { shape: Record<string, { description?: string }> }).shape;
     expect(shape.autofill!.description).toBe(
-      "For `lookup` columns: picking a record copies its same-named fields into sibling columns (a product's unit_price/description). On by default; set false to disable. An amount of money is copied only into a cell in the same currency: a picked amount in another currency than its cell (the home currency, or the code a line follows from its header) is not copied, the cell stays empty and the grid says why. Nothing is converted.",
+      "For `lookup` columns: picking a record copies its same-named fields into sibling columns (a product's unit_price/description). On by default; set false to disable. An amount of money is copied only into a cell in the same currency: a picked amount in another currency than its cell (its child field's: a `fixed` code, the code the line or its header holds, or the home currency) is not copied, the cell stays empty and the grid says why. Nothing is converted.",
     );
   });
 

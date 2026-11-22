@@ -25,7 +25,7 @@ import { ObjectForm } from './ObjectForm';
 import { ModalForm } from './ModalForm';
 import { registerAllFields } from '@object-ui/fields';
 import { SchemaRendererContext } from '@object-ui/react';
-import { LocalizationProvider } from '@object-ui/i18n';
+import { createI18n, I18nProvider, LocalizationProvider } from '@object-ui/i18n';
 
 registerAllFields();
 
@@ -370,9 +370,9 @@ describe('ObjectForm — a pick does not copy an amount into a field in another 
     update: vi.fn(),
   });
 
-  function renderQuote(initialValues: Record<string, unknown>) {
+  function renderQuote(initialValues: Record<string, unknown>, i18n?: ReturnType<typeof createI18n>) {
     const ds = makeCurrencyDS();
-    const view = render(
+    const form = (
       <LocalizationProvider value={{ currency: 'USD' }}>
         <SchemaRendererContext.Provider value={{ dataSource: ds } as never}>
           <ObjectForm
@@ -380,8 +380,9 @@ describe('ObjectForm — a pick does not copy an amount into a field in another 
             dataSource={ds as any}
           />
         </SchemaRendererContext.Provider>
-      </LocalizationProvider>,
+      </LocalizationProvider>
     );
+    const view = render(i18n ? <I18nProvider instance={i18n}>{form}</I18nProvider> : form);
     return { ds, container: view.container };
   }
 
@@ -398,6 +399,24 @@ describe('ObjectForm — a pick does not copy an amount into a field in another 
     expect(note.textContent).toContain('EUR');
     const price = container.querySelector('input[name="unit_price"]') as HTMLInputElement | null;
     expect(price?.value ?? '').toBe('');
+  });
+
+  it('the note names the field as the form shows it: the translated label, not the authored one', async () => {
+    const i18n = createI18n({
+      defaultLanguage: 'zh',
+      detectBrowserLanguage: false,
+      resources: { zh: { app: { fields: { fx_quote: { unit_price: '单价' } } } } },
+    });
+    const { container } = renderQuote({ currency_code: 'EUR' }, i18n);
+    await input(container, 'description');
+    await screen.findByText('单价');
+    await pick('product', 'Widget');
+
+    const note = await screen.findByTestId('lookup-autofill-withheld');
+    const line = note.querySelector('[data-withheld-target="unit_price"]');
+    expect(line?.textContent).toContain('单价');
+    expect(line?.textContent).not.toContain('Unit Price');
+    expect(line?.textContent).not.toContain('unit_price');
   });
 
   it('a USD quote: the price fills as before, with no note', async () => {

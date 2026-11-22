@@ -290,19 +290,25 @@ export const LOOKUP_AUTOFILL_TARGETS_KEY = 'lookupAutofillTargets';
  * `def` with the definitions of its `lookupAutofill` targets stamped, read
  * off `fields` (the edited object's field map), each carrying the parent
  * object it follows when its currency follows a parent (ADR-0144 D2 as
- * amended). `def` itself when it declares no pairs or `fields` names none of
- * its targets.
+ * amended). `labels` names each field as the form shows it (translated);
+ * a target the form draws carries that name as its `label`, so a note about
+ * it names the field the way the form does. `def` itself when it declares no
+ * pairs or `fields` names none of its targets.
  */
 export function withLookupAutofillTargets<T extends object>(
   def: T,
   fields: Readonly<Record<string, unknown>> | null | undefined,
+  labels?: Readonly<Record<string, string>>,
 ): T {
   const pairs = (def as { lookupAutofill?: unknown }).lookupAutofill;
   if (!Array.isArray(pairs) || pairs.length === 0 || !fields) return def;
   const targets: Record<string, object> = {};
   for (const pair of pairs as LookupAutofillPair[]) {
     const target = fields[pair?.target];
-    if (target && typeof target === 'object') targets[pair.target] = withFollowedParentObject(target, fields);
+    if (!target || typeof target !== 'object') continue;
+    const stamped = withFollowedParentObject(target, fields);
+    const shown = labels?.[pair.target];
+    targets[pair.target] = typeof shown === 'string' && shown !== '' ? { ...stamped, label: shown } : stamped;
   }
   return Object.keys(targets).length > 0 ? { ...def, [LOOKUP_AUTOFILL_TARGETS_KEY]: targets } : def;
 }
