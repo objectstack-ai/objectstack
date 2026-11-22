@@ -14,9 +14,8 @@
  * Its first choice is "show empty fields": a reader who opens a
  * section's "Show N empty fields" row wants to see the whole record, and wants
  * it on every section of the page, on the next record of the same object and
- * after a reload. The host keeps that choice where it keeps the user's list
- * state, a `sys_user_preference` row per object (the Console's key is
- * `ui.record.<object>`, beside `ui.list.<object>`).
+ * after a reload. The host keeps that choice in a `sys_user_preference` row
+ * per object (the Console's key is `ui.record.<object>`).
  *
  * ## Why a context, and why here
  *

@@ -12,7 +12,7 @@
 import { useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense, type ReactNode } from 'react';
 import { useParams, useSearchParams, useNavigate, useLocation, useHref, createSearchParams } from 'react-router-dom';
 import { resolveAffordance, type FilterTokenScope, type SchemaLike } from '@object-ui/core';
-import { useObjectListPreferences } from '../context/ListPreferencesProvider.js';
+import { useObjectListLayout } from './listLayoutStore.js';
 const ImportWizard = lazy(() =>
   import('@object-ui/plugin-grid').then((m) => ({ default: m.ImportWizard })),
 );
@@ -456,16 +456,14 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         [personalViews.views],
     );
 
-    // objectui#12418 — the signed-in user's OWN list state for this object:
-    // the tab order, and per view the sort, the Filter panel's conditions and
-    // the column layout. A toolbar change writes here (`sys_user_preference`
-    // `ui.list.<object>`, localStorage as the cache), never into the shared
-    // view: the view's authored values stay the default for every user with
-    // no preference. See `ListPreferencesProvider`.
-    const listPrefs = useObjectListPreferences(objectName);
+    // objectstack#35955 — the reader's list LAYOUT for this object, in this
+    // browser only (`./listLayoutStore.ts`): the tab order, and per view the
+    // column widths and the row height. Never written to the server or into
+    // the shared view: the view's authored values stay every other reader's.
+    const listLayout = useObjectListLayout(objectName);
     // Content keys, not identities (AGENTS.md #10): the views memo and the list
-    // relay re-run when what the user stored changes, and on nothing else.
-    const prefViewOrderKey = JSON.stringify(listPrefs.preference.viewOrder ?? []);
+    // relay re-run when the reader's tab order changes, and on nothing else.
+    const prefViewOrderKey = JSON.stringify(listLayout.layout.viewOrder ?? []);
     useEffect(() => {
         let cancelled = false;
         if (!objectName) {
@@ -608,7 +606,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         }
 
         // Stable sort: respect the user's own view-order preference (for both
-        // metadata and saved views; objectui#12418, `listPrefs`). Falls back
+        // metadata and saved views; `listLayout`). Falls back
         // to: metadata views first in declared order, then saved views by
         // `sortOrder` / created_at — the authored order, every user's default.
         const indexOf = new Map(viewList.map((v, i) => [v.id, i]));
@@ -735,7 +733,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     const listDraft = useListDraft(listDraftScope(user?.id, objectName ?? '', activeView?.id ? String(activeView.id) : ''));
     /** The list on screen in the reader-state shape the view builders read (draft + kept widths and row height). */
     const draftPreferenceOf = (id: string | undefined) =>
-        id ? listDraftPreference(listDraft.draft, listPrefs.preference.perView?.[id]) : undefined;
+        id ? listDraftPreference(listDraft.draft, listLayout.layout.perView?.[id]) : undefined;
     /** The Display panel's layout and row colour the draft holds, for the view builders. */
     const draftDisplay = {
         ...(listDraft.draft.viewType ? { viewType: listDraft.draft.viewType } : {}),
@@ -759,7 +757,6 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         objectDef,
         activeView,
         viewResolving: awaitingPersonalViews,
-        listPrefs,
         listDraft: listDraft.draft,
         perms,
         user,
@@ -850,7 +847,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         setRefreshKey,
         confirmHandler,
         savedViews,
-        listPrefs,
+        listLayout,
         views,
         activeViewId,
         baseView,
@@ -1216,7 +1213,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         managedUsers,
         managedUserMarker,
         savedViews,
-        listPrefs,
+        listLayout,
         listDraft,
         derivedColumnViewIds,
         baseView,

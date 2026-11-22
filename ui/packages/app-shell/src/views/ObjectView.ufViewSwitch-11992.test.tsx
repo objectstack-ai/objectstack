@@ -96,7 +96,6 @@ import '@objectstack/lint';
 import { ObjectView } from './ObjectView';
 import { resetListDraftStoreForTests } from './listDraftStore';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
-import { buildListFilterKey } from './listFilterStorage';
 import { LIST_FILTER_PARAM } from './userFilterUrlState';
 
 const OBJ = 'uf_task';
@@ -278,7 +277,7 @@ describe('a view switch reads the next view\'s own URL for its quick filters (ob
     // A Filter panel group an earlier console kept for this browser: since
     // objectstack#35955 a list opens on its draft only, never on stored state.
     localStorage.setItem(
-      buildListFilterKey('u1', OBJ, 'qb')!,
+      `list-filters:u1:${OBJ}:qb`,
       JSON.stringify({ filters: { id: 'root', logic: 'and', conditions: [{ id: 'r', field: 'status', operator: 'equals', value: 'open' }] } }),
     );
     const host = await mountHost(`${VIEW}/qa?uf_priority=urgent`);
