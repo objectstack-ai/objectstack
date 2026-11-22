@@ -130,6 +130,7 @@
 - 线程 ⛔ 不做 harness 开 PR 后指派/请审。
 - 派发令由 coordinator 写进线程开场消息,`Writes:` 行逐字在内,⛔ 不落共享目录;卡上留指针。
 - coordinator 开线程即读线程分支交席位(读不到则线程自报);⛔ 线程不认领、不写卡 assignee。
+- 线程首报带实供档(核对步住 `os-dev.md`),席位写进认领 Container & model 行;与令不符 ⇒ 席位定夺前不开工。
 - 席位写 assignee+`pm:dispatched`+带该 `Branch:` 的认领。
 - worktree 照建;线程读 `os-dev.md`、派发令、卡与全部评论,⛔ 不读 `SKILL.md`;references 按需读。
 - 交回:PR 与报告落地后给席位线程发一条消息(PR、head、报告要点);L1/L2 期线程不关,接 FAIL。

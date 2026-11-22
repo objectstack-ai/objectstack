@@ -21,7 +21,7 @@ import {
 import { groupSearchOf, useServerGroupHeaders, useServerGroupRows, type ServerGroupLeaf } from './useServerGrouping';
 import { useLookupTargetDefs } from './lookupGroupTargets';
 import { normalizeColumns } from './objectGridColumns';
-import { honestGroupAggregations } from './recordCurrencyAggregates';
+import { honestGroupAggregations, honestGroupAggregationsByDepth } from './recordCurrencyAggregates';
 import type { useGridTranslation } from './objectGridTranslations';
 import type { useObjectGridQueryInputs } from './objectGridQueryInputs';
 import type { useObjectGridGroupingDecisions } from './objectGridGroupingDecisions';
@@ -309,6 +309,11 @@ export function useObjectGridGrouping({
   // quantities in different units, so it is dropped before either the server
   // or the client bucketing computes it. Keyed on what it reads, so a
   // host that rebuilds `schema` every render does not re-key the header query.
+  // [objectstack#36276] Judged PER DEPTH, on the levels the grid really
+  // groups by (the server's, or the render grouping's): a depth-`d` group is
+  // bucketed by the first `d` levels only, so a sum over a quantity whose unit
+  // field is the second level stands in the second level's bands and is left
+  // out of the first's. The header query judges its own depths the same way.
   // [objectstack#32119] Per aggregated field whose cell paints a date-family
   // face, that face, resolved as the group headings' faces are: a `min` /
   // `max` over it is a time, drawn as the cell draws it, and a `sum` / `avg`
@@ -316,20 +321,24 @@ export function useObjectGridGrouping({
   // aggregates, before either path computes it or the server is asked.
   const groupAggregationKey = JSON.stringify({
     aggregations: schema.aggregations ?? null,
-    grouping: usableGroupingFields(schema.grouping?.fields).map((gf) => gf.field),
+    grouping: usableGroupingFields(serverGroupedFetch ? serverGroupingFields : groupingForRender?.fields).map((gf) => gf.field),
     temporal: temporalFacesOfAggregations(schema.aggregations, normalizeColumns(schema.columns) ?? [], objectFields),
   });
-  const groupAggregations = React.useMemo(() => {
+  const { groupAggregations, groupAggregationsByDepth } = React.useMemo(() => {
     const { aggregations, grouping, temporal } = JSON.parse(groupAggregationKey) as {
       aggregations: ObjectGridSchema['aggregations'] | null;
       grouping: string[];
       temporal: Array<[string, TemporalCellFace]>;
     };
     const temporalFields = new Set(temporal.map(([field]) => field));
-    const honest = honestGroupAggregations(aggregations ?? undefined, objectFields, grouping);
-    if (!honest || temporalFields.size === 0) return honest;
-    const kept = honest.filter(({ field, type }) => !(temporalFields.has(field) && (type === 'sum' || type === 'avg')));
-    return kept.length === honest.length ? honest : kept;
+    const configured = aggregations ?? undefined;
+    const faceable = !configured || temporalFields.size === 0
+      ? configured
+      : configured.filter(({ field, type }) => !(temporalFields.has(field) && (type === 'sum' || type === 'avg')));
+    return {
+      groupAggregations: honestGroupAggregations(faceable, objectFields, grouping),
+      groupAggregationsByDepth: honestGroupAggregationsByDepth(faceable, objectFields, grouping),
+    };
   }, [groupAggregationKey, objectFields]);
   const displayLocale = useDisplayLocale();
   const temporalAggregates = React.useMemo((): TemporalAggregateFaces | undefined => {
@@ -391,6 +400,7 @@ export function useObjectGridGrouping({
     serverGroupSource,
     groupOptionRanks,
     temporalAggregates,
+    groupAggregationsByDepth,
   );
 
   // Reset grouped pagination to page 1 whenever the grouping config, page size
