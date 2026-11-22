@@ -13,9 +13,9 @@
  *    one in organization B;
  *  - rows that must survive: `ui.record.account` (the record page's family,
  *    still read), `ui.recent`, the bare key `ui.list`, a look-alike prefix
- *    `ui.listx.account`, and `UI.LIST.account` — a key SQLite's `LIKE` matches
- *    against the prefix, since it compares ASCII without case, so it proves
- *    the family is judged byte for byte after the read.
+ *    `ui.listx.account`, and `UI.LIST.account` — together they pin that the
+ *    driver's `$startsWith` read is the family exactly: the trailing dot and
+ *    the case both count.
  *
  * ## What each case proves
  *

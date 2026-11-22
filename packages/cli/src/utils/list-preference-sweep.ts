@@ -22,11 +22,12 @@
  * `ui.record.<object>`, `ui.recent`, `ui.favorites`, `ui.app.last` and
  * `ui.flow.palette.recents` are other families and are never touched.
  *
- * The read may ask the driver for the prefix (`$startsWith`), which narrows
- * what is read and decides nothing: a SQL `LIKE` can match more than the
- * prefix (SQLite compares ASCII without case), so every row read is judged
- * again by {@link isListPreferenceKey}, and only rows that predicate admits
- * are counted, exported or deleted.
+ * The read asks the driver for the prefix with `$startsWith`, whose contract
+ * is a case-sensitive, escaped prefix match on every driver (the SQL driver's
+ * `textMatchPredicate` without folding). So the driver's answer IS the family:
+ * `ui.listx.account`, the bare `ui.list` and `UI.LIST.account` are not in it
+ * (`commands/migrate/list-preferences.integration.test.ts` seeds all three
+ * and holds them stored after an `--apply`). No second filter restates it here.
  *
  * Read-only by construction: nothing here holds a write verb.
  */
@@ -37,7 +38,7 @@ export const LIST_PREFERENCE_PREFIX = 'ui.list.';
 /** The object the family is stored in. */
 export const LIST_PREFERENCE_OBJECT = 'sys_user_preference';
 
-/** Does this stored key belong to the retired family? Byte-exact, the trailing dot included. */
+/** Does this key belong to the retired family? Byte-exact, the trailing dot included: the export's read-back judges with it. */
 export function isListPreferenceKey(key: unknown): key is string {
   return typeof key === 'string' && key.startsWith(LIST_PREFERENCE_PREFIX);
 }
@@ -53,10 +54,9 @@ export interface ListPreferenceReader {
  * and a row missing from it is a row the report never mentions.
  */
 export async function readListPreferenceRows(reader: ListPreferenceReader): Promise<Record<string, unknown>[]> {
-  const rows = await reader.find(LIST_PREFERENCE_OBJECT, {
+  return reader.find(LIST_PREFERENCE_OBJECT, {
     where: { key: { $startsWith: LIST_PREFERENCE_PREFIX } },
   });
-  return rows.filter((row) => isListPreferenceKey(row.key));
 }
 
 /** One key of the family and how many rows and readers hold it. */
