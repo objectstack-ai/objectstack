@@ -187,6 +187,8 @@ test.describe('the line-item grid on a form\'s first open (objectstack#36102)', 
   async function typeKeepsFocus(page: Page, scope: ReturnType<Page['getByTestId']>) {
     const cell = scope.locator('input[aria-label="Description"]').first();
     await cell.click();
+    // A stored line already has text: type at its end, not where the click landed.
+    await cell.press('End');
     await cell.pressSequentially('first-open');
     // A beat for any late remount to land before it is checked.
     await page.waitForTimeout(300);
