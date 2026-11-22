@@ -377,6 +377,7 @@
     "data/Field:scale",
     "data/Field:searchable",
     "data/Field:settledWhen",
+    "data/Field:showOnCreate",
     "data/Field:sortable",
     "data/Field:step",
     "data/Field:storage",
