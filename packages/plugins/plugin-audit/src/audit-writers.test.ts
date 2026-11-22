@@ -619,7 +619,8 @@ describe('audit writers — declarative trackHistory activity (ADR-0052 §5b)', 
     crm_opportunity: {
       id: { type: 'text' },
       name: { type: 'text', label: 'Name' },
-      amount: { type: 'currency', label: 'Amount' },
+      // [#36290] Values are on unless turned off: this one is turned off.
+      amount: { type: 'currency', label: 'Amount', trackHistory: false },
       stage: {
         type: 'select',
         label: 'Stage',
@@ -812,7 +813,8 @@ describe('audit writers — the generic update summary names the changed fields 
     previous: Record<string, any>,
     result: Record<string, any>,
   ) {
-    const { engine, fire, created } = makeEngine(schema, { campaign: { label: 'Campaign' } });
+    // [#36290] Values off for the object: this describe pins the label-only branch.
+    const { engine, fire, created } = makeEngine(schema, { campaign: { label: 'Campaign', enable: { fieldHistory: false } } });
     installAuditWriters(engine as any, 'test.audit');
     await fire('afterUpdate', {
       object: 'campaign',
@@ -1425,7 +1427,10 @@ describe('audit writers — localized activity summaries (framework#3039)', () =
       result[`f${i}`] = 1;
     }
     const i18n = makeI18n();
-    const { engine, fire, created } = setup('zh-CN', i18n, {}, { ...SINGLE_TENANT, person_qualification: fields });
+    // [#36290] Values off for the object, so the named-field list is what is written.
+    const { engine, fire, created } = setup(
+      'zh-CN', i18n, { person_qualification: { enable: { fieldHistory: false } } }, { ...SINGLE_TENANT, person_qualification: fields },
+    );
     await fire('afterUpdate', { ...insertCtx(), previous, result });
     const [activity] = activityRows(created);
     expect(activity.summary).toBe('Updated person_qualification "OC-00001": F1, F2, F3, F4, F5, and 2 more');

@@ -147,8 +147,10 @@ const bizDeal = {
     region_id: f('region_id', 'lookup', { label: 'Region', reference: 'crm_region' }),
     parent_id: f('parent_id', 'master_detail', { label: 'Parent', reference: 'crm_account' }),
     vault_id: f('vault_id', 'lookup', { label: 'Vault', reference: 'crm_vault' }),
+    // [#36290] Values off, so a change of it alone reaches the generic branch.
     priority: f('priority', 'select', {
       label: 'Priority',
+      trackHistory: false,
       options: [{ value: 'p1', label: 'Highest' }, { value: 'p2', label: 'Normal' }],
     }),
   },

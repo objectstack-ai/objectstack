@@ -725,6 +725,7 @@
     "data/ObjectCapabilities:approvalsVisibleToReaders",
     "data/ObjectCapabilities:clone",
     "data/ObjectCapabilities:feeds",
+    "data/ObjectCapabilities:fieldHistory",
     "data/ObjectCapabilities:files",
     "data/ObjectCapabilities:searchable",
     "data/ObjectCapabilities:trackHistory",

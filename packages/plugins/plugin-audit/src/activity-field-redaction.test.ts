@@ -362,7 +362,8 @@ describe('[#21081] sys_activity value-bearing columns are served through the sec
     const row = await engine.findOne(ACTIVITY, { where: { id: tracked.id }, context: MASKED_READER }) as Row;
     expect(row?.id).toBe(tracked.id);
     expect(JSON.stringify(row)).not.toContain(V.masked2);
-    expect(row).not.toHaveProperty('summary');
+    // [#36290] Re-composed from the changes this reader is served.
+    expect(String(row?.summary)).toContain(V.open2);
   });
 
   it('a row in the mirror’s earlier shape (no provenance) keeps no text for a restricted reader, and keeps it for the control', async () => {

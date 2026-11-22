@@ -41,7 +41,8 @@ const contract = {
         { value: 'signed', label: 'Signed' },
       ],
     },
-    note: { name: 'note', label: 'Note', type: 'text' as const },
+    // [#36290] label-only: these pins read the changed-fields line, not old → new
+    note: { name: 'note', label: 'Note', type: 'text' as const, trackHistory: false },
   },
 };
 
