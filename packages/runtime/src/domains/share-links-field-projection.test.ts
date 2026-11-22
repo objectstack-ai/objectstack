@@ -25,6 +25,15 @@
  * - A lookup's value is the stored id (the record read expands nothing), and
  *   its projection names the target object and the authored display field.
  * - Both mounts answer the same `data`, byte for byte.
+ * - [#33552] `link.object_label` is the object's label in the request's
+ *   locale (`Accept-Language`, through the request's i18n service), the
+ *   declared one when the bundle has no entry; a field the object declares
+ *   hidden — authored, or an injected column marked so at its source —
+ *   reports `hidden: true`, and no other field carries the flag.
+ * - [#33552] A renamed object (a code extension's rename folded into the served
+ *   schema) keeps its rename under a request whose bundle translates the
+ *   packaged label — the packaged base read through the request's metadata
+ *   protocol, as the meta door reads it.
  *
  * ## What is real here
  *
@@ -33,8 +42,11 @@
  * harness `share-links-refusal-order.test.ts` uses.
  */
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/metadata';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SHARE_LINK_SERVICE } from '@objectstack/spec/contracts';
 import type { IHttpServer, IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
@@ -70,10 +82,26 @@ const DEAL = {
     amount: { name: 'amount', label: 'Deal Value', type: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' } },
     account: { name: 'account', label: 'Customer', type: 'lookup', reference: TARGET_OBJECT, displayField: 'company' },
     margin_note: { name: 'margin_note', label: 'Margin Note', type: 'text' },
+    // [#33552] Declared hidden: served, and reported hidden.
+    risk_score: { name: 'risk_score', label: 'Risk Score', type: 'number', hidden: true },
     // The record read never returns an `internal` column.
     internal_ref: { name: 'internal_ref', label: 'Internal Ref', type: 'text', internal: true },
   },
 };
+
+/** [#33552] A packaged object a code extension renames. */
+const LEAD_OBJECT = 'projection_lead';
+const LEAD_RECORD = 'lead_1';
+const LEAD = {
+  name: LEAD_OBJECT,
+  label: 'Projection Lead',
+  publicSharing: { enabled: true, allowedAudiences: ['public'], allowedPermissions: ['view'] },
+  fields: {
+    id: { name: 'id', label: 'ID', type: 'text', primaryKey: true },
+    title: { name: 'title', label: 'Title', type: 'text' },
+  },
+};
+const LEAD_RENAME = { name: LEAD_OBJECT, label: 'Prospect' };
 
 const ACCOUNTS = {
   name: TARGET_OBJECT,
@@ -85,20 +113,32 @@ const ACCOUNTS = {
 };
 
 type Mount = 'plugin route' | 'dispatcher twin';
-type LinkKey = 'redacted' | 'unredacted';
+type LinkKey = 'redacted' | 'unredacted' | 'renamed';
 type Answer = { status: number; body: any };
 
 const MOUNTS: readonly Mount[] = ['plugin route', 'dispatcher twin'];
+
+/** [#33552] The request's i18n service: a zh-CN entry for the shared object's label, none in en. */
+const I18N = {
+  getLocales: () => ['en', 'zh-CN'],
+  getTranslations: (locale: string) =>
+    locale === 'zh-CN' ? { objects: { [OBJECT]: { label: '投影商机' }, [LEAD_OBJECT]: { label: '投影线索' } } } : {},
+  getDefaultLocale: () => 'en',
+};
 
 const realErrorFromThrown = (() => {
   const dispatcher: any = new HttpDispatcher({ context: { getService: () => null } } as any);
   return (e: any, fallbackStatus?: number) => dispatcher.errorFromThrown(e, fallbackStatus);
 })();
 
-function makeDeps(engine: any, svc: any): DomainHandlerDeps {
+function makeDeps(engine: any, svc: any, protocol: any): DomainHandlerDeps {
   const deps: any = {
     resolveService: async (_c: any, name: string) =>
-      name === SHARE_LINK_SERVICE ? svc : name === 'objectql' ? engine : undefined,
+      name === SHARE_LINK_SERVICE ? svc
+        : name === 'objectql' ? engine
+        : name === 'i18n' ? I18N
+        : name === 'protocol' ? protocol
+        : undefined,
     getRequestKernelService: async (_c: any, name: string) => (name === 'objectql' ? engine : undefined),
     success: (data: any, meta?: any) => ({ status: 200, body: { success: true, data, ...(meta ? { meta } : {}) } }),
     error: (message: string, httpStatus = 500, details?: any) => apiErrorResponse({ message, httpStatus, details }),
@@ -122,7 +162,7 @@ class RouteRecorder implements IHttpServer {
 
 let engine: ObjectQL;
 const tokens = {} as Record<LinkKey, string>;
-let open: (mount: Mount, link: LinkKey) => Promise<Answer>;
+let open: (mount: Mount, link: LinkKey, headers?: Record<string, string>) => Promise<Answer>;
 
 beforeAll(async () => {
   engine = new ObjectQL();
@@ -131,34 +171,42 @@ beforeAll(async () => {
     true,
   );
   await engine.init();
-  for (const o of [SysShareLink, DEAL, ACCOUNTS]) engine.registry.registerObject(o as any, '@objectstack/runtime-test');
+  for (const o of [SysShareLink, DEAL, ACCOUNTS, LEAD]) engine.registry.registerObject(o as any, '@objectstack/runtime-test');
+  engine.registry.registerObject(LEAD_RENAME as any, '@objectstack/runtime-test-extension', undefined, 'extend');
   await engine.syncSchemas();
   await installDefaultOrganization(engine);
   const system = { context: { isSystem: true } } as any;
   await engine.insert(TARGET_OBJECT, { id: ACCOUNT, company: 'Acme' }, system);
   await engine.insert(
     OBJECT,
-    { id: RECORD, title: 'Big deal', stage: 'open', amount: 1250.5, account: ACCOUNT, margin_note: 'thin', internal_ref: 'X-1' },
+    { id: RECORD, title: 'Big deal', stage: 'open', amount: 1250.5, account: ACCOUNT, margin_note: 'thin', internal_ref: 'X-1', risk_score: 3 },
     system,
   );
+  await engine.insert(LEAD_OBJECT, { id: LEAD_RECORD, title: 'Warm lead' }, system);
+  const protocol = new ObjectStackProtocolImplementation(engine as any);
 
   const svc = new ShareLinkService({ engine: engine as any });
   const creator = { isSystem: true, userId: 'usr_creator' } as any;
   tokens.redacted = (await svc.createLink({ object: OBJECT, recordId: RECORD, audience: 'public', redactFields: ['margin_note'] }, creator)).token;
   tokens.unredacted = (await svc.createLink({ object: OBJECT, recordId: RECORD, audience: 'public' }, creator)).token;
+  tokens.renamed = (await svc.createLink({ object: LEAD_OBJECT, recordId: LEAD_RECORD, audience: 'public' }, creator)).token;
 
   const http = new RouteRecorder();
-  registerShareLinkRoutes(http, svc, engine as any, { contextFromRequest: () => ({}) });
+  registerShareLinkRoutes(http, svc, engine as any, {
+    contextFromRequest: () => ({}),
+    i18n: () => I18N,
+    protocol: () => protocol,
+  });
   const pluginResolve = http.routes.get('GET /api/v1/share-links/:token/resolve');
   if (!pluginResolve) throw new Error('registerShareLinkRoutes mounted no resolve route');
-  const deps = makeDeps(engine, svc);
+  const deps = makeDeps(engine, svc, protocol);
 
-  open = async (mount, link) => {
+  open = async (mount, link, headers = {}) => {
     const token = tokens[link];
     if (mount === 'dispatcher twin') {
       const res = await handleShareLinksRequest(deps, `/${token}/resolve`, 'GET', undefined, {}, {
         executionContext: {},
-        request: { headers: {} },
+        request: { headers },
       } as unknown as HttpProtocolContext);
       if (!res.handled || !res.response) throw new Error('the dispatcher twin did not handle resolve');
       const r = res.response as { status: number; body: any };
@@ -175,7 +223,7 @@ beforeAll(async () => {
       params: { token },
       query: {},
       body: undefined,
-      headers: {},
+      headers,
       method: 'GET',
       path: `/api/v1/share-links/${token}/resolve`,
     };
@@ -192,11 +240,16 @@ afterAll(async () => {
   }
 });
 
-async function served(mount: Mount, link: LinkKey) {
-  const answer = await open(mount, link);
+async function served(mount: Mount, link: LinkKey, headers?: Record<string, string>) {
+  const answer = await open(mount, link, headers);
   expect(answer.status, JSON.stringify(answer.body)).toBe(200);
   expect(answer.body?.success).toBe(true);
-  return answer.body.data as { record: Record<string, unknown>; fields: Record<string, any>; redactFields: string[] };
+  return answer.body.data as {
+    record: Record<string, unknown>;
+    fields: Record<string, any>;
+    redactFields: string[];
+    link: Record<string, unknown>;
+  };
 }
 
 describe.each(MOUNTS)('[#26991] share-link resolve field projection — the %s', (mount) => {
@@ -262,5 +315,46 @@ describe('[#26991] both mounts answer one resolve shape', () => {
     const plugin = await served('plugin route', link);
     const twin = await served('dispatcher twin', link);
     expect(twin).toEqual(plugin);
+  });
+});
+
+describe.each(MOUNTS)('[#33552] the object label and the hidden flag — the %s', (mount) => {
+  it('link.object_label is the object label in the request locale', async () => {
+    const data = await served(mount, 'unredacted', { 'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8' });
+    expect(data.link.object_label).toBe('投影商机');
+  });
+
+  it('a locale the bundle has no entry for serves the declared label', async () => {
+    expect((await served(mount, 'unredacted', { 'accept-language': 'en-US' })).link.object_label).toBe('Projection Deal');
+    expect((await served(mount, 'unredacted')).link.object_label).toBe('Projection Deal');
+  });
+
+  it('a field the object declares hidden reports hidden, and a shown field carries no flag', async () => {
+    const data = await served(mount, 'unredacted');
+    expect(data.record.risk_score).toBe(3);
+    expect(data.fields.risk_score).toEqual({ label: 'Risk Score', type: 'number', hidden: true });
+    expect(data.fields.title).not.toHaveProperty('hidden');
+    // The injected ownership-queue column is marked hidden at its source.
+    expect(data.record).toHaveProperty('queue');
+    expect(data.fields.queue?.hidden).toBe(true);
+  });
+});
+
+describe.each(MOUNTS)('[#33552] a renamed object keeps its rename — the %s', (mount) => {
+  it('the served label is the rename, though the bundle translates the packaged label', async () => {
+    expect(engine.getSchema(LEAD_OBJECT)?.label, 'the extension renames the served schema').toBe('Prospect');
+    const data = await served(mount, 'renamed', { 'accept-language': 'zh-CN' });
+    expect(data.link.object_label).toBe('Prospect');
+  });
+
+  it('control: the object whose label is the packaged one is translated', async () => {
+    expect((await served(mount, 'unredacted', { 'accept-language': 'zh-CN' })).link.object_label).toBe('投影商机');
+  });
+});
+
+describe('[#33552] both mounts answer one localized shape', () => {
+  it('the plugin route and the dispatcher twin serve equal data under a zh-CN request', async () => {
+    const headers = { 'accept-language': 'zh-CN' };
+    expect(await served('dispatcher twin', 'unredacted', headers)).toEqual(await served('plugin route', 'unredacted', headers));
   });
 });

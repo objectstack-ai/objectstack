@@ -34,7 +34,8 @@ the record is `GET /data/{object}/{id}`, a related list is
 `GET /data/sys_comment` for the record's thread plus
 `GET /data/sys_comment_reaction` for those comments, `activity` is
 `GET /data/sys_activity` for the record with its actor expanded, and
-`attachments` is `GET /data/sys_attachment` for the record with `$count`.
+`attachments` is `GET /data/sys_attachment` for the record with `$count`
+and its uploader expanded.
 The three stream parts are each that read exactly as the table on
 `RecordPageActivityRequestSchema` spells it: the route composes the record's
 scope and the order, and the request names only whether a stream is wanted
