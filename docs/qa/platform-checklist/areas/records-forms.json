@@ -187,7 +187,7 @@
       "title": "Create → read → update → delete a record through the console UI",
       "since": "v15",
       "status": "active",
-      "revision": 21,
+      "revision": 22,
       "priority": "P0",
       "surface": "browser",
       "personas": [
@@ -213,7 +213,7 @@
         "capture the create request/response (expect POST /api/v1/data/showcase_account). The payload also carries the select defaults of fields the step leaves untouched — sales_region:'amer' (its AMER option is default:true, examples/app-showcase/src/data/objects/account.object.ts) — so expect that key in the body you diff (QA run #24556)",
         "re-read server-side: GET /api/v1/data/showcase_account?$filter=[[\"name\",\"=\",\"os-qa-<runid>\"]] — field-by-field vs the submitted payload",
         "open the record detail; edit exactly one field, annual_revenue, to a new positive number; submit it (an edit form's button reads 'Update'); capture the PATCH /api/v1/data/showcase_account/<id>; re-read the full row via GET /api/v1/data/showcase_account/<id>. annual_revenue is the field because showcase_account has no rule-free TEXT field the later steps can spare: `name` is the key steps[3] and steps[8] filter on, and tax_id, billing_email and churn_reason are each judged by a validation rule (account.object.ts: tax_id_format, billing_email_format, churn_reason_consistency); annual_revenue carries none (its only constraint is the field's min 0). ⛔ Not `hq`: it is a location field (Field.location), whose input takes 'latitude, longitude', and text that is not a coordinate pair clears the stored value while the save still reports success (#32139) — a defect of its own, not this clause's subject",
-        "read the record's field-change history on the record page's timeline stream, under its Changes chip (变更). Record page v3 draws no tab named History at any width (#27055). The stream's whole face, with its chips, is the Activity (动态) tab of the record's tab row — Overview (概览), one tab per related list in its order (an empty one muted, with no number), Attachments, Approvals (while a request exists), then Activity (动态) last with its count, the tabs that do not fit folded into its 'More N' (更多 N) dropdown (ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row; ui/packages/plugin-detail/src/RecordTabRow.tsx; #35595). Open it from that tab, from the title of the Overview tab's 最近动态 (Recent activity) card, in the right rail beside the details (below them in one column under 760 px, ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor; ui/packages/plugin-detail/src/RecordSummaryRail.tsx, #35596), or by ?related=timeline (#27524). The rail card shows only the newest three lines, read-only, with no chips, and can lag the update line until a fresh read (QA run #28545): read the change lines on the Activity tab after a reload, not off the card. Screenshot first, then read the change lines",
+        "read the record's field-change history on the record page's timeline stream, under its Changes chip (变更). Record page v3 draws no tab named History at any width (#27055). The stream's whole face, with its chips, is the Activity (动态) tab of the record's tab row — Details (详情), one tab per related list in its order (an empty one muted, with no number), Attachments, Approvals (while a request exists), then Activity (动态) last with its count, the tabs that do not fit folded into its 'More N' (更多 N) dropdown (ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row; ui/packages/plugin-detail/src/RecordTabRow.tsx; #35595). showcase_account's 'primary' Invoices and Projects tables sit among its details, so its full page never pins the details in a left column (ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPagePinsDetails, #35890): the tab row, 详情 first, at every width. Open the stream from its Activity tab or by ?related=timeline (#27524); the right rail and its 最近动态 card are retired (#35890). The stream can lag the update line until a fresh read (QA run #28545): read the change lines on the Activity tab after a reload. Screenshot first, then read the change lines",
         "clone the record: POST /api/v1/data/showcase_account/<id>/clone (optionally with {overrides:{name:'os-qa-<runid>-clone'}}); capture the 201 result (new id ≠ source, sourceId, record); re-read the clone via GET /api/v1/data/showcase_account/<new id>",
         "RLS probe on clone: as a persona WITHOUT read on the source row (a permission-zoo persona, or a non-owner under owner-RLS), POST the same clone route and capture the refusal — expect 404 RECORD_NOT_FOUND, never a silent duplicate (record blocked(fixture) if no non-reading persona is bound on this boot)",
         "delete via the record header's 'More actions' (⋯) menu → Delete (the menu also holds Refresh / Add to favorites / Share; detail.moreActions), or the list row's menu; confirm the dialog; re-read via the filtered GET. ⚠️ If clause 7's recipe gave the member an own-row invoice pointing at THIS account, the delete answers 409 DELETE_RESTRICTED: the invoice's account lookup is required, and the engine turns a required set_null into restrict (packages/objectql/src/engine.ts). Point that invoice at a seeded account instead (the recipe's step 5 says so)",
@@ -247,7 +247,7 @@
         {
           "clause": "the record's field-change history (the record page's sys_audit_log read, shown as the timeline stream's Changes chip) reflects the create and the update with display values (option labels, localized dates, real actor), not raw audit payloads or phantom value→null rows",
           "oracle": "dom",
-          "verify": "after a fresh read of the page (the Overview rail's 最近动态 card can lag the update line, QA run #28545), open the stream by the Activity tab, the 最近动态 card's title or ?related=timeline (steps[5]); after a screenshot confirms the Changes chip is selected on the account's timeline stream, read its change lines — same contract ui/e2e/live/record-history-display.spec.ts pins on showcase_account, the showcase's enable.trackHistory object, at 1440×900 (its option labels, the localized Customer Since date and the resolved owner). The page reads sys_audit_log only for an object whose enable.trackHistory is true (ui/packages/app-shell/src/views/RecordDetailView.tsx, historyEnabled), and the rows reach the stream as field_change items (ui/packages/plugin-detail/src/recordTimelineStream.ts#auditEntriesToFeedItems). The chip also lists the stream's sys_activity created/updated rows, so attribute a line to the audit read before scoring it. ⛔ Never look for a tab named History: record page v3 removed it at every width (#27055; buildDefaultPageSchema.test.ts asserts the default tabs carry neither Activity nor History), so its absence fails a working product. The spec is a live Playwright spec in this checkout, run from ui/ with `pnpm test:e2e:live` against a backend on port 3000 and the console dev server on port 5180",
+          "verify": "after a fresh read of the page (the stream can lag the update line until one, QA run #28545), open the stream by the Activity tab or ?related=timeline (steps[5]); after a screenshot confirms the Changes chip is selected on the account's timeline stream, read its change lines — same contract ui/e2e/live/record-history-display.spec.ts pins on showcase_account, the showcase's enable.trackHistory object, at 1440×900 (its option labels, the localized Customer Since date and the resolved owner). The page reads sys_audit_log only for an object whose enable.trackHistory is true (ui/packages/app-shell/src/views/RecordDetailView.tsx, historyEnabled), and the rows reach the stream as field_change items (ui/packages/plugin-detail/src/recordTimelineStream.ts#auditEntriesToFeedItems). The chip also lists the stream's sys_activity created/updated rows, so attribute a line to the audit read before scoring it. ⛔ Never look for a tab named History: record page v3 removed it at every width (#27055; buildDefaultPageSchema.test.ts asserts the default tabs carry neither Activity nor History), so its absence fails a working product. The spec is a live Playwright spec in this checkout, run from ui/ with `pnpm test:e2e:live` against a backend on port 3000 and the console dev server on port 5180",
           "evidence": "screenshot + entries"
         },
         {
@@ -409,6 +409,12 @@
           "date": "2026-11-20",
           "change": "steps[5] and acceptance[4].verify re-pointed to the record page's tab rules and right rail (#35595, #35596): every related list is a tab of its own in its order, an empty one muted with no number, the width the row's only fold ('More N'), Activity last; the 动态 panel of the right column became the Overview rail's 最近动态 card (newest three, read-only), whose title opens the Activity tab. Supersedes the records-first row of #28469 (partitionRecordTabsByRecords is retired). No clause changed: the change lines are still read on the Activity tab after a reload. Read from source at the PR's head.",
           "ref": "#35595"
+        },
+        {
+          "revision": 22,
+          "date": "2026-11-22",
+          "change": "steps[5] and acceptance[4].verify re-pointed after #35890 retired the right rail: the Overview rail's 最近动态 card is gone and the first tab reads 详情 (Details); showcase_account's 'primary' body tables keep its full page from pinning the details in a left column (recordPagePinsDetails), so the tab row stands at every width. The stream opens from its Activity tab or ?related=timeline. No clause changed. Read from source at base 28ba01fe",
+          "ref": "#36188"
         }
       ]
     },
@@ -1701,7 +1707,7 @@
       "title": "Related lists derive from the relationship and page on the server — never fetch every child row — and are read-gated on both ends",
       "since": "v16",
       "status": "active",
-      "revision": 14,
+      "revision": 15,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1722,14 +1728,14 @@
         ]
       },
       "steps": [
-        "open the Northwind account's full record page: from /_console/apps/com.example.showcase/showcase_account, clicking Northwind opens a ~720 px record DRAWER (the console's default record-open mode, ui/packages/app-shell/src/views/ObjectView.tsx), not the column-tier page steps[1] reads — open it full page with the drawer's 'Open as full page' (↗), or load /_console/apps/com.example.showcase/showcase_account/record/ID directly",
-        "screenshot at a column-tier width (a record view of 760 px or wider, which a 1440×900 window gives; ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor); enumerate the related lists. The page draws the record's tab row — Overview (概览), one tab per related list in its order (an empty one muted, with no number), Attachments, Approvals (while a request exists), then Activity (动态) last with its count, the tabs that do not fit folded into its 'More N' (更多 N) dropdown (ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row; ui/packages/plugin-detail/src/RecordTabRow.tsx; #35595) over the columns, so a role=tab strip is expected: enumerate the lists from it (QA run #33861 read the earlier records-first row). The primary lists (relatedList: 'primary' — Invoices on showcase_invoice.account, Projects on showcase_project.account) are body tables in the Overview tab's details column, and every non-primary child — Contacts among them — is a tab of its own whose face is the whole list with its pager; on Overview, the right rail's 其他相关 (Other related) group draws a card for each such list that HAS records, naming at most 3 rows with no pager (ui/packages/plugin-detail/src/RecordSummaryRail.tsx, #35596) (packages/spec/src/data/field.zod.ts relatedList: 'true/absent = shown as a supporting list, a side card in the record's related column (the shared \"Related\" tab on the tabbed page)'). Below 760 px the same tab row draws over one column: the details, then the rail",
-        "open Contacts' whole list: its card's header or count chip enlarges it in place (?related=showcase_contact.account); capture the page-1 data request. An enlarged list whose block names no limit pages 25 rows (ui/packages/plugin-detail/src/RecordPageColumns.tsx, ENLARGED_PAGE_SIZE), so the pager reads 'Page 1 of 2' for Northwind's 26 contacts (QA run #27438)",
+        "open the Northwind account's full record page: from /_console/apps/com.example.showcase/showcase_account, clicking Northwind opens a ~720 px record DRAWER (the console's default record-open mode, ui/packages/app-shell/src/views/ObjectView.tsx), not the full page steps[1] reads — open it full page with the drawer's 'Open as full page' (↗), or load /_console/apps/com.example.showcase/showcase_account/record/ID directly",
+        "screenshot at 1440×900; enumerate the related lists. The page draws the record's tab row — Details (详情), one tab per related list in its order (an empty one muted, with no number), Attachments, Approvals (while a request exists), then Activity (动态) last with its count, the tabs that do not fit folded into its 'More N' (更多 N) dropdown (ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row; ui/packages/plugin-detail/src/RecordTabRow.tsx; #35595), so a role=tab strip is expected: enumerate the lists from it (QA run #33861 read the earlier records-first row). The primary lists (relatedList: 'primary' — Invoices on showcase_invoice.account, Projects on showcase_project.account) are body tables among the 详情 tab's details and take no tab, and every non-primary child — Contacts among them — is a tab of its own whose face is the whole list with its pager (packages/spec/src/data/field.zod.ts relatedList: 'true = an auxiliary panel on the record page; … 'primary' = a body table: part of the record's main content'). With those tables among its details the account's full page never pins the details in a left column (ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPagePinsDetails, #35890): the same tab row at every width, and no right rail (retired, #35890)",
+        "open Contacts' whole list: its tab opens it in place (?related=showcase_contact.account); capture the page-1 data request. An enlarged list whose block names no limit pages 25 rows (ui/packages/plugin-detail/src/RecordPageColumns.tsx, ENLARGED_PAGE_SIZE), so the pager reads 'Page 1 of 2' for Northwind's 26 contacts (QA run #27438)",
         "click next-page; capture the page-2 request; note the pager text ('Page 2 of 2', one row)",
         "diff page-1 and page-2 row ids for overlap",
-        "read the Invoices body table in the details column (on the tabbed page it sits inside the Details tab); verify its title and columns match the declaration on the lookup field (name, status, total, issued_on)",
+        "read the Invoices body table among the 详情 tab's details; verify its title and columns match the declaration on the lookup field (name, status, total, issued_on)",
         "capture every data request issued by the detail page and check each child query for a `top` bound (the console spells its list params without a `$` — top, skip, filter, sort — objectui data-objectstack's adapter; the server's own spelling $top is the same bound)",
-        "read-gate both-sides: sign in as showcase_contributor (reads showcase_account, NOT showcase_contact); open the Northwind account detail; screenshot and confirm the Contacts card (or, on the tabbed page, its section of the Related tab) is ABSENT; then forge GET /api/v1/data/showcase_contact?$filter=[[\"account\",\"=\",\"<northwind id>\"]] as that persona and capture the 403",
+        "read-gate both-sides: sign in as showcase_contributor (reads showcase_account, NOT showcase_contact); open the Northwind account detail; screenshot and confirm the Contacts tab is ABSENT from the tab row and its 'More N' dropdown; then forge GET /api/v1/data/showcase_contact?$filter=[[\"account\",\"=\",\"<northwind id>\"]] as that persona and capture the 403",
         "repeat as showcase_manager (has showcase_contact read): confirm the Contacts section renders AND the same child query answers 200 with rows"
       ],
       "acceptance": [
@@ -1748,7 +1754,7 @@
         {
           "clause": "related lists are DERIVED from the relationship declaration with no hand-built page: the Account detail auto-renders them (Projects is the pinned example)",
           "oracle": "dom",
-          "verify": "after screenshot, the relationship-derived lists exist on the stock detail page: the Projects and Invoices body tables and the Contacts card at a column-tier width (under the Details and Related tabs below 760 px)",
+          "verify": "after screenshot, the relationship-derived lists exist on the stock detail page: the Projects and Invoices body tables among 详情's details and a Contacts tab on the tab row (or in its 'More N' dropdown), at every width",
           "evidence": "detail screenshot"
         },
         {
@@ -1766,7 +1772,7 @@
         {
           "clause": "related lists are READ-gated on BOTH ends: a persona WITHOUT read on the child object (showcase_contributor lacks showcase_contact read) sees NO Contacts section on the account detail (UI courtesy — deriveRelatedLists drops children the user cannot read, objectui#2359) AND a direct child query is refused server-side (403); a persona WITH child read (showcase_manager) sees the section AND the query 200s",
           "oracle": "api",
-          "verify": "as showcase_contributor: screenshot confirms the Contacts card is absent, and the forged GET /api/v1/data/showcase_contact?$filter=[[\"account\",\"=\",\"<northwind id>\"]] returns 403; as showcase_manager: the card renders and the identical query returns 200 with rows — the server is the authority (ADR-0124 D1, RUNNER rule 4), the UI drop is courtesy",
+          "verify": "as showcase_contributor: screenshot confirms the Contacts tab is absent, and the forged GET /api/v1/data/showcase_contact?$filter=[[\"account\",\"=\",\"<northwind id>\"]] returns 403; as showcase_manager: the tab is drawn and the identical query returns 200 with rows — the server is the authority (ADR-0124 D1, RUNNER rule 4), the UI drop is courtesy",
           "evidence": "both personas' detail screenshots + the 403 and the 200 child queries"
         }
       ],
@@ -1868,6 +1874,12 @@
           "date": "2026-11-20",
           "change": "steps[1] re-pointed (#35595, #35596): every related list is a tab of its own, empty or not, and the non-primary children are no longer compact cards in a related column — the Overview rail's 其他相关 group draws a 3-row card for each list with records, and the list's tab is its whole face with the pager. The shared Related tab below 760 px is gone: the same tab row draws over one column. No clause changed. Read from source at the PR's head.",
           "ref": "#35595"
+        },
+        {
+          "revision": 15,
+          "date": "2026-11-22",
+          "change": "steps[0], [1], [2], [5], [7] and acceptance[2] and [5].verify re-pointed after #35890 retired the right rail: no 其他相关 cards, so Contacts is read as its tab (whose face is the whole list with its pager) and the gate's absence is the tab's; the first tab reads 详情 (Details), and the 'primary' Invoices and Projects tables keep the account's full page from pinning the details (recordPagePinsDetails), one tab row at every width. The field.zod.ts quote is today's relatedList describe. No clause changed. Read from source at base 28ba01fe",
+          "ref": "#36188"
         }
       ]
     },
@@ -4122,7 +4134,7 @@
       "title": "Record edit undo: toast Undo / Ctrl+Z restores the prior value through the API and logs a revert; undo after a concurrent change must not silently clobber",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -4142,7 +4154,7 @@
       "steps": [
         "open a record; run the packaged undoable action (fixtures.requires[0]) on it; confirm the success toast shows an Undo button. An inline edit offers none by design",
         "click Undo (or press Ctrl+Z); capture the resulting update; re-read the record over the API and confirm the prior value is restored",
-        "read the record's field-change history on the record page's timeline stream, under its Changes chip (变更). Record page v3 draws no tab named History at any width (#27055). The stream's whole face, with its chips, is the 动态 (Activity) tab: open it from the Activity tab of the record's tab row — Overview (概览), one tab per related list in its order (an empty one muted, with no number), Attachments, Approvals (while a request exists), then Activity (动态) last with its count, the tabs that do not fit folded into its 'More N' (更多 N) dropdown (ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row; ui/packages/plugin-detail/src/RecordTabRow.tsx; #35595), from the title of the Overview tab's 最近动态 (Recent activity) card, in the right rail beside the details (below them in one column under 760 px, ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor; ui/packages/plugin-detail/src/RecordSummaryRail.tsx, #35596), or by ?related=timeline (#27524). The rail card itself shows only the newest three lines, read-only, with no chips. Also read sys_audit_log for the record over the API, and confirm a revert entry was added (a forward write, not a silent rollback)",
+        "read the record's field-change history on the record page's timeline stream, under its Changes chip (变更). Record page v3 draws no tab named History at any width (#27055). The stream's whole face, with its chips, is the 动态 (Activity) tab: open it from the Activity tab of the record's tab row — Details (详情), one tab per related list in its order (an empty one muted, with no number), Attachments, Approvals (while a request exists), then Activity (动态) last with its count, the tabs that do not fit folded into its 'More N' (更多 N) dropdown (ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row; ui/packages/plugin-detail/src/RecordTabRow.tsx; #35595) or by ?related=timeline (#27524); the right rail and its 最近动态 card are retired (#35890). A full page wide enough pins the details in a left column with the other tabs beside them, and then the row has no 详情 tab (ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPagePinsDetails). Also read sys_audit_log for the record over the API, and confirm a revert entry was added (a forward write, not a silent rollback)",
         "press Ctrl+Shift+Z (redo); confirm the edited value is restored",
         "CONCURRENT-CLOBBER probe: in session A make the undoable edit; in session B change the SAME field and save; back in A, click Undo",
         "observe and FLAG whether A's undo carries an OCC guard or silently overwrites B's value"
@@ -4239,6 +4251,12 @@
           "date": "2026-11-20",
           "change": "fixtures.requires[0] and knownGaps[1] follow #35685: a list grid's cell save now offers its own Undo (the save toast's button and Ctrl+Z / Cmd+Z on a cell, a new If-Match update of the prior value), so 'inline grid edits push none' is narrowed to the shared globalUndoManager stack these clauses read. That Undo is the grid's own stack, with no redo, and is not this item's lifting fixture; `blocked` unchanged. No clause changed. Read at the PR's head",
           "ref": "#35898"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-22",
+          "change": "steps[2] re-pointed after #35890 retired the right rail: the stream opens from the Activity tab or ?related=timeline (the 最近动态 card is gone), the first tab reads 详情 (Details), and a wide full page pins the details left of the tabs with no 详情 tab (recordPagePinsDetails). No clause changed. Read from source at base 28ba01fe",
+          "ref": "#36188"
         }
       ]
     },
@@ -5663,7 +5681,7 @@
       "title": "Per-field trackHistory: a tracked edit lands the ADR-0052 §5b old→new timeline summary with display values, an untracked edit does not, and object-level enable.trackHistory gates the record page's sys_audit_log field-change read and derived history op both ways",
       "since": "v15",
       "status": "active",
-      "revision": 14,
+      "revision": 15,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -5684,7 +5702,7 @@
         "boot the showcase on its own port and DB; sign in as admin; open a seeded account record",
         "edit the TRACKED select `industry` (e.g. Technology → Finance); save; read the record's sys_activity rows over the API and open the timeline",
         "edit an UNTRACKED field (e.g. website) alone; save; re-read sys_activity for the record",
-        "record the network log from page load, open the account record and select its timeline stream's Changes chip (变更). Record page v3 has no History tab at any width (#27055). The chips are on the stream's whole face, the 动态 (Activity) tab: open it from the Activity tab of the record's tab row — Overview (概览), one tab per related list in its order (an empty one muted, with no number), Attachments, Approvals (while a request exists), then Activity (动态) last with its count, the tabs that do not fit folded into its 'More N' (更多 N) dropdown (ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row; ui/packages/plugin-detail/src/RecordTabRow.tsx; #35595), from the title of the Overview tab's 最近动态 (Recent activity) card, in the right rail beside the details (below them in one column under 760 px, ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor; ui/packages/plugin-detail/src/RecordSummaryRail.tsx, #35596), or by ?related=timeline (#27524). QA run #28656 read the tab row at 1440, 1000 and 700 px. Then open a seeded task's detail and read the network log again",
+        "record the network log from page load, open the account record and select its timeline stream's Changes chip (变更). Record page v3 has no History tab at any width (#27055). The chips are on the stream's whole face, the 动态 (Activity) tab: open it from the Activity tab of the record's tab row — Details (详情), one tab per related list in its order (an empty one muted, with no number), Attachments, Approvals (while a request exists), then Activity (动态) last with its count, the tabs that do not fit folded into its 'More N' (更多 N) dropdown (ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row; ui/packages/plugin-detail/src/RecordTabRow.tsx; #35595) or by ?related=timeline (#27524); the right rail and its 最近动态 card are retired (#35890), and the account's 'primary' Invoices and Projects tables among its details keep its full page from pinning them in a left column (ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPagePinsDetails), so 详情 stays the first tab at every width. QA run #28656 read the tab row at 1440, 1000 and 700 px. Then open a seeded task's detail and read the network log again",
         "GET /api/v1/auth/me/permissions and compare apiOperations for showcase_account vs showcase_task"
       ],
       "acceptance": [
@@ -5703,7 +5721,7 @@
         {
           "clause": "the record page's sys_audit_log field-change history gates on OBJECT-level enable.trackHistory, both ways: the account detail (flag true) reads sys_audit_log and its timeline stream's Changes chip lists the tracked edits as old → new lines with display values; the task detail (no enable block — per-field flags alone do not summon it) makes NO sys_audit_log read",
           "oracle": "network",
-          "verify": "the network log after settle: one sys_audit_log read for the account record (at page load, at every width: the Overview rail's 最近动态 card draws the stream at open, #35596; a drawer, which draws no rail, reads it when its Activity tab opens) and none for the task; screenshot the account's Changes chip showing the industry edit. Gating ruled at ui/packages/app-shell/src/views/RecordDetailView.tsx (historyEnabled: enable.trackHistory explicitly true, sys_audit_log registered, the viewed object not sys_audit_log itself; and the read serves only the synthesized page's stream, never an assigned page); the read's rows reach the stream through RecordFieldChangesContext as field_change items (ui/packages/plugin-detail/src/recordTimelineStream.ts#auditEntriesToFeedItems). The task half is over-determined (knownGaps): record which gate the verdict rests on. ⛔ An empty Changes chip is never an absence oracle: the chip also lists the stream's sys_activity created/updated rows (ACTIVITY_TYPE_TO_FEED_TYPE maps both to field_change). Measured on a seeded account, the chip showed a sys_activity 'Updated Account …' row beside the audit read. ⛔ Nor is a History tab: record page v3 removed it at every width (#27055; buildDefaultPageSchema.test.ts asserts 'no Activity or History tab'), so looking for one fails a working product (QA run #27438)",
+          "verify": "the network log after settle: one sys_audit_log read for the account record (at page load, whichever tab shows: a laid-out synthesized page reads it at open, historyConsumerOnScreen in ui/packages/app-shell/src/views/RecordDetailView.tsx, pinned by ui/packages/app-shell/src/views/RecordDetailView.recordOpenWaves-13010.test.tsx 'a trackHistory record reads the audit log at open'; the rail that drew the stream is retired, #35890) and none for the task; screenshot the account's Changes chip showing the industry edit. Gating ruled at ui/packages/app-shell/src/views/RecordDetailView.tsx (historyEnabled: enable.trackHistory explicitly true, sys_audit_log registered, the viewed object not sys_audit_log itself; and the read serves only the synthesized page's stream, never an assigned page); the read's rows reach the stream through RecordFieldChangesContext as field_change items (ui/packages/plugin-detail/src/recordTimelineStream.ts#auditEntriesToFeedItems). The task half is over-determined (knownGaps): record which gate the verdict rests on. ⛔ An empty Changes chip is never an absence oracle: the chip also lists the stream's sys_activity created/updated rows (ACTIVITY_TYPE_TO_FEED_TYPE maps both to field_change). Measured on a seeded account, the chip showed a sys_activity 'Updated Account …' row beside the audit read. ⛔ Nor is a History tab: record page v3 removed it at every width (#27055; buildDefaultPageSchema.test.ts asserts 'no Activity or History tab'), so looking for one fails a working product (QA run #27438)",
           "evidence": "the two network logs + the account's Changes screenshot"
         },
         {
@@ -5823,6 +5841,12 @@
           "date": "2026-11-20",
           "change": "steps[3] and acceptance[2].verify re-pointed (#35595, #35596): the tab row is Overview, one tab per related list, Attachments, Approvals, Activity; the right column's 动态 panel became the Overview rail's 最近动态 card, which draws the stream at open, so the audit read at page load stands; a drawer draws no rail and reads it when its Activity tab opens. No clause changed. Read from source at the PR's head.",
           "ref": "#35595"
+        },
+        {
+          "revision": 15,
+          "date": "2026-11-22",
+          "change": "steps[3] and acceptance[2].verify re-pointed after #35890 retired the right rail: the stream opens from the Activity tab or ?related=timeline, the first tab reads 详情 (Details), and the account's body tables keep its page from pinning (recordPagePinsDetails). The audit read at page load now rests on RecordDetailView's historyConsumerOnScreen (a laid-out synthesized page reads it at open) instead of the retired 最近动态 card; the drawer half, which named the rail, is dropped. No clause changed. Read from source at base 28ba01fe",
+          "ref": "#36188"
         }
       ]
     },
@@ -7280,10 +7304,10 @@
     },
     {
       "id": "records-forms.master-detail-body-tables",
-      "title": "A master_detail child is a table in the record overview by default: above the field sections, drawn when empty, capped with show-all, totalled by the server, and never a tab or a side card",
+      "title": "A master_detail child is a tab of its parent's record page by default; a parent field group naming it also draws it as a body table at that group's position — drawn when empty, capped with show-all, totalled by the server — and that page never pins its details in a left column",
       "since": "v18.6",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -7293,74 +7317,86 @@
         "app": "showcase",
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin`",
-          "showcase_task.project is a master_detail FK to showcase_project with no relatedList and no inlineEdit, relatedListTitle 'Tasks' (examples/app-showcase/src/data/objects/task.object.ts); the seed gives 'Website Relaunch' five tasks",
-          "a project with no task: create one ('QA Empty Project') before step 3"
+          "showcase_expense_line.expense_report is a master_detail FK to showcase_expense_report declaring no relatedList, and the report's fieldGroups place it: report, then { key: 'lines', label: 'Expense Lines', relatedList: 'showcase_expense_line' }, then totals (examples/app-showcase/src/data/objects/expense-report.object.ts, #35921); the report declares no relatedLists, so the lines keep their tab. The seed gives EXP-2001 four lines (examples/app-showcase/src/data/seed/index.ts). Not showcase_invoice, whose group places its lines the same way: its default record page is the authored kind 'full' invoice document (examples/app-showcase/src/ui/pages/invoice-document.page.ts), drawn as written on the desktop full page",
+          "a report with no line: create one ('QA Empty Report') before step 3",
+          "the tab-only contrast: showcase_task.project is a master_detail FK no group names (examples/app-showcase/src/data/objects/task.object.ts), and the seed gives 'Website Relaunch' five tasks; read it in the drawer, which draws the standard page (skills/objectstack-ui/rules/record-page.md, step 4), since showcase_project's default record page is the authored kind 'full' project detail (examples/app-showcase/src/ui/pages/project-detail.page.ts)"
         ]
       },
       "steps": [
-        "open the 'Website Relaunch' project's full record page at a column-tier width (1440×900) and screenshot the overview",
-        "read the tab row and the right column",
-        "open 'QA Empty Project' the same way and screenshot the Tasks table",
-        "on 'Website Relaunch', click the Tasks table's ↗ button; read the address bar and the list",
-        "open 'Website Relaunch' from the project list in the record drawer and screenshot it"
+        "open EXP-2001's full record page (/_console/apps/com.example.showcase/showcase_expense_report/record/ID) at 1440×900 with the record's comment panel closed, and screenshot 详情 (Details)",
+        "read the tab row, its 'More N' (更多 N) dropdown, and the page's data-record-page-pinned and data-record-columns-shown markers",
+        "open 'QA Empty Report' the same way and screenshot its Expense Lines table",
+        "on EXP-2001, click the Expense Lines table's ↗ button; read the address bar and the list",
+        "open EXP-2001 from the expense report list in the record drawer and screenshot it",
+        "open 'Website Relaunch' from the project list in the record drawer; read its tab row and 详情"
       ],
       "acceptance": [
         {
-          "clause": "the Tasks table is drawn in the overview's left column, under the header strip's stage bar and key fields and above the first field section",
+          "clause": "the Expense Lines table is drawn in 详情 at the 'lines' group's position: after the Report section, before the Totals section",
           "oracle": "dom",
-          "verify": "in the details column the record:related_list node for showcase_task precedes the first record:details node (ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts#bodyTablePlacement)",
-          "evidence": "the overview screenshot"
+          "verify": "in the details the record:related_list node for showcase_expense_line follows the record:details node holding Report and precedes the one holding Totals (ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts#bodyTablePlacement)",
+          "evidence": "the 详情 screenshot"
         },
         {
-          "clause": "the body table has no tab of its own and no card in the right column",
+          "clause": "the group-placed table keeps its tab, with its count, and the page, its details holding a body table, never pins them in a left column: 详情 stays the first tab",
           "oracle": "dom",
-          "verify": "the tab row names no 'Tasks' tab (also not in its '+N' dropdown) and the right column holds no Tasks card",
-          "evidence": "the overview screenshot"
+          "verify": "the tab row (or its 'More N' dropdown) holds data-record-tab=\"showcase_expense_line.expense_report\" counting four; no data-record-page-pinned on the page, data-record-columns-shown reads 'details' and the row's first tab is data-record-tab=\"overview\", labelled 详情 (ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPagePinsDetails, #35890)",
+          "evidence": "the tab row read and the 详情 screenshot"
         },
         {
           "clause": "an empty body table still draws its column headers and one empty row with an add entry",
           "oracle": "dom",
-          "verify": "the Tasks table on 'QA Empty Project' shows its headers and one row [data-body-table-empty-row] reading 'No related records found' with a New button; clicking New opens a task create form with Project filled",
+          "verify": "the Expense Lines table on 'QA Empty Report' shows its headers and one row [data-body-table-empty-row] reading 'No related records found' with its add entry [data-body-table-empty-add]",
           "evidence": "the empty-project screenshot"
         },
         {
           "clause": "↗ opens the child list filtered to this parent",
           "oracle": "dom",
-          "verify": "the showcase_task list opens holding exactly the five Website Relaunch tasks",
+          "verify": "the showcase_expense_line list opens holding exactly EXP-2001's four lines",
           "evidence": "the list screenshot and the URL"
         },
         {
-          "clause": "the drawer draws the same overview: the Tasks table above the field sections",
+          "clause": "the drawer draws the same 详情: the Expense Lines table between the Report and Totals sections, and the lines' tab on its row",
           "oracle": "dom",
-          "verify": "the drawer's overview shows the Tasks table before the first field section",
+          "verify": "the drawer's 详情 shows the table after the Report section and before Totals, and its tab row holds data-record-tab=\"showcase_expense_line.expense_report\"",
           "evidence": "the drawer screenshot"
         },
         {
-          "clause": "the pins pass at the run subject sha: the default cap of 10 with 'Show all N' expanding in place, the total read from the parent's summary field or a server aggregate over every child row (never a sum of the rows shown), the rule cells (no relatedList → body; false → hidden; true → side; lookup → side), and an authored page's master_detail list getting the body treatment",
+          "clause": "a master_detail child no group names is a tab only, not a body table",
+          "oracle": "dom",
+          "verify": "the 'Website Relaunch' drawer's tab row holds data-record-tab=\"showcase_task.project\" counting five, and its 详情 draws no Tasks table",
+          "evidence": "the drawer tab row read and its 详情 screenshot"
+        },
+        {
+          "clause": "the pins pass at the run subject sha: the default cap of 10 with 'Show all N' expanding in place, the total read from the parent's summary field or a server aggregate over every child row (never a sum of the rows shown), the rule cells (no relatedList: a tab, and also a body table where a parent group names it; true: a tab only, even named; false: hidden; 'primary': a body table with no tab; a declared relatedLists that leaves a group-placed table out drops its tab), an authored page's body-table list getting the body treatment, and a body-table page that does not pin",
           "oracle": "test",
-          "verify": "run ui/packages/plugin-detail/src/__tests__/RelatedList.bodyTable-27055.test.tsx, ui/packages/plugin-detail/src/synth/__tests__/buildDefaultPageSchema.bodyTables-27055.test.ts, ui/packages/app-shell/src/utils/__tests__/deriveRelatedLists.test.ts and ui/packages/app-shell/src/views/RecordDetailView.harness.test.tsx from ui/ with vitest, and packages/spec/src/data/related-list-body-table.test.ts with the spec vitest; each reports ≥1 test and 0 failed",
+          "verify": "run ui/packages/plugin-detail/src/__tests__/RelatedList.bodyTable-27055.test.tsx, ui/packages/plugin-detail/src/synth/__tests__/buildDefaultPageSchema.bodyTables-27055.test.ts, ui/packages/app-shell/src/utils/__tests__/deriveRelatedLists.test.ts, ui/packages/app-shell/src/utils/__tests__/deriveRelatedLists.relatedListsOrder-27069.test.ts, ui/packages/app-shell/src/views/RecordDetailView.harness.test.tsx and ui/packages/plugin-detail/src/__tests__/RecordPageColumns.test.tsx from ui/ with vitest, and packages/spec/src/data/related-list-body-table.test.ts with the spec vitest; each reports ≥1 test and 0 failed",
           "evidence": "the vitest summary lines, with the subject sha"
         }
       ],
       "negative": [
-        "a Tasks tab on the tab row, or a Tasks card in the right column, is a FAIL: a body table is drawn once, in the overview",
-        "an empty Tasks table collapsing to a one-line sentence with no headers is a FAIL",
-        "a total that changes when 'Show all' is clicked is a FAIL: the total is over every child row, never the rows shown"
+        "the Expense Lines table missing from 详情, or drawn before the Report section or after Totals, is a FAIL: a group places its table at its own position",
+        "no lines tab on EXP-2001's row or in its 'More N', or the details pinned in a left column beside the tabs, is a FAIL",
+        "an empty Expense Lines table collapsing to a one-line sentence with no headers is a FAIL",
+        "a total that changes when 'Show all' is clicked is a FAIL: the total is over every child row, never the rows shown",
+        "a Tasks table in the 'Website Relaunch' drawer's 详情 is a FAIL: a master_detail child no group names is a tab only"
       ],
       "traps": [
         "hydration-race"
       ],
       "automated": {
         "kind": "unit",
-        "ref": "ui/packages/plugin-detail/src/__tests__/RelatedList.bodyTable-27055.test.tsx (cap, show-all, ↗, empty row, server totals), ui/packages/plugin-detail/src/synth/__tests__/buildDefaultPageSchema.bodyTables-27055.test.ts (placement), ui/packages/app-shell/src/views/RecordDetailView.harness.test.tsx (the relation type decides, objectstack#35597), packages/spec/src/data/related-list-body-table.test.ts (the rule cells); no live spec opens the overview"
+        "ref": "ui/packages/plugin-detail/src/__tests__/RelatedList.bodyTable-27055.test.tsx (cap, show-all, ↗, empty row, server totals), ui/packages/plugin-detail/src/synth/__tests__/buildDefaultPageSchema.bodyTables-27055.test.ts (placement at the group, and the tab a group-placed table keeps), ui/packages/app-shell/src/utils/__tests__/deriveRelatedLists.test.ts and deriveRelatedLists.relatedListsOrder-27069.test.ts (keepsTab, and the declared relatedLists that drops it), ui/packages/app-shell/src/views/RecordDetailView.harness.test.tsx (the relation type and the group decide, #35921), ui/packages/plugin-detail/src/__tests__/RecordPageColumns.test.tsx (a body-table page does not pin, #35890), packages/spec/src/data/related-list-body-table.test.ts (the rule cells); no live spec opens the page"
       },
       "source": [
         "packages/spec/src/data/related-list-body-table.ts#isBodyTableRelationship",
+        "packages/spec/src/data/related-list-body-table.ts#fieldGroupsPlaceRelationship",
         "ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts#bodyTablePlacement",
         "ui/packages/plugin-detail/src/RelatedList.tsx#useBodyTableTotals",
         "ui/packages/app-shell/src/utils/deriveRelatedLists.ts#authoredBodyTableIds",
-        "docs/adr/0035-config-driven-master-detail.md (Amended 2026-11-19)",
-        "#35597"
+        "ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPagePinsDetails",
+        "docs/adr/0035-config-driven-master-detail.md (Amended 2026-11-20, #35889, and its #35897 note)",
+        "#35921"
       ],
       "history": [
         {
@@ -7368,15 +7404,21 @@
           "date": "2026-11-19",
           "change": "initial — master_detail children are overview body tables by default (#35597, epic #35590), read from source on the PR branch; no live run made",
           "ref": "#35597"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-22",
+          "change": "rewritten to the tab-by-default rule of #35921 (rule of #35889): a plain master_detail child is a tab; a parent field group naming it also draws it as a body table at the group's position, keeping its tab unless a declared relatedLists leaves it out; such a page never pins its details (recordPagePinsDetails, #35890). The fixture moves from showcase_project's Tasks (now a tab only, and the project's default page is authored) to showcase_expense_report's group-placed Expense Lines; Tasks stays as the tab-only contrast in the drawer. The old 'above the field sections, never a tab or a side card' clauses are replaced, and the empty-row clause no longer opens a create form (its source was the task-on-project case). Covers released card #35846. Read from source at base 28ba01fe",
+          "ref": "#36188"
         }
       ]
     },
     {
       "id": "records-forms.related-tab-arrangement",
-      "title": "A reader moves a related list's tab left or right and hides it from the tab's own menu, and 「更多」's 「恢复默认顺序」 brings the default back — kept per reader and object, in a drawer too; 概览, 附件, 审批 and 动态 never move",
+      "title": "A reader moves a related list's tab left or right and hides it from the tab's own menu, and 「更多」's 「恢复默认顺序」 brings the default back — kept per reader and object, in a drawer too; 详情, 附件, 审批 and 动态 never move",
       "since": "v18.7",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -7386,16 +7428,16 @@
         "app": "showcase",
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin`",
-          "a showcase_account record whose synthesized page has at least three side related lists (the Northwind account: contacts, opportunities, invoices and the rest the showcase derives); the zh-CN console (语言 中文) so the menu reads 左移 / 右移 / 隐藏"
+          "a showcase_account record whose synthesized page has at least three side related lists (the Northwind account: Contacts, the Field Zoo lookups and the rest the showcase derives; its 'primary' Invoices and Projects are body tables in 详情 and take no tab); the zh-CN console (语言 中文) so the menu reads 左移 / 右移 / 隐藏"
         ]
       },
       "steps": [
-        "open the Northwind account's full record page at 1440×900 and read the tab row's order",
+        "open the Northwind account's full record page at 1440×900 and read the tab row's order; its details hold the 'primary' body tables, so the page never pins them in a left column and 详情 (Details) is the row's first tab (ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPagePinsDetails, #35890)",
         "open the second related list's tab, click it again to open its menu, choose 左移; then open the menu again and choose 右移",
         "open another related list's tab, open its menu and choose 隐藏; open 「更多」 and read its hidden lists",
         "reload the page and read the tab row and 「更多」",
         "open 「更多」 and choose 恢复默认顺序; read the tab row",
-        "open the 概览, 附件, 审批 (while a request exists) and 动态 tabs in turn and click each again",
+        "open the 详情, 附件, 审批 (while a request exists) and 动态 tabs in turn and click each again",
         "open the same account in the record drawer, hide one list there from its tab's menu, then choose 恢复默认顺序 from the drawer's 「更多」"
       ],
       "acceptance": [
@@ -7406,9 +7448,9 @@
           "evidence": "the tab row read before and after each move"
         },
         {
-          "clause": "隐藏 takes the open list off the row into 「更多」's hidden lists and returns the page to 概览",
+          "clause": "隐藏 takes the open list off the row into 「更多」's hidden lists and returns the page to 详情",
           "oracle": "dom",
-          "verify": "the hidden list has no role=tab on the row; 「更多」 lists it under 已隐藏 (data-record-tab-hidden); 概览 is aria-selected",
+          "verify": "the hidden list has no role=tab on the row; 「更多」 lists it under 已隐藏 (data-record-tab-hidden); 详情 (data-record-tab=\"overview\") is aria-selected",
           "evidence": "the 「更多」 screenshot"
         },
         {
@@ -7424,13 +7466,13 @@
           "evidence": "the tab row after the reset"
         },
         {
-          "clause": "概览, 附件, 审批 and 动态 are fixed: open, a second click opens no menu",
+          "clause": "详情, 附件, 审批 and 动态 are fixed: open, a second click opens no menu",
           "oracle": "dom",
           "verify": "none of the four tabs carries aria-haspopup, and no [data-record-tab-arrange-menu] opens",
           "evidence": "one screenshot per tab"
         },
         {
-          "clause": "the drawer, which has no rail, moves, hides and resets the same way from its tab row",
+          "clause": "the drawer, which never pins the details (not a full page), moves, hides and resets the same way from its tab row",
           "oracle": "dom",
           "verify": "the drawer's 「更多」 holds 恢复默认顺序 after the hide, and choosing it shows the list again",
           "evidence": "the drawer screenshot"
@@ -7438,12 +7480,12 @@
         {
           "clause": "the pins pass at the run subject sha",
           "oracle": "test",
-          "verify": "run ui/packages/plugin-detail/src/__tests__/RecordPageColumns.readerArrangement-35595.test.tsx and ui/packages/plugin-detail/src/synth/__tests__/relatedArrangement-27055.test.ts from ui/ with vitest, and ui/e2e/record-tabs-rail-35595.spec.ts with Playwright (Chromium); each reports ≥1 test and 0 failed",
+          "verify": "run ui/packages/plugin-detail/src/__tests__/RecordPageColumns.readerArrangement-35595.test.tsx and ui/packages/plugin-detail/src/synth/__tests__/relatedArrangement-27055.test.ts from ui/ with vitest, and ui/e2e/record-tabs-35595.spec.ts with Playwright (Chromium); each reports ≥1 test and 0 failed",
           "evidence": "the vitest and Playwright summary lines, with the subject sha"
         }
       ],
       "negative": [
-        "a menu on 概览, 附件, 审批 or 动态 is a FAIL: those tabs never move or hide",
+        "a menu on 详情, 附件, 审批 or 动态 is a FAIL: those tabs never move or hide",
         "an arrangement that is gone after a reload is a FAIL: it is kept per reader and object",
         "a drawer with a hidden list and no way to show it again is a FAIL"
       ],
@@ -7452,7 +7494,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "ui/packages/plugin-detail/src/__tests__/RecordPageColumns.readerArrangement-35595.test.tsx (move, hide, reset, the drawer, the fixed tabs), ui/packages/plugin-detail/src/synth/__tests__/relatedArrangement-27055.test.ts (the merge rules), ui/e2e/record-tabs-rail-35595.spec.ts (move, hide and reset with real pointer events in Chromium); no live spec drives the stored preference across a reload"
+        "ref": "ui/packages/plugin-detail/src/__tests__/RecordPageColumns.readerArrangement-35595.test.tsx (move, hide, reset, the drawer, the fixed tabs), ui/packages/plugin-detail/src/synth/__tests__/relatedArrangement-27055.test.ts (the merge rules), ui/e2e/record-tabs-35595.spec.ts (move, hide and reset with real pointer events in Chromium); no live spec drives the stored preference across a reload"
       },
       "source": [
         "ui/packages/plugin-detail/src/RecordTabRow.tsx#RecordTabRow",
@@ -7466,6 +7508,12 @@
           "date": "2026-11-20",
           "change": "initial — reader arrangement moved from the related cards to the tabs (#35783, after #35595 retired the cards), read from source on the PR branch; no live run made",
           "ref": "#35783"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-22",
+          "change": "#35890 renamed the first tab 概览 to 详情 (Details) and the e2e spec record-tabs-rail-35595.spec.ts to record-tabs-35595.spec.ts; title, steps[0], steps[5], acceptance[1], [4], [5], [6].verify, negative[0] and automated.ref follow. steps[0] notes that Northwind's 'primary' body tables keep its page from pinning (recordPagePinsDetails), so 详情 is on the row; the fixture's example lists drop opportunities (no showcase object) and invoices (a body table, no tab). No clause changed. Read from source at base 28ba01fe",
+          "ref": "#36188"
         }
       ]
     },
