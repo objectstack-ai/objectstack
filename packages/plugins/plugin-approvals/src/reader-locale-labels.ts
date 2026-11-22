@@ -198,9 +198,9 @@ interface ObjectLabelTranslation {
  * else `defaultLocale` (`getDefaultLocale()`). Each getter is
  * feature-detected; a service that declares none gets none.
  *
- * The locale is the reader's as REQUESTED, the one `/meta` hands its
- * translator for the same request (`translateObject` negotiates the bundle
- * key itself), so the two answer one label.
+ * The locale is the reader's, negotiated ({@link negotiatedReaderLocale}),
+ * the one every lookup of this read asks with — as objectql's refusal labels
+ * hand `translateObject` the negotiated locale (`labelTranslationOf`).
  *
  * `undefined` — the declared label stands — for a service that cannot hand
  * its translations over (no `getLocales` / `getTranslations`). A throwing
@@ -267,7 +267,7 @@ export function readerLabelsFor(
   const objectLabel = (objectName: string): string | undefined =>
     memo(objectLabels, objectName, () => {
       try {
-        translation ??= { value: objectLabelTranslation(service, requested) };
+        translation ??= { value: objectLabelTranslation(service, locale) };
         if (!translation.value) return undefined;
         const label = translateObject({ name: objectName }, translation.value.bundle, translation.value.options).label;
         return typeof label === 'string' && label.trim().length > 0 ? label : undefined;
