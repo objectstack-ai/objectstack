@@ -295,6 +295,9 @@ describe('view conversions reach the flattened-overlay spelling (payload at top 
    * `hidden` are retired (ADR-0049) and `view-overlay-owner-hidden-removed`
    * strips them. It is asserted GONE below, by that entry, while every key
    * that still binds or orders the row survives.
+   *
+   * [#36403] So did `columnState`: retired from both wire doors, and
+   * `view-column-state-removed` strips it. Asserted GONE below the same way.
    */
   it('never touches the overlay identity/round-trip fields', () => {
     const { out, notices } = convertViewRow({
@@ -318,11 +321,12 @@ describe('view conversions reach the flattened-overlay spelling (payload at top 
     expect(out.isDefault).toBe(true);
     expect(out.order).toBe(3);
     expect(out.scope).toBe('user');
-    expect(out.columnState).toEqual({ order: ['name'], widths: { name: 120 } });
-    // The two retired keys on this row — each stripped by its own entry.
+    // The three retired keys on this row — each stripped by its own entry.
     expect('filterableFields' in out).toBe(false);
     expect('owner' in out).toBe(false);
+    expect('columnState' in out).toBe(false);
     expect(pathsFor(notices, 'view-overlay-owner-hidden-removed')).toEqual(['views[0].owner']);
+    expect(pathsFor(notices, 'view-column-state-removed')).toEqual(['views[0].columnState']);
   });
 });
 

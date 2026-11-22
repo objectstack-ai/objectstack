@@ -109,7 +109,6 @@ export const frGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "metadataForms.view.fields.gantt.label": "57ffc6ef520edfc5",
   "metadataForms.view.fields.kanban.label": "dd95c452aa71459e",
   "metadataForms.view.fields.navigation.label": "51cd9fc784a9643f",
-  "metadataForms.view.fields.navigation.mode.helpText": "3a34d1e59dc81b9f",
   "metadataForms.view.fields.navigation.mode.label": "74dde5013435abdc",
   "metadataForms.view.fields.pagination.label": "309131fbaca258df",
   "metadataForms.view.fields.selection.type.label": "901bb552898b2cab",

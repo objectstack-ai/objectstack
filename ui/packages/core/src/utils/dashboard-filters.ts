@@ -753,6 +753,21 @@ export function boundMemberFilterNames(
 }
 
 /**
+ * The dashboard filters that never reach this widget's query: each `def` the
+ * widget is not bound to, in `defs` order. It asks the binding
+ * {@link buildWidgetScopedFilter} asks (`resolveBoundField`), so a card's
+ * "this filter does not apply here" mark and the query the card sends cannot
+ * disagree: a filter listed here contributes no condition for any value, and
+ * one left out contributes one for every value it lowers.
+ */
+export function dashboardFiltersNotApplied(
+  widget: Pick<DashboardWidgetSchema, 'id' | 'filterBindings'>,
+  defs: DashboardFilterDef[],
+): DashboardFilterDef[] {
+  return defs.filter((def) => resolveBoundField(widget, def) === undefined);
+}
+
+/**
  * Resolve which of the widget's fields a filter binds to.
  * Returns `undefined` when the widget is not bound to this filter.
  *

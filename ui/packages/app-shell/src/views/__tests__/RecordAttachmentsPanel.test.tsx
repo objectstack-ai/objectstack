@@ -934,3 +934,111 @@ describe('RecordAttachmentsPanel — upload attaches through the upload’s own 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('did not attach it to this record'));
   });
 });
+
+describe('RecordAttachmentsPanel — the uploader column names other people\'s files (objectstack#35724)', () => {
+  /** The list item rendering `fileName`. */
+  const rowOf = (fileName: string): HTMLElement => {
+    const li = screen.getByText(fileName).closest('li');
+    if (!li) throw new Error(`no row for ${fileName}`);
+    return li as HTMLElement;
+  };
+
+  it('the list read expands the uploader', async () => {
+    const dataSource = makeDataSource();
+    setup(dataSource);
+    await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
+    expect(dataSource.find).toHaveBeenCalledWith(
+      'sys_attachment',
+      expect.objectContaining({ $expand: ['uploaded_by'] }),
+    );
+  });
+
+  it('another user\'s file, expanded by a reader who may read that user, shows the uploader\'s name', async () => {
+    setup(makeDataSource({ find: vi.fn(async () => [{ ...ROW, uploaded_by: { id: 'u-ada', name: 'Ada Lovelace' } }]) }));
+    await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
+    expect(within(rowOf('report.pdf')).getByText('Ada Lovelace')).toBeInTheDocument();
+  });
+
+  it('a reader without user-read rights, served the bare id, sees no name and no id', async () => {
+    setup(makeDataSource({ find: vi.fn(async () => [{ ...ROW, uploaded_by: 'u-ada' }]) }));
+    await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
+    const row = rowOf('report.pdf');
+    expect(row.textContent).not.toContain('u-ada');
+    expect(row.textContent).not.toContain('Ada Lovelace');
+    expect(row.querySelector('[title="u-ada"]')).toBeNull();
+  });
+});
+
+describe('RecordAttachmentsPanel — Rename sends the new name to the rename door (objectstack#35724)', () => {
+  const renameTo = async (user: ReturnType<typeof userEvent.setup>, name: string) => {
+    await chooseRowAction(user, 'Rename');
+    const dialog = await screen.findByTestId('attachment-rename-dialog');
+    const input = within(dialog).getByTestId('attachment-rename-input');
+    await user.clear(input);
+    await user.type(input, name);
+    await user.click(within(dialog).getByTestId('attachment-rename-submit'));
+  };
+
+  it('PATCHes the attachment with the trimmed name, and the row shows the stored name', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ success: true, data: { id: 'a1', file_name: 'Q3 report.pdf' } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    setup(makeDataSource());
+    await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
+
+    const user = userEvent.setup();
+    await renameTo(user, '  Q3 report.pdf ');
+
+    await waitFor(() => expect(screen.getByText('Q3 report.pdf')).toBeInTheDocument());
+    expect(screen.queryByText('report.pdf')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId('attachment-rename-dialog')).not.toBeInTheDocument());
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchSpy.mock.calls[0] as [RequestInfo | URL, RequestInit];
+    expect(String(url)).toContain('/api/v1/attachments/a1');
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(String(init.body))).toEqual({ file_name: 'Q3 report.pdf' });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('a refused rename keeps the old name and names the rule, and the dialog stays open', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({ success: false, error: { code: 'RECORD_NOT_ACCESSIBLE', message: 'Cannot update attachment a1' } }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    setup(makeDataSource());
+    await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
+
+    await renameTo(userEvent.setup(), 'other.pdf');
+
+    const dialog = await screen.findByTestId('attachment-rename-dialog');
+    await waitFor(() =>
+      expect(within(dialog).getByRole('alert')).toHaveTextContent(
+        'Only the uploader or someone who can edit this record may rename this attachment.',
+      ),
+    );
+    expect(screen.queryByText('other.pdf')).not.toBeInTheDocument();
+  });
+
+  it('a blank name or the unchanged name cannot be saved, and nothing is sent', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    setup(makeDataSource());
+    await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
+
+    const user = userEvent.setup();
+    await chooseRowAction(user, 'Rename');
+    const dialog = await screen.findByTestId('attachment-rename-dialog');
+    const input = within(dialog).getByTestId('attachment-rename-input');
+    const save = within(dialog).getByTestId('attachment-rename-submit');
+    expect(input).toHaveValue('report.pdf');
+    expect(save).toBeDisabled();
+    await user.clear(input);
+    await user.type(input, '   ');
+    expect(save).toBeDisabled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
