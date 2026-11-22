@@ -13,7 +13,9 @@
  * - `record` — the shared row with the link's effective `redactFields` (object
  *   default ∪ per-link) stripped, exactly as both mounts stripped it before.
  * - `link` — the nine link columns a holder may read; never the password hash,
- *   the email allowlist or the creator.
+ *   the email allowlist or the creator. Beside them, `object_label`: the shared
+ *   object's label in the request's locale (see "The object label" below), so
+ *   the page can name what was shared without the meta door it cannot open.
  * - `fields` — the DISPLAY projection of the fields `record` carries, keyed by
  *   field name. The route's visitor is usually anonymous and the meta door
  *   (`GET /meta/object/NAME`) refuses an anonymous caller, so this is the only
@@ -36,13 +38,30 @@
  * ADR-0144 D2 — the `currencyField` pointer, only while `record` also carries
  * that code field, so a redacted code field's name is never disclosed); and a
  * lookup's `reference` (target object) and authored
- * `displayField`. The labels are the authored ones the object schema holds:
- * the resolve read path has no caller-locale seam, and this module builds none.
- * A lookup's value stays what the record read returns — the stored id; nothing
- * here reads the target record.
+ * `displayField`; and `hidden: true` for a field the object declares hidden
+ * (`FieldSchema.hidden`, which the injected scope and queue columns carry at
+ * their source), so the page leaves off what the record page leaves off. The
+ * field labels are the authored ones the object schema holds. A lookup's value
+ * stays what the record read returns — the stored id; nothing here reads the
+ * target record.
+ *
+ * ## The object label
+ *
+ * `link.object_label` is the object's label as `GET /meta/object/NAME` serves
+ * it in the request's locale: the translation bundle laid over the declared
+ * `label` by `translateObject` (`@objectstack/spec/system`), with the resolve
+ * options that route builds (`metaTranslateOptions` in `@objectstack/rest`:
+ * the locale, the declared fallback locale, and the authored language — the
+ * declared `sourceLocale`, else the default locale). The locale is the
+ * request's `Accept-Language` top tag, else the i18n service's default locale,
+ * as the meta door reads it. No i18n service, no locale, a bundle with no
+ * entry, or a service that throws: the declared label. An object that
+ * declares no label carries no `object_label`, and the page names it by
+ * `object_name`.
  */
 
 import type { ResolveShareLinkResult, ShareLink } from '@objectstack/spec/contracts';
+import { preferredLocaleFromHeader, translateObject, type TranslationBundle } from '@objectstack/spec/system';
 
 /** One picklist option, as the shared-record page draws it. */
 export interface ShareLinkFieldOption {
@@ -72,13 +91,36 @@ export interface ShareLinkFieldDisplay {
   currencyConfig?: ShareLinkFieldCurrencyConfig;
   reference?: string;
   displayField?: string;
+  /** The object declares the field hidden from the default UI (`FieldSchema.hidden`). */
+  hidden?: true;
 }
 
-/** The link columns a holder of the token may read. */
+/**
+ * The link columns a holder of the token may read, and the shared object's
+ * label in the request's locale (absent when the object declares none).
+ */
 export type ShareLinkResolvedLink = Pick<
   ShareLink,
   'id' | 'token' | 'object_name' | 'record_id' | 'permission' | 'audience' | 'expires_at' | 'label' | 'created_at'
->;
+> & { object_label?: string };
+
+/** The slice of `II18nService` the object label is translated through — what the metadata route reads. */
+export interface ShareLinkLabelI18n {
+  getLocales?: () => string[];
+  getTranslations?: (locale: string) => Record<string, unknown>;
+  getFallbackLocale?: () => string | undefined;
+  getDefaultLocale?: () => string | undefined;
+  /** The declared `i18n.sourceLocale`; read before `getDefaultLocale` as the authored language. */
+  getSourceLocale?: () => string | undefined;
+}
+
+/** The request facts the answer's `link.object_label` is read in — see "The object label". */
+export interface ShareLinkAnswerLocale {
+  /** The request's `Accept-Language` header value, as it arrived. */
+  acceptLanguage?: string | null;
+  /** The deployment's i18n service, when one is registered. */
+  i18n?: ShareLinkLabelI18n;
+}
 
 /** `data` of a served `GET /share-links/:token/resolve`. */
 export interface ShareLinkResolveAnswer {
@@ -138,6 +180,7 @@ function projectField(field: Record<string, unknown>, carried: (key: string) => 
   }
   if (typeof field.reference === 'string') out.reference = field.reference;
   if (typeof field.displayField === 'string') out.displayField = field.displayField;
+  if (field.hidden === true) out.hidden = true;
   return out;
 }
 
@@ -165,18 +208,70 @@ export function projectSharedRecordFields(
   return fields;
 }
 
+/** A non-empty string, or `undefined`. */
+function textOf(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/** Every locale the service holds, keyed by locale, as the metadata route builds it; `undefined` when it holds none. */
+function bundleOf(i18n: ShareLinkLabelI18n): TranslationBundle | undefined {
+  if (typeof i18n.getLocales !== 'function' || typeof i18n.getTranslations !== 'function') return undefined;
+  const bundle: Record<string, unknown> = {};
+  for (const locale of i18n.getLocales()) {
+    const data = i18n.getTranslations(locale);
+    if (data && typeof data === 'object') bundle[locale] = data;
+  }
+  return Object.keys(bundle).length > 0 ? (bundle as TranslationBundle) : undefined;
+}
+
+/**
+ * The shared object's label in the request's locale — see "The object label"
+ * in the module header. `undefined` when the schema declares no label.
+ */
+export function sharedObjectLabel(schema: unknown, request?: ShareLinkAnswerLocale): string | undefined {
+  if (!isPlainObject(schema)) return undefined;
+  const authored = textOf(schema.label);
+  const name = textOf(schema.name);
+  const i18n = request?.i18n;
+  if (!authored || !name || !i18n) return authored;
+  try {
+    const locale = preferredLocaleFromHeader(request?.acceptLanguage)
+      ?? (typeof i18n.getDefaultLocale === 'function' ? textOf(i18n.getDefaultLocale()) : undefined);
+    if (!locale) return authored;
+    const bundle = bundleOf(i18n);
+    if (!bundle) return authored;
+    const fallback = typeof i18n.getFallbackLocale === 'function' ? textOf(i18n.getFallbackLocale()) : undefined;
+    // The authored language: the declared `sourceLocale`, else the users'
+    // `defaultLocale` (the metadata route's `metaTranslateOptions` rule).
+    const source = typeof i18n.getSourceLocale === 'function' ? textOf(i18n.getSourceLocale()) : undefined;
+    const defaultLocale = source ?? (typeof i18n.getDefaultLocale === 'function' ? textOf(i18n.getDefaultLocale()) : undefined);
+    const translated = translateObject({ name, label: authored }, bundle, {
+      locale,
+      ...(fallback ? { fallbackChain: [fallback] } : {}),
+      ...(defaultLocale ? { defaultLocale } : {}),
+    });
+    return textOf(translated.label) ?? authored;
+  } catch {
+    // A misbehaving i18n service never fails the resolve: the declared label stands.
+    return authored;
+  }
+}
+
 /**
  * The resolve answer both mounts serve, from the record they read with a system
- * context, the token's resolution, and the shared object's schema
- * (`engine.getSchema(link.object_name)`).
+ * context, the token's resolution, the shared object's schema
+ * (`engine.getSchema(link.object_name)`), and the request facts the object's
+ * label is read in.
  */
 export function buildShareLinkResolveAnswer(
   record: unknown,
   resolved: ResolveShareLinkResult,
   schema: unknown,
+  request?: ShareLinkAnswerLocale,
 ): ShareLinkResolveAnswer {
   const served = redactSharedRecord(record, resolved.redactFields);
   const link = resolved.link;
+  const objectLabel = sharedObjectLabel(schema, request);
   return {
     record: served,
     link: {
@@ -189,6 +284,7 @@ export function buildShareLinkResolveAnswer(
       expires_at: link.expires_at,
       label: link.label,
       created_at: link.created_at,
+      ...(objectLabel ? { object_label: objectLabel } : {}),
     },
     redactFields: resolved.redactFields,
     fields: projectSharedRecordFields(schema, served, resolved.redactFields),

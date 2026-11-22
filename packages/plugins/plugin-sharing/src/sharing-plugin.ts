@@ -1228,6 +1228,15 @@ export class SharingServicePlugin implements Plugin {
             registerShareLinkRoutes(http, this.linkService, engine as SharingEngine, {
               basePath: this.options.shareLinkBasePath,
               contextFromRequest: verifiedContextFromRequest,
+              // The resolve answer's object label, in the request's locale. Read
+              // per request: the i18n plugin may register after this one.
+              i18n: () => {
+                try {
+                  return ctx.getService<II18nService>('i18n');
+                } catch {
+                  return undefined;
+                }
+              },
             });
             ctx.logger.info(
               'SharingServicePlugin: share-link routes mounted at ' +

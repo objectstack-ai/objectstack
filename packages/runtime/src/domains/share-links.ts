@@ -78,7 +78,7 @@ import { readSharePasswordHeader, SHARE_PASSWORD_VARY, type SharePasswordHeaderR
 // [#26991] The resolve answer — redaction and the field display projection
 // included — from the ONE builder the plugin-sharing mount serves it with; it
 // lives in `@objectstack/types` for the same dependency reason.
-import { buildShareLinkResolveAnswer } from '@objectstack/types';
+import { buildShareLinkResolveAnswer, type ShareLinkLabelI18n } from '@objectstack/types';
 
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
@@ -366,11 +366,22 @@ async function handleShareLinksRequestBody(
             // [#26991] The redacted record, the link, and the display projection
             // of exactly the fields that record carries (`fields`): the one
             // place an anonymous holder can read authored labels from, since
-            // the meta door refuses that caller.
+            // the meta door refuses that caller. The object's label is read in
+            // the request's locale (`Accept-Language`), through the request's
+            // i18n service, as the plugin-sharing twin reads it.
+            let i18n: unknown;
+            try {
+                i18n = await deps.resolveService(context, 'i18n');
+            } catch {
+                i18n = undefined;
+            }
             return {
                 handled: true,
                 response: deps.success(
-                    buildShareLinkResolveAnswer(record, resolved, engine?.getSchema(resolved.link.object_name)),
+                    buildShareLinkResolveAnswer(record, resolved, engine?.getSchema(resolved.link.object_name), {
+                        acceptLanguage: headerOf('accept-language'),
+                        i18n: (i18n ?? undefined) as ShareLinkLabelI18n | undefined,
+                    }),
                 ),
             };
         }

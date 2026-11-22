@@ -28,7 +28,9 @@
  *      bypasses normal RLS — the token IS the authorisation).
  *   3. Strip `redactFields` from the record before returning, and describe
  *      the fields it still carries (`fields`: label, type, option labels,
- *      currency and lookup display bits — `buildShareLinkResolveAnswer`).
+ *      currency and lookup display bits, the hidden flag —
+ *      `buildShareLinkResolveAnswer`), with the object's label in the
+ *      request's locale (`link.object_label`).
  *
  * For browser-rendered share pages, the front-end calls this endpoint
  * and renders the response read-only.
@@ -51,7 +53,7 @@ import { sendOk, sendError, sendServerFault } from '@objectstack/types';
 import { readSharePasswordHeader, SHARE_PASSWORD_VARY, type SharePasswordHeaderReading } from '@objectstack/types';
 // [#26991] The resolve answer — redaction and the field display projection
 // included — from the ONE builder the dispatcher twin serves it with.
-import { buildShareLinkResolveAnswer } from '@objectstack/types';
+import { buildShareLinkResolveAnswer, type ShareLinkLabelI18n } from '@objectstack/types';
 import type { ShareLinkExecutionContext } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { ErrorCode } from '@objectstack/spec/api';
@@ -90,6 +92,19 @@ export interface ShareLinkRoutesOptions {
    * themselves, via {@link refuseAnonymous}.
    */
   contextFromRequest?: (req: IHttpRequest) => ExecutionContext | Promise<ExecutionContext>;
+  /**
+   * The deployment's i18n service, resolved per request (the i18n plugin may
+   * register after this one). The resolve answer's `link.object_label` is
+   * translated through it into the request's locale; absent, or answering
+   * `undefined`, the object's declared label is served.
+   */
+  i18n?: () => ShareLinkLabelI18n | undefined;
+}
+
+/** A request header's value as one string — the first of a repeated header. */
+function headerText(value: unknown): string | undefined {
+  if (Array.isArray(value)) return typeof value[0] === 'string' ? value[0] : undefined;
+  return typeof value === 'string' ? value : undefined;
 }
 
 // [Finding-2] Secure default: anonymous (no identity read from headers). A
@@ -542,8 +557,13 @@ export function registerShareLinkRoutes(
       }
 
       // [#26991] The redacted record, the link, and the display projection of
-      // exactly the fields that record carries (`fields`).
-      sendOk(res, buildShareLinkResolveAnswer(record, resolved, engine.getSchema?.(resolved.link.object_name)));
+      // exactly the fields that record carries (`fields`). The object's label
+      // is read in the request's locale (`Accept-Language`), as the dispatcher
+      // twin reads it.
+      sendOk(res, buildShareLinkResolveAnswer(record, resolved, engine.getSchema?.(resolved.link.object_name), {
+        acceptLanguage: headerText(req.headers?.['accept-language']),
+        i18n: opts.i18n?.(),
+      }));
     },
     failure: 'Failed to resolve link',
   });
