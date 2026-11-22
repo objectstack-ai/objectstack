@@ -213,6 +213,9 @@ export type {
 // details and panels, and the layout.
 export {
   RECORD_PAGE_TWO_COLUMN_MIN_WIDTH,
+  RECORD_PAGE_DETAILS_WIDTH,
+  RECORD_PAGE_PIN_MIN_WIDTH,
+  recordPagePinsDetails,
   recordPageTierFor,
   recordPageTierHasRightColumn,
   buildDefaultPageColumns,

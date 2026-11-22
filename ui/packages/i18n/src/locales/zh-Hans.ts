@@ -1339,6 +1339,7 @@ const zh = {
     approvalPendingEditable: '审批中 · 可编辑',
     approvalPendingTooltip: '该记录有待审批的请求，但当前审批节点仍允许编辑',
     approvalPending: '审批中',
+    approvalPendingStep: '审批中 · {{step}}',
     approvalPendingNotEditableTooltip: '该记录有待审批的请求',
     approvalProgress: '审批 — 已通过 {{got}} / 共需 {{need}}',
     approvalProgressGroups: '会签 — 已完成 {{got}} / 共 {{need}} 个组',
@@ -1495,7 +1496,8 @@ const zh = {
     relatedHiddenCount_other: '已隐藏 {{count}} 张',
     relatedShowHidden: '显示',
     recordTabs: '记录页签',
-    recordTabOverview: '概览',
+    recordTabOverview: '详情',
+    detailsColumnResize: '调整详情栏宽度',
     recordTabMoveBefore: '左移',
     recordTabMoveAfter: '右移',
     recordTabsMore: '另外 {{count}} 个页签',
@@ -1505,7 +1507,9 @@ const zh = {
     recordTabsMoreTrigger: '更多 {{count}}',
     recordTabsMoreTrigger_one: '更多 {{count}}',
     recordTabsMoreTrigger_other: '更多 {{count}}',
-    // objectstack#35596 — the 概览 tab's summary rail.
+    // objectstack#35596 — the 概览 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
     summaryApprovalDone: '已通过',
     summaryApprovalMine: '待你审批',
     summaryApprovalWaitingOn: '等待 {{name}}',

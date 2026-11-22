@@ -141,12 +141,12 @@ export function useApprovalBandOnce(): { draws: boolean; mark: React.ReactNode }
 
 /**
  * The most columns a frameless detail section may take on the page being
- * drawn (objectstack#27524, Target 6): the record page's layout sets 2 in its
- * two-column tier, where the details share the row with the 320 px right
- * column, and leaves 3 in the wide tier and the stack, where the section's
- * own container width decides. 3 anywhere else.
+ * drawn: the record page's layout sets 1 while the details are pinned to its
+ * left column (objectstack#35890: one field a row, a long text the full width)
+ * and leaves 3 otherwise, where the section's own container width decides.
+ * 3 anywhere else.
  */
-export const DetailsColumnCapContext = React.createContext<2 | 3>(3);
+export const DetailsColumnCapContext = React.createContext<1 | 2 | 3>(3);
 
 /**
  * How many columns a frameless detail section lays its fields in, by the
@@ -154,8 +154,8 @@ export const DetailsColumnCapContext = React.createContext<2 | 3>(3);
  * 1–3 列」): one field takes one column, two to five take two, six and more
  * take three — never more than `cap` ({@link DetailsColumnCapContext}).
  */
-export function framelessSectionColumns(visibleFieldCount: number, cap: 2 | 3 = 3): 1 | 2 | 3 {
-  if (visibleFieldCount <= 1) return 1;
+export function framelessSectionColumns(visibleFieldCount: number, cap: 1 | 2 | 3 = 3): 1 | 2 | 3 {
+  if (visibleFieldCount <= 1 || cap === 1) return 1;
   if (visibleFieldCount <= 5 || cap === 2) return 2;
   return 3;
 }

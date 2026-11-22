@@ -71,12 +71,16 @@ export const objectForm = defineForm({
         // the publish door refuses it (`object-field-ref-unknown`,
         // `searchable-field-unknown`, both at `error`), and so does `os validate`.
         { field: 'highlightFields', widget: 'string-tags', colSpan: 2, helpText: 'Field names of this object, most important first — the first entry wins where only one fits (ADR-0085). Drives the default list and related-list columns, cards, child-record previews, the record hover card and the record picker. A name that is not a field of this object is refused at publish.' },
-        // #27069 — the business order of the record page's related lists: a
-        // list of inbound relationship names (child object, or `object.field`)
-        // on the `highlightFields` row's face. A dangling name is refused at
-        // the publish door (`related-list-ref-unknown`, `error`, judged against
-        // the registry's children) and by `os validate` / `os build`.
-        { field: 'relatedLists', widget: 'string-tags', colSpan: 2, helpText: 'Business order of this object\'s related lists on its record page, most important first. Each entry is a child object name (e.g. task), or object.field when that child has more than one relationship to this object. Listed lists come first; the rest follow in the derived order. A name that matches no relationship pointing at this object places nothing, so saving or validating the object refuses it.' },
+        // #27069 / #35897 / #35899 — the record page's tab list: inbound
+        // relationship names (child object, or `object.field`), the three
+        // built-in tabs by object name, or an entry's object form
+        // `{ list, label?, columns? }`. Its own widget, not `string-tags`: that
+        // chip input casts the value to `string[]`, and an object entry (which
+        // Studio's Record page tabs editor writes once a title or columns are
+        // set) cannot render as a chip there (#35923 review M1). A dangling name
+        // is refused at the publish door (`related-list-ref-unknown`, `error`,
+        // judged against the registry's children) and by `os validate` / `os build`.
+        { field: 'relatedLists', widget: 'related-list-entries', colSpan: 2, helpText: 'The record page tabs after the overview, in order. Each entry is a child object name (e.g. task), object.field when that child has more than one relationship to this object, a built-in tab (sys_attachment, sys_approval_request, sys_activity), or an entry with its own title and columns, set in Studio\'s object settings. Once anything is listed, a related list no entry names shows no tab, a list another package adds included, until this object names it; attachments show only when listed. Empty: every list shows in the default order. A name that matches no relationship pointing at this object is refused when the object is saved.' },
         { field: 'searchableFields', widget: 'string-tags', colSpan: 2, helpText: 'Field names the $search query matches (ADR-0061): the default for the record picker, list quick-search and global search; a view may narrow it. Unset, search uses the name/title field plus short-text fields. Each entry must name a stored field of this object — an unknown name or a virtual formula field is refused at publish.' },
         // #19332 (flight G2a of ruling record 5861442317) — the object's field
         // groups, the ADR-0085 layout role beside `nameField` / `highlightFields`.
