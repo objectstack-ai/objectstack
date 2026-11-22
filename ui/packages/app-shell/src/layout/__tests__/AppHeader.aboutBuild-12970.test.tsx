@@ -178,6 +178,7 @@ const PATHS: Record<AppHeaderVariant, string> = {
   home: '/home',
   orgs: '/organizations',
   studio: '/studio',
+  docs: '/docs',
 };
 
 function renderHeader(variant: AppHeaderVariant) {
@@ -216,7 +217,7 @@ afterEach(() => {
 });
 
 describe('AppHeader help menu: About names the console build (objectui#12970)', () => {
-  it.each<AppHeaderVariant>(['app', 'home', 'orgs', 'studio'])(
+  it.each<AppHeaderVariant>(['app', 'home', 'orgs', 'studio', 'docs'])(
     'the `%s` bar\'s help menu carries About, read from the packs',
     (variant) => {
       renderHeader(variant);

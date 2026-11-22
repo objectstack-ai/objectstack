@@ -3123,6 +3123,7 @@ function RelatedListFields({
         value: e.name,
         label: typeof e.def.label === 'string' && e.def.label ? (e.def.label as string) : e.name,
         type: typeof e.def.type === 'string' ? (e.def.type as string) : 'text',
+        ...(e.def.multiple === true ? { multiple: true } : {}),
       })),
     [ownFields],
   );

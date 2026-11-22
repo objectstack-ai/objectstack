@@ -328,6 +328,11 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      remove_user_manager: {
+        label: "Vorgesetzten entfernen",
+        confirmText: "Den Vorgesetzten dieses Benutzers entfernen? Bis erneut ein Vorgesetzter festgelegt wird, berichtet er an niemanden; das Genehmigungsrouting und der Datensatzbereich own_and_reports folgen der Änderung.",
+        successMessage: "Vorgesetzter entfernt"
+      },
       list_platform_admins: {
         label: "Plattformadministratoren",
         resultDialog: {

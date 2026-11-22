@@ -621,7 +621,7 @@
       "title": "List-view capability matrix: filter, search, sort, pagination, saved views, inline edit, export, visualization switcher, bulk/row actions, conditional formatting",
       "since": "v15",
       "status": "active",
-      "revision": 13,
+      "revision": 15,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -657,12 +657,12 @@
         "open the tabular saved view (sort [{field: 'estimate_hours', order: 'desc'}] — the array form: #17053 retired the bare string clause 'estimate_hours desc' platform-wide, so the objectui#2601 string-crash fixture no longer exists on stock); confirm it renders and the request carries the sort as sort=-estimate_hours",
         "load a list past its first window. No stock list holds more rows than the 50-row window (the largest seeded task and contact lists are under it), so stage one first: POST /api/v1/data/showcase_inquiry/createMany with a bare JSON array of 55 rows (name + email + message each — showcase_inquiry requires `message` too, and a name + email body answers 400 \"Message is required\", QA run #24616). A list view that declares no `pagination` (the stock Inquiries list) draws NO pager since #35554: it loads as it scrolls, so scroll the Inquiries list to its end and capture `top`/`skip` on every data request (top=50, then top=50&skip=50); the count beside the view name reads the server total. Then page a view that DECLARES `pagination` (stage one: PUT a view with pagination: {pageSize: 50} on showcase_inquiry) past page 1 and capture the same; confirm no unpaged full fetch on either",
         "in the grid saved view (inlineEdit: true), edit one cell in place; save; capture the PATCH; re-read the row via API",
-        "on in_progress, with the export grant from fixtures.requires[3] bound, open the 视图设置 (View settings) popover beside the view name — the Display popover, named 选项 (Options) until objectstack#35878 moved it there — Export sits in its footer ('Export as CSV / XLSX / JSON'), not as a separate toolbar button — and export each declared format (csv, xlsx, json); capture the requests and files. Without the grant the Export entries are absent and the route answers 403 EXPORT_NOT_PERMITTED — the opt-in working as designed, not a fail of the export variant",
+        "on in_progress, with the export grant from fixtures.requires[3] bound, open the 视图设置 (View settings) popover beside the view name — the Display popover, named 选项 (Options) until objectstack#35878 moved it there — Export sits in its footer ('Export as CSV / XLSX / JSON') and, since objectstack#36113, also in the 「导入 / 导出」 button at the view bar's end (the same formats, two doors) — and export each declared format (csv, xlsx, json) from either; capture the requests and files. Without the grant the Export entries are absent from both and the route answers 403 EXPORT_NOT_PERMITTED — the opt-in working as designed, not a fail of the export variant",
         "open the visualization switcher on All Tasks; enumerate the offered types; switch through each",
-        "on bulk_actions, select rows that are NOT done and run showcase_mark_done (per-record) — its visible gate, has(record.done) && record.done != true, judges each selected row, so a done row in the selection drops Mark Done from the selection actions the view bar's right end shows (since #35554 the list page has no bottom bulk bar; since #35878 the selection face is the view bar's right end, with ⋮ still last), or, over a mixed selection, the confirm reports the done rows not eligible and skipped (QA run #27438); either way the dispatch count stops matching the selection — and showcase_recalc_selection (aggregate — ONE dispatch: an api-type action, which the console sends through the action door, POST /api/v1/actions/showcase_task/showcase_recalc_selection with body {params:{_selectedIds:[…]}}; the server forwards those params flat to the action's own target /api/v1/apps/showcase/recalc in-process, buildApiActionRequest in packages/runtime/src/action-execution.ts, so the browser's network log shows the door request and no /recalc request); on legacy_row_actions confirm both named row actions resolve to live menu entries",
+        "on bulk_actions, select rows that are NOT done and run showcase_mark_done (per-record) — its visible gate, has(record.done) && record.done != true, judges each selected row, so a done row in the selection drops Mark Done from the selection actions the floating selection bar shows (since #35678 one bar floats at the bottom centre of the list and the view bar does not change on selection; over three actions the rest are under 「更多」), or, over a mixed selection, the confirm reports the done rows not eligible and skipped (QA run #27438); either way the dispatch count stops matching the selection — and showcase_recalc_selection (aggregate — ONE dispatch: an api-type action, which the console sends through the action door, POST /api/v1/actions/showcase_task/showcase_recalc_selection with body {params:{_selectedIds:[…]}}; the server forwards those params flat to the action's own target /api/v1/apps/showcase/recalc in-process, buildApiActionRequest in packages/runtime/src/action-execution.ts, so the browser's network log shows the door request and no /recalc request); on legacy_row_actions confirm both named row actions resolve to live menu entries",
         "on Field Zoo, confirm the conditionalFormatting row highlight applies to Specimen — Full (f_lookup set) and not Specimen — Minimal",
-        "at 1280×800 on a zh-CN session, read the list frame on All Tasks, then on its kanban view: no page bar (objectstack#35878): a 40px view bar with the object's icon and name, 「/」, ONE switcher trigger reading type icon → view name → record count → caret, and 「视图设置」 on the left, and the search icon, 「+ 新建」 and ⋮ (description, import, favorite) last on the right; under it a 40px condition row that is always drawn — dashed 「排序」 and 「筛选」 while no condition is set, one 「按 X 排序」 chip (with +N) and the filter chips once set — so the table's header does not move when a condition is set or reset; on the grid a 32px header and 33px rows at 13px; and, on a view whose columns declare a `summary`, each total under its own column with 「计数 N」 leftmost and no doubled colon. The kanban view draws the same two rows (objectstack#35548; the count beside the view name returns, after objectstack#34603 removed it)",
-        "at 1280×800 with the sidebar open, read the left edges of the list page on All Tasks (a list whose columns fit) and on a list that scrolls sideways (stage one by showing every field of showcase_task through 视图设置 → 添加列): the view bar's object icon, the header's select-all box, each row's checkbox and the footer's record count each start 16px from the main area's left; the selection column is 40px on both lists and stays 40px, pinned at the left, after scrolling to the far right and back; no row shows a number and each row's checkbox shows without a hover; the view bar's last control, ⋮, ends its icon 16px from the right; at 375 wide no leading item sits closer than 12px to the left (objectstack#35663)"
+        "at 1280×800 on a zh-CN session, read the list frame on All Tasks, then on its kanban view: a 44px page bar with the object's icon and name (objectstack#36113), ended by the shell's button group where it is on; under it a 40px view bar with ONE switcher trigger reading type icon → view name → record count → caret, and 「视图设置」 on the left, and the search icon, 「导入 / 导出」 (import and each export format), 「+ 新建任务」 and ⋮ (description, favorite) last on the right; under it a 40px condition row that is always drawn — dashed 「排序」 and 「筛选」 while no condition is set, one 「按 X 排序」 chip (with +N) and the filter chips once set — so the table's header does not move when a condition is set or reset; on the grid a 36px header and 36px rows at 13px (objectstack#36048); and, on a view whose columns declare a `summary`, each total under its own column with 「计数 N」 leftmost and no doubled colon. The kanban view draws the same three rows (objectstack#35548, objectstack#36113; the count beside the view name returns, after objectstack#34603 removed it)",
+        "at 1280×800 with the sidebar open, read the left edges of the list page on All Tasks (a list whose columns fit) and on a list that scrolls sideways (stage one by showing every field of showcase_task through 视图设置 → 添加列): the page bar's object icon, the view switcher's icon, the header's select-all box, each row's checkbox and the footer's record count each start 16px from the main area's left; the selection column is 40px on both lists and stays 40px, pinned at the left, after scrolling to the far right and back; no row shows a number and each row's checkbox shows without a hover; the view bar's last control, ⋮, ends its icon 16px from the right; at 375 wide no leading item sits closer than 12px to the left (objectstack#35663)"
       ],
       "acceptance": [
         {
@@ -726,15 +726,15 @@
           "evidence": "menu screenshot + dispatch traces"
         },
         {
-          "clause": "the list frame holds its geometry: no page bar, view bar 40, condition row 40 and always drawn (the header's top does not move when a condition is set or reset), header 32, rows 33, 13px on the header, the cells and the bar buttons, the first data row top at or above 168px under the 48px shell bar, the switcher read type icon → name → count → caret, every column total's right edge on its column's (±1px), no doubled colon in the summary row, and the kanban view under the same two rows",
+          "clause": "the list frame holds its geometry: page bar 44 (the object's icon and name), view bar 40, condition row 40 and always drawn (the header's top does not move when a condition is set or reset), header 36, rows 36, 13px on the header, the cells and the bar buttons, the table header's top at 172px and the first data row top at or above 212px under the 48px shell bar, the switcher read type icon → name → count → caret, every column total's right edge on its column's (±1px), no doubled colon in the summary row, and the kanban view under the same three rows",
           "oracle": "dom",
           "verify": "read getBoundingClientRect and the computed font size of each part at 1280×800 zh-CN (the geometry and order halves are pinned by ui/e2e/list-frame-geometry-35548.spec.ts over the real class strings; the kanban half by ui/packages/plugin-list/src/__tests__/ListView.viewBarLeading-35548.test.tsx); the summary half needs a view whose columns declare `summary`, which task.view.ts does not, so stage one in the showcase's customization pair as negative[0] does",
           "evidence": "light and dark screenshots of the grid and the kanban, plus the measured heights"
         },
         {
-          "clause": "the list page has one left edge: the view bar's object icon, select-all box, row checkboxes and footer count each at 16px (±1) from the main area on a list that fits and on one that scrolls sideways; the selection column is 40px on both and keeps its width and its left pin after a sideways scroll and back, with no gap between frozen cells; no row numbers; every row checkbox visible at rest; at 375 no leading item closer than 12px",
+          "clause": "the list page has one left edge: the page bar's object icon, the view switcher's icon, select-all box, row checkboxes and footer count each at 16px (±1) from the main area on a list that fits and on one that scrolls sideways; the selection column is 40px on both and keeps its width and its left pin after a sideways scroll and back, with no gap between frozen cells; no row numbers; every row checkbox visible at rest; at 375 no leading item closer than 12px",
           "oracle": "dom",
-          "verify": "read getBoundingClientRect of each item from the main area's left at 1280×800 on both lists, and the computed opacity of the row checkboxes with the pointer off the table (pinned by ui/e2e/list-left-edge-35663.spec.ts over the real ObjectGrid and view-bar classes, the view bar's object name read off VIEW_BAR_OBJECT_NAME in objectViewPageHeader.tsx)",
+          "verify": "read getBoundingClientRect of each item from the main area's left at 1280×800 on both lists, and the computed opacity of the row checkboxes with the pointer off the table (pinned by ui/e2e/list-left-edge-35663.spec.ts over the real ObjectGrid and view-bar classes, the page bar's row read off PageHeader.tsx's list posture)",
           "evidence": "screenshots of both lists at rest and scrolled, plus the measured edges"
         }
       ],
@@ -832,7 +832,9 @@
           "change": "steps[11] and its acceptance clause added: the list page's left edge (objectstack#35663, epic #35547). The page bar's icon, the view bar's icon, the select-all box, every row's checkbox and the footer's count share one 16px line, the selection column is 40px at any width and under a sideways scroll, and the grid draws no row numbers (each row's checkbox shows at rest). No earlier clause changed",
           "ref": "#35663"
         },
-        { "revision": 13, "date": "2026-11-20", "change": "steps[6], [8], [10], [11] and the clauses acceptance[10] and acceptance[11] follow #35878: the list page draws two rows, not three. There is no page bar; the view bar leads with the object's icon and name, then the switcher and 「视图设置」 (was 「选项」), and ends with search, 「+ 新建」 and ⋮ last (#35678). The condition row is always drawn at 40px, so the frame clause reads condition row 40 where it read 'no condition row height', and the left-edge clause's first item is the view bar's object icon where it was the page bar's (the view icon no longer leads the bar). Filter N and Sort N left the bar for the condition row", "ref": "#35878" }
+        { "revision": 13, "date": "2026-11-20", "change": "steps[6], [8], [10], [11] and the clauses acceptance[10] and acceptance[11] follow #35878: the list page draws two rows, not three. There is no page bar; the view bar leads with the object's icon and name, then the switcher and 「视图设置」 (was 「选项」), and ends with search, 「+ 新建」 and ⋮ last (#35678). The condition row is always drawn at 40px, so the frame clause reads condition row 40 where it read 'no condition row height', and the left-edge clause's first item is the view bar's object icon where it was the page bar's (the view icon no longer leads the bar). Filter N and Sort N left the bar for the condition row", "ref": "#35878" },
+        { "revision": 14, "date": "2026-11-21", "change": "steps[8] follows #35678: the selection actions are in one bar floating at the bottom centre of the list, and the view bar no longer changes on selection; what Mark Done's visible gate does is unchanged", "ref": "#35678" },
+        { "revision": 15, "date": "2026-11-21", "change": "steps[6], [10], [11] and the clauses acceptance[10] and acceptance[11] follow #36113: the list page draws three rows again. A 44px page bar holds the object's icon and name (ended by the shell's button group where it is on); the view bar leads with the switcher and ends with search, 「导入 / 导出」, 「+ 新建{对象}」 and ⋮. Export is offered in 「导入 / 导出」 as well as the 视图设置 footer, so steps[6] reads two doors. The frame clause reads page bar 44, the table header at 172 and the first row at or above 212 where it read 'no page bar' and 168, and header 36 / rows 36 where it read 32 / 33 (#36048, which the clause had not caught up with); the kanban view sits under the same three rows. The left-edge clause's first items are the page bar's object icon and the view switcher's icon, where it read the view bar's object icon", "ref": "#36113" }
       ]
     },
     {
@@ -961,7 +963,7 @@
       "title": "Form-view gallery: every FormViewSchema layout type renders and submits",
       "since": "v15",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -990,7 +992,7 @@
         "overlay the default form with the tabbed variant (type tabbed + the sections of formViews.tabbed, through the fixtures.requires[0] recipe with item-level isDefault:true); reopen the page form; verify the three tabs (Overview / Schedule / Details) and that switching tabs preserves entered values",
         "overlay the default form with the wizard variant; open the PAGE form (…/showcase_task/new, or the record's /edit route — RecordFormPage passes the type in both modes); walk Basics → Assignment → Schedule with next/back; verify back preserves values and submit happens ONCE at the end. The New/Edit MODAL renders a wizard as a stacked section list by design (resolveFormViewLayout), so the steps are walked on the page route",
         "RETIRED-TYPE refusal: put the default-form overlay of fixtures.requires[0] with type 'split', then 'drawer', then 'modal' (any sections), and capture each refusal: a 422 whose message names the retired value with its prescription (FORM_VIEW_TYPE_RETIRED). Record whether the draft PUT or its publish answered it. Then re-read GET /api/v1/meta/view/showcase_task.form and confirm none of the three landed. There is no split pane to look for: the showcase's formViews.split is now a two-tab tabbed form",
-        "drawer and modal: open task-desk.page.ts; click a task row — ObjectForm formType=\"drawer\" opens as a side panel over the list with the task's fields; click New task — ObjectForm formType=\"modal\" opens as a dialog. These are the React block's containers, which ADR-0050 keeps (the block is the caller that opens the form); a form view can no longer name either (steps[3])",
+        "drawer and modal: open task-desk.page.ts; click a task's title (or select one of its cells and press Space) — ObjectForm formType=\"drawer\" opens as a side panel over the list with the task's fields; click New task — ObjectForm formType=\"modal\" opens as a dialog. These are the React block's containers, which ADR-0050 keeps (the block is the caller that opens the form); a form view can no longer name either (steps[3])",
         "on the simple form, set priority to 'urgent' and verify the notes field appears (FormField.visibleWhen CEL); set it back and verify notes hides",
         "save an edit through each rendered variant; capture each save request; re-read via GET /api/v1/data/showcase_task/<id>. The page form's /new and /edit routes are reached by URL only: the record page's Edit opens the form as a modal (?form=ID, footer 'Update'), not the page (QA run #33861). A deep-linked page form saves and stays in the app: RecordFormPage's goBack goes back one entry only when the console pushed one (history.state.idx above 0) and otherwise replaces to the record page (edit) or the list (create) (ui/packages/app-shell/src/views/RecordFormPage.tsx)",
         "revert the default-form overlay so the stock simple form is back — DELETE /api/v1/meta/view/showcase_task.form, the reset door, which restores the artifact default byte-identically (QA run #24572) — and confirm it with a re-read of the view"
@@ -1096,6 +1098,12 @@
           "date": "2026-11-15",
           "change": "steps[6] re-pointed: the record page's Edit opens a modal (?form=ID), so the page routes are reached by URL (QA run #33861, ledger row 140), and a deep-linked page form no longer leaves the document on save (RecordFormPage goBack replaces to the record or the list when nothing was pushed). No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
           "ref": "#33990"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-21",
+          "change": "steps[4] opens the edit drawer from a task's title link, or Space on a selected cell: the list is select-first since #35684, so a click on an assignee, status or priority cell only selects it. No clause changed. Read at base c00be39b",
+          "ref": "#35794"
         }
       ]
     },
@@ -2925,7 +2933,7 @@
       "title": "User-built FilterBuilder/SortBuilder toolbar merges with the view filter, restores across nav, and reproduces rows from the URL",
       "since": "v16",
       "status": "active",
-      "revision": 12,
+      "revision": 14,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2946,11 +2954,12 @@
         "sign in as admin; open showcase_task and switch to the in_progress saved view (stored filter status=in_progress); screenshot",
         "open Filter in the condition row under the view bar (since objectstack#35878 the bar has no Filter or Sort button: the row is always there, with a dashed 「Filter」 button while no filter of the reader's own is set and a 「+」 after the filter chips once one is, both data-testid condition-add-filter; Sort is the row's first control, the dashed 「Sort」 button or, once sorted, the one sort chip 「Sorted by X +N」, data-testid condition-sort, ui/packages/plugin-list/src/conditions/ListConditionControls.tsx). Since objectstack#35549 / #35550 each opens the shared field list (the fields the view shows first, a search box, a type icon per row): Filter → a field → its values applies at once, with no Apply, and each condition shows as a chip in the condition row under the view bar; Sort → the direction on top → a field adds a level, the sort chip before the filter chips counting it as 「+N」. The full builders are one click further, behind the field list's footer: 「Advanced filter」 opens the FilterBuilder (no 「Where」 label any more) and 「All sort levels」 the SortBuilder. Add 2 conditions that leave at least TWO rows, so the sort clause has an order to read — on the stock seed priority = high AND estimate_hours > 4 leaves ONE row on in_progress, a single-datapoint for acceptance[1] (QA run #24616): check the count first and pick a pair that keeps ≥ 2; open the SortBuilder and add a sort (due_date desc); type a term into the list's quick search that keeps rows (acceptance[2] reads it back; QA run #29890 used 'pipeline'); capture the data request",
         "assert the request's `filter` param is the MERGE of the view's stored rule AND the two toolbar conditions (buildEffectiveFilter/mergeFilterNodes), and `sort` carries the toolbar sort (e.g. sort=-due_date) — the console spells its list params without a `$`; the returned rows satisfy view-filter AND toolbar conditions",
-        "navigate away via an in-app nav link to another object (the link carries no query string, so the URL state is dropped), then navigate back to showcase_task in_progress through the Tasks nav entry and the view switcher (it lands on /view/showcase_task.in_progress). ⛔ Not the sidebar's 'In-Progress Tasks' Data Slices link: it opens /showcase_task/data?filter[status]=in_progress, a different surface from the saved view; screenshot; confirm the toolbar filter + sort restored",
-        "read where the toolbar filter and sort are kept: the signed-in user's own sys_user_preference row keyed ui.list.showcase_task (GET /api/v1/data/sys_user_preference filtered to that key; its value's perView.<view> carries the filters and the sort — objectui ListPreferencesProvider.tsx, objectui#12418), and its localStorage write-through cache list-state:<userId>:showcase_task. Confirm both are the signed-in user's: the row's user_id, and the cache key's user segment. (Only the search term stays under the older list-filters:<userId>:showcase_task:<viewId> key)",
+        "navigate away via an in-app nav link to another object (the link carries no query string, so the URL state is dropped), then navigate back to showcase_task in_progress through the Tasks nav entry and the view switcher (it lands on /view/showcase_task.in_progress). ⛔ Not the sidebar's 'In-Progress Tasks' Data Slices link: it opens /showcase_task/data?filter[status]=in_progress, a different surface from the saved view; screenshot; confirm the list opens as the view declares it: no toolbar filter chip, the view's own sort, an empty search, and no 「Discard」/「Save」 at the condition row's end (objectstack#35955: opening another object drops the draft). Then build the two conditions, the sort and the search again, open a record from the list and come back with the browser's Back: confirm the conditions, the sort and the search are all still there, with 「Discard」 and 「Save」 at the condition row's end",
+        "read where the toolbar filter and sort are kept: nowhere durable. Since objectstack#35955 they are the list's DRAFT, held in this tab's memory (ui/packages/app-shell/src/views/listDraftStore.ts): the signed-in user's sys_user_preference row keyed ui.list.showcase_task (GET /api/v1/data/sys_user_preference filtered to that key) gains no filters, sort or search from the change — it holds only what is remembered for the reader (perView.<view>.columnState.widths, rowHeight, viewOrder) — and localStorage gains no list-filters:<userId>:showcase_task:<viewId> key. Reload the page: the list opens as the view declares it",
         "sign out through the account menu (the avatar menu's Log out, user.logout in ui/packages/app-shell/src/layout/AppHeader.tsx; never by clearing storage). That Log out itself removes the signed-out user's list-state:* and list-filters:* keys from localStorage (purgeSignedOutUserClientState, ui/packages/auth/src/ActiveOrganizationStorage.ts, run by AuthProvider's sign-out), so the first account's keys are gone by the time the second signs in; the clause holds by that wipe AND by the user-keyed row. Sign in as the SECOND account; open the same object+view; confirm the first account's cached toolbar filter does NOT appear",
         "userFilters/URL: where UserFilters are hosted (an interface page or the userFilters surface — NOT a bare object list, ADR-0053), apply a quick-filter; copy the URL; open it in a fresh tab; confirm the uf_<field> params (comma-joined, URI-encoded) reproduce the same rows and uf__tab carries the active preset (ADR-0047)",
-        "negative sweep: confirm tabs-element userFilters (preset chips, uf__tab) do NOT leak onto the bare object list view — dropdown chips the object view itself declares are allowed there (ADR-0047 amendment) and their uf_<field> params are not a leak"
+        "negative sweep: confirm tabs-element userFilters (preset chips, uf__tab) do NOT leak onto the bare object list view — dropdown chips the object view itself declares are allowed there (ADR-0047 amendment) and their uf_<field> params are not a leak",
+        "shared-view save (objectstack#35955): as the seeded admin on the in_progress saved view (a stored view the showcase package takes saves into), change the sort, pick Kanban in the Display panel's layout and a row colour, open a record and come back with Back (the layout and the row colour are part of the draft and are still there), then set the row height to Spacious on the options menu's Row height level. Press 「Save」 at the condition row's end (Save to this view): it asks once, 「Save to this view?」, saying everyone who uses the view will see the changes. Confirm; capture the two writes: PUT /api/v1/meta/view/<view> as a draft carrying If-None-Match: *, then POST /api/v1/meta/view/<view>/publish. The console toasts 「Saved, visible to everyone」 and the condition row's 「Discard」/「Save」 go away. Sign in as the second account and open the same view: it shows the saved sort and the Kanban layout, with the second account's own row height. Back as the admin, change something in the view settings and save it there as a draft without publishing it; change the sort and press 「Save」 again: the console says the view has unpublished changes, to publish or discard them in the view settings first, and writes nothing. Discard that settings draft afterwards"
       ],
       "acceptance": [
         {
@@ -2966,29 +2975,36 @@
           "evidence": "the request URL + row order"
         },
         {
-          "clause": "the toolbar filter + search survive a FULL in-app navigation away and back — restored from the user's own list preference (sys_user_preference ui.list.<object>, cached in localStorage list-state:<user>:<object>; URL params alone are lost on an in-app nav link that carries no query string, which is what the preference bridges)",
+          "clause": "the toolbar filter, sort and search are a DRAFT (objectstack#35955): they survive opening a record and coming back, and are dropped when another object (or view) is opened or the page reloads, so the list then opens as its view declares it; while a draft is held 「Discard」 and 「Save」 sit at the end of the condition row",
           "oracle": "dom",
-          "verify": "after a screenshot confirms the list rendered, the condition row under the view bar shows the two conditions as filter chips and the sort as a sort chip (objectstack#35549 / #35550; the same rows also show in the FilterBuilder and SortBuilder behind the field list's footers), and the quick search box shows the term (kept under list-filters:<userId>:showcase_task:<viewId>, steps[4]); the request re-issued on return carries the same merged `filter` param (the console spells it without a `$`; objectui app-shell/src/context/ListPreferencesProvider.tsx)",
-          "evidence": "before/after screenshots + the re-issued request"
+          "verify": "after a screenshot confirms the list rendered: on return through an in-app nav link from another object the condition row shows no filter chip, the sort chip is the view's own and the quick search box is empty, and the re-issued request carries only the view's filter; after a record opened from the list and Back, the condition row shows the two conditions as filter chips and the sort as a sort chip (objectstack#35549 / #35550), the quick search box shows the term, and the re-issued request carries the same merged `filter` param (the console spells it without a `$`; ui/packages/app-shell/src/views/listDraftStore.ts, objectViewListUrlState.ts)",
+          "evidence": "screenshots after each return (other object; record and Back) + the two re-issued requests"
         },
         {
-          "clause": "the list state is USER-SCOPED — it is the user's own sys_user_preference row (user_id = the signed-in user), and its localStorage cache key embeds the user id (list-state:<userId>:<object>), so a second account on the same browser never reads the first account's filters (a filter value can be sensitive)",
+          "clause": "the list state is never shared across accounts — the draft is never written to the user's sys_user_preference row or to browser storage, so a second account on the same browser never reads the first account's filters (a filter value can be sensitive)",
           "oracle": "dom",
-          "verify": "read account A's ui.list.showcase_task preference row and its list-state cache key, then sign A out through the account menu's Log out and sign in as account B on the same browser and confirm B's view opens with no A-authored toolbar filter (B reads its own row, or none)",
-          "evidence": "the two accounts' storage keys + B's clean toolbar"
+          "verify": "with account A's toolbar filter on screen, read A's ui.list.showcase_task preference row (no filters or sort in it) and localStorage (no list-filters:* key for the view), then sign A out through the account menu's Log out and sign in as account B on the same browser and confirm B's view opens with no A-authored toolbar filter",
+          "evidence": "A's preference row + localStorage keys + B's clean toolbar"
         },
         {
           "clause": "uf_* URL params make a filtered list shareable and reproducible: uf_<field> params (comma-joined, each URI-encoded) reproduce the same rows on a fresh load and uf__tab carries the active preset (ADR-0047)",
           "oracle": "network",
           "verify": "opening the copied URL fresh issues the same filtered data request and returns the same rows (app-shell/src/views/userFilterUrlState.ts parseUserFilterParams/applyUserFilterParams)",
           "evidence": "the shared URL + the reproduced rows"
+        },
+        {
+          "clause": "Save to this view on a shared view (objectstack#35955) is offered only to a reader who may edit the view, asks once, then saves the draft and publishes it in one step so every reader sees it on their next read; it never writes the saver's row height into the view, and it never publishes a draft someone else left pending: with one pending it writes nothing and says so",
+          "oracle": "network",
+          "verify": "the confirmed save issues PUT /api/v1/meta/view/<view> (a draft, If-None-Match: *) then POST /api/v1/meta/view/<view>/publish, and the published view carries the new sort, the kanban type and the row colour but not rowHeight tall; the second account's read of the view shows them; with a settings draft pending the second Save issues no PUT and no publish (or only a PUT the server refuses 409 METADATA_CONFLICT) and the pending draft is still there, unpublished (ui/packages/app-shell/src/views/runtime-metadata-persistence.ts saveAndPublishRuntimeMetadata)",
+          "evidence": "the two captured writes + the published view body + the second account's screenshot + the refused second save"
         }
       ],
       "negative": [
         "a toolbar filter that REPLACES the view's stored filter (rows appear that the view filter should exclude) is a FAIL — buildEffectiveFilter merges, it does not overwrite the base",
         "tabs-element userFilters (preset chips, the uf__tab preset) leaking onto a bare OBJECT list view is a FAIL — ADR-0053 suppresses them there by design, as amended by ADR-0047: on an object list view only `element: 'tabs'` userFilters (and quickFilters) are ignored — objectui app-shell warnSuppressedListNav.ts, which logs the suppression — while `element: 'dropdown'` value chips ARE allowed there (examples/app-showcase/src/ui/views/project.view.ts ships them on All Projects, QA run #24616) (the list-view-capabilities item flags the same regression). The reserved list-state params an object list writes for ITSELF — uf__filter, uf__search, uf__sort, uf__group (objectui#11860, userFilterUrlState.ts), e.g. uf__sort after a toolbar sort — are the list's own state mirrored into the URL, not userFilters, and do not count",
         "a cached toolbar filter from account A visible to account B on the same browser (A signed out through the account menu's Log out, never by clearing storage) is a FAIL — the key embeds the user id precisely to prevent that leak",
-        "an incomplete FilterBuilder row emitted as [field, op, ''] (which matches only empty and silently excludes everything) instead of being dropped is a FAIL — convertFilterGroupToAST skips valueless rows (#1964)"
+        "an incomplete FilterBuilder row emitted as [field, op, ''] (which matches only empty and silently excludes everything) instead of being dropped is a FAIL — convertFilterGroupToAST skips valueless rows (#1964)",
+        "a Save to this view that publishes a view draft which was already pending before the save (saved from the view settings, by anyone) is a FAIL — the draft write carries the first-write pin, so a pending draft refuses it; a shared save that writes the saver's row height into the view is a FAIL too"
       ],
       "traps": [
         "hydration-race",
@@ -3001,7 +3017,7 @@
       },
       "source": [
         "objectui: packages/plugin-list/src/ListView.tsx (buildEffectiveFilter, convertFilterGroupToAST, mergeFilterNodes; $filter + $orderby assembly)",
-        "objectui: packages/app-shell/src/context/ListPreferencesProvider.tsx (objectui#12418 — the per-user ui.list.<object> sys_user_preference row, cached in localStorage list-state:<user>:<object>); packages/app-shell/src/views/listFilterStorage.ts now keeps only the search term",
+        "objectui: packages/app-shell/src/views/listDraftStore.ts (objectstack#35955 — the list's draft: filters, sort, grouping, search and columns, held in the tab's memory for one reader, object and view); packages/app-shell/src/context/ListPreferencesProvider.tsx (the per-user ui.list.<object> sys_user_preference row, which since objectstack#35955 a list change writes only column widths, row height and the view order to)",
         "objectui: packages/app-shell/src/views/userFilterUrlState.ts (uf_* params, ADR-0047)",
         "ADR-0053 (userFilters belong to interface pages, suppressed on object list views); examples/app-showcase/src/ui/views/task.view.ts",
         "cross-ref: records-forms.list-view-capabilities (saved-view-filter / userFilters negative)"
@@ -3078,6 +3094,18 @@
           "date": "2026-11-20",
           "change": "steps[1] re-pointed to the two-row list toolbar (objectstack#35878): the view bar has no Filter or Sort button; Filter is the condition row's dashed 「Filter」 button or its 「+」 (condition-add-filter) and Sort its dashed 「Sort」 button or its one sort chip (condition-sort).",
           "ref": "#35878"
+        },
+        {
+          "revision": 13,
+          "date": "2026-11-21",
+          "change": "steps[3], steps[4], acceptance[2] (clause, verify, evidence), acceptance[3] (clause, verify, evidence) and source[1] re-pointed to the list draft (objectstack#35955): a toolbar filter, sort and search are a draft held in the tab's memory, kept on opening a record and coming back and dropped on opening another object or view or on a reload; they are no longer stored in the user's ui.list.<object> row. The in-app-navigation restore of revision 3 is replaced by the record round trip, and the user-scope clause now reads that nothing is stored at all. Not loosened: a second account must still see none of the first account's filters",
+          "ref": "#35955"
+        },
+        {
+          "revision": 14,
+          "date": "2026-11-21",
+          "change": "steps[8], acceptance[5] and negative[4] added for the shared-view save (objectstack#35955 PR 2): Save to this view on a stored view an administrator may edit asks once, then saves the draft and publishes it; the saver's row height stays theirs; a pending view draft is never published on anyone's behalf. steps[8] also reads the Display panel's layout and row colour back across a record round trip, since they are now part of the draft. Not loosened: every earlier clause is unchanged",
+          "ref": "#35955"
         }
       ]
     },
@@ -3576,7 +3604,7 @@
       "title": "Grid personalization persists across reload: column resize/reorder/pin, row-height, group-by (with API-true totals), row-color",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3602,17 +3630,17 @@
       "steps": [
         "open showcase_task grid; screenshot",
         "resize a column (reorder two columns only on a grid that sets reorderableColumns; there is no runtime pin control — acceptance[0]), and set a row height on the Row height level of the list's options menu (the toolbar's options trigger, then 行高 / Row height: three choices, 紧凑 / 标准 / 宽松 — Compact / Standard / Spacious, ui/packages/plugin-list/src/components/ViewSettingsPopover.tsx; a gallery's Row height level picks its card size the same way) — three modes, stored as rowHeight compact / medium / tall (the spec's five row heights compact/short/medium/tall/extra_tall narrow onto these three: objectui core normalize-list-view.ts DENSITY_MODE_TO_ROW_HEIGHT / ROW_HEIGHT_TO_DENSITY_MODE)",
-        "reload; confirm the columnState (widths, and the order where reorder is enabled) and row-height restored — they now persist in the signed-in user's own list preference, sys_user_preference ui.list.showcase_task (perView.<view>.columnState / rowHeight, objectui#12418), with localStorage grid-columns-showcase_task[-<viewId>] as the component's cache; the old per-view override through dataSource.updateViewConfig is retired (objectui#12504). Also reload in a FRESH browser context as the same user: the layout follows the user",
+        "reload; confirm the column widths and row-height restored — they persist in the signed-in user's own list preference, sys_user_preference ui.list.showcase_task (perView.<view>.columnState.widths / rowHeight, objectui#12418). A column ORDER is not: since objectstack#35955 it is the list's unsaved draft, so a reload reopens on the view's own order unless it was saved into a view, with localStorage grid-columns-showcase_task[-<viewId>] as the component's cache; the old per-view override through dataSource.updateViewConfig is retired (objectui#12504). Also reload in a FRESH browser context as the same user: the layout follows the user",
         "group-by status ('Add group field' pre-selects the first field, Title, and groups at once, so switch it to Status). A runtime grouping lives in the list's URL (uf__group, ui/packages/app-shell/src/views/objectViewListUrlState.ts), not in sys_user_preference: reloading that URL keeps it, a reload of the bare list URL reopens on the view's own grouping by design, and steps[6] reads it that way (QA run #33861). Confirm per-group headers appear and each group shows its record count — summarizeField (estimate_hours) is declared on the KANBAN config of task.view.ts, not on the grid, so grid groups carry counts; clear grouping and confirm the headers are removed cleanly",
         "cross-check each group's count against a direct per-group server count (GET /api/v1/data/showcase_task filtered to that status, read its total)",
         "read the row-color rule the stock Grid view declares — rowColor on priority with the colors map low slate / medium blue / high amber / urgent red (examples/app-showcase/src/ui/views/task.view.ts); there is no runtime row-color authoring control — and confirm rows paint by it (useRowColor, the -100 tint of each name)",
-        "reload once more; confirm every personalization survives; capture a screenshot per variant"
+        "reload once more; confirm every personalization this item stores survives (column widths, row height); capture a screenshot per variant"
       ],
       "acceptance": [
         {
-          "clause": "PER-VARIANT: column RESIZE persists across a reload — the widths restore from the column-state store (localStorage grid-columns-<object>[-<view>], or a persisted view override). Column REORDER and PIN are not stock list-view personalizations, and the clause does not assert them there. ObjectGrid enables drag-reorder only from `reorderableColumns` (default false), which is an object-grid component prop (packages/spec/src/ui/component.zod.ts#ObjectGridPropsSchema), not a ListView key. Pinning is AUTHOR-declared per column (`pinned`, packages/spec/src/ui/view.zod.ts#ListColumnSchema), with no runtime pin control, and the persisted column state carries widths and order, never pins. So: reorder persists across a reload only on a grid that enables it (score it there, or record n/a on the stock showcase_task list view); a column the view declares `pinned` renders pinned after the reload (n/a when the view declares none, as the stock task views do)",
+          "clause": "PER-VARIANT: column RESIZE persists across a reload — the widths restore from the column-state store (localStorage grid-columns-<object>[-<view>], or a persisted view override). Column REORDER and PIN are not stock list-view personalizations, and the clause does not assert them there. ObjectGrid enables drag-reorder only from `reorderableColumns` (default false), which is an object-grid component prop (packages/spec/src/ui/component.zod.ts#ObjectGridPropsSchema), not a ListView key. Pinning is AUTHOR-declared per column (`pinned`, packages/spec/src/ui/view.zod.ts#ListColumnSchema), with no runtime pin control, and the persisted column state carries widths and order, never pins. So: a column order is the list's unsaved draft since objectstack#35955 and does NOT persist across a reload (it is kept only by Save into a view); on a grid that enables reorder, score that the reload reopens on the view's order, or record n/a on the stock showcase_task list view; a column the view declares `pinned` renders pinned after the reload (n/a when the view declares none, as the stock task views do)",
           "oracle": "dom",
-          "verify": "after a screenshot confirms render, the reloaded grid shows the same widths (ObjectGrid columnState priority: props override > localStorage > empty; saveColumnState persists widths and order only). The reorder and pin variants are judged as the clause scopes them",
+          "verify": "after a screenshot confirms render, the reloaded grid shows the same widths (ObjectGrid columnState priority: props override > localStorage > empty; saveColumnState persists widths and order, and the console hands the grid the reader's widths alone (objectViewListRenderer.tsx persistListColumnState), so the props override carries no order after a reload). The reorder and pin variants are judged as the clause scopes them",
           "evidence": "before/after-reload screenshots + the storage value"
         },
         {
@@ -3703,6 +3731,12 @@
           "date": "2026-11-19",
           "change": "steps[1] and acceptance[1].clause re-pointed to the options menu's Row height level: three named choices (紧凑 / 标准 / 宽松, Compact / Standard / Spacious) replace the cycling density button, on a grid and on a gallery (its card size). Stored values unchanged (rowHeight compact / medium / tall). No clause's meaning changed.",
           "ref": "#35551"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-21",
+          "change": "steps[2], steps[6] and acceptance[0] (clause, verify) re-pointed to the list draft (objectstack#35955): a column order is the list's unsaved draft, kept only by Save into a view, so it no longer comes back after a reload; the widths and the row height still persist in the user's ui.list.<object> row. Not loosened: widths and row height must still survive a reload and follow the user to a fresh browser",
+          "ref": "#35955"
         }
       ]
     },
@@ -3826,7 +3860,7 @@
       "title": "Select-all-matching covers every matching id across pages (server total, not the rendered page); clear resets both selection sources",
       "since": "v16",
       "status": "active",
-      "revision": 11,
+      "revision": 12,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3845,20 +3879,20 @@
       },
       "steps": [
         "open the showcase_task 'Bulk Actions' view (…/showcase_task/view/bulk_actions) with the scratch tasks in place and quick-search their shared prefix so the match set exceeds one page (e.g. 'QA bulk' → 55 rows); screenshot; note the list shows its first N loaded rows and the count beside the view name shows the server total M (M > N); the view declares no `pagination`, so it loads as it scrolls (#35554) — leave it at its first window",
-        "tick the header checkbox (every loaded row); the view bar's right end swaps to 「已选 N 条」 and offers 「已选当前加载的 N 条。」 with 「选择全部 M 条」 (en 'All N loaded records are selected.' / 'Select all M')",
-        "click 「选择全部 M 条」; the selection face's count reads the whole match set ('M selected (all matches)')",
+        "tick the header checkbox (every loaded row); the selection bar floats at the bottom centre of the list reading 「已选 N 条」 and offers 「选择全部 M 条」 (en 'N selected' / 'Select all M'); the view bar does not change",
+        "click 「选择全部 M 条」; the selection bar's count reads the whole match set ('M selected (all matches)')",
         "dispatch a bulk action; capture the requests — resolveBulkRows fans out a paged find (dropping $top/$skip, paging 500) collecting every matching id ACROSS pages",
         "cross-check the collected id count against a direct API count for the same search: GET /api/v1/data/showcase_task?$search=…&$top=0 (or the response total)",
         "confirm the AGGREGATE action (showcase_recalc_selection) carries every matching id in `_selectedIds` — it is an api-type action, so the ONE request is the action door, POST /api/v1/actions/showcase_task/showcase_recalc_selection with body {params:{_selectedIds:[…]}} (the grid hands them to the action runner as params._selectedIds, ui/packages/plugin-grid/src/ObjectGrid.tsx; since #27611 the console sends a declared same-origin api action through the door, and the server forwards the params flat to /api/v1/apps/showcase/recalc in-process, buildApiActionRequest in packages/runtime/src/action-execution.ts); the run dialog then reads 'N / 55 processed' for ~15 s (QA run #24616); a per-record action (showcase_mark_done) fans out one dispatch per matching id",
         "click clear; confirm both selection sources reset (the toolbar empties AND the row checkboxes clear)",
-        "cap leg (acceptance[5]): provision more than 5000 matching scratch tasks — POST /api/v1/data/showcase_task/createMany with a bare JSON array of at most 200 records per call (the batch doors' default maxBatchSize; a 201-record call answers 400 BATCH_TOO_LARGE), e.g. 26 calls of 200 sharing one prefix — then repeat steps[1] and steps[2] and screenshot the banner and the selected count before and after Select all; delete the rows afterwards (POST /api/v1/data/showcase_task/deleteMany with {\"ids\": [...]}, at most 200 ids per call; a bare array answers 400)"
+        "cap leg (acceptance[5]): provision more than 5000 matching scratch tasks — POST /api/v1/data/showcase_task/createMany with a bare JSON array of at most 200 records per call (the batch doors' default maxBatchSize; a 201-record call answers 400 BATCH_TOO_LARGE), e.g. 26 calls of 200 sharing one prefix — then repeat steps[1] and steps[2] and screenshot the selection bar and its count (with its title) before and after Select all; delete the rows afterwards (POST /api/v1/data/showcase_task/deleteMany with {\"ids\": [...]}, at most 200 ids per call; a bare array answers 400)"
       ],
       "acceptance": [
         {
-          "clause": "the select-all offer in the view bar's selection face reports the SERVER total (totalMatching from the find result.total), not the loaded row count — and only appears when every loaded row is selected and more matching rows exist past them",
+          "clause": "the select-all offer in the floating selection bar reports the SERVER total (totalMatching from the find result.total), not the loaded row count — and only appears when every loaded row is selected and more matching rows exist past them",
           "oracle": "network",
-          "verify": "the offer's count equals the data request's response total (SelectionPageBar totalMatching; ListView hands result.total down as rowCount, read by ObjectGrid as resolvedTotalMatching)",
-          "evidence": "banner screenshot + the find response total"
+          "verify": "the offer's count equals the data request's response total (BulkActionBar totalMatching; ListView hands result.total down as rowCount, read by ObjectGrid as resolvedTotalMatching)",
+          "evidence": "selection bar screenshot + the find response total"
         },
         {
           "clause": "select-all-matching resolves EVERY matching id across pages: the dispatched set equals a direct filtered API count, not just the visible page (paged fan-out with $top/$skip dropped, capped at 5000)",
@@ -3885,15 +3919,15 @@
           "evidence": "the collected-set size vs the server total"
         },
         {
-          "clause": "past the cap the banner names it: when the server total exceeds HARD_CAP 5000, the cross-page offer, the all-selected line and the selected count say the action covers the first 5000 (e.g. 「将处理前 5000 条」, 'the first 5000 will be processed'), never the uncapped total alone — a banner claiming all M matching while the dispatch stops at 5000 is a silent partial execution",
+          "clause": "past the cap the selection bar names it: when the server total exceeds HARD_CAP 5000, the cross-page offer, the all-selected line and the selected count say the action covers the first 5000 (e.g. 「将处理前 5000 条」, 'the first 5000 will be processed'), never the uncapped total alone — a bar claiming all M matching while the dispatch stops at 5000 is a silent partial execution",
           "oracle": "dom",
-          "verify": "with more than 5000 matching rows (steps[7]), after a screenshot confirms the bar rendered: read the bulk-cross-page-banner text and the selected count before and after Select all; PASS when each names the 5000 cap, FAIL when any presents the uncapped total M as the set the action will process. The fan-out itself is acceptance[4]'s; this clause scores only what the banner tells the user",
-          "evidence": "the banner screenshot and its DOM text before and after Select all, the find response total, the collected-set size"
+          "verify": "with more than 5000 matching rows (steps[7]), after a screenshot confirms the bar rendered: read the bulk-select-all-matching offer text and the bulk-selection-count chip (its text and its title) before and after Select all; PASS when each names the 5000 cap, FAIL when any presents the uncapped total M as the set the action will process. The fan-out itself is acceptance[4]'s; this clause scores only what the bar tells the user",
+          "evidence": "the selection bar screenshot and its DOM text before and after Select all, the find response total, the collected-set size"
         }
       ],
       "negative": [
         "a 'select all matching' that only acts on the RENDERED page (ids = page rows, not the server match set) is THE FAIL this item extends list-view-capabilities (page-local bulk) to catch",
-        "a banner total that disagrees with the filtered API count is a FAIL",
+        "a selection bar total that disagrees with the filtered API count is a FAIL",
         "a clear that leaves the row checkboxes ticked while the toolbar empties (or vice versa) is a FAIL (#3056 drift)"
       ],
       "traps": [
@@ -3905,7 +3939,7 @@
         "ref": "objectui: packages/plugin-grid/src/__tests__/{objectBulkActionDispatch,BulkActionBar,bulkActionRefresh}.test.tsx — component layer, jsdom, over a mocked data source. None of the three exercises resolveBulkRows' paged fan-out or its HARD_CAP, so acceptance[1], acceptance[4] and negative[0] are not pinned by them. packages/plugin-grid/src/__tests__/bulkFanoutHostParams.test.tsx, outside this list, does drive that fan-out at the same component layer (500-record pages that replay the host's query, and 'still honours HARD_CAP over a match set larger than the cap'): it is evidence beside those clauses, never their pass, because their oracle is the dispatched set against a live filtered count (RUNNER rule 6). bulkActionRefresh.test.tsx's 'bulk bar Clear resets both selection sources' case asserts acceptance[3] and negative[2] in jsdom; their dom oracle wants the rendered page, screenshot first"
       },
       "source": [
-        "objectui: packages/plugin-grid/src/ObjectGrid.tsx (selectAllMatching, resolveBulkRows paged fan-out + HARD_CAP, resetSelection #3056, totalMatching), packages/plugin-grid/src/components/BulkActionBar.tsx (cross-page banner)",
+        "objectui: packages/plugin-grid/src/ObjectGrid.tsx (selectAllMatching, resolveBulkRows paged fan-out + HARD_CAP, resetSelection #3056, totalMatching), packages/plugin-grid/src/components/SelectionBar.tsx (the selection bar: count chip, select-all-matching offer)",
         "examples/app-showcase/src/ui/views/task.view.ts#bulk_actions (the 'Bulk Actions' view: bulkActions + the aggregate bulkActionDefs entry — this item's fixture since #23169; the stock 10 tasks need the scratch rows to exceed a page) — not examples/app-showcase/src/data/seed/index.ts's Northwind 26, which page the Account → Contacts related list (objectui#2711)",
         "PENDING-GAPS §C bulk-select-all-matching; cross-ref records-forms.list-view-capabilities (bulk-actions, page-local)"
       ],
@@ -3970,7 +4004,8 @@
           "change": "steps[0]–[2] and acceptance[0] follow #35554: the bottom bulk bar is retired on the list page and the selection is shown in the page bar (「已选 N 条」, the cross-window offer 「已选当前加载的 N 条。」 + 「选择全部 M 条」); a list with no declared `pagination` loads as it scrolls, so 'the whole page' is now 'every loaded row'. The cap strings of acceptance[5] are unchanged and the page bar names the cap with the same keys. Read at base 93fa4f97",
           "ref": "#35554"
         },
-        { "revision": 11, "date": "2026-11-20", "change": "steps[1], steps[2] and the clause acceptance[0] follow #35878: the list page has no page bar, so the selection face (「已选 N 条」, the cross-window offer) is the view bar's right end, with ⋮ still last. What it reports is unchanged", "ref": "#35878" }
+        { "revision": 11, "date": "2026-11-20", "change": "steps[1], steps[2] and the clause acceptance[0] follow #35878: the list page has no page bar, so the selection face (「已选 N 条」, the cross-window offer) is the view bar's right end, with ⋮ still last. What it reports is unchanged", "ref": "#35878" },
+        { "revision": 12, "date": "2026-11-21", "change": "steps[1]–[3], acceptance[0], acceptance[5], the negative and the source ref follow #35678: the selection is shown in one bar floating at the bottom centre of the list (「已选 N 条」, ×, 「选择全部 M 条」) and the view bar no longer changes; the cross-window sentence is gone, and past the cap the count chip's text and title carry the cap strings acceptance[5] reads. What it reports is unchanged", "ref": "#35678" }
       ]
     },
     {
@@ -6508,7 +6543,7 @@
       "title": "Defaults that changed meaning on v18 (ADR-0087 D3 18.* entries): an omitted list-view page size is 50 (was 25), an omitted editInline means editable in place, an autonumber with no `unique` is unique per organization, and a field-heavy form opens as a bounded modal on desktop",
       "since": "v18",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -6528,8 +6563,8 @@
         ]
       },
       "steps": [
-        "GET /api/v1/meta/view/VIEW to confirm the view declares no pagination and no userActions block — the meta read serves the authored view, so nothing resolved can be read there; the defaults show only in the renderer (the list request's top=50, the Edit inline switch). Seed more than 50 rows on the object whose list you count first (fixtures.requires[2]: no stock object holds that many), then open the list in the console and count the first page",
-        "as a member who may update, open the list and confirm the inline-edit affordance — the 'Edit inline' switch in the list's Display / view-settings popover at desktop width; as a read-only member confirm it is absent. The edit mode itself is session state that starts OFF (objectui app-shell ObjectView.tsx: 'The edit mode is now session state'), so cells are not editable on load until the switch is turned on — a click on a cell opens the record before then",
+        "GET /api/v1/meta/view/VIEW to confirm the view declares no pagination and no userActions block — the meta read serves the authored view, so nothing resolved can be read there; the defaults show only in the renderer (the list request's top=50, cells editable in place). Seed more than 50 rows on the object whose list you count first (fixtures.requires[2]: no stock object holds that many), then open the list in the console and count the first page",
+        "as a member who may update, open the list and confirm the inline-edit affordance — the list is editable in place with no switch and no mode: a click on a data cell selects it, and a double-click, Enter or typing opens its editor; as a read-only member select a cell and press Enter — the cell says why it cannot be edited and no editor opens",
         "create two rows of an autonumber object in the same org and read their numbers",
         "open New on a field-heavy object on a desktop viewport, then on a mobile viewport"
       ],
@@ -6547,7 +6582,7 @@
           "evidence": "row count + one-line screenshot description"
         },
         {
-          "clause": "inline edit is offered to an updater and absent for a read-only member with editInline omitted — 'offered' means the Edit inline switch is present (the edit mode starts off for the session, steps[1])",
+          "clause": "inline edit is offered to an updater and absent for a read-only member with editInline omitted — 'offered' means a selected cell opens its editor on Enter or a double-click, and 'absent' means the cell says why instead (steps[1])",
           "oracle": "screenshot",
           "verify": "per-persona affordance",
           "evidence": "two one-line descriptions"
@@ -6621,6 +6656,12 @@
           "date": "2026-11-19",
           "change": "acceptance[1] reads 'first window' for 'first page': since #35554 a list view with no declared `pagination` draws no pager and loads its next 50 as it scrolls; the 50-row default it pins is unchanged. Read at base 93fa4f97",
           "ref": "#35554"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-21",
+          "change": "steps[0], steps[1] and acceptance[2].clause follow #35684: the list is editable in place with no Edit inline switch and no session mode; a click selects a cell, a double-click, Enter or typing edits it, and for a read-only member the cell says why it cannot be edited. The 50-row and form-shape clauses are unchanged. Read at base c00be39b",
+          "ref": "#35794"
         }
       ]
     },
@@ -7407,6 +7448,116 @@
           "date": "2026-11-20",
           "change": "initial — reader arrangement moved from the related cards to the tabs (#35783, after #35595 retired the cards), read from source on the PR branch; no live run made",
           "ref": "#35783"
+        }
+      ]
+    },
+    {
+      "id": "records-forms.record-open-path-and-header",
+      "title": "An object's list opens a record one way — the name opens the full page, the hover icon beside it the side drawer — and the record's header is two rows: the way through the list (↑ ↓, 「第 N 条，共 M 条 · 视图名」, ✕) over the record (its name, chips and up to three actions), with the tabs right under it",
+      "since": "v18.7",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase (the live lane's `ui/e2e/live/ci/start-backend.sh`, or `pnpm dev -- --fresh --seed-admin`)",
+          "the showcase_account list (14 seeded accounts, a synthesized record page with a tab row) and the showcase_task list (its showcase_task_detail page authors three record_header actions: Mark Done, Log Time, Archive)"
+        ]
+      },
+      "steps": [
+        "at 1280×900 open the showcase_account list and click the second account's name; read the URL and the header's two rows",
+        "reload the page; read the navigation row again; press ↓; then click the view's name (「All Records」) in the navigation row",
+        "on the list, hover the second row and click the 「在侧边打开」 icon beside the name; read the URL, the drawer's edges and its header; press ↓ in the drawer, then its 「整页打开」",
+        "paste the address of an account record into a fresh tab (no list behind it); read the navigation row; click ✕",
+        "open a backlog task from the showcase_task list and read the record row's buttons; open a task in the drawer at 820 px wide and read them again",
+        "at 390×844 with touch, open the account list and tap a record"
+      ],
+      "acceptance": [
+        {
+          "clause": "the record's name opens the full page and nothing else does: no reader setting and no `navigation.mode` picks the drawer instead",
+          "oracle": "dom",
+          "verify": "after steps[0] the URL is …/showcase_account/record/<id> with no ?recordId=, and no drawer card ([data-record-drawer-card]) is drawn",
+          "evidence": "the URL and a screenshot"
+        },
+        {
+          "clause": "the page remembers the list it came from, across a reload: ↑ ↓ walk the list's rows in its order, the navigation row reads 「2 of 14 · All Records」, and the view's name goes back to the list",
+          "oracle": "dom",
+          "verify": "[data-record-top-bar-position] reads '2 of 14' and [data-record-top-bar-scope] 'All Records' before and after the reload; after ↓ the position reads '3 of 14'; the scope click lands on the list",
+          "evidence": "the navigation row before and after the reload"
+        },
+        {
+          "clause": "the icon beside the name, shown while the row is hovered, opens the record in a side drawer over the list, a floating card 8 px off the window's top, right and bottom edges, with 「整页打开」 and ✕ and no full-width state",
+          "oracle": "dom",
+          "verify": "the icon's opacity is 0 at rest and 1 on hover; after the click the URL carries ?recordId=, the list is still drawn, the card's box is 8 px from three edges with a rounded corner, and its frame holds exactly two buttons",
+          "evidence": "the drawer screenshot"
+        },
+        {
+          "clause": "the header is two rows on the page and in the drawer: a 40 px navigation row (the stepper and position, or the object when no list is behind it; ✕ at its far right) over a 48 px record row (icon, the name at 16 px, chips, actions)",
+          "oracle": "dom",
+          "verify": "[data-record-top-bar-rows='2'] holds [data-record-top-bar-nav] (40 px) above [data-record-top-bar-record] (48 px); the close button ends within 12 px of the row's right edge; with no list behind it there is no [data-record-top-bar-stepper] and the object crumb shows, and ✕ goes to the object's list",
+          "evidence": "the three figure-40 screenshots"
+        },
+        {
+          "clause": "the record row shows three authored actions by default, and folds those that do not fit its width into ⋯ rather than wrapping",
+          "oracle": "dom",
+          "verify": "on a backlog task Mark Done, Log Time and Archive stand inline beside Edit and ⋯; in the 820 px drawer every visible button of [data-record-top-bar-actions] shares one top",
+          "evidence": "both screenshots"
+        },
+        {
+          "clause": "the page's first row (its tab row, or a stage bar) starts right under the header, with no blank band",
+          "oracle": "dom",
+          "verify": "the tab row's top minus the header's bottom is at most 12 px, on the page and in the drawer",
+          "evidence": "the measured gap"
+        },
+        {
+          "clause": "on a phone there is no side-drawer icon; a tap opens the page, whose one-row bar still knows the list",
+          "oracle": "dom",
+          "verify": "no [data-testid='record-open-in-panel'] is drawn; after the tap the URL is the record's page and the bar reads '2 / 14', also after a reload",
+          "evidence": "the phone screenshot"
+        },
+        {
+          "clause": "the pins pass at the run subject sha",
+          "oracle": "test",
+          "verify": "run ui/e2e/live/record-open-path-35854.spec.ts and ui/e2e/live/record-topbar-35853.spec.ts with the live config (playwright.live.config.ts), and ui/packages/app-shell/src/views/ObjectView.recordOpenPath-35854.test.tsx and ui/packages/components/src/__tests__/record-top-bar-two-rows-35853.test.tsx from ui/ with vitest; each reports ≥1 test and 0 failed",
+          "evidence": "the Playwright and vitest summary lines, with the subject sha"
+        }
+      ],
+      "negative": [
+        "a name click that opens the drawer, or a 「打开记录：抽屉 / 整页」 setting anywhere in the list's view settings, is a FAIL",
+        "a page opened from a list that loses its position or view name on a reload is a FAIL",
+        "a list view declaring navigation.mode 'none' (or preventNavigation) whose rows open a record is a FAIL: 'none' still means rows open nothing",
+        "a blank band of more than 12 px between the header and the tab row is a FAIL"
+      ],
+      "traps": [
+        "hydration-race",
+        "shared-browser-tab"
+      ],
+      "automated": {
+        "kind": "e2e",
+        "ref": "ui/e2e/live/record-open-path-35854.spec.ts (name → page, hover icon → drawer, provenance across a reload, phone), ui/e2e/live/record-topbar-35853.spec.ts (the two rows on the page and in the drawer, three actions, the width fold, the gap above the tabs, the phone bar); both in the live lane, not in the required `:ci` allowlist"
+      },
+      "source": [
+        "ui/packages/app-shell/src/views/objectViewRecordNavigation.ts",
+        "ui/packages/app-shell/src/views/objectViewOpenAsPage.tsx#OpenInSidePanelButton",
+        "ui/packages/app-shell/src/views/recordDrawerStack.tsx#useRecordPageReturn",
+        "ui/packages/components/src/custom/record-top-bar.tsx#RecordTopBar",
+        "ui/packages/components/src/custom/navigation-overlay.tsx",
+        "ui/packages/components/src/renderers/layout/containers.tsx#PageHeaderActions",
+        "ui/packages/app-shell/src/views/RecordDetailView.tsx",
+        "#35854",
+        "#35853"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-20",
+          "change": "initial — the one open path (#35854, maintainer ruling 「废弃」 on the open preference and navigation.mode) and the two-row record header (#35853, with the gap above the tabs of #35745), read from the PR branch and driven live against the showcase",
+          "ref": "#35854"
         }
       ]
     }

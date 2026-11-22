@@ -38,6 +38,9 @@ export const objectForm = defineForm({
         { field: 'label', type: 'text', colSpan: 1, helpText: 'Singular display name (e.g. "Account")' },
         { field: 'pluralLabel', type: 'text', colSpan: 1, helpText: 'Plural display name (e.g. "Accounts")' },
         { field: 'icon', type: 'text', colSpan: 1, helpText: 'Lucide icon name (e.g. "building", "users")' },
+        // [#35985] The colour of the square the icon is drawn on: the swatch row
+        // (`color-picker`) reads its nine names off the closed enum.
+        { field: 'color', widget: 'color-picker', colSpan: 1, helpText: 'Color of the square the icon is drawn on, from the fixed palette. Unset draws gray.' },
         { field: 'description', type: 'textarea', colSpan: 2, helpText: 'Developer documentation' },
         // #19331 — `nameField` is declared by ObjectSchema and was offered by no
         // control, so the ADR-0079 record-title pointer could only be written
@@ -742,7 +745,7 @@ export const objectForm = defineForm({
             { field: 'import', label: 'Import', widget: 'json', helpText: 'The CSV import entry: on shows it, off hides it. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate the entry on the record in scope, evaluated once per toolbar.' },
             { field: 'edit', label: 'Edit', widget: 'json', helpText: 'Editing existing records, inline and in the form: on offers it, off hides it. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate each row on its own record.' },
             { field: 'delete', label: 'Delete', widget: 'json', helpText: 'Row and bulk delete: on offers it, off hides it. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate each row on its own record.' },
-            { field: 'exportCsv', label: 'Export CSV', type: 'boolean', helpText: 'The CSV export entry. Unset: shown, since every managedBy bucket offers export.' },
+            { field: 'exportCsv', label: 'Export CSV', type: 'boolean', helpText: 'The Export entry that downloads this object\'s data (CSV, XLSX or JSON) on its grids, list views and dataset reports: on shows it, off hides it. A Gantt chart\'s PNG / PDF export is not covered. Unset: shown, since every managedBy bucket offers export. It is not a permission: who may export is the permission set\'s allowExport.' },
             { field: 'transfer', label: 'Change Owner', widget: 'json', helpText: 'The Change Owner action, single and bulk: on offers it, off hides it. Unset: on, except off on a controlled_by_parent detail. Offered only on an object whose records have a reassignable owner (ownership user or unset, no managedBy, not a sys_ object, owner_id not readonly and, on an external object, declared or mapped); turning it on anywhere else is refused. It gates the action only, not a plain edit of owner_id. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate the action on each record.' },
           ],
         },

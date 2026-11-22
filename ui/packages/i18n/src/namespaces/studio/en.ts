@@ -548,6 +548,7 @@ const STUDIO_EN: Record<string, string> = {
   'designer.object.pluralLabel': 'Plural label',
   'designer.object.pluralPlaceholder': 'e.g. Accounts',
   'designer.object.icon': 'Icon',
+  'designer.object.iconAndColor': 'Icon and color',
   'designer.object.description': 'Description',
   'designer.object.descriptionPlaceholder': 'What this object represents',
   // Access controls (ADR-0066 D2/D3/④/⑤)
@@ -1508,6 +1509,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.condition.op.atLeast': 'at least',
   'engine.inspector.condition.op.atMost': 'at most',
   'engine.inspector.condition.op.contains': 'contains',
+  // objectstack#36167 — membership's complement on a list subject.
+  'engine.inspector.condition.op.notContains': 'does not contain',
   'engine.inspector.condition.op.inAnyOf': 'in (any of)',
   'engine.inspector.condition.op.notIn': 'not in',
   'engine.inspector.view.type.grid': 'Table / List',
@@ -1796,6 +1799,17 @@ const STUDIO_EN: Record<string, string> = {
   'engine.form.flaggedValue': '{value} {flag}',
   'engine.form.searchIcons': 'Search icons…',
   'engine.form.chooseIcon': 'Choose an icon',
+  // objectstack#35985: the object colour palette in the icon picker.
+  'engine.form.iconColor': 'Icon color',
+  'engine.form.objectColor.gray': 'Gray',
+  'engine.form.objectColor.blue': 'Blue',
+  'engine.form.objectColor.teal': 'Teal',
+  'engine.form.objectColor.green': 'Green',
+  'engine.form.objectColor.amber': 'Amber',
+  'engine.form.objectColor.orange': 'Orange',
+  'engine.form.objectColor.red': 'Red',
+  'engine.form.objectColor.pink': 'Pink',
+  'engine.form.objectColor.purple': 'Purple',
   'engine.form.iconsTruncated': 'Showing the first {shown} of {total} — type to narrow.',
   'engine.form.noMatchingIcons': 'No matching icons.',
   // objectui#12531 — the icon picker's inline warning on a stored name that
@@ -2350,7 +2364,6 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.settings.addFieldOption': '+ Add field…',
   'engine.studio.settings.undeclared': '(not declared — surfaces pick heuristically)',
   'engine.studio.settings.highlightMax': 'Up to {max} highlight fields — remove one to add another.',
-  'engine.studio.settings.highlightPreview': 'Highlight strip preview',
   'engine.studio.settings.relatedLists': 'Related list order (relatedLists) — the order of the lists of child records on this object\'s record page, most important first; it orders only, and showing or hiding a list stays on its relationship field',
   'engine.studio.settings.relatedListsAdd': '+ Add relationship…',
   'engine.studio.settings.relatedListsTail': 'Not listed — shown after these, in the default order',

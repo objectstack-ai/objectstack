@@ -92,6 +92,29 @@ const MISSING_BIN_NOTICE = 'missing-bin';
 /** How many ids one snapshot read names: the cascade walk's own `$in` batch. */
 const SNAPSHOT_READ_BATCH = 500;
 
+/**
+ * The engine's system-insert organization resolver
+ * (`MiddlewareAndContextFacet.resolveSystemInsertOrganization`, ADR-0131 D9):
+ * the organization an insert on `object` that carries none is stamped with,
+ * `undefined` when the context or every row already carries one (or the
+ * object has no tenant column, or the composition registers no organization
+ * object), and a thrown `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` where no
+ * owner is derivable.
+ *
+ * Handed to {@link RecycleBinCapture.write} by the delete path, which holds
+ * the engine and reaches the body through the middleware facet's host, rather
+ * than read off {@link RecycleBinCaptureHost}: that host is built in
+ * `engine.ts`, which is at its facade line ceiling
+ * (`scripts/facade-delegation-registry.json`), and the ceiling's remedy is
+ * new wiring in the module beside it. It is the same body the engine's own
+ * insert calls, ⛔ never a second spelling of the D9 decision.
+ */
+export type RecycleBinSystemInsertOrganization = (
+  object: string,
+  execCtx: ExecutionContext | undefined,
+  rows: readonly Record<string, unknown>[],
+) => Promise<string | undefined>;
+
 /** The engine members the capture reads. */
 export interface RecycleBinCaptureHost {
   readonly _registry: { getObject(name: string): unknown };
@@ -238,8 +261,15 @@ export class RecycleBinCapture {
    * Write the entry, after the walk and before the root row is removed.
    * `undefined` when there is nothing to keep: the root row was not there to
    * read (the delete removes nothing), or the set was never handed over.
+   *
+   * `resolveSystemInsertOrganization` is the engine's one ADR-0131 D9
+   * resolver, handed in by the delete path (see
+   * {@link RecycleBinSystemInsertOrganization} for why it is an argument and
+   * not a host member). It answers the entry's organization when neither the
+   * record nor the context names one, and its refusal throws from here,
+   * before the root row is removed, so the delete is refused with it.
    */
-  async write(): Promise<RecycleBinWrittenEntry | undefined> {
+  async write(resolveSystemInsertOrganization: RecycleBinSystemInsertOrganization): Promise<RecycleBinWrittenEntry | undefined> {
     const rows = this.rows;
     if (!rows || rows.length === 0 || rows[0].object !== this.object || rows[0].id !== this.id) {
       if (!this.set) {
@@ -267,6 +297,21 @@ export class RecycleBinCapture {
     });
     const row: Record<string, unknown> = { ...entry };
     if (organizationId !== undefined) row.organization_id = organizationId;
+    else {
+      // [ADR-0131 D9, ADR-0148 D1] Neither the record nor the context names an
+      // organization: a record of an object with no tenant column (a
+      // `tenancy: { enabled: false }` object) deleted through the system door,
+      // or a tenant-column row its driver left unstamped. The entry is a row of
+      // a tenant-column object all the same, so it takes the organization any
+      // system insert would: derived under `single`, refused under a wall or
+      // with no derivable owner (`ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`),
+      // left unstamped only in a composition that registers no organization
+      // object (the D9 lean-embedding note). ⛔ Never NULL by omission: that
+      // wrote a NULL-organization entry on a store that enforces no NOT NULL,
+      // and failed the delete on the bin's constraint on one that does.
+      const derived = await resolveSystemInsertOrganization(RECYCLE_BIN_OBJECT, this.context, [row]);
+      if (derived !== undefined) row.organization_id = derived;
+    }
     const driver = this.host.getDriver(RECYCLE_BIN_OBJECT);
     const options = this.host.buildDriverOptions(RECYCLE_BIN_OBJECT, this.context);
     const written = (await driver.create(RECYCLE_BIN_OBJECT, row, options)) as { id?: unknown } | null;
@@ -324,7 +369,8 @@ export class RecycleBinCapture {
 
   /**
    * The organization that owns the entry: the root row's own, read off its
-   * tenant column, else the deleting context's. An entry belongs to the
+   * tenant column, else the deleting context's; with neither, `write()`
+   * asks the D9 resolver. An entry belongs to the
    * organization whose record it holds, so the organization's delete removes
    * it (the bin's tenant column cascades) and its listing is that
    * organization's.

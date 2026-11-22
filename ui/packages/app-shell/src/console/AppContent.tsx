@@ -487,7 +487,11 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // app whose served item carries its package; the whole registry everywhere
   // else, as before (that module says why). A page route reads the objects
   // its page binds (objectui#12980), resolved as `PageView` resolves the page,
-  // and a record route those of its declared record page (objectui#13046).
+  // and a record route those of its declared record page (objectui#13046),
+  // on the desktop only: on a phone the view draws the standard page, whose
+  // related lists read every object that points at the record's
+  // (objectstack#36150), so the scope follows the width as the view does.
+  const phoneViewport = usePhoneViewport();
   const {
     candidate: scopeCandidate,
     scope: objectScope,
@@ -547,6 +551,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
       const appName = typeof activeApp?.name === 'string' ? activeApp.name : undefined;
       return bundledReads && appName ? bundledReads.objectsReferencing(appName, objectName) : BUNDLE_MISS;
     },
+    phoneViewport,
   );
   // Until the app list has loaded, a scope candidate does not know its package
   // yet, and reads nothing (the splash is up).
@@ -1072,13 +1077,22 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // the drawer over the still-intact list; a heavy one is the detail route.
   // `replace: true` swaps out the transient `?form=…` entry so Back returns
   // to the pre-create origin.
-  const handleRecordFormSuccess = useCallback(async (saved: any) => {
+  const handleRecordFormSuccess = useCallback(async (saved: any, outcome?: { createMore?: boolean }) => {
     // Child task (objectstack-ai/objectstack#2604 D3): the parent detail must stay EXACTLY as it was —
     // active tab, scroll, everything. So do NOT go through crud_success;
     // the child's open related lists refetch on their own via the
     // invalidation bus (#2269): the dataSource write already emitted a
     // MutationEvent that the bridge fans out — no manual notify needed.
     const feedback = answerWarningClaim.current?.take(saved);
+    // 「Create more」 (objectstack-ai/objectstack#35980): the dialog stays open
+    // on an empty form for the next record. Say the save landed and refresh
+    // the list behind (a child task's related lists refetch on the bus), but
+    // neither close the form nor leave for the new record.
+    if (outcome?.createMore) {
+      toastRecordSave(toast, recordSaveMessage(saved), feedback);
+      if (!isChildFormTask) setRefreshKey(k => k + 1);
+      return;
+    }
     if (isChildFormTask) {
       toastRecordSave(toast, recordSaveMessage(saved), feedback);
       closeRecordForm();
@@ -1765,6 +1779,11 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                   : [],
                 onSuccess: handleRecordFormSuccess,
                 onCancel: handleDialogCancel,
+                // The footer's 「Create more」 switch on a create, for the
+                // list's 「New」 and a related list's child create alike
+                // (objectstack-ai/objectstack#35980). ModalForm shows it on a
+                // create only.
+                createMore: true,
                 // objectstack-ai/objectstack#26843 — the selected form view's
                 // `buttons`, `layout` and `defaults` over this dialog's own
                 // defaults (`resolveFormViewChrome` states the precedence). A

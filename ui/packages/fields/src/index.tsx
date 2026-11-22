@@ -899,6 +899,8 @@ function RatingCellRenderer({ value, field }: CellRendererProps): React.ReactEle
         <Star
           key={i}
           aria-hidden="true"
+          // The star a click on a selected list cell sets (objectstack#36023).
+          data-rating-star={i + 1}
           className={cn(
             'h-3.5 w-3.5 shrink-0',
             i < filled ? 'fill-yellow-400 text-yellow-400' : 'text-muted-foreground/40',
@@ -2031,8 +2033,11 @@ export function EmailCellRenderer({ value }: CellRendererProps): React.ReactElem
           {safe}
         </a>
       </Button>
+      {/* A select-first grid does not draw this (`data-cell-copy`): there a
+          click selects the cell and Ctrl/Cmd+C copies it (objectstack#36015). */}
       <button
         type="button"
+        data-cell-copy=""
         className="shrink-0 opacity-0 group-hover/email:opacity-100 transition-opacity p-0.5 rounded hover:bg-muted"
         onClick={handleCopy}
         aria-label={label('detail.copyEmail', 'Copy email')}
@@ -2128,8 +2133,10 @@ export function PhoneCellRenderer({ value }: CellRendererProps): React.ReactElem
         <PhoneIcon className="h-3 w-3 shrink-0" />
         <span className="truncate">{safe}</span>
       </a>
+      {/* Not drawn in a select-first grid, as `EmailCellRenderer`'s. */}
       <button
         type="button"
+        data-cell-copy=""
         className="shrink-0 opacity-0 group-hover/phone:opacity-100 transition-opacity p-0.5 rounded hover:bg-muted"
         onClick={handleCopy}
         aria-label={label('detail.copyPhone', 'Copy phone number')}
@@ -2286,7 +2293,9 @@ function displayableImagesOf(value: unknown): Array<{ url: string; name?: string
  *
  * Clicking a thumbnail opens a full-screen lightbox (single or gallery). The
  * click is `stopPropagation`-guarded so, inside a grid row, enlarging an image
- * doesn't also trigger row navigation.
+ * doesn't also trigger row navigation. Each thumbnail is a `data-cell-opener`:
+ * in a select-first grid a plain click selects the cell, and the cell's open
+ * button or Ctrl/Cmd+Enter opens the lightbox (objectstack#36015).
  */
 export function ImageCellRenderer({ value }: CellRendererProps): React.ReactElement {
   const { t } = useObjectTranslation();
@@ -2349,6 +2358,7 @@ export function ImageCellRenderer({ value }: CellRendererProps): React.ReactElem
               key={idx}
               src={img.url}
               alt={imageAlt(idx, img.name)}
+              data-cell-opener=""
               onClick={open(idx)}
               className="size-8 cursor-zoom-in rounded-md border-2 border-background object-cover transition-transform hover:scale-110 hover:z-10"
             />
@@ -2356,6 +2366,7 @@ export function ImageCellRenderer({ value }: CellRendererProps): React.ReactElem
           {imgs.length > 3 && (
             <button
               type="button"
+              data-cell-opener=""
               onClick={open(3)}
               className="size-8 rounded-md border-2 border-background bg-muted flex items-center justify-center text-xs font-medium text-muted-foreground hover:bg-muted/80"
             >
@@ -2374,6 +2385,7 @@ export function ImageCellRenderer({ value }: CellRendererProps): React.ReactElem
       <img
         src={imgs[0].url}
         alt={imageAlt(0, imgs[0].name)}
+        data-cell-opener=""
         onClick={open(0)}
         className="size-10 cursor-zoom-in rounded-md object-cover transition-transform hover:scale-105"
       />
@@ -2498,9 +2510,13 @@ function ReferencedRecordLink({
         className={cn('text-primary underline-offset-4 hover:underline', className)}
         // A host's list grid draws a referenced record as a small chip led by
         // the name's first letter (objectstack#35548); these say which link
-        // is one and what its letter is. Nothing else reads them.
+        // is one and what its letter is.
         data-record-link=""
         data-initial={recordLinkInitial(label)}
+        // The record the chip names: a select-first grid opens it in place on
+        // a single click when its host asks to (objectstack#36015).
+        data-record-object={objectName}
+        data-record-id={String(recordId)}
         onClick={(e) => {
           // The rows this cell sits in carry their own click handlers — the
           // detail row copies the field value, a related-list row opens ITS own
@@ -3262,6 +3278,14 @@ export function UnresolvedReferenceMark({
  * `sys_user` policy, the object the runtime expands it into and the object
  * `UserField` points the picker at. The field's `reference` is not read.
  */
+/**
+ * A person's face in a cell (objectstack#36023): 24 px drawn, 20 px laid out,
+ * so it never makes its row taller than a row of text. A 32 px face made a
+ * list row 41 px tall, and the row dropped back to 33 px while the cell was
+ * edited, so the list jumped.
+ */
+const CELL_AVATAR_CLASS = 'size-6 -my-0.5';
+
 export function UserCellRenderer({ value }: CellRendererProps): React.ReactElement {
   // Called before any early return (rules of hooks). A policy that loads or
   // changes re-renders this cell through the context, and the drawing follows.
@@ -3323,19 +3347,19 @@ export function UserCellRenderer({ value }: CellRendererProps): React.ReactEleme
           return (
             <Avatar
               key={idx}
-              className="size-8 border-2 border-white"
+              className={cn(CELL_AVATAR_CLASS, 'border-2 border-white')}
               title={name}
             >
               {user.image && <AvatarImage src={user.image} alt={name} />}
-              <AvatarFallback className="bg-blue-500 text-white text-xs">
+              <AvatarFallback className="bg-blue-500 text-white text-[10px]">
                 {initials}
               </AvatarFallback>
             </Avatar>
           );
         })}
         {value.length > 3 && (
-          <Avatar className="size-8 border-2 border-white">
-            <AvatarFallback className="bg-gray-200 text-gray-600 text-xs">
+          <Avatar className={cn(CELL_AVATAR_CLASS, 'border-2 border-white')}>
+            <AvatarFallback className="bg-gray-200 text-gray-600 text-[10px]">
               +{value.length - 3}
             </AvatarFallback>
           </Avatar>
@@ -3374,9 +3398,9 @@ export function UserCellRenderer({ value }: CellRendererProps): React.ReactEleme
   
   return (
     <div className="flex items-center gap-2">
-      <Avatar className="size-8">
+      <Avatar className={CELL_AVATAR_CLASS}>
         {user.image && <AvatarImage src={user.image} alt={name} />}
-        <AvatarFallback className="bg-blue-500 text-white text-xs">
+        <AvatarFallback className="bg-blue-500 text-white text-[10px]">
           {initials}
         </AvatarFallback>
       </Avatar>
@@ -5355,6 +5379,21 @@ export {
 } from './widgets/file-value.js';
 export type { FileValueView, UploadResultLike } from './widgets/file-value.js';
 export * from './FieldEditWidget.js';
+// objectstack#35956 — the in-place fill-in a change opens when it makes other
+// fields required: the pre-evaluation and the dialog, shared by the kanban
+// drop, the list cell and the record page's inline edit.
+export {
+  collectRequiredWhenPromptFields,
+  requiredWhenPromptReads,
+  type RequiredWhenPromptField,
+  type RequiredWhenPromptOptions,
+} from './requiredWhenPrompt.js';
+export {
+  RequiredFieldsDialog,
+  type RequiredFieldsDialogField,
+  type RequiredFieldsDialogChange,
+  type RequiredFieldsDialogProps,
+} from './RequiredFieldsDialog.js';
 export * from './widgets/TextField.js';
 export * from './widgets/NumberField.js';
 export * from './widgets/BooleanField.js';
@@ -5363,6 +5402,10 @@ export * from './widgets/BooleanField.js';
 // highlights chip). `BooleanValueText` stays internal: its only caller is the
 // lookup column renderer in this package.
 export { useBooleanValueLabel, type BooleanValueLabel } from './widgets/booleanValueLabel.js';
+// objectstack#36070 — the up-to-two-character initials a person chip draws
+// when it has no avatar image (PersonRow, the people-field chips). Exported so
+// `@object-ui/plugin-detail`'s comment author avatar draws the same initials.
+export { getPersonInitials } from './widgets/personDisplay.js';
 export * from './widgets/SelectField.js';
 export * from './widgets/DateField.js';
 export * from './widgets/DateTimeField.js';

@@ -31,7 +31,7 @@ import { FIELD_GROUP_KEY_PATTERN } from './field-group-layout';
 // blueprint object (`ai/solution-blueprint.zod.ts`) runs this same refinement.
 import { refuseStageFieldWithoutKinds } from './stage-field-kinds';
 // [#32763] The `icon` leaf, shared with the AI blueprint object.
-import { OBJECT_ICON_SCHEMA } from './object-icon';
+import { OBJECT_COLOR_SCHEMA, OBJECT_ICON_SCHEMA } from './object-icon';
 // The masked-on-read declaration (#20141); `warnGenericPasswordFields` reads its
 // `password` exemption rather than restating it. No runtime cycle: that module's
 // only imports are type-only.
@@ -1414,8 +1414,9 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
    * `relatedList: 'primary'` (the group positions that body table), or a
    * `master_detail` FK that declares no `relatedList` (a tab by default; the
    * group makes it a body table at this position in the record page and its
-   * edit state, and the parent's entry form inlines it, below the record's
-   * fields until the form places it at the group too, #35889). A group
+   * edit state, and the parent's entry form inlines it at the same position;
+   * a form whose sections name no field group keeps it below its fields,
+   * #35889). A group
    * naming a side card, or a list its FK hides with `relatedList: false`,
    * draws nothing at the group, so it is refused wherever the child's fields
    * are known: at `defineStack` and at the runtime metadata write door
@@ -1426,7 +1427,7 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
    */
   relatedList: z.string().regex(RELATED_LIST_ENTRY_PATTERN, {
     message: 'A field group\'s relatedList is a child object name (e.g. "task") or object.field (e.g. "event.related_to"), in snake_case',
-  }).optional().describe('Places a related list\'s body table at this position in the record\'s details column instead of a section of fields: names one inbound relationship, as a relatedLists entry does (child object, or object.field when that child has more than one relationship to this object). A group with relatedList holds no fields: a field that names it as its group is refused, and so is a fields list on it. The name is judged as a relatedLists entry is: refused when its child is in the stack with no inbound lookup / master_detail field, or exists nowhere (by os validate / os build, which leave a sys_ / cloud_ / ai_ name to the runtime, and by a metadata write that names no package); a write into a package stores it, and the record page places nothing for it. It names a body table only (a FK declaring relatedList: \'primary\', or a master_detail FK that declares no relatedList, which is a tab unless a group places it; placed, it is drawn here, and the parent\'s entry form inlines it below the record\'s fields until the form places it at the group as well): a group naming a side card or a list hidden by relatedList: false draws nothing, so it is refused where the child\'s fields are known (os validate / os build and the metadata write door), naming the FK and the remedy (set relatedList: \'primary\' on it, name only the body table as object.field when a bare child name also names a side card, or remove the group\'s relatedList).').meta({ title: 'Related List' }),
+  }).optional().describe('Places a related list\'s body table at this position in the record\'s details column instead of a section of fields: names one inbound relationship, as a relatedLists entry does (child object, or object.field when that child has more than one relationship to this object). A group with relatedList holds no fields: a field that names it as its group is refused, and so is a fields list on it. The name is judged as a relatedLists entry is: refused when its child is in the stack with no inbound lookup / master_detail field, or exists nowhere (by os validate / os build, which leave a sys_ / cloud_ / ai_ name to the runtime, and by a metadata write that names no package); a write into a package stores it, and the record page places nothing for it. It names a body table only (a FK declaring relatedList: \'primary\', or a master_detail FK that declares no relatedList, which is a tab unless a group places it; placed, it is drawn here, and the parent\'s entry form inlines it here too, or below its fields when the form\'s sections name no field group): a group naming a side card or a list hidden by relatedList: false draws nothing, so it is refused where the child\'s fields are known (os validate / os build and the metadata write door), naming the FK and the remedy (set relatedList: \'primary\' on it, name only the body table as object.field when a bare child name also names a side card, or remove the group\'s relatedList).').meta({ title: 'Related List' }),
 
   /**
    * [ADR-0085 §5] Section visibility predicate — CEL, the ADR-0089 canonical
@@ -3931,6 +3932,8 @@ const ObjectSchemaBase = strictObject(
   pluralLabel: z.string().optional().describe('Human readable plural label (e.g. "Accounts")'),
   description: z.string().optional().describe('Developer documentation / description'),
   icon: OBJECT_ICON_SCHEMA,
+  // [#35985] The colour of the square the icon is drawn on, from a closed palette.
+  color: OBJECT_COLOR_SCHEMA,
 
   /**
    * Taxonomy & Organization
@@ -4079,9 +4082,9 @@ const ObjectSchemaBase = strictObject(
    * surfaces. Each flag overrides the default derived from
    * {@link managedBy} via {@link resolveCrudAffordances}. Useful for the
    * handful of objects whose lifecycle doesn't cleanly fit a single
-   * bucket — e.g. an `append-only` table that should still expose CSV
-   * Export, or a `config` table that admins legitimately want to bulk
-   * import via CSV.
+   * bucket — e.g. a `platform` table whose records the console should not
+   * offer for download (`exportCsv: false`), or a `config` table that
+   * admins legitimately want to bulk import via CSV.
    *
    * Omitting the block (or leaving individual flags `undefined`) keeps
    * the {@link managedBy}-derived default.
@@ -4100,8 +4103,8 @@ const ObjectSchemaBase = strictObject(
    * off on a `controlled_by_parent` detail), and it can open the action only
    * on an object that is structurally eligible for it — see
    * `user-action-transfer.ts` (`isTransferEligible`,
-   * `resolveUserActionTransfer`). Nothing reads it at runtime yet: the Change
-   * Owner endpoint and the console action are cards #35402 and #35403.
+   * `resolveUserActionTransfer`). The server's Change Owner endpoint reads it
+   * (card #35402); the console action is card #35403.
    */
   userActions: strictObject({
     surface: "this object's `userActions` block",
@@ -4159,10 +4162,10 @@ const ObjectSchemaBase = strictObject(
         '`clone` is a CAPABILITY, not a user action — write `enable: { clone: false }`. ' +
         'The `enable` block (ObjectCapabilities) is where record deep-cloning is governed.',
       read:
-        '`userActions` toggles WRITE affordances only; there is no read toggle. Read ' +
+        '`userActions` toggles the write affordances and the data Export entry; there is no read toggle. Read ' +
         'access is governed by permissions (`requiredPermissions`) and `access.default`.',
       view:
-        '`userActions` toggles WRITE affordances only; there is no view toggle. ' +
+        '`userActions` toggles the write affordances and the data Export entry; there is no view toggle. ' +
         'Visibility is governed by permissions (`requiredPermissions`) and `access.default`.',
     },
   }, {
@@ -4178,7 +4181,9 @@ const ObjectSchemaBase = strictObject(
     delete: z.union([z.boolean(), RowCrudActionOverrideSchema]).optional().describe(
       'Show row-level delete + bulk delete. Boolean, or an object adding per-record visibleWhen/disabledWhen CEL predicates.',
     ),
-    exportCsv: z.boolean().optional().describe('Show CSV export entry.'),
+    exportCsv: z.boolean().optional().describe(
+      "Show the Export entry that downloads this object's data as CSV, XLSX or JSON: the grid's Export menu and its table CSV button, the list view's Export, and a dataset report's Export over this object; false hides it. A view's export of the picture it draws (the Gantt chart's PNG / PDF) is not covered. Omitted: shown, in every managedBy bucket. It hides the entry and refuses no export request: who may export is the permission set's allowExport.",
+    ),
     transfer: z.union([z.boolean(), RowCrudActionOverrideSchema]).optional().describe(
       'Offer the Change Owner action (single and bulk) on records of this object. Boolean, or an object adding per-record visibleWhen/disabledWhen CEL predicates. Omitted: on, except off on a controlled_by_parent detail. Offered only where the platform injects a reassignable owner_id that is provable and not declared readonly (ownership user or omitted, no managedBy, not a sys_ object; an external object declares owner_id or maps a remote column onto it); enabled: true elsewhere is refused. Gates the action, not a plain owner_id write. Resolved by resolveUserActionTransfer.',
     ),
@@ -5795,7 +5800,11 @@ export interface CrudAffordances {
   edit: boolean;
   /** Row-level + bulk delete. */
   delete: boolean;
-  /** CSV / clipboard export. Allowed even on append-only audit tables by default. */
+  /**
+   * The console's data Export entry: a CSV, XLSX or JSON download of the
+   * object's data (not a view's picture export). On by default in every
+   * bucket, append-only audit tables included.
+   */
   exportCsv: boolean;
   /**
    * Per-record CEL predicates for the built-in row Edit action, present only

@@ -385,18 +385,18 @@
     {
       "id": 22,
       "prompt": "Add a `uom` text field to our `product` object for the unit of measure (pcs, kg, box, …).",
-      "expected_output": "Does not add a free-text unit. Checks the platform catalog (objectstack-project §0, question 3): units of measure are a Planned row there, not available yet, with the accepted contract linked. Builds the smallest thing the app needs meanwhile, a `select` field whose option values are the contract's UN/ECE Rec 20 codes in exact uppercase (`H87` for a piece, `KGM`, `XBX`) with this business's spellings (pcs, kg, box) as the labels, so the platform unit table later adds validation and leaves stored values unchanged, and marks it `// PLATFORM-CANDIDATE: <link>` so the bump sweep replaces it when that table ships. If the request only wanted a quantity, says the quantity stays a `number` and the unit lives on the field, not inside the value.",
+      "expected_output": "Adds `uom` as a `text` field that declares what it holds, `uom: Field.text({ unitConfig: { unitMode: 'code' } })`, neither a bare free-text field nor a `select`: the platform catalog (objectstack-project §0, question 3) lists `sys_unit` and `unitConfig` as what the platform ships, so the app declares no unit object and no option list. The field stores a unit code in exact uppercase: a standard UN/ECE Rec 20 code (`H87` for a piece, `KGM`, `XBX` for a box) or one of the organization's own units, which an administrator adds in Setup. The write path refuses any other value, so pcs, kg and box are what people say, not what is stored. If a quantity sits beside it, the quantity is a `number` field with `unitConfig: { unitMode: 'record', unitField: 'uom' }`, and `uom` then carries no `unitConfig` of its own; a quantity with one unit declares `unitMode: 'fixed'` with `unit`. Showing the unit beside a quantity, totals per unit and conversion are in the catalog's Planned section, not available yet.",
       "files": [],
       "assertions": {
         "must_contain": [
-          "PLATFORM-CANDIDATE",
-          "select",
+          "unitConfig",
+          "unitMode",
           "H87",
           "KGM"
         ],
         "must_not_contain": [
-          "uom: Field.text(",
-          "uom: { type: 'text'"
+          "uom: Field.select(",
+          "type: 'select'"
         ]
       }
     },

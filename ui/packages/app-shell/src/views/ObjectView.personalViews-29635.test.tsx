@@ -105,9 +105,10 @@ vi.mock('./MetadataInspector', () => ({
 vi.mock('./RecordDetailView', () => ({ RecordDetailView: () => null }));
 
 import { ObjectView } from './ObjectView';
+import { listDraftScope, patchListDraft, readListDraft, resetListDraftStoreForTests, type ListDraftPatch } from './listDraftStore';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 import { UserStateAdaptersProvider, useAttachListStateFamily } from '../context/UserStateAdapters';
-import { ListPreferencesProvider, listPreferenceKey, localListStateKey } from '../context/ListPreferencesProvider';
+import { ListPreferencesProvider, listPreferenceKey } from '../context/ListPreferencesProvider';
 import { applyListStateParams } from './userFilterUrlState';
 import { toast } from 'sonner';
 
@@ -247,6 +248,7 @@ beforeEach(() => {
   grants.isLoaded = false;
   grants.denied.clear();
   localStorage.clear();
+  resetListDraftStoreForTests();
   fetchCalls.length = 0;
   vi.mocked(toast.error).mockClear();
   Object.defineProperty(window, 'innerWidth', { value: 1440, configurable: true, writable: true });
@@ -603,8 +605,17 @@ describe('objectstack#30034 — a personal view opened by its address never carr
 describe('objectstack#30073 — a personal view\'s conditions are Filter panel rows, saved back by 保存', () => {
   const ROME = { id: 'root', logic: 'and' as const, conditions: [{ id: 'r1', field: 'city', operator: 'equals', value: 'Rome' }] };
   const romeLink = (path: string) => `${path}?${applyListStateParams(new URLSearchParams(), { filters: ROME as never }).toString()}`;
-  const storeListState = (state: unknown) => localStorage.setItem(localListStateKey('u1', 'crm_lead'), JSON.stringify(state));
-  const storedListState = () => JSON.parse(localStorage.getItem(localListStateKey('u1', 'crm_lead')) ?? '{}');
+  // objectstack#35955 — the list's draft (what the reader changed and left
+  // when they opened a record), the state a bare address opens on.
+  const storeListState = (state: { perView: Record<string, ListDraftPatch> }) => {
+    for (const [viewId, draft] of Object.entries(state.perView)) patchListDraft(listDraftScope('u1', 'crm_lead', viewId), draft);
+  };
+  const draftOf = (viewId: string) => readListDraft(listDraftScope('u1', 'crm_lead', viewId));
+  /** Open Save's menu and pick 「Save to this view」. */
+  const saveToThisView = async () => {
+    fireEvent.pointerDown(await screen.findByTestId('list-draft-save'), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    fireEvent.click(await screen.findByTestId('list-draft-save-to-view'));
+  };
   const filterTrigger = () => screen.getByTestId('condition-add-filter');
   const lastLeadRead = (dataSource: ReturnType<typeof mountLeads>['dataSource']) => JSON.stringify(leadReads(dataSource).at(-1));
 
@@ -622,18 +633,17 @@ describe('objectstack#30073 — a personal view\'s conditions are Filter panel r
     // The panel row is the condition: it is not laid under the list as well.
     await waitFor(() => expect(lastLeadRead(dataSource)).toContain('Paris'));
     expect(lastLeadRead(dataSource).match(/Paris/g)).toHaveLength(1);
-    expect(screen.queryByTestId('list-personalized-marker')).toBeNull();
+    expect(screen.queryByTestId('list-draft')).toBeNull();
     expect(dataSource.update).not.toHaveBeenCalled();
   });
 
-  it('an edited panel is personalized and offers 保存, which writes the panel into that view in the stored shape', async () => {
+  it('an edited panel is a draft and Save offers 「Save to this view」, which writes the panel into that view in the stored shape', async () => {
     const { dataSource } = mountLeads(romeLink('/apps/crm/crm_lead/view/pv_mine'));
     await listToolbar();
-    const marker = await screen.findByTestId('list-personalized-marker');
+    await screen.findByTestId('list-draft-discard');
     // Nothing is written back while the edit is only on screen.
     expect(dataSource.update).not.toHaveBeenCalled();
-    fireEvent.click(marker);
-    fireEvent.click(await screen.findByTestId('list-personalized-save'));
+    await saveToThisView();
 
     await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(1));
     const [resource, id, patch] = dataSource.update.mock.calls[0];
@@ -641,16 +651,18 @@ describe('objectstack#30073 — a personal view\'s conditions are Filter panel r
     expect(ListViewSchema.safeParse(patch.config).success).toBe(true);
     expect(patch.config.data).toEqual({ provider: 'object', object: 'crm_lead' });
     expect(patch.config.filter).toEqual([{ field: 'city', operator: 'equals', value: 'Rome' }]);
-    // The list opens again on the saved view: its rows are the view's own.
-    await waitFor(() => expect(screen.queryByTestId('list-personalized-marker')).toBeNull());
+    // The list opens again on the saved view: its rows are the view's own,
+    // Discard and Save go, and one notice says it was saved.
+    await waitFor(() => expect(screen.queryByTestId('list-draft')).toBeNull());
     await waitFor(() => expect(lastLeadRead(dataSource)).toContain('Rome'));
     expect(lastLeadRead(dataSource)).not.toContain('Paris');
+    expect(toast.success).toHaveBeenCalledWith('Saved');
   });
 
   it('Options offers the same 保存 beside 恢复默认 (objectstack#35551): it writes the panel into that view', async () => {
     const { dataSource } = mountLeads(romeLink('/apps/crm/crm_lead/view/pv_mine'));
     await listToolbar();
-    await screen.findByTestId('list-personalized-marker');
+    await screen.findByTestId('list-draft-discard');
     fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
     const reset = await screen.findByTestId('display-reset-button');
     expect(reset).toBeEnabled();
@@ -660,7 +672,7 @@ describe('objectstack#30073 — a personal view\'s conditions are Filter panel r
     const [resource, id, patch] = dataSource.update.mock.calls[0];
     expect([resource, id, Object.keys(patch)]).toEqual(['sys_personal_view', 'pv_mine', ['config']]);
     expect(patch.config.filter).toEqual([{ field: 'city', operator: 'equals', value: 'Rome' }]);
-    await waitFor(() => expect(screen.queryByTestId('list-personalized-marker')).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('list-draft')).toBeNull());
     // Nothing differs from the view now: no 保存, and 恢复默认 is dimmed.
     fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
     await waitFor(() => expect(screen.getByTestId('display-reset-button')).toBeDisabled());
@@ -670,10 +682,10 @@ describe('objectstack#30073 — a personal view\'s conditions are Filter panel r
   it('Options\' 恢复默认 is the marker\'s reset: the view opens as its own again', async () => {
     const { dataSource } = mountLeads(romeLink('/apps/crm/crm_lead/view/pv_mine'));
     await listToolbar();
-    await screen.findByTestId('list-personalized-marker');
+    await screen.findByTestId('list-draft-discard');
     fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
     fireEvent.click(await screen.findByTestId('display-reset-button'));
-    await waitFor(() => expect(screen.queryByTestId('list-personalized-marker')).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('list-draft')).toBeNull());
     await waitFor(() => expect(lastLeadRead(dataSource)).toContain('Paris'));
     expect(dataSource.update).not.toHaveBeenCalled();
   });
@@ -683,20 +695,20 @@ describe('objectstack#30073 — a personal view\'s conditions are Filter panel r
     grants.denied.add('sys_personal_view:update');
     mountLeads(romeLink('/apps/crm/crm_lead/view/pv_mine'));
     await listToolbar();
-    await screen.findByTestId('list-personalized-marker');
+    await screen.findByTestId('list-draft-discard');
     fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
     expect(await screen.findByTestId('display-reset-button')).toBeEnabled();
     expect(screen.queryByTestId('display-save-button')).toBeNull();
   });
 
-  it('a reader without update on their views is not offered 保存', async () => {
+  it('a reader without update on their views is not offered 「Save to this view」, only 「Save as my view」', async () => {
     grants.isLoaded = true;
     grants.denied.add('sys_personal_view:update');
     mountLeads(romeLink('/apps/crm/crm_lead/view/pv_mine'));
     await listToolbar();
-    fireEvent.click(await screen.findByTestId('list-personalized-marker'));
-    await screen.findByTestId('list-personalized-reset');
-    expect(screen.queryByTestId('list-personalized-save')).toBeNull();
+    fireEvent.pointerDown(await screen.findByTestId('list-draft-save'), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    expect(await screen.findByTestId('list-draft-save-as')).toBeInTheDocument();
+    expect(screen.queryByTestId('list-draft-save-to-view')).toBeNull();
   });
 
   it('a panel the fold cannot write keeps the refusal: nothing is written to the view', async () => {
@@ -709,8 +721,7 @@ describe('objectstack#30073 — a personal view\'s conditions are Filter panel r
     });
     const { dataSource } = mountLeads('/apps/crm/crm_lead/view/pv_mine');
     await listToolbar();
-    fireEvent.click(await screen.findByTestId('list-personalized-marker'));
-    fireEvent.click(await screen.findByTestId('list-personalized-save'));
+    await saveToThisView();
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({ description: expect.stringContaining('nested condition groups') }),
@@ -734,7 +745,7 @@ describe('objectstack#30073 — a personal view\'s conditions are Filter panel r
     storeListState({ perView: { v1: { filters: ROME } } });
     const first = mountLeads(romeLink('/apps/crm/crm_lead/view/v1'));
     await listToolbar();
-    await screen.findByTestId('list-personalized-marker');
+    await screen.findByTestId('list-draft-discard');
 
     const card = await saveAsMyView(openSwitcher(), 'Rome leads');
     fireEvent.click(within(card).getByTestId('create-view-card-submit'));
@@ -743,9 +754,9 @@ describe('objectstack#30073 — a personal view\'s conditions are Filter panel r
     expect(first.dataSource.create.mock.calls[0][1].config.filter).toEqual([{ field: 'city', operator: 'equals', value: 'Rome' }]);
     await waitFor(() => expect(switcher()).toHaveTextContent('Rome leads'));
     // The new view holds the conditions as its own rows: nothing reads personalized.
-    await waitFor(() => expect(screen.queryByTestId('list-personalized-marker')).toBeNull());
-    // The source's stored list state is gone.
-    expect(storedListState().perView?.v1).toBeUndefined();
+    await waitFor(() => expect(screen.queryByTestId('list-draft')).toBeNull());
+    // The source's draft is gone.
+    expect(draftOf('v1')).toEqual({});
     first.unmount();
 
     const again = mountLeads('/apps/crm/crm_lead/view/v1');
@@ -754,6 +765,72 @@ describe('objectstack#30073 — a personal view\'s conditions are Filter panel r
     await waitFor(() => expect(leadReads(again.dataSource).length).toBeGreaterThan(0));
     expect(lastLeadRead(again.dataSource)).not.toContain('Rome');
     expect(filterTrigger()).toHaveAttribute('data-empty', 'true');
-    expect(screen.queryByTestId('list-personalized-marker')).toBeNull();
+    expect(screen.queryByTestId('list-draft')).toBeNull();
+  });
+
+  it('objectstack#35955 — 「Save as my view」 in Save\'s menu asks a name first («<view> copy»), saves the draft, opens the new view and says so', async () => {
+    const first = mountLeads(romeLink('/apps/crm/crm_lead/view/v1'));
+    await listToolbar();
+    fireEvent.pointerDown(await screen.findByTestId('list-draft-save'), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    fireEvent.click(await screen.findByTestId('list-draft-save-as'));
+    const input = await screen.findByDisplayValue('View 1 copy');
+    // Nothing is written before the name is given.
+    expect(first.dataSource.create).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: 'Rome leads' } });
+    fireEvent.click(screen.getByTestId('personal-view-name-submit'));
+
+    await waitFor(() => expect(first.dataSource.create).toHaveBeenCalledTimes(1));
+    const [resource, row] = first.dataSource.create.mock.calls[0];
+    expect(resource).toBe('sys_personal_view');
+    expect(row.label).toBe('Rome leads');
+    expect(row.config.filter).toEqual([{ field: 'city', operator: 'equals', value: 'Rome' }]);
+    await waitFor(() => expect(switcher()).toHaveTextContent('Rome leads'));
+    expect(toast.success).toHaveBeenCalledWith('Saved');
+    await waitFor(() => expect(screen.queryByTestId('list-draft')).toBeNull());
+    expect(draftOf('v1')).toEqual({});
+  });
+
+  it.each([
+    ['no label', undefined, 'Leads copy'],
+    ['a label given as a locale map', { en: 'Hot list', 'zh-CN': '热门' }, 'Hot list copy'],
+  ])('objectstack#35955 L1-b S1 — 「Save as my view」 names the copy by the view\'s tab label when it has %s', async (_case, label, expected) => {
+    const v1 = LEAD.listViews.v1 as Record<string, unknown>;
+    const authored = v1.label;
+    if (label === undefined) delete v1.label;
+    else v1.label = label;
+    try {
+      mountLeads(romeLink('/apps/crm/crm_lead/view/v1'));
+      await listToolbar();
+      fireEvent.pointerDown(await screen.findByTestId('list-draft-save'), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+      fireEvent.click(await screen.findByTestId('list-draft-save-as'));
+      // Never 「 copy」 or 「[object Object] copy」: the name the tab draws.
+      expect(await screen.findByDisplayValue(expected)).toBeInTheDocument();
+    } finally {
+      v1.label = authored;
+    }
+  });
+
+  it('objectstack#35955 — the draft\'s row colour is saved too: into the reader\'s own view, and into a view of their own', async () => {
+    const RED = { field: 'status', colors: { open: 'red' } };
+    storeListState({ perView: { pv_mine: { sort: [{ field: 'name', order: 'desc' }], rowColor: RED } } });
+    const { dataSource } = mountLeads('/apps/crm/crm_lead/view/pv_mine');
+    await listToolbar();
+    await saveToThisView();
+    await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(1));
+    const patch = dataSource.update.mock.calls[0][2];
+    expect(patch.config.rowColor).toEqual(RED);
+    expect(patch.config.sort).toEqual([{ field: 'name', order: 'desc' }]);
+    expect(ListViewSchema.safeParse(patch.config).success).toBe(true);
+    cleanup();
+
+    storeListState({ perView: { v1: { sort: [{ field: 'name', order: 'desc' }], rowColor: RED } } });
+    const second = mountLeads('/apps/crm/crm_lead/view/v1');
+    await listToolbar();
+    fireEvent.pointerDown(await screen.findByTestId('list-draft-save'), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    fireEvent.click(await screen.findByTestId('list-draft-save-as'));
+    await screen.findByDisplayValue('View 1 copy');
+    fireEvent.click(screen.getByTestId('personal-view-name-submit'));
+    await waitFor(() => expect(second.dataSource.create).toHaveBeenCalledTimes(1));
+    expect(second.dataSource.create.mock.calls[0][1].config.rowColor).toEqual(RED);
   });
 });

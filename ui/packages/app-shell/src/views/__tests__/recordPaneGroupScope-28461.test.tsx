@@ -78,7 +78,7 @@ const previous = () => screen.queryByRole('button', { name: 'Previous record' })
 describe('the record pane steps within the opened row\'s group (objectstack#28461)', () => {
   it('grouped grid: the counter counts the group, and its tooltip names it', () => {
     mountPane('c-1', ROWS, GROUPS);
-    expect(counter()!.textContent).toBe('1 / 3');
+    expect(counter()!.textContent).toBe('1 of 3');
     expect(counter()!.getAttribute('title')).toBe('1 of 3 in Acme Corporation');
   });
 
@@ -86,7 +86,7 @@ describe('the record pane steps within the opened row\'s group (objectstack#2846
     mountPane('c-2', ROWS, GROUPS);
     fireEvent.click(next()!);
     expect(body()).toBe('c-3');
-    expect(counter()!.textContent).toBe('3 / 3');
+    expect(counter()!.textContent).toBe('3 of 3');
     // c-4 follows in the list, but in another group.
     expect(next()!.disabled).toBe(true);
     fireEvent.keyDown(document.body, { key: 'j' });
@@ -109,7 +109,7 @@ describe('the record pane steps within the opened row\'s group (objectstack#2846
 
   it('control: an ungrouped list steps through every row, named by the list\'s view', () => {
     mountPane('c-3', ROWS);
-    expect(counter()!.textContent).toBe('3 / 5');
+    expect(counter()!.textContent).toBe('3 of 5');
     expect(counter()!.getAttribute('title')).toBe('3 of 5 in All contacts');
     fireEvent.click(next()!);
     expect(body()).toBe('c-4');

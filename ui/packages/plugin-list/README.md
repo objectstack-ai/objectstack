@@ -287,6 +287,32 @@ import { ListView } from '@object-ui/plugin-list';
 />
 ```
 
+### Host props: the unsaved layout and row colour (`onRowColorChange`)
+
+A host that keeps the reader's layout and row colour as an unsaved change
+(the console's list draft) wires `onViewChange` and `onRowColorChange`.
+`onRowColorChange` is called with the colour rule a pick in the toolbar's row
+colour panel puts in force, or `null` for "none" (Clear, or the None entry);
+it is called for a pick only, never at mount, for a reset or for a prop
+change. The host lays the reader's choice into `schema.viewType` /
+`schema.rowColor` when the list mounts again, and passes the view's own in
+`viewDefaults.viewType` / `viewDefaults.rowColor`, so the Display control's
+count and the `layout` / `rowColor` parts of `onPersonalizationChange` are
+judged against the view. Like `viewDefaults.grouping`, each is read only when
+its key is present. These are React props for the host app, not schema keys.
+
+```tsx
+import { ListView } from '@object-ui/plugin-list';
+
+// The view colours nothing; the reader picked a colour by `stage`.
+<ListView
+  schema={{ type: 'list-view', objectName: 'deals', viewType: 'grid', rowColor: { field: 'stage' } }}
+  viewDefaults={{ viewType: 'grid', rowColor: undefined }}
+  onViewChange={(view) => console.log('Layout:', view)}
+  onRowColorChange={(rowColor) => console.log('Row colour:', rowColor)}
+/>
+```
+
 ### Host props: `addedFields` and `onAddedFieldsChange`
 
 A host that lets a reader add fields to their own list wires
@@ -294,13 +320,13 @@ A host that lets a reader add fields to their own list wires
 panel's section) then lists, after the view's columns, every other field of the
 object the reader may read and the definition does not mark `hidden`, unticked.
 Ticking one calls `onAddedFieldsChange` with the whole new list of added names;
-the host stores it as the reader's own and appends those fields to
+the host keeps it as the reader's own and appends those fields to
 `schema.columns`, naming them in `addedFields`, so unticking an added column
 takes it off the list instead of hiding it. These are React props for the host
 app, not schema keys: list metadata cannot set them. Without
 `onAddedFieldsChange` the popover lists the view's columns alone. The console
-wires both on the object list page, where the added fields are kept with the
-reader's other list preferences and cleared by "Reset to view".
+wires both on the object list page, where the added fields are part of the
+list's unsaved draft: Save keeps them in a view, Discard drops them.
 
 ```tsx
 import { ListView } from '@object-ui/plugin-list';
@@ -343,6 +369,50 @@ function TaskList() {
   );
 }
 ```
+
+### The condition row for another host: `ListConditionsBlock`
+
+A host that draws a child object's rows itself gets the list page's condition
+row as `ListConditionsBlock` (objectstack#35892). The record page's related tab
+is one: `@object-ui/plugin-detail` sits below this package, so it cannot import
+the block, and the record page hands it in through `plugin-detail`'s
+`RelatedListConditionsSlotContext`. It is the same `ConditionChipRow`,
+`SortPanel` and `FilterPanel` with the same field lists, and no view switch,
+view settings or search. It is a host element, not a registered node type: it is
+controlled, and every input is a React prop.
+
+```tsx
+import { useState } from 'react';
+import type { FilterBuilderRowGroup, SortItem } from '@object-ui/components';
+import { ListConditionsBlock } from '@object-ui/plugin-list';
+
+const NO_FILTER: FilterBuilderRowGroup = { id: 'root', logic: 'and', conditions: [] };
+
+export function QuoteConditions({ quoteDefinition }: { quoteDefinition: { fields?: Record<string, unknown> } }) {
+  const [sort, setSort] = useState<SortItem[]>([]);
+  const [filterGroup, setFilterGroup] = useState<FilterBuilderRowGroup>(NO_FILTER);
+  const [, setFilter] = useState<unknown[] | undefined>(undefined);
+  const changed = sort.length > 0 || filterGroup.conditions.length > 0;
+  const discard = () => { setSort([]); setFilterGroup(NO_FILTER); setFilter(undefined); };
+  return (
+    <ListConditionsBlock
+      objectName="quote"
+      objectDef={quoteDefinition}
+      shownFields={['name', 'amount', 'status']}
+      sort={sort}
+      onSortChange={setSort}
+      filters={filterGroup}
+      onFiltersChange={(group, filterNode) => { setFilterGroup(group); setFilter(filterNode); }}
+      onDiscard={changed ? discard : undefined}
+    />
+  );
+}
+```
+
+`onFiltersChange` hands back the group the panels edit and the query node the
+list page would send for it (`undefined` = no filter). **Discard**
+(`ConditionDiscardButton`, the list page's own) is drawn at the row's end while
+`onDiscard` is passed. Labels fold to icons when the row is narrow.
 
 ## Schema
 
@@ -680,6 +750,22 @@ block hands it the reporter `usePageTabCountReporter()` from
 says how many records its list holds. `page:tabs` mounts a tab holding a list
 block while it is inactive (hidden), so the badge is there before the tab is
 opened; a tab with an authored `count` is not mounted early.
+
+## Export
+
+The Export entry (the wide toolbar's button and the Display panel's footer) is
+offered when the view declares `exportOptions` and three things allow it: the
+view's `allowExport` and `operations.export` are not `false`, and the object's
+resolved export verdict is open. That verdict is
+`isObjectExportOffered(objectDef, effectiveApiOperations)` from
+`@object-ui/core`: the object's `userActions.exportCsv` over its
+`managedBy` default, ANDed with the caller's effective `export` API operation.
+An object that sets `userActions.exportCsv: false` therefore gets no Export
+entry in any of its formats (CSV, XLSX, JSON); one that does not set it keeps
+the entry, since every `managedBy` bucket defaults it on. The setting hides the
+entry and is not a permission: who may export is the permission set's
+`allowExport`. It covers the download of the object's data only: a Gantt view's
+PNG and PDF export of the chart it draws is not gated by it.
 
 ## Sorting (and why relational columns are not offered)
 

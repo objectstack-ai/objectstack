@@ -669,7 +669,7 @@ export function FileCell({
         </Button>
       )}
       {errors.length > 0 && (
-        <span className="w-full truncate text-[11px] text-destructive" title={errors.join('; ')}>
+        <span className="w-full truncate text-xs text-destructive" title={errors.join('; ')}>
           {errors[0]}
         </span>
       )}

@@ -182,7 +182,7 @@ function SectionDivider({ sectionKey, anchorId, label, description, collapsible,
               ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
               : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
           )}
-          <span className="text-sm font-semibold text-foreground">{label}</span>
+          <span className="text-sm font-medium text-foreground">{label}</span>
         </div>
       )}
       {/* A section's authored blurb. Carried on the divider because a sectioned
@@ -2636,7 +2636,7 @@ ComponentRegistry.register('form',
       const drawn = new Set<string>();
       const changeable = new Set<string>();
       for (const f of fields as FormFieldConfig[]) {
-        if (!f?.name || f.type === 'section-divider') continue;
+        if (!f?.name || f.type === 'section-divider' || f.type === 'form-slot') continue;
         drawn.add(f.name);
         if (f.hidden || (f as any).readonly === true || f.disabled === true) continue;
         changeable.add(f.name);
@@ -2757,8 +2757,16 @@ ComponentRegistry.register('form',
         const key = tabKeyByFieldName.get(name);
         if (key) out.add(key);
       }
+      // A host slot whose collection the last save was refused on
+      // (objectstack#35889's placed lines): the host owns that refusal, since
+      // no field of THIS form carries it, and says so on the slot row.
+      for (const f of fields as FormFieldConfig[]) {
+        if (f?.type !== 'form-slot' || !(f as { slotRefused?: boolean }).slotRefused) continue;
+        const key = tabKeyByFieldName.get(f.name);
+        if (key) out.add(key);
+      }
       return out;
-    }, [fieldTabs, tabKeyByFieldName, rejectedFieldNames]);
+    }, [fieldTabs, tabKeyByFieldName, rejectedFieldNames, fields]);
 
     // objectstack#34615 — below `sm` a horizontal tab strip that does not fit
     // scrolls sideways inside its own box (see the strip's classes) instead of
@@ -3317,7 +3325,15 @@ ComponentRegistry.register('form',
         typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
           ? CSS.escape(name)
           : name.replace(/["\\]/g, '\\$&');
-      return root.querySelector<HTMLElement>(`[data-field="${escaped}"]`);
+      // Not a field a host drew into one of THIS form's `form-slot` rows (an
+      // expanded line editor there is a form of its own, objectstack#35889);
+      // that editor, inside a slot, still finds its own fields.
+      return (
+        [...root.querySelectorAll<HTMLElement>(`[data-field="${escaped}"]`)].find((el) => {
+          const slot = el.closest('[data-form-slot]');
+          return !slot || !(root as Node).contains(slot);
+        }) ?? null
+      );
     };
     const revealField = (name: string) => {
       const target = fieldWrapper(name);
@@ -3712,6 +3728,24 @@ ComponentRegistry.register('form',
 
       // Skip hidden fields
       if (hidden) return null;
+
+      // A host slot (objectstack#35889): an empty full-width element the form's
+      // host fills through a portal (`@object-ui/plugin-form` `formSlots.ts`,
+      // a master-detail form's collection at its field group). It holds no
+      // value and registers no control; `slotRef` is the host's callback. A
+      // labelled slot is a stop of the section navigation, like a heading.
+      if (type === 'form-slot') {
+        const { slotRef } = fieldProps as { slotRef?: React.Ref<HTMLDivElement> };
+        return (
+          <div
+            key={name}
+            ref={slotRef}
+            id={label ? sectionAnchorId(formInstanceId, name) : undefined}
+            className="col-span-full min-w-0 scroll-mt-2 space-y-4"
+            data-form-slot={name}
+          />
+        );
+      }
 
       // A field claimed by a HIDDEN section is not drawn (#6236) — the same
       // `return null` a field's own false predicate takes, so the ruled
@@ -4478,7 +4512,7 @@ ComponentRegistry.register('form',
         // the section navigation lists exactly these, so a section a predicate
         // hides is absent from it by the same verdict that hid its row.
         block.forEach((f, j) => {
-          if (f?.type === 'section-divider' && nodes[j] != null && f.label && typeof f.name === 'string') {
+          if ((f?.type === 'section-divider' || f?.type === 'form-slot') && nodes[j] != null && f.label && typeof f.name === 'string') {
             drawnHeadings?.push({ key: f.name, label: String(f.label) });
           }
         });

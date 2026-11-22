@@ -47,6 +47,7 @@ const OPPORTUNITY_DEF = {
   name: 'crm_opportunity',
   label: 'Opportunity',
   icon: 'briefcase',
+  color: 'purple',
   nameField: 'name',
   fields: { name: { name: 'name', type: 'text', label: 'Name' } },
 };
@@ -115,6 +116,8 @@ describe('ObjectGrid — a referenceVia pointer cell draws the record it names (
     // The raw id moved to the tooltip; the object's icon is drawn beside the name.
     expect(cell).toHaveAttribute('title', 'opp-1');
     expect(cell.querySelector('svg.lucide-briefcase')).not.toBeNull();
+    // objectstack#35985 — drawn as the object's tile, in the object's colour.
+    expect(cell.querySelector('[data-object-icon-tile]')).toHaveAttribute('data-object-icon-tile', 'purple');
     // The id is not printed as cell text anywhere.
     expect(screen.queryByText('opp-1')).toBeNull();
 

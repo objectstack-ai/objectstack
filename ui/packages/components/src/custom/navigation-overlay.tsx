@@ -272,6 +272,11 @@ export interface NavigationOverlayProps {
    */
   toggles?: React.ReactNode;
   /**
+   * The record's comment switch (objectstack#36075), drawn in the bar before
+   * the record's button group (`RecordTopBar`'s `comments`).
+   */
+  comments?: React.ReactNode;
+  /**
    * The record header's one-row bar (objectstack#35593): handed the bar's
    * element the record's button group is drawn into, after the step pair.
    */
@@ -280,8 +285,17 @@ export interface NavigationOverlayProps {
    * Keep the step keys (`↑` / `↓` / `k` / `j`) but draw no counter and no
    * `↓` `↑` pair (objectstack#35593): a drawer over its list shows the list
    * beside it, so its header names neither the place nor the neighbours.
+   * objectstack#35853 reversed that: the console's drawer no longer passes
+   * it, and draws ↑ ↓ and 「第 N 条，共 M 条」 in its navigation row.
    */
   stepperHidden?: boolean;
+  /**
+   * The bar's record row (objectstack#35853): the record's icon, name and
+   * tags, or the slot the record header portals them into. Handed, the bar
+   * is two rows — navigation (`←`, `trail`, ↑ ↓ and the counter; ⤢ and ✕ at
+   * the right) over the record (this, the button group, `toggles`).
+   */
+  recordRow?: React.ReactNode;
 }
 
 /**
@@ -337,6 +351,17 @@ function escapeOwnedByTarget(target: EventTarget | null, pane?: Element | null):
   }
   const owner = target.closest('[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"]');
   return !!owner && owner !== pane;
+}
+
+/**
+ * Whether an `Esc` was pressed inside a region of the record that owns its
+ * own `Esc` (`[data-owns-escape]`, such as the record's comment panel), which
+ * then acts on it itself. Only a region inside the pane counts.
+ */
+function escapeOwnedByRegion(target: EventTarget | null, pane?: Element | null): boolean {
+  if (!target || !(target instanceof Element)) return false;
+  const region = target.closest('[data-owns-escape]');
+  return !!region && (!pane || pane.contains(region));
 }
 
 /**
@@ -471,8 +496,10 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   trail,
   stepper,
   toggles,
+  comments,
   actionSlotRef,
   stepperHidden = false,
+  recordRow,
 }) => {
   // Every chrome string below is locale-driven (objectstack#5430 for the two
   // close affordances, objectstack#5506 for the rest). Must stay above the
@@ -511,8 +538,17 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   // or a menu owns it, is not. It still holds the sheet open — left
   // unprevented, the layer would dismiss the whole drawer on it.
   const sheetRef = React.useRef<HTMLDivElement>(null);
+  //
+  // A region inside the record that owns its `Esc` (`[data-owns-escape]`: the
+  // record's comment panel, objectstack#36075) gets the key at every level,
+  // the root too: the drawer holds itself open and leaves the region to act.
   const handleDrawerEscape = (e: KeyboardEvent) => {
     if (e.defaultPrevented) return;
+    if (escapeOwnedByRegion(e.target, sheetRef.current)) {
+      e.preventDefault();
+      return;
+    }
+    if (!onBack) return;
     e.preventDefault();
     if (escapeOwnedByTarget(e.target, sheetRef.current)) return;
     handleEscape();
@@ -562,8 +598,10 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
 
   /* The bar — the record's top bar (objectstack#27524, Target 7, after
      objectstack#26679): the left end holds `←` and the host's breadcrumb; the
-     right end the counter and ↓ ↑, the host's panel switches, then ↗, ⤢ / ⤡
-     and ✕. */
+     right end the counter and ↓ ↑, the host's panel switches, then ⤢ and ✕.
+     With a `recordRow` it is two rows (objectstack#35853): `←`, the
+     breadcrumb, ↑ ↓ and the counter over the record, ⤢ and ✕ at the far
+     right of the first. */
   const bar = (
     <RecordTopBar
       leadingTestId="record-drawer-leading"
@@ -579,7 +617,9 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
       }
       stepper={stepperHidden ? undefined : stepper}
       actionSlotRef={actionSlotRef}
+      record={recordRow}
       toggles={toggles}
+      comments={comments}
       frame={
         <>
           {onExpand && (
@@ -621,7 +661,9 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
         // objectstack#26679 — below the root of an in-place stack, `Esc` goes
         // back one level. Only the root's `Esc` closes. objectstack#28156 — a
         // field's `Esc` stays the field's ({@link escapeOwnedByTarget}).
-        onEscapeKeyDown={onBack ? handleDrawerEscape : undefined}
+        // objectstack#36075 — at every level, a region's `Esc` stays the
+        // region's ({@link escapeOwnedByRegion}).
+        onEscapeKeyDown={handleDrawerEscape}
         ref={sheetRef}
         className={cn(
           // Mobile: full width (no inline cap, no max-w from base sheet).

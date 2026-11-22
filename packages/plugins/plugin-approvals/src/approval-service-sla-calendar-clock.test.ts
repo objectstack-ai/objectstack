@@ -28,7 +28,9 @@
 
 import { describe, it, expect } from 'vitest';
 import { WorkCalendarService } from '@objectstack/objectql';
+import { AutomationEngine } from '@objectstack/service-automation';
 import { ApprovalService } from './approval-service.js';
+import { registerApprovalNode } from './approval-node.js';
 
 interface Row { [k: string]: any }
 
@@ -388,5 +390,117 @@ describe("ApprovalEscalation.clock 'working_time' counts the hours on a working 
     const row = await svc.getRequest(req.id, SYS);
     expect(row?.sla_due_at).toBe('2026-01-16T21:00:00.000Z');
     expect(row?.sla_due_refusal).toBeUndefined();
+  });
+});
+
+// ── a calendar read that ERRORS, as opposed to one that refuses ─────────────
+//
+// A refusal (`isWorkCalendarRefusal`) is served as `sla_due_refusal` (D9). Any
+// other error — a driver failure reading `sys_work_calendar` — leaves that one
+// row with no deadline served: it never fails a request open that has already
+// written the row and told the approvers, never fails the rest of a list, and
+// never falls back to wall-clock hours (D2). The sweep skips the row and asks
+// again next pass.
+
+const CN_BACKUP: Row = { ...CN_CALENDAR, id: 'cal_cn_backup', code: 'cn_backup', is_default: false };
+
+/** The real calendar service, except that a read for a calendar code in `failing` throws a plain Error. */
+function erroringCalendarServiceAt(iso: string, failing: Set<string>) {
+  let nowMs = Date.parse(iso);
+  const engine = makeEngine();
+  const reads = calendarReads([CN_CALENDAR, CN_BACKUP], CN_EXCEPTIONS);
+  const real = new WorkCalendarService({ getEngine: () => reads, posture: () => 'isolated', ttlMs: 0 });
+  const warned: Array<{ msg: string; meta: any }> = [];
+  const logger = { info() {}, debug() {}, error() {}, warn: (msg: string, meta: any) => { warned.push({ msg, meta }); } };
+  const svc = new ApprovalService({
+    engine: engine as any,
+    logger: logger as any,
+    clock: { now: () => new Date(nowMs) },
+    workCalendar: () => ({
+      async addWorkingHours(scope, start, hours) {
+        if (typeof scope.calendar === 'string' && failing.has(scope.calendar)) {
+          throw new Error('sys_work_calendar read failed: connection reset');
+        }
+        return real.addWorkingHours(scope, start, hours);
+      },
+    }),
+  });
+  return { svc, engine, warned, setNow: (at: string) => { nowMs = Date.parse(at); } };
+}
+
+describe("ApprovalEscalation.clock 'working_time': a calendar read that errors costs only that row its deadline", () => {
+  const created = sh('2026-04-03', '17:00');
+
+  it('the open still returns the request it wrote and told the approvers about, with no deadline served', async () => {
+    const { svc, engine, warned } = erroringCalendarServiceAt(created, new Set(['cn_standard']));
+    const req = await openPending(svc, workingTimeInput('wt_error_open', 4, { calendar: 'cn_standard' }));
+
+    expect(engine._tables.sys_approval_request?.map((r) => r.id)).toEqual([req.id]);
+    expect(req.status).toBe('pending');
+    expect(req.sla_due_at).toBeUndefined();
+    expect(req.sla_due_refusal).toBeUndefined();
+    expect(warned.some((w) => w.meta?.request === req.id)).toBe(true);
+  });
+
+  it('the approval node suspends its run instead of failing it', async () => {
+    const { svc } = erroringCalendarServiceAt(created, new Set(['cn_standard']));
+    const automation = new AutomationEngine({ info() {}, warn() {}, error() {}, debug() {} } as any);
+    svc.attachAutomation(automation);
+    registerApprovalNode(automation, svc);
+    automation.registerFlow('wt_flow', {
+      name: 'wt_flow',
+      label: 'Working-time approval',
+      type: 'autolaunched',
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'approve_step', type: 'approval', label: 'Approve', config: workingTimeInput('approve_step', 4, { calendar: 'cn_standard' }).config },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'approve_step' },
+        { id: 'e2', source: 'approve_step', target: 'end', label: 'approve' },
+      ],
+    } as any);
+
+    const result = await automation.execute('wt_flow', { object: 'opportunity', record: { id: 'opp1' }, userId: 'u1' });
+    expect(result.status).toBe('paused');
+    expect(automation.listSuspendedRuns()).toHaveLength(1);
+  });
+
+  it('a list and a single read keep every other row and its deadline', async () => {
+    const failing = new Set<string>();
+    const { svc } = erroringCalendarServiceAt(created, failing);
+    const good = await openPending(svc, workingTimeInput('wt_good', 4, { calendar: 'cn_standard' }));
+    const bad = await openPending(svc, { ...workingTimeInput('wt_bad', 4, { calendar: 'cn_backup' }), recordId: 'opp2', record: { id: 'opp2', amount: 100 } });
+    failing.add('cn_backup');
+
+    const list = await svc.listRequests({ status: 'pending' }, SYS);
+    expect(list.map((r) => r.id).sort()).toEqual([good.id, bad.id].sort());
+    expect(list.find((r) => r.id === good.id)?.sla_due_at).toBe(sh('2026-04-07', '12:00'));
+    const listedBad = list.find((r) => r.id === bad.id);
+    expect(listedBad?.sla_due_at).toBeUndefined();
+    expect(listedBad?.sla_due_refusal).toBeUndefined();
+
+    const read = await svc.getRequest(bad.id, SYS);
+    expect(read?.id).toBe(bad.id);
+    expect(read?.sla_due_at).toBeUndefined();
+  });
+
+  it('the sweep skips the row, asks again next pass, and still escalates it once', async () => {
+    const failing = new Set<string>();
+    const { svc, setNow } = erroringCalendarServiceAt(created, failing);
+    const good = await openPending(svc, workingTimeInput('wt_sweep_good', 4, { calendar: 'cn_standard' }));
+    const bad = await openPending(svc, { ...workingTimeInput('wt_sweep_bad', 4, { calendar: 'cn_backup' }), recordId: 'opp2', record: { id: 'opp2', amount: 100 } });
+    failing.add('cn_backup');
+
+    setNow(sh('2026-04-20', '12:00'));
+    expect(await svc.runEscalations()).toMatchObject({ escalated: 1 });
+    expect((await svc.listActions(good.id, SYS)).some((a) => a.action === 'escalate')).toBe(true);
+    expect((await svc.listActions(bad.id, SYS)).some((a) => a.action === 'escalate')).toBe(false);
+
+    failing.delete('cn_backup');
+    expect(await svc.runEscalations()).toMatchObject({ escalated: 1 });
+    expect((await svc.listActions(bad.id, SYS)).filter((a) => a.action === 'escalate')).toHaveLength(1);
+    expect(await svc.runEscalations()).toMatchObject({ escalated: 0 });
   });
 });

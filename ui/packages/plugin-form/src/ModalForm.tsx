@@ -36,6 +36,8 @@ import {
   RecordTopBarButton,
   toast,
   FormSectionNavContext,
+  Switch,
+  resolveIcon,
 } from '@object-ui/components';
 import { Loader2, Maximize2, Minimize2 } from 'lucide-react';
 import { MasterDetailForm } from './MasterDetailForm';
@@ -53,6 +55,7 @@ import {
   inferColumns,
   inferModalSize,
   dialogUndeclaredColumns,
+  dialogDrawsSingleColumn,
   sectionedFormColumns,
   sectionedGridLayout,
   CONTAINER_GRID_COLS,
@@ -87,10 +90,11 @@ import {
 import { hasInlineFieldSource, noSubmitTargetError } from './submitTarget';
 import { useRecordInvalidation } from './recordInvalidation';
 import { useUploadGate, UploadGateProvider, UploadInFlightNotice } from './uploadGate';
-import { useInitialFieldFocus } from './initialFieldFocus';
+import { focusFirstEditableField, useInitialFieldFocus } from './initialFieldFocus';
 import { FormSectionNav, useFormSectionNav } from './FormSectionNav';
 import { FormDirtyReportContext } from './formDirtyReport';
 import { useModalFormMaximized } from './modalMaximize';
+import { isSubmitShortcut, submitShortcutLabel, useModalFormCreateMore } from './createMore';
 
 // Localized strings for the unsaved-changes guard and, since objectui#11039,
 // the form's own chrome (the default submit and cancel labels and the
@@ -125,6 +129,8 @@ const useDiscardTranslation = createSafeTranslation(
     // keys and labels (objectstack-ai/objectstack#34604).
     'detail.maximize': 'Maximize',
     'detail.restoreSize': 'Restore size',
+    // The create dialog's 「Create more」 switch (objectstack-ai/objectstack#35980).
+    'form.createMore': 'Create more',
   },
   'form.discardTitle',
 );
@@ -266,9 +272,27 @@ export interface ModalFormSchema {
    */
   submitHandler?: ObjectFormSchema['submitHandler'];
 
-  onSuccess?: (data: any) => void | Promise<void>;
+  /**
+   * Called with the saved record. `outcome.createMore` is `true` when the
+   * dialog stays open for the next record (the 「Create more」 switch,
+   * {@link ModalFormSchema.createMore}): the host refreshes what lists the
+   * record and stays where it is, instead of closing or leaving for the new
+   * record.
+   */
+  onSuccess?: (data: any, outcome?: { createMore?: boolean }) => void | Promise<void>;
   onError?: (error: Error) => void;
   onCancel?: () => void;
+  /**
+   * Offer the 「Create more」 switch in a `create` dialog's footer
+   * (objectstack-ai/objectstack#35980). On, a successful save keeps the dialog
+   * open: the form is drawn again from its opening values, focus returns to
+   * the first field, and `onSuccess` is told so. The switch is remembered per
+   * object in this browser. Off by default: a host offers it where creating
+   * several records in a row makes sense (a list's 「New」), and not where the
+   * create returns a record to its caller (a lookup's inline 「+ New」).
+   * Ignored by the master-detail arm, whose form owns its own Save bar.
+   */
+  createMore?: boolean;
   className?: string;
   /** Inline child collections — renders the modal as an atomic master-detail
    *  form. Each entry needs only `childObject` (FK + columns derived). */
@@ -323,7 +347,9 @@ const modalSizeClasses: Record<string, string> = {
 /**
  * The least grid the dialog draws where the author declared no `columns`
  * (objectui#12521): two from the container's `@md` tier up, one below it, so
- * the phone sheet keeps its single column. A field-heavy form draws more —
+ * the phone sheet keeps its single column — except in a short dialog that
+ * declares nothing, which draws one column in the narrow `lg` size
+ * (`dialogDrawsSingleColumn`, objectstack-ai/objectstack#35980). A field-heavy form draws more —
  * three in a bounded dialog, four in a `full` one — by
  * `dialogUndeclaredColumns` (objectstack-ai/objectstack#34607), whose
  * docblock carries the rule and the measured tier.
@@ -526,6 +552,15 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
   // column count — reads that effective size.
   const { maximized, toggleMaximized } = useModalFormMaximized(schema.objectName);
 
+  // The 「Create more」 switch (objectstack-ai/objectstack#35980): offered on
+  // a create dialog whose host asked for it, remembered per object. A save
+  // with it on draws the form again (`formResetKey`) instead of closing.
+  const createMoreOffered = schema.createMore === true && schema.mode === 'create';
+  const { createMore, setCreateMore } = useModalFormCreateMore(schema.objectName);
+  const createMoreOn = createMoreOffered && createMore;
+  const [formResetKey, setFormResetKey] = useState(0);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+
   // The dialog's size when the author declared none (objectui#12521): bounded
   // — `lg` or `xl`, never `full` — and chosen from the declared grid and the
   // field count, so a short form is not stretched across a wide dialog. An
@@ -533,19 +568,31 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
   // undeclared grid is at least `DIALOG_DEFAULT_COLUMNS` wide whatever the
   // size, so the size reads that floor and never the count it then bounds
   // (objectstack-ai/objectstack#34607).
+  // objectstack-ai/objectstack#35980 — at most six fields (ruling 7061696632) and no declared
+  // `columns` anywhere: one per row, in the narrow `lg` dialog. Maximized,
+  // the user asked for the room, and the form spreads as it did before.
+  const singleColumn = !maximized && dialogDrawsSingleColumn(
+    layoutFieldCount,
+    schema.columns,
+    (effectiveSections ?? []).map((s) => s.columns),
+  );
   const effectiveModalSize = useMemo(() => {
     if (maximized) return 'full';
     if (schema.modalSize) return schema.modalSize;
+    // A short dialog that declares no columns anywhere is one column in the
+    // narrow `lg` size (objectstack-ai/objectstack#35980).
+    if (singleColumn) return inferModalSize(1);
     const columns = effectiveSections?.length
       ? sectionedFormColumns(schema.columns, effectiveSections.map((s) => s.columns), DIALOG_DEFAULT_COLUMNS)
       : (clampColumns(schema.columns) ?? DIALOG_DEFAULT_COLUMNS);
     return inferModalSize(Math.min(columns, inferColumns(layoutFieldCount)));
-  }, [maximized, schema.modalSize, schema.columns, effectiveSections, layoutFieldCount]);
+  }, [maximized, schema.modalSize, schema.columns, effectiveSections, layoutFieldCount, singleColumn]);
 
   // The count an undeclared form or section draws in THIS dialog
   // (objectstack-ai/objectstack#34607): from the field count, bounded by the
-  // dialog's size — `dialogUndeclaredColumns`.
-  const undeclaredColumns = dialogUndeclaredColumns(layoutFieldCount, effectiveModalSize);
+  // dialog's size — `dialogUndeclaredColumns` — and one in a short dialog
+  // that declares nothing (`dialogDrawsSingleColumn`, #35980).
+  const undeclaredColumns = singleColumn ? 1 : dialogUndeclaredColumns(layoutFieldCount, effectiveModalSize);
 
   // Compute auto-layout for flat fields (no sections). A form that declares no
   // `columns` lays out at the dialog's undeclared count through the same
@@ -770,6 +817,29 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
     endLoading();
   }, [objectSchema, schema.fields, schema.customFields, schema.sections, schema.readOnly, schema.mode, dataSource]);
 
+  // 「Create more」 (objectstack-ai/objectstack#35980): after a save that keeps
+  // the dialog open, draw the form again from its opening values — a new
+  // `formResetKey` remounts the form renderer, so every typed value and the
+  // dirty state go with it — and put focus back on the first field.
+  const startNextRecord = useCallback(() => {
+    setIsDirty(false);
+    setFormResetKey((k) => k + 1);
+  }, []);
+  useEffect(() => {
+    if (formResetKey === 0) return;
+    // The remounted form draws its fields on a later frame (lazy widgets), so
+    // keep trying for a short while until the first field takes focus.
+    let tries = 0;
+    let frame = 0;
+    const attempt = () => {
+      const content = contentRef.current;
+      if (content && focusFirstEditableField(content)) return;
+      if (++tries < 30) frame = window.requestAnimationFrame(attempt);
+    };
+    frame = window.requestAnimationFrame(attempt);
+    return () => window.cancelAnimationFrame(frame);
+  }, [formResetKey]);
+
   // Handle form submission
   const handleSubmit = useCallback(async (data: Record<string, any>) => {
     // An upload is still in flight (objectui#10166). Saving now writes the
@@ -790,6 +860,11 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
       // adapter-less submit, bypassing a declared host seam and persisting
       // nothing (objectui#6300). See `submitTarget.ts` for the whole rule.
       if (!dataSource && !schema.submitHandler && hasInlineFieldSource(schema)) {
+        if (createMoreOn) {
+          await schema.onSuccess?.(data, { createMore: true });
+          startNextRecord();
+          return data;
+        }
         if (schema.onSuccess) {
           await schema.onSuccess(data);
         }
@@ -864,6 +939,13 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
       // bus change held while it was dirty (its own write's echo included) is
       // replayed now rather than behind input that is no longer unsaved.
       recordSaved();
+      // 「Create more」 (objectstack-ai/objectstack#35980): the record is
+      // made, and the dialog stays for the next one.
+      if (createMoreOn) {
+        await schema.onSuccess?.(result, { createMore: true });
+        startNextRecord();
+        return result;
+      }
       if (schema.onSuccess) {
         await schema.onSuccess(result);
       }
@@ -878,7 +960,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
     } finally {
       setIsSubmitting(false);
     }
-  }, [schema, dataSource, objectSchema, perms, saveWithOcc, formData, uploadGate.uploading, uploadGate.reason, recordSaved]);
+  }, [schema, dataSource, objectSchema, perms, saveWithOcc, formData, uploadGate.uploading, uploadGate.reason, recordSaved, createMoreOn, startNextRecord]);
 
   // Actually close the modal, firing onCancel only when the close originated
   // from the explicit Cancel button.
@@ -980,7 +1062,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
     if (error) {
       return (
         <div className="p-4 border border-red-300 bg-red-50 rounded-md">
-          <h3 className="text-red-800 font-semibold">{t('form.errorLoading')}</h3>
+          <h3 className="text-red-800 font-medium">{t('form.errorLoading')}</h3>
           <p className="text-red-600 text-sm mt-1">{error.message}</p>
         </div>
       );
@@ -1231,7 +1313,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
       <div className="@container rounded-md border bg-card p-4">
         {(schema.title || schema.description) && (
           <div className="mb-3 space-y-0.5">
-            {schema.title && <div className="text-sm font-semibold">{schema.title}</div>}
+            {schema.title && <div className="text-sm font-medium">{schema.title}</div>}
             {schema.description && <p className="text-xs text-muted-foreground">{schema.description}</p>}
           </div>
         )}
@@ -1269,7 +1351,43 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
   // The header keeps its title clear of the switch and the X from `sm` up.
   // Its bottom rule is each arm's: the flat arm hands it to the section nav
   // strip when one is drawn.
-  const headerClass = 'shrink-0 px-4 pt-4 sm:px-6 sm:pt-6 sm:pr-20 pb-2';
+  const headerClass = 'shrink-0 px-4 pt-4 sm:px-5 sm:pr-20 pb-3';
+
+  // The title (objectstack-ai/objectstack#35980): 16px, after the object's
+  // own icon when it declares one, in both arms.
+  // `resolveIcon` caches one component per name, so this is no hook.
+  const ObjectIconGlyph = resolveIcon((objectSchema as any)?.icon);
+  const dialogTitle = schema.title ? (
+    <DialogTitle className="flex items-center gap-2 text-base">
+      {ObjectIconGlyph && (
+        // `resolveIcon` returns a STABLE component out of lucide's static
+        // record; it does not create one during render (the annotation the
+        // other seam call sites carry).
+        // eslint-disable-next-line react-hooks/static-components
+        <ObjectIconGlyph
+          className="h-4 w-4 shrink-0 text-muted-foreground"
+          aria-hidden="true"
+          data-testid="modal-form-title-icon"
+        />
+      )}
+      {schema.title}
+    </DialogTitle>
+  ) : null;
+
+  // ⌘↵ / Ctrl+Enter saves (objectstack-ai/objectstack#35980), the shortcut the
+  // Save button shows. Only a keydown inside this dialog's own DOM: the
+  // discard and conflict alerts are React children, so their keydowns bubble
+  // here through React, but they are portalled outside the content.
+  const handleContentKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!isSubmitShortcut({ ...event, isComposing: event.nativeEvent.isComposing })) return;
+    if (!event.currentTarget.contains(event.target as Node)) return;
+    if (!showSubmit || isSubmitting || uploadGate.uploading) return;
+    const form = event.currentTarget.ownerDocument.getElementById(formId);
+    if (!(form instanceof HTMLFormElement)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    form.requestSubmit();
+  };
 
   // Unsaved-changes guard — rendered INSIDE DialogContent so its portal
   // inherits the Dialog's Radix layer context (focus scope + dismissable
@@ -1315,12 +1433,12 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
           showCloseButton={showCloseButton}
           onOpenAutoFocus={initialFieldFocus.onOpenAutoFocus}
           onCloseAutoFocus={initialFieldFocus.onCloseAutoFocus}
-          className={cn(sizeClass, 'flex flex-col overflow-hidden p-0', heightClass, className, schema.className)}
+          className={cn(sizeClass, 'flex flex-col overflow-hidden p-0 sm:p-0', heightClass, className, schema.className)}
           data-maximized={maximized ? '' : undefined}
         >
           {(schema.title || schema.description) && (
             <DialogHeader className={cn(headerClass, 'border-b')}>
-              {schema.title && <DialogTitle>{schema.title}</DialogTitle>}
+              {dialogTitle}
               {schema.description ? (
                 <DialogDescription>{schema.description}</DialogDescription>
               ) : (
@@ -1383,15 +1501,17 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
   return (
     <Dialog open={isOpen} onOpenChange={handleDialogOpenChange}>
       <MobileDialogContent
+        ref={contentRef}
         showCloseButton={showCloseButton}
         onOpenAutoFocus={initialFieldFocus.onOpenAutoFocus}
         onCloseAutoFocus={initialFieldFocus.onCloseAutoFocus}
-        className={cn(sizeClass, 'flex flex-col overflow-hidden p-0', heightClass, className, schema.className)}
+        onKeyDown={handleContentKeyDown}
+        className={cn(sizeClass, 'flex flex-col overflow-hidden p-0 sm:p-0', heightClass, className, schema.className)}
         data-maximized={maximized ? '' : undefined}
       >
         {(schema.title || schema.description) && (
           <DialogHeader className={cn(headerClass, !drawsSectionNav && 'border-b')}>
-            {schema.title && <DialogTitle>{schema.title}</DialogTitle>}
+            {dialogTitle}
             {schema.description ? (
               <DialogDescription>{schema.description}</DialogDescription>
             ) : (
@@ -1409,7 +1529,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
             their containing block, so it clips them and they scroll with it,
             instead of overflowing the `overflow-hidden` dialog box, which a
             scroll could then move off its title and footer (objectstack#35092). */}
-        <div className="@container relative flex-1 overflow-y-auto px-4 sm:px-6 py-4">
+        <div className="@container relative flex-1 overflow-y-auto px-4 sm:px-5 py-4">
           {/* Every upload widget below reports into this scope, however deep —
               a section, a tab, a subform row (objectui#10166). */}
           <UploadGateProvider gate={uploadGate}>
@@ -1417,7 +1537,9 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
             {/* The dialog owns its body's wait (objectui#12559) — see
                 `ModalFormBodyPending`. */}
             <Suspense fallback={<ModalFormBodyPending />}>
-              {renderContent()}
+              {/* A new key after a 「Create more」 save draws the form again
+                  from its opening values (objectstack-ai/objectstack#35980). */}
+              <React.Fragment key={formResetKey}>{renderContent()}</React.Fragment>
             </Suspense>
           </UploadGateProvider>
         </div>
@@ -1425,12 +1547,25 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
 
         {/* Sticky footer — always visible action buttons */}
         {hasFooter && (
-          <div className="shrink-0 border-t px-4 sm:px-6 py-3 bg-background" data-testid="modal-form-footer">
+          <div className="shrink-0 border-t px-4 sm:px-5 py-3" data-testid="modal-form-footer">
             {/* The REASON the Save below is disabled (objectui#10166). Above the
                 row rather than inside it so it reads before the dead control,
                 and so a long sentence never squeezes the buttons. */}
             <UploadInFlightNotice gate={uploadGate} />
-            <div className="flex flex-col sm:flex-row gap-2 sm:justify-end">
+            <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-end">
+              {/* 「Create more」 (objectstack-ai/objectstack#35980): at the
+                  footer's start, away from the buttons. */}
+              {createMoreOffered && showSubmit && (
+                <label className="flex min-h-[44px] items-center gap-2 text-sm text-muted-foreground sm:mr-auto sm:min-h-0">
+                  <Switch
+                    checked={createMore}
+                    onCheckedChange={setCreateMore}
+                    disabled={isSubmitting}
+                    data-testid="modal-form-create-more"
+                  />
+                  {t('form.createMore')}
+                </label>
+              )}
               {showCancel && (
                 <Button
                   type="button"
@@ -1461,10 +1596,20 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
                   type="submit"
                   form={formId}
                   disabled={isSubmitting || uploadGate.uploading}
+                  aria-keyshortcuts="Meta+Enter Control+Enter"
                   className="w-full sm:w-auto min-h-[44px] sm:min-h-0"
                 >
                   {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   {uploadGate.uploading ? uploadGate.busyLabel : submitLabel}
+                  {/* The save shortcut's keycaps (objectstack-ai/objectstack#35980);
+                      the phone sheet has no keyboard to show them for. */}
+                  <kbd
+                    aria-hidden="true"
+                    data-testid="modal-form-submit-shortcut"
+                    className="ml-2 hidden rounded border border-current/25 px-1 font-sans text-xs leading-4 opacity-75 sm:inline"
+                  >
+                    {submitShortcutLabel()}
+                  </kbd>
                 </Button>
               )}
             </div>
@@ -1488,8 +1633,10 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
  * action bar the flat arm's footer padding.
  */
 const MODAL_MASTER_DETAIL_FRAME: MasterDetailFrame = {
-  bodyClassName: '@container px-4 sm:px-6 py-4',
-  actionsClassName: 'px-4 sm:px-6 py-3',
+  bodyClassName: '@container px-4 sm:px-5 py-4',
+  // The card's own colour (objectstack-ai/objectstack#35980): the bar's
+  // `bg-background` is the page's grey, a strip on the dialog's white card.
+  actionsClassName: 'bg-card px-4 sm:px-5 py-3',
 };
 
 /**

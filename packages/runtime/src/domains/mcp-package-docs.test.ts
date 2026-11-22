@@ -12,16 +12,23 @@
  * - One visibility rule, the `/meta/doc` docs-audience gate (ADR-0046 §6.7):
  *   a page only a `{ permissionSet }` manual claims is neither found nor read
  *   by a caller without that set, and is both for a holder — the control that
- *   it is a match at all. On an OAuth grant the caller is the agent envelope,
- *   whose sets are the token's grant, so the page stays hidden there even when
- *   the delegating person holds the set.
+ *   it is a match at all.
+ * - On an OAuth grant (ADR-0090 D10) the holdings are the delegating person's
+ *   own, read by grant resolution in the token's organization: a holder finds
+ *   and reads the page, a non-holder does not, a person who does not exist or
+ *   holds no membership there holds no set, a set only the token's ceiling
+ *   carries opens nothing, and a token whose scope does not reach the docs
+ *   tools is carried no docs member at all.
  * - The address follows the Console's home-manual pick: the manual that claims
  *   the page, else the package's implicit manual (ADR-0046 §6.4).
  * - The door's twin for the tool layer is `packages/mcp/src/mcp-package-doc-tools-35442.test.ts`.
  */
 
 import { describe, expect, it } from 'vitest';
+import { MCP_AGENT_PERMISSION_SET_READ } from '@objectstack/spec/ai';
 import { HttpDispatcher } from '../http-dispatcher.js';
+import { resolveExecutionContext } from '../security/resolve-execution-context.js';
+import { bindCatalogFromTables } from '../security/security-catalog.testkit.js';
 // Paid at collection, not inside a case's clock: the dispatcher's reach loads it lazily.
 import '@objectstack/metadata';
 
@@ -83,11 +90,56 @@ const DOCS = [
 ];
 
 /**
- * A kernel over a protocol serving `items`, a security service granting
- * `crm_admin` to the person `admin`, and an `mcp` service that hands back the
- * bridge. The security fake keeps the real resolver's agent arm (ADR-0090
- * D10): an agent principal's sets are its own `permissions`, the token's
- * scope-derived ceiling, never its delegator's.
+ * The grant rows behind the OAuth pins: `admin` holds `crm_admin` in `orgA`;
+ * `u1` is a member of `orgA` holding it only in `orgB`; `ghost` has grant and
+ * membership rows and no `sys_user` row.
+ */
+function grantQl() {
+    const tables: Record<string, any[]> = {
+        sys_user: [{ id: 'admin' }, { id: 'u1' }],
+        sys_organization: [{ id: 'orgA' }, { id: 'orgB' }],
+        sys_member: ['admin', 'u1', 'ghost'].map((user_id) => ({ user_id, organization_id: 'orgA', role: 'member' })),
+        sys_user_permission_set: [
+            { id: 'g1', user_id: 'admin', permission_set_id: 'ps_crm_admin', permission_set: 'crm_admin', organization_id: 'orgA' },
+            { id: 'g2', user_id: 'ghost', permission_set_id: 'ps_crm_admin', permission_set: 'crm_admin', organization_id: 'orgA' },
+            { id: 'g3', user_id: 'u1', permission_set_id: 'ps_crm_admin', permission_set: 'crm_admin', organization_id: 'orgB' },
+        ],
+        sys_permission_set: [{ id: 'ps_crm_admin', name: 'crm_admin', object_permissions: '{}' }],
+        sys_position: [], sys_position_permission_set: [], sys_user_position: [],
+    };
+    const match = (opts: any) => (row: any) => Object.entries(opts?.where ?? {}).every(([k, v]) =>
+        v !== null && typeof v === 'object'
+            ? (Array.isArray((v as any).$in) ? (v as any).$in.includes(row[k]) : true)
+            : (v ?? null) === (row[k] ?? null));
+    return bindCatalogFromTables({
+        async find(object: string, opts: any) {
+            const rows = (tables[object] ?? []).filter(match(opts));
+            return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
+        },
+        async findOne(object: string, opts: any) {
+            return (tables[object] ?? []).find(match(opts)) ?? null;
+        },
+    }, tables);
+}
+
+/** The envelope the real `/mcp` identity door resolves for an OAuth token `person` consented to in `orgA`. */
+async function oauthEnvelope(person: string, scopes: string[], ql = grantQl()) {
+    return resolveExecutionContext({
+        acceptOAuthAccessToken: true,
+        getService: async (name: string) => name === 'auth'
+            ? { verifyMcpAccessToken: async () => ({ userId: person, scopes, clientId: 'c1', organizationId: 'orgA' }) }
+            : undefined,
+        getQl: async () => ql,
+        request: { headers: { authorization: 'Bearer a.b.c' } },
+    } as never) as Promise<Record<string, unknown>>;
+}
+
+/**
+ * A kernel over a protocol serving `items`, a security service, a data engine
+ * (`grantQl`) and an `mcp` service that hands back the bridge. The security
+ * fake answers the set names a context carries (`permissions`), as the real
+ * resolver requests them with the baseline left out: an agent envelope's are
+ * the token's scope-derived ceiling, a person's are their own.
  */
 function kernelOver(items: { doc: any[]; book: any[] } | null) {
     const mcp: any = {
@@ -100,18 +152,17 @@ function kernelOver(items: { doc: any[]; book: any[] } | null) {
     const protocol = items
         ? { getMetaItems: async ({ type }: { type: string }) => ({ type, items: (items as any)[type] ?? [] }) }
         : {};
-    const security = {
-        resolvePermissionSetNames: async (ctx: any) => {
-            if (ctx?.principalKind === 'agent') return [...(ctx.permissions ?? [])];
-            return ctx?.userId === 'admin' ? ['crm_admin'] : [];
-        },
-    };
-    const all: Record<string, any> = { protocol, security, mcp };
+    const security = { resolvePermissionSetNames: async (ctx: any) => [...(ctx?.permissions ?? [])] };
+    const all: Record<string, any> = { protocol, security, mcp, objectql: grantQl() };
     const get = (n: string) => all[n] ?? null;
     return { getService: get, getServiceAsync: async (n: string) => get(n), context: { getService: get } } as any;
 }
 
-async function bridgeFor(caller: string | Record<string, unknown>, items: { doc: any[]; book: any[] } | null = { doc: DOCS, book: BOOKS }) {
+/** A signed-in session's envelope carries the person's own sets: `admin` holds `crm_admin`. */
+const session = (userId: string) => ({ userId, isSystem: false, permissions: userId === 'admin' ? ['crm_admin'] : [] });
+
+/** The options the `/mcp` route hands the MCP runtime for this caller. */
+async function servedFor(caller: string | Record<string, unknown>, items: { doc: any[]; book: any[] } | null = { doc: DOCS, book: BOOKS }) {
     const kernel = kernelOver(items);
     const dispatcher = new HttpDispatcher(kernel, undefined, { enforceProjectMembership: false });
     const res = await dispatcher.handleMcp({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, {
@@ -122,10 +173,14 @@ async function bridgeFor(caller: string | Record<string, unknown>, items: { doc:
         }),
         response: {},
         environmentId: undefined,
-        executionContext: typeof caller === 'string' ? { userId: caller, isSystem: false } : caller,
+        executionContext: typeof caller === 'string' ? session(caller) : caller,
     } as any);
     expect(res.response?.status, 'precondition: the MCP route must have been served').toBe(200);
-    return kernel.getService('mcp').lastOpts.bridge;
+    return kernel.getService('mcp').lastOpts;
+}
+
+async function bridgeFor(caller: string | Record<string, unknown>, items?: { doc: any[]; book: any[] } | null) {
+    return (await servedFor(caller, items)).bridge;
 }
 
 const MAX = { maxResults: 10 };
@@ -180,25 +235,66 @@ describe('[#35442] one visibility rule: the /meta/doc docs-audience gate', () =>
         const page = await bridge.readPackageDoc({ name: 'crm_commission_rules' });
         expect(page.url).toBe(`/_console/apps/${CRM}/docs/admin/crm_commission_rules`);
     });
+});
 
-    it('on an OAuth grant the caller is the agent: the page is neither found nor read though the delegator holds the set', async () => {
-        // The agent envelope `assembleExecutionContext` builds for an OAuth token:
-        // the person stays `userId` and `onBehalfOf`, and `permissions` are the
-        // token's scope-derived ceiling.
-        const bridge = await bridgeFor({
-            userId: 'admin',
-            isSystem: false,
-            principalKind: 'agent',
-            onBehalfOf: { userId: 'admin', principalKind: 'human' },
-            positions: [],
-            permissions: ['mcp_agent_read'],
-        });
-        const names = (await bridge.searchPackageDocs({ terms: ['回款'] }, MAX)).results.map((r: any) => r.name);
-        expect(names).toEqual(['crm_order_payment']);
-        await expect(bridge.readPackageDoc({ name: 'crm_commission_rules' })).rejects.toMatchObject({
-            code: 'RESOURCE_NOT_FOUND',
-            status: 404,
-        });
+/** The page names a search for 回款 finds, and whether the restricted page reads. */
+async function reach(bridge: any): Promise<{ found: string[]; reads: boolean }> {
+    const found = (await bridge.searchPackageDocs({ terms: ['回款'] }, MAX)).results.map((r: any) => r.name).sort();
+    const reads = await bridge.readPackageDoc({ name: 'crm_commission_rules' }).then(
+        () => true,
+        (e: any) => {
+            expect(e).toMatchObject({ code: 'RESOURCE_NOT_FOUND', status: 404 });
+            return false;
+        },
+    );
+    return { found, reads };
+}
+
+const OPEN = { found: ['crm_commission_rules', 'crm_order_payment'], reads: true };
+const CLOSED = { found: ['crm_order_payment'], reads: false };
+
+describe('[#35584] on an OAuth grant the audience reads the delegating person\'s own holdings (ADR-0090 D10)', () => {
+    it('precondition: the envelope is the agent acting for the person, its sets the token\'s ceiling', async () => {
+        const ec = await oauthEnvelope('admin', ['data:read']);
+        expect(ec).toMatchObject({ principalKind: 'agent', onBehalfOf: { userId: 'admin' }, tenantId: 'orgA', permissions: [MCP_AGENT_PERMISSION_SET_READ] });
+    });
+
+    // Edited in place: before ADR-0090 D10 was applied here the agent envelope's
+    // ceiling was the caller, and this holder answered CLOSED.
+    it('the holder of the set finds and reads the page, addressed through the manual that claims it', async () => {
+        const bridge = await bridgeFor(await oauthEnvelope('admin', ['data:read']));
+        expect(await reach(bridge)).toEqual(OPEN);
+        expect((await bridge.readPackageDoc({ name: 'crm_commission_rules' })).url).toBe(`/_console/apps/${CRM}/docs/admin/crm_commission_rules`);
+    });
+
+    it('control: a person who does not hold the set in the token\'s organization neither finds nor reads it', async () => {
+        expect(await reach(await bridgeFor(await oauthEnvelope('u1', ['data:read'])))).toEqual(CLOSED);
+    });
+
+    it('a token whose scope does not reach the docs tools is carried no docs member, whatever the person holds', async () => {
+        const opts = await servedFor(await oauthEnvelope('admin', ['metadata:write', 'actions:execute']));
+        expect(opts.toolOptions).toEqual({ grantedScopes: ['metadata:write', 'actions:execute'] });
+        expect(opts.bridge.searchPackageDocs).toBeUndefined();
+        expect(opts.bridge.readPackageDoc).toBeUndefined();
+    });
+
+    it('fails closed: a person with no user row, or with no membership in the request\'s organization, holds no set', async () => {
+        const held = await oauthEnvelope('admin', ['data:read']);
+        const ghost = { ...held, userId: 'ghost', onBehalfOf: { userId: 'ghost', principalKind: 'human' } };
+        expect(await reach(await bridgeFor(ghost))).toEqual(CLOSED);
+        // `u1` holds the set in orgB only, and is a member of orgA only.
+        const outside = { ...(await oauthEnvelope('u1', ['data:read'])), tenantId: 'orgB' };
+        expect(await reach(await bridgeFor(outside))).toEqual(CLOSED);
+    });
+
+    it('no union: a manual whose audience is a set only the token\'s ceiling carries stays closed', async () => {
+        const books = [...BOOKS.slice(0, 1), { ...BOOKS[1], audience: { permissionSet: MCP_AGENT_PERMISSION_SET_READ } }];
+        expect(await reach(await bridgeFor(await oauthEnvelope('admin', ['data:read']), { doc: DOCS, book: books }))).toEqual(CLOSED);
+    });
+
+    it('an AI service account keeps its own sets', async () => {
+        const account = { userId: 'svc_bot', isSystem: false, principalKind: 'agent', positions: [], permissions: ['crm_admin'] };
+        expect(await reach(await bridgeFor(account))).toEqual(OPEN);
     });
 });
 

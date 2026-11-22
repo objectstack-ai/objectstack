@@ -22,9 +22,10 @@
  * `readonly: true` roll-up, which used to land `null` on such a create.
  *
  * Kept, each pinned here: the roll-up recompute's own write (`isSystem`), and
- * any other `isSystem` write of the column, on update and on create (seed
- * loads, package installs and historical imports write as the system
- * principal).
+ * any other `isSystem` write of the column, on update and on create (historical
+ * imports write as the system principal). A seed load never sends a roll-up
+ * value: the seed loader takes it out first (#35655,
+ * `seed-summary-never-stored.test.ts`).
  *
  * The REST and import doors, end to end over HTTP and SQLite:
  * `packages/rest/src/import-summary-update-lock-34672.test.ts`.
@@ -404,7 +405,7 @@ describe('[#34672] a roll-up summary is read-only on create: dropped, reported, 
     expect(acct('a9')).toMatchObject({ order_total: 50, order_total_ro: 50 });
   });
 
-  it('an isSystem create keeps its value (seed loads, package installs, historical imports)', async () => {
+  it('an isSystem create keeps its value (historical imports; a seed load strips the key before the engine, #35655)', async () => {
     const events: DroppedFieldsEvent[] = [];
     await engine.insert(
       'acct', { id: 'a1', name: 'A', order_total: 90, order_total_ro: 90 },

@@ -95,3 +95,37 @@ describe('a set\'s own readable: false row and that set\'s own super-user vote',
       .toEqual({ readable: true, editable: false });
   });
 });
+
+describe('[field-axis split, ruling 6912661484] viewAllFields: a read vote through the same shared vote, never an edit vote', () => {
+  const hider = { objects: { deal: { allowRead: true } }, fields: { 'deal.amount': { readable: false, editable: false } } };
+  const reader = (objects: Record<string, unknown>, fields?: Record<string, unknown>) => ({ objects, fields });
+
+  it('alone it reads every field another set hides, read-only, by the object entry and by the wildcard', () => {
+    for (const objects of [{ deal: { allowRead: true, viewAllFields: true } }, { '*': { allowRead: true, viewAllFields: true } }]) {
+      expect(buildEffectiveFieldPermissions([reader(objects), hider])).toEqual({ 'deal.amount': { readable: true, editable: false } });
+      expect(superuserFieldVote([reader(objects)], 'deal', 'amount')).toEqual({ readable: true, editable: false });
+    }
+  });
+
+  it('the set\'s own readable: false row beats its own viewAllFields; another set\'s bit still reads the field', () => {
+    const own = reader({ deal: { allowRead: true, viewAllFields: true } }, { 'deal.amount': { readable: false, editable: false } });
+    expect(buildEffectiveFieldPermissions([own])).toEqual({ 'deal.amount': { readable: false, editable: false } });
+    expect(superuserFieldVote([own], 'deal', 'amount')).toBeNull();
+    expect(buildEffectiveFieldPermissions([own, reader({ deal: { viewAllFields: true } })]))
+      .toEqual({ 'deal.amount': { readable: true, editable: false } });
+  });
+
+  it('an explicit entry is the set\'s whole answer: a wildcard bit does not reach an object the set names', () => {
+    const named = reader({ '*': { viewAllFields: true }, deal: { allowRead: true } });
+    expect(buildEffectiveFieldPermissions([named, hider])).toEqual({ 'deal.amount': { readable: false, editable: false } });
+  });
+
+  it('beside View All or Modify All it changes nothing: those bits already cast the vote', () => {
+    for (const bits of [{ viewAllRecords: true }, { modifyAllRecords: true }]) {
+      const without = reader({ '*': { allowRead: true, ...bits } });
+      const withBit = reader({ '*': { allowRead: true, ...bits, viewAllFields: true } });
+      expect(buildEffectiveFieldPermissions([withBit, hider])).toEqual(buildEffectiveFieldPermissions([without, hider]));
+      expect(superuserFieldVote([withBit], 'deal', 'amount')).toEqual(superuserFieldVote([without], 'deal', 'amount'));
+    }
+  });
+});

@@ -171,6 +171,13 @@ export interface PersonalViewListState {
    * the view's conditions included, and is not laid over them a second time.
    */
   panelFilters?: FilterBuilderRowGroup;
+  /**
+   * objectstack#35955 — the Display panel's layout and row colour the list's
+   * draft holds (`ListDraft.viewType` / `rowColor`). `viewType` retypes the
+   * body; `rowColor: null` is "none" over a view that colours its rows. An
+   * absent part is the view's own.
+   */
+  display?: { viewType?: string; rowColor?: { field: string; colors?: Record<string, string> } | null };
 }
 
 /** The column a `columns` entry names: a bare name, or an entry's `field`. */
@@ -192,9 +199,9 @@ function columnName(column: unknown): string | undefined {
  *   the panel alone is the filter: the reader may have edited or removed one.
  * - **sort** and **grouping**: the ones the address carries; absent there,
  *   the view's own.
- * - **columns**: the view's, in the reader's dragged order, without the
- *   columns they hid (so `hiddenFields` and `fieldOrder` are applied, not
- *   carried). **rowHeight**: the reader's density, else the view's.
+ * - **columns**: the view's and the ones the reader added, in the reader's
+ *   dragged order, without the columns they hid (so `hiddenFields` and
+ *   `fieldOrder` are applied, not carried). **rowHeight**: the reader's density, else the view's.
  *
  * The body is narrowed to the keys spec's closed `ListViewSchema` declares and
  * bound to this object (`config.data.object`) by `buildViewConfigSaveBody`,
@@ -206,6 +213,25 @@ export function buildPersonalViewConfig(
   view: Record<string, any>,
   state: PersonalViewListState,
 ): { ok: true; config: Record<string, unknown> } | { ok: false; reason: FilterFoldRefusal } {
+  const laid = layListStateOverView(view, state);
+  if (!laid.ok) return laid;
+  return { ok: true, config: buildViewConfigSaveBody(objectName, laid.view).config };
+}
+
+/**
+ * The open view's own entry (the view tab's shape, the one the view config
+ * panel saves) with the list on screen laid over it, as
+ * {@link buildPersonalViewConfig} lays it: what 「Save to this view」 writes
+ * into a shared view (objectstack#35955), and the body a personal view's
+ * config is narrowed from. The layout and row colour of `state.display`
+ * apply too; a retype to a type whose block lists fields of its own fills
+ * that list from the columns when the block holds none, as
+ * {@link buildInPlaceViewConfig} does.
+ */
+export function layListStateOverView(
+  view: Record<string, any>,
+  state: PersonalViewListState,
+): { ok: true; view: Record<string, unknown> } | { ok: false; reason: FilterFoldRefusal } {
   const own: unknown[] = Array.isArray(view.filter) ? view.filter : [];
   let filter: unknown[];
   if (state.panelFilters && state.url.filters === undefined) {
@@ -222,6 +248,15 @@ export function buildPersonalViewConfig(
   const hidden = new Set<string>(pref?.hiddenFields ?? (Array.isArray(view.hiddenFields) ? view.hiddenFields : []));
   const order = pref?.columnState?.order ?? (Array.isArray(view.fieldOrder) ? view.fieldOrder : undefined);
   let columns: unknown[] | undefined = Array.isArray(view.columns) ? [...view.columns] : undefined;
+  // objectstack#35955 — the fields the reader added as columns (objectstack#30077)
+  // are columns of the saved view, after the view's own, in the same spelling.
+  if (columns && pref?.addedFields?.length) {
+    const names = new Set(columns.map(columnName).filter((n): n is string => !!n));
+    const asObjects = columns.some((c) => typeof c !== 'string');
+    for (const field of pref.addedFields) {
+      if (!names.has(field)) columns.push(asObjects ? { field } : field);
+    }
+  }
   if (columns) {
     if (order && order.length > 0) {
       const rank = new Map(order.map((name: string, i: number) => [name, i]));
@@ -246,7 +281,18 @@ export function buildPersonalViewConfig(
     fieldOrder: undefined,
     rowHeight: pref?.rowHeight ?? view.rowHeight,
   };
-  return { ok: true, config: buildViewConfigSaveBody(objectName, draft).config };
+  const display = state.display;
+  if (display && 'rowColor' in display) draft.rowColor = display.rowColor ?? undefined;
+  if (display?.viewType && display.viewType !== view.type) {
+    draft.type = display.viewType;
+    const mirrorKey = IN_PLACE_COLUMN_MIRRORS[display.viewType];
+    const block = isRecord(view[display.viewType]) ? (view[display.viewType] as Record<string, unknown>) : undefined;
+    if (mirrorKey && block && !(Array.isArray(block[mirrorKey]) && (block[mirrorKey] as unknown[]).length > 0)) {
+      const names = (columns ?? []).map(columnName).filter((n): n is string => !!n);
+      if (names.length > 0) draft[display.viewType] = { ...block, [mirrorKey]: names };
+    }
+  }
+  return { ok: true, view: draft };
 }
 
 /** The read's state: `off` (nothing read), `loading`, `ready`, or `refused`. */

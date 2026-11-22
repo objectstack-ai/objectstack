@@ -2365,8 +2365,8 @@ export const FieldSchema = lazySchema(() => {
    * #35597's `'primary'` default): it joins the record's main content only
    * when a field group of the PARENT names it (`ObjectFieldGroupSchema.relatedList`),
    * which draws its table at the group's position in the record page and its
-   * edit state, and inlines it in the parent's entry form (below the record's
-   * fields until the form places it at the group too).
+   * edit state, and inlines it in the parent's entry form at the same place
+   * (a form whose sections name no field group keeps it below its fields).
    * Write `relatedList: true` to keep it a tab even from a group (a group
    * naming it is refused), `'primary'` to make it a body table with no group,
    * or `false` to hide it.

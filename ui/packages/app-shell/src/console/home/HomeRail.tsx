@@ -18,7 +18,7 @@ import {
   FileText, Database, LayoutDashboard, File, List, CircleAlert, Rocket, Lock,
 } from 'lucide-react';
 import { useDisplayLocale } from '@object-ui/i18n';
-import { Button, cn } from '@object-ui/components';
+import { Button, cn, NeutralIconTile, ObjectIconTile } from '@object-ui/components';
 import type { ActivityFeedReading } from '../../hooks/sharedUserFeeds.js';
 import type { HomeInboxStatus, HomeNotification, PendingApprovalRequest } from '../../hooks/useHomeInbox.js';
 import type { RecentItem } from '../../hooks/useRecentItems.js';
@@ -38,7 +38,7 @@ function CountPill({ count, primary, testId }: { count: number; primary?: boolea
     <span
       data-testid={testId}
       className={cn(
-        'inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1.5 text-[11px] font-semibold tabular-nums',
+        'inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1.5 text-xs font-medium tabular-nums',
         primary ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground',
       )}
     >
@@ -73,7 +73,7 @@ function WorkRow({
         type="button"
         onClick={onClick}
         data-testid={testId}
-        className="flex h-full w-full items-center gap-2.5 px-3 text-left text-[13px] transition-colors hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:outline-none max-sm:min-h-11"
+        className="flex h-full w-full items-center gap-2.5 px-3 text-left text-sm transition-colors hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:outline-none max-sm:min-h-11"
       >
         <span className={cn('inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md', tileClass)}>
           <Icon className="h-3.5 w-3.5" />
@@ -104,7 +104,7 @@ function ColumnNotice({
 }) {
   return (
     <div
-      className="flex h-10 items-center gap-2 border-t px-3 text-[13px] text-muted-foreground"
+      className="flex h-10 items-center gap-2 border-t px-3 text-xs text-muted-foreground"
       data-testid={testId}
       data-status={status}
     >
@@ -180,7 +180,7 @@ function WorkColumn({
   return (
     <section className="min-w-0 overflow-hidden rounded-lg border bg-card" data-testid={testId}>
       <div className="flex h-10 items-center justify-between gap-2 px-3 max-sm:h-11">
-        <h3 className="inline-flex min-w-0 items-center gap-2 text-[13px] font-semibold">
+        <h3 className="inline-flex min-w-0 items-center gap-2 text-sm font-medium">
           <span className="truncate">{title}</span>
           {count > 0 && <CountPill count={count} primary={primaryPill} testId={`${testId}-count`} />}
         </h3>
@@ -241,8 +241,8 @@ export function HomePendingDraftsRow({
       data-testid="home-pending-drafts"
     >
       <Rocket className="h-4 w-4 shrink-0 text-primary" aria-hidden />
-      <p className="min-w-0 flex-1 truncate text-[13px]">
-        <span className="font-semibold">
+      <p className="min-w-0 flex-1 truncate text-sm">
+        <span className="font-medium">
           {t('home.pendingDrafts.title', { count, defaultValue: '{{count}} unpublished change(s)' })}
         </span>
         {detail && <span className="text-muted-foreground"> · {detail}</span>}
@@ -352,7 +352,7 @@ export function HomeActionCenter({
   return (
     <section data-testid="home-my-work" aria-labelledby="home-my-work-title">
       <div className="mb-2 flex items-center justify-between gap-3">
-        <h2 id="home-my-work-title" className="inline-flex items-center gap-2 text-[15px] font-semibold tracking-tight">
+        <h2 id="home-my-work-title" className="inline-flex items-center gap-2 text-sm font-medium tracking-tight">
           {t('home.myWork.title', { defaultValue: 'My work' })}
           {total > 0 && <CountPill count={total} testId="home-my-work-count" />}
         </h2>
@@ -450,7 +450,7 @@ function approvalTitle(r: PendingApprovalRequest): string {
 function HomeSection({ title, testId, children }: { title: string; testId: string; children: React.ReactNode }) {
   return (
     <section className="min-w-0" data-testid={testId}>
-      <h2 className="mb-2 text-[15px] font-semibold tracking-tight">{title}</h2>
+      <h2 className="mb-2 text-sm font-medium tracking-tight">{title}</h2>
       {children}
     </section>
   );
@@ -482,8 +482,19 @@ export interface RecentItemContext {
   context: string;
   /** The label of the app the entry was opened in, or `undefined` when no app on Home is it. */
   app?: string;
-  /** A record's object icon (a Lucide name), or `undefined` to draw the kind's icon. */
+  /** The row's object's icon (a Lucide name), or `undefined` to draw the kind's icon. */
   icon?: string;
+  /**
+   * The row's object's palette colour (`ObjectSchema.color`), drawn as the
+   * object's tile (objectstack#35985).
+   */
+  color?: string;
+  /**
+   * The row is about an object (the object, one of its views or records) whose
+   * metadata was read: it draws that object's tile; otherwise the neutral tile
+   * with the kind's icon (objectstack#36141).
+   */
+  object?: boolean;
 }
 
 /**
@@ -518,13 +529,13 @@ export function HomeContinue({
   return (
     <HomeSection title={t('home.recentApps.title', { defaultValue: 'Recently Accessed' })} testId="home-recent">
       {items.length === 0 ? (
-        <p className="rounded-lg border border-border bg-card px-3 py-2.5 text-[13px] text-muted-foreground">
+        <p className="rounded-lg border border-border bg-card px-3 py-2.5 text-xs text-muted-foreground">
           {t('home.continueEmpty', { defaultValue: 'Items you open will show up here.' })}
         </p>
       ) : (
         <ul className="overflow-hidden rounded-lg border border-border bg-card">
           {items.map((it) => {
-            const { context, app, icon } = describe(it);
+            const { context, app, icon, color, object } = describe(it);
             const Icon = icon ? getIcon(icon) : RECENT_ICON[it.type] || FileText;
             const trail = [context, app, timeAgo(it.visitedAt, displayLocale)].filter(Boolean).join(' · ');
             return (
@@ -534,14 +545,16 @@ export function HomeContinue({
                   onClick={() => onOpen(it.href)}
                   data-testid="home-recent-row"
                   data-recent-type={it.type}
-                  className="flex h-10 w-full items-center gap-2.5 px-3 text-left text-[13px] transition-colors hover:bg-muted/60 max-sm:h-11"
+                  className="flex h-10 w-full items-center gap-2.5 px-3 text-left text-sm transition-colors hover:bg-muted/60 max-sm:h-11"
                 >
-                  <span
-                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"
-                    data-testid="home-recent-icon"
-                    data-icon={icon ?? it.type}
-                  >
-                    <Icon className="h-[13px] w-[13px]" />
+                  {/* objectstack#36141 — the menu's rule: an object row is its
+                      object's tile, every other row the neutral tile. */}
+                  <span className="inline-flex shrink-0" data-testid="home-recent-icon" data-icon={icon ?? it.type}>
+                    {object || icon ? (
+                      <ObjectIconTile glyph={Icon} color={color} size="md" />
+                    ) : (
+                      <NeutralIconTile glyph={Icon} size="md" />
+                    )}
                   </span>
                   <span className="min-w-0 flex-1 truncate">{labelOf(it)}</span>
                   <span className="shrink-0 text-xs text-muted-foreground" data-testid="home-recent-trail">
@@ -596,7 +609,7 @@ export function HomeActivity({ activity, onViewAll, t }: { activity: ActivityFee
         {/* Beside the list, not only in place of it, as on the action centre. */}
         {activity.status !== 'ready' && (
           <div
-            className="flex items-center gap-2 py-2 text-[13px] text-muted-foreground"
+            className="flex items-center gap-2 py-2 text-xs text-muted-foreground"
             data-testid="home-activity-unanswered"
           >
             {activity.status === 'error' && activity.refused ? (
@@ -618,14 +631,14 @@ export function HomeActivity({ activity, onViewAll, t }: { activity: ActivityFee
         )}
         {items.length === 0 ? (
           activity.status === 'ready' && (
-            <p className="py-2 text-[13px] text-muted-foreground">
+            <p className="py-2 text-xs text-muted-foreground">
               {t('layout.activityFeed.empty', { defaultValue: 'No recent activity' })}
             </p>
           )
         ) : (
           <ul>
             {items.slice(0, 5).map((a) => (
-              <li key={a.id} className="border-b border-border py-2 text-[13px] leading-snug" data-testid="home-activity-row">
+              <li key={a.id} className="border-b border-border py-2 text-sm leading-snug" data-testid="home-activity-row">
                 <span className="font-medium">{a.user}</span>{' '}
                 <span className="text-muted-foreground">{a.description}</span>
                 <div className="mt-0.5 text-xs text-muted-foreground">

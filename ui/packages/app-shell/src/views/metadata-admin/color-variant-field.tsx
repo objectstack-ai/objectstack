@@ -31,7 +31,18 @@ export const COLOR_VARIANTS: ColorVariant[] = [
   { value: 'amber', label: 'Amber', css: '#f59e0b' },
 ];
 
-const CSS_BY_VALUE: Record<string, string> = Object.fromEntries(COLOR_VARIANTS.map((c) => [c.value, c.css]));
+/**
+ * objectstack#35985 — the two names of the OBJECT palette (`ObjectSchema.color`)
+ * that no entry above paints, so the object form's `color` row draws each of
+ * its nine swatches in its own hue. Kept out of {@link COLOR_VARIANTS}: they
+ * are not colour-variant tokens, nor aliases of one.
+ */
+const OBJECT_PALETTE_EXTRA_CSS: Record<string, string> = { gray: '#6b7280', pink: '#db2777' };
+
+const CSS_BY_VALUE: Record<string, string> = {
+  ...OBJECT_PALETTE_EXTRA_CSS,
+  ...Object.fromEntries(COLOR_VARIANTS.map((c) => [c.value, c.css])),
+};
 
 /** Resolve a token (or hex) to a CSS color; unknown tokens fall back to neutral. */
 export function colorVariantCss(value: string | undefined): string {

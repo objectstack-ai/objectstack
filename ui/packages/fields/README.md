@@ -123,6 +123,20 @@ The app-shell `ActionParamDialog` uses these to render declared action params
 through the exact same widgets as the object form — with a drift test pinning
 param support ⊇ form support.
 
+### The grid cell editor's face (`inCell`, `onCommit`)
+
+`FieldEditWidget` forwards two optional host keys of `FieldWidgetComponentProps`
+to the widget it draws. `inCell` asks for the face a list grid's cell editor
+needs: a single select or multi-select field draws a searchable list of its
+options that is open from the start, a tags field the same list of this
+record's tags (plus an "Add" row for new text), a date opens its calendar (with today, tomorrow, next
+week and clear picks) while its text stays typeable, a time opens the browser
+picker, and a colour offers swatches. `onCommit` is the host's "write the last
+`onChange` value and close", which the date picker calls after a day or a quick
+pick and the in-cell colour face after a swatch.
+A host that passes neither gets the form faces unchanged; `ObjectGrid` passes
+both.
+
 ### Resolving declared action params
 
 An action param is declared either inline (`name` + `type`) or field-backed
@@ -334,6 +348,31 @@ or photo per row without opening the row form (objectui#2360). Columns accept
 `UploadProvider` pipeline as the full-size `FileField` (the compact control is
 exported as `FileCell`). Auto-derived subform columns map `file`/`image`/
 `avatar` fields to file columns instead of dropping them.
+
+### Cell panels in line-item grids
+
+`GridField` stays a typing-first grid: a text, number, currency, time or date
+cell is a live input the user types into on arrival, and Enter moves to the
+same column of the next line (on the last line it adds one). What opens a panel
+opens it under the cell, over the table, and the row keeps its height:
+
+- **Select** — the cell shows the option label. A click, Enter, Space, F2 or
+  Alt+ArrowDown opens a searchable option list under it; a typed letter opens it
+  with that letter as the search. A pick writes the value and closes the list;
+  Esc closes it and writes nothing; Tab moves on to the next cell.
+- **Date and date-time** — the browser's own control stays in the cell, typed
+  into as before, and the calendar opens under the cell when the cell is
+  entered, with Today, Tomorrow, Next week and Clear. A day writes the value (a
+  date-time keeps its time of day) and the cell keeps the focus.
+- **Text** — while the cell has the focus and its text is longer than the
+  column, the input floats right over the neighbouring cells instead of
+  scrolling its text out of sight.
+- **Esc in a cell** takes back what this visit to the cell changed (the whole
+  line returns to what it held when the cell was entered) and stops there: a
+  form open in a dialog keeps its dialog. A cell whose panel is open hands Esc
+  to the panel. Adding, removing, duplicating or moving a line ends the visit,
+  so Esc never writes a removed or shifted line over the one now at that
+  position.
 
 ### Registry-name pickers (`position-ref`, `permission-ref`)
 
