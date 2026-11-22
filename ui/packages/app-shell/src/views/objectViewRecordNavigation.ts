@@ -46,7 +46,7 @@
 
 import { useMemo, useCallback, useEffect, useRef, useState } from 'react';
 import type { NavigateFunction, Location, SetURLSearchParams } from 'react-router-dom';
-import { deriveRecordSurface, overlayWidthFor } from '@object-ui/plugin-view/core';
+import { deriveRecordSurface } from '@object-ui/plugin-view/core';
 import { useNavigationOverlay } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import type { ViewNavigationConfig } from '@object-ui/types';
@@ -55,7 +55,7 @@ import { RECORD_FORM_CREATE_VALUES_STATE } from '../utils/recordFormNavigation.j
 import { viewTabLabel } from './viewTabLabel.js';
 import { listRecordDetailUrl, listRecordActionsValue } from './objectViewRecordLinks.js';
 import { RECORD_PAGE_PUSHED_STATE } from './recordPagePush.js';
-import { RECORD_PREVIEW_DEFAULT_WIDTH, recordPreviewWidthKey } from './recordDrawerContext.js';
+import { recordPaneWidth, recordPreviewWidthKey } from './recordDrawerContext.js';
 import { servesRecordRead } from '../utils/recordReadServed.js';
 import {
     expandedRecordPath,
@@ -186,17 +186,6 @@ function splitRecordFormSearch(search: string): { form: string; origin: URLSearc
     return { form: form.toString(), origin };
 }
 
-type OverlaySizeBucket = 'sm' | 'md' | 'lg' | 'xl' | 'full';
-
-/**
- * The record pane's width before any drag (objectstack#36149): an authored
- * size bucket stands as authored; `auto` — or no size — is the side
- * preview's 460, whatever the object's field count.
- */
-function recordPaneWidth(size: 'auto' | OverlaySizeBucket | undefined, objectDef: unknown): string {
-    return !size || size === 'auto' ? RECORD_PREVIEW_DEFAULT_WIDTH : overlayWidthFor(size, objectDef);
-}
-
 export function useObjectViewRecordNavigation({
     activeView,
     objectDef,
@@ -267,10 +256,7 @@ export function useObjectViewRecordNavigation({
             return {
                 mode: 'drawer',
                 openNewTab: authored?.openNewTab,
-                width: authored?.width ?? recordPaneWidth(
-                    (authored as { size?: 'auto' | OverlaySizeBucket } | undefined)?.size,
-                    objectDef,
-                ),
+                width: recordPaneWidth(authored, objectDef),
             };
         },
         [activeView?.navigation, objectDef, phone, recordServed]

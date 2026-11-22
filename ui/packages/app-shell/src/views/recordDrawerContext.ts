@@ -17,6 +17,7 @@
 
 import { createContext, useContext } from 'react';
 import { recordOverlayWidthStorageKey } from '@object-ui/components';
+import { overlayWidthFor } from '@object-ui/plugin-view/core';
 
 /** What a record link inside a drawer host calls to open a record in place. */
 export interface RecordDrawerApi {
@@ -119,4 +120,18 @@ export function recordPreviewWidthKey(objectName: string, navigation: unknown): 
   const nav = navigation as { size?: unknown; width?: unknown } | null | undefined;
   const authored = nav != null && (nav.width != null || (nav.size != null && nav.size !== 'auto'));
   return authored ? recordOverlayWidthStorageKey(objectName) : RECORD_PREVIEW_WIDTH_KEY;
+}
+
+/**
+ * The record pane's width before any drag (objectstack#36149), the same on
+ * the list's preview and on a record page's drawer level: an authored
+ * `navigation.width` (pixel or percent) as written, else an authored `size`
+ * bucket; `auto`, or no size, is the side preview's 460, whatever the
+ * object's field count.
+ */
+export function recordPaneWidth(navigation: unknown, objectDef: unknown): string | number {
+  const nav = navigation as { size?: unknown; width?: string | number | null } | null | undefined;
+  if (nav?.width != null) return nav.width;
+  const size = nav?.size as Parameters<typeof overlayWidthFor>[0] | null | undefined;
+  return !size || size === 'auto' ? RECORD_PREVIEW_DEFAULT_WIDTH : overlayWidthFor(size, objectDef);
 }

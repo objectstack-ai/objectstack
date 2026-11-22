@@ -79,13 +79,13 @@ import {
 } from '../urlParams.js';
 import { appRecordPath, routableObjectNames } from './RelatedRecordActionsBridge.js';
 import {
-  RECORD_PREVIEW_DEFAULT_WIDTH,
   RecordDrawerContext,
   RecordPaneBarContext,
   RecordPaneContext,
   type RecordDrawerApi,
   type RecordPaneApi,
   type RecordPaneBarApi,
+  recordPaneWidth,
   recordPreviewWidthKey,
 } from './recordDrawerContext.js';
 
@@ -948,10 +948,10 @@ export function RecordPageDrawerHost({
   );
 
   const rootDef = root ? objects.find((o) => (o as { name?: unknown } | null)?.name === root.objectName) : undefined;
-  // The pane's own width (objectstack#27545): an authored one, else the side
-  // preview's 460 (objectstack#36149).
-  const rootWidth = (rootDef as { navigation?: { width?: string | number } } | undefined)?.navigation?.width
-    ?? RECORD_PREVIEW_DEFAULT_WIDTH;
+  // The pane's own width (objectstack#27545): an authored width or size
+  // bucket, else the side preview's 460 (`recordPaneWidth`, objectstack#36149).
+  const rootNavigation = (rootDef as { navigation?: unknown } | undefined)?.navigation;
+  const rootWidth = recordPaneWidth(rootNavigation, rootDef);
 
   return (
     <RecordDrawerContext.Provider value={api}>
@@ -960,7 +960,7 @@ export function RecordPageDrawerHost({
         stack={stack}
         open={!!root}
         width={rootWidth}
-        storageKey={root ? recordPreviewWidthKey(root.objectName, (rootDef as { navigation?: unknown } | undefined)?.navigation) : undefined}
+        storageKey={root ? recordPreviewWidthKey(root.objectName, rootNavigation) : undefined}
         objects={objects}
         onClose={close}
         onOpenAsPage={openAsPage}

@@ -391,20 +391,30 @@ function useDrawerResize(
   // ⚠️ `parseInt` is deliberate for the legacy value: that is how
   // `RecordDetailDrawer` read its own key, and reading it with a stricter
   // parser than the writer used would drop widths rather than carry them over.
+  //
+  // objectstack#36149 — a host that keeps one pane mounted and switches its
+  // key (a record page's drawer, from one object's record to another's) gets
+  // the width the NEW key holds: a key with no usable width, or no key at
+  // all, drops the previous key's width, so the host's own width applies.
   React.useEffect(() => {
-    if (!storageKey || typeof window === 'undefined') return;
+    if (typeof window === 'undefined') return;
+    if (!storageKey) {
+      setWidth(null);
+      return;
+    }
     try {
       const raw = window.localStorage.getItem(`ov:${storageKey}`);
       if (raw) {
         const n = Number(raw);
-        if (Number.isFinite(n) && n >= DRAWER_MIN_PX) setWidth(n);
+        setWidth(Number.isFinite(n) && n >= DRAWER_MIN_PX ? n : null);
         return;
       }
-      if (!legacyStorageKey) return;
-      const legacyRaw = window.localStorage.getItem(legacyStorageKey);
-      if (!legacyRaw) return;
-      const legacy = parseInt(legacyRaw, 10);
-      if (!Number.isFinite(legacy) || legacy < DRAWER_MIN_PX) return;
+      const legacyRaw = legacyStorageKey ? window.localStorage.getItem(legacyStorageKey) : null;
+      const legacy = legacyRaw ? parseInt(legacyRaw, 10) : Number.NaN;
+      if (!legacyStorageKey || !Number.isFinite(legacy) || legacy < DRAWER_MIN_PX) {
+        setWidth(null);
+        return;
+      }
       setWidth(legacy);
       window.localStorage.setItem(`ov:${storageKey}`, String(legacy));
       // Removing it is what makes this a MIGRATION rather than a permanent
@@ -412,7 +422,8 @@ function useDrawerResize(
       // width must stay gone.
       window.localStorage.removeItem(legacyStorageKey);
     } catch {
-      // ignore (private mode / quota)
+      // private mode / quota: nothing remembered, the host's width applies
+      setWidth(null);
     }
   }, [storageKey, legacyStorageKey]);
 

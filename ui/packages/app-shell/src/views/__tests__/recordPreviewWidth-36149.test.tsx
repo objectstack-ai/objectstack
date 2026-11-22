@@ -27,12 +27,13 @@ vi.mock('../RecordDetailView.js', () => ({
 
 import { ObjectViewRecordOverlay } from '../objectViewRecordOverlay';
 import { RecordPageDrawerHost } from '../recordDrawerStack';
-import { RECORD_PREVIEW_WIDTH_KEY, recordPreviewWidthKey, useRecordDrawer } from '../recordDrawerContext';
+import { RECORD_PREVIEW_WIDTH_KEY, recordPaneWidth, recordPreviewWidthKey, useRecordDrawer } from '../recordDrawerContext';
 
 const OBJECTS = [
   { name: 'crm_lead', label: 'Lead' },
   { name: 'crm_task', label: 'Task' },
   { name: 'crm_contract', label: 'Contract', navigation: { width: 720 } },
+  { name: 'crm_quote', label: 'Quote', navigation: { size: 'xl' } },
 ];
 
 beforeEach(() => window.localStorage.clear());
@@ -107,6 +108,7 @@ function RecordPage() {
     >
       <OpenButton objectName="crm_task" recordId="T-1" />
       <OpenButton objectName="crm_contract" recordId="K-1" />
+      <OpenButton objectName="crm_quote" recordId="Q-1" />
     </RecordPageDrawerHost>
   );
 }
@@ -169,5 +171,47 @@ describe('the side preview has one remembered width for every object (objectstac
     expect(recordPreviewWidthKey('crm_lead', { size: 'auto' })).toBe(RECORD_PREVIEW_WIDTH_KEY);
     expect(recordPreviewWidthKey('crm_lead', { size: 'xl' })).toBe(recordOverlayWidthStorageKey('crm_lead'));
     expect(recordPreviewWidthKey('crm_lead', { width: 720 })).toBe(recordOverlayWidthStorageKey('crm_lead'));
+  });
+
+  it("one mounted record-page drawer: a task at the shared width, then a contract that authors 720 opens at 720", () => {
+    window.localStorage.setItem(`ov:${RECORD_PREVIEW_WIDTH_KEY}`, '600');
+    mountRecordPage();
+    fireEvent.click(screen.getByRole('button', { name: 'open crm_task' }));
+    expect(drawerWidth()).toBe('600px');
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(screen.queryByTestId('record-body')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'open crm_contract' }));
+    expect(screen.getByTestId('record-body')).toHaveTextContent('crm_contract/K-1');
+    expect(drawerWidth()).toBe('720px');
+  });
+
+  it('one mounted record-page drawer, the reverse: a contract at its own dragged 500, then a task opens at the default', () => {
+    window.localStorage.setItem(`ov:${recordOverlayWidthStorageKey('crm_contract')}`, '500');
+    mountRecordPage();
+    fireEvent.click(screen.getByRole('button', { name: 'open crm_contract' }));
+    expect(drawerWidth()).toBe('500px');
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(screen.queryByTestId('record-body')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'open crm_task' }));
+    expect(screen.getByTestId('record-body')).toHaveTextContent('crm_task/T-1');
+    expect(drawerWidth()).toBe('min(92vw, 460px)');
+  });
+
+  it("a record page's drawer opens an object that authors `size: 'xl'` at that size, as the list does", () => {
+    window.localStorage.setItem(`ov:${RECORD_PREVIEW_WIDTH_KEY}`, '600');
+    mountRecordPage();
+    fireEvent.click(screen.getByRole('button', { name: 'open crm_quote' }));
+    expect(screen.getByTestId('record-body')).toHaveTextContent('crm_quote/Q-1');
+    const xl = recordPaneWidth({ size: 'xl' }, OBJECTS[3]);
+    expect(xl).toMatch(/^min\(92vw, \d+px\)$/);
+    expect(drawerWidth()).toBe(xl);
+  });
+
+  it('recordPaneWidth: an authored width as written, else the size bucket, else 460', () => {
+    expect(recordPaneWidth(undefined, {})).toBe('min(92vw, 460px)');
+    expect(recordPaneWidth({ size: 'auto' }, {})).toBe('min(92vw, 460px)');
+    expect(recordPaneWidth({ width: '50%' }, {})).toBe('50%');
+    expect(recordPaneWidth({ width: 720, size: 'sm' }, {})).toBe(720);
+    expect(recordPaneWidth({ size: 'xl' }, {})).not.toBe('min(92vw, 460px)');
   });
 });
