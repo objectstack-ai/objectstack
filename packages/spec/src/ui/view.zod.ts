@@ -5357,7 +5357,7 @@ export const FormViewSchema = lazySchema(() => strictObject({
    * console's New / Edit dialog no longer reads a form view, so it is not that
    * caller: it sizes itself. Its liveness verdict is re-audited on #36544.
    */
-  modalSize: z.enum(['sm', 'default', 'lg', 'xl', 'full']).optional().describe("Size bucket of the dialog a caller opens this form in, such as the modal container of the React `ObjectForm` block (formType 'modal'); the console's New / Edit dialog reads no form view and sizes itself"),
+  modalSize: z.enum(['sm', 'default', 'lg', 'xl', 'full']).optional().describe("Size bucket of the dialog a caller opens this form in: the console's New / Edit dialog, or the modal container of the React `ObjectForm` block (formType 'modal')"),
 
   /**
    * Data Source Configuration. NOT removed in the #3896 sweep despite the
