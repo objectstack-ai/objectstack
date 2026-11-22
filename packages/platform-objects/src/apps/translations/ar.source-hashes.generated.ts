@@ -20,10 +20,6 @@
 export const arGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "metadataForms.email_template.fields.fromOverride.helpText": "c5e29fa12ee1525b",
   "metadataForms.email_template.fields.variables.helpText": "27197774c2cda633",
-  "metadataForms.field.fields.transferBehavior.helpText": "4794a6116648e502",
-  "metadataForms.field.fields.transferBehavior.label": "32c75a203e894f81",
-  "metadataForms.object.fields.fields.transferBehavior.helpText": "4794a6116648e502",
-  "metadataForms.object.fields.fields.transferBehavior.label": "32c75a203e894f81",
   "metadataForms.permission.fields.fields.helpText": "887a0bae04a950e2",
   "metadataForms.permission.fields.objects.helpText": "e2512cfb3b501aae",
   "metadataForms.permission.fields.tabPermissions.helpText": "8942e2aebe59897c",

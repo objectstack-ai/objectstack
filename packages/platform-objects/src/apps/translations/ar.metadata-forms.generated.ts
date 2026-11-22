@@ -241,8 +241,8 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "ما يحدث عند حذف السجل المُشار إليه"
       },
       "fields.transferBehavior": {
-        label: "Transfer Behavior",
-        helpText: "Whether Change Owner on the referenced record can also move the records that point at it through this field"
+        label: "سلوك تغيير المالك",
+        helpText: "ما إذا كان «تغيير المالك» على السجل المشار إليه يمكنه أيضًا نقل السجلات التي تشير إليه عبر هذا الحقل"
       },
       "fields.multiple": {
         label: "متعدد",
@@ -762,8 +762,8 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "ما يحدث عند حذف السجل المُشار إليه"
       },
       transferBehavior: {
-        label: "Transfer Behavior",
-        helpText: "Whether Change Owner on the referenced record can also move the records that point at it through this field"
+        label: "سلوك تغيير المالك",
+        helpText: "ما إذا كان «تغيير المالك» على السجل المشار إليه يمكنه أيضًا نقل السجلات التي تشير إليه عبر هذا الحقل"
       },
       relatedListFilter: {
         label: "عامل تصفية القائمة المرتبطة",

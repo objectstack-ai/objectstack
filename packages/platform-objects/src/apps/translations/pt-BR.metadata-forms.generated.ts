@@ -241,8 +241,8 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "O que acontece quando o registro referenciado é excluído"
       },
       "fields.transferBehavior": {
-        label: "Transfer Behavior",
-        helpText: "Whether Change Owner on the referenced record can also move the records that point at it through this field"
+        label: "Comportamento na troca de proprietário",
+        helpText: "Indica se “Alterar proprietário” no registro referenciado também pode mover os registros que apontam para ele por este campo"
       },
       "fields.multiple": {
         label: "Múltiplo",
@@ -762,8 +762,8 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "O que acontece quando o registro referenciado é excluído"
       },
       transferBehavior: {
-        label: "Transfer Behavior",
-        helpText: "Whether Change Owner on the referenced record can also move the records that point at it through this field"
+        label: "Comportamento na troca de proprietário",
+        helpText: "Indica se “Alterar proprietário” no registro referenciado também pode mover os registros que apontam para ele por este campo"
       },
       relatedListFilter: {
         label: "Filtro da lista relacionada",

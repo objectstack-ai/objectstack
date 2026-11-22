@@ -241,8 +241,8 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Что происходит при удалении связанной записи"
       },
       "fields.transferBehavior": {
-        label: "Transfer Behavior",
-        helpText: "Whether Change Owner on the referenced record can also move the records that point at it through this field"
+        label: "Поведение при смене владельца",
+        helpText: "Может ли «Сменить владельца» у связанной записи заодно передать записи, которые ссылаются на неё через это поле"
       },
       "fields.multiple": {
         label: "Множественный выбор",
@@ -762,8 +762,8 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Что происходит при удалении связанной записи"
       },
       transferBehavior: {
-        label: "Transfer Behavior",
-        helpText: "Whether Change Owner on the referenced record can also move the records that point at it through this field"
+        label: "Поведение при смене владельца",
+        helpText: "Может ли «Сменить владельца» у связанной записи заодно передать записи, которые ссылаются на неё через это поле"
       },
       relatedListFilter: {
         label: "Фильтр связанного списка",

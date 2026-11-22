@@ -241,8 +241,8 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Was geschieht, wenn der referenzierte Datensatz gelöscht wird"
       },
       "fields.transferBehavior": {
-        label: "Transfer Behavior",
-        helpText: "Whether Change Owner on the referenced record can also move the records that point at it through this field"
+        label: "Verhalten beim Inhaberwechsel",
+        helpText: "Ob „Inhaber ändern“ am referenzierten Datensatz auch die Datensätze mitnehmen kann, die über dieses Feld auf ihn verweisen"
       },
       "fields.multiple": {
         label: "Mehrfach",
@@ -762,8 +762,8 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Was geschieht, wenn der referenzierte Datensatz gelöscht wird"
       },
       transferBehavior: {
-        label: "Transfer Behavior",
-        helpText: "Whether Change Owner on the referenced record can also move the records that point at it through this field"
+        label: "Verhalten beim Inhaberwechsel",
+        helpText: "Ob „Inhaber ändern“ am referenzierten Datensatz auch die Datensätze mitnehmen kann, die über dieses Feld auf ihn verweisen"
       },
       relatedListFilter: {
         label: "Filter der verknüpften Liste",

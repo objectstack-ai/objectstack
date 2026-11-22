@@ -18,10 +18,6 @@
  */
 
 export const zhCNGeneratedSourceHashes: Readonly<Record<string, string>> = {
-  "metadataForms.field.fields.transferBehavior.helpText": "4794a6116648e502",
-  "metadataForms.field.fields.transferBehavior.label": "32c75a203e894f81",
-  "metadataForms.object.fields.fields.transferBehavior.helpText": "4794a6116648e502",
-  "metadataForms.object.fields.fields.transferBehavior.label": "32c75a203e894f81",
   "objects.sys_email.fields.message_id.label": "14cd089a4062f4b1",
   "objects.sys_email_template.fields.id.label": "00b0385c9c152888",
   "objects.sys_exchange_rate.fields.id.label": "00b0385c9c152888",
