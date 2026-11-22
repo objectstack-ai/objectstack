@@ -549,6 +549,7 @@ const zhHant = {
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: '儲存中…',
     cellSaved: '已儲存',
+    cellSavedAnnouncement: '已儲存：{{fields}}',
     openRecordToFinish: '開啟記錄完成修改',
   },
   grid: {

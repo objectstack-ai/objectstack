@@ -548,6 +548,7 @@ const es = {
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "Guardando…",
     cellSaved: "Guardado",
+    cellSavedAnnouncement: "Guardado: {{fields}}",
     openRecordToFinish: "Abre el registro para completar el cambio",
   },
   grid: {

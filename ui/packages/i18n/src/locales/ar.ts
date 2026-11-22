@@ -570,6 +570,7 @@ const ar = {
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "جارٍ الحفظ…",
     cellSaved: "تم الحفظ",
+    cellSavedAnnouncement: "تم الحفظ: {{fields}}",
     openRecordToFinish: "افتح السجل لإكمال التغيير",
   },
   grid: {

@@ -536,6 +536,7 @@ const de = {
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "Wird gespeichert…",
     cellSaved: "Gespeichert",
+    cellSavedAnnouncement: "Gespeichert: {{fields}}",
     openRecordToFinish: "Datensatz öffnen, um die Änderung abzuschließen",
   },
   grid: {

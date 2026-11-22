@@ -1384,7 +1384,19 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         }
       : undefined,
   });
-  const gridCellSelection: GridCellSelection | null = hostCellSelection
+  // objectstack#35689 — the value is new only when what `describeCell`
+  // answers from changed (the object, its fields, the reader's permissions,
+  // a verdict or an approval lock landing, the language): the table asks the
+  // selected cell's facts again on a new value, so one new on every render
+  // would ask on every render. The commit question and the chip opener read
+  // what this render holds through `latestCellHooks`.
+  const gridEditable = schema.editable ?? false;
+  const latestCellHooks = React.useRef({ requiredPrompt, askStateMove, openReferencedRecord });
+  React.useLayoutEffect(() => {
+    latestCellHooks.current = { requiredPrompt, askStateMove, openReferencedRecord };
+  });
+  const opensReferencedRecords = !!openReferencedRecord;
+  const gridCellSelection = useMemo((): GridCellSelection | null => (hostCellSelection
     ? {
         describeCell: (row, columnKey) => {
           const fieldDef = objectFields?.[columnKey];
@@ -1396,9 +1408,13 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
           const kind = cellReadOnlyKind({
             fieldDef,
             fieldWritable: !objectName || resolveFieldAffordance('listInlineEdit', perms, objectName, columnKey),
-            gridEditable: schema.editable ?? false,
+            gridEditable,
             objectEditable: objectInlineEditable,
-            canUpdate: resolveAffordanceGrant('listInlineEdit', affordanceSource),
+            canUpdate: resolveAffordanceGrant('listInlineEdit', {
+              objectSchema: objectSchema as SchemaLike | null | undefined,
+              objectName,
+              perms,
+            }),
             approvalLocked: approvalLocks.isLocked(recordId, row),
             recordUpdate,
           });
@@ -1435,19 +1451,25 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         // before anything is written (`./objectGridStateConfirm`). A move that
         // needs fields filled asks for them first; that dialog is the
         // confirmation, so a state-machine move does not ask twice.
-        confirmCommit: (row, columnKey, value) =>
-          requiredPrompt.ask(row, columnKey, value, () => askStateMove(row, columnKey, value)),
+        confirmCommit: (row, columnKey, value) => {
+          const { requiredPrompt: prompt, askStateMove: askMove } = latestCellHooks.current;
+          return prompt.ask(row, columnKey, value, () => askMove(row, columnKey, value));
+        },
         // objectstack#36015 — a lookup cell's chip opens its record in place.
-        ...(openReferencedRecord
+        ...(opensReferencedRecords
           ? {
               referenceCells: {
                 isReferenceColumn: (columnKey: string) => opensReferenceInPlace(objectFields?.[columnKey]),
-                openRecord: openReferencedRecord,
+                openRecord: (target: string, recordId: string) =>
+                  latestCellHooks.current.openReferencedRecord?.(target, recordId),
               },
             }
           : {}),
       }
-    : null;
+    : null), [
+    hostCellSelection, opensReferencedRecords, objectFields, objectSchema, objectName, perms,
+    gridEditable, objectInlineEditable, approvalLocks, recordVerdict, pageRecordIds, t,
+  ]);
   // objectstack#35685 — the state-machine confirm, the grid's next question
   // when the required-fields prompt has nothing to ask.
   function askStateMove(row: any, columnKey: string, value: unknown): Promise<boolean> | null {
