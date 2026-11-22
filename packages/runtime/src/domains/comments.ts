@@ -80,9 +80,9 @@ export const COMMENTS_DOMAIN_METHODS = ['PUT', 'DELETE'] as const;
 
 /** The three door shapes, as dispatcher paths (API prefix stripped), in the mount's order. */
 export const COMMENT_DOOR_PATHS = [
-    { method: 'DELETE', path: '/comments/reactions/:id' },
-    { method: 'PUT', path: '/comments/:id/resolution' },
-    { method: 'DELETE', path: '/comments/:id' },
+    { method: 'DELETE', pattern: '/comments/reactions/:id' },
+    { method: 'PUT', pattern: '/comments/:id/resolution' },
+    { method: 'DELETE', pattern: '/comments/:id' },
 ] as const;
 
 /** The wire prefix the doors are mounted under by plugin-audit (its routes are fixed at `/api/v1`). */
@@ -100,7 +100,7 @@ export function matchCommentDoorPath(method: string, path: string): boolean {
     const got = path.split('/');
     return COMMENT_DOOR_PATHS.some((door) => {
         if (door.method !== verb) return false;
-        const want = door.path.split('/');
+        const want = door.pattern.split('/');
         return want.length === got.length
             && want.every((segment, i) => (segment.startsWith(':') ? got[i].length > 0 : segment === got[i]));
     });
