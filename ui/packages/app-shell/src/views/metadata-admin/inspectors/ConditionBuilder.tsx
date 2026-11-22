@@ -1241,6 +1241,9 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
           placeholder={celExampleForRoots(offeredRoots)}
           objectName={objectName}
           fieldNames={fieldNames}
+          /* Each field's type and `multiple`, hidden ones too, so a list
+             field read with `==` / `!=` is refused as the save refuses it. */
+          fieldDefs={fields}
           /* Forwarded verbatim, `undefined` included — see the `scope` prop's
              own note. An omitted scope must reach `celAuthoring` as absent so
              its `hint.scope ?? 'flattened'` default answers unchanged. */
