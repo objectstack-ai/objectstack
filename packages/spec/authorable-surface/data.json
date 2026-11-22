@@ -384,6 +384,7 @@
     "data/Field:summaryOperations",
     "data/Field:system",
     "data/Field:trackHistory",
+    "data/Field:transferBehavior",
     "data/Field:type",
     "data/Field:unique",
     "data/Field:unitConfig",

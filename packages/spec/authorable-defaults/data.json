@@ -37,6 +37,7 @@
     "data/Field:required = false",
     "data/Field:searchable = false",
     "data/Field:sortable = true",
+    "data/Field:transferBehavior = \"none\"",
     "data/FilePersistenceConfig:autoSaveIntervalMs = 2000",
     "data/FormatValidation:active = true",
     "data/FormatValidation:events = [\"insert\",\"update\"]",

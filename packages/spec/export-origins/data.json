@@ -1198,6 +1198,7 @@
     "summaryFunctionReadsField": "src/data/field.zod.ts#summaryFunctionReadsField (function)",
     "textComparandRefusalReason": "src/data/filter-text-comparand.ts#textComparandRefusalReason (function)",
     "textOperatorDoorVerdict": "src/data/filter-text-operator-declared-type.ts#textOperatorDoorVerdict (function)",
+    "transferCascadeIneligibilityReason": "src/data/user-action-transfer.ts#transferCascadeIneligibilityReason (function)",
     "transferIneligibilityReason": "src/data/user-action-transfer.ts#transferIneligibilityReason (function)",
     "undeclaredActionRefusalAtRun": "src/data/hook-refusal-codes.ts#undeclaredActionRefusalAtRun (function)",
     "undeclaredActionRefusalCodeAtSave": "src/data/hook-refusal-codes.ts#undeclaredActionRefusalCodeAtSave (function)",
