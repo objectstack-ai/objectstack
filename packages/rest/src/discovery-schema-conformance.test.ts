@@ -493,7 +493,9 @@ describe('[#36198] the restriction profile is mounted on the unscoped base only'
   const UNSCOPED_BASE = '/api/v1';
   const SCOPED_BASE = '/api/v1/environments/:environmentId';
   const PROFILE = '/discovery/restriction-profile';
-  const VERBS = ['get', 'post', 'put', 'delete', 'patch'] as const;
+  /** Each HTTP method, with the `IHttpServer` member that mounts it. */
+  const VERBS = { GET: 'get', POST: 'post', PUT: 'put', DELETE: 'delete', PATCH: 'patch' } as const;
+  const METHODS = Object.keys(VERBS) as Array<keyof typeof VERBS>;
   const NONE = { reported: [], managed: [], host: [] };
   const GET_ONLY = { reported: ['GET'], managed: ['GET'], host: ['GET'] };
 
@@ -506,8 +508,8 @@ describe('[#36198] the restriction profile is mounted on the unscoped base only'
     rest.registerRoutes();
     return (path: string) => ({
       reported: rest.getRoutes().filter((r) => r.path === path).map((r) => r.method.toUpperCase()),
-      managed: VERBS.map((verb) => verb.toUpperCase()).filter((verb) => rest.getRouteManager().get(verb, path)),
-      host: VERBS.filter((verb) => httpServer[verb].mock.calls.some((call) => call[0] === path)).map((verb) => verb.toUpperCase()),
+      managed: METHODS.filter((method) => rest.getRouteManager().get(method, path)),
+      host: METHODS.filter((method) => httpServer[VERBS[method]].mock.calls.some((call) => call[0] === path)),
     });
   }
 
