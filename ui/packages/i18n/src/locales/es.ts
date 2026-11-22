@@ -3520,6 +3520,11 @@ const es = {
     collapse: 'Contraer la barra lateral',
     expand: 'Expandir la barra lateral',
   },
+  designMode: {
+    title: 'Modo de diseño',
+    leaveUnsaved: '¿Salir del modo de diseño? Se perderán los cambios no guardados.',
+    saveFailed: 'Algunos cambios no se guardaron: {{reason}}',
+  },
   topbar: {
     openAssistant: "Abrir el asistente {{name}}",
     offline: "Sin conexión",

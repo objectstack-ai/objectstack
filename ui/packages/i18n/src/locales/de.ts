@@ -3440,6 +3440,11 @@ const de = {
     collapse: 'Seitenleiste einklappen',
     expand: 'Seitenleiste ausklappen',
   },
+  designMode: {
+    title: 'Designmodus',
+    leaveUnsaved: 'Designmodus verlassen? Nicht gespeicherte Änderungen gehen verloren.',
+    saveFailed: 'Einige Änderungen wurden nicht gespeichert: {{reason}}',
+  },
   topbar: {
     openAssistant: "Assistent {{name}} öffnen",
     offline: "Offline",

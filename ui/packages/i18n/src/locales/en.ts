@@ -4114,6 +4114,11 @@ const en = {
     collapse: 'Collapse sidebar',
     expand: 'Expand sidebar',
   },
+  designMode: {
+    title: 'Design mode',
+    leaveUnsaved: 'Leave design mode? Your unsaved changes will be lost.',
+    saveFailed: 'Some changes were not saved: {{reason}}',
+  },
   topbar: {
     aiAssistant: 'AI Assistant',
     designInStudio: 'Design in Studio',
