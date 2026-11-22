@@ -851,6 +851,39 @@ describe('persona grants — what the card has each persona read and write, agai
     expect(verdicts(facts)[3]).toEqual(['persona-grant:contractor:task:delete', false]);
   });
 
+  it("an applied write the card routes through its own action (`via`), withheld and the action declared: not measured, named, never a pass", () => {
+    // The card names set_task_status (not confirm-gated) as start_qa's route,
+    // the shape of a manager deciding an approval step through the card's
+    // decide action. The rich build declares set_task_status.
+    const ROUTED: ScenarioArtifactCard = {
+      ...PROJECT,
+      run: { ...PROJECT.run, operations: PROJECT.run.operations!.map((o) => (o.id === 'start_qa' ? { ...o, via: 'set_task_status' } : o)) },
+    };
+    const UPDATE = 'persona-grant:contractor:task:update';
+    const facts = built(READ_ONLY);
+    expect(verdicts(facts, ROUTED).find(([c]) => c === UPDATE)).toEqual([UPDATE, 'not-measured']);
+    expect(gradePersonaGrants(facts, ROUTED).find((c) => c.check === UPDATE)!.notMeasured).toBe(
+      "contractor grants no update on task, and the build declares the card's agent action each write names as its route (`via`) or its confirm-gated one, a door that writes as the platform: whether operation start_qa through set_task_status goes through it is the run's to observe",
+    );
+    // Counted in neither figure: one check fewer than the same build scored on the card without `via`.
+    const routed = scoreScenarioArtifact(artifact(READ_ONLY), ROUTED);
+    const plain = scoreScenarioArtifact(artifact(READ_ONLY), PROJECT);
+    expect([routed.total, routed.passed]).toEqual([plain.total - 1, plain.passed]);
+    // A set that grants the verb still passes, as without `via`.
+    expect(verdicts(built(GRANTED), ROUTED).find(([c]) => c === UPDATE)).toEqual([UPDATE, true]);
+    // The build does not declare the named action: measured, and the withheld grant fails.
+    expect(verdicts(built(READ_ONLY, withoutAction('set_task_status')), ROUTED).find(([c]) => c === UPDATE)).toEqual([UPDATE, false]);
+    // Without `via` the same write stays measured (the card as it ships).
+    expect(verdicts(facts).find(([c]) => c === UPDATE)).toEqual([UPDATE, false]);
+    // A second write of the same verb that names no route keeps the grant measured.
+    const { via: _route, ...unrouted } = ROUTED.run.operations!.find((o) => o.id === 'start_qa')!;
+    const MIXED: ScenarioArtifactCard = {
+      ...ROUTED,
+      run: { ...ROUTED.run, operations: [...ROUTED.run.operations!, { ...unrouted, id: 'start_qa_again' }] },
+    };
+    expect(verdicts(facts, MIXED).find(([c]) => c === UPDATE)).toEqual([UPDATE, false]);
+  });
+
   it('edit and delete are read ∧ grant, as the enforcement door folds them', () => {
     const writeOnly = built({ ...GRANTED, contractor: { objects: { task: { allowCreate: true, allowEdit: true, allowDelete: true } } } }, (stack) => {
       // The authoring schema refuses a write grant without read; a stored set may still carry one.

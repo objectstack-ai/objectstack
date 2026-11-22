@@ -16,7 +16,10 @@
  * (still the English source) is left out: the overlay then returns the spec's
  * own English for it, as it does for every type it does not name. The one
  * exception is a leaf a curated inspector SHOWS that the platform has no zh
- * for; it is hand-worded here and marked so at its row.
+ * for; it is hand-worded here and marked so at its row. The second is the
+ * `report` form's wording leaves (objectstack#36373, marked ⟨36373⟩): the
+ * report panel speaks business wording — 数据来源 / 分组 / 指标 — and this
+ * overlay is the only source of its residual rows' words.
  *
  * ## Two depths, by who renders the form
  *
@@ -295,44 +298,56 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
     },
   },
   report: {
+    // objectstack#36373 — the report panel speaks business wording: 数据来源 /
+    // 分组 / 指标, never 数据集 / 维度 / 度量 (and no `rows`/`values` tokens).
+    // The leaves marked ⟨36373⟩ are hand-worded here and depart from the
+    // platform's zh-CN copy, which the generic server-rendered form still reads.
     label: '报表',
     sections: {
       basics: { label: '基础信息', description: '标识与报表类型' },
-      dataset_binding: { label: '数据集绑定', description: '本报表渲染的语义层数据集。度量与行分别来自该数据集的度量与维度' },
-      joined_blocks: { label: 'joined 报表分块', description: '叠加进同一张报表的其他数据集分块（仅 joined 报表）' },
+      // ⟨36373⟩ The curated fields above the form draw this section's data source,
+      // groups and metrics; what the form shows under it is the order and the drill.
+      dataset_binding: { label: '排序与下钻', description: '汇总结果怎么排，点开一行时看到哪些记录' },
+      // ⟨36373⟩
+      joined_blocks: { label: '联合报表的分块', description: '叠加进同一张报表的其他分块，各有自己的数据来源（仅联合报表）' },
       filter_and_chart: { label: '筛选与图表', description: '条件与图表展示' },
       period_and_export: { label: '时间段与导出', description: '报表的默认时间段，以及其表格可下载的格式' },
     },
     fields: {
       name: { label: '名称', helpText: 'snake_case 唯一标识符' },
       label: { label: '显示名称' },
-      description: { label: '描述' },
-      type: { label: '类型', helpText: '报表类型：tabular / summary / matrix / joined' },
-      dataset: { label: '数据集', helpText: '要绑定的数据集（度量/维度来自其语义层）' },
-      values: { label: '度量', helpText: '要展示的度量名（来自该数据集）' },
-      rows: { label: '行', helpText: '用于分组行的维度名（来自该数据集）' },
-      columns: { label: '列', helpText: '横向展开的维度名（仅 matrix 报表）' },
-      order: { label: '排序', helpText: '排序键，最重要的在前（rows/columns 维度或 values 度量）。时间维度默认按时间顺序排列。' },
+      // ⟨36373⟩ the spec's own text here is the I18nLabel shape, not a hint for the reader.
+      description: { label: '描述', helpText: '一句话说明这张报表看什么，显示在名称下方' },
+      // ⟨36373⟩ type · dataset · values · rows · columns · order
+      type: { label: '类型', helpText: '报表类型：明细表、汇总表、矩阵表或联合报表' },
+      dataset: { label: '数据来源', helpText: '报表从这里取数；每个人只能看到自己有权限的记录' },
+      values: { label: '指标', helpText: '要统计的指标（来自数据来源）' },
+      rows: { label: '分组', helpText: '按哪些字段分组（来自数据来源）' },
+      columns: { label: '列分组', helpText: '横向展开的分组（仅矩阵报表）' },
+      order: { label: '排序', helpText: '排序依据，最重要的在前（某个分组或指标）。时间分组默认按时间先后排列。' },
       'order.by': { label: '排序依据' },
       'order.direction': { label: '排序方向' },
-      drilldown: { label: '下钻', helpText: '点击聚合后的行/单元格，打开其底层记录' },
-      blocks: { label: '分块', helpText: '绑定数据集的子报表（仅 joined 报表）' },
+      drilldown: { label: '下钻', helpText: '点击汇总后的行或单元格，打开其中的记录' },
+      // ⟨36373⟩ blocks.*
+      blocks: { label: '分块', helpText: '各有数据来源的子报表（仅联合报表）' },
       'blocks.name': { label: '名称' },
       'blocks.label': { label: '显示名称' },
       'blocks.description': { label: '描述' },
       'blocks.type': { label: '分块类型' },
-      'blocks.dataset': { label: '数据集' },
-      'blocks.rows': { label: '行' },
-      'blocks.columns': { label: '列' },
-      'blocks.values': { label: '度量' },
+      'blocks.dataset': { label: '数据来源' },
+      'blocks.rows': { label: '分组' },
+      'blocks.columns': { label: '列分组' },
+      'blocks.values': { label: '指标' },
       'blocks.runtimeFilter': { label: '运行时筛选' },
       'blocks.order': { label: '排序' },
       runtimeFilter: { label: '运行时筛选', helpText: '渲染时的范围筛选，在查询时以 AND 方式并入' },
       chart: { label: '图表', helpText: '图表类型与配置' },
-      dateRange: { label: '日期范围', helpText: '默认时间段与自定义范围开关。维度必须是数据集的日期维度；数据集只有一个日期维度时可留空' },
-      exportOptions: { label: '导出选项', helpText: '下载格式（csv、xlsx）与文件名。谁可以下载由数据集对象上的导出权限决定' },
+      // ⟨36373⟩ dateRange · exportOptions
+      dateRange: { label: '日期范围', helpText: '默认时间段与自定义范围开关。按数据来源里的一个日期分组筛选；只有一个日期分组时可留空' },
+      exportOptions: { label: '导出选项', helpText: '下载格式（csv、xlsx）与文件名。谁可以下载由数据来源对象上的导出权限决定' },
     },
   },
+
   dataset: {
     label: '数据集',
     fields: {
