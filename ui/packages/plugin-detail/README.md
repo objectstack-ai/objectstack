@@ -792,11 +792,30 @@ when the window has no room below.
 
 ### InlineEditSaveBar & InlineFieldInput
 
-The record-level inline-edit session (#2407): double-clicking a field (or its
-hover pencil) in the highlights strip or details body stages edits into ONE
-shared draft (`InlineEditProvider` from `@object-ui/react`), committed by
-`<InlineEditSaveBar>` as a single atomic OCC-guarded update. Polish shipped in
-#2572:
+Two ways into an edit, one write path:
+
+- **A field edited in place** (objectstack#36475): on the default record
+  page's field list — the full page, the side preview, a phone, the wide
+  page's pinned column — a click on an editable value (or its pencil) opens
+  `FieldInPlaceEditor` over that value alone. The other fields stay values and
+  no save bar is drawn. The editor is the list cell's (`FieldEditWidget` with
+  `inCell`): Enter or a click elsewhere saves, a multi-line text saves on
+  Cmd/Ctrl+Enter, Esc discards and writes nothing, an unchanged value writes
+  nothing; a single select, a date, a record or a person opens its panel at
+  once and saves on the pick; a check flips and saves on the click. A refused
+  save keeps the editor open with the typed value and the server's reason
+  under the field. Offered where the record context can write the record the
+  page shows; elsewhere the click enters the whole-record session below.
+- **The whole record** (#2407): the header's Edit, and on a page an author
+  laid out a double-click on a field (or its hover pencil), stages edits into
+  ONE shared draft (`InlineEditProvider` from `@object-ui/react`), committed by
+  `<InlineEditSaveBar>` as a single atomic OCC-guarded update.
+
+The in-place editor saves through the same `<InlineEditSaveBar>`, in a session
+of the field's own: `face="field"` draws no bar and binds no window
+shortcuts (its 409 and required-fields dialogs only), and `saveRef` hands the
+host its save, called with the draft to write. Default `face` is `"bar"`.
+Polish shipped in #2572:
 
 - **Editors**: `InlineFieldInput` routes every field type to the same widget
   the form uses — including `number` / `currency` / `percent` (numeric

@@ -129,7 +129,30 @@ export interface InlineEditSaveBarProps {
   /** Tooltip/label explaining why the record is locked. */
   lockedHint?: string;
   className?: string;
+  /**
+   * How the session is committed (objectstack#36475).
+   *
+   * - `bar` (default) — the sticky Save / Cancel bar, with the session's
+   *   Cmd/Ctrl+Enter and Esc shortcuts.
+   * - `field` — the session edits ONE field of the record page in place
+   *   (`FieldInPlaceEditor`): no bar and no shortcuts are drawn, because the
+   *   field's editor saves on Enter or a click elsewhere and owns Esc. Every
+   *   write behaviour stays this component's: the one guarded update, the
+   *   refusal attributed per field, the 409 dialog and the fill-in dialog for
+   *   a value that makes other fields required.
+   */
+  face?: 'bar' | 'field';
+  /**
+   * Receives this bar's save, for a `field` face host to call when its editor
+   * is done. Called with a draft, the save writes that draft instead of the
+   * session's: a pick that saves at once hands its value over before the
+   * session's own state has caught up with it.
+   */
+  saveRef?: React.MutableRefObject<InlineEditSave | null>;
 }
+
+/** The save an {@link InlineEditSaveBar} hands its `field` face host. */
+export type InlineEditSave = (draft?: Record<string, unknown>) => Promise<void>;
 
 /**
  * The shape `isConcurrentUpdateError` narrows to, DERIVED from the predicate
@@ -323,6 +346,8 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
   locked = false,
   lockedHint,
   className,
+  face = 'bar',
+  saveRef,
 }) => {
   const { t } = useDetailTranslation();
   const inline = useInlineEdit();
@@ -516,9 +541,9 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
     setEditBase((prev) => prev ?? { version: dataVersion });
   }, [editing, dataVersion]);
 
-  const handleSave = React.useCallback(async () => {
+  const handleSave = React.useCallback<InlineEditSave>(async (handed) => {
     if (!inline) return;
-    const draft = inline.draft;
+    const draft = handed ?? inline.draft;
     const entries = Object.entries(draft);
     // No edits staged → just leave edit mode (matches the old empty-save path).
     if (entries.length === 0) {
@@ -636,7 +661,8 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
   const cancel = inline?.cancel;
   const conflictOpen = !!conflict;
   React.useEffect(() => {
-    if (!editing) return;
+    // The `field` face's editor owns its keys (objectstack#36475).
+    if (!editing || face === 'field') return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
         if (saving || locked || conflictOpen) return;
@@ -661,7 +687,15 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [editing, saving, locked, conflictOpen, handleSave, cancel]);
+  }, [editing, saving, locked, conflictOpen, handleSave, cancel, face]);
+
+  React.useEffect(() => {
+    if (!saveRef) return undefined;
+    saveRef.current = handleSave;
+    return () => {
+      if (saveRef.current === handleSave) saveRef.current = null;
+    };
+  }, [saveRef, handleSave]);
 
   const changedWhileEditing =
     !saving && editBase !== null && editBase.version !== undefined && dataVersion !== undefined && dataVersion !== editBase.version;
@@ -743,6 +777,24 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
   // Render nothing unless a provider is present and the record is being edited.
   if (!inline || !inline.editing) return null;
 
+  // The `field` face draws no bar: its editor shows the reason under the
+  // field, and only the dialogs a save may open are drawn here.
+  if (face === 'field') {
+    return (
+      <>
+        {requiredAsk && renderRequiredAsk(requiredAsk)}
+        <ConcurrentUpdateDialog
+          open={!!conflict}
+          conflict={conflict}
+          busy={conflictBusy}
+          onCancel={closeConflict}
+          onReload={handleConflictReload}
+          onOverwrite={handleConflictOverwrite}
+        />
+      </>
+    );
+  }
+
   const recordMessages =
     recordRefusal && recordRefusal.error === inline.error ? recordRefusal.messages : [];
 
@@ -819,7 +871,7 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
         <Button
           variant="default"
           size="sm"
-          onClick={handleSave}
+          onClick={() => void handleSave()}
           disabled={inline.saving || locked}
           className="h-11 gap-2 sm:h-9"
           title={locked ? lockedHint : undefined}

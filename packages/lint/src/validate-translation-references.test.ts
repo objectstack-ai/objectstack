@@ -2373,7 +2373,7 @@ describe('validateTranslationReferences — flow approval steps (`approvals.<nod
     expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.opportunity_approval.approvals.gate');
     expect(findings[0].message).toBe(
       'Translations are keyed to approval step "gate", which flow "opportunity_approval" declares as a ' +
-        '`decision` node, not an `approval`, so nothing resolves this key.',
+        '`decision` node, not an `approval`; its label is keyed `nodes.gate.label`.',
     );
     expect(findings[0].hint).toBe('Approval-step translations are keyed by the `id` of an `approval` node.');
   });
@@ -2426,10 +2426,103 @@ describe('validateTranslationReferences — flow approval steps (`approvals.<nod
     );
   });
 
-  it('control: a `screens` key over a non-approval, non-screen node keeps its own diagnosis', () => {
+  it('a `screens` key over a non-approval, non-screen node keeps its own diagnosis, pointed at `nodes`', () => {
     const findings = validateTranslationReferences(bundle({ opportunity_approval: { screens: { gate: { title: 'x' } } } }));
     expect(findings).toHaveLength(1);
-    expect(findings[0].message).toContain('declares as a `decision` node, not a `screen`');
+    expect(findings[0].message).toBe(
+      'Translations are keyed to screen "gate", which flow "opportunity_approval" declares as a `decision` node, ' +
+        'not a `screen`; its label is keyed `nodes.gate.label`.',
+    );
+  });
+});
+
+describe('validateTranslationReferences — flow node labels (`nodes.<node_id>.label`, ruling 7076440876)', () => {
+  /**
+   * The same measured HotCRM shape as the approval steps above: a start, a
+   * decision, a screen, an approval and a refusing end, plus a notify nested
+   * in a loop body (an ADR-0031 region), so every verdict below is judged
+   * against the same metadata and differs only in the bundle.
+   */
+  const nodeStack = {
+    flows: [
+      {
+        name: 'opportunity_approval',
+        type: 'autolaunched',
+        nodes: [
+          { id: 'start', type: 'start', label: 'Start' },
+          { id: 'gate', type: 'decision', label: 'High Value (> $500K)?' },
+          { id: 'collect', type: 'screen', label: 'Collect', config: { fields: [{ name: 'note' }] } },
+          {
+            id: 'manager_review',
+            type: 'approval',
+            label: 'Sales Manager Review',
+            config: { approvers: [{ type: 'manager' }] },
+          },
+          {
+            id: 'each_line',
+            type: 'loop',
+            label: 'Each line',
+            config: { collection: '{lines}', body: { nodes: [{ id: 'tell_owner', type: 'notify', label: 'Tell owner' }] } },
+          },
+          { id: 'refuse', type: 'end', label: 'Refused', config: { outcome: 'refused', message: 'Refused.' } },
+        ],
+      },
+    ],
+  };
+  const bundle = (flows: unknown) => ({ ...nodeStack, translations: [{ 'zh-CN': { flows } }] });
+
+  it('reports nothing for the label of a start, decision, end or nested node — and the other groups beside it', () => {
+    expect(
+      validateTranslationReferences(
+        bundle({
+          opportunity_approval: {
+            nodes: {
+              start: { label: '开始' },
+              gate: { label: '大额（> 50 万美元）？' },
+              each_line: { label: '逐行' },
+              tell_owner: { label: '通知负责人' },
+              refuse: { label: '已拒绝' },
+            },
+            screens: { collect: { title: '收集' } },
+            approvals: { manager_review: { label: '销售经理审核' } },
+            refusals: { refuse: { message: '已拒绝。' } },
+          },
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('points a `nodes` key over an `approval` node at its step label', () => {
+    const findings = validateTranslationReferences(bundle({ opportunity_approval: { nodes: { manager_review: { label: 'x' } } } }));
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [TRANSLATION_TARGET_UNKNOWN, 'error', 'translations[0]["zh-CN"].flows.opportunity_approval.nodes.manager_review'],
+    ]);
+    expect(findings[0].message).toBe(
+      'Translations are keyed to node "manager_review", which flow "opportunity_approval" declares as an ' +
+        '`approval` node; its step label is keyed `approvals.manager_review.label`.',
+    );
+  });
+
+  it('points a `nodes` key over a `screen` node at its heading', () => {
+    const findings = validateTranslationReferences(bundle({ opportunity_approval: { nodes: { collect: { label: 'x' } } } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toBe(
+      'Translations are keyed to node "collect", which flow "opportunity_approval" declares as a `screen` node; ' +
+        'its heading is keyed `screens.collect.title`.',
+    );
+  });
+
+  it('refuses a `nodes` key over an UNKNOWN node, with the nearest labelled node offered', () => {
+    const findings = validateTranslationReferences(bundle({ opportunity_approval: { nodes: { gaet: { label: 'x' } } } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.opportunity_approval.nodes.gaet');
+    expect(findings[0].message).toContain(
+      'Translations are keyed to node "gaet", which flow "opportunity_approval" does not declare, so its drawn ' +
+        'step keeps its authored label.',
+    );
+    expect(findings[0].message).toContain('Did you mean "gate"?');
+    expect(findings[0].hint).toBe("Node-label translations are keyed by a node's `id`, not its `label`.");
   });
 });
 
@@ -4705,6 +4798,10 @@ describe('[#22161] one-line verdicts — translation-target-unknown, translation
     '`screen` node; its heading is keyed',
     'declares no node for, so the step keeps',
     '`approval` node; its step label is keyed',
+    '`decision` node, not a `screen`; its label is keyed',
+    'not an `approval`; its label is keyed',
+    'so its drawn step keeps its authored label',
+    '`screen` node; its heading is keyed `screens.collect.title`',
     'is not a form view, so no title resolves this key',
     'Translations are keyed to parameter "',
     'does not declare in `outcomeMessages`',
