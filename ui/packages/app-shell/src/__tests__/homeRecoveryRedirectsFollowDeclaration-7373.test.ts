@@ -36,8 +36,8 @@
  *     agent;
  *   - `console/ai/__tests__/resolveCollapseToDockTarget.test.ts` — the dock
  *     landing on a cold deep link;
- *   - `views/studio-design/StudioDesignSurface.packageDeletionInference.test.tsx`
- *     — eviction when the edited package is deleted;
+ *   - `views/studio-design/StudioDesignSurface.backToApp-36501.test.tsx` — the
+ *     Studio top bar's 「Back to app」 when the package has no published app;
  *   - `apps/console/src/components/StudioRoute.test.tsx` — the `/studio` entry
  *     gate and the front door's wordmark;
  *   - `apps/console/src/pages/auth/__tests__/AcceptInvitationRoute.test.tsx` —
@@ -139,12 +139,13 @@ const RECOVERY_SITES: ReadonlyArray<{
     alsoReads: [
       'packages/app-shell/src/views/studio-design/StudioNavItemInspector.tsx',
       'packages/app-shell/src/views/studio-design/PackageSwitcher.tsx',
+      'packages/app-shell/src/views/studio-design/StudioBackToApp.tsx',
       'packages/app-shell/src/views/studio-design/InterfacesNavRail.tsx',
       'packages/app-shell/src/views/studio-design/AutomationsFlowRail.tsx',
       'packages/app-shell/src/views/studio-design/StudioPillarKit.tsx',
       'packages/app-shell/src/views/studio-design/DataPillarHelpers.tsx',
     ],
-    site: 'Studio: deleted-package eviction + header Home',
+    site: 'Studio: the header Back to app, with no app to name',
     expression: /const homePath = useHomePath\(\)/,
   },
   {

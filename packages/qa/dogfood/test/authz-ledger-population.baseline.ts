@@ -100,8 +100,8 @@ export const LEDGER_POPULATION_BASELINE: readonly string[] = [
   // `/keys` and `/share-links` (ADR-0138 D2: each domain's anonymous decision
   // moved to its first statement), and `/ui` and `/data` (ADR-0138 D2's second
   // slice: each domain's anonymous decision became its first statement).
-  // `/approvals/act` and `/webhooks/redeliver` were never enumerated here: they
-  // arrived classified. The other 9 domains are here.
+  // `/approvals/act`, `/webhooks/redeliver` and `/comments` (#36469) were
+  // never enumerated here: they arrived classified. The other 9 domains are here.
   'dispatcher-domain:route-ledger.ts:/.well-known/objectstack',
   'dispatcher-domain:route-ledger.ts:/ai',
   'dispatcher-domain:route-ledger.ts:/apps',

@@ -99,8 +99,8 @@ import {
 } from './flowGrouping.js';
 import { StudioRefusalStrip } from './StudioRefusalStrip.js';
 import { StudioNavItemInspector, StudioPicker } from './StudioNavItemInspector.js';
-import { PACKAGE_LIST_TOAST_ID, PackageSwitcher, STUDIO_LANDING_PATH } from './PackageSwitcher.js';
-import { StudioOpenApp, type StudioOpenAppTarget } from './StudioOpenApp.js';
+import { PACKAGE_LIST_TOAST_ID, STUDIO_LANDING_PATH } from './PackageSwitcher.js';
+import { StudioBackToApp, type StudioAppTarget } from './StudioBackToApp.js';
 import {
   ContributedNavRows,
   InterfacesNavContributionsContext,
@@ -219,7 +219,6 @@ import {
   Rocket,
   ChevronDown,
   Lock,
-  Home as HomeIcon,
   Shield,
   ShieldCheck,
   ShieldQuestion,
@@ -830,7 +829,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   const ensurePair = React.useCallback(async (): Promise<string> => (await ensurePairPackage()).packageId, [ensurePairPackage]);
   const baseLabel = pkgEntry?.id === packageId ? pkgEntry.name : (packageId ?? '');
 
-  // objectui#2600 — the header's pillar links, Home button and PackageSwitcher
+  // objectui#2600 — the header's pillar links and its 「‹ Back to app」 link
   // are pure SPA client navigation, so the editors' `beforeunload` guard never
   // fires; a dirty pillar unmounts silently and its unsaved edits are gone
   // (Access matrix cells, Interfaces nav). Each pillar mirrors its dirty state
@@ -1276,10 +1275,10 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
       ? { id: publishNoneReasonId, text: t('engine.studio.publishNoneTitle', locale), testId: 'publish-none-reason' }
       : null;
 
-  // Builder → running-app bridge (Airtable's Launch): the builder edits the
-  // package (the design surface), the app is its published front-end. If this
-  // package ships a published app, the header offers Open app (`StudioOpenApp`,
-  // objectstack#34593), in the same tab, mirroring the app bar's Edit app.
+  // Builder → running-app bridge: the builder edits the package (the design
+  // surface), the app is its published front-end. The header's way back to it
+  // is 「‹ Back to app」 at the left (`StudioBackToApp`, objectstack#36501), in
+  // the same tab, mirroring the app bar's Edit app.
   const shellNavigate = useNavigate();
   React.useEffect(() => {
     openAccessRef.current = () => {
@@ -1296,13 +1295,14 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // order: the Automations rail orders its groups by it. Read off the same
   // app row as `packageApp`, so the pillar adds no read of its own.
   const [packageAppObjectOrder, setPackageAppObjectOrder] = React.useState<readonly string[]>([]);
-  // objectstack#34593 — the package's PUBLISHED apps, the header's Open app
-  // targets: a draft app has no running front-end to open. Read off the same
-  // list as `packageApp`.
-  const [publishedApps, setPublishedApps] = React.useState<readonly StudioOpenAppTarget[]>([]);
+  // objectstack#36501 — the package's PUBLISHED apps, where the header's
+  // 「‹ Back to app」 goes when the author did not come from an app: a draft
+  // app has no running front-end to open. Read off the same list as
+  // `packageApp`.
+  const [publishedApps, setPublishedApps] = React.useState<readonly StudioAppTarget[]>([]);
   // Create app (package has no app yet): create a draft `app` item — the
-  // published front-end's on-ramp. The button flips to Open app after the
-  // package publish.
+  // published front-end's on-ramp. After the package publish, 「‹ Back to
+  // app」 names it.
   const [appCreating, setAppCreating] = React.useState(false);
   const [appBusy, setAppBusy] = React.useState(false);
   const [appErr, setAppErr] = React.useState<string | null>(null);
@@ -1642,37 +1642,24 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
 
         <div className="flex min-w-0 flex-1 flex-col">
           <header className={STUDIO_HEADER} data-testid="studio-shell-header">
-            {/* objectui#12459 — three columns: the package at the left, the
-                pillars centered, the package actions at the right.
+            {/* objectui#12459 — three columns: the way back to the app at the
+                left, the pillars centered, the package actions at the right.
                 objectui#12509 — below `sm` the pillars take a second row of
                 their own (`STUDIO_HEADER_PILLAR_NAV`), and on any row the
-                package chip is the piece that gives way. */}
+                app's name is the piece that gives way. */}
             <div className={cn('flex min-w-0 items-center gap-1', STUDIO_HEADER_PACKAGE_COLUMN)}>
-              {/* Never a dead end: walk back to the Studio landing
-                  (objectui#12513), where the author picks the next package.
-                  The console home stays one click away from there, through
-                  the landing's own top bar. */}
-              <button
-                type="button"
-                data-testid="studio-home"
-                onClick={() => {
-                  if (!confirmLeavePillar()) return;
-                  shellNavigate(STUDIO_LANDING_PATH);
-                }}
-                title={t('engine.studio.landingHome', locale)}
-                className={STUDIO_HEADER_ICON_BUTTON}
-              >
-                <HomeIcon className="h-4 w-4" />
-              </button>
-              <div className="flex min-w-0">
-                <PackageSwitcher
-                  packageId={packageId}
-                  tab={tab}
-                  beforeNavigate={confirmLeavePillar}
-                  app={packageApp}
-                  openEntry={pkgEntry?.id === packageId ? pkgEntry : null}
-                />
-              </div>
+              {/* objectstack#36501 — 「‹ Back to app」, the app's name and the
+                  Studio mark: Studio's one way out, to the app page the author
+                  came from. It replaced the Studio-home button, the package
+                  switcher and the top-right Open app; a different package is
+                  picked in the app, or on the Studio landing. */}
+              <StudioBackToApp
+                packageId={packageId}
+                apps={publishedApps}
+                locale={locale}
+                beforeNavigate={confirmLeavePillar}
+                navigate={shellNavigate}
+              />
             </div>
             <nav className={STUDIO_HEADER_PILLAR_NAV} data-testid="studio-pillar-nav">
               {/* objectui#11553 — the package-less scope offers its one pillar. */}
@@ -1718,20 +1705,6 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
               {/* objectstack#26708 — nothing to create, review or publish in a
                   package that is not there. */}
               {!pkgMissing && (<>
-              {/* objectstack#34593 — the way back to the running app, the
-                  mirror of the app bar's Edit app: it lands on the object (or
-                  interface) in focus, in the same tab. The canvas's Run mode
-                  stays the way to try the app without leaving the workbench.
-                  objectui#11553 — the package-less scope has no app. */}
-              {packageId !== null && (
-                <StudioOpenApp
-                  packageId={packageId}
-                  apps={publishedApps}
-                  locale={locale}
-                  beforeNavigate={confirmLeavePillar}
-                  navigate={shellNavigate}
-                />
-              )}
               {/* objectui#11553 — the package-less scope has no app to create. */}
               {packageId === null || packageApp ? null : appDraftPending ? (
                 <span

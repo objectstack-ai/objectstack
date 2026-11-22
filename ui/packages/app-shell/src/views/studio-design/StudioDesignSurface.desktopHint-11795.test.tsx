@@ -10,8 +10,11 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The surface's reach loads `@objectstack/lint` lazily; pay that load during
+// collection, not inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const PACKAGE_ID = 'app.b2r4';
@@ -119,9 +122,11 @@ describe('StudioDesignSurface — the one-line desktop hint on a phone (objectui
   it('the control: from `md` up, no hint', async () => {
     renderSurfaceAt(768);
 
-    await waitFor(() =>
-      expect(screen.getByTestId('studio-pkg-chip')).toHaveAttribute('data-pkg-list-state', 'loaded'),
-    );
+    // The header is up (its first control drawn), and the phone's line is not.
+    await screen.findByTestId('studio-back-to-app');
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
     expect(screen.queryByText(HINT)).toBeNull();
   });
 });
