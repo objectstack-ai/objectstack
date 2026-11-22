@@ -21,6 +21,7 @@ import {
   groupFieldOptions,
   isGroupableField,
   type ViewSettingsField,
+  type ViewSettingsKanban,
   PHONE_TOUCH_TARGET,
   useBelowSm,
 } from './components/ViewSettingsPopover';
@@ -445,6 +446,15 @@ export interface ListViewProps {
   initialSearchTerm?: string;
   /** Called when the user asks for a new record (toolbar "+ New" and the empty-state CTA). */
   onAddRecord?: () => void;
+  /**
+   * objectstack#36370 — the board's settings, changed in 视图设置 or in a
+   * lane's 「⋯」 menu: the keys of the view's `kanban` block that change (its
+   * lane field, lanes, card fields, card toggles and lane statistic), a key
+   * set to `null` leaving the block. The host holds them in the list's draft
+   * and hands the block back, changed, on `schema.kanban`. Absent ⇒ a board's
+   * settings are shown and not changed.
+   */
+  onKanbanChange?: (patch: Record<string, unknown>) => void;
   /** Called with a non-delete bulk action key and the currently selected rows. */
   onBulkAction?: (action: string, records: any[]) => void;
   /** Called when the user picks a different page size in the pager. */
@@ -1707,6 +1717,12 @@ function kanbanLaneFieldOf(schema: ListViewSchema, objectDef: unknown): string |
 }
 
 /**
+ * objectstack#36370 — the field types a board's lane statistic totals or
+ * averages: numbers, as the list footer offers `sum` and `avg` on them.
+ */
+const LANE_STATISTIC_FIELD_TYPES: ReadonlySet<string> = new Set(['number', 'currency', 'percent', 'integer']);
+
+/**
  * How many of the view's columns a card carries when the kanban block names
  * no card fields of its own (objectui#12619).
  */
@@ -2361,6 +2377,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   onHiddenFieldsChange,
   addedFields,
   onAddedFieldsChange,
+  // objectstack#36370 — by name, so it never rides the `{...props}` forward.
+  onKanbanChange,
   onColumnStateChange,
   onColumnSummaryPick,
   columnSummaryPickFields,
@@ -5485,7 +5503,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         // ObjectKanban's own `columns` prop is its LANES, so it goes out as
         // `cardFields` (mirrors plugin-view's adapter), and the block's `lanes`
         // goes out as that `columns`.
-        const { columns: kanbanCardColumns, titleField, summarizeField, lanes } = kanbanCfg as Record<string, any>;
+        const { columns: kanbanCardColumns, titleField, summarizeField, lanes, summary: laneStatistic, showFieldLabels, hideEmptyFields } = kanbanCfg as Record<string, any>;
         const laneField = kanbanLaneFieldOf(schema, objectDef);
         // objectstack#28211 — the block's `lanes`, the lanes the board draws
         // in the author's order, go out as the node's `columns` (its lanes).
@@ -5533,6 +5551,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           ...(groupingConfig ? { grouping: groupingConfig } : {}),
           // objectui#11629: the board sums this field at the top of each lane.
           ...(summarizeField ? { summarizeField } : {}),
+          // objectstack#36370 — the lane statistic at each lane's foot, and
+          // how a card draws its fields; each relayed only when the view says.
+          ...(laneStatistic && typeof laneStatistic === 'object' ? { summary: laneStatistic } : {}),
+          ...(typeof showFieldLabels === 'boolean' ? { showFieldLabels } : {}),
+          ...(typeof hideEmptyFields === 'boolean' ? { hideEmptyFields } : {}),
           // objectui#12619 — a board that pages its own lanes queries with the
           // EFFECTIVE filter, as every view that queries for itself does
           // (`selfQueryFilter`): the toolbar Filter and the chips reach its
@@ -7278,6 +7301,157 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               </Button>
             )) : null;
 
+  // objectstack#36370 — a board's own settings for 视图设置 and its lanes'
+  // 「⋯」 and 「+」: what the view's kanban block holds now (the host lays the
+  // list's draft over it), and the whole next block a change writes. Plain
+  // per-render values, not memos (AGENTS.md #10).
+  const kanbanBlock = currentView === 'kanban' ? kanbanBlockOf(schema) : undefined;
+  const boardLaneField = kanbanBlock ? kanbanLaneFieldOf(schema, objectDef) : undefined;
+  const writeKanban = kanbanBlock && onKanbanChange
+    ? (patch: Record<string, unknown>) => {
+        // `undefined` here is "the block without this key": `null` on the wire.
+        onKanbanChange!(Object.fromEntries(Object.entries(patch).map(([key, value]) => [key, value === undefined ? null : value])));
+      }
+    : undefined;
+  const boardLaneDef = boardLaneField
+    ? (objectDef?.fields as Record<string, { type?: unknown; options?: unknown } | undefined> | undefined)?.[boardLaneField]
+    : undefined;
+  // The lanes the lane field offers: its options, in their own order, under
+  // the labels the board draws. A field with no options (a person, a linked
+  // record) has its lanes from the data, and the panel lists none.
+  const boardLaneOptions: Array<{ value: string; label: string }> = (() => {
+    const raw = Array.isArray(boardLaneDef?.options) ? (boardLaneDef!.options as unknown[]) : [];
+    const translated = schema.objectName && boardLaneField ? translateOptions(schema.objectName, boardLaneField, raw as any[]) : raw;
+    return (translated as Array<{ value?: unknown; label?: unknown } | string>).flatMap((option) => {
+      const value = typeof option === 'string' ? option : option?.value;
+      if (typeof value !== 'string' || value === '') return [];
+      const label = typeof option === 'object' && typeof option?.label === 'string' && option.label ? option.label : value;
+      return [{ value, label }];
+    });
+  })();
+  const boardShownLanes: string[] = Array.isArray(kanbanBlock?.lanes) && kanbanBlock!.lanes.length > 0
+    ? (kanbanBlock!.lanes as unknown[]).filter((v): v is string => typeof v === 'string')
+    : boardLaneOptions.map((o) => o.value);
+  // `lanes` is written only while it differs from every option in its own
+  // order: the view with no `lanes` draws exactly that.
+  const writeShownLanes = writeKanban
+    ? (lanes: string[]) => {
+        if (lanes.length === 0) return;
+        const all = boardLaneOptions.map((o) => o.value);
+        writeKanban({ lanes: lanes.length === all.length && lanes.every((v, i) => v === all[i]) ? undefined : lanes });
+      }
+    : undefined;
+  const boardCardFields: string[] = Array.isArray(kanbanBlock?.columns) && kanbanBlock!.columns.length > 0
+    ? (kanbanBlock!.columns as unknown[]).filter((v): v is string => typeof v === 'string')
+    : kanbanBlock
+      ? kanbanCardFieldsFromView(effectiveFields, [
+          kanbanBlock.titleField,
+          resolveNameField(objectDef),
+          boardLaneField,
+          kanbanOwnerFieldOf(objectDef),
+        ])
+      : [];
+  // The fields a card may show: the object's fields the caller may read and
+  // the definition does not hide, business ones first, then the system ones.
+  const boardCardFieldCandidates: ViewSettingsField[] = (() => {
+    if (!kanbanBlock) return [];
+    const defs = objectDef?.fields as Record<string, { label?: string; hidden?: unknown; system?: boolean } | undefined> | undefined;
+    if (!defs) return boardCardFields.map((name) => ({ name, label: tFieldLabel(name, name) }));
+    const candidates = Object.entries(defs).filter(([name]) =>
+      !isDeclaredHidden(defs, name) && canReadField(perms, schema.objectName, name));
+    const out: ViewSettingsField[] = [];
+    for (const tier of [false, true]) {
+      for (const [name, def] of candidates) {
+        if (isSystemManagedField(name, def) !== tier) continue;
+        out.push({ name, label: tFieldLabel(name, def?.label || name) });
+      }
+    }
+    return out;
+  })();
+  // The lane statistic the board draws: the view's `summary`, else the sum
+  // of its `summarizeField` (objectui#11629), else none.
+  const boardLaneStatistic: { type: string; field?: string } | null = (() => {
+    const own = kanbanBlock?.summary as { type?: unknown; field?: unknown } | undefined;
+    if (own && typeof own.type === 'string') {
+      return own.type === 'none' ? null : { type: own.type, ...(typeof own.field === 'string' ? { field: own.field } : {}) };
+    }
+    return typeof kanbanBlock?.summarizeField === 'string' && kanbanBlock.summarizeField
+      ? { type: 'sum', field: kanbanBlock.summarizeField }
+      : null;
+  })();
+  // The fields a lane may total or average: the object's number fields the
+  // caller may read.
+  const boardNumberFields: Array<{ value: string; label: string }> = kanbanBlock
+    ? Object.entries((objectDef?.fields ?? {}) as Record<string, { type?: unknown; label?: string; hidden?: unknown } | undefined>)
+        .filter(([name, def]) =>
+          !!def && LANE_STATISTIC_FIELD_TYPES.has(String(def.type)) && def.hidden !== true
+          && canReadField(perms, schema.objectName, name))
+        .map(([name, def]) => ({ value: name, label: tFieldLabel(name, def?.label || name) }))
+    : [];
+  const kanbanSettings: ViewSettingsKanban | undefined = kanbanBlock
+    ? {
+        laneField: boardLaneField,
+        laneFieldOptions: groupOptions,
+        // A new lane field draws every lane it offers: the lanes chosen on the
+        // old field name none of its values.
+        onLaneFieldChange: writeKanban ? (field) => writeKanban({ groupByField: field, lanes: undefined }) : undefined,
+        lanes: boardLaneOptions,
+        shownLanes: boardShownLanes,
+        onShownLanesChange: writeShownLanes,
+        cardFields: boardCardFields,
+        cardFieldCandidates: boardCardFieldCandidates,
+        onCardFieldsChange: writeKanban ? (fields) => writeKanban({ columns: fields }) : undefined,
+        // Both default to on: what every board drew before the keys. Turning
+        // one back on writes no key (the view's absence is "on").
+        ...(writeKanban
+          ? {
+              showFieldLabels: {
+                value: kanbanBlock.showFieldLabels !== false,
+                onChange: (next: boolean) => writeKanban({ showFieldLabels: next ? undefined : false }),
+              },
+              hideEmptyFields: {
+                value: kanbanBlock.hideEmptyFields !== false,
+                onChange: (next: boolean) => writeKanban({ hideEmptyFields: next ? undefined : false }),
+              },
+            }
+          : {}),
+        summary: writeKanban
+          ? {
+              value: boardLaneStatistic,
+              numberFields: boardNumberFields,
+              // 「None」 over a view that sums `summarizeField` says so
+              // (`{ type: 'none' }`); over one that shows nothing, the key goes.
+              onChange: (next) => writeKanban({
+                summary: next ?? (kanbanBlock.summarizeField ? { type: 'none' } : undefined),
+              }),
+            }
+          : undefined,
+      }
+    : undefined;
+  // The lane header's 「⋯」 and 「+」 (objectstack#36370, `KanbanLaneMenu.ts` in
+  // plugin-kanban): hiding a lane is unticking it here; 「+」 opens the host's
+  // create form on a new record carrying the lane's value, as the calendar's
+  // empty-day hand-off does (`onEdit` with a record that has no id).
+  const boardLaneValue = (laneId: string): unknown => {
+    const type = typeof boardLaneDef?.type === 'string' ? boardLaneDef.type : undefined;
+    if (type === 'boolean' || type === 'toggle') return laneId === 'true' ? true : laneId === 'false' ? false : laneId;
+    return laneId;
+  };
+  const boardLaneMenu = kanbanBlock
+    ? {
+        collapseKey: schema.objectName ? `${schema.objectName}:${schema.id ?? ''}` : undefined,
+        onHideLane: writeShownLanes && boardLaneOptions.length > 0
+          ? (laneId: string) => {
+              if (!boardShownLanes.includes(laneId) || boardShownLanes.length <= 1) return;
+              writeShownLanes(boardShownLanes.filter((v) => v !== laneId));
+            }
+          : undefined,
+        onCreateInLane: props.onAddRecord && props.onEdit && boardLaneField
+          ? (laneId: string) => props.onEdit!({ [boardLaneField]: boardLaneValue(laneId) })
+          : undefined,
+      }
+    : undefined;
+
   // 视图设置's props, once: the desktop draws them as the popover beside the
   // view's name, the phone as the content of its bottom sheet
   // (objectstack#35883: a row of the view panel opens it there).
@@ -7285,6 +7459,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     <ViewSettingsPopover
       t={t as any}
       allFields={allFields as any}
+      kanban={kanbanSettings}
       fieldType={(name) => {
         const type = (objectDef?.fields as Record<string, { type?: unknown } | undefined> | undefined)?.[name]?.type;
         return typeof type === 'string' ? type : undefined;
@@ -8470,6 +8645,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               // objectstack#28461 — the board's open lanes and their cards, on
               // the board's host channel (a React prop, never a node key).
               ? { onRowGroupsChange: handleBoardRowGroups }
+              : {})}
+            {...(viewComponentSchema.type === 'object-kanban' && boardLaneMenu
+              // objectstack#36370 — the lane header's 「⋯」 and 「+」, on the
+              // board's host channel (a React prop, never a node key).
+              ? { laneMenu: boardLaneMenu }
               : {})}
             {...(viewComponentSchema.type === 'object-grid' && rowAdornment
               // objectui#13330 — the host's node beside each row's title, on
