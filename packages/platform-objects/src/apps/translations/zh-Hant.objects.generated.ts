@@ -328,6 +328,11 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      remove_user_manager: {
+        label: "移除經理",
+        confirmText: "要移除此使用者的經理嗎?在重新設定經理之前,此使用者不向任何人匯報;審批路由與 own_and_reports 記錄範圍會隨之變更。",
+        successMessage: "已移除經理"
+      },
       list_platform_admins: {
         label: "平台管理員",
         resultDialog: {

@@ -139,7 +139,9 @@ async function coverageAt(initialPath: string, ui: ReactNode) {
 /**
  * The invariant, phrased so a failure prints the reading that produced it.
  * `LoadingScreen` renders a full-viewport root (`div.h-screen.bg-background`),
- * which is what "covered" has to mean — a stray text node would not do.
+ * which is what "covered" has to mean — a stray text node would not do. On an
+ * app route after the session read the gates draw the console's boot frame
+ * instead (`[data-boot-shell]`, objectstack#35981), full-viewport too.
  */
 function expectCovered(reading: { covered: boolean; html: string }, site: string) {
   expect(
@@ -149,7 +151,9 @@ function expectCovered(reading: { covered: boolean; html: string }, site: string
       `flash. Hand off with RedirectWithSplash, not a bare <Navigate>.`,
   ).toBe(true);
   expect(
-    screen.getByTestId(APP_ROOT).querySelector('div.h-screen.bg-background'),
+    // objectstack#35981 — or the console's boot frame (`ConsoleBootShell`), which
+    // an app route draws after the session read: the full-viewport chrome frame.
+    screen.getByTestId(APP_ROOT).querySelector('div.h-screen.bg-background, [data-boot-shell]'),
     `${site}: something rendered, but not the full-viewport splash — the page ` +
       `background still shows around it.`,
   ).toBeTruthy();

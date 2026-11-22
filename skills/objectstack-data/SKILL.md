@@ -57,7 +57,7 @@ same literal goes inside `ObjectSchema.create({...})`):
 
 ```json
 { "name": "crm_account", "label": "Account", "pluralLabel": "Accounts", "icon": "building",
-  "sharingModel": "public_read_write",
+  "color": "blue", "sharingModel": "public_read_write",
   "fields": { "name": { "type": "text", "label": "Name", "required": true } } }
 ```
 
@@ -94,6 +94,7 @@ all (Relationship Patterns below).
 | `label` | Auto from `name` | Human-readable singular label |
 | `pluralLabel` | — | Plural form (e.g., "Accounts") — on 31/31 objects in the reference apps; author it alongside `label` |
 | `icon` | — | Icon name for nav, list headers and lookup pickers — on 31/31 objects in the reference apps |
+| `color` | `gray` | Tile colour, one of `gray` `blue` `teal` `green` `amber` `orange` `red` `pink` `purple` (no hex); the console draws `icon` white on it. Give every object one; avoid repeats in one app |
 | `highlightFields` | derived | Ordered field keys used as a record's compact face: the columns a **related list** renders on the parent's detail page, and what a lookup picker shows. Declare it on the CHILD object (see [Relationships](./rules/relationships.md)) |
 | `namespace` | — | **Not a schema key** — an unknown key is refused, so authoring it is a build error. Embed the prefix directly in `name` instead |
 | `datasource` | `'default'` | Target datasource ID for virtualized data |

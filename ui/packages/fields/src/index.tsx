@@ -2510,9 +2510,13 @@ function ReferencedRecordLink({
         className={cn('text-primary underline-offset-4 hover:underline', className)}
         // A host's list grid draws a referenced record as a small chip led by
         // the name's first letter (objectstack#35548); these say which link
-        // is one and what its letter is. Nothing else reads them.
+        // is one and what its letter is.
         data-record-link=""
         data-initial={recordLinkInitial(label)}
+        // The record the chip names: a select-first grid opens it in place on
+        // a single click when its host asks to (objectstack#36015).
+        data-record-object={objectName}
+        data-record-id={String(recordId)}
         onClick={(e) => {
           // The rows this cell sits in carry their own click handlers — the
           // detail row copies the field value, a related-list row opens ITS own
@@ -5398,6 +5402,10 @@ export * from './widgets/BooleanField.js';
 // highlights chip). `BooleanValueText` stays internal: its only caller is the
 // lookup column renderer in this package.
 export { useBooleanValueLabel, type BooleanValueLabel } from './widgets/booleanValueLabel.js';
+// objectstack#36070 — the up-to-two-character initials a person chip draws
+// when it has no avatar image (PersonRow, the people-field chips). Exported so
+// `@object-ui/plugin-detail`'s comment author avatar draws the same initials.
+export { getPersonInitials } from './widgets/personDisplay.js';
 export * from './widgets/SelectField.js';
 export * from './widgets/DateField.js';
 export * from './widgets/DateTimeField.js';

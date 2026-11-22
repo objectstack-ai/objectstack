@@ -632,7 +632,7 @@ interface RlsFilterOptions {
   /**
    * Drop the PLATFORM's own row-level write ownership floor
    * (`owner_only_writes` / `owner_only_deletes` — see
-   * `platform-ownership-policies.ts`) from Layer 1.
+   * `platform-ownership-policies.ts`) from Layer 1 where it is the OR's last term; beside an authored `using` term it stays one (#35917).
    *
    * Set only when `ISharingService.checkEdit` / `checkDelete` answered `allow`
    * for the row this filter is about to be enforced against — a positive basis
@@ -1249,15 +1249,23 @@ export { describeHighPrivilegeBits } from '@objectstack/spec/security';
  *    with `clause: 'check'` reads `using` for a policy that declares no
  *    `check`), OR-combined. This is the half that changed: those writes were
  *    unchecked, and a row outside every applicable `using` is now refused.
- * 3. **The platform's ownership floor takes part in case 2 exactly when the
- *    pre-image gate kept it** (`owner_only_writes`, recognised by provenance
- *    through {@link isPlatformOwnershipFloorPolicy}; `keepOwnershipFloor`).
- *    The by-id write gate lets a declared write authority replace the floor
- *    (an `allow` from the sharing service, a `public_read_write` OWD, a
- *    covering controlled-by-parent master gate). Each of those writes targets
- *    a row whose `created_by` is someone else, so the floor's `using` on the
- *    post-image would refuse them again one step later; there it stays out.
- *    Where the pre-image kept it, it stays in: an app-authored USING-only
+ * 3. **The platform's ownership floor takes part in case 2 unless a declared
+ *    write authority replaced it** (`owner_only_writes`, recognised by
+ *    provenance through {@link isPlatformOwnershipFloorPolicy};
+ *    `keepOwnershipFloor`). A `public_read_write` OWD or a covering
+ *    controlled-by-parent master gate replaces it outright. An `allow` from
+ *    the sharing service replaces it only where no applicable app-authored
+ *    policy carries a `using` (#35917): beside one, the floor stays an OR term
+ *    in the check as it does at the pre-image. A replaced floor stays out,
+ *    because each of those writes may target a row whose `created_by` is
+ *    someone else, and the floor's `using` on the post-image would refuse it
+ *    again one step later. The check asks the applicable policies before the
+ *    pre-image's field-existence pass 1, so the two can part where that pass
+ *    sets an authored policy aside without counting it (an `organization_id`
+ *    policy on a tenancy-disabled object): there the pre-image drops the floor
+ *    and the check keeps it, and a non-creator the row gate admits is refused
+ *    by the check, as on main.
+ *    Where the floor stays in: an app-authored USING-only
  *    update policy is a WIDENER OR-ed with the floor at the pre-image
  *    (`stage == 'prospecting'`: anyone may edit an open deal), and leaving
  *    the floor out of the check would turn that widener into a restriction on
@@ -2966,9 +2974,10 @@ export class SecurityPlugin implements Plugin {
    * two, and it is private to this package by design.
    *
    * **No second RLS evaluator.** The verdict is read off the SAME
-   * {@link computeLayeredRlsFilter} the middleware enforces with, driven by the
-   * SAME `dropPlatformOwnershipFloor` knob #6684 landed for the by-id write
-   * pre-image gate — the floor is removed by provenance, everything else
+   * {@link computeLayeredRlsFilter} the middleware enforces with. The floor is
+   * removed by provenance from the permission SETS before the call (since
+   * #35917 the `dropPlatformOwnershipFloor` knob keeps the floor beside an
+   * authored term, which is the case this probe exists for); everything else
    * compiles exactly as it would on the enforcement path. Two consequences
    * worth naming, because both are load-bearing:
    *

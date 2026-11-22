@@ -1,0 +1,8 @@
+{
+  "file": "packages/plugins/plugin-sharing/src/share-arm-boot.ts",
+  "adrs": [
+    "ADR-0111",
+    "ADR-0155"
+  ],
+  "invariant": "The two boot-time answers that land with the share-grant leaf (ADR-0155 plan step 6). R1 at boot: a host that registers an object-scoped middleware, or a beforeFind or afterFind hook, for sys_record_share BY NAME has its boot refused with D4's envelope (INTERNAL_ERROR / 500, fixedReadLeafRefusal) before any request is served; the class is kept whole, with no exemption for a registration that skips system reads, and a registration naming no object or '*' is outside it. The recognition is the engine's own (IObjectQLEngine.fixedReadLeafClassOf), never restated here. R2's report: every object whose storage cannot evaluate the leaf and that holds sys_record_share rows is named once at warn (ADR-0111 D10's visible trail); it never fails the boot."
+}

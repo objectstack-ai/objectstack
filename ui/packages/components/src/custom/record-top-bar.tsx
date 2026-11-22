@@ -98,6 +98,12 @@ export interface RecordTopBarProps {
   actionSlotRef?: React.Ref<HTMLSpanElement>;
   /** The panel switches (the right column's ⊟), after the step group. */
   toggles?: React.ReactNode;
+  /**
+   * The record's comment switch (objectstack#36075): the comments icon and its
+   * count, drawn before the record's button group. A host that hands nothing
+   * (feeds off, a page with its own discussion) draws nothing there.
+   */
+  comments?: React.ReactNode;
   /** The frame controls — ⤢ (a drawer), ✕ — at the right end. */
   frame?: React.ReactNode;
   /**
@@ -195,7 +201,7 @@ export function useRecordStepKeys(
  * The record's top bar (objectstack#27524, Target 7). See the module doc for
  * the anatomy; `data-record-top-bar` marks it on every face.
  */
-export function RecordTopBar({ leading, leadingTestId, stepper, actionSlotRef, toggles, frame, record, className }: RecordTopBarProps) {
+export function RecordTopBar({ leading, leadingTestId, stepper, actionSlotRef, toggles, comments, frame, record, className }: RecordTopBarProps) {
   const { t } = useTopBarTranslation();
   const position =
     stepper?.position && stepper.position.total > 0 && stepper.position.index >= 0 && stepper.position.index < stepper.position.total
@@ -285,6 +291,7 @@ export function RecordTopBar({ leading, leadingTestId, stepper, actionSlotRef, t
             {record}
           </div>
           <div className="flex min-w-0 shrink items-center justify-end gap-0.5" data-record-top-bar-controls="">
+            {comments}
             {actionSlotRef && (
               <>
                 <span
@@ -340,6 +347,7 @@ export function RecordTopBar({ leading, leadingTestId, stepper, actionSlotRef, t
             )}
           </>
         )}
+        {comments}
         {actionSlotRef && (
           <>
             <span

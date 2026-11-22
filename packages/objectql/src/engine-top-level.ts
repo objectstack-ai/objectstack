@@ -2544,9 +2544,10 @@ function withSummaryRollUpsReadonly(schema: unknown): unknown {
  *
  * On create the taken value is replaced by the empty-child-list seed
  * (`initializeSummaryFields`, re-run by `staticReadonlyCreateStrip`): `0`
- * for `count` / `sum`, nothing for `min` / `max` / `avg`. Seed loads,
- * package installs and historical imports write as the system principal and
- * keep a pre-computed total. The `summary` note on
+ * for `count` / `sum`, nothing for `min` / `max` / `avg`. Historical imports
+ * write as the system principal and keep a pre-computed total; a seed load (a
+ * package install's too) never sends one, because the seed loader takes a
+ * seed record's roll-up value out before the write (#35655). The `summary` note on
  * `RUNTIME_OWNED_FIELD_TYPES` in `validation/rule-validator.ts` says why the
  * type rides this strip and not the runtime-owned one.
  *

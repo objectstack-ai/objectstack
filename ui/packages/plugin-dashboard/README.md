@@ -493,6 +493,16 @@ Notes:
   query time, so widgets resolve them exactly like hand-authored filters.
 - Dataset-bound widgets receive the merged filter through the dataset
   query's `runtimeFilter`.
+- A `select` / `lookup` filter bound to a field that holds several values
+  (`multiple: true`, or a `multiselect` / `checkboxes` / `tags` field) is sent
+  as `$contains`, one member per condition and `$or` for any of several,
+  because the server refuses `=` / `$in` on such a field. The dashboard reads
+  the field's definition first: a dataset-bound widget's base object through
+  the data source's optional `getDataset`, a `provider: 'object'` widget's own
+  object, each through `getObjectSchema`. The widget's query waits for that
+  answer. When the definition cannot be read (a data source without
+  `getDataset`, a dataset the server does not serve), the filter is sent as
+  `=` / `$in` and a console warning names it.
 - Filter values are also readable in widget expressions as `page.<name>`
   (e.g. `page.region`), since they are hosted as dashboard variables.
 - `optionsFrom` resolves distinct option values server-side (a dataset

@@ -60,6 +60,43 @@ export interface DiscussionContextValue {
    * nothing was deleted.
    */
   onDeleteComment?: (itemId: string | number) => void | Promise<void>;
+  /**
+   * Resolve (`true`) or reopen (`false`) the thread of a top-level comment
+   * (objectstack#36071, #36075, #36186). The comment panel draws it on every
+   * top-level row whose `resolved` the host set, the viewer's own and anyone
+   * else's: the host hands it over only where its write admits every thread
+   * the viewer can read (the platform's resolution door,
+   * `PUT /api/v1/comments/:id/resolution`). A rejection means nothing changed.
+   */
+  onResolveComment?: (itemId: string | number, resolved: boolean) => void | Promise<void>;
+  /**
+   * The viewer may edit and delete OTHER people's comments on this record
+   * (objectstack#36075 item 6): the server admits a comment's author or a user
+   * whose by-id update of the record is admitted. `true` only on a definite
+   * allow; absent or `false`, the panel offers Edit and Delete on the viewer's
+   * own comments alone. The handlers still come from `onEditComment` /
+   * `onDeleteComment`.
+   */
+  moderatesComments?: boolean;
+  /**
+   * The server admits the viewer's update of a comment they did NOT write
+   * (objectstack#36075): the platform's row floor lets most members update
+   * only the rows they created, before any comment rule is asked. `true` only
+   * on a definite allow; absent or `false`, the panel offers Edit on the
+   * viewer's own rows alone. Edit on others' comments also needs
+   * {@link moderatesComments}; ✓ and Delete do not read this.
+   */
+  updatesOthersComments?: boolean;
+  /**
+   * The viewer's Delete removes only their own comments, and only one nobody
+   * replied under (objectstack#36191): the host's {@link onDeleteComment}
+   * goes through the platform's own-comment delete door
+   * (`DELETE /api/v1/comments/:id`), because the viewer holds no `delete`
+   * grant on `sys_comment`. `true`: Delete is offered on the viewer's own
+   * comments that have no reply, and on nobody else's, whatever
+   * {@link moderatesComments} says. Absent or `false`: as before.
+   */
+  ownCommentDeletesOnly?: boolean;
   /** Optional list of users (or any mentionable entities) the comment
    *  input can suggest after the user types `@`. When omitted the input
    *  falls back to free-text @-mentions without autocompletion. */
@@ -124,6 +161,10 @@ export const DiscussionContextProvider: React.FC<DiscussionContextProviderProps>
     value.onToggleReaction,
     value.onEditComment,
     value.onDeleteComment,
+    value.onResolveComment,
+    value.moderatesComments,
+    value.updatesOthersComments,
+    value.ownCommentDeletesOnly,
     value.mentionSuggestions,
     value.onMentionSuggestionsWanted,
     value.onUploadAttachments,

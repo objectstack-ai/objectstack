@@ -398,13 +398,21 @@ object and the view does not declare `userActions.editInline: false`, and
 
 - **A click selects** a cell (a ring around it); it neither edits nor opens the
   record. Only the name link keeps its own click (it opens the record). Every
-  other link a cell draws (an email, a phone number, a URL, a file, a lookup or
-  user chip, an image thumbnail) is selected by a click too (objectstack#36015);
-  to open it, Ctrl/Cmd-click it, press the **Open** button the selected cell
-  shows on hover, or press Ctrl/Cmd+Enter. A cell of several chips opens the
-  first one that way. The email and phone cells draw no copy button here:
-  Ctrl/Cmd+C copies the selected cell. On a touch screen a tap opens the
-  record.
+  other link a cell draws (an email, a phone number, a URL, a file, a user
+  chip, an image thumbnail, and a lookup chip unless the host opens it in
+  place, below) is selected by a click too (objectstack#36015); to open it,
+  Ctrl/Cmd-click it, press the **Open** button the selected cell shows on
+  hover, or press Ctrl/Cmd+Enter. A cell of several chips opens the first one
+  that way. The email and phone cells draw no copy button here: Ctrl/Cmd+C
+  copies the selected cell. On a touch screen a tap opens the record.
+- **A lookup chip opens its record in place** when the host passes
+  `openReferencedRecord` (the console's list page opens it in the side drawer,
+  over the list): a single click on the chip opens that record, a click beside
+  it selects the cell, and Ctrl/Cmd+Enter opens the first chip the same way. A
+  lookup cell draws an **Edit** (pencil) button on hover and while selected,
+  which opens its editor; it is not drawn when the cell cannot be edited, and
+  it takes the place of the **Open** button. A chip naming a person (a lookup
+  to `sys_user`) keeps the click-selects behaviour above.
 - **A cut-off value shows in full** when its cell is selected: a long text, a
   multi-line text or a list of tags that the column truncates opens on a
   layer over the cell, wrapped, scrolling inside past a few lines. Escape, an

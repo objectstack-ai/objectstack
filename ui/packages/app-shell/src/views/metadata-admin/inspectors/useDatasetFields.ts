@@ -48,6 +48,12 @@ export interface DatasetFieldOption {
   label: string;
   /** Raw framework field type (e.g. 'text', 'currency', 'lookup'). */
   type?: string;
+  /**
+   * `true` when the field is declared `multiple: true` (its value is a list).
+   * Read by the filter rows: with the type it decides which operators they
+   * offer. Absent otherwise.
+   */
+  multiple?: boolean;
   /** Group heading: the base object label, or `rel → target`. */
   group: string;
 }
@@ -183,7 +189,7 @@ export function fieldTypeToDimensionType(type: string | undefined): string {
 
 export interface NormalizedObject {
   label: string;
-  fields: Array<{ name: string; label: string; type?: string; def: Record<string, unknown> }>;
+  fields: Array<{ name: string; label: string; type?: string; multiple?: boolean; def: Record<string, unknown> }>;
   relationships: DatasetRelationship[];
 }
 
@@ -195,6 +201,7 @@ export function normalizeObject(doc: Record<string, unknown> | null | undefined,
     name: e.name,
     label: resolveLabel(e.def.label, e.name),
     type: typeof e.def.type === 'string' ? (e.def.type as string) : undefined,
+    ...(e.def.multiple === true ? { multiple: true } : {}),
     def: e.def,
   }));
   const relationships: DatasetRelationship[] = fields
@@ -241,6 +248,7 @@ export function buildFieldOptions(
     value: f.name,
     label: f.label,
     type: f.type,
+    ...(f.multiple ? { multiple: true } : {}),
     group: base.label,
   }));
   for (const path of include) {
@@ -248,7 +256,7 @@ export function buildFieldOptions(
     if (!resolved) continue;
     const heading = [...resolved.labels, resolved.target.label].join(' → ');
     for (const f of resolved.target.fields) {
-      options.push({ value: `${path}.${f.name}`, label: f.label, type: f.type, group: heading });
+      options.push({ value: `${path}.${f.name}`, label: f.label, type: f.type, ...(f.multiple ? { multiple: true } : {}), group: heading });
     }
   }
   return options;

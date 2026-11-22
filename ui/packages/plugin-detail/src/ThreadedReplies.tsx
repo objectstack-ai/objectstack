@@ -13,6 +13,7 @@ import type { FeedItem } from '@object-ui/types';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { useDetailTranslation } from './useDetailTranslation';
 import { CommentBody } from './CommentAuthorControls';
+import { CommentAuthorAvatar } from './CommentAuthorAvatar';
 
 export interface ThreadedRepliesProps {
   /** Parent feed item (root comment) */
@@ -23,6 +24,14 @@ export interface ThreadedRepliesProps {
   onAddReply?: (parentId: string | number, text: string) => void | Promise<void>;
   /** Whether to show the reply input */
   showReplyInput?: boolean;
+  /**
+   * Put the caret in the reply input each time it opens (objectstack#36070):
+   * the host that shows the input behind its own Reply button passes `true`, so
+   * the reader types straight into the reply. Opening it also expands the
+   * replies first, when they were collapsed. Off by default: a host that
+   * always shows the input must not have every thread pull focus on mount.
+   */
+  focusReplyOnOpen?: boolean;
   /**
    * Stores a new text for a reply the viewer wrote (objectui#12268): a reply
    * is a comment too, and offers its author the same Edit as a root comment,
@@ -68,6 +77,7 @@ export const ThreadedReplies: React.FC<ThreadedRepliesProps> = ({
   replies,
   onAddReply,
   showReplyInput = true,
+  focusReplyOnOpen = false,
   onEditComment,
   onDeleteComment,
   className,
@@ -78,6 +88,19 @@ export const ThreadedReplies: React.FC<ThreadedRepliesProps> = ({
   const [expanded, setExpanded] = React.useState(false);
   const [replyText, setReplyText] = React.useState('');
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const replyInputRef = React.useRef<HTMLInputElement>(null);
+  const inputShown = showReplyInput && !!onAddReply;
+  // Each opening of the input (mount included) expands the replies during
+  // that render, then the effect puts the caret in the input it drew.
+  const opensFocused = focusReplyOnOpen && inputShown;
+  const [wasOpenFocused, setWasOpenFocused] = React.useState(false);
+  if (opensFocused !== wasOpenFocused) {
+    setWasOpenFocused(opensFocused);
+    if (opensFocused) setExpanded(true);
+  }
+  React.useEffect(() => {
+    if (opensFocused) replyInputRef.current?.focus();
+  }, [opensFocused]);
 
   const handleSubmitReply = React.useCallback(async () => {
     const text = replyText.trim();
@@ -132,31 +155,19 @@ export const ThreadedReplies: React.FC<ThreadedRepliesProps> = ({
         <div className="space-y-2 border-l-2 border-border pl-3">
           {replies.map((reply) => (
             <div key={reply.id} className="flex gap-2">
-              <div className="shrink-0">
-                {reply.actorAvatarUrl ? (
-                  <img
-                    src={reply.actorAvatarUrl}
-                    alt={reply.actor}
-                    className="h-6 w-6 rounded-full object-cover"
-                  />
-                ) : (
-                  <div className="h-6 w-6 rounded-full bg-muted flex items-center justify-center text-[10px] font-medium text-muted-foreground">
-                    {reply.actor.charAt(0).toUpperCase()}
-                  </div>
-                )}
-              </div>
+              <CommentAuthorAvatar name={reply.actor} avatarUrl={reply.actorAvatarUrl} />
               <div className="flex-1 min-w-0">
                 {/* Wraps between pieces; the time never breaks inside
                     (objectstack#34614), as on the entry it replies to. */}
                 <div className="flex flex-wrap items-center gap-x-1.5">
                   <span className="text-xs font-medium">{reply.actor}</span>
-                  <span className="text-[10px] text-muted-foreground whitespace-nowrap" data-feed-when="">
+                  <span className="text-xs text-muted-foreground whitespace-nowrap" data-feed-when="">
                     {formatTimestamp(reply.createdAt, t, displayLocale)}
                   </span>
                   {/* A reply edited by its author reads as edited, as a root
                       comment does (objectui#12268). */}
                   {reply.edited && (
-                    <span className="text-[10px] text-muted-foreground italic">{t('detail.edited')}</span>
+                    <span className="text-xs text-muted-foreground italic">{t('detail.edited')}</span>
                   )}
                 </div>
                 <CommentBody
@@ -172,9 +183,10 @@ export const ThreadedReplies: React.FC<ThreadedRepliesProps> = ({
       )}
 
       {/* Reply input */}
-      {showReplyInput && onAddReply && (
+      {inputShown && (
         <div className="flex gap-1.5 mt-1.5">
           <input
+            ref={replyInputRef}
             className="flex-1 rounded-md border border-input bg-background px-2 py-1 text-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             placeholder={t('detail.replyPlaceholder')}
             value={replyText}

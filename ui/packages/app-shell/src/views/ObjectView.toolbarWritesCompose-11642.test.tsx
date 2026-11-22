@@ -121,6 +121,9 @@ vi.mock('@object-ui/plugin-list', async (importOriginal) => ({
 }));
 
 import { toast } from 'sonner';
+// `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 
@@ -325,12 +328,11 @@ afterEach(() => {
 describe('objectui#11642 — two toolbar changes in one session both survive a reload, on every row kind', () => {
   /**
    * objectui#12474 — the density and the hidden fields are the USER's own
-   * list state now (`listPrefs`, beside the sort and the column layout), so
-   * neither change writes the view on any row kind: each row is left exactly
-   * as stored, and the reload shows both changes from the user's state. This
-   * harness mounts no preference provider, so that state is this browser's
-   * (the provider-less fallback); the cross-device half is
-   * `ObjectView.userListState-12418.test.tsx`'s.
+   * now, so neither change writes the view on any row kind: each row is left
+   * exactly as stored, and the reload shows both changes. Since
+   * objectstack#35955 the density is the reader's layout in this browser
+   * (`./listLayoutStore.ts`) and the hidden fields are the list's draft; the
+   * rest is `ObjectView.userListState-12418.test.tsx`'s.
    */
   async function bothSurviveWithNoViewWrite(seed: Record<string, any>, viewId: string) {
     const { meta, rows } = makeStore([seed]);
@@ -364,5 +366,5 @@ describe('objectui#11642 — two toolbar changes in one session both survive a r
 // own write queue (a 300 ms debounce, then each PUT waiting for the previous
 // one). Since objectui#12474 no list toolbar control reached that function, and
 // objectui#12504 retired it, so there is no toolbar write left to queue; the
-// user's state has its own debounce, pinned by
+// reader's layout is written to this browser at once, pinned by
 // `ObjectView.userListState-12418.test.tsx`.

@@ -164,6 +164,8 @@ const SLOT_FILES = [
     'recycle-bin-routes.ts',
     // [ADR-0158 U7 R1] The unit code backfill door, the record-currency one's twin (the NINTH consumer).
     'meta-unit-code-backfill-route.ts',
+    // [#35402] The Change Owner doors, single and bulk (the TENTH consumer).
+    'change-owner-routes.ts',
 ] as const;
 const SOURCES = new Map<string, string>(SLOT_FILES.map((file) => [
     file, file === 'rest-server.ts' ? SOURCE : readFileSync(resolve(HERE, file), 'utf8'),
@@ -245,12 +247,13 @@ describe('[#18546] §1 the `objectQLProvider` consumer census is mechanical', ()
         // `meta-record-currency-backfill-route.ts`. [#30237] 8: the recycle
         // bin's doors, one site in `recycle-bin-routes.ts` shared by all four.
         // [ADR-0158 U7 R1] 9: the unit code backfill door, its one site in
-        // `meta-unit-code-backfill-route.ts`.
+        // `meta-unit-code-backfill-route.ts`. [#35402] 10: the Change Owner
+        // doors, one site in `change-owner-routes.ts` shared by both routes.
         const sites = censusInvocationSites('objectQLProvider');
         // The message carries the sites, so a failure here hands the next
         // reader the new census instead of a bare number.
         expect(sites.map((s) => `${s.file}:${s.line}: ${s.text}`).join('\n')).toBeTruthy();
-        expect(sites).toHaveLength(9);
+        expect(sites).toHaveLength(10);
     });
 
     it('⭐ [#18559] ALL FIVE consumers reach the slot through `wiredEngineOrLoud` — none reads it directly', () => {
@@ -266,7 +269,7 @@ describe('[#18546] §1 the `objectQLProvider` consumer census is mechanical', ()
         // the site rather than a bare number.
         expect(direct.map((s) => `${s.file}:${s.line}: ${s.text}`).join('\n')).toBe('');
         expect(direct).toHaveLength(0);
-        expect(viaSeam).toHaveLength(9);
+        expect(viaSeam).toHaveLength(10);
 
         // ⭐ CONTROL for the window predicate itself, on BOTH axes. It reads a
         // WINDOW of source text, so "3 of 3" is only a reading if the same
