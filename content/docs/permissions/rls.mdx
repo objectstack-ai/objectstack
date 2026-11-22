@@ -84,9 +84,10 @@ does not take away a row the floor admits (one the caller created), whether
 or not record sharing replaces the floor for that row. Two exceptions: on an
 object whose org-wide default is `public_read_write`, an `update` has no floor,
 so an authored `update` policy is the whole scope and does refuse the caller's
-own non-matching row; and on a `controlled_by_parent` detail, a by-id write is
+own non-matching row; and on a `controlled_by_parent` detail, a write is
 judged by its master gate instead of the floor, so a detail policy bounds every
-detail row written by id (a predicate write on a detail keeps the floor). To cap what a caller
+detail row written, by id or by predicate (a write made on another user's
+behalf keeps the floor). To cap what a caller
 may do to rows they created, use a `check` (it judges the stored image) or a
 `beforeUpdate` / `beforeDelete` lifecycle hook (it sees the prior row as
 `ctx.previous`). Nothing is derived for `insert`

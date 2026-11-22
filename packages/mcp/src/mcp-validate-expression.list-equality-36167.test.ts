@@ -163,6 +163,24 @@ describe('validate_expression — list-equality on a multiple: true field (#3616
     }
   });
 
+  it('flow_condition: the bare rewrite is parenthesised whole and reads ok itself', async () => {
+    const [refused] = listEquality(await validate(stdioBridge(), "record.stage == 'b' && picks != 'a'", 'flow_condition'));
+    expect(refused!.params?.rewrite).toBe('(picks == null || !("a" in picks))');
+    const r = await validate(stdioBridge(), `record.stage == 'b' && ${refused!.params?.rewrite as string}`, 'flow_condition');
+    expect(listEquality(r)).toEqual([]);
+  });
+
+  // A flow no record write fires runs on what its entrance handed it: `picks`
+  // is not proven to be the field there, so `picks == 'a'` can be correct.
+  it.each(['api', 'schedule', 'none'] as const)(
+    'CONTROL — flow_condition with triggerKind %s: neither the bare nor the record. read is judged',
+    async (triggerKind) => {
+      for (const expression of ["picks == 'a'", "record.picks == 'a'"]) {
+        expect(listEquality(await validate(stdioBridge(), expression, 'flow_condition', { triggerKind }))).toEqual([]);
+      }
+    },
+  );
+
   it('CONTROL — flow_condition: a bare name a declared variable holds is not the field; without the member, as before', async () => {
     const variables = [{ name: 'picks', type: 'text' }];
     expect(listEquality(await validate(stdioBridge(), "picks == 'a'", 'flow_condition', { variables }))).toEqual([]);

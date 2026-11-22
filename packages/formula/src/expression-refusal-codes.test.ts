@@ -854,12 +854,13 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         operator: '==',
         operand: '"frontend"',
         answer: 'false',
-        rewrite: 'record.labels != null && "frontend" in record.labels',
+        rewrite: '(has(record.labels) && record.labels != null && "frontend" in record.labels)',
       },
       message:
         'list compared with a scalar — `record.labels` holds a list (a multi-value field), and `==` compares the whole ' +
         'list with `"frontend"`, so the expression answers `false` on every row whatever the list holds: the condition ' +
-        'never changes. Test membership with `in`: write `record.labels != null && "frontend" in record.labels`. ' +
+        'never changes. Test membership with `in`: write ' +
+        '`(has(record.labels) && record.labels != null && "frontend" in record.labels)`. ' +
         'To test whether the list is set, compare it with `null`.',
     },
     {
@@ -875,13 +876,61 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         operator: '!=',
         operand: '"u1"',
         answer: 'true',
-        rewrite: 'previous.owners == null || !("u1" in previous.owners)',
+        rewrite: '(!has(previous.owners) || previous.owners == null || !("u1" in previous.owners))',
       },
       message:
         'list compared with a scalar — `previous.owners` holds a list (a multi-value field), and `!=` compares the whole ' +
         'list with `"u1"`, so the expression answers `true` on every row whatever the list holds: the condition ' +
-        'never changes. Test membership with `in`: write `previous.owners == null || !("u1" in previous.owners)`. ' +
+        'never changes. Test membership with `in`: write ' +
+        '`(!has(previous.owners) || previous.owners == null || !("u1" in previous.owners))`. ' +
         'To test whether the list is set, compare it with `null`.',
+    },
+    {
+      // A bare field name at a flattened site proven to bind the typed row.
+      produce: () =>
+        onlyError('predicate', "owners != 'u1'", {
+          scope: 'flattened',
+          faultOutcome: 'run-fails',
+          fields: ['owners'],
+          fieldTypes: { owners: 'user' },
+          multiValueFields: ['owners'],
+        }),
+      params: {
+        reference: 'owners',
+        operator: '!=',
+        operand: '"u1"',
+        answer: 'true',
+        rewrite: '(owners == null || !("u1" in owners))',
+      },
+      message:
+        'list compared with a scalar — `owners` holds a list (a multi-value field), and `!=` compares the whole ' +
+        'list with `"u1"`, so the expression answers `true` on every row whatever the list holds: the condition ' +
+        'never changes. Test membership with `in`: write `(owners == null || !("u1" in owners))`. ' +
+        'To test whether the list is set, compare it with `null`.',
+    },
+    {
+      // A source compiled to a query filter (a sharing rule's condition).
+      produce: () =>
+        onlyError('predicate', "record.labels == 'frontend'", {
+          scope: 'record',
+          filterCompiled: true,
+          fields: ['labels'],
+          fieldTypes: { labels: 'multiselect' },
+        }),
+      params: {
+        reference: 'record.labels',
+        operator: '==',
+        operand: '"frontend"',
+        answer: 'false',
+        rewrite: '(record.labels != null && record.labels.contains("frontend"))',
+      },
+      message:
+        'list compared with a scalar — `record.labels` holds a list (a multi-value field), and `==` compares the whole ' +
+        'list with `"frontend"`: as CEL it answers `false` on every row, and this condition compiles to a query ' +
+        'filter, where `==` against a list column is refused, so it never tests membership. Test membership with ' +
+        '`contains`, which compiles to a membership filter: write ' +
+        '`(record.labels != null && record.labels.contains("frontend"))`. To test whether the list is set, compare ' +
+        'it with `null`.',
     },
   ],
   'empty-expression': [
