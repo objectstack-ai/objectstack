@@ -292,8 +292,8 @@ export function buildSaveAsViewSpec(
  * objectstack#36408 — this page's own list defaults, for `ListView`'s
  * `viewDefaults`: no sort and no grouping (the page has no view to declare
  * either), the hidden fields and row height its `schema` never sets. The
- * sort and grouping `schema` carries are the address's, so the list's
- * 「Reset to default」 returns to these rather than to the address's.
+ * sort and grouping `schema` carries are the address's, never a default the
+ * list should offer to return to.
  */
 const DATA_PAGE_LIST_DEFAULTS = { hiddenFields: undefined, rowHeight: undefined, sort: undefined, grouping: undefined };
 
@@ -393,13 +393,19 @@ export function ObjectDataPage({ dataSource, objects }: any) {
    */
   const [listGeneration, setListGeneration] = React.useState(0);
   const listResetPendingRef = React.useRef(false);
-  const listSeedRef = React.useRef<{ key: string; state: ListUrlState; refusedPanelFilter?: boolean } | undefined>(undefined);
+  const listSeedRef = React.useRef<{
+    key: string;
+    state: ListUrlState;
+    /** Taken by a 「Reset」, which wrote the address itself. */
+    reset?: boolean;
+    refusedPanelFilter?: boolean;
+  } | undefined>(undefined);
   const listSeedKey = objectDef ? `${objectDef.name}~${listGeneration}` : undefined;
   if (objectDef && listSeedKey && listSeedRef.current?.key !== listSeedKey) {
     const reset = listResetPendingRef.current;
     listResetPendingRef.current = false;
     if (reset) {
-      listSeedRef.current = { key: listSeedKey, state: {} };
+      listSeedRef.current = { key: listSeedKey, state: {}, reset: true };
     } else {
       const acceptField: ListUrlFieldGate = (field: string) =>
         !!objectDef.fields?.[field]
@@ -414,7 +420,11 @@ export function ObjectDataPage({ dataSource, objects }: any) {
   const listSeed = listSeedRef.current?.key === listSeedKey ? listSeedRef.current?.state : undefined;
   React.useEffect(() => {
     const seed = listSeedRef.current;
-    if (!seed || seed.key !== listSeedKey) return;
+    // A 「Reset」's seed writes nothing: the reset already cleared the
+    // address, and the location this render read may still be the one before
+    // it (the router commits a navigation in a transition), so a write from
+    // it would put the cleared conditions back.
+    if (!seed || seed.key !== listSeedKey || seed.reset) return;
     const next = applyListStateParams(searchParams, {
       filters: seed.state.filters ?? null,
       search: seed.state.search ?? null,
@@ -1062,7 +1072,8 @@ export function ObjectDataPage({ dataSource, objects }: any) {
             // grouping: opened from the address, and every change written
             // back to it (replace). `schema` carries the address's sort and
             // grouping, so this page's own defaults — no sort, no grouping —
-            // are handed apart, for the list's 「Reset to default」.
+            // are handed apart: the address's sort is no default this page
+            // declares (the list draws no 「Reset to default」 for it).
             initialSearchTerm={listSeed?.search}
             initialFilters={listSeed?.filters}
             viewDefaults={DATA_PAGE_LIST_DEFAULTS}
