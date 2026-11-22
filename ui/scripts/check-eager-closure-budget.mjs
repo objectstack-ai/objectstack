@@ -2488,7 +2488,7 @@ export const PER_CHUNK_GZIP_CEILINGS = Object.freeze({
   // REGRESSION_THIS_GATE_MUST_CATCH_BYTES and the other per-chunk rows. No
   // exemption was added and no import was made lazy.
   //
-  // ⭐ LOWERED (2026-11-22), from 451,100 by 5,960 bytes, to 445,140, by
+  // ⭐ LOWERED (2026-11-22), from 451,100 by 5,956 bytes, to 445,144, by
   // objectstack#36102, the follow-up ruling 7063116595 names (GridField out of
   // the eager chunk; seat note 7064483594 on that card, on ruling 7063869131:
   // lower the ceiling and baseline by the bytes taken out, no more). Its
@@ -2498,22 +2498,22 @@ export const PER_CHUNK_GZIP_CEILINGS = Object.freeze({
   // WHAT THE BYTES ARE — one container, one instrument: `CI=true pnpm exec
   // turbo run build --filter=@object-ui/console...`, reading
   // `apps/console/dist/eager-closure.json`, twice on one tree: `main` at
-  // `b3bcfefc` alone, then the same `main` with this change (`4ca78ed1`, the
-  // branch head, whose only console build inputs are this change). Gzipped
-  // bytes:
+  // `b3bcfefc` alone, then the same `main` with this change (`3c422050`, a
+  // branch commit on that base; the branch's later commits change no emitted
+  // byte of the eager closure). Gzipped bytes:
   //
-  //   | chunk                 | `b3bcfefc` | `4ca78ed1` |  delta |
+  //   | chunk                 | `b3bcfefc` | `3c422050` |  delta |
   //   |-----------------------|-----------:|-----------:|-------:|
   //   | `vendor-objectstack`  |    674,662 |    674,662 |      0 |
   //   | `i18n-locale-en`      |     66,785 |     66,785 |      0 |
   //   | `framework`           |     88,559 |     88,559 |      0 |
-  //   | `ui-components`       |    352,359 |    346,399 | −5,960 |
-  //   | ⇒ aggregate           |  1,875,902 |  1,870,022 | −5,880 |
+  //   | `ui-components`       |    352,359 |    346,403 | −5,956 |
+  //   | ⇒ aggregate           |  1,875,902 |  1,869,974 | −5,928 |
   //
   // The same 105 eager chunks by name in both builds (2,577 -> 2,578 chunks in
   // all: the new one is `fields-grid`, lazy); besides this one, none moved by
-  // more than 26 bytes (`index` +26). Raw minified bytes of this chunk:
-  // 1,309,110 -> 1,289,858 (−19,252).
+  // more than 31 bytes (`index` +31). Raw minified bytes of this chunk:
+  // 1,309,110 -> 1,289,869 (−19,241).
   //
   // WHAT LEFT: the line-item grid's body, now
   // `packages/fields/src/widgets/grid-field/GridFieldWidget.tsx` in the lazy
@@ -2524,7 +2524,7 @@ export const PER_CHUNK_GZIP_CEILINGS = Object.freeze({
   // BASELINE, REGRESSION_THIS_GATE_MUST_CATCH_BYTES and the other per-chunk
   // rows. No exemption was added. The headroom `pnpm check:eager-closure`
   // prints on YOUR build is the figure in force, ⛔ not this one.
-  'ui-components': 445_140,
+  'ui-components': 445_144,
 });
 
 /**
@@ -2747,10 +2747,10 @@ export const PER_CHUNK_BASELINE = Object.freeze({
   // PER_CHUNK_GZIP_CEILINGS), so this is again `bbf6b02d9`'s reading.
   //
   // Moved with its ceiling (2026-11-22, objectstack#36102), from 265,937 by
-  // the same −5,960 bytes GridField's body took out (the entry on that key of
+  // the same −5,956 bytes GridField's body took out (the entry on that key of
   // PER_CHUNK_GZIP_CEILINGS), which keeps the ceiling-minus-baseline gap this
   // key carried. ⚠️ So this is no longer one build's reading.
-  'ui-components': 259_977,
+  'ui-components': 259_981,
 });
 
 /**
