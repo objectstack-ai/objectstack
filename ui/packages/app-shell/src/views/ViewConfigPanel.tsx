@@ -107,7 +107,7 @@ export interface ViewConfigPanelProps {
      * overwrite it, or keep editing) instead of overwriting a draft saved
      * since. It resolves `'reloaded'` when the author chose the saved version.
      */
-    onSave?: (draft: Record<string, any>, saveDraft: DraftVersionGuard['save']) => unknown;
+    onSave?: (draft: Record<string, any>, saveDraft?: DraftVersionGuard['save']) => unknown;
     /** Called when create-mode view is created */
     onCreate?: (config: Record<string, any>) => void;
     /**

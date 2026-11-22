@@ -4,7 +4,7 @@
 
 fix(console): a view settings save is pinned to the draft it opened, so it can no longer be published by someone else's Save to this view
 
-Clause-②: yes (widening) — `ViewConfigPanel`'s `onSave` host prop is called with a second argument, the panel's draft-version guard (`saveDraft`); a host that takes one argument is called as before; nothing removed or renamed
+Clause-②: yes (widening) — `ViewConfigPanel`'s `onSave` host prop gains an optional second parameter, the panel's draft-version guard (`saveDraft`), which the panel always passes; a host that takes one argument is called as before; nothing removed or renamed
 Metadata-protocol: none
 
 **Save to this view** on a shared view writes a draft and then publishes it. A save from the view settings panel that landed between the two used to overwrite that draft unpinned, and the publish then made the settings panel's unreviewed change live for everyone.
