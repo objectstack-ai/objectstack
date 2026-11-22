@@ -85,7 +85,7 @@ export const CEILINGS = new Map([
   ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 20058],
   ['.claude/skills/pm-dispatch/references/state-machine.md', 4189],
   ['.claude/skills/pm-dispatch/references/contract-review.md', 6419],
-  ['.claude/skills/pm-dispatch/references/decision-analysis.md', 5024], // raised 4892 → 5024 (+132) by ruling record 7076338827, the addendum to 7076315104 (a simple question goes to the maintainer in chat after the at-tier analysis: 「先由 Fable 分析，但是不一定要写成文件吧？简单的问题是不是直接和我沟通就可以」)
+  ['.claude/skills/pm-dispatch/references/decision-analysis.md', 5024], // raised 4892 → 5024 (+132) by ruling record 7076338827, the addendum to 7076315104 (a simple question goes to the maintainer in chat after the at-tier analysis: 「不一定要写成文件吧？简单的问题是不是直接和我沟通就可以」)
   ['.claude/skills/pm-dispatch/references/platform-readings.md', 1082],
   ['.claude/skills/pm-dispatch/references/readings-queue.md', 9074],
   ['.claude/skills/pm-dispatch/references/readings-channels.md', 7138],
