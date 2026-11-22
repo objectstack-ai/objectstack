@@ -34,6 +34,7 @@ import { completeWidgetLayout, defaultWidgetPlacement } from '@object-ui/types';
 import {
   DATE_RANGE_FILTER_NAME,
   resolveDashboardFilterDefs,
+  columnIdentity,
   type DashboardFilterDef,
   type RegistryComponentMeta,
 } from '@object-ui/core';
@@ -624,12 +625,12 @@ export function DashboardWidgetInspector({
 }
 
 /**
- * The label of the dataset dimension a dashboard filter's field names: the one
- * named `field`, else the one reading the object field `field`.
+ * The label of the dataset dimension that reads the object field a dashboard
+ * filter names. A dimension's column is `columnIdentity()`'s answer — its
+ * declared `field`, else its `name` — the same column the filter applies to.
  */
 function dimensionLabelOf(dimensions: DatasetDimensionInfo[], field: string): string | undefined {
-  const hit = dimensions.find((d) => d.name === field) ?? dimensions.find((d) => d.field === field);
-  return hit?.label || undefined;
+  return dimensions.find((d) => columnIdentity(d) === field)?.label || undefined;
 }
 
 /**
