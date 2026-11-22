@@ -17,7 +17,7 @@ The report editor beside a report (runtime 「编辑」 and Studio) and the dash
 - The line under the data source is plain words: 「报表从这里取数；每个人只能看到自己有权限的记录。」 — no 「受治理」 or 「RLS」.
 - The report form rows below the curated fields (section headings and hints in zh-CN) use the same wording.
 
-The report's name box and a widget's title box show the served (current-language) text while it is untouched, and an edit lands in the session language only: a plain-string source shown translated becomes `{ default: SOURCE, LANG: EDIT }`, so every other language reads exactly what it read before. The server resolves that entry ahead of the translation bundle, so the edit is what the page shows after save.
+The report's name box and a widget's title box show the served (current-language) text while it is untouched, and an edit lands in the session language only: a plain-string source shown translated becomes `{ default: SOURCE, LANG: EDIT }`, so every other language reads exactly what it read before. For a report or dashboard installed from a package (one with a packaged base), the server resolves that entry ahead of the translation bundle, so the edit is what the page shows after save. A report with no packaged base keeps the bundle first: where the bundle has an entry for that language, the stored edit does not show.
 
 Fixed: opening the report editor no longer turns the page heading and subtitle from the served 「各阶段商机」 to the English source. The page draws the served text for every translated key the edit has not touched.
 

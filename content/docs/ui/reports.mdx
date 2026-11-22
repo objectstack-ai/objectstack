@@ -316,8 +316,10 @@ The panel speaks the reader's language rather than the schema's:
 - The chart type list shows each type by name with its icon.
 - The name box shows the report's name in the current language. An edit made in a
   non-default language is stored for that language only, as the inline locale map
-  `{ default: SOURCE, 'zh-CN': EDIT }`, so every other language reads what it read before;
-  the server serves that entry ahead of the translation bundle
+  `{ default: SOURCE, 'zh-CN': EDIT }`, so every other language reads what it read before.
+  For a report installed from a package, the server serves that entry ahead of the
+  package's translation bundle; a report with no packaged base keeps the bundle first, so
+  where the bundle has an entry for that language the edit does not show
   ([inline locale maps](/docs/protocol/kernel/i18n-standard#form-2-is-several-locales-text-at-once)).
 - The page heading and subtitle stay in the current language while the panel is open; a key
   the edit changes shows the edit.
