@@ -4,7 +4,7 @@
 
 fix(scenarios): scorer and card fixes from the 18.6.0 gallery refresh
 
-Clause-②: no
+Clause-②: yes (widening) — new exports `confirmTurnMetNoConfirmationService` and `SEED_POSTURE` on the `./runner` entry
 Metadata-protocol: none
 
 - The confirmed write of a `pending_confirmation` operation is not measured, never failed, when the first turn's write already met `428 ACTION_CONFIRMATION_REQUIRED` with `reason: no_confirmation_service` and the confirmation turn sends no write on the object: the agent remembered that the route cannot apply on that server. A confirmation turn that does write is graded as before. New export: `confirmTurnMetNoConfirmationService(firstMet, turn, object)`.
