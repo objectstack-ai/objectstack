@@ -428,7 +428,7 @@ describe('page:header in a side preview\'s bar (objectstack#36201, objectstack#3
     renderHeader({ bar: vi.fn(), preview: true });
     const titleSlot = screen.getByTestId('title-slot');
     await waitFor(() => expect(titleSlot.querySelector('h1')?.textContent).toBe('Mira Costa'));
-    expect(titleSlot.querySelector('button[aria-label="Copy record ID"]')).toBeNull();
+    expect(copyIdButton(titleSlot)).toBeUndefined();
     expect(titleSlot.querySelector('h1 [data-record-header-name]')?.getAttribute('title')).toBe('Mira Costa');
   });
 
@@ -436,9 +436,13 @@ describe('page:header in a side preview\'s bar (objectstack#36201, objectstack#3
     renderHeader({ bar: vi.fn() });
     const titleSlot = screen.getByTestId('title-slot');
     await waitFor(() => expect(titleSlot.querySelector('h1')?.textContent).toBe('Mira Costa'));
-    expect(titleSlot.querySelector('button[aria-label="Copy record ID"]')).toBeTruthy();
+    expect(copyIdButton(titleSlot)).toBeTruthy();
     expect(titleSlot.querySelector('[data-record-header-name]')).toBeNull();
   });
+
+  /** The chip's copy-id icon (its label is the bundle key with no `I18nProvider`). */
+  const copyIdButton = (root: HTMLElement) =>
+    Array.from(root.querySelectorAll('button')).find((b) => /copy/i.test(b.getAttribute('aria-label') ?? ''));
 
   /** jsdom lays nothing out: the name's drawn and full widths are stubbed. */
   function stubName(shown: number, full: number) {
