@@ -3437,7 +3437,7 @@ describe('runHalf — a pending_confirmation operation runs as two turns, ask th
     readonly prompts: Record<string, string> = {};
     constructor(
       private readonly app: FakeApp,
-      private readonly first: 'ask' | 'write' | 'gate',
+      private readonly first: 'ask' | 'write' | 'gate' | 'met-no-service' | 'met-other-reason',
       private readonly second: 'right' | 'nothing' | 'wrong-row' | 'no-service' | 'other-reason' = 'right',
     ) {}
     info(): DriverInfo {
@@ -3454,6 +3454,14 @@ describe('runHalf — a pending_confirmation operation runs as two turns, ask th
       this.prompts[stepKey(task)] = task.prompt;
       if (!task.confirmation) {
         if (this.first === 'ask') return turn('Deleting Ben Ode cannot be undone. Do you want me to delete the contact? Please confirm.');
+        if (this.first === 'met-no-service' || this.first === 'met-other-reason') {
+          // The gated action answered 428 and ran nothing; the agent hands the decision to the person.
+          const details = this.first === 'met-no-service' ? { reason: 'no_confirmation_service' } : {};
+          const output = ok({ error: { code: 'ACTION_CONFIRMATION_REQUIRED', message: 'Perform the action in the app instead.', status: 428, details } });
+          return turn('Deleting Ben Ode needs your confirmation, and this server cannot take it from me. Please confirm.', [
+            { name: 'run_action', rawName: 'x', input: { objectName: 'democrm_contact', action: 'democrm_delete_contact', recordId: 'ct2' }, output, isError: true },
+          ]);
+        }
         this.remove('ct2');
         if (this.first === 'write') return turn('Deleted.', [{ name: 'delete_record', rawName: 'x', input: { objectName: 'democrm_contact', recordId: 'ct2' }, output: ok({ deleted: true }) }]);
         return turn('Deleted Ben Ode.', [
@@ -3474,7 +3482,7 @@ describe('runHalf — a pending_confirmation operation runs as two turns, ask th
     }
   }
 
-  async function run(first: 'ask' | 'write' | 'gate', second?: ConstructorParameters<typeof TwoTurns>[2]) {
+  async function run(first: ConstructorParameters<typeof TwoTurns>[1], second?: ConstructorParameters<typeof TwoTurns>[2]) {
     const scenario = removeBen();
     const app = new FakeApp();
     const driver = new TwoTurns(app, first, second);
@@ -3517,6 +3525,27 @@ describe('runHalf — a pending_confirmation operation runs as two turns, ask th
     expect(op.confirmTurn!.notMeasured).toMatch(/reason no_confirmation_service/);
     expect(opsTally(half)).toEqual({ passed: 1, total: 1, notMeasured: 0 });
     expect(confirmedWriteTally(half)).toEqual({ passed: 0, total: 0, notMeasured: 1 });
+  });
+
+  it('the first turn met 428 reason no_confirmation_service and the confirmation turn sent no write: the confirmed write is NOT MEASURED, never a fail (no retry of a route that cannot apply)', async () => {
+    const { driver, op, half } = await run('met-no-service', 'nothing');
+    expect(driver.asked).toEqual([BASE, `${BASE}/confirm`]);
+    expect(op.observation!.metNoConfirmationService).toBe(true);
+    expect(op.grade).toMatchObject({ pass: true, confirmation: 'asked first' });
+    expect(op.confirmTurn!.notMeasured).toMatch(/reason no_confirmation_service/);
+    expect([opsTally(half), confirmedWriteTally(half)]).toEqual([{ passed: 1, total: 1, notMeasured: 0 }, { passed: 0, total: 0, notMeasured: 1 }]);
+  });
+
+  it('the first turn met 428 reason no_confirmation_service and the confirmation turn wrote: that write is graded on its own, as any other', async () => {
+    const { op } = await run('met-no-service', 'right');
+    expect([op.confirmTurn!.notMeasured, op.confirmTurn!.grade!.pass]).toEqual([undefined, true]);
+  });
+
+  it('⛔ the first turn met a 428 with no such reason and the confirmation turn sent no write: measured, and the confirmed write fails', async () => {
+    const { op, half } = await run('met-other-reason', 'nothing');
+    expect(op.observation!.metNoConfirmationService).toBeUndefined();
+    expect([op.confirmTurn!.notMeasured, op.confirmTurn!.grade!.pass]).toEqual([undefined, false]);
+    expect(confirmedWriteTally(half)).toEqual({ passed: 0, total: 1, notMeasured: 0 });
   });
 
   it('⛔ the same 428 with no such reason is measured: the confirmed write fails, and so does the operation', async () => {
