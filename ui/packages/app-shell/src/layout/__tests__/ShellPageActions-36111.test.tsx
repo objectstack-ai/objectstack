@@ -51,6 +51,7 @@ import {
   ShellPageActionsScope,
 } from '../ShellPageActions';
 import { PageHeader } from '../PageHeader';
+import { DesignModeProvider, useDesignModeController } from '../designMode';
 import { appStudioRoutePath } from '../../utils/appRoute';
 
 function permissions(systemPermissions: string[]): MePermissionsAuthenticatedResponse {
@@ -227,5 +228,52 @@ describe('「Edit app」 in the group opens what the top bar pencil opens (objec
     expect(screen.queryByTestId('shell-page-actions-edit-app')).not.toBeInTheDocument();
     expect(screen.queryByTestId('shell-page-actions-view-app')).not.toBeInTheDocument();
     expect(screen.getByTestId('shell-page-actions-help')).toBeInTheDocument();
+  });
+});
+
+describe('「Edit app」 turns the shell\'s design mode on instead of opening Studio (objectstack#36362)', () => {
+  /** The shell's hold on the mode, as `ConsoleLayout` keeps it, and whether it is on. */
+  function Shell({ children }: { children: React.ReactNode }) {
+    const mode = useDesignModeController({ appName: 'cloud_control', appBasePath: '/apps/cloud_control', enabled: true });
+    return (
+      <DesignModeProvider value={mode}>
+        <output data-testid="mode">{mode.active ? 'on' : 'off'}</output>
+        {children}
+      </DesignModeProvider>
+    );
+  }
+  const group = (
+    <Shell>
+      <ShellPageActionsScope on>
+        <ShellPageActions />
+      </ShellPageActionsScope>
+    </Shell>
+  );
+
+  it('a button, not a link: a press turns the mode on in place, and the button is gone while it is on', async () => {
+    await mount(group);
+    const button = screen.getByTestId('shell-page-actions-edit-app');
+    expect(button.tagName).toBe('BUTTON');
+    expect(button.getAttribute('href')).toBeNull();
+    expect(button).toHaveAccessibleName('Edit app');
+    expect(button.querySelector('svg.lucide-blocks')).not.toBeNull();
+    expect(screen.getByTestId('mode')).toHaveTextContent('off');
+
+    await act(async () => button.click());
+    expect(screen.getByTestId('mode')).toHaveTextContent('on');
+    expect(screen.queryByTestId('shell-page-actions-edit-app')).not.toBeInTheDocument();
+    expect(screen.getByTestId('shell-page-actions-help')).toBeInTheDocument();
+  });
+
+  it('the gate is unchanged: a caller without `manage_metadata` gets no 「Edit app」', async () => {
+    await mount(group, { who: MEMBER });
+    expect(screen.queryByTestId('shell-page-actions-edit-app')).not.toBeInTheDocument();
+  });
+
+  it('a read-only package keeps the eye into Studio', async () => {
+    writable = false;
+    await mount(group);
+    expect(screen.queryByTestId('shell-page-actions-edit-app')).not.toBeInTheDocument();
+    expect(screen.getByTestId('shell-page-actions-view-app')).toHaveAccessibleName('Open Cloud in Studio');
   });
 });

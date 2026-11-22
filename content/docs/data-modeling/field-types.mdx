@@ -1175,7 +1175,14 @@ widgets, so the record form offers choices instead of a bare box:
 |---|---|---|---|
 | `notification-topic` | `topic` (`text`; also on `sys_notification_template`) | a pick-or-type list from `GET /api/v1/messaging/preference-options` | the topic as written, `*` for all |
 | `notification-channel` | `channel` (`text`) | the same list, marking a known channel whose service is not configured | the channel id as written, `*` for all |
-| `quiet-hours` | `quiet_hours` (`json`) | a time-zone picker and two times | `{ tz?, start: 'HH:MM', end: 'HH:MM' }` |
+| `quiet-hours` | `quiet_hours` (`json`) | a time-zone picker and two times | `{ tz?, start: 'HH:MM', end: 'HH:MM' }`, or `{ off: true }` for no quiet hours |
+
+A preference's `digest` and `quiet_hours` each have three states. Empty means not set: the next
+preference decides, which is the default for all users and then none. The explicit off is `none`
+for the digest and `{ "off": true }` for quiet hours. Otherwise the field holds a value. For each
+field, the most specific preference that sets it decides, so a person's own "no digest" or "no
+quiet hours" beats the organization's default. The `quiet-hours` widget shows a stored
+`{ "off": true }` as stored and keeps it unless it is replaced.
 
 A typed topic or channel the list does not hold is still stored. Like every `widget` value,
 a name no host registers falls back to the type's default input.

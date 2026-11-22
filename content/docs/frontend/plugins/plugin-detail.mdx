@@ -198,14 +198,17 @@ declare const handleAddComment: (text: string) => void;
 ## The record's comment panel
 
 On the desktop console, a record's comments live in a panel of their own,
-opened from the comments icon in the record header (on the record page and in
-the record drawer), and no longer inside the 动态 (Activity) tab
-(objectstack#36075):
+opened from the comments icon in the record page's header, and no longer inside
+the 动态 (Activity) tab (objectstack#36075). The record drawer (the side
+preview a list or a record page opens) has no icon and no panel, and its 动态
+tab shows no comments either: the comments are the full page's, one
+「Open as full page」 away (objectstack#36225).
+
 
 - **The icon** shows how many unresolved threads the record holds (a comment
   and its replies are one thread). A press
   opens the panel, the next one closes it, and the browser remembers whether it
-  was left open, once for the record page and once for the drawer.
+  was left open.
 - **The panel** is 380 px wide: 「评论」 and ✕ at the top, the threads oldest
   first, the comment box at the foot. A thread's replies fold to 「N 条回复」
   and open in place. A comment's actions (Reply, an emoji, ✓ on a thread's
@@ -228,9 +231,8 @@ the record drawer), and no longer inside the 动态 (Activity) tab
   「只看我参与的」, the threads you started, replied in or are mentioned in. A
   reply into a resolved thread reopens it.
 - **Where it sits**: beside the record from a 1280 px window, the record giving
-  way; over the record's right edge in a narrower window. In a drawer narrower
-  than 760 px (the default drawer is 720) it covers the drawer's body, and ✕ or
-  Esc returns to the record.
+  way; over the record's right edge in a narrower window. ✕ or Esc returns to
+  the record.
 - **The 动态 tab** then holds the system entries only: activity and field
   changes, with no comment box and no All / Activity / Discussion chips. The
   Changes chip stays where the record shows its field history; pressed again,

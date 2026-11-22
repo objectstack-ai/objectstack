@@ -3198,10 +3198,10 @@
     },
     {
       "id": "identity-auth.ai-service-account-lifecycle",
-      "title": "An AI service account is suspended, resumed, re-owned, retired, and has a key revoked and restored, each by the right holder: the owner may suspend but not resume, retire ends the membership and revokes every key, and an owner leaving the organization suspends the account",
+      "title": "An AI service account is suspended, resumed, re-owned, retired, and has a key revoked and restored, each by the right holder: the owner may suspend but not resume, retire ends the membership and revokes every key, an owner leaving the organization suspends the account, and an owner banned by an administrator suspends it too and cannot be named or resumed under",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3220,7 +3220,8 @@
         "as the owner: POST /api/v1/auth/service-account/suspend {\"userId\": ID}; call a read with each key; then as the owner POST …/resume; then as the administrator POST …/resume; call a read with each key",
         "as the administrator: POST …/revoke-key {\"keyId\": K1}; call a read with each key; as the owner POST …/restore-key {\"keyId\": K1}; then as the administrator",
         "as the administrator: remove the owner from the organization; read the account's ban fields; POST …/resume; then POST …/set-owner {\"userId\": ID, \"ownerId\": THIRD} and POST …/resume",
-        "as the administrator: POST …/retire; call a read with each key; POST …/restore-key {\"keyId\": K2}; POST …/retire again; POST …/create-key"
+        "as the administrator: POST …/retire; call a read with each key; POST …/restore-key {\"keyId\": K2}; POST …/retire again; POST …/create-key",
+        "as a platform administrator: POST /api/v1/auth/admin/ban-user {\"userId\": THIRD}; read the account's ban fields; call a read with each key; POST …/resume; POST …/set-owner naming THIRD on a second account, and POST …/register with ownerId THIRD; then POST /api/v1/auth/admin/unban-user {\"userId\": THIRD}; read the account's ban fields; POST …/resume"
       ],
       "acceptance": [
         {
@@ -3246,11 +3247,18 @@
           "oracle": "api",
           "verify": "both keys are refused; the account has no sys_member row; restore of K2 answers 403; a second retire answers 409; create-key answers 409 (packages/plugins/plugin-auth/src/service-account-lifecycle.ts#runRetireServiceAccount)",
           "evidence": "the reads, the membership read and the three refusals"
+        },
+        {
+          "clause": "an administrator's ban of the accountable owner suspends the account with its own reason; register, set-owner and resume refuse an owner disabled by any door (a ban, a directory deactivation); an unban resumes none",
+          "oracle": "api",
+          "verify": "the ban answers data.revoked.serviceAccounts at least 1; the account's ban reason is the banned-owner reason (packages/plugins/plugin-auth/src/service-account-owner-leaves.ts#SERVICE_ACCOUNT_OWNER_BANNED_REASON) and both reads are refused; resume answers 409 RESOURCE_CONFLICT; set-owner and register naming THIRD answer 400 VALIDATION_FAILED at ownerId (packages/plugins/plugin-auth/src/service-account-doors.ts#isAccountableOwnerActive); after the unban the ban reason is unchanged, and only then does resume answer 200",
+          "evidence": "the ban answer, the ban fields before and after the unban, and the five door answers"
         }
       ],
       "negative": [
         "the owner resuming its own account is a FAIL: suspension by the owner is lifted by an administrator",
-        "a retired account whose key is restored, or a new key minted, is a FAIL"
+        "a retired account whose key is restored, or a new key minted, is a FAIL",
+        "an account still running after its owner's ban, or resumed by the unban alone, is a FAIL: an account runs only while its owner's account is active"
       ],
       "traps": ["wrong-persona", "auth-state-leak", "cache-staleness"],
       "automated": {
@@ -3260,6 +3268,7 @@
       "source": [
         "packages/plugins/plugin-auth/src/service-account-lifecycle.ts#runSuspendServiceAccount, #runResumeServiceAccount, #runSetServiceAccountOwner, #runRetireServiceAccount, #runRevokeServiceAccountKey, #runRestoreServiceAccountKey",
         "packages/plugins/plugin-auth/src/service-account-owner-leaves.ts#suspendAccountsOfDepartedOwner",
+        "packages/plugins/plugin-auth/src/service-account-owner-leaves.ts#suspendAccountsOfBannedOwner; packages/plugins/plugin-auth/src/service-account-doors.ts#isAccountableOwnerActive; packages/plugins/plugin-auth/src/admin-ban-endpoints.ts#runAdminBanUser",
         "packages/plugins/plugin-auth/src/auth-route-ledger.ts (the six lifecycle rows: who may call each and every refusal)",
         "docs/adr/0151-ai-service-account-a-headless-agent-is-a-registered-principal-of-its-own.md D6",
         "#31981"
@@ -3276,6 +3285,12 @@
           "date": "2026-11-14",
           "change": "fixtures.requires[0] names the grant (stale spec, QA run #33092, comment 6850793622; ledger row 231 of #32908). Under ADR-0151 D3 a fresh account's key answers 403 to every data read, so acceptance[0] and [2]'s 'reads answer 200' need a ceiling-safe set assigned first; a ceiling set is refused as a grant (agent-account-grant-refusal.ts). The clauses are unchanged. Read at base 82838e83",
           "ref": "#33328"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-21",
+          "change": "acceptance[4], steps[4] and a negative added: an account runs only while its owner's account is active. An administrator's ban of the owner suspends the account with its own reason, register, set-owner and resume refuse an owner disabled by any door (one shared check), and an unban resumes none (maintainer ruling 2026-11-21, option A). Read from source on branch claude/sec2-account-removal; no live run made",
+          "ref": "claude/sec2-account-removal"
         }
       ]
     },

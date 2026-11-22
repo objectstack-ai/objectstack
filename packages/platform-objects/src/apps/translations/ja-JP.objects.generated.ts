@@ -176,7 +176,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "利用停止",
-        description: "このユーザーを利用停止にしますか？利用停止になるとサインアウトされ、解除されるまでサインインできず、API キーも拒否されます。OAuth アクセストークンとトークンの更新も同様に拒否されます。解除後はキーが再び使えるようになります。",
+        description: "このユーザーを利用停止にしますか？利用停止になるとサインアウトされ、解除されるまでサインインできず、API キーも拒否されます。OAuth アクセストークンとトークンの更新も同様に拒否されます。解除後はキーが再び使えるようになります。利用停止により、このユーザーが責任者である AI サービスアカウントも停止され、登録した OAuth アプリケーションは無効化、発行した SCIM 認証情報は失効します。利用停止を解除してもこれらは元に戻りません。",
         successMessage: "ユーザーを利用停止にしました",
         params: {
           banReason: {
@@ -496,6 +496,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       revoke_reason: {
         label: "失効理由",
         help: "セッションが失効した理由（idle_timeout、absolute_max、concurrent_cap、ip_not_allowed、user_revoked、admin、organization_membership_ended、admin_password_reset、password_reset など）。"
+      },
+      sso_provider_id: {
+        label: "SSO プロバイダー",
+        help: "このセッションのサインインに使われた SSO プロバイダー（ある場合）。そのプロバイダーを削除するとセッションは終了します。システム管理。"
       },
       active_organization_id: {
         label: "アクティブ組織"

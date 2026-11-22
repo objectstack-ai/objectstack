@@ -211,6 +211,18 @@ export interface ViewTabItem {
    */
   definitionReadonly?: boolean;
   /**
+   * The view is a customization of a view a read-only package ships: the
+   * package's customization holds an override of it (a pin, a default or a
+   * name changed here), and every user of the view sees that copy instead of
+   * the package's own.
+   *
+   * When `true`, `ManageViewsDialog` draws a small "customized" mark on the
+   * row and, when the host wires `onRestoreFactory`, offers "Restore factory
+   * version", which removes that override. Ignored on a `readonly` row.
+   * Absent ⇒ no mark and no restore. `ViewTabBar` does not read it.
+   */
+  customized?: boolean;
+  /**
    * The view's description, already resolved to the viewer's language and
    * already gated by the host on the view's `appearance.showDescription`
    * (absent when that is `false`). The strip draws it on the ACTIVE tab only:
