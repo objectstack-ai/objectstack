@@ -318,7 +318,9 @@ describe('overlay owner/hidden retirement — the hide-only residue', () => {
   });
 
   it('CONTROL: a write that adds a real view key (a toolbar toggle) saves — the residue is the identity-only body, not the row', () => {
-    for (const toggle of [{ isDefault: true }, { order: 2 }, { columnState: { widths: { name: 120 } } }]) {
+    // [#36403] `columnState` was the third toggle here; it is retired, and
+    // `hiddenFields` (a live personalization key) stands in for it.
+    for (const toggle of [{ isDefault: true }, { order: 2 }, { hiddenFields: ['name'] }]) {
       expect(ViewMetadataSchema.safeParse({ ...IDENTITY, ...toggle }).success, JSON.stringify(toggle)).toBe(true);
     }
   });
