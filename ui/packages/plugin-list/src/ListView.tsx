@@ -7471,7 +7471,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     ? {
         // objectstack#36370 — each reader's own, per object and view.
         collapseKey: schema.objectName
-          ? [filterScope.currentUserId || '-', schema.objectName, props.laneCollapseKey || schema.id || (schema as { name?: string }).name || '-'].join(':')
+          ? [filterScope.currentUserId || '-', schema.objectName, props.laneCollapseKey || schema.id || '-'].join(':')
           : undefined,
         onHideLane: writeShownLanes && boardLaneOptions.length > 0
           ? (laneId: string) => {

@@ -154,7 +154,11 @@ describe('视图设置 on a board (objectstack#36370)', () => {
   });
 
   it('writes each toggle and the statistic', () => {
-    const kanban = kanbanOf();
+    // The board counts today, so each pick below is a change (picking the
+    // current statistic writes nothing).
+    const kanban = kanbanOf({
+      summary: { value: { type: 'count' }, numberFields: [{ value: 'amount', label: 'Amount' }], onChange: vi.fn() },
+    });
     openMenu({ kanban });
     fireEvent.click(screen.getByTestId('options-toggle-field-labels-switch'));
     expect(kanban.showFieldLabels!.onChange).toHaveBeenCalledWith(false);
@@ -162,7 +166,7 @@ describe('视图设置 on a board (objectstack#36370)', () => {
     expect(kanban.hideEmptyFields!.onChange).toHaveBeenCalledWith(false);
     fireEvent.click(screen.getByTestId('options-row-lane-summary'));
     fireEvent.click(screen.getByTestId('options-lane-summary-count'));
-    expect(kanban.summary!.onChange).toHaveBeenLastCalledWith({ type: 'count' });
+    expect(kanban.summary!.onChange).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId('options-row-lane-summary'));
     // The board computes a count or a sum (`KanbanLaneSummarySchema`): no average.
     expect(screen.queryByTestId('options-lane-summary-avg:amount')).toBeNull();
