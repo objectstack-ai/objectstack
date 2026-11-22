@@ -65,6 +65,7 @@ import {
 import { ORGANIZATION_DELETE_PATH } from './organization-delete.js';
 import { clientAddressStateEntries } from './request-client-address.js';
 import { SESSION_ERASURE_PATHS } from './session-tombstone.js';
+import { ADMIN_REMOVE_USER_PATH, answerRemovalEnded, runWithRemovalTally } from './removed-account-registrations.js';
 import { envelopeVendorAdminRefusal } from './vendor-admin-refusal-envelope.js';
 import { OAUTH_REVOKE_PATH } from './mcp-token-revocation.js';
 import { ssoCallbackOf } from './sso-oidc-refusal-cause.js';
@@ -369,11 +370,18 @@ export async function handleRequest(this: Pick<RequestRoutingHost, 'config' | 'b
   // members and invitations before the organization row, with no
   // transaction, and the engine's refusal on that last row used to leave the
   // organization standing with no owner.
+  //
+  // An administrator's delete answers what it ended of the account's
+  // registrations (`removed-account-registrations.ts`): the delete's database
+  // hook writes it into the tally opened here, and a delete that succeeded
+  // carries it as `revoked`, as the forced reset answers its own.
   const providerResponse =
-    endpointPath !== undefined &&
-    (SESSION_ERASURE_PATHS.has(endpointPath) || endpointPath === ORGANIZATION_DELETE_PATH)
-      ? await this.runSubjectErasureAtomically(runRequest)
-      : await runRequest();
+    endpointPath === ADMIN_REMOVE_USER_PATH
+      ? await answerRemovalEnded(await runWithRemovalTally(() => this.runSubjectErasureAtomically(runRequest)))
+      : endpointPath !== undefined &&
+          (SESSION_ERASURE_PATHS.has(endpointPath) || endpointPath === ORGANIZATION_DELETE_PATH)
+        ? await this.runSubjectErasureAtomically(runRequest)
+        : await runRequest();
   const vendorResponse = revocationRequest
     ? await this.answerOAuthTokenRevocation(revocationRequest, providerResponse)
     : providerResponse;

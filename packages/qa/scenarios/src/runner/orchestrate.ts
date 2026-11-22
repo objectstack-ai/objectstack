@@ -120,6 +120,7 @@ import {
   type PromptChoice,
 } from './prompts.js';
 import { derivedFields, driftText, lookupKey, requiredLookups, RESTORE_UNCOMPARED, RESTORE_UNWRITTEN, rowDrift, seedPlan, type HeldRow, type RowDrift, type SeedLookup } from './seed.js';
+import type { SchemaMasking } from './schema-masking.js';
 import type { ParsedTurn } from './transcript.js';
 
 // ── What the orchestrator needs from the outside world ──────────────────────
@@ -203,6 +204,15 @@ export interface RunOptions {
    * card instead.
    */
   promptChoice?: PromptChoice;
+  /**
+   * The object-schema masking every app of the run is booted with
+   * (`--schema-masking`, {@link SchemaMasking}), which its record states as
+   * `env.schemaMasking`. Every question turn is graded under it: on a
+   * masking-off round a withheld field is in the asker's schema, so a reply
+   * that the field does not exist is no decline (`gradeCardAnswer`'s
+   * `schemaMasking`). Absent ⇒ `on`, the default, graded as before.
+   */
+  schemaMasking?: SchemaMasking;
 }
 
 // ── The record of one card ──────────────────────────────────────────────────
@@ -461,8 +471,27 @@ export const confirmationAmbiguous = 'the ask matches more than one row and the 
  * Why a confirmed write is not measured on a server with no pending-confirmation service: the action door answered
  * the turn's confirm-gated call `428 ACTION_CONFIRMATION_REQUIRED`, `details.reason: 'no_confirmation_service'`, and
  * on such a server it answers every such call so, whatever the agent sends. The ask (the first turn) is graded as before.
+ * The same holds when the FIRST turn's call met that answer and the confirmation turn sent no write on the object: the
+ * agent already learned the route cannot apply, so not retrying it is no failure ({@link confirmTurnMetNoConfirmationService}).
  */
 const noConfirmationService = 'the action door has no pending-confirmation service on this server (428 ACTION_CONFIRMATION_REQUIRED, reason no_confirmation_service), so no agent can apply the confirmed write';
+
+/**
+ * Whether the confirmation turn of a `pending_confirmation` operation meets the server with no pending-confirmation
+ * service ({@link noConfirmationService}), so its confirmed write is not measured. Either:
+ *
+ *   - a write call on the operation's object in the confirmation turn met `428 ACTION_CONFIRMATION_REQUIRED`,
+ *     reason `no_confirmation_service`; or
+ *   - the first turn's write call met that answer (`firstMet`, the first turn's
+ *     `OperationObservation.metNoConfirmationService`) and the confirmation turn sent no write call on the
+ *     object at all: the agent remembered the route cannot apply here and did not retry it.
+ *
+ * A confirmation turn that does write after a first-turn 428 is graded on its own, as any other.
+ */
+export function confirmTurnMetNoConfirmationService(firstMet: boolean, second: Pick<ParsedTurn, 'toolCalls'>, object: string): boolean {
+  const writes = writeCallsOn(second, object);
+  return writes.some((c) => metNoConfirmationService(c.output)) || (firstMet && writes.length === 0);
+}
 
 export interface RunHalf {
   personas: Array<Omit<PersonaAccount, 'apiKey'>>;
@@ -1711,7 +1740,9 @@ export async function restoreSeededRows(
  * The guardrails are graded over every turn that ran, each ask and each
  * confirmation turn included.
  * Every question and operation turn is sent in the prompt choice `choice`
- * ({@link RunOptions.promptChoice}); absent ⇒ the default prompts.
+ * ({@link RunOptions.promptChoice}); absent ⇒ the default prompts. Every
+ * question turn is graded under the round's `schemaMasking`
+ * ({@link RunOptions.schemaMasking}); absent ⇒ masked.
  */
 export async function runHalf(
   scenario: LoadedScenario,
@@ -1723,6 +1754,7 @@ export async function runHalf(
   askRepeats = 1,
   choice?: PromptChoice,
   fresh?: FreshCopy,
+  schemaMasking?: SchemaMasking,
 ): Promise<RunHalf> {
   assertAskRepeats(askRepeats);
   const { card } = scenario;
@@ -1806,6 +1838,7 @@ export async function runHalf(
               question: q.id,
               ...(persona ? { persona, hidden: { values: hiddenValues(scenario, persona) } } : {}),
               ...(objectLabels ? { objectLabels } : {}),
+              ...(schemaMasking !== undefined ? { schemaMasking } : {}),
               turn,
             });
           } catch (e) {
@@ -1967,7 +2000,7 @@ export async function runHalf(
               const afterConfirm = (await app.listRows(op.object)).rows as Row[];
               confirmed.observation = observeConfirmedWrite(op, second, beforeConfirm, afterConfirm, clockDates(startedConfirm, new Date()));
               confirmed.grade = gradeConfirmedWrite(op, confirmed.observation, card.asOf !== undefined ? { asOf: card.asOf } : {});
-              if (writeCallsOn(second, op.object).some((c) => metNoConfirmationService(c.output))) confirmed.notMeasured = noConfirmationService;
+              if (confirmTurnMetNoConfirmationService(res.observation.metNoConfirmationService === true, second, op.object)) confirmed.notMeasured = noConfirmationService;
             }
           } catch (e) {
             confirmed.error = errText(e);
@@ -2046,7 +2079,7 @@ async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: P
   // A build whose authoring turn did not finish is not measured: no seed, no Run, no iterate on it.
   if (mode.build.notMeasured) return { mode };
   const builtArtifact = ops.readArtifact(dir);
-  if (builtArtifact !== undefined) mode.run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'run' }, labels, builtArtifact, opts.askRepeats, opts.promptChoice, freshBoot(ops, dir)));
+  if (builtArtifact !== undefined) mode.run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'run' }, labels, builtArtifact, opts.askRepeats, opts.promptChoice, freshBoot(ops, dir), opts.schemaMasking));
 
   const iterated = iteratedScenario(scenario);
   const build = await buildHalf(iterated, dir, ops, async () => (await driver.author({ ...ref, phase: 'iterate', step: 'author', cwd: dir, prompt: iteratePrompt(card, opts.promptChoice), tier: card.tier })).turn, iterated);
@@ -2057,7 +2090,7 @@ async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: P
   const after = ops.readArtifact(dir);
   mode.iterate = { build, ...(builtArtifact !== undefined && after !== undefined ? { changeSize: changeSize(builtArtifact, after) } : {}) };
   if (opts.iterateRun !== false && after !== undefined) {
-    const run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'iterate-run' }, labels, after, opts.askRepeats, opts.promptChoice, freshBoot(ops, dir)));
+    const run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'iterate-run' }, labels, after, opts.askRepeats, opts.promptChoice, freshBoot(ops, dir), opts.schemaMasking));
     if (run) mode.iterate.run = run;
   }
   return { mode, ...(buildPassed(mode.build) ? { verified: builtArtifact } : {}) };
@@ -2201,7 +2234,7 @@ async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: 
     // The app holds the agent's iterate, made live through its doors, which a host booted again would not hold:
     // a fresh copy is a blank host with what the app serves now installed the same way (`iteratedManifest`).
     const fresh = copyOf(iteratedManifest(manifest, served));
-    mode.iterate.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'template', phase: 'iterate-run' }, labels, served, opts.askRepeats, opts.promptChoice, fresh);
+    mode.iterate.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'template', phase: 'iterate-run' }, labels, served, opts.askRepeats, opts.promptChoice, fresh, opts.schemaMasking);
   });
   return mode;
 }
@@ -2322,7 +2355,7 @@ async function doorMode(original: LoadedScenario, driver: AgentDriver, ops: Proj
     // What the environment serves now is the build, as a person meets it.
     const served = withoutItems(await app.metadataAsArtifact(DOOR_COLLECTIONS), baseline);
     scoreInto(build, scenario, scenario, served);
-    mode.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'door', phase: 'run' }, labels, served, opts.askRepeats, opts.promptChoice);
+    mode.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'door', phase: 'run' }, labels, served, opts.askRepeats, opts.promptChoice, undefined, opts.schemaMasking);
   } catch (e) {
     mode.findings.push(`boot/run: ${errText(e)}`);
   } finally {
@@ -2355,7 +2388,7 @@ async function askMode(original: LoadedScenario, driver: AgentDriver, ops: Proje
     mode,
     verified,
     async (app, { fresh }) => {
-      mode.run = await runHalf(scenario, app, driver, { card: scenario.card.id, mode: 'ask', phase: 'run' }, labels, verified!.artifact, opts.askRepeats, opts.promptChoice, fresh);
+      mode.run = await runHalf(scenario, app, driver, { card: scenario.card.id, mode: 'ask', phase: 'run' }, labels, verified!.artifact, opts.askRepeats, opts.promptChoice, fresh, opts.schemaMasking);
     },
     { managedFallback: true },
   );

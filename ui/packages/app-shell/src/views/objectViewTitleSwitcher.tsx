@@ -432,8 +432,14 @@ export function useObjectViewTitleSwitcher({
         .filter((item) => !personalViewIds.has(item.id))
         .map((item) => {
             if (item.readonly) return item;
-            const packageId = studioPackageId(savedViews.find((sv: any) => viewRowId(sv) === item.id));
-            return packageId !== null && refusingPackages.has(packageId) ? { ...item, definitionReadonly: true } : item;
+            const saved = savedViews.find((sv: any) => viewRowId(sv) === item.id);
+            const packageId = studioPackageId(saved);
+            if (packageId === null || !refusingPackages.has(packageId)) return item;
+            // objectstack#36011 — customized: the row is served with the
+            // override declaration naming that package (ADR-0146 D2), the one
+            // `updateView` writes into the package's customization.
+            const customized = saved?.overrides?.package === packageId;
+            return { ...item, definitionReadonly: true, ...(customized ? { customized: true } : {}) };
         });
     const switcherViews: TitleSwitcherView[] = viewItems.map((item) => {
         const personal = personalViewIds.has(item.id);

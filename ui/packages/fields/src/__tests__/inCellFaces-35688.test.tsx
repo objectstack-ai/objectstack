@@ -23,7 +23,10 @@ import { TagsField } from '../widgets/TagsField';
 import { ColorField } from '../widgets/ColorField';
 import { TimeField } from '../widgets/TimeField';
 import { DatePickerField, DateTimePickerField } from '../widgets/date-picker/DatePickerField';
-import { FieldEditWidget } from '../FieldEditWidget';
+import { FieldEditWidget, hasFieldEditWidget, hasInCellPanelEditWidget, isInlineExcludedFieldType } from '../FieldEditWidget';
+// The rich-content panel's widget sits behind `React.lazy` in `FieldEditWidget`;
+// imported here so its factory resolves at once (ui/AGENTS.md, flaky tests).
+import '../widgets/RichTextField';
 import { TextField } from '../widgets/TextField';
 import { EmailField } from '../widgets/EmailField';
 import { PhoneField } from '../widgets/PhoneField';
@@ -456,5 +459,46 @@ describe('in-cell record picker (objectstack#35688)', () => {
     render(<LookupField field={PRIORITY} value={undefined} onChange={() => {}} />);
     expect(screen.queryByTestId('lookup-in-cell')).toBeNull();
     expect(screen.queryByRole('listbox')).toBeNull();
+  });
+});
+
+describe('in-cell rich-content panel (objectstack#36023)', () => {
+  it('markdown, html and rich text get the text box only when the cell face is asked for', () => {
+    for (const type of ['markdown', 'html', 'richtext']) {
+      expect(hasInCellPanelEditWidget(type), type).toBe(true);
+      // Every other host keeps them out, exactly as before.
+      expect(hasFieldEditWidget(type), type).toBe(false);
+      expect(isInlineExcludedFieldType(type), type).toBe(true);
+    }
+    // CONTROL: no other type, excluded or in-place, is a panel text box.
+    for (const type of ['text', 'textarea', 'address', 'password', 'secret', 'object', 'file', undefined]) {
+      expect(hasInCellPanelEditWidget(type), String(type)).toBe(false);
+    }
+  });
+
+  it('draws the stored source in a text box; typing stages it; Enter is left to the text box (a new line)', async () => {
+    const onChange = vi.fn();
+    const onGridKey = vi.fn();
+    render(
+      <GridEditor onGridKey={onGridKey}>
+        <FieldEditWidget field={{ name: 'notes', type: 'richtext' } as unknown as Field} value="<p>Hello</p>" onChange={onChange} inCell />
+      </GridEditor>,
+    );
+    const box = (await screen.findByRole('textbox')) as HTMLTextAreaElement;
+    expect(box.tagName).toBe('TEXTAREA');
+    expect(box.value).toBe('<p>Hello</p>');
+    fireEvent.change(box, { target: { value: '<p>Hello</p>\n<p>World</p>' } });
+    expect(onChange).toHaveBeenLastCalledWith('<p>Hello</p>\n<p>World</p>');
+    // The widget does not take Enter: it reaches the grid's wrapper with its
+    // default intact, and the wrapper commits a text box only on Ctrl/Cmd+Enter.
+    expect(fireEvent.keyDown(box, { key: 'Enter' })).toBe(true);
+    expect(onGridKey).toHaveBeenCalledWith('Enter');
+  });
+
+  it('CONTROL: without the cell face the same field gets no editor', () => {
+    const { container } = render(
+      <FieldEditWidget field={{ name: 'notes', type: 'markdown' } as unknown as Field} value="# Hi" onChange={() => {}} />,
+    );
+    expect(container.innerHTML).toBe('');
   });
 });

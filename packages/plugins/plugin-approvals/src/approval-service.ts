@@ -107,6 +107,7 @@ import {
 // decision methods' slot test and `can_act` alike (`approver-address.ts`).
 import {
   actingAddresses,
+  actorAddresses,
   addressedPosition,
   equivalentApproverAddresses,
   heldSlot,
@@ -163,7 +164,7 @@ import {
   type FieldVisibilitySource,
 } from './payload-redaction.js';
 import { APPROVAL_REQUEST_CHILD_OBJECTS, type RequestVisibilitySource } from './request-read-gate.js';
-import { nodeConfigLocksRecord, recordHeldByLockingApproval } from './lifecycle-hooks.js';
+import { detailRowHeldByLockingApproval, nodeConfigLocksRecord, recordHeldByLockingApproval } from './lifecycle-hooks.js';
 import { PendingApproverReadGrantSource, type PendingApproverReadGrants } from './pending-approver-read-grant.js';
 // The ADR-0043 pages — the ONE copy of their text, rendered by the plugin's
 // self-hosted mount and by `handleActionPage` alike.
@@ -3018,8 +3019,11 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     pending: readonly string[],
     actorId: string,
     context: ExecutionContext,
+    caller?: ActingCaller | null,
   ): Promise<string | undefined> {
-    return heldSlot(pending, actorId, await this.actingCaller(context));
+    // `caller`: the {@link actingCaller} a method already resolved for this
+    // context, so a method that reads it twice (reassign) asks once.
+    return heldSlot(pending, actorId, caller !== undefined ? caller : await this.actingCaller(context));
   }
 
   /**
@@ -7607,9 +7611,12 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       throw new Error(`VALIDATION_FAILED: '${to}' is already a pending approver`);
     }
     const isOverride = this.isOverrideActor(context, raw.organization_id ?? null, pending);
+    // The caller, resolved once: the slot test below and the own-slot test in
+    // the hand-off branch read the same answer.
+    const caller = await this.actingCaller(context);
     // The slot the actor takes (`takenSlot`) — and, when `from` is not named,
     // the slot being handed over.
-    const slot = await this.takenSlot(pending, actorId, context);
+    const slot = await this.takenSlot(pending, actorId, context, caller);
     const from = String(input.from ?? slot ?? actorId).trim();
     // #4466 — same rule as `decideNode`: the marker records that the actor was
     // admitted only by the privileged branch, holding no slot themselves. A
@@ -7631,6 +7638,17 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
         throw new Error(
           `FORBIDDEN: actor '${actorId}' may not move the platform administrators' slot: it moves only for a `
           + `platform administrator, or the system`,
+        );
+      }
+      // The call moves only a slot held by the actor it names: `from` must be
+      // one of that actor's addresses (`actorAddresses`, the same set the
+      // slot test reads; an omitted `actorId` names the caller). Moving any
+      // other slot is the system's or the override's (`isOverride` admits the
+      // system), never a fellow approver's.
+      if (!isOverride && !actorAddresses(actorId, caller).includes(from)) {
+        throw new Error(
+          `FORBIDDEN: actor '${actorId}' may move only a slot it holds, and does not hold '${from}': `
+          + `that slot moves only for its holder, an administrator, or the system`,
         );
       }
       next = pending.map(a => (a === from ? to : a));
@@ -11124,7 +11142,11 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * `{ locked }` only: no request id, node, participants or `pending`. Request
    * content stays behind `approvalsVisibleToReaders` (#8652 ruling 5299823744,
    * untouched). The judgement is the record-lock hook's own
-   * ({@link recordHeldByLockingApproval}), never a second copy of it.
+   * ({@link recordHeldByLockingApproval}), never a second copy of it — and,
+   * for a master-detail line, the detail-row lock's
+   * ({@link detailRowHeldByLockingApproval}): a locked record's lines are
+   * locked with it, so the read answers `true` for a line whose write the hook
+   * refuses.
    */
   async getRecordLock(
     object: string,
@@ -11139,7 +11161,9 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       where: { id }, fields: ['id'], limit: 1, context,
     });
     if (!Array.isArray(readable) || readable.length === 0) return null;
-    return { locked: await recordHeldByLockingApproval(this.engine, objectName, id) };
+    const locked = await recordHeldByLockingApproval(this.engine, objectName, id)
+      || await detailRowHeldByLockingApproval(this.engine, objectName, id);
+    return { locked };
   }
 
   private async loadRequest(

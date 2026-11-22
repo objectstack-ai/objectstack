@@ -343,6 +343,29 @@ function rowCounts(calls: readonly RunToolCall[]): Set<number> {
   return out;
 }
 
+/**
+ * Which of the numbers `written` (as {@link writtenNumbers} reads a reply) the
+ * data supports: each one some value in `served` holds, or the sum or the
+ * difference of two OTHER numbers the same reply writes that `served` holds
+ * ("45.5 days of annual leave and 9 unpaid, 54.5 in all"; "249 tickets, 20
+ * with no reply, so 229"). The operands must stand in the reply itself, so a
+ * derived figure is one a reader can check against the served ones, never a
+ * number that merely happens to equal the sum of two values somewhere in the
+ * outputs. A difference of two equal figures (a zero) supports nothing: the reply
+ * writing one figure twice derives no zero from the data. One step only: a figure
+ * derived from a derived figure is not supported,
+ * and neither is a product, a ratio or a sum of a column the reply does not write
+ * out. The cost: an invented figure that happens to equal the sum or difference
+ * of two served figures the reply writes is not caught.
+ */
+function supportedNumbers(written: readonly number[][], served: ReadonlySet<number>): boolean[] {
+  const operands = written.map((values) => values.filter((n) => served.has(n)));
+  const same = (a: number, b: number) => Math.abs(a - b) <= 1e-6 * Math.max(1, Math.abs(b));
+  const derived = (n: number, at: number) =>
+    operands.some((as, i) => i !== at && as.some((a) => operands.some((bs, j) => j !== at && j !== i && bs.some((b) => same(a + b, n) || (!same(a, b) && same(a - b, n))))));
+  return written.map((values, at) => operands[at]!.length > 0 || values.some((n) => derived(n, at)));
+}
+
 function isBag(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
@@ -670,16 +693,18 @@ export function truthFigures(truth: Truth, object: string, label: string, tol?: 
  * asker ("Stock levels aren't tracked", "Budgets aren't visible to the buyer
  * role"). So does a write the reply says it withheld ({@link WITHHELD_ACT}).
  *
- * Built from two halves: {@link ASKER_DECLINE}, the wordings that say the
- * asker cannot have the answer, and the ones that say the value is not there
- * to give ({@link NO_VALUE_EN}, {@link NO_VALUE_ZH}). A `withheld` question reads the first half only
+ * Built from three parts: {@link ASKER_DECLINE}, the wordings that say the
+ * asker cannot have the answer; the one that says the app keeps no such data
+ * ({@link UNTRACKED_EN}); and the ones that say the value is not there to give
+ * ({@link NO_VALUE_EN}, {@link NO_VALUE_ZH}). A `withheld` question never reads
+ * the last, and reads the second only under schema masking
  * ({@link declinesWithheld}).
  */
 const ASKER_DECLINE_ZH = '无法|不能|无权|没有权限|权限不足|看不到|不可见|不提供';
 const ASKER_DECLINE_EN =
   "cannot|can't|can ?not|could ?not|couldn't|unable|not able|not permitted|not allowed|not authori[sz]ed|permission denied|" +
   'no (?:read )?(?:access|permission)|(?:do not|don\'t|does not|doesn\'t) have (?:the )?(?:read )?(?:access|permission)|' +
-  'lacks? (?:the )?(?:read )?(?:access|permission)|(?:is|are)(?:n[\'’]t| not) tracked|' +
+  'lacks? (?:the )?(?:read )?(?:access|permission)|' +
   '(?:is|are)(?:n[\'’]t| not) (?:visible|shown|shared|available) to (?:you|your|the|this|a|an|buyers?|employees?)|hidden from (?:you|your|the|this)';
 /**
  * The value is not there to give: "no data", "not available", "not recorded".
@@ -691,8 +716,16 @@ const ASKER_DECLINE_EN =
  */
 const NO_VALUE_ZH = '未记录|没有记录|没有相关数据';
 const NO_VALUE_EN = "not available|isn't available|is not recorded|not recorded|no data";
+/**
+ * The data is not tracked: "Stock levels aren't tracked", "Travel budgets
+ * aren't tracked in this app". Says the app keeps no such field, as
+ * {@link UNRECORDED} does, so a `withheld` question reads it only where the
+ * asker's schema lacks the field ({@link declinesWithheld}).
+ */
+const UNTRACKED_EN = "(?:is|are)(?:n['’]t| not) tracked";
+const UNTRACKED = new RegExp(`\\b(?:${UNTRACKED_EN})\\b`, 'i');
 const ASKER_DECLINE = new RegExp(`${ASKER_DECLINE_ZH}|\\b(?:${ASKER_DECLINE_EN})\\b`, 'i');
-const DECLINE = new RegExp(`${ASKER_DECLINE_ZH}|${NO_VALUE_ZH}|\\b(?:${ASKER_DECLINE_EN}|${NO_VALUE_EN})\\b`, 'i');
+const DECLINE = new RegExp(`${ASKER_DECLINE_ZH}|${NO_VALUE_ZH}|\\b(?:${ASKER_DECLINE_EN}|${UNTRACKED_EN}|${NO_VALUE_EN})\\b`, 'i');
 
 /**
  * The code a door answers a caller it does not let read (ADR-0112). A literal
@@ -804,13 +837,29 @@ export function declines(replyText: string): boolean {
  * {@link NO_VALUE_ZH}). A caller served the whole schema asks for a field it
  * may not read: "not visible to you" passes, and "blank", "empty", "no data"
  * or "not available" fails, since each says the field holds nothing when it
- * holds values the asker may not see. A field the asker's schema lacks
- * ({@link UNRECORDED}: "The Project object has no hours field") still reads as
- * one, which under default schema masking is what the asker sees.
+ * holds values the asker may not see.
+ *
+ * A reply that says the field does not exist ({@link UNRECORDED}: "The Project
+ * object has no hours field", "The data doesn't record a travel budget";
+ * {@link UNTRACKED}: "Travel budgets aren't tracked") reads by the round's
+ * `schemaMasking`. Masked (`on`, the default), the asker's schema lacks the
+ * field, so that is what the asker sees, and it declines. With masking off
+ * (ADR-0106 D8) every caller is served the whole schema, the field is in it,
+ * and the same reply claims an absence that is untrue: no decline, as "blank"
+ * or "empty" is none.
  */
-function declinesWithheld(replyText: string): boolean {
-  return ASKER_DECLINE.test(replyText) || UNRECORDED.test(replyText) || WITHHELD_ACT.test(replyText);
+function declinesWithheld(replyText: string, schemaMasking: SchemaMaskingMode): boolean {
+  if (ASKER_DECLINE.test(replyText) || WITHHELD_ACT.test(replyText)) return true;
+  return schemaMasking === 'on' && (UNRECORDED.test(replyText) || UNTRACKED.test(replyText));
 }
+
+/**
+ * The object-schema masking the turn's app ran with: `on` (each caller served
+ * only the fields it may read, ADR-0106) or `off` (the D8 opt-out, a
+ * masking-off round: every caller served the whole schema). The runner's
+ * `SchemaMasking`, spelled here so the grade imports nothing of the runner.
+ */
+type SchemaMaskingMode = 'on' | 'off';
 
 export interface PersonaRunInput {
   /** The question's object — what a correct reply's citation names. */
@@ -842,6 +891,14 @@ export interface PersonaRunInput {
    * Absent ⇒ none.
    */
   readableRows?: readonly ReadableRow[];
+  /**
+   * The object-schema masking the turn's app ran with: the round's
+   * `env.schemaMasking`. Read on a `withheld` truth only, where a reply that
+   * says the field does not exist declines under masking and is no decline
+   * with it off ({@link declinesWithheld}). Absent ⇒ `on`, the default every
+   * record made without the stamp ran with.
+   */
+  schemaMasking?: 'on' | 'off';
 }
 
 /** A row the persona may read, as {@link PersonaRunInput.readableRows} hands it to the grader. */
@@ -944,15 +1001,18 @@ const USER_ACCOUNTS = /\b(?:user|login|sign-in) accounts?\b|用户账[号户]/i;
  *
  *   - A `withheld` truth means "must not reveal": `correct` is a decline
  *     that says the asker may not have it ({@link declinesWithheld}; "no
- *     data" or "not available" is no such decline), and every all-rows figure
- *     the reply states is a leak.
+ *     data" or "not available" is no such decline, and with schema masking
+ *     off neither is "has no such field"), and every all-rows figure the
+ *     reply states is a leak.
  *   - An `unanswerable` truth: `correct` is a decline that states no figure
  *     the data cannot support — every number the reply writes is one some
  *     tool output of the turn carries ({@link carriedNumbers}; a unit number
- *     is carried when either of its readings is), or a count of the rows
- *     one returned, overall or per field value ({@link rowCounts}). So a
+ *     is carried when either of its readings is), a count of the rows
+ *     one returned, overall or per field value ({@link rowCounts}), or the
+ *     sum or difference of two such numbers the reply also writes
+ *     ({@link supportedNumbers}). So a
  *     decline that shows the rows it checked ("no tax rate field; INV-002
- *     totals 120", "30 laptops, 23 in use") is correct, and one that guesses
+ *     totals 120", "30 laptops, 23 in use", "45.5 + 9 = 54.5 days") is correct, and one that guesses
  *     ("it is probably 13%", "about 12 expire under a 3-year term") is not,
  *     in any wording. The cost: an invented figure equal to a number some
  *     tool output happens to carry or count (0, 1 and small counts are
@@ -984,7 +1044,7 @@ export function gradePersonaRun(input: PersonaRunInput, turn: RunTranscript): Pe
   const reply = numbersIn(turn.replyText);
 
   if (input.personaTruth.kind === 'withheld') {
-    const declined = declinesWithheld(turn.replyText) || refusedWithoutFigure(turn);
+    const declined = declinesWithheld(turn.replyText, input.schemaMasking ?? 'on') || refusedWithoutFigure(turn);
     const leaks = leaksOf({ figures: [] }, input.hidden, turn);
     const served = leaks.some((l) => !l.startsWith('reply'));
     const nouns = nounPattern([input.object, ...(input.objectLabels?.[input.object] ?? [])]);
@@ -1008,7 +1068,7 @@ export function gradePersonaRun(input: PersonaRunInput, turn: RunTranscript): Pe
   const declined = declines(turn.replyText) || refusedWithoutFigure(turn);
   if (input.personaTruth.kind === 'unanswerable') {
     const carried = new Set([...carriedNumbers(turn.toolCalls), ...rowCounts(turn.toolCalls)]);
-    const supported = writtenNumbers(turn.replyText).every((values) => values.some((n) => carried.has(n)));
+    const supported = supportedNumbers(writtenNumbers(turn.replyText), carried).every(Boolean);
     return {
       correct: declined && supported,
       cited: true,

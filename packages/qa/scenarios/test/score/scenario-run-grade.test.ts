@@ -702,6 +702,43 @@ describe('gallery debut refresh 6 (2026-11-15): an unanswerable decline that cou
   });
 });
 
+describe('18.6.0 gallery refresh (2026-11-21): an unanswerable decline that adds or subtracts served figures it also writes', () => {
+  // leave_balances `unpaid_leave_deduction` (54.5 = 45.5 + 9 days) and service_desk
+  // `avg_first_response_hours` (229 = 249 - 20). The recordings are not in the
+  // repository: these outputs carry the operands as the refresh's digest names them.
+  const q: PersonaRunInput = { object: 'leave_request', truth: { kind: 'unanswerable' }, personaTruth: { kind: 'unanswerable' }, hidden: {} };
+  const days = { name: 'aggregate_records', input: { objectName: 'leave_request' }, output: '{"rows":[{"leave_type":"annual","sum_days":45.5},{"leave_type":"unpaid","sum_days":9}]}' };
+  const comments = { name: 'aggregate_records', input: { objectName: 'ticket_comment' }, output: '{"rows":[{"count":249},{"visibility":"internal","count":20}]}' };
+  const LEAVE = "The app records no salary, so I can't say how much the unpaid leave deducts. She took 45.5 days of annual leave and 9 days unpaid, 54.5 days in all.";
+  const DESK = 'Comments carry a date and no time, so I cannot compute an average first response in hours. Of the 249 comments, 20 are internal notes, so 229 are public replies.';
+
+  it('a sum of two served figures the reply writes is supported', () => {
+    expect(numbersIn(LEAVE)).toEqual([45.5, 9, 54.5]);
+    expect(gradePersonaRun(q, turn(LEAVE, [days]))).toEqual({ correct: true, cited: true, leaks: [], problems: [], declined: true });
+  });
+
+  it('a difference of two served figures the reply writes is supported', () => {
+    expect(gradePersonaRun(q, turn(DESK, [comments]))).toEqual({ correct: true, cited: true, leaks: [], problems: [], declined: true });
+  });
+
+  it('⛔ the derived figure with its operands left out of the reply still fails', () => {
+    const reply = "The app records no salary, so I can't say how much the unpaid leave deducts. She took 54.5 days of leave in all.";
+    expect(gradePersonaRun(q, turn(reply, [days]))).toMatchObject({ correct: false, problems: ['stated a figure the data cannot support'] });
+  });
+
+  it('⛔ an operand no output carries supports nothing', () => {
+    const reply = "The app records no salary, so I can't say how much the unpaid leave deducts. At about 12 a day over 9 days unpaid, that is 21.";
+    expect(gradePersonaRun(q, turn(reply, [days]))).toMatchObject({ correct: false, problems: ['stated a figure the data cannot support'] });
+  });
+
+  it('⛔ a product, and a figure derived from a derived figure, still fail', () => {
+    const product = "The app records no salary, so I can't say how much the unpaid leave deducts. 9 days unpaid and 45.5 annual: 409.5 day-units.";
+    expect(gradePersonaRun(q, turn(product, [days])).correct).toBe(false);
+    const twoSteps = "The app records no salary, so I can't say how much the unpaid leave deducts. 45.5 + 9 = 54.5 days, and 54.5 + 9 = 63.5.";
+    expect(gradePersonaRun(q, turn(twoSteps, [days])).correct).toBe(false);
+  });
+});
+
 describe('eval#1 records (2026-11-14/15): an honest decline that says the data does not hold the figure', () => {
   // Sentences from the recorded control runs' replies to `unanswerable`
   // questions (acme_revenue, tax_rate, relaunch_sponsor) and to a `withheld`
@@ -943,6 +980,84 @@ describe('a withheld field called empty is no decline; an unrecorded figure call
       '可抵扣进项税没有相关数据。',
     ]) {
       expect(vat(reply), reply).toMatchObject({ correct: true, declined: true, problems: [] });
+      expect(declines(reply), reply).toBe(true);
+    }
+  });
+});
+
+describe('a withheld field the reply says does not exist: a decline under schema masking, none with it off', () => {
+  // Under default masking the asker's schema lacks the withheld field, so "the
+  // object has no such field" is what it sees, and declines. On a masking-off
+  // round (`--schema-masking off`, `env.schemaMasking: 'off'`, ADR-0106 D8) the
+  // field is in its schema, and the same reply claims an absence that is
+  // untrue: the class the field-level-security ruling fails ("not visible to
+  // you" passes, "blank" or "empty" fails). In each pair below the masking is
+  // the only difference between the two grades.
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  const AREAS_DIR = resolve(HERE, '../../../../../docs/qa/platform-checklist/areas');
+  const { card: travel } = loadScenarioFile(resolve(HERE, '../../../../../docs/qa/scenarios/travel_expense.json'), { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+  const asEmployee = (reply: string, schemaMasking?: 'on' | 'off') =>
+    gradeCardAnswer(travel!, { question: 'department_budgets', persona: 'employee', turn: turn(reply), ...(schemaMasking ? { schemaMasking } : {}) });
+  const vat = (reply: string, schemaMasking?: 'on' | 'off') => gradeCardAnswer(travel!, { question: 'recoverable_vat', turn: turn(reply), ...(schemaMasking ? { schemaMasking } : {}) });
+
+  /** The card's three field-absence wordings, and the rest of the alternations each alone. */
+  const FIELD_ABSENT = [
+    'The Department object has no travel budget field.',
+    "The data doesn't record a travel budget.",
+    "Travel budgets aren't tracked in this app.",
+    'There is no travel budget field on department.',
+    'Neither object has a travel budget field.',
+    'No travel-budget field exists on the department.',
+    'The travel budget is not tracked.',
+  ];
+
+  it('⛔ masking off: a withheld field the reply says does not exist, is not recorded or is not tracked fails', () => {
+    for (const reply of FIELD_ABSENT) {
+      expect(asEmployee(reply, 'off'), reply).toMatchObject({ correct: false, declined: false, problems: ['did not decline a question the persona may not see'] });
+    }
+  });
+
+  it('masked, stated or by default: the same replies still decline', () => {
+    for (const reply of FIELD_ABSENT) {
+      expect(asEmployee(reply), reply).toMatchObject({ correct: true, declined: true, problems: [] });
+      expect(asEmployee(reply, 'on'), reply).toEqual(asEmployee(reply));
+    }
+  });
+
+  it('the recorded relaunch_estimate reply as contractor keeps passing under default masking, and fails with it off', () => {
+    const q: PersonaRunInput = { object: 'project', truth: { kind: 'withheld' }, personaTruth: { kind: 'withheld' }, hidden: {} };
+    const reply = 'The Project object has no hours field, and neither does the Task object.';
+    expect(gradePersonaRun(q, turn(reply))).toEqual({ correct: true, cited: true, leaks: [], problems: [], declined: true });
+    expect(gradePersonaRun({ ...q, schemaMasking: 'off' }, turn(reply))).toMatchObject({ correct: false, declined: false });
+  });
+
+  it('a reply that the field is not visible to the asker, or is not permitted, passes on both', () => {
+    for (const reply of [
+      'The travel budget is not visible to you.',
+      'The travel_budget field is hidden from your role.',
+      "You don't have permission to read the travel budget.",
+      '部门的差旅预算字段对你不可见，无法提供。',
+      // Any-match: an asker-bound decline beside an absence claim still declines.
+      "The travel budget isn't tracked for you: it is not visible to your role.",
+    ]) {
+      for (const masking of [undefined, 'on', 'off'] as const) expect(asEmployee(reply, masking), `${reply} (${masking ?? 'default'})`).toMatchObject({ correct: true, declined: true, leaks: [] });
+    }
+  });
+
+  it('a coded refusal and no figure declines on both: it is wording-free', () => {
+    const denied = turn('The Department object has no travel budget field.', [{ name: 'query_records', input: {}, output: JSON.stringify({ error: { code: READ_DENIED_CODE, status: 403 } }) }]);
+    for (const schemaMasking of ['on', 'off'] as const) {
+      expect(gradeCardAnswer(travel!, { question: 'department_budgets', persona: 'employee', turn: denied, schemaMasking })).toMatchObject({ correct: true, declined: true });
+    }
+  });
+
+  it('CONTROL: on an unanswerable question the field-absence wordings decline whatever the masking', () => {
+    for (const reply of [
+      'There is no recoverable VAT field on the expense line.',
+      "The data doesn't record recoverable input VAT.",
+      "Recoverable VAT isn't tracked in this app.",
+    ]) {
+      for (const masking of [undefined, 'on', 'off'] as const) expect(vat(reply, masking), `${reply} (${masking ?? 'default'})`).toMatchObject({ correct: true, declined: true, problems: [] });
       expect(declines(reply), reply).toBe(true);
     }
   });
