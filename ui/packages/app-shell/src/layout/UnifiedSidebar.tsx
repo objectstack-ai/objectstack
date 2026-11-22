@@ -95,6 +95,13 @@ import type { FavoriteItem } from '../hooks/useFavorites.js';
 import { usePhoneAppHomeSlot } from './PhoneAppHome.js';
 
 /**
+ * The app's menu as the design mode edits it (objectstack#36363). Loaded on
+ * the mode's first use: it brings the metadata client and the package doors
+ * the menu's write needs, which no other sidebar row reads.
+ */
+const DesignModeMenu = React.lazy(() => import('./DesignModeMenu.js'));
+
+/**
  * The class the Recent group's label carries so that, once the sidebar
  * collapses to icons, the hidden label takes no pointer events
  * (objectui#12744). The `SidebarGroupLabel` primitive hides a label there with
@@ -692,7 +699,20 @@ export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false
 
            {/* App Navigation tree. `locale` is the same `language` the area
                labels above resolve in, so an entry label written as an inline
-               locale map reads the viewer's entry too (objectui#11299). */}
+               locale map reads the viewer's entry too (objectui#11299).
+               objectstack#36363 — while the design mode is on, the app's
+               menu is drawn by its editor instead (an app whose menu is split
+               in areas keeps its menu: the card edits `navigation`). */}
+           {designMode && where === 'sidebar' && context === 'app' && activeApp && areas.length === 0 ? (
+             <React.Suspense fallback={null}>
+               <DesignModeMenu
+                 app={activeApp}
+                 basePath={basePath}
+                 resolveTargetLabel={resolveNavTargetLabel}
+                 resolveTargetIcon={resolveNavTargetIcon}
+               />
+             </React.Suspense>
+           ) : (
            <NavigationRenderer
              items={processedNavigation}
              basePath={basePath}
@@ -718,6 +738,7 @@ export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false
              t={t}
              templateContext={navTemplateContext}
            />
+           )}
     </>
   );
 

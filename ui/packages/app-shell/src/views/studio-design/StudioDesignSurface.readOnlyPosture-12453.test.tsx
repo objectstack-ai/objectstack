@@ -1,10 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectui#12453 — a read-only package says so twice, the same in every
- * pillar: a lock and "Read-only" in the app chip, muted, its title the
- * package's read-only sentence; and one read-only mark at the right of the
- * item header. With no item open (these pillars list nothing here) the mark
+ * objectui#12453 — a read-only package says so, the same in every pillar: one
+ * read-only mark at the right of the item header. (The app chip's lock and
+ * "Read-only" left the top bar with the chip, objectstack#36501: the bar's left
+ * end is 「‹ Back to app」 now, and the item header's mark is the posture.) With no item open (these pillars list nothing here) the mark
  * reads "Read-only" and links nowhere: it offers an overlay only for an open
  * item whose type accepts one (#27356 row 13, `StudioReadOnlyLink.overlay-27356`).
  *
@@ -15,8 +15,11 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The surface's reach loads `@objectstack/lint` lazily; pay that load during
+// collection, not inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const PACKAGE_ID = 'app.r34d';
@@ -110,17 +113,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('Studio read-only posture: the app chip and the item header link (objectui#12453)', () => {
-  it.each(PILLARS)('%s: the chip carries a muted lock, the header one read-only mark that links nowhere', async (pillar) => {
+describe('Studio read-only posture: the item header link (objectui#12453)', () => {
+  it.each(PILLARS)('%s: the item header carries one read-only mark that links nowhere', async (pillar) => {
     servePackage(false);
     renderPillar(pillar);
-
-    const header = screen.getByTestId('studio-shell-header');
-    const chip = await within(header).findByTestId('studio-pkg-readonly');
-    expect(chip).toHaveTextContent(READ_ONLY);
-    expect(chip).toHaveAttribute('title', t('engine.studio.pkg.readonlyHint', 'en'));
-    expect(chip).toHaveClass('text-muted-foreground');
-    expect(chip.className).not.toMatch(/amber/);
 
     const links = await screen.findAllByTestId('studio-readonly-link');
     expect(links).toHaveLength(1);
@@ -129,21 +125,18 @@ describe('Studio read-only posture: the app chip and the item header link (objec
     expect(links[0]).not.toHaveAttribute('href');
     expect(links[0]).toHaveAttribute('title');
 
-    expect(visibleReadOnlyCount()).toBe(2);
+    expect(visibleReadOnlyCount()).toBe(1);
   });
 
   it.each(PILLARS)('CONTROL — %s on a writable package: no lock, no link', async (pillar) => {
     servePackage(true);
     renderPillar(pillar);
 
-    const header = screen.getByTestId('studio-shell-header');
-    await waitFor(() =>
-      expect(within(header).getByTestId('studio-pkg-chip')).toHaveAttribute(
-        'data-pkg-list-state',
-        'loaded',
-      ),
-    );
-    expect(screen.queryByTestId('studio-pkg-readonly')).toBeNull();
+    // Settled: the package list has answered, and the surface has read it.
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith('/api/v1/packages', expect.anything()));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
     expect(screen.queryByTestId('studio-readonly-link')).toBeNull();
     expect(visibleReadOnlyCount()).toBe(0);
   });
