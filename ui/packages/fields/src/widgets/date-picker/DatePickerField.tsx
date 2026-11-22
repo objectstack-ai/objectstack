@@ -92,6 +92,16 @@ import { isImeKey } from '../imeKey.js';
  * today. Every pick goes through `fromDateTimeInputValue`, the same write the
  * text box uses. The `date` face is unchanged: no time row, and a day pick
  * closes the popover.
+ *
+ * ## A click in the text box opens the calendar too
+ *
+ * Outside a grid cell, a click in the text box opens the same popover its
+ * calendar button opens, and the box keeps the focus: typing still edits the
+ * text, Enter commits it and closes the popover, Escape closes it, and Tab
+ * moves on without entering it. Only a click opens it: focus arriving by Tab
+ * does not, so tabbing through a form never pops a calendar. Closing returns
+ * the focus to the box when nothing else took it. The grid's in-cell face is
+ * not this face: it shows the calendar beneath the box already.
  */
 export function DatePickerField(props: FieldWidgetComponentProps<string>) {
   return <TemporalPicker {...props} withTime={false} />;
@@ -127,6 +137,11 @@ function TemporalPicker({
   const { t } = useFieldTranslation();
   const noticeId = React.useId();
   const [open, setOpen] = React.useState(false);
+  // Whether the popover was opened by a click in the text box, which keeps
+  // the focus there, rather than by the calendar button.
+  const [openedFromBox, setOpenedFromBox] = React.useState(false);
+  const panelId = React.useId();
+  const boxRef = React.useRef<HTMLInputElement>(null);
   const hourRef = React.useRef<HTMLButtonElement>(null);
   const rootRef = React.useRef<HTMLDivElement>(null);
 
@@ -188,13 +203,15 @@ function TemporalPicker({
     if (next !== nativeValue) onChange(stored);
   };
 
+  /** Reads the typed text; `false` when it names no date. */
   const commitText = () => {
     const parsed = parseLocaleDateText(text, locale, withTime);
     if (parsed === null) {
       setBadText(text);
-      return;
+      return false;
     }
     write(parsed);
+    return true;
   };
 
   /**
@@ -251,10 +268,14 @@ function TemporalPicker({
     ? [domProps['aria-describedby'], noticeId].filter(Boolean).join(' ')
     : domProps['aria-describedby'];
 
-  /** The text box: the value as the reader's locale writes it, typeable. */
-  const textBox = (className: string) => (
+  /**
+   * The text box: the value as the reader's locale writes it, typeable. With
+   * `opensPopover` a click in it opens the calendar popover too.
+   */
+  const textBox = (className: string, opensPopover = false) => (
     <Input
       {...domProps}
+      ref={boxRef}
       type="text"
       inputMode="numeric"
       autoComplete="off"
@@ -274,13 +295,23 @@ function TemporalPicker({
           // Commit, and keep a bare Enter from submitting the form with
           // the text not yet read.
           e.preventDefault();
-          commitText();
+          if (commitText() && opensPopover) setOpen(false);
         }
       }}
+      onClick={opensPopover ? (e) => {
+        domProps.onClick?.(e);
+        if (open) return;
+        setOpenedFromBox(true);
+        setOpen(true);
+      } : domProps.onClick}
       disabled={disabled}
       // After the DOM spread, the objectui#3222 idiom `DateField` follows.
       aria-invalid={!!error || impossible || badText !== null}
       aria-describedby={describedBy}
+      // The popover relationship Radix gives the calendar button.
+      aria-haspopup={opensPopover ? 'dialog' : undefined}
+      aria-expanded={opensPopover ? open : undefined}
+      aria-controls={opensPopover && open ? panelId : undefined}
     />
   );
 
@@ -294,7 +325,8 @@ function TemporalPicker({
         defaultMonth={selected}
         selected={selected}
         onSelect={pickDay}
-        autoFocus={!inCell}
+        // Opened from the text box, the focus stays in the box.
+        autoFocus={!inCell && !openedFromBox}
         className="[--cell-size:2.75rem] sm:[--cell-size:2rem]"
       />
       {withTime ? (
@@ -396,7 +428,7 @@ function TemporalPicker({
       <div className="relative">
         {/* Below `sm` the two buttons inside grow to the touch floor, so the
             text stops short of both (2 x 44 px plus the gap). */}
-        {textBox(cn(PHONE_TOUCH_HEIGHT, 'pr-24 sm:pr-16', domProps.className))}
+        {textBox(cn(PHONE_TOUCH_HEIGHT, 'pr-24 sm:pr-16', domProps.className), true)}
         <div className="absolute inset-y-0 right-1 flex items-center gap-0.5">
           {!disabled && (text || nativeValue) ? (
             <Button
@@ -411,7 +443,14 @@ function TemporalPicker({
               <X className="h-3.5 w-3.5" />
             </Button>
           ) : null}
-          <Popover open={open} onOpenChange={setOpen}>
+          <Popover
+            open={open}
+            onOpenChange={(next) => {
+              // Only the calendar button and a dismissal come through here.
+              if (next) setOpenedFromBox(false);
+              setOpen(next);
+            }}
+          >
             <PopoverTrigger asChild>
               <Button
                 type="button"
@@ -420,14 +459,31 @@ function TemporalPicker({
                 className={cn('h-7 w-7', PHONE_TOUCH_SQUARE)}
                 disabled={disabled}
                 aria-label={t('fields.datePicker.openCalendar')}
+                aria-controls={open ? panelId : undefined}
                 data-testid="date-picker-trigger"
               >
                 <CalendarDays className="h-4 w-4" />
               </Button>
             </PopoverTrigger>
             <PopoverContent
+              id={panelId}
               className="w-auto p-0"
               align="end"
+              onOpenAutoFocus={(e) => {
+                if (openedFromBox) e.preventDefault();
+              }}
+              // A click or focus in the text box is not a click outside.
+              onInteractOutside={(e) => {
+                if (boxRef.current?.contains(e.target as Node)) e.preventDefault();
+              }}
+              onCloseAutoFocus={(e) => {
+                if (!openedFromBox) return;
+                // Not to the calendar button: back to the box, unless the
+                // close moved the focus somewhere else on purpose.
+                e.preventDefault();
+                const active = document.activeElement;
+                if (!active || active === document.body) boxRef.current?.focus();
+              }}
             >
               {panel}
             </PopoverContent>
