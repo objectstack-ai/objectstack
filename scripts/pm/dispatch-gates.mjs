@@ -13270,7 +13270,7 @@ export function tierLines(result) {
   if (!mandatory) {
     return [
       `Model tier — no path-derived mandate: the surface hits none of the ${declared} declared glob(s), derived here, not recalled.`,
-      `  The tier stays below the ceiling: with no mandate the PM picks floor or default per card, and a ceiling build takes a MANDATORY line or the maintainer's explicit order (floor ${TIER_FLOOR} · default ${TIER_DEFAULT} · ceiling ${TIER_CEILING}).`,
+      `  The tier stays below the ceiling: with no mandate the PM picks floor or default per card, and a ceiling build takes a path-derived mandate or the maintainer's explicit order (floor ${TIER_FLOOR} · default ${TIER_DEFAULT} · ceiling ${TIER_CEILING}).`,
       clause2,
       ...suspicion,
     ];
