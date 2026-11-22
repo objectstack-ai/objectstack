@@ -7062,10 +7062,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   }, [shownRowsKey, shownRowsSettled]);
 
   // The Display panel (objectui#12423) is the default form of the toolbar's
-  // settings cluster, drawn whenever it has a control to offer.
+  // settings cluster, drawn whenever it has a control to offer. Refresh is not
+  // one of them: the default toolbar has no Refresh (objectstack#35878), so
+  // `userActions.refresh` alone never draws the panel (objectstack#36002).
   const displayOffered = toolbarFlags.compactToolbar && !!(
     viewSwitcherOffered || toolbarFlags.showGroup || toolbarFlags.showColor || toolbarFlags.showDensity
-    || toolbarFlags.showHideFields || currentView === 'grid' || toolbarFlags.showRefresh
+    || toolbarFlags.showHideFields || currentView === 'grid'
     || (resolvedExportOptions && exportPermitted && exportableFormats.length > 0)
   );
   // The condition controls (objectstack#35549, objectstack#35550): the Filter
@@ -7854,9 +7856,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
 
           {/* Refresh — re-fetch the current view from the backend without a full page
               reload. Filters / sort / pagination / search all live in component state,
-              so bumping refreshKey re-queries while preserving the view. In the wide
-              form a bar button (mobile + desktop); in the Display form it sits in
-              the panel's footer. */}
+              so bumping refreshKey re-queries while preserving the view. Wide form
+              only, a bar button (mobile + desktop): the default (Display) toolbar
+              has no Refresh, neither on the bar nor in the panel (objectstack#35878). */}
           {toolbarFlags.showRefresh && !toolbarFlags.compactToolbar && (
             <Button
               variant="ghost"

@@ -226,7 +226,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       },
       digest: {
         label: "摘要",
-        help: "將這些通知彙整成一份摘要，而不是逐則送出：daily 於午夜送出，weekly 於週一午夜送出，none 則每則立即送出。緊急通知一律立即送出。僅在通道為 *（所有通道）的偏好設定上生效。",
+        help: "將這些通知彙整成一份摘要，而不是逐則送出：daily 於午夜送出，weekly 於週一午夜送出，none 則每則立即送出。緊急通知一律立即送出。僅在通道為 *（所有通道）的偏好設定上生效。留空時由下一筆偏好設定決定：先是所有使用者的預設設定，然後是 none。",
         options: {
           none: "不彙整",
           daily: "每日",
@@ -235,7 +235,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       },
       quiet_hours: {
         label: "勿擾時段",
-        help: "每天暫緩通知、並於時段結束時送達的時段，例如 { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }。時間為該時區的 HH:MM（未填 tz 時為 UTC），時段可以跨越午夜。緊急通知不會暫緩。僅在通道為 *（所有通道）的偏好設定上生效。"
+        help: "每天暫緩通知、並於時段結束時送達的時段，例如 { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }。時間為該時區的 HH:MM（未填 tz 時為 UTC），時段可以跨越午夜。緊急通知不會暫緩。僅在通道為 *（所有通道）的偏好設定上生效。{ \"off\": true } 表示不設免打擾時段；留空時由下一筆偏好設定決定：先是所有使用者的預設設定，然後是不設。"
       },
       created_at: {
         label: "建立時間"

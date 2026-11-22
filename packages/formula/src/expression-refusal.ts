@@ -329,9 +329,14 @@ export interface ExpressionRefusalParams {
    * or a `fieldTypes` type that is inherently multi) and a non-null scalar
    * literal: CEL compares the whole list with the scalar, so the expression
    * answers the same constant on every row. `reference` is the read as
-   * `<root>.<field>`, `operand` the literal as CEL prints it, `answer` the
-   * constant (`false` for `==`, `true` for `!=`), and `rewrite` the
-   * null-guarded membership test that replaces the comparison.
+   * `<root>.<field>` (`record['f']` renders `record.f`), or the bare
+   * `<field>` at a flattened (flow) site, `operand` the literal as CEL prints
+   * it, `answer` the constant CEL answers (`false` for `==`, `true` for
+   * `!=`), and `rewrite` the guarded membership test that replaces the
+   * comparison, parenthesised whole and spelled for the site: `has()`-guarded
+   * `in` for a `<root>.<field>` read, `!= null`-guarded `in` for a bare name,
+   * `.contains(…)` where the source compiles to a query filter
+   * (`ExprSchemaHint.filterCompiled`).
    */
   'list-equality': {
     readonly reference: string;

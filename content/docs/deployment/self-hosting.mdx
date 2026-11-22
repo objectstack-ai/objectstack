@@ -783,13 +783,28 @@ the list admits that address's sign-up. Verification is forced on under this
 posture, and while the account's address is unverified it joins no
 organization: it joins by accepting the invitation once the address is
 verified, and the acceptance writes the membership the invitation names. Verifying the address binds nothing by itself.
-An address on the list is admitted by its domain, invitation or not, and the
-membership policy binds it at creation as before. Both admissions have one
+An address on the list is admitted by its domain, invitation or not: the
+membership policy binds it at creation as before, it receives the declared
+`selfRegistrationPermissionSet` like an uninvited sign-up, and a pending
+invitation still places it as the invitation names once it accepts. Both admissions have one
 exception: under this posture a sign-in through a social provider creates an
 account only when the provider reports the address verified, and is otherwise
 refused `403 SELF_REGISTRATION_CLOSED`, whatever the list or an invitation
 says ([Authentication](/docs/permissions/authentication#2-handle-callback)).
 Once the provider verifies the address, the next sign-in is admitted.
+Under `open` every address is admitted by the posture, invitation or not, so an
+invited sign-up likewise receives the declared set beside its invitation.
+
+**A sign-up the posture admits needs its declared set, invited or not.** When
+`selfRegistrationPermissionSet` cannot be resolved (no such set, or the set is
+switched off), every sign-up the posture's own rule admits is refused
+`403 AUTH_CONFIG_ERROR`, and the message names the set: any address under
+`open`, an address on the list under `email_domain`, with or without a pending
+invitation. Nothing is created, and the deployment logs the same reason at
+error level. Correct the setting, or switch the set on, and the next sign-up is
+admitted. A pending invitation does not admit such a sign-up without the set.
+The two admissions an invitation makes alone, under `invite_only` and for an
+address off the list under `email_domain`, ask for no set and are unaffected.
 
 **Accepting, declining and listing an invitation need a verified email
 address, on every deployment.** The invitation's `id`, which its link carries,

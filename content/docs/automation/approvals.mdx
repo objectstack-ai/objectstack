@@ -935,7 +935,7 @@ continuity levers on the same request. All are `POST
 | Verb | Route | Who | Effect |
 |:---|:---|:---|:---|
 | `approve` / `reject` | `/approve` `/reject` | pending approver | Records the decision (finalizes per `behavior`). Accepts `comment` (a reject's reason — required at every human door, see below), `attachments`, and — when the node declares `decisionOutputs` — structured `outputs` handed to the flow as `<nodeId>.<key>` variables. |
-| `reassign` | `/reassign` | pending approver | Hands one slot to another user (`to`); the request stays pending. |
+| `reassign` | `/reassign` | pending approver | Hands their own slot to another user (`to`); the request stays pending. A `from` naming a slot the acting approver does not hold is refused `403 FORBIDDEN`; an administrator (the override) or the system may move any pending slot. |
 | `revise` (send back) | `/revise` | pending approver | Ends this round as **`returned`**, unlocks the record for rework (ADR-0044). |
 | `request-info` | `/request-info` | pending approver | Asks the submitter for more info; the request **stays pending**. `comment` required. |
 | `remind` | `/remind` | submitter | Nudges the pending approvers (publishes a notification topic). |
