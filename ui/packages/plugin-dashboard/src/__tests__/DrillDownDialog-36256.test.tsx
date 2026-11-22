@@ -19,9 +19,12 @@ import { DrillNavigationProvider } from '@object-ui/react';
 import '@object-ui/components';
 import { DrillDownDrawer } from '../DrillDownDrawer';
 
-let listProps: Record<string, any> | null = null;
+// The props each render handed the stub, read back through the spy: a
+// component writes nothing outside itself during render.
+const seenProps = vi.fn();
+const lastProps = (): Record<string, any> | null => seenProps.mock.calls.at(-1)?.[0] ?? null;
 const StubList = (props: Record<string, any>) => {
-  listProps = props;
+  seenProps(props);
   return (
     <button type="button" data-testid="stub-row" onClick={() => {
       props.onRowsChange?.([{ id: 'o1' }, { id: 'o2' }, { id: 'o3' }]);
@@ -58,7 +61,7 @@ function renderDialog(props: Record<string, any> = {}, openRecord = vi.fn()) {
 
 describe('drill dialog over the standard list (#36256)', () => {
   beforeEach(() => {
-    listProps = null;
+    seenProps.mockClear();
     ComponentRegistry.register('list-view', StubList as any);
   });
   afterEach(() => {
@@ -77,8 +80,8 @@ describe('drill dialog over the standard list (#36256)', () => {
 
   it('mounts the standard list read-only, with the drill conditions as chips and the drilled fields as columns', async () => {
     renderDialog();
-    await waitFor(() => expect(listProps).not.toBeNull());
-    const { schema, initialFilters, showViewSwitcher } = listProps!;
+    await waitFor(() => expect(lastProps()).not.toBeNull());
+    const { schema, initialFilters, showViewSwitcher } = lastProps()!;
     expect(schema).toMatchObject({
       type: 'list-view',
       dataSource: { object: 'opportunity' },
@@ -93,16 +96,16 @@ describe('drill dialog over the standard list (#36256)', () => {
     ]);
     expect(showViewSwitcher).toBe(false);
     for (const door of ['onSaveView', 'onAddRecord', 'onBulkAction', 'onEdit', 'onDelete', 'onSortChange', 'onFilterChange']) {
-      expect(listProps![door]).toBeUndefined();
+      expect(lastProps()![door]).toBeUndefined();
     }
   });
 
   it("an added column and a picked calculation stay in the dialog's own state", async () => {
     renderDialog();
-    await waitFor(() => expect(listProps).not.toBeNull());
-    React.act(() => listProps!.onAddedFieldsChange(['owner_id']));
-    React.act(() => { listProps!.onColumnSummaryPick('amount', 'sum'); });
-    expect(listProps!.schema.columns).toEqual(['name', 'industry', { field: 'amount', summary: 'sum' }, 'owner_id']);
+    await waitFor(() => expect(lastProps()).not.toBeNull());
+    React.act(() => lastProps()!.onAddedFieldsChange(['owner_id']));
+    React.act(() => { lastProps()!.onColumnSummaryPick('amount', 'sum'); });
+    expect(lastProps()!.schema.columns).toEqual(['name', 'industry', { field: 'amount', summary: 'sum' }, 'owner_id']);
   });
 
   it("the record's name opens its page with the shown rows, and closes the drill", async () => {
@@ -114,7 +117,7 @@ describe('drill dialog over the standard list (#36256)', () => {
 
   it('keeps the side drawer and the same list when target is drawer', async () => {
     renderDialog({ target: 'drawer' });
-    await waitFor(() => expect(listProps).not.toBeNull());
+    await waitFor(() => expect(lastProps()).not.toBeNull());
     expect(screen.queryByTestId('drill-down-dialog')).toBeNull();
   });
 });

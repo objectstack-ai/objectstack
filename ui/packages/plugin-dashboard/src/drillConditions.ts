@@ -40,9 +40,8 @@ const ROW_OPERATOR: Readonly<Record<string, FilterBuilderRow['operator']>> = {
   $contains: 'contains',
 };
 
-type Scalar = string | number | boolean;
-
-const isScalar = (v: unknown): v is Scalar =>
+/** A value one chip row compares with: the filter dialect's own scalars. */
+const isScalar = (v: unknown): v is string | number | boolean =>
   typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean';
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
