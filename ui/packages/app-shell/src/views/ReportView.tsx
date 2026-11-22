@@ -71,8 +71,10 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
   // Drill-through (ADR-0021 D2): clicking an aggregated row/cell opens the
   // underlying records in an in-place drawer (peek without leaving the report),
   // with an "Open in list →" escape hatch to the full object list page.
-  const drillNavigation = useRecordListDrillNavigation();
-  const [drill, setDrill] = useState<{ object: string; filter: Record<string, unknown>; title: string } | null>(null);
+  const drillNavigation = useRecordListDrillNavigation(
+    metadataText(reportData?.title, language) ?? metadataText(reportData?.label, language),
+  );
+  const [drill, setDrill] = useState<{ object: string; filter: Record<string, unknown>; title: string; fields?: string[] } | null>(null);
 
   const getFieldsForObject = useCallback(
     (objName: string | undefined) => {
@@ -118,7 +120,7 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
   //     dim (the drill lands on a superset rather than filtering wrongly)
   //   - granularity-bucketed dates → need a range, not equality; skip too
   const handleDatasetDrill = useCallback(
-    async ({ dataset, groupKey, object, objectFilter }: DatasetDrillArgs) => {
+    async ({ dataset, groupKey, object, objectFilter, fields }: DatasetDrillArgs) => {
       try {
         // Drawer header: the clicked group's display values (e.g. "West / Q3"),
         // else the report's label in the viewer's language (objectui#13470).
@@ -131,7 +133,7 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
         // server's drillRawRows — correct for select/lookup dims (a stored
         // value, not a display label) with NO dataset-definition round-trip.
         if (object && objectFilter) {
-          setDrill({ object, filter: objectFilter, title });
+          setDrill({ object, filter: objectFilter, title, fields });
           return;
         }
 
@@ -550,15 +552,17 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
          />
       </div>
     </div>
-    {/* Drill-through drawer: peek the records behind a clicked group, then
-        click a row to open a record, or use "Open in list →" to escalate to
-        the full object list page. */}
+    {/* Drill-through dialog: the records behind a clicked group or bar in the
+        standard list; a record's name opens its page, 「Open in list」 the
+        object's list page (objectstack-ai/objectstack#36256). */}
     <DrillDownDrawer
       open={!!drill}
       onClose={() => setDrill(null)}
       title={drill?.title ?? ''}
       objectName={drill?.object ?? ''}
       filter={drill?.filter}
+      defaultColumns={drill?.fields}
+      target="dialog"
       dataSource={dataSource as any}
     />
     </DrillNavigationProvider>

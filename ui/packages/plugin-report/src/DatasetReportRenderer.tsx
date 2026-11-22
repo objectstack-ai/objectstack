@@ -110,6 +110,8 @@ import {
   // family lives (#4466 / #4497 / #4673 / #4500 / #4508), so routing through it
   // INHERITS those fixes instead of re-deriving them on a third surface.
   buildChartSeries,
+  findChartSeriesRow,
+  type ChartSegmentClickEvent,
   // The authored half of objectui#4229's data/presentation split (objectui#4877):
   // the chrome and the per-series presentation. No axis is lowered, and none
   // needs to be: a report's `chart.xAxis`/`chart.yAxis` are bare
@@ -215,6 +217,12 @@ export interface DatasetDrillArgs {
    * would mis-filter — without re-fetching the dataset definition.
    */
   objectFilter?: Record<string, unknown>;
+  /**
+   * The object fields the clicked number stands for — the bucket's grouped
+   * fields and the measure's aggregated ones — which the drill list shows
+   * after the record's name (objectstack-ai/objectstack#36256).
+   */
+  fields?: string[];
 }
 
 /** A report (or joined block) bound to a dataset. Field access is permissive — */
@@ -921,6 +929,74 @@ function resolveRelationshipDrill(
   );
 }
 
+/**
+ * Drill one clicked bucket — a table line or a chart mark — to its records:
+ * the exact field-to-stored-value filter when the answer names its `object`
+ * (a relationship path resolved first), else the host's `groupKey` fallback.
+ * One function for both, so a bar and the table line it stands for open the
+ * same list (objectstack-ai/objectstack#36256). `fields` names the grouped
+ * and measured fields the drill list shows by default.
+ */
+function emitBucketDrill({
+  state,
+  dataset,
+  groupKey,
+  drillDims,
+  rawRow,
+  rowRanges,
+  scope,
+  runtimeFilter,
+  dataSource,
+  onDrill,
+}: {
+  state: { object?: string; dimensionFields?: Record<string, string> };
+  dataset: string;
+  groupKey: Record<string, unknown>;
+  drillDims: string[];
+  rawRow: Record<string, unknown> | undefined;
+  rowRanges: Record<string, DatasetDrillRange> | undefined;
+  scope: MeasureDrillScope;
+  runtimeFilter: Record<string, unknown> | undefined;
+  dataSource: unknown;
+  onDrill: (args: DatasetDrillArgs) => void;
+}): void {
+  const hasRange = !!rowRanges && Object.keys(rowRanges).length > 0;
+  const fields = Array.from(new Set([
+    ...drillDims.map((d) => state.dimensionFields?.[d]).filter((f): f is string => !!f && !f.includes('.')),
+    ...Object.values(rowRanges ?? {}).map((range) => range.field),
+    ...measuredFieldsOf(scope),
+  ]));
+  if (state.object && datasetDrillHasRelationshipPath(drillDims, state.dimensionFields)) {
+    const object = state.object;
+    resolveRelationshipDrill(object, scope, rawRow, drillDims, state.dimensionFields ?? {}, runtimeFilter, rowRanges, dataSource, (resolved) =>
+      onDrill({ dataset, groupKey, runtimeFilter, object, objectFilter: resolved, fields }));
+    return;
+  }
+  let objectFilter: Record<string, unknown> | undefined;
+  if (state.object && (drillDims.length > 0 || hasRange)) {
+    const built = drillFilterOrRefusal(scope, rawRow, drillDims, state.dimensionFields ?? {}, runtimeFilter, rowRanges);
+    // Refused: no drill at all — see `drillFilterOrRefusal`.
+    if (built === null) return;
+    objectFilter = built;
+  } else if (Object.keys(scope).length > 0) {
+    // No exact bucket filter to carry the scope, and the host's groupKey
+    // fallback rebuilds the list from the bucket ALONE: no drill.
+    return;
+  }
+  onDrill({ dataset, groupKey, runtimeFilter, object: state.object, objectFilter, fields });
+}
+
+/**
+ * The fields a measure scope says hold a value (`{ field: { $null: false } }`,
+ * which `drillScopes` writes for a measure over a field): the fields the
+ * clicked number aggregates.
+ */
+function measuredFieldsOf(scope: MeasureDrillScope): string[] {
+  return Object.entries(scope ?? {})
+    .filter(([field, c]) => !field.startsWith('$') && !!c && typeof c === 'object' && (c as { $null?: unknown }).$null === false)
+    .map(([field]) => field);
+}
+
 function EmptyMeasures({ dataset }: { dataset: string }) {
   return (
     <div className="flex items-center justify-center rounded-md border border-dashed bg-muted/20 p-4 text-xs text-muted-foreground">
@@ -1111,25 +1187,7 @@ function DatasetReportTable({
     const rowRanges = members
       ? spanDrillRanges(members.map((i) => state.drillRanges?.[i]))
       : state.drillRanges?.[index];
-    const hasRange = !!rowRanges && Object.keys(rowRanges).length > 0;
-    let objectFilter: Record<string, unknown> | undefined;
-    if (state.object && datasetDrillHasRelationshipPath(drillDims, state.dimensionFields)) {
-      const object = state.object;
-      resolveRelationshipDrill(object, scope, state.drillRawRows?.[index], drillDims, state.dimensionFields ?? {}, runtimeFilter, rowRanges, dataSource, (resolved) =>
-        onDrill!({ dataset, groupKey, runtimeFilter, object, objectFilter: resolved }));
-      return;
-    }
-    if (state.object && (drillDims.length > 0 || hasRange)) {
-      const built = drillFilterOrRefusal(scope, state.drillRawRows?.[index], drillDims, state.dimensionFields ?? {}, runtimeFilter, rowRanges);
-      // Refused: no drill at all — see `drillFilterOrRefusal`.
-      if (built === null) return;
-      objectFilter = built;
-    } else if (Object.keys(scope).length > 0) {
-      // No exact bucket filter to carry the scope, and the host's groupKey
-      // fallback rebuilds the list from the bucket ALONE: no drill.
-      return;
-    }
-    onDrill!({ dataset, groupKey, runtimeFilter, object: state.object, objectFilter });
+    emitBucketDrill({ state, dataset, groupKey, drillDims, rawRow: state.drillRawRows?.[index], rowRanges, scope, runtimeFilter, dataSource, onDrill: onDrill! });
   };
 
   // objectui#7534 — resolve a BUILT-IN default measure's caption through the
@@ -1435,7 +1493,7 @@ export function planReportChart(t: unknown): ReportChartPlan {
  */
 function useRegistryComponent(
   type: string,
-): React.ComponentType<{ schema: Record<string, unknown> }> | undefined {
+): React.ComponentType<{ schema: Record<string, unknown>; onChartClick?: (event: ChartSegmentClickEvent) => void }> | undefined {
   const [, bump] = React.useReducer((x: number) => x + 1, 0);
   React.useEffect(() => {
     if (ComponentRegistry.get(type)) return;
@@ -1452,7 +1510,7 @@ function useRegistryComponent(
     return unsub;
   }, [type]);
   return ComponentRegistry.get(type) as
-    | React.ComponentType<{ schema: Record<string, unknown> }>
+    | React.ComponentType<{ schema: Record<string, unknown>; onChartClick?: (event: ChartSegmentClickEvent) => void }>
     | undefined;
 }
 
@@ -1548,6 +1606,7 @@ function DatasetReportChart({
   dataSource,
   order,
   timeWindow,
+  onDrill,
 }: {
   dataset: string;
   chart: Record<string, unknown>;
@@ -1555,6 +1614,8 @@ function DatasetReportChart({
   dataSource?: unknown;
   order?: SelectionOrder;
   timeWindow?: ReportTimeWindow;
+  /** The report's drill sink: a clicked mark drills like its table line (objectstack-ai/objectstack#36256). */
+  onDrill?: (args: DatasetDrillArgs) => void;
 }) {
   const xAxis = typeof chart.xAxis === 'string' ? chart.xAxis : '';
   const yAxis = typeof chart.yAxis === 'string' ? chart.yAxis : '';
@@ -1851,6 +1912,36 @@ function DatasetReportChart({
   // itself — not spec `ChartAxis` objects, so there is no axis presentation to
   // merge. (`@object-ui/core`'s object-axis lowering, `mergeAuthoredPresentation`,
   // was deliberately not used here and was removed by objectui#11372.)
+  // objectstack-ai/objectstack#36256 — a mark drills to the records its
+  // bucket counted, through the table's own `emitBucketDrill`, so a bar and
+  // its summary line open the same list. A measure the answer gives no record
+  // list (`drillScopes`) offers no click.
+  const markScope: MeasureDrillScope | undefined = state.object ? measureDrillScope(state.drillScopes, yAxis) : {};
+  const handleMarkClick = onDrill && markScope !== undefined
+    ? (ev: ChartSegmentClickEvent) => {
+      const at = findChartSeriesRow(plotRows, queryDimensions, [yAxis], ev?.category, ev?.series, {
+        nullCategoryLabel,
+        bucketId: ev?.categoryId,
+      });
+      if (at < 0) return;
+      const index = plotLayout ? plotLayout[at] : at;
+      const groupKey: Record<string, unknown> = {};
+      for (const dim of queryDimensions) groupKey[dim] = displayRows[index]?.[dim];
+      emitBucketDrill({
+        state,
+        dataset,
+        groupKey,
+        drillDims: state.dimensionFields ? queryDimensions.filter((d) => d in state.dimensionFields!) : [],
+        rawRow: state.drillRawRows?.[index],
+        rowRanges: state.drillRanges?.[index],
+        scope: markScope,
+        runtimeFilter,
+        dataSource,
+        onDrill,
+      });
+    }
+    : undefined;
+
   const authoredSeries = mergeAuthoredSeries(derivedSeries, chart.series);
   // #4020's three-level display name OUTRANKS both of the labels above: the
   // derivation's `fields[].label` (level ② without the i18n field-label
@@ -1922,6 +2013,7 @@ function DatasetReportChart({
           // chart's own default (value-descending) still applies.
           ...(categoryOrder ? { categoryOrder } : {}),
         }}
+        onChartClick={handleMarkClick}
       />
     </div>
   );
@@ -2555,6 +2647,7 @@ const DatasetReportRendererBody: React.FC<DatasetReportRendererProps> = ({
       dataSource={dataSource}
       order={reportOrder}
       timeWindow={timeWindow}
+      onDrill={drillSink}
     />
   ) : null;
 

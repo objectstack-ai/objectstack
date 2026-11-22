@@ -63,6 +63,21 @@ export interface DrillNavigationValue {
    * destination, which is how a host behaved before this member existed.
    */
   canOpenRecordList?: (objectName: string, filter?: Record<string, unknown>) => boolean;
+  /**
+   * Open one drilled record's full page (objectstack-ai/objectstack#36256):
+   * the drill list's record name calls it. `origin` is the drill list the
+   * page came from: the ids of the rows it shows, in order, which the page
+   * steps through with ↑ ↓ under its 「N of M」 counter, and the count it
+   * matched. The host makes the page it opened from (the dashboard, the
+   * report) the page's way back. Absent ⇒ the drill list opens no record.
+   */
+  openRecord?: (objectName: string, recordId: string, origin?: DrillRecordOrigin) => void;
+}
+
+/** The drill list a record page was opened from — see {@link DrillNavigationValue.openRecord}. */
+export interface DrillRecordOrigin {
+  siblings: readonly string[];
+  total?: number;
 }
 
 export const DrillNavigationContext = createContext<DrillNavigationValue>({});

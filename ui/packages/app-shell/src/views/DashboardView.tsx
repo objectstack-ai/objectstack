@@ -98,8 +98,6 @@ type DashboardRefreshState = Parameters<
 // ---------------------------------------------------------------------------
 
 export function DashboardView({ dataSource }: { dataSource?: any }) {
-  // Drill "escape hatch": lets the drill drawers open an object's full list page.
-  const drillNavigation = useRecordListDrillNavigation();
   const { dashboardName } = useParams<{ dashboardName: string }>();
   // Setup's own System Overview (`platform-objects`' `system_overview`).
   const isSystemOverview = useInSetupApp() && dashboardName === 'system_overview';
@@ -253,6 +251,12 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
     if (filtered.length === widgets.length) return dashboard;
     return { ...dashboard, widgets: filtered };
   }, [dashboard, unregistered]);
+
+  // Drill navigation: the drill list's 「Open in list」 and its record pages,
+  // which name this dashboard as their way back (objectstack-ai/objectstack#36256).
+  const drillNavigation = useRecordListDrillNavigation(
+    dashboard ? resolveKeyedI18nLabel(dashboard.label, t) || dashboard.name : undefined,
+  );
 
   // ---- Loading / not-found guards -----------------------------------------
   if (isLoading) {

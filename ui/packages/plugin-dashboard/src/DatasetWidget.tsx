@@ -112,6 +112,7 @@ import { DrillDownDrawer, type DrillDownNotice } from './DrillDownDrawer';
 import { DatasetQueryCoalescerContext } from './datasetQueryBatch';
 import { metricDrillFilter, readMeasureDrillScope } from './metricDrill';
 import { sharedMeasureDrillScope, scopeDrillFilter } from './measureDrill';
+import { measuredFieldsOf } from './drillConditions';
 import { specDefaultWidgetType } from './widgetDispatch';
 import { DASHBOARD_WIDGET_MULTI_MEASURE_TYPES } from '@objectstack/spec/ui';
 import { SnakeCaseIdentifierSchema } from '@objectstack/spec/shared';
@@ -1054,7 +1055,7 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
   // while each hop's schema is read, and keeps one when the path cannot be
   // drilled (`resolveDatasetDrillFilter`); `filter` is set once there is a list
   // to read.
-  const [drill, setDrill] = useState<{ filter?: Record<string, unknown>; title: string; notice?: DrillDownNotice } | null>(null);
+  const [drill, setDrill] = useState<{ filter?: Record<string, unknown>; title: string; notice?: DrillDownNotice; columns?: string[] } | null>(null);
   // The click a pending relationship resolution answers: a later click, or the
   // drawer closing, makes an earlier answer stale.
   const drillRequest = useRef(0);
@@ -1495,6 +1496,15 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
     const scope = sharedMeasureDrillScope(state, measures);
     if (!scope) return;
     const drillTitle = title || String(widget?.title ?? '');
+    // objectstack-ai/objectstack#36256 item 4 — the list shows the record's
+    // name, the fields this bucket is grouped by (a base-object field; a
+    // relationship path has no column on the base list) and the fields the
+    // measure aggregates; the reader adds the rest.
+    const columns = Array.from(new Set([
+      ...drillDims.map((d) => dimensionFields?.[d]).filter((f): f is string => !!f && !f.includes('.')),
+      ...Object.values(drillRanges?.[index] ?? {}).map((range) => range.field),
+      ...measuredFieldsOf(scope),
+    ]));
     const request = ++drillRequest.current;
     const scopedFilter = scopeDrillFilter(runtimeFilter, scope);
     // A dimension whose field is a `relationship.field` path drills as one
@@ -1517,7 +1527,7 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
       }).then(
         (resolution) => {
           if (drillRequest.current !== request) return;
-          if (resolution.status === 'resolved') setDrill({ filter: resolution.filter, title: drillTitle });
+          if (resolution.status === 'resolved') setDrill({ filter: resolution.filter, title: drillTitle, columns });
           else setDrill({ title: drillTitle, notice: resolution.status === 'too-many' ? 'too-many' : 'unavailable' });
         },
         (error: unknown) => {
@@ -1545,7 +1555,7 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
       console.warn(`[DatasetWidget] drill-down refused — the drilled list cannot be scoped: ${error.message}`);
       return;
     }
-    setDrill({ filter: merged, title: drillTitle });
+    setDrill({ filter: merged, title: drillTitle, columns });
   };
   const closeDrill = () => {
     drillRequest.current += 1;
@@ -1559,6 +1569,8 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
       objectName={drillObject}
       filter={drill.filter}
       notice={drill.notice}
+      defaultColumns={drill.columns}
+      target="dialog"
       dataSource={dataSource}
     />
   ) : null;
@@ -1626,7 +1638,11 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
       ranges: drillRanges?.[0],
     });
     const openTileDrill = tileDrillFilter
-      ? () => setDrill({ filter: tileDrillFilter, title: heading?.title || measureLabel })
+      ? () => setDrill({
+        filter: tileDrillFilter,
+        title: heading?.title || measureLabel,
+        columns: measuredFieldsOf(readMeasureDrillScope(state, tileMeasure)),
+      })
       : undefined;
     const tileDrillProps = openTileDrill
       ? {
