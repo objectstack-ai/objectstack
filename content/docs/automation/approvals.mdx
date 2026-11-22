@@ -417,12 +417,22 @@ the run that opened the request still write the lines. Children joined by a plai
 
 **Deleting the record while it is pending** is not refused: the delete lands and
 its pending request is cancelled (`status: 'cancelled'`, with `cancel_reason` on
-the row). The delete removes the record's `master_detail` lines with it. If the
-line object has a second relation that also cascades on delete (a `lookup` with
-`deleteBehavior: 'cascade'`, or a second `master_detail`), the server cannot tell
-which record's delete removes the line, so it refuses the line's removal while any
-of its masters is locked. Deleting a different record never removes a locked
-record's line.
+the row). The delete removes the record's `master_detail` lines with it. In two
+cases the server refuses the whole delete with `409 RECORD_LOCKED` instead, and
+the record, its lines and its pending request all stay:
+
+- the line object has a second relation that also cascades on delete (a `lookup`
+  with `deleteBehavior: 'cascade'`, or a second `master_detail`), so the server
+  cannot tell which record's delete removes the line;
+- the delete does not run in a transaction: the datasource declares
+  `supports.transactionsUnsupported`, or the cascade spans more than one
+  datasource. The lines would be removed one by one, and a later refusal (a
+  `restrict` reference to the record) would leave the record locked with its
+  lines gone.
+
+Deleting a different record never removes a locked record's line, with one
+exception: when the locked record is itself a `master_detail` child, deleting its
+parent removes the locked record and its lines, and cancels its request.
 
 **Reading the lock.** Anyone who can read the record can ask whether it is
 locked, including a member who is not on the approval and so is served no

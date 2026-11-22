@@ -246,6 +246,24 @@ describe('a locked record\'s lines are locked with it — deleting the record it
       product: { name: 'product', type: 'lookup' as const, reference: 'product', deleteBehavior: 'cascade' as const },
     },
   };
+  /** A junction under two cascading masters: the held deal and a contact. */
+  const contact = {
+    name: 'contact',
+    label: 'Contact',
+    fields: {
+      id: { name: 'id', type: 'text' as const, primaryKey: true },
+      name: { name: 'name', type: 'text' as const },
+    },
+  };
+  const dealContact = {
+    name: 'deal_contact',
+    label: 'Deal Contact',
+    fields: {
+      id: { name: 'id', type: 'text' as const, primaryKey: true },
+      opportunity: { name: 'opportunity', type: 'master_detail' as const, reference: 'opportunity' },
+      contact: { name: 'contact', type: 'master_detail' as const, reference: 'contact' },
+    },
+  };
 
   afterEach(async () => {
     try { await engine?.destroy(); } catch { /* noop */ }
@@ -260,7 +278,7 @@ describe('a locked record\'s lines are locked with it — deleting the record it
       useNullAsDefault: true,
     }), true);
     await engine.init();
-    for (const o of [opportunity, lineItem, product, bundleLine, approvalRequest]) {
+    for (const o of [opportunity, lineItem, product, bundleLine, contact, dealContact, approvalRequest]) {
       engine.registry.registerObject(o as any, 'com.objectstack.test.detail-row-lock');
     }
     await engine.syncSchemas();
@@ -308,11 +326,210 @@ describe('a locked record\'s lines are locked with it — deleting the record it
     expect(await linesOf('opportunity_line', lockedId)).toHaveLength(2);
   });
 
+  /** The held record's own delete, refused whole: the record, its lines and its pending request all stay. */
+  const expectHeldDeleteRefusedIntact = async (err: any) => {
+    expect(err?.code).toBe('RECORD_LOCKED');
+    expect(err?.statusCode).toBe(409);
+    expect(await engine.findOne('opportunity', { where: { id: lockedId } })).toBeTruthy();
+    expect(await linesOf('opportunity_line', lockedId)).toHaveLength(2);
+    expect(cancelled).not.toContain(`opportunity:${lockedId}`);
+  };
+
+  it('FAIL-CLOSED — a line with a second cascading relation (master_detail plus a cascading lookup): the held record\'s own delete is refused, nothing removed', async () => {
+    await expectHeldDeleteRefusedIntact(await refusal(() => engine.delete('opportunity', { where: { id: lockedId }, ...USER })));
+    expect(await linesOf('bundle_line', lockedId)).toHaveLength(1);
+  });
+
+  it('FAIL-CLOSED — a junction under two cascading masters: the held record\'s own delete is refused, nothing removed', async () => {
+    await engine.delete('bundle_line', { where: { opportunity: lockedId }, multi: true, ...SYSTEM } as any);
+    const contactId = String((await engine.insert('contact', { name: 'Ada' }, SYSTEM)).id);
+    await engine.insert('deal_contact', { opportunity: lockedId, contact: contactId }, SYSTEM);
+    await expectHeldDeleteRefusedIntact(await refusal(() => engine.delete('opportunity', { where: { id: lockedId }, ...USER })));
+    expect(await linesOf('deal_contact', lockedId)).toHaveLength(1);
+  });
+
   it('deleting a DIFFERENT record whose cascade would remove a held line is refused, and nothing is removed', async () => {
     const err: any = await refusal(() => engine.delete('product', { where: { id: productId }, ...USER }));
     expect(err?.code).toBe('RECORD_LOCKED');
     expect(err?.statusCode).toBe(409);
     expect(await engine.findOne('product', { where: { id: productId } })).toBeTruthy();
     expect(await linesOf('bundle_line', lockedId)).toHaveLength(1);
+  });
+});
+
+/**
+ * The cascade leg yields only inside an open transaction. Without one — a
+ * datasource that declares `supports.transactionsUnsupported`, or a cascade
+ * the engine splits across datasources — the legs land one by one, so a later
+ * refusal of the record's own delete would leave the record held with its lines
+ * gone. There the held record's delete is refused `RECORD_LOCKED`, whole.
+ */
+describe('a locked record\'s lines are locked with it — without a transaction the held record\'s delete is refused', () => {
+  /** The real sqlite driver, declaring that its transport cannot carry a transaction. */
+  class NoTransactionSqlDriver extends SqlDriver {
+    get supports() {
+      return { ...super.supports, transactionsUnsupported: true };
+    }
+  }
+
+  /** Registered AFTER the line object, so its `restrict` is met after the cascade into the lines has run. */
+  const hold = {
+    name: 'opportunity_hold',
+    label: 'Opportunity Hold',
+    fields: {
+      id: { name: 'id', type: 'text' as const, primaryKey: true },
+      opportunity: { name: 'opportunity', type: 'lookup' as const, reference: 'opportunity', deleteBehavior: 'restrict' as const },
+    },
+  };
+
+  let engine: ObjectQL;
+  let lockedId: string;
+  let freeId: string;
+  const cancelled: string[] = [];
+
+  afterEach(async () => {
+    try { await engine?.destroy(); } catch { /* noop */ }
+  });
+
+  beforeEach(async () => {
+    cancelled.length = 0;
+    engine = new ObjectQL();
+    engine.registerDriver(new NoTransactionSqlDriver({
+      client: 'better-sqlite3',
+      connection: { filename: ':memory:' },
+      useNullAsDefault: true,
+    }), true);
+    await engine.init();
+    for (const o of [opportunity, lineItem, hold, approvalRequest]) {
+      engine.registry.registerObject(o as any, 'com.objectstack.test.detail-row-lock');
+    }
+    await engine.syncSchemas();
+    await installDefaultOrganization(engine);
+
+    lockedId = String((await engine.insert('opportunity', { name: 'Locked deal' }, SYSTEM)).id);
+    freeId = String((await engine.insert('opportunity', { name: 'Free deal' }, SYSTEM)).id);
+    for (const opp of [lockedId, freeId]) {
+      await engine.insert('opportunity_line', { product: 'A', quantity: 1, opportunity: opp }, SYSTEM);
+      await engine.insert('opportunity_line', { product: 'B', quantity: 2, opportunity: opp }, SYSTEM);
+    }
+    await engine.insert('sys_approval_request', {
+      object_name: 'opportunity',
+      record_id: lockedId,
+      status: 'pending',
+      flow_run_id: 'run_open',
+      node_config_json: JSON.stringify({ lockRecord: true }),
+    }, SYSTEM);
+
+    bindDetailRowLockHook(engine as any);
+    bindRecordDeleteCancelHook(engine as any, {
+      cancelForDeletedRecord: async (objectName: string, recordId: string) => {
+        cancelled.push(`${objectName}:${recordId}`);
+        return { cancelled: [], suspendedRuns: [] };
+      },
+    });
+  });
+
+  const linesOf = async (opp: string) =>
+    engine.find('opportunity_line', { where: { opportunity: opp }, context: { isSystem: true } } satisfies EngineQueryOptions);
+  const requestStatus = async () =>
+    (await engine.findOne('sys_approval_request', { where: { record_id: lockedId }, context: { isSystem: true } } as any))?.status;
+
+  it('a held record with a later `restrict` row: the delete is refused RECORD_LOCKED; record, lines and pending request all stay', async () => {
+    await engine.insert('opportunity_hold', { opportunity: lockedId }, SYSTEM);
+    const err: any = await refusal(() => engine.delete('opportunity', { where: { id: lockedId }, ...USER }));
+    expect(err?.code).toBe('RECORD_LOCKED');
+    expect(err?.statusCode).toBe(409);
+    expect(await engine.findOne('opportunity', { where: { id: lockedId } })).toBeTruthy();
+    expect(await linesOf(lockedId)).toHaveLength(2);
+    expect(await requestStatus()).toBe('pending');
+    expect(cancelled).not.toContain(`opportunity:${lockedId}`);
+  });
+
+  it('a held record with lines and nothing else: still refused RECORD_LOCKED without a transaction, nothing removed', async () => {
+    const err: any = await refusal(() => engine.delete('opportunity', { where: { id: lockedId }, ...USER }));
+    expect(err?.code).toBe('RECORD_LOCKED');
+    expect(err?.statusCode).toBe(409);
+    expect(await linesOf(lockedId)).toHaveLength(2);
+    expect(await requestStatus()).toBe('pending');
+  });
+
+  it('CONTROL — a record no approval holds deletes with its lines on the same driver', async () => {
+    expect(await refusal(() => engine.delete('opportunity', { where: { id: freeId }, ...USER }))).toBeNull();
+    expect(await engine.findOne('opportunity', { where: { id: freeId } })).toBeFalsy();
+    expect(await linesOf(freeId)).toHaveLength(0);
+  });
+});
+
+/**
+ * The qualification of "deleting a different record never removes a held
+ * line": when the held record is itself a `master_detail` child, deleting ITS
+ * master removes the held record and, through that record's own delete, its
+ * lines — and the delete-cancel linkage cancels its request.
+ */
+describe('a locked record\'s lines are locked with it — a held record that is itself a detail row goes with its master', () => {
+  const account = {
+    name: 'account',
+    label: 'Account',
+    fields: {
+      id: { name: 'id', type: 'text' as const, primaryKey: true },
+      name: { name: 'name', type: 'text' as const },
+    },
+  };
+  const deal = {
+    name: 'deal',
+    label: 'Deal',
+    fields: {
+      id: { name: 'id', type: 'text' as const, primaryKey: true },
+      account: { name: 'account', type: 'master_detail' as const, reference: 'account' },
+    },
+  };
+  const dealLine = {
+    name: 'deal_line',
+    label: 'Deal Line',
+    fields: {
+      id: { name: 'id', type: 'text' as const, primaryKey: true },
+      deal: { name: 'deal', type: 'master_detail' as const, reference: 'deal' },
+    },
+  };
+
+  let engine: ObjectQL;
+  afterEach(async () => {
+    try { await engine?.destroy(); } catch { /* noop */ }
+  });
+
+  it('deleting the held record\'s master removes the held record and its lines, and cancels its request', async () => {
+    engine = new ObjectQL();
+    engine.registerDriver(new SqlDriver({
+      client: 'better-sqlite3',
+      connection: { filename: ':memory:' },
+      useNullAsDefault: true,
+    }), true);
+    await engine.init();
+    for (const o of [account, deal, dealLine, approvalRequest]) {
+      engine.registry.registerObject(o as any, 'com.objectstack.test.detail-row-lock');
+    }
+    await engine.syncSchemas();
+    await installDefaultOrganization(engine);
+    const accountId = String((await engine.insert('account', { name: 'Acme' }, SYSTEM)).id);
+    const dealId = String((await engine.insert('deal', { account: accountId }, SYSTEM)).id);
+    await engine.insert('deal_line', { deal: dealId }, SYSTEM);
+    await engine.insert('deal_line', { deal: dealId }, SYSTEM);
+    await engine.insert('sys_approval_request', {
+      object_name: 'deal', record_id: dealId, status: 'pending', flow_run_id: 'run_open',
+      node_config_json: JSON.stringify({ lockRecord: true }),
+    }, SYSTEM);
+    const cancelled: string[] = [];
+    bindDetailRowLockHook(engine as any);
+    bindRecordDeleteCancelHook(engine as any, {
+      cancelForDeletedRecord: async (objectName: string, recordId: string) => {
+        cancelled.push(`${objectName}:${recordId}`);
+        return { cancelled: [], suspendedRuns: [] };
+      },
+    });
+
+    expect(await refusal(() => engine.delete('account', { where: { id: accountId }, ...USER }))).toBeNull();
+    expect(await engine.findOne('deal', { where: { id: dealId } })).toBeFalsy();
+    expect(await engine.find('deal_line', { where: { deal: dealId }, context: { isSystem: true } } satisfies EngineQueryOptions)).toHaveLength(0);
+    expect(cancelled).toContain(`deal:${dealId}`);
   });
 });

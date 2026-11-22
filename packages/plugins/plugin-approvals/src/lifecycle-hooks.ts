@@ -919,6 +919,20 @@ function unscalarFk(value: unknown): boolean {
  * the leg is judged as a hand delete and refused: deleting a DIFFERENT record
  * never takes a held record's line with it.
  *
+ * The yield also needs the delete to run inside an OPEN TRANSACTION
+ * (`ctx.transaction`, the handle the engine's atomic cascade opens). Without
+ * one — a datasource that declares `supports.transactionsUnsupported`, or a
+ * cascade the engine splits across datasources — each leg lands on its own, so
+ * a later refusal of the record's own delete (a `restrict` row met after the
+ * lines were removed) would leave the record held, its request pending and its
+ * lines gone. There the leg is refused, and so the held record's delete is
+ * refused `RECORD_LOCKED`, whole.
+ *
+ * One more shape is the yield's by construction: when the held record is itself
+ * a `master_detail` child, deleting ITS master removes the held record (its own
+ * edge is to an unheld master) and, through that record's own delete, its lines
+ * — and the delete-cancel linkage cancels its request.
+ *
  * ## The refusal
  *
  * The END-USER sentence of the record lock ({@link recordLockRefusal}), naming
@@ -971,8 +985,10 @@ export function bindDetailRowLockHook(
       if (!previous) unresolved = true;
       // A cascade leg of the held master's OWN delete yields on that one edge
       // (see "Deleting the locked master itself" above); every other edge of the
-      // row is still judged.
-      const cascadeSource = event === 'delete' && ctx?.referentialCascadeDelete === true
+      // row is still judged. Only inside an open transaction: without one the
+      // legs land one by one, and a later refusal of the record's own delete
+      // would leave the record held with its lines gone.
+      const cascadeSource = event === 'delete' && ctx?.referentialCascadeDelete === true && ctx?.transaction != null
         ? soleCascadeEdgeOf(engine, object, edges)
         : undefined;
       for (const e of edges) {
