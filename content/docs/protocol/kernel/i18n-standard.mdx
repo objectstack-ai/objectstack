@@ -287,6 +287,21 @@ its own raw dotted key on screen, in every locale.
 For the props that have no bundle key at all, the map is the **only**
 localisation route — a document localised that way is fully localised.
 
+**A report's `label` and `description` and a dashboard widget's `title` keep
+their map entry over the bundle at the `/meta` boundary** (objectstack#36373).
+These props have a bundle key too, so `translateReport` and
+`translateDashboard` decide between the two: the map's entry for the requested
+locale — the exact tag, then its base language, never `default` — is served
+when the item has a packaged base and the entry differs from that base's own
+entry for that locale; otherwise (no packaged base, no entry, or the same
+entry) the bundle entry is served as before. A map that repeats the package's own map
+therefore still takes a package's translation updates, and a map an admin
+edited in one language serves that edit while every other language reads its
+bundle text. This is how the report and widget panels store an edit made in a
+non-default language: `{ default: SOURCE, 'zh-CN': EDIT }`, the source text
+untouched. Dataset members are not covered: `translateDataset` keeps ADR-0149's
+bundle-first order.
+
 **A map is never extracted, and no bundle key is synthesised for one.**
 `os i18n extract` scaffolds no row for a map and no key family exists for one;
 in particular **no key is derived from a node's position in the component
