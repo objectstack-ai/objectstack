@@ -50,9 +50,10 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { callData, type ActionExecutionDeps } from './action-execution.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
+import { DEFAULT_ORGANIZATION_ID, installDefaultOrganization } from './default-organization.testkit.js';
 
 const REQ = { request: {} } as HttpProtocolContext;
-const MEMBER = { userId: 'dp_member', isSystem: false, positions: [], permissions: [] } as any;
+const MEMBER = { userId: 'dp_member', organizationId: DEFAULT_ORGANIZATION_ID, isSystem: false, positions: [], permissions: [] } as any;
 const SYSTEM = { isSystem: true } as any;
 
 const PKG_A = 'dp35526_a';
@@ -86,6 +87,7 @@ async function makeHarness(opts: { withProtocol: boolean }) {
     engine.registry.registerObject(BETA as any, PKG_B, undefined, 'own');
     engine.registry.registerObject(GAMMA as any, PKG_C, undefined, 'own');
     await engine.syncSchemas();
+    await installDefaultOrganization(engine);
     const beta: any = await engine.insert('dp_beta', { name: 'beta', secret_note: SECRET });
     const gamma: any = await engine.insert('dp_gamma', { name: 'gamma', note: 'open' });
     await engine.insert('dp_alpha', { name: 'alpha', b_ref: beta.id, c_ref: gamma.id });
