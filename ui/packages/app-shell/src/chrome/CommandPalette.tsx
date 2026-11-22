@@ -503,6 +503,16 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
     ? { objectName: selectedHit.objectName, recordId: selectedHit.recordId }
     : null;
   const showPreview = recordGroups.length > 0;
+  // A query's record hits answer after its other entries are drawn, above
+  // them: when a new set of hits lands, the selection moves to the first one,
+  // so the top entry is the one Enter opens and the pane previews.
+  const firstHitValue = recordGroups[0]?.hits[0] ? recordHitValue(recordGroups[0].hits[0]) : '';
+  const hitSignature = recordHits.map(recordHitValue).join('\n');
+  useEffect(() => {
+    if (firstHitValue !== '') setSelectedValue(firstHitValue);
+    // Keyed on the hits' text alone: only a new set of hits moves the
+    // selection, and the arrow keys own it after (ui/AGENTS.md #10).
+  }, [hitSignature, firstHitValue]);
 
   // objectstack#36286 — the app's objects the member may create a record of,
   // the object of the page the palette was opened on first. Only once
