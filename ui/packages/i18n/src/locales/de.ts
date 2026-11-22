@@ -1276,6 +1276,9 @@ const de = {
     dragToReorder: "Zum Neuanordnen ziehen",
     defaultView: "Standardansicht",
     defaultBadge: "Standard",
+    customizedBadge: "angepasst",
+    customizedTitle: "Hier geändert: Alle sehen diese Kopie statt der Version, die das Paket mitliefert.",
+    restoreFactory: "Werksversion wiederherstellen",
     tabActionsFor: "Ansichtsaktionen für {{name}}",
     readonlyAriaLabel: "Schreibgeschützte Ansicht",
     readonlyTooltip: "Systemansicht — im Code definiert, schreibgeschützt.",
@@ -2782,6 +2785,10 @@ const de = {
       delete: "Löschen",
       deleteViewTitle: "Ansicht löschen",
       deleteViewConfirm: "Möchten Sie die Ansicht „{{name}}“ wirklich löschen? Dies kann nicht rückgängig gemacht werden.",
+      restoreFactory: "Wiederherstellen",
+      restoreFactoryTitle: "Werksversion wiederherstellen",
+      restoreFactoryConfirm: "Die Ansicht „{{name}}“ auf die Version zurücksetzen, die das Paket mitliefert? Alle, die diese Ansicht verwenden, sehen wieder die Werksversion; der hier geänderte Name, die Anheftung und der Standard werden entfernt.",
+      restoreFactoryDone: "Werksversion von „{{name}}“ wiederhergestellt",
       bulkDeleteConfirm: "{{count}} ausgewählte Datensätze löschen? Dies kann nicht rückgängig gemacht werden.",
       bulkDeleteConfirm_one: "{{count}} ausgewählten Datensatz löschen? Dies kann nicht rückgängig gemacht werden.",
       bulkDeleteConfirm_other: "{{count}} ausgewählte Datensätze löschen? Dies kann nicht rückgängig gemacht werden.",
@@ -3798,6 +3805,7 @@ const de = {
   objectViewActions: {
     renameFailed: "Ansicht konnte nicht umbenannt werden",
     deleteFailed: "Ansicht konnte nicht gelöscht werden",
+    restoreFactoryFailed: "Werksversion konnte nicht wiederhergestellt werden",
   },
   dashboardActions: {
     printDialogOpening: "Druckdialog Ihres Browsers wird geöffnet (kein PDF-Export)",
