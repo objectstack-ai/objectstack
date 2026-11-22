@@ -58,7 +58,7 @@ import { formatDate } from '@object-ui/core';
 import { I18nProvider, LocalizationProvider } from '@object-ui/i18n';
 import { DateField } from '../widgets/DateField';
 import { FormulaField } from '../widgets/FormulaField';
-import { GridField } from '../widgets/GridField';
+import { GridFieldWidget as GridField } from '../widgets/grid-field/GridFieldWidget';
 import { renderLookupColumnValue } from '../widgets/lookupColumnDisplay';
 
 afterEach(cleanup);

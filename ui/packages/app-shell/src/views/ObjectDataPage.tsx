@@ -406,7 +406,8 @@ export function ObjectDataPage({ dataSource, objects }: any) {
   // name, the rows it shows and the count it matched), so the page's ✕ comes
   // back here and its ↑ ↓ step through these rows. The name cell's hover icon
   // 「在侧边打开」 opens the side drawer over the list instead, URL-driven
-  // (`?recordId=…` is shareable and refresh-safe). A click on any other cell
+  // (`?recordId=…` is shareable and refresh-safe), and that drawer's ⤢ opens
+  // the same full page with the same origin. A click on any other cell
   // selects it and opens nothing (the grid's select-first model). An object
   // the server does not read one record of (`servesRecordRead`, a list-only
   // object) has no record surface: its rows open nothing.
@@ -442,13 +443,10 @@ export function ObjectDataPage({ dataSource, objects }: any) {
   const handleListTotalChange = React.useCallback((total: number) => {
     listTotalRef.current = total;
   }, []);
-  const handleRecordClick = React.useCallback(
-    (record: any, event?: any) => {
-      if (!recordServed) return;
-      const id = record?.id ?? record?._id;
-      if (id == null || id === '') return;
-      const isMod = !!(event && (event.metaKey || event.ctrlKey || event.button === 1));
-      if (isMod) { window.open(recordUrl(id), '_blank'); return; }
+  // The record's full page, with this page as its origin: the one way to it,
+  // from the name and from the side drawer's ⤢ alike (objectstack#36300).
+  const openRecordPage = React.useCallback(
+    (id: string | number) => {
       const { pathname, search } = locationRef.current;
       navigate(recordUrl(id), {
         state: {
@@ -467,7 +465,18 @@ export function ObjectDataPage({ dataSource, objects }: any) {
         },
       });
     },
-    [recordServed, recordUrl, navigate, phone],
+    [recordUrl, navigate, phone],
+  );
+  const handleRecordClick = React.useCallback(
+    (record: any, event?: any) => {
+      if (!recordServed) return;
+      const id = record?.id ?? record?._id;
+      if (id == null || id === '') return;
+      const isMod = !!(event && (event.metaKey || event.ctrlKey || event.button === 1));
+      if (isMod) { window.open(recordUrl(id), '_blank'); return; }
+      openRecordPage(id);
+    },
+    [recordServed, recordUrl, openRecordPage],
   );
   // The name cell's 「在侧边打开」: the record in the side drawer over the list,
   // for a row with a record surface on a desktop. A phone opens every record
@@ -494,6 +503,14 @@ export function ObjectDataPage({ dataSource, objects }: any) {
     setSearchParams((prev) => { const n = new URLSearchParams(prev); n.delete(RECORD_DRAWER_PARAM); return n; });
   }, [setSearchParams]);
   const openedRecordId = recordServed ? drawerRecordId : null;
+  // The drawer bar's ⤢ 「Open as full page」, as the object list's drawer
+  // draws it (objectstack#36300): the drawer closes and the record's full page
+  // opens with the same origin a name click carries, so its ✕ comes back here.
+  const openDrawerRecordAsPage = React.useCallback(() => {
+    if (!openedRecordId) return;
+    closeRecordDrawer();
+    openRecordPage(openedRecordId);
+  }, [openedRecordId, closeRecordDrawer, openRecordPage]);
   React.useEffect(() => {
     if (openedRecordId && !navOverlay.isOpen) navOverlay.open({ id: openedRecordId });
     else if (!openedRecordId && navOverlay.isOpen) navOverlay.close();
@@ -928,6 +945,7 @@ export function ObjectDataPage({ dataSource, objects }: any) {
         <NavigationOverlay
           {...navOverlay}
           setIsOpen={(open: boolean) => { if (!open) closeRecordDrawer(); }}
+          onExpand={openedRecordId ? openDrawerRecordAsPage : undefined}
           title={servedObjectLabel(objectDef, language, objectLabel)}
         >
           {(record: any) => (
