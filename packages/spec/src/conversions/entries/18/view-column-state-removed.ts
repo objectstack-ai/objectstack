@@ -15,11 +15,13 @@ import { type Dict, isDict, stripKeys } from '../shared.js';
  * in `ui/view.zod.ts`), declared on two wire doors: the view item RECORD
  * (`viewItemWireFields()`, member 1 of the `view` union) and the FLATTENED
  * overlay (`flattenedViewOverlayFields()`, members 3 and 4). The console's grid
- * wrote one column order and set of widths there and read it back. Both ends are
- * gone: the overlay writer retired with objectui#12504, and since #35955 a column
- * drag goes to the list's draft while widths live in the reader's browser. Writer
- * census before removal, at `main` 97b9d1e6: none in this framework, its examples
- * or its console, none in the HotCRM app or the gallery; cloud was not reachable.
+ * wrote one column order and set of widths there and applied it on read. The
+ * writer is gone: the overlay writer retired with objectui#12504, and since #35955
+ * a column drag goes to the list's draft while widths live in the reader's
+ * browser. Writer census before removal, at `main` 97b9d1e6: none in this
+ * framework, its examples or its console, none in the HotCRM app or the gallery;
+ * cloud was not reachable. The reader is NOT gone until this conversion runs (see
+ * the last paragraph).
  *
  * **Retired from the load path** — the key is a `retiredKey()` tombstone on both
  * doors, so a live author is refused at parse with the prescription. The entry
@@ -54,8 +56,21 @@ import { type Dict, isDict, stripKeys } from '../shared.js';
  * collection and the stored-row seam's wrapping; `viewItems`
  * ({@link ASSEMBLED_VIEW_ITEMS_KEY}) is the assembled-manifest channel, whose
  * registration parse (`AssembledViewArtifactSchema`, built from the same
- * members) now refuses the key too. Deletion is the whole conversion, and it
- * changes no render: no reader applies a stored column layout any more.
+ * members) now refuses the key too. Deletion is the whole conversion.
+ *
+ * **Not lossless for what a reader sees.** Until this release the console still
+ * APPLIED a stored layout: a record's key rode `listViews()` through
+ * `VIEW_ITEM_ROUND_TRIP_KEYS`, an overlay's survived `narrowPersonalizationOverlay`
+ * through `VIEW_OVERLAY_OWNED_KEYS`, and the list renderer seeded the grid from
+ * the view's `columnState` for any reader with no draft order and no widths of
+ * their own in the browser. After the strip that reader sees the view's own
+ * column order (`columns` / `fieldOrder`) and widths. This is the ruled outcome,
+ * not a side effect: the maintainer retired the server-side per-user list layout
+ * and ruled that a stored layout is not migrated — every reader goes back to the
+ * view's own columns, column order and widths (#35955, items 5 and 6 and its
+ * acceptance; restated on #36403 as the ruling of record, comment 7079029398).
+ * So no stored `order` is moved into `fieldOrder`: that would keep a
+ * layout the ruling drops.
  */
 const viewColumnStateRemoved: MetadataConversion = {
   id: 'view-column-state-removed',
@@ -65,8 +80,9 @@ const viewColumnStateRemoved: MetadataConversion = {
   surface: 'view.columnState — on a view item record ({ name, object, viewKind, config }) and on a flattened view overlay ({ name, object, viewKind, …, no config })',
   summary:
     "view key 'columnState' removed (ADR-0049 — the console's per-user column order and widths, "
-    + 'stored on a shared view row; nothing writes or reads it since column widths moved to the '
-    + "reader's browser and a column order is saved into the view itself)",
+    + 'stored on a shared view row; nothing writes it since column widths moved to the '
+    + "reader's browser and a column order is saved into the view itself, and a stored layout is "
+    + "no longer applied: every reader sees the view's own column order and widths)",
   apply(stack, emit) {
     const stripFromRow = (view: Dict, path: string): Dict => {
       if (view.config !== undefined) {

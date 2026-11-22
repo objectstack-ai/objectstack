@@ -9,7 +9,7 @@ Metadata-protocol: narrowed
 
 <!-- adr-0087: registered view-column-state-retired -->
 
-**BREAKING** for a stored `view` row, a package view or a source that still carries `columnState`. The key held the console grid's per-user column order and widths on a shared view row (admitted as a runtime-only overlay key in 17.1.0). Since #35955 nothing writes or reads it: a column drag goes to the list's draft and is saved into the view's own `columns` / `fieldOrder`, and column widths are kept in the reader's browser, per view. A stored layout is not carried forward; every reader sees the view's own columns and widths.
+**BREAKING** for a stored `view` row, a package view or a source that still carries `columnState`. The key held the console grid's per-user column order and widths on a shared view row (admitted as a runtime-only overlay key in 17.1.0). Since #35955 nothing writes it: a column drag goes to the list's draft and is saved into the view's own `columns` / `fieldOrder`, and column widths are kept in the reader's browser, per view. Until this release a stored layout was still applied: a reader with no column order or widths of their own in the browser saw the order and widths the row held. It is not carried forward (the maintainer's ruling on #35955, restated on #36403 in comment 7079029398: a stored layout is not migrated): from this release that reader sees the view's own columns, column order and widths. No stored order is moved into `fieldOrder`; to keep a layout for everyone, reorder the columns and Save to the view, or set `width` on the columns.
 
 What moves (each line FROM → TO):
 

@@ -3551,7 +3551,9 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'item record and the flattened overlay, written onto a shared row and read back. No writer is '
       + 'left — a column drag goes to the list\'s draft and is saved into the view itself — so the key is '
       + 'a `retiredKey()` tombstone on both doors, and the D2 conversion `view-column-state-removed` '
-      + 'strips it in `views` and `viewItems`, so a stored row is served without it. A row that held '
+      + 'strips it in `views` and `viewItems`, so a stored row is served without it and its layout is no '
+      + 'longer applied: as ruled, a stored layout is not migrated and every reader sees the view\'s own '
+      + 'column order and widths. A row that held '
       + 'other view keys is then valid again and re-saves; an overlay that held nothing but its identity '
       + 'and the key is left identity-only, which the door refuses, and is deleted. Its D3 record is the '
       + 'semantic entry `view-column-state-retired`.',

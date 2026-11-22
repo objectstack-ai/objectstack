@@ -3378,7 +3378,7 @@ export function checkListViewTimesheetBinding(
 const VIEW_LIST_COLUMN_STATE_RETIRED =
   '`listView.columnState` was removed in @objectstack/spec 18.7.0 (ADR-0049 enforce-or-remove) — it was '
   + 'never a list view key: it held one column order and set of widths the console once stored on a view '
-  + 'row, and nothing reads it any more. Delete the key. To ship a column order, list `columns` in that '
+  + 'row, and that layout is no longer applied. Delete the key. To ship a column order, list `columns` in that '
   + 'order (or set `fieldOrder`); to ship a width, set `width` on the column.';
 
 /**
@@ -6194,14 +6194,19 @@ type ViewItemWireArmShape<K extends 'list' | 'form', C extends z.ZodTypeAny> = {
  * [commit d5552ca13] had admitted it as a runtime-only overlay key: the
  * console grid's column order and widths, PUT onto a stored `view` row (a
  * personalization overlay, or a view item record through `updateView`) and
- * read back. Both ends are gone. The overlay writer retired with
+ * applied on read. The writer is gone. The overlay writer retired with
  * objectui#12504, and since #35955 a column drag goes to the list's draft
  * (saved into the view's own `columns` / `fieldOrder`) while column widths
  * live only in the reader's browser. Writer census before removal, at `main`
  * 97b9d1e6: none in this framework, its examples or its console
  * (`ui/packages/**`), none in the HotCRM app or the gallery; cloud was not
- * reachable. The console's readers that still named the key read rows at
- * rest, and the D2 conversion strips the key from those on every read.
+ * reachable. The reader was not gone: until this release the console
+ * applied a stored layout (a record's key rode `listViews()`, an overlay's
+ * survived its narrowing, and the list renderer seeded the grid from it for a
+ * reader with no layout of their own in the browser). The D2 conversion
+ * strips the key on every read, so from this release no stored layout is
+ * applied and every reader sees the view's own column order and widths — the
+ * maintainer's ruling that a stored layout is not migrated (#35955).
  *
  * Tombstoned on BOTH wire doors that declared it ({@link viewItemWireFields}
  * and {@link flattenedViewOverlayFields}), never deleted: a bare deletion on
@@ -6218,8 +6223,9 @@ type ViewItemWireArmShape<K extends 'list' | 'form', C extends z.ZodTypeAny> = {
  */
 const VIEW_COLUMN_STATE_RETIRED =
   '`view.columnState` was removed in @objectstack/spec 18.7.0 (ADR-0049 enforce-or-remove) — it held one '
-  + 'column order and set of widths on a shared view row, and nothing writes or reads it any more: the '
-  + 'console keeps column widths in each reader\'s browser and saves a column order into the view itself. '
+  + 'column order and set of widths on a shared view row; nothing writes it any more, and a stored layout is '
+  + 'no longer applied, so every reader sees the view\'s own column order and widths. The console keeps '
+  + 'column widths in each reader\'s browser and saves a column order into the view itself. '
   + 'Delete the key. To ship a column order, list `columns` in that order (or set `fieldOrder`); to ship a '
   + 'width, set `width` on the column. '
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
