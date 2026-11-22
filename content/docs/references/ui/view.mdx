@@ -474,7 +474,7 @@ Form-view select option — the object-field option shape minus the per-option `
 | :--- | :--- | :--- | :--- |
 | **childObject** | `string` | ✅ | Child object whose records are entered inline |
 | **relationshipField** | `string` | optional | FK on the child pointing back to the parent (auto-detected when omitted) |
-| **columns** | `{ name: string; label?: string; type?: Enum<'text' \| 'number' \| 'currency' \| 'date' \| 'datetime' \| 'time' \| 'select' \| 'lookup' \| 'file'>; width?: number; … }[]` | optional | Editable grid columns (derived from the child object when omitted). Each entry is the strict, name-keyed inline grid column a relationship field's `inlineColumns` takes (`{ name, label?, type?, … }` — objectui GridColumn); identity-only entries (`{ name }`) hydrate everything else from the child object's fields. Unknown keys and the retired `field` spelling are refused at parse. |
+| **columns** | `{ name: string; label?: string; type?: Enum<'text' \| 'number' \| 'currency' \| 'date' \| 'datetime' \| 'time' \| 'select' \| …>; width?: number; … }[]` | optional | Editable grid columns (derived from the child object when omitted). Each entry is the strict, name-keyed inline grid column a relationship field's `inlineColumns` takes (`{ name, label?, type?, … }` — objectui GridColumn); identity-only entries (`{ name }`) hydrate everything else from the child object's fields. Unknown keys and the retired `field` spelling are refused at parse. |
 | **amountField** | `string` | optional | Numeric child column summed for the running total |
 | **totalField** | `string` | optional | Parent field to receive the rolled-up sum |
 | **title** | `string` | optional | Section title |
