@@ -175,3 +175,30 @@ describe('the object label and the hidden flag', () => {
     expect(answer.link).not.toHaveProperty('object_label');
   });
 });
+
+describe('the object label keeps a rename, as the meta door serves it (packagedBase)', () => {
+  // The served schema carries the tenant's rename; the packaged declaration the
+  // old label, which the deployment catalog translates.
+  const RENAMED = { name: 'deal', label: 'Prospect', fields: {} };
+  const I18N = {
+    getLocales: () => ['en', 'zh-CN'],
+    getTranslations: (locale: string) => (locale === 'zh-CN' ? { objects: { deal: { label: '商机' } } } : {}),
+    getDefaultLocale: () => 'en',
+  };
+  const protocol = { getPackagedObjectBase: (name: string) => (name === 'deal' ? { name: 'deal', label: 'Deal' } : undefined) };
+
+  it('a renamed object with a bundle entry for its packaged label keeps the rename', () => {
+    const answer = buildShareLinkResolveAnswer({}, RESOLVED, RENAMED, { acceptLanguage: 'zh-CN', i18n: I18N, protocol });
+    expect(answer.link.object_label).toBe('Prospect');
+  });
+
+  it('an object whose label is the packaged one is still translated', () => {
+    const answer = buildShareLinkResolveAnswer({}, RESOLVED, { ...RENAMED, label: 'Deal' }, { acceptLanguage: 'zh-CN', i18n: I18N, protocol });
+    expect(answer.link.object_label).toBe('商机');
+  });
+
+  it('a protocol that cannot answer the packaged base is read as no baseline known', () => {
+    const throwing = { getPackagedObjectBase: () => { throw new Error('boom'); } };
+    expect(buildShareLinkResolveAnswer({}, RESOLVED, RENAMED, { acceptLanguage: 'zh-CN', i18n: I18N, protocol: throwing }).link.object_label).toBe('商机');
+  });
+});

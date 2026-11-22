@@ -2,10 +2,12 @@
 
 /**
  * [#21839] The dispatcher's two PUBLIC share-link routes answer with
- * `Cache-Control: no-store` and `Vary: X-Share-Password, X-Share-Password-Encoding`
+ * `Cache-Control: no-store` and
+ * `Vary: X-Share-Password, X-Share-Password-Encoding, Accept-Language`
  * on every outcome (the second name since #22049, which made the answer depend on
- * the header declaring the password's encoding too), and the authenticated
- * routes are not touched.
+ * the header declaring the password's encoding too; the third since #33552,
+ * which reads the resolve answer's object label in the request's language), and
+ * the authenticated routes are not touched.
  *
  * Driven over a REAL `ObjectQL` + `@objectstack/driver-sql` + better-sqlite3,
  * the same harness `share-links-internal-hash-probe.test.ts` uses, so every
@@ -107,7 +109,7 @@ async function harness() {
 
 function expectNoStore(answer: Answer, label: string) {
   expect(answer.headers?.['Cache-Control'], label).toBe('no-store');
-  expect(answer.headers?.Vary, label).toBe('X-Share-Password, X-Share-Password-Encoding');
+  expect(answer.headers?.Vary, label).toBe('X-Share-Password, X-Share-Password-Encoding, Accept-Language');
 }
 
 describe('[#21839] dispatcher public share-link routes are never cached', () => {

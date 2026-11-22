@@ -201,7 +201,7 @@ describe('[#22049] dispatcher: a declared encoding that does not hold is refused
     expect(answer.body?.error?.message).toContain('X-Share-Password');
     expect(JSON.stringify(answer.body)).not.toContain(headers['x-share-password']);
     expect(answer.headers?.['Cache-Control']).toBe('no-store');
-    expect(answer.headers?.Vary).toBe('X-Share-Password, X-Share-Password-Encoding');
+    expect(answer.headers?.Vary).toBe('X-Share-Password, X-Share-Password-Encoding, Accept-Language');
     expect(resolveToken).not.toHaveBeenCalled();
   });
 

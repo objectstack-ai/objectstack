@@ -50,10 +50,10 @@ import {
 import { sendOk, sendError, sendServerFault } from '@objectstack/types';
 // [#22049] The one reading of the password header pair, shared with the
 // dispatcher twin — see `presentedPassword` below.
-import { readSharePasswordHeader, SHARE_PASSWORD_VARY, type SharePasswordHeaderReading } from '@objectstack/types';
+import { readSharePasswordHeader, SHARE_LINK_PUBLIC_VARY, type SharePasswordHeaderReading } from '@objectstack/types';
 // [#26991] The resolve answer — redaction and the field display projection
 // included — from the ONE builder the dispatcher twin serves it with.
-import { buildShareLinkResolveAnswer, type ShareLinkLabelI18n } from '@objectstack/types';
+import { buildShareLinkResolveAnswer, type ShareLinkLabelI18n, type ShareLinkLabelProtocol } from '@objectstack/types';
 import type { ShareLinkExecutionContext } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { ErrorCode } from '@objectstack/spec/api';
@@ -99,6 +99,13 @@ export interface ShareLinkRoutesOptions {
    * `undefined`, the object's declared label is served.
    */
   i18n?: () => ShareLinkLabelI18n | undefined;
+  /**
+   * The metadata protocol (`'protocol'` service), resolved per request: the
+   * object label reads the object's packaged base through it, as the meta
+   * door does, so a renamed object keeps its rename. Absent, or answering
+   * `undefined`, no packaged base is known.
+   */
+  protocol?: () => ShareLinkLabelProtocol | undefined;
 }
 
 /** A request header's value as one string — the first of a repeated header. */
@@ -275,16 +282,18 @@ function presentedPassword(req: IHttpRequest): SharePasswordHeaderReading {
  * `Cache-Control: no-store` — the body is a record released by a capability
  * token (and, for a protected link, by a password); no browser or shared cache
  * may keep a copy of it, nor of a refusal that would be replayed after the
- * link changes. `Vary: X-Share-Password, X-Share-Password-Encoding` — the
- * answer depends on that request header and on the one declaring its encoding
- * (#22049), so any cache that does not honour `no-store` must at least never
- * serve one presenter's answer to another. The dispatcher twin
- * (`runtime/src/domains/share-links.ts`) sends the same pair, from the same
- * `SHARE_PASSWORD_VARY` constant.
+ * link changes. `Vary: X-Share-Password, X-Share-Password-Encoding,
+ * Accept-Language` — the answer depends on that request header, on the one
+ * declaring its encoding (#22049), and on the request's language, which the
+ * resolve answer's object label is read in (#33552), so any cache that does
+ * not honour `no-store` must at least never serve one presenter's or one
+ * language's answer to another. The dispatcher twin
+ * (`runtime/src/domains/share-links.ts`) sends the same value, from the same
+ * `SHARE_LINK_PUBLIC_VARY` constant.
  */
 const SHARE_LINK_PUBLIC_RESPONSE_HEADERS: Readonly<Record<string, string>> = Object.freeze({
   'Cache-Control': 'no-store',
-  Vary: SHARE_PASSWORD_VARY,
+  Vary: SHARE_LINK_PUBLIC_VARY,
 });
 
 function setPublicResponseHeaders(res: IHttpResponse): void {
@@ -563,6 +572,7 @@ export function registerShareLinkRoutes(
       sendOk(res, buildShareLinkResolveAnswer(record, resolved, engine.getSchema?.(resolved.link.object_name), {
         acceptLanguage: headerText(req.headers?.['accept-language']),
         i18n: opts.i18n?.(),
+        protocol: opts.protocol?.(),
       }));
     },
     failure: 'Failed to resolve link',

@@ -30,6 +30,10 @@
  *   declared one when the bundle has no entry; a field the object declares
  *   hidden — authored, or an injected column marked so at its source —
  *   reports `hidden: true`, and no other field carries the flag.
+ * - [#33552] A renamed object (a code extension's rename folded into the served
+ *   schema) keeps its rename under a request whose bundle translates the
+ *   packaged label — the packaged base read through the request's metadata
+ *   protocol, as the meta door reads it.
  *
  * ## What is real here
  *
@@ -42,6 +46,7 @@
 import '@objectstack/metadata';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SHARE_LINK_SERVICE } from '@objectstack/spec/contracts';
 import type { IHttpServer, IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
@@ -84,6 +89,20 @@ const DEAL = {
   },
 };
 
+/** [#33552] A packaged object a code extension renames. */
+const LEAD_OBJECT = 'projection_lead';
+const LEAD_RECORD = 'lead_1';
+const LEAD = {
+  name: LEAD_OBJECT,
+  label: 'Projection Lead',
+  publicSharing: { enabled: true, allowedAudiences: ['public'], allowedPermissions: ['view'] },
+  fields: {
+    id: { name: 'id', label: 'ID', type: 'text', primaryKey: true },
+    title: { name: 'title', label: 'Title', type: 'text' },
+  },
+};
+const LEAD_RENAME = { name: LEAD_OBJECT, label: 'Prospect' };
+
 const ACCOUNTS = {
   name: TARGET_OBJECT,
   label: 'Projection Account',
@@ -94,7 +113,7 @@ const ACCOUNTS = {
 };
 
 type Mount = 'plugin route' | 'dispatcher twin';
-type LinkKey = 'redacted' | 'unredacted';
+type LinkKey = 'redacted' | 'unredacted' | 'renamed';
 type Answer = { status: number; body: any };
 
 const MOUNTS: readonly Mount[] = ['plugin route', 'dispatcher twin'];
@@ -102,7 +121,8 @@ const MOUNTS: readonly Mount[] = ['plugin route', 'dispatcher twin'];
 /** [#33552] The request's i18n service: a zh-CN entry for the shared object's label, none in en. */
 const I18N = {
   getLocales: () => ['en', 'zh-CN'],
-  getTranslations: (locale: string) => (locale === 'zh-CN' ? { objects: { [OBJECT]: { label: '投影商机' } } } : {}),
+  getTranslations: (locale: string) =>
+    locale === 'zh-CN' ? { objects: { [OBJECT]: { label: '投影商机' }, [LEAD_OBJECT]: { label: '投影线索' } } } : {},
   getDefaultLocale: () => 'en',
 };
 
@@ -111,10 +131,14 @@ const realErrorFromThrown = (() => {
   return (e: any, fallbackStatus?: number) => dispatcher.errorFromThrown(e, fallbackStatus);
 })();
 
-function makeDeps(engine: any, svc: any): DomainHandlerDeps {
+function makeDeps(engine: any, svc: any, protocol: any): DomainHandlerDeps {
   const deps: any = {
     resolveService: async (_c: any, name: string) =>
-      name === SHARE_LINK_SERVICE ? svc : name === 'objectql' ? engine : name === 'i18n' ? I18N : undefined,
+      name === SHARE_LINK_SERVICE ? svc
+        : name === 'objectql' ? engine
+        : name === 'i18n' ? I18N
+        : name === 'protocol' ? protocol
+        : undefined,
     getRequestKernelService: async (_c: any, name: string) => (name === 'objectql' ? engine : undefined),
     success: (data: any, meta?: any) => ({ status: 200, body: { success: true, data, ...(meta ? { meta } : {}) } }),
     error: (message: string, httpStatus = 500, details?: any) => apiErrorResponse({ message, httpStatus, details }),
@@ -147,7 +171,8 @@ beforeAll(async () => {
     true,
   );
   await engine.init();
-  for (const o of [SysShareLink, DEAL, ACCOUNTS]) engine.registry.registerObject(o as any, '@objectstack/runtime-test');
+  for (const o of [SysShareLink, DEAL, ACCOUNTS, LEAD]) engine.registry.registerObject(o as any, '@objectstack/runtime-test');
+  engine.registry.registerObject(LEAD_RENAME as any, '@objectstack/runtime-test-extension', undefined, 'extend');
   await engine.syncSchemas();
   await installDefaultOrganization(engine);
   const system = { context: { isSystem: true } } as any;
@@ -157,17 +182,24 @@ beforeAll(async () => {
     { id: RECORD, title: 'Big deal', stage: 'open', amount: 1250.5, account: ACCOUNT, margin_note: 'thin', internal_ref: 'X-1', risk_score: 3 },
     system,
   );
+  await engine.insert(LEAD_OBJECT, { id: LEAD_RECORD, title: 'Warm lead' }, system);
+  const protocol = new ObjectStackProtocolImplementation(engine as any);
 
   const svc = new ShareLinkService({ engine: engine as any });
   const creator = { isSystem: true, userId: 'usr_creator' } as any;
   tokens.redacted = (await svc.createLink({ object: OBJECT, recordId: RECORD, audience: 'public', redactFields: ['margin_note'] }, creator)).token;
   tokens.unredacted = (await svc.createLink({ object: OBJECT, recordId: RECORD, audience: 'public' }, creator)).token;
+  tokens.renamed = (await svc.createLink({ object: LEAD_OBJECT, recordId: LEAD_RECORD, audience: 'public' }, creator)).token;
 
   const http = new RouteRecorder();
-  registerShareLinkRoutes(http, svc, engine as any, { contextFromRequest: () => ({}), i18n: () => I18N });
+  registerShareLinkRoutes(http, svc, engine as any, {
+    contextFromRequest: () => ({}),
+    i18n: () => I18N,
+    protocol: () => protocol,
+  });
   const pluginResolve = http.routes.get('GET /api/v1/share-links/:token/resolve');
   if (!pluginResolve) throw new Error('registerShareLinkRoutes mounted no resolve route');
-  const deps = makeDeps(engine, svc);
+  const deps = makeDeps(engine, svc, protocol);
 
   open = async (mount, link, headers = {}) => {
     const token = tokens[link];
@@ -305,6 +337,18 @@ describe.each(MOUNTS)('[#33552] the object label and the hidden flag — the %s'
     // The injected ownership-queue column is marked hidden at its source.
     expect(data.record).toHaveProperty('queue');
     expect(data.fields.queue?.hidden).toBe(true);
+  });
+});
+
+describe.each(MOUNTS)('[#33552] a renamed object keeps its rename — the %s', (mount) => {
+  it('the served label is the rename, though the bundle translates the packaged label', async () => {
+    expect(engine.getSchema(LEAD_OBJECT)?.label, 'the extension renames the served schema').toBe('Prospect');
+    const data = await served(mount, 'renamed', { 'accept-language': 'zh-CN' });
+    expect(data.link.object_label).toBe('Prospect');
+  });
+
+  it('control: the object whose label is the packaged one is translated', async () => {
+    expect((await served(mount, 'unredacted', { 'accept-language': 'zh-CN' })).link.object_label).toBe('投影商机');
   });
 });
 

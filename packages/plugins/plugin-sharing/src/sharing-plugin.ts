@@ -96,6 +96,7 @@ import { bindRecordShareCascade } from './record-share-cascade.js';
 import { createDeclaredSharingRuleSource } from './declared-sharing-rules.js';
 import { normalizeTenancyPosture, postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { inProcessSessionReadInput } from '@objectstack/types';
+import type { ShareLinkLabelProtocol } from '@objectstack/types';
 import { backfillStoredDeclarationPackagesAtBoot } from './stored-declaration-package-backfill.js';
 import { registeredObjectNames, reportInertShareGrantHolders, shareGrantRegistrationRefusal } from './share-arm-boot.js';
 
@@ -1233,6 +1234,15 @@ export class SharingServicePlugin implements Plugin {
               i18n: () => {
                 try {
                   return ctx.getService<II18nService>('i18n');
+                } catch {
+                  return undefined;
+                }
+              },
+              // The metadata protocol, for the object's packaged base (a renamed
+              // object keeps its rename, as on the meta door).
+              protocol: () => {
+                try {
+                  return ctx.getService<ShareLinkLabelProtocol>('protocol');
                 } catch {
                   return undefined;
                 }
