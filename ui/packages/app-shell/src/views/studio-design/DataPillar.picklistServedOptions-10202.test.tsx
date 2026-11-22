@@ -143,6 +143,7 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), dismiss: vi.fn() } }));
 
 import { DataPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { addFieldFromGrid } from './__tests__/dataPillarAddField';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 
@@ -161,9 +162,9 @@ afterEach(() => {
 
 function renderData() {
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
+    <StudioSaveHarness><MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
       <DataPillar packageId={PKG} />
-    </MemoryRouter>,
+    </MemoryRouter></StudioSaveHarness>,
   );
 }
 

@@ -71,6 +71,7 @@ let server: Server;
 const PUBLISHED = objectWith(ACCEPTED);
 
 const mockClient: Record<string, unknown> = {
+  publish: vi.fn(async () => ({})), reset: vi.fn(async () => ({})),
   save: vi.fn(async (_type: string, _name: string, body: Record<string, unknown>) => {
     const copy = JSON.parse(JSON.stringify(body)) as Record<string, unknown>;
     server.sent.push(copy);
@@ -130,6 +131,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 });
 
 import { DataPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
 import { __setCelFormulaLoader } from '../metadata-admin/celAuthoring';
@@ -167,9 +169,9 @@ const pause = (ms = 2500) => new Promise((r) => setTimeout(r, ms));
 function mount(draft: Record<string, unknown> | null) {
   server = { draft, sent: [] };
   render(
-    <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+    <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
       <DataPillar packageId="com.example.showcase" />
-    </MemoryRouter>,
+    </MemoryRouter></StudioSaveHarness>,
   );
 }
 

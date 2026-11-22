@@ -68,6 +68,7 @@ const mockClient = vi.hoisted(() => ({
     if (draft) return { item: JSON.parse(JSON.stringify(draft)) as Record<string, unknown> };
     throw Object.assign(new Error(`No pending draft exists for ${type}/${name}.`), { code: 'NO_DRAFT', status: 404 });
   }),
+  publish: vi.fn(async () => ({})), reset: vi.fn(async () => ({})),
   save: vi.fn(async (_type: string, name: string, item: unknown) => {
     const body = JSON.parse(JSON.stringify(item)) as Record<string, unknown>;
     server.saves.push({ name, body });
@@ -117,6 +118,7 @@ vi.mock('sonner', () => ({
 }));
 
 import { DataPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { addFieldFromGrid } from './__tests__/dataPillarAddField';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { readFields } from '../metadata-admin/previews/object-fields-io';
@@ -173,9 +175,9 @@ const fieldCount = () => screen.getByText(/^\d+ fields?( \(\+\d+ system\))?$/);
 
 async function openTask(): Promise<void> {
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
+    <StudioSaveHarness><MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
       <DataPillar packageId={PKG} />
-    </MemoryRouter>,
+    </MemoryRouter></StudioSaveHarness>,
   );
   await waitFor(() => expect(fieldCount()).toHaveTextContent('2 fields'), SLOW);
 }

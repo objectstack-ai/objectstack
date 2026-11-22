@@ -45,6 +45,7 @@ const objectDef = {
 };
 
 const mockClient = {
+  publish: vi.fn(async () => ({})), reset: vi.fn(async () => ({})),
   save: vi.fn(async () => ({})),
   list: vi.fn(async () => [{ name: 'showcase_task', label: 'Task' }]),
   listDrafts: vi.fn(async () => []),
@@ -98,6 +99,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 });
 
 import { DataPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
 import { __setCelFormulaLoader } from '../metadata-admin/celAuthoring';
@@ -135,9 +137,9 @@ afterEach(() => {
 /** Open the pillar's Rules tab and put the selected rule's guard into raw CEL. */
 async function openRuleGuard() {
   render(
-    <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+    <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
       <DataPillar packageId="com.example.showcase" />
-    </MemoryRouter>,
+    </MemoryRouter></StudioSaveHarness>,
   );
   // objectui#12450 — the flat tab; the passthrough menu draws the folded
   // entry as a second button of the same name.
@@ -146,32 +148,32 @@ async function openRuleGuard() {
   return screen.getAllByRole('combobox').find((el) => el.tagName === 'TEXTAREA') as HTMLTextAreaElement;
 }
 
-// objectui#5813 retired the 保存草稿 button for debounced AUTO-save; the gate
-// now guards the TIMER (objectui#4306's own rule), so the observable is
-// client.save itself.
-describe('DataPillar — auto-save is gated on the validations panel’s CEL verdict (#4527/#5813)', () => {
+// objectstack#36511 — the gate guards the top bar's Save (objectui#4306's own
+// rule), so the observable is client.save itself, after Save is pressed.
+describe('DataPillar — Save is gated on the validations panel’s CEL verdict (#4527/#36511)', () => {
   it('refuses a rule guard that does not parse', async () => {
     const box = await openRuleGuard();
 
-    // A valid guard first — the auto-save fires; pins that a good guard never
-    // blocks, and clears the dirty window.
+    // A valid guard first — Save sends it; pins that a good guard never blocks.
     fireEvent.change(box, { target: { value: "record.status == 'open'" } });
+    await pressStudioSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 4000 });
     mockClient.save.mockClear();
 
     fireEvent.change(box, { target: { value: 'record.status ==' } });
-    await new Promise((r) => setTimeout(r, 2300));
+    await pressStudioSave();
     expect(mockClient.save).not.toHaveBeenCalled();
   });
 
-  it('re-arms the auto-save once the guard parses again', async () => {
+  it('re-arms the Save once the guard parses again', async () => {
     const box = await openRuleGuard();
 
     fireEvent.change(box, { target: { value: 'record.status ==' } });
-    await new Promise((r) => setTimeout(r, 2300));
+    await pressStudioSave();
     expect(mockClient.save).not.toHaveBeenCalled();
 
     fireEvent.change(box, { target: { value: "record.status == 'open'" } });
+    await pressStudioSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 4000 });
   });
 
@@ -183,11 +185,11 @@ describe('DataPillar — auto-save is gated on the validations panel’s CEL ver
     const box = await openRuleGuard();
 
     fireEvent.change(box, { target: { value: 'record.status ==' } });
-    await new Promise((r) => setTimeout(r, 2300));
+    await pressStudioSave();
     expect(mockClient.save).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Form' }));
-    await new Promise((r) => setTimeout(r, 2300));
+    await pressStudioSave();
     expect(mockClient.save).not.toHaveBeenCalled();
     expect(screen.getByTestId('studio-held-message')).toHaveTextContent('Rule A');
   });

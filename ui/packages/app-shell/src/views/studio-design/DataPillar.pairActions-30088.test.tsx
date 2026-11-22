@@ -121,6 +121,7 @@ const mockClient = {
   ),
   get: vi.fn(async () => null),
   // The pair's action drafts are kept, so a read after a write serves them.
+  publish: vi.fn(async () => ({})),
   save: vi.fn(async (type: string, name: string, body: unknown, opts?: { packageId?: string }) => {
     if (type === 'action' && opts?.packageId === PAIR) srv.pairDrafts[name] = body as Record<string, unknown>;
     return { ok: true, version: 'v2', state: 'draft' };
@@ -176,6 +177,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 // collection, never inside a case's clocked window (`check:test-source-alias`).
 import '@objectstack/lint';
 import { DataPillar, type StudioBaseCustomization } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
 import { t, tFormat } from '../metadata-admin/i18n';
@@ -229,9 +231,9 @@ afterEach(() => {
 
 async function mountOnActions(props: { readOnly: boolean; customization?: StudioBaseCustomization | null }) {
   render(
-    <MemoryRouter initialEntries={[`/studio/${BASE}/data`]}>
+    <StudioSaveHarness><MemoryRouter initialEntries={[`/studio/${BASE}/data`]}>
       <DataPillar packageId={BASE} readOnly={props.readOnly} customization={props.customization ?? null} />
-    </MemoryRouter>,
+    </MemoryRouter></StudioSaveHarness>,
   );
   // The first match is the flat tab (the passthrough menu draws a second).
   fireEvent.click((await screen.findAllByRole('button', { name: L('engine.studio.data.tab.actions') }, { timeout: 8000 }))[0]);

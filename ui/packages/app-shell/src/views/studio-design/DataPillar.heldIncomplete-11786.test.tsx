@@ -78,6 +78,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 });
 
 import { DataPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { addFieldFromFormToolbar } from './__tests__/dataPillarAddField';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
@@ -117,9 +118,9 @@ function lastSentField(name: string): Record<string, unknown> | undefined {
 /** Mount, add a field on the Form tab, and retype it; returns its API name and label. */
 async function addFieldAs(typeOption: RegExp): Promise<{ name: string; label: string }> {
   render(
-    <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+    <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
       <DataPillar packageId="com.example.showcase" />
-    </MemoryRouter>,
+    </MemoryRouter></StudioSaveHarness>,
   );
   fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
   await addFieldFromFormToolbar();
@@ -202,9 +203,9 @@ describe('Studio data page — Lookup is held until it has a target (objectui#11
 describe('Studio data page — complete bodies are sent as before (objectui#11786 controls)', () => {
   it('a complete edit autosaves, with no held line', async () => {
     render(
-      <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+      <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
         <DataPillar packageId="com.example.showcase" />
-      </MemoryRouter>,
+      </MemoryRouter></StudioSaveHarness>,
     );
     fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
     await addFieldFromFormToolbar();
@@ -225,9 +226,9 @@ describe('Studio data page — complete bodies are sent as before (objectui#1178
       },
     };
     render(
-      <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+      <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
         <DataPillar packageId="com.example.showcase" />
-      </MemoryRouter>,
+      </MemoryRouter></StudioSaveHarness>,
     );
     fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
     await addFieldFromFormToolbar();

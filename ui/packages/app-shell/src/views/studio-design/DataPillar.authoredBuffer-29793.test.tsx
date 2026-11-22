@@ -128,6 +128,7 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
 import { DataPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { t, tFormat } from '../metadata-admin/i18n';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
 import { ObjectFieldInspector } from '../metadata-admin/inspectors/ObjectFieldInspector';
@@ -174,9 +175,9 @@ afterEach(() => {
 function renderZh() {
   return render(
     <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }} persistLanguage={false}>
-      <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
+      <StudioSaveHarness><MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
         <DataPillar packageId={PKG} />
-      </MemoryRouter>
+      </MemoryRouter></StudioSaveHarness>
     </I18nProvider>,
   );
 }

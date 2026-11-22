@@ -68,6 +68,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 });
 
 import { DataPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { addFieldFromFormToolbar } from './__tests__/dataPillarAddField';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
@@ -109,9 +110,9 @@ function lastSentField(name: string): Record<string, unknown> | undefined {
  */
 async function addRollup(): Promise<{ name: string; label: string }> {
   render(
-    <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+    <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
       <DataPillar packageId="com.example.showcase" />
-    </MemoryRouter>,
+    </MemoryRouter></StudioSaveHarness>,
   );
   fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
   await addFieldFromFormToolbar(undefined, { label: 'Child Count', type: /^Rollup$/ });

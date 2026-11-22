@@ -18,7 +18,10 @@
  *    stop the others: the toast names each refused item with its reason and
  *    lists the items that were saved.
  *  - A buffer that holds an edit it cannot send yet (`held`) refuses the whole
- *    Save before anything is written, naming what it needs.
+ *    Save before anything is written, naming what it needs. The held state is
+ *    read once the expression checks of the last keystroke have run (they run
+ *    {@link LINT_DEBOUNCE_MS} after it): a Save pressed at once never sends a
+ *    formula its check has not judged yet (objectui#4306).
  *  - Cancel drops every dirty buffer's edits: each goes back to what the
  *    server holds.
  */
@@ -30,6 +33,10 @@ import { cn } from '@object-ui/components';
 import type { MetadataClient } from '@object-ui/data-objectstack';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
 import { t, tFormat } from '../metadata-admin/i18n.js';
+import { LINT_DEBOUNCE_MS } from '../metadata-admin/CelPredicateField.js';
+
+/** Past the editors' expression check of the last keystroke, and its report. */
+const VERDICT_SETTLE_MS = LINT_DEBOUNCE_MS + 50;
 
 /** What one buffer's Save did. */
 export type StudioSaveResult =
@@ -137,15 +144,18 @@ export function useStudioSaveCoordinator(locale: string): StudioSaveCoordinator 
   );
   const save = React.useCallback(async () => {
     if (savingRef.current) return;
-    const entries = dirtyEntries();
-    if (entries.length === 0) return;
-    const held = entries.find((e) => e.held !== null);
-    if (held) {
-      toast.error(tFormat('engine.studio.save.held', locale, { clause: held.held ?? '' }));
-      return;
-    }
+    if (dirtyEntries().length === 0) return;
     savingRef.current = true;
     setSaving(true);
+    await new Promise((settled) => setTimeout(settled, VERDICT_SETTLE_MS));
+    const entries = dirtyEntries();
+    const held = entries.find((e) => e.held !== null);
+    if (held || entries.length === 0) {
+      savingRef.current = false;
+      setSaving(false);
+      if (held) toast.error(tFormat('engine.studio.save.held', locale, { clause: held.held ?? '' }));
+      return;
+    }
     const saved: string[] = [];
     const refused: Array<{ label: string; reason: string }> = [];
     try {

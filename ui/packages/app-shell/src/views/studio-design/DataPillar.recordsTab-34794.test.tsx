@@ -53,6 +53,7 @@ const mockClient = {
   listDrafts: vi.fn(async () => []),
   layered: vi.fn(async () => ({ effective: SERVED, code: AUTHORED })),
   getDraft: vi.fn(async () => null),
+  publish: vi.fn(async () => ({})), reset: vi.fn(async () => ({})),
   save: vi.fn(async () => ({})),
 };
 
@@ -92,6 +93,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
 import { DataPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { t } from '../metadata-admin/i18n';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
 import { ObjectFieldInspector } from '../metadata-admin/inspectors/ObjectFieldInspector';
@@ -124,9 +126,9 @@ afterEach(() => {
 
 async function renderGrid(props: { readOnly?: boolean } = {}) {
   render(
-    <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+    <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
       <DataPillar packageId="com.example.showcase" readOnly={props.readOnly} />
-    </MemoryRouter>,
+    </MemoryRouter></StudioSaveHarness>,
   );
   await waitFor(() => expect(document.querySelector('thead th[data-column-key="title"]')).not.toBeNull(), {
     timeout: 8000,

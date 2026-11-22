@@ -122,6 +122,7 @@ const mockClient = {
     draft: (servedDraft as { item?: unknown } | null)?.item ?? null,
   })),
   getDraft: vi.fn(async () => servedDraft),
+  publish: vi.fn(async () => ({})), reset: vi.fn(async () => ({})),
   save: vi.fn<(type: string, name: string, body: Record<string, unknown>, opts?: unknown) => Promise<unknown>>(
     async () => ({ ok: true }),
   ),
@@ -201,6 +202,7 @@ vi.mock('@dnd-kit/core', async (importOriginal) => {
 });
 
 import { DataPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { SurfaceDeepLinkProvider } from './surfaceDeepLinkChannel';
 import { isStudioHiddenSystemField } from './studioHiddenSystemField';
 
@@ -218,11 +220,11 @@ afterEach(() => {
 
 function renderPillar() {
   return render(
-    <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+    <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
       <SurfaceDeepLinkProvider>
         <DataPillar packageId="com.example.showcase" />
       </SurfaceDeepLinkProvider>
-    </MemoryRouter>,
+    </MemoryRouter></StudioSaveHarness>,
   );
 }
 

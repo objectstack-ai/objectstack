@@ -9,7 +9,8 @@
  */
 
 import * as React from 'react';
-import { act, fireEvent, screen } from '@testing-library/react';
+import { expect } from 'vitest';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import {
   StudioSaveControls,
   StudioSaveProvider,
@@ -28,11 +29,20 @@ export function StudioSaveHarness({ children, locale = 'en' }: { children: React
   );
 }
 
-/** Press the top bar's Save once it is drawn (the page holds an unsaved edit). */
-export async function pressStudioSave(): Promise<void> {
+/**
+ * Press the top bar's Save once it is drawn (the page holds an unsaved edit),
+ * and, unless `settle` is false, wait for that Save to end: its writes sent,
+ * or refused before any. `settle: false` for a Save that stops on a question
+ * the case answers (the draft-version conflict).
+ */
+export async function pressStudioSave({ settle = true }: { settle?: boolean } = {}): Promise<void> {
   const save = await screen.findByTestId('studio-save', undefined, { timeout: 4000 });
   await act(async () => {
     fireEvent.click(save);
+  });
+  if (!settle) return;
+  await waitFor(() => expect(screen.queryByTestId('studio-save')?.hasAttribute('disabled') ?? false).toBe(false), {
+    timeout: 4000,
   });
 }
 

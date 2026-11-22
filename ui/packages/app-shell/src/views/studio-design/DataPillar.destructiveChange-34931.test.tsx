@@ -80,6 +80,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 });
 
 import { DataPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
 // The source reaches a dynamic import of it: its first load is paid at collection (`check:test-source-alias`).
@@ -101,9 +102,9 @@ const fieldNames = (i: number) => puts[i].body.fields.map((f) => f.name);
 async function removePlace(first: Response) {
   answers = [first];
   render(
-    <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+    <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
       <DataPillar packageId="com.example.showcase" />
-    </MemoryRouter>,
+    </MemoryRouter></StudioSaveHarness>,
   );
   fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
   fireEvent.click((await screen.findByText('Place')).closest('.cursor-grab') as HTMLElement);

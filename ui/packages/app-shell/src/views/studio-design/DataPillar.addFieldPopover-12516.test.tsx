@@ -32,6 +32,7 @@ const mockClient = {
   listDrafts: vi.fn(async () => []),
   layered: vi.fn(async () => ({ effective: servedObject, code: servedObject })),
   getDraft: vi.fn(async () => null),
+  publish: vi.fn(async () => ({})), reset: vi.fn(async () => ({})),
   save: vi.fn(async () => ({ ok: true })),
 };
 
@@ -69,6 +70,7 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
 });
 
 import { DataPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { t } from '../metadata-admin/i18n';
 import { readFields } from '../metadata-admin/previews/object-fields-io';
 import { addFieldFromFormToolbar, addFieldFromGrid } from './__tests__/dataPillarAddField';
@@ -98,9 +100,9 @@ afterEach(() => {
 
 async function renderPillar(props: { readOnly?: boolean } = {}) {
   render(
-    <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+    <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
       <DataPillar packageId="com.example.showcase" readOnly={props.readOnly} />
-    </MemoryRouter>,
+    </MemoryRouter></StudioSaveHarness>,
   );
   await waitFor(() => expect(screen.getByTestId('records-panel')).toBeInTheDocument(), { timeout: 8000 });
 }

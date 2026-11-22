@@ -131,6 +131,7 @@ const mockClient = {
     return pending ? { item: pending.served, version: 'v7' } : null;
   }),
   get: vi.fn(async () => null),
+  publish: vi.fn(async () => ({})), reset: vi.fn(async () => ({})),
   save: vi.fn(async () => ({ ok: true, version: 'v2', state: 'draft' })),
 };
 
@@ -162,6 +163,7 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
 // warmed here so its first load is paid at import, not inside a test's clock.
 import '@objectstack/lint';
 import { DataPillar, type StudioBaseCustomization } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { t } from '../metadata-admin/i18n';
 import { emitMetadataRefresh } from '../../assistant/assistantBus';
 
@@ -201,9 +203,9 @@ afterEach(() => {
 
 async function openForm(props: { readOnly?: boolean; customization?: StudioBaseCustomization } = {}) {
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
+    <StudioSaveHarness><MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
       <DataPillar packageId={PKG} {...props} />
-    </MemoryRouter>,
+    </MemoryRouter></StudioSaveHarness>,
   );
   await waitFor(() => expect(screen.getByTestId('records-panel')).toBeInTheDocument(), { timeout: 8000 });
   await userEvent.click(screen.getAllByRole('button', { name: FORM })[0]);

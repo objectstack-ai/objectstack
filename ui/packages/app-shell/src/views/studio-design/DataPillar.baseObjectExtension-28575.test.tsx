@@ -82,6 +82,7 @@ const mockClient = {
   get: vi.fn(async (type: string, name: string, opts?: { packageId?: string }) =>
     type === 'object_extension' && name === OBJECT && opts?.packageId === PAIR ? srv.publishedExt : null,
   ),
+  publish: vi.fn(async () => ({})), reset: vi.fn(async () => ({})),
   save: vi.fn(async (type: string, _name: string, _body: unknown, _opts?: { packageId?: string }) => {
     if (type === 'object_extension' && srv.refuse) throw srv.refuse;
     return { ok: true, version: 'v2', state: 'draft' };
@@ -125,6 +126,7 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
 // warmed here so its first load is paid at import, not inside a test's clock.
 import '@objectstack/lint';
 import { DataPillar, type StudioBaseCustomization } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { t, tFormat } from '../metadata-admin/i18n';
 import { emitMetadataRefresh } from '../../assistant/assistantBus';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
@@ -186,9 +188,9 @@ afterEach(() => {
 
 async function renderBase(over: Partial<StudioBaseCustomization> = {}) {
   render(
-    <MemoryRouter initialEntries={[`/studio/${BASE}/data`]}>
+    <StudioSaveHarness><MemoryRouter initialEntries={[`/studio/${BASE}/data`]}>
       <DataPillar packageId={BASE} readOnly customization={customizationOf(over)} />
-    </MemoryRouter>,
+    </MemoryRouter></StudioSaveHarness>,
   );
   await waitFor(() => expect(screen.getByTestId('records-panel')).toBeInTheDocument(), { timeout: 8000 });
 }
@@ -415,9 +417,9 @@ describe('Studio adds a field to a read-only base object as an extension in its 
 describe('CONTROL: a writable package’s add-field is unchanged (objectstack#28575)', () => {
   it('a plain name into the object’s own body, and a fully editable inspector', async () => {
     render(
-      <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+      <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
         <DataPillar packageId="com.example.showcase" />
-      </MemoryRouter>,
+      </MemoryRouter></StudioSaveHarness>,
     );
     await waitFor(() => expect(screen.getByTestId('records-panel')).toBeInTheDocument(), { timeout: 8000 });
     await openForm();
@@ -495,9 +497,9 @@ describe('the object header says where a base object’s extension is saved (obj
 
   it('CONTROL: an object of a writable package says nothing of the kind', async () => {
     render(
-      <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+      <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
         <DataPillar packageId="com.example.showcase" />
-      </MemoryRouter>,
+      </MemoryRouter></StudioSaveHarness>,
     );
     await waitFor(() => expect(screen.getByTestId('records-panel')).toBeInTheDocument(), { timeout: 8000 });
     expect(savedTo()).toBeNull();

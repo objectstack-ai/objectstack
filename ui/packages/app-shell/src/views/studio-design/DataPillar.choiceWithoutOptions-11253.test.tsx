@@ -93,6 +93,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 });
 
 import { DataPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { addFieldFromFormToolbar } from './__tests__/dataPillarAddField';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
@@ -155,9 +156,9 @@ function heldOptionsLine(label: string): string {
 /** Add a field on the Form tab and turn it into the given choice type. */
 async function addFieldAndType(typeLabel: RegExp): Promise<string> {
   render(
-    <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+    <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
       <DataPillar packageId="com.example.showcase" />
-    </MemoryRouter>,
+    </MemoryRouter></StudioSaveHarness>,
   );
   fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
   await addFieldFromFormToolbar();
@@ -207,9 +208,9 @@ describe('Studio data page — an object that already stores an empty select (ob
   it('an unrelated edit is held and names the stored field; an option on it lets both go', async () => {
     served = storedEmptySelect;
     render(
-      <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+      <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
         <DataPillar packageId="com.example.showcase" />
-      </MemoryRouter>,
+      </MemoryRouter></StudioSaveHarness>,
     );
     fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
 

@@ -129,6 +129,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 });
 
 import { DataPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
 import { t, tFormat } from '../metadata-admin/i18n';
@@ -154,9 +155,9 @@ async function outlastDebounce(): Promise<void> {
 async function mountOnView(def: Record<string, unknown>, tabKey: string): Promise<void> {
   objectDef = def;
   render(
-    <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+    <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
       <DataPillar packageId="com.example.showcase" />
-    </MemoryRouter>,
+    </MemoryRouter></StudioSaveHarness>,
   );
   // The first match is the flat tab (the passthrough menu draws a second).
   fireEvent.click((await screen.findAllByRole('button', { name: L(tabKey) }))[0]);

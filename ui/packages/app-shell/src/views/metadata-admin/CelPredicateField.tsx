@@ -79,7 +79,8 @@ import { useServerHoldAt, type ServerDiagnosticEntry } from './draftVerdict.js';
 // fields as lists (`celAuthoring.ts` stays free of any import at load).
 import { multiValueFieldsOf, type CelFieldDef } from './clientValidation.js';
 
-const LINT_DEBOUNCE_MS = 250;
+/** The lint pass runs this long after the last keystroke; Studio's Save waits it out (objectstack#36511). */
+export const LINT_DEBOUNCE_MS = 250;
 
 const KIND_TAG: Record<CelSuggestionKind, string> = {
   field: 'field',

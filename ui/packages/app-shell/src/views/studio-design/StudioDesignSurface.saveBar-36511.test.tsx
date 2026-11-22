@@ -148,10 +148,13 @@ describe('the Studio top bar: Save where Publish was, Changes and Publish for dr
     const cancel = within(header).getByTestId('studio-cancel');
     expect(within(header).queryByRole('button', { name: CHANGES })).toBeNull();
     expect(within(header).queryByRole('button', { name: PUBLISH })).toBeNull();
-    // Cancel, then Save, the last of the right column's actions.
+    // Cancel, then Save: the last of the right column's actions, where Publish
+    // was; only the slot's show/hide icon follows it, as it followed Publish.
     expect(cancel.compareDocumentPosition(save) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const column = save.parentElement as HTMLElement;
-    const actions = within(column).getAllByRole('button');
+    const actions = within(column)
+      .getAllByRole('button')
+      .filter((b) => b.getAttribute('data-testid') !== 'studio-slot-toggle');
     expect(actions[actions.length - 1]).toBe(save);
     expect(writes).toEqual([]);
   });

@@ -75,6 +75,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 });
 
 import { DataPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { addFieldFromFormToolbar } from './__tests__/dataPillarAddField';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
@@ -98,9 +99,9 @@ function controlUnder(label: string): HTMLElement {
 describe('Studio data page — a held Picklist reads as a sentence (objectui#11785, held since objectui#11786)', () => {
   it('names the field by its label and shows no developer text', async () => {
     render(
-      <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+      <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
         <DataPillar packageId="com.example.showcase" />
-      </MemoryRouter>,
+      </MemoryRouter></StudioSaveHarness>,
     );
     fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
     await addFieldFromFormToolbar();
@@ -134,9 +135,9 @@ describe('Studio data page — a held Picklist reads as a sentence (objectui#117
 
   it('"Show me" opens the named field\'s inspector after it was closed', async () => {
     render(
-      <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+      <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
         <DataPillar packageId="com.example.showcase" />
-      </MemoryRouter>,
+      </MemoryRouter></StudioSaveHarness>,
     );
     fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
     await addFieldFromFormToolbar();
