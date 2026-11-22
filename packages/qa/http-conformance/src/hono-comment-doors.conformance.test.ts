@@ -221,12 +221,12 @@ describe('[#36469] the comment doors answer on the hosted shape (createHonoApp, 
 
         const resolved = await door.send(path, as(ALICE, { method: 'PUT', body: JSON.stringify({ resolved: true }) }));
         expect(resolved.status, await resolved.clone().text()).toBe(200);
-        expect((await resolved.json()).data).toMatchObject({ id: commentId, is_resolved: true, resolved_by: ALICE });
+        expect(((await resolved.json()) as { data: unknown }).data).toMatchObject({ id: commentId, is_resolved: true, resolved_by: ALICE });
         expect((await door.stored(COMMENT, commentId) as any)?.is_resolved).toBeTruthy();
 
         const reopened = await door.send(path, as(ALICE, { method: 'PUT', body: JSON.stringify({ resolved: false }) }));
         expect(reopened.status, await reopened.clone().text()).toBe(200);
-        expect((await reopened.json()).data).toMatchObject({ id: commentId, is_resolved: false });
+        expect(((await reopened.json()) as { data: unknown }).data).toMatchObject({ id: commentId, is_resolved: false });
         expect((await door.stored(COMMENT, commentId) as any)?.is_resolved).toBeFalsy();
     });
 
