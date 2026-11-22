@@ -2,14 +2,16 @@
  * Dashboard View Component
  * Renders a dashboard based on the dashboardName parameter.
  *
- * This is a pure VIEWER. Authoring a dashboard (adding/removing widgets,
- * editing config) lives in Studio's Interfaces pillar — reached via the top
- * bar's "Design in Studio" icon, which deep-links to this dashboard's design
- * surface. The former in-page inline edit button + config panel were retired
- * so there is a single, consistent authoring surface.
+ * A viewer, with one edit state for the people who may design the
+ * dashboard's package (objectstack#36372): the header's Edit button opens it
+ * in place, over the stored document, with Studio's own dashboard panels at
+ * the right (`DashboardInPageEditor.tsx`). Its Save writes where Studio's
+ * would and publishes that one item, so everyone sees the change at once.
+ * Deeper authoring (a new dashboard, chart drawing) stays in Studio's
+ * Interfaces pillar, reached through the top bar's "Design in Studio" icon.
  */
 
-import { useState, useEffect, useMemo, type ComponentProps } from 'react';
+import { useState, useEffect, useMemo, useRef, type ComponentProps } from 'react';
 import { useParams } from 'react-router-dom';
 import { DashboardRenderer } from '@object-ui/plugin-dashboard';
 import { DrillNavigationProvider, notifyDataChanged } from '@object-ui/react';
@@ -38,7 +40,17 @@ import { useBundledItem } from '../providers/bundledReads.js';
 import { readDashboardWidgetObjects } from '../console/appObjectScope.js';
 import { useObjectTranslation, useSafeTranslate } from '@object-ui/i18n';
 import { DeploymentNotice } from '../console/deployment-notice/DeploymentNotice.js';
+import { useMetadataClient } from './metadata-admin/useMetadata.js';
+import {
+  DashboardEditActions,
+  DashboardEditButton,
+  DashboardEditingBadge,
+  DashboardEditPanel,
+  useDashboardEditOffered,
+  useDashboardInPageEdit,
+} from './DashboardInPageEditor.js';
 import { useInSetupApp } from '../console/setupApp.js';
+import { useCustomizeDoorWalled } from './studio-design/StudioCustomizeControls.js';
 
 /**
  * One refresh of this dashboard's data: the `onRefresh` handed to
@@ -193,12 +205,20 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
   // prefer-local, as before. While the bundle is on the wire the dashboard is
   // not yet known.
   const bundledDashboard = useBundledItem('dashboard', dashboardName, (activeApp as any)?._packageId);
-  const dashboard =
+  const readDashboard =
     bundledDashboard.state === 'hit'
       ? bundledDashboard.value
       : bundledDashboard.state === 'miss'
         ? preferLocal(metadata.dashboards as any[], dashboardName, (activeApp as any)?._packageId)
         : undefined;
+  // objectstack#36372 — a save re-reads the bundle, which is on the wire for a
+  // moment: the dashboard shown keeps standing meanwhile, so a save does not
+  // flash the skeleton. Only for the same name: another dashboard waits.
+  const lastShown = useRef<{ name: string | undefined; value: any } | null>(null);
+  if (readDashboard) lastShown.current = { name: dashboardName, value: readDashboard };
+  const dashboard =
+    readDashboard ??
+    (bundledDashboard.state === 'pending' && lastShown.current?.name === dashboardName ? lastShown.current?.value : undefined);
 
   // ---- A miss: refused, or not there? (objectui#12112) ---------------------
   // The server lists only the dashboards this caller may open
@@ -241,6 +261,41 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
     if (registered.size === 0) return null;
     return (name) => !registered.has(name);
   }, [absentObjectNames, listedObjects]);
+  // ---- In-page edit (objectstack#36372) ------------------------------------
+  // The package the dashboard is served from, else the app's.
+  const ownerPackageId: string | null =
+    (dashboard as any)?._packageId ?? (activeApp as any)?._packageId ?? null;
+  const editOffered = useDashboardEditOffered(ownerPackageId);
+  const metadataClient = useMetadataClient();
+  const customizeWalled = useCustomizeDoorWalled();
+  const edit = useDashboardInPageEdit({
+    name: dashboardName ?? '',
+    ownerPackageId,
+    client: metadataClient as any,
+    dataSource: adapter as any,
+    walled: customizeWalled,
+  });
+  const editing = edit.draft !== null;
+  const startEdit = async () => {
+    const refused = await edit.open();
+    if (!refused) return;
+    if (refused.reason === 'pending-draft') toast.error(tt('dashboard.inPageEdit.pendingDraft', 'This dashboard has unpublished changes in Studio. Publish or discard them there, then edit it here.'));
+    else if (refused.reason === 'walled') toast.error(tt('dashboard.inPageEdit.walled', "On this deployment, only the platform operator can customize an installed app's dashboard."));
+    else if (refused.reason === 'no-version') toast.error(tt('dashboard.inPageEdit.noVersion', 'The package list does not say which version of this app is installed, so its dashboard cannot be customized here.'));
+    else if (refused.reason === 'no-package') toast.error(tt('dashboard.inPageEdit.noPackage', "This dashboard cannot be saved here: its app has no package this account can customize."), refused.detail ? { description: refused.detail } : undefined);
+    else toast.error(tt('dashboard.inPageEdit.loadFailed', 'The dashboard could not be opened for editing'), refused.detail ? { description: refused.detail } : undefined);
+  };
+  const saveEdit = async () => {
+    try {
+      const outcome = await edit.save();
+      if (outcome === 'published') toast.success(tt('dashboard.inPageEdit.saved', 'Dashboard saved'));
+      else if (outcome === 'pending-draft') toast.error(tt('dashboard.inPageEdit.pendingDraft', 'This dashboard has unpublished changes in Studio. Publish or discard them there, then edit it here.'));
+      else toast.error(tt('dashboard.inPageEdit.saveFailed', 'The dashboard could not be saved'));
+    } catch (err: any) {
+      toast.error(tt('dashboard.inPageEdit.saveFailed', 'The dashboard could not be saved'), { description: err?.message || String(err) });
+    }
+  };
+
   const previewSchema = useMemo(() => {
     if (!dashboard || !unregistered) return dashboard;
     const widgets = (dashboard as any).widgets;
@@ -253,6 +308,15 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
     if (filtered.length === widgets.length) return dashboard;
     return { ...dashboard, widgets: filtered };
   }, [dashboard, unregistered]);
+
+  // The edit buffer is the stored document, which carries none of the read's
+  // decorations: it is drawn with the served `_packageId` beside it, so its
+  // cards' dataset queries keep naming the dashboard's package as their reader
+  // (`callerPackage`, ADR-0150 D3), as in view mode. A save drops `_` keys.
+  const editSchema = useMemo(
+    () => (edit.draft ? { ...edit.draft, _packageId: (dashboard as { _packageId?: unknown } | undefined)?._packageId } : null),
+    [edit.draft, dashboard],
+  );
 
   // ---- Loading / not-found guards -----------------------------------------
   if (isLoading) {
@@ -364,9 +428,21 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
           `hideHeaderText` already suppresses. */}
       <PageHeader
         title={display}
-        subtitle={desc || undefined}
+        subtitle={editing ? tt('dashboard.inPageEdit.hint', 'Saved changes apply to everyone at once') : desc || undefined}
         icon={<LayoutDashboard className="h-4 w-4" />}
-        actions={refreshState && (
+        badge={editing ? <DashboardEditingBadge /> : undefined}
+        actions={editing ? (
+          <DashboardEditActions
+            onAddCard={edit.addCard}
+            onDiscard={edit.discard}
+            onSave={saveEdit}
+            saving={edit.saving}
+            dirty={edit.dirty}
+          />
+        ) : (refreshState || editOffered) && (
+          <div className="flex items-center gap-2">
+          {editOffered && <DashboardEditButton onClick={startEdit} busy={edit.opening} />}
+          {refreshState && (
           <Button
             variant="outline"
             size="sm"
@@ -379,6 +455,8 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
             <RefreshCw className={cn('h-4 w-4 mr-2', refreshState.refreshing && 'animate-spin')} />
             {refreshState.refreshing ? tt('dashboard.refreshing', 'Refreshing…') : tt('dashboard.refreshAll', 'Refresh All')}
           </Button>
+          )}
+          </div>
         )}
       />
 
@@ -388,23 +466,53 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
 
       {/* ── Main area ────────────────────────────────────────────── */}
       <div className="flex-1 overflow-hidden flex flex-col sm:flex-row relative">
-         <div className="flex-1 min-w-0 overflow-auto p-2 sm:p-4 md:p-6">
+         <div
+            className={cn(
+              'flex-1 min-w-0 overflow-auto p-2 sm:p-4 md:p-6',
+              // The edit state draws every card dashed (objectstack#36372).
+              editing && '[&_[data-widget-id]]:outline-dashed [&_[data-widget-id]]:outline-1 [&_[data-widget-id]]:outline-offset-2 [&_[data-widget-id]]:outline-muted-foreground/50',
+            )}
+         >
             <DrillNavigationProvider value={drillNavigation}>
               {/* `localized`: this document is the `/meta` read's, already
                   translated for this language, so the renderer draws its
-                  title, description and sub-caption as served (objectui#11295). */}
+                  title, description and sub-caption as served (objectui#11295).
+                  The edit state draws the stored document instead, every card
+                  of it, so it resolves its own labels and prunes nothing. */}
               <DashboardRenderer
-                schema={previewSchema}
-                localized
+                schema={editing ? (editSchema as any) : previewSchema}
+                localized={!editing}
                 dataSource={dataSource}
                 modalHandler={modalHandler}
                 scriptHandlers={scriptHandlers}
                 onRefresh={refreshDashboardData}
                 onRefreshStateChange={setRefreshState}
                 hideHeaderText
+                {...(editing
+                  ? {
+                      designMode: true,
+                      selectedWidgetId: edit.selection?.kind === 'widget' ? edit.selection.id : null,
+                      onWidgetClick: (id: string | null) => edit.select(id ? { kind: 'widget', id } : null),
+                      onWidgetsReorder: edit.reorder,
+                      onWidgetResize: edit.resize,
+                      onAddFilter: edit.requestFilters,
+                    }
+                  : {})}
               />
             </DrillNavigationProvider>
          </div>
+
+         {editing && (
+            <DashboardEditPanel
+              name={dashboardName ?? ''}
+              draft={edit.draft as Record<string, unknown>}
+              selection={edit.selection}
+              onPatch={edit.patch}
+              onSelectionChange={edit.select}
+              revealFilters={edit.revealFilters}
+              onFiltersRevealed={edit.filtersRevealed}
+            />
+         )}
 
          <MetadataPanel
             open={showDebug}

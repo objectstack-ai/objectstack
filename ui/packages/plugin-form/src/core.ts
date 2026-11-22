@@ -35,3 +35,5 @@ export type { FieldDefaultsSchemaLike, OptionListFieldLike } from './schemaDefau
 export { resolveSectionGroupReferences } from './sectionGroups';
 export type { ResolveSectionGroupsOptions } from './sectionGroups';
 export { useInitialFieldFocus } from './initialFieldFocus';
+export { FormOwnerLineContext } from './formOwnerLineContext';
+export type { FormOwnerActionTarget, FormOwnerLineHost } from './formOwnerLineContext';
