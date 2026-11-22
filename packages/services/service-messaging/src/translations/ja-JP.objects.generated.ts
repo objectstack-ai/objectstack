@@ -226,7 +226,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       digest: {
         label: "Digest",
-        help: "これらの通知を 1 件ずつ送らず、1 通のまとめにします。daily は深夜 0 時、weekly は月曜の深夜 0 時に送信し、none は 1 件ずつすぐに送信します。緊急の通知は常にすぐに送信されます。チャネルが *（すべてのチャネル）の設定でのみ有効です。",
+        help: "これらの通知を 1 件ずつ送らず、1 通のまとめにします。daily は深夜 0 時、weekly は月曜の深夜 0 時に送信し、none は 1 件ずつすぐに送信します。緊急の通知は常にすぐに送信されます。チャネルが *（すべてのチャネル）の設定でのみ有効です。空のままにすると、次の設定が決めます（全ユーザーの既定、その次は none）。",
         options: {
           none: "none",
           daily: "daily",
@@ -235,7 +235,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       quiet_hours: {
         label: "Quiet Hours",
-        help: "通知を保留し、終了時にまとめて配信する毎日の時間帯。例: { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }。時刻はそのタイムゾーンの HH:MM で指定します（tz を省略した場合は UTC）。時間帯は深夜 0 時をまたいでもかまいません。緊急の通知は保留されません。チャネルが *（すべてのチャネル）の設定でのみ有効です。"
+        help: "通知を保留し、終了時にまとめて配信する毎日の時間帯。例: { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }。時刻はそのタイムゾーンの HH:MM で指定します（tz を省略した場合は UTC）。時間帯は深夜 0 時をまたいでもかまいません。緊急の通知は保留されません。チャネルが *（すべてのチャネル）の設定でのみ有効です。{ \"off\": true } はおやすみ時間なしを意味します。空のままにすると、次の設定が決めます（全ユーザーの既定、その次はなし）。"
       },
       created_at: {
         label: "Created At"

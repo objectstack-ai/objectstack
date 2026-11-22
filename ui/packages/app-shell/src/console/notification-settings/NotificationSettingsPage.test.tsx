@@ -169,7 +169,7 @@ describe('NotificationSettingsPage', () => {
     );
   });
 
-  it('an organization digest in force: "No digest" is not offered, and the digest shows where it comes from', async () => {
+  it('an organization digest in force: "No digest" is offered and saves the explicit none', async () => {
     const orgDaily: General = { ...BUILTIN_GENERAL, digest: { value: 'daily', source: 'default' } };
     const apiFetch = vi.fn().mockResolvedValue(json(answer(false, undefined, orgDaily)));
     const adapter = { create: vi.fn(async () => ({})), update: vi.fn() };
@@ -177,22 +177,30 @@ describe('NotificationSettingsPage', () => {
 
     const select = (await screen.findByTestId('notification-settings-digest')) as HTMLSelectElement;
     expect(select.value).toBe('daily');
-    expect([...select.options].map((o) => o.value)).toEqual(['daily', 'weekly']);
+    expect([...select.options].map((o) => o.value)).toEqual(['none', 'daily', 'weekly']);
     expect(screen.getByTestId('notification-settings-digest-source')).toHaveTextContent('«notificationSettings.sourceDefault»');
-    expect(screen.getByTestId('notification-settings-digest-no-off')).toHaveTextContent('«notificationSettings.digestNoOff»');
+    fireEvent.change(select, { target: { value: 'none' } });
+    await waitFor(() =>
+      expect(adapter.create).toHaveBeenCalledWith('sys_notification_preference', {
+        user_id: 'alice',
+        topic: '*',
+        channel: '*',
+        enabled: true,
+        digest: 'none',
+      }),
+    );
   });
 
-  it('with no digest in force, "No digest" is the current value and the hint is not shown', async () => {
+  it('with no digest in force, "No digest" is the current value', async () => {
     const apiFetch = vi.fn().mockResolvedValue(json(answer(false)));
     render(<NotificationSettingsPage />, { wrapper: host(apiFetch, { create: vi.fn(), update: vi.fn() }) });
 
     const select = (await screen.findByTestId('notification-settings-digest')) as HTMLSelectElement;
     expect(select.value).toBe('none');
     expect(screen.getByTestId('notification-settings-digest-source')).toHaveTextContent('«notificationSettings.sourceBuiltin»');
-    expect(screen.queryByTestId('notification-settings-digest-no-off')).toBeNull();
   });
 
-  it('organization quiet hours in force: clearing the window cannot be saved, a complete window can', async () => {
+  it('organization quiet hours in force: a cleared window saves the explicit off', async () => {
     const orgQuiet: General = { ...BUILTIN_GENERAL, quietHours: { value: { start: '22:00', end: '07:00' }, source: 'default' } };
     const apiFetch = vi.fn().mockResolvedValue(json(answer(false, undefined, orgQuiet)));
     const adapter = { create: vi.fn(async () => ({})), update: vi.fn() };
@@ -205,7 +213,30 @@ describe('NotificationSettingsPage', () => {
 
     fireEvent.change(start, { target: { value: '' } });
     fireEvent.change(end, { target: { value: '' } });
-    expect(await screen.findByTestId('notification-settings-quiet-hours-no-clear')).toHaveTextContent('«notificationSettings.quietHoursNoClear»');
+    await waitFor(() => expect(save).not.toBeDisabled());
+    fireEvent.click(save);
+    await waitFor(() =>
+      expect(adapter.create).toHaveBeenCalledWith('sys_notification_preference', {
+        user_id: 'alice',
+        topic: '*',
+        channel: '*',
+        enabled: true,
+        quiet_hours: { off: true },
+      }),
+    );
+  });
+
+  it('organization quiet hours in force: a half-filled window cannot be saved, a complete one can', async () => {
+    const orgQuiet: General = { ...BUILTIN_GENERAL, quietHours: { value: { start: '22:00', end: '07:00' }, source: 'default' } };
+    const apiFetch = vi.fn().mockResolvedValue(json(answer(false, undefined, orgQuiet)));
+    const adapter = { create: vi.fn(async () => ({})), update: vi.fn() };
+    render(<NotificationSettingsPage />, { wrapper: host(apiFetch, adapter) });
+
+    const start = await screen.findByTestId('quiet-hours-start');
+    const end = screen.getByTestId('quiet-hours-end');
+    const save = screen.getByTestId('notification-settings-quiet-hours-save');
+
+    fireEvent.change(start, { target: { value: '' } });
     expect(save).toBeDisabled();
     fireEvent.click(save);
     expect(adapter.create).not.toHaveBeenCalled();
@@ -213,7 +244,6 @@ describe('NotificationSettingsPage', () => {
     fireEvent.change(start, { target: { value: '23:00' } });
     fireEvent.change(end, { target: { value: '06:00' } });
     await waitFor(() => expect(save).not.toBeDisabled());
-    expect(screen.queryByTestId('notification-settings-quiet-hours-no-clear')).toBeNull();
     fireEvent.click(save);
     await waitFor(() =>
       expect(adapter.create).toHaveBeenCalledWith('sys_notification_preference', {
