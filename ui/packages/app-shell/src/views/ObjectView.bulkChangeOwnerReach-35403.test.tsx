@@ -34,8 +34,8 @@ vi.mock('@object-ui/permissions', async (importOriginal) => {
     roles: [],
     isLoaded: false,
     hasCapabilities: () => true,
-    can: () => true,
-    cannot: () => false,
+    can: (_object: string, grant?: string) => grant !== 'delete',
+    cannot: (_object: string, grant?: string) => grant === 'delete',
   };
   const fieldPerms = { canRead: () => true, canWrite: () => true, permissions: [] };
   return { ...actual, usePermissions: () => perms, useFieldPermissions: () => fieldPerms };
@@ -154,28 +154,44 @@ async function rowBoxes(): Promise<HTMLElement[]> {
   }, { timeout: 5000 });
 }
 
+/** Every bulk entry the bar carries, its More included. */
 async function barNames(): Promise<string[]> {
   const bar = await screen.findByTestId('bulk-actions-bar', undefined, { timeout: 5000 });
-  return within(bar).queryAllByTestId(/^bulk-action-/).map((el) => el.getAttribute('data-testid')!.slice('bulk-action-'.length));
+  const names = within(bar).queryAllByTestId(/^bulk-action-/).map((el) => el.getAttribute('data-testid')!.slice('bulk-action-'.length));
+  const more = within(bar).queryByTestId('selection-actions-more');
+  if (more) {
+    await act(async () => { fireEvent.pointerDown(more, { button: 0, ctrlKey: false, pointerType: 'mouse' }); });
+    const menu = await screen.findByRole('menu');
+    names.push(...within(menu).queryAllByTestId(/^row-context-bulk-/).map((el) => el.getAttribute('data-testid')!.slice('row-context-bulk-'.length)));
+    await act(async () => { fireEvent.keyDown(menu, { key: 'Escape' }); });
+  }
+  return names;
+}
+
+/** Tick both rows: on a list page the bar's bulk entries are a multi-row selection's. */
+async function tickBoth(boxes: HTMLElement[]): Promise<void> {
+  for (const box of boxes) await act(async () => { fireEvent.click(box); });
 }
 
 describe('objectstack#35403 — bulk Change Owner is reachable without bulk Delete or authored bulk actions', () => {
   it('transfer, no delete, no authored bulk actions: checkboxes on open with no request; the first tick asks once and draws Change Owner', async () => {
     mountDeals(true);
-    const [first] = await rowBoxes();
+    const boxes = await rowBoxes();
     await act(async () => {});
     expect(transferAsks, 'opening the list asks nothing').toEqual([]);
 
-    await act(async () => { fireEvent.click(first); });
-    await waitFor(async () => expect(await barNames()).toContain('sys_change_owner'), { timeout: 5000 });
-    expect(await barNames()).not.toContain('delete');
+    await tickBoth(boxes);
+    await waitFor(() => expect(transferAsks).toHaveLength(1), { timeout: 5000 });
+    await act(async () => {});
+    const names = await barNames();
+    expect(names).toContain('sys_change_owner');
+    expect(names, 'this user has no bulk Delete').not.toContain('delete');
     expect(transferAsks).toEqual([{ object: 'crm_deal', operation: 'transfer' }]);
   });
 
   it('a refused transfer verdict: the rows still select, and the bar draws no Change Owner', async () => {
     mountDeals(false);
-    const [first] = await rowBoxes();
-    await act(async () => { fireEvent.click(first); });
+    await tickBoth(await rowBoxes());
     await waitFor(() => expect(transferAsks).toHaveLength(1), { timeout: 5000 });
     await act(async () => {});
     expect(await barNames()).not.toContain('sys_change_owner');

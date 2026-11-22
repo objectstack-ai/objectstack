@@ -457,10 +457,11 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
   /**
    * objectstack#35403 — the built-in bulk Change Owner. A host wires it where
    * the object offers the action; the rows then take a selection (as a bulk
-   * action does), and the selection bar offers 「Change Owner」 for the selected
-   * records — one or more — unless {@link bulkChangeOwnerOffered} is `false`.
-   * It is handed the selected rows (the expanded set when 「select all
-   * matching」 is on). The host owns the dialog and its per-row report, as
+   * action does), and the selection bar offers 「Change Owner」 among its bulk
+   * actions unless {@link bulkChangeOwnerOffered} is `false` — at any count,
+   * except on a list page, where one selected record shows that record's own
+   * actions instead and the bulk entries start at two. It is handed the
+   * selected rows (the expanded set when 「select all matching」 is on). The host owns the dialog and its per-row report, as
    * `onBulkDelete`'s host owns the delete confirmation.
    */
   onBulkChangeOwner?: (records: any[]) => void;
