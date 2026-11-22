@@ -353,10 +353,12 @@ describe('objectstack#33219 — the bare data page opens no record of a list-onl
     expect(findOne).not.toHaveBeenCalled();
   });
 
-  it('CONTROL — the same object served with no restriction: a touch tap on a cell opens the drawer', async () => {
+  // objectstack#35875 — the data page opens a record by the list's one rule:
+  // a touch tap opens the record's page, as on the object list.
+  it('CONTROL — the same object served with no restriction: a touch tap on a cell opens the record page', async () => {
     await mountDataPage(undefined);
     openWithTap('scim_ab12');
-    await waitFor(() => expect(search()).toBe('?recordId=c1'));
-    expect(await screen.findByRole('dialog', undefined, { timeout: 5000 })).toBeTruthy();
+    await waitFor(() => expect(pathname()).toBe(`/apps/setup/${OBJECT_NAME}/record/c1`));
+    expect(screen.getByTestId('left-the-list')).toBeTruthy();
   });
 });

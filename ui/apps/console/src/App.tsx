@@ -22,7 +22,6 @@ import { DevMasterDetail } from './dev/DevMasterDetail';
 import { DevLists } from './dev/DevLists';
 import { DevModal } from './dev/DevModal';
 import { DevLookup } from './dev/DevLookup';
-import { DevRowActions } from './dev/DevRowActions';
 import {
   AiAddressRedirect,
   ConsoleShell,
@@ -102,6 +101,9 @@ const DocPage = lazy(() => import('./pages/DocPage'));
  * body loads the chat UI when it first renders.
  */
 const SharedRecordPage = lazy(() => import('./pages/SharedRecordPage'));
+// Dev-only page drawn with `ObjectGrid`: lazy, so the grid package stays off
+// every first load.
+const DevRowActions = lazy(() => import('./dev/DevRowActions'));
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || '';
 const AUTH_URL = `${SERVER_URL}/api/v1/auth`;
@@ -481,7 +483,7 @@ export function App() {
             {/* Dev-only: row-action inline-overflow (multiple primary actions). */}
             <Route path="/dev/row-actions" element={
               <ProtectedRoute>
-                <DevRowActions />
+                <Suspense fallback={<LoadingScreen />}><DevRowActions /></Suspense>
               </ProtectedRoute>
             } />
             <Route path="/organizations" element={

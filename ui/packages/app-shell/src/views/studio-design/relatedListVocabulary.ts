@@ -49,13 +49,16 @@ type ObjectDoc = Record<string, unknown>;
  * the draft adds is an inbound relationship too.
  */
 export function catalogWithDraft(objects: readonly unknown[], name: string, draft: ObjectDoc): ObjectDoc[] {
-  const own = { ...draft, name };
+  const own: ObjectDoc = { ...draft, name };
   let replaced = false;
   const out: ObjectDoc[] = [];
   for (const o of objects) {
     if (!o || typeof o !== 'object') continue;
     if ((o as ObjectDoc).name === name) {
-      out.push(own);
+      // objectstack#35901 — the served object's package rides along, so a
+      // child list another package brings is told apart (`fromPackage`).
+      const served = (o as ObjectDoc)._packageId;
+      out.push(own._packageId === undefined && served !== undefined ? { ...own, _packageId: served } : own);
       replaced = true;
     } else {
       out.push(o as ObjectDoc);
@@ -69,7 +72,10 @@ export function catalogWithDraft(objects: readonly unknown[], name: string, draf
 export function inboundRelationships(name: string, catalog: readonly ObjectDoc[]): DerivedRelatedList[] {
   // The derived order is the order with NO declared entries: the stored
   // `relatedLists` must not reorder the vocabulary it is judged against.
-  return deriveRelatedLists({ name }, catalog as never[], { includeHidden: true });
+  // objectstack#35901 — the parent's package (as the catalog holds it) tells a
+  // child list another package brings, which the editor shows with its source.
+  const packageId = catalog.find((o) => o.name === name)?._packageId;
+  return deriveRelatedLists({ name, ...(packageId !== undefined ? { _packageId: packageId } : {}) }, catalog as never[], { includeHidden: true });
 }
 
 /**

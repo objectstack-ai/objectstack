@@ -7232,3 +7232,71 @@ describe('ApprovalService — one spec names each resolved person once (#28684)'
     expect(snapshotGroups()).toEqual({ l1: ['legal', 'finance'] });
   });
 });
+
+/**
+ * [#34862] A link that opens a Console page carries the Console's mount.
+ *
+ * `os serve` serves the Console at `/_console/` and nothing at `/system/*`, so
+ * the approval e-mail's link and the action-link pages' inbox link open a page
+ * only under that mount. The mount is read from the auth service's Console page
+ * composer (`getConsoleUrl`, which reads `AuthConfig.uiBasePath`); the double
+ * below composes exactly as `AuthManager.getConsolePageUrl` does, so the two
+ * mounts pinned here are the two values that setting takes: its `/_console`
+ * default, and `/` for a deployment that serves the Console at the root.
+ */
+describe('ApprovalService — Console page links carry the Console mount (#34862)', () => {
+  const ORIGIN = 'https://app.example.test';
+  /** `AuthManager.getConsolePageUrl`'s composition: `${origin}${uiBasePath}${path}`. */
+  const authComposer = (uiBasePath: string) => (path: string) =>
+    `${ORIGIN}${uiBasePath.replace(/\/$/, '')}${path.startsWith('/') ? path : `/${path}`}`;
+
+  function serviceUnder(uiBasePath: string | undefined) {
+    let n = 0;
+    const engine = makeFakeEngine();
+    const svc = new ApprovalService({
+      engine: engine as any,
+      clock: { now: () => new Date(Date.UTC(2026, 0, 15, 10, 0, n++)) },
+      publicBaseUrl: ORIGIN,
+      ...(uiBasePath === undefined ? {} : { getConsoleUrl: authComposer(uiBasePath) }),
+    });
+    const emitted: any[] = [];
+    svc.attachMessaging({ async emit(input) { emitted.push(input); } });
+    return { svc, emitted };
+  }
+
+  async function requestedLink(uiBasePath: string | undefined) {
+    const { svc, emitted } = serviceUnder(uiBasePath);
+    const { id } = (await svc.openNodeRequest(openInput(['u9']), CTX)) as unknown as { id: string };
+    const [requested] = emitted.filter(e => e.topic === 'approval.requested');
+    return { id, payload: requested.payload };
+  }
+
+  async function inboxHref(uiBasePath: string | undefined) {
+    const { svc } = serviceUnder(uiBasePath);
+    const res = await svc.handleActionPage(new Request(`${ORIGIN}/api/v1/approvals/act?token=not-a-token`));
+    return /<a href="([^"]*)">Open the Approvals Inbox/.exec(await res.text())?.[1];
+  }
+
+  it('under the default /_console mount the e-mail link opens the request in the Console', async () => {
+    const { id, payload } = await requestedLink('/_console');
+    expect(payload.approvalUrl).toBe(`${ORIGIN}/_console/system/approvals?request=${id}`);
+    // The inbox notice's own link stays the Console's route: the Console routes on it.
+    expect(payload.actionUrl).toBe(`/system/approvals?request=${id}`);
+  });
+
+  it('under a root mount the e-mail link stays at the root', async () => {
+    const { id, payload } = await requestedLink('/');
+    expect(payload.approvalUrl).toBe(`${ORIGIN}/system/approvals?request=${id}`);
+  });
+
+  it('the action-link page links the Console inbox under the same mount', async () => {
+    expect(await inboxHref('/_console')).toBe(`${ORIGIN}/_console/system/approvals`);
+    expect(await inboxHref('/')).toBe(`${ORIGIN}/system/approvals`);
+  });
+
+  it('with no auth service there is no mount to read: the e-mail link is the one built before, and the inbox link carries the base', async () => {
+    const { id, payload } = await requestedLink(undefined);
+    expect(payload.approvalUrl).toBe(`${ORIGIN}/system/approvals?request=${id}`);
+    expect(await inboxHref(undefined)).toBe(`${ORIGIN}/system/approvals`);
+  });
+});

@@ -3029,7 +3029,9 @@ describe('RecordDetailView.recordEditState-35599', () => {
 
   const headerButton = (label: string) =>
     (Array.from(document.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === label) as HTMLButtonElement | undefined) ?? null;
-  const pencils = (container: HTMLElement) => container.querySelectorAll('button[aria-label="Double-click to edit"]').length;
+  // The field list's pencil is named for a click (objectstack#36147), every other face's for a double-click.
+  const pencils = (container: HTMLElement) =>
+    container.querySelectorAll('button[aria-label="Double-click to edit"], button[aria-label="Click to edit"]').length;
   const editor = (container: HTMLElement, id: string) => container.querySelector(`[data-body-table-editor="${id}"]`) as HTMLElement | null;
   const cells = (scope: HTMLElement, label: string) => Array.from(scope.querySelectorAll(`input[aria-label="${label}"]`)) as HTMLInputElement[];
   const summaryInput = (container: HTMLElement) =>
@@ -3058,9 +3060,13 @@ describe('RecordDetailView.recordEditState-35599', () => {
     fireEvent.change(cells(tasks, 'Subject')[0], { target: { value: 'Visit' } });
   }
 
-  /** The pencil of the Summary field (the inline-edit entry), on the details column. */
+  /**
+   * The pencil of the Summary field (the inline-edit entry), on the details
+   * column: the keyboard's way in on the field list, named for a click
+   * (objectstack#36147).
+   */
   const summaryPencil = (container: HTMLElement) =>
-    (Array.from(container.querySelectorAll('[data-record-column="details"] button[aria-label="Double-click to edit"]')) as HTMLElement[])
+    (Array.from(container.querySelectorAll('[data-record-column="details"] button[aria-label="Click to edit"]')) as HTMLElement[])
       .find((b) => (b.closest('.group')?.textContent ?? '').includes('Summary')) ?? null;
   const saveBar = () => document.querySelector('[role="region"][aria-label="Edit fields"]') as HTMLElement | null;
   const detailInputValues = (container: HTMLElement) =>

@@ -96,7 +96,7 @@ import { isDeadlineSettled, withoutDeniedFields } from '@object-ui/core';
 import { getCellRenderer, resolveCellRendererType } from '@object-ui/fields';
 import { useSafeFieldLabel } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
-import { deriveFieldGroupDetailSections, isWideFieldType, RelatedList } from '@object-ui/plugin-detail';
+import { deriveFieldGroupDetailSections, isWideFieldType } from '@object-ui/plugin-detail/core';
 import {
   useAdapter,
   useDataInvalidation,
@@ -112,6 +112,7 @@ import { deriveRecordDetailSections } from '../recordDetailSections.js';
 import { deriveRelatedLists } from '../../utils/deriveRelatedLists.js';
 import { servedObjectLabel, servedObjectPluralLabel } from '../../hooks/servedObjectLabel.js';
 import { useReportRecordRead } from './recordReadReport.js';
+import { LazyRelatedList } from '../lazyDetailSurfaces.js';
 import {
   distinctLabels,
   planSubmittedRecord,
@@ -608,7 +609,7 @@ export function SubmittedChildTables({ model, className }: { model: SubmittedRec
             data-submitted-child={relation.childObject}
           >
             <p className="mb-2 text-xs text-muted-foreground" data-submitted-child-note>{note}</p>
-            <RelatedList
+            <LazyRelatedList
               title={title}
               type="table"
               api={relation.childObject}

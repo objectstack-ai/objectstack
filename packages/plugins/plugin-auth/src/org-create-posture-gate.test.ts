@@ -54,8 +54,10 @@
 // Real better-auth pipeline throughout (the #3585 EdDSA / #4785 session-of-record
 // precedent: patch the real thing, never stub our own code).
 
+// Pays the first load of the egress module at collection, not inside a clocked test.
+import '@objectstack/core/egress';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
+import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { AuthManager } from './auth-manager';
 import { createTenancyService, type TenancyService, type TenancyPosture } from './tenancy-service';
 // [#23184] better-auth's first module load is paid HERE, at module load, and
@@ -97,8 +99,10 @@ const createMemoryEngine = () => {
     a instanceof Date || b instanceof Date
       ? new Date(a as any).getTime() === new Date(b as any).getTime()
       : a === b;
-  const matches = (row: any, where: Record<string, any> = {}) =>
+  const matches = (row: any, where: Record<string, any> = {}): boolean =>
     Object.entries(where).every(([k, v]) => {
+      // A conjunction of conditions, as the engine's predicate path takes one.
+      if (k === '$and' && Array.isArray(v)) return v.every((w) => matches(row, w));
       if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       const actual = row[k];
       if (v && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Date)) {
@@ -135,7 +139,15 @@ const createMemoryEngine = () => {
     async count(name: string, q: any = {}) {
       return rows(name).filter((r) => matches(r, q.where)).length;
     },
-    async update(name: string, patch: any) {
+    async update(name: string, patch: any, options?: any) {
+      const dispatch = assertEngineUpdateDispatch(patch, options);
+      // The predicate path (`multi: true`, a `where` and no id in the payload)
+      // writes every matching row and answers how many it wrote.
+      if (dispatch.kind === 'multi') {
+        const targets = rows(name).filter((r) => matches(r, options?.where));
+        for (const target of targets) Object.assign(target, patch);
+        return targets.length;
+      }
       const row = rows(name).find((r) => r.id === patch.id);
       if (!row) return null;
       Object.assign(row, patch);

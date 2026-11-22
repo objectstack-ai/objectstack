@@ -15,10 +15,10 @@
  * column beside the other tabs on a wide full page (objectstack#35890), and
  * that no width draws the right rail of summary cards any more.
  *
- * One describe (objectstack#35253) opts each `record:details` stub into
- * mounting the `DetailView` the real block mounts (`showHeader: false`,
- * inline edit on), so the approval band it draws is measured on the laid-out
- * page; every other describe keeps the bare stub.
+ * Two describes (objectstack#35253, objectstack#35483) opt each
+ * `record:details` stub into mounting the `DetailView` the real block mounts
+ * (`showHeader: false`, inline edit on), so the approval band it draws is
+ * measured on the laid-out page; every other describe keeps the bare stub.
  */
 
 import * as React from 'react';
@@ -30,7 +30,7 @@ import { RecordContextProvider } from '@object-ui/react';
 const harness = vi.hoisted(() => ({
   /** Set by the objectstack#35253 describe: a `record:details` stub mounts `body`. */
   detailBodies: false,
-  body: null as React.ComponentType | null,
+  body: null as React.ComponentType<{ schema: any }> | null,
   /** The content width every element reports (jsdom lays nothing out). */
   width: 0,
 }));
@@ -42,7 +42,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
     return (
       <div data-node={schema?.type} data-cap={React.useContext(DetailsColumnCapContext)}>
         {schema?.properties?.objectName ?? schema?.type}
-        {Body && <Body />}
+        {Body && <Body schema={schema} />}
       </div>
     );
   };
@@ -53,6 +53,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 });
 
 import { RecordPageColumns } from '../RecordPageColumns';
+import { useReportEmptyFields } from '../recordFieldList';
 import { buildDefaultPageColumns } from '../synth/recordPageColumns';
 import { buildDefaultPageSchema } from '../synth/buildDefaultPageSchema';
 import { DetailView } from '../DetailView';
@@ -100,8 +101,8 @@ describe('RecordPageColumns — no right rail at any width (objectstack#35890 re
       expect(container.querySelector('[data-record-summary-card]')).toBeNull();
       expect(nodesIn(column(container, 'details'))).toEqual(['record:details']);
       expect(column(container, 'details')!.lastElementChild?.getAttribute('data-testid')).toBe('meta-footer');
-      // The details alone take the row: a section's own width decides, up to three.
-      expect(column(container, 'details')!.querySelector('[data-node="record:details"]')!.getAttribute('data-cap')).toBe('3');
+      // A drawer or pane (no `fullPage`): one field a row (objectstack#36147).
+      expect(column(container, 'details')!.querySelector('[data-node="record:details"]')!.getAttribute('data-cap')).toBe('1');
     });
   }
 
@@ -426,5 +427,181 @@ describe('RecordPageColumns — the approval band is drawn once per page (object
     );
     expect(screen.queryByText('Locked for approval')).toBeNull();
     expect(screen.getAllByText('In approval · editable')).toHaveLength(1);
+  });
+});
+
+/**
+ * objectstack#35483 / objectstack#35484 — the band is not dropped when the
+ * FIRST details part draws no body. A slotted page's `details` slot places the
+ * author's own `record:details` nodes in the laid-out details column; the first
+ * may draw no band of its own: its `requiredPermissions` withheld (the real
+ * block draws its insufficient-permissions notice in place of the body,
+ * `record-blocks.requiredPermissions-gate.test.tsx`) or `showHeader: true`
+ * (the body draws its own header, and no band). The column draws the band once
+ * by the first body that reaches its place (`ApprovalBandOnceScope`), so the
+ * next part draws it. Before, every part after the first was told not to draw
+ * it and such a page showed no band at all, on a locked record.
+ */
+describe('RecordPageColumns — a first details part that draws no band leaves it to the next (objectstack#35483, objectstack#35484)', () => {
+  /** What `record:details` mounts for its node: the notice when withheld, else its body. */
+  const PartBody = ({ schema }: { schema: any }) => {
+    const p = { ...schema, ...(schema?.properties ?? {}) };
+    if (Array.isArray(p.requiredPermissions) && p.requiredPermissions.length > 0) {
+      return <p role="status">Insufficient permissions to view details.</p>;
+    }
+    return (
+      <DetailView
+        schema={{ type: 'detail-view', objectName: 'quote', showHeader: p.showHeader ?? false, data: { id: 'Q1', name: 'Q-1' }, sections: [] } as any}
+        inlineEdit
+        recordFromHost
+      />
+    );
+  };
+  beforeEach(() => {
+    harness.detailBodies = true;
+    harness.body = PartBody;
+  });
+  afterEach(() => {
+    harness.detailBodies = false;
+    harness.body = null;
+  });
+
+  const quote = { name: 'quote', fields: { name: { type: 'text', label: 'Name' }, terms: { type: 'textarea', label: 'Terms' } } };
+  const part = (id: string, props: Record<string, unknown> = {}) => ({
+    type: 'record:details',
+    id,
+    properties: { sections: [{ name: id, label: id, fields: [id === 'first' ? 'name' : 'terms'] }], ...props },
+  });
+  const slotted = (details: any[]) => buildDefaultPageColumns(buildDefaultPageSchema(quote, { slots: { details } } as any))!;
+  const drawPage = (columns: ReturnType<typeof slotted>, approval: { locked?: boolean; approvalPending?: boolean; canEdit?: boolean }) =>
+    render(
+      <InlineEditProvider canEdit={approval.canEdit ?? false} locked={approval.locked} approvalPending={approval.approvalPending}>
+        <RecordPageColumns tier="wide" columns={columns} />
+      </InlineEditProvider>,
+    );
+  /** The details parts (by node id) whose subtree shows `text`. */
+  const partsShowing = (container: HTMLElement, text: string) =>
+    Array.from(column(container, 'details')!.querySelectorAll('[data-node="record:details"]'))
+      .map((node, index) => ({ node, index }))
+      .filter(({ node }) => node.textContent?.includes(text))
+      .map(({ index }) => index);
+
+  it('the slotted page lays its two details nodes out in the details column', () => {
+    expect(slotted([part('first'), part('second')]).details.map((n: any) => n.id)).toEqual(['first', 'second']);
+  });
+
+  for (const [why, props] of [
+    ['withheld by its requiredPermissions', { requiredPermissions: ['quote.audit'] }],
+    ['drawing its own header', { showHeader: true }],
+  ] as const) {
+    it(`a first part ${why}: "Locked for approval" once, on the second part`, () => {
+      const { container } = drawPage(slotted([part('first', props), part('second')]), { locked: true });
+      expect(screen.getAllByText('Locked for approval')).toHaveLength(1);
+      expect(partsShowing(container, 'Locked for approval')).toEqual([1]);
+    });
+  }
+
+  it('a `lockRecord: false` approval behind a withheld first part reads editable, once — never locked', () => {
+    drawPage(slotted([part('first', { requiredPermissions: ['quote.audit'] }), part('second')]), { approvalPending: true, locked: false, canEdit: true });
+    expect(screen.queryByText('Locked for approval')).toBeNull();
+    expect(screen.getAllByText('In approval · editable')).toHaveLength(1);
+  });
+
+  it('CONTROL: two drawing parts keep the band on the first, once', () => {
+    const { container } = drawPage(slotted([part('first'), part('second')]), { locked: true });
+    expect(screen.getAllByText('Locked for approval')).toHaveLength(1);
+    expect(partsShowing(container, 'Locked for approval')).toEqual([0]);
+  });
+
+  it('CONTROL: a single slotted details part draws its one band', () => {
+    drawPage(slotted([part('first')]), { locked: true });
+    expect(screen.getAllByText('Locked for approval')).toHaveLength(1);
+  });
+
+  it('CONTROL: a single withheld part draws no band and no body (nothing on the page reaches its place)', () => {
+    drawPage(slotted([part('first', { requiredPermissions: ['quote.audit'] })]), { locked: true });
+    expect(screen.queryByText('Locked for approval')).toBeNull();
+    expect(screen.getByText('Insufficient permissions to view details.')).toBeTruthy();
+  });
+});
+
+/**
+ * objectstack#36147 — the field area is one list wherever it sits beside other
+ * tabs or is one of them: the drawer, the phone, the narrow page and the
+ * pinned left column draw it one field a row. Only a full page whose details
+ * are its only face (objectstack#35890 item 4) lays them out by width. The
+ * list ends in one row folding every empty field of its groups.
+ */
+describe('RecordPageColumns — the field area is one list (objectstack#36147)', () => {
+  beforeEach(() => RelatedCountStore._reset());
+  const find = vi.fn(async () => ({ data: [], total: 0 }));
+  let draws = 0;
+  const drawPage = (cols: typeof columns, extra: Record<string, unknown> = {}) =>
+    render(
+      <RecordContextProvider
+        objectName="lead"
+        recordId={`lead-1-${++draws}`}
+        dataSource={{ find, getObjectSchema: vi.fn(async () => ({ fields: {} })) } as any}
+      >
+        <RecordPageColumns tier="wide" columns={cols} onEnlargeRelated={vi.fn()} {...extra} />
+      </RecordContextProvider>,
+    );
+  const capOf = (container: HTMLElement) =>
+    container.querySelector('[data-record-column="details"] [data-node="record:details"]')?.getAttribute('data-cap');
+
+  it('one column in a drawer at any width, on a narrow page with tabs, and pinned', () => {
+    harness.width = 1600;
+    const drawer = drawPage(columns, { fullPage: false });
+    expect(capOf(drawer.container)).toBe('1');
+    drawer.unmount();
+    harness.width = 600;
+    const narrow = drawPage(columns, { fullPage: true });
+    expect(narrow.container.querySelector('[data-record-page-pinned]')).toBeNull();
+    expect(capOf(narrow.container)).toBe('1');
+    narrow.unmount();
+    harness.width = 1184;
+    const pinned = drawPage(columns, { fullPage: true });
+    expect(pinned.container.querySelector('[data-record-page-pinned]')).not.toBeNull();
+    expect(capOf(pinned.container)).toBe('1');
+  });
+
+  it('a full page whose details are its only face keeps laying them out by width', () => {
+    const bare = buildDefaultPageColumns(buildDefaultPageSchema({ name: 'thing', fields: {} }, { hideDiscussion: true }))!;
+    harness.width = 1600;
+    const { container } = drawPage(bare, { fullPage: true });
+    expect(capOf(container)).toBe('3');
+  });
+
+  it('the details end in one row folding every empty field the groups report, after the footer', () => {
+    const Reporter = ({ count }: { count: number }) => {
+      useReportEmptyFields(count);
+      return null;
+    };
+    harness.width = 600;
+    const { container } = drawPage(columns, {
+      footer: (
+        <>
+          <Reporter count={2} />
+          <Reporter count={3} />
+          <p data-testid="meta-footer">meta</p>
+        </>
+      ),
+    });
+    const details = column(container, 'details')!;
+    const row = details.lastElementChild as HTMLElement;
+    expect(row.hasAttribute('data-empty-fields-row')).toBe(true);
+    expect(row.getAttribute('data-empty-fields-count')).toBe('5');
+    expect(row.previousElementSibling?.getAttribute('data-testid')).toBe('meta-footer');
+    const button = within(row).getByRole('button');
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    expect(button.textContent).toMatch(/5/);
+    fireEvent.click(button);
+    expect(within(column(container, 'details')!.lastElementChild as HTMLElement).getByRole('button').getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('no empty field, no row', () => {
+    harness.width = 600;
+    const { container } = drawPage(columns, { footer: <p data-testid="meta-footer">meta</p> });
+    expect(container.querySelector('[data-empty-fields-row]')).toBeNull();
   });
 });

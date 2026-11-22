@@ -167,8 +167,8 @@ at runtime from the client viewport, because an author
 (especially an AI) cannot know the client's screen. **Write the data (fields,
 `fieldGroups`); let the platform lay it out.**
 
-- **Surface.** A clicked record opens in the **drawer**, which expands to the full
-  page; `page` only by declaration ([Record Page](./record-page.md) §5–6). Create /
+- **Surface.** On an object's list the record's name opens the **page**, the
+  hover icon beside it the **drawer** ([Record Page](./record-page.md) §5–6). Create /
   edit opens in a **modal**, or the full-page route when the object declares `editMode: 'page'`.
 - **Field width.** **Omit it** (`auto` sizes by widget type × current columns —
   textarea / rich-text / file take the row). Both keys are valid: `colSpan`

@@ -429,6 +429,29 @@ SDK call is `client.approvals.getRecordLock(object, recordId)`, and the service
 member is `IApprovalService.getRecordLock`. An approvals service without that
 member answers `501`.
 
+**Reading the locks of a page of records.** A list asks for every row on screen
+in one request rather than one per row:
+
+```bash
+curl -b cookies.txt -X POST -H 'Content-Type: application/json' \
+  -d '{"recordIds":["rec_123","rec_456","rec_789"]}' \
+  "https://your-app.example.com/api/v1/approvals/records/expense/locks"
+# → { "success": true, "data": { "records": [
+#      { "recordId": "rec_123", "locked": true },
+#      { "recordId": "rec_456", "locked": false },
+#      { "recordId": "rec_789", "locked": null } ] } }
+```
+
+Each entry is what the single-record read answers for that id, in the order the
+ids were sent; `null` stands where that read answers `404`, so a record the
+caller cannot read and one that does not exist look the same. One request
+carries at most 200 ids (`APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS`); a longer list,
+an empty one or any other body key is refused with `400 VALIDATION_ERROR`. The
+SDK call is `client.approvals.getRecordLocks(object, recordIds)`, the service
+member `IApprovalService.getRecordLocks`, and an approvals service without it
+answers `501`. A list that edits in place reads it when a cell is first
+selected, and holds an edit asked before the answer arrives until it does.
+
 Only `approvers` is required on the node; everything else has a default
 (`behavior: 'first_response'`, `lockRecord: true`, `maxRevisions: 3`).
 
@@ -593,7 +616,9 @@ administrator is its submitter on a step that sets `excludeSubmitter`. The
 server logs a warning, and the request's timeline and a notice to its submitter
 say that no one else can approve it yet and that an organization administrator
 must add a member who can (one who holds the unstaffed position, when the slate
-names one). Only the admin override decides it, and never its submitter's own.
+names one). The timeline's note names that position the way the note above
+does: by its label for a reader, by its name in the text the row stores. Only the
+admin override decides it, and never its submitter's own.
 
 ### The approver finds it in their queue
 

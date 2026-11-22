@@ -15,8 +15,8 @@ view / page / dashboard / report metadata.
   put first, and the attachments tab removed, by the parent's `relatedLists`
   naming every tab it keeps (no page file); a field placed in its group's
   own `fields`; a child table placed between field sections by a group's
-  `relatedList`; `navigation: { mode: 'page' }` on the list view with the
-  reader's own open choice left out of metadata; and `placedActions: true`
+  `relatedList`; an object's list opening a record one way, with the
+  deprecated `navigation.mode` left unauthored; and `placedActions: true`
   on a full page's `page:header` so packaged header actions draw without an
   id list.
 - `report-period-export.json` — a non-`joined` report's `dateRange` (one
