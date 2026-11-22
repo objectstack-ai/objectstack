@@ -31,8 +31,7 @@ import {
  * preference stays per browser.
  */
 export function pinnedListViewScope(objectName: string, orgId: string | null): WorkspacePreferenceScope {
-  const scope = objectPreferenceScope(objectName);
-  return orgId ? `${scope}@org:${orgId}` : scope;
+  return orgId ? `object:${objectName}@org:${orgId}` : objectPreferenceScope(objectName);
 }
 
 /**

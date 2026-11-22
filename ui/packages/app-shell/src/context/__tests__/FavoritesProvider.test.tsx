@@ -456,6 +456,10 @@ describe('FavoritesProvider — kept per organization (objectstack#36244)', () =
 
   beforeEach(() => {
     rows.clear();
+    // The suite above leaves its last copy under the user-only key, which the
+    // first organization to read would adopt.
+    localStorage.clear();
+    mockUser.current = { id: 'user-1', name: 'Alice', email: 'a@x' } as any;
     // The pointer `ActiveOrganizationStorage` resolves its per-user key from.
     localStorage.setItem('auth-session-user-id', 'user-1');
   });
