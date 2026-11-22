@@ -179,7 +179,7 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
 import '@objectstack/lint';
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
-import { localListStateKey } from '../context/ListPreferencesProvider';
+import { listLayoutStorageKey } from './listLayoutStore';
 import { listDraftScope, patchListDraft, readListDraft, resetListDraftStoreForTests } from './listDraftStore';
 
 const OBJECT_NAME = 'duly_task';
@@ -320,11 +320,11 @@ const viewWrites = (dataSource: any): unknown[][] => [
  * objectui#12474 — the hidden fields this user chose for `viewId`. Since
  * objectstack#35955 the choice is the list's DRAFT (`./listDraftStore.ts`):
  * kept while the reader opens a record and comes back (a remount here), never
- * stored. The second half reads that nothing reaches the reader's stored
- * state either.
+ * stored. The second half reads that nothing reaches the layout this
+ * browser keeps for the reader either.
  */
 function storedHiddenFields(viewId: string): unknown {
-  const raw = localStorage.getItem(localListStateKey('u1', OBJECT_NAME));
+  const raw = localStorage.getItem(listLayoutStorageKey('u1', OBJECT_NAME)!);
   expect(raw ? JSON.parse(raw)?.perView?.[viewId]?.hiddenFields : undefined).toBeUndefined();
   return readListDraft(listDraftScope('u1', OBJECT_NAME, viewId)).hiddenFields;
 }
@@ -641,7 +641,7 @@ describe('an unprojected view applies neither hiddenFields nor fieldOrder on the
       },
     };
     localStorage.setItem(
-      localListStateKey('u1', OBJECT_NAME),
+      `list-state:u1:${OBJECT_NAME}`,
       JSON.stringify({ perView: { [PROBE_ID]: { hiddenFields: ['stage'] } } }),
     );
     await mountRoute(listViews, PROBE_ID, makeDataSource());
