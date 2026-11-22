@@ -464,7 +464,11 @@ export function InspectorSelectField({
 }: {
   label: string;
   value: string | undefined;
-  options: Array<{ value: string; label: string }>;
+  /**
+   * The roster. An option's `icon`, when given, is drawn before its label in
+   * the list and on the trigger (the chart-type pickers' glyphs).
+   */
+  options: Array<{ value: string; label: string; icon?: React.ReactNode }>;
   onCommit: (v: string) => void;
   placeholder?: string;
   /**
@@ -666,7 +670,16 @@ export function InspectorSelectField({
         </SelectTrigger>
         <SelectContent>
           {shownOptions.map((o) => (
-            <SelectItem key={o.value} value={toInner(o.value)}>{o.label}</SelectItem>
+            <SelectItem key={o.value} value={toInner(o.value)}>
+              {'icon' in o && o.icon ? (
+                <span className="inline-flex items-center gap-2">
+                  {o.icon}
+                  {o.label}
+                </span>
+              ) : (
+                o.label
+              )}
+            </SelectItem>
           ))}
         </SelectContent>
       </Select>

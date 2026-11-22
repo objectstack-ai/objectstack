@@ -29,7 +29,8 @@ These properties apply to **all** field types and are validated by the base `Fie
 | `readonly` | `boolean` | `false` | Blocks user edits in UI forms; server-enforced on **both create and update** — a non-system write to the field is silently dropped from the payload (system-context writes such as import/seed/migration are exempt) |
 | `sortable` | `boolean` | `true` | Whether field appears in list view sort options |
 | `externalId` | `boolean` | `false` | Not read: nothing matches on it. A seed dataset names its match field in its own `externalId`, an import in its mapping's `upsertKey` |
-| `trackHistory` | `boolean` | — | Render this field's value changes as entries on the record activity timeline |
+| `trackHistory` | `boolean` | — | Opt a media or JSON field into old → new values on the record activity timeline; other fields show them already, and `false` does not hide them |
+| `fieldHistory` | `boolean` | — | This field's old → new values on the record activity timeline: absent shows them, `false` turns them off |
 | `visibleWhen` | `string \| Expression` | — | CEL predicate; field is shown only when `TRUE` |
 | `readonlyWhen` | `string \| Expression` | — | CEL predicate; field is read-only when `TRUE` |
 | `requiredWhen` | `string \| Expression` | — | CEL predicate; field is required when `TRUE` |
@@ -509,7 +510,8 @@ For sensitive data, use the properties and types the platform actually enforces:
 | Property | Type | Default | Description |
 |:---|:---|:---|:---|
 | `requiredPermissions` | `string[]` | — | Capabilities required to read/edit the field — masked on read, denied on write unless the caller holds all of them (ADR-0066 D3) |
-| `trackHistory` | `boolean` | — | Render the field's value changes as entries on the record activity timeline |
+| `trackHistory` | `boolean` | — | Opt a media or JSON field into old → new values on the record activity timeline; other fields show them already, and `false` does not hide them |
+| `fieldHistory` | `boolean` | — | This field's old → new values on the record activity timeline: absent shows them, `false` turns them off |
 
 For reversible encrypted-at-rest values (API keys, tokens, DB passwords), use the
 `secret` field type — it is the type with an enforced encryption/masking code path

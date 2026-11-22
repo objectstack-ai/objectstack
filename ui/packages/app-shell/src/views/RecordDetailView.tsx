@@ -278,6 +278,15 @@ function recordPagePlacesNoComponent(page: Parameters<typeof checkPageRecordPlac
 }
 
 /**
+ * Whether a record page is a print page (objectui#11958): it declares `print`
+ * as an object. Only an assigned page can; the default page never does.
+ */
+function pageDeclaresPrintOf(page: unknown): boolean {
+  const print = (page as { print?: unknown } | null | undefined)?.print;
+  return typeof print === 'object' && print !== null && !Array.isArray(print);
+}
+
+/**
  * The fields the highlight strip of a synthesized record page draws: the
  * `fields` of the `record:highlights` blocks among the page's top-level blocks,
  * where a slotted page's own `highlights` slot lands. The default page places
@@ -5301,11 +5310,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           : onEdit({ id: pureRecordId }, objectName)),
       } as any);
     }
-    // The record's favorites entry (objectui#12427), in the `⋯` overflow ahead
-    // of Share. A record is never a navigation entry, so this toggles the
-    // `record:` favorite, which the sidebar draws in its Favorites section at
-    // the top.
-    if (favoriteRecord) {
+    // The record's favorites control is the star beside the record's name
+    // (objectstack#36246), drawn by `page:header` from the record context
+    // below, so the `⋯` holds no second entry. A print page draws no
+    // `page:header`, so no name and no star: there the favorites entry stays
+    // in the `⋯` of its chrome row, ahead of Share. A record is never a
+    // navigation entry, so both toggle the `record:` favorite, which the
+    // sidebar draws in its Favorites section at the top.
+    if (favoriteRecord && pageDeclaresPrintOf(assignedPage)) {
       items.push({
         name: 'sys_favorite',
         label: isRecordFavorite
@@ -5842,8 +5854,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // what it hides). The action is the browser's print preview of it, and it is
   // offered only where the page declares `print`, so every other record page
   // is unchanged.
-  const pagePrint = (renderedPage as { print?: unknown } | null | undefined)?.print;
-  const pageDeclaresPrint = typeof pagePrint === 'object' && pagePrint !== null && !Array.isArray(pagePrint);
+  const pageDeclaresPrint = pageDeclaresPrintOf(renderedPage);
   const printHint = t('common.printDialogHint');
 
   // Shared cross-cutting chrome: lifecycle badge + presence avatars —
@@ -6024,11 +6035,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         reread={headerReread}
         headerSystemActions={synthSystemActions}
         objectLabelNote={inSetupApp ? managedByNote ?? undefined : undefined}
+        // objectstack#36246 — the record's favorite star beside its name, in
+        // every face `page:header` draws (the page's bar, a drawer or pane,
+        // a phone's header): hollow until the record is a favorite, filled
+        // once it is, one press to toggle.
+        isFavorite={isRecordFavorite}
+        onToggleFavorite={favoriteRecord ? handleToggleRecordFavorite : undefined}
       >
-        {/* No `isFavorite` / `onToggleFavorite` here (objectui#12427): the
-            record's favorites entry is the `sys_favorite` item in the header's
-            `⋯` overflow, and the `page:header` chrome draws its star only for
-            a host that wires `onToggleFavorite`, so this page draws none. */}
         {/* objectui#2407 P2 — ONE record-level inline-edit session spanning
             the highlights strip AND the details body (both descend from this
             provider), committed together by the single <InlineEditSaveBar>

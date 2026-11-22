@@ -1645,3 +1645,9 @@ export {
     // `resetInflightGetsForTesting` is test-only and stays off the barrel
     // (objectui#13453); tests import it from `http-inflight` directly.
 } from './http-inflight.js';
+
+// The one avatar-initials rule (objectstack#36346). Same argument for the same
+// home: its callers — the field renderers, the kanban card owner, the history
+// timeline, the user menu in `@object-ui/auth` and the presence stack — have no
+// package in common lower than this one.
+export { getPersonInitials } from './person-initials.js';
