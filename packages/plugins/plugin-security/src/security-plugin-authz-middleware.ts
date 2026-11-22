@@ -135,7 +135,11 @@ import {
 } from './unresolved-posture.js';
 import { assertReadableQueryFields } from './predicate-guard.js';
 import { DelegationScopeViolationError, PermissionDeniedError, MaskedValueWriteError } from './errors.js';
-import { masterGateRefusalUserCopyOf, type MasterQuestion } from './security-plugin-cbp-write-gate.js';
+import {
+  masterGateRefusalUserCopyOf,
+  predicateWriteRowIdsJudgedByMasterGate,
+  type MasterQuestion,
+} from './security-plugin-cbp-write-gate.js';
 import {
   QUEUE_FIELD,
   CLAIM_REFUSAL,
@@ -940,7 +944,9 @@ export function registerAuthzMiddleware(
     // never reaches 2.7, so its per-row check (step 3.6, [#19950]) keeps the
     // floor on exactly the terms its `where` scope does: step 3 decides the
     // floor per matched row ({@link predicateFloorDropIds}), and the check
-    // reads that decision for each row it judges.
+    // reads that decision for each row it judges; on a `controlled_by_parent`
+    // detail the master gate vouched for, both carry no floor
+    // ({@link predicateMasterGateRowIds}).
     let preImageFloorOpts: RlsFilterOptions | null = null;
     // [#35802] The predicate write's per-row floor decision: the matched rows
     // whose platform ownership floor step 3 replaced, because a by-id write of
@@ -949,6 +955,18 @@ export function registerAuthzMiddleware(
     // 3.6's per-row check reads it when the engine hands the rows over, which
     // is after step 3 has run.
     let predicateFloorDropIds: ReadonlySet<unknown> | null = null;
+    // [ADR-0055 §3 as amended 2026-11-22 · ruling record 7073030861] The
+    // COVERAGE VOUCH on the predicate path: the rows ADR-0055's master gate
+    // (step 2.8) judged for this addressed predicate update or delete of a
+    // `controlled_by_parent` detail, on the caller's own pass, having refused
+    // none. Null until that pass returns, and on every other write: a by-id
+    // write (step 2.7 vouches there), a delegated one (both floors stay,
+    // ADR-0090 D10), a nested or referential one, an object that derives
+    // nothing from a master. Step 3 hands the platform ownership floor to the
+    // gate for exactly these rows and scopes the write to them; step 3.6
+    // holds a predicate update's rows to the check composed on the same
+    // decision.
+    let predicateMasterGateRowIds: readonly unknown[] | null = null;
     // [ADR-0090 D10] Its twin for the DELEGATOR of an on-behalf-of write: the
     // floor decision and coverage vouch the delegator's OWN direct by-id write
     // of this row would get ({@link delegatorOwnWriteFloorOptions}). Null on
@@ -1466,7 +1484,8 @@ export function registerAuthzMiddleware(
         // pass, and 2.8's condition is a strict SUPERSET of this one: the same
         // `permissionSets.length > 0 && userId && this.ql` triple, the same
         // single target id (`extractSingleId`; with none, 2.8 judges every
-        // master the write reaches instead), and one
+        // master the write reaches instead, and vouches for that write
+        // itself: `predicateMasterGateRowIds`), and one
         // additional operation (`insert`, which has no pre-image and so no
         // floor to drop). Reaching this line therefore PROVES the master gate
         // will answer the same write — the maintainer's precondition, held
@@ -1660,6 +1679,16 @@ export function registerAuthzMiddleware(
           opCtx,
           opCtx.context,
         );
+        // [ADR-0055 §3 as amended 2026-11-22 · ruling record 7073030861] The
+        // gate has just judged this write for the caller and refused nothing.
+        // On an addressed predicate write that is not delegated, the rows it
+        // judged are the vouch that it covers this write, as step 2.7's
+        // position above this block is for a by-id write. Read here, before
+        // the delegator's pass, so the record is the caller's; a delegated
+        // write takes none and keeps both floors, as its by-id write does.
+        if (!delegatorSets && this.addressedPredicateWrite(opCtx, nestedInOperation, referentialFieldClearWrite)) {
+          predicateMasterGateRowIds = predicateWriteRowIdsJudgedByMasterGate(opCtx);
+        }
         // [ADR-0090 D10] The delegator must ALSO have edit access to the master
         // — a detail write on behalf of a user requires that user's master-edit.
         if (delegatorSets) {
@@ -2258,7 +2287,11 @@ export function registerAuthzMiddleware(
         opCtx.object,
         opCtx.operation,
         opCtx.context,
-        preImageFloorOpts ?? undefined,
+        // A by-id update is held to step 2.7's floor decision. A predicate
+        // update of a `controlled_by_parent` detail the master gate vouched
+        // for is held to the check its rows' by-id writes get, the floor
+        // handed to that gate (ruling record 7073030861).
+        preImageFloorOpts ?? (predicateMasterGateRowIds ? { masterGateCoversThisWrite: true } : undefined),
       );
       // [ADR-0090 D10] The post-image must satisfy the delegator's CHECK too —
       // an on-behalf-of write may not produce a row the delegator itself
@@ -2511,10 +2544,13 @@ export function registerAuthzMiddleware(
           // old one. Every other row keeps `checkParts`. Not on a delegated
           // write, whose floors step 3 keeps, nor where step 2.7 already
           // decided this write's floor (`preImageFloorOpts`), whose
-          // `checkParts` already carry that decision.
+          // `checkParts` already carry that decision; nor where the master
+          // gate vouched for a predicate write (`predicateMasterGateRowIds`),
+          // for the same reason.
           let floorDropJudge: ((image: Record<string, unknown>) => boolean) | undefined;
           if (
             !preImageFloorOpts &&
+            !predicateMasterGateRowIds &&
             !delegatorSets &&
             this.addressedPredicateWrite(opCtx, nestedInOperation, referentialFieldClearWrite)
           ) {
@@ -2805,11 +2841,18 @@ export function registerAuthzMiddleware(
       // here with the SAME `andComposeLayers` that wrapper uses — so the
       // injected predicate is byte-identical to before, and the Layer 0
       // verdict that produced it is in hand to be RECORDED below.
+      //
+      // [ADR-0055 §3 as amended 2026-11-22 · ruling record 7073030861] A
+      // predicate write the master gate vouched for (step 2.8,
+      // `predicateMasterGateRowIds`) composes the Layer 1 its rows' by-id
+      // writes do: the platform ownership floor handed to that gate, every
+      // app-authored policy and the write-visibility derivation as they stand.
       const layered = await this.computeLayeredRlsFilter(
         permissionSets,
         opCtx.object,
         opCtx.operation,
         opCtx.context,
+        predicateMasterGateRowIds ? { masterGateCoversThisWrite: true } : undefined,
       );
       const rlsFilter = andComposeLayers(layered.layer0, layered.layer1);
       // [#35802] Where the caller's scope sits in `extra`: a predicate write
@@ -2861,7 +2904,17 @@ export function registerAuthzMiddleware(
       // writes none of the object's records, whatever its predicate addresses.
       // The by-id leg (step 2.7) refuses the same caller too.
       if (this.addressedPredicateWrite(opCtx, nestedInOperation, referentialFieldClearWrite)) {
-        const readableScope = await this.readableRowsScopeForPredicateWrite(opCtx);
+        // [ruling record 7073030861] Where the master gate vouched for this
+        // write, the scope is the gate's own row list, never a second asking
+        // of the same read question: the rows the floor is handed over for
+        // are then the rows whose masters were judged, and a row that came to
+        // match the predicate after the gate read it is not written. The list
+        // is the read door's answer for the caller's predicate, under the cap
+        // and the refusals the narrowing itself applies
+        // (`controlledByParentPredicateWriteMasters`).
+        const readableScope = predicateMasterGateRowIds
+          ? { id: { $in: [...predicateMasterGateRowIds] } }
+          : await this.readableRowsScopeForPredicateWrite(opCtx);
         extra.push(readableScope);
         // [#35802] The #5492 floor composition, per matched row. Step 2.7
         // lets the declared write authority's `allow` replace the platform
@@ -2877,8 +2930,10 @@ export function registerAuthzMiddleware(
         // and only where no authored write-class policy remains once it is
         // (where one does, replacing the floor admits no row and no verdict is
         // asked). Layer 0 is recomposed as it stood. Not for a delegated
-        // write, which keeps both floors on the by-id path too.
-        if (rlsFilter && layered.layer1 && !delegatorSets) {
+        // write, which keeps both floors on the by-id path too, nor for a
+        // write the master gate vouched for, whose Layer 1 carries no floor
+        // to replace.
+        if (rlsFilter && layered.layer1 && !delegatorSets && !predicateMasterGateRowIds) {
           const relief = await predicateWriteFloorRelief.call(
             this,
             opCtx,
