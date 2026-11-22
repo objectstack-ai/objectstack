@@ -556,6 +556,7 @@ const pt = {
       objectReadOnly: "Estes registros não podem ser editados aqui.",
       noPermission: "Você não tem permissão para editar estes registros.",
       approvalLocked: "Este registro está bloqueado enquanto está em aprovação.",
+      checking: "Verificando se este registro pode ser editado…",
       noRecordPermission: "Você não tem permissão para editar este registro.",
     },
     stateChange: {

@@ -562,6 +562,7 @@ const zh = {
       objectReadOnly: '这些记录不能在这里编辑。',
       noPermission: '您没有编辑这些记录的权限。',
       approvalLocked: '此记录正在审批中，已锁定。',
+      checking: '正在确认这条记录能否编辑…',
       noRecordPermission: '您没有编辑此记录的权限。',
     },
     stateChange: {

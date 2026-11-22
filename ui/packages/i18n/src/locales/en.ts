@@ -817,6 +817,7 @@ const en = {
       objectReadOnly: 'These records can\'t be edited here.',
       noPermission: 'You don\'t have permission to edit these records.',
       approvalLocked: 'This record is locked while it\'s in approval.',
+      checking: 'Checking whether this record can be edited…',
       noRecordPermission: 'You don\'t have permission to edit this record.',
     },
     // objectstack#35685 — the confirm before a list cell moves a state-machine field.
