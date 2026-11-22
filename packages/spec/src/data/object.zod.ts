@@ -68,7 +68,7 @@ import { injectedSystemColumnDefs } from './injected-system-column-provenance';
 // [ruling 7000907189 point 1] Change Owner's structural test, read by the
 // `userActions.transfer` refusal. The same cycle as above, one module further
 // (it reads `resolveInjectedSystemColumns`): called only at parse time.
-import { transferIneligibilityReason } from './user-action-transfer';
+import { transferCascadeIneligibilityReason, transferIneligibilityReason } from './user-action-transfer';
 import {
   BOOLEAN_VALUE_TYPES,
   CALENDAR_DATE_TYPES,
@@ -3905,6 +3905,46 @@ function refuseIneligibleUserActionTransfer(
 }
 
 /**
+ * [ruling 7000907189 point 4 · ADR-0049] `transferBehavior: 'cascade'` on a
+ * reference field asks a Change Owner of the parent to move THIS object's rows
+ * too, by the same action — so this object must offer Change Owner itself
+ * (`transferCascadeIneligibilityReason`, `user-action-transfer.ts`):
+ * structurally eligible, not a `controlled_by_parent` detail (its access
+ * follows its master, so it is not cascaded for access), and its
+ * `userActions.transfer` not off. One located issue at
+ * `['fields', <name>, 'transferBehavior']` per such field anywhere else — the
+ * endpoint would never run the cascade, so the declaration would be a key
+ * nothing honours. `'none'` is accepted everywhere the field's own type
+ * admits the key (the type half is `FieldSchema`'s).
+ *
+ * Refused at parse on every door: the key is new, so no stored object carries
+ * it. Kept in the existing callback so it adds no check node the JSON Schema
+ * projection would have to drop.
+ */
+function refuseIneligibleTransferCascades(
+  object: { name?: unknown; fields?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  const fields = object.fields;
+  if (fields === null || typeof fields !== 'object' || Array.isArray(fields)) return;
+  let reason: string | undefined | null = null;
+  for (const [fieldName, field] of Object.entries(fields as Record<string, unknown>)) {
+    if ((field as { transferBehavior?: unknown } | null)?.transferBehavior !== 'cascade') continue;
+    if (reason === null) reason = transferCascadeIneligibilityReason(object);
+    if (reason === undefined) return;
+    const name = typeof object.name === 'string' && object.name.length > 0 ? object.name : 'this object';
+    ctx.addIssue({
+      code: 'custom',
+      path: ['fields', fieldName, 'transferBehavior'],
+      message:
+        `Field '${fieldName}' declares transferBehavior: 'cascade', but object '${name}' cannot take a Change ` +
+        `Owner cascade: ${reason}. A cascade moves this object's records by the Change Owner action, so it ` +
+        "acts only on an object that offers that action itself. Set transferBehavior to 'none' or remove it.",
+    });
+  }
+}
+
+/**
  * [ruling A on the read half of #32442] `enable.aiReadable` is declared only
  * where it has a reader: a `sys_*` object outside the stored-metadata family.
  * One located issue at `['enable', 'aiReadable']`; the family is judged before
@@ -5300,6 +5340,9 @@ const ObjectSchemaBase = strictObject(
   // [ruling 7000907189 point 1 · ADR-0049] `userActions.transfer` opens Change
   // Owner only on a structurally eligible object. See the helper's docblock.
   refuseIneligibleUserActionTransfer(object, ctx);
+  // [ruling 7000907189 point 4 · ADR-0049] `transferBehavior: 'cascade'` only on
+  // a field of an object that offers Change Owner itself. See the helper's docblock.
+  refuseIneligibleTransferCascades(object, ctx);
   // [ADR-0154 D10] Each `lifecycle.seal.valueFields` name is a declared field.
   // See the helper's docblock.
   refuseUndeclaredSealValueFields(object.lifecycle, object.fields, ctx);

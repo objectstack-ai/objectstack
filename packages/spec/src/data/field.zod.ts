@@ -2294,6 +2294,43 @@ export const FieldSchema = lazySchema(() => {
     default: 'set_null',
   }),
   /**
+   * [ruling 7000907189 point 4 · #35315] What a Change Owner of the referenced
+   * (parent) record does to THIS object's records that point at it — the
+   * relationship-level cascade, declared on the child's reference field beside
+   * {@link deleteBehavior}, as Dynamics 365's per-relationship Assign cascade.
+   *
+   * - `'none'` (the default, also when omitted): the child rows keep their owner.
+   * - `'cascade'`: the Change Owner dialog offers this relationship as a tick,
+   *   and a Change Owner request that names it (`cascade: [{ object, field }]`)
+   *   also moves, to the parent's new owner, the child rows that point at the
+   *   parent AND are owned by the parent's PREVIOUS owner — no other rows (the
+   *   ruled default semantics; there is no filter key). Each cascaded row is an
+   *   ordinary update under the caller's own context, so it passes the caller's
+   *   own transfer verdict on the child object; a row it does not pass is
+   *   reported, never skipped, and one call moves at most the hand-over's row
+   *   cap. The reader is `@objectstack/core`'s `change-record-owner.ts`.
+   *
+   * Refused where it could never act (ADR-0049): on any type but `lookup` and
+   * `master_detail` (here), on a reference to a `sys_*` object (no `sys_*`
+   * object offers Change Owner), and — on `ObjectSchema`, where the declaring
+   * object is known — `'cascade'` on a field of an object that does not offer
+   * Change Owner itself: one that is not structurally eligible, a
+   * `controlled_by_parent` detail (its access already follows its master, so
+   * it is not cascaded for access), or one whose `userActions.transfer` is
+   * off.
+   */
+  transferBehavior: z.enum(['none', 'cascade']).optional().meta({
+    description:
+      "What a Change Owner of the referenced (parent) record does to this object's records that point at it. "
+      + "'none' (default): they keep their owner. 'cascade': the Change Owner dialog offers this relationship, "
+      + "and when it is ticked the records here that point at the parent and are owned by the parent's previous "
+      + "owner move to the new owner too, each as the caller's own update (a row the caller may not transfer is "
+      + 'reported, never skipped; one call moves at most 500 rows). Only on lookup and master_detail fields, not '
+      + 'on a reference to a sys_ object, and cascade only on an object that offers Change Owner itself (eligible, '
+      + 'not controlled_by_parent, userActions.transfer not off).',
+    default: 'none',
+  }),
+  /**
    * Master-detail INLINE EDITING — the FORM FACTOR of the child's rows in the
    * parent's form. WHETHER the parent's form inlines this child is no longer
    * this key's to say (#35889, maintainer ruling B: 「明细表应该改成指看分组的定义了」):
@@ -3327,6 +3364,40 @@ export const FieldSchema = lazySchema(() => {
         'inbound mail, and only an `email` field stores an address to match. Change the field to ' +
         "`type: 'email'` if it holds an email address, or drop the key.",
     });
+  }
+  // [ruling 7000907189 point 4 · #35315] `transferBehavior` is the Change Owner
+  // cascade of a relationship: only a `lookup` or `master_detail` field points
+  // at a parent whose owner can change, and no `sys_*` object offers Change
+  // Owner, so on any other type, or on a reference to one, the key would parse
+  // and move nothing. An authored `'none'` off-type is refused too: the key
+  // describes nothing there (the `mailAssociation` precedent above). The
+  // declaring object's own eligibility is judged on `ObjectSchema`
+  // (`refuseIneligibleTransferCascades`), where that object is known.
+  if (field.transferBehavior !== undefined) {
+    if (field.type !== 'lookup' && field.type !== 'master_detail') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['transferBehavior'],
+        message:
+          "`transferBehavior` is only valid on `type: 'lookup'` or `type: 'master_detail'` (this field is " +
+          `\`${field.type}\`): it says whether a Change Owner of the record this field points at also moves ` +
+          "this object's records, and only a lookup or master_detail points at such a parent. Declare it on " +
+          'the reference field to the parent, or drop the key.',
+      });
+    } else if (
+      field.transferBehavior === 'cascade'
+      && typeof field.reference === 'string'
+      && field.reference.startsWith('sys_')
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['transferBehavior'],
+        message:
+          `\`transferBehavior: 'cascade'\` cannot act on a reference to '${field.reference}': no sys_ object ` +
+          'offers the Change Owner action, so its owner never changes through it and nothing would cascade. ' +
+          "Drop the key, or set it to 'none'.",
+      });
+    }
   }
   // [#27945] `lookupAutofill` copies fields of the ONE record a pick chooses.
   // Off a relationship there is no pick, and on a multi-value relationship a

@@ -217,3 +217,36 @@ export function resolveUserActionTransfer(def: unknown): UserActionTransferResol
   if (disabledWhen != null) predicates.disabledWhen = disabledWhen;
   return { enabled, predicates };
 }
+
+/**
+ * [ruling 7000907189 point 4] Why `def` — the CHILD object of a relationship —
+ * cannot take a Change Owner cascade (`transferBehavior: 'cascade'` on one of
+ * its reference fields), as one clause, or `undefined` when it can.
+ *
+ * A cascade moves the child's rows by the same action, so the child must offer
+ * Change Owner itself (point 1's object facts: structurally eligible, and its
+ * switch on). A `controlled_by_parent` detail is refused whatever its switch
+ * says: its access already follows its master, so it is not cascaded for
+ * access (point 4). The caller's transfer verdict on the child — point 1's
+ * third fact — is per caller and per row, and is the write path's at the
+ * cascade.
+ *
+ * The one test: `ObjectSchema` refuses the declaration with it at parse, and
+ * the Change Owner endpoint (`@objectstack/core`'s `change-record-owner.ts`)
+ * offers and runs only the relationships whose child it answers `undefined`
+ * for.
+ */
+export function transferCascadeIneligibilityReason(def: unknown): string | undefined {
+  const structural = transferIneligibilityReason(def);
+  if (structural !== undefined) return structural;
+  const obj = asRecord(def) ?? {};
+  const sharingModel = obj.sharingModel ?? asRecord(obj.security)?.sharingModel;
+  if (sharingModel === 'controlled_by_parent') {
+    return 'it is a controlled_by_parent detail, whose access already follows its master, so it is not ' +
+      'cascaded for access';
+  }
+  if (!resolveUserActionTransfer(def).enabled) {
+    return 'its userActions.transfer is off, so it does not offer Change Owner itself';
+  }
+  return undefined;
+}
