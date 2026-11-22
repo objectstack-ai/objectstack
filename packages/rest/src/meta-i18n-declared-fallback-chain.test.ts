@@ -438,3 +438,195 @@ describe('#33634 §6 — the declared sourceLocale, not defaultLocale, is the au
         expect(labels(await read(undeclared, 'zh-CN'))).toEqual(CHINESE);
     });
 });
+
+// ---------------------------------------------------------------------------
+// §7 — a regional tag reads the pack of its language (#36466)
+// ---------------------------------------------------------------------------
+
+/**
+ * [#36466] The §6 deployment (`sourceLocale: 'en'`, `defaultLocale: 'zh-CN'`,
+ * the chain collapsed to `zh-CN`) holding an `en` pack that carries no
+ * `account` rows, asked in `en-US`. `/meta` hands the translators the request
+ * tag NEGOTIATED against the locales the service holds — the tag objectql's
+ * `negotiatedMessageLocale` hands them — so `en-US` is the authored language
+ * and reads `Account`, as a write refusal on the same request names it. Before,
+ * `/meta` handed the raw tag over, walked the chain and read `客户`.
+ */
+describe('#36466 §7 — /meta negotiates the request tag against the held locales before it picks a pack', () => {
+    const ACCOUNT = {
+        name: 'account',
+        label: 'Account',
+        pluralLabel: 'Accounts',
+        fields: { name: { name: 'name', type: 'text', label: 'Account Name' } },
+    };
+    const ACCOUNT_DOCS = { object: ACCOUNT, app: KPI_APP };
+    const ZH_PACK = { objects: { account: { label: '客户', pluralLabel: '客户', fields: { name: { label: '客户名称' } } } } };
+    /** An `en` catalog the deployment holds — none of its rows names `account`. */
+    const EN_PACK = { messages: { greeting: 'Hello' } };
+    const stack = (bundles: Record<string, any> = { 'zh-CN': ZH_PACK, en: EN_PACK }) =>
+        i18nFor({ bundles, defaultLocale: 'zh-CN', fallbackLocale: 'zh-CN', sourceLocale: 'en' });
+    const read = (i18n: any, locale: string | undefined) => readItem(makeRest(i18n, ACCOUNT_DOCS), 'object', 'account', locale);
+    const labels = (doc: any) => ({ label: doc.label, pluralLabel: doc.pluralLabel, name: doc.fields.name.label });
+    const ENGLISH_INLINE = { label: 'Account', pluralLabel: 'Accounts', name: 'Account Name' };
+    const CHINESE = { label: '客户', pluralLabel: '客户', name: '客户名称' };
+
+    it('an en-US request with only an en pack reads Account', async () => {
+        expect(labels(await read(stack(), 'en-US'))).toEqual(ENGLISH_INLINE);
+        // The list read and the bare `en` tag agree with it.
+        const [item] = await readList(makeRest(stack(), ACCOUNT_DOCS), 'object', 'en-US');
+        expect(labels(item)).toEqual(ENGLISH_INLINE);
+        expect(labels(await read(stack(), 'en'))).toEqual(ENGLISH_INLINE);
+    });
+
+    it('a request for a locale with no pack at all still reads the default locale', async () => {
+        expect(labels(await read(stack(), 'fr-FR'))).toEqual(CHINESE);
+        expect(labels(await read(stack(), undefined))).toEqual(CHINESE);
+    });
+
+    it('CONTROL: with no en locale held, en-US has nothing to negotiate to and walks to the default locale', async () => {
+        expect(labels(await read(stack({ 'zh-CN': ZH_PACK }), 'en-US'))).toEqual(CHINESE);
+        // …and a zh request still reads the zh-CN pack.
+        expect(labels(await read(stack(), 'zh'))).toEqual(CHINESE);
+    });
+
+    // ── The server-side reader: objectql's DELETE_RESTRICTED names the object ──
+
+    const CONTACT = {
+        name: 'contact',
+        label: 'Contact',
+        fields: {
+            id: { name: 'id', type: 'text', primaryKey: true },
+            account: { name: 'account', type: 'lookup', reference: 'account', label: 'Owning Account', required: true },
+        },
+    };
+
+    /** A driver holding rows in memory — enough for an insert and a restricted delete. */
+    function rowDriver() {
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const storeFor = (o: string) => { let s = stores.get(o); if (!s) { s = new Map(); stores.set(o, s); } return s; };
+        const matches = (row: Record<string, unknown>, where: any): boolean => {
+            for (const [k, v] of Object.entries(where ?? {})) {
+                if (k.startsWith('$')) continue;
+                const exp = v && typeof v === 'object' && '$eq' in (v as any) ? (v as any).$eq : v;
+                if ((row[k] ?? null) !== (exp ?? null)) return false;
+            }
+            return true;
+        };
+        let next = 0;
+        const driver: any = {
+            name: 'memory', version: '0.0.0', supports: {},
+            async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
+            async find(o: string, ast: any) {
+                const rows = Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where));
+                return typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
+            },
+            async findOne(o: string, ast: any) { for (const r of storeFor(o).values()) if (matches(r, ast?.where)) return r; return null; },
+            async create(o: string, data: Record<string, unknown>) {
+                next += 1; const id = (data.id as string) ?? `r_${next}`; const row = { ...data, id }; storeFor(o).set(id, row); return row;
+            },
+            async update(o: string, id: string, data: Record<string, unknown>) { const row = { ...storeFor(o).get(id), ...data, id }; storeFor(o).set(id, row); return row; },
+            async upsert(o: string, data: Record<string, unknown>) { return this.create(o, data); },
+            async delete(o: string, id: string) { return storeFor(o).delete(id); },
+            async count(o: string, ast: any) { return (await this.find(o, ast)).length; },
+            async bulkCreate(o: string, rows: Record<string, unknown>[]) { return Promise.all(rows.map((r) => this.create(o, r))); },
+            async bulkUpdate() { return []; }, async bulkDelete() {},
+            async beginTransaction() { return { commit: async () => {}, rollback: async () => {} }; }, async commit() {}, async rollback() {},
+        };
+        return driver;
+    }
+
+    /** The message of the refusal objectql answers a delete of a referenced `account` with, in `locale`. */
+    async function restrictedDeleteMessage(i18n: any, locale: string): Promise<string> {
+        const { ObjectQL } = await import('@objectstack/objectql');
+        const engine = new ObjectQL();
+        engine.registerDriver(rowDriver(), true);
+        await engine.init();
+        for (const o of [{ ...ACCOUNT, fields: { id: { name: 'id', type: 'text', primaryKey: true }, ...ACCOUNT.fields } }, CONTACT]) {
+            engine.registry.registerObject(o as any);
+        }
+        engine.setI18nService(i18n);
+        const acct: any = await engine.insert('account', { name: 'Acme' });
+        await engine.insert('contact', { account: acct.id });
+        try {
+            await engine.delete('account', { where: { id: acct.id }, context: { locale } } as any);
+        } catch (e: any) {
+            expect(e).toMatchObject({ code: 'DELETE_RESTRICTED', status: 409 });
+            return String(e.message);
+        }
+        throw new Error('expected the delete to be refused');
+    }
+
+    it('for the same request, /meta and objectql name the object with the same label', async () => {
+        for (const [locale, label, other] of [['en-US', 'Account', '客户'], ['fr-FR', '客户', 'Account']] as const) {
+            const served = await read(stack(), locale);
+            expect(served.label).toBe(label);
+            const message = await restrictedDeleteMessage(stack(), locale);
+            expect(message).toContain(served.label);
+            expect(message).not.toContain(other);
+        }
+    });
+
+    // ── The cached arm (`getMetaItemCached`, the default door) ──
+
+    /**
+     * A protocol whose cached read folds the request's `locale` into the
+     * validator over the untranslated document, as the producer does
+     * (`protocol-search-and-cache.ts`, #1319).
+     */
+    function cachedRest(i18n: any) {
+        const p: any = protocol(ACCOUNT_DOCS);
+        p.getMetaItemCached = vi.fn(async ({ name, locale }: any) => ({
+            data: JSON.parse(JSON.stringify(ACCOUNT)),
+            etag: { value: `v_${name}_${locale ?? 'none'}`, weak: false },
+            cacheControl: { directives: ['private', 'no-cache'] },
+            notModified: false,
+        }));
+        const rest = new RestServer(
+            mockServer() as any, p as any, { api: { requireAuth: false } } as any,
+            undefined, undefined, undefined, undefined, undefined,
+            undefined, undefined, undefined, undefined, undefined,
+            async () => i18n,
+        );
+        (rest as any).resolveExecCtx = async () => ({ userId: 'u1', systemPermissions: [] });
+        rest.registerRoutes();
+        return { rest, p };
+    }
+
+    async function readCached(rest: RestServer, headers: Record<string, string>) {
+        const res: any = { statusCode: 200, headers: {} as Record<string, string> };
+        res.status = vi.fn((c: number) => { res.statusCode = c; return res; });
+        res.json = vi.fn((b: any) => { res.body = b; return res; });
+        res.header = vi.fn((k: string, v: string) => { res.headers[k] = v; return res; });
+        res.send = vi.fn(() => res);
+        await routeFor(rest, '/api/v1/meta/:type/:name').handler(
+            { method: 'GET', params: { type: 'object', name: 'account' }, query: {}, body: {}, headers }, res,
+        );
+        return res;
+    }
+
+    it('the cached arm translates with the negotiated tag, and a validator never answers 304 for another locale', async () => {
+        const { rest, p } = cachedRest(stack());
+        const enUS = await readCached(rest, { 'accept-language': 'en-US' });
+        expect(p.getMetaItemCached).toHaveBeenCalled();
+        expect(enUS.statusCode).toBe(200);
+        expect(labels(enUS.body.item)).toEqual(ENGLISH_INLINE);
+        expect(enUS.headers.Vary).toBe('Accept-Language');
+        const etag = enUS.headers.ETag;
+        expect(typeof etag).toBe('string');
+
+        // `en` is served the same body as `en-US`.
+        const en = await readCached(rest, { 'accept-language': 'en' });
+        expect(en.body.item).toEqual(enUS.body.item);
+
+        // The en-US validator revalidates its own request…
+        const again = await readCached(rest, { 'accept-language': 'en-US', 'if-none-match': etag });
+        expect(again.statusCode).toBe(304);
+        // …and never pins a request for another language to the English body.
+        const zh = await readCached(rest, { 'accept-language': 'zh-CN', 'if-none-match': etag });
+        expect(zh.statusCode).toBe(200);
+        expect(labels(zh.body.item)).toEqual(CHINESE);
+        const fr = await readCached(rest, { 'accept-language': 'fr-FR', 'if-none-match': etag });
+        expect(fr.statusCode).toBe(200);
+        expect(labels(fr.body.item)).toEqual(CHINESE);
+    });
+});
