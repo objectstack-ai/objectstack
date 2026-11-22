@@ -32,10 +32,12 @@ const residualExtensions = (stack: unknown) =>
     .map((entry) => ({ field: entry.field, index: entry.index, target: (entry.item as { extend: string }).extend, fields: Object.keys((entry.item as { fields: object }).fields) }));
 
 describe('unclaimedTopLevel lists a residual objectExtensions entry', () => {
+  // `'preserve'` keeps the last manifest (owner's) as the residual's id, and
+  // owner does not extend the target: the residual's entry has a slot of its own.
   const composed = () => composeStacks(
     [
-      defineStack({ manifest: owner, objects: [account] }),
       defineStack({ manifest: other, objectExtensions: [extension('other_note')] }),
+      defineStack({ manifest: owner, objects: [account] }),
       defineStack({ objectExtensions: [extension('residual_note')] }),
     ],
     { manifest: 'preserve' },
@@ -46,7 +48,7 @@ describe('unclaimedTopLevel lists a residual objectExtensions entry', () => {
       expect(residualExtensions(stack), leg).toEqual([
         { field: 'objectExtensions', index: 1, target: 'probe_account', fields: ['residual_note'] },
       ]);
-      expect(unclaimedTopLevel(stack)?.ownerId, leg).toBe(other.id);
+      expect(unclaimedTopLevel(stack)?.ownerId, leg).toBe(owner.id);
     }
   });
 
