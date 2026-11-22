@@ -11,6 +11,8 @@ feat(console): record create and edit stop loading internal forms; a field's Sho
 Clause-②: no (narrowing)
 Metadata-protocol: semantic
 
+<!-- adr-0087: registered internal-record-forms-not-loaded -->
+
 The Console's record create and edit surfaces no longer load an object's internal form view. The create dialog, the edit dialog, the full-page create and edit (`/new`, `/record/:id/edit`) and a create or edit an action opens now lay the record out by the object's field groups (`fieldGroups`) and follow the rules on its fields (`visibleWhen`, `readonlyWhen`, `requiredWhen`, `required`). What used to steer those surfaces and now steers nothing: the default form view (`form`, `formViews.default`), the `create` form view, and on them `sections`, the `tabbed` and `wizard` layouts, `defaultTab`, `tabPosition`, `subforms`, `modalSize`, `buttons`, `layout` and `defaults`. A master-detail sub-table still comes from `fieldGroups[].relatedList`, and a flow screen reads its sub-table settings from there too.
 
 An app that still declares an internal form installs and runs as before; the definition is inert. A public form (`sharing.enabled: true`) keeps loading at its own link by its own definition, and a named form an action of type `form` opens is unchanged.
@@ -22,3 +24,5 @@ An app that still declares an internal form installs and runs as before; the def
 Studio: the Data pillar's Form tab always lays out the object's field groups, and the Interfaces rail no longer lists internal forms; public forms and named forms stay listed.
 
 An app that relied on its internal form for create defaults should move them to each field's `defaultValue`; sections move to `fieldGroups`, and required or conditional rules move onto the fields.
+
+The upgrade guide carries this as the protocol-18 semantic entry `internal-record-forms-not-loaded`.
