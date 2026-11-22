@@ -18,8 +18,10 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
  * in the engine registry's fold. The loader used to prefer the metadata copy
  * whenever it had `fields`, so the extension lookup was no reference at all:
  * no `ext_order → ext_quote` edge, and the quote's name written verbatim into
- * the foreign-key column. Measured on unfixed `origin/main` a5a5312ff4 with
- * this harness: `quote_ref = 'Q-ACME'`, `insertOrder` with `ext_order` first.
+ * the foreign-key column. Measured with the resolver of `origin/main`
+ * a5a5312ff4 put back: this harness stores `quote_ref = 'Q-ACME'`, and a real
+ * `os dev` boot of a two-package artifact of this shape stores the quote's
+ * name in both an `update` and an `upsert` row.
  *
  * The metadata double serves the authored `ext_order` (no `quote_ref`); the
  * engine double's `getSchema` serves the folded one (with it), as the ObjectQL
