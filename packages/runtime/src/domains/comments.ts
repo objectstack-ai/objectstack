@@ -14,9 +14,14 @@
  * can read) and `DELETE /comments/:id` (remove a comment you wrote). A
  * self-hosted kernel serves them already: plugin-audit mounts them on the
  * kernel's `http.server` (`mountCommentDoors`). A hosted tenant kernel owns no
- * socket and therefore no `http.server`, so on that shape every unreact,
- * resolve and own-comment delete answered the host's unmatched
- * `404 ENDPOINT_NOT_FOUND` (#36469). This domain is the hosted door (ruling A
+ * socket and therefore no `http.server`. Its host mounts `createHonoApp`'s
+ * `/api/v1/*` catch-all, which hands every request no other route claims to
+ * `dispatch()`, and no domain claimed these paths, so on that shape every
+ * unreact, resolve and own-comment delete answered the dispatcher's
+ * `404 ROUTE_NOT_FOUND` (#36469; the card's reading of the transport's
+ * `404 ENDPOINT_NOT_FOUND` on the hosted rig is not explained by this tree:
+ * it predates this domain, or a layer upstream of the catch-all answered it).
+ * This domain is the hosted door (ruling A
  * on #22438, applied to this member of the class): it forwards the request to
  * the request kernel's `comments` slot — the transport-neutral
  * `ICommentDoorsService.handleCommentDoor(request)` member — and returns that
@@ -63,7 +68,8 @@
  * Read on every request, never recorded (AGENTS.md, "Startup registry
  * reads"). An empty `comments` slot (a stack without plugin-audit) or a slot
  * whose service has no `handleCommentDoor` answers `501 NOT_IMPLEMENTED`,
- * ⛔ never `ENDPOINT_NOT_FOUND`: the route IS mounted, and what is missing is
+ * ⛔ never the dispatcher's `404 ROUTE_NOT_FOUND` (nor a transport's
+ * `404 ENDPOINT_NOT_FOUND`): the route IS mounted, and what is missing is
  * the implementation behind it.
  */
 

@@ -70,7 +70,8 @@ export interface ICommentDoorsService {
    * mounted twice.
    *
    * **Optional, and its absence is loud.** An empty `comments` slot or an
-   * absent member answers a typed `501`, ⛔ never `ENDPOINT_NOT_FOUND`: that
+   * absent member answers a typed `501`, ⛔ never the dispatcher's
+   * `404 ROUTE_NOT_FOUND` (nor a transport's `404 ENDPOINT_NOT_FOUND`): that
    * answer would tell a member the URL is wrong, when what is missing is the
    * service behind it.
    *

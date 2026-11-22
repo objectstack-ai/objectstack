@@ -6,11 +6,13 @@
  * REAL `AuditPlugin` over a real store.
  *
  * Before the `/comments` dispatcher domain and the `comments` slot existed,
- * every request below answered the transport's unmatched
- * `404 ENDPOINT_NOT_FOUND` on this shape: the doors were mounted only on the
- * kernel's own `http.server`, which this kernel does not have. That is the
- * card's measured body, and the first pin here asserts it is gone, door by
- * door.
+ * every request below answered the dispatcher's `404 ROUTE_NOT_FOUND` on
+ * this shape: the doors were mounted only on the kernel's own `http.server`,
+ * which this kernel does not have, and the catch-all's `dispatch()` had no
+ * domain for them. The first pin here asserts no door answers a route miss
+ * any more, door by door. (The card's hosted reading spelled the miss
+ * `ENDPOINT_NOT_FOUND`, the transport's own; this tree does not explain that
+ * spelling, so the pin refuses both.)
  *
  * What this pins:
  *  1. on the hosted shape, a member removes their own reaction, resolves and
@@ -187,7 +189,7 @@ async function snapshot(res: Response) {
 }
 
 describe('[#36469] the comment doors answer on the hosted shape (createHonoApp, no http.server, real AuditPlugin)', () => {
-    it('no door answers the unmatched ENDPOINT_NOT_FOUND any more', async () => {
+    it('no door answers a route miss (ROUTE_NOT_FOUND or ENDPOINT_NOT_FOUND) any more', async () => {
         const door = await hostedDoor();
         const { commentId, reactionId } = await door.seed();
         const requests: Array<[string, RequestInit]> = [
@@ -198,6 +200,7 @@ describe('[#36469] the comment doors answer on the hosted shape (createHonoApp, 
         for (const [path, init] of requests) {
             const res = await door.send(path, init);
             const body = await res.text();
+            expect(body, `${init.method} ${path}`).not.toContain('ROUTE_NOT_FOUND');
             expect(body, `${init.method} ${path}`).not.toContain('ENDPOINT_NOT_FOUND');
             expect(res.status, `${init.method} ${path}: ${body}`).not.toBe(404);
         }

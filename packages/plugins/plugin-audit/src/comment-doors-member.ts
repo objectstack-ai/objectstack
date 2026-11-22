@@ -8,9 +8,12 @@
  *
  * `AuditPlugin` mounts the three comment doors on the kernel's `http.server`
  * (`mountCommentDoors`). A hosted tenant kernel owns no socket and registers no
- * `http.server`, so on that shape the doors were never mounted, and the host's
- * catch-all answered every unreact, resolve and own-comment delete with the
- * unmatched `404 ENDPOINT_NOT_FOUND`. The runtime dispatcher reaches that
+ * `http.server`, so on that shape the doors were never mounted. Its host's
+ * `createHonoApp` catch-all handed each unreact, resolve and own-comment
+ * delete to the runtime dispatcher, where no domain claimed it, and the
+ * answer was the dispatcher's `404 ROUTE_NOT_FOUND`. (The card's hosted
+ * reading of `404 ENDPOINT_NOT_FOUND` is not explained by this tree.) The
+ * runtime dispatcher reaches that
  * kernel instead, through its `/comments` domain, which forwards the request
  * to this member on the kernel's `comments` slot (ruling A on #22438, applied
  * to this member of the class).
