@@ -11,7 +11,7 @@ related-list columns). `fieldGroups` are the Details sections in array order,
 each listing its members in `fields` (absent: the fields whose `group` names it);
 `editMode` (`'modal'` | `'page'`) is how Edit opens. Layout follows the surface's
 width, never a key: a full page fitting 320 px of details beside 400 px of tabs
-pins the details left, the other tabs right; otherwise one column, Details first.
+pins the details left of the tabs; else one column, Details first.
 
 **2 · The parent's `relatedLists` is the tab list.** Without it nothing changes:
 every related list is a tab, then `sys_attachment` (with `enable.files`),
@@ -47,7 +47,7 @@ record in the drawer (always the standard page), which expands to the full page;
 refused with their fix. Field count never decides; a phone always pages.
 
 **6 · The reader's own choices are not metadata.** ⛔ Never author these: the
-Display menu's **Open records** (drawer or full page), the
+Display menu's **Open records**, the
 tabs' order and hidden set (per user × object), the details column's dragged width,
 the drawer's dragged width and ⤢. On `navigation` only the `size`
 bucket (`sm`…`full`) nudges the drawer's starting width.
@@ -57,7 +57,7 @@ bucket (`sm`…`full`) nudges the drawer's starting width.
 import { ObjectSchema } from '@objectstack/spec/data';
 
 export const Quote = ObjectSchema.create({
-  name: 'quote',
+  name: 'quote', sharingModel: 'private',
   fields: { name: { type: 'text' }, amount: { type: 'currency' } },
   fieldGroups: [{ key: 'basic', label: 'Basic', fields: ['amount', 'name'] }],
   relatedLists: [{ list: 'quote_line', label: 'Lines', columns: ['product'] }, 'sys_activity'],

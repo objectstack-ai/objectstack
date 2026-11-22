@@ -232,6 +232,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 export const Quote = ObjectSchema.create({
   name: 'quote',
   label: 'Quote',
+  sharingModel: 'private',
   fields: {
     name: Field.text({ label: 'Quote Name', required: true }),
     account: Field.lookup('account', { label: 'Account' }),
