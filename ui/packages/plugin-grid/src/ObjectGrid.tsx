@@ -1466,8 +1466,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
           };
         },
         onCellSelect: (row) => {
-          // objectstack#35689 — a row held in its group is left.
-          leaveHeldRows(rowRecordId(row));
+          // objectstack#35689 — a row held in its group is left. Keyed as
+          // the save keys it (`resolveRecordId`).
+          leaveHeldRows(row?._id ?? row?.id);
           recordVerdict.requestVerdicts();
           // objectstack#35795 — one lock read for the page, not one per row selected.
           approvalLocks.probe([rowRecordId(row), ...pageRecordIds]);

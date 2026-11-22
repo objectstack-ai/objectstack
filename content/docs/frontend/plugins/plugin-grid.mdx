@@ -463,6 +463,12 @@ value a server hook rewrote shows as stored); the list is not read again, so a
 row whose new value would sort it elsewhere stays in place until the next load
 (a refresh, a sort, a filter or a page change).
 
+- **Groups and totals follow the save** (objectstack#35689). A save that
+  changes the grouping field leaves the row in its group while the user is on
+  it; once a cell of another row is selected, the row shows in its new group
+  and both groups' counts and subtotals are correct (a server-grouped grid
+  reads its group headers and open groups' rows again then). Any other save is
+  in its group's subtotals at once, and in the footer total of a flat grid.
 - **A refused save** keeps the typed value and shows the server's reason on the
   cell. Escape puts the stored value back. A later edit on the same row is sent
   together with the refused one, as one update. When the reason names a field
