@@ -61,9 +61,13 @@
  * `email_domain` an explicit invitation also trumps the domain list — an
  * operator inviting an external contractor must not dead-end them), except a
  * social-provider creation whose address the provider did not verify under a
- * posture whose admission rests on the address (below). Without
- * this carve-out the posture would be "admin-create only" and the invitation
- * surface would be dead for new users — the invite dead-end class.
+ * posture whose admission rests on the address (below), and except a creation
+ * the posture's own rule already admits ({@link isAdmittedByPostureRule}): that
+ * one is a self-registrant, invitation or not, so it asks for the declared
+ * self-registration set and is refused with the uninvited sign-up when the set
+ * cannot be resolved — the invitation does not admit it without the grant.
+ * Without this carve-out the posture would be "admin-create only" and the
+ * invitation surface would be dead for new users — the invite dead-end class.
  *
  * What "holding" means is {@link invitationProofFor}'s answer. Under
  * `invite_only` a self-serve sign-up is admitted only by the invitation it
@@ -125,7 +129,8 @@
  * ("a valid posture said no") because sending the debugger to re-read a
  * setting that looks exactly as they left it is the recorded failure mode. A
  * declared permission set that cannot be resolved refuses admission the same
- * way: admitting a self-registrant WITHOUT the declared grant would be the
+ * way, for every sign-up the posture's rule admits, invited or not: admitting
+ * a self-registrant WITHOUT the declared grant would be the
  * ADR-0078 "declared but inert" defect at runtime, and fail-open is the one
  * direction this gate must never take.
  */

@@ -949,6 +949,47 @@ describe('end of the chain: better-auth pipeline over the memory engine (#11739)
     expect((engine.tables.get('sys_user') ?? []).length).toBe(1);
   });
 
+  // An invited sign-up the posture's own rule admits is a self-registrant: it
+  // asks for the declared set like an uninvited one, so a set that cannot be
+  // resolved refuses it too. The invitation does not admit it without the grant.
+  it.each([
+    ['open', 'missing', { posture: 'open' }, 'invited@anywhere.com'],
+    ['open', 'switched off', { posture: 'open' }, 'invited@anywhere.com'],
+    ['email_domain (on the allowlist)', 'missing', { posture: 'email_domain', allowedEmailDomains: ['acme.com'] }, 'invited@acme.com'],
+    ['email_domain (on the allowlist)', 'switched off', { posture: 'email_domain', allowedEmailDomains: ['acme.com'] }, 'invited@acme.com'],
+  ] as const)('%s: an invited sign-up whose declared set is %s is refused AUTH_CONFIG_ERROR, like an uninvited one', async (_posture, state, posture, email) => {
+    const engine = createMemoryEngine();
+    seedExistingUser(engine);
+    if (state === 'switched off') {
+      seedPermissionSet(engine, 'member_default');
+      engine.tables.set('sys_metadata_activation', [
+        { id: 'act_member', metadata_type: 'permission', name: 'member_default', package_id: 'pkg', active: false },
+      ]);
+    }
+    seedPendingInvitation(engine, email);
+    const set = state === 'missing' ? 'ghost' : 'member_default';
+    const manager = makeManager(engine, { audience: { ...posture, selfRegistrationPermissionSet: set } });
+    const res = await signUp(manager, email);
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.code).toBe(AUDIENCE_CONFIG_ERROR);
+    expect(String(body.message)).toContain(`'${set}'`);
+    expect((engine.tables.get('sys_user') ?? []).length).toBe(1);
+  });
+
+  it('CONTROL: email_domain, an invited sign-up OFF the allowlist is admitted by its invitation alone, asking for no set, so a missing set does not refuse it', async () => {
+    const engine = createMemoryEngine();
+    seedExistingUser(engine);
+    seedPendingInvitation(engine, 'contractor@external.com');
+    const manager = makeManager(engine, {
+      audience: { posture: 'email_domain', allowedEmailDomains: ['acme.com'], selfRegistrationPermissionSet: 'ghost' },
+    });
+    const res = await signUp(manager, 'contractor@external.com');
+    expect(res.status, await res.clone().text()).toBeLessThan(300);
+    expect((engine.tables.get('sys_user') ?? []).length).toBe(2);
+    expect(engine.tables.get('sys_user_permission_set') ?? []).toEqual([]);
+  });
+
   it('[ADR-0131 D3] the set ROW\'s `active` switches nothing: a row flagged off still admits and grants', async () => {
     // The resolver reads no catalog row, so the row flag is not a deactivation.
     const engine = createMemoryEngine();
