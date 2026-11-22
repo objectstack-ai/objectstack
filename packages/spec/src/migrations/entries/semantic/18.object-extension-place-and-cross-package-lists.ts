@@ -30,7 +30,7 @@ export const entry: SemanticMigration = {
     + 'label / columns and a field\'s after / before are not applied, and the boot log names each such '
     + 'placement (os validate too when the parent is in the same stack). An anchor the parent does not have '
     + 'puts the item at the end; several packages at one anchor order by priority, then package name. An '
-    + 'extension places only its own items. SHIPPED BEHAVIOUR CHANGE: under #35897 a declared non-empty '
+    + 'extension places only its own items. SHIPPED BEHAVIOUR CHANGE: under related-lists-declared-is-tab-list a declared non-empty '
     + 'relatedLists hid a side list no entry named, a child list another package adds included, until the '
     + "parent named it. Now such a list (child and parent belong to different packages) is not hidden: placed, "
     + 'it sits where its package puts it; unplaced, it shows at the end of the tabs (「装了就自动排在末尾」), '
