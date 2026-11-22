@@ -1589,6 +1589,11 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
           }
         }),
       );
+      // The derived columns are what draw the line grid, so they land together
+      // with its body (objectstack#36102): the collection stays on "Loading
+      // columns…" until both are here, and the grid never mounts on its
+      // loading placeholder. `preloadGridField` never rejects.
+      await preloadGridField();
       if (!cancelled) setResolvedEntries(out);
     })();
     return () => { cancelled = true; };

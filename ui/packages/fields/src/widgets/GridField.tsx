@@ -30,9 +30,10 @@ import type { GridFieldWidgetProps } from './grid-field/GridFieldWidget.js';
  *    arrives. Each mount decides once, so a row the user is editing is never
  *    remounted by the load finishing.
  *  - {@link preloadGridField} starts that load early. The record forms that
- *    draw line items call it when they mount, while their child object's
- *    schema is still being fetched, so the grid is there before its columns
- *    are.
+ *    draw line items (`@object-ui/plugin-form`) call it when they mount, and
+ *    the two that derive a grid's columns from the child object's schema
+ *    (`MasterDetailForm`, `RecordBodyTableEditor`) also wait for it together
+ *    with that schema, so their grid never mounts on the placeholder.
  *  - The pure helpers below stay in this file, in the eager chunk, because the
  *    entry exports them by name and they import nothing heavy.
  *
@@ -409,14 +410,18 @@ export function loadGridFieldWidget(): Promise<GridFieldWidgetModule> {
 
 /**
  * Start loading the line-item grid's body ahead of its first render. Call it
- * where a form that may draw line items mounts. Idempotent. A failed preload is
- * not reported here: the grid's own render asks again and a failure there
- * reaches the nearest error boundary, where it can be seen.
+ * where a form that may draw line items mounts; idempotent. The promise
+ * settles once the body has loaded, so a caller that must render in the same
+ * tick (a test at module scope) can await it. ⛔ It never rejects, so a caller
+ * may drop it: a failed preload is reported by the grid's own render, which
+ * asks again and hands a second failure to the nearest error boundary, where
+ * it can be seen.
  */
-export function preloadGridField(): void {
-  loadGridFieldWidget().catch(() => {
-    // Reported by the render that needs the body; see above.
-  });
+export function preloadGridField(): Promise<void> {
+  return loadGridFieldWidget().then(
+    () => undefined,
+    () => undefined,
+  );
 }
 
 const LazyGridFieldWidget = React.lazy(() =>

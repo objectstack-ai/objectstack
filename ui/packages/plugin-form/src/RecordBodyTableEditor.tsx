@@ -234,8 +234,10 @@ export const RecordBodyTableEditor: React.FC<RecordBodyTableEditorProps> = ({ ob
   useEffect(() => {
     let cancelled = false;
     if (!dataSource || typeof dataSource.getObjectSchema !== 'function') return;
-    Promise.resolve(dataSource.getObjectSchema(objectName))
-      .then((s: any) => { if (!cancelled) setChildSchema(s ?? { fields: {} }); })
+    // The child schema is what draws the line grid, so it lands together with
+    // the grid's body (objectstack#36102); `preloadGridField` never rejects.
+    Promise.all([dataSource.getObjectSchema(objectName), preloadGridField()])
+      .then(([s]: [any, void]) => { if (!cancelled) setChildSchema(s ?? { fields: {} }); })
       .catch(() => { if (!cancelled) setLoadFailed(true); });
     return () => { cancelled = true; };
   }, [dataSource, objectName]);
