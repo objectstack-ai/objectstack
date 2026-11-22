@@ -106,6 +106,17 @@ describe('page:header record chrome: the favorite star draws only where the host
     expect(onToggleFavorite).toHaveBeenCalledTimes(1);
   });
 
+  it('the star keeps a 44px tap target on a phone, as the copy-id button beside it does (objectstack#36246)', () => {
+    const { header } = renderHeader({ isFavorite: false, onToggleFavorite: () => {} });
+    const [star] = stars(header);
+    const copyId = header.querySelector('button[aria-label="Copy record ID"]')!;
+    for (const cls of ['min-h-[44px]', 'min-w-[44px]', 'sm:min-h-0', 'sm:min-w-0']) {
+      // CONTROL: the copy-id button carries the same phone target.
+      expect(copyId.classList.contains(cls), `copy-id ${cls}`).toBe(true);
+      expect(star.classList.contains(cls), `star ${cls}`).toBe(true);
+    }
+  });
+
   it('CONTROL: the star mirrors the host state', () => {
     const { header } = renderHeader({ isFavorite: true, onToggleFavorite: () => {} });
     const [star] = stars(header);
