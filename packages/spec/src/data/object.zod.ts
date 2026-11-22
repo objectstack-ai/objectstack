@@ -6492,8 +6492,10 @@ function objectExtensionPlaceDescription(): string {
     'or before a group of the extended object; `{ list, after | before, label?, columns? }` — a child list of ' +
     'this package (a child object of the same package that points at the extended object, or object.field), ' +
     'right after or before a tab of the extended object (a relatedLists entry name, a built-in tab included), ' +
-    'with that tab\'s own title and columns. Write `after` or `before`, or neither for the end. An anchor that ' +
-    'does not exist puts the item at the end of its group, of the groups, or of the tabs (before the approvals ' +
+    'with that tab\'s own title and columns (each column a field of the child, judged as a relatedLists ' +
+    'entry\'s columns are). Write `after` or `before`, or neither for the end. An anchor may be an item another ' +
+    'placement brings, whatever order the two are written or registered in. An anchor nobody has puts the ' +
+    'item at the end of its group, of the groups, or of the tabs (before the approvals ' +
     'and activity-stream tabs); a group that does not exist puts the field among the ungrouped fields. Nothing ' +
     'is dropped. Several items at one anchor follow ascending `priority`, then package name, so every build ' +
     'gives the same order. Placement arranges what the extended object declares: list placements apply when it ' +
@@ -6505,9 +6507,13 @@ function objectExtensionPlaceDescription(): string {
     'placement that did not apply, with the object and the package; `os validate` names it too when the ' +
     'extended object is in the same stack. A child list another package brings shows even when the extended object\'s `relatedLists` ' +
     'does not name it: placed, at its place; unplaced, at the end of the tabs. An extension places only its own ' +
-    'items: a field outside its own `fields`, a group key the extended object or another package already ' +
-    'declares, or a list that is not a child object of its package is refused (here, or at `defineStack` where ' +
-    'the package\'s objects are known) and skipped by the merge with a warning naming whose item it is. Applied ' +
+    'items: a field outside its own `fields` is refused here; a field the extended object declares (an owner ' +
+    'field this extension redeclares for its display is still the owner\'s), a group key the extended object ' +
+    'declares, and a list (or a group\'s `relatedList`) that is not a child object of its package are refused ' +
+    'at `defineStack` where the objects are known; the merge skips each of them too, with a warning naming ' +
+    'whose item it is. A ' +
+    'group key another package\'s extension already adds is not refused: the merge adds it once and names the ' +
+    'second. Applied ' +
     'once, by the registry merge, so the record page, the forms and Studio show one arrangement; uninstalling ' +
     'the package removes its items and leaves the extended object\'s own order as it was. Example: ' +
     '`place: [{ field: \'tax_id\', group: \'basic\', after: \'industry\' }, { list: \'contract\', after: ' +

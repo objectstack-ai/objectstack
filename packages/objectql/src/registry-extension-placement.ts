@@ -23,14 +23,22 @@
  *
  * Several items at one anchor keep reading order: after an anchor they follow
  * it lowest priority first; before an anchor they precede it lowest priority
- * first. An anchor the object does not have puts the item at the end and is
- * named. An item the object (or the base the fold starts from) already
+ * first. An anchor another placement brings is found whatever order the two
+ * are written or registered in (each pass places in rounds); an anchor nobody
+ * brings puts the item at the end and is named. An item the object (or the base the fold starts from) already
  * arranges keeps that position, silently: the owner's position wins, and a
  * body that already carries the placements re-folds to itself.
  *
  * Nothing here drops an item from the object: a placement that does not apply
  * leaves the item where the merge put it (the field among the fields, the
  * list in the automatic tab order) and is named once.
+ *
+ * An extension places only its own items, judged here as well as at parse and
+ * at `defineStack` (a manifest's body reaches the registry unparsed): a field
+ * it does not add is not moved, a group's `fields` keep only the fields it
+ * adds, and a list placement, or a group whose `relatedList` names a list, is
+ * skipped when the list's child object is registered to another package (or
+ * to none). Each is named once; an unregistered child is no verdict.
  */
 
 import { readFieldGroupMembership, relatedListEntryName } from '@objectstack/spec/data';
@@ -56,7 +64,10 @@ export interface PlacementContributor {
   readonly priority: number;
   /** The extension's `place` entries, as registered (un-parsed tolerant read). */
   readonly place: readonly unknown[];
-  /** The field names this extension's own `fields` declares. */
+  /**
+   * The fields this extension adds and owns: keys of its own `fields` that
+   * neither the owner nor an extension folded earlier declares.
+   */
   readonly ownFields: ReadonlySet<string>;
 }
 
@@ -137,6 +148,50 @@ function splice<T>(slots: Slot<T>[], name: string, value: T, after: string | und
   return after === undefined && before === undefined;
 }
 
+/** One splice a pass queues: where it goes, and what to do once it is placed. */
+interface PlacementJob<T> {
+  readonly slots: Slot<T>[];
+  readonly name: string;
+  readonly value: T;
+  readonly after: string | undefined;
+  readonly before: string | undefined;
+  readonly endIndex: () => number;
+  /** Called once, with whether the anchor it names was found. */
+  readonly placed: (anchored: boolean) => void;
+}
+
+/**
+ * [#35901] Run a pass's splices so that an anchor another placement brings
+ * is found whatever order the two are written or registered in (`os validate`
+ * accepts such an anchor, so the merge must too). Rounds in placement order:
+ * each round places every job whose anchor is present (or that names none);
+ * a job whose anchor is absent waits for the next round. When a round places
+ * nothing, the jobs still waiting name an anchor nobody brings, and go to the
+ * end in placement order.
+ */
+function placeInRounds<T>(jobs: readonly PlacementJob<T>[]): void {
+  const holds = (job: PlacementJob<T>): boolean => {
+    const anchor = job.after ?? job.before;
+    return anchor === undefined || job.slots.some((slot) => slot.name === anchor);
+  };
+  let waiting = [...jobs];
+  let progressed = true;
+  while (waiting.length > 0 && progressed) {
+    progressed = false;
+    const next: PlacementJob<T>[] = [];
+    for (const job of waiting) {
+      if (!holds(job)) {
+        next.push(job);
+        continue;
+      }
+      job.placed(splice(job.slots, job.name, job.value, job.after, job.before, job.endIndex));
+      progressed = true;
+    }
+    waiting = next;
+  }
+  for (const job of waiting) job.placed(splice(job.slots, job.name, job.value, job.after, job.before, job.endIndex));
+}
+
 /** The extensions in placement order: ascending priority, then package id. */
 function inPlacementOrder(extensions: readonly PlacementContributor[]): PlacementContributor[] {
   return extensions
@@ -178,20 +233,27 @@ function tabsArrange(names: readonly string[], list: string): boolean {
 
 /**
  * [#35901] The `extend` contributors that carry placements, in the fold's
- * hands: each one's `place` and the names of its own `fields`.
+ * hands: each one's `place` and the fields it OWNS. A field is owned by where
+ * it comes from, never by its presence in a body: the owner's fields
+ * (`ownerFields`) are the owner's, and a field two extensions declare is the
+ * one folded first's (contributors arrive in fold order). An extension that
+ * redeclares such a field (ADR-0146 D10 admits a display-only redeclaration)
+ * does not own it, so it cannot place it.
  */
-export function placementContributorsOf(contributors: readonly ObjectContributor[]): PlacementContributor[] {
+export function placementContributorsOf(
+  contributors: readonly ObjectContributor[],
+  ownerFields: ReadonlySet<string> | undefined,
+): PlacementContributor[] {
   const out: PlacementContributor[] = [];
+  const claimed = new Set<string>(ownerFields ?? []);
   for (const contributor of contributors) {
     if (contributor.ownership !== 'extend') continue;
     const body = contributor.definition as unknown as AnyRecord;
+    const declared = isRecord(body.fields) ? Object.keys(body.fields) : [];
+    const ownFields = new Set(declared.filter((name) => !claimed.has(name)));
+    for (const name of declared) claimed.add(name);
     if (!Array.isArray(body.place) || body.place.length === 0) continue;
-    out.push({
-      packageId: contributor.packageId,
-      priority: contributor.priority,
-      place: body.place,
-      ownFields: new Set(isRecord(body.fields) ? Object.keys(body.fields) : []),
-    });
+    out.push({ packageId: contributor.packageId, priority: contributor.priority, place: body.place, ownFields });
   }
   return out;
 }
@@ -241,12 +303,30 @@ export function applyExtensionPlacements(
     .map((group) => ({ name: isRecord(group) ? stringOrUndefined(group.key) ?? '' : '', value: group }));
   const groupAddedBy = new Map<string, string | undefined>();
   let groupsChanged = false;
+  const groupJobs: PlacementJob<unknown>[] = [];
   for (const extension of placing) {
     extension.place.forEach((entry, index) => {
       if (!isRecord(entry) || !isRecord(entry.group)) return;
       const key = stringOrUndefined(entry.group.key);
       if (key === undefined) return;
       const { after, before } = anchorOf(entry);
+      // A group that places a body table moves that list into the field area
+      // (and, on a declared tab list that does not name it, off the tabs), so
+      // it is judged as a list placement is: skipped on a positive verdict
+      // that the child is not this package's. An unregistered child is no
+      // verdict: its package may register it later in the boot.
+      const groupList = relatedListEntryName(entry.group.relatedList);
+      if (groupList !== undefined) {
+        const owner = context.childPackageOf(childOf(groupList));
+        if (owner !== undefined && (owner ?? undefined) !== extension.packageId) {
+          note(extension, index, `group:${key}`,
+            `adds field group '${key}' (place[${index}]) placing list '${groupList}', whose object ` +
+            `'${childOf(groupList)}' is ${owner === null ? 'registered with no package' : `package "${owner}"'s`}, ` +
+            'not a child object this package defines, so the group is not added: the lists of the extended ' +
+            'object and of other packages are arranged by their owners.');
+          return;
+        }
+      }
       if (!groupsDeclared) {
         note(extension, index, `group:${key}`,
           `places field group '${key}' (place[${index}]), which is not applied: "${objectName}" declares no ` +
@@ -271,16 +351,36 @@ export function applyExtensionPlacements(
       // A base that already carries the key (a body that carries these
       // placements, or a tenant base) keeps its own position.
       if (groupSlots.some((slot) => slot.name === key)) return;
-      const anchored = splice(groupSlots, key, { ...entry.group }, after, before, () => groupSlots.length);
-      groupAddedBy.set(key, extension.packageId);
-      groupsChanged = true;
-      if (!anchored) {
-        note(extension, index, `group:${key}`,
-          `places field group '${key}' ${anchorText(after, before)} (place[${index}]), but "${objectName}" has ` +
-          'no such group, so it is placed after the last group.');
+      // The parse refuses a group listing a field the extension does not add;
+      // a manifest's body reaches the registry unparsed, so the merge drops
+      // such a name from the group too, and its owner keeps arranging it.
+      const placed: AnyRecord = { ...entry.group };
+      if (Array.isArray(entry.group.fields)) {
+        const listed = entry.group.fields;
+        const own = listed.filter((name): name is string => typeof name === 'string' && extension.ownFields.has(name));
+        const foreign = listed.filter((name): name is string => typeof name === 'string' && !extension.ownFields.has(name));
+        if (own.length !== listed.length) placed.fields = own;
+        if (foreign.length > 0) {
+          note(extension, index, `group:${key}:fields`,
+            `adds field group '${key}' (place[${index}]) listing ${foreign.map((name) => `\`${name}\``).join(', ')}, ` +
+            'which this extension does not add, so the group does not take them: a field of the extended object, ' +
+            'or of another package\'s extension, is arranged by its owner.');
+        }
       }
+      groupAddedBy.set(key, extension.packageId);
+      groupJobs.push({
+        slots: groupSlots, name: key, value: placed, after, before, endIndex: () => groupSlots.length,
+        placed: (anchored) => {
+          groupsChanged = true;
+          if (anchored) return;
+          note(extension, index, `group:${key}`,
+            `places field group '${key}' ${anchorText(after, before)} (place[${index}]), but "${objectName}" has ` +
+            'no such group, so it is placed after the last group.');
+        },
+      });
     });
   }
+  placeInRounds(groupJobs);
 
   // ── 2. fields ───────────────────────────────────────────────────────────
   // Members of each group the pass touches, read once from the running
@@ -289,6 +389,7 @@ export function applyExtensionPlacements(
   const groupsNow = (): AnyRecord[] => groupSlots.map((slot) => slot.value).filter(isRecord);
   const listedSomewhere = (field: string): boolean =>
     groupsNow().some((group) => Array.isArray(group.fields) && group.fields.includes(field));
+  const fieldJobs: PlacementJob<string>[] = [];
   for (const extension of placing) {
     extension.place.forEach((entry, index) => {
       if (!isRecord(entry) || typeof entry.field !== 'string') return;
@@ -299,7 +400,8 @@ export function applyExtensionPlacements(
       if (!extension.ownFields.has(field)) {
         note(extension, index, `field:${field}`,
           `places field \`${field}\` (place[${index}]), which is not a field this extension adds, so it is not ` +
-          'moved: a field of the extended object, or of another package\'s extension, is arranged by its owner.');
+          'moved: a field of the extended object, or of another package\'s extension, is arranged by its owner, ' +
+          'also when this extension redeclares it.');
         return;
       }
       if (!isRecord(fields[field])) return;
@@ -334,18 +436,23 @@ export function applyExtensionPlacements(
       }
       const at = slots.findIndex((slot) => slot.name === field);
       if (at !== -1) slots.splice(at, 1);
-      const anchored = splice(slots, field, field, after, before, () => slots!.length);
+      const memberList = slots;
+      fieldJobs.push({
+        slots: memberList, name: field, value: field, after, before, endIndex: () => memberList.length,
+        placed: (anchored) => {
+          if (anchored) return;
+          note(extension, index, `field:${field}`,
+            `places field \`${field}\` ${anchorText(after, before)} in group '${key}' (place[${index}]), but that ` +
+            'group has no such member, so the field is placed last in the group.');
+        },
+      });
       if (fields[field] && (fields[field] as AnyRecord).group !== key) {
         fields = { ...fields, [field]: { ...(fields[field] as AnyRecord), group: key } };
         fieldsChanged = true;
       }
-      if (!anchored) {
-        note(extension, index, `field:${field}`,
-          `places field \`${field}\` ${anchorText(after, before)} in group '${key}' (place[${index}]), but that ` +
-          'group has no such member, so the field is placed last in the group.');
-      }
     });
   }
+  placeInRounds(fieldJobs);
   if (memberSlots.size > 0) {
     for (let index = 0; index < groupSlots.length; index += 1) {
       const slot = groupSlots[index];
@@ -365,6 +472,7 @@ export function applyExtensionPlacements(
     return end;
   };
   let tabsChanged = false;
+  const listJobs: PlacementJob<unknown>[] = [];
   for (const extension of placing) {
     extension.place.forEach((entry, index) => {
       if (!isRecord(entry) || typeof entry.list !== 'string') return;
@@ -396,18 +504,22 @@ export function applyExtensionPlacements(
       const value = label !== undefined || columns !== undefined
         ? { list, ...(label !== undefined ? { label } : {}), ...(columns !== undefined ? { columns: [...columns] } : {}) }
         : list;
-      const anchored = splice(tabSlots, list, value, after, before, tabsEnd);
-      tabsChanged = true;
-      // Before a trailing built-in tab the object leaves unlisted is the end
-      // of the tabs anyway (the approvals and the stream follow every listed
-      // tab), so that miss is the position asked for and is not named.
-      if (!anchored && !(before !== undefined && TRAILING_BUILTIN_TABS.has(before))) {
-        note(extension, index, `list:${list}`,
-          `places list '${list}' ${anchorText(after, before)} (place[${index}]), but "${objectName}" has no such ` +
-          'tab in its `relatedLists`, so the list is placed at the end of the tabs.');
-      }
+      listJobs.push({
+        slots: tabSlots, name: list, value, after, before, endIndex: tabsEnd,
+        placed: (anchored) => {
+          tabsChanged = true;
+          // Before a trailing built-in tab the object leaves unlisted is the
+          // end of the tabs anyway (the approvals and the stream follow every
+          // listed tab), so that miss is the position asked for and is not named.
+          if (anchored || (before !== undefined && TRAILING_BUILTIN_TABS.has(before))) return;
+          note(extension, index, `list:${list}`,
+            `places list '${list}' ${anchorText(after, before)} (place[${index}]), but "${objectName}" has no such ` +
+            'tab in its `relatedLists`, so the list is placed at the end of the tabs.');
+        },
+      });
     });
   }
+  placeInRounds(listJobs);
 
   if (!groupsChanged && !tabsChanged && !fieldsChanged) return { object, notes };
   const out = { ...record } as AnyRecord;

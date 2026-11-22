@@ -112,7 +112,9 @@ Keys that merely hide/re-arrange correct information (`hideRelatedTab`, `showRef
 > `relatedLists`: placed, it sits where its package puts it; unplaced, it shows at the end of the
 > tabs (the maintainer: 「装了就自动排在末尾」, ruling 7073014077, flipping ruling 7072511859). The
 > parent's tab list still decides everything the parent's own package and package-less metadata
-> bring. Placement arranges what the parent declares (「父对象声明了才生效」): a group or field placement
+> bring. The ruling's consequence, for the approver: the parent cannot hide another package's list.
+> It can move it by naming it in its own `relatedLists`; only `relatedList: false` on that package's
+> FK hides it, and that FK is the other package's to set. Placement arranges what the parent declares (「父对象声明了才生效」): a group or field placement
 > applies only where the parent declares `fieldGroups`, so §5's derivation is unchanged: an
 > extension's group lands among the declared groups (after or before one of them, or last) and a
 > field it places lands inside a group's member list, never above the parent's own fields on a

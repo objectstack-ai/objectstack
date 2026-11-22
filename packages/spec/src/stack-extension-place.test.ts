@@ -47,7 +47,9 @@ const contract = {
 };
 const memo = { name: 'xplx_memo', label: 'Memo', fields: { title: { type: 'text' as const, label: 'Title' } } };
 
-const extensionPackage = (place: unknown[], objects: unknown[] = [contract, memo]) => ({
+const TAX_ID_FIELDS = { tax_id: { type: 'text' as const, label: 'Tax ID' } };
+
+const extensionPackage = (place: unknown[], objects: unknown[] = [contract, memo], fields: Record<string, unknown> = TAX_ID_FIELDS) => ({
   manifest: {
     id: 'com.example.xpl-ext',
     namespace: 'xplx',
@@ -57,14 +59,14 @@ const extensionPackage = (place: unknown[], objects: unknown[] = [contract, memo
     objects,
     objectExtensions: [{
       extend: 'xpl_account',
-      fields: { tax_id: { type: 'text' as const, label: 'Tax ID' } },
+      fields,
       place,
     }],
   },
 });
 
-const stackWith = (place: unknown[], objects?: unknown[]) =>
-  ({ manifest, objects: [account, opportunity], packages: [extensionPackage(place, objects)] }) as any;
+const stackWith = (place: unknown[], objects?: unknown[], fields?: Record<string, unknown>) =>
+  ({ manifest, objects: [account, opportunity], packages: [extensionPackage(place, objects, fields)] }) as any;
 
 const refusalOf = (fn: () => unknown): Refusal | undefined => {
   try {
@@ -120,6 +122,25 @@ describe('defineStack — an extension adds a group of its own', () => {
     expect(refusal?.code).toBe('STACK_CROSS_REFERENCE_INVALID');
     expect(refusal?.issues).toHaveLength(1);
     expect(refusal?.issues?.[0]).toContain("adds group 'basic', which is a group 'xpl_account' declares itself");
+  });
+});
+
+describe('defineStack — an extension places only a field it adds, not one it redeclares', () => {
+  // ADR-0146 D10 admits redeclaring an owner field for its display; that does not make it the extension's.
+  const redeclared = { ...TAX_ID_FIELDS, industry: { type: 'text' as const, label: 'Sector' } };
+
+  it('accepts placing its own field while it redeclares an owner field (control)', () => {
+    expect(() => defineStack(stackWith([{ field: 'tax_id', group: 'basic', after: 'industry' }], undefined, redeclared))).not.toThrow();
+  });
+
+  it.each([
+    ['at the entry', { field: 'industry', group: 'basic', after: 'name' }, "place[0] places field 'industry'"],
+    ['in a placed group\'s fields', { group: { key: 'tax', label: 'Tax', fields: ['tax_id', 'industry'] }, after: 'basic' }, "place[0].group.fields[1] places field 'industry'"],
+  ])('refuses placing the redeclared owner field %s', (_label, entry, subject) => {
+    const refusal = refusalOf(() => defineStack(stackWith([entry], undefined, redeclared)));
+    expect(refusal?.code).toBe('STACK_CROSS_REFERENCE_INVALID');
+    expect(refusal?.issues).toHaveLength(1);
+    expect(refusal?.issues?.[0]).toContain(`${subject}, which 'xpl_account' declares itself`);
   });
 });
 

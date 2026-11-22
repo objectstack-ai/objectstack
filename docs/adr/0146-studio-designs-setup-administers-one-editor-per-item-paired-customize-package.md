@@ -635,8 +635,11 @@ name suffixed, the base untouched (N-23c).
 > `fields` into a group of the extended object after or before a member, a group of the extension's own after or before
 > one of the object's groups, and a child list of the extension's own package after or before one of the object's tabs.
 > A field of the base (or of another package's extension), a group key the base declares, and another package's list
-> are refused at parse or at `defineStack` and skipped by the merge with a warning: the base's arrangement stays the
-> base's, as its fields beyond the whitelist do. The placements are applied once, by the registry fold
+> (placed as a tab or by a group's `relatedList`) are refused at parse or at `defineStack` and skipped by the merge with
+> a warning: the base's arrangement stays the base's, as its fields beyond the whitelist do. A field is the extension's
+> by where it comes from, not by its presence in the extension's `fields`: a base field the extension redeclares for its
+> display (admitted above) is still the base's, and the extension cannot place it. The merge judges every door, the
+> stored `object_extension` row and an unparsed manifest body included. The placements are applied once, by the registry fold
 > (`packages/objectql/src/registry-extension-placement.ts#applyExtensionPlacements`, after every contributor's fields are
 > merged), so the record page, the forms and Studio read one arrangement, and uninstalling or disabling the package
 > leaves the base's order as it was. They arrange only what the base declares (ruling 7073014077: a list placement

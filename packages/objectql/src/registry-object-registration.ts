@@ -945,7 +945,7 @@ export class ObjectRegistrationFacet {
     // [#35901] Where each extension's own fields, groups and child lists go:
     // applied once, here, after every contributor's fields are merged, so the
     // anchors an extension names are the object's as served.
-    const placing = placementContributorsOf(contributors);
+    const placing = placementContributorsOf(contributors, ownFields);
     if (placing.length > 0) {
       const placed = applyExtensionPlacements(merged, placing, {
         objectName: String(merged.name ?? baseDefinition.name ?? ''),

@@ -119,10 +119,12 @@ objectExtensions: [{
   after or before one of the target's groups. Its `fields` may name only fields you add.
 - **`{ list, after | before, label?, columns? }`** puts a child list of your own package (a
   child object of your package with a lookup to the target, or `object.field`) right after
-  or before one of the target's tabs, with that tab's own title and columns.
+  or before one of the target's tabs, with that tab's own title and columns (each column a
+  field of the child, checked by `os validate` as a `relatedLists` entry's columns are).
 
-Write `after` or `before`, not both; neither means the end. An anchor the target does not
-have puts the item at the end of its group, of the groups, or of the tabs (before the
+Write `after` or `before`, not both; neither means the end. An anchor may be an item
+another placement brings, in whatever order the two are written or installed. An anchor
+nobody has puts the item at the end of its group, of the groups, or of the tabs (before the
 approvals and activity-stream tabs). Several packages at one anchor follow ascending
 `priority`, then package name. When the target's owner already names your list or lists
 your field, the owner's position wins.
@@ -140,9 +142,9 @@ stack.
 A child list your package brings is shown even when the target's `relatedLists` does not
 name it: placed, where you put it; unplaced, at the end of the tabs.
 
-**You place only what you bring.** A field of the target or of another package, a group
-key the target already declares, or a list that is not a child object of your package is
-refused at authoring time, and skipped by the merge with a warning naming whose item it
+**You place only what you bring.** A field of the target or of another package (also one
+you redeclare to relabel it), a group key the target already declares, or a list (or a
+group placing one) that is not a child object of your package is refused at authoring time, and skipped by the merge with a warning naming whose item it
 is. Uninstalling or disabling your package takes its items off and leaves the target's own
 order as it was.
 

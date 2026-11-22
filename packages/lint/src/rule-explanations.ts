@@ -4757,6 +4757,8 @@ const RELATED_LIST_COLUMN_UNKNOWN_EXPLANATION: RuleExplanation = {
       '`os validate`, `os build` and at the runtime publish gate. Judged against every child the entry ' +
       'names whose fields this rule can see (the authored fields and the registry-injected columns); a ' +
       'child outside the stack is not judged here.',
+    'An object extension\'s list placement (`place: [{ list, columns }]`) carries its columns the same way, ' +
+      'and they are judged the same way, against the child the placement names.',
   ],
 };
 

@@ -17,6 +17,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { SchemaRegistry } from './registry.js';
 import { ObjectQL } from './engine.js';
 import { PLACEMENT_ARRANGES_DECLARED_ONLY, applyExtensionPlacements } from './registry-extension-placement.js';
+import { ObjectExtensionSchema } from '@objectstack/spec/data';
 
 const OWNER_PKG = 'com.vendor.crm';
 const EXT_PKG = 'com.acme.contracts';
@@ -283,6 +284,40 @@ describe('#35901 — an extension places only its own items', () => {
     expect(warn.mock.calls.map((c) => String(c[0])).join('\n')).toContain(`package "${OWNER_PKG}"'s, not a child object this package defines`);
   });
 
+  it('a group placing a list whose object another package owns is not added, named; the owner\'s tab stays', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const reg = withVendor();
+    extend(reg, [{ group: { key: 'deals', label: 'Deals', relatedList: 'crm_opportunity' }, after: 'basic' }]);
+    const body = served(reg);
+    expect(body.fieldGroups).toEqual(vendorAccount().fieldGroups);
+    expect(body.relatedLists).toEqual(['crm_contact', 'crm_opportunity']);
+    expect(warn.mock.calls.map((c) => String(c[0])).join('\n')).toContain(
+      `adds field group 'deals' (place[0]) placing list 'crm_opportunity', whose object 'crm_opportunity' is package "${OWNER_PKG}"'s`,
+    );
+  });
+
+  it('a group placing its own package\'s list, or a list not registered (yet), is added (control)', () => {
+    const reg = withVendor();
+    reg.registerObject(child('acme_contract', 'Contract') as any, EXT_PKG, undefined, 'own');
+    extend(reg, [
+      { group: { key: 'contracts', label: 'Contracts', relatedList: 'acme_contract' }, after: 'basic' },
+      { group: { key: 'later', label: 'Later', relatedList: 'acme_later' }, after: 'contracts' },
+    ]);
+    expect(served(reg).fieldGroups.map((g: any) => g.key)).toEqual(['basic', 'contracts', 'later', 'more']);
+  });
+
+  it('a group listing a field the extension does not add takes only its own, named; the owner\'s field stays', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const reg = withVendor();
+    extend(reg, [{ group: { key: 'tax', label: 'Tax', fields: ['tax_id', 'industry'] }, after: 'basic' }]);
+    const body = served(reg);
+    expect(groupFields(body, 'tax')).toEqual(['tax_id']);
+    expect(body.fields.industry.group).toBe('basic');
+    expect(warn.mock.calls.map((c) => String(c[0])).join('\n')).toContain(
+      "adds field group 'tax' (place[0]) listing `industry`, which this extension does not add",
+    );
+  });
+
   it('a child not registered (yet) is no verdict: the list is placed', () => {
     const reg = withVendor();
     extend(reg, [{ list: 'acme_later', after: 'crm_contact' }]);
@@ -299,6 +334,94 @@ describe('#35901 — an extension places only its own items', () => {
     const text = warn.mock.calls.map((c) => String(c[0])).join('\n');
     expect(text).toContain("which is a group \"crm_account\" declares itself");
     expect(text).toContain('`industry` (place[1]), which is not a field this extension adds');
+  });
+});
+
+describe('#35901 — a field is owned by where it comes from, not by its presence in a body (L2 S2)', () => {
+  it('an owner field the extension redeclares for its display is not moved by its placement, named', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const reg = withVendor();
+    extend(reg, [{ field: 'industry', group: 'basic', after: 'phone' }], {
+      fields: { tax_id: TAX_ID, industry: { name: 'industry', type: 'text', label: 'Sector', group: 'basic' } },
+    });
+    const body = served(reg);
+    expect(groupFields(body, 'basic')).toBeUndefined();
+    expect(body.fieldGroups).toEqual(vendorAccount().fieldGroups);
+    expect(warn.mock.calls.map((c) => String(c[0])).join('\n')).toContain(
+      '`industry` (place[0]), which is not a field this extension adds',
+    );
+  });
+
+  it('a field two extensions declare is the one folded first\'s: the later one cannot place it', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const region = { name: 'region', type: 'text', label: 'Region' };
+    const reg = withVendor();
+    extend(reg, [], { pkg: 'com.acme.first', priority: 100, fields: { region } });
+    extend(reg, [{ field: 'region', group: 'basic', after: 'name' }], { pkg: 'com.acme.second', priority: 200, fields: { region } });
+    expect(groupFields(served(reg), 'basic')).toBeUndefined();
+    expect(served(reg).fields.region.group).toBeUndefined();
+  });
+
+  it('a placed group\'s fields keep only the extension\'s own, a redeclared owner field left out', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const reg = withVendor();
+    extend(reg, [{ group: { key: 'tax', label: 'Tax', fields: ['tax_id', 'industry'] }, after: 'basic' }], {
+      fields: { tax_id: TAX_ID, industry: { name: 'industry', type: 'text', label: 'Sector', group: 'basic' } },
+    });
+    expect(groupFields(served(reg), 'tax')).toEqual(['tax_id']);
+  });
+});
+
+describe('#35901 — an anchor another placement brings is found whatever the order (L2 S3)', () => {
+  it('a list anchored on a list the same extension places after it', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const reg = withVendor();
+    extend(reg, [{ list: 'acme_a', after: 'acme_b' }, { list: 'acme_b', after: 'crm_contact' }]);
+    expect(served(reg).relatedLists).toEqual(['crm_contact', 'acme_b', 'acme_a', 'crm_opportunity']);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('a lower-priority package anchored on a higher-priority package\'s group', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const reg = withVendor();
+    extend(reg, [{ group: { key: 'audit', label: 'Audit' }, after: 'tax' }], { pkg: 'com.acme.audit', priority: 100, fields: {} });
+    extend(reg, [{ group: { key: 'tax', label: 'Tax' }, after: 'basic' }], { pkg: 'com.acme.tax', priority: 200, fields: {} });
+    expect(served(reg).fieldGroups.map((g: any) => g.key)).toEqual(['basic', 'tax', 'audit', 'more']);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('a field anchored on a field the same extension places later in the entry list', () => {
+    const reg = withVendor();
+    extend(
+      reg,
+      [{ field: 'tax_region', group: 'basic', after: 'tax_id' }, { field: 'tax_id', group: 'basic', after: 'industry' }],
+      { fields: { tax_id: TAX_ID, tax_region: { name: 'tax_region', type: 'text', label: 'Tax region' } } },
+    );
+    expect(groupFields(served(reg), 'basic')).toEqual(['name', 'industry', 'tax_id', 'tax_region', 'phone']);
+  });
+
+  it('an anchor nobody brings still goes to the end and is named (control)', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const reg = withVendor();
+    extend(reg, [{ list: 'acme_a', after: 'acme_nowhere' }]);
+    expect(served(reg).relatedLists).toEqual(['crm_contact', 'crm_opportunity', 'acme_a']);
+    expect(warn.mock.calls.map((c) => String(c[0])).join('\n')).toContain("places list 'acme_a' after 'acme_nowhere'");
+  });
+});
+
+describe('#35901 — the stored object_extension door (parse only) is held by the merge too (L2 S1)', () => {
+  it('a parsed extension whose group places the owner\'s list is not added, named', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const reg = withVendor();
+    const parsed = ObjectExtensionSchema.parse({
+      extend: OBJ,
+      place: [{ group: { key: 'deals', label: 'Deals', relatedList: 'crm_opportunity' }, after: 'basic' }],
+    });
+    reg.registerObjectExtension(parsed as never, EXT_PKG);
+    const body = served(reg);
+    expect(body.fieldGroups).toEqual(vendorAccount().fieldGroups);
+    expect(body.relatedLists).toEqual(['crm_contact', 'crm_opportunity']);
+    expect(warn.mock.calls.map((c) => String(c[0])).join('\n')).toContain("placing list 'crm_opportunity'");
   });
 });
 

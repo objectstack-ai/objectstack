@@ -4643,6 +4643,10 @@ function collectRelatedListNameErrors(
  *  - a placed group's `key` must not be one of the extended object's own
  *    group keys, where this stack defines that object: the group would be
  *    the owner's, which an extension does not arrange.
+ *  - a placed field (and a placed group's `fields`) must not be a field the
+ *    extended object declares, where this stack defines that object: an
+ *    extension may redeclare an owner field for its display properties
+ *    (ADR-0146 D10), which does not make the field the extension's to move.
  *
  * Anchors are not judged here: a missing anchor puts the item at the end and
  * is a `@objectstack/lint` warning, never a refusal, so removing a field from
@@ -4729,12 +4733,26 @@ function collectExtensionPlacementErrors(config: ObjectStackDefinition): string[
           );
         }
       };
+      const targetFields = asRecord(definedAnywhere.get(target)?.fields) ?? {};
+      const judgeOwnerField = (name: unknown, where: string): void => {
+        if (typeof name !== 'string' || !Object.prototype.hasOwnProperty.call(targetFields, name)) return;
+        errors.push(
+          `${at}objectExtensions[${j}] (extending '${target}') ${where} places field '${name}', which ` +
+            `'${target}' declares itself: an extension places only a field it adds, and redeclaring an owner ` +
+            'field (for its display properties) does not make it the extension\'s. The owner arranges it; ' +
+            'remove the placement.',
+        );
+      };
       (record.place as unknown[]).forEach((entry: unknown, k: number) => {
         const placement = asRecord(entry);
         if (!placement) return;
         if (typeof placement.list === 'string') judgeList(placement.list, `place[${k}].list`);
+        judgeOwnerField(placement.field, `place[${k}]`);
         const group = asRecord(placement.group);
         if (!group) return;
+        if (Array.isArray(group.fields)) {
+          group.fields.forEach((name: unknown, f: number) => judgeOwnerField(name, `place[${k}].group.fields[${f}]`));
+        }
         if (typeof group.relatedList === 'string') judgeList(group.relatedList, `place[${k}].group.relatedList`);
         if (typeof group.key === 'string' && targetGroups.has(group.key)) {
           errors.push(
