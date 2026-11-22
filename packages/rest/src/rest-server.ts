@@ -5151,8 +5151,7 @@ export class RestServer {
      *
      * One route is never registered on the scoped base: the restriction
      * profile, `GET {basePath}/discovery/restriction-profile`, is mounted on
-     * the unscoped base only (#36198), so a `required` server does not
-     * serve it.
+     * the unscoped base only, so a `required` server does not serve it.
      */
     registerRoutes(): void {
         const basePath = this.getApiBasePath();
