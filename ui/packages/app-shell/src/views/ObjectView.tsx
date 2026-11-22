@@ -826,6 +826,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         handleViewAction,
         handleRenameView,
         handleDeleteView,
+        handleRestoreFactoryView,
         handlePinView,
         handleSetDefaultView,
         handleReorderViews,
@@ -1552,6 +1553,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                  onReorder={handleReorderViews}
                  onAddView={handleAddView}
                  onConfigView={handleConfigViewFromRow}
+                 onRestoreFactory={(id) => { void handleRestoreFactoryView(id); }}
                />
              )}
 

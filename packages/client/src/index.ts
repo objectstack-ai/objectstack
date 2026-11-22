@@ -7096,6 +7096,26 @@ export class ObjectStackClient {
     },
 
     /**
+     * Whether each of a page of records of one object is held by a locking
+     * approval, in one request (`IApprovalService.getRecordLocks`): entry `i`
+     * answers `recordIds[i]` with what {@link getRecordLock} answers for that
+     * id, a record the caller cannot read (or that does not exist) as
+     * `locked: null`. At most `APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS` ids per
+     * call, else 400; a deployment without the read answers 501.
+     */
+    getRecordLocks: async (
+      object: string,
+      recordIds: readonly string[],
+    ): Promise<{ records: Array<{ recordId: string; locked: boolean | null }> }> => {
+      const route = this.getRoute('approvals');
+      const res = await this.fetch(`${this.baseUrl}${route}/records/${encodeURIComponent(object)}/locks`, {
+        method: 'POST',
+        body: JSON.stringify({ recordIds: [...recordIds] }),
+      });
+      return this.unwrapResponse<{ records: Array<{ recordId: string; locked: boolean | null }> }>(res);
+    },
+
+    /**
      * Record an approve decision on a request. Finalises the request when the
      * node's behaviour is satisfied and resumes the owning flow run.
      */

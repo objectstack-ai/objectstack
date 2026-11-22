@@ -165,7 +165,7 @@ export interface RecordActivityTimelineProps {
   onRetryFeed?: () => void;
   /**
    * objectstack#27055, Target 3 — `stream` is the record page's 动态 stream
-   * in full (the 动态 tab): the filter chips 全部 / 活动 / 讨论 / 变更 on the
+   * in full (the 动态 tab): the filter chips 全部 / 事件 / 讨论 / 变更 on the
    * title row instead of the dropdown, system entries (field changes, system
    * events) as one compact muted line each, and paging at the foot.
    * objectstack#27524, Target 5 — `peek` is the body of the 动态 panel, the
@@ -192,7 +192,7 @@ export interface RecordActivityTimelineProps {
   className?: string;
 }
 
-/** The stream chips' copy (objectstack#27055): 全部 / 活动 / 讨论 / 变更. */
+/** The stream chips' copy (objectstack#27055): 全部 / 事件 / 讨论 / 变更. */
 /** A comment's avatar cell: the author's 20 px avatar, centred on its first line. */
 const COMMENT_AVATAR_CELL = 'shrink-0 flex h-[30px] w-5 items-center justify-center';
 /** A comment's header line: who, then when, 30 px tall, wrapping between pieces. */
@@ -206,7 +206,7 @@ const ROW_ACTIONS_REVEAL =
 
 const STREAM_FILTER_KEYS: Record<TimelineStreamFilter, { key: string; fallback: string }> = {
   all: { key: 'detail.streamAll', fallback: 'All' },
-  activity: { key: 'detail.streamActivity', fallback: 'Activity' },
+  activity: { key: 'detail.streamActivity', fallback: 'Events' },
   discussion: { key: 'detail.streamDiscussion', fallback: 'Discussion' },
   changes: { key: 'detail.streamChanges', fallback: 'Changes' },
 };

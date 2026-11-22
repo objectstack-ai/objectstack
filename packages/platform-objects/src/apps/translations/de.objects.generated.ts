@@ -176,7 +176,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "Benutzer sperren",
-        description: "Diesen Benutzer sperren? Er wird abgemeldet, kann sich nicht anmelden, und seine API-Schlüssel werden bis zur Entsperrung abgelehnt, ebenso seine OAuth-Zugriffstoken und Token-Aktualisierungen. Nach der Entsperrung funktionieren die Schlüssel wieder.",
+        description: "Diesen Benutzer sperren? Er wird abgemeldet, kann sich nicht anmelden, und seine API-Schlüssel werden bis zur Entsperrung abgelehnt, ebenso seine OAuth-Zugriffstoken und Token-Aktualisierungen. Nach der Entsperrung funktionieren die Schlüssel wieder. Die Sperre setzt außerdem die KI-Dienstkonten aus, für die der Benutzer verantwortlich ist, deaktiviert die von ihm registrierten OAuth-Anwendungen und widerruft die von ihm erstellten SCIM-Anmeldedaten; das Entsperren stellt nichts davon wieder her.",
         successMessage: "Benutzer gesperrt",
         params: {
           banReason: {

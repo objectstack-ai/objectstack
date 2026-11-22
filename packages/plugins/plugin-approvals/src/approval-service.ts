@@ -156,13 +156,14 @@ import {
   type ReaderLabels,
 } from './reader-locale-labels.js';
 import type { SlotLabelSource } from './display-label-backfill.js';
+import { recordsHeldByLockingApproval } from './lifecycle-hooks.js';
 import {
   redactSnapshot,
   resolveReadableSnapshotFields,
   type FieldVisibilitySource,
 } from './payload-redaction.js';
 import { APPROVAL_REQUEST_CHILD_OBJECTS, type RequestVisibilitySource } from './request-read-gate.js';
-import { nodeConfigLocksRecord, recordHeldByLockingApproval } from './lifecycle-hooks.js';
+import { detailRowHeldByLockingApproval, nodeConfigLocksRecord, recordHeldByLockingApproval } from './lifecycle-hooks.js';
 import { PendingApproverReadGrantSource, type PendingApproverReadGrants } from './pending-approver-read-grant.js';
 // The ADR-0043 pages — the ONE copy of their text, rendered by the plugin's
 // self-hosted mount and by `handleActionPage` alike.
@@ -10992,6 +10993,37 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     return fresh;
   }
 
+  /**
+   * `IApprovalService.getRecordLocks` — {@link getRecordLock} for a page of
+   * rows, in two reads whatever the page size: the caller's read of the ids
+   * (the same #8652 anchor, one `$in` read AS THE CALLER, so an unreadable row
+   * and a missing one both answer `null` and stay indistinguishable) and one
+   * pending-request lookup judged by the record-lock hook's own judgement
+   * ({@link recordsHeldByLockingApproval}). Entry `i` answers `recordIds[i]`.
+   *
+   * The cap is the door's to refuse loudly; here a blank id answers `null`.
+   */
+  async getRecordLocks(
+    object: string,
+    recordIds: readonly string[],
+    context: ExecutionContext,
+  ): Promise<Array<{ locked: boolean } | null>> {
+    const objectName = String(object ?? '').trim();
+    const ids = recordIds.map((recordId) => String(recordId ?? '').trim());
+    const asked = Array.from(new Set(ids.filter((id) => id !== '')));
+    if (!objectName || asked.length === 0) return ids.map(() => null);
+    // The anchor. As the CALLER — see getRecordLock's doc block.
+    const readable = await this.engine.find(objectName, {
+      where: { id: { $in: asked } }, fields: ['id'], limit: asked.length, context,
+    });
+    const readableIds = new Set((Array.isArray(readable) ? readable : []).map((row: any) => String(row?.id)));
+    const readableAsked = asked.filter((id) => readableIds.has(id));
+    const held = readableAsked.length > 0
+      ? await recordsHeldByLockingApproval(this.engine, objectName, readableAsked)
+      : new Set<string>();
+    return ids.map((id) => (readableIds.has(id) ? { locked: held.has(id) } : null));
+  }
+
   async getRequest(requestId: string, context: ExecutionContext): Promise<ApprovalRequestRow | null> {
     return this.loadRequest(requestId, context, true);
   }
@@ -11092,7 +11124,11 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * `{ locked }` only: no request id, node, participants or `pending`. Request
    * content stays behind `approvalsVisibleToReaders` (#8652 ruling 5299823744,
    * untouched). The judgement is the record-lock hook's own
-   * ({@link recordHeldByLockingApproval}), never a second copy of it.
+   * ({@link recordHeldByLockingApproval}), never a second copy of it — and,
+   * for a master-detail line, the detail-row lock's
+   * ({@link detailRowHeldByLockingApproval}): a locked record's lines are
+   * locked with it, so the read answers `true` for a line whose write the hook
+   * refuses.
    */
   async getRecordLock(
     object: string,
@@ -11107,7 +11143,9 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       where: { id }, fields: ['id'], limit: 1, context,
     });
     if (!Array.isArray(readable) || readable.length === 0) return null;
-    return { locked: await recordHeldByLockingApproval(this.engine, objectName, id) };
+    const locked = await recordHeldByLockingApproval(this.engine, objectName, id)
+      || await detailRowHeldByLockingApproval(this.engine, objectName, id);
+    return { locked };
   }
 
   private async loadRequest(

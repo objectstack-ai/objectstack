@@ -562,6 +562,7 @@ const zh = {
       objectReadOnly: '这些记录不能在这里编辑。',
       noPermission: '您没有编辑这些记录的权限。',
       approvalLocked: '此记录正在审批中，已锁定。',
+      checking: '正在确认这条记录能否编辑…',
       noRecordPermission: '您没有编辑此记录的权限。',
     },
     stateChange: {
@@ -1302,6 +1303,9 @@ const zh = {
     dragToReorder: '拖动排序',
     defaultView: '默认视图',
     defaultBadge: '默认',
+    customizedBadge: '已定制',
+    customizedTitle: '已在此处修改：所有人看到的是这份副本，而不是其包自带的版本。',
+    restoreFactory: '恢复出厂版本',
     tabActionsFor: '{{name}} 的视图操作',
     readonlyAriaLabel: '只读视图',
     readonlyTooltip: '系统视图 — 由代码定义，只读。',
@@ -1454,7 +1458,7 @@ const zh = {
     viewAll: '查看全部',
     new: '新建',
     add: '添加',
-    activity: '活动',
+    activity: '动态',
     // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
     // panel, its tab and the strip's label; the right column's ⊟, and the
     // 动态 panel's one-line composer.
@@ -1520,7 +1524,7 @@ const zh = {
     recordTabsHidden: '已隐藏',
     bodyTableTotals: '本页合计',
     streamAll: '全部',
-    streamActivity: '活动',
+    streamActivity: '事件',
     streamDiscussion: '讨论',
     streamChanges: '变更',
     viewAllEntries: '查看全部 {{count}} 条 →',
@@ -1657,10 +1661,10 @@ const zh = {
     fieldChangesFilter: '字段变更',
     tasksOnly: '仅任务',
     leaveCommentPlaceholder: '留下评论… (Ctrl+Enter 提交)',
-    noActivity: '暂无活动记录',
-    activityAccessDenied: '您没有查看此记录活动的权限。',
+    noActivity: '暂无动态',
+    activityAccessDenied: '您没有查看此记录动态的权限。',
     commentsAccessDenied: '您没有查看此记录评论的权限。',
-    activityLoadFailed: '无法加载此记录的活动。',
+    activityLoadFailed: '无法加载此记录的动态。',
     commentsLoadFailed: '无法加载此记录的评论。',
     retryLoadFeed: '重试',
     // objectui#7149 — the rest of `ActivityTimeline`. The four chip labels the
@@ -1696,7 +1700,7 @@ const zh = {
     replyCount_other: '{{count}} 条回复',
     replyPlaceholder: '回复…',
     // 无障碍标签
-    filterActivity: '筛选活动',
+    filterActivity: '筛选动态',
     openDiscussion: '打开讨论面板',
     closeDiscussion: '关闭讨论面板',
     subscribeAriaLabel: '订阅通知',
@@ -2859,6 +2863,10 @@ const zh = {
       delete: '删除',
       deleteViewTitle: '删除视图',
       deleteViewConfirm: '确定要删除视图 "{{name}}" 吗？此操作无法撤销。',
+      restoreFactory: '恢复',
+      restoreFactoryTitle: '恢复出厂版本',
+      restoreFactoryConfirm: '将视图 "{{name}}" 恢复为其包自带的版本？此视图的所有用户都将重新看到出厂版本，在此处修改的名称、固定和默认设置将被移除。',
+      restoreFactoryDone: '已恢复 "{{name}}" 的出厂版本',
       bulkDeleteConfirm: '确定要删除选中的 {{count}} 条记录吗？此操作无法撤销。',
       bulkDeleteConfirm_one: '确定要删除选中的 {{count}} 条记录吗？此操作无法撤销。',
       bulkDeleteConfirm_other: '确定要删除选中的 {{count}} 条记录吗？此操作无法撤销。',
@@ -4080,6 +4088,7 @@ const zh = {
   objectViewActions: {
     renameFailed: '重命名视图失败',
     deleteFailed: '删除视图失败',
+    restoreFactoryFailed: '恢复出厂版本失败',
   },
   dashboardActions: {
     printDialogOpening: '正在打开浏览器打印对话框（不是导出 PDF）',

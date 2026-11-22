@@ -176,7 +176,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "Banir usuário",
-        description: "Banir este usuário? Ele será desconectado, não poderá entrar e suas chaves de API serão recusadas até o desbanimento, assim como seus tokens de acesso OAuth e as renovações de token. As chaves voltam a funcionar após o desbanimento.",
+        description: "Banir este usuário? Ele será desconectado, não poderá entrar e suas chaves de API serão recusadas até o desbanimento, assim como seus tokens de acesso OAuth e as renovações de token. As chaves voltam a funcionar após o desbanimento. O banimento também suspende as contas de serviço de IA pelas quais ele é responsável, desativa os aplicativos OAuth que ele registrou e revoga as credenciais SCIM que ele emitiu; o desbanimento não restaura nada disso.",
         successMessage: "Usuário banido",
         params: {
           banReason: {

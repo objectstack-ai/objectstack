@@ -176,7 +176,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "停權使用者",
-        description: "要停權該使用者嗎？停權後會立即登出，在解除停權前無法再次登入，其 API 金鑰也會被拒絕，OAuth 存取權杖與權杖續期同樣被拒絕。解除停權後這些金鑰恢復可用。",
+        description: "要停權該使用者嗎？停權後會立即登出，在解除停權前無法再次登入，其 API 金鑰也會被拒絕，OAuth 存取權杖與權杖續期同樣被拒絕。解除停權後這些金鑰恢復可用。停權還會暫停該使用者負責的 AI 服務帳號、停用其註冊的 OAuth 應用程式並撤銷其建立的 SCIM 憑證；解除停權不會恢復這些。",
         successMessage: "使用者已停權",
         params: {
           banReason: {

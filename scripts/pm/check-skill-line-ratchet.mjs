@@ -82,7 +82,7 @@ const REPO_ROOT = new URL('../../', import.meta.url);
 // only when a reader needs the ruling at the row.
 export const CEILINGS = new Map([
   ['.claude/skills/pm-dispatch/SKILL.md', 33872], // lowered 33934 → 33872 by the re-basing PR's own edit
-  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 20070],
+  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 20354], // raised 20070 → 20354 (+284) by ruling record 7075909669 (#36203 items 1-5: 「同意五条都改」): a card thread confirms Actions started after each push; the seat reads pr-state of every in-flight card PR
   ['.claude/skills/pm-dispatch/references/state-machine.md', 4189],
   ['.claude/skills/pm-dispatch/references/contract-review.md', 6419],
   ['.claude/skills/pm-dispatch/references/decision-analysis.md', 4892],
@@ -104,7 +104,7 @@ export const CEILINGS = new Map([
   ['.claude/skills/pm-dispatch/references/seat-post-protocol.md', 7720],
   ['.claude/skills/pm-dispatch/references/true-green.md', 2068],
   ['.claude/skills/pm-dispatch/references/compile-surfaces.md', 2488],
-  ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 9070],
+  ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 9076], // raised 9070 → 9076 (+6) by ruling record 7075909669 (#36203 items 1-5: 「同意五条都改」): card-pick --why every patrol round
   ['.claude/skills/pm-dispatch/references/area-lease.md', 6586], // raised 6401 → 6586 by the ruled text (one seat per lane by default; a new `area:*` is a partition of that seat), ruling record 7030459053
   ['.claude/skills/pm-dispatch/references/coordinator.md', 4265], // raised 3781 → 4265 by the ruled text (one seat per lane by default; a new `area:*` is a partition of that seat), ruling record 7030459053
   ['.claude/skills/pm-dispatch/references/untrusted-text.md', 3280],
@@ -113,9 +113,9 @@ export const CEILINGS = new Map([
   ['.claude/skills/pm-dispatch/references/reading-discipline.md', 3822],
   ['.claude/skills/pm-dispatch/references/cross-repo-coordination.md', 4959],
   ['.claude/skills/pm-dispatch/references/triage-duties.md', 13559], // edited byte-neutral by the re-basing PR (12399 → 12399); raised 12399 → 13559 (+1160, the landed bytes) by the rulings whose rows are written in it: ruling records 7031931263 (rows 2–5: 「adr接受你的建议」, 「只考虑合并没人认领的，没开始开发的，你负责处理」, 「影响评测的卡不能关，这个会影响到AI的开发效果」, 「adr和skills修改相对是重要的」), 7032145340 (row 6: 「同意」) and 7032418455 (row 7: 「你分诊的时候是不是应该同时评估大概的卡大小作为参考」); review record 7038100802 triggered the part of rows 2, 3 and 6 added in fix round 1 (one close reason, the sweep roll-over, the never-fold list of standing exclusions) and is a trigger, not a ruling
-  ['.claude/skills/pm-dispatch/references/execution-duties.md', 20154], // raised 19810 → 20148 (+338) by ruling records 7031931263 (row 2, the weekly ADR card: 「adr接受你的建议」) and 7032145340 (row 6, the lane seat claims the weekly sweep card: 「同意」); 20148 → 20154 (+6) by ruling record 7073679594 (the L2 review effort line moves to `high` on the review sweep's readings: 「C」, under ruling 7073045669 point 4)
-  ['.claude/skills/pm-dispatch/references/filing-gate.md', 9096], // raised 8386 → 9096 (+710, the landed bytes) by the rulings whose rows are written in it: the rule card's body ruling (row 1, a dedupe hit on an open same-mechanism card ends in a comment: 「感觉你的第二种方案也很好啊」) and ruling record 7032145340 (row 6, the weekly sweep card entry rule and triage's move at first touch: 「同意」); review record 7038100802 triggered the quota line's pointer to row 1 (fix round 1) and is a trigger, not a ruling
-  ['.claude/skills/pm-dispatch/references/project-forms.md', 4669],
+  ['.claude/skills/pm-dispatch/references/execution-duties.md', 20277], // raised 19810 → 20148 (+338) by ruling records 7031931263 (row 2, the weekly ADR card: 「adr接受你的建议」) and 7032145340 (row 6, the lane seat claims the weekly sweep card: 「同意」); 20148 → 20154 (+6) by ruling record 7073679594 (the L2 review effort line moves to `high` on the review sweep's readings: 「C」, under ruling 7073045669 point 4); 20154 → 20277 (+123) by ruling record 7075909669 (#36203 items 1-5: 「同意五条都改」): a hold is Blocked-by + pm:blocked on the card, the probe covers card threads
+  ['.claude/skills/pm-dispatch/references/filing-gate.md', 9101], // raised 9096 → 9101 (+5) by ruling record 7075909669 (#36203 items 1-5: 「同意五条都改」): same-epic order is the later card's Blocked-by; raised 8386 → 9096 (+710, the landed bytes) by the rulings whose rows are written in it: the rule card's body ruling (row 1, a dedupe hit on an open same-mechanism card ends in a comment: 「感觉你的第二种方案也很好啊」) and ruling record 7032145340 (row 6, the weekly sweep card entry rule and triage's move at first touch: 「同意」); review record 7038100802 triggered the quota line's pointer to row 1 (fix round 1) and is a trigger, not a ruling
+  ['.claude/skills/pm-dispatch/references/project-forms.md', 4889], // raised 4669 → 4889 (+220 B, the two project-memory lines less 48 B of restatement cuts) by ruling record 7046610679 「同意，立卡派发」 under ruling record 6184799323, letter B
   ['.claude/skills/pm-dispatch/references/app-platform-boundary.md', 3928],
   ['.claude/skills/pm-dispatch/references/lanes/server.md', 4832],
   ['.claude/skills/pm-dispatch/references/lanes/devx.md', 2533],

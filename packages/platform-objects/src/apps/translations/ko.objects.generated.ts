@@ -176,7 +176,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "사용자 차단",
-        description: "이 사용자를 차단하시겠습니까? 차단이 해제될 때까지 로그아웃되고 로그인할 수 없으며, API 키와 OAuth 액세스 토큰 및 토큰 갱신도 거부됩니다. 차단을 해제하면 키가 다시 작동합니다.",
+        description: "이 사용자를 차단하시겠습니까? 차단이 해제될 때까지 로그아웃되고 로그인할 수 없으며, API 키와 OAuth 액세스 토큰 및 토큰 갱신도 거부됩니다. 차단을 해제하면 키가 다시 작동합니다. 차단하면 이 사용자가 책임자인 AI 서비스 계정도 일시 중지되고, 등록한 OAuth 애플리케이션은 비활성화되며, 발급한 SCIM 자격 증명은 폐기됩니다. 차단을 해제해도 이들은 복원되지 않습니다.",
         successMessage: "사용자 차단됨",
         params: {
           banReason: {
