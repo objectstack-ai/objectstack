@@ -98,7 +98,7 @@ Two separate questions:
 1. **Who can configure it?** Editing flows/automations needs `manage_metadata` (typically Studio users). Don't expose automation config to end users — see [audience-based interfaces](/docs/ui/audience-based-interfaces).
 2. **As whom does it run?** A flow's `runAs` (ADR-0049):
    - `runAs: 'user'` (default) — runs as the triggering user; CRUD nodes respect that user's RLS. **Safer default.**
-   - `runAs: 'system'` — elevated, bypasses RLS. Make elevation *explicit*, and surface it in the UI as "runs as system".
+   - `runAs: 'system'` — elevated, bypasses RLS but not the organization wall: a run for a user sees through that wall exactly what the user sees ([system context](/docs/permissions/system-context)). Make elevation *explicit*, and surface it in the UI as "runs as system".
 
    A schedule-triggered run has no user, so under `user` its data operations are refused — declare `system` to make the elevation explicit and intended.
 
