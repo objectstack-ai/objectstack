@@ -13,6 +13,11 @@ import {
   viewEnvelope,
   deriveViewKey,
   saveAndPublishRuntimeMetadata,
+  resolveDashboardEditTarget,
+  ensureDashboardSaveTarget,
+  dashboardSaveBody,
+  saveDashboardInPlace,
+  type DashboardSaveTargetDoors,
 } from './runtime-metadata-persistence';
 
 /**
@@ -114,6 +119,7 @@ describe('runtime-metadata-persistence seam (ADR-0034)', () => {
 
     expect(metadataClient.save).toHaveBeenCalledWith('view', 'view_123', body, {
       mode: 'draft',
+      ifNoneMatch: '*',
     });
     expect(id).toBe('view_123');
   });
@@ -243,7 +249,7 @@ describe('runtime-metadata-persistence seam (ADR-0034)', () => {
       const id = await createRuntimeMetadata('view', env.name, env, { metadataClient });
       // Row key (URL segment), returned id, and body.name are the SAME value.
       expect(id).toBe('acct.mine');
-      expect(metadataClient.save).toHaveBeenCalledWith('view', 'acct.mine', env, { mode: 'draft' });
+      expect(metadataClient.save).toHaveBeenCalledWith('view', 'acct.mine', env, { mode: 'draft', ifNoneMatch: '*' });
       expect(env.name).toBe('acct.mine');
     });
   });
@@ -373,5 +379,108 @@ describe('saveAndPublishRuntimeMetadata — a confirmed save everyone sees at on
     metadataClient.publish.mockRejectedValue(refused);
     await expect(saveAndPublishRuntimeMetadata('view', 'task.all', {}, { metadataClient })).rejects.toBe(refused);
     expect(metadataClient.reset).toHaveBeenCalledWith('view', 'task.all', { state: 'draft' });
+  });
+});
+
+/**
+ * objectstack#36372 — a dashboard edited on its own page saves where Studio's
+ * Customize would: the owning package when writable, else the app's
+ * customization package (ADR-0146), declaring the override of its base. The
+ * pair is only read while editing; the ensure door, which creates it, is
+ * asked at save. The save is the confirmed-save door above, naming that
+ * package on all three writes.
+ */
+describe('dashboard in-page save (objectstack#36372)', () => {
+  const listed = (entries: Record<string, { writable: boolean; version?: string }>) =>
+    new Map(
+      Object.entries(entries).map(([id, e]) => [id, { writable: e.writable, manifest: { id, version: e.version } } as any]),
+    );
+  const doors = (
+    entries: Record<string, { writable: boolean; version?: string }>,
+    ensure: DashboardSaveTargetDoors['ensureCustomization'] = vi.fn(async (base: string) => ({ packageId: `${base}.custom`, writable: true })),
+  ): DashboardSaveTargetDoors => ({ listPackages: vi.fn(async () => listed(entries)), ensureCustomization: ensure });
+
+  it('a dashboard of a writable package saves into that package, asking no pair', async () => {
+    const d = doors({ crm: { writable: true } });
+    const target = await resolveDashboardEditTarget('crm', d);
+    expect(target).toEqual({ kind: 'package', packageId: 'crm' });
+    await expect(ensureDashboardSaveTarget(target as any, d)).resolves.toEqual({ kind: 'package', packageId: 'crm' });
+    expect(d.ensureCustomization).not.toHaveBeenCalled();
+  });
+
+  it('a read-only (installed) package is read for its pair without creating one; the ensure door is asked at save', async () => {
+    const d = doors({ crm: { writable: false, version: '2.1.0' } });
+    const target = await resolveDashboardEditTarget('crm', d);
+    // No pair listed yet: none is named, and none is made by reading.
+    expect(target).toEqual({ kind: 'customization', base: 'crm', basedOn: '2.1.0', pair: null });
+    expect(d.ensureCustomization).not.toHaveBeenCalled();
+    await expect(ensureDashboardSaveTarget(target as any, d)).resolves.toEqual({
+      kind: 'customization',
+      packageId: 'crm.custom',
+      base: 'crm',
+      basedOn: '2.1.0',
+    });
+    expect(d.ensureCustomization).toHaveBeenCalledWith('crm');
+  });
+
+  it('a pair the package list already lists is named for reading', async () => {
+    const d = doors({ crm: { writable: false, version: '2.1.0' }, 'crm.custom': { writable: true, version: '0.0.0' } });
+    await expect(resolveDashboardEditTarget('crm', d)).resolves.toMatchObject({ kind: 'customization', pair: 'crm.custom' });
+    expect(d.ensureCustomization).not.toHaveBeenCalled();
+  });
+
+  it('is refused when the owner is not listed; at save, when the ensure door refuses or the pair is not writable', async () => {
+    await expect(resolveDashboardEditTarget('crm', doors({}))).resolves.toMatchObject({ kind: 'refused' });
+    const target = { kind: 'customization' as const, base: 'crm', basedOn: '2.1.0', pair: null };
+    const refusing = vi.fn(async () => {
+      throw new Error('forbidden');
+    });
+    await expect(ensureDashboardSaveTarget(target, { ensureCustomization: refusing })).rejects.toThrow('forbidden');
+    const readOnlyPair = vi.fn(async () => ({ packageId: 'crm.custom', writable: false }));
+    await expect(ensureDashboardSaveTarget(target, { ensureCustomization: readOnlyPair })).rejects.toThrow('not writable');
+  });
+
+  it('a dashboard naming no package is saved where it lives', async () => {
+    await expect(resolveDashboardEditTarget(null, doors({}))).resolves.toEqual({ kind: 'unbound' });
+  });
+
+  it('the body drops the read\'s `_` keys, and into a pair declares the override of its base', () => {
+    const doc = { name: 'exec', label: 'Exec', widgets: [], _packageId: 'crm', _diagnostics: [] };
+    expect(dashboardSaveBody(doc, { kind: 'package', packageId: 'crm' })).toEqual({ name: 'exec', label: 'Exec', widgets: [] });
+    expect(dashboardSaveBody(doc, { kind: 'customization', packageId: 'crm.custom', base: 'crm', basedOn: '2.1.0' })).toEqual({
+      name: 'exec',
+      label: 'Exec',
+      widgets: [],
+      overrides: { package: 'crm', basedOn: '2.1.0' },
+    });
+    // No version to declare the override at, and none declared: nothing is guessed.
+    expect(dashboardSaveBody(doc, { kind: 'customization', packageId: 'crm.custom', base: 'crm', basedOn: null })).toBeNull();
+  });
+
+  it('stages and publishes the one item in the target package', async () => {
+    const metadataClient = makeMetadataClient();
+    const body = { name: 'exec', widgets: [] };
+    await expect(
+      saveDashboardInPlace('exec', body, { kind: 'customization', packageId: 'crm.custom', base: 'crm', basedOn: '2.1.0' }, { metadataClient }),
+    ).resolves.toBe('published');
+    expect(metadataClient.save).toHaveBeenCalledWith('dashboard', 'exec', body, { mode: 'draft', ifNoneMatch: '*', packageId: 'crm.custom' });
+    expect(metadataClient.publish).toHaveBeenCalledWith('dashboard', 'exec', { packageId: 'crm.custom' });
+  });
+
+  it('over a pending Studio draft nothing is published', async () => {
+    const metadataClient = makeMetadataClient();
+    metadataClient.save.mockRejectedValue(Object.assign(new Error('pending'), { status: 409, code: 'METADATA_CONFLICT' }));
+    await expect(
+      saveDashboardInPlace('exec', {}, { kind: 'package', packageId: 'crm' }, { metadataClient }),
+    ).resolves.toBe('pending-draft');
+    expect(metadataClient.publish).not.toHaveBeenCalled();
+  });
+
+  it('a refused publish discards its own draft in the same package', async () => {
+    const metadataClient = makeMetadataClient();
+    const refused = Object.assign(new Error('refused'), { status: 400 });
+    metadataClient.publish.mockRejectedValue(refused);
+    await expect(saveDashboardInPlace('exec', {}, { kind: 'package', packageId: 'crm' }, { metadataClient })).rejects.toBe(refused);
+    expect(metadataClient.reset).toHaveBeenCalledWith('dashboard', 'exec', { state: 'draft', packageId: 'crm' });
   });
 });

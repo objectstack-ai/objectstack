@@ -35,11 +35,13 @@ import { ConnectionBanner } from './ConnectionBanner.js';
 import { useGoHomeShortcut } from '../chrome/goHomeShortcut.js';
 import { useHomePath } from '../hooks/useHomePath.js';
 import { AppHeader } from './AppHeader.js';
+import { DesignModeProvider, useDesignModeController } from './designMode.js';
+import { DesignModeBar } from './DesignModeBar.js';
 import { useResponsiveSidebar } from '../hooks/useResponsiveSidebar.js';
 import { usePhoneNavDrawerHistory } from './usePhoneNavDrawerHistory.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 import { isAppDocsPath, isRecordPagePath } from './consoleRoutePaths.js';
-import { primeConsoleSidebarOpen } from './consoleSidebarRail.js';
+import { SIDEBAR_TOGGLE_CHORD, primeConsoleSidebarOpen } from './consoleSidebarRail.js';
 import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
 import { servedObjectLabel } from '../hooks/servedObjectLabel.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
@@ -80,16 +82,18 @@ interface ConsoleLayoutProps {
 }
 
 /**
- * `⌘B` / `Ctrl+B` toggles the sidebar. The listener is `SidebarProvider`'s own
- * (`@object-ui/components`' synced Shadcn primitive, mounted by `AppShell`):
- * it matches `b` with ⌘ or Ctrl, and a bare `B` does nothing. That code is not
- * ours to edit, so the shortcut is advertised from inside the provider it
- * belongs to, by {@link ConsoleLayoutInner} (objectui#11674).
+ * `⌘B` / `Ctrl+B` toggles the sidebar: it matches `b` with ⌘ or Ctrl, and a
+ * bare `B` does nothing. From 768 px up the console sidebar answers it as a
+ * press on its expand / collapse button (`useConsoleSidebarRailPanel`, ruling
+ * 7074574380 on objectstack#36112); on a phone the listener is
+ * `SidebarProvider`'s own (`@object-ui/components`' synced Shadcn primitive,
+ * mounted by `AppShell`). The shortcut is advertised from inside that
+ * provider, by {@link ConsoleLayoutInner} (objectui#11674).
  */
 const TOGGLE_SIDEBAR_SHORTCUT: AdvertisedShortcut = {
   id: 'toggle-sidebar',
   group: 'navigation',
-  chord: { key: 'b', mod: true },
+  chord: SIDEBAR_TOGGLE_CHORD,
   label: (t: ShortcutLabelTranslate) => t('console.shortcuts.toggleSidebar'),
 };
 
@@ -200,6 +204,9 @@ export function ConsoleLayout({
   }, [activeAppName, rememberApp]);
   const { apps: metadataApps } = useMetadata();
   const appBasePath = `/apps/${appAddressSegment(metadataApps, activeApp) ?? activeAppName}`;
+  // objectstack#36362 — the app's design mode, held here so it stays on from
+  // page to page of the app; never on a phone, which has no 「Edit app」.
+  const designMode = useDesignModeController({ appName: activeAppName, appBasePath, enabled: !phone });
   // objectstack#30043 — the page in view, handed to the dock as its
   // `context.surface` (cloud#1610's shape): the object of a list, the object
   // and record id of a record page, the dashboard, report or page. Read off the
@@ -255,6 +262,7 @@ export function ConsoleLayout({
     <PhoneAppHomeSlotProvider>
     {/* objectstack#35883 — a page's own phone top row, drawn by the app bar. */}
     <PhonePageBarProvider>
+    <DesignModeProvider value={designMode}>
     <AppShell
       sidebar={
         docsPage ? undefined : (
@@ -271,8 +279,14 @@ export function ConsoleLayout({
       // own instead, objectstack#28483). An app's docs pages keep it at every
       // width: they mount no sidebar (objectstack#35424), so the bar is still
       // where their account, search and bell are.
-      showHeader={(phone || docsPage) && !recordPageOwnsTopBar}
+      //
+      // objectstack#36362 — while the design mode is on, its bar takes the
+      // top slot instead, across the whole window, on every route.
+      showHeader={designMode.active || ((phone || docsPage) && !recordPageOwnsTopBar)}
       navbar={
+        designMode.active ? (
+          <DesignModeBar mode={designMode} />
+        ) : (
           <AppHeader
             variant="app"
             appName={appLabel}
@@ -281,6 +295,7 @@ export function ConsoleLayout({
             activeAppName={activeAppName}
             onAppChange={onAppChange}
           />
+        )
       }
       // objectui#12463 — from `lg` up the inset is a flex column: the banners
       // box (`shrink-0`, below) keeps its height and the route slot (below)
@@ -371,6 +386,7 @@ export function ConsoleLayout({
       {/* Under `md` the drawer is a bottom sheet (no room for a rail on a phone). */}
       {chatDock.sheet}
     </AppShell>
+    </DesignModeProvider>
     </PhonePageBarProvider>
     </PhoneAppHomeSlotProvider>
     </CommandPaletteProvider>

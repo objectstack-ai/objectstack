@@ -390,7 +390,11 @@ describe('posture reading, with a red control for each', () => {
     // of the `view` write door (the save stores the parsed body, so a strip
     // there lost a key silently). The two sites left are `ViewColumnStateSchema`
     // (above) and the form field's `base` shape, both unchanged by #26711.
-    expect(countStripSites(at('ui/view.zod.ts'))).toBe(2);
+    //
+    // 2 → 1 at #36403: `columnState` retired from both wire doors (a
+    // `retiredKey()` tombstone now), and `ViewColumnStateSchema` went with it.
+    // The one site left is the form field's `base` shape.
+    expect(countStripSites(at('ui/view.zod.ts'))).toBe(1);
   });
 
   it('lets a chained posture override the idiom in either direction (#5072)', () => {

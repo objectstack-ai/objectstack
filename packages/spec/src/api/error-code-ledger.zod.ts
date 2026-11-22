@@ -1595,6 +1595,12 @@ export const ERROR_CODE_LEDGER = {
     // through rest. `@objectstack/rest` keeps its own rows for the data door.
     'OBJECT_API_DISABLED',
     'OBJECT_API_METHOD_NOT_ALLOWED',
+    // [#35525] …and the data door's disabled-package refusal, stamped by the
+    // same gate (`api-exposure-door.ts`) for an object of a disabled package
+    // in a query's read set: 404, the data route's own sentence. Same wire
+    // paths as the two above. Provenance, not identity:
+    // `@objectstack/metadata-protocol` keeps its row for the data door.
+    'OBJECT_PACKAGE_DISABLED',
     'RAW_SQL_UNSUPPORTED',
     'READ_SCOPE_COMPILE_FAILED',   // [#5367] RLS read-scope lowering failed fail-closed — a SERVER fault (500), never the caller's
   ],
@@ -2322,6 +2328,16 @@ export type ProvenanceWaiver = z.input<typeof ProvenanceWaiverSchema>;
  * adjudicated on #13353 itself.
  */
 export const PROVENANCE_WAIVERS: readonly ProvenanceWaiver[] = [
+  {
+    package: '@objectstack/core',
+    code: 'PROJECT_MEMBERSHIP_REQUIRED',
+    registeredUnder: '@objectstack/runtime',
+    reason: 'Shared verdict one package over: core\'s `environment-membership.ts` defines the code ' +
+      'beside `judgeEnvironmentMembership` so every door of a multi-environment host applies one ' +
+      'judgment, but core has no HTTP door. The refusal ships on the wire from the runtime ' +
+      'dispatcher (`HttpDispatcher`, the runtime row\'s emitter) and from the REST server, both ' +
+      'of which ask that function and write its code; neither spells the string itself.',
+  },
   {
     package: '@objectstack/metadata-core',
     code: 'SCHEMA_UPGRADE_CONFIRMATION_REQUIRED',

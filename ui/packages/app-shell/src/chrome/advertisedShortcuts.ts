@@ -16,9 +16,10 @@
  * chat page's `⌘⇧O` / `⌘⇧S` are advertised by that page, so they are listed
  * only where that page is mounted.
  *
- * Two advertisers sit beside a handler they do not own the code of: `⌘B` is
- * the Shadcn `SidebarProvider`'s own listener (a synced primitive, see
- * `ConsoleLayout`), and `Esc` is Radix's dismiss handler on every dialog and
+ * Two advertisers sit beside a handler they do not own the code of: `⌘B` is,
+ * on a phone, the Shadcn `SidebarProvider`'s own listener (a synced primitive;
+ * from 768 px up the console sidebar answers it, see `ConsoleLayout`), and
+ * `Esc` is Radix's dismiss handler on every dialog and
  * panel (see `KeyboardShortcutsDialog`). The pin
  * `KeyboardShortcutsDialog.wiredOnly-11674.test.tsx` fires every listed
  * entry's chord against the real handler, those two included, and fails on a

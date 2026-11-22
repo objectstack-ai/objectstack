@@ -308,12 +308,18 @@ export function AddFieldPopover({
   loading,
   error,
   onAdd,
+  nameOnHover = false,
 }: {
   fields: ObjectFieldInfo[];
   usedNames: Set<string>;
   loading: boolean;
   error: string | null;
   onAdd: (field: ObjectFieldInfo) => void;
+  /**
+   * Keep each option's machine name off the list, reachable on hover only (the
+   * option's title) — for the panels that speak business wording.
+   */
+  nameOnHover?: boolean;
 }) {
   const locale = useMetadataLocale();
   const [open, setOpen] = React.useState(false);
@@ -374,8 +380,13 @@ export function AddFieldPopover({
                   className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent"
                 >
                   <FieldIcon type={f.type} />
-                  <span className="min-w-0 flex-1 truncate font-medium">{f.label}</span>
-                  {f.name !== f.label && (
+                  <span
+                    className="min-w-0 flex-1 truncate font-medium"
+                    title={nameOnHover && f.name !== f.label ? f.name : undefined}
+                  >
+                    {f.label}
+                  </span>
+                  {f.name !== f.label && !nameOnHover && (
                     <code className="max-w-[6rem] truncate text-[10px] text-muted-foreground">
                       {f.name}
                     </code>

@@ -48,7 +48,10 @@ const CENSUS: Record<string, readonly ViewMetadataBranch[]> = {
   isPinned: ['viewItem', 'listOverlay'],
   sortOrder: ['viewItem', 'listOverlay'],
   visibility: ['viewItem', 'listOverlay'],
-  columnState: ['viewItem', 'listOverlay'],
+  // [#36403] `columnState` left the census: the console writes no column layout
+  // onto a stored row any more (widths live in the reader's browser, a column
+  // order is saved into the view itself, #35955), so it was retired from both
+  // members — `view-column-state-retirement.test.ts`.
   _isOverride: ['listOverlay'],
 };
 
@@ -58,7 +61,6 @@ const VALUE: Record<string, unknown> = {
   isPinned: true,
   sortOrder: 3,
   visibility: 'team',
-  columnState: { order: ['name'], widths: { name: 120 } },
   _isOverride: true,
 };
 

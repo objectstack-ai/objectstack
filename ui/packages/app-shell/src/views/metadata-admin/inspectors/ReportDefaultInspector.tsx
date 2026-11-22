@@ -59,8 +59,11 @@ import { mergeServerFields } from '../mergeServerFields.js';
 import { t } from '../i18n.js';
 import { mapLoaded } from '../loadState.js';
 import type { WidgetContext } from '../widgets.js';
-import { labelBesideName, datasetPickerOptions, datasetSelectOptions } from './dataset-picker-options.js';
+import { datasetPickerOptions, datasetLabelOptions } from './dataset-picker-options.js';
 import { pickLocalized, setLocalized, clearLocalized } from '@object-ui/i18n';
+import { WIDGET_TYPE_META } from '../previews/widget-types.js';
+import { shownLabel, writtenLabel, useLabelLanguage } from './servedLabel.js';
+import { useServedReportText } from '../../studio-design/servedReportText.js';
 
 /**
  * Top-level report fields this inspector renders with its own dedicated
@@ -211,11 +214,30 @@ function withAggregate(text: string, aggregate: string | undefined): string {
   return aggregate ? `${text} · ${aggregate}` : text;
 }
 
-/** The bound dataset's measures as add-member options (the name rides in `name`). */
-export function datasetMeasureOptions(measures: DatasetMeasureInfo[]): ObjectFieldInfo[] {
+/**
+ * A measure's aggregate in the designer locale — `合计` for `sum` in zh-CN —
+ * or the stored word for an aggregate the catalogue has no entry for.
+ */
+export function aggregateText(aggregate: string | undefined, locale: MetadataDefaultInspectorProps['locale']): string | undefined {
+  if (!aggregate) return undefined;
+  const key = `engine.inspector.report.aggregate.${aggregate}`;
+  const text = t(key, locale);
+  return text === key ? aggregate : text;
+}
+
+/**
+ * The bound dataset's measures as add-member options (the name rides in
+ * `name`): the author's label and the aggregate, `Amount · Sum`. Given a
+ * `locale`, the aggregate reads in it ({@link aggregateText}); without one it
+ * is the stored word, as it has always been.
+ */
+export function datasetMeasureOptions(
+  measures: DatasetMeasureInfo[],
+  locale?: MetadataDefaultInspectorProps['locale'],
+): ObjectFieldInfo[] {
   return measures.map((m) => ({
     name: m.name,
-    label: withAggregate(m.label ?? m.name, m.aggregate),
+    label: withAggregate(m.label ?? m.name, locale ? aggregateText(m.aggregate, locale) : m.aggregate),
     type: 'number',
     hidden: false,
   }));
@@ -265,6 +287,14 @@ export function DatasetNamesEditor({
     for (const o of options) m.set(o.name, o.type);
     return m;
   }, [options]);
+  // A picked member reads as the author's label (the option's), its machine
+  // name reachable on hover only; a member the catalog does not carry, or one
+  // read while the catalog is still loading, reads as its name.
+  const labelByName = React.useMemo(() => {
+    const m = new Map<string, string>();
+    for (const o of options) m.set(o.name, o.label);
+    return m;
+  }, [options]);
 
   return (
     <div className="border-t pt-3 space-y-1.5">
@@ -285,8 +315,9 @@ export function DatasetNamesEditor({
             <FieldListRow
               key={`${name}-${i}`}
               index={i}
-              label={name}
+              label={labelByName.get(name) ?? name}
               fieldName={name}
+              nameOnHover
               fieldType={typeByName.get(name) ?? 'number'}
               selected={false}
               canEdit={!readOnly}
@@ -316,6 +347,7 @@ export function DatasetNamesEditor({
           usedNames={used}
           loading={loading}
           error={error}
+          nameOnHover
           onAdd={(f) => onCommit(appendArray(names, f.name))}
         />
       )}
@@ -336,6 +368,10 @@ export function ReportDefaultInspector({
   onInlineIssueFieldsChange,
 }: ReportDefaultInspectorProps) {
   const tr = React.useCallback((key: string) => t(key, locale), [locale]);
+  // The language the report's own text (its name, its chart title) is shown
+  // and edited in: the session's, the one the page beside the panel reads.
+  const language = useLabelLanguage(locale);
+  const servedText = useServedReportText();
 
   // In create mode the host passes an empty `name` (the PK is assigned on
   // first save). Mirror ObjectDefaultInspector: expose an editable Name that
@@ -355,7 +391,9 @@ export function ReportDefaultInspector({
   // string arm painted an EMPTY Label box over a report that has a label, and
   // the empty box is what invites the retype that flattens the map
   // (objectui#9274). READ through the repo's one resolver for the union.
-  const labelValue = pickLocalized(draft.label, locale);
+  // The Name box shows the current language's text: the served translation
+  // while the buffer still holds the authored source (`servedLabel.ts`).
+  const labelValue = shownLabel(draft.label, servedText?.label, language);
   // objectui#12680 — whether the author has edited the name is read off the
   // DRAFT, not kept in this component: the name still follows the label while
   // it is empty or equals the identifier the label as it stands derives. A ref
@@ -400,8 +438,10 @@ export function ReportDefaultInspector({
   //
   // objectui#11161 — a select item renders text only, so a declared
   // description follows the label after ` — `.
+  // objectstack#36373 — the report panel speaks business wording: a dataset
+  // reads as its label alone (the machine name stays the stored value).
   const datasetOptions = React.useMemo(
-    () => datasetSelectOptions(catalog.datasets),
+    () => datasetLabelOptions(catalog.datasets),
     [catalog.datasets],
   );
 
@@ -428,8 +468,8 @@ export function ReportDefaultInspector({
   );
 
   const measureOptions: ObjectFieldInfo[] = React.useMemo(
-    () => datasetMeasureOptions(semantics.measures),
-    [semantics.measures],
+    () => datasetMeasureOptions(semantics.measures, locale),
+    [semantics.measures, locale],
   );
   const dimensionOptions: ObjectFieldInfo[] = React.useMemo(
     () => datasetDimensionOptions(semantics.dimensions),
@@ -448,7 +488,7 @@ export function ReportDefaultInspector({
   const chartType = typeof chart.type === 'string' ? (chart.type as string) : '';
   const chartX = typeof chart.xAxis === 'string' ? (chart.xAxis as string) : '';
   const chartY = typeof chart.yAxis === 'string' ? (chart.yAxis as string) : '';
-  const chartTitle = pickLocalized(chart.title, locale);
+  const chartTitle = pickLocalized(chart.title, language);
   const commitChart = (patch: Record<string, unknown>) => {
     const next = { ...chart, ...patch };
     onPatch({ chart: next.type ? next : undefined });
@@ -456,19 +496,36 @@ export function ReportDefaultInspector({
   // Both axis rosters used to append an out-of-catalog axis unflagged
   // (objectui#8488): visible, but indistinguishable from a dimension the
   // dataset actually offers. The flag is `InspectorSelectField`'s job now.
-  // objectui#11161 — a select item renders text only, so each axis reads
-  // `LABEL (name)`; the stored axis is the name.
+  // objectstack#36373 — each axis reads as the author's label (a measure with
+  // its aggregate in the designer locale); the stored axis is the name.
   const chartXOptions = React.useMemo(
-    () => semantics.dimensions.map((d) => ({ value: d.name, label: labelBesideName(d.name, d.label) })),
+    () => semantics.dimensions.map((d) => ({ value: d.name, label: d.label || d.name })),
     [semantics.dimensions],
   );
   const chartYOptions = React.useMemo(
     () =>
       semantics.measures.map((m) => ({
         value: m.name,
-        label: withAggregate(labelBesideName(m.name, m.label), m.aggregate),
+        label: withAggregate(m.label || m.name, aggregateText(m.aggregate, locale)),
       })),
-    [semantics.measures],
+    [semantics.measures, locale],
+  );
+  // The chart-type roster: each family by its name in the designer locale and
+  // its glyph — the widget-type registry the dashboard pickers read.
+  const chartTypeOptions = React.useMemo(
+    () => [
+      { value: '', label: t('engine.inspector.report.chartNone', locale) },
+      ...REPORT_CHART_TYPES.map((tp) => {
+        const meta = WIDGET_TYPE_META[tp];
+        const Icon = meta?.icon;
+        return {
+          value: tp,
+          label: meta ? t(meta.selectLabelKey, locale) : tp,
+          ...(Icon ? { icon: <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden /> } : {}),
+        };
+      }),
+    ],
+    [locale],
   );
 
   // A `joined` report carries its data on dataset-bound `blocks` (edited via
@@ -540,8 +597,11 @@ export function ReportDefaultInspector({
           // report, so it is the more reachable of the two. A required key
           // spells "empty" as `''`, not as an absent key, so the clear arm's
           // `undefined` (nothing localized left) is mapped back onto it.
+          // objectstack#36373 — the edit lands in the session language's
+          // entry; a plain-string source the box showed translated becomes
+          // `{ default: SOURCE, LANG: EDIT }` (`servedLabel.ts`).
           const patch: Record<string, unknown> = {
-            label: v ? setLocalized(draft.label, locale, v) : (clearLocalized(draft.label, locale) ?? ''),
+            label: writtenLabel(draft.label, servedText?.label, language, v, ''),
           };
           // Live-derive the snake_case name from the label until the author
           // edits the Name field directly (create mode only). `v` is the plain
@@ -593,6 +653,9 @@ export function ReportDefaultInspector({
               mono
             />
           )}
+          <p className="text-[10px] leading-snug text-muted-foreground" data-testid="report-dataset-hint">
+            {tr('engine.inspector.report.datasetHint')}
+          </p>
 
           <DatasetNamesEditor
             label={tr('engine.inspector.report.values')}
@@ -635,10 +698,7 @@ export function ReportDefaultInspector({
             <InspectorSelectField
               label={tr('engine.inspector.report.chartType')}
               value={chartType}
-              options={[
-                { value: '', label: tr('engine.inspector.report.chartNone') },
-                ...REPORT_CHART_TYPES.map((tp) => ({ value: tp, label: tp })),
-              ]}
+              options={chartTypeOptions}
               onCommit={(v) => commitChart({ type: v || undefined })}
               disabled={readOnly}
             />
@@ -655,8 +715,8 @@ export function ReportDefaultInspector({
                     // clearing a plain-string title has always done).
                     commitChart({
                       title: v
-                        ? setLocalized(chart.title, locale, v)
-                        : clearLocalized(chart.title, locale),
+                        ? setLocalized(chart.title, language, v)
+                        : clearLocalized(chart.title, language),
                     })
                   }
                   disabled={readOnly}

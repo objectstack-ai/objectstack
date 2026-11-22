@@ -21,7 +21,15 @@
 import * as React from 'react';
 import { ComponentRegistry } from '@object-ui/core';
 import { useMetadataItem, resolveInlineAriaProps } from '@object-ui/react';
-import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
+import {
+  formatCurrency,
+  formatNumber,
+  resolveFieldCurrency,
+  useDisplayLocale,
+  useFlowLabelTranslations,
+  useLocalization,
+  useObjectTranslation,
+} from '@object-ui/i18n';
 import type { AriaProps } from '@object-ui/types';
 import {
   ArrowRight,
@@ -37,6 +45,17 @@ import {
 import type { SelectOption as SpecSelectOption } from '@objectstack/spec/data';
 import { cn } from '../../lib/utils';
 import { readProps } from './readProps';
+import {
+  decisionBranches,
+  entryGuard,
+  flowSubjects,
+  readCondition,
+  subjectFieldOf,
+  type BranchGuard,
+  type ConditionContext,
+  type FlowConditionField,
+  type FlowSubjects,
+} from './flow-branches';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -381,9 +400,144 @@ const TECHNICAL_NODE_TYPES = new Set([
   'boundary_event',
 ]);
 
+/**
+ * How the business view reads a condition (`flow-branches.ts`): field labels
+ * and options from the flow's object as served, amounts in the reader's
+ * locale and, for a currency field, its currency.
+ */
+function useConditionContext(object: any, subjects: FlowSubjects): ConditionContext {
+  const { t } = useObjectTranslation();
+  const locale = useDisplayLocale();
+  const { currency: tenantCurrency } = useLocalization();
+  return {
+    field(path): FlowConditionField | undefined {
+      const name = subjectFieldOf(path, subjects);
+      const def = getField(object, name);
+      if (!name || !def || typeof def !== 'object') return undefined;
+      return {
+        label: typeof def.label === 'string' && def.label ? def.label : name,
+        type: def.type,
+        options: Array.isArray(def.options) ? def.options : undefined,
+        currency: def.type === 'currency' ? resolveFieldCurrency(def, tenantCurrency) : undefined,
+      };
+    },
+    formatNumber(value, field) {
+      if (!field.currency) return formatNumber(value, { locale });
+      // A whole threshold reads whole (`$500,000`); a fractional one at the
+      // currency's own width.
+      const whole = Number.isInteger(value) ? { minimumFractionDigits: 0, maximumFractionDigits: 0 } : {};
+      try {
+        return formatCurrency(value, { locale, currency: field.currency, ...whole });
+      } catch {
+        return formatNumber(value, { locale });
+      }
+    },
+    words: {
+      and: t('element.metadataViewer.conditionAnd', { defaultValue: 'and' }),
+      or: t('element.metadataViewer.conditionOr', { defaultValue: 'or' }),
+      more: t('element.metadataViewer.conditionMore', { defaultValue: 'other conditions' }),
+    },
+  };
+}
+
+/** The business view's condition reader, provided by {@link FlowConditions}. */
+const ConditionScope = React.createContext<ConditionContext | null>(null);
+
+/**
+ * Reads the object the flow runs on (one request per embed) and provides the
+ * condition reader to the branches below it. Mounted once the flow is known,
+ * so its object request starts in the loading state rather than drawing the
+ * conditions unread for a render.
+ */
+function FlowConditions({ flow, fallback, children }: { flow: unknown; fallback: React.ReactNode; children: React.ReactNode }) {
+  const subjects = flowSubjects(flow);
+  const subject = useMetadataItem('object', subjects.object ?? null);
+  const ctx = useConditionContext(subject.item, subjects);
+  if (subject.loading) return <>{fallback}</>;
+  return <ConditionScope.Provider value={ctx}>{children}</ConditionScope.Provider>;
+}
+
+/** A branch's condition as text, or the neutral marker when it cannot be read; never the raw expression. */
+function ConditionText({ guard, ctx }: { guard: BranchGuard; ctx: ConditionContext }) {
+  const { t } = useObjectTranslation();
+  if (guard.kind === 'none') return null;
+  if (guard.kind === 'otherwise') {
+    return (
+      <span data-condition="otherwise" className="italic text-muted-foreground">
+        {t('element.metadataViewer.otherwise', { defaultValue: 'otherwise' })}
+      </span>
+    );
+  }
+  const text = guard.kind === 'cel' ? readCondition(guard.source, ctx) : null;
+  if (text === null) {
+    return (
+      <span data-condition="opaque" className="italic text-muted-foreground">
+        {t('element.metadataViewer.condition', { defaultValue: 'condition' })}
+      </span>
+    );
+  }
+  return (
+    <span data-condition="read" className="font-medium">
+      {text}
+    </span>
+  );
+}
+
+/** The flow's entry condition, once, above its steps. */
+function EntryCondition({ flow }: { flow: unknown }) {
+  const { t } = useObjectTranslation();
+  const ctx = React.useContext(ConditionScope);
+  const guard = entryGuard(flow);
+  if (!ctx || guard.kind === 'none') return null;
+  return (
+    <div data-flow-entry className="mb-2 text-xs text-muted-foreground">
+      {withChips(t('element.metadataViewer.runsWhen', { defaultValue: 'Runs when {{condition}}', condition: CHIP[0] }), [
+        <ConditionText key="c" guard={guard} ctx={ctx} />,
+      ])}
+    </div>
+  );
+}
+
+/** A decision's branches: each condition (or the neutral marker) and the step it leads to. */
+function Branches({
+  flow,
+  node,
+  nodes,
+  stepLabel,
+}: {
+  flow: unknown;
+  node: any;
+  nodes: any[];
+  /** The step's translated label (`flows.<flow>.approvals.<node_id>.label`), or `undefined`. */
+  stepLabel?: (node: any) => string | undefined;
+}) {
+  const ctx = React.useContext(ConditionScope);
+  const branches = decisionBranches(flow, node);
+  if (!ctx || branches.length === 0) return null;
+  return (
+    <ul data-flow-branches={node.id} className="w-full space-y-1 pl-7 text-xs">
+      {branches.map((b) => {
+        const target = nodes.find((x) => x?.id === b.target);
+        return (
+          <li key={b.key} data-branch-target={b.target} className="flex flex-wrap items-center gap-1.5">
+            <ConditionText guard={b.guard} ctx={ctx} />
+            <ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+            <span>{(target && stepLabel?.(target)) ?? target?.label ?? b.target}</span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 function FlowView({ name, detail }: ViewerProps) {
   const { item: flow, loading, error } = useMetadataItem('flow', name ?? null);
   const { t, ...view } = useViewStates();
+  // The package's `flows` translations in the reader's language: the flow label
+  // and each `approval` step's label, the resolution the Studio designer and
+  // the runner share. Any other step has no key and keeps its authored label.
+  const translated = useFlowLabelTranslations(name ?? '');
+  const business = (detail ?? 'business') === 'business';
 
   if (!name) return view.missing('name');
   if (loading) return view.loading(name);
@@ -391,37 +545,41 @@ function FlowView({ name, detail }: ViewerProps) {
   if (!flow) return view.notFound(name);
 
   const allNodes: any[] = Array.isArray(flow.nodes) ? flow.nodes : [];
-  const business = (detail ?? 'business') === 'business';
   const nodes = business ? allNodes.filter((n) => !TECHNICAL_NODE_TYPES.has(n?.type)) : allNodes;
   const hiddenCount = allNodes.length - nodes.length;
 
-  return (
+  const card = (
     <Shell
       hint={t('element.metadataViewer.flow', { defaultValue: 'Flow' })}
       icon={GitBranch}
-      title={flow.label ?? flow.name ?? name}
+      title={translated?.flowLabel ?? flow.label ?? flow.name ?? name}
       subtitle={
         flow.description ??
         t('element.metadataViewer.steps', { defaultValue: 'Steps: {{count}}', count: allNodes.length })
       }
     >
+      {business && <EntryCondition flow={flow} />}
       {nodes.length === 0 ? (
         <Placeholder>{t('element.metadataViewer.noSteps', { defaultValue: 'No steps to show.' })}</Placeholder>
       ) : (
         <ol className="space-y-1.5">
           {nodes.map((n, i) => (
-            <li key={n?.id ?? i} className="flex items-center gap-2.5 rounded-md border bg-muted/20 px-2.5 py-2">
+            <li key={n?.id ?? i} className="flex flex-wrap items-center gap-2.5 rounded-md border bg-muted/20 px-2.5 py-2">
               <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
                 {i + 1}
               </span>
               <span className="text-sm">
-                {n?.label ?? n?.id ?? t('element.metadataViewer.untitledStep', { defaultValue: '(step)' })}
+                {(n && translated?.stepLabel(n)) ??
+                  n?.label ??
+                  n?.id ??
+                  t('element.metadataViewer.untitledStep', { defaultValue: '(step)' })}
               </span>
               {n?.type && (
                 <span className="ml-auto rounded border bg-background px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
                   {n.type}
                 </span>
               )}
+              {business && <Branches flow={flow} node={n} nodes={allNodes} stepLabel={translated?.stepLabel} />}
             </li>
           ))}
         </ol>
@@ -439,6 +597,13 @@ function FlowView({ name, detail }: ViewerProps) {
         </div>
       )}
     </Shell>
+  );
+  return business ? (
+    <FlowConditions flow={flow} fallback={view.loading(name)}>
+      {card}
+    </FlowConditions>
+  ) : (
+    card
   );
 }
 

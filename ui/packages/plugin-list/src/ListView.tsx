@@ -459,6 +459,17 @@ export interface ListViewProps {
   onDelete?: (record: any) => void;
   onBulkDelete?: (records: any[]) => void;
   /**
+   * objectstack#35403 — the built-in bulk Change Owner, forwarded to
+   * `ObjectGrid` (which declares it with this signature): the grid's selection
+   * bar offers it while the host wires it.
+   */
+  onBulkChangeOwner?: (records: any[]) => void;
+  /**
+   * objectstack#35403 — forwarded to `ObjectGrid`: `false` holds the bulk
+   * Change Owner entry back while `onBulkChangeOwner` keeps the rows selectable.
+   */
+  bulkChangeOwnerOffered?: boolean;
+  /**
    * A host-drawn node rendered FIRST in the toolbar row's left group, before
    * the user filters, in a `min-w-0 flex-1` wrapper: it takes the width the
    * right-hand tool cluster leaves (objectui#12440). The console passes its
@@ -6675,6 +6686,17 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       updateOfferedHiddenFields(hidden);
     }
   };
+  // objectstack#35955 — "Hide column" in the grid's column menu is the eye's
+  // own choice, made on one column: it goes through the same writer, so the
+  // host holds it in the list's draft (Discard brings the column back, Save
+  // keeps it hidden), and an added column leaves the reader's added fields as
+  // it does there. A key that names no column this list draws is the table's
+  // own business and is not reported.
+  const hideColumnFromMenu = (field: string) => {
+    if (offeredHiddenFields.has(field)) return;
+    if (!effectiveFields.some((column: unknown) => columnIdentity(column as any) === field)) return;
+    updateListedFields(new Set([...offeredHiddenFields, field]));
+  };
   // Ticking an offered field adds it to the reader's list. A stale hidden
   // entry with the same name (a column the view has since dropped) is cleared
   // with it, or the added column would be drawn hidden.
@@ -7062,10 +7084,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   }, [shownRowsKey, shownRowsSettled]);
 
   // The Display panel (objectui#12423) is the default form of the toolbar's
-  // settings cluster, drawn whenever it has a control to offer.
+  // settings cluster, drawn whenever it has a control to offer. Refresh is not
+  // one of them: the default toolbar has no Refresh (objectstack#35878), so
+  // `userActions.refresh` alone never draws the panel (objectstack#36002).
   const displayOffered = toolbarFlags.compactToolbar && !!(
     viewSwitcherOffered || toolbarFlags.showGroup || toolbarFlags.showColor || toolbarFlags.showDensity
-    || toolbarFlags.showHideFields || currentView === 'grid' || toolbarFlags.showRefresh
+    || toolbarFlags.showHideFields || currentView === 'grid'
     || (resolvedExportOptions && exportPermitted && exportableFormats.length > 0)
   );
   // The condition controls (objectstack#35549, objectstack#35550): the Filter
@@ -7854,9 +7878,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
 
           {/* Refresh — re-fetch the current view from the backend without a full page
               reload. Filters / sort / pagination / search all live in component state,
-              so bumping refreshKey re-queries while preserving the view. In the wide
-              form a bar button (mobile + desktop); in the Display form it sits in
-              the panel's footer. */}
+              so bumping refreshKey re-queries while preserving the view. Wide form
+              only, a bar button (mobile + desktop): the default (Display) toolbar
+              has no Refresh, neither on the bar nor in the panel (objectstack#35878). */}
           {toolbarFlags.showRefresh && !toolbarFlags.compactToolbar && (
             <Button
               variant="ghost"
@@ -8493,6 +8517,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               // objectstack#35876 — and its column header opens the column
               // menu instead of sorting on a click.
               ? { cellSelection: true, headerMenu: true }
+              : {})}
+            {...(viewComponentSchema.type === 'object-grid'
+              // objectstack#35955 — the column menu's "Hide column" is the
+              // hide-fields eye's choice (`hideColumnFromMenu`), on the grid's
+              // host channel (a React prop, never a node key).
+              ? { onColumnHide: hideColumnFromMenu }
               : {})}
             {...(ROW_OPENS_RECORD_VIEW_TYPES.has(viewComponentSchema.type) && rowOpensRecord !== undefined
               // objectstack#33317, objectstack#33548 — whether the host's row

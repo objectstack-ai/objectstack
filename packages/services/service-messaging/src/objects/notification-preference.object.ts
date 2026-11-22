@@ -189,14 +189,22 @@ export const NotificationPreference = ObjectSchema.create({
             description: 'When false, this (user, topic, channel) is muted.',
         }),
 
+        // [ruling 7073270426 on #35123] Three states, no `defaultValue`: empty
+        // is "not set" and the next row decides (the organization's default,
+        // then none); `none` is the explicit "send each one right away" and
+        // decides. A default of `none` would store that choice on every row
+        // nobody chose it for (`applyFieldDefaults` fills an omitted field on
+        // insert). `preference-resolver.ts` `parseDigest` reads the states;
+        // `preference-digest-unset.ts` keeps an omitted digest empty on a
+        // database whose column still carries the old physical DEFAULT.
         digest: Field.select(['none', 'daily', 'weekly'], {
             label: 'Digest',
             required: false,
-            defaultValue: 'none',
             description:
                 'Collect these notifications into one summary instead of sending each as it arrives: daily sends it at midnight, ' +
                 'weekly on Monday at midnight, none sends each one right away. Critical notifications are always sent at once. ' +
-                'Takes effect on a preference whose channel is * (all channels).',
+                'Takes effect on a preference whose channel is * (all channels). ' +
+                'Left empty, the next preference decides: the default for all users, then none.',
         }),
 
         quiet_hours: Field.json({
@@ -209,11 +217,15 @@ export const NotificationPreference = ObjectSchema.create({
             // unregistered widget degrades to the JSON editor.
             // `notification-preference-topic-channel-help.test.ts` pins it.
             widget: 'quiet-hours',
+            // [ruling 7073270426 on #35123] Three states: empty is "not set"
+            // (the next row decides), `{ "off": true }` is "no quiet hours, by
+            // choice" (`QUIET_HOURS_OFF`) and decides, a window decides.
             description:
                 'A daily window when notifications are held and delivered when it ends, for example ' +
                 '{ "tz": "Europe/Berlin", "start": "22:00", "end": "07:00" }. Times are HH:MM in that time zone (UTC when tz is left out), ' +
                 'and the window may run past midnight. Critical notifications are not held. ' +
-                'Takes effect on a preference whose channel is * (all channels).',
+                'Takes effect on a preference whose channel is * (all channels). ' +
+                '{ "off": true } means no quiet hours; left empty, the next preference decides: the default for all users, then none.',
         }),
 
         created_at: Field.datetime({ label: 'Created At', readonly: true }),

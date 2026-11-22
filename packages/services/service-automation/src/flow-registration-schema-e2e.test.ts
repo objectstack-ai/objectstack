@@ -180,3 +180,72 @@ describe('registerFlow — a flow condition\'s record. / previous. date-text rea
     }
   });
 });
+
+// [#34946] The record-root date-arithmetic verdict reaches `registerFlow`'s
+// schema advisory exactly as the bare name's does (the same shared validator):
+// logged, never thrown — the publish door is what refuses.
+describe('registerFlow — a flow condition\'s record. / previous. date arithmetic is advised as its bare name is (#34946)', () => {
+  let kernel: LiteKernel;
+  let engine: AutomationEngine;
+  let stdout: string[];
+  let stdoutSpy: ReturnType<typeof vi.spyOn>;
+  const loanFlow = (name: string, condition: string) => ({
+    name,
+    label: 'Loan due',
+    type: 'record_change',
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start', config: { objectName: 'library_loan', triggerType: 'record-after-update', condition } },
+      { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [{ id: 'e1', source: 'start', target: 'end' }],
+  });
+
+  beforeEach(async () => {
+    stdout = [];
+    stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: unknown) => {
+      stdout.push(String(chunk));
+      return true;
+    }) as never);
+    kernel = new LiteKernel();
+    kernel.use({
+      name: 'fake-objectql',
+      version: '1.0.0',
+      async init(ctx: PluginContext) {
+        (ctx as unknown as { registerService(name: string, svc: unknown): void }).registerService('objectql', {
+          registry: {
+            getObject: (name: string) =>
+              name === 'library_loan'
+                ? { name, fields: { due_date: { type: 'date', required: true }, picked_up_at: { type: 'datetime', required: true } } }
+                : undefined,
+          },
+        });
+      },
+    });
+    kernel.use(new AutomationServicePlugin());
+    await kernel.bootstrap();
+    engine = kernel.getService('automation') as AutomationEngine;
+  });
+
+  afterEach(async () => {
+    stdoutSpy.mockRestore();
+    await kernel.shutdown();
+  });
+
+  it('logs the date-arithmetic advisory for record. and previous. as for the bare name, and registers', () => {
+    for (const read of ['due_date', 'record.due_date', 'previous.due_date']) {
+      stdout.length = 0;
+      const name = `loan_${read.replace('.', '_')}`;
+      expect(() => engine.registerFlow(name, loanFlow(name, `${read} + 1 > 5`)), read).not.toThrow();
+      expect(stdout.join(''), read).toContain(`date arithmetic \`google.protobuf.Timestamp + int\` — \`${read}\` is a date`);
+    }
+  });
+
+  it('CONTROL: an ordering of the date against today() is not advised', () => {
+    for (const read of ['record.due_date', 'previous.due_date']) {
+      stdout.length = 0;
+      const name = `loan_${read.replace('.', '_')}`;
+      expect(() => engine.registerFlow(name, loanFlow(name, `${read} < today()`)), read).not.toThrow();
+      expect(stdout.join(''), read).not.toMatch(/date arithmetic/);
+    }
+  });
+});

@@ -845,37 +845,45 @@ page that keeps the default tab strip) is laid out by the width of the view it
 occupies — the full page, the split pane, the overlay drawer, the maximized
 pane, a phone — by one rule, never by the viewport:
 
-| Container width | Layout |
+| Where, and how wide | Layout |
 |---|---|
-| 1120 px and up | Details · the right column (380 px). A details section takes up to three field columns; the 动态 panel shows five entries |
-| 760 – 1119 px | Details · the right column (320 px). A details section takes up to two field columns; the 动态 panel shows three entries |
-| below 760 px | One column: the details sections, then the right column's panels in their order |
+| A full page whose content is at least 744 px wide (`RECORD_PAGE_PIN_MIN_WIDTH`: a 320 px left column, a 24 px gap, 400 px of tabs), with at least one other tab, and no field group placing a related table among the fields | The details pinned to a left column, 400 px by default, one field a row; beside it the tab row without the details, open on its first tab. Each side scrolls on its own |
+| Anywhere else: a narrower page, a drawer, a pane, a phone, or a page that places a related table among its fields | The tab row with the details as its first tab (「详情」, Details), the open tab drawn the full width. The details take one field a row, except on a full page whose details are its only tab: up to three field columns there |
 
-The right column holds the panels, each the same shape (a title and a count;
-the header row opens the panel's whole face, the host's `?related=`): first
-**动态** (Activity) — one stream of the discussion, the activity and, with
-`enable.trackHistory`, the field changes, shown as a one-line composer, the
-newest entries and 「查看全部 N 条 →」, which opens the stream in full with its
-All / Activity / Discussion chips, a Changes chip while the record shows its
-field history (the host's `RecordFieldHistoryContext`; it holds the audit's
-field changes with their before and after values, and every activity event,
-`created` and `updated` included, sits under Activity; one action that wrote
-both an activity row and an audit entry is one row, its before and after values
-on it), and paging
-(`?related=timeline`) — then each related list in the reader's arrangement, then Approvals and
-Attachments. The reader's ⊟ (`rightColumn`) takes the right column out of the
-two-column tiers; there is no tabbed tier.
+No width draws a right column of summary panels any more. Each tab's count
+carries what a panel said, and the reader's ⊟ (`rightColumn`) and `rail` are
+ignored. `tier` (`recordPageTierFor`) is still taken and stamped on the page as
+`data-record-page-tier`, but the layout above is decided by the page
+content's own measured width.
 
-A tab row closes the record header in every tier (`RecordTabRow`): 「概览」
-(Overview), then 动态, then one tab per related panel in the reader's
-arrangement, each with its count. A tab is its panel's whole face: choosing it
-draws the full list (every column, paging, sort, inline edit) or the full
-stream below the row, with the header unchanged, and the URL carries it
-(`?related=<object>.<field>`, `?related=timeline`); 「概览」 or Esc returns. The
-row shows as many tabs as its own width fits, measured on every resize, and
-folds the rest into 「+N ▾」, which lists them with their counts and ends with
-the hidden panels' tabs. 「概览」, at least one more tab and the active tab are
-always on the row.
+On a pinned page the left column narrows on its own to leave the tabs 400 px,
+never below 320 px; under that the page is no longer pinned and the details
+become its first tab again. The divider between the column and the tabs is a
+separator: drag it, or move it with ← → (Home / End to either end); a
+double-click puts the column back to the default. The width is the host's to
+keep — `detailsWidth` and `onDetailsWidthChange`, per reader and per object in
+the console — and a double-click keeps the default there too.
+
+A tab row closes the record header (`RecordTabRow`): 「详情」 (Details) where
+the details are not pinned, then one tab per related list in the reader's
+arrangement, then Attachments, Approvals, and 动态 (Activity) last, each with
+its count. A tab is its panel's whole face: choosing it draws the full list
+(every column, paging, sort, inline edit) or the full stream below the row,
+with the header unchanged, and the URL carries it
+(`?related=<object>.<field>`, `?related=timeline`); 「详情」 or Esc returns
+where the details are a tab. The row shows as many tabs as its own width
+fits, measured on every resize, and folds the rest into 「+N ▾」, which lists
+them with their counts and ends with the hidden lists' tabs. The details tab
+(where there is one), at least one more tab and the active tab are always on
+the row.
+
+The 动态 tab is one stream of the discussion, the activity and, with
+`enable.trackHistory`, the field changes, with All / Activity / Discussion
+chips and a Changes chip while the record shows its field history (the host's
+`RecordFieldHistoryContext`; it holds the audit's field changes with their
+before and after values, and every activity event, `created` and `updated`
+included, sits under Activity; one action that wrote both an activity row and
+an audit entry is one row, its before and after values on it), and paging.
 
 The related panels load counts first and rows on demand (`RelatedCardStack`).
 Every panel's count is asked in one request set, and each panel is a
@@ -963,9 +971,11 @@ Every part reads the record's discussion off the host's `DiscussionContext`
 (`useRecordComments`) and offers each write exactly where the host hands it, so
 the panel needs no props beyond `onClose`. Where it sits and how wide is the
 host's to decide; the console's record page gives it 380 px beside the record
-from a 1280 px window, over the record's right edge in a narrower one, and the
-whole drawer body in a drawer narrower than 760 px. While the host wraps the
-page in `RecordCommentsInPanelContext` (value `true`), the default page's 动态
+from a 1280 px window, over the record's right edge in a narrower one. The
+console's record drawer (the side preview) draws no panel and no icon: the
+comments are the full page's (objectstack#36225). While the host wraps the
+page in `RecordCommentsInPanelContext` (value `true`; the console does so on
+the full page and in the drawer alike), the default page's 动态
 stream draws the system entries alone: no comment rows, no All / Activity /
 Discussion chips (the Changes chip stays, a toggle), no comment box, and its
 count leaves the comments out.

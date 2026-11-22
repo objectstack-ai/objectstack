@@ -29,6 +29,11 @@
  * back to the column (fail open: the server refuses a locked write whatever
  * this says). A 501 (no approvals service in this deployment) is latched and
  * the read is not sent again, like the record page's.
+ *
+ * A read that answers re-renders the host (objectstack#35689), so what the
+ * grid already says of the selected cell (its `aria-readonly`) follows the
+ * lock without waiting for the reader to move: `isLocked`, and the value this
+ * hook returns, are new exactly when the answers it reads changed.
  */
 import * as React from 'react';
 import { APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS } from '@objectstack/spec/contracts';
@@ -75,9 +80,13 @@ export function useRowApprovalLocks(objectName: string | undefined): RowApproval
   const answersRef = React.useRef(new Map<string, LockAnswer>());
   /** The read each row asked is waiting on, while it is on the wire. */
   const wiresRef = React.useRef(new Map<string, Promise<void>>());
+  // Counts the changes to what `isLocked` reads: a read answering, the answers dropped.
+  const [answerSeq, setAnswerSeq] = React.useState(0);
   React.useEffect(() => {
+    const dropped = answersRef.current.size > 0;
     answersRef.current = new Map();
     wiresRef.current = new Map();
+    if (dropped) setAnswerSeq((n) => n + 1);
   }, [objectName, invalidation]);
 
   const probe = React.useCallback((recordIds: readonly unknown[]) => {
@@ -124,13 +133,18 @@ export function useRowApprovalLocks(objectName: string | undefined): RowApproval
             answers.set(id, answered.get(id) ?? 'unanswered');
             wires.delete(id);
           }
+          // Answers for answers since dropped (the object changed) read nowhere.
+          if (answered.size > 0 && answers === answersRef.current) setAnswerSeq((n) => n + 1);
         }
       })();
       for (const id of chunk) if (answers.get(id) === 'asking') wires.set(id, wire);
     }
   }, [objectName, apiFetch]);
 
+  // `answerSeq` is read so this callback, and the value below, are new when a
+  // read answers: the host's cell facts depend on it.
   const isLocked = React.useCallback((recordId: unknown, row: any) => {
+    void answerSeq;
     const answer = recordId == null ? undefined : answersRef.current.get(String(recordId));
     const readAnswered = typeof answer === 'object';
     return resolveApprovalLock({
@@ -138,7 +152,7 @@ export function useRowApprovalLocks(objectName: string | undefined): RowApproval
       openApproval: readAnswered && answer.locked ? { locked: true } : null,
       recordStatus: row?.approval_status,
     }).locked;
-  }, []);
+  }, [answerSeq]);
 
   const settling = React.useCallback(
     (recordId: unknown) => (recordId == null ? null : wiresRef.current.get(String(recordId)) ?? null),

@@ -1307,7 +1307,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "userActions.refresh": {
         label: "Refresh",
-        helpText: "Allow users to reload the view data from the backend without a full page reload"
+        helpText: "Allow users to reload the view data from the backend without a full page reload. Governs only the wide toolbar's Refresh button (`compactToolbar: false`): the default toolbar has no Refresh, so the toggle changes nothing there."
       },
       "userActions.rowHeight": {
         label: "Row Height",
