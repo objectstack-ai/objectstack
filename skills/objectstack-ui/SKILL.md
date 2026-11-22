@@ -63,7 +63,8 @@ Two more: [List Views](#list-views), [Actions](#actions).
    must never be what keeps a user from someone else's data.
 5. **The object declares its record page.** Related lists, their order and
    filter are flags on the object and its fields, not a page file; how a record
-   opens is one list-view key, and the reader's own display choices are never
+   opens from an object's list is not authored (the name opens the page, its
+   hover icon the drawer), and the reader's own display choices are never
    metadata ([Record Page](./rules/record-page.md)).
 
 ## Where to go
@@ -73,7 +74,7 @@ Two more: [List Views](#list-views), [Actions](#actions).
 | A list, board, calendar, gallery or gantt: columns, `filter`, quick filters, toolbar search, sorting, grouping | `src/views/*.view.ts` | [List Views](./rules/list-views.md) |
 | A form (`simple` / `tabbed` / `wizard`): width, columns and `sections`; master-detail (a parent with line items), a public form, field conditional rules | `src/views/*.view.ts` | [Form Views](./rules/list-views.md#form-views) |
 | An app and its navigation; who sees or opens it; object nav, a `filters` slice or an interface page | `src/apps/*.app.ts` | [Navigation](./rules/navigation.md) |
-| What a record page shows: related lists, a slotted or full page, drawer or page | the object | [Record Page](./rules/record-page.md) |
+| What a record page shows: related lists, a slotted or full page; how a record opens | the object | [Record Page](./rules/record-page.md) |
 | A button or operation: `locations`, visibility, dialog and toast copy, params, new tab, the body's `ctx`, refusing by code (`refusals`) | `src/actions/*.action.ts`, `*.actions.ts` | [Actions](./rules/actions.md) |
 | A number, chart, KPI or report over records: datasets, widgets, dashboard filters, `compareTo`, date bucketing, drilldown, cubes | `src/datasets/*.dataset.ts`, `src/dashboards/*.dashboard.ts`, `src/reports/*.report.ts` | [Dashboards](./rules/dashboards.md) |
 | A page (regions, components, print, `kind: 'html'` / `'react'` source, styling) or package docs | `*.page.ts`, `src/docs/*.md` | [Pages & Docs](./rules/pages.md) |
