@@ -780,11 +780,12 @@ export function registerAuthzMiddleware(
         return this.computeLayeredRlsFilter(callerSets, object, operation, callerContext);
       },
       rowInScope: async (object, id, layer0) => {
-        const row = await ql.findOne(object, {
-          where: { $and: [{ id }, layer0] },
-          fields: ['id'],
+        // Read as the platform, by the wall's predicate alone, as step 2.7
+        // reads the addressed row by the caller's.
+        const row = await this.ql.findOne(object, {
+          where: { $and: [{ id: typeof id === 'bigint' ? String(id) : id }, layer0] },
           context: { isSystem: true },
-        } as any);
+        });
         return !!row;
       },
       notFound: (object, id, context) => recordNotFoundError(object, id as string | number, context as any),
