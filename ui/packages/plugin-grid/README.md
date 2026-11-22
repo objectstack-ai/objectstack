@@ -1054,21 +1054,27 @@ click opens a cell's editor, and the save/cancel affordances appear on their own
 once a row has pending changes:
 
 ```tsx
-<ObjectGrid
-  cellSelection={false}
-  dataSource={dataSource}
-  schema={{
-    type: 'object-grid',
-    objectName: 'products',
-    columns: [
-      { field: 'sku', label: 'SKU' },
-      { field: 'name', label: 'Name' },
-      { field: 'price', label: 'Price', type: 'currency', align: 'right' },
-      { field: 'stock', label: 'Stock', type: 'number', align: 'right' },
-    ],
-    editable: true,
-  }}
-/>
+import { ObjectGrid, type ObjectGridComponentProps } from '@object-ui/plugin-grid';
+
+declare const dataSource: NonNullable<ObjectGridComponentProps['dataSource']>;
+
+export const ProductsGrid = () => (
+  <ObjectGrid
+    cellSelection={false}
+    dataSource={dataSource}
+    schema={{
+      type: 'object-grid',
+      objectName: 'products',
+      columns: [
+        { field: 'sku', label: 'SKU' },
+        { field: 'name', label: 'Name' },
+        { field: 'price', label: 'Price', type: 'currency', align: 'right' },
+        { field: 'stock', label: 'Stock', type: 'number', align: 'right' },
+      ],
+      editable: true,
+    }}
+  />
+);
 ```
 
 Left alone, saving goes through the host's data source. A React host that needs to
