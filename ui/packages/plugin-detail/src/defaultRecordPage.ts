@@ -126,10 +126,13 @@ export function useApprovalBandOnce(): { draws: boolean; mark: React.ReactNode }
 
 /**
  * The most columns a frameless detail section may take on the page being
- * drawn: the record page's layout sets 1 while the details are pinned to its
- * left column (objectstack#35890: one field a row, a long text the full width)
- * and leaves 3 otherwise, where the section's own container width decides.
- * 3 anywhere else.
+ * drawn: the record page's layout sets 1 wherever the details sit beside other
+ * tabs or are one of them — a drawer, a phone, a narrow page, the pinned left
+ * column (objectstack#36147: one field a row, label left and value right, at
+ * any width) — and leaves 3 only on a full page whose details are its only
+ * face, where the section's own container width decides. 3 anywhere else.
+ * 1 is also the field list face: `DetailSection` draws its rows one under the
+ * other with a hairline between them.
  */
 export const DetailsColumnCapContext = React.createContext<1 | 2 | 3>(3);
 

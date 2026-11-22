@@ -34,6 +34,13 @@ export interface CommentItemProps {
   onToggleReaction?: (emoji: string) => void;
   /** What sits under the comment: a thread's 「N 条回复」, or its replies. */
   footer?: React.ReactNode;
+  /**
+   * The comment's box answers a press besides its own controls (the phone's
+   * long press, `useCommentPress`): spread on the box, which then takes no
+   * text selection and no system callout, so the press is the page's. Not
+   * while the comment is being edited: the press is then the editor's.
+   */
+  interactionProps?: React.HTMLAttributes<HTMLDivElement>;
   className?: string;
 }
 
@@ -51,13 +58,23 @@ export const CommentItem: React.FC<CommentItemProps> = ({
   onCancelEdit,
   onToggleReaction,
   footer,
+  interactionProps,
   className,
 }) => {
   const { t } = useDetailTranslation();
   const locale = useDisplayLocale();
   const reactions = item.reactions ?? [];
   return (
-    <div className={cn('group/comment relative', className)} data-comment-item="" data-comment-id={String(item.id)}>
+    <div
+      {...(editing ? undefined : interactionProps)}
+      className={cn(
+        'group/comment relative',
+        interactionProps && !editing && 'select-none [-webkit-touch-callout:none]',
+        className,
+      )}
+      data-comment-item=""
+      data-comment-id={String(item.id)}
+    >
       <div className="flex min-h-5 items-center gap-2 pr-1">
         <CommentAuthorAvatar name={item.actor} avatarUrl={item.actorAvatarUrl} />
         <span className="truncate text-sm font-medium text-foreground">{item.actor}</span>

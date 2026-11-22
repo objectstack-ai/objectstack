@@ -253,6 +253,17 @@ describe('rateLimit — #5006 primitives, an endpoint-scoped keyspace', () => {
         expect(trusted.keys()).toEqual([endpointBucketKey('showcase_tasks', 'ip:198.51.100.1')]);
     });
 
+    it('keys by the entry the declared proxy appended under the trusted-network form', async () => {
+        const endpoint = limited();
+        const h = harness({
+            headers: { 'x-forwarded-for': '198.51.100.1, 192.0.2.44' },
+            remoteAddress: '10.0.0.2',
+        });
+        h.context.trustProxy = { networks: ['10.0.0.0/8'], header: 'x-forwarded-for' };
+        await run(endpoint, h);
+        expect(h.keys()).toEqual([endpointBucketKey('showcase_tasks', 'ip:192.0.2.44')]);
+    });
+
     it('meters BEFORE it gates, so a 401 storm still spends the budget (#5040 §3)', async () => {
         // The order that matters most and is easiest to get wrong: credential
         // stuffing is anonymous traffic against an `authRequired` endpoint. If

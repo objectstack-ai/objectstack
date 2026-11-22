@@ -1561,6 +1561,10 @@ const zhHant = {
     threadResolved: "已解決",
     threadResolvedBy: "已由 {{name}} 解決",
     filterComments: "篩選評論",
+    addReactionEmoji: "用 {{emoji}} 回應",
+    commentThread: "評論串",
+    formatBold: "加粗",
+    formatItalic: "斜體",
     showResolvedComments: "顯示已解決",
     commentsInvolvingMe: "只看我參與的",
     noUnresolvedComments: "沒有未解決的評論",
@@ -1591,6 +1595,12 @@ const zhHant = {
     updatedBy: '更新人',
     created: '創建於',
     updated: '更新於',
+    // Record page field list (objectstack#36147).
+    systemInfo: '系統資訊',
+    createdTime: '建立時間',
+    updatedTime: '修改時間',
+    recordNumber: '記錄編號',
+    clickToEdit: '點選編輯',
     // Attachments
     dropFilesToUpload: '拖拽檔案到此處或點選上傳',
     attachmentCount: '{{count}} 個附件',

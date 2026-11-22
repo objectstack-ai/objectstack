@@ -4217,7 +4217,10 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     // `referenceTo` is absent — likewise.
     // [#29026] `summaryOperations` joined: a `count` / `sum` roll-up is
     // always valued for the null-guard gate, and its function is read below.
-    expected: ['defaultValue', 'options', 'reference', 'required', 'summaryOperations', 'type'],
+    // [#36167] `multiple` joined: with `type`, it says whether the field's
+    // value is a list (`isMultiValueField`), handed to the validator as
+    // `ExprSchemaHint.multiValueFields`.
+    expected: ['defaultValue', 'multiple', 'options', 'reference', 'required', 'summaryOperations', 'type'],
     declaredBy: 'FieldSchema',
     keys: () => Object.keys(FieldSchema.shape),
   },
@@ -4432,6 +4435,9 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // the metadata reads, `options` and `picklist`, go through
       // `declaresOptionsOnceServed`.
       'fieldList', 'declaredNames',
+      // [#36167] object name → its list-valued field names; its keys are Map
+      // methods (`get`), never metadata keys.
+      'multiValueFieldIndex',
       // [#33494] The names the door's stored extensions add (a Set of field
       // names), read to keep the target's served copy from filling a tied
       // name back in. Its keys are Set methods (`add`, `has`), never metadata keys.
