@@ -7266,9 +7266,9 @@ describe('ApprovalService — Console page links carry the Console mount (#34862
 
   async function requestedLink(uiBasePath: string | undefined) {
     const { svc, emitted } = serviceUnder(uiBasePath);
-    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+    const { id } = (await svc.openNodeRequest(openInput(['u9']), CTX)) as unknown as { id: string };
     const [requested] = emitted.filter(e => e.topic === 'approval.requested');
-    return { id: req.id, payload: requested.payload };
+    return { id, payload: requested.payload };
   }
 
   async function inboxHref(uiBasePath: string | undefined) {
