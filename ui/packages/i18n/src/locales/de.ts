@@ -1659,6 +1659,7 @@ const de = {
     updatedTime: "Geändert am",
     recordNumber: "Datensatz-ID",
     clickToEdit: "Zum Bearbeiten klicken",
+    setField: "{{field}} festlegen",
     // objectui#3863 — base key. de's categories are exactly `one`/`other`, so this
     // slot is unreachable here and equals `_other` for key-set parity.
     showEmptyRelated: "+ {{count}} leer",
@@ -3438,6 +3439,11 @@ const de = {
     allReports: "Alle Berichte",
     collapse: 'Seitenleiste einklappen',
     expand: 'Seitenleiste ausklappen',
+  },
+  designMode: {
+    title: 'Designmodus',
+    leaveUnsaved: 'Designmodus verlassen? Nicht gespeicherte Änderungen gehen verloren.',
+    saveFailed: 'Einige Änderungen wurden nicht gespeichert: {{reason}}',
   },
   topbar: {
     openAssistant: "Assistent {{name}} öffnen",

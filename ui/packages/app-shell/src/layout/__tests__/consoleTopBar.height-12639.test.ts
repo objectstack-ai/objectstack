@@ -161,9 +161,10 @@ describe('the console top bar is one 48 px bar in every frame (objectui#12639)',
     ).toBe(`!top-${step} !h-[calc(100svh-${step / 4}rem)]`);
     // The sidebar's class leads with it below 768 px, where the phone keeps
     // its bar; from 768 px up an app draws no bar and the sidebar starts at
-    // the window's top (objectstack#36112).
+    // the window's top (objectstack#36112), unless the design mode's bar is
+    // drawn there (objectstack#36362).
     expect(code('packages/app-shell/src/layout/UnifiedSidebar.tsx')).toMatch(
-      /<Sidebar\b[^>]*\bclassName=\{cn\(!rail\.desktop && CONSOLE_BELOW_TOP_BAR\b/,
+      /<Sidebar\b[^>]*\bclassName=\{cn\(\(!rail\.desktop \|\| designMode\) && CONSOLE_BELOW_TOP_BAR\b/,
     );
   });
 
@@ -199,7 +200,11 @@ describe('the console top bar is one 48 px bar in every frame (objectui#12639)',
       }
       if (bar === 'app-shell') {
         expect(code(file)).toMatch(/import\s*\{[^}]*\bAppShell\b[^}]*\}\s*from\s*'@object-ui\/layout'/);
-        expect(code(file)).toMatch(/<AppShell\b[\s\S]*?navbar=\{\s*<AppHeader\b/);
+        // The same slot draws the design mode's bar while the mode is on
+        // (objectstack#36362), and so at the same height.
+        expect(code(file)).toMatch(
+          /<AppShell\b[\s\S]*?navbar=\{\s*designMode\.active \?\s*\(\s*<DesignModeBar\b[\s\S]*?\)\s*:\s*\(\s*<AppHeader\b/,
+        );
         expect(headerLiteralOf(LAYOUT_APP_SHELL), `${LAYOUT_APP_SHELL}'s header is not the console bar`).toBe(
           CONSOLE_TOP_BAR,
         );
