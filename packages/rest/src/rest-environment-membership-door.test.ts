@@ -25,6 +25,11 @@
  *    (`api.enforceProjectMembership: false`), and an engine that registers no
  *    `sys_environment_member`;
  *  - a membership read that cannot answer is the loud outage, never served;
+ *  - a metadata door answers the non-member the same refusal;
+ *  - the two answers ordered before the judgment keep their place: a
+ *    credential anchored in another environment gets the anonymous-deny
+ *    response, and a session the ADR-0069 gate holds gets the gate's code —
+ *    neither reads membership;
  *  - the composition root reads the switch through the same function the
  *    dispatcher's plugin does (`createRestApiPlugin`).
  */
