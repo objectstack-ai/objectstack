@@ -389,8 +389,10 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    * cell and never edits it or opens the record; double-click, Enter, F2 or
    * typing edits (Space included); each committed cell saves at once and
    * updates its own row (objectstack#35685); a cell that opens no editor says
-   * why (`describeCell`, `./objectGridCellFacts`). Absent ⇒ the table keeps
-   * its click-to-edit / click-to-open behaviour, as before this prop existed.
+   * why (`describeCell`, `./objectGridCellFacts`). `false` ⇒ the table keeps
+   * its staged click-to-edit / click-to-open behaviour. Absent ⇒ the model
+   * follows whether the grid renders editable (objectstack#36270): an editable
+   * grid is select-first, a read-only one keeps click-to-open.
    *
    * A RUNTIME prop, never authored metadata: the host decides it, and no node
    * key reaches it.
@@ -849,7 +851,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   rowAdornment,
   recordLinkAdornment,
   rowOpensRecord,
-  cellSelection: hostCellSelection,
+  cellSelection: cellSelectionProp,
   headerMenu: hostHeaderMenu,
   openReferencedRecord,
   onBulkDelete,
@@ -1199,6 +1201,16 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // ListView's — verified rather than assumed, since "it's already gated
   // upstream" is exactly the reasoning that left this door open to begin with.
   const inlineEditable = (schema.editable ?? false) && objectInlineEditable;
+
+  // objectstack#36270 — the select-first cell model is how a grid that renders
+  // editable edits, wherever it is drawn: a click selects a cell, double-click,
+  // Enter or typing opens its editor, and each committed cell saves on its own,
+  // with no pending-changes bar and no "Save All" (the model `ListView` and the
+  // related tab ask for by name, objectstack#35684). A grid that renders
+  // read-only keeps click-to-open. A host's own `cellSelection` wins either
+  // way: `true` asks for the model on a read-only grid too (`ListView`), and
+  // `false` keeps the staged click-to-edit on an editable one.
+  const hostCellSelection = cellSelectionProp ?? inlineEditable;
 
   // When the consumer wired onEdit/onDelete callbacks but the view schema
   // omits an explicit `operations` block, default to allowing those actions.
@@ -3690,7 +3702,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
           );
         }
       : undefined,
-    singleClickEdit: schema.singleClickEdit ?? true,
+    // objectstack#36270 — the authored `singleClickEdit` is retired: a grid
+    // that renders editable is select-first, where a click selects. A host
+    // that keeps the staged model (`cellSelection={false}`) edits on a single
+    // click, the retired key's default.
+    singleClickEdit: true,
     // objectui#11068 — arrow-key cell navigation on the WAI-ARIA grid pattern:
     // the data cells become ONE roving Tab stop that the arrows move (the
     // behaviour is `data-table`'s, documented on `DataTableSchema`). The

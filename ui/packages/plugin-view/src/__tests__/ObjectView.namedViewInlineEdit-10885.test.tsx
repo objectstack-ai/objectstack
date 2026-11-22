@@ -99,9 +99,10 @@ async function clickCell(named: Record<string, unknown>, userActions?: Record<st
   await waitFor(() => expect(screen.getByText('Alpha')).toBeInTheDocument());
   const td = screen.getByText('Alpha').closest('td') as HTMLElement;
   fireEvent.click(td);
-  // objectstack#36270 — an editable grid selects the cell on that click (the
-  // list page's select-first model) and Enter asks for its editor; a
-  // read-only grid has no selected cell to ask, and the click opens the row.
+  // objectstack#36270 — a grid that renders editable selects the cell on that
+  // click (the list page's select-first model) and Enter asks for its editor;
+  // a grid that renders read-only has no selected cell, and the click opens
+  // the row.
   const catcher = document.querySelector<HTMLInputElement>('[data-slot="cell-type-catcher"]');
   if (catcher) fireEvent.keyDown(catcher, { key: 'Enter' });
   // One tick lets React flush the editor, so `false` means "never opened",
@@ -110,7 +111,6 @@ async function clickCell(named: Record<string, unknown>, userActions?: Record<st
   return {
     editor: document.querySelector('td[data-editing-cell] input') != null,
     recordForm: screen.queryByTestId('object-form') != null,
-    readOnlyReason: screen.queryByTestId('cell-readonly-reason'),
   };
 }
 
@@ -124,10 +124,9 @@ describe('objectui#10885 — route 2 hands `ObjectGrid` the named view\'s `inlin
   it('THE GRANT STILL WINS: a named `inlineEdit: true` opens no editor when the object refuses inline edit', async () => {
     const r = await clickCell({ inlineEdit: true }, { edit: false });
     expect(r.editor).toBe(false);
-    // The click landed: it selected the cell, which says why it opens no
-    // editor, and opened no record (objectstack#36270).
-    expect(r.readOnlyReason).not.toBeNull();
-    expect(r.recordForm).toBe(false);
+    // The click landed: a grid that renders read-only keeps click-to-open
+    // (objectstack#36270), so it went through to the row.
+    expect(r.recordForm).toBe(true);
   });
 
   it('CONTROL: a named view that declares no `inlineEdit` stays read-only, as before', async () => {

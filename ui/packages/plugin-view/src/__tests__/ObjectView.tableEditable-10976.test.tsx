@@ -91,9 +91,10 @@ async function clickCell(table: NonNullable<ObjectViewSchema['table']>, userActi
   await waitFor(() => expect(screen.getByText('Alpha')).toBeInTheDocument());
   const td = screen.getByText('Alpha').closest('td') as HTMLElement;
   fireEvent.click(td);
-  // objectstack#36270 — an editable grid selects the cell on that click (the
-  // list page's select-first model) and Enter asks for its editor; a
-  // read-only grid has no selected cell to ask, and the click opens the row.
+  // objectstack#36270 — a grid that renders editable selects the cell on that
+  // click (the list page's select-first model) and Enter asks for its editor;
+  // a grid that renders read-only has no selected cell, and the click opens
+  // the row.
   const catcher = document.querySelector<HTMLInputElement>('[data-slot="cell-type-catcher"]');
   if (catcher) fireEvent.keyDown(catcher, { key: 'Enter' });
   // One tick lets React flush the editor, so `false` means "never opened",
@@ -102,24 +103,22 @@ async function clickCell(table: NonNullable<ObjectViewSchema['table']>, userActi
   return {
     editor: document.querySelector('td[data-editing-cell] input') != null,
     recordForm: screen.queryByTestId('object-form') != null,
-    readOnlyReason: screen.queryByTestId('cell-readonly-reason'),
   };
 }
 
 describe('objectui#10976 — `table.editable` reaches the real grid', () => {
-  it('THE FIX: `table: { editable: true, singleClickEdit: true }` opens an in-cell editor when the object grants inline edit', async () => {
-    const r = await clickCell({ columns: ['name'], editable: true, singleClickEdit: true });
+  it('THE FIX: `table: { editable: true }` opens an in-cell editor when the object grants inline edit', async () => {
+    const r = await clickCell({ columns: ['name'], editable: true });
     expect(r.editor).toBe(true);
     expect(r.recordForm).toBe(false);
   });
 
   it('THE GRANT STILL WINS: `table.editable: true` opens no editor when the object refuses inline edit', async () => {
-    const r = await clickCell({ columns: ['name'], editable: true, singleClickEdit: true }, { edit: false });
+    const r = await clickCell({ columns: ['name'], editable: true }, { edit: false });
     expect(r.editor).toBe(false);
-    // The click landed: it selected the cell, which says why it opens no
-    // editor, and opened no record (objectstack#36270).
-    expect(r.readOnlyReason).not.toBeNull();
-    expect(r.recordForm).toBe(false);
+    // The click landed: a grid that renders read-only keeps click-to-open
+    // (objectstack#36270), so it went through to the row.
+    expect(r.recordForm).toBe(true);
   });
 
   it('CONTROL: a `table` that writes no `editable` stays read-only, as before', async () => {

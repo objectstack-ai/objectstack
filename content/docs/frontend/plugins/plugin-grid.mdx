@@ -347,20 +347,23 @@ Enable inline cell editing for quick data updates:
       { "field": "email", "label": "Email" },
       { "field": "status", "label": "Status", "type": "select" }
     ],
-    "editable": true,
-    "singleClickEdit": false
+    "editable": true
   }
 }
 ```
 
 `editable` is the only switch: it is a grid-level flag, and edits persist
 through the host's data source (`dataSource.update`) with no callback to wire.
+A grid that renders editable (`editable` set and the reader allowed to edit
+the object) uses the **select-first** cell model described below: a click
+selects a cell, and double-click, Enter, F2 or typing opens its editor. A grid
+that renders read-only keeps its click-to-open row. `singleClickEdit` is
+retired (objectstack#36270): `@objectstack/spec` refuses it, and
+`os migrate meta` deletes it from existing sources.
 
 **Features:**
-- **Double-click to edit**: double-click any editable cell to enter edit mode
-  (`singleClickEdit: true` opens it on the first click instead)
-- **Keyboard shortcuts**: press Enter on a focused cell to start editing, Enter
-  again to save, Escape to cancel
+- **Select, then edit**: a click selects a cell; double-click, Enter, F2 or
+  typing opens its editor, Enter commits, Escape cancels
 - **Per-field read-only**: which cells open is decided by the **field
   definition**, not by a column key — a field marked `readonly`, and
   computed/binary field types (formula, autonumber, file, …), never open an
@@ -387,14 +390,17 @@ through the host's data source (`dataSource.update`) with no callback to wire.
 To own persistence in a React host, supply `onCellChange` as a **component
 prop** — it is not a schema key.
 
-#### On an object's list page
+#### The select-first cell model
 
-The console's list page draws its grid with the **select-first** cell model
-(objectstack#35684, objectstack#35687), which its host turns on (the
-`cellSelection` component prop, not a schema key). There is no inline-edit
-mode and no toggle: the grid is editable wherever the reader may edit the
-object and the view does not declare `userActions.editInline: false`, and
-`singleClickEdit` is not read there.
+Every grid that renders editable uses the **select-first** cell model
+(objectstack#35684, objectstack#35687, objectstack#36270): the console's list
+page, the grid an `object-view` draws, and an authored `object-grid`. There is
+no inline-edit mode and no toggle. On the list page the grid is editable
+wherever the reader may edit the object and the view does not declare
+`userActions.editInline: false`; elsewhere it is editable where `editable` is
+set and the reader may edit the object. A React host can pass the
+`cellSelection` component prop (not a schema key) as `false` to keep the staged
+model described under [Batch Editing](#batch-editing--multi-row-save).
 
 - **A click selects** a cell (a ring around it); it neither edits nor opens the
   record. Only the name link keeps its own click (it opens the record). Every
@@ -539,10 +545,12 @@ WAI-ARIA grid pattern (objectui#11068):
 - **Editing.** On an editable grid, Enter still opens the focused cell, and an
   open cell's editor keeps every key. An edit ended with Enter or Escape hands
   focus back to its cell, so the arrows carry on from there.
-- **Default.** On when the grid renders editable — the authored `editable` *and*
-  the viewer's permission to update the object, the same value inline editing
-  obeys. A read-only grid keeps every cell its own Tab stop unless you write
-  `true`, and `false` turns it off on an editable grid.
+- **Default.** Always on when the grid renders editable — the authored
+  `editable` *and* the viewer's permission to update the object, the same value
+  inline editing obeys — because that grid selects a cell first and moves the
+  selection with these keys; `false` does not turn it off there
+  (objectstack#36270). A read-only grid keeps every cell its own Tab stop unless
+  you write `true`.
 - While it is on, the table is exposed to assistive technology as a `grid`. A
   grouped grid navigates within each group's table; the mobile card layout has
   no cells and is unaffected.
@@ -550,26 +558,29 @@ WAI-ARIA grid pattern (objectui#11068):
 ### Batch Editing & Multi-Row Save
 
 Edit multiple cells across multiple rows and save them individually or all at
-once. This is the model of a grid without the select-first cell model (a
-related list, a dashboard table, an `object-grid` outside a list page); a list
-page saves each cell as it is committed (above). The schema half is just
-`editable` — the save/cancel affordances appear on their own once a row has
-pending changes:
+once. This is the staged model, which no metadata selects: since
+objectstack#36270 every grid that renders editable saves each cell as it is
+committed (above). A React host that draws `ObjectGrid` itself opts back into
+it by passing `cellSelection={false}`; then a click opens a cell's editor, and
+the save/cancel affordances appear on their own once a row has pending
+changes:
 
-```json
-{
-  "type": "object-grid",
-  "properties": {
-    "objectName": "products",
-    "columns": [
-      { "field": "sku", "label": "SKU" },
-      { "field": "name", "label": "Name" },
-      { "field": "price", "label": "Price", "type": "currency", "align": "right" },
-      { "field": "stock", "label": "Stock", "type": "number", "align": "right" }
+```tsx
+<ObjectGrid
+  cellSelection={false}
+  dataSource={dataSource}
+  schema={{
+    type: 'object-grid',
+    objectName: 'products',
+    columns: [
+      { field: 'sku', label: 'SKU' },
+      { field: 'name', label: 'Name' },
+      { field: 'price', label: 'Price', type: 'currency', align: 'right' },
+      { field: 'stock', label: 'Stock', type: 'number', align: 'right' },
     ],
-    "editable": true
-  }
-}
+    editable: true,
+  }}
+/>
 ```
 
 Left alone, saving goes through the host's data source. A React host that needs

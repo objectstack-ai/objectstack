@@ -71,6 +71,7 @@ import { objectExternalSharingModelRemoved } from './entries/18/object-external-
 import { objectGridDefaultFiltersRemoved } from './entries/18/object-grid-default-filters-removed.js';
 import { objectGridDefaultSortRemoved } from './entries/18/object-grid-default-sort-removed.js';
 import { objectGridResizableColumnsRemoved } from './entries/18/object-grid-resizable-columns-removed.js';
+import { objectGridSingleClickEditRemoved } from './entries/18/object-grid-single-click-edit-removed.js';
 import { objectKanbanQuickAddRemoved } from './entries/18/object-kanban-quick-add-removed.js';
 import { pageHeaderBreadcrumbRemoved } from './entries/18/page-header-breadcrumb-removed.js';
 import { pageHeaderShowStarRemoved } from './entries/18/page-header-show-star-removed.js';
@@ -252,6 +253,7 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: objectGridDefaultFiltersRemoved, order: 35.5 },
   { conversion: objectGridDefaultSortRemoved, order: 14 },
   { conversion: objectGridResizableColumnsRemoved, order: 57 },
+  { conversion: objectGridSingleClickEditRemoved, order: 83 },
   { conversion: objectKanbanQuickAddRemoved, order: 15 },
   { conversion: objectMasterDetailFormDetailSortFieldRemoved, order: 60 },
   { conversion: objectTenancyOrganizationFieldRemoved, order: 35 },

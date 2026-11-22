@@ -133,7 +133,7 @@ async function renderGrid(extra: Record<string, unknown> = {}, cellSelection = t
         ...extra,
       }}
       objectFields={FIELDS}
-      cellSelection={cellSelection || undefined}
+      cellSelection={cellSelection}
     />,
   );
   await screen.findByText('Gamma', {}, { timeout: 5000 });
@@ -158,11 +158,26 @@ describe('ObjectGrid cellSelection — the relay (objectstack#35684)', () => {
     await waitFor(() => expect(g.container.querySelector('td[data-editing-cell]')).not.toBeNull());
   });
 
-  it('control: without it the grid keeps its click-to-edit', async () => {
+  it('without it an editable grid selects a cell first too (objectstack#36270)', async () => {
     const { container } = render(
       <ObjectGridRenderer
         schema={{ type: 'object-grid', objectName: 'probe', columns: ['name'], data: { provider: 'value', items: ROWS }, editable: true }}
         objectFields={FIELDS}
+      />,
+    );
+    await screen.findByText('Gamma', {}, { timeout: 5000 });
+    const first = container.querySelector<HTMLElement>('tbody tr td[data-grid-cell]')!;
+    fireEvent.click(first);
+    expect(first).toHaveAttribute('data-selected-cell');
+    expect(container.querySelector('td[data-editing-cell]')).toBeNull();
+  });
+
+  it('control: `cellSelection: false` keeps the staged click-to-edit', async () => {
+    const { container } = render(
+      <ObjectGridRenderer
+        schema={{ type: 'object-grid', objectName: 'probe', columns: ['name'], data: { provider: 'value', items: ROWS }, editable: true }}
+        objectFields={FIELDS}
+        cellSelection={false}
       />,
     );
     await screen.findByText('Gamma', {}, { timeout: 5000 });

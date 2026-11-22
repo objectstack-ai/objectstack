@@ -2541,6 +2541,21 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`object-grid-resizable-columns-retired`.',
   },
   {
+    id: 'object-grid-single-click-edit-retired',
+    order: 123,
+    text:
+      'It also retires `object-grid`\'s `singleClickEdit` (ADR-0049 enforce-or-remove; the '
+      + 'maintainer\'s ruling A of objectstack#36270, one editing model). A grid that renders editable '
+      + 'now selects a cell first: a click selects it, and double-click, Enter, F2 or typing opens its '
+      + 'editor, with each committed cell saved on its own. That model has no single-click entry, so '
+      + 'neither value could be honoured: `true` (the renderer\'s default) would open the editor on the '
+      + 'selecting click, and `false` named the double-click entry the model already has. A retiredKey '
+      + 'tombstone on `ObjectGridPropsSchema` with one D2 conversion that deletes the key, whatever its '
+      + 'value. In the same change `keyboardNavigation`\'s describe narrows to what is enforced: on a '
+      + 'grid that renders editable the navigation is always on, and `false` is no longer honoured '
+      + 'there. Its D3 record is the semantic entry `object-grid-single-click-edit-retired`.',
+  },
+  {
     id: 'object-kanban-quick-add-retired',
     order: 28,
     text:
