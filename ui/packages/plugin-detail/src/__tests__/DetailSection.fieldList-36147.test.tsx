@@ -383,6 +383,8 @@ describe('an empty editable value reads "Set <label>" and one click edits it (ob
     const { container } = render(
       <DetailSection section={section} data={data} objectSchema={objectSchema} onEnterInlineEdit={vi.fn()} />,
     );
+    // The section's own toggle shows its empty rows off the field face.
+    fireEvent.click(screen.getByRole('button', { name: /Show 2 empty fields/ }));
     expect(setOf(container)).toHaveLength(0);
     // CONTROL: the empty row is on screen, so the count above is not vacuous.
     const noteRow = screen.getByText('Note', { exact: true }).closest('.group') as HTMLElement;
