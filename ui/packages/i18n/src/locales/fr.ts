@@ -491,6 +491,7 @@ const fr = {
       openRow: "Ouvrir la ligne",
       duplicateRow: "Dupliquer la ligne",
       removeRow: "Supprimer la ligne",
+      columnHelp: "Aide",
     },
   },
   table: {

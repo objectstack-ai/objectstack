@@ -125,8 +125,57 @@ function logSameTargetObjectExtensions(
   }
 }
 
+/**
+ * The partial object definition an `objectExtensions` entry registers as an
+ * `extend` contribution to its target, and the priority it registers at — the
+ * ONE reading of an entry, taken by a package body's entries
+ * ({@link RegistrationFacet.registerApp} step 2b) and by a multi-package
+ * stack's RESIDUAL entries (`ObjectQLPlugin`, ADR-0130 D4) alike.
+ *
+ * ⛔ Never a second literal at either caller: a key added here reaches both, so
+ * a residual extension registers exactly what the same entry registers from a
+ * package body (pinned by `manifest-service-residual-object-extension.test.ts`,
+ * which compares the object both registrations serve).
+ */
+export function objectExtensionContribution(ext: any): {
+  definition: {
+    name: string; fields: unknown; fieldPatches: unknown; label: unknown; pluralLabel: unknown;
+    description: unknown; validations: unknown; indexes: unknown; place: unknown;
+    fieldGroups: unknown; relatedLists: unknown;
+  };
+  priority: number;
+} {
+  return {
+    definition: {
+      name: ext.extend, // Use the target FQN as name
+      fields: ext.fields,
+      // [ADR-0146 D10, second rule] The per-field display patches,
+      // the slot as `ObjectExtensionSchema.fieldPatches` declares
+      // it — applied by the registry's `mergeObjectDefinitions`,
+      // whose fold every object read shares.
+      fieldPatches: ext.fieldPatches,
+      label: ext.label,
+      pluralLabel: ext.pluralLabel,
+      description: ext.description,
+      validations: ext.validations,
+      indexes: ext.indexes,
+      // [#35901] Where its own fields, groups and child lists go —
+      // applied by the registry fold after every contributor's
+      // fields are merged (`applyExtensionPlacements`).
+      place: ext.place,
+      // [ADR-0146 D10] The whole arrangement the paired `.custom`
+      // package declares — applied by the registry fold, last
+      // (`applyCustomArrangement`), which skips any other
+      // package's and names it.
+      fieldGroups: ext.fieldGroups,
+      relatedLists: ext.relatedLists,
+    },
+    priority: ext.priority ?? 200,
+  };
+}
+
 /** Structural equality of two JSON-shaped values: same primitives, same arrays in order, same keys with equal values. */
-function equalByValue(a: unknown, b: unknown): boolean {
+export function equalByValue(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
   if (Array.isArray(a) !== Array.isArray(b)) return false;
@@ -395,36 +444,13 @@ export class RegistrationFacet {
           // outcome is unchanged.
           logSameTargetObjectExtensions(this.logger, id, manifest.objectExtensions);
           for (const ext of manifest.objectExtensions) {
-              const targetFqn = ext.extend;
-              const priority = ext.priority ?? 200;
-              // Create a partial object definition for the extension
-              const extDef = {
-                  name: targetFqn, // Use the target FQN as name
-                  fields: ext.fields,
-                  // [ADR-0146 D10, second rule] The per-field display patches,
-                  // the slot as `ObjectExtensionSchema.fieldPatches` declares
-                  // it — applied by the registry's `mergeObjectDefinitions`,
-                  // whose fold every object read shares.
-                  fieldPatches: ext.fieldPatches,
-                  label: ext.label,
-                  pluralLabel: ext.pluralLabel,
-                  description: ext.description,
-                  validations: ext.validations,
-                  indexes: ext.indexes,
-                  // [#35901] Where its own fields, groups and child lists go —
-                  // applied by the registry fold after every contributor's
-                  // fields are merged (`applyExtensionPlacements`).
-                  place: ext.place,
-                  // [ADR-0146 D10] The whole arrangement the paired `.custom`
-                  // package declares — applied by the registry fold, last
-                  // (`applyCustomArrangement`), which skips any other
-                  // package's and names it.
-                  fieldGroups: ext.fieldGroups,
-                  relatedLists: ext.relatedLists,
-              };
+              // The partial object definition for the extension — the one
+              // reading of an entry, shared with the residual's
+              // ({@link objectExtensionContribution}).
+              const { definition: extDef, priority } = objectExtensionContribution(ext);
               // Register as extension (namespace is undefined since we're targeting by FQN)
-              this._registry.registerObject(stampPackage(extDef, id, version), id, undefined, 'extend', priority);
-              this.logger.debug('Registered Object Extension', { target: targetFqn, priority, from: id });
+              this._registry.registerObject(stampPackage(extDef as any, id, version), id, undefined, 'extend', priority);
+              this.logger.debug('Registered Object Extension', { target: extDef.name, priority, from: id });
           }
       }
 

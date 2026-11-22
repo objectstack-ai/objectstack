@@ -86,6 +86,7 @@ export const SysLifecycleState = ObjectSchema.create({
 
   enable: {
     trackHistory: false,
+    fieldHistory: false, // [#36290] keeps this object's "no history": values off in the activity stream
     searchable: false,
     // Internal clock state — no data API at all. The sweeper reads and writes
     // it in process, under a system context.

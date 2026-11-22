@@ -263,6 +263,7 @@ export const SysTwoFactor = ObjectSchema.create({
   
   enable: {
     trackHistory: false,
+    fieldHistory: false, // [#36290] keeps this object's "no history": values off in the activity stream
     searchable: false,
     apiEnabled: true,
     // #1591 — reads only: writes are refused by the identity write guard

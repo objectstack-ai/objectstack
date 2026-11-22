@@ -721,6 +721,13 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'externalId',
     why: "graded `dead` (`liveness/field.json`): no upsert, import or seed matches on a field's `externalId`, so a control would invite an author to rely on a flag nothing reads, and `os lint` then warns on the value the form offered. The schema still parses the key, so a stored value stays valid. A seed dataset names its match field in its own `externalId`, an import mapping in its `upsertKey`",
   },
+  {
+    kind: 'omit',
+    type: 'field',
+    path: ROOT_PATH,
+    key: 'showOnCreate',
+    why: "graded `planned` (`liveness/field.json`): no create surface reads it yet, so a switch offered now would be honoured nowhere (declared = enforced = shown). The row is offered, and this entry deleted, in the change that lands the create surfaces' readers",
+  },
 
   // Measured, and deliberately NOT recorded: seven `view` keys with no
   // liveness verdict at any coordinate. `liveness/view.json` cannot hold them:
