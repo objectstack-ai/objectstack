@@ -46,13 +46,14 @@
  */
 
 import { BASE_FIELD_DISPLAY_WHITELIST, isInjectedColumnDefinition, materializeTreeSelfReferences, provisionPrimary, resolveInjectedSystemColumns } from '@objectstack/spec/data';
-import type { ObjectOwnership, ServiceObject } from '@objectstack/spec/data';
-import { QUEUE_FIELD_DEF, applyAuditFieldGovernance, fieldPatchTargetMisses, isCodeArtifactBody, isTenantAuthored } from '@objectstack/metadata-core';
+import type { ObjectOwnership, RelatedListsArrangement, ServiceObject } from '@objectstack/spec/data';
+import { QUEUE_FIELD_DEF, applyAuditFieldGovernance, fieldPatchTargetMisses, installedManifestsOf, isCodeArtifactBody, isTenantAuthored, pairsOf } from '@objectstack/metadata-core';
 import type { FieldPatchTargetMiss } from '@objectstack/metadata-core';
 import { scalarOverridesPackagedBase } from '@objectstack/spec/system';
 import { SEARCH_COMPANION_FIELD, provisionSearchCompanion } from './search-companion.js';
 import { applyExtensionPlacements, fieldGroupKeysOf, placementContributorsOf } from './registry-extension-placement.js';
 import type { ExtensionPlacementNote } from './registry-extension-placement.js';
+import { applyCustomArrangement, relatedListsArrangementOf, rememberRelatedListsArrangement } from './registry-custom-arrangement.js';
 import { applyProtection } from '@objectstack/spec/shared';
 import { isObjectLessActionKey, standaloneActionOwnerKey } from './action-governance.js';
 import { recordCurrencyFollowRefusal, recordCurrencySummaryRefusal } from './record-currency-aggregate-door.js';
@@ -107,6 +108,7 @@ export interface ObjectRegistrationHost {
   getObject: SchemaRegistry['getObject'];
   getObjectContributors: SchemaRegistry['getObjectContributors'];
   getObjectOwner: SchemaRegistry['getObjectOwner'];
+  getPackage: SchemaRegistry['getPackage'];
   hasDisabledPackage: SchemaRegistry['hasDisabledPackage'];
   isActionWithheldByDisabledPackage: SchemaRegistry['isActionWithheldByDisabledPackage'];
   isPackageDisabled: SchemaRegistry['isPackageDisabled'];
@@ -784,6 +786,31 @@ export class ObjectRegistrationFacet {
   }
 
   /**
+   * [ADR-0146 D10] The body, and the contract, of
+   * `SchemaRegistry#getRelatedListsArrangement` (the facade keeps its line
+   * count, so the docblock lives here).
+   *
+   * What the served `relatedLists` of `name` cannot say about the tab list
+   * the base's paired `.custom` package declares for it: the lists it hides,
+   * and whether a list no entry names is shown after the listed tabs
+   * (`RelatedListsArrangement`, `@objectstack/spec/data`). `undefined` when
+   * no `.custom` package arranges the object's tabs: none extends it, none
+   * writes `relatedLists`, or the one that does is disabled.
+   *
+   * The served object read stamps this as its `_relatedListsArrangement` read
+   * decoration, because only the record page knows which lists exist for the
+   * reader: a served `relatedLists` names tabs and cannot hide another
+   * package's list by leaving it out. Accepts a short name or an FQN, as
+   * `getObject` does. Read off the served fold's own body
+   * ({@link resolveObject}), so this answer and the served `relatedLists`
+   * cannot disagree.
+   */
+  static getRelatedListsArrangement(this: Pick<ObjectRegistrationHost, 'resolveObject' | 'resolveObjectKey'>, name: string): RelatedListsArrangement | undefined {
+    const fqn = this.resolveObjectKey(name);
+    return fqn === undefined ? undefined : relatedListsArrangementOf(this.resolveObject(fqn));
+  }
+
+  /**
    * [#34901] The body of `SchemaRegistry#getWithheldExtensionFields`; the
    * method's docblock there is its contract. Read off
    * {@link withholdDisabledExtensions}, the one reading of what a disable
@@ -865,7 +892,7 @@ export class ObjectRegistrationFacet {
    * {@link foldObjectExtendersOnto} can apply it to a body that never came
    * from this registry without growing a second copy of the merge.
    */
-  static foldExtendersOntoDefinition(this: Pick<ObjectRegistrationHost, 'finishServedObject' | 'getObjectOwner' | 'reportChangedRuleCopies' | 'reportExtensionPlacements' | 'reportFieldPatchMisses' | 'reportRedeclaredFields' | 'resolveObjectKey' | 'tenantAuthoredScalars' | 'tenantPatchedDisplayKeys' | 'tenantRuleSettings' | 'withPackagedOwnerRules' | 'withoutExtensionQueueField'>, contributors: ObjectContributor[], baseDefinition: ServiceObject, layer: ServedObjectLayer = 'served'): ServiceObject {
+  static foldExtendersOntoDefinition(this: Pick<ObjectRegistrationHost, 'finishServedObject' | 'getObjectOwner' | 'getPackage' | 'reportChangedRuleCopies' | 'reportExtensionPlacements' | 'reportFieldPatchMisses' | 'reportRedeclaredFields' | 'resolveObjectKey' | 'tenantAuthoredScalars' | 'tenantPatchedDisplayKeys' | 'tenantRuleSettings' | 'withPackagedOwnerRules' | 'withoutExtensionQueueField'>, contributors: ObjectContributor[], baseDefinition: ServiceObject, layer: ServedObjectLayer = 'served'): ServiceObject {
     // [ADR-0029 D9.2a] Computed ONCE, over the base the fold starts from — never
     // re-derived from the running `merged`, which would make an extender's own
     // scalar look "authored" to the next extender and silently invert
@@ -960,11 +987,25 @@ export class ObjectRegistrationFacet {
       merged = placed.object;
       this.reportExtensionPlacements(placed.notes);
     }
+    // [ADR-0146 D10] The third layer, last: where the base's paired `.custom`
+    // package writes `fieldGroups` or `relatedLists`, that key replaces the
+    // arrangement the owner and the placements above gave, whole. The pair is
+    // the owner's App's, asked of the one pair lookup (ADR-0146 D3).
+    const arranged = applyCustomArrangement(merged, contributors, {
+      objectName: String(merged.name ?? baseDefinition.name ?? ''),
+      customizationPairs: () => pairsOf(contributors.find((c) => c.ownership === 'own')?.packageId, installedManifestsOf(this)),
+    });
+    merged = arranged.object;
+    this.reportExtensionPlacements(arranged.notes);
     if (tenantRules) this.reportChangedRuleCopies(contributors, baseDefinition);
     // A picklist-bound field is served with its list's options resolved onto
     // it — here, in the fold every object read and the write door share, so
     // the set a client is offered and the set a write is judged by are one.
-    return this.finishServedObject(merged, layer, picklistReferrerOf(contributors));
+    const served = this.finishServedObject(merged, layer, picklistReferrerOf(contributors));
+    // …and what the `.custom` tab list says that `relatedLists` cannot travels
+    // beside the body it describes ({@link getRelatedListsArrangement}).
+    rememberRelatedListsArrangement(served, arranged.relatedLists);
+    return served;
   }
 
   /**

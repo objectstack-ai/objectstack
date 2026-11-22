@@ -4,7 +4,14 @@
 import React from 'react';
 import type { InlineGridColumn } from '@objectstack/spec/data';
 import { resolveFieldCurrency, currencyFractionDigits } from '../currency.js';
-import { declaredLookupAutofillPatch, type LookupAutofillPair } from './lookupAutofill.js';
+import {
+  crossCurrencyRefusal,
+  planDeclaredLookupAutofill,
+  type AutofillCurrencyContext,
+  type LookupAutofillPair,
+  type LookupAutofillPlan,
+  type WithheldAutofill,
+} from './lookupAutofill.js';
 import { fieldHelpText } from '../fieldHelpText.js';
 // Type-only: erased at build, so it adds no edge to the bundle graph. The one
 // RUNTIME edge to the widget body is the `import()` in `loadGridFieldWidget`.
@@ -207,24 +214,48 @@ export function evalArith(expr: string, row: Row): number | null {
  * (`declaredLookupAutofillPatch`), whatever the column's `autofill` says, and
  * a declared target is taken out of the same-named copy, so one target never
  * has two writers on one pick.
+ *
+ * `currency` is the pick's cross-currency rule (`crossCurrencyRefusal`): a
+ * value it refuses is left out of the patch, the same-named copy and the
+ * declared pairs alike, and listed under `withheld` so the grid says why the
+ * cell stayed empty. Without it every value copies as before.
  */
-export function lookupAutofillPatch(
+export function planLookupAutofill(
   columns: GridColumn[],
   col: GridColumn,
   record: any,
   declared?: { pairs?: readonly LookupAutofillPair[]; row?: Row; previous?: Row | null },
-): Row {
+  currency?: AutofillCurrencyContext,
+): LookupAutofillPlan {
   const patch: Row = { [col.name]: record?.value ?? record?.id ?? record?._id };
+  const withheld: WithheldAutofill[] = [];
   const declaredTargets = new Set((declared?.pairs ?? []).map((p) => p.target));
   if (col.autofill !== false && record && typeof record === 'object') {
     for (const other of columns) {
       if (other.name === col.name || other.computed || other.type === 'lookup') continue;
       if (declaredTargets.has(other.name)) continue;
       const v = record[other.name];
-      if (v !== undefined && v !== null && v !== '') patch[other.name] = v;
+      if (v === undefined || v === null || v === '') continue;
+      const refusal = currency
+        ? crossCurrencyRefusal(currency.sourceCurrency(other.name, v), currency.targetCurrency(other.name), currency.home)
+        : undefined;
+      if (refusal) withheld.push({ target: other.name, source: other.name, amount: Number(v), ...refusal });
+      else patch[other.name] = v;
     }
   }
-  return { ...patch, ...declaredLookupAutofillPatch(declared?.pairs, record, declared?.row, declared?.previous) };
+  const pairs = planDeclaredLookupAutofill(declared?.pairs, record, declared?.row, declared?.previous, currency);
+  return { patch: { ...patch, ...pairs.patch }, withheld: [...withheld, ...pairs.withheld] };
+}
+
+/** {@link planLookupAutofill}'s writes alone. */
+export function lookupAutofillPatch(
+  columns: GridColumn[],
+  col: GridColumn,
+  record: any,
+  declared?: { pairs?: readonly LookupAutofillPair[]; row?: Row; previous?: Row | null },
+  currency?: AutofillCurrencyContext,
+): Row {
+  return planLookupAutofill(columns, col, record, declared, currency).patch;
 }
 
 /**

@@ -120,6 +120,26 @@
         "must_contain": ["isoDate(addDays(record.borrow_date, 7))", "F`"],
         "must_not_contain": ["timestamp(record.borrow_date)", "{record."]
       }
+    },
+    {
+      "id": 13,
+      "prompt": "On `ticket`, `labels` is a `tags` field. Write the hook `condition` that is true when the ticket carries the `urgent` label.",
+      "expected_output": "`P`(has(record.labels) && record.labels != null && 'urgent' in record.labels)``. `labels` holds a list, so `record.labels == 'urgent'` compares the whole list with a scalar and is refused (`list-equality`): it answers `false` on every row. A hook `condition` is evaluated as CEL, so membership is `in`, behind a `!= null` guard, because `in` faults on a `null` list.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["record.labels != null", "in record.labels", "P`"],
+        "must_not_contain": ["P`record.labels == 'urgent'", "{record."]
+      }
+    },
+    {
+      "id": 14,
+      "prompt": "On `ticket`, `labels` is a `tags` field. Write the sharing rule `condition` that matches the tickets carrying the `urgent` label.",
+      "expected_output": "`P`(record.labels != null && record.labels.contains('urgent'))``. A sharing rule's `condition` is compiled to a query filter, not evaluated as CEL, so membership is `.contains()`: `has()` and an `in` with the literal first do not lower there, and the rule would grant nothing. `record.labels == 'urgent'` compares the whole list with a scalar and is refused (`list-equality`).",
+      "files": [],
+      "assertions": {
+        "must_contain": ["record.labels != null", "record.labels.contains("],
+        "must_not_contain": ["P`record.labels == 'urgent'", "has(record.labels) &&", "{record."]
+      }
     }
   ]
 }

@@ -47,6 +47,7 @@ import { packageDependencyClosure, pairsOf, type PackageClosureRegistry } from '
 import { disabledExactAddressHolder } from './protocol-exact-qualifier.js';
 import type { PrereadActiveRows } from './protocol-meta-item-reads.js';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
+import { RELATED_LISTS_ARRANGEMENT_DECORATION, type RelatedListsArrangement } from '@objectstack/spec/data';
 import { overlayMemberValue, overlayMemberWhere } from './migrations/overlay-index.js';
 import { isServedOverrideRowOf } from './served-override.js';
 import {
@@ -811,6 +812,54 @@ export function withWithheldFieldsDecoration(registry: unknown, item: unknown, n
     return { ...body, _withheldFields: Object.fromEntries(entries.map(([field, at]) => [field, { packageId: at.packageId }])) };
 }
 
+/**
+ * [ADR-0146 D10] `item` with the served object read's
+ * `_relatedListsArrangement` decoration: what the tab list the base's paired
+ * `.custom` package declares says that the served `relatedLists` cannot
+ * (`SchemaRegistry.getRelatedListsArrangement`): the lists it hides, and
+ * whether a list no entry names is shown after the listed tabs. `item` itself
+ * when no `.custom` package arranges the object's tabs, or when the registry
+ * cannot answer.
+ *
+ * Why it is served: the registry fold writes the `.custom` tab list into
+ * `relatedLists` (the entries it shows, then the entries of the arrangement
+ * it replaces that it does not name), and `relatedLists` keeps the meaning it
+ * has on every object. Which lists exist for the reader is the record page's
+ * to know, so the two things that depend on it travel beside the list, and
+ * the record page reads them through `readRelatedListsArrangement`
+ * (`@objectstack/spec/data`).
+ *
+ * A read decoration (`METADATA_READ_DECORATIONS`, `@objectstack/spec`), on the
+ * faces {@link withWithheldFieldsDecoration} is stamped on and no other.
+ */
+export function withRelatedListsArrangementDecoration(registry: unknown, item: unknown, name?: string): unknown {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) return item;
+    const body = item as Record<string, unknown>;
+    const objectName = typeof name === 'string' && name !== '' ? name : body.name;
+    const r = registry as { getRelatedListsArrangement?: (name: string) => RelatedListsArrangement | undefined } | null | undefined;
+    if (typeof objectName !== 'string' || typeof r?.getRelatedListsArrangement !== 'function') return item;
+    const arrangement = r.getRelatedListsArrangement(objectName);
+    if (arrangement === undefined) return item;
+    return {
+        ...body,
+        [RELATED_LISTS_ARRANGEMENT_DECORATION]: {
+            packageId: arrangement.packageId,
+            hidden: [...arrangement.hidden],
+            unlisted: arrangement.unlisted,
+        },
+    };
+}
+
+/**
+ * `item` with every decoration the served object read derives from the
+ * registry: {@link withWithheldFieldsDecoration} and
+ * {@link withRelatedListsArrangementDecoration}. `item` itself when neither
+ * applies. The one call of the served by-name read and the served list.
+ */
+export function withServedObjectDecorations(registry: unknown, item: unknown, name?: string): unknown {
+    return withRelatedListsArrangementDecoration(registry, withWithheldFieldsDecoration(registry, item, name), name);
+}
+
 /** The body of `ObjectStackProtocolImplementation#readMetaItemFace`; the method's docblock there is its contract. */
 export async function readMetaItemFace(
     this: Pick<MetaItemFaceHost, 'readMetaItem'> & ServedRowHost,
@@ -912,10 +961,12 @@ export async function readMetaItemFace(
     if (withheldHolder === undefined && (request.type === 'object' || request.type === 'package'
         || (!withheldAction && !isItemOfDisabledPackage(this.engine?.registry, answer?.item)))) {
         // [#34901] The served object read names the fields a disabled
-        // package withholds ({@link withWithheldFieldsDecoration}); the
-        // execution face and a pending draft's authoring read never do.
+        // package withholds, and [ADR-0146 D10] what the paired `.custom`
+        // tab list says beside `relatedLists`
+        // ({@link withServedObjectDecorations}); the execution face and a
+        // pending draft's authoring read never do.
         if (request.type === 'object' && face === 'served' && request.state !== 'draft' && answer?.item != null) {
-            const item = withWithheldFieldsDecoration(this.engine?.registry, answer.item, request.name);
+            const item = withServedObjectDecorations(this.engine?.registry, answer.item, request.name);
             return item === answer.item ? answer : { ...answer, item };
         }
         return answer;

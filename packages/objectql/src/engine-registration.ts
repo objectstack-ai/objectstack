@@ -141,6 +141,7 @@ export function objectExtensionContribution(ext: any): {
   definition: {
     name: string; fields: unknown; fieldPatches: unknown; label: unknown; pluralLabel: unknown;
     description: unknown; validations: unknown; indexes: unknown; place: unknown;
+    fieldGroups: unknown; relatedLists: unknown;
   };
   priority: number;
 } {
@@ -162,6 +163,12 @@ export function objectExtensionContribution(ext: any): {
       // applied by the registry fold after every contributor's
       // fields are merged (`applyExtensionPlacements`).
       place: ext.place,
+      // [ADR-0146 D10] The whole arrangement the paired `.custom`
+      // package declares — applied by the registry fold, last
+      // (`applyCustomArrangement`), which skips any other
+      // package's and names it.
+      fieldGroups: ext.fieldGroups,
+      relatedLists: ext.relatedLists,
     },
     priority: ext.priority ?? 200,
   };
