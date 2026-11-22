@@ -929,7 +929,8 @@ export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false
     </Sidebar>
     {/* objectstack#35062 — the window's left edge while the sidebar is
         hidden: resting the pointer on it, or a press, floats the menu. For
-        the pointer only; the keyboard has the app bar's trigger and ⌘B. */}
+        the pointer only; the keyboard has the page header's expand button
+        and ⌘B, which dock the sidebar. */}
     {railPanel.edgeZoneProps && (
       <div
         data-testid="console-sidebar-edge"
