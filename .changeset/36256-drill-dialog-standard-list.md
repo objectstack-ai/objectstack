@@ -3,7 +3,7 @@
 '@object-ui/plugin-report': patch
 '@object-ui/react': patch
 '@object-ui/app-shell': patch
-'@object-ui/components': minor
+'@object-ui/components': patch
 ---
 
 feat(plugin-dashboard): a dashboard or report drill opens a centred dialog over the standard list, and a report's chart marks drill
