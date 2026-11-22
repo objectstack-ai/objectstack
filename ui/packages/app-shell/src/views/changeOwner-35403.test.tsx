@@ -390,16 +390,16 @@ describe("a list asks the explain engine's transfer verdict for the object, once
   it('an allow offers the bulk entry, asked once at object grain (no recordId)', async () => {
     stubExplain(true);
     const def = { name: 'crm_deal', fields: {} };
-    const first = renderHook(() => useListChangeOwnerOffered(def));
+    const first = renderHook(() => useListChangeOwnerOffered(def, true));
     await waitFor(() => expect(first.result.current).toBe(true));
-    const second = renderHook(() => useListChangeOwnerOffered(def));
+    const second = renderHook(() => useListChangeOwnerOffered(def, true));
     await waitFor(() => expect(second.result.current).toBe(true));
     expect(asked).toEqual([{ url: '/api/v1/security/explain', body: { object: 'crm_deal', operation: 'transfer' } }]);
   });
 
   it('a refusal offers nothing', async () => {
     stubExplain(false);
-    const { result } = renderHook(() => useListChangeOwnerOffered({ name: 'crm_deal', fields: {} }));
+    const { result } = renderHook(() => useListChangeOwnerOffered({ name: 'crm_deal', fields: {} }, true));
     await waitFor(() => expect(asked.length).toBe(1));
     await act(async () => {});
     expect(result.current).toBe(false);
@@ -407,15 +407,34 @@ describe("a list asks the explain engine's transfer verdict for the object, once
 
   it('no answer (a refused read) offers nothing', async () => {
     stubExplain(true, false);
-    const { result } = renderHook(() => useListChangeOwnerOffered({ name: 'crm_deal', fields: {} }));
+    const { result } = renderHook(() => useListChangeOwnerOffered({ name: 'crm_deal', fields: {} }, true));
     await waitFor(() => expect(asked.length).toBe(1));
     await act(async () => {});
     expect(result.current).toBe(false);
   });
 
+  it('no open selection asks nothing; opening one asks once, and reopening reads the kept answer', async () => {
+    stubExplain(true);
+    const def = { name: 'crm_deal', fields: {} };
+    const { result, rerender } = renderHook(({ wanted }) => useListChangeOwnerOffered(def, wanted), {
+      initialProps: { wanted: false },
+    });
+    await act(async () => {});
+    expect(result.current).toBe(false);
+    expect(asked).toEqual([]);
+    rerender({ wanted: true });
+    await waitFor(() => expect(result.current).toBe(true));
+    rerender({ wanted: false });
+    expect(result.current).toBe(false);
+    rerender({ wanted: true });
+    expect(result.current).toBe(true);
+    await act(async () => {});
+    expect(asked).toHaveLength(1);
+  });
+
   it('an object that does not offer Change Owner asks nothing and offers nothing', async () => {
     stubExplain(true);
-    const { result } = renderHook(() => useListChangeOwnerOffered({ name: 'crm_tag', ownership: 'none', fields: {} }));
+    const { result } = renderHook(() => useListChangeOwnerOffered({ name: 'crm_tag', ownership: 'none', fields: {} }, true));
     await act(async () => {});
     expect(result.current).toBe(false);
     expect(asked).toEqual([]);

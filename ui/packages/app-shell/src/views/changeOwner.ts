@@ -204,13 +204,23 @@ export function __clearObjectTransferVerdicts(): void {
  * record page reads, at the grain a list has. Drawn on a definite allow only,
  * as on the record page. A list asks no record verdict: each selected row is
  * judged by the endpoint, which reports every row it did not move.
+ *
+ * Asked when the selection bar is reached for, not on first paint: the answer
+ * matters only to an entry of the selection bar, so `wanted` (the host's "a
+ * selection is open in this list") holds the question back until then — the
+ * posture the grid's row verdicts take (`useRecordCrudVerdicts`), so opening a
+ * list costs the server no explain read. A verdict already asked for this
+ * object and principal is read again at once, without a second request.
  */
-export function useListChangeOwnerOffered(objectDef: ChangeOwnerObjectDef | null | undefined): boolean {
+export function useListChangeOwnerOffered(
+  objectDef: ChangeOwnerObjectDef | null | undefined,
+  wanted: boolean,
+): boolean {
   const principal = usePermissions().userId;
   const apiFetch = React.useContext(SchemaRendererContext)?.apiFetch;
   const enabled = React.useMemo(() => changeOwnerObjectOffer(objectDef).enabled, [objectDef]);
   const name = objectDef?.name;
-  const asks = enabled && !!name;
+  const asks = enabled && !!name && wanted;
   const [verdict, setVerdict] = React.useState<{ key: string; allowed: boolean | undefined } | null>(null);
   const key = asks ? JSON.stringify([principal, name]) : '';
   React.useEffect(() => {

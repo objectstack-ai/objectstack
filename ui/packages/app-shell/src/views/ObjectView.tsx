@@ -291,7 +291,10 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // object offers the action and the caller holds the object's transfer
     // grant; the rows the switch's `visibleWhen` excludes are left out and
     // counted, and the server judges and reports every row it is sent.
-    const bulkChangeOwnerOffered = useListChangeOwnerOffered(objectDef as any);
+    // Asked once a selection is open in this page's list, never on first paint.
+    const [pageColumnEl, setPageColumnEl] = useState<HTMLDivElement | null>(null);
+    const listSelecting = useListPageSelecting(pageColumnEl);
+    const bulkChangeOwnerOffered = useListChangeOwnerOffered(objectDef as any, listSelecting);
     const changeOwnerScope = usePredicateScope();
     const [bulkChangeOwner, setBulkChangeOwner] = useState<{ rows: Record<string, unknown>[]; skipped: number } | null>(null);
     const openBulkChangeOwner = useCallback((records: any[]) => {
@@ -1368,8 +1371,8 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // objectstack#35883 — on a phone the page's top row is its own: 「‹」 (the
     // app bar's), the object's icon and name, then ⋮ More with 「Select」 first.
     // The app bar draws it in place of its pill, search, bell and avatar.
-    const [pageColumnEl, setPageColumnEl] = useState<HTMLDivElement | null>(null);
-    const listSelecting = useListPageSelecting(pageColumnEl);
+    // (`pageColumnEl` and `listSelecting` are declared above, beside the bulk
+    // Change Owner gate that reads them first.)
     // 「Select」 is offered only where the list would open a selection: cards
     // whose rows take more than one tick (not a kanban, a calendar, or a list
     // with no or single selection).
