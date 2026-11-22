@@ -289,9 +289,11 @@ export async function computeLayeredRlsFilter(
     // the floor comes off only where the master gate DEMONSTRABLY covers the
     // same operation, which is a fact about the call site. The by-id write
     // pre-image gate vouches for it (step 2.8 runs immediately below it on
-    // the same pass, under a superset of its own guard); the bulk-write path
-    // does not and must not, because `assertControlledByParentWrite` returns
-    // early with no single id and nothing would replace the floor there.
+    // the same pass, under a superset of its own guard); the addressed
+    // predicate write vouches for it once step 2.8 has judged every master
+    // the write reaches, for the rows it judged (ADR-0055 §3 as amended
+    // 2026-11-22, ruling record 7073030861); a write that gate did not judge
+    // carries no vouch and keeps the floor.
     // Both directions are pinned in
     // `controlled-by-parent-detail-write-authority.test.ts`.
     //

@@ -27,6 +27,8 @@ import { withFieldCarrier } from './withFieldCarrier.js';
 // Pure formatting rule shared with `AddressField`'s readonly branch — no React,
 // so this does not pull the widget out of its lazy chunk (objectui#4037).
 import { formatAddress, type AddressValue } from './widgets/address-format.js';
+import { referenceRecordCache, referenceRecordKey, heldReferenceRecord } from './widgets/referenceRecordCache.js';
+import { getPersonInitials } from './widgets/personDisplay.js';
 import { deriveHexBadgePalette } from './hexBadgePalette.js';
 // The same arrangement for numbers: one formatting call shared with
 // `NumberField`'s read-only branch (objectui#11431), and likewise for currency
@@ -37,18 +39,11 @@ import { useBooleanValueLabel } from './widgets/booleanValueLabel.js';
 import { RecordHoverCard, type RecordHoverCardObjectDef } from './RecordHoverCard.js';
 
 // Module-level cache so multiple renderers fetching the same lookup ID
-// only trigger one network call. Keyed by `${objectName}:${id}`. It holds the
-// fetched RECORD and the referenced object's schema, not a resolved name: the
-// name is a display value, resolved per render from the row the viewer may
-// read (objectui#10501), so it follows the permission policy of the render
-// that shows it rather than the one in force when the record arrived.
-type LookupCacheEntry =
-  | { state: 'pending'; promise: Promise<void> }
-  | { state: 'ok'; record: Record<string, unknown> | null | undefined; schema: unknown }
-  // The reader's own read was REFUSED (objectstack#29641): settled, not failed.
-  | { state: 'refused' }
-  | { state: 'err' };
-const lookupNameCache: Map<string, LookupCacheEntry> = new Map();
+// only trigger one network call. It holds the fetched RECORD and the
+// referenced object's schema, not a resolved name (objectui#10501); a pick
+// fills it too (objectstack#36046). Its own module, which `LookupField`
+// shares: `./widgets/referenceRecordCache.ts`.
+const lookupNameCache = referenceRecordCache;
 
 /**
  * Pick the most reasonable display name from an arbitrary record object.
@@ -294,7 +289,7 @@ function useLookupName(
   // `displayField`s could share one; the key is left as it was so that this
   // change does not alter how many reads a screen makes.
   const cacheKey = isResolvable
-    ? `${referenceTo}:${String(value)}:${displayField ?? ''}`
+    ? referenceRecordKey(referenceTo!, value as string | number, displayField)
     : '';
 
   React.useEffect(() => {
@@ -3324,7 +3319,7 @@ export function UnresolvedReferenceMark({
  */
 const CELL_AVATAR_CLASS = 'size-6 -my-0.5';
 
-export function UserCellRenderer({ value }: CellRendererProps): React.ReactElement {
+export function UserCellRenderer({ value: stored }: CellRendererProps): React.ReactElement {
   // Called before any early return (rules of hooks). A policy that loads or
   // changes re-renders this cell through the context, and the drawing follows.
   const perms = usePermissions();
@@ -3335,7 +3330,15 @@ export function UserCellRenderer({ value }: CellRendererProps): React.ReactEleme
   // avatar-stack branch below and rendered an empty stack (objectui#8481) —
   // and the floor alone would let `0` through to `UnresolvedUserReference`,
   // which is not what a user reference of zero is.
-  if (isEmptyValue(value) || !value) return <EmptyValue />;
+  if (isEmptyValue(stored) || !stored) return <EmptyValue />;
+
+  // objectstack#36046 — a stored id this page already holds the person for
+  // (a pick in this cell, which stores the id and keeps the record it picked)
+  // is drawn as that person, as an expanded value is: never the raw id until
+  // the list is read again. An id nothing here holds stays unresolved, below.
+  const value: CellRendererProps['value'] = Array.isArray(stored)
+    ? stored.map((entry: unknown) => heldReferenceRecord(personObject, entry) ?? entry)
+    : heldReferenceRecord(personObject, stored) ?? stored;
 
   // A primitive is an UNRESOLVED reference, not "the ID/username" (objectui#8434).
   // The comment that stood here stated the branch's premise, and the premise was
@@ -3380,7 +3383,7 @@ export function UserCellRenderer({ value }: CellRendererProps): React.ReactEleme
             );
           }
           const name = user.name || user.username || 'User';
-          const initials = name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
+          const initials = getPersonInitials(String(name));
           
           return (
             <Avatar
@@ -3432,7 +3435,8 @@ export function UserCellRenderer({ value }: CellRendererProps): React.ReactEleme
   }
 
   const name = user.name || user.username || 'User';
-  const initials = name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
+  // objectstack#36046 — the initials every person chip draws: letters only.
+  const initials = getPersonInitials(String(name));
   
   return (
     <div className="flex items-center gap-2">
