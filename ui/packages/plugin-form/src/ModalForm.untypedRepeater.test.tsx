@@ -29,8 +29,13 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, waitFor, fireEvent, screen, act } from '@testing-library/react';
 import React from 'react';
 
-import { registerAllFields, GridField, resolveFormWidgetType } from '@object-ui/fields';
+import { registerAllFields, GridField, preloadGridField, resolveFormWidgetType } from '@object-ui/fields';
 import { ModalForm } from './ModalForm';
+
+// The line grid renders behind `@object-ui/fields`' lazy face (objectstack#36102);
+// load its body before the first render, as the record forms' mount-time
+// preload does in the console.
+await preloadGridField();
 
 registerAllFields();
 

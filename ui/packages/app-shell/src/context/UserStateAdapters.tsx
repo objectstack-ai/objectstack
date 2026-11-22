@@ -23,6 +23,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { ActiveOrganizationStorage, useAuth } from '@object-ui/auth';
 import type { UserDataAdapter, UserPreferenceFamily } from '@object-ui/data-objectstack';
 
 // ---------------------------------------------------------------------------
@@ -147,9 +148,69 @@ export function useAttachRecordStateFamily() {
 /**
  * Build a user-scoped localStorage key. Falls back to the unscoped key for
  * unauthenticated / preview sessions to preserve current behaviour.
+ *
+ * With `orgId` the key also names the organization (`BASE:u:USER:o:ORG`): the
+ * browser copy of a server row that is kept per organization
+ * (`sys_user_preference`, ADR-0120 D1) is kept per organization too, so a
+ * person in two organizations never reads or saves one organization's copy in
+ * the other (objectstack#36244). Without one — no organization feature, a
+ * preview, the boot before an organization is known — the key is the user's
+ * alone, as before.
  */
-export function scopedKey(base: string, userId?: string | null): string {
-  return userId ? `${base}:u:${userId}` : base;
+export function scopedKey(base: string, userId?: string | null, orgId?: string | null): string {
+  if (!userId) return base;
+  return orgId ? `${base}:u:${userId}:o:${orgId}` : `${base}:u:${userId}`;
+}
+
+/**
+ * The raw browser copy kept under `scopedKey(base, userId, orgId)`, or `null`.
+ *
+ * An organization that finds no copy of its own ADOPTS the copy kept before the
+ * organization was part of the key (`scopedKey(base, userId)`): the value moves
+ * under this organization's key and the user-only key is removed, so exactly
+ * one organization — the first to read it — inherits it, and nothing the
+ * person had is lost (objectstack#36244). The first reader is in practice the
+ * organization that copy mirrors: every hydrate rewrote it with the active
+ * organization's server row, and the first page-load on this code boots into
+ * the organization the browser last held.
+ */
+export function readScopedCopy(base: string, userId?: string | null, orgId?: string | null): string | null {
+  try {
+    const key = scopedKey(base, userId, orgId);
+    const own = localStorage.getItem(key);
+    if (own !== null || !userId || !orgId) return own;
+    const userOnlyKey = scopedKey(base, userId);
+    const userOnly = localStorage.getItem(userOnlyKey);
+    if (userOnly === null) return null;
+    try {
+      localStorage.setItem(key, userOnly);
+      localStorage.removeItem(userOnlyKey);
+    } catch {
+      // Storage refused the move: the copy still answers this read.
+    }
+    return userOnly;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The organization the browser copies of the signed-in person's state are kept
+ * under, or `null` with none (objectstack#36244).
+ *
+ * It is `ActiveOrganizationStorage`'s id — the one `createAuthenticatedFetch`
+ * stamps on the preference reads and writes as `X-Tenant-ID` — so the browser
+ * copy and the server row it mirrors always name the same organization. It is
+ * a synchronous read, so the first paint after an organization switch (which
+ * reloads the console with the new id already stored) reads the new
+ * organization's copy; and it is re-read on every render of a caller, which
+ * the auth context re-renders whenever the active organization moves.
+ */
+export function useOrganizationScope(): string | null {
+  // Subscribes the caller to the auth context: the stored id moves together
+  // with the context's active organization (AuthProvider writes both).
+  useAuth();
+  return ActiveOrganizationStorage.get();
 }
 
 /**

@@ -34,7 +34,7 @@ import React, { startTransition, useCallback, useContext, useEffect, useMemo, us
 import { createPortal } from 'react-dom';
 import type { BatchTransactionOperation, DataSource, GridFieldMetadata, I18nLabel } from '@object-ui/types';
 import { resolveAffordance, runBatchTransaction } from '@object-ui/core';
-import { isUntouchedNewRow, LineItemsField, lookupAutofillByField, columnHelpByField, UNTOUCHED_NEW_ROW, useBooleanValueLabel, type BooleanValueLabel, type ColumnHelp, type GridColumn, type LookupAutofillByField } from '@object-ui/fields';
+import { isUntouchedNewRow, LineItemsField, preloadGridField, lookupAutofillByField, columnHelpByField, UNTOUCHED_NEW_ROW, useBooleanValueLabel, type BooleanValueLabel, type ColumnHelp, type GridColumn, type LookupAutofillByField } from '@object-ui/fields';
 import { Button, Card, CardContent, CardHeader, CardTitle, cn, toast } from '@object-ui/components';
 import {
   formatDisplayNumber,
@@ -966,6 +966,34 @@ const FormSlotPlacement: React.FC<{
 };
 
 /**
+ * Set once this module's own `preloadGridField()` has settled, so a form that
+ * mounts after that renders its grids at its first paint.
+ */
+let gridBodySettled = false;
+
+/**
+ * Whether the line grid's body is here (objectstack#36102). The grid is drawn
+ * only once it is, so a collection stays on "Loading columns…" until then and
+ * the grid never mounts on its loading placeholder, however its columns were
+ * reached: derived from the child schema, authored in full, or authored
+ * untyped and drawn while the derivation is still in flight. A failed load
+ * settles too: the grid then reports it, through the nearest error boundary.
+ */
+function useGridBodySettled(): boolean {
+  const [settled, setSettled] = useState(gridBodySettled);
+  useEffect(() => {
+    if (settled) return;
+    let live = true;
+    void preloadGridField().then(() => {
+      gridBodySettled = true;
+      if (live) setSettled(true);
+    });
+    return () => { live = false; };
+  }, [settled]);
+  return settled;
+}
+
+/**
  * The line-item grids + document totals, isolated from the header form.
  *
  * It owns `parentRecord` — the header's record (`headerRecord`) with the user's
@@ -1000,6 +1028,7 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
   // used to pass `toLocaleString` an explicit `undefined`, i.e. the MACHINE's
   // locale (objectui#9909).
   const displayLocale = useDisplayLocale();
+  const gridBodyReady = useGridBodySettled();
   // The tenant default currency (ADR-0053): the totals stack's currency when
   // the amount field fixes none (objectui#11132).
   const { currency: tenantCurrency } = useLocalization();
@@ -1211,7 +1240,7 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
                 { object: d.childObject, parent: parentObjectName, property: 'relationshipField' },
               )}
             </p>
-          ) : !d.columns?.length ? (
+          ) : !d.columns?.length || !gridBodyReady ? (
             <p className="py-4 text-sm text-muted-foreground">{t('form.masterDetail.loadingColumns')}</p>
           ) : (
             <LineItemsField
@@ -1319,6 +1348,9 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
   dataSource,
   className,
 }) => {
+  // The line grid's body loads on first use (objectstack#36102). Start it now,
+  // while the child schema is fetched, so the grid is there before its columns.
+  preloadGridField();
   const rawDetails = schema.details || [];
   const isEdit = schema.mode === 'edit' && !!schema.recordId;
   // `title` / `submitText` / `cancelText` are `I18nLabel` (see the schema

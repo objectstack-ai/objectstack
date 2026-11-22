@@ -519,7 +519,6 @@ export function RecordStackDrawer({
   // reported, by level key: the breadcrumb names the record, and an ancestor
   // that was not opened with a title is still named by the one it reported.
   const [toggleSlot, setToggleSlot] = useState<HTMLElement | null>(null);
-  const [commentsSlot, setCommentsSlot] = useState<HTMLElement | null>(null);
   const [titles, setTitles] = useState<Readonly<Record<string, string>>>({});
   // objectstack#35593 / objectstack#35853 — the record header draws the
   // record's name and tags, and its button group, into the bar's record row
@@ -535,14 +534,13 @@ export function RecordStackDrawer({
   const bar = useMemo<RecordPaneBarApi>(
     () => ({
       toggleSlot,
-      commentsSlot,
       reportTitle: (recordId: string, title: string | undefined) => {
         if (!currentObject || !title) return;
         const key = `${currentObject}:${recordId}`;
         setTitles((prev) => (prev[key] === title ? prev : { ...prev, [key]: title }));
       },
     }),
-    [toggleSlot, commentsSlot, currentObject],
+    [toggleSlot, currentObject],
   );
   const defOf = (objectName: string) =>
     objects.find((o) => (o as { name?: unknown } | null)?.name === objectName);
@@ -632,7 +630,6 @@ export function RecordStackDrawer({
       recordRow={recordRow}
       onExpand={pane ? () => pane.openAsPage() : undefined}
       toggles={<span ref={setToggleSlot} className="contents" data-record-pane-toggles="" />}
-      comments={<span ref={setCommentsSlot} className="contents" data-record-pane-comments="" />}
     >
       {() => (
         <RecordDrawerContext.Provider value={api}>
@@ -666,13 +663,6 @@ export function RecordPaneBarToggles({ children }: { children: ReactNode }) {
   const bar = useContext(RecordPaneBarContext);
   if (!bar?.toggleSlot || children == null || children === false) return null;
   return createPortal(children, bar.toggleSlot);
-}
-
-/** The record's comments switch, drawn into its pane's bar before the button group (objectstack#36075). */
-export function RecordPaneBarComments({ children }: { children: ReactNode }) {
-  const bar = useContext(RecordPaneBarContext);
-  if (!bar?.commentsSlot || children == null || children === false) return null;
-  return createPortal(children, bar.commentsSlot);
 }
 
 /**

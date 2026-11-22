@@ -72,7 +72,7 @@ import { DateCellRenderer, DateTimeCellRenderer } from '../index';
 import { DateField } from '../widgets/DateField';
 import { DateTimeField } from '../widgets/DateTimeField';
 import { FormulaField } from '../widgets/FormulaField';
-import { GridField } from '../widgets/GridField';
+import { GridFieldWidget as GridField } from '../widgets/grid-field/GridFieldWidget';
 
 /**
  * `n` days from today, pinned to local noon so a run that starts near

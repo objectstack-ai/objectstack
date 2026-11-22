@@ -37,7 +37,7 @@
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { BatchTransactionOperation, GridFieldMetadata } from '@object-ui/types';
 import { resolveAffordance, type SchemaLike } from '@object-ui/core';
-import { LineItemsField, lookupAutofillByField, columnHelpByField, useBooleanValueLabel, type GridColumn } from '@object-ui/fields';
+import { LineItemsField, preloadGridField, lookupAutofillByField, columnHelpByField, useBooleanValueLabel, type GridColumn } from '@object-ui/fields';
 import { cn } from '@object-ui/components';
 import { useLocalization } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
@@ -207,6 +207,9 @@ const BODY_TABLE_EDIT_LIMIT = 500;
  * a part of the record page's edit state, never a standalone block.
  */
 export const RecordBodyTableEditor: React.FC<RecordBodyTableEditorProps> = ({ objectName, relationshipField, title }) => {
+  // The line grid's body loads on first use (objectstack#36102). Start it now,
+  // while the child schema is fetched, so the grid is there before its columns.
+  preloadGridField();
   const session = useContext(RecordEditSessionContext);
   const record = useRecordContext();
   // The record page's adapter, as its related lists read it.
@@ -231,8 +234,10 @@ export const RecordBodyTableEditor: React.FC<RecordBodyTableEditorProps> = ({ ob
   useEffect(() => {
     let cancelled = false;
     if (!dataSource || typeof dataSource.getObjectSchema !== 'function') return;
-    Promise.resolve(dataSource.getObjectSchema(objectName))
-      .then((s: any) => { if (!cancelled) setChildSchema(s ?? { fields: {} }); })
+    // The child schema is what draws the line grid, so it lands together with
+    // the grid's body (objectstack#36102); `preloadGridField` never rejects.
+    Promise.all([dataSource.getObjectSchema(objectName), preloadGridField()])
+      .then(([s]) => { if (!cancelled) setChildSchema(s ?? { fields: {} }); })
       .catch(() => { if (!cancelled) setLoadFailed(true); });
     return () => { cancelled = true; };
   }, [dataSource, objectName]);

@@ -154,7 +154,11 @@
  *     a delta to this number; count the registry. Nothing asserts it against a written
  *     one, so this line is prose and can rot; the pin that cannot is the one
  *     comparing the two halves to each other.
- *   - **51 entries** in `KnownDrift`, **91 keys** across them — 51 / 90 until
+ *   - **51 entries** in `KnownDrift`, **92 keys** across them — 51 / 91 until
+ *     objectstack#35955 declared `DataTableSchema.onColumnHide`, the host's
+ *     handler for the column menu's "Hide column", as a runtime slot refused
+ *     by name on the mirror, so it JOINED the same
+ *     `data-display.zod.ts#DataTableSchema` entry. It was 51 / 90 until
  *     objectstack#35678 declared `DataTableSchema.floatingBar`, the host-built
  *     selection bar the table floats over its rows, as a runtime slot refused
  *     by name on the mirror, so it JOINED the same
@@ -2536,7 +2540,11 @@ interface KnownDrift {
     // objectstack#35678 — `floatingBar` is a RUNTIME SLOT in the same shape:
     // the host-built selection bar `data-table` floats over its rows
     // (`ObjectGrid` supplies it while rows are selected).
-    | 'floatingBar';
+    | 'floatingBar'
+    // objectstack#35955 — `onColumnHide` is a RUNTIME SLOT in the objectui#6124
+    // shape: `data-table` calls it with the column's key when the column menu's
+    // "Hide column" is picked; `ObjectGrid` forwards its host's handler.
+    | 'onColumnHide';
   /** RUNTIME SLOT (objectui#7759 group E, the objectui#6124 shape): `data-table`, `ObjectGrid` and `VirtualGrid` call `col.cell(value, row)`. */
   'data-display.zod.ts#TableColumnSchema': 'cell';
   /**
