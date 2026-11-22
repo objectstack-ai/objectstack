@@ -1276,6 +1276,9 @@ const ko = {
     dragToReorder: "드래그하여 순서 변경",
     defaultView: "기본 보기",
     defaultBadge: "기본",
+    customizedBadge: "사용자 지정됨",
+    customizedTitle: "여기에서 변경됨: 모든 사용자가 패키지에 포함된 버전 대신 이 사본을 봅니다.",
+    restoreFactory: "기본 제공 버전으로 복원",
     tabActionsFor: "{{name}}의 보기 작업",
     readonlyAriaLabel: "읽기 전용 보기",
     readonlyTooltip: "시스템 보기 — 코드에 정의되어 있으며 읽기 전용입니다.",
@@ -2782,6 +2785,10 @@ const ko = {
       delete: "삭제",
       deleteViewTitle: "보기 삭제",
       deleteViewConfirm: "\"{{name}}\" 보기를 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.",
+      restoreFactory: "복원",
+      restoreFactoryTitle: "기본 제공 버전으로 복원",
+      restoreFactoryConfirm: "\"{{name}}\" 보기를 패키지에 포함된 버전으로 복원하시겠습니까? 이 보기를 사용하는 모든 사용자가 다시 기본 제공 버전을 보게 되며, 여기에서 변경한 이름, 고정 및 기본값이 제거됩니다.",
+      restoreFactoryDone: "\"{{name}}\"의 기본 제공 버전을 복원했습니다",
       bulkDeleteConfirm: "선택한 {{count}}개 레코드를 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.",
       bulkDeleteConfirm_one: "선택한 {{count}}개 레코드를 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.",
       bulkDeleteConfirm_other: "선택한 {{count}}개 레코드를 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.",
@@ -3797,6 +3804,7 @@ const ko = {
   objectViewActions: {
     renameFailed: "보기 이름 변경 실패",
     deleteFailed: "보기 삭제 실패",
+    restoreFactoryFailed: "기본 제공 버전 복원 실패",
   },
   dashboardActions: {
     printDialogOpening: "브라우저의 인쇄 대화 상자를 여는 중입니다（PDF 내보내기가 아닙니다）",

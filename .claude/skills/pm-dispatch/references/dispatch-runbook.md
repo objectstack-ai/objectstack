@@ -133,6 +133,8 @@
 - 席位写 assignee+`pm:dispatched`+带该 `Branch:` 的认领。
 - worktree 照建;线程读 `os-dev.md`、派发令、卡与全部评论,⛔ 不读 `SKILL.md`;references 按需读。
 - 交回:PR 与报告落地后给席位线程发一条消息(PR、head、报告要点);L1/L2 期线程不关,接 FAIL。
+- 线程每推后 10 分钟核 Actions 已起、非 `dirty`(冲突 PR 不起 CI),否则合 main 重推;等 CI 必留 `send_later` ≤30分钟兜底。
+- 席每轮读在飞卡 PR `pr-state.mjs`:推后 30 分钟零 Actions、`dirty`、2h 无推无报 ⇒ 当轮叫醒线程,⛔ 互等。
 - PR 正文由线程自改(中继 `issue_patch`)再报要点,⛔ 不请席或区代发;线程已关才代改。
 
 ## 派发前置:前提核实,再把本地检出钉到 main

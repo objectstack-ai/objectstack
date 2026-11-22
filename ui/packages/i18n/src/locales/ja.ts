@@ -1276,6 +1276,9 @@ const ja = {
     dragToReorder: "ドラッグして並べ替え",
     defaultView: "デフォルトビュー",
     defaultBadge: "デフォルト",
+    customizedBadge: "カスタマイズ済み",
+    customizedTitle: "ここで変更されています: パッケージ付属のバージョンではなく、このコピーが全員に表示されます。",
+    restoreFactory: "出荷時のバージョンに戻す",
     tabActionsFor: "{{name}} のビュー操作",
     readonlyAriaLabel: "読み取り専用ビュー",
     readonlyTooltip: "システムビュー — コードで定義され、読み取り専用です。",
@@ -2784,6 +2787,10 @@ const ja = {
       delete: "削除",
       deleteViewTitle: "ビューを削除",
       deleteViewConfirm: "ビュー「{{name}}」を削除してもよろしいですか？この操作は元に戻せません。",
+      restoreFactory: "戻す",
+      restoreFactoryTitle: "出荷時のバージョンに戻す",
+      restoreFactoryConfirm: "ビュー「{{name}}」をパッケージ付属のバージョンに戻しますか？このビューのすべてのユーザーに出荷時のバージョンが再び表示され、ここで変更した名前、ピン留め、デフォルト設定は削除されます。",
+      restoreFactoryDone: "「{{name}}」を出荷時のバージョンに戻しました",
       bulkDeleteConfirm: "選択した {{count}} 件のレコードを削除しますか？この操作は元に戻せません。",
       bulkDeleteConfirm_one: "選択した {{count}} 件のレコードを削除しますか？この操作は元に戻せません。",
       bulkDeleteConfirm_other: "選択した {{count}} 件のレコードを削除しますか？この操作は元に戻せません。",
@@ -3800,6 +3807,7 @@ const ja = {
   objectViewActions: {
     renameFailed: "ビューの名前変更に失敗しました",
     deleteFailed: "ビューの削除に失敗しました",
+    restoreFactoryFailed: "出荷時のバージョンに戻せませんでした",
   },
   dashboardActions: {
     printDialogOpening: "ブラウザーの印刷ダイアログを開いています（PDF エクスポートではありません）",
