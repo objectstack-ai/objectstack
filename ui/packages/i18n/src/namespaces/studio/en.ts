@@ -2373,6 +2373,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.settings.relatedListsUnmatched': '“{entry}” names no relationship that points at this object, so the next change to this list leaves it out.',
   'engine.studio.settings.relatedListsHidden': 'hidden',
   'engine.studio.settings.relatedListsPrimary': 'in body',
+  'engine.studio.settings.relatedListsFromPackage': 'from {package} · that package places it; unplaced, it shows at the end of the tabs',
   'engine.studio.settings.relatedListsPreview': 'Record page order',
   'engine.studio.settings.relatedListsPreviewBody': 'In the body',
   'engine.studio.settings.relatedListsPreviewSide': 'Tabs',

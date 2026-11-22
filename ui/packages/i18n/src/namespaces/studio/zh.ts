@@ -2158,6 +2158,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.settings.relatedListsUnmatched': '“{entry}”不对应任何指向本对象的关系,下次修改此列表时会被去掉。',
   'engine.studio.settings.relatedListsHidden': '已隐藏',
   'engine.studio.settings.relatedListsPrimary': '正文',
+  'engine.studio.settings.relatedListsFromPackage': '来自 {package} · 由该包自己摆放位置;没摆的排在页签末尾',
   'engine.studio.settings.relatedListsPreview': '记录页顺序',
   'engine.studio.settings.relatedListsPreviewBody': '正文',
   'engine.studio.settings.relatedListsPreviewSide': '页签',

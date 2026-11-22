@@ -216,6 +216,10 @@ export {
  *     tenant authored it — the same D9.2a rule as the scalars. A patch reaches
  *     the owner's own fields only (`ownFields`): one naming any other field,
  *     a field an extension adds included, is skipped here; the fold names it.
+ *   - `place` [#35901] is not read here: the fold applies every extension's
+ *     placements once, after this merge has run for all of them
+ *     (`applyExtensionPlacements`, registry-extension-placement.ts), so an
+ *     anchor names the object as served.
  *
  * **Every other top-level prop on `extension` is silently discarded.**
  * `merged` starts as `{ ...base }` and nothing outside the list above is ever
@@ -228,7 +232,7 @@ export {
  * Declarative authors never reach that silence, though: `ObjectExtensionSchema`
  * (`packages/spec/src/data/object.zod.ts`) is `.strict()` — its shape is
  * exactly `extend` / `fields` / `fieldPatches` / `label` / `pluralLabel` /
- * `description` / `validations` / `indexes` / `priority`, so an `objectExtensions` entry
+ * `description` / `validations` / `indexes` / `place` / `priority`, so an `objectExtensions` entry
  * naming `tenancy`, `permissions`, or any other key outside that list fails
  * LOUDLY at authoring time with a prescription (#4001; the same rule is
  * documented at `content/docs/data-modeling/object-extensions.mdx`). This
