@@ -6682,7 +6682,7 @@
       "title": "A multi-currency invoice stores its home-currency amount at the rate in force on its document date, refuses a date no rate covers, and keeps a currency-less amount blank",
       "since": "v18.4",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -6697,14 +6697,14 @@
           "the console bundle for the browser legs (pnpm console:build)"
         ],
         "knownGaps": [
-          "invoice lines and the Subtotal (`total`) roll-up stay dynamic-mode currency: the showcase's invoice lines declare no record-mode amount, and a summary over a record-mode child amount is refused (packages/objectql/src/record-currency-aggregate-door.ts#RecordCurrencySummaryRefusedError). On a EUR or JPY invoice those two show the home currency's symbol while `amount` shows the record's own. That is the platform's current shape, not a failure of this item. A master_detail child following its parent's currency (currencyField PARENT_FIELD.CODE_FIELD) is admitted by the spec since #31956, but the engine does not project through the path at 43a51b55 (#31911 open): records-forms.master-detail-child-follows-parent-currency (planned) is where that lands",
+          "the invoice lines and the Subtotal (`total`) roll-up follow the invoice's currency since #36005: `showcase_invoice_line.unit_price` and `amount` declare currencyField `invoice.currency_code` and `total` declares the invoice's `currency_code` (examples/app-showcase/src/data/objects/invoice.object.ts, ADR-0144 D2 and D6 as amended). So every seed invoice with a line refuses a change of its `currency_code` (VALIDATION_FAILED, invalid_value on currency_code, naming showcase_invoice_line: the lock under D2), which is why steps[2] PATCHes a draft with no line, and a priced line under an invoice with no code is refused ERR_CURRENCY_CODE_REQUIRED. This item does not score either refusal; the planned item records-forms.master-detail-child-follows-parent-currency is where they are scored",
           "a host with no .env reader and no other currency source has no home currency, so every coded seed invoice is refused ERR_HOME_CURRENCY_UNSET and dropped by the seeder with a warning: the invoice list is empty. That is a fixture failure (requires[0]), scored blocked(fixture), never a FAIL of these clauses"
         ]
       },
       "steps": [
         "GET /api/v1/data/showcase_invoice?filter currency_code in EUR, JPY and read amount, currency_code, invoice_date, amount_home and amount_rate on each; GET /api/v1/data/sys_exchange_rate for the rows those dates select",
         "POST a showcase_invoice with no currency_code (name, account, status draft) and read it back",
-        "PATCH a USD draft invoice's currency_code to EUR and read amount_home / amount_rate again",
+        "POST a USD draft showcase_invoice with no line (name, account, status draft, currency_code USD), then PATCH its currency_code to EUR and read amount_home / amount_rate again. Not a seed draft: INV-1002 carries a line, so its code is locked (fixtures.knownGaps[0])",
         "POST a showcase_invoice with currency_code JPY and invoice_date 2024-06-01 (before any JPY rate)",
         "in the console, open a EUR invoice's detail page, then its edit form, and change currency_code and invoice_date on the form without saving"
       ],
@@ -6778,6 +6778,12 @@
           "date": "2026-11-14",
           "change": "fixtures.requires[2] (the seed line): every foreign invoice now carries a non-zero total, not only INV-1004 and INV-1008. PR #33376 seeded one line each under INV-1007, INV-1009 and INV-1010, so the per-invoice recomputation of acceptance[0] no longer passes on 0 ÷ rate for three of the five. Measured on a stock boot of PR #33376's head (2b2bca197): INV-1007 JPY 95400 → 629.7 at 151.5, INV-1009 EUR 2016 → 2191.3 at 0.92, INV-1010 EUR 276 → 300 at 0.92. No clause changed",
           "ref": "#33351"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-22",
+          "change": "fixtures.knownGaps[0] and steps[2]: the invoice lines and the Subtotal now follow the invoice's currency (#36005), so a seed invoice with a line locks its currency_code and the old steps[2] PATCH of the seed USD draft INV-1002 (one line) is refused. steps[2] now POSTs a USD draft with no line and PATCHes that; acceptance[3] reads the same id before and after, as before. Measured on a stock boot of this branch: PATCH INV-1010 EUR to USD answers 400 naming showcase_invoice_line; a lineless USD draft PATCHed to EUR answers 200. No clause changed",
+          "ref": "#36005"
         }
       ]
     },
