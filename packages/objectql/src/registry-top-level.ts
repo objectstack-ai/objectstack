@@ -414,13 +414,40 @@ export function parseFQN(fqn: string): { namespace: string | undefined; shortNam
 }
 
 /**
- * The three SCALAR props {@link mergeObjectDefinitions} resolves last-writer-wins
- * — the exact set the #8284 ruling and ADR-0029 D9.2a both cover, and the same three
- * {@link scalarOverridesPackagedBase} answers for.
+ * The SCALAR props {@link mergeObjectDefinitions} resolves last-writer-wins
+ * — the three string scalars the #8284 ruling and ADR-0029 D9.2a both cover,
+ * which {@link scalarOverridesPackagedBase} answers for, and [#36366]
+ * `pinnedActions`, the object's header buttons per page type, which
+ * {@link foldScalarOverridesPackagedBase} answers for by its structure.
  */
-const OBJECT_FOLD_SCALAR_KEYS = ['label', 'pluralLabel', 'description'] as const;
+const OBJECT_FOLD_SCALAR_KEYS = ['label', 'pluralLabel', 'description', 'pinnedActions'] as const;
 
 type ObjectFoldScalarKey = (typeof OBJECT_FOLD_SCALAR_KEYS)[number];
+
+/** [#36366] A `pinnedActions` value as one comparable string (its two arms, in order), or `null` when it pins nothing. */
+function pinnedActionsKey(value: unknown): string | null {
+  if (!isPlainRecord(value)) return null;
+  const list = Array.isArray(value.list) ? value.list : null;
+  const record = Array.isArray(value.record) ? value.record : null;
+  return list === null && record === null ? null : JSON.stringify([list, record]);
+}
+
+/**
+ * [ADR-0029 D9.2a] Whether the fold's base carries `value` for the scalar
+ * `key` authored away from the packaged owner's. The string scalars ask
+ * {@link scalarOverridesPackagedBase}, the one comparison both layers share.
+ * [#36366] `pinnedActions` is not a string, so that predicate answers `false`
+ * for it whatever the base holds; it asks the same question by structure,
+ * with the predicate's three conservative edges: no owner document → `false`,
+ * a value that pins nothing → `false`, and equality is exact (both arms, in
+ * order).
+ */
+function foldScalarOverridesPackagedBase(owner: unknown, key: ObjectFoldScalarKey, value: unknown): boolean {
+  if (key !== 'pinnedActions') return scalarOverridesPackagedBase(owner, key, value);
+  if (!isPlainRecord(owner)) return false;
+  const authored = pinnedActionsKey(value);
+  return authored !== null && authored !== pinnedActionsKey(owner.pinnedActions);
+}
 
 /**
  * [ADR-0146 D10, second rule] An object extension's per-field display patches:
@@ -2249,7 +2276,7 @@ export {
   QUEUE_FIELD, RunRegisteredObject, SECURITY_CATALOG_NAME_RULE, ServedObjectLayer, TenantRuleSettings,
   WithheldExtensions, admittedFieldPatches, applyFieldPatches, bareNameConflictLine, bareNameReasonFor, bundleBaseKey,
   carriesTenantScopeColumn, changedPackagedRuleKeys, coldBootConflictMessage, collectBundle, declaredOwnedObjectNames,
-  declaresTenantIndex, displayKeyOverridesPackagedBase, entriesOfMember, fieldNamesOf, fieldPatchYieldKey,
+  declaresTenantIndex, displayKeyOverridesPackagedBase, entriesOfMember, fieldNamesOf, fieldPatchYieldKey, foldScalarOverridesPackagedBase,
   indexKeysOf, isLeftOutExtension, isPackagelessActionSlotKey, isPlainRecord, isStoredActionRow, leavesExtensionsOut,
   mergeValidationsByName, optionByValue, overlaySlotEntriesOf, overlaySlotKey, ownFieldNamesOf, ownFieldsTarget,
   packageBodySlot, packagedAddedFields, packagelessActionOwnerKey, packagelessActionSlotEntriesOf,

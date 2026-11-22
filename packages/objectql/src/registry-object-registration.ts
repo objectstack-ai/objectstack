@@ -49,7 +49,6 @@ import { BASE_FIELD_DISPLAY_WHITELIST, isInjectedColumnDefinition, materializeTr
 import type { ObjectOwnership, ServiceObject } from '@objectstack/spec/data';
 import { QUEUE_FIELD_DEF, applyAuditFieldGovernance, fieldPatchTargetMisses, isCodeArtifactBody, isTenantAuthored } from '@objectstack/metadata-core';
 import type { FieldPatchTargetMiss } from '@objectstack/metadata-core';
-import { scalarOverridesPackagedBase } from '@objectstack/spec/system';
 import { SEARCH_COMPANION_FIELD, provisionSearchCompanion } from './search-companion.js';
 import { applyExtensionPlacements, fieldGroupKeysOf, placementContributorsOf } from './registry-extension-placement.js';
 import type { ExtensionPlacementNote } from './registry-extension-placement.js';
@@ -61,7 +60,7 @@ import type { RecordCurrencyFollowRefusedError } from './record-currency-aggrega
 import {
   DEFAULT_EXTENDER_PRIORITY, DEFAULT_OVERLAY_PRIORITY, DEFAULT_OWNER_PRIORITY, NO_PACKAGE_REFERRER,
   OBJECT_FOLD_SCALAR_KEYS, QUEUE_FIELD, admittedFieldPatches, changedPackagedRuleKeys, computeFQN,
-  displayKeyOverridesPackagedBase, fieldNamesOf, fieldPatchYieldKey, indexKeysOf, isLeftOutExtension,
+  displayKeyOverridesPackagedBase, fieldNamesOf, fieldPatchYieldKey, foldScalarOverridesPackagedBase, indexKeysOf, isLeftOutExtension,
   isPackagelessActionSlotKey, isPlainRecord, leavesExtensionsOut, mergeValidationsByName, optionByValue,
   ownFieldNamesOf, ownFieldsTarget, parseOverlaySlotKey, parsePackageObjectActions, picklistReferrerOf,
   reconcileManagedApiMethods, recordFieldOf, ruleNamesOf, sortActionsByOrder, stableStringify, storedRowPackageOf,
@@ -1272,7 +1271,7 @@ export class ObjectRegistrationFacet {
   }
 
   /**
-   * [ADR-0029 D9.2a] Which of the three fold scalars the BASE layer carries a
+   * [ADR-0029 D9.2a] Which of the fold scalars the BASE layer carries a
    * TENANT-AUTHORED value for — i.e. one that no longer equals the packaged
    * owner's.
    *
@@ -1282,8 +1281,10 @@ export class ObjectRegistrationFacet {
    * extender yields. This **amends ADR-0029 D9.2**, whose fold was
    * unconditionally last-writer-wins on the scalars, and it is deliberately the
    * SAME comparison-based mechanism the #8284 fix applies one layer up — the
-   * predicate is literally {@link scalarOverridesPackagedBase}, imported from
-   * `@objectstack/spec`, not a second copy of the shape. One sentence at both
+   * predicate is literally `scalarOverridesPackagedBase`, imported from
+   * `@objectstack/spec`, not a second copy of the shape ([#36366] the
+   * structured scalar `pinnedActions` asks the same question by its structure,
+   * `foldScalarOverridesPackagedBase`). One sentence at both
    * layers: *an explicit override beats a packaged default.*
    *
    * ⛔ No provenance flag is stamped on the document and no migration is
@@ -1332,7 +1333,7 @@ export class ObjectRegistrationFacet {
     if (!owner || owner === baseDefinition) return undefined;
     let authored: Set<ObjectFoldScalarKey> | undefined;
     for (const key of OBJECT_FOLD_SCALAR_KEYS) {
-      if (scalarOverridesPackagedBase(owner, key, baseDefinition[key])) {
+      if (foldScalarOverridesPackagedBase(owner, key, baseDefinition[key])) {
         (authored ??= new Set()).add(key);
       }
     }
