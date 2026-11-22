@@ -134,7 +134,7 @@ export async function convertLegacyNoneDigestsOnce(
             `[messaging] the one-time ${OBJECT} digest conversion did NOT run: the deployment ledger ` +
                 `(${DATA_MIGRATION_FLAG_OBJECT}) is not available on this kernel, so the pass could not be recorded and ` +
                 'would erase choices made after it on every later boot. Rows that still hold the old default digest ' +
-                "'none' read as a person's own choice of no digest. Compose PlatformObjectsPlugin (it provisions the ledger).",
+                "'none' read as a person's own choice of no digest. Compose PlatformObjectsPlugin, which registers the ledger.",
         );
         return result('ledger-unavailable');
     }
