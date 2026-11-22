@@ -1659,6 +1659,7 @@ const ko = {
     updatedTime: "수정 일시",
     recordNumber: "레코드 ID",
     clickToEdit: "클릭하여 편집",
+    setField: "{{field}} 설정",
     // objectui#3863 — base key. ko has a single plural category (`other`), so this
     // slot is unreachable here and equals `_other` for key-set parity.
     showEmptyRelated: "+ {{count}}개 비어 있음",
@@ -2614,6 +2615,14 @@ const ko = {
       systemTheme: "시스템 테마",
       actions: "작업",
       openFullSearch: "전체 검색 페이지 열기",
+      create: "만들기",
+      createAs: "'{{query}}'을(를) {{object}}(으)로 만들기",
+      previewEmpty: "레코드를 선택하면 세부 정보가 표시됩니다.",
+      enterOpenRecord: "레코드 열기",
+      enterCreate: "만들기",
+      enterSwitchApp: "앱 전환",
+      enterApplyTheme: "테마 적용",
+      enterOpen: "열기",
       searching: "검색 중…",
       records: "레코드",
       recentRecords: "최근 본 항목",
@@ -3438,6 +3447,11 @@ const ko = {
     allReports: "모든 보고서",
     collapse: '사이드바 접기',
     expand: '사이드바 펼치기',
+  },
+  designMode: {
+    title: '디자인 모드',
+    leaveUnsaved: '디자인 모드를 종료할까요? 저장하지 않은 변경 사항은 사라집니다.',
+    saveFailed: '일부 변경 사항이 저장되지 않았습니다: {{reason}}',
   },
   topbar: {
     openAssistant: "{{name}} 어시스턴트 열기",

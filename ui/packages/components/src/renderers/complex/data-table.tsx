@@ -2670,6 +2670,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     }
     setColumns(prev => prev.filter(c => c.accessorKey !== columnKey));
     setContextMenu(null);
+    // objectstack#35955 — a host that keeps the columns shown owns the choice
+    // (the list holds it in its draft, as the hide-fields eye does).
+    schema.onColumnHide?.(columnKey);
   };
 
   const handleSelectAll = (checked: boolean) => {

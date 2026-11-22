@@ -9,7 +9,7 @@
       "title": "Every user-initiated write answers visibly — success names what changed, a refusal says why, and a no-op claims nothing",
       "since": "v17.7",
       "status": "active",
-      "revision": 16,
+      "revision": 17,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -39,7 +39,7 @@
         "param action dialog — Setup → Users → Invite User → Confirm (declared outcomeMessages: link_only on a deployment that sends no mail, sent where it does; successMessage `Invitation sent to {{ result.email }}` is the fallback, knownGaps[0])",
         "approval decision — open the request from the approvals page, /_console/apps/com.example.showcase/system/approvals (the 'Approvals inbox' link opens the review-queue page, which is not where the decision is taken). The route has no drawer: opening a request's row navigates to its record page (sys_approval_request_detail), and the row's record title (e.g. EXP-2001) links to the subject record's own page (showcase_expense_report/record/ID), whose header also carries Approve — QA run #33914 took the decision there. Record which page the decision was taken on → Approve with a comment. On a per_group request (e.g. showcase_expense_signoff's 会签: a manager AND a finance approver must each approve, examples/app-showcase/src/automation/flows/index.ts#ExpenseSignoffFlow) one approval leaves the request pending, so read the decision from sys_approval_action, not from the request's status",
         "import — Tasks → Import a two-row CSV → the result screen",
-        "Studio autosave — rename a field label in the scratch package: give the scratch object one record first (with no records the Studio object's Records grid shows no columns), then open the column header's 'Edit field properties' (data-testid grid-edit-column-FIELD), which opens the field inspector with the Label input; clicking the header text itself sorts the column (QA run #33914)",
+        "Studio autosave — rename a field label in the scratch package: give the scratch object one record first (with no records the Studio object's Records grid shows no columns), then open the column header's 'Edit field properties' (data-testid grid-edit-column-FIELD), which opens the field inspector with the Label input; clicking the header text itself selects that field and opens the same inspector, and never sorts: sort and hide are in the column menu the header's 'Sort and hide' caret opens (data-testid grid-column-menu-FIELD; StudioDesignSurface's Records grid since objectstack#34794 — QA run #33914 predates it, when the click sorted)",
         "Studio publish — Publish the scratch package",
         "Studio discard — on the All metadata area's item page, /_console/studio/~all/metadata/object/OBJ (where Setup's /_console/apps/setup/metadata/object/OBJ now redirects, ADR-0146 D1, #28818), for a scratch-package object with a pending draft, click 'Discard draft' and accept the in-app confirm dialog (it is no longer the browser's native confirm). Open it on the ~all leg: the per-package /_console/studio/PKG/metadata/object/OBJ opens the object's Data pillar instead (areaItemPillarPath, metadataArea.ts), which offers no discard. A scratch object's name carries its package's namespace prefix, so read it off the package before building the URL",
         "settings save — Settings → Localization → save a value other than the currency, e.g. fiscal year start: on stock the currency reads 'Default currency locked: USD' (OS_LOCALIZATION_CURRENCY; QA run #33861)"
@@ -201,6 +201,12 @@
           "date": "2026-11-20",
           "change": "knownGaps[3] follows #35685: a list cell save now offers Undo (the save toast's button and Ctrl+Z / Cmd+Z on a cell, a new If-Match update of the prior value), so the stock surfaces with an Undo are the import and the list cell save, and 'inline edits push none' is narrowed to the shared stack. The clauses are unchanged. Read at the PR's head",
           "ref": "#35898"
+        },
+        {
+          "revision": 17,
+          "date": "2026-11-22",
+          "change": "variants[8]'s last clause re-read at base 4e55e4eb: in Studio's Records grid a click on a field's column header selects the field and opens its properties and does not sort (objectstack#34794, StudioDesignSurface's onClickCapture on data-records-body); sort and hide are in the 'Sort and hide' caret's column menu, which #35876 made a role=menu. The step said the click sorts (QA run #33914). No clause changed",
+          "ref": "#35922"
         }
       ]
     },

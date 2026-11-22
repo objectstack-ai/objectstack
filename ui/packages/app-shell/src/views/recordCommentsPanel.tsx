@@ -20,42 +20,30 @@ export const COMMENTS_PANEL_WIDTH = 380;
 export const COMMENTS_PANEL_BESIDE_MIN_WINDOW = 1280;
 
 /**
- * From this drawer width the panel sits beside the record inside the drawer,
- * leaving the record at least as wide as the panel; a narrower drawer (the
- * default `md`, 720) gives the panel the whole drawer body.
+ * Where the open panel is drawn on the record's full page: `beside` the
+ * record, which gives it the width; or `over` the page's right edge (a window
+ * under 1280). A record drawn in a drawer or pane has no panel
+ * (objectstack#36225): its comments are the full page's.
  */
-export const COMMENTS_PANEL_DRAWER_SPLIT_MIN_WIDTH = 2 * COMMENTS_PANEL_WIDTH;
+export type CommentsPanelPlacement = 'beside' | 'over';
 
-/**
- * Where the open panel is drawn: `beside` the record, which gives it the
- * width; `over` the page's right edge (a window under 1280); or as a `cover`
- * of the whole drawer body (a drawer under 760).
- */
-export type CommentsPanelPlacement = 'beside' | 'over' | 'cover';
-
-export function commentsPanelPlacement({
-  embedded,
-  windowWidth,
-  hostWidth,
-}: {
-  /** The record is drawn in a drawer or pane, not on its own page. */
-  embedded: boolean;
-  windowWidth: number;
-  /** The width of the record view itself (the drawer's body when embedded). */
-  hostWidth: number;
-}): CommentsPanelPlacement {
-  if (embedded) return hostWidth >= COMMENTS_PANEL_DRAWER_SPLIT_MIN_WIDTH ? 'beside' : 'cover';
+export function commentsPanelPlacement(windowWidth: number): CommentsPanelPlacement {
   return windowWidth >= COMMENTS_PANEL_BESIDE_MIN_WINDOW ? 'beside' : 'over';
 }
 
 /**
- * Whether the reader keeps the comment panel open (objectstack#36075, item 2):
- * a preference, kept in this browser, one for the record page and one for
- * the drawer, so the drawer (where the panel may cover the record) does not
- * open on the comments because the page was left with them open.
+ * The browser's record of whether the reader keeps the comment panel open
+ * (objectstack#36075, item 2).
  */
-export function useCommentsPanelOpen(surface: 'page' | 'drawer'): [boolean, (open: boolean) => void] {
-  const key = `os:record-comments-panel:${surface}`;
+export const COMMENTS_PANEL_OPEN_KEY = 'os:record-comments-panel:page';
+
+/**
+ * Whether the reader keeps the record page's comment panel open
+ * (objectstack#36075, item 2): a preference, kept in this browser, so a
+ * record opened later opens with the panel as it was left.
+ */
+export function useCommentsPanelOpen(): [boolean, (open: boolean) => void] {
+  const key = COMMENTS_PANEL_OPEN_KEY;
   const [open, setOpenState] = useState<boolean>(() => {
     try {
       return typeof window !== 'undefined' && window.localStorage.getItem(key) === 'open';
@@ -92,25 +80,9 @@ export function useWindowWidth(): number {
   return width;
 }
 
-/** An element's rendered width, re-read whenever it resizes; 0 before it mounts. */
-export function useElementWidth(element: Element | null): number {
-  const [width, setWidth] = useState(0);
-  useEffect(() => {
-    if (!element) return undefined;
-    const read = () => setWidth(element.getBoundingClientRect().width);
-    read();
-    if (typeof ResizeObserver === 'undefined') return undefined;
-    const observer = new ResizeObserver(read);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [element]);
-  return width;
-}
-
 const PLACEMENT_CLASS: Record<CommentsPanelPlacement, string> = {
   beside: 'relative w-[380px] shrink-0 border-l border-border',
   over: 'absolute inset-y-0 right-0 z-30 w-[380px] max-w-full border-l border-border shadow-xl',
-  cover: 'absolute inset-0 z-30',
 };
 
 /**
@@ -132,7 +104,7 @@ export function RecordCommentsAside({
   const ref = useRef<HTMLDivElement>(null);
   // Closed from inside (✕, Esc), the focus goes back to the record: to the
   // comments icon that opened the panel, the nearest one round it (the page's
-  // header, or the drawer's record row).
+  // header).
   const close = useCallback(() => {
     const el = ref.current;
     const hadFocus = !!el && el.contains(document.activeElement);

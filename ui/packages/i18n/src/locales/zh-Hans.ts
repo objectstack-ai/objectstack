@@ -1606,6 +1606,7 @@ const zh = {
     updatedTime: '修改时间',
     recordNumber: '记录编号',
     clickToEdit: '点击编辑',
+    setField: '设置{{field}}',
     // Attachments
     dropFilesToUpload: '拖拽文件到此处或点击上传',
     attachmentCount: '{{count}} 个附件',
@@ -2357,6 +2358,14 @@ const zh = {
       systemTheme: '系统主题',
       actions: '操作',
       openFullSearch: '打开完整搜索页面',
+      create: '新建',
+      createAs: '新建「{{query}}」为{{object}}',
+      previewEmpty: '选中一条记录即可查看详情。',
+      enterOpenRecord: '打开记录',
+      enterCreate: '新建',
+      enterSwitchApp: '切换应用',
+      enterApplyTheme: '应用主题',
+      enterOpen: '打开',
     },
     ai: {
       pendingDrafts: {
@@ -3519,6 +3528,11 @@ const zh = {
     allReports: '全部报表',
     collapse: '收起侧边栏',
     expand: '展开侧边栏',
+  },
+  designMode: {
+    title: '设计模式',
+    leaveUnsaved: '离开设计模式？未保存的改动将会丢失。',
+    saveFailed: '部分改动没有保存：{{reason}}',
   },
   topbar: {
     aiAssistant: 'AI 助手',

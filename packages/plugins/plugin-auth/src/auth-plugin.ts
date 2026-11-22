@@ -128,6 +128,7 @@ import { resolveKernelCache } from './kernel-cache.js';
 import { authIdentityManifest } from './manifest.js';
 import { scheduleLegacySsoSecretMigration } from './sso-client-secret.js';
 import { reportSsoProvidersWithNonBareDomainEntries } from './sso-stored-domain-entries.js';
+import { reportSsoProviderAccessSweep } from './sso-provider-lifecycle.js';
 import {
   directSignInNetworkRefusal,
   isDirectSignInDoorNavigation,
@@ -1324,6 +1325,21 @@ export class AuthPlugin implements Plugin {
         try { ql = ctx.getService<IDataEngine>('data'); } catch { ql = undefined; }
       }
       await reportSsoProvidersWithNonBareDomainEntries(ql, ctx.logger);
+    });
+
+    // Deleting an SSO provider ends the sessions its sign-ins opened and its projected grants: what a provider
+    // that no longer exists left behind (the grants its sign-ins projected,
+    // the live sessions signed in through it) is removed once per boot
+    // (`sso-provider-lifecycle.ts` `sweepDeletedSsoProviderAccess`). Registered
+    // unconditionally: the grants grant wherever they are read. Never throws
+    // into boot.
+    ctx.hook('kernel:ready', async () => {
+      let ql: IDataEngine | undefined;
+      try { ql = ctx.getService<IDataEngine>('objectql'); } catch { ql = undefined; }
+      if (!ql) {
+        try { ql = ctx.getService<IDataEngine>('data'); } catch { ql = undefined; }
+      }
+      await reportSsoProviderAccessSweep(ql, ctx.logger);
     });
 
     // [#23367, ruling A] Record when this deployment started enforcing the

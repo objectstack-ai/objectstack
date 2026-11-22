@@ -628,9 +628,22 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
     const fieldEditable =
       !isReadonly && !isComputedField && !isSystemField && !isInlineExcluded && isWriteGranted;
     const canInlineEditField = fieldEditable && !!onEnterInlineEdit;
+    const fieldLabelText = fieldLabel(objectName || '', field.name, field.label || field.name);
 
     const displayValue = (() => {
       const isEmpty = !hasCellValue(value);
+      // On the record page's field face an empty value the reader can fill in
+      // reads "Set <label>", light, and the row's one click opens its editor.
+      // Only where a click edits: a read-only field, a field without the
+      // write grant and a record that is not inline-editable keep the shared
+      // placeholder below, and so does every face that edits on a double-click.
+      if (isEmpty && frameless && canInlineEditField) {
+        return (
+          <span className="text-muted-foreground/70" data-detail-set-field="">
+            {t('detail.setField', { field: fieldLabelText, defaultValue: 'Set {{field}}' })}
+          </span>
+        );
+      }
       if (isEmpty) {
         // The SHARED placeholder (objectui#8506). The span that stood here
         // spelled its own em-dash and resolved its own `aria-label` from
@@ -844,9 +857,10 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
     // (the desktop row, its Enter/Space, its hover button, and the mobile
     // grouped-inset row's click and Enter/Space).
     const copyOffered = canCopy && !isMaskedField;
-    // An editable field surfaces the pencil (edit) affordance instead of the
-    // copy affordance, and reserves single-click for text selection — so
-    // click-to-copy only applies to non-editable fields.
+    // An editable field surfaces the pencil (edit) affordance, and its click
+    // is never a copy — so click-to-copy only applies to non-editable fields.
+    // Off the field face the pencil stands instead of the copy button; on it
+    // the copy button stands beside the keyboard-only pencil.
     // The frameless face (the record page's field list, objectstack#36147)
     // takes no click on a read-only row: a click there selects text, and the
     // value is copied from its hover / focus button. An editable row's click
@@ -860,7 +874,6 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
       ? t('detail.clickToEdit', { defaultValue: 'Click to edit' })
       : t('detail.editInlineHint');
     const isCopied = copiedField === field.name;
-    const fieldLabelText = fieldLabel(objectName || '', field.name, field.label || field.name);
 
     // iOS-style grouped-inset row (mobile, read mode): label left, value right,
     // hairline-separated rows inside the section card. The native-feeling
@@ -995,7 +1008,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
           >
             {displayValue}
           </div>
-          {canInlineEditField ? (
+          {canInlineEditField && (
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -1018,7 +1031,12 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
-          ) : copyOffered ? (
+          )}
+          {/* On the field face an editable value is copied from the same
+              hover / focus button a read-only one is: its click is the
+              way into edit, so the button is the way to copy. Elsewhere
+              an editable row keeps the pencil alone. */}
+          {copyOffered && (!canInlineEditField || frameless) && (
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -1055,7 +1073,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
-          ) : null}
+          )}
         </div>
         )}
       </div>

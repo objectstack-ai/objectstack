@@ -227,3 +227,59 @@ describe('useRegisterUnsavedEdits (objectui#13231)', () => {
     expect(confirmSpy).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('a registration names the pages it keeps its edits on (objectstack#36362)', () => {
+  it('a link to a page it keeps asks nothing; a link to any other page asks its question', () => {
+    window.history.replaceState(null, '', '/_console/apps/crm/crm_lead');
+    const inApp = document.createElement('a');
+    inApp.href = '/_console/apps/crm/dashboard/sales';
+    const outOfApp = document.createElement('a');
+    outOfApp.href = '/_console/home';
+    document.body.append(inApp, outOfApp);
+    const stop = (e: Event) => e.preventDefault();
+    window.addEventListener('click', stop);
+    const release = registerUnsavedEdits(KEEP, {
+      keeps: (url) => url.pathname.startsWith('/_console/apps/crm/'),
+    });
+    releases.push(release);
+    try {
+      inApp.click();
+      expect(confirmSpy).not.toHaveBeenCalled();
+
+      outOfApp.click();
+      expect(confirmSpy).toHaveBeenCalledTimes(1);
+      expect(confirmSpy).toHaveBeenCalledWith(KEEP);
+    } finally {
+      window.removeEventListener('click', stop);
+      inApp.remove();
+      outOfApp.remove();
+    }
+  });
+
+  it('a page another registration does not keep still asks that registration\'s question', () => {
+    window.history.replaceState(null, '', '/_console/apps/crm/crm_lead');
+    const inApp = document.createElement('a');
+    inApp.href = '/_console/apps/crm/dashboard/sales';
+    document.body.append(inApp);
+    const stop = (e: Event) => e.preventDefault();
+    window.addEventListener('click', stop);
+    releases.push(registerUnsavedEdits('page question'));
+    releases.push(registerUnsavedEdits(KEEP, { keeps: () => true }));
+    try {
+      inApp.click();
+      expect(confirmSpy).toHaveBeenCalledWith('page question');
+    } finally {
+      window.removeEventListener('click', stop);
+      inApp.remove();
+    }
+  });
+
+  it('a tab close and a shell departure still ask, whatever the registration keeps', () => {
+    releases.push(registerUnsavedEdits(KEEP, { keeps: () => true }));
+    expect(unloadHeld()).toBe(true);
+    const go = vi.fn();
+    confirmUnsavedLeave(go);
+    expect(confirmSpy).toHaveBeenCalledWith(KEEP);
+    expect(go).not.toHaveBeenCalled();
+  });
+});
