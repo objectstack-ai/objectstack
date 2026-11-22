@@ -272,6 +272,13 @@ export {
 export type { RecordTitleFinding, RecordTitleSeverity } from './validate-record-title.js';
 
 export {
+  validateRecordPageHeader,
+  RECORD_PAGE_HEADER_TITLE_DIFFERS,
+  RECORD_PAGE_HEADER_ACTIONS_DIFFER,
+} from './validate-record-page-header.js';
+export type { RecordPageHeaderFinding } from './validate-record-page-header.js';
+
+export {
   validateSemanticRoles,
   FIELD_GROUP_UNDECLARED,
   FIELD_GROUP_EMPTY,

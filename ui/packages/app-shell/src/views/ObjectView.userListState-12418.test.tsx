@@ -15,42 +15,40 @@
  *
  * ## What runs
  *
- * The real object page, the real `ListPreferencesProvider` (its 500 ms write
- * debounce included) and a list-state family that records its `load` and
- * `save` the way `@object-ui/data-objectstack`'s does (`sys_user_preference`,
- * one `ui.list.<object>` row per object). The view writes are the adapter's
- * `updateView` spy and, for the view editor's save, a real `MetadataClient`
- * whose `PUT /meta/view/…` is counted. `ListView` is captured (a toolbar change
- * is the page's own callback) and Manage Views is reduced to its reorder and
- * its config entry.
+ * The real object page, with the reader's list layout kept where the page
+ * keeps it: this browser's `list-layout:<user>:<object>` entry
+ * (`./listLayoutStore.ts`), every write of which is recorded. The view writes
+ * are the adapter's `updateView` spy and, for the view editor's save, a real
+ * `MetadataClient` whose `PUT /meta/view/…` is counted. `ListView` is captured
+ * (a toolbar change is the page's own callback) and Manage Views is reduced to
+ * its reorder and its config entry.
  *
  * ## The pins
  *
  *   1. A header sort writes no view and nothing stored: it is the draft's. A
- *      column resize lands as ONE save of the object's row, widths only. A
- *      Manage Views drag lands as ONE save. The view editor's save still
- *      writes `/meta/view`.
- *   2. A fresh browser opens on the reader's stored tab order and column
- *      widths once the family has loaded; a sort or filter an earlier console
- *      stored there no longer applies. Another user sees the view's own.
- *      Discard puts the list back as its view declares it and keeps the
- *      widths; it writes nothing.
- *   3. objectui#12474 — the density stays the reader's stored choice; a Hide
+ *      column resize is ONE write of the reader's layout, widths only. A
+ *      Manage Views drag is ONE write. The view editor's save still writes
+ *      `/meta/view`.
+ *   2. The list opens on the tab order and column widths this browser keeps
+ *      for the reader; another user sees the view's own. Discard puts the list
+ *      back as its view declares it and keeps the widths; it writes nothing.
+ *   3. objectui#12474 — the density stays the reader's kept choice; a Hide
  *      Fields change is the draft's. objectui#12505 — on a saved view that
  *      declares no `columns` the draft's hide applies over the drawn defaults.
  *   4. objectui#12949 — the list is handed the view's own density and hidden
  *      fields in `viewDefaults`, beside the reader's in `schema`.
  *   5. objectstack#28948 — the list's "Reset to view default" drops the reset
- *      parts (from the draft, or the stored row height), so the reader follows
+ *      parts (from the draft, or the kept row height), so the reader follows
  *      later changes to the view; a deliberate `sort: []` / `hiddenFields: []`
  *      is a draft part too.
  *   6. objectstack#30077 — a field the reader adds is a draft part: the list is
  *      handed it appended to the view's columns, and Discard drops it.
- *   7. CONTROL — no provider (a host without the console shell): a sort is the
- *      draft's there too; the older `viewOrder:<object>` key still orders the
- *      tabs, and the Filter panel's older per-browser group no longer applies.
- *   8. objectstack#32627 — a width change writes the reader's row only when it
- *      changes it.
+ *   7. objectstack#35955 — what an earlier Console kept (the `ui.list.<object>`
+ *      row's cache `list-state:*`, the Filter panel's `list-filters:*`, the
+ *      bare `viewOrder:<object>`) is removed and never read: a part an earlier
+ *      Console stored no longer applies.
+ *   8. objectstack#32627 — a width change writes the reader's layout only when
+ *      it changes it.
  */
 
 
@@ -142,7 +140,6 @@ vi.mock('./metadata-admin/inspectors/ViewVariantInspector', () => ({
 const OBJECT_NAME = 'crm_deal';
 const SYSTEM_ID = `${OBJECT_NAME}.all`;
 const SAVED_ID = `${OBJECT_NAME}.pipeline`;
-const LIST_KEY = `ui.list.${OBJECT_NAME}`;
 
 /** The tab order Manage Views is handed, as its stub last saw it. */
 let manageViewsOrder: string[] = [];
@@ -190,8 +187,7 @@ vi.mock('./metadata-admin/useMetadata', async (importOriginal) => ({
 import '@objectstack/lint';
 import { ObjectView, type ConsoleObjectViewProps } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
-import { UserStateAdaptersProvider, useAttachListStateFamily } from '../context/UserStateAdapters';
-import { ListPreferencesProvider, localListStateKey } from '../context/ListPreferencesProvider';
+import { listLayoutStorageKey, resetListLayoutStoreForTests } from './listLayoutStore';
 import { listDraftScope, patchListDraft, readListDraft, resetListDraftStoreForTests } from './listDraftStore';
 
 const FIELDS = {
@@ -231,30 +227,34 @@ function makeDataSource(savedRow: Record<string, unknown> = SAVED_ROW) {
   } as unknown as ConsoleObjectViewProps['dataSource'];
 }
 
-/** A list-state family recording its traffic; `rows` is the user's stored rows. */
-function makeFamily(rows: Record<string, unknown>, opts: { held?: boolean } = {}) {
-  let release: () => void = () => {};
-  const gate = opts.held ? new Promise<void>((resolve) => { release = resolve; }) : Promise.resolve();
-  const family = {
-    prefix: 'ui.list.',
-    load: vi.fn(async () => {
-      await gate;
-      return structuredClone(rows) as Record<string, any>;
-    }),
-    save: vi.fn(async (key: string, value: unknown) => {
-      rows[key] = structuredClone(value);
-    }),
+/** The signed-in reader's layout entry for the object, in this browser. */
+const layoutKey = () => listLayoutStorageKey(session.userId, OBJECT_NAME);
+
+/**
+ * Every write of a `list-layout:` entry since the case's {@link makeLayout}, as
+ * the value written (a removed entry as `{}`). Recorded by wrapping the storage
+ * methods once for the file, so no case's spy outlives it.
+ */
+const layoutWrites: unknown[] = [];
+{
+  const proto = Storage.prototype;
+  const setItem = proto.setItem;
+  const removeItem = proto.removeItem;
+  proto.setItem = function (this: Storage, key: string, value: string) {
+    if (key.startsWith('list-layout:')) layoutWrites.push(JSON.parse(value));
+    return setItem.call(this, key, value);
   };
-  return { family, release: () => release() };
+  proto.removeItem = function (this: Storage, key: string) {
+    if (key.startsWith('list-layout:')) layoutWrites.push({});
+    return removeItem.call(this, key);
+  };
 }
 
-function AttachFamily({ family }: { family: any }) {
-  const attach = useAttachListStateFamily();
-  React.useEffect(() => {
-    attach(family);
-    return () => attach(null);
-  }, [attach, family]);
-  return null;
+/** The reader's layout in this browser: `seed` is kept under their entry before the page mounts, and is not a write. */
+function makeLayout(seed?: Record<string, unknown>) {
+  if (seed) localStorage.setItem(layoutKey()!, JSON.stringify(seed));
+  layoutWrites.length = 0;
+  return { writes: layoutWrites };
 }
 
 function page(dataSource: ConsoleObjectViewProps['dataSource'], viewId: string, opts: { app?: boolean } = {}) {
@@ -275,14 +275,9 @@ function page(dataSource: ConsoleObjectViewProps['dataSource'], viewId: string, 
   );
 }
 
-/** Mount the page in the console's preference providers, with `family` attached. */
-function mountWithFamily(dataSource: ConsoleObjectViewProps['dataSource'], family: any, viewId = SYSTEM_ID, opts: { app?: boolean } = {}) {
-  return render(
-    <UserStateAdaptersProvider>
-      <AttachFamily family={family} />
-      <ListPreferencesProvider>{page(dataSource, viewId, opts)}</ListPreferencesProvider>
-    </UserStateAdaptersProvider>,
-  );
+/** Mount the object page. */
+function mount(dataSource: ConsoleObjectViewProps['dataSource'], viewId = SYSTEM_ID, opts: { app?: boolean } = {}) {
+  return render(page(dataSource, viewId, opts));
 }
 
 const wait = (ms: number) => act(() => new Promise<void>((resolve) => setTimeout(resolve, ms)));
@@ -339,6 +334,8 @@ beforeEach(() => {
   manageViewsOrder = [];
   localStorage.clear();
   resetListDraftStoreForTests();
+  resetListLayoutStoreForTests();
+  layoutWrites.length = 0;
   client = new MetadataClient({ baseUrl: 'http://localhost', fetch: wire() as unknown as typeof fetch });
   vi.stubGlobal('fetch', vi.fn(async () => json({ data: [] }, 200)));
   vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -353,24 +350,21 @@ afterEach(() => {
 });
 
 describe('a toolbar change writes no view (objectui#12418); what it changes is a draft (objectstack#35955)', () => {
-  it('a header sort writes nothing stored; a column resize lands as one save of the object\'s row, widths only', async () => {
+  it('a header sort writes nothing stored; a column resize is one write of the reader\'s layout, widths only', async () => {
     const ds = makeDataSource();
-    const { family } = makeFamily({});
-    mountWithFamily(ds, family);
+    const layout = makeLayout();
+    mount(ds);
     await listReady();
 
     act(() => {
       listProps.onSortChange([{ id: 'row-1', field: 'amount', order: 'desc' }]);
       listProps.onColumnStateChange({ widths: { name: 320 } });
     });
-    await wait(700);
+    await wait(50);
 
     expect(viewWrites(ds)).toBe(0);
     expect(toast.error).not.toHaveBeenCalled();
-    expect(family.save).toHaveBeenCalledTimes(1);
-    expect(family.save).toHaveBeenCalledWith(LIST_KEY, {
-      perView: { [SYSTEM_ID]: { columnState: { widths: { name: 320 } } } },
-    });
+    expect(layout.writes).toEqual([{ perView: { [SYSTEM_ID]: { widths: { name: 320 } } } }]);
     // The sort is the draft's (the list holds it on screen itself).
     expect(draftOf().sort).toEqual([{ field: 'amount', order: 'desc' }]);
     // The page hands the grid the reader's widths back.
@@ -379,18 +373,15 @@ describe('a toolbar change writes no view (objectui#12418); what it changes is a
 
   it('a column drag is the draft\'s order; the widths reported with it are the only stored part', async () => {
     const ds = makeDataSource();
-    const { family } = makeFamily({});
-    mountWithFamily(ds, family);
+    const layout = makeLayout();
+    mount(ds);
     await listReady();
 
     act(() => listProps.onColumnStateChange({ order: ['amount', 'name'], widths: { name: 300 } }));
-    await wait(700);
+    await wait(50);
 
     expect(viewWrites(ds)).toBe(0);
-    expect(family.save).toHaveBeenCalledTimes(1);
-    expect(family.save).toHaveBeenCalledWith(LIST_KEY, {
-      perView: { [SYSTEM_ID]: { columnState: { widths: { name: 300 } } } },
-    });
+    expect(layout.writes).toEqual([{ perView: { [SYSTEM_ID]: { widths: { name: 300 } } } }]);
     expect(draftOf().columnOrder).toEqual(['amount', 'name']);
     expect(listProps.schema.columnState).toEqual({ order: ['amount', 'name'], widths: { name: 300 } });
     // A drag lights Discard and Save on its own: the list reports no part for it.
@@ -399,42 +390,41 @@ describe('a toolbar change writes no view (objectui#12418); what it changes is a
 
   it('the schema-level sort relay is the same draft write', async () => {
     const ds = makeDataSource();
-    const { family } = makeFamily({});
-    mountWithFamily(ds, family);
+    const layout = makeLayout();
+    mount(ds);
     await listReady();
 
     act(() => listProps.schema.onSortChange([{ field: 'amount', order: 'asc' }]));
-    await wait(700);
+    await wait(50);
 
     expect(viewWrites(ds)).toBe(0);
-    expect(family.save).not.toHaveBeenCalled();
+    expect(layout.writes).toEqual([]);
     expect(draftOf().sort).toEqual([{ field: 'amount', order: 'asc' }]);
   });
 
-  it('a Manage Views drag writes no view and lands as one save', async () => {
+  it('a Manage Views drag writes no view and is one write of the reader\'s layout', async () => {
     const ds = makeDataSource();
-    const { family } = makeFamily({});
-    mountWithFamily(ds, family);
+    const layout = makeLayout();
+    mount(ds);
     await listReady();
     expect(manageViewsOrder).toEqual([SYSTEM_ID, SAVED_ID]);
 
     await act(async () => {
       fireEvent.click(screen.getByTestId('stub-reorder'));
     });
-    await wait(700);
+    await wait(50);
 
     expect(viewWrites(ds)).toBe(0);
     expect(toast.error).not.toHaveBeenCalled();
-    expect(family.save).toHaveBeenCalledTimes(1);
-    expect(family.save).toHaveBeenCalledWith(LIST_KEY, { viewOrder: [SAVED_ID, SYSTEM_ID] });
+    expect(layout.writes).toEqual([{ viewOrder: [SAVED_ID, SYSTEM_ID] }]);
     // The tabs follow the user's order at once.
     expect(manageViewsOrder).toEqual([SAVED_ID, SYSTEM_ID]);
   });
 
   it('the view editor\'s save still writes /meta/view', async () => {
     const ds = makeDataSource();
-    const { family } = makeFamily({});
-    mountWithFamily(ds, family, SAVED_ID);
+    const layout = makeLayout();
+    mount(ds, SAVED_ID);
     await listReady();
 
     fireEvent.click(screen.getByTestId('stub-config'));
@@ -447,38 +437,23 @@ describe('a toolbar change writes no view (objectui#12418); what it changes is a
     });
 
     await waitFor(() => expect(puts).toEqual([`/api/v1/meta/view/${SAVED_ID}`]));
-    expect(family.save).not.toHaveBeenCalled();
+    expect(layout.writes).toEqual([]);
   });
 });
 
 describe('what the reader keeps follows them; the draft does not (objectui#12418, objectstack#35955)', () => {
-  /** A row an earlier console stored: its sort and filters are no longer read. */
+  /** The reader's layout kept in this browser: their tab order and one view's widths. */
   const STORED = {
-    [LIST_KEY]: {
-      viewOrder: [SAVED_ID, SYSTEM_ID],
-      perView: {
-        [SYSTEM_ID]: {
-          sort: [{ field: 'amount', order: 'desc' }],
-          filters: { id: 'root', logic: 'and', conditions: [{ id: 'c1', field: 'name', operator: 'contains', value: 'Acme' }] },
-          columnState: { widths: { name: 280 } },
-        },
-      },
-    },
+    viewOrder: [SAVED_ID, SYSTEM_ID],
+    perView: { [SYSTEM_ID]: { widths: { name: 280 } } },
   };
 
-  it('a fresh browser opens on the stored tab order and column widths once the family has loaded; the stored sort and filters no longer apply', async () => {
+  it('the list opens on the tab order and column widths this browser keeps for the reader', async () => {
     const ds = makeDataSource();
-    const { family, release } = makeFamily(structuredClone(STORED), { held: true });
-    mountWithFamily(ds, family);
-
-    // The list waits for the reader's state: nothing to open on yet.
-    await screen.findByTestId('object-view-list-preferences-pending');
-    expect(listProps).toBeNull();
-
-    await act(async () => release());
+    makeLayout(STORED);
+    mount(ds);
     await listReady();
 
-    expect(family.load).toHaveBeenCalledTimes(1);
     expect(manageViewsOrder).toEqual([SAVED_ID, SYSTEM_ID]);
     expect(listProps.schema.columnState).toEqual({ widths: { name: 280 } });
     expect(listProps.schema.sort).toEqual(AUTHORED_SORT);
@@ -490,8 +465,8 @@ describe('what the reader keeps follows them; the draft does not (objectui#12418
   it('another user, with no state of their own, sees the view\'s authored defaults', async () => {
     session.userId = 'u2';
     const ds = makeDataSource();
-    const { family } = makeFamily({});
-    mountWithFamily(ds, family);
+    const layout = makeLayout();
+    mount(ds);
     await listReady();
 
     expect(manageViewsOrder).toEqual([SYSTEM_ID, SAVED_ID]);
@@ -505,8 +480,8 @@ describe('what the reader keeps follows them; the draft does not (objectui#12418
 
   it('Discard puts the list back as its view declares it, keeps the widths and writes nothing', async () => {
     const ds = makeDataSource();
-    const { family } = makeFamily(structuredClone(STORED));
-    mountWithFamily(ds, family);
+    const layout = makeLayout(STORED);
+    mount(ds);
     await listReady();
     const filters = { id: 'root', logic: 'and', conditions: [{ id: 'c2', field: 'name', operator: 'contains', value: 'Beta' }] };
     act(() => {
@@ -524,10 +499,10 @@ describe('what the reader keeps follows them; the draft does not (objectui#12418
     expect(button.textContent?.trim()).toBe('console.objectView.draft.discard');
     expect(button.getAttribute('title')).toBe('console.objectView.draft.discardTitle');
     await discard();
-    await wait(700);
+    await wait(50);
 
     expect(viewWrites(ds)).toBe(0);
-    expect(family.save).not.toHaveBeenCalled();
+    expect(layout.writes).toEqual([]);
     expect(draftOf()).toEqual({});
     // The list is mounted again on the view's own.
     expect(listProps).not.toBe(before);
@@ -541,8 +516,8 @@ describe('what the reader keeps follows them; the draft does not (objectui#12418
 
   it('with no favorites entry (no app segment), the ⋯ offers no reset: the way back is Discard', async () => {
     const ds = makeDataSource();
-    const { family } = makeFamily({});
-    mountWithFamily(ds, family, SYSTEM_ID, { app: false });
+    const layout = makeLayout();
+    mount(ds, SYSTEM_ID, { app: false });
     await listReady();
 
     // objectstack#35548 — the page bar's ⋮ also holds the description and
@@ -566,8 +541,8 @@ describe('what the reader keeps follows them; the draft does not (objectui#12418
 
   it('"Clear all" in the Filter panel drops the draft\'s filters and keeps its sort', async () => {
     const ds = makeDataSource();
-    const { family } = makeFamily({});
-    mountWithFamily(ds, family);
+    const layout = makeLayout();
+    mount(ds);
     await listReady();
     act(() => {
       listProps.onSortChange([{ field: 'amount', order: 'asc' }]);
@@ -576,62 +551,57 @@ describe('what the reader keeps follows them; the draft does not (objectui#12418
     expect(draftOf().filters).toBeDefined();
 
     act(() => listProps.onFilterChange({ id: 'root', logic: 'and', conditions: [] }));
-    await wait(700);
+    await wait(50);
 
     expect(viewWrites(ds)).toBe(0);
-    expect(family.save).not.toHaveBeenCalled();
+    expect(layout.writes).toEqual([]);
     expect(draftOf()).not.toHaveProperty('filters');
     expect(draftOf().sort).toEqual([{ field: 'amount', order: 'asc' }]);
   });
 });
 
 describe('the density stays the reader\'s; the hidden fields are the draft\'s (objectui#12474, objectstack#35955)', () => {
-  it('a density toggle writes no view and lands as one save of the object\'s row', async () => {
+  it('a density toggle writes no view and is one write of the reader\'s layout', async () => {
     const ds = makeDataSource();
-    const { family } = makeFamily({});
-    mountWithFamily(ds, family);
+    const layout = makeLayout();
+    mount(ds);
     await listReady();
     expect(listProps.schema.rowHeight).toBe(AUTHORED_ROW_HEIGHT);
 
     act(() => listProps.schema.onDensityChange('compact'));
-    await wait(700);
+    await wait(50);
 
     expect(viewWrites(ds)).toBe(0);
     expect(toast.error).not.toHaveBeenCalled();
-    expect(family.save).toHaveBeenCalledTimes(1);
-    expect(family.save).toHaveBeenCalledWith(LIST_KEY, { perView: { [SYSTEM_ID]: { rowHeight: 'compact' } } });
+    expect(layout.writes).toEqual([{ perView: { [SYSTEM_ID]: { rowHeight: 'compact' } } }]);
     expect(listProps.schema.rowHeight).toBe('compact');
     expect(draftOf()).toEqual({});
   });
 
   it('a Hide Fields change writes no view and nothing stored: the list is handed the draft\'s', async () => {
     const ds = makeDataSource();
-    const { family } = makeFamily({});
-    mountWithFamily(ds, family);
+    const layout = makeLayout();
+    mount(ds);
     await listReady();
     expect(listProps.schema.hiddenFields).toEqual(AUTHORED_HIDDEN);
 
     // The whole list the popover emits: the reader showed `amount` and hid `name`.
     act(() => listProps.onHiddenFieldsChange(['name']));
-    await wait(700);
+    await wait(50);
 
     expect(viewWrites(ds)).toBe(0);
     expect(toast.error).not.toHaveBeenCalled();
-    expect(family.save).not.toHaveBeenCalled();
+    expect(layout.writes).toEqual([]);
     expect(draftOf().hiddenFields).toEqual(['name']);
     expect(listProps.schema.hiddenFields).toEqual(['name']);
   });
 
-  const STORED = {
-    [LIST_KEY]: { perView: { [SYSTEM_ID]: { rowHeight: 'compact', hiddenFields: [] } } },
-  };
+  const STORED = { perView: { [SYSTEM_ID]: { rowHeight: 'compact' } } };
 
-  it('a fresh browser opens on the stored density; hidden fields an earlier console stored no longer apply', async () => {
+  it('the list opens on the kept density; hidden fields found in the entry are not one of its parts and do not apply', async () => {
     const ds = makeDataSource();
-    const { family, release } = makeFamily(structuredClone(STORED), { held: true });
-    mountWithFamily(ds, family);
-    await screen.findByTestId('object-view-list-preferences-pending');
-    await act(async () => release());
+    makeLayout({ perView: { [SYSTEM_ID]: { rowHeight: 'compact', hiddenFields: [] } } });
+    mount(ds);
     await listReady();
 
     expect(listProps.schema.rowHeight).toBe('compact');
@@ -641,8 +611,8 @@ describe('the density stays the reader\'s; the hidden fields are the draft\'s (o
   it('another user, with no state of their own, sees the view\'s authored density and hidden fields', async () => {
     session.userId = 'u2';
     const ds = makeDataSource();
-    const { family } = makeFamily({});
-    mountWithFamily(ds, family);
+    const layout = makeLayout();
+    mount(ds);
     await listReady();
 
     expect(listProps.schema.rowHeight).toBe(AUTHORED_ROW_HEIGHT);
@@ -651,8 +621,8 @@ describe('the density stays the reader\'s; the hidden fields are the draft\'s (o
 
   it('Discard drops the hidden fields and keeps the stored density', async () => {
     const ds = makeDataSource();
-    const { family } = makeFamily(structuredClone(STORED));
-    mountWithFamily(ds, family);
+    const layout = makeLayout(STORED);
+    mount(ds);
     await listReady();
     act(() => {
       listProps.onHiddenFieldsChange(['name']);
@@ -661,18 +631,18 @@ describe('the density stays the reader\'s; the hidden fields are the draft\'s (o
     expect(listProps.schema.hiddenFields).toEqual(['name']);
 
     await discard();
-    await wait(700);
+    await wait(50);
 
     expect(viewWrites(ds)).toBe(0);
-    expect(family.save).not.toHaveBeenCalled();
+    expect(layout.writes).toEqual([]);
     expect(listProps.schema.rowHeight).toBe('compact');
     expect(listProps.schema.hiddenFields).toEqual(AUTHORED_HIDDEN);
   });
 
   it('a density the list reports alone draws no Discard: it is not a draft part', async () => {
     const ds = makeDataSource();
-    const { family } = makeFamily(structuredClone(STORED));
-    mountWithFamily(ds, family);
+    const layout = makeLayout(STORED);
+    mount(ds);
     await listReady();
     act(() => listProps.onPersonalizationChange(['density']));
     await wait(50);
@@ -690,26 +660,26 @@ describe('on a saved view that declares no `columns`, the draft\'s hidden fields
 
   it('a Hide Fields change writes no view and nothing stored, and applies at once', async () => {
     const ds = makeDataSource(UNPROJECTED_SAVED_ROW);
-    const { family } = makeFamily({});
-    mountWithFamily(ds, family, SAVED_ID);
+    const layout = makeLayout();
+    mount(ds, SAVED_ID);
     await listReady();
     // The drawn defaults, with neither the view's key nor anyone's list applied.
     expect(listProps.schema.columns).toEqual(expect.arrayContaining(['name', 'amount']));
     expect(listProps.schema.hiddenFields).toBeUndefined();
 
     act(() => listProps.onHiddenFieldsChange(['amount']));
-    await wait(700);
+    await wait(50);
 
     expect(viewWrites(ds)).toBe(0);
-    expect(family.save).not.toHaveBeenCalled();
+    expect(layout.writes).toEqual([]);
     expect(draftOf(SAVED_ID).hiddenFields).toEqual(['amount']);
     expect(listProps.schema.hiddenFields).toEqual(['amount']);
   });
 
-  it('a list an earlier console stored for the view no longer applies', async () => {
+  it('a hidden list found in the reader\'s entry for the view does not apply', async () => {
     const ds = makeDataSource(UNPROJECTED_SAVED_ROW);
-    const { family } = makeFamily({ [LIST_KEY]: { perView: { [SAVED_ID]: { hiddenFields: ['amount'] } } } });
-    mountWithFamily(ds, family, SAVED_ID);
+    makeLayout({ perView: { [SAVED_ID]: { hiddenFields: ['amount'] } } });
+    mount(ds, SAVED_ID);
     await listReady();
 
     expect(listProps.schema.columns).toEqual(expect.arrayContaining(['name', 'amount']));
@@ -719,8 +689,8 @@ describe('on a saved view that declares no `columns`, the draft\'s hidden fields
 
   it('Discard drops the draft\'s list, and the list opens on the default columns', async () => {
     const ds = makeDataSource(UNPROJECTED_SAVED_ROW);
-    const { family } = makeFamily({});
-    mountWithFamily(ds, family, SAVED_ID);
+    const layout = makeLayout();
+    mount(ds, SAVED_ID);
     await listReady();
     act(() => {
       listProps.onHiddenFieldsChange(['amount']);
@@ -728,38 +698,36 @@ describe('on a saved view that declares no `columns`, the draft\'s hidden fields
     });
 
     await discard();
-    await wait(700);
+    await wait(50);
 
     expect(viewWrites(ds)).toBe(0);
-    expect(family.save).not.toHaveBeenCalled();
+    expect(layout.writes).toEqual([]);
     expect(listProps.schema.hiddenFields).toBeUndefined();
   });
 
   it('CONTROL: on the saved view that declares `columns`, the hide applies the same way', async () => {
     const ds = makeDataSource();
-    const { family } = makeFamily({});
-    mountWithFamily(ds, family, SAVED_ID);
+    const layout = makeLayout();
+    mount(ds, SAVED_ID);
     await listReady();
     expect(listProps.schema.columns).toEqual(['name']);
 
     act(() => listProps.onHiddenFieldsChange(['name']));
-    await wait(700);
+    await wait(50);
 
     expect(viewWrites(ds)).toBe(0);
-    expect(family.save).not.toHaveBeenCalled();
+    expect(layout.writes).toEqual([]);
     expect(listProps.schema.hiddenFields).toEqual(['name']);
   });
 });
 
 describe('the list is handed the view\'s own density and hidden fields beside the reader\'s (objectui#12949)', () => {
-  const STORED = { [LIST_KEY]: { perView: { [SYSTEM_ID]: { rowHeight: 'compact' } } } };
+  const STORED = { perView: { [SYSTEM_ID]: { rowHeight: 'compact' } } };
 
   it('`schema` carries the reader\'s density and the draft\'s hidden fields, `viewDefaults` the view\'s own', async () => {
     const ds = makeDataSource();
-    const { family, release } = makeFamily(structuredClone(STORED), { held: true });
-    mountWithFamily(ds, family);
-    await screen.findByTestId('object-view-list-preferences-pending');
-    await act(async () => release());
+    makeLayout(STORED);
+    mount(ds);
     await listReady();
     act(() => listProps.onHiddenFieldsChange(['name']));
 
@@ -770,19 +738,18 @@ describe('the list is handed the view\'s own density and hidden fields beside th
 
   it('a choice equal to the view\'s own, made through the controls\' doors, is still the reader\'s choice', async () => {
     const ds = makeDataSource();
-    const { family } = makeFamily(structuredClone(STORED));
-    mountWithFamily(ds, family);
+    const layout = makeLayout(STORED);
+    mount(ds);
     await listReady();
 
     act(() => {
       listProps.onHiddenFieldsChange(listProps.viewDefaults.hiddenFields);
       listProps.schema.onDensityChange('spacious');
     });
-    await wait(700);
+    await wait(50);
 
     expect(viewWrites(ds)).toBe(0);
-    expect(family.save).toHaveBeenCalledTimes(1);
-    expect(family.save).toHaveBeenCalledWith(LIST_KEY, { perView: { [SYSTEM_ID]: { rowHeight: AUTHORED_ROW_HEIGHT } } });
+    expect(layout.writes).toEqual([{ perView: { [SYSTEM_ID]: { rowHeight: AUTHORED_ROW_HEIGHT } } }]);
     expect(draftOf().hiddenFields).toEqual(AUTHORED_HIDDEN);
     expect(listProps.schema.rowHeight).toBe(AUTHORED_ROW_HEIGHT);
     expect(listProps.schema.hiddenFields).toEqual(AUTHORED_HIDDEN);
@@ -792,8 +759,8 @@ describe('the list is handed the view\'s own density and hidden fields beside th
   it('CONTROL: another user, with no state of their own, is handed the same value twice', async () => {
     session.userId = 'u2';
     const ds = makeDataSource();
-    const { family } = makeFamily({});
-    mountWithFamily(ds, family);
+    const layout = makeLayout();
+    mount(ds);
     await listReady();
 
     expect(listProps.schema.hiddenFields).toEqual(AUTHORED_HIDDEN);
@@ -808,8 +775,8 @@ describe('the list is handed the view\'s own density and hidden fields beside th
   it('on a saved view that declares no `columns`, the view hides nothing: its authored key stays unapplied (objectui#12505)', async () => {
     const UNPROJECTED_SAVED_ROW = { name: SAVED_ID, object: OBJECT_NAME, label: 'Pipeline', type: 'grid', hiddenFields: ['name'] };
     const ds = makeDataSource(UNPROJECTED_SAVED_ROW);
-    const { family } = makeFamily({});
-    mountWithFamily(ds, family, SAVED_ID);
+    const layout = makeLayout();
+    mount(ds, SAVED_ID);
     await listReady();
     act(() => listProps.onHiddenFieldsChange(['amount']));
 
@@ -819,24 +786,24 @@ describe('the list is handed the view\'s own density and hidden fields beside th
 });
 
 describe('the list\'s "Reset to view default" drops the reset parts instead of copying the view into them (objectstack#28948)', () => {
-  const STORED = { [LIST_KEY]: { perView: { [SYSTEM_ID]: { rowHeight: 'compact' } } } };
+  const STORED = { perView: { [SYSTEM_ID]: { rowHeight: 'compact' } } };
   const VIEW = OBJECT.listViews[SYSTEM_ID] as Record<string, unknown>;
 
   /**
-   * Mount on `rows` with a draft sort and hidden fields that differ from the
+   * Mount on the kept layout `seed` with a draft sort and hidden fields that differ from the
    * view's: the draft is held before the list mounts, as when the reader comes
    * back from a record.
    */
-  async function mountChanged(rows: Record<string, any> = structuredClone(STORED)) {
+  async function mountChanged(seed: Record<string, unknown> | undefined = STORED) {
     patchListDraft(listDraftScope(session.userId, OBJECT_NAME, SYSTEM_ID), {
       sort: [{ field: 'amount', order: 'desc' }],
       hiddenFields: ['name'],
     });
     const ds = makeDataSource();
-    const { family } = makeFamily(rows);
-    const mounted = mountWithFamily(ds, family);
+    const layout = makeLayout(seed);
+    const mounted = mount(ds);
     await listReady();
-    return { ds, family, ...mounted };
+    return { ds, layout, ...mounted };
   }
 
   it('the list is wired to tell a reset from a choice, and is handed the view\'s own sort', async () => {
@@ -848,15 +815,15 @@ describe('the list\'s "Reset to view default" drops the reset parts instead of c
     expect(listProps.viewDefaults.sort).toEqual(AUTHORED_SORT);
   });
 
-  it('a Display reset of density and hidden fields drops the draft\'s hidden fields and the stored row height', async () => {
-    const { ds, family } = await mountChanged();
+  it('a Display reset of density and hidden fields drops the draft\'s hidden fields and the kept row height', async () => {
+    const { ds, layout } = await mountChanged();
 
     act(() => listProps.onRestoreViewDefaults(['hiddenFields', 'rowHeight']));
-    await wait(700);
+    await wait(50);
 
     expect(viewWrites(ds)).toBe(0);
-    expect(family.save).toHaveBeenCalledTimes(1);
-    expect(family.save).toHaveBeenCalledWith(LIST_KEY, {});
+    // The view's entry is left with nothing: the reader's entry is removed.
+    expect(layout.writes).toEqual([{}]);
     expect(draftOf()).toEqual({ sort: [{ field: 'amount', order: 'desc' }] });
     // The list is handed the view's own again.
     expect(listProps.schema.rowHeight).toBe(AUTHORED_ROW_HEIGHT);
@@ -864,10 +831,9 @@ describe('the list\'s "Reset to view default" drops the reset parts instead of c
   });
 
   it('after the reset the reader follows the view: a changed `rowHeight` and `hiddenFields` reach them on the next open', async () => {
-    const rows = structuredClone(STORED) as Record<string, any>;
-    const { unmount } = await mountChanged(rows);
+    const { unmount } = await mountChanged();
     act(() => listProps.onRestoreViewDefaults(['hiddenFields', 'rowHeight']));
-    await wait(700);
+    await wait(50);
     unmount();
 
     // The view's author changes its defaults.
@@ -876,7 +842,7 @@ describe('the list\'s "Reset to view default" drops the reset parts instead of c
     VIEW.hiddenFields = ['name'];
     try {
       listProps = null;
-      mountWithFamily(makeDataSource(), makeFamily(rows).family);
+      mount(makeDataSource());
       await listReady();
       expect(listProps.schema.rowHeight).toBe('short');
       expect(listProps.schema.hiddenFields).toEqual(['name']);
@@ -887,32 +853,31 @@ describe('the list\'s "Reset to view default" drops the reset parts instead of c
   });
 
   it('a sort reset drops the draft\'s sort and writes nothing', async () => {
-    const { ds, family } = await mountChanged({});
+    const { ds, layout } = await mountChanged(undefined);
 
     act(() => listProps.onRestoreViewDefaults(['sort']));
-    await wait(700);
+    await wait(50);
 
     expect(viewWrites(ds)).toBe(0);
-    expect(family.save).not.toHaveBeenCalled();
+    expect(layout.writes).toEqual([]);
     expect(draftOf()).toEqual({ hiddenFields: ['name'] });
   });
 
   it('CONTROL: a deliberate "no sort" and "show every column" are draft parts, and survive the list being mounted again', async () => {
-    const rows: Record<string, any> = {};
-    const { unmount } = mountWithFamily(makeDataSource(), makeFamily(rows).family);
+    const { unmount } = mount(makeDataSource());
     await listReady();
     act(() => {
       listProps.onSortChange([]);
       listProps.onHiddenFieldsChange([]);
     });
-    await wait(700);
-    expect(rows).toEqual({});
+    await wait(50);
+    expect(localStorage.getItem(layoutKey()!)).toBeNull();
     expect(draftOf()).toEqual({ sort: [], hiddenFields: [] });
     unmount();
 
     // Opening a record as a page and coming back mounts the list again.
     listProps = null;
-    mountWithFamily(makeDataSource(), makeFamily(rows).family);
+    mount(makeDataSource());
     await listReady();
     expect(listProps.schema.sort).toEqual([]);
     expect(listProps.schema.hiddenFields).toEqual([]);
@@ -922,28 +887,28 @@ describe('the list\'s "Reset to view default" drops the reset parts instead of c
 describe('a field the reader adds to their list is a draft part (objectstack#30077, objectstack#35955)', () => {
   it('adding a field writes no view and nothing stored, and the list is handed it as a column', async () => {
     const ds = makeDataSource();
-    const { family } = makeFamily({});
-    mountWithFamily(ds, family);
+    const layout = makeLayout();
+    mount(ds);
     await listReady();
     expect(listProps.schema.columns).toEqual(['name', 'amount']);
     expect(listProps.addedFields).toEqual([]);
     expect(typeof listProps.onAddedFieldsChange).toBe('function');
 
     act(() => listProps.onAddedFieldsChange(['owner']));
-    await wait(700);
+    await wait(50);
 
     expect(viewWrites(ds)).toBe(0);
     expect(toast.error).not.toHaveBeenCalled();
-    expect(family.save).not.toHaveBeenCalled();
+    expect(layout.writes).toEqual([]);
     expect(draftOf().addedFields).toEqual(['owner']);
     expect(listProps.schema.columns).toEqual(['name', 'amount', 'owner']);
     expect(listProps.addedFields).toEqual(['owner']);
   });
 
-  it('a field an earlier console stored as added no longer applies', async () => {
+  it('an added field found in the reader\'s entry does not apply', async () => {
     const ds = makeDataSource();
-    const { family } = makeFamily({ [LIST_KEY]: { perView: { [SYSTEM_ID]: { addedFields: ['owner'] } } } });
-    mountWithFamily(ds, family);
+    makeLayout({ perView: { [SYSTEM_ID]: { addedFields: ['owner'] } } });
+    mount(ds);
     await listReady();
 
     expect(listProps.schema.columns).toEqual(['name', 'amount']);
@@ -952,8 +917,8 @@ describe('a field the reader adds to their list is a draft part (objectstack#300
 
   it('Discard drops the added field: the addition alone draws Discard and Save, and the list opens on the view\'s columns', async () => {
     const ds = makeDataSource();
-    const { family } = makeFamily({});
-    mountWithFamily(ds, family);
+    const layout = makeLayout();
+    mount(ds);
     await listReady();
     act(() => listProps.onAddedFieldsChange(['owner']));
     expect(listProps.schema.columns).toEqual(['name', 'amount', 'owner']);
@@ -961,10 +926,10 @@ describe('a field the reader adds to their list is a draft part (objectstack#300
     // Nothing reported by the list: the addition is a part of its own.
     expect(screen.getByTestId('list-draft')).toBeTruthy();
     await discard();
-    await wait(700);
+    await wait(50);
 
     expect(viewWrites(ds)).toBe(0);
-    expect(family.save).not.toHaveBeenCalled();
+    expect(layout.writes).toEqual([]);
     expect(listProps.schema.columns).toEqual(['name', 'amount']);
     expect(listProps.addedFields).toEqual([]);
     expect(screen.queryByTestId('list-draft')).toBeNull();
@@ -972,8 +937,8 @@ describe('a field the reader adds to their list is a draft part (objectstack#300
 
   it('a name the view declares itself is the view\'s column, not an addition: no duplicate, nothing handed as added', async () => {
     const ds = makeDataSource();
-    const { family } = makeFamily({});
-    mountWithFamily(ds, family);
+    const layout = makeLayout();
+    mount(ds);
     await listReady();
     act(() => listProps.onAddedFieldsChange(['amount', 'owner']));
 
@@ -983,79 +948,90 @@ describe('a field the reader adds to their list is a draft part (objectstack#300
 
   it('on a saved view that declares `columns` the addition applies the same way', async () => {
     const ds = makeDataSource();
-    const { family } = makeFamily({});
-    mountWithFamily(ds, family, SAVED_ID);
+    const layout = makeLayout();
+    mount(ds, SAVED_ID);
     await listReady();
     expect(listProps.schema.columns).toEqual(['name']);
 
     act(() => listProps.onAddedFieldsChange(['amount']));
-    await wait(700);
+    await wait(50);
 
     expect(viewWrites(ds)).toBe(0);
-    expect(family.save).not.toHaveBeenCalled();
+    expect(layout.writes).toEqual([]);
     expect(listProps.schema.columns).toEqual(['name', 'amount']);
   });
 });
 
-describe('CONTROL — no provider: a sort is the draft\'s here too (objectui#12418, objectstack#35955)', () => {
-  function mountBare(ds: ConsoleObjectViewProps['dataSource'], viewId = SYSTEM_ID) {
-    return render(page(ds, viewId));
-  }
-
-  it('a sort writes no view and nothing in this browser\'s storage, and the list mounted again opens on it', async () => {
+describe('what an earlier Console kept is removed and never read (objectstack#35955)', () => {
+  it('a sort writes no view and nothing in this browser\'s storage, and the list mounted again opens on it (the draft)', async () => {
     const ds = makeDataSource();
-    mountBare(ds);
+    const layout = makeLayout();
+    mount(ds);
     await listReady();
     act(() => listProps.onSortChange([{ id: 'row-1', field: 'amount', order: 'desc' }]));
-    await wait(400);
+    await wait(50);
 
     expect(viewWrites(ds)).toBe(0);
-    expect(localStorage.getItem(localListStateKey('u1', OBJECT_NAME))).toBeNull();
+    expect(layout.writes).toEqual([]);
+    expect(Object.keys(localStorage).filter((k) => k.includes(OBJECT_NAME))).toEqual([]);
 
     cleanup();
     listProps = null;
-    mountBare(makeDataSource());
+    mount(makeDataSource());
     await listReady();
     expect(listProps.schema.sort).toEqual([{ field: 'amount', order: 'desc' }]);
   });
 
-  it('the older `viewOrder:<object>` key still orders the tabs; the Filter panel\'s older per-browser group no longer applies', async () => {
-    localStorage.setItem(`viewOrder:${OBJECT_NAME}`, JSON.stringify([SAVED_ID, SYSTEM_ID]));
+  it('the `ui.list.<object>` row\'s cache, the Filter panel\'s group and the bare `viewOrder:<object>` are removed, and none applies', async () => {
     const filters = { id: 'root', logic: 'and', conditions: [{ id: 'c1', field: 'name', operator: 'contains', value: 'Acme' }] };
+    localStorage.setItem(`list-state:u1:${OBJECT_NAME}`, JSON.stringify({
+      viewOrder: [SAVED_ID, SYSTEM_ID],
+      perView: { [SYSTEM_ID]: { sort: [{ field: 'amount', order: 'desc' }], filters, columnState: { widths: { name: 280 } }, rowHeight: 'compact' } },
+    }));
     localStorage.setItem(`list-filters:u1:${OBJECT_NAME}:${SYSTEM_ID}`, JSON.stringify({ filters, search: 'acme' }));
+    localStorage.setItem(`viewOrder:${OBJECT_NAME}`, JSON.stringify([SAVED_ID, SYSTEM_ID]));
+    const layout = makeLayout();
 
-    mountBare(makeDataSource());
+    mount(makeDataSource());
     await listReady();
 
-    expect(manageViewsOrder).toEqual([SAVED_ID, SYSTEM_ID]);
+    expect(localStorage.getItem(`list-state:u1:${OBJECT_NAME}`)).toBeNull();
+    expect(localStorage.getItem(`list-filters:u1:${OBJECT_NAME}:${SYSTEM_ID}`)).toBeNull();
+    expect(localStorage.getItem(`viewOrder:${OBJECT_NAME}`)).toBeNull();
+    // Nothing they held is carried over: the list opens on its view's own.
+    expect(layout.writes).toEqual([]);
+    expect(manageViewsOrder).toEqual([SYSTEM_ID, SAVED_ID]);
+    expect(listProps.schema.columnState).toEqual({});
+    expect(listProps.schema.rowHeight).toBe(AUTHORED_ROW_HEIGHT);
+    expect(listProps.schema.sort).toEqual(AUTHORED_SORT);
     expect(listProps.initialFilters).toBeUndefined();
     expect(listProps.initialSearchTerm ?? '').toBe('');
   });
 
-  it('a drag writes no view and keeps the order in this browser', async () => {
+  it('a drag after the sweep keeps the order under the reader\'s layout entry', async () => {
+    localStorage.setItem(`viewOrder:${OBJECT_NAME}`, JSON.stringify([SYSTEM_ID, SAVED_ID]));
     const ds = makeDataSource();
-    mountBare(ds);
+    mount(ds);
     await listReady();
     await act(async () => {
       fireEvent.click(screen.getByTestId('stub-reorder'));
     });
-    await wait(100);
+    await wait(50);
 
     expect(viewWrites(ds)).toBe(0);
     expect(manageViewsOrder).toEqual([SAVED_ID, SYSTEM_ID]);
-    expect(JSON.parse(localStorage.getItem(localListStateKey('u1', OBJECT_NAME)) ?? '{}')).toEqual({
-      viewOrder: [SAVED_ID, SYSTEM_ID],
-    });
+    expect(JSON.parse(localStorage.getItem(layoutKey()!) ?? '{}')).toEqual({ viewOrder: [SAVED_ID, SYSTEM_ID] });
+    expect(localStorage.getItem(`viewOrder:${OBJECT_NAME}`)).toBeNull();
   });
 });
 
-describe('a width change writes the reader\'s row only when it changes it (objectstack#32627)', () => {
-  const STORED = { [LIST_KEY]: { perView: { [SYSTEM_ID]: { columnState: { widths: { name: 280 } } } } } };
+describe('a width change writes the reader\'s layout only when it changes it (objectstack#32627)', () => {
+  const STORED = { perView: { [SYSTEM_ID]: { widths: { name: 280 } } } };
 
   it('re-stating the stored widths, a sort, and clearing filters nobody set, sends no write', async () => {
     const ds = makeDataSource();
-    const { family } = makeFamily(structuredClone(STORED));
-    mountWithFamily(ds, family);
+    const layout = makeLayout(STORED);
+    mount(ds);
     await listReady();
 
     act(() => {
@@ -1063,39 +1039,38 @@ describe('a width change writes the reader\'s row only when it changes it (objec
       listProps.onColumnStateChange({ widths: { name: 280 } });
       listProps.onFilterChange({ id: 'root', logic: 'and', conditions: [] });
     });
-    await wait(700);
+    await wait(50);
 
-    expect(family.save).not.toHaveBeenCalled();
+    expect(layout.writes).toEqual([]);
   });
 
-  it('a width change undone before the write leaves sends no write', async () => {
+  it('re-stating a width just written sends no second write', async () => {
     const ds = makeDataSource();
-    const { family } = makeFamily(structuredClone(STORED));
-    mountWithFamily(ds, family);
+    const layout = makeLayout(STORED);
+    mount(ds);
     await listReady();
 
     act(() => listProps.onColumnStateChange({ widths: { name: 400 } }));
-    act(() => listProps.onColumnStateChange({ widths: { name: 280 } }));
-    await wait(700);
+    act(() => listProps.onColumnStateChange({ widths: { name: 400 } }));
+    await wait(50);
 
-    expect(family.save).not.toHaveBeenCalled();
-    expect(listProps.schema.columnState).toEqual({ widths: { name: 280 } });
+    expect(layout.writes).toEqual([{ perView: { [SYSTEM_ID]: { widths: { name: 400 } } } }]);
+    expect(listProps.schema.columnState).toEqual({ widths: { name: 400 } });
   });
 
-  it('CONTROL: a width that differs from the stored one is one write, and undoing it after it landed is another', async () => {
+  it('CONTROL: a width that differs from the kept one is one write, and undoing it is another', async () => {
     const ds = makeDataSource();
-    const { family } = makeFamily(structuredClone(STORED));
-    mountWithFamily(ds, family);
+    const layout = makeLayout(STORED);
+    mount(ds);
     await listReady();
 
     act(() => listProps.onColumnStateChange({ widths: { name: 400 } }));
-    await wait(700);
-    expect(family.save).toHaveBeenCalledTimes(1);
-    expect((family.save.mock.calls[0][1] as any).perView[SYSTEM_ID].columnState).toEqual({ widths: { name: 400 } });
+    await wait(50);
+    expect(layout.writes).toEqual([{ perView: { [SYSTEM_ID]: { widths: { name: 400 } } } }]);
 
     act(() => listProps.onColumnStateChange({ widths: { name: 280 } }));
-    await wait(700);
-    expect(family.save).toHaveBeenCalledTimes(2);
-    expect((family.save.mock.calls[1][1] as any).perView[SYSTEM_ID].columnState).toEqual({ widths: { name: 280 } });
+    await wait(50);
+    expect(layout.writes).toHaveLength(2);
+    expect(layout.writes[1]).toEqual({ perView: { [SYSTEM_ID]: { widths: { name: 280 } } } });
   });
 });
