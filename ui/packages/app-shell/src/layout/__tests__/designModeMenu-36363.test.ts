@@ -94,7 +94,7 @@ describe('the menu edits (objectstack#36363)', () => {
 
   it('what the menu opens, one key per thing; a picked thing makes the entry that opens it', () => {
     expect([...menuTargets(MENU)].sort()).toEqual(
-      ['dashboard:home', 'object:crm_lead', 'object:crm_opportunity', 'report:pipeline', 'view:crm_opportunity.mine'].sort(),
+      ['dashboard/home', 'object/crm_lead', 'object/crm_opportunity', 'report/pipeline', 'view/crm_opportunity.mine'].sort(),
     );
     expect(targetKeyOf({ type: 'object', objectName: 'a', recordId: '1' })).toBeNull();
     expect(entryFor('view', 'crm_lead.hot', 'n1')).toEqual({ id: 'n1', type: 'object', objectName: 'crm_lead', viewName: 'crm_lead.hot' });
@@ -105,7 +105,7 @@ describe('the menu edits (objectstack#36363)', () => {
       url: 'https://e.x',
     });
     for (const kind of ['object', 'dashboard', 'report', 'page'] as const) {
-      expect(targetKeyOf(entryFor(kind, 'n', 'id'))).toBe(`${kind}:n`);
+      expect(targetKeyOf(entryFor(kind, 'n', 'id'))).toBe(`${kind}/n`);
     }
   });
 

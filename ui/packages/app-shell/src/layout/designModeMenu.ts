@@ -232,29 +232,31 @@ export function patchEntry(menu: Menu, id: string, patch: Record<string, unknown
 }
 
 /**
- * What an entry opens, as one key per thing: `object:<name>`,
- * `view:<view name>` (an object entry that lands on a view), `dashboard:`,
- * `report:`, `page:`, `url:`; `null` for a group, a separator or an entry
- * that names no target.
+ * What an entry opens, as one key per thing: `object/<name>`,
+ * `view/<view name>` (an object entry that lands on a view), `dashboard/`,
+ * `report/`, `page/`, `url/`; `null` for a group, a separator or an entry
+ * that names no target. The picker compares these only with each other
+ * (`targetKeyFor`); they are no cache key, and are spelled with `/` so they
+ * never read as the data adapter's `view:` keys.
  */
 export function targetKeyOf(entry: MenuEntry): string | null {
   const str = (key: string) => (typeof entry[key] === 'string' && entry[key] ? (entry[key] as string) : null);
   switch (entry.type) {
     case 'object': {
       const view = str('viewName');
-      if (view) return `view:${view}`;
+      if (view) return `view/${view}`;
       const object = str('objectName');
       // An entry that opens a record or a form is not the object's list.
-      return object && !str('recordId') && !str('form') ? `object:${object}` : null;
+      return object && !str('recordId') && !str('form') ? `object/${object}` : null;
     }
     case 'dashboard':
-      return str('dashboardName') ? `dashboard:${str('dashboardName')}` : null;
+      return str('dashboardName') ? `dashboard/${str('dashboardName')}` : null;
     case 'report':
-      return str('reportName') ? `report:${str('reportName')}` : null;
+      return str('reportName') ? `report/${str('reportName')}` : null;
     case 'page':
-      return str('pageName') ? `page:${str('pageName')}` : null;
+      return str('pageName') ? `page/${str('pageName')}` : null;
     case 'url':
-      return str('url') ? `url:${str('url')}` : null;
+      return str('url') ? `url/${str('url')}` : null;
     default:
       return null;
   }
@@ -302,5 +304,5 @@ export function entryFor(
 
 /** The {@link targetKeyOf} key the picker's row `name` of `kind` would add. */
 export function targetKeyFor(kind: MenuTargetKind, name: string): string {
-  return `${kind}:${name}`;
+  return `${kind}/${name}`;
 }
