@@ -276,7 +276,7 @@ export const DrillDownDrawer: React.FC<DrillDownDrawerProps> = ({
     return (
       <Dialog open={open} modal={false} onOpenChange={(v) => !v && onClose()}>
         <DialogContent
-          className="flex h-[65vh] w-[70vw] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none"
+          className="flex h-[65vh] w-[70vw] max-w-[70vw] flex-col gap-0 overflow-hidden p-0"
           data-testid="drill-down-dialog"
         >
           <DialogHeader className="flex-row items-center justify-between gap-4 space-y-0 border-b px-4 py-3 pr-12">
