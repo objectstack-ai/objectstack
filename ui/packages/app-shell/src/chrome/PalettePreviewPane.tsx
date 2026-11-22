@@ -48,7 +48,7 @@ export const PREVIEW_PANE_CLASS =
 /**
  * `target` once it has stayed the same for `ms`. While a new target settles the
  * previous one is still answered, so the pane does not blink between two
- * records; with no target, nothing is.
+ * records; with no target, nothing is answered.
  */
 function useSettledTarget(target: PalettePreviewTarget | null, ms: number): PalettePreviewTarget | null {
   // Keyed on the pair's text, never on the object handed in (ui/AGENTS.md #10).
@@ -56,10 +56,7 @@ function useSettledTarget(target: PalettePreviewTarget | null, ms: number): Pale
   const recordId = target?.recordId ?? null;
   const [settled, setSettled] = useState<PalettePreviewTarget | null>(null);
   useEffect(() => {
-    if (objectName === null || recordId === null) {
-      setSettled(null);
-      return;
-    }
+    if (objectName === null || recordId === null) return;
     const timer = setTimeout(() => setSettled({ objectName, recordId }), ms);
     return () => clearTimeout(timer);
   }, [objectName, recordId, ms]);

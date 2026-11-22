@@ -507,12 +507,14 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
   // them: when a new set of hits lands, the selection moves to the first one,
   // so the top entry is the one Enter opens and the pane previews.
   const firstHitValue = recordGroups[0]?.hits[0] ? recordHitValue(recordGroups[0].hits[0]) : '';
+  // Compared by the hits' text alone (ui/AGENTS.md #10): only a new set of
+  // hits moves the selection, and the arrow keys own it after.
   const hitSignature = recordHits.map(recordHitValue).join('\n');
-  useEffect(() => {
+  const [seenHitSignature, setSeenHitSignature] = useState('');
+  if (hitSignature !== seenHitSignature) {
+    setSeenHitSignature(hitSignature);
     if (firstHitValue !== '') setSelectedValue(firstHitValue);
-    // Keyed on the hits' text alone: only a new set of hits moves the
-    // selection, and the arrow keys own it after (ui/AGENTS.md #10).
-  }, [hitSignature, firstHitValue]);
+  }
 
   // objectstack#36286 — the app's objects the member may create a record of,
   // the object of the page the palette was opened on first. Only once
