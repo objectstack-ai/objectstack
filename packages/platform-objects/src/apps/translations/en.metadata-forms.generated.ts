@@ -278,7 +278,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.trackHistory": {
         label: "Track History",
-        helpText: "Summarize this field on the record activity timeline"
+        helpText: "Show this field's old → new values on the record activity timeline (on unless turned off)"
       },
       "fields.visibleWhen": {
         label: "Visible When",
@@ -298,6 +298,9 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "enable.trackHistory": {
         label: "Track History"
+      },
+      "enable.fieldHistory": {
+        label: "Field History"
       },
       "enable.searchable": {
         label: "Searchable"
@@ -899,7 +902,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       trackHistory: {
         label: "Track History",
-        helpText: "Render this field's value changes as entries on the record activity timeline (ADR-0052 §5b). Opt-in per field."
+        helpText: "Show this field's old → new values on the record activity timeline (ADR-0052 §5b). On unless turned off; false names the change without its values."
       },
       widget: {
         label: "Widget",

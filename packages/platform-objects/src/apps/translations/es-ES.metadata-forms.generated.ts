@@ -278,7 +278,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.trackHistory": {
         label: "Seguimiento de historial",
-        helpText: "Resume este campo en la cronología de actividad del registro"
+        helpText: "Muestra los valores anterior → nuevo de este campo en la cronología de actividad del registro (activado salvo que se desactive)"
       },
       "fields.visibleWhen": {
         label: "Condición de visibilidad",
@@ -298,6 +298,9 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "enable.trackHistory": {
         label: "Seguimiento de historial"
+      },
+      "enable.fieldHistory": {
+        label: "Valores de cambios de campo"
       },
       "enable.searchable": {
         label: "Buscable"
@@ -899,7 +902,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       trackHistory: {
         label: "Registrar historial",
-        helpText: "Muestra los cambios de valor de este campo como entradas en la línea de actividad del registro (ADR-0052 §5b). Se activa campo a campo."
+        helpText: "Muestra los valores anterior → nuevo de este campo en la línea de actividad del registro (ADR-0052 §5b). Activado salvo que se desactive; con false se nombra el cambio sin sus valores."
       },
       widget: {
         label: "Control del campo",

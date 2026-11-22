@@ -278,7 +278,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.trackHistory": {
         label: "기록 추적",
-        helpText: "레코드 활동 타임라인에 이 필드를 요약합니다"
+        helpText: "레코드 활동 타임라인에 이 필드의 이전 값 → 새 값을 표시합니다(끄지 않으면 켜짐)"
       },
       "fields.visibleWhen": {
         label: "표시 조건",
@@ -298,6 +298,9 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "enable.trackHistory": {
         label: "기록 추적"
+      },
+      "enable.fieldHistory": {
+        label: "필드 변경 값"
       },
       "enable.searchable": {
         label: "검색 가능"
@@ -899,7 +902,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       trackHistory: {
         label: "기록 추적",
-        helpText: "이 필드의 값 변경을 레코드 활동 타임라인의 항목으로 렌더링합니다(ADR-0052 §5b). 필드별로 선택합니다."
+        helpText: "레코드 활동 타임라인에 이 필드의 이전 값 → 새 값을 표시합니다(ADR-0052 §5b). 끄지 않으면 켜져 있으며, false이면 값 없이 필드 이름만 표시합니다."
       },
       widget: {
         label: "위젯",

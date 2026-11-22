@@ -278,7 +278,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.trackHistory": {
         label: "历史跟踪",
-        helpText: "在记录的活动时间线上概述该字段的变更"
+        helpText: "在记录的活动时间线上显示该字段的旧值 → 新值（默认开启，可关闭）"
       },
       "fields.visibleWhen": {
         label: "可见条件",
@@ -298,6 +298,9 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "enable.trackHistory": {
         label: "历史跟踪"
+      },
+      "enable.fieldHistory": {
+        label: "字段修改值"
       },
       "enable.searchable": {
         label: "可搜索"
@@ -899,7 +902,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       trackHistory: {
         label: "记录变更历史",
-        helpText: "把该字段的值变更渲染为记录活动时间线上的条目（ADR-0052 §5b）。按字段逐个开启。"
+        helpText: "在记录的活动时间线上显示该字段的旧值 → 新值（ADR-0052 §5b）。默认开启；设为 false 时只写出字段名，不写值。"
       },
       widget: {
         label: "控件覆盖",

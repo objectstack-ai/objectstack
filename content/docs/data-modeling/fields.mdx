@@ -618,7 +618,7 @@ Database indexes are declared at the object level in the object's `indexes[]` ar
 | Property | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `requiredPermissions` | `string[]` | — | Capabilities required to read/edit this field — masked on read, denied on write unless the caller holds all of them (ADR-0066 D3) |
-| `trackHistory` | `boolean` | — | Render this field's value changes as entries on the record activity timeline |
+| `trackHistory` | `boolean` | — | Show this field's old → new values on the record activity timeline (on unless the field or object turns them off) |
 
 For values that must be encrypted at rest (API keys, tokens, DB passwords), use the
 `secret` field type — see the [Field Type Gallery](/docs/data-modeling/field-types#secret).

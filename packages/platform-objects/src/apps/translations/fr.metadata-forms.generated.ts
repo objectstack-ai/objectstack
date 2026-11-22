@@ -278,7 +278,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.trackHistory": {
         label: "Suivre l’historique",
-        helpText: "Résumer ce champ dans la chronologie d’activité de l’enregistrement"
+        helpText: "Afficher les valeurs ancienne → nouvelle de ce champ dans la chronologie d’activité de l’enregistrement (activé sauf désactivation)"
       },
       "fields.visibleWhen": {
         label: "Visible si",
@@ -298,6 +298,9 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "enable.trackHistory": {
         label: "Suivre l’historique"
+      },
+      "enable.fieldHistory": {
+        label: "Valeurs des modifications de champ"
       },
       "enable.searchable": {
         label: "Recherchable"
@@ -899,7 +902,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       trackHistory: {
         label: "Suivre l’historique",
-        helpText: "Afficher les modifications de valeur de ce champ sous forme d’entrées dans la chronologie d’activité de l’enregistrement (ADR-0052 §5b). Activation par champ."
+        helpText: "Afficher les valeurs ancienne → nouvelle de ce champ dans la chronologie d’activité de l’enregistrement (ADR-0052 §5b). Activé sauf désactivation ; false nomme la modification sans ses valeurs."
       },
       widget: {
         label: "Widget",

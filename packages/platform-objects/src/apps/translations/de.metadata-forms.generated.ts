@@ -278,7 +278,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.trackHistory": {
         label: "Verlauf verfolgen",
-        helpText: "Dieses Feld in der Aktivitätszeitleiste des Datensatzes zusammenfassen"
+        helpText: "Alte → neue Werte dieses Felds in der Aktivitätszeitleiste des Datensatzes anzeigen (aktiv, sofern nicht ausgeschaltet)"
       },
       "fields.visibleWhen": {
         label: "Sichtbar wenn",
@@ -298,6 +298,9 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "enable.trackHistory": {
         label: "Verlauf verfolgen"
+      },
+      "enable.fieldHistory": {
+        label: "Feldänderungswerte"
       },
       "enable.searchable": {
         label: "Durchsuchbar"
@@ -899,7 +902,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       trackHistory: {
         label: "Verlauf verfolgen",
-        helpText: "Wertänderungen dieses Felds als Einträge in der Aktivitätszeitleiste des Datensatzes darstellen (ADR-0052 §5b). Pro Feld einzeln zu aktivieren."
+        helpText: "Alte → neue Werte dieses Felds in der Aktivitätszeitleiste des Datensatzes anzeigen (ADR-0052 §5b). Aktiv, sofern nicht ausgeschaltet; false nennt die Änderung ohne ihre Werte."
       },
       widget: {
         label: "Widget",

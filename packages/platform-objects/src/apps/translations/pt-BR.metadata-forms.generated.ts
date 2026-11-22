@@ -278,7 +278,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.trackHistory": {
         label: "Acompanhar histórico",
-        helpText: "Resumir este campo na linha do tempo de atividades do registro"
+        helpText: "Mostrar os valores antigo → novo deste campo na linha do tempo de atividades do registro (ativado, a menos que seja desligado)"
       },
       "fields.visibleWhen": {
         label: "Visível quando",
@@ -298,6 +298,9 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "enable.trackHistory": {
         label: "Acompanhar histórico"
+      },
+      "enable.fieldHistory": {
+        label: "Valores de alterações de campo"
       },
       "enable.searchable": {
         label: "Pesquisável"
@@ -899,7 +902,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       trackHistory: {
         label: "Acompanhar histórico",
-        helpText: "Exibir as alterações de valor deste campo como entradas na linha do tempo de atividades do registro (ADR-0052 §5b). Ativação opcional por campo."
+        helpText: "Mostrar os valores antigo → novo deste campo na linha do tempo de atividades do registro (ADR-0052 §5b). Ativado, a menos que seja desligado; false nomeia a alteração sem seus valores."
       },
       widget: {
         label: "Widget",

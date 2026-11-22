@@ -956,9 +956,13 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     // switch (ruling 7000907189 point 1) — a label and a help text, two leaves,
     // all translated leaves authored by the same card. `advanced` reads
     // 104 → 106; `capabilities` is untouched.
-    expect(PANEL_LEAVES.length).toBe(117);
+    // 118 since #36290: the `enable` composite offers `fieldHistory` (the
+    // object's off switch for old → new values on the activity stream) — one
+    // label leaf, authored in every locale by the same card. `capabilities`
+    // reads 11 → 12; `advanced` is untouched.
+    expect(PANEL_LEAVES.length).toBe(118);
     expect(PANEL_LEAVES.every((l) => l.prop === 'label' || l.prop === 'helpText')).toBe(true);
-    expect(PANEL_LEAVES.filter((l) => l.section === 'capabilities').length).toBe(11);
+    expect(PANEL_LEAVES.filter((l) => l.section === 'capabilities').length).toBe(12);
     expect(PANEL_LEAVES.filter((l) => l.section === 'advanced').length).toBe(106);
   });
 
@@ -1117,14 +1121,15 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     expect(flagged.length).toBe(PANEL_LEAVES.length);
   });
 
-  it('⭐ the capability block is now DONE — zero of its 11 leaves echoes in any locale', () => {
+  it('⭐ the capability block is now DONE — zero of its 12 leaves echoes in any locale', () => {
     const capability = PANEL_LEAVES.filter((l) => l.section === 'capabilities');
     const echoing = capability.filter((l) =>
       TRANSLATED_LOCALES.some(([, forms]) => catalogLeaf(forms, l.path, l.prop) === l.en),
     );
     expect(echoing.map((l) => `${l.path}.${l.prop}`)).toEqual([]);
     // Lit — and it really walked the section, which a zero alone would not show.
-    expect(capability.length).toBe(11);
+    // 12 since #36290 added `enable.fieldHistory`.
+    expect(capability.length).toBe(12);
   });
 });
 

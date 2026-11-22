@@ -278,7 +278,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "fields.trackHistory": {
         label: "歷史追蹤",
-        helpText: "在記錄的活動時間軸上概述該欄位的變更"
+        helpText: "在記錄的活動時間軸上顯示該欄位的舊值 → 新值（預設開啟，可關閉）"
       },
       "fields.visibleWhen": {
         label: "可見條件",
@@ -298,6 +298,9 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "enable.trackHistory": {
         label: "歷史追蹤"
+      },
+      "enable.fieldHistory": {
+        label: "欄位修改值"
       },
       "enable.searchable": {
         label: "可搜尋"
@@ -899,7 +902,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       trackHistory: {
         label: "記錄變更歷史",
-        helpText: "把該欄位的值變更呈現為記錄活動時間軸上的條目（ADR-0052 §5b）。依欄位逐個開啟。"
+        helpText: "在記錄的活動時間軸上顯示該欄位的舊值 → 新值（ADR-0052 §5b）。預設開啟；設為 false 時只寫出欄位名，不寫值。"
       },
       widget: {
         label: "控制項覆寫",

@@ -278,7 +278,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.trackHistory": {
         label: "履歴追跡",
-        helpText: "レコードのアクティビティタイムラインでこのフィールドを要約する"
+        helpText: "レコードのアクティビティタイムラインにこのフィールドの旧値 → 新値を表示します（既定でオン、オフにできます）"
       },
       "fields.visibleWhen": {
         label: "表示条件",
@@ -298,6 +298,9 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "enable.trackHistory": {
         label: "履歴追跡"
+      },
+      "enable.fieldHistory": {
+        label: "フィールド変更値"
       },
       "enable.searchable": {
         label: "検索可能"
@@ -899,7 +902,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       trackHistory: {
         label: "変更履歴を記録",
-        helpText: "この項目の値の変更を、レコードのアクティビティタイムラインの項目として表示します（ADR-0052 §5b）。項目ごとのオプトインです。"
+        helpText: "この項目の旧値 → 新値を、レコードのアクティビティタイムラインに表示します（ADR-0052 §5b）。既定でオンです。false にすると値を出さずに項目名だけを示します。"
       },
       widget: {
         label: "ウィジェット指定",

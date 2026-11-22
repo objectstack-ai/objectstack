@@ -1302,7 +1302,9 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // all three locales.
       // 756 since #35985: the object form's `basics` offers a `color` row,
       // whose label zh-CN translates.
-      expect(translated.length, `${locale} positive control`).toBe(756);
+      // 757 since #36290: the object form's `enable` composite offers
+      // `fieldHistory` — one row label, authored in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(757);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

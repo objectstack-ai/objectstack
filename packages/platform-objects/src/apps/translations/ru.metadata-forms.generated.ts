@@ -278,7 +278,7 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.trackHistory": {
         label: "Отслеживать историю",
-        helpText: "Отражать это поле в ленте активности записи"
+        helpText: "Показывать старое → новое значение этого поля в ленте активности записи (включено, если не отключено)"
       },
       "fields.visibleWhen": {
         label: "Видимо, когда",
@@ -298,6 +298,9 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "enable.trackHistory": {
         label: "Отслеживать историю"
+      },
+      "enable.fieldHistory": {
+        label: "Значения изменений поля"
       },
       "enable.searchable": {
         label: "Доступно для поиска"
@@ -899,7 +902,7 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       trackHistory: {
         label: "Отслеживать историю",
-        helpText: "Отображать изменения значения этого поля как записи в ленте активности записи (ADR-0052 §5b). Включается для каждого поля отдельно."
+        helpText: "Показывать старое → новое значение этого поля в ленте активности записи (ADR-0052 §5b). Включено, если не отключено; false называет изменение без значений."
       },
       widget: {
         label: "Виджет",
