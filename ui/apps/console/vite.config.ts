@@ -1513,7 +1513,7 @@ export default defineConfig({
             // The same mechanism as the date picker above, one widget over. The
             // grid's body is `packages/fields/src/widgets/grid-field/`, and
             // nothing reaches it but `loadGridFieldWidget`'s `import()` in
-            // `widgets/GridField.tsx`: the `GridField` / `LineItemsField` the
+            // `widgets/GridField.ts`: the `GridField` / `LineItemsField` the
             // package exports by name are the small lazy face in that file, so
             // the entry's named export no longer makes the body a static
             // dependency of the eager graph. Without this group `ui-components`

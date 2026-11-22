@@ -1,3 +1,6 @@
+// A `.ts` file, JSX-free: the widget body that used to be `GridField.tsx` moved
+// to `./grid-field/GridFieldWidget.tsx`, and every import of `./GridField.js`
+// still lands here (objectstack#36102).
 import React from 'react';
 import type { InlineGridColumn } from '@objectstack/spec/data';
 import { resolveFieldCurrency, currencyFractionDigits } from '../currency.js';
@@ -433,14 +436,12 @@ const LazyGridFieldWidget = React.lazy(() =>
  * grid's header height, marked busy, so the form does not jump when the table
  * replaces it.
  */
-function GridFieldLoading() {
-  return (
-    <div
-      className="min-h-10 w-full rounded-md border border-dashed"
-      aria-busy="true"
-      data-testid="grid-field-loading"
-    />
-  );
+function GridFieldLoading(): React.ReactElement {
+  return React.createElement('div', {
+    className: 'min-h-10 w-full rounded-md border border-dashed',
+    'aria-busy': 'true',
+    'data-testid': 'grid-field-loading',
+  });
 }
 
 /**
@@ -453,12 +454,12 @@ export function GridField(props: GridFieldWidgetProps): React.ReactElement {
   const [loadedAtMount] = React.useState(() => gridFieldWidgetModule);
   if (loadedAtMount) {
     const { GridFieldWidget } = loadedAtMount;
-    return <GridFieldWidget {...props} />;
+    return React.createElement(GridFieldWidget, props);
   }
-  return (
-    <React.Suspense fallback={<GridFieldLoading />}>
-      <LazyGridFieldWidget {...props} />
-    </React.Suspense>
+  return React.createElement(
+    React.Suspense,
+    { fallback: React.createElement(GridFieldLoading) },
+    React.createElement(LazyGridFieldWidget, props),
   );
 }
 

@@ -5504,7 +5504,7 @@ export * from './widgets/ObjectField.js';
 export * from './widgets/VectorField.js';
 // `GridField` / `LineItemsField` are the grid's lazy face: the body loads on
 // first use, or earlier through `preloadGridField` (objectstack#36102). The
-// pure helpers beside them are eager. See `widgets/GridField.tsx`.
+// pure helpers beside them are eager. See `widgets/GridField.ts`.
 export { evalArith, lookupAutofillPatch, computeRow, GridField, LineItemsField, preloadGridField, UNTOUCHED_NEW_ROW, isUntouchedNewRow, columnHelpByField } from './widgets/GridField.js';
 export type { ColumnCurrencies, ColumnHelp } from './widgets/GridField.js';
 export type { GridColumn } from './widgets/GridField.js';

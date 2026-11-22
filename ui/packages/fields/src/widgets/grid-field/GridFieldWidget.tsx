@@ -31,7 +31,7 @@ import { isImeKey } from '../imeKey.js';
 import { GRID_FIELD_RETIRED_KEYS, type GridFieldMetadata, type GridFieldRetiredKey } from '@object-ui/types';
 // The grid's pure half: the column type, the computed-cell evaluator, the
 // lookup-pick patch and the row marks. They live beside the public face in
-// `../GridField.tsx`, in the eager chunk, because `@object-ui/fields` exports
+// `../GridField.ts`, in the eager chunk, because `@object-ui/fields` exports
 // them by name and they import nothing heavy (objectstack#36102).
 import {
   computeRow,
@@ -53,7 +53,7 @@ import {
  *
  * This is the widget BODY, and it is reached only through `import()`: the
  * `GridField` / `LineItemsField` that `@object-ui/fields` exports by name are
- * the small lazy face in `../GridField.tsx`, and the `grid` form-field loader
+ * the small lazy face in `../GridField.ts`, and the `grid` form-field loader
  * imports this file through that face's one loader. ⛔ Do not import it
  * statically from anything outside this directory and its tests: one static
  * importer in the eager graph puts these bytes back on every console page

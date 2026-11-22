@@ -1296,7 +1296,7 @@ describe('cell faces that open under the cell (objectstack#36023)', () => {
 
 /**
  * objectstack#36102 — `@object-ui/fields` exports a lazy face for the grid
- * (`./GridField.tsx`); the body (`./grid-field/GridFieldWidget.tsx`) loads
+ * (`./GridField.ts`); the body (`./grid-field/GridFieldWidget.tsx`) loads
  * through one `import()`. Each case re-imports the face from a fresh module
  * registry, so "before the body loaded" does not depend on case order.
  */

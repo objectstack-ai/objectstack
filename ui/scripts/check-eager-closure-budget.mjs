@@ -2519,7 +2519,7 @@ export const PER_CHUNK_GZIP_CEILINGS = Object.freeze({
   // `packages/fields/src/widgets/grid-field/GridFieldWidget.tsx` in the lazy
   // `fields-grid` chunk (20,374 raw bytes), reached only through
   // `loadGridFieldWidget`'s `import()`. The package entry exports the small
-  // lazy face in `widgets/GridField.tsx` under the same names, and the pure
+  // lazy face in `widgets/GridField.ts` under the same names, and the pure
   // helpers it exports stay here. ⛔ Not moved: MAX_EAGER_CLOSURE_GZIP_BYTES,
   // BASELINE, REGRESSION_THIS_GATE_MUST_CATCH_BYTES and the other per-chunk
   // rows. No exemption was added. The headroom `pnpm check:eager-closure`
@@ -2881,7 +2881,7 @@ export const PER_CHUNK_MEMBERSHIP_CARVE_OUTS = Object.freeze({
     Object.freeze({ subtree: 'src/widgets/date-picker', chunk: 'fields-date-picker' }),
     // objectstack#36102: the line-item grid's body, which only
     // `loadGridFieldWidget`'s `import()` reaches; the package entry exports its
-    // lazy face (`widgets/GridField.tsx`). Same rule as the row above: its chunk
+    // lazy face (`widgets/GridField.ts`). Same rule as the row above: its chunk
     // carries no ceiling, so it must stay ABSENT from the eager closure.
     Object.freeze({ subtree: 'src/widgets/grid-field', chunk: 'fields-grid' }),
   ]),
