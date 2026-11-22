@@ -35,7 +35,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { AuditPlugin } from '@objectstack/plugin-audit';
 import { createHonoApp } from '@objectstack/hono';
 import type { IHttpServer } from '@objectstack/spec/contracts';
-import { installDefaultOrganization } from './default-organization.testkit.js';
+import { installDefaultOrganization, DEFAULT_ORGANIZATION_ID } from './default-organization.testkit.js';
 
 const PREFIX = '/api/v1';
 const COMMENT = 'sys_comment';
@@ -45,6 +45,35 @@ const BOARD = 'cdh_board';
 const SIGNED_IN_AS = 'x-test-signed-in-as';
 const ALICE = 'usr_alice';
 const SYSTEM = { isSystem: true } as const;
+
+/**
+ * The identity rows the door's caller resolution reads on every signed-in
+ * request (`resolve-authz-context.ts`: membership, positions, permission
+ * sets). A deployment's auth and security plugins register them; this kernel
+ * stubs `auth`, so they are spelled here with only the columns that resolver
+ * reads, the precedent `conformance.integration.test.ts` set. Registered
+ * before the schema sync, so their tables exist and Alice's membership reads.
+ */
+const text = (name: string) => ({ name, type: 'text' as const });
+const identityObjects = [
+    { owner: '@objectstack/plugin-auth', def: { name: 'sys_user', label: 'User', fields: { id: { ...text('id'), primaryKey: true }, email: text('email') } } },
+    {
+        owner: '@objectstack/plugin-auth',
+        def: { name: 'sys_member', label: 'Member', fields: { id: { ...text('id'), primaryKey: true }, user_id: text('user_id'), organization_id: text('organization_id'), role: text('role') } },
+    },
+    {
+        owner: '@objectstack/plugin-security',
+        def: { name: 'sys_user_position', label: 'User Position', fields: { id: { ...text('id'), primaryKey: true }, user_id: text('user_id'), position: text('position'), organization_id: text('organization_id') } },
+    },
+    {
+        owner: '@objectstack/plugin-security',
+        def: { name: 'sys_user_permission_set', label: 'User Permission Set', fields: { id: { ...text('id'), primaryKey: true }, user_id: text('user_id'), permission_set_id: text('permission_set_id'), organization_id: text('organization_id') } },
+    },
+    {
+        owner: '@objectstack/plugin-security',
+        def: { name: 'sys_position', label: 'Position', fields: { id: { ...text('id'), primaryKey: true }, name: text('name'), active: { name: 'active', type: 'boolean' as const }, organization_id: text('organization_id') } },
+    },
+] as const;
 
 const board = { name: BOARD, label: 'Board', fields: { name: { name: 'name', label: 'Name', type: 'text' as const } } };
 
@@ -59,7 +88,7 @@ class TestAuth implements Plugin {
                 async getSession(input: { headers: Headers }) {
                     const userId = input.headers.get(SIGNED_IN_AS);
                     if (!userId) return null;
-                    return { user: { id: userId, email: `${userId}@acme.test` }, session: { id: `ses_${userId}`, userId } };
+                    return { user: { id: userId, email: `${userId}@acme.test` }, session: { id: `ses_${userId}`, userId, activeOrganizationId: DEFAULT_ORGANIZATION_ID } };
                 },
             },
         });
@@ -98,8 +127,12 @@ async function bootKernel(opts: { selfHosted: boolean; audit?: boolean }) {
     liveDrivers.push(driver);
     (objectql as any).registerDriver(driver, true);
     objectql.registry.registerObject(board as any, 'comment-doors-test', 'comment-doors-test');
+    for (const o of identityObjects) objectql.registry.registerObject(o.def as never, o.owner);
     await (objectql as any).syncSchemas();
     await installDefaultOrganization(objectql as any);
+    // Alice is a current member of the organization her session names.
+    await objectql.insert('sys_user', { id: ALICE, email: `${ALICE}@acme.test` }, { context: SYSTEM } as any);
+    await objectql.insert('sys_member', { user_id: ALICE, organization_id: DEFAULT_ORGANIZATION_ID, role: 'member' }, { context: SYSTEM } as any);
 
     /** A thread on a board, with one top-level comment Alice wrote and one reaction of hers on it. */
     const seed = async () => {
