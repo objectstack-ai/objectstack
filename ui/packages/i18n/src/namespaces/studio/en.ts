@@ -3435,11 +3435,12 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.pillar.metadata': 'All metadata',
   // Header · package-level publish + app bridge
   'engine.studio.changes': 'Changes',
-  // objectstack#34593 — the header's way back to the package's running app,
-  // the mirror of the app bar's Edit app; with several apps it opens a picker.
-  'engine.studio.openApp': 'Open app',
-  'engine.studio.openAppTitle': 'Open {app} — leave Studio for the running app',
-  'engine.studio.openAppPick': 'Open which app?',
+  // objectstack#36501 — the top bar's left end: 「‹ Back to app」, the app's
+  // name, and the Studio mark. It returns to the app page the author came from.
+  'engine.studio.backToApp': 'Back to app',
+  'engine.studio.backToAppTitle': 'Leave Studio and go back to {app}',
+  'engine.studio.backToAppTitleNoApp': 'Leave Studio and go back to your apps',
+  'engine.studio.mark': 'Studio',
   'engine.studio.publishTitle': 'Review and publish every pending draft in this package together',
   'engine.studio.publishNoneTitle': 'No drafts pending publish',
   'engine.studio.publishedAll': 'Published all drafts in this package',
@@ -3457,7 +3458,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.app.openTitle': 'Open app “{label}” (the published front-end)',
   'engine.studio.app.create': 'Create app',
   'engine.studio.app.noneTitle': 'This package has no app (front-end) yet — create one',
-  'engine.studio.app.willOpenAfterPublish': 'After publishing, this becomes “Open app”',
+  'engine.studio.app.willOpenAfterPublish': 'After publishing, “Back to app” leads to this app',
   'engine.studio.app.pending': 'App “{label}” pending publish',
   'engine.studio.app.namePlaceholder': 'App name (e.g. Order Center)',
   'engine.studio.app.idPlaceholder': 'Identifier (e.g. orders_app)',

@@ -76,6 +76,21 @@
  *     The three built-in tab names (`RECORD_PAGE_BUILTIN_TABS` in
  *     `@objectstack/spec/data`) name the page's own tabs, never a child list;
  *     the synthesized page places those (`buildDefaultTabs`).
+ *   - THE ENVIRONMENT'S TAB LIST (ADR-0146 D10): where the base's paired
+ *     `.custom` package arranges the tabs, the server writes its list into the
+ *     served `relatedLists` and says two more things beside it, in the served
+ *     read's `_relatedListsArrangement` decoration (read through the spec's
+ *     `readRelatedListsArrangement`), because only this derivation knows which
+ *     lists exist for the reader. `hidden`: a side list one of those names
+ *     names is not derived, whichever package brings it and whether or not
+ *     `relatedLists` is declared (the authoring surface keeps it, flagged
+ *     `isUnlisted`); a body table stays at its group and loses the tab it
+ *     keeps. `unlisted: 'shown'`: a list no entry names is kept after the
+ *     listed ones, as the automatic list the arrangement replaced showed it.
+ *     `unlisted: 'hidden'`: the served list is a DECLARED one even when it is
+ *     empty (the environment hid every tab of it), so a list no entry names
+ *     follows the declared rule and a list the owner left out stays hidden.
+ *     With no decoration, nothing in this derivation changes.
  *   - An entry's own TITLE and COLUMNS (objectstack#35899): the object form
  *     `{ list, label, columns }` wins over the FK's `relatedListTitle` /
  *     `relatedListColumns`, for every list that entry names first, wherever
@@ -98,6 +113,7 @@ import {
   isBodyTableRelationship,
   isGroupPlaceableRelationship,
   isRecordPageBuiltinTab,
+  readRelatedListsArrangement,
   relatedListEntryName,
 } from '@objectstack/spec/data';
 import { convertSortToQueryParams } from '@object-ui/core';
@@ -203,7 +219,9 @@ export interface DerivedRelatedList {
    * list (objectstack#35897), so the record page shows no tab for it — present
    * only when the caller asked for hidden relationships
    * ({@link DeriveRelatedListsOptions.includeHidden}), as `isHidden` is. Never
-   * on a list another package brings (objectstack#35901): that one shows.
+   * on a list another package brings (objectstack#35901): that one shows,
+   * unless the environment's tab list hides it (ADR-0146 D10), which flags
+   * any side list it names, whichever package brings it.
    */
   isUnlisted?: true;
   /**
@@ -249,6 +267,13 @@ interface MergedObjectLike {
    * name, or `{ list, label?, columns? }`; see {@link resolveRelatedListOrder}.
    */
   relatedLists?: unknown[];
+  /**
+   * The served read's `_relatedListsArrangement` decoration (ADR-0146 D10),
+   * present when the base's paired `.custom` package arranges this object's
+   * tabs: `{ packageId, hidden, unlisted }`. Read only through the spec's
+   * `readRelatedListsArrangement`.
+   */
+  _relatedListsArrangement?: unknown;
   /**
    * The spec's optional `fieldGroups`, read when this object is the parent: a
    * group's `relatedList` names the related list it places (objectstack#35889).
@@ -567,16 +592,44 @@ export function deriveRelatedLists(
   // field groups' to place, so it stays, after the listed ones.
   // objectstack#35899 — the naming entry's own `label` / `columns` win over
   // the FK's `relatedListTitle` / `relatedListColumns`.
+  // ADR-0146 D10 — what the paired `.custom` package's tab list says beside
+  // the served `relatedLists`: the lists it hides, and whether a list no
+  // entry names still shows. `undefined` (no such arrangement) changes nothing.
+  const arrangement = readRelatedListsArrangement(objectDef);
+  const hiddenByArrangement = (list: Working): boolean =>
+    arrangement !== undefined && arrangement.hidden.some((name) => relatedListEntryNames(name, list));
+  const unlistedShown = arrangement?.unlisted === 'shown';
   const derived = [...owned, ...referenced];
-  const naming = relatedListNamingEntries(derived, objectDef.relatedLists);
+  // An empty `relatedLists` reads as "none declared". Beside `unlisted:
+  // 'hidden'` it is a declared list whose every tab the environment hid: no
+  // entry names a list, so the declared rule decides each one.
+  const naming = relatedListNamingEntries(derived, objectDef.relatedLists)
+    ?? (arrangement?.unlisted === 'hidden' ? new Map<Working, unknown>() : null);
   const all: Working[] = [];
   for (const list of resolveRelatedListOrder(derived, objectDef.relatedLists)) {
+    if (hiddenByArrangement(list)) {
+      // The environment hides this list's tab: a body table stays at its
+      // group with no tab, a side list is not derived, whichever package
+      // brings it. The authoring surface keeps it, flagged.
+      if (list.isPrimary) {
+        const { keepsTab: _hiddenTab, ...bodyOnly } = list;
+        all.push(bodyOnly);
+      } else if (options?.includeHidden) all.push({ ...list, isUnlisted: true });
+      continue;
+    }
     if (!naming) {
       all.push(list);
       continue;
     }
     const entry = naming.get(list);
     if (!naming.has(list)) {
+      // ADR-0146 D10 — the environment's list replaced the AUTOMATIC one, in
+      // which every list shows: a list it does not name still does, after
+      // the listed ones, with the tab it had.
+      if (unlistedShown) {
+        all.push(list);
+        continue;
+      }
       // A body table no entry names stays at its group, with no tab: a
       // declared `relatedLists` decides the tabs, so the tab a group-placed
       // `master_detail` table keeps on the default page goes (the seat's

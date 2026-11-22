@@ -67,7 +67,7 @@ import { resolveInitialRecord } from './initialRecord';
 import { sectionEntryName } from './sectionFields';
 import { deriveDetail } from './deriveMasterDetail';
 import { schemaDefaultValues } from './schemaDefaults';
-import { parentCurrencyFieldsOf, followedColumnCurrencies } from './parentCurrencyColumns';
+import { currencyFieldDefsOf, parentCurrencyFieldsOf, followedColumnCurrencies } from './parentCurrencyColumns';
 // objectui#11428 — the per-row form's offer test is the spec's rule.
 import { isInlineRowFormOffered } from '@objectstack/spec/data';
 // objectui#11396 — one `details` entry, by reference: the spec's own type for
@@ -455,6 +455,12 @@ interface DetailEntry {
    * currency. Internal state, never authored.
    */
   parentCurrencyFields?: ReturnType<typeof parentCurrencyFieldsOf>;
+  /**
+   * The child fields that hold an amount of money, by name
+   * (`currencyFieldDefsOf`): a pick copies an amount into a line column only
+   * in the same currency (objectstack#36249). Internal state, never authored.
+   */
+  currencyFields?: ReturnType<typeof currencyFieldDefsOf>;
 }
 
 /** The field shape `resolveFieldCurrency` reads — the one currency resolver. */
@@ -1263,6 +1269,9 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
               // The columns whose amount follows this header's currency
               // (ADR-0144 D2 as amended), in the header's live code.
               columnCurrencies={followedColumnCurrencies(entry.parentCurrencyFields, parentRecord, tenantCurrency)}
+              // Each currency column's own currency (a `fixed` code, a code on
+              // the line), for a pick's cross-currency rule (objectstack#36249).
+              columnFields={entry.currencyFields}
               // objectstack#35940 — a new line starts on the child's defaults,
               // and its empty required cell reads red once a save was tried,
               // as on the record page's edit state.
@@ -1569,6 +1578,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
                 lookupAutofill: lookupAutofillByField(childSchema?.fields as Record<string, unknown> | undefined),
                 columnHelp: columnHelpByField(childSchema?.fields as Record<string, unknown> | undefined),
                 parentCurrencyFields: parentCurrencyFieldsOf(childSchema?.fields as Record<string, unknown> | undefined, d.relationshipField),
+                currencyFields: currencyFieldDefsOf(childSchema?.fields as Record<string, unknown> | undefined),
               };
             }
             return {
@@ -1588,6 +1598,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
               lookupAutofill: lookupAutofillByField(childSchema?.fields as Record<string, unknown> | undefined),
               columnHelp: columnHelpByField(childSchema?.fields as Record<string, unknown> | undefined),
               parentCurrencyFields: parentCurrencyFieldsOf(childSchema?.fields as Record<string, unknown> | undefined, derived.relationshipField),
+              currencyFields: currencyFieldDefsOf(childSchema?.fields as Record<string, unknown> | undefined),
             };
           } catch (err) {
             // THE DERIVE FAILED, on a schema that loaded fine — almost always

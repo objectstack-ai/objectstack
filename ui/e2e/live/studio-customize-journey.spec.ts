@@ -165,7 +165,9 @@ test('a read-only base is customized, restored and extended through Studio, and 
   try {
     await test.step('Customize a view: the edit lands in the pair, and the server serves its columns', async () => {
       await page.goto(`/studio/${BASE}/interfaces?surface=${encodeURIComponent(`view:${VIEW}`)}`);
-      await expect(page.getByTestId('studio-pkg-readonly')).toBeVisible();
+      // The read-only base offers Customize (the top bar's read-only chip left
+      // with the package switcher, objectstack#36501).
+      await expect(page.getByTestId('studio-customize')).toBeVisible();
       await page.getByTestId('studio-customize').click();
 
       const ensured = page.waitForResponse(

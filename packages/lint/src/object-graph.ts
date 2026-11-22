@@ -397,6 +397,16 @@ export interface VisibleObjectExtension {
   label: unknown;
   fieldPatches: Record<string, AnyRec>;
   /**
+   * [ADR-0146 D10] Its `fieldGroups` records (`[]` when absent): the whole
+   * field arrangement the base's paired `.custom` package declares for the
+   * target. Carried for the one reader that addresses an object's groups by
+   * key (`validate-translation-references.ts`, `_sections.KEY`); like
+   * `validations`, carrying them changes nothing about which entries survive.
+   * Which package may write the key is the arrangement judge's question
+   * (`os validate` refuses any other writer), not this fold's.
+   */
+  fieldGroups: AnyRec[];
+  /**
    * [#33494] Set on an entry the host's registry already holds
    * ({@link StoredObjectExtension}), folded in at its priority but never
    * located: its fields are no field of the stack, so no walk names one.
@@ -483,6 +493,7 @@ export function objectExtensionsByTarget(
         priority: typeof ext.priority === 'number' ? ext.priority : 200,
         fields: recordsOf(ext.fields),
         validations: recordsOf(ext.validations),
+        fieldGroups: Array.isArray(ext.fieldGroups) ? ext.fieldGroups.filter(isRec) : [],
         label: ext.label,
         fieldPatches: isRec(ext.fieldPatches)
           ? Object.fromEntries(

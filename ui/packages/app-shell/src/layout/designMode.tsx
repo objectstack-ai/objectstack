@@ -37,8 +37,12 @@
  * does not ask: the mode, and what it holds, go along.
  *
  * Who may enter is the header button's gate (`useAppStudioEntry`, a workspace
- * administrator holding `manage_metadata` on a writable package), read where
- * the button is drawn. The mode has no address: no URL enters it. Each
+ * administrator holding `manage_metadata`), read where the button is drawn
+ * (`ShellPageActions`). The app's package need not be writable: a read-only
+ * (installed) package's app enters too, and what the mode saves goes to that
+ * package's customization package, as Studio's edits do, except where the
+ * customization door is walled off for the caller. The mode has no address:
+ * no URL enters it. Each
  * change's `commit` is a write the server judges again.
  *
  * @module
