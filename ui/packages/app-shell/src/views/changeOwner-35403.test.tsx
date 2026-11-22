@@ -204,7 +204,10 @@ describe('the default edit form shows the owner read-only, with the action besid
     const line = screen.getByTestId('form-owner-line');
     expect(within(line).getByText('Account Manager')).toBeTruthy();
     expect((await within(line).findByTestId('readonly-owner_id')).textContent).toBe('u_amy');
-    await act(async () => { await verdict; });
+    // Let the host's lazy action load and settle, so its absence is the
+    // verdict's answer and not a chunk still on its way.
+    await act(async () => { await import('./FormOwnerChangeAction'); await verdict; });
+    await act(async () => {});
     expect(within(line).queryByRole('textbox')).toBeNull();
     expect(action()).toBeNull();
   });
