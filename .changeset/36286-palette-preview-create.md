@@ -5,7 +5,7 @@
 
 feat(console): the ⌘K palette previews the record it is on, creates a record from what you typed, finds "New OBJECT", and says what Enter does
 
-Clause-②: no
+Clause-②: yes (widening) — eight new published language-pack keys, in all eleven packs: console.commandPalette.create, createAs, previewEmpty, enterOpenRecord, enterCreate, enterSwitchApp, enterApplyTheme, enterOpen
 Metadata-protocol: none
 
 The command palette inside an app gains four things; which records it searches, and how it ranks them, are unchanged.
