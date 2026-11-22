@@ -2400,6 +2400,7 @@ const zhHant = {
       enterSwitchApp: '切換應用',
       enterApplyTheme: '應用主題',
       enterOpen: '開啟',
+      currentPage: '當前頁面',
     },
     ai: {
       pendingDrafts: {

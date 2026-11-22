@@ -2847,6 +2847,7 @@ const en = {
       enterSwitchApp: 'Switch app',
       enterApplyTheme: 'Apply theme',
       enterOpen: 'Open',
+      currentPage: 'Current page',
     },
     ai: {
       pendingDrafts: {

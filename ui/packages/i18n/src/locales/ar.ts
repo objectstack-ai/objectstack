@@ -2945,6 +2945,7 @@ const ar = {
       enterSwitchApp: "تبديل التطبيق",
       enterApplyTheme: "تطبيق المظهر",
       enterOpen: "فتح",
+      currentPage: "الصفحة الحالية",
       searching: "جارٍ البحث…",
       records: "السجلات",
       recentRecords: "شوهد مؤخراً",
