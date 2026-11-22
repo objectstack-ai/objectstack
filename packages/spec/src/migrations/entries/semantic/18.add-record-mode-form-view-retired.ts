@@ -15,7 +15,7 @@ export const entry: SemanticMigration = {
   replacement: 'Nothing replaces `mode`: the Add button opens the object\'s create form the way the '
     + 'object list\'s New opens it. In place of `formView`: the create form is the object\'s own. It '
     + 'lays out by the object\'s `fieldGroups` and leaves out every field marked `showOnCreate: false` '
-    + '(#36425: an internal `formViews.create`, `form` or `formViews.default` is no longer loaded).',
+    + '(an internal `formViews.create`, `form` or `formViews.default` is no longer loaded).',
   reason: 'The D2 conversion `add-record-mode-form-view-removed` deletes both keys from every '
     + '`addRecord` block it reaches — every list payload in `stack.views[]`, every object\'s '
     + '`listViews`, every page\'s `interfaceConfig` and every page `list-view` node. The delete '
