@@ -969,7 +969,7 @@ function emitBucketDrill({
   if (state.object && datasetDrillHasRelationshipPath(drillDims, state.dimensionFields)) {
     const object = state.object;
     resolveRelationshipDrill(object, scope, rawRow, drillDims, state.dimensionFields ?? {}, runtimeFilter, rowRanges, dataSource, (resolved) =>
-      onDrill({ dataset, groupKey, runtimeFilter, object, objectFilter: resolved, fields }));
+      onDrill({ dataset, groupKey, runtimeFilter, object, objectFilter: resolved, ...(fields.length ? { fields } : {}) }));
     return;
   }
   let objectFilter: Record<string, unknown> | undefined;
@@ -983,7 +983,7 @@ function emitBucketDrill({
     // fallback rebuilds the list from the bucket ALONE: no drill.
     return;
   }
-  onDrill({ dataset, groupKey, runtimeFilter, object: state.object, objectFilter, fields });
+  onDrill({ dataset, groupKey, runtimeFilter, object: state.object, objectFilter, ...(fields.length ? { fields } : {}) });
 }
 
 /**

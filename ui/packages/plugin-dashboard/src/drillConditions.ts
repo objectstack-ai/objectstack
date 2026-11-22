@@ -95,11 +95,22 @@ export interface DrillListConditions {
 export function drillListConditions(filter: Record<string, unknown> | undefined): DrillListConditions {
   const conditions: FilterBuilderRow[] = [];
   const rest: Record<string, unknown>[] = [];
+  const seen = new Set<string>();
   for (const part of andParts(filter)) {
     const [field, condition] = Object.entries(part)[0];
     const rows = rowsOf(field, condition);
-    if (rows) rows.forEach((row) => conditions.push({ ...row, id: `drill-${conditions.length}` }));
-    else rest.push(part);
+    if (!rows) {
+      rest.push(part);
+      continue;
+    }
+    // A condition stated twice (the widget filter's range and the clicked
+    // bucket's) ANDs to itself: one chip says it.
+    for (const row of rows) {
+      const key = JSON.stringify([row.field, row.operator, row.value]);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      conditions.push({ ...row, id: `drill-${conditions.length}` });
+    }
   }
   return {
     chips: { logic: 'and', conditions },

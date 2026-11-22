@@ -36,6 +36,15 @@ describe('drillListConditions', () => {
     expect(rest).toEqual({ $and: [{ account: { industry: 'tech' } }, { $or: [{ a: 1 }, { b: 2 }] }, { owner: { $regex: 'x' } }] });
   });
 
+  it('draws a condition stated twice as one chip', () => {
+    expect(rows({
+      $and: [{ close_date: { $gte: '2026-10-01' } }, { close_date: { $gte: '2026-10-01', $lt: '2027-01-01' } }],
+    })).toEqual([
+      { field: 'close_date', operator: 'greater_than_or_equal', value: '2026-10-01' },
+      { field: 'close_date', operator: 'less_than', value: '2027-01-01' },
+    ]);
+  });
+
   it('answers no rows and no rest for no filter', () => {
     expect(drillListConditions(undefined)).toEqual({ chips: { logic: 'and', conditions: [] }, rest: undefined });
   });

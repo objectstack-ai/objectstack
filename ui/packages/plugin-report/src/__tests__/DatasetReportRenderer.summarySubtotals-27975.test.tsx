@@ -296,6 +296,8 @@ describe('summary report subtotals (objectstack-ai/objectstack#27975)', () => {
         runtimeFilter: undefined,
         object: 'opportunity',
         objectFilter: { owner_id: 'usr_amy' },
+        // objectstack-ai/objectstack#36256 — the grouped field the drill list shows.
+        fields: ['owner_id'],
       });
     });
 
