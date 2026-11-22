@@ -3577,3 +3577,79 @@ describe('ListView.groupPickerUnstored-32631', () => {
     });
   });
 });
+
+// ── ListView.refreshOnlyDisplay-36002 ───────────────────────────────────────────
+
+/**
+ * objectstack#36002 — the default (Display) toolbar has no Refresh
+ * (objectstack#35878, 「刷新去掉」), so `userActions.refresh` is not a reason to
+ * draw the Display entry. A non-grid view whose every other Display control is
+ * off (no layout switch, Group, Row height, Hide fields, Row colour or Export)
+ * draws no Display entry at all, instead of one that opens a panel with only
+ * its footer. The grid always offers Display (its columns), so the fixture is
+ * a kanban. The CONTROLS: the key still draws the wide toolbar's Refresh, and
+ * the same fixture with one Display control on draws the entry again.
+ */
+describe('ListView.refreshOnlyDisplay-36002', () => {
+  restoreAfterBlock();
+
+  /** Every Display control off; `refresh` is left at its default, on. */
+  const REFRESH_ONLY: ListViewSchema = {
+    type: 'list-view',
+    objectName: 'opportunity',
+    viewType: 'kanban',
+    fields: ['name', 'stage'],
+    kanban: { groupByField: 'stage' },
+    userActions: { group: false, rowHeight: false, hideFields: false },
+  } as ListViewSchema;
+
+  let previousKanban: ReturnType<typeof ComponentRegistry.get>;
+
+  beforeEach(() => {
+    previousKanban = ComponentRegistry.get('object-kanban');
+    ComponentRegistry.register('object-kanban', () => <div data-testid="kanban-stub" />);
+  });
+
+  afterEach(() => {
+    cleanup();
+    if (previousKanban) ComponentRegistry.register('object-kanban', previousKanban as any);
+  });
+
+  function mount(schema: Partial<ListViewSchema> = {}) {
+    const dataSource = {
+      find: vi.fn().mockResolvedValue({ data: [{ id: '1', name: 'Acme', stage: 'won' }], total: 1 }),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn().mockResolvedValue({
+        name: 'opportunity',
+        fields: { name: { type: 'text', label: 'Name' }, stage: { type: 'text', label: 'Stage' } },
+      }),
+    };
+    render(
+      <SchemaRendererProvider dataSource={dataSource as never}>
+        <ListView schema={{ ...REFRESH_ONLY, ...schema } as ListViewSchema} dataSource={dataSource as never} />
+      </SchemaRendererProvider>,
+    );
+  }
+
+  it('the default toolbar draws no Display entry when Refresh was its only option', async () => {
+    mount();
+    await screen.findByTestId('kanban-stub');
+    expect(screen.queryByTestId('toolbar-display-trigger')).toBeNull();
+    expect(screen.queryByTestId('refresh-button')).toBeNull();
+  });
+
+  it('CONTROL — the wide toolbar (`compactToolbar: false`) still draws Refresh for the same view', async () => {
+    mount({ compactToolbar: false } as Partial<ListViewSchema>);
+    await screen.findByTestId('kanban-stub');
+    expect(screen.getByTestId('refresh-button')).toBeInTheDocument();
+  });
+
+  it('CONTROL — the same view with Row height on draws the Display entry', async () => {
+    mount({ userActions: { group: false, rowHeight: true, hideFields: false } } as Partial<ListViewSchema>);
+    await screen.findByTestId('kanban-stub');
+    expect(screen.getByTestId('toolbar-display-trigger')).toBeInTheDocument();
+  });
+});
