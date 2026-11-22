@@ -70,7 +70,7 @@ export type RelatedListEntryInput = string | RelatedListEntryObject;
  * plus `hidden`. Only that arrangement writes `hidden`; an object's own
  * `relatedLists` hides a tab by leaving it out.
  */
-export interface CustomRelatedListEntryObject extends RelatedListEntryObject {
+export interface ObjectExtensionRelatedListEntryObject extends RelatedListEntryObject {
   readonly hidden?: boolean;
 }
 
