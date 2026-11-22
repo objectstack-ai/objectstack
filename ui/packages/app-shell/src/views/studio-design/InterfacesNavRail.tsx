@@ -480,13 +480,13 @@ export function offNavViewReachedByEntry(
 
 /**
  * objectstack-ai/objectstack#36425 — whether the 视图 group leaves `item` out
- * as an internal create / edit form: a `form` view that is not a public form
- * (`publicForm`, `sharing.enabled`). The console no longer loads one, so the
- * Studio does not list it. A public form stays listed, and so does a view
- * whose family is unknown (a draft-only row carries no body).
+ * as an internal create / edit form (`internalForm`: the object's default or
+ * `OBJECT.create` form, not shared publicly). The console no longer loads one,
+ * so the Studio does not list it. A public form stays listed, as do a named
+ * form an action opens and a view whose body is unknown (a draft-only row).
  */
-export function offNavViewIsInternalForm(item: Pick<PackageSurface, 'viewKind' | 'publicForm'>): boolean {
-  return item.viewKind === 'form' && item.publicForm !== true;
+export function offNavViewIsInternalForm(item: Pick<PackageSurface, 'internalForm'>): boolean {
+  return item.internalForm === true;
 }
 
 /**

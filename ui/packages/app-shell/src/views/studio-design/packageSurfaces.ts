@@ -58,12 +58,15 @@ export interface PackageSurface {
   object?: string;
   viewKind?: string;
   /**
-   * objectstack-ai/objectstack#36425 — a `form` view row whose body turns on
-   * public sharing (`sharing.enabled === true`): a public form, which keeps
-   * loading at its own link. Every other form view is an internal create /
-   * edit form, which the console no longer loads.
+   * objectstack-ai/objectstack#36425 — a `form` view row that is an internal
+   * create / edit form, which the console no longer loads: the object's
+   * default form (`isDefault`) or its `OBJECT.create` form, unless its body
+   * turns on public sharing (`sharing.enabled === true`, a public form, which
+   * keeps loading at its own link). A form under any other name is a named
+   * form an action of type `form` opens: not internal. The same test as the
+   * `form-view-internal-not-loaded` lint rule.
    */
-  publicForm?: boolean;
+  internalForm?: boolean;
 }
 
 /**
@@ -164,12 +167,22 @@ function mergeSurfaces(
  * declares them as strings: the members {@link PackageSurface} carries for a
  * `view` row. Used for a published row and for a draft-overlaid one alike.
  */
-export function viewBindingOf(item: Record<string, unknown>): Pick<PackageSurface, 'object' | 'viewKind' | 'publicForm'> {
+export function viewBindingOf(item: Record<string, unknown>): Pick<PackageSurface, 'object' | 'viewKind' | 'internalForm'> {
   return {
     ...(typeof item.object === 'string' && item.object ? { object: item.object } : {}),
     ...(typeof item.viewKind === 'string' && item.viewKind ? { viewKind: item.viewKind } : {}),
-    ...(item.viewKind === 'form' && isPublicFormBody(item) ? { publicForm: true } : {}),
+    ...(isInternalFormItem(item) ? { internalForm: true } : {}),
   };
+}
+
+/**
+ * objectstack-ai/objectstack#36425 — whether a view item is an internal create
+ * / edit form (see {@link PackageSurface.internalForm}).
+ */
+function isInternalFormItem(item: Record<string, unknown>): boolean {
+  if (item.viewKind !== 'form' || isPublicFormBody(item)) return false;
+  const object = typeof item.object === 'string' ? item.object : '';
+  return item.isDefault === true || (!!object && item.name === `${object}.create`);
 }
 
 /**
