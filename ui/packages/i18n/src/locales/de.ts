@@ -5237,6 +5237,7 @@ const de = {
       dragSort: 'Ziehen, um die Sortierpriorität zu ändern',
       viewOwn: 'Teil dieser Ansicht; hier nicht entfernbar',
       viewFilter: 'Ansichtsfilter',
+      relationPath: '{{lookup}} › {{field}}',
     },
   },
   sortBuilder: {

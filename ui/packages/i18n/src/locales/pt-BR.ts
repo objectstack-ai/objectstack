@@ -5387,6 +5387,7 @@ const pt = {
       dragSort: 'Arraste para mudar a prioridade da ordenação',
       viewOwn: 'Faz parte desta visualização; não pode ser removido aqui',
       viewFilter: 'Filtro da visualização',
+      relationPath: '{{lookup}} › {{field}}',
     },
   },
   sortBuilder: {

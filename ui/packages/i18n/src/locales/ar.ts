@@ -5855,6 +5855,7 @@ const ar = {
       dragSort: 'اسحب لتغيير أولوية الفرز',
       viewOwn: 'جزء من طريقة العرض هذه؛ لا يمكن إزالته هنا',
       viewFilter: 'تصفية طريقة العرض',
+      relationPath: '{{field}} ({{lookup}})',
     },
   },
   sortBuilder: {
