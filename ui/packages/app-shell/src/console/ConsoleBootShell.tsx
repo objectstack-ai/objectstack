@@ -9,8 +9,9 @@
  * `/auth/me/permissions` (seconds, server-side, on a hosted environment) and
  * `AppContent`'s readiness gate (the app list and the admin verdict,
  * objectui#5619). Each used to draw the full-screen splash. They now draw
- * {@link ConsoleBootShell}: the chrome's frame (the 48 px top bar, the sidebar
- * at the width the reader left it, the route slot) with grey blocks in it and
+ * {@link ConsoleBootShell}: the chrome's frame (the sidebar at the width the
+ * reader left it, with its head and foot from 768 px up; the 48 px top bar on
+ * a phone and on a docs page; the route slot) with grey blocks in it and
  * the skeleton of the route the URL names in the slot. The real chrome takes
  * its place when the gates pass, at the same geometry.
  *
@@ -31,7 +32,15 @@
 import { useState } from 'react';
 import { useInRouterContext, useLocation } from 'react-router-dom';
 import { useAuth } from '@object-ui/auth';
-import { Sidebar, SidebarContent, SidebarGroup, SidebarMenu, Skeleton } from '@object-ui/components';
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarHeader,
+  SidebarMenu,
+  Skeleton,
+} from '@object-ui/components';
 import { AppShell } from '@object-ui/layout';
 import { LoadingScreen } from '../chrome/LoadingScreen.js';
 import { CONSOLE_BELOW_TOP_BAR } from '../layout/consoleTopBar.js';
@@ -75,15 +84,19 @@ export function ConsoleBootShell() {
   const reads = metadataReadsForAppRoute(appSubPath, []);
   // The shape the chrome will have on this route, from the same predicates
   // `ConsoleLayout` reads, so nothing the frame draws is removed when the
-  // chrome lands: no app menu beside a docs page (objectstack#35424), no app
-  // bar on a phone record page, which draws its own (objectstack#28483).
+  // chrome lands. From 768 px up an app draws no top bar: the app menu, the
+  // search and the bell sit in the sidebar's head and the account at its foot
+  // (objectstack#36112). A phone keeps the bar, except on a record page,
+  // which draws its own (objectstack#28483). A docs page mounts no sidebar
+  // and keeps the bar at every width (objectstack#35424).
   const phone = usePhoneViewport();
   const docsPage = isAppDocsPath(pathname);
   const recordPageOwnsTopBar = phone && isRecordPagePath(pathname);
+  const desktopSidebar = !phone && !docsPage;
   return (
     <div data-boot-splash="" data-boot-shell="" aria-busy="true" className="contents">
       <AppShell
-        showHeader={!recordPageOwnsTopBar}
+        showHeader={(phone || docsPage) && !recordPageOwnsTopBar}
         navbar={
           <div className="flex w-full items-center gap-3">
             <Skeleton className="h-7 w-28 rounded-md" />
@@ -93,8 +106,23 @@ export function ConsoleBootShell() {
         }
         sidebar={
           docsPage ? undefined : (
-          <Sidebar collapsible="offcanvas" className={CONSOLE_BELOW_TOP_BAR}>
-            <SidebarContent>
+          <Sidebar collapsible="offcanvas" className={phone ? CONSOLE_BELOW_TOP_BAR : undefined}>
+            {desktopSidebar && (
+              // Where the app menu (and the collapse button), the search and
+              // the bell will be: grey, since the app list decides the app.
+              <SidebarHeader className="gap-1 p-2 pb-1" data-boot-sidebar-head="">
+                <div className="flex h-8 items-center gap-2 px-1.5">
+                  <Skeleton className="size-5 rounded-md" />
+                  <Skeleton className="h-4 w-24" />
+                  <Skeleton className="ml-auto size-7 rounded-md" />
+                </div>
+                <div className="flex items-center gap-1">
+                  <Skeleton className="h-8 flex-1 rounded-md" />
+                  <Skeleton className="size-8 rounded-md" />
+                </div>
+              </SidebarHeader>
+            )}
+            <SidebarContent className="pt-2">
               <SidebarGroup>
                 <SidebarMenu>
                   {SIDEBAR_ROWS.map((width, i) => (
@@ -106,6 +134,15 @@ export function ConsoleBootShell() {
                 </SidebarMenu>
               </SidebarGroup>
             </SidebarContent>
+            {desktopSidebar && (
+              // Where the account menu will be.
+              <SidebarFooter className="gap-1 border-t border-sidebar-border p-2" data-boot-sidebar-foot="">
+                <div className="flex h-12 items-center gap-2 px-2">
+                  <Skeleton className="size-8 rounded-lg" />
+                  <Skeleton className="h-4 w-28" />
+                </div>
+              </SidebarFooter>
+            )}
           </Sidebar>
           )
         }

@@ -54,8 +54,8 @@ describe('the console boot fallback (objectstack#35981)', () => {
     expect(shell()).not.toBeNull();
     // Still the boot wait: readiness waits and first-paint-deferred reads key on it.
     expect(shell()).toHaveAttribute('data-boot-splash');
-    // The top bar and the route slot, the slot shaped like a record page.
-    expect(document.querySelector('header')).not.toBeNull();
+    // The sidebar and the route slot, the slot shaped like a record page.
+    expect(document.querySelector('[data-sidebar="sidebar"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="route-metadata-skeleton"]')).not.toBeNull();
   });
 
@@ -104,37 +104,48 @@ describe('the console boot fallback (objectstack#35981)', () => {
     expect(frame.querySelectorAll('a, button, input, [role="menuitem"], [role="link"]')).toHaveLength(0);
   });
 
-  it('draws the shape the chrome will have: no app menu on a docs page, no app bar on a phone record page', () => {
+  it('draws the shape the chrome will have on each route and width', () => {
     // The frame reads the same predicates as `ConsoleLayout`, so nothing it
-    // draws is taken away when the chrome lands (objectstack#35424, #28483).
+    // draws is taken away when the chrome lands: from 768 px up no top bar,
+    // and the sidebar's head (app menu, search, bell) and foot (account)
+    // (objectstack#36112); a phone keeps the bar, but not on a record page
+    // (objectstack#28483); a docs page has no sidebar and keeps the bar at
+    // every width (objectstack#35424).
     const width = window.innerWidth;
     const setWidth = (w: number) =>
       Object.defineProperty(window, 'innerWidth', { value: w, configurable: true, writable: true });
     const sidebar = () => shell()!.querySelector('[data-sidebar="sidebar"]');
     const header = () => shell()!.querySelector('header');
+    const head = () => shell()!.querySelector('[data-boot-sidebar-head]');
+    const foot = () => shell()!.querySelector('[data-boot-sidebar-foot]');
     try {
-      setWidth(1440);
-      at('/apps/crm/docs/manual/intro', <ConsoleBootShell />);
-      expect(sidebar()).toBeNull();
-      expect(header()).not.toBeNull();
-      cleanup();
-
-      setWidth(390);
-      at(RECORD, <ConsoleBootShell />);
-      expect(header()).toBeNull();
-      cleanup();
-
-      // Control: the app menu and the app bar wherever the chrome draws them.
-      at('/apps/crm/account', <ConsoleBootShell />);
-      expect(header()).not.toBeNull();
-      cleanup();
       setWidth(1440);
       for (const path of [RECORD, '/apps/crm/account', '/apps/crm/docsearch']) {
         at(path, <ConsoleBootShell />);
+        expect(header(), path).toBeNull();
         expect(sidebar(), path).not.toBeNull();
-        expect(header(), path).not.toBeNull();
+        expect(head(), path).not.toBeNull();
+        expect(foot(), path).not.toBeNull();
         cleanup();
       }
+      for (const w of [1440, 375]) {
+        setWidth(w);
+        at('/apps/crm/docs/manual/intro', <ConsoleBootShell />);
+        expect(sidebar(), `docs @${w}`).toBeNull();
+        expect(header(), `docs @${w}`).not.toBeNull();
+        cleanup();
+      }
+
+      setWidth(375);
+      at(RECORD, <ConsoleBootShell />);
+      expect(header()).toBeNull();
+      cleanup();
+      at('/apps/crm/account', <ConsoleBootShell />);
+      expect(header()).not.toBeNull();
+      // The phone drawer has no head or foot: the bar carries those.
+      expect(head()).toBeNull();
+      expect(foot()).toBeNull();
+      cleanup();
     } finally {
       setWidth(width);
     }
