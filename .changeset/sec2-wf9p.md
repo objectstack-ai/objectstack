@@ -18,7 +18,7 @@ The rule: elevation lifts a caller's business rules, never the organization wall
 
 - FROM: the elevation, not the caller's organization wall, decided what such a context reached of a tenant-scoped object.
 - TO: the caller's own organization wall decides it, applied as the plain door applies it:
-  - with no active organization under `isolated`, an empty membership set under `group`, or no membership at all under `single`: its reads of a tenant-scoped object resolve to nothing (zero rows, no error), and its writes (insert, update, transfer, delete, and the recycle bin's purge and restore) are refused with `403 PERMISSION_DENIED`, naming the missing active organization or membership;
+  - with no active organization under `isolated`, an empty membership set under `group`, or no membership at all under `single`: its reads of a tenant-scoped object resolve to nothing (zero rows, no error); its delete and purge are answered by that read rule, as its plain door answers them (a predicate delete matches nothing, a by-id delete answers `404 RECORD_NOT_FOUND`); and its other writes (insert, update, transfer, and the recycle bin's restore) are refused with `403 PERMISSION_DENIED`, naming the missing active organization or membership;
   - under `group`, a member reads and writes the union of the organizations they hold a membership in, with or without an active organization, as their own requests do;
   - on a federated object it reads only rows of the caller's organization scope, and a by-id write of a row outside it answers `404 RECORD_NOT_FOUND`, as a row that is not there;
   - an insert with no active organization on a walled tenant object, and a write naming an organization outside the caller's scope, are refused with `403 PERMISSION_DENIED`.

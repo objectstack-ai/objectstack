@@ -38,8 +38,11 @@
  * - a caller the wall DENIES — no active organization under `isolated`, an
  *   empty membership set under `group`, a person outside every organization
  *   under `single` (ADR-0093 D8.1, as amended) — reads nothing (zero rows, no
- *   error), and every write is refused `403 PERMISSION_DENIED`, naming the
- *   missing active organization (ADR-0123 D2 and D4).
+ *   error). Its delete and purge are answered by that read rule, as its plain
+ *   door answers them (ADR-0123 D2): a predicate delete matches nothing, and a
+ *   by-id delete answers as a row that is not there (`404`). Every other write
+ *   is refused `403 PERMISSION_DENIED`, naming the missing active organization
+ *   (ADR-0123 D4).
  *
  * ## When the engine's own projection already is the caller's wall
  *
@@ -83,11 +86,15 @@ import { isOutsideEveryOrganization, rlsOperationForVerb, runCallerOf } from '@o
 import type { TenantLayer0Verdict } from '@objectstack/spec/security';
 
 import { PermissionDeniedError } from './errors.js';
+import { RLS_DENY_FILTER } from './rls-compiler.js';
 import { ELEVATION, SUBJECT, elevationSource, type ElevationSource } from './flow-system-identity-write-refusal.js';
 import { extractSingleId } from './security-plugin-addressed-writes.js';
 
 /** The verbs judged as writes: `rlsOperationForVerb` maps `purge`, `transfer` and `restore` onto them. */
 const WRITE_CLASS: ReadonlySet<string> = new Set(['insert', 'update', 'delete']);
+
+/** The removal class (`delete`, and `purge` mapped onto it): answered by the read rule when the wall denies. */
+const REMOVAL = 'delete';
 
 /** The organization column the wall's filters and a payload name. */
 const ORGANIZATION_FIELD = 'organization_id';
@@ -188,7 +195,8 @@ export function appAutomationOrganizationWallRefusal(
     { operation, object },
     `[ADR-0123 D2] An app-authored elevation sees through the organization wall exactly what its caller's plain ` +
       `door sees: the caller's Layer 0 leaves '${object}' no organization for this ${operation}, so the elevation's ` +
-      'reads resolve to nothing and its writes are refused. System work that runs for no caller is unaffected.',
+      'reads resolve to nothing, its delete and purge match nothing, and its other writes are refused. System work ' +
+      'that runs for no caller is unaffected.',
   );
 }
 
@@ -275,9 +283,18 @@ export async function applyAppAutomationOrganizationWall(
     : await deps.completeCaller(caller.callerContext);
   if (!federated && !callerMayLackOrganization(callerContext)) return;
 
-  const { layer0, tenantLayer0Verdict, crossedByPlatformAdmin } = await deps.callerLayer0(callerContext, object, operation);
-  const isWrite = WRITE_CLASS.has(rlsOperationForVerb(operation));
-  if (tenantLayer0Verdict.kind === 'deny' && isWrite) {
+  const answer = await deps.callerLayer0(callerContext, object, operation);
+  const { tenantLayer0Verdict, crossedByPlatformAdmin } = answer;
+  // A deny verdict's projection is the deny sentinel, never "no wall".
+  const layer0 = tenantLayer0Verdict.kind === 'deny' ? (answer.layer0 ?? RLS_DENY_FILTER) : answer.layer0;
+  const verb = rlsOperationForVerb(operation);
+  const isWrite = WRITE_CLASS.has(verb);
+  const denied = tenantLayer0Verdict.kind === 'deny';
+  // [ADR-0123 D2] A denied caller's delete and purge are answered by the read
+  // rule, as its plain door answers them: the wall's deny filter goes onto a
+  // predicate delete (it matches nothing), and a by-id delete answers as a
+  // row that is not there. Every other write is refused, naming what is missing.
+  if (denied && isWrite && verb !== REMOVAL) {
     throw appAutomationOrganizationWallRefusal(caller.source, object, operation, callerContext);
   }
 
@@ -323,7 +340,7 @@ export async function applyAppAutomationOrganizationWall(
       // caller's wall admits it; a row it does not admit answers as absent.
       const id = extractSingleId(opCtx);
       if (id === null) throw appAutomationOrganizationWallRefusal(caller.source, object, operation, callerContext);
-      if (!(await deps.rowInScope(object, id, layer0))) throw deps.notFound(object, id, opCtx.context);
+      if (denied || !(await deps.rowInScope(object, id, layer0))) throw deps.notFound(object, id, opCtx.context);
       return;
     }
   } else if (!opCtx.ast) {

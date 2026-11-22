@@ -1295,7 +1295,8 @@ export const FlowSchema = lazySchema(() => strictObject(
         'would change the ledger row; an insert is not judged by this rule. ' +
         "Nor does it reach past the organization wall: a system run for a user reads and writes through that wall " +
         "exactly what the user's own request would — with no active organization its reads of an organization's " +
-        'records return none and its writes are refused with PERMISSION_DENIED — and a run that began with no ' +
+        'records return none, its deletes remove none, and its other writes are refused with PERMISSION_DENIED — ' +
+        'and a run that began with no ' +
         'trigger user is not judged by it, after an approval decision too. ' +
         'A run with no trigger user has no identity to scope to, so under user its data operations are REFUSED — ' +
         'declare system to make the elevation explicit. This covers schedule/time-relative/api triggers AND any ' +

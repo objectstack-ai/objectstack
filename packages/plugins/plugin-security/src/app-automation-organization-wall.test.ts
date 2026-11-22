@@ -99,12 +99,33 @@ describe('an app-authored elevation sees through the organization wall what its 
         }
       });
 
-      it('with no active organization, every write is refused 403 PERMISSION_DENIED naming the missing active organization', async () => {
-        for (const operation of ['insert', 'update', 'delete', 'transfer', 'purge', 'restore']) {
+      it('with no active organization, every write but a removal is refused 403 PERMISSION_DENIED naming the missing active organization', async () => {
+        for (const operation of ['insert', 'update', 'transfer', 'restore']) {
           const opCtx: any = { object: 'task', operation, context: context(), data: { name: 'x' } };
           const e = await refusalOf(() => applyAppAutomationOrganizationWall(opCtx, depsFor(DENY)));
           expect([e.code, e.status]).toEqual(['PERMISSION_DENIED', 403]);
           expect(e.message).toContain('has no active organization');
+        }
+      });
+
+      it('with no active organization, a predicate delete or purge matches nothing: the read rule, not a refusal', async () => {
+        for (const operation of ['delete', 'purge']) {
+          const opCtx: any = { object: 'task', operation, context: context(), ast: { object: 'task', where: { status: 'done' } } };
+          await applyAppAutomationOrganizationWall(opCtx, depsFor(DENY));
+          expect(opCtx.ast.where).toEqual({ $and: [{ status: 'done' }, RLS_DENY_FILTER] });
+          expect(opCtx.ast.where.$and[1]).toBe(RLS_DENY_FILTER);
+          expect(opCtx.tenantLayer0Verdict).toEqual(DENY);
+        }
+      });
+
+      it('with no active organization, a by-id delete or purge answers as a row that is not there', async () => {
+        for (const operation of ['delete', 'purge']) {
+          const deps = depsFor(DENY);
+          const e = await refusalOf(() =>
+            applyAppAutomationOrganizationWall({ object: 'task', operation, context: context(), options: { where: { id: 't_9' } } }, deps),
+          );
+          expect([e.code, e.status]).toEqual(['RECORD_NOT_FOUND', 404]);
+          expect(deps.rowInScope).not.toHaveBeenCalled();
         }
       });
 
@@ -206,6 +227,17 @@ describe('an app-authored elevation sees through the organization wall what its 
         applyAppAutomationOrganizationWall({ object: 'remote', operation: 'update', context: actionBody({ tenantId: 'org_a' }), data: { id: 'r_1' } }, deps),
       );
       expect([e.code, e.status]).toEqual(['PERMISSION_DENIED', 403]);
+      const removal = await refusalOf(() =>
+        applyAppAutomationOrganizationWall({ object: 'remote', operation: 'delete', context: actionBody({ tenantId: 'org_a' }), data: { id: 'r_1' } }, deps),
+      );
+      expect([removal.code, removal.status]).toEqual(['RECORD_NOT_FOUND', 404]);
+    });
+
+    it('a deny verdict handed without its projection still walls a removal: the deny sentinel, never no wall', async () => {
+      const deps = depsFor(DENY, { callerLayer0: vi.fn(async () => ({ layer0: null, tenantLayer0Verdict: DENY })) });
+      const opCtx: any = { object: 'task', operation: 'delete', context: actionBody(), ast: { object: 'task' } };
+      await applyAppAutomationOrganizationWall(opCtx, deps);
+      expect(opCtx.ast.where).toBe(RLS_DENY_FILTER);
     });
   });
 

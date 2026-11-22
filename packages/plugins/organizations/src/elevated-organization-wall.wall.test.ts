@@ -8,10 +8,11 @@
  * each run `{ ...the caller's envelope, isSystem: true }`. Elevation lifts the
  * caller's business rules; it does not lift the organization wall. So for a
  * caller with no active organization, such an elevation reads nothing of a
- * tenant-scoped object and every write it makes there is refused
- * `403 PERMISSION_DENIED`, naming the missing active organization; and for a
- * caller with an active organization it keeps exactly that organization's
- * reach.
+ * tenant-scoped object, its delete there is answered by that read rule (a
+ * predicate delete matches nothing, a by-id delete answers `404`), and every
+ * other write it makes there is refused `403 PERMISSION_DENIED`, naming the
+ * missing active organization; and for a caller with an active organization
+ * it keeps exactly that organization's reach.
  *
  * ## What is real
  *
@@ -227,6 +228,8 @@ const APP = {
     },
     { name: 'eow_flow_read', label: 'Flow read', objectName: TASK, type: 'flow', target: 'eow_sys_read' },
     { name: 'eow_flow_write', label: 'Flow write', objectName: TASK, type: 'flow', target: 'eow_sys_write' },
+    { name: 'eow_remove', label: 'Remove', objectName: TASK, type: 'script', target: 'eowRemove' },
+    { name: 'eow_flow_delete', label: 'Flow delete', objectName: TASK, type: 'flow', target: 'eow_sys_delete' },
   ],
   hooks: [
     {
@@ -324,6 +327,22 @@ const APP = {
       ],
     },
     {
+      name: 'eow_sys_delete',
+      label: 'System delete',
+      type: 'screen',
+      status: 'active',
+      runAs: 'system',
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'remove', type: 'delete_record', label: 'Remove', config: { objectName: TASK, filter: { status: 'completed' }, multi: true } },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'remove' },
+        { id: 'e2', source: 'remove', target: 'end' },
+      ],
+    },
+    {
       name: 'eow_sys_write',
       label: 'System write',
       type: 'screen',
@@ -394,6 +413,10 @@ describe('an app-authored elevation sees through the organization wall what its 
       const ids = done.map((r: any) => r.id);
       if (ids.length > 0) await ctx.engine.delete(TASK, ids);
       return { deleted: ids.length };
+    });
+    ql.registerAction(TASK, 'eowRemove', async (ctx: any) => {
+      await ctx.engine.delete(TASK, String(ctx.params?.target));
+      return { removed: 1 };
     });
     ql.registerAction(TASK, 'eowIds', async (ctx: any) => {
       const ids: string[] = ctx.params?.ids ?? [];
@@ -489,6 +512,21 @@ describe('an app-authored elevation sees through the organization wall what its 
       expect(await touched()).toEqual(UNTOUCHED);
     });
 
+    it('an action body handler’s by-id delete answers as a row that is not there, and removes nothing', async () => {
+      await reseed();
+      const r = await run(TASK, 'eow_remove', { target: await idOf('B2') });
+      expect(r.status, JSON.stringify(r.body)).toBe(404);
+      expect(r.body.error.code).toBe('RECORD_NOT_FOUND');
+      expect(Object.keys(await tasks()).sort()).toEqual(['A1', 'A2', 'B1', 'B2']);
+    });
+
+    it('a system flow’s predicate delete matches nothing, and removes nothing', async () => {
+      await reseed();
+      const r = await run(TASK, 'eow_flow_delete');
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      expect(Object.keys(await tasks()).sort()).toEqual(['A1', 'A2', 'B1', 'B2']);
+    });
+
     it('a declared action body reads nothing of a tenant-scoped object', async () => {
       await reseed();
       const r = await run(TASK, 'eow_body_read');
@@ -550,6 +588,22 @@ describe('an app-authored elevation sees through the organization wall what its 
     it('an action body handler deletes its organization’s completed rows and no other’s', async () => {
       await reseed();
       const r = await run(TASK, 'eow_delete_completed');
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      expect(Object.keys(await tasks()).sort()).toEqual(['A1', 'B1', 'B2']);
+    });
+
+    it('an action body handler’s by-id delete removes its organization’s row, and another’s answers as not there', async () => {
+      await reseed();
+      const own = await run(TASK, 'eow_remove', { target: await idOf('A2') });
+      expect(own.status, JSON.stringify(own.body)).toBe(200);
+      const other = await run(TASK, 'eow_remove', { target: await idOf('B2') });
+      expect(other.status, JSON.stringify(other.body)).toBe(404);
+      expect(Object.keys(await tasks()).sort()).toEqual(['A1', 'B1', 'B2']);
+    });
+
+    it('a system flow’s predicate delete removes its organization’s rows and no other’s', async () => {
+      await reseed();
+      const r = await run(TASK, 'eow_flow_delete');
       expect(r.status, JSON.stringify(r.body)).toBe(200);
       expect(Object.keys(await tasks()).sort()).toEqual(['A1', 'B1', 'B2']);
     });

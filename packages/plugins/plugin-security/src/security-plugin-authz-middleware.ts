@@ -724,8 +724,9 @@ export function registerAuthzMiddleware(
     // predicate, sees through the organization wall exactly what the caller it
     // runs for sees at the plain door: elevation lifts the caller's business
     // rules, never the wall. A caller the wall denies (no active organization)
-    // reads nothing of a tenant-scoped object, and every write there is
-    // refused naming the missing organization. The wall is the caller's own
+    // reads nothing of a tenant-scoped object, its delete and purge there match
+    // nothing (the read rule), and every other write there is refused naming
+    // the missing organization. The wall is the caller's own
     // Layer 0, over the caller's own context and permission sets, so its
     // exemptions are the plain door's. A caller with an active organization,
     // an elevation with no caller, and every platform system context pass on
