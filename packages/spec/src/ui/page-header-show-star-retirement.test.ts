@@ -58,7 +58,7 @@ const REGISTERED_KEY = 'ui/PageHeaderProps:showStar';
 // Unanchored, because a thrown `ZodError`'s message is the JSON of its issues;
 // the key-first house convention is asserted on the issue message itself.
 const PRESCRIPTION =
-  /`page:header` property `showStar` was removed in @objectstack\/spec 18 \(ADR-0087 D2\) — the reference console draws no star beside the record title.*the record's favorites entry is the header's ⋯ menu, and metadata does not control it\..*Delete the key, whether it was `true` or `false`.*Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\./s;
+  /`page:header` property `showStar` was removed in @objectstack\/spec 18 \(ADR-0087 D2\) — the console draws the record's star from the host's favorites toggle, never from metadata, so the key switched nothing\..*Delete the key, whether it was `true` or `false`.*Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\./s;
 
 /** A page header's live keys — what an author commonly writes, not the retired one. */
 const HEADER = { title: 'Account', subtitle: '{industry}', showCopyId: false, actions: ['log_call'] } as const;
