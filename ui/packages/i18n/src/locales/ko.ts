@@ -1662,6 +1662,7 @@ const ko = {
     updatedTime: "수정 일시",
     recordNumber: "레코드 ID",
     clickToEdit: "클릭하여 편집",
+    setField: "{{field}} 설정",
     // objectui#3863 — base key. ko has a single plural category (`other`), so this
     // slot is unreachable here and equals `_other` for key-set parity.
     showEmptyRelated: "+ {{count}}개 비어 있음",
@@ -3441,6 +3442,11 @@ const ko = {
     allReports: "모든 보고서",
     collapse: '사이드바 접기',
     expand: '사이드바 펼치기',
+  },
+  designMode: {
+    title: '디자인 모드',
+    leaveUnsaved: '디자인 모드를 종료할까요? 저장하지 않은 변경 사항은 사라집니다.',
+    saveFailed: '일부 변경 사항이 저장되지 않았습니다: {{reason}}',
   },
   topbar: {
     openAssistant: "{{name}} 어시스턴트 열기",

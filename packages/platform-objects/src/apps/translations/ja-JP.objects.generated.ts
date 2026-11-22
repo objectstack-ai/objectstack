@@ -497,6 +497,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "失効理由",
         help: "セッションが失効した理由（idle_timeout、absolute_max、concurrent_cap、ip_not_allowed、user_revoked、admin、organization_membership_ended、admin_password_reset、password_reset など）。"
       },
+      sso_provider_id: {
+        label: "SSO プロバイダー",
+        help: "このセッションのサインインに使われた SSO プロバイダー（ある場合）。そのプロバイダーを削除するとセッションは終了します。システム管理。"
+      },
       active_organization_id: {
         label: "アクティブ組織"
       },

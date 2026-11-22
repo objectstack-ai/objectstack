@@ -1377,6 +1377,7 @@ const ru = {
     updatedTime: "Дата изменения",
     recordNumber: "ID записи",
     clickToEdit: "Нажмите, чтобы изменить",
+    setField: "Указать «{{field}}»",
     back: "Назад",
     edit: "Редактировать",
     editInline: "Редактировать",
@@ -3606,6 +3607,11 @@ const ru = {
     allReports: "Все отчёты",
     collapse: 'Свернуть боковую панель',
     expand: 'Развернуть боковую панель',
+  },
+  designMode: {
+    title: 'Режим дизайна',
+    leaveUnsaved: 'Выйти из режима дизайна? Несохранённые изменения будут потеряны.',
+    saveFailed: 'Некоторые изменения не сохранены: {{reason}}',
   },
   topbar: {
     openAssistant: "Открыть ассистента {{name}}",

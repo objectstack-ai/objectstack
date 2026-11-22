@@ -41,7 +41,11 @@
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { emitMetadataRefresh } from '../assistant/assistantBus.js';
 import { slugify } from './metadata-admin/createDerive.js';
-import { isDraftVersionConflict } from './metadata-admin/DraftConflictDialog.js';
+import {
+  isDraftVersionConflict,
+  type DraftSaveOutcome,
+  type DraftVersionGuard,
+} from './metadata-admin/DraftConflictDialog.js';
 import { ensureCustomizationPackage, fetchListedPackageManifests } from './studio-design/packages-io.js';
 
 /** The runtime-editable artifact types ADR-0034 unifies. `page` (a record
@@ -322,16 +326,29 @@ export function unwrapDraftBody(
 /**
  * Persist a runtime edit of a view / report / dashboard as a per-item DRAFT
  * (invisible to other users until {@link publishRuntimeMetadata}).
+ *
+ * objectstack#36137 — `saveDraft` is the editing buffer's draft-version guard
+ * (`useDraftSaveGuard`'s `save`): the write is sent pinned to the draft the
+ * buffer was loaded from (`If-Match`, or `If-None-Match: *` over no draft),
+ * and a `409 METADATA_CONFLICT` is asked about instead of overwriting. Without
+ * one the write goes unpinned, as a report's still does. Resolves
+ * `'reloaded'` when the author chose the saved version: nothing was written.
  */
 export async function persistRuntimeMetadata(
   type: RuntimeArtifactType,
   name: string,
   body: any,
   ctx: RuntimePersistCtx,
-): Promise<void> {
-  await ctx.metadataClient.save(type, name, body, { mode: 'draft' });
+  saveDraft?: DraftVersionGuard['save'],
+): Promise<DraftSaveOutcome> {
+  if (saveDraft) {
+    if ((await saveDraft(type, name, body, { mode: 'draft' })) === 'reloaded') return 'reloaded';
+  } else {
+    await ctx.metadataClient.save(type, name, body, { mode: 'draft' });
+  }
   invalidateViewCaches(type, name, ctx);
   announceDraftLedgerWrite();
+  return 'saved';
 }
 
 /**
@@ -451,7 +468,14 @@ export async function createRuntimeMetadata(
   }
   const app = type === 'view' ? ctx.app : null;
   const packageId = app?.packageId ? await resolveRuntimeCreatePackage(app.packageId) : null;
-  await ctx.metadataClient.save(type, name, body, packageId ? { mode: 'draft', packageId } : { mode: 'draft' });
+  // objectstack#36137 — the first-write pin: a create over a name that already
+  // holds a pending draft is refused `409 METADATA_CONFLICT`, never written over it.
+  await ctx.metadataClient.save(
+    type,
+    name,
+    body,
+    packageId ? { mode: 'draft', packageId, ifNoneMatch: '*' } : { mode: 'draft', ifNoneMatch: '*' },
+  );
   invalidateViewCaches(type, name, ctx);
   announceDraftLedgerWrite();
   if (app?.packageId && !packageId) {

@@ -648,7 +648,10 @@ also holds Discard on a narrow list or a phone).
   widths into the view. When the view already has unpublished changes (a draft saved from
   the view settings, by anyone), nothing is saved: the Console says so and points to the view
   settings to publish or discard that draft first. Every other change to a shared view still
-  goes to a draft that the view settings publish.
+  goes to a draft that the view settings publish. A view settings save is pinned to the draft
+  the settings opened, so one that lands while a Save to this view is between its save and its
+  publish is refused, never published with it: the settings say the draft changed and offer
+  to reload it, overwrite it or keep editing.
 - A footer calculation is offered on every column the saved view would carry: the columns
   the list draws and the fields the user added. Picking the view's own calculation again
   takes that column out of the draft.

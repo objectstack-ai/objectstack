@@ -1909,6 +1909,7 @@ const en = {
     updatedTime: 'Updated on',
     recordNumber: 'Record ID',
     clickToEdit: 'Click to edit',
+    setField: 'Set {{field}}',
     // Attachments
     dropFilesToUpload: 'Drop files here or click to upload',
     attachmentCount: '{{count}} attachment',
@@ -4115,6 +4116,11 @@ const en = {
     allReports: 'All reports',
     collapse: 'Collapse sidebar',
     expand: 'Expand sidebar',
+  },
+  designMode: {
+    title: 'Design mode',
+    leaveUnsaved: 'Leave design mode? Your unsaved changes will be lost.',
+    saveFailed: 'Some changes were not saved: {{reason}}',
   },
   topbar: {
     aiAssistant: 'AI Assistant',
