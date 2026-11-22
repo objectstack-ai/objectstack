@@ -1600,7 +1600,7 @@ const zhHant = {
     createdTime: '建立時間',
     updatedTime: '修改時間',
     recordNumber: '記錄編號',
-    clickToEdit: '點擊編輯',
+    clickToEdit: '點選編輯',
     // Attachments
     dropFilesToUpload: '拖拽檔案到此處或點選上傳',
     attachmentCount: '{{count}} 個附件',
