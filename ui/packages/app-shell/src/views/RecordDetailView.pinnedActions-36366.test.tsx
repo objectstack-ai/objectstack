@@ -6,7 +6,8 @@
  * in the header's ⋯. Both record headers read them: the synthesized default
  * page's (`RecordDetailView`'s header list) and an authored `page:header` with
  * `placedActions: true` (`PageHeaderActions`). No pins: each header draws as
- * before (the control).
+ * before (the control). A header authored with its own `actions` list keeps
+ * that list, and the design mode offers it no 「Header buttons」.
  *
  * Read through the real `RecordDetailView` → `page:header` renderer →
  * `PageHeaderActions`, embedded as `ObjectView`'s drawer mounts it (the drawer
@@ -47,6 +48,7 @@ import { I18nProvider } from '@object-ui/i18n';
 import { MetadataCtx } from '@object-ui/react';
 import { RecordDetailView } from './RecordDetailView';
 import { FavoritesProvider } from '../context/FavoritesProvider';
+import { DesignModeProvider } from '../layout/designMode';
 
 const RECORD_ID = 'rec-1';
 
@@ -58,8 +60,15 @@ const ACTIONS = [CONVERT, MARK_WON, SHARE, LOG_CALL];
 const LABELS = ACTIONS.map((a) => a.label);
 
 const PLACED_HEADER = { type: 'page:header', properties: { placedActions: true } };
+const OWN_LIST_HEADER = { type: 'page:header', properties: { actions: ['convert', 'share', 'log_call'] } };
 
-function mount(pinnedActions: unknown, authoredHeader: boolean) {
+type HeaderKind = 'synthesized' | 'placed' | 'own';
+
+/** The design mode, on, with nothing staged: the store's surface the header reads. */
+const DESIGN_MODE_ON = { active: true, changes: new Map(), stage: () => {}, unstage: () => {} } as any;
+
+function mount(pinnedActions: unknown, header: HeaderKind | boolean, designMode = false) {
+  const kind: HeaderKind = header === true ? 'placed' : header === false ? 'synthesized' : header;
   const objects = [
     {
       name: 'crm_deal',
@@ -69,7 +78,7 @@ function mount(pinnedActions: unknown, authoredHeader: boolean) {
       ...(pinnedActions ? { pinnedActions } : {}),
     },
   ];
-  const pages = authoredHeader
+  const pages = kind !== 'synthesized'
     ? [
         {
           name: 'crm_deal_detail',
@@ -78,7 +87,7 @@ function mount(pinnedActions: unknown, authoredHeader: boolean) {
           object: 'crm_deal',
           kind: 'full',
           isDefault: true,
-          regions: [{ name: 'main', width: 'full', components: [PLACED_HEADER, { type: 'record:details', properties: {} }] }],
+          regions: [{ name: 'main', width: 'full', components: [kind === 'placed' ? PLACED_HEADER : OWN_LIST_HEADER, { type: 'record:details', properties: {} }] }],
         },
       ]
     : [];
@@ -101,19 +110,24 @@ function mount(pinnedActions: unknown, authoredHeader: boolean) {
     update: vi.fn(async () => ({})),
     delete: vi.fn(async () => ({})),
   } as any;
+  const view = (
+    <RecordDetailView
+      dataSource={dataSource}
+      objects={objects}
+      onEdit={vi.fn()}
+      objectNameOverride="crm_deal"
+      recordIdOverride={RECORD_ID}
+      // An authored page is drawn on the full page only (the drawer takes the
+      // standard page, objectstack#36150), so an authored header mounts there.
+      embedded={kind === 'synthesized'}
+    />
+  );
   render(
     <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }} persistLanguage={false}>
       <MetadataCtx.Provider value={metadata}>
         <FavoritesProvider>
           <MemoryRouter initialEntries={[`/apps/a/crm_deal?recordId=${RECORD_ID}`]}>
-            <RecordDetailView
-              dataSource={dataSource}
-              objects={objects}
-              onEdit={vi.fn()}
-              objectNameOverride="crm_deal"
-              recordIdOverride={RECORD_ID}
-              embedded
-            />
+            {designMode ? <DesignModeProvider value={DESIGN_MODE_ON}>{view}</DesignModeProvider> : view}
           </MemoryRouter>
         </FavoritesProvider>
       </MetadataCtx.Provider>
@@ -189,5 +203,29 @@ describe.each([
     const { inline, menu } = await headerFaces();
     expect(inline).toEqual(['Convert', 'Mark Won', 'Share']);
     expect(menu).toEqual(['Log Call']);
+  });
+});
+
+describe('#36366 a record header authored with its own actions list', () => {
+  it('keeps its list: the pins do not choose its buttons', async () => {
+    mount({ record: ['mark_won'] }, 'own');
+    const { inline } = await headerFaces();
+    expect(inline).toEqual(['Convert', 'Share']);
+    expect(inline).not.toContain('Mark Won');
+  });
+
+  it('is offered no 「Header buttons」 under the design mode; the headers that read pins are', async () => {
+    // The control is loaded lazily: the headers that offer it load it first,
+    // so its absence below is asked once it would have drawn.
+    mount(undefined, 'placed', true);
+    expect(await screen.findByTestId('design-header-pins', {}, { timeout: 5000 })).toBeInTheDocument();
+    cleanup();
+    mount(undefined, 'synthesized', true);
+    expect(await screen.findByTestId('design-header-pins', {}, { timeout: 5000 })).toBeInTheDocument();
+    cleanup();
+    mount(undefined, 'own', true);
+    await headerFaces();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByTestId('design-header-pins')).toBeNull();
   });
 });

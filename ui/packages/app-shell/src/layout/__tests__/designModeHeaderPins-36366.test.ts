@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PIN_LIMIT,
   defaultPins,
+  headerReadsPins,
   movePin,
   pinCandidates,
   pinsChangeKey,
@@ -86,5 +87,14 @@ describe('the header pins under the design mode (objectstack#36366)', () => {
     expect(pinsRefusal(served, { record: ['convert', 'log_call'], list: ['$export', 'mass_assign'] }, TEXTS)).toBeNull();
     expect(pinsRefusal(served, { record: ['ghost'] }, TEXTS)).toBe('unknown ghost');
     expect(pinsRefusal(served, { list: ['convert'] }, TEXTS)).toBe('not placed convert');
+  });
+  it('the synthesized header and placedActions read the pins; a header with its own list, or none, does not', () => {
+    const page = (header: Record<string, unknown>) => ({ regions: [{ name: 'main', components: [{ type: 'page:header', properties: header }] }] });
+    expect(headerReadsPins(null)).toBe(true);
+    expect(headerReadsPins({ regions: [{ name: 'main', components: [{ type: 'record:details' }] }] })).toBe(true);
+    expect(headerReadsPins(page({ placedActions: true }))).toBe(true);
+    expect(headerReadsPins(page({ actions: ['convert', 'clone'] }))).toBe(false);
+    expect(headerReadsPins(page({ subtitle: 'no actions' }))).toBe(false);
+    expect(headerReadsPins({ header: { type: 'page:header', actions: [] } })).toBe(false);
   });
 });

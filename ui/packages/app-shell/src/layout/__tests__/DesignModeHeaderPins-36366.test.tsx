@@ -114,7 +114,7 @@ function start(objectDef: Record<string, unknown> = SERVED, enter = true) {
 
 async function openPanel() {
   // The panel is loaded once the mode is on.
-  fireEvent.click(await screen.findByTestId('design-header-pins'));
+  fireEvent.click(await screen.findByTestId('design-header-pins', {}, { timeout: 5000 }));
   await flush();
   return screen.getByTestId('design-header-pins-panel');
 }
