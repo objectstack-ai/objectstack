@@ -866,6 +866,13 @@ on it), and paging
 Attachments. The reader's ⊟ (`rightColumn`) takes the right column out of the
 two-column tiers; there is no tabbed tier.
 
+On a wide full page (`fullPage`) the details pin to a left column, 400 px wide
+by default, with the other tabs beside it. The divider between them is a
+separator: drag it, or move it with ← → (Home / End to either end); a
+double-click puts the column back to the default. The width is the host's to
+keep — `detailsWidth` and `onDetailsWidthChange`, per reader and per object in
+the console — and a double-click keeps the default there too.
+
 A tab row closes the record header in every tier (`RecordTabRow`): 「概览」
 (Overview), then 动态, then one tab per related panel in the reader's
 arrangement, each with its count. A tab is its panel's whole face: choosing it
