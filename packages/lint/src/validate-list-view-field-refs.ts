@@ -982,8 +982,8 @@ const KANBAN_SUMMARY_POSITIONS: Array<{ key: string; severity: Sev }> = [{ key: 
  * [#36370] The refusal a `kanban.summary` of type `sum` earns over the field it
  * totals on `object`, or `undefined` when nothing is judged or the pair is
  * accepted. The same verdict `columns[].summary` asks ({@link columnSummaryRefusal}):
- * the aggregate × field-type table's `sum` row over the field's declaration.
- * The board totals its loaded cards in the browser today, and a value that is
+ * the aggregate × field-type table's `sum` row over the field's declaration,
+ * less the true / false class the board does not add. The board totals its loaded cards in the browser today, and a value that is
  * no number blanks the lane's foot; the whole lane's figure is the server's
  * `sum`, so the pair is judged by the door that will answer it. `count` and
  * `none` compare no value.
@@ -1001,7 +1001,19 @@ function kanbanSummaryRefusal(
   const fieldType = verdict.meta?.type;
   if (!isJudgeableAggregateType(fieldType)) return undefined;
   const shape = { type: fieldType, multiple: verdict.meta?.multiple === true };
-  if (aggregateAcceptsDeclaration('sum', shape)) return undefined;
+  // A true / false field the door would sum as a count of trues; the board
+  // totals numbers only (a `true` reads as no number and blanks the foot), so
+  // the board's picker leaves the class out and so does this verdict.
+  const yesNo = fieldType === 'boolean' || fieldType === 'toggle';
+  if (!yesNo && aggregateAcceptsDeclaration('sum', shape)) return undefined;
+  if (yesNo) {
+    return {
+      message:
+        `summary "sum" over "${field}" (${declaredAs(shape)}) totals no number: the board adds number values, ` +
+        'and a true / false value draws no figure at the lane\'s foot',
+      hint: `Total a number field of "${object}", or count each lane's cards with \`summary: { type: 'count' }\`.`,
+    };
+  }
   return {
     message:
       `summary "sum" over "${field}" (${declaredAs(shape)}) totals no number: the aggregate door refuses ` +

@@ -459,9 +459,8 @@ export interface ListViewProps {
    * objectstack#36370 — the open view's identity for the board's lane
    * collapse, which each reader keeps in their own browser. The key is this
    * reader's id, the object and this view key, so it is each person's own
-   * and each view's own. Absent ⇒ `schema.id`, then `schema.name`; a host
-   * whose views carry neither passes its own (the Console passes the view's
-   * id).
+   * and each view's own. Absent ⇒ `schema.id`, else `-`; a host whose views
+   * carry no id passes its own (the Console passes the view's id).
    */
   laneCollapseKey?: string;
   /** Called with a non-delete bulk action key and the currently selected rows. */

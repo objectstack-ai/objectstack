@@ -1727,6 +1727,12 @@ describe('[#36370] the lane foot statistic of a board', () => {
     expect(withSummary({ type: 'sum', field: 'score' })).toHaveLength(1);
   });
 
+  it('refuses a sum over a boolean, which the aggregate table admits but the board does not add', () => {
+    const findings = withSummary({ type: 'sum', field: 'is_locked' });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('summary "sum" over "is_locked" (`boolean`) totals no number');
+  });
+
   it('accepts a sum over a number, and judges nothing for count or none', () => {
     expect(withSummary({ type: 'sum', field: 'estimate' })).toEqual([]);
     expect(withSummary({ type: 'count' })).toEqual([]);
