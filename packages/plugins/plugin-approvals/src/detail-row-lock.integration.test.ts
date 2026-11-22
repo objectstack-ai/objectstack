@@ -533,3 +533,86 @@ describe('a locked record\'s lines are locked with it — a held record that is 
     expect(cancelled).toContain(`deal:${dealId}`);
   });
 });
+
+/**
+ * "Inside a transaction" means an OPEN unit. A handle whose unit has already
+ * closed (an `async: true` after-hook's run, or a caller holding a handle past
+ * its unit) is no transaction to the engine's write path, so a cascade leg
+ * carrying one lands on its own, exactly as with no handle at all. Measured on a
+ * cascade split across two datasources, where the engine opens no unit of its
+ * own and the caller's closed handle reaches the legs.
+ */
+describe('a locked record\'s lines are locked with it — a closed unit\'s handle is no transaction', () => {
+  /** A second sqlite datasource, under its own name. */
+  class SecondSqlDriver extends SqlDriver {
+    override readonly name = 'com.objectstack.test.second-sql';
+  }
+  /** On the second datasource, so the held record's cascade is split across two. */
+  const hold = {
+    name: 'opportunity_hold',
+    label: 'Opportunity Hold',
+    datasource: 'com.objectstack.test.second-sql',
+    fields: {
+      id: { name: 'id', type: 'text' as const, primaryKey: true },
+      opportunity: { name: 'opportunity', type: 'lookup' as const, reference: 'opportunity', deleteBehavior: 'restrict' as const },
+    },
+  };
+
+  let engine: ObjectQL;
+  let lockedId: string;
+  const cancelled: string[] = [];
+
+  afterEach(async () => {
+    try { await engine?.destroy(); } catch { /* noop */ }
+  });
+
+  beforeEach(async () => {
+    cancelled.length = 0;
+    engine = new ObjectQL();
+    engine.registerDriver(new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }), true);
+    engine.registerDriver(new SecondSqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }));
+    await engine.init();
+    for (const o of [opportunity, lineItem, hold, approvalRequest]) {
+      engine.registry.registerObject(o as any, 'com.objectstack.test.detail-row-lock');
+    }
+    await engine.syncSchemas();
+    await installDefaultOrganization(engine);
+
+    lockedId = String((await engine.insert('opportunity', { name: 'Locked deal' }, SYSTEM)).id);
+    await engine.insert('opportunity_line', { product: 'A', quantity: 1, opportunity: lockedId }, SYSTEM);
+    await engine.insert('opportunity_line', { product: 'B', quantity: 2, opportunity: lockedId }, SYSTEM);
+    await engine.insert('opportunity_hold', { opportunity: lockedId }, SYSTEM);
+    await engine.insert('sys_approval_request', {
+      object_name: 'opportunity',
+      record_id: lockedId,
+      status: 'pending',
+      flow_run_id: 'run_open',
+      node_config_json: JSON.stringify({ lockRecord: true }),
+    }, SYSTEM);
+
+    bindDetailRowLockHook(engine as any);
+    bindRecordDeleteCancelHook(engine as any, {
+      cancelForDeletedRecord: async (objectName: string, recordId: string) => {
+        cancelled.push(`${objectName}:${recordId}`);
+        return { cancelled: [], suspendedRuns: [] };
+      },
+    });
+  });
+
+  it('a delete carrying a closed unit\'s handle is refused RECORD_LOCKED; record, lines and pending request all stay', async () => {
+    let closedHandle: unknown;
+    await engine.transaction(async (trx: any) => { closedHandle = trx?.transaction; });
+    expect(closedHandle).toBeDefined();
+
+    const err: any = await refusal(() => engine.delete('opportunity', {
+      where: { id: lockedId },
+      context: { userId: 'u1', transaction: closedHandle },
+    } satisfies EngineDeleteOptions));
+    expect(err?.code).toBe('RECORD_LOCKED');
+    expect(err?.statusCode).toBe(409);
+    expect(await engine.findOne('opportunity', { where: { id: lockedId } })).toBeTruthy();
+    expect(await engine.find('opportunity_line', { where: { opportunity: lockedId }, context: { isSystem: true } } satisfies EngineQueryOptions)).toHaveLength(2);
+    expect((await engine.findOne('sys_approval_request', { where: { record_id: lockedId }, context: { isSystem: true } } satisfies EngineQueryOptions))?.status).toBe('pending');
+    expect(cancelled).not.toContain(`opportunity:${lockedId}`);
+  });
+});

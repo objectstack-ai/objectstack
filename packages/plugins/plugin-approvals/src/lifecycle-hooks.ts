@@ -155,6 +155,14 @@ interface MinimalEngine {
    * WORDING, never the lock.
    */
   getSchema?(objectName: string): any | undefined;
+  /**
+   * Has the unit of work `handle` names already closed? Read structurally —
+   * the predicate the engine's own write path reads before it writes into a
+   * threaded handle — so the detail-row lock's cascade yield asks exactly the
+   * question the write answers. Optional for the reason `getSchema` is; absent,
+   * the yield is withheld ({@link inOpenUnit}).
+   */
+  isClosedUnitHandle?(handle: unknown): boolean;
 }
 
 /**
@@ -848,6 +856,29 @@ function soleCascadeEdgeOf(
   return edges.find((e) => e.fk === cascading[0]);
 }
 
+/**
+ * Is `handle` the handle of a unit of work that is still OPEN — one the
+ * engine's write path would write a cascade leg into, and roll back with the
+ * record's own delete?
+ *
+ * The engine's write path treats the handle of a unit that has already closed
+ * (a run detached from its dispatch's unit — an `async: true` after-hook — or a
+ * caller holding a handle past its unit) as no handle at all, and writes
+ * unenrolled. So a handle present on the context is not enough: it must be one
+ * the engine does not report closed (`isClosedUnitHandle`, the predicate its
+ * write path reads). An engine that cannot answer the question answers "not
+ * open": the yield is withheld, never granted on a guess.
+ */
+function inOpenUnit(engine: Pick<MinimalEngine, 'isClosedUnitHandle'>, handle: unknown): boolean {
+  if (handle === undefined || handle === null) return false;
+  if (typeof engine.isClosedUnitHandle !== 'function') return false;
+  try {
+    return engine.isClosedUnitHandle(handle) === false;
+  } catch {
+    return false;
+  }
+}
+
 /** A scalar foreign-key value, or `null` for an empty or non-scalar one. */
 function scalarFk(value: unknown): string | null {
   if (typeof value === 'string') return value ? value : null;
@@ -919,10 +950,12 @@ function unscalarFk(value: unknown): boolean {
  * the leg is judged as a hand delete and refused: deleting a DIFFERENT record
  * never takes a held record's line with it.
  *
- * The yield also needs the delete to run inside an OPEN TRANSACTION
- * (`ctx.transaction`, the handle the engine's atomic cascade opens). Without
- * one — a datasource that declares `supports.transactionsUnsupported`, or a
- * cascade the engine splits across datasources — each leg lands on its own, so
+ * The yield also needs the delete to run inside an OPEN unit of work: a
+ * `ctx.transaction` handle the engine does not report closed
+ * ({@link inOpenUnit}), such as the one its atomic cascade opens. Without one —
+ * a datasource that declares `supports.transactionsUnsupported`, a cascade the
+ * engine splits across datasources, or a handle whose unit already closed (an
+ * `async: true` after-hook's run) — each leg lands on its own, so
  * a later refusal of the record's own delete (a `restrict` row met after the
  * lines were removed) would leave the record held, its request pending and its
  * lines gone. There the leg is refused, and so the held record's delete is
@@ -985,10 +1018,11 @@ export function bindDetailRowLockHook(
       if (!previous) unresolved = true;
       // A cascade leg of the held master's OWN delete yields on that one edge
       // (see "Deleting the locked master itself" above); every other edge of the
-      // row is still judged. Only inside an open transaction: without one the
-      // legs land one by one, and a later refusal of the record's own delete
-      // would leave the record held with its lines gone.
-      const cascadeSource = event === 'delete' && ctx?.referentialCascadeDelete === true && ctx?.transaction != null
+      // row is still judged. Only inside an OPEN unit: without one the legs land
+      // one by one, and a later refusal of the record's own delete would leave
+      // the record held with its lines gone.
+      const cascadeSource = event === 'delete' && ctx?.referentialCascadeDelete === true
+        && inOpenUnit(engine, ctx?.transaction)
         ? soleCascadeEdgeOf(engine, object, edges)
         : undefined;
       for (const e of edges) {
