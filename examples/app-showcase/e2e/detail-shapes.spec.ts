@@ -21,9 +21,9 @@ import { test, expect } from '@playwright/test';
  *                      one-column stack tier (objectstack#27524): a
  *                      `relatedList: 'primary'` list is a body table in the
  *                      details (objectstack#27055, Target 8) and takes no tab;
- *                      the rest are tabs of the tab row (objectstack#35595),
- *                      and one with records is a card of the 概览 tab's rail
- *                      below the details (objectstack#35596)
+ *                      the rest are tabs of the tab row (objectstack#35595);
+ *                      the 概览 tab's rail that summarized them is retired
+ *                      (objectstack#35890), so the case opens the Contacts tab
  *
  * Runs against the console the backend serves at /_console (baseURL from
  * playwright.config.ts; storageState carries the admin session). The
@@ -170,8 +170,8 @@ test('related-heavy: body tables, the tab row and the rail on Contoso', async ({
   // The synthesized record page lays itself out by the width of the view it
   // occupies, by one rule (objectstack#26678, objectstack#27524): details |
   // the right column from `RECORD_PAGE_TWO_COLUMN_MIN_WIDTH` (760 px,
-  // `@object-ui/plugin-detail`), and ONE column below it — the details, then
-  // the 概览 tab's rail. The tab row (objectstack#35595) is drawn in every
+  // `@object-ui/plugin-detail`), and ONE column below it — the details on
+  // the tab row's first tab. The tab row (objectstack#35595) is drawn in every
   // tier. The case stays in that stack tier on purpose: the column tiers are
   // what every other page of this smoke draws at the Desktop Chrome viewport,
   // and the stack is also what the split pane (720 px) and a phone draw.
@@ -207,7 +207,9 @@ test('related-heavy: body tables, the tab row and the rail on Contoso', async ({
   await expect(page.locator(HIGHLIGHT_STRIP)).toHaveCount(0);
   await expect(page.locator(stageTag('status')).first()).toBeVisible();
 
-  // One column: the details, then the rail. The tab row opens on 概览.
+  // One column, on the tab row, which opens on its first tab (详情 / Details,
+  // `overview`). The right summary rail is retired in every tier
+  // (objectstack#35890): the other related lists are the row's tabs.
   await expect(page.locator('[data-record-page-tier]')).toHaveAttribute('data-record-page-tier', 'stack');
   await expect(page.locator('[data-record-columns]')).toHaveAttribute('data-record-columns-shown', 'details');
   await expect(page.locator('[data-record-tab="overview"]')).toHaveAttribute('aria-selected', 'true');
@@ -216,8 +218,7 @@ test('related-heavy: body tables, the tab row and the rail on Contoso', async ({
   // them (objectstack#27055, Target 8): Invoices and Projects are
   // `relatedList: 'primary'` (CORE relationships), so each is a body table in
   // the details, with its rows read at open, and takes no tab of its own; the
-  // rest of Contoso's lists (Contacts and the Field Zoo lookups) are tabs, and
-  // one with records is a card of the rail (objectstack#35596).
+  // rest of Contoso's lists (Contacts and the Field Zoo lookups) are tabs.
   // CONTROL for the absence below: an ordinary list's tab is drawn under the
   // same `OBJECT.FIELD` id, so a renamed id scheme reds here, not silently.
   await expect(page.locator('[data-record-tab="showcase_contact.account"]')).toHaveCount(1);
@@ -231,8 +232,6 @@ test('related-heavy: body tables, the tab row and the rail on Contoso', async ({
     .filter({ has: page.getByRole('columnheader', { name: 'Project Name' }) });
   await expect(invoicesTable.getByRole('cell', { name: 'INV-1002', exact: true })).toBeVisible();
   await expect(projectsTable.getByRole('cell', { name: 'Data Platform', exact: true })).toBeVisible();
-  const rightColumn = page.locator('[data-record-column="right"]');
-  await expect(rightColumn.getByRole('region', { name: /^(Invoices|Projects)$/ })).toHaveCount(0);
 
   // Contoso's own groups render in the details (ADR-0085 §5), its highlighted
   // fields among their members.
@@ -244,15 +243,23 @@ test('related-heavy: body tables, the tab row and the rail on Contoso', async ({
   await expect(details.getByText('$25,000,000', { exact: false }).first()).toBeVisible();
   const footer = page.locator('[data-testid="record-meta-footer"]');
   await expect(footer).toBeVisible();
+  // On the field list the footer is a "System information" section that
+  // starts collapsed (objectstack#36147): open it, then read its rows
+  // (objectstack#36321).
+  const systemInfo = footer.getByRole('button', { name: 'System information' });
+  await systemInfo.click();
+  await expect(systemInfo).toHaveAttribute('aria-expanded', 'true');
   const footerText = (await footer.innerText()).replace(/\s+/g, ' ');
   expect(footerText, 'footer dangles "Created by" without an actor').not.toMatch(/Created by/);
   expect(footerText).toMatch(/Created/);
 
-  // The rail's Contacts card summarizes the Contacts tab: its first rows,
-  // Contoso's seeded contacts among them.
-  const contactsCard = rightColumn.getByRole('region', { name: 'Contacts', exact: true });
-  await contactsCard.scrollIntoViewIfNeeded();
-  await expect(contactsCard.locator('[data-record-summary-row]').filter({ hasText: 'Carl Fox' })).toBeVisible();
+  // Contoso's contacts are the Contacts tab, where the retired rail's card
+  // summarized them (objectstack#35890, objectstack#36321): the tab lists
+  // Contoso's seeded contacts.
+  const contactsTab = page.locator('[data-record-tab="showcase_contact.account"]');
+  await contactsTab.click();
+  await expect(contactsTab).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('tabpanel').getByText('Carl Fox', { exact: true }).first()).toBeVisible();
 
   expect(errors, 'uncaught page errors on related-heavy detail').toEqual([]);
 });
