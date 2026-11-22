@@ -497,6 +497,8 @@ describe('deleting an SSO provider ends the live sessions signed in through it',
     await session('ses_acme_1', PROVIDER);
     await session('ses_acme_2', PROVIDER);
     await session('ses_acme_ended', PROVIDER, { revoked_at: new Date(0), revoke_reason: 'user_revoked' });
+    // Already past its expiry: not live, so not revoked (it stays an ordinary expired row the TTL sweep reaps).
+    await session('ses_acme_expired', PROVIDER, { expires_at: new Date(Date.now() - 60_000) });
     await session('ses_globex', OTHER);
     await session('ses_password', null);
 
@@ -508,7 +510,7 @@ describe('deleting an SSO provider ends the live sessions signed in through it',
     const byId = new Map((await rows(s, 'sys_session', { user_id: mia })).map((r) => [r.id, r]));
     for (const id of ['ses_acme_1', 'ses_acme_2']) expect(byId.get(id)?.revoke_reason, id).toBe('sso_provider_deleted');
     expect(byId.get('ses_acme_ended')?.revoke_reason).toBe('user_revoked');
-    for (const id of ['ses_globex', 'ses_password']) expect(byId.get(id)?.revoked_at ?? null, id).toBeNull();
+    for (const id of ['ses_globex', 'ses_password', 'ses_acme_expired']) expect(byId.get(id)?.revoked_at ?? null, id).toBeNull();
   });
 });
 
