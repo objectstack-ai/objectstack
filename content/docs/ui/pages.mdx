@@ -232,9 +232,10 @@ synthesizer fills in the rest. A slotted page authors `slots`, not `regions`:
 
 Each slot takes one component or an array of them, and replaces its part whole: there is no
 deep merge. There is no `tabs` slot: the page's panels are composed from the object's fields
-and relationship flags. To change which related lists appear or their order, set `relatedList` /
-`relatedList: 'primary'` on the child's reference field; a page that needs its own strip is
-`kind: 'full'`, drawn as authored. `slots.tabs`, `slots.related` and `slots.relatedLists` are
+and relationship flags. To choose which related lists and built-in tabs appear and in what
+order, list them in the object's `relatedLists` (the built-ins by object name: `sys_attachment`,
+`sys_approval_request`, `sys_activity`); `relatedList: false` on the child's reference field
+still hides a list. A page that needs its own strip is `kind: 'full'`, drawn as authored. `slots.tabs`, `slots.related` and `slots.relatedLists` are
 refused by name, and `os migrate meta --from 17` drops a stored `slots.tabs`.
 
 {/* os:check */}

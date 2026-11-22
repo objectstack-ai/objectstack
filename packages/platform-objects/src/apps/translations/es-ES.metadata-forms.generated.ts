@@ -77,8 +77,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Nombres de campo de este objeto, del más importante al menos; donde solo cabe uno, gana la primera entrada (ADR-0085). Determinan las columnas predeterminadas de las listas y de las listas relacionadas, las tarjetas, las vistas previas de registros hijos, la tarjeta flotante del registro y el selector de registros. Un nombre que no sea un campo de este objeto se rechaza al publicar."
       },
       relatedLists: {
-        label: "Orden de listas relacionadas",
-        helpText: "Orden de negocio de las listas relacionadas de este objeto en su página de registro, de la más importante a la menos. Cada entrada es el nombre de un objeto hijo (p. ej., task), u objeto.campo cuando ese hijo tiene más de una relación con este objeto. Las listas indicadas van primero; el resto sigue en el orden derivado. Un nombre que no coincide con ninguna relación que apunte a este objeto no coloca nada, y se rechaza al guardar o validar el objeto."
+        label: "Pestañas de la página de registro",
+        helpText: "Las pestañas de la página de registro después del resumen, en orden. Cada entrada es el nombre de un objeto hijo (p. ej., task), object.field cuando ese hijo tiene más de una relación con este objeto, una pestaña integrada (sys_attachment, sys_approval_request, sys_activity) o una entrada con su propio título y columnas, definida en la configuración del objeto en Studio. En cuanto se enumera algo, una lista relacionada que ninguna entrada nombra no muestra pestaña, incluida una lista que añade otro paquete, hasta que este objeto la nombre; los adjuntos solo se muestran si se enumeran. Vacío: todas las listas se muestran en el orden predeterminado. Un nombre que no coincide con ninguna relación que apunte a este objeto se rechaza al guardar el objeto."
       },
       searchableFields: {
         label: "Campos buscables",
