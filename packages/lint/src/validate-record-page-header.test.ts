@@ -166,9 +166,15 @@ describe('validateRecordPageHeader · the actions', () => {
   });
 
   it('skips a destructive or menu-only action when picking the primary, as the renderer does', () => {
-    const actions = leadActions();
-    actions[0].variant = 'danger'; // convert_lead never draws as the primary
-    expect(validateRecordPageHeader(stackOf(leadPage({ actions: LISTED }), actions))).toEqual([]);
+    // Unlisted, so only the standard page draws them, and first by order: neither is its primary.
+    const actions = [
+      { name: 'delete_lead', objectName: 'crm_lead', locations: ['record_header'], order: -9, variant: 'danger' },
+      { name: 'more_menu', objectName: 'crm_lead', locations: ['record_header'], order: -8, component: 'action:menu' },
+      { name: 'archive_lead', objectName: 'crm_lead', locations: ['record_more'], order: -7 },
+      ...leadActions(),
+    ];
+    const list = ['convert_lead', 'qualify_lead', 'schedule_followup'];
+    expect(validateRecordPageHeader(stackOf(leadPage({ actions: list }), actions))).toEqual([]);
   });
 
   it('judges no list naming an action the stack does not declare on the object', () => {
