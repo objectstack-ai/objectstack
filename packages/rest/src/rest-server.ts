@@ -5148,6 +5148,11 @@ export class RestServer {
      * controls whether unscoped legacy routes remain available:
      *   - `required` → only scoped routes registered.
      *   - `optional` / `auto` → both scoped and unscoped routes registered.
+     *
+     * One route is never registered on the scoped base: the restriction
+     * profile, `GET {basePath}/discovery/restriction-profile`, is mounted on
+     * the unscoped base only (ADR-0138 D2, as amended 2026-11-22), so a
+     * `required` server does not serve it.
      */
     registerRoutes(): void {
         const basePath = this.getApiBasePath();
