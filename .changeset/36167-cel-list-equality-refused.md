@@ -12,7 +12,7 @@ fix(formula)!: `validateExpression` refuses `==` / `!=` between a list-valued fi
 
 Clause-②: no (narrowing)
 Metadata-protocol: narrowed
-Skills-docs: follow-up owed — skills/objectstack-formula/SKILL.md
+Skills-docs: follow-up #36217
 
 <!-- adr-0087: registered cel-list-equality-refused -->
 
