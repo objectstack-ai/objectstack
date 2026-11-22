@@ -90,6 +90,8 @@
  */
 
 import {
+  canServeApiOperation,
+  type EnableLike,
   referenceTargetOf,
   resolveUserActionTransfer,
   transferCascadeIneligibilityReason,
@@ -379,7 +381,8 @@ function targetOf(field: AnyRec): string | undefined {
  * (`transferCascadeIneligibilityReason` answers nothing). The parse refuses the
  * declaration on any other child; this reads the registered definitions again,
  * because a definition can reach the registry without that parse. Objects of a
- * disabled package are left out, as the data door serves none of their rows.
+ * disabled package are left out, as the data door serves none of their rows,
+ * and so is a child whose declared API exposure does not serve `update`.
  * In registration and declaration order.
  */
 export function transferCascadeRelations(engine: Pick<ChangeOwnerEngine, 'getConfigs' | 'registry'>, parent: string): ChangeOwnerCascadeCandidate[] {
@@ -395,6 +398,11 @@ export function transferCascadeRelations(engine: Pick<ChangeOwnerEngine, 'getCon
       f.transferBehavior === 'cascade' && (f.type === 'lookup' || f.type === 'master_detail') && targetOf(f) === parent);
     if (declared.length === 0) continue;
     if (transferCascadeIneligibilityReason(child) !== undefined) continue;
+    // The child is a second object: its rows are read and written here, so it
+    // is asked its own declared exposure for `update`, the operation the route
+    // judges the addressed object as (ADR-0049, #22661). A child the data API
+    // does not let the caller update is no cascade candidate.
+    if (!canServeApiOperation(asRecord(child.enable) as EnableLike | undefined, 'update')) continue;
     for (const [field, def] of declared) {
       out.push({ object: name, field, label: labelOf(child, name), fieldLabel: labelOf(def, field) });
     }

@@ -328,6 +328,20 @@ describe('[#35315 phase 2] the Change Owner cascade', () => {
     expect(transferCascadeRelations(engine, 'lead')).toEqual([]);
   });
 
+  it('offers no cascade to a child whose declared API exposure does not serve update', async () => {
+    for (const enable of [{ apiEnabled: false }, { apiMethods: ['get', 'list'] }]) {
+      const engine = Object.assign(fakeEngine(), { getConfigs: () => ({ ...SCHEMAS, lead_task: { ...leadTask, enable } }) });
+      expect(transferCascadeRelations(engine, 'lead')).toEqual([]);
+      await expect(changeRecordOwner(engine, 'lead', 'l1', { ownerId: 'u_next' }, CALLER, {
+        cascade: [{ object: 'lead_task', field: 'lead' }],
+      })).rejects.toMatchObject({ status: 400, code: 'VALIDATION_ERROR' });
+      expect(engine.calls.filter((c) => c.object === 'lead_task')).toEqual([]);
+    }
+    // The control: an exposure that serves update keeps the candidate.
+    const open = Object.assign(fakeEngine(), { getConfigs: () => ({ ...SCHEMAS, lead_task: { ...leadTask, enable: { apiMethods: ['get', 'list', 'update'] } } }) });
+    expect(transferCascadeRelations(open, 'lead').map((c) => c.object)).toEqual(['lead_task']);
+  });
+
   it('moves only the child rows owned by the previous owner, each by id under the caller\'s context', async () => {
     const engine = fakeEngine();
     const result = await changeRecordOwner(engine, 'lead', 'l1', { ownerId: 'u_next' }, CALLER, {

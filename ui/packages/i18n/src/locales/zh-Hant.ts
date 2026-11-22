@@ -2853,8 +2853,8 @@ const zhHant = {
       cascadeHelp: '指向此記錄且屬於原負責人的相關記錄，也會轉給新負責人。',
       cascadeOption: '{{object}}（{{field}}）',
       cascadesFailed: '無法讀取可一併轉移的相關記錄：{{message}}',
-      cascadeReport: '{{object}}（{{field}}）：已轉移 {{moved}} 筆，{{failed}} 筆無法轉移。',
-      cascadeRemaining: '超出單次變更 500 筆上限、仍歸原負責人的記錄：{{count}} 筆。',
+      cascadeReport: '{{object}}（{{field}}）：已轉移 {{moved}} 條，{{failed}} 條無法轉移。',
+      cascadeRemaining: '超出單次更改 500 條上限、仍歸原負責人的記錄：{{count}} 條。',
       cascadeReadFailure: '{{object}}（{{field}}）：無法讀取相關記錄：{{message}}',
     },
     objectView: {

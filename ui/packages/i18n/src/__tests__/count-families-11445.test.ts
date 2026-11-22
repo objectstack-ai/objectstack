@@ -135,6 +135,9 @@ const COUNT_NEUTRAL = {
     // objectstack#30325 — the install confirm's "Sample records: up to N"
     // value; the noun is the row's label, the number stands after "up to".
     'marketplace.install.preview.atMost',
+    // objectstack#35315 — the Change Owner cascade's "left past the cap: N";
+    // the number stands after a label and a colon, a counter in zh/ja/ko.
+    'console.changeOwner.cascadeRemaining',
   ],
   /** Every pack phrases it count-invariantly: an `(s)` marker in `en`/`de`/
    *  `fr`/`es`/`pt` (the convention `perm-home-namespace-3546.test.tsx` pins),

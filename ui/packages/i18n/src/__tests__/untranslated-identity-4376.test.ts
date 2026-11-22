@@ -127,6 +127,7 @@ const LEGITIMATE_IDENTITIES: Record<string, string> = {
   // `appTileOpenedLine-12601.test.ts`, not an omission.
   'home.appOpened': 'Tile last-opened line — the bare `{{time}}` hole where no verb fits the tile.',
   'console.changeOwner.failure': 'Change Owner report row — the row id and the server\'s own sentence joined by a colon, a format string with no word to translate; zh-Hans and fr use their own colon (objectstack#35403).',
+  'console.changeOwner.cascadeOption': 'Change Owner cascade tick — the related object and its reference field, the field in parentheses, a format string with no word to translate; zh-Hans, zh-Hant and ja use fullwidth parentheses (objectstack#35315).',
 
   // Loanwords these packs have adopted as their OWN vocabulary (checked against
   // their neighbours: zh writes `Logo 链接` / `Logo 已上传…`, ru writes `Email подтверждён`).
