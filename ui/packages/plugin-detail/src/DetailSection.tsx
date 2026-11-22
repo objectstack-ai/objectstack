@@ -1175,11 +1175,13 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
 
   // objectstack#27055 — the frameless face of the default record page: the
   // section's title row over a hairline, then the field grid. No card border,
-  // no shadow. A collapsible section collapses from its title row (a native
+  // no shadow. Every titled section folds from its title row (a native
   // button carrying `aria-expanded`, as the card face's disclosure does,
-  // objectui#12625); a section its group declares `collapse: 'none'` keeps a
-  // plain heading — the author's declaration holds on every face. An untitled
-  // section is the grid alone.
+  // objectui#12625), whatever its group's `collapse`: on this page folding a
+  // group is the reader's action, and `collapse` only picks the first state
+  // (`defaultCollapsed`), so `'none'` and `'expanded'` both start open
+  // (objectstack#36269). Forms, the designer preview and every other face
+  // keep reading `collapsible`. An untitled section is the grid alone.
   if (frameless) {
     const titleRow = 'flex min-h-11 sm:min-h-9 w-full items-center justify-between gap-2 py-1.5 text-left text-sm font-medium text-foreground';
     return (
@@ -1189,17 +1191,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
         data-detail-section-face="frameless"
         data-detail-section-list={listFace ? '' : undefined}
       >
-        {section.title && !section.collapsible && (
-          <div className={cn('border-b border-border', headerColorClass(section.headerColor))}>
-            <h3 className={titleRow}>
-              <span className="flex min-w-0 items-center gap-2">
-                {section.icon && <SectionIcon name={section.icon} />}
-                <span className="truncate">{section.title}</span>
-              </span>
-            </h3>
-          </div>
-        )}
-        {section.title && section.collapsible && (
+        {section.title && (
           <div className={cn('border-b border-border', headerColorClass(section.headerColor))}>
             <button
               type="button"

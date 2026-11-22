@@ -62,6 +62,7 @@ import '@object-ui/components';
 import '@object-ui/fields';
 import '../index';
 import { buildDefaultPageSchema } from '../synth/buildDefaultPageSchema';
+import { DefaultRecordPageContext } from '../defaultRecordPage';
 
 const OBJECT_NAME = 'crm_account';
 
@@ -125,8 +126,10 @@ function collectNodes(node: any, type: string, out: any[] = []): any[] {
  * scoped to the synthesized body rather than to page chrome that happens to
  * carry similar text.
  */
-function renderDefaultPage(): HTMLElement {
-  const page = buildDefaultPageSchema(objectDef as any);
+function renderDefaultPage(
+  { def = objectDef, onRecordPage = false }: { def?: typeof objectDef; onRecordPage?: boolean } = {},
+): HTMLElement {
+  const page = buildDefaultPageSchema(def as any);
 
   // Harness guard, not the pin: if the default page ever stops carrying a
   // single `record:details` node, every assertion below would go red for a
@@ -137,14 +140,16 @@ function renderDefaultPage(): HTMLElement {
   ).toHaveLength(1);
 
   const { container } = render(
-    <RecordContextProvider
-      objectName={OBJECT_NAME}
-      recordId="A1"
-      data={RECORD}
-      objectSchema={objectDef}
-    >
-      <SchemaRenderer schema={page} />
-    </RecordContextProvider>,
+    <DefaultRecordPageContext.Provider value={onRecordPage}>
+      <RecordContextProvider
+        objectName={OBJECT_NAME}
+        recordId="A1"
+        data={RECORD}
+        objectSchema={def}
+      >
+        <SchemaRenderer schema={page} />
+      </RecordContextProvider>
+    </DefaultRecordPageContext.Provider>,
   );
 
   const block = container.querySelector<HTMLElement>('[data-obj-type="record:details"]');
@@ -286,5 +291,45 @@ describe('default `fieldGroups` detail page — synthesized section headings rea
     for (const group of DECLARED_GROUPS) {
       expect(within(block).queryByText(group.key)).not.toBeInTheDocument();
     }
+  });
+});
+
+/**
+ * objectstack#36269 — the same synthesized page, drawn as the record page
+ * draws it (`DefaultRecordPageContext`): every titled group folds, and
+ * `collapse` picks only its first state. Across the seam, so the group's
+ * resolution in `record:details` is what reaches the toggle.
+ */
+describe('default `fieldGroups` record page — every titled group folds (objectstack#36269)', () => {
+  const disclosures = (block: HTMLElement) =>
+    Array.from(block.querySelectorAll('button[aria-expanded]')).map((b) => [b.textContent, b.getAttribute('aria-expanded')]);
+
+  it('groups that declare no `collapse` each fold from their title, starting open; the untitled bucket has none', () => {
+    const block = renderDefaultPage({ onRecordPage: true });
+    expect(disclosures(block)).toEqual([
+      ['Basic Information', 'true'],
+      ['Financial Details', 'true'],
+    ]);
+  });
+
+  it("`collapse: 'collapsed'` starts closed and `'none'` starts open", () => {
+    const def = {
+      ...objectDef,
+      fieldGroups: [
+        { key: 'basic_info', label: 'Basic Information', collapse: 'none' },
+        { key: 'financials', label: 'Financial Details', collapse: 'collapsed' },
+      ],
+    } as unknown as typeof objectDef;
+    const block = renderDefaultPage({ def, onRecordPage: true });
+    expect(disclosures(block)).toEqual([
+      ['Basic Information', 'true'],
+      ['Financial Details', 'false'],
+    ]);
+    expect(within(block).queryByText('Credit Terms')).not.toBeInTheDocument();
+  });
+
+  it('control: the same page off the record page keeps a group that declares nothing unfoldable', () => {
+    const block = renderDefaultPage();
+    expect(disclosures(block)).toEqual([]);
   });
 });

@@ -99,11 +99,10 @@ describe('DetailSection — the frameless face (objectstack#27055)', () => {
     expect(gridOf(container)).toBeNull();
   });
 
-  it("a section its group declares `collapse: 'none'` keeps a plain heading, no disclosure", () => {
+  it("a section its group declares `collapse: 'none'` folds from its title too, starting open (objectstack#36269)", () => {
     const fixed = section('Address', ['street'], { collapsible: false });
     render(onDefaultPage(<DetailSection section={fixed} data={{ street: 'Main St' }} />));
-    expect(screen.queryByRole('button', { name: 'Address' })).toBeNull();
-    expect(screen.getByRole('heading', { name: 'Address' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Address' }).getAttribute('aria-expanded')).toBe('true');
   });
 
   it('CONTROL — outside the default page the card face draws', () => {
