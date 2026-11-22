@@ -804,6 +804,8 @@ const en = {
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: 'Saving…',
     cellSaved: 'Saved',
+    // objectstack#35689 — what the list's live region says when cells saved.
+    cellSavedAnnouncement: 'Saved: {{fields}}',
     openRecordToFinish: 'Open the record to finish this change',
   },
   grid: {
@@ -2800,6 +2802,14 @@ const en = {
       systemTheme: 'System Theme',
       actions: 'Actions',
       openFullSearch: 'Open Full Search Page',
+      create: 'Create',
+      createAs: 'Create "{{query}}" as {{object}}',
+      previewEmpty: 'Select a record to see its details.',
+      enterOpenRecord: 'Open record',
+      enterCreate: 'Create',
+      enterSwitchApp: 'Switch app',
+      enterApplyTheme: 'Apply theme',
+      enterOpen: 'Open',
     },
     ai: {
       pendingDrafts: {

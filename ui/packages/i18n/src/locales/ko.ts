@@ -536,6 +536,7 @@ const ko = {
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "저장 중…",
     cellSaved: "저장됨",
+    cellSavedAnnouncement: "저장됨: {{fields}}",
     openRecordToFinish: "레코드를 열어 변경을 완료하세요",
   },
   grid: {
@@ -2615,6 +2616,14 @@ const ko = {
       systemTheme: "시스템 테마",
       actions: "작업",
       openFullSearch: "전체 검색 페이지 열기",
+      create: "만들기",
+      createAs: "'{{query}}'을(를) {{object}}(으)로 만들기",
+      previewEmpty: "레코드를 선택하면 세부 정보가 표시됩니다.",
+      enterOpenRecord: "레코드 열기",
+      enterCreate: "만들기",
+      enterSwitchApp: "앱 전환",
+      enterApplyTheme: "테마 적용",
+      enterOpen: "열기",
       searching: "검색 중…",
       records: "레코드",
       recentRecords: "최근 본 항목",

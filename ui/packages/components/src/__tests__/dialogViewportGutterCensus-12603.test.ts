@@ -342,6 +342,7 @@ const sites: Site[] = scans.flatMap((s) => s.sites);
  * and is added here; a dialog that narrows leaves in the same commit.
  */
 const WIDE_SITES: Array<[file: string, tags: string[]]> = [
+  ['packages/app-shell/src/chrome/CommandPalette.tsx', ['DialogContent']],
   ['packages/app-shell/src/hooks/useActionModal.tsx', ['DialogContent']],
   ['packages/app-shell/src/views/ActionParamDialog.tsx', ['DialogContent']],
   ['packages/app-shell/src/views/FlowRunner.tsx', ['DialogContent']],

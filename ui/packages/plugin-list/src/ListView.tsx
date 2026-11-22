@@ -6675,6 +6675,17 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       updateOfferedHiddenFields(hidden);
     }
   };
+  // objectstack#35955 — "Hide column" in the grid's column menu is the eye's
+  // own choice, made on one column: it goes through the same writer, so the
+  // host holds it in the list's draft (Discard brings the column back, Save
+  // keeps it hidden), and an added column leaves the reader's added fields as
+  // it does there. A key that names no column this list draws is the table's
+  // own business and is not reported.
+  const hideColumnFromMenu = (field: string) => {
+    if (offeredHiddenFields.has(field)) return;
+    if (!effectiveFields.some((column: unknown) => columnIdentity(column as any) === field)) return;
+    updateListedFields(new Set([...offeredHiddenFields, field]));
+  };
   // Ticking an offered field adds it to the reader's list. A stale hidden
   // entry with the same name (a column the view has since dropped) is cleared
   // with it, or the added column would be drawn hidden.
@@ -8495,6 +8506,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               // objectstack#35876 — and its column header opens the column
               // menu instead of sorting on a click.
               ? { cellSelection: true, headerMenu: true }
+              : {})}
+            {...(viewComponentSchema.type === 'object-grid'
+              // objectstack#35955 — the column menu's "Hide column" is the
+              // hide-fields eye's choice (`hideColumnFromMenu`), on the grid's
+              // host channel (a React prop, never a node key).
+              ? { onColumnHide: hideColumnFromMenu }
               : {})}
             {...(ROW_OPENS_RECORD_VIEW_TYPES.has(viewComponentSchema.type) && rowOpensRecord !== undefined
               // objectstack#33317, objectstack#33548 — whether the host's row
