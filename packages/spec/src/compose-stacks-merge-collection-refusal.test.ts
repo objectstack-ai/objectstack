@@ -80,6 +80,8 @@ const COLLECTION_KEYS_IN_SHAPE_ORDER = [
  * in `compose-stacks-merge-config-object-refusal.test.ts`.
  */
 const CONFIG_OBJECT_KEYS_IN_SHAPE_ORDER = [
+  // [#36366] `pinnedActions` — the page headers' pinned buttons, per page type.
+  'pinnedActions',
   'userActions',
   'external',
   'tenancy',
