@@ -48,6 +48,23 @@ describe('fieldTypeToColumnType', () => {
     expect(fieldTypeToColumnType('time')).toBe('time');
   });
 
+  // objectstack#36043 — each of these used to fold into a number box, a
+  // yes/no select or a plain text box.
+  it('maps people, multi-select, tags, check and rating to their own cells', () => {
+    expect(fieldTypeToColumnType('user')).toBe('user');
+    expect(fieldTypeToColumnType('multiselect')).toBe('multiselect');
+    expect(fieldTypeToColumnType('checkboxes')).toBe('multiselect');
+    expect(fieldTypeToColumnType('tags')).toBe('tags');
+    expect(fieldTypeToColumnType('boolean')).toBe('boolean');
+    expect(fieldTypeToColumnType('toggle')).toBe('boolean');
+    expect(fieldTypeToColumnType('rating')).toBe('rating');
+    // CONTROL: their neighbours keep their cells.
+    expect(fieldTypeToColumnType('select')).toBe('select');
+    expect(fieldTypeToColumnType('radio')).toBe('select');
+    expect(fieldTypeToColumnType('percent')).toBe('number');
+    expect(fieldTypeToColumnType('lookup')).toBe('lookup');
+  });
+
   it('maps the spec file-family media types to a file column', () => {
     expect(fieldTypeToColumnType('file')).toBe('file');
     expect(fieldTypeToColumnType('image')).toBe('file');
@@ -538,12 +555,12 @@ describe('hydrateColumns types a formula / summary column by its declared value 
     });
   });
 
-  it('returnType number → number (its scale carried); date → date; boolean → select with the boolean labels; text → text', () => {
+  it('returnType number → number (its scale carried); date → date; boolean → check with the boolean labels; text → text', () => {
     const byName = hydrate(['weight', 'ships_on', 'is_large', 'line_code']);
     expect(byName.weight).toMatchObject({ type: 'number', computed: true, scale: 1 });
     expect(byName.ships_on.type).toBe('date');
     expect(byName.is_large).toMatchObject({
-      type: 'select',
+      type: 'boolean',
       options: [{ label: en.common.yes, value: 'true' }, { label: en.common.no, value: 'false' }],
     });
     expect(byName.line_code.type).toBe('text');
@@ -564,5 +581,70 @@ describe('hydrateColumns types a formula / summary column by its declared value 
     expect(cols[0].type).toBe('number');
     expect(cols[0].computed).toBeUndefined(); // an authored column is returned as written
     expect(cols[1].type).toBe('currency');
+  });
+});
+
+describe('people, multi-select, tags, check and rating columns take their extras from the child field (objectstack#36043)', () => {
+  const lineSchema = {
+    name: 'task_line',
+    fields: {
+      task: { type: 'master_detail', reference: 'task' },
+      owner: { type: 'user', label: 'Owner' },
+      watchers: { type: 'user', label: 'Watchers', multiple: true },
+      colors: { type: 'multiselect', label: 'Colors', options: [{ label: 'Red', value: 'red' }, 'green'] },
+      sizes: { type: 'checkboxes', label: 'Sizes', options: [{ label: 'S', value: 's' }] },
+      labels: { type: 'tags', label: 'Labels' },
+      done: { type: 'boolean', label: 'Done' },
+      score: { type: 'rating', label: 'Score' },
+      stars: { type: 'rating', label: 'Stars', max: 10 },
+      title: { type: 'text', label: 'Title' },
+    },
+  };
+  const derived = () => Object.fromEntries(deriveColumns(lineSchema, { booleanLabel, relationshipField: 'task', maxColumns: 0 }).map((c) => [c.name, c]));
+  const hydrated = (names: string[]) =>
+    Object.fromEntries(hydrateColumns(names.map((name) => ({ name })) as any, lineSchema, { booleanLabel }).map((c) => [c.name, c]));
+
+  it('a people column carries `multiple` only from a multi-person field', () => {
+    for (const byName of [derived(), hydrated(['owner', 'watchers'])]) {
+      expect(byName.owner).toEqual({ name: 'owner', label: 'Owner', type: 'user', required: false });
+      expect(byName.watchers).toMatchObject({ type: 'user', multiple: true });
+    }
+  });
+
+  it('multi-select and checkboxes columns carry their options; a tags column has none to carry', () => {
+    for (const byName of [derived(), hydrated(['colors', 'sizes', 'labels'])]) {
+      expect(byName.colors).toMatchObject({ type: 'multiselect', options: [{ label: 'Red', value: 'red' }, { label: 'green', value: 'green' }] });
+      expect(byName.sizes).toMatchObject({ type: 'multiselect', options: [{ label: 'S', value: 's' }] });
+      expect(byName.labels).toEqual({ name: 'labels', label: 'Labels', type: 'tags', required: false });
+    }
+  });
+
+  it('a check column carries the two words its cell reads as', () => {
+    for (const byName of [derived(), hydrated(['done'])]) {
+      expect(byName.done).toMatchObject({
+        type: 'boolean',
+        options: [{ label: en.common.yes, value: 'true' }, { label: en.common.no, value: 'false' }],
+      });
+    }
+  });
+
+  it("a rating column carries the field's `max`, and none when the field declares none (the cell draws 5)", () => {
+    for (const byName of [derived(), hydrated(['score', 'stars'])]) {
+      expect(byName.score).toEqual({ name: 'score', label: 'Score', type: 'rating', required: false });
+      expect(byName.stars).toMatchObject({ type: 'rating', max: 10 });
+    }
+  });
+
+  it('CONTROL: an authored column keeps its own type and extras, a select over a boolean field included', () => {
+    const cols = hydrateColumns(
+      [
+        { name: 'done', type: 'select', options: [{ label: 'On', value: 'true' }] },
+        { name: 'stars', type: 'rating', max: 3 },
+      ] as any,
+      lineSchema,
+      { booleanLabel },
+    );
+    expect(cols[0]).toEqual({ name: 'done', type: 'select', options: [{ label: 'On', value: 'true' }] });
+    expect(cols[1]).toEqual({ name: 'stars', type: 'rating', max: 3 });
   });
 });

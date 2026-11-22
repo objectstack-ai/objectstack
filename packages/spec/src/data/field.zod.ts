@@ -1377,7 +1377,7 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
   }, {
     label: z.string().describe('Option label shown in the select cell.'),
     value: z.string().min(1).describe("Stored option value; must match the child select field's option values."),
-  })).optional().describe("Options of a `select` or `multiselect` cell, and the tags a `tags` cell offers; derived from the child field's options when the column declares no `type`.").meta({ title: 'Options' }),
+  })).optional().describe("Options of a `select` or `multiselect` cell, the tags a `tags` cell offers, and the words a `boolean` cell reads as (values `true` / `false`); derived from the child field's options when the column declares no `type`.").meta({ title: 'Options' }),
   // #20045 — no default symbol: the grid shows the resolved currency's own
   // symbol when this is omitted (objectui GridField `currencyAdornment`,
   // objectui#10355), so the former 「(default '¥')」 described a fallback the

@@ -160,10 +160,10 @@ function applyFileColumnProps(col: GridColumn, d: any): void {
 }
 
 /**
- * A select column's options, from its child field. A `boolean` / `toggle`
- * field has no options of its own, so it gets two, whose STORED values are
- * `'true'` / `'false'` and whose LABELS are the session's word for each value,
- * drawn by `booleanLabel` (objectui#12924).
+ * A column's options, from its child field. A `boolean` / `toggle` field has
+ * no options of its own, so it gets two, keyed `'true'` / `'false'`, whose
+ * LABELS are the session's word for each value, drawn by `booleanLabel`
+ * (objectui#12924): the words its check cell is read as (objectstack#36043).
  *
  * The labels used to be the literals `Yes` / `No`, so the line-items grid's
  * select and its read-only cells read English on every locale. They now come
@@ -191,9 +191,13 @@ function optionsFor(def: any, booleanLabel: BooleanValueLabel): GridColumn['opti
   );
 }
 
-/** The column types whose cell offers the child field's options (objectstack#36043). */
+/**
+ * The column types that carry the child field's options (objectstack#36043):
+ * the choices of a select or multi-select cell, the tags a tags cell offers,
+ * and the two words a check cell is read as.
+ */
 function takesOptions(type: GridColumn['type']): boolean {
-  return type === 'select' || type === 'multiselect' || type === 'tags';
+  return type === 'select' || type === 'multiselect' || type === 'tags' || type === 'boolean';
 }
 
 /**

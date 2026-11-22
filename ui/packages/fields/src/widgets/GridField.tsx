@@ -599,7 +599,12 @@ function cellDisplayText(c: GridColumn, value: any, locale: string, fileText: Ce
     if (value.length === 0) return '—';
     return value.map((v) => c.options?.find((o) => String(o.value) === String(v))?.label ?? String(v)).join(', ');
   }
-  if (c.type === 'boolean') return fileText.booleanWord(value === true || BOOLEAN_READINGS.get(value) === true);
+  // A check cell reads as its option's word (the session's, from the derive),
+  // else the session's word itself (objectstack#36043).
+  if (c.type === 'boolean') {
+    const on = value === true || BOOLEAN_READINGS.get(value) === true;
+    return c.options?.find((o) => o.value === String(on))?.label ?? fileText.booleanWord(on);
+  }
   if (isNumeric(c.type)) {
     const n = Number(value);
     // The numeric branch formats in the SAME declared locale the temporal
@@ -964,6 +969,21 @@ function GridFieldBody({
   };
   const displayText = (c: GridColumn, value: any, locale: string, cellCurrency?: string) =>
     cellDisplayText(c, value, locale, fileText, cellCurrency);
+  /**
+   * The read-only face of a cell that is not text (objectstack#36043): people
+   * by name, a rating as its stars; `null` for every other cell, which reads
+   * through `displayText`. Shared by the read-only table and list mode.
+   */
+  const readOnlyFace = (c: GridColumn, value: any): React.ReactNode | null => {
+    if (isEmptyCell(value)) return null;
+    if (c.type === 'user') {
+      return <UserField value={value} onChange={() => {}} readonly field={{ type: 'user', multiple: c.multiple } as any} />;
+    }
+    if (c.type === 'rating') {
+      return <RatingField value={Number(value)} onChange={() => {}} readonly field={{ type: 'rating', max: ratingMax(c) } as any} />;
+    }
+    return null;
+  };
   const cellIdBase = React.useId();
   // The tenant default currency (ADR-0053) — the resolver's last step, and in
   // practice the currency of every `currency` column (objectui#10355, see
@@ -980,7 +1000,7 @@ function GridFieldBody({
   // the row's boolean cells read as booleans (`ruleRecordOf`). Every column,
   // shown or not, since a predicate may read any cell of the row.
   const booleanColumns = React.useMemo(
-    () => allColumns.filter(isBooleanSelectColumn).map((c) => c.name),
+    () => allColumns.filter((c) => c.type === 'boolean' || isBooleanSelectColumn(c)).map((c) => c.name),
     [allColumns],
   );
   const cellRules = useCallback(
@@ -1434,7 +1454,7 @@ function GridFieldBody({
                         // (objectui#3569), a select's stored value instead of
                         // its option label, and an amount ungrouped and in no
                         // locale (objectui#12915).
-                        displayText(c, row[c.name], displayLocale, currencyOf(c))
+                        readOnlyFace(c, row[c.name]) ?? displayText(c, row[c.name], displayLocale, currencyOf(c))
                       )}
                     </td>
                   ))}
@@ -1536,13 +1556,8 @@ function GridFieldBody({
             field={{ reference: c.reference, displayField: c.displayField, idField: c.idField } as any} />
         );
       }
-      // objectstack#36043 — people by name, a rating as its stars.
-      if (c.type === 'user' && !isEmptyCell(val)) {
-        return <UserField value={val} onChange={() => {}} readonly field={{ type: 'user', multiple: c.multiple } as any} />;
-      }
-      if (c.type === 'rating' && !isEmptyCell(val)) {
-        return <RatingField value={Number(val)} onChange={() => {}} readonly field={{ type: 'rating', max: ratingMax(c) } as any} />;
-      }
+      const face = readOnlyFace(c, val);
+      if (face) return face;
       return (
         <span className={cn('px-2 text-sm text-foreground', isNumeric(c.type) && 'tabular-nums', (val == null || val === '') && 'text-muted-foreground')}>
           {displayText(c, val, displayLocale, currencyOf(c))}
@@ -1651,11 +1666,7 @@ function GridFieldBody({
         <GridPanelCell<any>
           value={val ?? null}
           onWrite={(next) => setCellValue(rowIdx, c.name, next)}
-          display={
-            isEmptyCell(val)
-              ? <span className="text-muted-foreground">—</span>
-              : <UserField value={val} onChange={() => {}} readonly field={field} />
-          }
+          display={readOnlyFace(c, val) ?? <span className="text-muted-foreground">—</span>}
           disabled={locked}
           invalid={invalid}
           label={c.label || c.name}
