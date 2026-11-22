@@ -269,7 +269,8 @@ describe('#7134 what the save path must NOT change', () => {
             isDefault: false,
             sortOrder: 3,
             visibility: 'team',
-            columnState: { order: ['name'], widths: { name: 180 } },
+            // [objectstack#36403] `columnState` is retired from the record, so
+            // this GUARD no longer carries it; the retirement pins it refused.
             _isOverride: true,
         };
         expect(Object.keys(VIEW_CONSOLE_ROUND_TRIP_KEYS).filter(
@@ -558,7 +559,8 @@ describe('[#20051] stage (iv): a saved view stores the parsed value of every key
         ['W1 sort', { sort: [{ id: SORT_ROW_ID, field: 'name', order: 'desc' }] }],
         ['W2 density', { rowHeight: 'compact' }],
         ['W3 hidden fields', { hiddenFields: ['status'] }],
-        ['W4 column state', { columnState: { order: ['status', 'name'], widths: { name: 180 } } }],
+        // W4 (column state) is gone: `columnState` retired (objectstack#36403),
+        // and the console no longer writes it.
         ['W5 inline edit', { inlineEdit: false }],
     ];
 
