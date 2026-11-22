@@ -204,8 +204,9 @@ export {
  *     [ADR-0029 D9.2a, 2026-10-30 note]): rules of different names add, and a
  *     rule of a name already folded replaces it — with `tenantRules`, carrying
  *     the tenant's `message` and `active`, never the tenant's condition.
- *   - The three {@link OBJECT_FOLD_SCALAR_KEYS} (`label`, `pluralLabel`,
- *     `description`) are overridden last-writer-wins, subject to the
+ *   - The {@link OBJECT_FOLD_SCALAR_KEYS} (`label`, `pluralLabel`,
+ *     `description`, and [#36366] `pinnedActions` arm by arm) are overridden
+ *     last-writer-wins, subject to the
  *     `tenantAuthored` yield rule below. [#30391] A `label` that renames the
  *     object without a `pluralLabel` beside it also takes the running
  *     `pluralLabel` off: the plural named the old label.
@@ -232,7 +233,7 @@ export {
  * Declarative authors never reach that silence, though: `ObjectExtensionSchema`
  * (`packages/spec/src/data/object.zod.ts`) is `.strict()` — its shape is
  * exactly `extend` / `fields` / `fieldPatches` / `label` / `pluralLabel` /
- * `description` / `validations` / `indexes` / `place` / `fieldGroups` / `relatedLists` / `priority`, so an `objectExtensions` entry
+ * `description` / `pinnedActions` / `validations` / `indexes` / `place` / `fieldGroups` / `relatedLists` / `priority`, so an `objectExtensions` entry
  * naming `tenancy`, `permissions`, or any other key outside that list fails
  * LOUDLY at authoring time with a prescription (#4001; the same rule is
  * documented at `content/docs/data-modeling/object-extensions.mdx`). This
@@ -308,6 +309,12 @@ function mergeObjectDefinitions(
   }
   if (extension.description !== undefined && !yields('description')) {
     merged.description = extension.description;
+  }
+  // [#36366] The header buttons per page type, a fold scalar like the three
+  // above, arm by arm: an arm the extension sets replaces the running arm, an
+  // arm it leaves out stays as folded.
+  if (extension.pinnedActions !== undefined && !yields('pinnedActions')) {
+    merged.pinnedActions = { ...merged.pinnedActions, ...extension.pinnedActions };
   }
 
   // [ADR-0146 D10, second rule] The extension's display patches of the
