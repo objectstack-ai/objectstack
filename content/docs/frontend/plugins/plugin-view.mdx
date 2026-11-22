@@ -514,8 +514,10 @@ drawer, except an object whose `navigation` authors a `size` (other than
 `auto`) or a `width` (pixel or percent). That object keeps its own remembered
 width, shared with its calendar, gantt, kanban, tree and grid overlays: its
 drawer opens at the authored width until a width is dragged in it or in one
-of them. The drawer draws no dimming overlay and is non-modal, so the list
-behind it stays readable and clickable:
+of them. A record page's drawer opens the same way, and a drawer next opened
+for another object's record opens at that object's width. The drawer draws no
+dimming overlay and is non-modal, so the list behind it stays readable and
+clickable:
 
 - the open record's row is highlighted and follows the drawer's ↑ ↓;
 - clicking another row swaps the record.
