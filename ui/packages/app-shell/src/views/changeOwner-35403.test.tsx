@@ -197,19 +197,33 @@ describe('the default edit form shows the owner read-only, with the action besid
   const SCHEMA = { name: 'crm_deal', fields: { owner_id: { type: 'lookup', label: 'Account Manager' } } };
 
   it('edit without transfer: the owner reads read-only under its own label, and no action is drawn', async () => {
-    const recordId = freshId();
-    const verdict = Promise.resolve(DENY);
-    seedRecordVerdict(null, 'crm_deal', recordId, 'transfer', verdict);
-    mountForm(recordId, SCHEMA);
-    const line = screen.getByTestId('form-owner-line');
-    expect(within(line).getByText('Account Manager')).toBeTruthy();
-    expect((await within(line).findByTestId('readonly-owner_id')).textContent).toBe('u_amy');
-    // Let the host's lazy action load and settle, so its absence is the
-    // verdict's answer and not a chunk still on its way.
-    await act(async () => { await import('./FormOwnerChangeAction'); await verdict; });
-    await act(async () => {});
-    expect(within(line).queryByRole('textbox')).toBeNull();
-    expect(action()).toBeNull();
+    // Two lines in one tree: the refused record, and a control record the
+    // verdict allows. The control's button proves the host's lazy action has
+    // loaded and drawn, so the refused line's empty slot is the verdict's
+    // answer and not a chunk still on its way.
+    const denied = freshId();
+    const control = freshId();
+    seedRecordVerdict(null, 'crm_deal', denied, 'transfer', Promise.resolve(DENY));
+    seedRecordVerdict(null, 'crm_deal', control, 'transfer', Promise.resolve(ALLOW));
+    const line = (recordId: string) => (
+      <div data-testid={`line-${recordId}`}>
+        <FormOwnerLine mode="edit" objectName="crm_deal" recordId={recordId} record={{ id: recordId, owner_id: 'u_amy' }} objectSchema={SCHEMA} />
+      </div>
+    );
+    render(
+      <AdapterCtx.Provider value={noClient()}>
+        <ConsoleFormOwnerLine>
+          {line(denied)}
+          {line(control)}
+        </ConsoleFormOwnerLine>
+      </AdapterCtx.Provider>,
+    );
+    const deniedLine = screen.getByTestId(`line-${denied}`);
+    expect(within(deniedLine).getByText('Account Manager')).toBeTruthy();
+    expect((await within(deniedLine).findByTestId('readonly-owner_id')).textContent).toBe('u_amy');
+    expect(await within(screen.getByTestId(`line-${control}`)).findByTestId('form-owner-change')).toBeTruthy();
+    expect(within(deniedLine).queryByRole('textbox')).toBeNull();
+    expect(within(deniedLine).queryByTestId('form-owner-change')).toBeNull();
   });
 
   it('with the transfer verdict, Change Owner sits beside the read-only owner', async () => {
