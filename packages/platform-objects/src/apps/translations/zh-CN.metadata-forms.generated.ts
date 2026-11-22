@@ -276,9 +276,13 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "语言",
         helpText: "编辑器语言（如 sql、javascript）"
       },
+      "fields.fieldHistory": {
+        label: "字段修改值",
+        helpText: "在记录的活动时间线上显示该字段的旧值 → 新值。未设置即为开启，尽管开关显示为关：只有先打开再关闭才会写入 false，此时只写出字段名。打开时，媒体或 JSON 字段也会显示值。"
+      },
       "fields.trackHistory": {
         label: "历史跟踪",
-        helpText: "在记录的活动时间线上显示该字段的旧值 → 新值（默认开启，可关闭）"
+        helpText: "让媒体或 JSON 字段（图片、文件、json 等）在活动时间线上显示旧值 → 新值。其他字段本来就会显示，关掉它也不会隐藏值：请用「字段修改值」。"
       },
       "fields.visibleWhen": {
         label: "可见条件",
@@ -300,7 +304,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "历史跟踪"
       },
       "enable.fieldHistory": {
-        label: "字段修改值"
+        label: "字段修改值",
+        helpText: "在记录的活动时间线上显示被修改字段的旧值 → 新值。未设置即为开启，尽管开关显示为关：只有先打开再关闭才会写入 false，此时整个对象都不显示值。"
       },
       "enable.searchable": {
         label: "可搜索"
@@ -900,9 +905,13 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "不对外返回",
         helpText: "该字段的值永远不经通用数据通道返回：引擎会从 find/findOne 结果以及创建和更新的响应体中删除这个键——默认投影如此，客户端在 ?select= 中点名它时同样如此。存储、过滤和索引都不受影响。"
       },
+      fieldHistory: {
+        label: "字段修改值",
+        helpText: "在记录的活动时间线上显示该字段的旧值 → 新值。未设置即为开启，尽管开关显示为关：只有先打开再关闭才会写入 false，此时只写出字段名。打开时，媒体或 JSON 字段也会显示值。"
+      },
       trackHistory: {
         label: "记录变更历史",
-        helpText: "在记录的活动时间线上显示该字段的旧值 → 新值（ADR-0052 §5b）。默认开启；设为 false 时只写出字段名，不写值。"
+        helpText: "让媒体或 JSON 字段（图片、文件、json 等）在活动时间线上显示旧值 → 新值。其他字段本来就会显示，关掉它也不会隐藏值：请用「字段修改值」。"
       },
       widget: {
         label: "控件覆盖",

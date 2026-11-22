@@ -620,7 +620,7 @@ describe('audit writers — declarative trackHistory activity (ADR-0052 §5b)', 
       id: { type: 'text' },
       name: { type: 'text', label: 'Name' },
       // [#36290] Values are on unless turned off: this one is turned off.
-      amount: { type: 'currency', label: 'Amount', trackHistory: false },
+      amount: { type: 'currency', label: 'Amount', fieldHistory: false },
       stage: {
         type: 'select',
         label: 'Stage',
@@ -663,7 +663,7 @@ describe('audit writers — declarative trackHistory activity (ADR-0052 §5b)', 
     });
 
     const activity = created.find((c) => c.object === 'sys_activity');
-    // The label, never the value: `amount` is not `trackHistory`'d.
+    // The label, never the value: `amount` turns its values off (`fieldHistory: false`).
     expect(activity?.row.summary).toBe('Updated crm_opportunity "Acme Renewal": Amount');
   });
 });
@@ -674,10 +674,14 @@ describe('[#36290] a changed field shows old → new unless the object or the fi
     name: { type: 'text', label: 'Name' },
     amount: { type: 'currency', label: 'Amount' },
     note: { type: 'textarea', label: 'Note' },
-    quiet: { type: 'text', label: 'Quiet', trackHistory: false },
+    quiet: { type: 'text', label: 'Quiet', fieldHistory: false },
+    // What the field designer wrote on every save while the key meant nothing.
+    designer_saved: { type: 'text', label: 'Designer Saved', trackHistory: false },
     api_token: { type: 'secret', label: 'API Token' },
     payload: { type: 'json', label: 'Payload' },
     payload_opted: { type: 'json', label: 'Payload Opted', trackHistory: true },
+    payload_on: { type: 'json', label: 'Payload On', fieldHistory: true },
+    insisted: { type: 'text', label: 'Insisted', fieldHistory: true },
   };
   const schemaWith = (summary: Record<string, any> = { type: 'text' }) => ({
     sys_audit_log: SINGLE_TENANT.sys_audit_log,
@@ -729,7 +733,17 @@ describe('[#36290] a changed field shows old → new unless the object or the fi
     expect(summary).toBe('Amount: 100 → 200');
   });
 
-  it('a field that sets trackHistory: false is named by label only, beside a field that shows its values', async () => {
+  it('a field that sets trackHistory: false still shows its values: that false is not an off switch', async () => {
+    const { summary } = await updateDeal({ designer_saved: 'd-before' }, { designer_saved: 'd-after' });
+    expect(summary).toBe('Designer Saved: d-before → d-after');
+  });
+
+  it('enable.fieldHistory: false wins over a field that sets fieldHistory: true', async () => {
+    const { summary } = await updateDeal({ insisted: 'i1' }, { insisted: 'i2' }, { objectDef: { enable: { fieldHistory: false } } });
+    expect(summary).toBe('Updated Deal "D-1": Insisted');
+  });
+
+  it('a field that sets fieldHistory: false is named by label only, beside a field that shows its values', async () => {
     const quietOnly = await updateDeal({ quiet: 'q-before' }, { quiet: 'q-after' });
     expect(quietOnly.summary).toBe('Updated Deal "D-1": Quiet');
     expect(quietOnly.summary).not.toContain('q-after');
@@ -745,11 +759,13 @@ describe('[#36290] a changed field shows old → new unless the object or the fi
     expect(JSON.stringify({ summary, metadata })).not.toContain('tok-after');
   });
 
-  it('a structured-JSON field shows values only when it opts in with trackHistory: true', async () => {
+  it('a structured-JSON field shows values only when it opts in with trackHistory: true or fieldHistory: true', async () => {
     const plain = await updateDeal({ payload: { a: 1 } }, { payload: { a: 2 } });
     expect(plain.summary).toBe('Updated Deal "D-1": Payload');
     const opted = await updateDeal({ payload_opted: 'p1' }, { payload_opted: 'p2' });
     expect(opted.summary).toBe('Payload Opted: p1 → p2');
+    const on = await updateDeal({ payload_on: 'p1' }, { payload_on: 'p2' });
+    expect(on.summary).toBe('Payload On: p1 → p2');
   });
 
   it('a long value still fits a bounded summary column, and the code keeps a bounded copy of each side', async () => {

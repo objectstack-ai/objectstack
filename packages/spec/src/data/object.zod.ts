@@ -346,9 +346,9 @@ export const ObjectCapabilities = strictObject({
    * (#36290, ruling 7076513167, reversing ADR-0052 §5b.1's opt-in default).
    *
    * Absent: every changed field's old → new values show on the record's
-   * activity stream (`sys_activity`); a field turns its own off with
-   * `trackHistory: false`. `false`: off for the object — a change names its
-   * fields, never their values. Deliberately no `.default()`: a parsed body
+   * activity stream (`sys_activity`); a field turns its own off with its
+   * own `fieldHistory: false`. `false`: off for the object — a change names
+   * its fields, never their values, whatever a field says. Deliberately no `.default()`: a parsed body
    * that materialized a default would persist it into every built artifact
    * and stored definition, where it could not be told from an authored value.
    *
@@ -357,7 +357,7 @@ export const ObjectCapabilities = strictObject({
    * writing `trackHistory: false` alone shows values. Who reads a value is the
    * field's read rule, per reader; a credential field never shows one.
    */
-  fieldHistory: z.boolean().optional().describe('Field-change values on the record activity stream. Absent: each changed field\'s old → new values show (a field opts out with its own trackHistory: false). false: off for this object, a change names its fields only. Independent of trackHistory, which does not turn values off. Who reads a value is the field\'s read rule; a credential field never shows one'),
+  fieldHistory: z.boolean().optional().describe('Field-change values on the record activity stream. Absent: each changed field\'s old → new values show (a field opts out with its own fieldHistory: false). false: off for this object, a change names its fields only, whatever a field says. Independent of trackHistory, which does not turn values off. Who reads a value is the field\'s read rule; a credential field never shows one'),
 
   /** Enable global search indexing */
   searchable: z.boolean().default(true).describe('Index records for global search'),

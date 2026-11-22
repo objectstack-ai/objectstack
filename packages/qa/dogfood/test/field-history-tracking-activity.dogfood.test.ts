@@ -13,7 +13,7 @@
 //     labels ('Industry: Retail → Finance'), never the raw option values.
 //   acceptance[1], negative[0] — a website-only edit lands its old → new
 //     values too: since #36290 values show for every changed field unless the
-//     object (`enable.fieldHistory: false`) or the field (`trackHistory: false`)
+//     object (`enable.fieldHistory: false`) or the field (`fieldHistory: false`)
 //     turns them off, and `website` declares neither. The label-only frame for
 //     a turned-off field is the plugin-audit unit pins' (audit-writers.test.ts).
 //   acceptance[3] — the derived `history` operation follows get ∧

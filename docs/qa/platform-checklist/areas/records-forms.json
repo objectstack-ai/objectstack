@@ -5719,7 +5719,7 @@
           "evidence": "the sys_activity row + a timeline screenshot"
         },
         {
-          "clause": "an edit of a field that declares no trackHistory ALSO lands its old→new values: since #36290 they show for every changed field unless the object writes enable.fieldHistory: false or the field writes trackHistory: false (changeValuesShownFor, packages/plugins/plugin-audit/src/audit-writers.ts). The label-only frame of a turned-off field is the unit pins' (audit-writers.test.ts '[#36290]'), since no showcase object turns values off",
+          "clause": "an edit of a field that declares no trackHistory ALSO lands its old→new values: since #36290 they show for every changed field unless the object writes enable.fieldHistory: false or the field writes fieldHistory: false (a field's trackHistory: false reads like absent) (changeValuesShownFor, packages/plugins/plugin-audit/src/audit-writers.ts). The label-only frame of a turned-off field is the unit pins' (audit-writers.test.ts '[#36290]'), since no showcase object turns values off",
           "oracle": "api",
           "verify": "post-edit sys_activity for the website-only edit carries 'Website: <old url> → <new url>', message key fieldChanges",
           "evidence": "the sys_activity read"
@@ -5744,7 +5744,7 @@
         }
       ],
       "negative": [
-        "an edit of a field that declares no trackHistory landing WITHOUT its old→new values in the sys_activity summary is a FAIL (#36290: on unless the object writes enable.fieldHistory: false or the field writes trackHistory: false), and so is a value from a field with trackHistory: false. ⛔ Not the timeline stream's audit-log lines (on a trackHistory object they fill the Changes chip, and the stream's sys_activity `updated` rows step aside for them: ui/packages/plugin-detail/src/recordTimelineStream.ts#mergeTimelineStream): they come from sys_audit_log (the compliance audit, ui/packages/app-shell/src/views/RecordDetailView.tsx), which records every field and is not per-field-gated, so 'Website old → new' there for the untracked field is correct; sys_activity.metadata also carries raw old/new for untracked fields by design — only the rendered summary is gated (QA runs #24616, #27438)",
+        "an edit of a field that declares no trackHistory landing WITHOUT its old→new values in the sys_activity summary is a FAIL (#36290: on unless the object writes enable.fieldHistory: false or the field writes fieldHistory: false), and so is a value from a field with fieldHistory: false. ⛔ Not the timeline stream's audit-log lines (on a trackHistory object they fill the Changes chip, and the stream's sys_activity `updated` rows step aside for them: ui/packages/plugin-detail/src/recordTimelineStream.ts#mergeTimelineStream): they come from sys_audit_log (the compliance audit, ui/packages/app-shell/src/views/RecordDetailView.tsx), which records every field and is not per-field-gated, so 'Website old → new' there for the untracked field is correct; sys_activity.metadata also carries raw old/new for untracked fields by design — only the rendered summary is gated (QA runs #24616, #27438)",
         "a sys_audit_log read on the task detail is a FAIL — per-field flags without the object-level opt-in must not summon the field-change history; judged on the network log, never on an empty Changes chip or a missing tab (acceptance[2].verify says why)",
         "a tracked select rendering raw option VALUES ('in_progress') instead of labels is a FAIL (#7289 closed exactly that). To stage it on showcase_task's status, walk its state machine: a direct backlog → in_progress PATCH answers 400 invalid_transition, so PATCH backlog → todo → in_progress (examples/app-showcase/src/data/objects/task.object.ts, transitions)"
       ],
@@ -5857,7 +5857,7 @@
         {
           "revision": 16,
           "date": "2026-11-22",
-          "change": "title, acceptance[1], negative[0], automated.ref and source[1] re-pointed: field-change values now show by default (ruling 7076513167). A field with no trackHistory lands old → new; enable.fieldHistory: false (object) or trackHistory: false (field) turns them off; enable.trackHistory keeps the ledger read and the history op. The dogfood pin's website leg reads the values. Read at base SHA c448c615",
+          "change": "title, acceptance[1], negative[0], automated.ref and source[1] re-pointed: field-change values now show by default (ruling 7076513167). A field with no trackHistory lands old → new; enable.fieldHistory: false (object) or fieldHistory: false (field) turns them off, and a field's trackHistory: false reads like absent; enable.trackHistory keeps the ledger read and the history op. The dogfood pin's website leg reads the values. Read at base SHA c448c615",
           "ref": "#36290"
         }
       ]

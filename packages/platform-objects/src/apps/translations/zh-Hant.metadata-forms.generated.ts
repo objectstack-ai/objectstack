@@ -276,9 +276,13 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "語言",
         helpText: "編輯器語言（如 sql、javascript）"
       },
+      "fields.fieldHistory": {
+        label: "欄位修改值",
+        helpText: "在記錄的活動時間軸上顯示該欄位的舊值 → 新值。未設定即為開啟，儘管開關顯示為關：只有先打開再關閉才會寫入 false，此時只寫出欄位名。打開時，媒體或 JSON 欄位也會顯示值。"
+      },
       "fields.trackHistory": {
         label: "歷史追蹤",
-        helpText: "在記錄的活動時間軸上顯示該欄位的舊值 → 新值（預設開啟，可關閉）"
+        helpText: "讓媒體或 JSON 欄位（圖片、檔案、json 等）在活動時間軸上顯示舊值 → 新值。其他欄位本來就會顯示，關掉它也不會隱藏值：請用「欄位修改值」。"
       },
       "fields.visibleWhen": {
         label: "可見條件",
@@ -300,7 +304,8 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "歷史追蹤"
       },
       "enable.fieldHistory": {
-        label: "欄位修改值"
+        label: "欄位修改值",
+        helpText: "在記錄的活動時間軸上顯示被修改欄位的舊值 → 新值。未設定即為開啟，儘管開關顯示為關：只有先打開再關閉才會寫入 false，此時整個物件都不顯示值。"
       },
       "enable.searchable": {
         label: "可搜尋"
@@ -900,9 +905,13 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "不對外傳回",
         helpText: "該欄位的值永遠不經通用資料通道傳回：引擎會從 find/findOne 結果以及建立和更新的回應體中刪除這個鍵——預設投影如此，用戶端在 ?select= 中點名它時同樣如此。儲存、過濾和索引都不受影響。"
       },
+      fieldHistory: {
+        label: "欄位修改值",
+        helpText: "在記錄的活動時間軸上顯示該欄位的舊值 → 新值。未設定即為開啟，儘管開關顯示為關：只有先打開再關閉才會寫入 false，此時只寫出欄位名。打開時，媒體或 JSON 欄位也會顯示值。"
+      },
       trackHistory: {
         label: "記錄變更歷史",
-        helpText: "在記錄的活動時間軸上顯示該欄位的舊值 → 新值（ADR-0052 §5b）。預設開啟；設為 false 時只寫出欄位名，不寫值。"
+        helpText: "讓媒體或 JSON 欄位（圖片、檔案、json 等）在活動時間軸上顯示舊值 → 新值。其他欄位本來就會顯示，關掉它也不會隱藏值：請用「欄位修改值」。"
       },
       widget: {
         label: "控制項覆寫",

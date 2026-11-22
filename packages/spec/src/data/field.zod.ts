@@ -2723,18 +2723,33 @@ export const FieldSchema = lazySchema(() => {
   dimensions: z.number().int().min(1).max(10000).optional().describe('Vector dimensionality (e.g., 1536 for OpenAI embeddings)'),
 
   /**
-   * Track this field's value changes on the record **activity timeline**. When
-   * TRUE, the platform's activity writer renders each change as a human-readable
-   * entry ("<label>: <old> → <new>") instead of a generic "Updated <object>"
-   * row — no app code required. Opt-in per field (cf. Salesforce Feed Tracking,
-   * ServiceNow field auditing, Dataverse column auditing). The writer already
-   * captures the field diff; this flag controls whether it is surfaced legibly.
+   * Opt a no-line field into old → new values on the record **activity
+   * timeline** (ADR-0052 §5b). Since #36290 values show by default for every
+   * field, so `true` matters only for a media or structured-JSON type (image,
+   * file, json, …), which shows them only when asked. `false` and absent read
+   * the same — values show. ⛔ `false` is NOT an off switch: the field
+   * designer wrote it on every save while it meant nothing, so a stored
+   * `false` cannot be told from a choice. The off switch is
+   * {@link FieldSchema.fieldHistory} `false`.
    *
    * Unlike the pruned `auditTrail` below, this flag HAS a runtime consumer
    * (`@objectstack/plugin-audit` audit-writers), satisfying enforce-or-remove
-   * (ADR-0049). See ADR-0052 §5b.
+   * (ADR-0049).
    */
-  trackHistory: z.boolean().optional().describe("Whether this field's old → new values show on the record activity timeline (ADR-0052 §5b). On unless turned off: absent shows them (unless the object sets enable.fieldHistory: false), false names the change without its values. A credential field never shows values; a media or structured-JSON field shows them only with an explicit true. Who reads a value is this field's read rule."),
+  trackHistory: z.boolean().optional().describe("Opt a media or structured-JSON field into old → new values on the record activity timeline (ADR-0052 §5b). Every other field shows them already, so true changes nothing there. false and absent read the same: values show. false is not an off switch; turn a field's values off with fieldHistory: false."),
+
+  /**
+   * [#36290, ruling 7076513167 point 1] This field's off switch for old → new
+   * values on the record activity timeline. No default on purpose: a parsed
+   * field never carries the key, so only an author who wrote it turns values
+   * off. Absent: values show (a media or structured-JSON type only with an
+   * explicit `true`). `false`: the change is named by the field's label only.
+   * `true`: values show, a no-line type included. Under an object that writes
+   * `enable.fieldHistory: false`, values stay off whatever the field says. A
+   * credential field never shows values. Who reads a value is the field's read
+   * rule.
+   */
+  fieldHistory: z.boolean().optional().describe("This field's old → new values on the record activity timeline. Absent: they show (a media or structured-JSON type only with true). false: off, the change names the field's label only. true: on, a media or JSON type included. Off whatever this says when the object sets enable.fieldHistory: false; a credential field never shows values. Who reads a value is this field's read rule."),
 
   // Pruned 2026-06 (dead in both layers — aspirational governance with no runtime
   // consumer; encryption/masking implied at-rest protection that never happened —

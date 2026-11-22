@@ -276,9 +276,13 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Linguagem",
         helpText: "Linguagem do editor (por exemplo sql, javascript)"
       },
+      "fields.fieldHistory": {
+        label: "Valores de alterações de campo",
+        helpText: "Valores antigo → novo deste campo na linha do tempo de atividades do registro. Não definido significa LIGADO, embora o interruptor pareça desligado: só um interruptor ligado e depois desligado grava false, e então a alteração é nomeada só pelo rótulo. Ligado também mostra os valores de um campo de mídia ou JSON."
+      },
       "fields.trackHistory": {
         label: "Acompanhar histórico",
-        helpText: "Mostrar os valores antigo → novo deste campo na linha do tempo de atividades do registro (ativado, a menos que seja desligado)"
+        helpText: "Faz um campo de mídia ou JSON (imagem, arquivo, json, …) mostrar valores antigo → novo na linha do tempo de atividades. Os outros campos já os mostram, e desligar não os oculta: use Valores de alterações de campo."
       },
       "fields.visibleWhen": {
         label: "Visível quando",
@@ -300,7 +304,8 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Acompanhar histórico"
       },
       "enable.fieldHistory": {
-        label: "Valores de alterações de campo"
+        label: "Valores de alterações de campo",
+        helpText: "Valores antigo → novo dos campos alterados na linha do tempo de atividades do registro. Não definido significa LIGADO, embora o interruptor pareça desligado: só um interruptor ligado e depois desligado grava false, e então o objeto inteiro deixa de mostrar valores."
       },
       "enable.searchable": {
         label: "Pesquisável"
@@ -900,9 +905,13 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Interno",
         helpText: "Nunca retornar o valor deste campo pelo caminho de dados genérico: o mecanismo omite a chave dos resultados de find/findOne e dos corpos de resposta de criação e atualização, na projeção padrão e quando um cliente nomeia o campo em ?select=. O armazenamento, a filtragem e a indexação não são afetados."
       },
+      fieldHistory: {
+        label: "Valores de alterações de campo",
+        helpText: "Valores antigo → novo deste campo na linha do tempo de atividades do registro. Não definido significa LIGADO, embora o interruptor pareça desligado: só um interruptor ligado e depois desligado grava false, e então a alteração é nomeada só pelo rótulo. Ligado também mostra os valores de um campo de mídia ou JSON."
+      },
       trackHistory: {
         label: "Acompanhar histórico",
-        helpText: "Mostrar os valores antigo → novo deste campo na linha do tempo de atividades do registro (ADR-0052 §5b). Ativado, a menos que seja desligado; false nomeia a alteração sem seus valores."
+        helpText: "Faz um campo de mídia ou JSON (imagem, arquivo, json, …) mostrar valores antigo → novo na linha do tempo de atividades. Os outros campos já os mostram, e desligar não os oculta: use Valores de alterações de campo."
       },
       widget: {
         label: "Widget",

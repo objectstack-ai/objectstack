@@ -276,9 +276,13 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Langue",
         helpText: "Langage de l’éditeur (par ex. sql, javascript)"
       },
+      "fields.fieldHistory": {
+        label: "Valeurs des modifications de champ",
+        helpText: "Valeurs ancienne → nouvelle de ce champ dans la chronologie d’activité de l’enregistrement. Non défini signifie ACTIVÉ, même si l’interrupteur paraît éteint : seul un interrupteur allumé puis éteint écrit false, et la modification n’est alors nommée que par son libellé. Allumé, il affiche aussi les valeurs d’un champ média ou JSON."
+      },
       "fields.trackHistory": {
         label: "Suivre l’historique",
-        helpText: "Afficher les valeurs ancienne → nouvelle de ce champ dans la chronologie d’activité de l’enregistrement (activé sauf désactivation)"
+        helpText: "Fait afficher à un champ média ou JSON (image, fichier, json, …) ses valeurs ancienne → nouvelle dans la chronologie d’activité. Les autres champs les affichent déjà, et l’éteindre ne les masque pas : utilisez Valeurs des modifications de champ."
       },
       "fields.visibleWhen": {
         label: "Visible si",
@@ -300,7 +304,8 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Suivre l’historique"
       },
       "enable.fieldHistory": {
-        label: "Valeurs des modifications de champ"
+        label: "Valeurs des modifications de champ",
+        helpText: "Valeurs ancienne → nouvelle des champs modifiés dans la chronologie d’activité de l’enregistrement. Non défini signifie ACTIVÉ, même si l’interrupteur paraît éteint : seul un interrupteur allumé puis éteint écrit false, et l’objet entier n’affiche alors plus de valeurs."
       },
       "enable.searchable": {
         label: "Recherchable"
@@ -900,9 +905,13 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Interne",
         helpText: "Ne jamais renvoyer la valeur de ce champ par le chemin de données générique : le moteur omet la clé des résultats find/findOne et des corps de réponse de création et de mise à jour, avec la projection par défaut comme lorsqu’un client nomme le champ dans ?select=. Le stockage, le filtrage et l’indexation ne sont pas affectés."
       },
+      fieldHistory: {
+        label: "Valeurs des modifications de champ",
+        helpText: "Valeurs ancienne → nouvelle de ce champ dans la chronologie d’activité de l’enregistrement. Non défini signifie ACTIVÉ, même si l’interrupteur paraît éteint : seul un interrupteur allumé puis éteint écrit false, et la modification n’est alors nommée que par son libellé. Allumé, il affiche aussi les valeurs d’un champ média ou JSON."
+      },
       trackHistory: {
         label: "Suivre l’historique",
-        helpText: "Afficher les valeurs ancienne → nouvelle de ce champ dans la chronologie d’activité de l’enregistrement (ADR-0052 §5b). Activé sauf désactivation ; false nomme la modification sans ses valeurs."
+        helpText: "Fait afficher à un champ média ou JSON (image, fichier, json, …) ses valeurs ancienne → nouvelle dans la chronologie d’activité. Les autres champs les affichent déjà, et l’éteindre ne les masque pas : utilisez Valeurs des modifications de champ."
       },
       widget: {
         label: "Widget",

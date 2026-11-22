@@ -1105,8 +1105,8 @@ type ChangeValuesShown = (key: string, field: any) => boolean;
 /**
  * [#36290] The field types whose value has no one-line text — media, embedded
  * structured values, vectors, a signature. Their change is named by label
- * only, unless the field itself declares `trackHistory: true`, which keeps the
- * opt-in it always was.
+ * only, unless the field itself turns them on (`fieldHistory: true`, or the
+ * `trackHistory: true` opt-in it always was).
  */
 const NO_LINE_VALUE_TYPES: ReadonlySet<string> = new Set([
   'image', 'file', 'avatar', 'video', 'audio', 'signature',
@@ -1117,16 +1117,19 @@ const NO_LINE_VALUE_TYPES: ReadonlySet<string> = new Set([
  * [#36290, ruling 7076513167] ADR-0052 §5b.1 with its default reversed: a
  * changed field's old → new values render on the record's activity stream
  * unless the object turns it off (`enable.fieldHistory: false`) or the field
- * does (`trackHistory: false`). An absent flag is on, and the object's
- * `enable.trackHistory` is not read here: it keeps its own meaning (the ledger
- * view and the `history` verb), and a parsed body materializes it as `false`
- * on every object with an `enable` block. Two classes never render
- * values, whatever the flags say:
+ * does (its own `fieldHistory: false`). An absent flag is on. Neither
+ * `trackHistory` turns values off: the object's keeps its own meaning (the
+ * ledger view and the `history` verb) and a parsed body materializes it as
+ * `false` on every object with an `enable` block; the field's `false` was
+ * written by the field designer on every save while it meant nothing, so a
+ * stored one cannot be told from a choice and reads like an absent key. A
+ * field's `trackHistory: true` still forces a no-line type on. Two classes
+ * never render values, whatever the flags say:
  *
  *  - a credential field (`collectMaskedReadFields`): both sides are the same
  *    mask, so the change is named by label only, never `•••• → ••••`;
  *  - a type in {@link NO_LINE_VALUE_TYPES}, unless the field declares
- *    `trackHistory: true` itself.
+ *    `fieldHistory: true` or `trackHistory: true` itself.
  *
  * Who may READ the values is not decided here: the row is redacted per reader,
  * field by field (`activity-field-redaction.ts`).
@@ -1135,8 +1138,8 @@ function changeValuesShownFor(objectDef: any): ChangeValuesShown {
   if (objectDef?.enable?.fieldHistory === false) return () => false;
   const credentials = new Set(collectMaskedReadFields(objectDef));
   return (key, field) => {
-    if (!field || field.trackHistory === false || credentials.has(key)) return false;
-    if (field.trackHistory === true) return true;
+    if (!field || field.fieldHistory === false || credentials.has(key)) return false;
+    if (field.fieldHistory === true || field.trackHistory === true) return true;
     return !(typeof field.type === 'string' && NO_LINE_VALUE_TYPES.has(field.type));
   };
 }

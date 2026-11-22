@@ -89,7 +89,7 @@ const member = {
     id: f('id', 'text', { primaryKey: true }),
     person: f('person', 'lookup', { reference: 'sys_user' }),
     // [#36290] Values off: the update row is named by the record label, the text these pins read.
-    rate: f('rate', 'number', { trackHistory: false }),
+    rate: f('rate', 'number', { fieldHistory: false }),
   },
 };
 

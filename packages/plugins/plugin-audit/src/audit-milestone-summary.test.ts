@@ -150,7 +150,7 @@ const bizDeal = {
     // [#36290] Values off, so a change of it alone reaches the generic branch.
     priority: f('priority', 'select', {
       label: 'Priority',
-      trackHistory: false,
+      fieldHistory: false,
       options: [{ value: 'p1', label: 'Highest' }, { value: 'p2', label: 'Normal' }],
     }),
   },

@@ -276,9 +276,13 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Idioma",
         helpText: "Lenguaje del editor (p. ej. sql, javascript)"
       },
+      "fields.fieldHistory": {
+        label: "Valores de cambios de campo",
+        helpText: "Valores anterior → nuevo de este campo en la cronología de actividad del registro. Sin definir equivale a ACTIVADO, aunque el interruptor se vea apagado: solo un interruptor encendido y luego apagado escribe false, y entonces el cambio se nombra solo con la etiqueta. Encendido también muestra los valores de un campo multimedia o JSON."
+      },
       "fields.trackHistory": {
         label: "Seguimiento de historial",
-        helpText: "Muestra los valores anterior → nuevo de este campo en la cronología de actividad del registro (activado salvo que se desactive)"
+        helpText: "Hace que un campo multimedia o JSON (imagen, archivo, json, …) muestre valores anterior → nuevo en la cronología de actividad. Los demás campos ya los muestran, y apagarlo no los oculta: use Valores de cambios de campo."
       },
       "fields.visibleWhen": {
         label: "Condición de visibilidad",
@@ -300,7 +304,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Seguimiento de historial"
       },
       "enable.fieldHistory": {
-        label: "Valores de cambios de campo"
+        label: "Valores de cambios de campo",
+        helpText: "Valores anterior → nuevo de los campos modificados en la cronología de actividad del registro. Sin definir equivale a ACTIVADO, aunque el interruptor se vea apagado: solo un interruptor encendido y luego apagado escribe false, y entonces el objeto entero deja de mostrar valores."
       },
       "enable.searchable": {
         label: "Buscable"
@@ -900,9 +905,13 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Interno",
         helpText: "Nunca devuelve el valor de este campo por la ruta de datos genérica: el motor omite la clave en los resultados de find/findOne y en los cuerpos de respuesta de creación y actualización, tanto en la proyección predeterminada como cuando un cliente la nombra en ?select=. El almacenamiento, el filtrado y los índices no se ven afectados."
       },
+      fieldHistory: {
+        label: "Valores de cambios de campo",
+        helpText: "Valores anterior → nuevo de este campo en la cronología de actividad del registro. Sin definir equivale a ACTIVADO, aunque el interruptor se vea apagado: solo un interruptor encendido y luego apagado escribe false, y entonces el cambio se nombra solo con la etiqueta. Encendido también muestra los valores de un campo multimedia o JSON."
+      },
       trackHistory: {
         label: "Registrar historial",
-        helpText: "Muestra los valores anterior → nuevo de este campo en la línea de actividad del registro (ADR-0052 §5b). Activado salvo que se desactive; con false se nombra el cambio sin sus valores."
+        helpText: "Hace que un campo multimedia o JSON (imagen, archivo, json, …) muestre valores anterior → nuevo en la cronología de actividad. Los demás campos ya los muestran, y apagarlo no los oculta: use Valores de cambios de campo."
       },
       widget: {
         label: "Control del campo",

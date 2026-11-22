@@ -960,9 +960,12 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     // object's off switch for old → new values on the activity stream) — one
     // label leaf, authored in every locale by the same card. `capabilities`
     // reads 11 → 12; `advanced` is untouched.
-    expect(PANEL_LEAVES.length).toBe(118);
+    // 119 since that card's L2 (S1) gave the `enable.fieldHistory` row a help
+    // text saying what an unset switch means — one leaf, authored in every
+    // locale. `capabilities` reads 12 → 13.
+    expect(PANEL_LEAVES.length).toBe(119);
     expect(PANEL_LEAVES.every((l) => l.prop === 'label' || l.prop === 'helpText')).toBe(true);
-    expect(PANEL_LEAVES.filter((l) => l.section === 'capabilities').length).toBe(12);
+    expect(PANEL_LEAVES.filter((l) => l.section === 'capabilities').length).toBe(13);
     expect(PANEL_LEAVES.filter((l) => l.section === 'advanced').length).toBe(106);
   });
 
@@ -999,7 +1002,10 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     // 128 since #35985 gave `basics` the `color` row (the object's palette
     // colour) — label and help text, authored in every translated locale by
     // that card, so `openEchoes` stays at zero.
-    expect(OPEN_LEAVES.length).toBe(128);
+    // 130 since #36290 gave the `fields` repeater its `fieldHistory` sub-row
+    // (a field's off switch for old → new values) — label and help text,
+    // authored in every translated locale, so `openEchoes` stays at zero.
+    expect(OPEN_LEAVES.length).toBe(130);
     expect(PANEL_LEAVES.some((l) => l.path === 'fields.placeholder')).toBe(false);
     expect(OPEN_LEAVES.some((l) => l.path === 'fields.placeholder')).toBe(true);
     for (const path of ['name', 'label', 'fields', 'fields.valueDomain', 'fields.deleteBehavior', 'fields.expression']) {
@@ -1121,15 +1127,15 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     expect(flagged.length).toBe(PANEL_LEAVES.length);
   });
 
-  it('⭐ the capability block is now DONE — zero of its 12 leaves echoes in any locale', () => {
+  it('⭐ the capability block is now DONE — zero of its 13 leaves echoes in any locale', () => {
     const capability = PANEL_LEAVES.filter((l) => l.section === 'capabilities');
     const echoing = capability.filter((l) =>
       TRANSLATED_LOCALES.some(([, forms]) => catalogLeaf(forms, l.path, l.prop) === l.en),
     );
     expect(echoing.map((l) => `${l.path}.${l.prop}`)).toEqual([]);
     // Lit — and it really walked the section, which a zero alone would not show.
-    // 12 since #36290 added `enable.fieldHistory`.
-    expect(capability.length).toBe(12);
+    // 13 since #36290 added `enable.fieldHistory` and its help text.
+    expect(capability.length).toBe(13);
   });
 });
 
