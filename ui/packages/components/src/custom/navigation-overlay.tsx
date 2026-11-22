@@ -370,6 +370,17 @@ function escapeOwnedByRegion(target: EventTarget | null, pane?: Element | null):
 }
 
 /**
+ * Whether the pane draws a part of the record that owns EVERY `Esc` the pane
+ * hears while it is drawn, wherever the key is pressed
+ * (`[data-owns-pane-escape]`: the record's inline edit session, whose Esc
+ * ends the edit — objectstack#36472). The pane then holds itself open and
+ * leaves the key to it; once the edit ends, the next `Esc` is the pane's.
+ */
+function escapeOwnedByPaneSession(pane?: Element | null): boolean {
+  return !!pane?.querySelector('[data-owns-pane-escape]');
+}
+
+/**
  * Pane resize state — drag handle on the left edge, value persisted to
  * localStorage so the same user gets a consistent width across sessions /
  * objects. Returns `null` when storageKey is absent (resize disabled).
@@ -558,9 +569,15 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   // A region inside the record that owns its `Esc` (`[data-owns-escape]`: the
   // record's comment panel, objectstack#36075) gets the key at every level,
   // the root too: the drawer holds itself open and leaves the region to act.
+  //
+  // An edit session drawn in the record (`[data-owns-pane-escape]`,
+  // objectstack#36472) gets every key the drawer hears, the root's too: the
+  // first `Esc` ends the edit and the drawer stays; the next one is the
+  // drawer's again. The drawer's layer only hears the key with nothing open
+  // over it, so a popover or menu over the record still closes first.
   const handleDrawerEscape = (e: KeyboardEvent) => {
     if (e.defaultPrevented) return;
-    if (escapeOwnedByRegion(e.target, sheetRef.current)) {
+    if (escapeOwnedByRegion(e.target, sheetRef.current) || escapeOwnedByPaneSession(sheetRef.current)) {
       e.preventDefault();
       return;
     }
@@ -678,7 +695,9 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
         // back one level. Only the root's `Esc` closes. objectstack#28156 — a
         // field's `Esc` stays the field's ({@link escapeOwnedByTarget}).
         // objectstack#36075 — at every level, a region's `Esc` stays the
-        // region's ({@link escapeOwnedByRegion}).
+        // region's ({@link escapeOwnedByRegion}). objectstack#36472 — while
+        // the record is being edited, `Esc` ends the edit
+        // ({@link escapeOwnedByPaneSession}).
         onEscapeKeyDown={handleDrawerEscape}
         ref={sheetRef}
         className={cn(

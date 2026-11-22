@@ -23,8 +23,11 @@
  *     (objectstack#35995): see `handleSave`.
  *
  * While the session is active the bar also owns the record-level keyboard
- * shortcuts (objectui#2572): **Esc** cancels (when no popover/dialog is open)
- * and **Cmd/Ctrl+Enter** saves — both respecting `saving`/`locked`.
+ * shortcuts (objectui#2572): **Esc** cancels (when no popover/dialog is open
+ * over the session) and **Cmd/Ctrl+Enter** saves — both respecting
+ * `saving`/`locked`. In a record pane (the side preview's drawer) the session
+ * owns the pane's Esc too (objectstack#36472): the first Esc ends the edit and
+ * the pane stays open, as the full page does.
  *
  * The bar renders nothing unless the record is actively being edited.
  *
@@ -310,6 +313,26 @@ export async function updateVia(
       '[InlineEditSaveBar] DataSource exposes no update/updateOne/patch method; cannot persist inline edit',
     );
   }
+}
+
+/**
+ * Whether an `Esc` belongs to a layer over the edit session: open floating
+ * content (a lookup or select popover, a menu, a tooltip), an alert, or an
+ * open dialog the session is not inside (the conflict or fill-in dialog, a
+ * confirm). The dialog that holds the session — a record pane's drawer — is
+ * not one (objectstack#36472).
+ */
+function escapeOwnedByLayerOver(bar: Element | null): boolean {
+  const doc = bar?.ownerDocument ?? document;
+  if (doc.querySelector('[data-radix-popper-content-wrapper], [role="alertdialog"][data-state="open"]')) return true;
+  return Array.from(doc.querySelectorAll('[role="dialog"][data-state="open"]')).some(
+    (dialog) => !bar || !dialog.contains(bar),
+  );
+}
+
+/** Whether the session is drawn inside a pane's dialog (the side preview's drawer). */
+function paneHolding(bar: Element | null): boolean {
+  return !!bar?.closest('[role="dialog"]');
 }
 
 export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
@@ -627,16 +650,29 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
 
   // Record-level keyboard shortcuts for the shared edit session
   // (objectui#2572 item 5): Cmd/Ctrl+Enter commits the draft, Esc cancels.
-  // Installed only while editing. Esc defers to any open Radix layer
-  // (popover / select / dropdown / dialog) — those own Escape for "close the
-  // layer", so the session only cancels when nothing is stacked on top.
-  // Both respect the in-flight `saving` state; save also respects `locked`
-  // and stands down while the conflict dialog drives the session.
+  // Installed only while editing. Esc defers to any open Radix layer over the
+  // session (popover / select / dropdown / dialog) — those own Escape for
+  // "close the layer", so the session only cancels when nothing is stacked on
+  // top. Both respect the in-flight `saving` state; save also respects
+  // `locked` and stands down while the conflict dialog drives the session.
+  //
+  // objectstack#36472 — in a record pane (the side preview's drawer) the
+  // dialog that HOLDS the session is not a layer over it. The drawer holds
+  // itself open while the bar is drawn (`data-owns-pane-escape` below), and
+  // marks the key handled to do so, so inside a pane `defaultPrevented` says
+  // nothing; whether a layer was stacked over the session is read when the
+  // key is pressed — on the window in the capture phase, before any layer
+  // closes on it — instead.
   const saving = !!inline?.saving;
   const cancel = inline?.cancel;
   const conflictOpen = !!conflict;
+  const barRef = React.useRef<HTMLDivElement | null>(null);
   React.useEffect(() => {
     if (!editing) return;
+    let layeredPress: KeyboardEvent | null = null;
+    const onKeyDownCapture = (e: KeyboardEvent) => {
+      layeredPress = e.key === 'Escape' && escapeOwnedByLayerOver(barRef.current) ? e : null;
+    };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
         if (saving || locked || conflictOpen) return;
@@ -645,22 +681,25 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
         return;
       }
       if (e.key === 'Escape') {
-        if (e.defaultPrevented || saving || conflictOpen) return;
+        const layered = layeredPress === e;
+        layeredPress = null;
+        if (saving || conflictOpen) return;
+        // On the full page a key already handled is not the session's; in a
+        // pane the pane marks every key it holds itself open on.
+        if (e.defaultPrevented && !paneHolding(barRef.current)) return;
         // An open floating layer (lookup/select popover, dropdown, dialog)
         // owns this Esc — let it close instead of tearing down the draft.
-        if (
-          document.querySelector(
-            '[data-radix-popper-content-wrapper], [role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]',
-          )
-        ) {
-          return;
-        }
+        if (layered || escapeOwnedByLayerOver(barRef.current)) return;
         e.preventDefault();
         cancel?.();
       }
     };
+    window.addEventListener('keydown', onKeyDownCapture, true);
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDownCapture, true);
+      window.removeEventListener('keydown', onKeyDown);
+    };
   }, [editing, saving, locked, conflictOpen, handleSave, cancel]);
 
   const changedWhileEditing =
@@ -753,8 +792,13 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
           'sticky bottom-0 z-30 mt-4 flex flex-wrap items-center justify-end gap-2 rounded-md border bg-background/95 px-3 py-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80',
           className,
         )}
+        ref={barRef}
         role="region"
         aria-label={t('detail.editFieldsInline')}
+        // objectstack#36472: while the edit session is drawn, a record pane
+        // round it (the side preview's drawer) leaves every Esc to it — the
+        // first Esc ends the edit, the next one closes the pane.
+        data-owns-pane-escape=""
         // objectui#12248: this bar sticks to the bottom edge with Save at its
         // right end, which is where a host's floating launcher sits (the
         // console assistant's button covered Save at 1440 wide). The marker
