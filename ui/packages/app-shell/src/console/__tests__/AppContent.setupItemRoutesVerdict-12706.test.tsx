@@ -224,6 +224,9 @@ vi.mock('../../context/LastAppProvider', async (importOriginal) => ({
   useLastApp: () => ({ lastApp: lastAppFixture, settled: true, rememberApp: () => {} }),
 }));
 
+// The console's preview and authoring code loads `@objectstack/lint` lazily;
+// warmed here so its first load is paid at import, not inside a test's clock.
+import '@objectstack/lint';
 import { AppContent } from '../AppContent';
 
 function LocationProbe() {
