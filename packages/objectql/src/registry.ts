@@ -1,7 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { RelatedListsArrangement } from '@objectstack/spec/data';
-import { ServiceObject, ObjectOwnership, resolveInjectedSystemColumns, resolveInjectedColumnProvenance as injectedColumnProvenance, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
+import { ServiceObject, ObjectOwnership, type RelatedListsArrangement, resolveInjectedSystemColumns, resolveInjectedColumnProvenance as injectedColumnProvenance, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
 // [#4513] The audit-family governance table, and [#6562] the injected-column
 // DEFINITION tables it governs — see the re-exports below for why both live in a
 // package `objectql` and `metadata-protocol` both depend on.
@@ -221,10 +220,6 @@ export {
  *     placements once, after this merge has run for all of them
  *     (`applyExtensionPlacements`, registry-extension-placement.ts), so an
  *     anchor names the object as served.
- *   - `fieldGroups` / `relatedLists` [ADR-0146 D10] are not read here either:
- *     the fold applies the paired `.custom` package's arrangement once, after
- *     the placements (`applyCustomArrangement`,
- *     registry-custom-arrangement.ts), and skips any other package's.
  *
  * **Every other top-level prop on `extension` is silently discarded.**
  * `merged` starts as `{ ...base }` and nothing outside the list above is ever
@@ -237,8 +232,7 @@ export {
  * Declarative authors never reach that silence, though: `ObjectExtensionSchema`
  * (`packages/spec/src/data/object.zod.ts`) is `.strict()` — its shape is
  * exactly `extend` / `fields` / `fieldPatches` / `label` / `pluralLabel` /
- * `description` / `validations` / `indexes` / `place` / `fieldGroups` /
- * `relatedLists` / `priority`, so an `objectExtensions` entry
+ * `description` / `validations` / `indexes` / `place` / `fieldGroups` / `relatedLists` / `priority`, so an `objectExtensions` entry
  * naming `tenancy`, `permissions`, or any other key outside that list fails
  * LOUDLY at authoring time with a prescription (#4001; the same rule is
  * documented at `content/docs/data-modeling/object-extensions.mdx`). This
@@ -2962,20 +2956,7 @@ export class SchemaRegistry {
     return ObjectRegistrationFacet.getWithheldExtensionFields.call(objectRegistrationHost.of(this), name);
   }
 
-  /**
-   * [ADR-0146 D10] What the served `relatedLists` of `name` cannot say about
-   * the tab list the base's paired `.custom` package declares for it: the
-   * lists it hides, and whether a list no entry names is shown after the
-   * listed tabs (`RelatedListsArrangement`, `@objectstack/spec/data`).
-   * `undefined` when no `.custom` package arranges the object's tabs: none
-   * extends it, none writes `relatedLists`, or the one that does is disabled.
-   *
-   * The served object read stamps this as its `_relatedListsArrangement` read
-   * decoration, because only the record page knows which lists exist for the
-   * reader: a served `relatedLists` names tabs and cannot hide another
-   * package's list by leaving it out. Accepts a short name or an FQN, as
-   * {@link getObject} does.
-   */
+  /** [ADR-0146 D10] What the served `relatedLists` of `name` cannot say; contract: `ObjectRegistrationFacet.getRelatedListsArrangement`. */
   getRelatedListsArrangement(name: string): RelatedListsArrangement | undefined {
     return ObjectRegistrationFacet.getRelatedListsArrangement.call(objectRegistrationHost.of(this), name);
   }

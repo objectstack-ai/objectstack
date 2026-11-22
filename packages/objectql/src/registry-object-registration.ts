@@ -785,10 +785,24 @@ export class ObjectRegistrationFacet {
   }
 
   /**
-   * [ADR-0146 D10] The body of `SchemaRegistry#getRelatedListsArrangement`;
-   * the method's docblock there is its contract. Read off the served fold's
-   * own body ({@link resolveObject}), so this answer and the served
-   * `relatedLists` cannot disagree.
+   * [ADR-0146 D10] The body, and the contract, of
+   * `SchemaRegistry#getRelatedListsArrangement` (the facade keeps its line
+   * count, so the docblock lives here).
+   *
+   * What the served `relatedLists` of `name` cannot say about the tab list
+   * the base's paired `.custom` package declares for it: the lists it hides,
+   * and whether a list no entry names is shown after the listed tabs
+   * (`RelatedListsArrangement`, `@objectstack/spec/data`). `undefined` when
+   * no `.custom` package arranges the object's tabs: none extends it, none
+   * writes `relatedLists`, or the one that does is disabled.
+   *
+   * The served object read stamps this as its `_relatedListsArrangement` read
+   * decoration, because only the record page knows which lists exist for the
+   * reader: a served `relatedLists` names tabs and cannot hide another
+   * package's list by leaving it out. Accepts a short name or an FQN, as
+   * `getObject` does. Read off the served fold's own body
+   * ({@link resolveObject}), so this answer and the served `relatedLists`
+   * cannot disagree.
    */
   static getRelatedListsArrangement(this: Pick<ObjectRegistrationHost, 'resolveObject' | 'resolveObjectKey'>, name: string): RelatedListsArrangement | undefined {
     const fqn = this.resolveObjectKey(name);
