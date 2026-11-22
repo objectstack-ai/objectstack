@@ -26,6 +26,11 @@
  * case reads the tab as the console draws it.
  */
 import { describe, it, expect, vi } from 'vitest';
+// The inspector reaches the console's dynamic `@objectstack/formula` and
+// `@objectstack/lint` imports (CEL authoring); their first load is paid here,
+// at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import React from 'react';
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
