@@ -461,8 +461,27 @@ export const confirmationAmbiguous = 'the ask matches more than one row and the 
  * Why a confirmed write is not measured on a server with no pending-confirmation service: the action door answered
  * the turn's confirm-gated call `428 ACTION_CONFIRMATION_REQUIRED`, `details.reason: 'no_confirmation_service'`, and
  * on such a server it answers every such call so, whatever the agent sends. The ask (the first turn) is graded as before.
+ * The same holds when the FIRST turn's call met that answer and the confirmation turn sent no write on the object: the
+ * agent already learned the route cannot apply, so not retrying it is no failure ({@link confirmTurnMetNoConfirmationService}).
  */
 const noConfirmationService = 'the action door has no pending-confirmation service on this server (428 ACTION_CONFIRMATION_REQUIRED, reason no_confirmation_service), so no agent can apply the confirmed write';
+
+/**
+ * Whether the confirmation turn of a `pending_confirmation` operation meets the server with no pending-confirmation
+ * service ({@link noConfirmationService}), so its confirmed write is not measured. Either:
+ *
+ *   - a write call on the operation's object in the confirmation turn met `428 ACTION_CONFIRMATION_REQUIRED`,
+ *     reason `no_confirmation_service`; or
+ *   - the first turn's write call met that answer (`firstMet`, the first turn's
+ *     `OperationObservation.metNoConfirmationService`) and the confirmation turn sent no write call on the
+ *     object at all: the agent remembered the route cannot apply here and did not retry it.
+ *
+ * A confirmation turn that does write after a first-turn 428 is graded on its own, as any other.
+ */
+export function confirmTurnMetNoConfirmationService(firstMet: boolean, second: Pick<ParsedTurn, 'toolCalls'>, object: string): boolean {
+  const writes = writeCallsOn(second, object);
+  return writes.some((c) => metNoConfirmationService(c.output)) || (firstMet && writes.length === 0);
+}
 
 export interface RunHalf {
   personas: Array<Omit<PersonaAccount, 'apiKey'>>;
@@ -1967,7 +1986,7 @@ export async function runHalf(
               const afterConfirm = (await app.listRows(op.object)).rows as Row[];
               confirmed.observation = observeConfirmedWrite(op, second, beforeConfirm, afterConfirm, clockDates(startedConfirm, new Date()));
               confirmed.grade = gradeConfirmedWrite(op, confirmed.observation, card.asOf !== undefined ? { asOf: card.asOf } : {});
-              if (writeCallsOn(second, op.object).some((c) => metNoConfirmationService(c.output))) confirmed.notMeasured = noConfirmationService;
+              if (confirmTurnMetNoConfirmationService(res.observation.metNoConfirmationService === true, second, op.object)) confirmed.notMeasured = noConfirmationService;
             }
           } catch (e) {
             confirmed.error = errText(e);
