@@ -114,6 +114,9 @@ vi.mock('./ViewConfigPanel', () => {
   };
 });
 
+// The view's source reaches a dynamic import of `@objectstack/lint`: pay its
+// load at collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 
