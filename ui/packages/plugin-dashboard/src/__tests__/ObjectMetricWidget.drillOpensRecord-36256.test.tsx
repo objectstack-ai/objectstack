@@ -28,8 +28,12 @@ const StubList = (props: Record<string, any>) => (
 const DEAL = { id: '1', name: 'Acme Renewal', stage: 'won', amount: 120, owner: 'Dana', description: 'Three-year renewal' };
 
 /** Answers with the record projected to the listed columns, as the list's `$select` read does. */
-const ProjectingList = (props: Record<string, any>) => {
-  const listed: string[] = (props.schema?.columns ?? []).map((c: any) => (typeof c === 'string' ? c : c.field));
+interface ListProps {
+  schema?: { columns?: Array<string | { field: string }> };
+  onRowClick?: (row: Record<string, unknown>) => void;
+}
+const ProjectingList = (props: ListProps) => {
+  const listed = (props.schema?.columns ?? []).map((c) => (typeof c === 'string' ? c : c.field));
   const row = Object.fromEntries(Object.entries(DEAL).filter(([k]) => k === 'id' || listed.includes(k)));
   return <button type="button" data-testid="stub-row" onClick={() => props.onRowClick?.(row)}>row</button>;
 };
@@ -82,7 +86,7 @@ describe('a page block with no record page opens the drilled record in a dialog 
   });
 
   it('draws the fields the list read, each with its value, and no field it did not read', async () => {
-    ComponentRegistry.register('list-view', ProjectingList as any);
+    ComponentRegistry.register('list-view', ProjectingList as never);
     mount({ enabled: true, target: 'dialog', columns: ['name', 'stage', 'amount'] });
     fireEvent.click(await screen.findByRole('button', { name: /revenue|120/i }));
     fireEvent.click(await screen.findByTestId('stub-row'));
