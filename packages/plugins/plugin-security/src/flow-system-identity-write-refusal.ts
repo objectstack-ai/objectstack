@@ -109,17 +109,17 @@ export const FLOW_SYSTEM_IDENTITY_WRITE_OBJECTS: ReadonlySet<string> = new Set([
 const ASSIGNMENT_OBJECTS: ReadonlySet<string> = new Set(['sys_user_position', 'sys_user_permission_set']);
 
 /** Which elevation wrote: a flow run, or an app-automation mark. */
-type ElevationSource = 'flow' | AppAutomationElevation;
+export type ElevationSource = 'flow' | AppAutomationElevation;
 
 /** How each source is named in the refusal. */
-const SUBJECT: Readonly<Record<ElevationSource, string>> = {
+export const SUBJECT: Readonly<Record<ElevationSource, string>> = {
   flow: "a flow that runs as system (runAs: 'system')",
   hook: "a hook that runs as system (runAs: 'system', a system context it inherits, or ctx.api.sudo())",
   action: 'an action body (an action body runs as system)',
 };
 
 /** Whose elevation the refusal says does not lift the door. */
-const ELEVATION: Readonly<Record<ElevationSource, string>> = {
+export const ELEVATION: Readonly<Record<ElevationSource, string>> = {
   flow: "a flow's system elevation",
   hook: "a hook's system elevation",
   action: "an action body's system elevation",
@@ -145,9 +145,11 @@ const MEMBERSHIP_PRESCRIPTION =
 /**
  * The elevation a system context's write comes from — a flow run, a hook's
  * `runAs: 'system'`, an action body — or `undefined` for every other context
- * (a platform writer's, a user's).
+ * (a platform writer's, a user's). The one predicate every refusal of
+ * app-authored automation's elevation reads, the organization wall's
+ * (`app-automation-organization-wall.ts`) included.
  */
-function elevationSource(context: { isSystem?: unknown; flowRunId?: unknown } | null | undefined): ElevationSource | undefined {
+export function elevationSource(context: { isSystem?: unknown; flowRunId?: unknown } | null | undefined): ElevationSource | undefined {
   if (!context?.isSystem) return undefined;
   if (context.flowRunId) return 'flow';
   return appAutomationElevationOf(context);

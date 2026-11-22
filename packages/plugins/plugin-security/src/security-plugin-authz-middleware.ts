@@ -118,6 +118,7 @@ import {
   assertFlowSystemIdentityWriteAllowed,
   warnAppAutomationAppendOnlyInsert,
 } from './flow-system-identity-write-refusal.js';
+import { applyAppAutomationOrganizationWall } from './app-automation-organization-wall.js';
 import { delegatedUnitReadScope, isUnreadableAddressedRowRefusal } from './delegated-admin-gate.js';
 import { isRowWriteProbe, logGateRefusal, type AuthzMiddlewareFn } from './record-row-write-probe.js';
 import {
@@ -713,6 +714,26 @@ export function registerAuthzMiddleware(
       (object) => (typeof ql?.getSchema === 'function' ? ql.getSchema(object) : undefined),
       (line) => ctx.logger.warn(line),
     );
+    // [ADR-0095 D1 · ADR-0123 D2] The same elevation, judged by the same
+    // predicate, sees through the organization wall exactly what the caller it
+    // runs for sees at the plain door: elevation lifts the caller's business
+    // rules, never the wall. A caller the wall denies (no active organization)
+    // reads nothing of a tenant-scoped object, and every write there is
+    // refused naming the missing organization. The wall is the caller's own
+    // Layer 0, over the caller's own context and permission sets, so its
+    // exemptions are the plain door's. A caller with an active organization,
+    // an elevation with no caller, and every platform system context pass on
+    // to the bypass unchanged. See `app-automation-organization-wall.ts`.
+    await applyAppAutomationOrganizationWall(opCtx, async (callerContext, object, operation) => {
+      let callerSets: PermissionSet[] = [];
+      try {
+        callerSets = await this.resolvePermissionSetsForContext(callerContext);
+      } catch {
+        // Unresolvable sets grant no exemption: the wall's verdict stands.
+        callerSets = [];
+      }
+      return this.computeLayeredRlsFilter(callerSets, object, operation, callerContext);
+    });
 
     // [#34885] An action body's insert is owner-stamped as a direct create
     // is: the body's `ctx.api` / `ctx.engine` run the invoker's envelope
