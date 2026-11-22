@@ -1,5 +1,5 @@
 ---
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 '@objectstack/service-automation': patch
 '@objectstack/trigger-record-change': patch
 '@objectstack/runtime': patch
@@ -9,7 +9,7 @@
 feat(automation): `POST /api/v1/automation/_record-starts` answers which flows a proposed update of one record would start
 
 Clause-②: yes (widening) — one new public read: the route `POST /api/v1/automation/_record-starts` (`automation.listRecordUpdateStarts` in the API contract and in `@objectstack/client`); `@objectstack/spec/api` adds `RecordUpdateStartsRequestSchema`, `RecordUpdateStartSchema`, `RecordUpdateStartsResponseSchema` and their types; `@objectstack/spec/contracts` adds `RecordUpdateStartsInput` and the optional `IAutomationService.listRecordUpdateStarts`; `@objectstack/spec/automation` adds `recordChangeTriggerHookEvents` and `recordChangeTriggerFiresOnUpdate`; `_record-starts` joins the `/automation` domain's reserved position literals. Nothing existing is removed or re-typed.
-Metadata-protocol: none
+Metadata-protocol: added — the three new `@objectstack/spec/api` schemas enter the `api` authorable-surface shard (10 keys: `RecordUpdateStart:name/label/startsApproval`, `RecordUpdateStartsRequest:object/recordId/changes`, `RecordUpdateStartsResponse:success/data/error/meta`); no flow or other metadata key is added
 Skills-docs: none — no skill under `skills/**` teaches the console's stage confirms; `content/docs/automation/flows.mdx` gains the read in this change.
 
 The console's stage confirms now name the flows a move would start (objectstack#35928, ruling record 7073655354). They ask the server:
