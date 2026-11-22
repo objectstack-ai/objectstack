@@ -18,14 +18,14 @@ export type { RecordDisplayNameOptions } from '@object-ui/core';
 
 export {
   resolveRecordFormTarget,
-  resolveFormViewLayout,
+  resolveRecordFormModalLayout,
 } from './recordFormNavigation.js';
 export type {
   ObjectDefinitionForNavigation,
   RecordFormTarget,
-  ObjectDefinitionForFormView,
+  ObjectDefinitionForRecordForm,
   FormViewDefinition,
-  FormViewModalLayout,
+  RecordFormModalLayout,
 } from './recordFormNavigation.js';
 
 export { deriveRelatedLists } from './deriveRelatedLists.js';

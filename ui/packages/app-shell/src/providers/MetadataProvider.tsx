@@ -628,17 +628,17 @@ function viewItemBody(view: any): Record<string, any> {
  * this entry by its listViews key.
  * FORM-family views land in `formViews` only, never in the list-view switcher.
  *
- * `bucket.form` — what create and edit render — is set ONLY from a form item
- * that carries `isDefault` (objectui#11539). `@objectstack/spec` `ViewSchema`
+ * `bucket.form` is set ONLY from a form item that carries `isDefault`
+ * (objectui#11539). No record create or edit reads it any more
+ * (objectstack-ai/objectstack#36425): those lay out by the object's field
+ * groups. It stays merged so the served object still says what it declares. `@objectstack/spec` `ViewSchema`
  * calls a container's `form` its "Default form view" and `formViews`
  * "Additional named form views", and the served rows say which one is default:
  * `OBJECT.form` alone carries `isDefault`. There is no "first form wins"
  * fallback, so arrival order decides nothing: a default arriving after a named
  * form still takes `.form`, and a named form arriving after the default does
  * not displace it. A container with no `form` serves its named forms with no
- * `isDefault`, and `.form` stays unset. Create and edit then take the path an
- * object with no default form view takes: `resolveFormViewLayout` returns no
- * sections, and the dialog lays out the object's own fields. A named form —
+ * `isDefault`, and `.form` stays unset. A named form —
  * which can be a public anonymous intake form or a wizard — is reached only by
  * its name, through `formViews`.
  */
@@ -724,13 +724,17 @@ export function mergeViewsIntoObjects(objects: any[], views: any[]): any[] {
 /**
  * Relationship-driven master-detail: a parent object's field group can name a
  * child list (`fieldGroups[].relatedList`) to declare "these rows are part of
- * me". This pass scans every object for such children and merges the
- * resulting child collections into each parent object's form view as
- * `subforms` — so the parent's standard create/edit form renders an atomic
- * master-detail form with NO view config and NO bespoke page. The intent lives
- * in the data model (where it's defined once, e.g. by an AI modelling the
- * schema); forms just follow. An explicit `form.subforms` entry for the same
- * child overrides the model-derived one.
+ * me". This pass scans every object for such children and sets the
+ * resulting child collections on each parent object as `groupSubforms` — so
+ * the parent's standard create/edit form renders an atomic master-detail form
+ * with NO view config and NO bespoke page (`recordFormSubforms` in
+ * `utils/recordFormNavigation`). The intent lives in the data model (where
+ * it's defined once, e.g. by an AI modelling the schema); forms just follow.
+ *
+ * objectstack-ai/objectstack#36425 — this is the ONLY source of a record
+ * form's child collections. An internal form view's `subforms` is not read:
+ * the create and edit forms no longer load an object's internal form views,
+ * and the derived list is no longer merged into `form`.
  *
  * objectstack#35889 (maintainer ruling B, 「明细表应该改成指看分组的定义了」) —
  * a child is inlined in its parent's form ONLY when a field group of the
@@ -785,16 +789,7 @@ export function attachInlineSubforms(objects: any[]): any[] {
   return objects.map((obj) => {
     const derived = inlineByParent[obj.name];
     if (!derived?.length) return obj;
-    const form: any = { ...(obj.form || { type: 'simple' }) };
-    const explicit: any[] = Array.isArray(form.subforms) ? form.subforms : [];
-    const explicitChildren = new Set(explicit.map((s: any) => s.childObject));
-    // Model-derived first; an explicit view subform for the same child wins.
-    form.subforms = [...derived.filter((d) => !explicitChildren.has(d.childObject)), ...explicit];
-    const next: any = { ...obj, form };
-    if (obj.formViews?.default) {
-      next.formViews = { ...obj.formViews, default: { ...obj.formViews.default, subforms: form.subforms } };
-    }
-    return next;
+    return { ...obj, groupSubforms: derived };
   });
 }
 

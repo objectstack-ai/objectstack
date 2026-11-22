@@ -117,6 +117,7 @@ import { fileIdOf, getLazyFieldWidget } from '@object-ui/fields';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { SCREEN_FIELD_RECORD_LINK_TYPE, flowScreenFieldOptionKey } from '@objectstack/spec/automation';
 import { appRecordPath, routableObjectNames } from './RelatedRecordActionsBridge.js';
+import { recordFormSubforms } from '../utils/recordFormNavigation.js';
 
 /**
  * The object form's lookup picker (`LookupField`), through the shared lazy
@@ -428,9 +429,10 @@ export interface ScreenViewProps {
 export function ScreenView({ screen, values, onValueChange, dataSource, objects, objectForm, errors, className }: ScreenViewProps) {
   if (isObjectFormScreen(screen)) {
     const objectDef = Array.isArray(objects) ? objects.find((o: any) => o?.name === screen.objectName) : undefined;
-    const subforms = objectDef
-      ? ((objectDef as any).form?.subforms ?? (objectDef as any).formViews?.default?.subforms)
-      : undefined;
+    // objectstack-ai/objectstack#36425 — the child collections the object's
+    // field groups place (`fieldGroups[].relatedList`, derived onto the served
+    // object as `groupSubforms`), never an internal form view's `subforms`.
+    const subforms = recordFormSubforms(objectDef);
     // Full object create/edit form (with inline master-detail grids). At runtime
     // the form owns its own Save/Cancel bar; the preview hides it.
     return (
