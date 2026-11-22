@@ -3600,7 +3600,9 @@ const es = {
       addBefore: 'Añadir un elemento antes',
       addAfter: 'Añadir un elemento después',
       rename: 'Cambiar nombre e icono',
+      renameSourceOnly: 'Los nombres del menú se cambian en el idioma de origen de la aplicación',
       remove: 'Quitar del menú',
+      contributed: 'Otro paquete añade este elemento. Se mueve, se renombra o se quita allí.',
       pickerTitle: 'Añadir elemento de menú',
       search: 'Buscar…',
       kind: {
@@ -3623,6 +3625,7 @@ const es = {
       notListed: 'El paquete de esta aplicación no está en la lista, así que su menú no se puede guardar.',
       pendingDraft: 'Esta aplicación tiene cambios sin publicar en Studio. Publícalos o descártalos allí y vuelve a guardar.',
       noVersion: 'El paquete de esta aplicación no declara versión, así que su menú no se puede personalizar.',
+      notWritable: 'El paquete de personalización de esta aplicación no se puede escribir, así que su menú no se puede guardar.',
     },
   },
   topbar: {

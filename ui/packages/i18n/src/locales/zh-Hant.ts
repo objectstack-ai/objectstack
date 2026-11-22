@@ -3599,7 +3599,9 @@ const zhHant = {
       addBefore: '在前面加一項',
       addAfter: '在後面加一項',
       rename: '改名和圖示',
+      renameSourceOnly: '選單名稱需在應用的源語言下修改',
       remove: '從選單移除',
+      contributed: '此選單項由另一個包新增，請在那個包中移動、改名或移除。',
       pickerTitle: '新增選單項',
       search: '搜尋…',
       kind: {
@@ -3622,6 +3624,7 @@ const zhHant = {
       notListed: '這個應用所在的包不在列表中，選單無法儲存。',
       pendingDraft: '這個應用在 Studio 裡有未釋出的改動。請先在那裡釋出或丟棄，再儲存。',
       noVersion: '這個應用所在的包沒有宣告版本，選單無法定製。',
+      notWritable: '這個應用的定製包不可寫，選單無法儲存。',
     },
   },
   topbar: {

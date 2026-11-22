@@ -6,7 +6,10 @@
  *
  * Real subjects: `DesignModeMenu`, `useDesignModeController`,
  * `DesignModeProvider`, `DesignModeBar`, `saveAppMenu`. The metadata client
- * and the package doors are fakes that record what is written.
+ * and the package doors are fakes that record what is written; the
+ * deployment's languages (`GET /api/v1/i18n/locales`) are a stubbed fetch.
+ * `DndContext` is the real one, its `onDragEnd` kept so that a drop can be
+ * played without the pointer geometry jsdom does not have.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -16,14 +19,28 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { MemoryRouter } from 'react-router-dom';
 import { SidebarProvider } from '@object-ui/components';
 
+const session = vi.hoisted(() => ({ language: 'en', defaultLocale: 'en' }));
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useObjectTranslation: () => ({
     t: (k: string, o?: Record<string, unknown>) =>
       String(o?.defaultValue ?? k).replace(/\{\{(\w+)\}\}/g, (_hole, name: string) => String(o?.[name] ?? '')),
-    language: 'en',
+    language: session.language,
   }),
 }));
+
+const dragEnd = vi.hoisted(() => ({ current: null as null | ((event: unknown) => void) }));
+vi.mock('@dnd-kit/core', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@dnd-kit/core')>();
+  const { createElement } = await import('react');
+  return {
+    ...real,
+    DndContext: (props: React.ComponentProps<typeof real.DndContext>) => {
+      dragEnd.current = props.onDragEnd as never;
+      return createElement(real.DndContext, props);
+    },
+  };
+});
 
 const toastError = vi.hoisted(() => vi.fn());
 vi.mock('sonner', async (importOriginal) => ({
@@ -46,9 +63,14 @@ const listed = vi.hoisted(() => ({
     { name: 'crm_lead_record', label: 'Lead record', type: 'record' },
   ],
 }) as Record<string, Array<Record<string, unknown>>>);
+/** The app's menu as stored (`null`: as served). */
+const storedNav = vi.hoisted(() => ({ current: null as unknown[] | null }));
 const client = vi.hoisted(() => ({
   list: async (type: string) => listed[type] ?? [],
-  get: async () => ({ name: 'crm', label: 'CRM', navigation: [] }),
+  layered: async () => {
+    const code = { name: 'crm', label: 'CRM', navigation: storedNav.current ?? NAVIGATION };
+    return { code, effective: code };
+  },
   save: async (...args: unknown[]) => {
     written.push(['save', ...args]);
     return {};
@@ -77,6 +99,7 @@ import { DesignModeProvider, useDesignMode, useDesignModeController } from '../d
 import { DesignModeBar } from '../DesignModeBar';
 import DesignModeMenu from '../DesignModeMenu';
 import { confirmUnsavedLeave } from '../../chrome/unsavedEdits';
+import { __resetDefaultLocale } from '../designModeMenuSave';
 
 const NAVIGATION = [
   { id: 'home', type: 'report', reportName: 'pipeline', label: 'Home' },
@@ -163,6 +186,20 @@ beforeEach(() => {
   written.length = 0;
   switchedTo.length = 0;
   toastError.mockReset();
+  session.language = 'en';
+  session.defaultLocale = 'en';
+  storedNav.current = null;
+  __resetDefaultLocale();
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => {
+      if (String(url).endsWith('/api/v1/i18n/locales')) {
+        const locales = ['en', 'zh-CN'].map((code) => ({ code, label: code, isDefault: code === session.defaultLocale }));
+        return new Response(JSON.stringify({ success: true, data: { locales } }), { status: 200 });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }),
+  );
 });
 afterEach(() => {
   cleanup();
@@ -273,6 +310,83 @@ describe('the menu under the design mode (objectstack#36363)', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
     await flush();
     expect(entry('leads')).toHaveTextContent('Prospects');
+  });
+
+  // Ruling (4) on review 7081226692: a name is changed in the app's source language only.
+  it('under zh-CN, with English the default, the name is not changed: the field is closed and says why; the icon still is', async () => {
+    session.language = 'zh-CN';
+    start();
+    await flush();
+    await act_on('leads', 'Rename and icon');
+    const dialog = await screen.findByTestId('design-menu-rename');
+    expect(within(dialog).getByLabelText('Name')).toBeDisabled();
+    expect(within(dialog).getByTestId('design-menu-rename-source-only')).toHaveTextContent(
+      "Menu names are changed in the app's source language",
+    );
+    fireEvent.change(within(dialog).getByLabelText('Icon'), { target: { value: 'user-plus' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
+    await flush();
+    fireEvent.click(screen.getByTestId('design-mode-save'));
+    await flush();
+    await flush();
+    const leads = (written[0][3] as { navigation: Array<{ children?: Array<Record<string, unknown>> }> }).navigation[1].children![0];
+    expect(leads).toEqual({ id: 'leads', type: 'object', objectName: 'crm_lead', label: 'Leads', icon: 'user-plus' });
+  });
+
+  it('in the default language, an entry shown under a label other than its stored one is not renamed here', async () => {
+    storedNav.current = NAVIGATION.map((e) => (e.id === 'home' ? { ...e, label: 'apps.crm.home' } : e));
+    start();
+    await flush();
+    await act_on('home', 'Rename and icon');
+    expect(within(await screen.findByTestId('design-menu-rename')).getByLabelText('Name')).toBeDisabled();
+  });
+
+  it("another package's entry (served, not in the stored menu) says where it is changed, and is not moved or removed here", async () => {
+    storedNav.current = NAVIGATION.map((e) =>
+      e.id === 'sales' ? { ...e, children: (e.children ?? []).filter((c) => c.id !== 'accounts') } : e,
+    );
+    start();
+    await flush();
+    const trigger = within(entry('accounts')).getByTestId('design-menu-actions');
+    fireEvent.pointerDown(trigger, { button: 0, pointerType: 'mouse' });
+    await flush();
+    expect(await screen.findByTestId('design-menu-contributed')).toHaveTextContent('Another package adds this item');
+    for (const name of ['Move up', 'Rename and icon', 'Remove from menu']) {
+      expect(screen.getByRole('menuitem', { name })).toHaveAttribute('aria-disabled', 'true');
+    }
+    expect(screen.getByRole('menuitem', { name: 'Add an item after' })).not.toHaveAttribute('aria-disabled');
+  });
+
+  it('adding and moving stay open under zh-CN', async () => {
+    session.language = 'zh-CN';
+    start();
+    await flush();
+    await act_on('accounts', 'Move up');
+    expect(order()).toEqual(['home', ['sales', ['accounts', 'leads']], ['insights', []]]);
+    fireEvent.click(screen.getByTestId('design-menu-add-insights'));
+    expect(await screen.findByTestId('design-menu-picker')).toBeInTheDocument();
+  });
+
+  // N4 on review 7081253549: the drop's wiring, to another group.
+  it('an entry dropped on another group\'s end moves there; dropped on an entry elsewhere, it takes that place', async () => {
+    start();
+    act(() => dragEnd.current!({ active: { id: 'leads' }, over: { id: 'design-menu-end:insights' } }));
+    expect(order()).toEqual(['home', ['sales', ['accounts']], ['insights', ['leads']]]);
+    act(() => dragEnd.current!({ active: { id: 'accounts' }, over: { id: 'home' } }));
+    expect(order()).toEqual(['accounts', 'home', ['sales', []], ['insights', ['leads']]]);
+    act(() => dragEnd.current!({ active: { id: 'home' }, over: { id: 'design-menu-end:' } }));
+    expect(order()).toEqual(['accounts', ['sales', []], ['insights', ['leads']], 'home']);
+
+    fireEvent.click(screen.getByTestId('design-mode-save'));
+    await flush();
+    await flush();
+    const nav = (written[0][3] as { navigation: Array<{ id: string; children?: Array<{ id: string }> }> }).navigation;
+    expect(nav.map((e) => [e.id, e.children?.map((c) => c.id)])).toEqual([
+      ['accounts', undefined],
+      ['sales', []],
+      ['insights', ['leads']],
+      ['home', undefined],
+    ]);
   });
 
   it('「Cancel」 after three edits leaves the menu as it was, and writes nothing', async () => {

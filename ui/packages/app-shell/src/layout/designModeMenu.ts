@@ -244,8 +244,11 @@ export function targetKeyOf(entry: MenuEntry): string | null {
   switch (entry.type) {
     case 'object': {
       const view = str('viewName');
-      if (view) return `view/${view}`;
       const object = str('objectName');
+      // A view is named `<object>.<key>`; an entry may name it by its key
+      // alone (`viewName: 'my_projects'`, as HotCRM's menus do), which is
+      // the same view of its own object.
+      if (view) return `view/${view.includes('.') || !object ? view : `${object}.${view}`}`;
       // An entry that opens a record or a form is not the object's list.
       return object && !str('recordId') && !str('form') ? `object/${object}` : null;
     }
@@ -305,4 +308,259 @@ export function entryFor(
 /** The {@link targetKeyOf} key the picker's row `name` of `kind` would add. */
 export function targetKeyFor(kind: MenuTargetKind, name: string): string {
   return `${kind}/${name}`;
+}
+
+/** An entry's own keys, its `children` left out: what a patch compares. */
+function ownKeys(entry: MenuEntry): Record<string, unknown> {
+  const { children: _children, ...own } = entry as Record<string, unknown>;
+  return own;
+}
+
+interface Located {
+  readonly entry: MenuEntry;
+  readonly parentId: string | null;
+}
+
+function locate(menu: Menu, keyOf: (entry: MenuEntry) => string | null): Map<string, Located> {
+  const out = new Map<string, Located>();
+  const walk = (entries: Menu, parentId: string | null) => {
+    for (const entry of entries) {
+      const key = keyOf(entry);
+      if (key) out.set(key, { entry, parentId });
+      if (isGroup(entry)) walk(childrenOf(entry), key);
+    }
+  };
+  walk(menu, null);
+  return out;
+}
+
+/**
+ * The key of each stored entry: its id, else the id `withEntryIds` gave its
+ * served copy, matched by its group, type and target, in order. `null` for a
+ * stored entry the reader was never shown.
+ */
+interface StoredKeyer {
+  (entry: MenuEntry): string | null;
+  /** Give `copy`, a rebuilt copy of a stored entry, that entry's key. */
+  alias(copy: MenuEntry, key: string | null): MenuEntry;
+}
+
+function storedKeyer(served: Menu, stored: Menu): StoredKeyer {
+  const storedIds = new Set<string>();
+  locate(stored, idOf).forEach((_v, id) => storedIds.add(id));
+  const unclaimed = [...locate(served, idOf).entries()].filter(([id]) => !storedIds.has(id));
+  const adopted = new Map<MenuEntry, string>();
+  const claim = (entry: MenuEntry, parentId: string | null): string | null => {
+    const at = unclaimed.findIndex(
+      ([, s]) => s.parentId === parentId && s.entry.type === entry.type && targetKeyOf(s.entry) === targetKeyOf(entry),
+    );
+    if (at < 0) return null;
+    const [[id]] = unclaimed.splice(at, 1);
+    return id;
+  };
+  const adopt = (entries: Menu, parentId: string | null) => {
+    for (const entry of entries) {
+      const id = idOf(entry) ?? claim(entry, parentId);
+      if (id && !idOf(entry)) adopted.set(entry, id);
+      if (isGroup(entry)) adopt(childrenOf(entry), id);
+    }
+  };
+  adopt(stored, null);
+  const keyOf = ((entry: MenuEntry) => idOf(entry) ?? adopted.get(entry) ?? null) as StoredKeyer;
+  keyOf.alias = (copy, key) => {
+    if (key && !idOf(copy)) adopted.set(copy, key);
+    return copy;
+  };
+  return keyOf;
+}
+
+/** The stored entry behind each served entry, by the served entry's id. */
+export function storedEntriesById(served: Menu, stored: Menu): Map<string, MenuEntry> {
+  const keyOf = storedKeyer(served, stored);
+  const out = new Map<string, MenuEntry>();
+  locate(stored, keyOf).forEach((located, id) => out.set(id, located.entry));
+  return out;
+}
+
+/**
+ * The served entries that keep their place: in the same group, and in the
+ * longest run of that group's entries whose order the edits kept (so a
+ * removal or an addition beside an entry does not move it, and of two
+ * entries swapped one is moved, the later one in the served order).
+ */
+function staysInOrder(served: Map<string, Located>, edited: Map<string, Located>): Set<string> {
+  const groups = new Map<string | null, { was: string[]; now: string[] }>();
+  const groupOf = (parentId: string | null) => {
+    let g = groups.get(parentId);
+    if (!g) groups.set(parentId, (g = { was: [], now: [] }));
+    return g;
+  };
+  served.forEach((was, id) => {
+    if (edited.get(id)?.parentId === was.parentId) groupOf(was.parentId).was.push(id);
+  });
+  edited.forEach((now, id) => {
+    if (served.get(id)?.parentId === now.parentId) groupOf(now.parentId).now.push(id);
+  });
+  const out = new Set<string>();
+  groups.forEach(({ was, now }) => {
+    // The longest common subsequence of the two orders.
+    const n = was.length;
+    const m = now.length;
+    const len: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
+    for (let i = n - 1; i >= 0; i -= 1) {
+      for (let j = m - 1; j >= 0; j -= 1) {
+        len[i][j] = was[i] === now[j] ? len[i + 1][j + 1] + 1 : Math.max(len[i + 1][j], len[i][j + 1]);
+      }
+    }
+    for (let i = 0, j = 0; i < n && j < m; ) {
+      if (was[i] === now[j]) {
+        out.add(was[i]);
+        i += 1;
+        j += 1;
+      } else if (len[i + 1][j] > len[i][j + 1]) i += 1;
+      else j += 1;
+    }
+  });
+  return out;
+}
+
+/**
+ * The edits made to `served` (the tree the editor was seeded from, every
+ * entry with an id) that turned it into `edited`, applied by entry id to
+ * `stored`, the app's navigation as stored (objectstack#36363).
+ *
+ * The served tree is not what is stored: its labels are translated for the
+ * reader's language (`translateApp`), and entries the reader may not open
+ * are pruned from it (`filterNav`). So the save never writes it back. It
+ * writes `stored` with the edits replayed on it:
+ *
+ * - an entry `edited` no longer holds is removed;
+ * - an entry `edited` adds is put in its group after the entry before it;
+ * - an entry moved (to another group, or out of the order its group's other
+ *   entries kept, `staysInOrder`) is taken out and put back after the entry
+ *   before it in `edited`, its stored keys kept;
+ * - an entry whose own keys changed (a rename, an icon) has those keys
+ *   written, and only those: a key it did not change keeps its stored value.
+ *
+ * Every other stored entry, one the reader was never shown included, stays
+ * where it was and is the same object. A stored entry without an id is
+ * matched to the id `withEntryIds` gave its served copy by its group, type
+ * and target, in order.
+ */
+export function rebaseMenuEdits(served: Menu, edited: Menu, stored: Menu): Menu {
+  const keyOf = storedKeyer(served, stored);
+  const s = locate(served, idOf);
+  const e = locate(edited, idOf);
+  const removed = new Set([...s.keys()].filter((id) => !e.has(id)));
+  const stays = staysInOrder(s, e);
+  const placed: string[] = [];
+  const patches = new Map<string, Record<string, unknown>>();
+  e.forEach((now, id) => {
+    const was = s.get(id);
+    if (!was) {
+      placed.push(id);
+      return;
+    }
+    if (!stays.has(id)) placed.push(id);
+    const before = ownKeys(was.entry);
+    const after = ownKeys(now.entry);
+    const patch: Record<string, unknown> = {};
+    for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+      if (JSON.stringify(before[key]) !== JSON.stringify(after[key])) patch[key] = after[key];
+    }
+    if (Object.keys(patch).length > 0) patches.set(id, patch);
+  });
+  const lifted = new Set(placed);
+
+  // The stored entries a moved one takes along, by key, each with its patch.
+  const taken = new Map<string, MenuEntry>();
+  const patched = (entry: MenuEntry, key: string | null): MenuEntry => {
+    const patch = key ? patches.get(key) : undefined;
+    if (!patch) return entry;
+    const next: Record<string, unknown> = { ...entry, ...patch };
+    for (const [k, v] of Object.entries(patch)) if (v === undefined) delete next[k];
+    return keyOf.alias(next, key);
+  };
+  const strip = (entries: Menu): Menu => {
+    const out: MenuEntry[] = [];
+    let changed = false;
+    for (const entry of entries) {
+      const key = keyOf(entry);
+      if (key && removed.has(key)) {
+        changed = true;
+        continue;
+      }
+      let next = entry;
+      if (isGroup(entry)) {
+        const kids = childrenOf(entry);
+        const kept = strip(kids);
+        if (kept !== kids) next = keyOf.alias({ ...entry, children: kept }, key);
+      }
+      next = patched(next, key);
+      if (key && lifted.has(key)) {
+        taken.set(key, next);
+        changed = true;
+        continue;
+      }
+      if (next !== entry) changed = true;
+      out.push(next);
+    }
+    return changed ? out : entries;
+  };
+  let result = strip(stored);
+
+  // Put each placed entry back, in the edited tree's reading order, after the
+  // nearest entry before it in `edited` that the result holds.
+  const holdsKey = (menu: Menu, key: string) => {
+    const walk = (entries: Menu): boolean => entries.some((x) => keyOf(x) === key || (isGroup(x) && walk(childrenOf(x))));
+    return walk(menu);
+  };
+  const indexIn = (entries: Menu, key: string) => entries.findIndex((x) => keyOf(x) === key);
+  const groupEntries = (menu: Menu, parentId: string | null): Menu | null => {
+    if (parentId === null) return menu;
+    let found: Menu | null = null;
+    const walk = (entries: Menu) => {
+      for (const x of entries) {
+        if (found) return;
+        if (keyOf(x) === parentId && isGroup(x)) found = childrenOf(x);
+        else if (isGroup(x)) walk(childrenOf(x));
+      }
+    };
+    walk(menu);
+    return found;
+  };
+  const replaceGroup = (menu: Menu, parentId: string | null, entries: Menu): Menu => {
+    if (parentId === null) return entries;
+    return menu.map((x) => {
+      if (!isGroup(x)) return x;
+      if (keyOf(x) === parentId) return keyOf.alias({ ...x, children: entries }, parentId);
+      const kids = childrenOf(x);
+      const next = replaceGroup(kids, parentId, entries);
+      return next === kids || next.every((k, i) => k === kids[i]) ? x : keyOf.alias({ ...x, children: next }, keyOf(x));
+    });
+  };
+  const editedSiblings = (parentId: string | null): string[] => {
+    const group = parentId === null ? edited : siblingsAt(edited, parentId) ?? [];
+    return group.map((x) => idOf(x)).filter((x): x is string => !!x);
+  };
+  for (const id of placed) {
+    const now = e.get(id)!;
+    const entry = taken.get(id) ?? now.entry;
+    // A group the stored menu lacks: the entry goes to the end of the top level.
+    const lost = now.parentId !== null && !groupEntries(result, now.parentId);
+    const parentId = lost ? null : now.parentId;
+    const siblings = groupEntries(result, parentId) ?? [];
+    const order = editedSiblings(now.parentId);
+    let at = lost ? siblings.length : 0;
+    for (let i = lost ? -1 : order.indexOf(id) - 1; i >= 0; i -= 1) {
+      const before = indexIn(siblings, order[i]);
+      if (before >= 0) {
+        at = before + 1;
+        break;
+      }
+    }
+    if (holdsKey(result, id)) continue;
+    result = replaceGroup(result, parentId, [...siblings.slice(0, at), entry, ...siblings.slice(at)]);
+  }
+  return result;
 }

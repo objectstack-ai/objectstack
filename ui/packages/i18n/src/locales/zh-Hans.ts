@@ -3599,7 +3599,9 @@ const zh = {
       addBefore: '在前面加一项',
       addAfter: '在后面加一项',
       rename: '改名和图标',
+      renameSourceOnly: '菜单名称需在应用的源语言下修改',
       remove: '从菜单移除',
+      contributed: '此菜单项由另一个包添加，请在那个包中移动、改名或移除。',
       pickerTitle: '添加菜单项',
       search: '搜索…',
       kind: {
@@ -3622,6 +3624,7 @@ const zh = {
       notListed: '这个应用所在的包不在列表中，菜单无法保存。',
       pendingDraft: '这个应用在 Studio 里有未发布的改动。请先在那里发布或丢弃，再保存。',
       noVersion: '这个应用所在的包没有声明版本，菜单无法定制。',
+      notWritable: '这个应用的定制包不可写，菜单无法保存。',
     },
   },
   topbar: {

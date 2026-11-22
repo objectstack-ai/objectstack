@@ -3518,7 +3518,9 @@ const de = {
       addBefore: 'Eintrag davor einfügen',
       addAfter: 'Eintrag danach einfügen',
       rename: 'Umbenennen und Symbol',
+      renameSourceOnly: 'Menünamen werden in der Ausgangssprache der App geändert',
       remove: 'Aus dem Menü entfernen',
+      contributed: 'Ein anderes Paket fügt diesen Eintrag hinzu. Er wird dort verschoben, umbenannt oder entfernt.',
       pickerTitle: 'Menüeintrag hinzufügen',
       search: 'Suchen…',
       kind: {
@@ -3541,6 +3543,7 @@ const de = {
       notListed: 'Das Paket dieser App ist nicht gelistet, daher kann ihr Menü nicht gespeichert werden.',
       pendingDraft: 'Diese App hat unveröffentlichte Änderungen in Studio. Veröffentlichen oder verwerfen Sie sie dort und speichern Sie dann erneut.',
       noVersion: 'Das Paket dieser App nennt keine Version, daher kann ihr Menü nicht angepasst werden.',
+      notWritable: 'Das Anpassungspaket dieser App ist nicht beschreibbar, daher kann ihr Menü nicht gespeichert werden.',
     },
   },
   topbar: {

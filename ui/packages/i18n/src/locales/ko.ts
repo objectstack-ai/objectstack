@@ -3518,7 +3518,9 @@ const ko = {
       addBefore: '앞에 항목 추가',
       addAfter: '뒤에 항목 추가',
       rename: '이름 및 아이콘 변경',
+      renameSourceOnly: '메뉴 이름은 앱의 원본 언어에서 변경합니다',
       remove: '메뉴에서 제거',
+      contributed: '이 항목은 다른 패키지가 추가합니다. 이동, 이름 변경, 제거는 그 패키지에서 합니다.',
       pickerTitle: '메뉴 항목 추가',
       search: '검색…',
       kind: {
@@ -3541,6 +3543,7 @@ const ko = {
       notListed: '이 앱의 패키지가 목록에 없어 메뉴를 저장할 수 없습니다.',
       pendingDraft: '이 앱에는 Studio에 게시되지 않은 변경 사항이 있습니다. 그곳에서 게시하거나 취소한 뒤 다시 저장하세요.',
       noVersion: '이 앱의 패키지에 버전이 없어 메뉴를 사용자 지정할 수 없습니다.',
+      notWritable: '이 앱의 사용자 지정 패키지에 쓸 수 없어 메뉴를 저장할 수 없습니다.',
     },
   },
   topbar: {

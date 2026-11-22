@@ -17,6 +17,20 @@
  *   kept, and the picker offers it again.
  * - An entry can be dragged to another place, in its group or another one.
  *
+ * A name is changed only in the app's source language (objectstack#36363,
+ * ruling (4)): the stored labels are the app's own, and a translation is
+ * written elsewhere. The rename's name field is open when the session
+ * language is the deployment's default (`GET /i18n/locales`, the server
+ * stating no source language of its own yet, objectstack#36504) and the
+ * entry's shown label is its stored one; else it is closed and says why.
+ * The icon, adding and moving are open in every language.
+ *
+ * An entry another package puts into the menu (its manifest's
+ * `navigationContributions`, appended when the app is served) is not in the
+ * app's stored menu, so it is not moved, renamed or removed here: its
+ * 「⋮」 says it is changed in that package, and it is not dragged. Adding an
+ * item before or after it stays open.
+ *
  * Every edit is staged with the mode (`useDesignModeChange`), under one key
  * for the app's menu: the mode's 「Save」 writes it (`saveAppMenu`), its
  * 「Cancel」 drops it. The menu drawn is the staged one, so it survives a page
@@ -115,13 +129,20 @@ import {
   patchEntry,
   placeOf,
   removeEntry,
+  storedEntriesById,
   targetKeyFor,
   withEntryIds,
   type Menu,
   type MenuEntry,
   type MenuTargetKind,
 } from './designModeMenu.js';
-import { consoleAppMenuDoors, saveAppMenu } from './designModeMenuSave.js';
+import {
+  consoleAppMenuDoors,
+  fetchDefaultLocale,
+  isSameLanguage,
+  readStoredMenu,
+  saveAppMenu,
+} from './designModeMenuSave.js';
 
 /**
  * The group label's icon-mode hiding, as the sidebar's own labels declare it
@@ -179,20 +200,42 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
       noVersion: t('designMode.menu.noVersion', {
         defaultValue: "This app's package states no version, so its menu cannot be customized.",
       }),
+      notWritable: t('designMode.menu.notWritable', {
+        defaultValue: "This app's customization package cannot be written, so its menu cannot be saved.",
+      }),
     }),
     [t],
   );
   const appName = app.name;
   const commit = React.useCallback(
     (navigation: Menu) =>
-      saveAppMenu({ appName, packageId, navigation }, texts, consoleAppMenuDoors(client as never)),
-    [appName, packageId, texts, client],
+      saveAppMenu({ appName, packageId, served, navigation }, texts, consoleAppMenuDoors(client as never)),
+    [appName, packageId, served, texts, client],
   );
   const stage = change.stage;
   const update = React.useCallback((next: Menu) => stage(next, commit), [stage, commit]);
 
   const [addAt, setAddAt] = React.useState<AddAt | null>(null);
   const [renaming, setRenaming] = React.useState<string | null>(null);
+
+  // The stored menu and the deployment's default language, for the rename's
+  // source-language rule; both `undefined` while read.
+  const [storedMenu, setStoredMenu] = React.useState<Menu | null | undefined>(undefined);
+  const [defaultLocale, setDefaultLocale] = React.useState<string | null | undefined>(undefined);
+  React.useEffect(() => {
+    let cancelled = false;
+    void readStoredMenu(appName, packageId, client as never).then((nav) => !cancelled && setStoredMenu(nav));
+    void fetchDefaultLocale().then((code) => !cancelled && setDefaultLocale(code));
+    return () => {
+      cancelled = true;
+    };
+  }, [appName, packageId, client]);
+  const storedById = React.useMemo(
+    () => (storedMenu ? storedEntriesById(served, storedMenu) : null),
+    [served, storedMenu],
+  );
+  /** Whether the entry `id` is another package's (served, and not in the stored menu). */
+  const contributed = (id: string): boolean => !!storedById && !storedById.has(id) && !!entryOf(served, id);
 
   const labelOf = React.useCallback(
     (entry: MenuEntry) =>
@@ -256,9 +299,11 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
         label={labelOf(entry)}
         basePath={basePath}
         resolveTargetIcon={resolveTargetIcon}
+        fixed={contributed(id)}
         actions={
           <EntryActions
             label={labelOf(entry)}
+            fixed={contributed(id)}
             canUp={canMoveBy(menu, id, -1)}
             canDown={canMoveBy(menu, id, 1)}
             groups={groups
@@ -316,6 +361,14 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
   };
 
   const renamed = renaming ? entryOf(menu, renaming) : null;
+  /** Whether the entry `id`'s name may be changed here (ruling (4)). */
+  const nameOpen = (id: string): boolean => {
+    if (!defaultLocale || !isSameLanguage(language, defaultLocale)) return false;
+    const shown = entryOf(served, id);
+    if (!shown) return true; // added in this session: its name is the editor's own
+    const stored = storedById?.get(id);
+    return !!stored && labelOf(shown) === labelOf(stored);
+  };
 
   return (
     <SidebarGroup data-testid="design-mode-menu">
@@ -340,11 +393,12 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
         <RenameDialog
           label={labelOf(renamed)}
           icon={typeof renamed.icon === 'string' ? renamed.icon : ''}
+          nameLocked={!nameOpen(String(renamed.id))}
           onClose={() => setRenaming(null)}
           onDone={(label, icon) => {
             // A name left as it was stays inherited (or as authored); a cleared one inherits again.
             const patch: Record<string, unknown> = { icon: icon || undefined };
-            if (label !== labelOf(renamed)) patch.label = label || undefined;
+            if (nameOpen(String(renamed.id)) && label !== labelOf(renamed)) patch.label = label || undefined;
             update(patchEntry(menu, String(renamed.id), patch));
             setRenaming(null);
           }}
@@ -365,6 +419,7 @@ function MenuLeaf({
   label,
   basePath,
   resolveTargetIcon,
+  fixed,
   actions,
 }: {
   id: string;
@@ -373,9 +428,11 @@ function MenuLeaf({
   label: string;
   basePath: string;
   resolveTargetIcon?: NavTargetIconResolver;
+  /** Another package's entry: not dragged. */
+  fixed: boolean;
   actions: React.ReactNode;
 }) {
-  const sortable = useSortable({ id });
+  const sortable = useSortable({ id, disabled: fixed });
   const item = entry as unknown as NavigationItem;
   const iconName =
     item.type === 'object' && item.objectName
@@ -390,7 +447,7 @@ function MenuLeaf({
       className={cn(sortable.isDragging && 'z-10 opacity-70')}
       data-testid={`design-menu-entry-${id}`}
     >
-      <SidebarMenuButton asChild tooltip={label} className="cursor-grab">
+      <SidebarMenuButton asChild tooltip={label} className={fixed ? undefined : 'cursor-grab'}>
         {external ? (
           <a href={href} target="_blank" rel="noopener noreferrer" {...sortable.attributes} {...sortable.listeners}>
             {icon}
@@ -438,6 +495,7 @@ function AddRow({ parentId, depth, label, onAdd }: { parentId: string | null; de
 
 function EntryActions({
   label,
+  fixed,
   canUp,
   canDown,
   groups,
@@ -451,6 +509,8 @@ function EntryActions({
   onRemove,
 }: {
   label: string;
+  /** Another package's entry: only adding beside it is open. */
+  fixed: boolean;
   canUp: boolean;
   canDown: boolean;
   groups: Array<{ id: string; label: string; depth: number }>;
@@ -476,14 +536,22 @@ function EntryActions({
         </SidebarMenuAction>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="right" align="start">
-        <DropdownMenuItem disabled={!canUp} onSelect={onUp}>
+        {fixed && (
+          <>
+            <p className="max-w-56 px-2 py-1.5 text-xs text-muted-foreground" data-testid="design-menu-contributed">
+              {t('designMode.menu.contributed', { defaultValue: 'Another package adds this item. It is moved, renamed or removed there.' })}
+            </p>
+            <DropdownMenuSeparator />
+          </>
+        )}
+        <DropdownMenuItem disabled={fixed || !canUp} onSelect={onUp}>
           {t('designMode.menu.moveUp', { defaultValue: 'Move up' })}
         </DropdownMenuItem>
-        <DropdownMenuItem disabled={!canDown} onSelect={onDown}>
+        <DropdownMenuItem disabled={fixed || !canDown} onSelect={onDown}>
           {t('designMode.menu.moveDown', { defaultValue: 'Move down' })}
         </DropdownMenuItem>
         <DropdownMenuSub>
-          <DropdownMenuSubTrigger disabled={groups.length === 0 && atTopLevel}>
+          <DropdownMenuSubTrigger disabled={fixed || (groups.length === 0 && atTopLevel)}>
             {t('designMode.menu.moveToGroup', { defaultValue: 'Move to group' })}
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent>
@@ -506,11 +574,11 @@ function EntryActions({
         <DropdownMenuItem onSelect={onAddAfter}>
           {t('designMode.menu.addAfter', { defaultValue: 'Add an item after' })}
         </DropdownMenuItem>
-        <DropdownMenuItem onSelect={onRename}>
+        <DropdownMenuItem disabled={fixed} onSelect={onRename}>
           {t('designMode.menu.rename', { defaultValue: 'Rename and icon' })}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={onRemove} className="text-destructive focus:text-destructive">
+        <DropdownMenuItem disabled={fixed} onSelect={onRemove} className="text-destructive focus:text-destructive">
           {t('designMode.menu.remove', { defaultValue: 'Remove from menu' })}
         </DropdownMenuItem>
       </DropdownMenuContent>
@@ -729,11 +797,14 @@ function MenuItemPicker({
 function RenameDialog({
   label,
   icon,
+  nameLocked,
   onClose,
   onDone,
 }: {
   label: string;
   icon: string;
+  /** The name is shown, not changed: the session is not in the app's source language. */
+  nameLocked: boolean;
   onClose: () => void;
   onDone: (label: string, icon: string) => void;
 }) {
@@ -756,7 +827,19 @@ function RenameDialog({
         >
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="design-menu-rename-label">{t('designMode.menu.name', { defaultValue: 'Name' })}</Label>
-            <Input id="design-menu-rename-label" autoFocus value={name} onChange={(e) => setName(e.target.value)} />
+            <Input
+              id="design-menu-rename-label"
+              autoFocus={!nameLocked}
+              disabled={nameLocked}
+              aria-describedby={nameLocked ? 'design-menu-rename-label-hint' : undefined}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+            {nameLocked && (
+              <p id="design-menu-rename-label-hint" className="text-xs text-muted-foreground" data-testid="design-menu-rename-source-only">
+                {t('designMode.menu.renameSourceOnly', { defaultValue: "Menu names are changed in the app's source language" })}
+              </p>
+            )}
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="design-menu-rename-icon">{t('designMode.menu.icon', { defaultValue: 'Icon' })}</Label>
@@ -764,7 +847,7 @@ function RenameDialog({
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border">
                 {preview}
               </span>
-              <Input id="design-menu-rename-icon" value={iconName} onChange={(e) => setIconName(e.target.value)} placeholder="briefcase" />
+              <Input id="design-menu-rename-icon" autoFocus={nameLocked} value={iconName} onChange={(e) => setIconName(e.target.value)} placeholder="briefcase" />
             </div>
             <p className="text-xs text-muted-foreground">
               {t('designMode.menu.iconHint', { defaultValue: 'A Lucide icon name, such as "briefcase".' })}

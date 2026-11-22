@@ -3595,7 +3595,9 @@ const pt = {
       addBefore: 'Adicionar um item antes',
       addAfter: 'Adicionar um item depois',
       rename: 'Renomear e ícone',
+      renameSourceOnly: 'Os nomes do menu são alterados no idioma de origem do aplicativo',
       remove: 'Remover do menu',
+      contributed: 'Outro pacote adiciona este item. Ele é movido, renomeado ou removido lá.',
       pickerTitle: 'Adicionar item de menu',
       search: 'Pesquisar…',
       kind: {
@@ -3618,6 +3620,7 @@ const pt = {
       notListed: 'O pacote deste aplicativo não está listado, então o menu não pode ser salvo.',
       pendingDraft: 'Este aplicativo tem alterações não publicadas no Studio. Publique ou descarte-as lá e salve novamente.',
       noVersion: 'O pacote deste aplicativo não declara versão, então o menu não pode ser personalizado.',
+      notWritable: 'O pacote de personalização deste aplicativo não pode ser gravado, então o menu não pode ser salvo.',
     },
   },
   topbar: {

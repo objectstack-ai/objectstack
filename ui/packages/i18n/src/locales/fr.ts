@@ -3596,7 +3596,9 @@ const fr = {
       addBefore: 'Ajouter un élément avant',
       addAfter: 'Ajouter un élément après',
       rename: 'Renommer et icône',
+      renameSourceOnly: 'Les noms du menu se modifient dans la langue source de l’application',
       remove: 'Retirer du menu',
+      contributed: 'Un autre package ajoute cet élément. Il se déplace, se renomme ou se retire là-bas.',
       pickerTitle: 'Ajouter un élément de menu',
       search: 'Rechercher…',
       kind: {
@@ -3619,6 +3621,7 @@ const fr = {
       notListed: 'Le package de cette application n’est pas listé : son menu ne peut pas être enregistré.',
       pendingDraft: 'Cette application a des modifications non publiées dans Studio. Publiez-les ou annulez-les là-bas, puis enregistrez à nouveau.',
       noVersion: 'Le package de cette application ne déclare aucune version : son menu ne peut pas être personnalisé.',
+      notWritable: 'Le package de personnalisation de cette application n’est pas modifiable : son menu ne peut pas être enregistré.',
     },
   },
   topbar: {

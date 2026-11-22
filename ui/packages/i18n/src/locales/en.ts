@@ -4193,7 +4193,9 @@ const en = {
       addBefore: 'Add an item before',
       addAfter: 'Add an item after',
       rename: 'Rename and icon',
+      renameSourceOnly: 'Menu names are changed in the app\'s source language',
       remove: 'Remove from menu',
+      contributed: 'Another package adds this item. It is moved, renamed or removed there.',
       pickerTitle: 'Add menu item',
       search: 'Search…',
       kind: {
@@ -4216,6 +4218,7 @@ const en = {
       notListed: 'This app\'s package is not listed, so its menu cannot be saved.',
       pendingDraft: 'This app has unpublished changes in Studio. Publish or discard them there, then save again.',
       noVersion: 'This app\'s package states no version, so its menu cannot be customized.',
+      notWritable: 'This app\'s customization package cannot be written, so its menu cannot be saved.',
     },
   },
   topbar: {
