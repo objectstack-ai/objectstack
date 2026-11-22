@@ -115,6 +115,16 @@ const BOARD = {
   columns: ['name', 'amount'], kanban: { groupByField: 'status', columns: ['name', 'amount'] },
   _packageId: SHIPPED_PACKAGE,
 };
+/**
+ * A board that declares no `kanban` block: the lane field is the one the
+ * object's lifecycle picks (`status`), drawn by `kanbanViewOptions`.
+ */
+const BARE_BOARD = { name: `${OBJECT}.bare_board`, object: OBJECT, label: 'Bare board', type: 'kanban', columns: ['name', 'amount'], _packageId: SHIPPED_PACKAGE };
+/** The reader's own board, saved with no `kanban` block either. */
+const PERSONAL_BOARD = {
+  id: 'pv_board', user_id: 'u1', object_name: OBJECT, label: 'My board',
+  config: { type: 'kanban', columns: ['name', 'amount'], data: { provider: 'object', object: OBJECT } },
+};
 const UNBOUND = { name: `${OBJECT}.unbound`, object: OBJECT, label: 'Unbound', type: 'grid', columns: ['name', 'amount'] };
 /** A stored view that declares no columns (the list draws the object's defaults). */
 const BARE = { name: `${OBJECT}.bare`, object: OBJECT, label: 'Bare', type: 'grid' };
@@ -133,13 +143,13 @@ const PACKAGES = [
 function mount(viewId: string) {
   const dataSource = {
     find: vi.fn(async (resource: string) =>
-      resource === 'sys_personal_view' ? { data: [PERSONAL], total: 1 } : { data: [], total: 0 }),
+      resource === 'sys_personal_view' ? { data: [PERSONAL, PERSONAL_BOARD], total: 2 } : { data: [], total: 0 }),
     findOne: vi.fn(async () => null),
     create: vi.fn(async (_resource: string, data: Record<string, any>) => ({ id: 'pv_new', ...data })),
     update: vi.fn(async (_resource: string, _id: string, _patch: Record<string, any>) => ({})),
     delete: vi.fn(async () => ({})),
     getObjectSchema: vi.fn(async () => ({ name: OBJECT, fields: {} })),
-    listViews: vi.fn(async () => [SHIPPED, CUSTOM, UNBOUND, BARE, BOARD]),
+    listViews: vi.fn(async () => [SHIPPED, CUSTOM, UNBOUND, BARE, BOARD, BARE_BOARD]),
     updateView: vi.fn(async () => ({})),
   };
   render(
@@ -247,6 +257,46 @@ describe('objectstack#36370 — 「Save as my view」 keeps a board\'s changed s
       showFieldLabels: false,
       summary: { type: 'count' },
     });
+    expect(writes).toEqual([]);
+  });
+
+  /**
+   * L2 on #36411: a board whose view declares no `kanban` block draws the lane
+   * field the object picks. A changed toggle or statistic, saved, must carry
+   * that lane: `KanbanConfigSchema` requires `groupByField`, and a stored
+   * `kanban: { showFieldLabels: false }` alone is a block the spec refuses.
+   */
+  it('a board with no kanban block: 「Save as my view」 stores the lane field the board draws', async () => {
+    const page = mount(BARE_BOARD.name);
+    await settle();
+    await waitFor(() => expect(typeof listProps.current?.onKanbanChange).toBe('function'));
+    act(() => {
+      listProps.current!.onKanbanChange({ showFieldLabels: false });
+    });
+    await settle();
+    await openSave();
+    fireEvent.click(await screen.findByTestId('list-draft-save-as'));
+    fireEvent.click(await screen.findByTestId('personal-view-name-submit'));
+    await waitFor(() => expect(page.dataSource.create).toHaveBeenCalledTimes(1));
+    const [, row] = page.dataSource.create.mock.calls[0];
+    expect(row.config.kanban).toMatchObject({ groupByField: 'status', showFieldLabels: false });
+    expect(writes).toEqual([]);
+  });
+
+  it('the reader\'s own board with no kanban block: 「Save to this view」 stores the lane field the board draws', async () => {
+    const page = mount(PERSONAL_BOARD.id);
+    await settle();
+    await waitFor(() => expect(typeof listProps.current?.onKanbanChange).toBe('function'));
+    act(() => {
+      listProps.current!.onKanbanChange({ summary: { type: 'count' } });
+    });
+    await settle();
+    await openSave();
+    fireEvent.click(await screen.findByTestId('list-draft-save-to-view'));
+    await waitFor(() => expect(page.dataSource.update).toHaveBeenCalledTimes(1));
+    const [resource, id, patch] = page.dataSource.update.mock.calls[0];
+    expect([resource, id]).toEqual(['sys_personal_view', PERSONAL_BOARD.id]);
+    expect(patch.config.kanban).toMatchObject({ groupByField: 'status', summary: { type: 'count' } });
     expect(writes).toEqual([]);
   });
 });

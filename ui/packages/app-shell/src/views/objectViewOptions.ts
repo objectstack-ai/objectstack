@@ -365,6 +365,27 @@ export function kanbanViewOptions(viewDef: any, objectDef: any): Record<string, 
 }
 
 /**
+ * objectstack#36370 — the board's draft (`listDraft.draft.kanban`) as a save
+ * lays it over the view's own `kanban` block. A view that declares no block,
+ * or a block with no `groupByField`, draws the lane field the object's
+ * lifecycle picks (`kanbanViewOptions` above); a save that kept only the
+ * changed keys would store `kanban: { showFieldLabels: false }`, a block
+ * `KanbanConfigSchema` refuses (it requires `groupByField`). So the lane the
+ * board draws goes with it, unless the draft picks one of its own.
+ */
+export function kanbanDraftToSave(
+    viewDef: any,
+    objectDef: any,
+    draft: Readonly<Record<string, unknown>> | undefined,
+): Record<string, unknown> | undefined {
+    if (!draft) return undefined;
+    const ownLane = viewDef?.kanban?.groupByField;
+    if ((typeof ownLane === 'string' && ownLane !== '') || 'groupByField' in draft) return { ...draft };
+    const lane = kanbanViewOptions(viewDef, objectDef).groupByField;
+    return typeof lane === 'string' && lane !== '' ? { groupByField: lane, ...draft } : { ...draft };
+}
+
+/**
  * objectui#10046 — is `a` the same set of per-kind blocks as `b` (the `options`
  * bag until #25923), compared by VALUE? (objectui#7237 holds the resolved
  * `filter` through the same comparison.)

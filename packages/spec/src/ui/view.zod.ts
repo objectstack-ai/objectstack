@@ -2371,11 +2371,15 @@ export const EmptyStateSchema = lazySchema(() => strictObject({
  * objectstack#36370 — a board lane's foot statistic (`kanban.summary`).
  *
  * Its own closed set, not the list footer's `ColumnSummaryConfigSchema`: the
- * board computes these over the cards a lane holds, so the set is exactly what
- * a reader computes. `count` counts the lane's records; `sum` totals a number
- * field (`field` required); `none` shows nothing, also over `summarizeField`.
- * An average, a minimum or a maximum waits for a server-side lane read: over a
- * lane that has loaded only part of its cards none of them is even a bound.
+ * board computes these in the browser, so the set is exactly what a reader
+ * computes. `count` counts the lane's records (the lane's own count, the one
+ * its header shows); `sum` totals a number field (`field` required) over the
+ * cards the lane has LOADED, not over every record of the lane, and says so
+ * at the foot when the lane holds more than it drew; `none` shows nothing,
+ * also over `summarizeField`. A sum over the whole lane, and an average, a
+ * minimum or a maximum, wait for a lane aggregate the query answers
+ * (objectstack#36520): over a lane that has loaded only part of its cards none
+ * of them is even a bound.
  */
 export const KanbanLaneSummarySchema = lazySchema(() => z.discriminatedUnion('type', [
   strictObject({
@@ -2395,9 +2399,9 @@ export const KanbanLaneSummarySchema = lazySchema(() => z.discriminatedUnion('ty
     history: VIEW_HISTORY,
   }, {
     type: z.literal('sum'),
-    field: z.string().min(1).describe('The number field the lane totals (e.g. amount)'),
+    field: z.string().min(1).describe('The number field the lane totals over its loaded cards (e.g. amount)'),
   }),
-]).describe('Lane foot statistic: none, count, or the sum of a number field'));
+]).describe('Lane foot statistic: none, the count of the lane\'s records, or the sum of a number field over the lane\'s loaded cards'));
 
 /**
  * Kanban Settings
@@ -2465,7 +2469,8 @@ export const KanbanConfigSchema = lazySchema(() => strictObject({
   /**
    * objectstack#36370 — the statistic each lane shows at its foot
    * ({@link KanbanLaneSummarySchema}): `{ type: 'count' }` counts the lane's
-   * records; `{ type: 'sum', field }` totals a number field over them;
+   * records; `{ type: 'sum', field }` totals a number field over the cards
+   * the lane has loaded (not the lane's every record: objectstack#36520);
    * `{ type: 'none' }` shows nothing, also over a `summarizeField`. Without
    * it a lane shows the sum of `summarizeField` where that is set, as before
    * this key, and nothing otherwise.
@@ -2475,7 +2480,8 @@ export const KanbanConfigSchema = lazySchema(() => strictObject({
    */
   summary: KanbanLaneSummarySchema.optional().describe(
     'The statistic each lane shows at its foot. `{ type: \'count\' }` counts the lane records; '
-    + '`{ type: \'sum\', field: \'amount\' }` totals a number field; `{ type: \'none\' }` shows nothing. '
+    + '`{ type: \'sum\', field: \'amount\' }` totals a number field over the cards the lane has loaded, '
+    + 'not every record of the lane (the foot says so when the lane holds more); `{ type: \'none\' }` shows nothing. '
     + 'Takes precedence over summarizeField. Omit to keep summarizeField\'s sum, or no statistic without it.',
   ),
   /**

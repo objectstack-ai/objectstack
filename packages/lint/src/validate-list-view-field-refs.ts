@@ -972,9 +972,10 @@ export function columnSummaryRefusal(
 /**
  * [#36370] The field-naming position inside `kanban.summary`, the lane foot
  * statistic. Its own table rather than a `POSITIONS` row: the key lives one
- * record further down, as `columns[].summary.field` does. A stale name totals
- * nothing, and every lane's foot prints a sum of 0 the author never asked for:
- * the `columns[].summary.field` level, not `summarizeField`'s.
+ * record further down, as `columns[].summary.field` does. A stale name draws
+ * nothing: the board finds no such field on the object and every lane's foot
+ * goes blank, the statistic the author asked for gone without a word. The
+ * `columns[].summary.field` level, not `summarizeField`'s.
  */
 const KANBAN_SUMMARY_POSITIONS: Array<{ key: string; severity: Sev }> = [{ key: 'field', severity: 'error' }];
 

@@ -37,11 +37,6 @@ import { isEmptyValue } from '@object-ui/core';
  * exactly as they did before.
  */
 /**
- * objectstack#36370 — the calculations a lane statistic computes on the board:
- * the list footer's that read the lane's own cards (`ColumnSummary` in the
- * spec), `count` and a number field's `sum`, `avg`, `min` and `max`.
- */
-/**
  * objectstack#36370 — the lane statistics the board computes, the closed set
  * the spec's `KanbanLaneSummarySchema` publishes (with `none`). An average, a
  * minimum or a maximum over a lane that has loaded part of its cards is not

@@ -1731,6 +1731,13 @@ describe('[#36370] the lane foot statistic of a board', () => {
     const findings = withSummary({ type: 'sum', field: 'is_locked' });
     expect(findings).toHaveLength(1);
     expect(findings[0].message).toContain('summary "sum" over "is_locked" (`boolean`) totals no number');
+    // A toggle is the same true / false class: refused at the same place.
+    const objects = [{ name: 'duly_task', label: 'Task', fields: [{ name: 'probe', type: 'toggle', label: 'Probe' }] }];
+    const toggle = validateListViewFieldRefsUnrecorded(
+      stackWith({ data: { provider: 'object', object: 'duly_task' }, type: 'kanban', columns: ['probe'], kanban: { groupByField: 'probe', summary: { type: 'sum', field: 'probe' } } }, objects),
+    ).filter((f) => f.rule === LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED);
+    expect(toggle.map((f) => [f.path, f.severity])).toEqual([['views[0].list.kanban.summary', 'error']]);
+    expect(toggle[0].message).toContain('(`toggle`) totals no number');
   });
 
   it('accepts a sum over a number, and judges nothing for count or none', () => {

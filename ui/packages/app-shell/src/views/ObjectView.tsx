@@ -117,6 +117,7 @@ import { ChangeOwnerDialog } from './ChangeOwnerDialog.js';
 import { changeOwnerEligibleRows, changeOwnerObjectOffer, useListChangeOwnerOffered } from './changeOwner.js';
 import { parseListStateParams } from './userFilterUrlState.js';
 import { FILTER_FOLD_REFUSAL_KEYS } from './viewFilterFold.js';
+import { kanbanDraftToSave } from './objectViewOptions.js';
 
 // objectstack#25992 slice 1: these module-level helpers moved to the sibling
 // `objectView*.ts` modules above. Every name this file exported stays
@@ -770,8 +771,9 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     const draftDisplay = {
         ...(listDraft.draft.viewType ? { viewType: listDraft.draft.viewType } : {}),
         ...(listDraft.draft.rowColor !== undefined ? { rowColor: listDraft.draft.rowColor } : {}),
-        // objectstack#36370 — and a board's changed settings.
-        ...(listDraft.draft.kanban ? { kanban: listDraft.draft.kanban } : {}),
+        // objectstack#36370 — and a board's changed settings, with the lane
+        // field the board draws when the view declares none (`kanbanDraftToSave`).
+        ...(listDraft.draft.kanban ? { kanban: kanbanDraftToSave(activeView, objectDef, listDraft.draft.kanban) } : {}),
     };
     // objectstack#25992 slice 8: the list's toolbar state in the URL (seed, write-back,
     // "Reset view") moved to `./objectViewListUrlState.ts`.
@@ -1035,7 +1037,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         // a board's changed settings.
         const saveAsDisplay = {
             ...(listDraft.draft.rowColor !== undefined ? { rowColor: listDraft.draft.rowColor } : {}),
-            ...(listDraft.draft.kanban ? { kanban: listDraft.draft.kanban } : {}),
+            ...(listDraft.draft.kanban ? { kanban: kanbanDraftToSave(activeView, objectDef, listDraft.draft.kanban) } : {}),
         };
         const built = buildInPlaceViewConfig(
             objectDef.name,
