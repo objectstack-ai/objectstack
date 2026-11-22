@@ -83,7 +83,7 @@ const result = CurrencyConfigSchema.parse(data);
 | **deleteBehavior** | `Enum<'set_null' \| 'cascade' \| 'restrict'>` | optional (default: `"set_null"`) | What happens if referenced record is deleted |
 | **inlineEdit** | `boolean \| Enum<'grid' \| 'form'>` | optional | How the parent's form edits these child records inline (atomic master-detail) when a field group of the parent names this child (fieldGroups[].relatedList); a child no group names is not inlined, whatever this says. true or absent = auto-pick grid/form by child shape; 'grid' = editable line-item grid; 'form' = list + per-row full form. |
 | **inlineTitle** | `string` | optional | Title for the inline master-detail grid |
-| **inlineColumns** | `{ name: string; label?: string; type?: Enum<'text' \| 'number' \| 'currency' \| 'date' \| 'datetime' \| 'time' \| 'select' \| 'lookup' \| 'file'>; width?: number; … }[]` | optional | Explicit columns for the inline grid (derived from the child object when omitted). Each entry is a strict, name-keyed column (`{ name, label?, type?, … }` — objectui GridColumn); identity-only entries (`{ name }`) hydrate everything else from the child object's fields. Unknown keys and the retired `field` spelling are refused at parse. |
+| **inlineColumns** | `{ name: string; label?: string; type?: Enum<'text' \| 'number' \| 'currency' \| 'date' \| 'datetime' \| 'time' \| 'select' \| …>; width?: number; … }[]` | optional | Explicit columns for the inline grid (derived from the child object when omitted). Each entry is a strict, name-keyed column (`{ name, label?, type?, … }` — objectui GridColumn); identity-only entries (`{ name }`) hydrate everything else from the child object's fields. Unknown keys and the retired `field` spelling are refused at parse. |
 | **inlineAmountField** | `string` | optional | Numeric child field summed for the inline grid total |
 | **relatedList** | `boolean \| 'primary'` | optional | Show this child collection as a related list on the parent's detail page (read-side mirror of inlineEdit). true = an auxiliary panel on the record page; absent = an auxiliary panel, except that a master_detail field becomes a body table when a field group of the parent names it (fieldGroups[].relatedList); false = hidden: the child object is not shown on the parent record page; 'primary' = a body table: part of the record's main content, shown as a full-width table in the record's detail body. Write true on a master_detail field to keep it an auxiliary panel even from a field group. 'primary' places a list and does not order it: the parent object's relatedLists orders the full-width tables and the auxiliary panels. The page layout is defined by ADR-0085. A derived related list (relatedList: 'primary') inherits its row order from the child object's DEFAULT list view sort — the isDefault view, or the first declared list item when none is marked default; wire spelling is sort=`<field>` / sort=-`<field>`, never $orderby. A child object with no list-view sort emits no ordering parameter, and rows fall back to record-id order. |
 | **relatedListTitle** | `string` | optional | Title for the detail-page related list |
@@ -218,16 +218,17 @@ const result = CurrencyConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Child field this column shows — the key the grid reads and writes on each row object (objectui GridColumn.name). The retired `field` spelling is refused. |
 | **label** | `string` | optional | Column header; defaults to the child field's label via hydration. |
-| **type** | `Enum<'text' \| 'number' \| 'currency' \| 'date' \| 'datetime' \| 'time' \| 'select' \| 'lookup' \| 'file'>` | optional | Cell control, derived from the child field's type when omitted. Declaring it opts the column out of schema hydration — supply the extras (options / reference / …) yourself. |
+| **type** | `Enum<'text' \| 'number' \| 'currency' \| 'date' \| 'datetime' \| 'time' \| 'select' \| …>` | optional | Cell control, derived from the child field's type when omitted: `user` is a person picker, `multiselect` a list holding several of the column's options, `tags` a list of free-form tags, `boolean` a checkbox and `rating` a row of stars. Declaring it opts the column out of schema hydration — supply the extras (options / reference / …) yourself. |
 | **width** | `number` | optional | Fixed column width in px; omitted columns use type-based role sizing (text flexes, numeric/date/select stay fixed). |
 | **required** | `boolean` | optional | Cell is flagged inline-invalid while empty. Computed columns are never required. |
-| **options** | `{ label: string; value: string }[]` | optional | Select-cell options for `type: 'select'`; derived from the child field's options when the column declares no `type`. |
+| **options** | `{ label: string; value: string }[]` | optional | Options of a `select` or `multiselect` cell, and the tags a `tags` cell offers; derived from the child field's options when the column declares no `type`. |
 | **prefix** | `string` | optional | Symbol shown in a `currency` cell in place of the resolved currency's own symbol. No default: when omitted, the cell shows the symbol of the currency it resolves. It replaces the symbol only — the amount's decimal places stay the currency's. |
 | **step** | `number` | optional | Input step for numeric cells. |
 | **reference** | `string` | optional | Referenced object for `type: 'lookup'` cells; derived from the child lookup field when the column declares no `type`. |
 | **displayField** | `string` | optional | Label field shown for a picked lookup record. |
 | **idField** | `string` | optional | Id field stored for a picked lookup record. |
-| **multiple** | `boolean` | optional | Multi-value column: multi-record lookup, or multi-file upload cell. |
+| **multiple** | `boolean` | optional | Multi-value column: multi-record lookup, several people in a `user` cell, or multi-file upload cell. |
+| **max** | `integer` | optional | Star count of a `rating` cell (default 5); derived from the child field's `max` when the column declares no `type`. |
 | **accept** | `string[]` | optional | Accepted MIME types / extensions for a `file` cell's picker (e.g. ['image/*', '.pdf']); omit to accept anything. |
 | **defaultHidden** | `boolean` | optional | Collapsed into the grid's column chooser by default (not dropped); required columns are never default-hidden. |
 | **computed** | `boolean` | optional | Read-only computed column, recomputed live from sibling cells via `expr` and written back into the row. |
@@ -415,16 +416,17 @@ Allowed Values: `phone`, `id_card`, `bank_account`, `email`, `name`
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Child field this column shows — the key the grid reads and writes on each row object (objectui GridColumn.name). The retired `field` spelling is refused. |
 | **label** | `string` | optional | Column header; defaults to the child field's label via hydration. |
-| **type** | `Enum<'text' \| 'number' \| 'currency' \| 'date' \| 'datetime' \| 'time' \| 'select' \| 'lookup' \| 'file'>` | optional | Cell control, derived from the child field's type when omitted. Declaring it opts the column out of schema hydration — supply the extras (options / reference / …) yourself. |
+| **type** | `Enum<'text' \| 'number' \| 'currency' \| 'date' \| 'datetime' \| 'time' \| 'select' \| 'lookup' \| 'file' \| 'user' \| 'multiselect' \| 'tags' \| 'boolean' \| 'rating'>` | optional | Cell control, derived from the child field's type when omitted: `user` is a person picker, `multiselect` a list holding several of the column's options, `tags` a list of free-form tags, `boolean` a checkbox and `rating` a row of stars. Declaring it opts the column out of schema hydration — supply the extras (options / reference / …) yourself. |
 | **width** | `number` | optional | Fixed column width in px; omitted columns use type-based role sizing (text flexes, numeric/date/select stay fixed). |
 | **required** | `boolean` | optional | Cell is flagged inline-invalid while empty. Computed columns are never required. |
-| **options** | `{ label: string; value: string }[]` | optional | Select-cell options for `type: 'select'`; derived from the child field's options when the column declares no `type`. |
+| **options** | `{ label: string; value: string }[]` | optional | Options of a `select` or `multiselect` cell, and the tags a `tags` cell offers; derived from the child field's options when the column declares no `type`. |
 | **prefix** | `string` | optional | Symbol shown in a `currency` cell in place of the resolved currency's own symbol. No default: when omitted, the cell shows the symbol of the currency it resolves. It replaces the symbol only — the amount's decimal places stay the currency's. |
 | **step** | `number` | optional | Input step for numeric cells. |
 | **reference** | `string` | optional | Referenced object for `type: 'lookup'` cells; derived from the child lookup field when the column declares no `type`. |
 | **displayField** | `string` | optional | Label field shown for a picked lookup record. |
 | **idField** | `string` | optional | Id field stored for a picked lookup record. |
-| **multiple** | `boolean` | optional | Multi-value column: multi-record lookup, or multi-file upload cell. |
+| **multiple** | `boolean` | optional | Multi-value column: multi-record lookup, several people in a `user` cell, or multi-file upload cell. |
+| **max** | `integer` | optional | Star count of a `rating` cell (default 5); derived from the child field's `max` when the column declares no `type`. |
 | **accept** | `string[]` | optional | Accepted MIME types / extensions for a `file` cell's picker (e.g. ['image/*', '.pdf']); omit to accept anything. |
 | **defaultHidden** | `boolean` | optional | Collapsed into the grid's column chooser by default (not dropped); required columns are never default-hidden. |
 | **computed** | `boolean` | optional | Read-only computed column, recomputed live from sibling cells via `expr` and written back into the row. |

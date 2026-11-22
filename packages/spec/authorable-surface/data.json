@@ -517,6 +517,7 @@
     "data/InlineGridColumn:expr",
     "data/InlineGridColumn:idField",
     "data/InlineGridColumn:label",
+    "data/InlineGridColumn:max",
     "data/InlineGridColumn:multiple",
     "data/InlineGridColumn:name",
     "data/InlineGridColumn:options",
