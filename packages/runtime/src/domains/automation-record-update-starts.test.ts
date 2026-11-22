@@ -19,6 +19,9 @@ import { recordNotFoundError } from '@objectstack/core';
 import { RecordUpdateStartsResponseSchema } from '@objectstack/spec/api';
 import type { RecordUpdateStartsInput } from '@objectstack/spec/contracts';
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/metadata';
+
 import { HttpDispatcher } from '../http-dispatcher.js';
 
 const STORED = { id: 'p1', status: 'active', name: 'Apollo' };
