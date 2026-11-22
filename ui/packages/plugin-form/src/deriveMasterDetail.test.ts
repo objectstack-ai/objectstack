@@ -589,7 +589,7 @@ describe('people, multi-select, tags, check and rating columns take their extras
     name: 'task_line',
     fields: {
       task: { type: 'master_detail', reference: 'task' },
-      owner: { type: 'user', label: 'Owner' },
+      assignee: { type: 'user', label: 'Assignee' },
       watchers: { type: 'user', label: 'Watchers', multiple: true },
       colors: { type: 'multiselect', label: 'Colors', options: [{ label: 'Red', value: 'red' }, 'green'] },
       sizes: { type: 'checkboxes', label: 'Sizes', options: [{ label: 'S', value: 's' }] },
@@ -605,8 +605,8 @@ describe('people, multi-select, tags, check and rating columns take their extras
     Object.fromEntries(hydrateColumns(names.map((name) => ({ name })) as any, lineSchema, { booleanLabel }).map((c) => [c.name, c]));
 
   it('a people column carries `multiple` only from a multi-person field', () => {
-    for (const byName of [derived(), hydrated(['owner', 'watchers'])]) {
-      expect(byName.owner).toEqual({ name: 'owner', label: 'Owner', type: 'user', required: false });
+    for (const byName of [derived(), hydrated(['assignee', 'watchers'])]) {
+      expect(byName.assignee).toEqual({ name: 'assignee', label: 'Assignee', type: 'user', required: false });
       expect(byName.watchers).toMatchObject({ type: 'user', multiple: true });
     }
   });
