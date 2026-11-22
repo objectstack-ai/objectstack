@@ -22,11 +22,15 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { ObjectSchema } from '@objectstack/spec/data';
-import { t } from '../metadata-admin/i18n';
+import { CONTROLLED_BY_PARENT_MASTER_INVALID, ObjectSchema } from '@objectstack/spec/data';
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+import { t, tFormat } from '../metadata-admin/i18n';
 import { ObjectSettingsPanel } from './ObjectSettingsPanel';
 
 afterEach(cleanup);
+
+// Resident before any case, so a zh render reads the zh catalogue synchronously.
+const ZH = await loadStudioCatalogue('zh');
 
 const CBP_LABEL = t('engine.studio.settings.sharingControlledByParent', 'en-US');
 const PRIVATE_LABEL = t('engine.studio.settings.sharingPrivate', 'en-US');
@@ -92,7 +96,7 @@ describe('ObjectSettingsPanel — controlled_by_parent forces the master require
     expect(onPatch.mock.calls[0][0]).toEqual({ sharingModel: 'private' });
   });
 
-  it('with two master-detail fields it picks neither, and shows the spec\'s refusal', async () => {
+  it('with two master-detail fields it picks neither, and shows the refusal in business words', async () => {
     const draft = { name: 'crm_case', sharingModel: 'private', fields: TWO_MASTERS };
     const { onPatch } = renderPanel(draft);
     await pickSharing(CBP_LABEL);
@@ -100,15 +104,21 @@ describe('ObjectSettingsPanel — controlled_by_parent forces the master require
     expect(patch.fields.account.required).toBe(true);
     expect(patch.fields.contact.required).toBe(true);
 
-    // The panel the patch leads to shows what the save door will say, verbatim.
+    // The panel the patch leads to shows the save door's verdict, worded by
+    // the shape the spec stamps on its issue (objectstack#36526).
     cleanup();
     const next = { ...draft, ...patch };
     const parsed = ObjectSchema.safeParse(next);
     expect(parsed.success).toBe(false);
-    const specText = parsed.success ? '' : parsed.error.issues.find((i) => i.path.join('.') === 'fields')?.message;
-    expect(specText).toBeTruthy();
+    const issue = parsed.success ? undefined : parsed.error.issues.find((i) => i.path.join('.') === 'fields');
+    expect((issue as { params?: unknown } | undefined)?.params).toEqual({
+      code: CONTROLLED_BY_PARENT_MASTER_INVALID,
+      shape: 'several-required-masters',
+    });
     renderPanel(next);
-    expect(screen.getByTestId('owd-cbp-refusal')).toHaveTextContent(specText!);
+    expect(screen.getByTestId('owd-cbp-refusal').textContent).toBe(
+      tFormat('engine.studio.settings.cbpRefusalSeveralRequiredMasters', 'en-US', { fields: '“account”, “contact”' }),
+    );
   });
 
   it('shows no refusal for an object that derives exactly one master, nor for another model', () => {
@@ -126,9 +136,62 @@ describe('ObjectSettingsPanel — controlled_by_parent forces the master require
   it('shows the refusal for a controlled_by_parent object with no master-detail field', () => {
     const draft = { name: 'crm_case', sharingModel: 'controlled_by_parent', fields: { subject: { type: 'text' } } };
     const parsed = ObjectSchema.safeParse(draft);
-    const specText = parsed.success ? '' : parsed.error.issues.find((i) => i.path.join('.') === 'sharingModel')?.message;
-    expect(specText).toBeTruthy();
+    expect(parsed.success).toBe(false);
     renderPanel(draft);
-    expect(screen.getByTestId('owd-cbp-refusal')).toHaveTextContent(specText!);
+    expect(screen.getByTestId('owd-cbp-refusal').textContent).toBe(t('engine.studio.settings.cbpRefusalNoMaster', 'en-US'));
+  });
+});
+
+describe('ObjectSettingsPanel — the controlled_by_parent refusal speaks the author\'s language (objectstack#36526)', () => {
+  function renderIn(draft: Record<string, unknown>, locale: 'en-US' | 'zh-CN') {
+    render(<ObjectSettingsPanel name="crm_case" draft={draft} onPatch={vi.fn()} locale={locale} />);
+    return screen.getByTestId('owd-cbp-refusal').textContent ?? '';
+  }
+
+  const CASES: Array<[string, Record<string, unknown>, string, Record<string, string>, Record<string, string>]> = [
+    [
+      'two required masters',
+      {
+        account: { type: 'master_detail', label: 'Account', reference: 'crm_account', required: true },
+        contact: { type: 'master_detail', reference: 'crm_contact', required: true },
+      },
+      'engine.studio.settings.cbpRefusalSeveralRequiredMasters',
+      { fields: '“Account”, “contact”' },
+      { fields: '「Account」、「contact」' },
+    ],
+    [
+      'two master-detail fields, none required',
+      {
+        account: { type: 'master_detail', reference: 'crm_account', required: false },
+        contact: { type: 'master_detail', reference: 'crm_contact', required: false },
+      },
+      'engine.studio.settings.cbpRefusalSeveralMasters',
+      { fields: '“account”, “contact”' },
+      { fields: '「account」、「contact」' },
+    ],
+    [
+      'a required lookup only',
+      { account: { type: 'lookup', label: 'Account', reference: 'crm_account', required: true } },
+      'engine.studio.settings.cbpRefusalRequiredLookupOnly',
+      { fields: '“Account”' },
+      { fields: '「Account」' },
+    ],
+    ['no relationship field', { subject: { type: 'text' } }, 'engine.studio.settings.cbpRefusalNoMaster', {}, {}],
+  ];
+
+  it.each(CASES)('%s: the wording its shape selects, in en and zh, naming the fields', (_label, fields, key, enVars, zhVars) => {
+    const draft = { name: 'crm_case', sharingModel: 'controlled_by_parent', fields };
+    const en = renderIn(draft, 'en-US');
+    expect(en).toBe(tFormat(key, 'en-US', enVars));
+    cleanup();
+    const zh = renderIn(draft, 'zh-CN');
+    expect(zh).toBe(tFormat(key, 'zh-CN', zhVars));
+    // The zh row is the zh catalogue's, not the English fallback.
+    expect(ZH[key]).toBeTruthy();
+    expect(zh).not.toBe(en);
+    // Neither carries the spec's developer text: no ADR number, no spec version, no raw key syntax.
+    for (const text of [en, zh]) {
+      expect(text).not.toMatch(/ADR-|@objectstack\/spec|sharingModel|master_detail|required: /);
+    }
   });
 });

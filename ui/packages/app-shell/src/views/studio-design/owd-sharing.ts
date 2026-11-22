@@ -11,8 +11,13 @@
  * DOM-free, so both surfaces can share one validated implementation.
  */
 
-import { ObjectSchema, controlledByParentMasterOf } from '@objectstack/spec/data';
-import { readFields, writeFields } from '../metadata-admin/previews/object-fields-io.js';
+import {
+  CONTROLLED_BY_PARENT_MASTER_INVALID,
+  ObjectSchema,
+  controlledByParentMasterOf,
+  type ControlledByParentMasterShape,
+} from '@objectstack/spec/data';
+import { readFields, writeFields, type FieldEntry } from '../metadata-admin/previews/object-fields-io.js';
 
 /**
  * The four canonical OWD values (ADR-0090 D4). The legacy `read` / `read_write`
@@ -112,23 +117,95 @@ export function requireCbpMasterDetails(fields: unknown): unknown {
 const CBP_REFUSAL_PATHS: ReadonlySet<string> = new Set(['sharingModel', 'fields']);
 
 /**
+ * The business wording for each refusal shape the spec stamps on its issue
+ * (`params.shape`, beside `params.code` = `CONTROLLED_BY_PARENT_MASTER_INVALID`).
+ * Keyed by the spec's own shape union, so a shape the spec adds fails the
+ * type-check here until it has a row; at run time a shape with no row (an
+ * issue from a spec this build was not compiled against) falls back to the
+ * spec's message.
+ */
+export const CBP_REFUSAL_KEYS: Readonly<Record<ControlledByParentMasterShape, string>> = {
+  'several-required-masters': 'engine.studio.settings.cbpRefusalSeveralRequiredMasters',
+  'several-masters': 'engine.studio.settings.cbpRefusalSeveralMasters',
+  'master-not-required': 'engine.studio.settings.cbpRefusalMasterNotRequired',
+  'required-lookup-only': 'engine.studio.settings.cbpRefusalRequiredLookupOnly',
+  'no-master': 'engine.studio.settings.cbpRefusalNoMaster',
+  'master-not-writable': 'engine.studio.settings.cbpRefusalMasterNotWritable',
+};
+
+/** The installed spec's refusal of a `controlled_by_parent` object's master relation — see {@link cbpMasterRefusal}. */
+export interface CbpMasterRefusal {
+  /** The spec's own message, in English: the fallback when no business wording applies. */
+  readonly message: string;
+  /**
+   * The refusal's shape, read from the issue's `params` when it carries the
+   * spec's code; undefined when it does not, and the message is then shown.
+   */
+  readonly shape?: ControlledByParentMasterShape;
+  /** The fields the author has to act on, in field order (none for `no-master`). */
+  readonly fields: readonly FieldEntry[];
+}
+
+/** The `params` a refusal issue carries, read defensively (zod types them as unknown). */
+function refusalShape(params: unknown): ControlledByParentMasterShape | undefined {
+  if (params === null || typeof params !== 'object') return undefined;
+  const { code, shape } = params as { code?: unknown; shape?: unknown };
+  if (code !== CONTROLLED_BY_PARENT_MASTER_INVALID || typeof shape !== 'string') return undefined;
+  return Object.prototype.hasOwnProperty.call(CBP_REFUSAL_KEYS, shape)
+    ? (shape as ControlledByParentMasterShape)
+    : undefined;
+}
+
+/**
+ * The fields a refusal of this shape names, read off the same probe the spec
+ * judged. It selects what to show; the verdict and the shape stay the spec's.
+ */
+function refusalFields(
+  shape: ControlledByParentMasterShape,
+  entries: readonly FieldEntry[],
+  probe: Record<string, Record<string, unknown>>,
+): FieldEntry[] {
+  const masterDetails = entries.filter((e) => e.def.type === MASTER_DETAIL);
+  switch (shape) {
+    case 'several-required-masters':
+      return masterDetails.filter((e) => probe[e.name]?.required === true);
+    case 'several-masters':
+    case 'master-not-required':
+      return masterDetails;
+    case 'required-lookup-only':
+      return entries.filter((e) => e.def.type === 'lookup' && probe[e.name]?.required === true);
+    case 'master-not-writable': {
+      const master = controlledByParentMasterOf(probe);
+      return master ? entries.filter((e) => e.name === master.field) : [];
+    }
+    case 'no-master':
+      return [];
+  }
+}
+
+/**
  * The installed spec's own refusal of a `controlled_by_parent` object that does
  * not declare exactly one required `master_detail`, or undefined when the spec
- * accepts its master relation. The text is the spec's, so the designer says
- * what the save door will say, and names the fix the same way.
+ * accepts its master relation. The verdict is the spec's, so the designer says
+ * what the save door will say: the issue's `params` carry the spec's code and
+ * the refusal's shape, which the settings tab turns into business wording in
+ * the author's language ({@link CBP_REFUSAL_KEYS}), naming the fields to fix.
  *
- * The spec does not export the check, only `ObjectSchema`, so this parses a
- * PROBE: the object's name, `sharingModel: 'controlled_by_parent'`, and its
- * relationship fields reduced to `type`, `reference` and a boolean `required`.
- * The probe is needed because a whole draft can carry an issue elsewhere (an
- * unknown key, a malformed field) that stops `ObjectSchema` before the master
- * check runs, and the panel would then read a refused object as accepted. Of
- * the probe's issues it keeps the custom ones at `sharingModel` (zero masters)
- * and at `fields` (two or more), the two paths the spec reports this refusal at.
+ * It parses `ObjectSchema` — the save door's own parse — rather than calling
+ * the spec's exported `controlledByParentMasterRefusal` directly, so the code
+ * it reads is the one the door stamps. It parses a PROBE: the object's name,
+ * `sharingModel: 'controlled_by_parent'`, and its relationship fields reduced
+ * to `type`, `reference` and a boolean `required`. The probe is needed because
+ * a whole draft can carry an issue elsewhere (an unknown key, a malformed
+ * field) that stops `ObjectSchema` before the master check runs, and the panel
+ * would then read a refused object as accepted. Of the probe's issues it keeps
+ * the custom ones at `sharingModel` (zero masters) and at `fields` (two or
+ * more), the two paths the spec reports this refusal at.
  */
-export function cbpMasterRefusal(objectName: unknown, fields: unknown): string | undefined {
+export function cbpMasterRefusal(objectName: unknown, fields: unknown): CbpMasterRefusal | undefined {
+  const entries = readFields(fields).entries;
   const probeFields: Record<string, Record<string, unknown>> = {};
-  for (const e of readFields(fields).entries) {
+  for (const e of entries) {
     const type = e.def.type;
     if (type !== MASTER_DETAIL && type !== 'lookup') continue;
     const def: Record<string, unknown> = { type };
@@ -142,10 +219,16 @@ export function cbpMasterRefusal(objectName: unknown, fields: unknown): string |
     fields: probeFields,
   });
   if (result.success) return undefined;
-  const refusal = result.error.issues.find(
+  const issue = result.error.issues.find(
     (i) => i.code === 'custom' && i.path.length === 1 && CBP_REFUSAL_PATHS.has(String(i.path[0])),
   );
-  return refusal?.message;
+  if (!issue) return undefined;
+  const shape = refusalShape((issue as { params?: unknown }).params);
+  return {
+    message: issue.message,
+    shape,
+    fields: shape ? refusalFields(shape, entries, probeFields) : [],
+  };
 }
 
 /**
