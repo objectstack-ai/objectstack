@@ -3,6 +3,7 @@
 '@objectstack/rest': patch
 '@object-ui/app-shell': patch
 '@object-ui/i18n': patch
+'@object-ui/core': patch
 ---
 
 feat(service-storage): rename an attachment through a door by the attachment delete rule, and the Attachments tab names the uploader of other people's files
@@ -16,3 +17,5 @@ Two additions, no answer narrowed:
 - **The uploader, expanded.** The record page payload's `attachments` part (`POST /api/v1/data/:object/:id/page`) now asks its `sys_attachment` read with `uploaded_by` expanded, as the `activity` part expands its actor, and the Attachments panel's own list read does the same. The expansion is a read of `sys_user` as the caller: a reader who may read the uploader gets that user's row (its name), and a reader who may not keeps the stored id. A consumer of that part that compared `uploaded_by` with a user id now reads `uploaded_by.id` where the reader may read the user.
 
 The record Attachments tab shows the uploader's name on every row whose uploader the reader may read, and never shows a bare id. Its row menu offers Rename beside Delete, on the reader's own uploads and, to a reader who also holds the edit grant on `sys_attachment`, on every row, opening a name prompt; the new name is the one the list shows after a reload.
+
+`@object-ui/core`: the affordance-to-grant map gains the `attachmentRename` row (the edit grant on `sys_attachment`), which the panel asks for a row the caller did not upload.

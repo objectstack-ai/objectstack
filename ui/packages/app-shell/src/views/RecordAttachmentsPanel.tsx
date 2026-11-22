@@ -305,10 +305,11 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
    * through the engine as the caller, which needs the edit grant on
    * `sys_attachment`. So a row offers Rename to a reader who may delete and
    * either uploaded it or holds the edit grant; offering it elsewhere would
-   * offer a door the server refuses. With no provider mounted `can` answers
-   * `true`, and the server remains the gate.
+   * offer a door the server refuses. The edit-grant half is the map's
+   * `attachmentRename` row; with no provider mounted it reads open, and the
+   * server remains the gate.
    */
-  const canEditAttachments = perms.can('sys_attachment', 'update');
+  const canEditAttachments = resolveAffordance('attachmentRename', { objectName: 'sys_attachment', perms }).allowed;
   const callerId = user?.id ?? currentUserId ?? null;
   const canRename = (row: AttachmentRow): boolean => {
     if (!canDelete) return false;
