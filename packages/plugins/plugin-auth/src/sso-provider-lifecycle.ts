@@ -24,14 +24,25 @@
  *     route is counted, not only the console. A count that cannot be read
  *     refuses the delete `503`: the answer names what was unlinked, and an
  *     unlink cannot be taken back;
- *   - **after** a delete the vendor answered `success`, the after-hook removes
- *     what the provider left behind ({@link removeSsoProviderDependents}): its
- *     `sys_idp_group_mapping` rows (`source_kind: 'sso'`, `source_id` = the
- *     provider id) and the `sys_user_permission_set` grants whose `reason` is
- *     exactly the provider's projection marker (`ssoGroupProjectionReason`),
+ *   - **after** a delete the vendor answered `success`, the after-hook ends
+ *     the sessions its sign-ins opened and removes what it left behind
+ *     ({@link removeSsoProviderDependents}): the live sessions signed in
+ *     through it are revoked (`sys_session.sso_provider_id`, recorded at
+ *     sign-in by `sso-session-provider.ts`; `revoke_reason`
+ *     {@link SSO_PROVIDER_DELETED_REVOKE_REASON}), so a user it unlinked is
+ *     not left signed in until the session expires, while a session signed in
+ *     any other way is left as it is; then its `sys_idp_group_mapping` rows
+ *     (`source_kind: 'sso'`, `source_id` = the provider id) and the
+ *     `sys_user_permission_set` grants whose `reason` is exactly the
+ *     provider's projection marker (`ssoGroupProjectionReason`) are removed,
  *     never a grant by permission-set name, so a grant made by hand or by SCIM
  *     is never touched; then it adds the counts to the answer
  *     ({@link settleSsoProviderDelete}).
+ *   - **at every boot**, what a provider that no longer exists left behind is
+ *     removed the same way ({@link sweepDeletedSsoProviderAccess}): a projected
+ *     grant or a live session naming a provider with no row. That covers a
+ *     provider deleted before the delete removed its grants, and a delete whose
+ *     cleanup failed after the vendor had already deleted the provider.
  *
  * A delete the vendor refuses (`403` not the provider's manager, `404` no such
  * provider) runs no cleanup and gets no counts: the counts are only ever
@@ -97,10 +108,12 @@ import type { IDataEngine } from '@objectstack/core';
 import { withSystemContext } from './objectql-adapter.js';
 import {
   IDP_GROUP_MAPPING_OBJECT,
+  SSO_GROUP_PROJECTION_REASON_PREFIX,
   SSO_MAPPING_SOURCE_KIND,
   ssoGroupProjectionReason,
 } from './scim-group-projection.js';
 import { SSO_PROVIDER_OBJECT } from './sso-client-secret.js';
+import { SESSION_SSO_PROVIDER_FIELD } from './sso-session-provider.js';
 
 /** The better-auth endpoints whose bodies carry a provider's `domain`. */
 export const SSO_PROVIDER_REGISTER_PATH = '/sso/register';
@@ -108,6 +121,10 @@ export const SSO_PROVIDER_UPDATE_PATH = '/sso/update-provider';
 
 const ACCOUNT_OBJECT = 'sys_account';
 const GRANT_OBJECT = 'sys_user_permission_set';
+const SESSION_OBJECT = 'sys_session';
+
+/** The `sys_session.revoke_reason` of a session ended because the provider it was signed in through was deleted. */
+export const SSO_PROVIDER_DELETED_REVOKE_REASON = 'sso_provider_deleted';
 
 const text = (v: unknown): string => (typeof v === 'string' ? v : v == null ? '' : String(v));
 
@@ -423,6 +440,11 @@ export function ssoProviderDeleteSummary(impact: SsoProviderDeleteImpact, done: 
     + `and the ${plural(impact.projectedGrants, 'permission-set grant')} they gave.`;
 }
 
+/** The sessions half of a delete's answer: how many live sessions signed in through the provider it ended. */
+function sessionsSentence(revoked: number): string {
+  return `It ended ${plural(revoked, 'live session')} signed in through it.`;
+}
+
 /** Where the before-hook leaves the count for the after-hook, on the request's better-auth context. */
 export const SSO_PROVIDER_DELETE_IMPACT_STASH = '__osSsoProviderDeleteImpact';
 
@@ -461,29 +483,140 @@ export async function stageSsoProviderDeleteImpact(
 
 /** What the after-hook removed. */
 export interface SsoProviderDependentsRemoved {
+  /** Live sessions signed in through the provider, revoked. */
+  revokedSessions: number;
   removedGroupMappings: number;
   removedGrants: number;
 }
 
 /**
- * Remove what a deleted provider leaves behind: its group mapping rows, and
- * the grants whose `reason` is exactly its projection marker. Each grant is
- * deleted with its own organization as the write's tenant, as the sign-in
- * that projected it wrote it. Throws on the first failed write.
+ * A write that reports the rows it matched as a number; one that reports none is read as `fallback`.
+ * The id set is always spelled `$in`, even for one row: a scalar `where.id` is a by-id write, which
+ * throws when another writer removed the row first, where a predicate write simply matches nothing.
  */
-export async function removeSsoProviderDependents(engine: IDataEngine, providerId: string): Promise<SsoProviderDependentsRemoved> {
+const countOf = (result: unknown, fallback: number): number => (typeof result === 'number' ? result : fallback);
+
+/**
+ * Most rows one read pages in and one write touches. Below the engine's ceiling on
+ * rows a single predicate write may run per-row hooks over (`MAX_BULK_PER_ROW_HOOK_ROWS`,
+ * 10,000; a served deployment binds per-row hooks on every object), which refuses the
+ * whole write above it, and below SQLite's legacy 999-parameter bind limit for the id
+ * set. Any count is ended by paging, never by one write.
+ */
+export const SSO_PROVIDER_WRITE_BATCH = 500;
+
+/**
+ * Read `object` in pages of {@link SSO_PROVIDER_WRITE_BATCH} rows matching `where`,
+ * ordered by id and resumed after the last id read, handing each page to `each`
+ * before reading the next. A row the page's own write removed or revoked does not
+ * stall the walk: the cursor, not the filter, moves it on.
+ */
+async function eachPage(
+  reader: IDataEngine,
+  object: string,
+  where: Record<string, unknown>,
+  fields: string[],
+  each: (page: Record<string, unknown>[]) => Promise<void>,
+): Promise<void> {
+  let after: string | undefined;
+  for (;;) {
+    const page = rowsOf(
+      await reader.find(object, {
+        where: after === undefined ? where : { ...where, id: { $gt: after } },
+        fields,
+        orderBy: [{ field: 'id', order: 'asc' }],
+        limit: SSO_PROVIDER_WRITE_BATCH,
+      } as never),
+    );
+    if (page.length === 0) return;
+    await each(page);
+    if (page.length < SSO_PROVIDER_WRITE_BATCH) return;
+    after = text(page[page.length - 1]!.id);
+  }
+}
+
+/** A session row a request could still authenticate with: not revoked, not past its expiry. */
+function isLiveSession(row: Record<string, unknown>, now: number): boolean {
+  if (row.revoked_at) return false;
+  const expires = row.expires_at;
+  if (expires && new Date(expires as string | number | Date).getTime() <= now) return false;
+  return true;
+}
+
+const SESSION_ROW_FIELDS = ['id', 'expires_at', 'revoked_at', SESSION_SSO_PROVIDER_FIELD];
+
+/**
+ * Revoke the live ones of `sessions` (not revoked, not past their expiry) in
+ * one predicate write, in the shape every other revocation writes
+ * (`expires_at` a second in the past, `revoked_at`, `revoke_reason`), which
+ * `session-tombstone.ts` hides from better-auth's session reads. The write
+ * matches only rows still unrevoked, so a session another writer revoked first
+ * (a second sweep on another node) is not matched and keeps its own reason.
+ * Answers how many rows the write matched. Throws when the write fails.
+ */
+async function revokeSessions(engine: IDataEngine, sessions: Record<string, unknown>[], now: number): Promise<number> {
+  const ids = [...new Set(sessions.filter((row) => isLiveSession(row, now)).map((row) => text(row.id)).filter(Boolean))];
+  if (ids.length === 0) return 0;
+  const result: unknown = await withSystemContext(engine).update(
+    SESSION_OBJECT,
+    { expires_at: new Date(now - 1000), revoked_at: new Date(now), revoke_reason: SSO_PROVIDER_DELETED_REVOKE_REASON },
+    { where: { id: { $in: ids }, revoked_at: null }, multi: true, context: { isSystem: true } },
+  );
+  return countOf(result, ids.length);
+}
+
+/**
+ * Delete `grants` by predicate, one write per organization with that
+ * organization as the write's tenant, as the sign-in that projected them wrote
+ * them. A row another writer removed first (a second sweep on another node) is
+ * simply not matched. Answers how many rows the writes matched. Throws when a
+ * write fails.
+ */
+async function deleteGrants(engine: IDataEngine, grants: Record<string, unknown>[]): Promise<number> {
+  const byTenant = new Map<string, string[]>();
+  for (const grant of grants) {
+    const id = text(grant.id);
+    if (!id) continue;
+    const tenant = text(grant.organization_id);
+    byTenant.set(tenant, [...(byTenant.get(tenant) ?? []), id]);
+  }
+  const writer: IDataEngine = withSystemContext(engine);
+  let removed = 0;
+  for (const [tenant, ids] of byTenant) {
+    const result: unknown = await writer.delete(GRANT_OBJECT, {
+      where: { id: { $in: ids } },
+      multi: true,
+      context: { isSystem: true, tenantId: tenant || undefined },
+    });
+    removed += countOf(result, ids.length);
+  }
+  return removed;
+}
+
+/**
+ * End the sessions a deleted provider's sign-ins opened and remove what it leaves behind:
+ * first the live sessions signed in through it are revoked, then its group
+ * mapping rows and the grants whose `reason` is exactly its projection marker
+ * are deleted. Throws on the first failed write.
+ */
+export async function removeSsoProviderDependents(
+  engine: IDataEngine,
+  providerId: string,
+  now: number = Date.now(),
+): Promise<SsoProviderDependentsRemoved> {
   const reader: IDataEngine = withSystemContext(engine);
   const writer: IDataEngine = withSystemContext(engine);
+  let revokedSessions = 0;
+  if (registered(engine, SESSION_OBJECT)) {
+    await eachPage(reader, SESSION_OBJECT, { [SESSION_SSO_PROVIDER_FIELD]: providerId, revoked_at: null }, SESSION_ROW_FIELDS, async (page) => {
+      revokedSessions += await revokeSessions(engine, page, now);
+    });
+  }
   let removedGrants = 0;
   if (registered(engine, GRANT_OBJECT)) {
-    const grants = rowsOf(
-      await reader.find(GRANT_OBJECT, { where: { reason: ssoGroupProjectionReason(providerId) }, fields: ['id', 'organization_id'] } as never),
-    );
-    for (const grant of grants) {
-      const tenantId = text(grant.organization_id) || undefined;
-      await writer.delete(GRANT_OBJECT, { where: { id: text(grant.id) }, context: { isSystem: true, tenantId } });
-      removedGrants++;
-    }
+    await eachPage(reader, GRANT_OBJECT, { reason: ssoGroupProjectionReason(providerId) }, ['id', 'organization_id'], async (page) => {
+      removedGrants += await deleteGrants(engine, page);
+    });
   }
   let removedGroupMappings = 0;
   if (registered(engine, IDP_GROUP_MAPPING_OBJECT)) {
@@ -495,7 +628,7 @@ export async function removeSsoProviderDependents(engine: IDataEngine, providerI
       removedGroupMappings++;
     }
   }
-  return { removedGroupMappings, removedGrants };
+  return { revokedSessions, removedGroupMappings, removedGrants };
 }
 
 /** The answer a successful delete carries under `data`. */
@@ -503,9 +636,11 @@ export interface SsoProviderDeleteAnswer {
   providerId: string;
   unlinkedUsers: number;
   usersWithoutOtherSignIn: number;
+  /** Live sessions signed in through the provider, ended with it. */
+  revokedSessions: number;
   removedGroupMappings: number;
   removedGrants: number;
-  /** False when removing the mappings and grants failed: they are still there. */
+  /** False when ending the sessions or removing the mappings and grants failed: what was not done is still there. */
   dependentsRemoved: boolean;
   message: string;
 }
@@ -537,7 +672,7 @@ export async function settleSsoProviderDelete(
   if (!returned || typeof returned !== 'object' || Array.isArray(returned) || isVendorError(returned)) return;
   if ((returned as { success?: unknown }).success !== true) return;
 
-  let removed: SsoProviderDependentsRemoved = { removedGroupMappings: 0, removedGrants: 0 };
+  let removed: SsoProviderDependentsRemoved = { revokedSessions: 0, removedGroupMappings: 0, removedGrants: 0 };
   let dependentsRemoved = true;
   let failure = '';
   try {
@@ -546,10 +681,13 @@ export async function settleSsoProviderDelete(
     dependentsRemoved = false;
     failure = (error as Error)?.message ?? String(error);
     logError(
-      `[auth] SSO provider '${impact.providerId}' was DELETED, but removing its IdP group mappings and the permission-set `
-        + 'grants they projected FAILED; they are still in place. '
-        + `Remedy: delete the sys_user_permission_set rows whose reason is "${ssoGroupProjectionReason(impact.providerId)}" `
-        + `and the sys_idp_group_mapping rows of source_id '${impact.providerId}' (POST /admin/scim/delete-group-mapping). Cause: ${failure}`,
+      `[auth] SSO provider '${impact.providerId}' was DELETED, but ending the sessions signed in through it and removing `
+        + 'its IdP group mappings and the permission-set grants they projected FAILED; what was not done is still in place. '
+        + 'Remedy: restart the server; its boot sweep ends the live sessions recording this provider and removes the grants '
+        + `whose reason is "${ssoGroupProjectionReason(impact.providerId)}". The sweep does NOT remove the provider's IdP group `
+        + `mappings: delete each sys_idp_group_mapping row of source_id '${impact.providerId}' with `
+        + 'POST /api/v1/auth/admin/scim/delete-group-mapping { "mappingId": "…" } (Setup: Delete Mapping on the row). '
+        + `Cause: ${failure}`,
     );
   }
   const done: SsoProviderDeleteImpact = {
@@ -558,17 +696,139 @@ export async function settleSsoProviderDelete(
     projectedGrants: removed.removedGrants,
   };
   const message = dependentsRemoved
-    ? ssoProviderDeleteSummary(done, true)
-    : `${unlinkSentence(impact, true)} Its ${plural(impact.groupMappings, 'IdP group mapping')} and `
-      + `${plural(impact.projectedGrants, 'projected grant')} could NOT be removed and are still in place: ${failure}`;
+    ? `${ssoProviderDeleteSummary(done, true)} ${sessionsSentence(removed.revokedSessions)}`
+    : `${unlinkSentence(impact, true)} The sessions signed in through it could NOT all be ended, or its `
+      + `${plural(impact.groupMappings, 'IdP group mapping')} and ${plural(impact.projectedGrants, 'projected grant')} `
+      + `could NOT be removed; what was not done is still in place: ${failure}`;
   const data: SsoProviderDeleteAnswer = {
     providerId: impact.providerId,
     unlinkedUsers: impact.linkedUsers,
     usersWithoutOtherSignIn: impact.usersWithoutOtherSignIn,
+    revokedSessions: removed.revokedSessions,
     removedGroupMappings: removed.removedGroupMappings,
     removedGrants: removed.removedGrants,
     dependentsRemoved,
     message,
   };
   (returned as Record<string, unknown>).data = data;
+}
+
+// ── What a provider that no longer exists left behind ──────────────────────
+
+/** What one boot sweep removed. */
+export interface SsoProviderAccessSwept {
+  removedGrants: number;
+  revokedSessions: number;
+}
+
+/** The logger the boot sweep reports through. */
+export interface SsoProviderAccessSweepLogger {
+  info?: (message: string, meta?: Record<string, unknown>) => void;
+  /** The fallback when the host's sink carries no `error`: a failed sweep is never silent. */
+  warn: (message: string, meta?: Record<string, unknown>) => void;
+  error?: (message: string) => void;
+}
+
+const SSO_GRANT_REASON_HEAD = `${SSO_GROUP_PROJECTION_REASON_PREFIX}: provider '`;
+
+/** The provider a projected grant's `reason` names, when it is exactly a projection marker. */
+function markerProvider(reason: unknown): string | undefined {
+  if (typeof reason !== 'string' || !reason.startsWith(SSO_GRANT_REASON_HEAD) || !reason.endsWith("'")) return undefined;
+  const providerId = reason.slice(SSO_GRANT_REASON_HEAD.length, -1);
+  return providerId && ssoGroupProjectionReason(providerId) === reason ? providerId : undefined;
+}
+
+async function storedProviderIds(reader: IDataEngine): Promise<Set<string>> {
+  return new Set(
+    rowsOf(await reader.find(SSO_PROVIDER_OBJECT, { fields: ['provider_id'] } as never)).map((row) => text(row.provider_id)).filter(Boolean),
+  );
+}
+
+/**
+ * Remove what an SSO provider with no `sys_sso_provider` row left behind: the
+ * grants whose `reason` is its projection marker, and the live sessions
+ * signed in through it. Run once per boot ({@link reportSsoProviderAccessSweep}).
+ *
+ * A boot sweep and not a one-shot backfill: a provider row can go while its
+ * dependents stay (a delete whose cleanup failed once the vendor had deleted
+ * the provider, a row removed beneath the engine), and a sweep run once would
+ * leave those for good.
+ *
+ * Candidates are read and written in pages ({@link SSO_PROVIDER_WRITE_BATCH}),
+ * so any count is settled. The provider rows are read before the candidates
+ * and again for each page; a candidate is removed only when neither read holds
+ * its provider, so a provider registered while the sweep runs keeps what its
+ * sign-ins write.
+ * Answers `undefined`, removing nothing, when the provider object is not
+ * registered: with nothing to read, no provider can be judged gone. Throws on
+ * a failed read or write.
+ */
+export async function sweepDeletedSsoProviderAccess(
+  engine: IDataEngine,
+  now: number = Date.now(),
+): Promise<SsoProviderAccessSwept | undefined> {
+  if (!registered(engine, SSO_PROVIDER_OBJECT)) return undefined;
+  const reader: IDataEngine = withSystemContext(engine);
+  const before = await storedProviderIds(reader);
+  // Re-read once per page: a provider registered while the sweep runs keeps its own.
+  const goneNow = async () => {
+    const after = await storedProviderIds(reader);
+    return (providerId: string | undefined) => !!providerId && !before.has(providerId) && !after.has(providerId);
+  };
+
+  let removedGrants = 0;
+  if (registered(engine, GRANT_OBJECT)) {
+    const markers = [...before].map(ssoGroupProjectionReason);
+    const where = { reason: { $startsWith: SSO_GRANT_REASON_HEAD, ...(markers.length > 0 ? { $nin: markers } : {}) } };
+    await eachPage(reader, GRANT_OBJECT, where, ['id', 'organization_id', 'reason'], async (page) => {
+      const gone = await goneNow();
+      removedGrants += await deleteGrants(engine, page.filter((row) => gone(markerProvider(row.reason))));
+    });
+  }
+  let revokedSessions = 0;
+  if (registered(engine, SESSION_OBJECT)) {
+    const where = {
+      [SESSION_SSO_PROVIDER_FIELD]: { $null: false, ...(before.size > 0 ? { $nin: [...before] } : {}) },
+      revoked_at: { $null: true },
+    };
+    await eachPage(reader, SESSION_OBJECT, where, SESSION_ROW_FIELDS, async (page) => {
+      const gone = await goneNow();
+      revokedSessions += await revokeSessions(engine, page.filter((row) => gone(text(row[SESSION_SSO_PROVIDER_FIELD]))), now);
+    });
+  }
+  return { removedGrants, revokedSessions };
+}
+
+/**
+ * The boot step: run {@link sweepDeletedSsoProviderAccess} once and say what
+ * it removed, at `info`. Never throws into boot. A sweep that fails is said at
+ * `error`: a provider that is gone still grants its permission sets or keeps
+ * its sessions live, while nothing looks wrong.
+ */
+export async function reportSsoProviderAccessSweep(
+  engine: IDataEngine | null | undefined,
+  logger: SsoProviderAccessSweepLogger | undefined,
+): Promise<SsoProviderAccessSwept | undefined> {
+  if (!engine) return undefined;
+  try {
+    const swept = await sweepDeletedSsoProviderAccess(engine);
+    if (swept && (swept.removedGrants > 0 || swept.revokedSessions > 0)) {
+      logger?.info?.(
+        `[auth] Removed what deleted SSO providers left behind: ${plural(swept.removedGrants, 'projected permission-set grant')} `
+          + `and ${plural(swept.revokedSessions, 'live session')} of providers that no longer exist.`,
+        { removedGrants: swept.removedGrants, revokedSessions: swept.revokedSessions },
+      );
+    }
+    return swept;
+  } catch (error) {
+    const say = (message: string) => (logger?.error ? logger.error(message) : logger?.warn(message));
+    say(
+      '[auth] Removing what deleted SSO providers left behind FAILED at boot: a permission-set grant projected by a '
+        + 'provider that no longer exists still gives its set, and a session signed in through one is still live. '
+        + `Remedy: fix the cause and restart; or delete the sys_user_permission_set rows whose reason starts with "${SSO_GRANT_REASON_HEAD}" `
+        + 'and names no provider in sys_sso_provider, and revoke the sys_session rows whose sso_provider_id names none. '
+        + `Cause: ${(error as Error)?.message ?? String(error)}`,
+    );
+    return undefined;
+  }
 }

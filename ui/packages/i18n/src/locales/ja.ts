@@ -1659,6 +1659,7 @@ const ja = {
     updatedTime: "更新日時",
     recordNumber: "レコード ID",
     clickToEdit: "クリックで編集",
+    setField: "{{field}}を設定",
     // objectui#3863 — base key. ja has a single plural category (`other`), so this
     // slot is unreachable here and equals `_other` for key-set parity.
     showEmptyRelated: "+ {{count}} 件（空）",
@@ -2616,6 +2617,14 @@ const ja = {
       systemTheme: "システムテーマ",
       actions: "アクション",
       openFullSearch: "完全な検索ページを開く",
+      create: "新規作成",
+      createAs: "「{{query}}」を{{object}}として作成",
+      previewEmpty: "レコードを選択すると詳細が表示されます。",
+      enterOpenRecord: "レコードを開く",
+      enterCreate: "作成",
+      enterSwitchApp: "アプリを切り替え",
+      enterApplyTheme: "テーマを適用",
+      enterOpen: "開く",
       searching: "検索中…",
       records: "レコード",
       recentRecords: "最近閲覧",
@@ -3440,6 +3449,11 @@ const ja = {
     allReports: "すべてのレポート",
     collapse: 'サイドバーを折りたたむ',
     expand: 'サイドバーを展開',
+  },
+  designMode: {
+    title: 'デザインモード',
+    leaveUnsaved: 'デザインモードを終了しますか？保存されていない変更は失われます。',
+    saveFailed: '一部の変更が保存されませんでした：{{reason}}',
   },
   topbar: {
     openAssistant: "{{name}} アシスタントを開く",

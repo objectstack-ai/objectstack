@@ -1180,6 +1180,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // keeps ⟳ off those surfaces for now. `undefined` is the opt-out
   // `page:header` reads, so nothing renders there.
   const headerRefresh = embedded ? undefined : handleManualRefresh;
+  // objectstack#36309 — the header's re-read (`RecordContext.reread`) is not
+  // the ⟳: the stage menu draws in a drawer too, and its 409 answer must read
+  // the record again there, so every host provides it. Same `'*'` scope as the
+  // ⟳: a 409 is exactly a write this client never saw.
+  const headerReread = handleManualRefresh;
 
   // Record-scoped presence ("who else is viewing this record"). The default
   // PresenceProvider source is a no-op, so this resolves to `[]` until a
@@ -5969,6 +5974,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         dataSource={dataSource}
         embedded={embedded}
         refresh={headerRefresh}
+        reread={headerReread}
         headerSystemActions={synthSystemActions}
         objectLabelNote={inSetupApp ? managedByNote ?? undefined : undefined}
         // objectstack#36246 — the record's favorite star beside its name, in
