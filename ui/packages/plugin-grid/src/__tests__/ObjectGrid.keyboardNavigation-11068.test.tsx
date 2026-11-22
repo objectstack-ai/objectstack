@@ -17,8 +17,10 @@
  *
  *   1. a read-only grid keeps today's Tab behaviour (every cell its own stop)
  *      unless `keyboardNavigation: true` is authored;
- *   2. an editable grid has it ON by default — one Tab stop, arrows move it —
- *      and `keyboardNavigation: false` turns it off;
+ *   2. an editable grid has it ON — since objectstack#36270 it selects a cell
+ *      first (the list page's model), the arrows move that selection, and
+ *      `keyboardNavigation: false` no longer turns it off there (the spec's
+ *      describe narrowed to what is enforced, ruling A);
  *   3. the `editable` the default follows is the one the grid RENDERS: an
  *      `editable: true` grid shown to a viewer with no update grant is
  *      read-only, so it keeps its Tab behaviour too;
@@ -120,6 +122,28 @@ function reading(container: HTMLElement) {
 const OFF = { cells: ROWS.length * DATA_COLUMNS, tabStops: ROWS.length * DATA_COLUMNS, role: null, arrowTaken: false, focusAfterArrowDown: 'stayed' };
 const ON = { cells: ROWS.length * DATA_COLUMNS, tabStops: 1, role: 'grid', arrowTaken: true, focusAfterArrowDown: 'next row' };
 
+/**
+ * objectstack#36270 — the reading of a grid that renders editable, which
+ * selects a cell first: a click selects, the selection (not DOM focus) is what
+ * the arrows move, and the one Tab stop is the grid's own key catcher, so no
+ * data cell is a Tab stop.
+ */
+function selectFirstReading(container: HTMLElement) {
+  const cells = dataCells(container);
+  fireEvent.click(cellAt(container, 0, 0));
+  const catcher = container.querySelector<HTMLElement>('[data-slot="cell-type-catcher"]');
+  const arrowTaken = catcher ? !fireEvent.keyDown(catcher, { key: 'ArrowDown' }) : false;
+  return {
+    cells: cells.length,
+    cellTabStops: cells.filter((td) => td.tabIndex === 0).length,
+    role: container.querySelector('table')?.getAttribute('role') ?? null,
+    arrowTaken,
+    selectionAfterArrowDown: cellAt(container, 1, 0).hasAttribute('data-selected-cell') ? 'next row' : 'stayed',
+  };
+}
+
+const SELECT_FIRST = { cells: ROWS.length * DATA_COLUMNS, cellTabStops: 0, role: 'grid', arrowTaken: true, selectionAfterArrowDown: 'next row' };
+
 /* ── 1. Read-only ────────────────────────────────────────────────────────── */
 
 describe('a read-only `object-grid` keeps its Tab behaviour unless `keyboardNavigation: true` (objectui#11068)', () => {
@@ -136,30 +160,41 @@ describe('a read-only `object-grid` keeps its Tab behaviour unless `keyboardNavi
 
 /* ── 2. Editable ─────────────────────────────────────────────────────────── */
 
-describe('an editable `object-grid` has it on by default; `false` turns it off (objectui#11068)', () => {
-  it('`editable: true`, no key: one roving Tab stop, and ArrowDown moves it', async () => {
+describe('an editable `object-grid` always has it on: it selects a cell first (objectui#11068, objectstack#36270)', () => {
+  it('`editable: true`, no key: the grid pattern, and ArrowDown moves the selection', async () => {
     const { container } = await renderGrid({ editable: true });
-    expect(reading(container)).toEqual(ON);
+    expect(selectFirstReading(container)).toEqual(SELECT_FIRST);
   });
 
-  it('`editable: true` with `keyboardNavigation: false`: every cell its own stop again', async () => {
+  it('`editable: true` with `keyboardNavigation: false`: still on — `false` is no longer honoured on an editable grid', async () => {
     const { container } = await renderGrid({ editable: true, keyboardNavigation: false });
-    expect(reading(container)).toEqual(OFF);
+    expect(selectFirstReading(container)).toEqual(SELECT_FIRST);
   });
 
-  it('Enter still opens the focused cell, and Enter hands focus back to it', async () => {
+  it('Enter opens the selected cell, and Enter commits and keeps it selected', async () => {
     const { container } = await renderGrid({ editable: true });
     const cell = cellAt(container, 1, 0);
-    cell.focus();
-    fireEvent.keyDown(cell, { key: 'Enter' });
+    fireEvent.click(cell);
+    const catcher = container.querySelector<HTMLElement>('[data-slot="cell-type-catcher"]')!;
+    fireEvent.keyDown(catcher, { key: 'Enter' });
     const input = await waitFor(() => {
-      const el = cell.querySelector('input');
+      const el = container.querySelector<HTMLInputElement>('td[data-editing-cell] input');
       expect(el).not.toBeNull();
       return el as HTMLInputElement;
     });
     fireEvent.keyDown(input, { key: 'Enter' });
-    await waitFor(() => expect(cell.querySelector('input')).toBeNull());
-    await waitFor(() => expect(document.activeElement).toBe(cell));
+    await waitFor(() => expect(container.querySelector('td[data-editing-cell]')).toBeNull());
+    expect(cellAt(container, 1, 0)).toHaveAttribute('data-selected-cell');
+  });
+
+  it('CONTROL: a host that keeps the staged model (`cellSelection: false`) keeps the roving cell focus, and `false` turns it off', async () => {
+    const on = render(<ObjectGridRenderer schema={grid({ editable: true })} cellSelection={false} />);
+    await screen.findByText('Gamma', {}, { timeout: 5000 });
+    expect(reading(on.container)).toEqual(ON);
+    cleanup();
+    const off = render(<ObjectGridRenderer schema={grid({ editable: true, keyboardNavigation: false })} cellSelection={false} />);
+    await screen.findByText('Gamma', {}, { timeout: 5000 });
+    expect(reading(off.container)).toEqual(OFF);
   });
 });
 
@@ -198,14 +233,20 @@ describe('the authored `{ type, properties }` document reaches the same reads (o
     </ActionProvider>
   );
 
-  it('`properties.editable: true` turns it on, and `properties.keyboardNavigation: false` turns it off', async () => {
+  it('`properties.editable: true` turns it on (select-first), and `properties.keyboardNavigation: false` does not turn it off', async () => {
     const on = render(page({ editable: true }));
     await screen.findByText('Gamma', {}, { timeout: 5000 });
-    expect(reading(on.container)).toEqual(ON);
+    expect(selectFirstReading(on.container)).toEqual(SELECT_FIRST);
     cleanup();
 
     const off = render(page({ editable: true, keyboardNavigation: false }));
     await screen.findByText('Gamma', {}, { timeout: 5000 });
-    expect(reading(off.container)).toEqual(OFF);
+    expect(selectFirstReading(off.container)).toEqual(SELECT_FIRST);
+  });
+
+  it('LIT CONTROL: `properties.keyboardNavigation: true` on a read-only node turns it on', async () => {
+    render(page({ keyboardNavigation: true }));
+    await screen.findByText('Gamma', {}, { timeout: 5000 });
+    expect(reading(document.body)).toEqual(ON);
   });
 });

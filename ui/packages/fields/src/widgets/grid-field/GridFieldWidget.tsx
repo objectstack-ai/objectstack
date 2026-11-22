@@ -19,14 +19,27 @@ import { formatDate, formatDateTime, resolveFieldRuleState, toDisplayDate } from
 import { useDisplayLocale, useLocalization, formatDisplayNumber } from '@object-ui/i18n';
 import { currencySymbol } from '../../currency.js';
 import { LookupField } from '../LookupField.js';
-import type { LookupAutofillByField } from '../lookupAutofill.js';
+import {
+  amountCurrencyOf,
+  pickedAmountCurrencyOf,
+  type AmountCurrency,
+  type AutofillCurrencyContext,
+  type LookupAutofillByField,
+  type WithheldAutofill,
+  withheldAutofillMessage,
+} from '../lookupAutofill.js';
 import { FileCell } from '../FileField.js';
 import { toDateInputValue, toDateTimeInputValue, fromDateTimeInputValue, isImpossibleStoredDay } from '../nativeDateValue.js';
 import { useFieldTranslation } from '../useFieldTranslation.js';
 import { toDomProps } from '../toDomProps.js';
 import { PHONE_TOUCH_HEIGHT, PHONE_TOUCH_SQUARE } from '../touchTarget.js';
 import { toHostGroupProps } from '../toHostGroupProps.js';
-import { GRID_CELL_CONTROL_CLASS, GridDateCell, GridSelectCell, GrowingCellInput } from '../gridCellPanels.js';
+import { GRID_CELL_CONTROL_CLASS, GridDateCell, GridPanelCell, GridSelectCell, GrowingCellInput } from '../gridCellPanels.js';
+import { MultiSelectField } from '../MultiSelectField.js';
+import { TagsField } from '../TagsField.js';
+import { UserField } from '../UserField.js';
+import { RatingField } from '../RatingField.js';
+import { useBooleanValueLabel } from '../booleanValueLabel.js';
 import { isImeKey } from '../imeKey.js';
 import { GRID_FIELD_RETIRED_KEYS, type GridFieldMetadata, type GridFieldRetiredKey } from '@object-ui/types';
 // The grid's pure half: the column type, the computed-cell evaluator, the
@@ -38,7 +51,7 @@ import {
   currencyOfColumn,
   currencyWidth,
   isUntouchedNewRow,
-  lookupAutofillPatch,
+  planLookupAutofill,
   sumColumn,
   UNTOUCHED_NEW_ROW,
   type ColumnCurrencies,
@@ -119,6 +132,18 @@ type Row = Record<string, any>;
 
 const isNumeric = (t?: string) => t === 'number' || t === 'currency';
 
+/** A cell holding nothing: no value, an empty string, or an empty list (multi-select, tags, people). */
+const isEmptyCell = (value: unknown) =>
+  value == null || value === '' || (Array.isArray(value) && value.length === 0);
+
+/** The star count of a `rating` column: its `max`, else `Field.rating`'s own 5 (objectstack#36043). */
+const ratingMax = (c: GridColumn) => c.max ?? 5;
+/** A list cell emptied by the user writes `null`, not `[]` (objectstack#36043):
+ *  the field contract stores a cleared multi-value field as `null`, and the
+ *  save path's blank-line check (`isBlankRow`) reads only `null` / `''` as
+ *  empty, so a `[]` would send a line the user emptied as a child record. */
+const emptyListAsNull = <V,>(next: V): V | null => (Array.isArray(next) && next.length === 0 ? null : next);
+
 /** Comfortable minimum widths per column type so cells never get crushed; the
  *  grid scrolls horizontally instead. Authors can still pin a `width`. */
 const MIN_WIDTH_BY_TYPE: Record<string, number> = {
@@ -133,6 +158,12 @@ const MIN_WIDTH_BY_TYPE: Record<string, number> = {
   datetime: 200,
   time: 116,
   file: 168,
+  // objectstack#36043 — the five cells that edit as in the main list.
+  user: 168,
+  multiselect: 168,
+  tags: 168,
+  boolean: 72,
+  rating: 120,
 };
 const minWidthFor = (c: GridColumn): number => c.width ?? MIN_WIDTH_BY_TYPE[c.type ?? 'text'] ?? 132;
 
@@ -282,17 +313,20 @@ function currencyText(c: GridColumn, n: number, currency: string | undefined, lo
 }
 
 /**
- * The session-language words a file cell's text is made of (objectui#12924),
- * read by the component from the packs and handed to {@link cellDisplayText}:
- * the count a cell holding several files states (`detail.fileCount`, the count
- * family `FileCellRenderer` states a file count with), and the name a file
- * whose value carries none is shown by (`fields.file.fileFallback`, the name
- * `FileField` and `FileCellRenderer` give it). Both used to be the English
- * literals `N files` / `File` here, on every locale.
+ * The session-language words a cell's text is made of (objectui#12924), read
+ * by the component from the packs and handed to {@link cellDisplayText}: the
+ * count a cell holding several files states (`detail.fileCount`, the count
+ * family `FileCellRenderer` states a file count with), the name a file whose
+ * value carries none is shown by (`fields.file.fileFallback`, the name
+ * `FileField` and `FileCellRenderer` give it), and a check cell's word for its
+ * value. The first two used to be the English literals `N files` / `File`
+ * here, on every locale.
  */
-interface FileCellText {
+interface CellText {
   count: (count: number) => string;
   nameless: string;
+  /** The session's word for a check cell's value (objectstack#36043). */
+  booleanWord: (value: boolean) => string;
 }
 
 /** Read-only display text for a cell in list mode (select → option label,
@@ -300,8 +334,9 @@ interface FileCellText {
  *  name or a count of its files, empty → em dash). Lookups render separately.
  *  `currency` is the column's resolved currency, read only by the currency
  *  branch. The component binds `fileText` once, as its `displayText`. */
-function cellDisplayText(c: GridColumn, value: any, locale: string, fileText: FileCellText, currency?: string): string {
-  if (value === null || value === undefined || value === '') return '—';
+function cellDisplayText(c: GridColumn, value: any, locale: string, fileText: CellText, currency?: string): string {
+  // An emptied multi-value cell (a tags list) reads as empty too, like multi-select.
+  if (value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) return '—';
   if (isTemporal(c.type)) return temporalText(c.type, value, locale);
   if (c.type === 'file') {
     const files = Array.isArray(value) ? value : [value];
@@ -313,6 +348,17 @@ function cellDisplayText(c: GridColumn, value: any, locale: string, fileText: Fi
   if (c.type === 'select' && Array.isArray(c.options)) {
     const opt = c.options.find((o) => String(o.value) === String(value));
     return opt ? opt.label : String(value);
+  }
+  // A multi-select cell names each value by its option's label (objectstack#36043).
+  if (c.type === 'multiselect' && Array.isArray(value)) {
+    if (value.length === 0) return '—';
+    return value.map((v) => c.options?.find((o) => String(o.value) === String(v))?.label ?? String(v)).join(', ');
+  }
+  // A check cell reads as its option's word (the session's, from the derive),
+  // else the session's word itself (objectstack#36043).
+  if (c.type === 'boolean') {
+    const on = value === true || BOOLEAN_READINGS.get(value) === true;
+    return c.options?.find((o) => o.value === String(on))?.label ?? fileText.booleanWord(on);
   }
   if (isNumeric(c.type)) {
     const n = Number(value);
@@ -390,6 +436,65 @@ function coerce(type: string | undefined, raw: string): any {
   if (type === 'datetime') return fromDateTimeInputValue(raw);
   return raw;
 }
+/**
+ * The cross-currency context of a pick in this grid (`crossCurrencyRefusal`).
+ *
+ * - A picked value's currency is its field's on the referenced object
+ *   (`sourceFields`, the schema the lookup cell read for its labels), read on
+ *   the picked record. A value whose field the cell does not know is a value
+ *   of unknown currency when it is a number.
+ * - A cell's currency is its column's: a `currency` column the host resolved
+ *   (`columnCurrencies`, a line amount following its header's currency) is in
+ *   that code, or in none while the header holds no code. Any other `currency`
+ *   column whose child field definition the host handed over (`columnFields`)
+ *   is in that definition's currency, read on the line as the record form
+ *   reads it (`amountCurrencyOf`): a `fixed` code, the code a sibling field on
+ *   the line holds, or the home currency. A `currency` column the host named
+ *   nothing for is in the home currency. A column of any other type holds no
+ *   amount of money. A declared target that is not a drawn column is judged
+ *   by its child field the same way, and holds no amount when the host names
+ *   none.
+ */
+function gridAutofillCurrency(
+  columns: readonly GridColumn[],
+  sourceFields: Readonly<Record<string, unknown>> | null | undefined,
+  picked: Row | null | undefined,
+  columnCurrencies: ColumnCurrencies | undefined,
+  home: string | undefined,
+  columnFields?: Readonly<Record<string, unknown>>,
+  line?: Row,
+): AutofillCurrencyContext {
+  return {
+    home,
+    sourceCurrency: (source, value) =>
+      pickedAmountCurrencyOf(sourceFields?.[source] as never, value, picked),
+    targetCurrency: (target): AmountCurrency | undefined => {
+      // A declared target need not be a drawn column: one that is not is
+      // judged by its child field all the same, as the record form judges it.
+      const c = columns.find((x) => x.name === target);
+      if (c && c.type !== 'currency') return undefined;
+      if (columnCurrencies && Object.prototype.hasOwnProperty.call(columnCurrencies, target)) {
+        const code = columnCurrencies[target];
+        return code ? { kind: 'code', code } : { kind: 'unset' };
+      }
+      const def = columnFields?.[target];
+      if (def && typeof def === 'object') return amountCurrencyOf(def as never, line) ?? (c ? { kind: 'home' } : undefined);
+      return c ? { kind: 'home' } : undefined;
+    },
+  };
+}
+
+/**
+ * What the last pick on one line did not copy (objectstack#36249): the lookup
+ * column picked, the value it committed, and each withheld value. The note
+ * stands while the line still holds that pick and the withheld cell is empty.
+ */
+interface WithheldPick {
+  lookup: string;
+  picked: unknown;
+  items: readonly WithheldAutofill[];
+}
+
 export type GridFieldWidgetProps = FieldWidgetComponentProps<Row[]> & {
   /** When provided, each row shows an "expand" button that opens the row in a
    *  full form (the host — e.g. MasterDetailForm — renders the drawer/modal and
@@ -417,6 +522,15 @@ export type GridFieldWidgetProps = FieldWidgetComponentProps<Row[]> & {
    *  so the master-detail host that holds the header and the child schema
    *  hands it over. A column it does not name is in the tenant currency. */
   columnCurrencies?: ColumnCurrencies;
+  /** The child field definition behind each `currency` column, by column
+   *  name (objectstack#36249): a grid column carries no `currencyConfig`, so
+   *  the host that holds the child schema hands the definitions over. A pick
+   *  copies an amount into a column only in the same currency, and a column
+   *  named here is in its definition's currency (a `fixed` code, or the code
+   *  a sibling field on the line holds), read as the record form reads it.
+   *  {@link columnCurrencies} still decides a column it names. Absent: such a
+   *  column counts as being in the tenant currency, as before. */
+  columnFields?: Readonly<Record<string, unknown>>;
   /** The values a new line starts with (objectstack#35816): the child
    *  object's static field defaults, by field name. A grid column carries no
    *  default (the spec's inline column refuses `defaultValue`), so the host
@@ -445,28 +559,45 @@ export type GridFieldWidgetProps = FieldWidgetComponentProps<Row[]> & {
 
 /**
  * The info button beside a column's header label (objectstack#35804): the
- * column's help on hover and on keyboard focus, and the button's accessible
- * name is the help itself, so a screen reader hears it on reaching the button.
- * Its own provider, so the grid draws it under any host.
+ * column's help on hover and on keyboard focus.
+ *
+ * The button sits inside the `<th>`, so its accessible name joins the column
+ * header's, which a screen reader announces with every cell of the column
+ * (objectstack#36004). The help is therefore NOT the button's name: the button
+ * is named by a short Help word from the pack (`fields.grid.columnHelp`), and
+ * the help is its DESCRIPTION, through `aria-describedby` on a `hidden` copy
+ * beside it. A hidden node takes no part in the header's name from content,
+ * and a description reads a node it references even when it is hidden, so a
+ * screen reader hears "Help" and then the help on reaching the button, while
+ * the column stays named by its label. The text is the host's, already in the
+ * reader's language. Its own provider, so the grid draws it under any host.
  */
 function ColumnHeaderHelp({ help }: { help: string | undefined }) {
+  const { t } = useFieldTranslation();
+  const descriptionId = React.useId();
   if (!help) return null;
   return (
-    <TooltipProvider delayDuration={200}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            aria-label={help}
-            className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-sm align-middle text-muted-foreground/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            data-testid="line-items-column-help"
-          >
-            <Info className="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent className="max-w-xs whitespace-normal text-xs font-normal">{help}</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <>
+      <TooltipProvider delayDuration={200}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label={t('fields.grid.columnHelp', { defaultValue: 'Help' })}
+              aria-describedby={descriptionId}
+              className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-sm align-middle text-muted-foreground/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              data-testid="line-items-column-help"
+            >
+              <Info className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-xs whitespace-normal text-xs font-normal">{help}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+      <span id={descriptionId} hidden>
+        {help}
+      </span>
+    </>
   );
 }
 
@@ -572,6 +703,7 @@ function GridFieldBody({
   onAdd,
   lookupAutofill,
   columnCurrencies,
+  columnFields,
   newRowValues,
   newRowRequiredShown,
   columnHelp,
@@ -617,12 +749,29 @@ function GridFieldBody({
   // several files and the name of a nameless one. Bound into `displayText`
   // here, so every cell that draws its text through it — the list-mode cell,
   // the computed cell and the read-only table — takes the same words.
-  const fileText: FileCellText = {
+  const booleanWord = useBooleanValueLabel();
+  const fileText: CellText = {
     count: (count) => t('detail.fileCount', { count, defaultValue: '{{count}} files' }),
     nameless: t('fields.file.fileFallback', { defaultValue: 'File' }),
+    booleanWord,
   };
   const displayText = (c: GridColumn, value: any, locale: string, cellCurrency?: string) =>
     cellDisplayText(c, value, locale, fileText, cellCurrency);
+  /**
+   * The read-only face of a cell that is not text (objectstack#36043): people
+   * by name, a rating as its stars; `null` for every other cell, which reads
+   * through `displayText`. Shared by the read-only table and list mode.
+   */
+  const readOnlyFace = (c: GridColumn, value: any): React.ReactNode | null => {
+    if (isEmptyCell(value)) return null;
+    if (c.type === 'user') {
+      return <UserField value={value} onChange={() => {}} readonly field={{ type: 'user', multiple: c.multiple } as any} />;
+    }
+    if (c.type === 'rating') {
+      return <RatingField value={Number(value)} onChange={() => {}} readonly field={{ type: 'rating', max: ratingMax(c) } as any} />;
+    }
+    return null;
+  };
   const cellIdBase = React.useId();
   // The tenant default currency (ADR-0053) — the resolver's last step, and in
   // practice the currency of every `currency` column (objectui#10355, see
@@ -639,7 +788,7 @@ function GridFieldBody({
   // the row's boolean cells read as booleans (`ruleRecordOf`). Every column,
   // shown or not, since a predicate may read any cell of the row.
   const booleanColumns = React.useMemo(
-    () => allColumns.filter(isBooleanSelectColumn).map((c) => c.name),
+    () => allColumns.filter((c) => c.type === 'boolean' || isBooleanSelectColumn(c)).map((c) => c.name),
     [allColumns],
   );
   const cellRules = useCallback(
@@ -774,19 +923,31 @@ function GridFieldBody({
    * than its index, so adding, removing or reordering rows cannot misattribute it.
    */
   const pickedLookupRecords = useRef(new Map<string, Row>());
+  // The values the last pick on each line did not copy, because the picked
+  // amount is in another currency than the cell (objectstack#36249): said
+  // under the line while that pick still stands and the cell is still empty.
+  const [withheldFills, setWithheldFills] = React.useState<ReadonlyMap<number, WithheldPick>>(() => new Map());
   const applyLookupSelection = useCallback(
-    (rowIdx: number, col: GridColumn, record: any) => {
+    (rowIdx: number, col: GridColumn, record: any, picked?: { sourceFields?: Readonly<Record<string, unknown>> | null }) => {
       const row = rows[rowIdx] ?? blankRow();
       const pickKey = (id: unknown) => `${col.name}\u0000${String(id)}`;
       const heldId = row[col.name];
       const previous = heldId == null || heldId === '' ? null : pickedLookupRecords.current.get(pickKey(heldId)) ?? null;
-      const patch = lookupAutofillPatch(columns, col, record, { pairs: lookupAutofill?.[col.name], row, previous });
+      const currency = gridAutofillCurrency(columns, picked?.sourceFields, record, columnCurrencies, tenantCurrency, columnFields, row);
+      const { patch, withheld } = planLookupAutofill(columns, col, record, { pairs: lookupAutofill?.[col.name], row, previous }, currency);
       if (record && typeof record === 'object' && patch[col.name] != null) {
         pickedLookupRecords.current.set(pickKey(patch[col.name]), record);
       }
+      setWithheldFills((prev) => {
+        if (withheld.length === 0 && !prev.has(rowIdx)) return prev;
+        const next = new Map(prev);
+        if (withheld.length === 0) next.delete(rowIdx);
+        else next.set(rowIdx, { lookup: col.name, picked: patch[col.name], items: withheld });
+        return next;
+      });
       applyPatch(rowIdx, patch);
     },
-    [columns, rows, blankRow, lookupAutofill, applyPatch],
+    [columns, rows, blankRow, lookupAutofill, applyPatch, columnCurrencies, tenantCurrency, columnFields],
   );
 
   /** Set a cell to an already-typed value (lookup ids, etc.) without coercion. */
@@ -1093,7 +1254,7 @@ function GridFieldBody({
                         // (objectui#3569), a select's stored value instead of
                         // its option label, and an amount ungrouped and in no
                         // locale (objectui#12915).
-                        displayText(c, row[c.name], displayLocale, currencyOf(c))
+                        readOnlyFace(c, row[c.name]) ?? displayText(c, row[c.name], displayLocale, currencyOf(c))
                       )}
                     </td>
                   ))}
@@ -1195,6 +1356,8 @@ function GridFieldBody({
             field={{ reference: c.reference, displayField: c.displayField, idField: c.idField } as any} />
         );
       }
+      const face = readOnlyFace(c, val);
+      if (face) return face;
       return (
         <span className={cn('px-2 text-sm text-foreground', isNumeric(c.type) && 'tabular-nums', (val == null || val === '') && 'text-muted-foreground')}>
           {displayText(c, val, displayLocale, currencyOf(c))}
@@ -1218,7 +1381,7 @@ function GridFieldBody({
         <LookupField
           value={val}
           onChange={(v: any) => setCellValue(rowIdx, c.name, v)}
-          onSelectRecord={(rec: any) => applyLookupSelection(rowIdx, c, rec)}
+          onSelectRecord={(rec: any, picked?: { sourceFields?: Readonly<Record<string, unknown>> | null }) => applyLookupSelection(rowIdx, c, rec, picked)}
           compact
           field={{ reference: c.reference, displayField: c.displayField, idField: c.idField, multiple: c.multiple, options: c.options, placeholder: '—' } as any}
           disabled={locked}
@@ -1262,6 +1425,106 @@ function GridFieldBody({
           onNavKeyDown={(e) => onCellKeyDown(e, rowIdx, colIdx)}
           data-cell={`${rowIdx}-${colIdx}`}
         />
+      );
+    }
+    // objectstack#36043 — multi-select, tags and people open the face the
+    // main list's cell editor draws, in a panel under the cell; the cell keeps
+    // drawing its value meanwhile.
+    if (c.type === 'multiselect' || c.type === 'tags') {
+      const held: string[] = Array.isArray(val) ? val.map(String) : isEmptyCell(val) ? [] : [String(val)];
+      const Face = c.type === 'multiselect' ? MultiSelectField : TagsField;
+      return (
+        <GridPanelCell<string[]>
+          value={held}
+          onWrite={(next) => setCellValue(rowIdx, c.name, emptyListAsNull(next))}
+          display={
+            <span className={cn('truncate', held.length === 0 && 'text-muted-foreground')}>
+              {displayText(c, held, displayLocale)}
+            </span>
+          }
+          disabled={locked}
+          invalid={invalid}
+          label={c.label || c.name}
+          onNavKeyDown={(e) => onCellKeyDown(e, rowIdx, colIdx)}
+          data-cell={`${rowIdx}-${colIdx}`}
+          panelTestId={`line-items-${c.type}-panel`}
+        >
+          {({ draft, setDraft }) => (
+            <Face
+              inCell
+              value={draft}
+              onChange={(next: string[]) => setDraft(next)}
+              field={{ name: c.name, type: c.type, options: c.options } as any}
+            />
+          )}
+        </GridPanelCell>
+      );
+    }
+    if (c.type === 'user') {
+      const field = { name: c.name, type: 'user', label: c.label, multiple: c.multiple } as any;
+      return (
+        <GridPanelCell<any>
+          value={val ?? null}
+          onWrite={(next) => setCellValue(rowIdx, c.name, emptyListAsNull(next))}
+          display={readOnlyFace(c, val) ?? <span className="text-muted-foreground">—</span>}
+          disabled={locked}
+          invalid={invalid}
+          label={c.label || c.name}
+          onNavKeyDown={(e) => onCellKeyDown(e, rowIdx, colIdx)}
+          data-cell={`${rowIdx}-${colIdx}`}
+          panelTestId="line-items-user-panel"
+        >
+          {({ draft, setDraft, commit }) => (
+            <UserField inCell value={draft} onChange={(next: any) => setDraft(next)} onCommit={commit} field={field} />
+          )}
+        </GridPanelCell>
+      );
+    }
+    // A check cell is a checkbox: a click or Space toggles it (objectstack#36043).
+    if (c.type === 'boolean') {
+      return (
+        <div className="flex h-8 items-center justify-center">
+          <Checkbox
+            data-cell={`${rowIdx}-${colIdx}`}
+            aria-label={c.label || c.name}
+            aria-invalid={invalid || undefined}
+            checked={val === true || BOOLEAN_READINGS.get(val) === true}
+            onCheckedChange={(checked) => setCellValue(rowIdx, c.name, checked === true)}
+            onKeyDown={(e) => onCellKeyDown(e, rowIdx, colIdx)}
+            disabled={locked}
+          />
+        </div>
+      );
+    }
+    // A rating is set in place: a click on a star, or a digit key on the
+    // cell (0 clears), as in the main list (objectstack#36023, #36043).
+    if (c.type === 'rating') {
+      const max = ratingMax(c);
+      return (
+        <div
+          data-cell={`${rowIdx}-${colIdx}`}
+          tabIndex={-1}
+          aria-label={c.label || c.name}
+          aria-invalid={invalid || undefined}
+          className="flex h-8 items-center outline-none focus-visible:ring-1 focus-visible:ring-ring/60"
+          onKeyDown={(e) => {
+            if (!locked && /^[0-9]$/.test(e.key) && Number(e.key) <= max) {
+              e.preventDefault();
+              setCellValue(rowIdx, c.name, e.key === '0' ? null : Number(e.key));
+              return;
+            }
+            onCellKeyDown(e, rowIdx, colIdx);
+          }}
+        >
+          <RatingField
+            inCell
+            value={isEmptyCell(val) ? 0 : Number(val)}
+            onChange={(next: number) => setCellValue(rowIdx, c.name, next)}
+            field={{ type: 'rating', max } as any}
+            disabled={locked}
+            error={invalid ? requiredCellText(c) : undefined}
+          />
+        </div>
       );
     }
     // The editable currency cell shows the SAME symbol its display face does
@@ -1417,9 +1680,16 @@ function GridFieldBody({
               displayRows.map((row, rowIdx) => {
                 const isGhost = hasGhost && rowIdx === rows.length;
                 const reorderable = allowReorder && !isGhost && !isList;
+                // objectstack#36249 — the values this line's pick did not copy,
+                // while the pick stands and the cell is still empty.
+                const withheldPick = withheldFills.get(rowIdx);
+                const withheldShown =
+                  withheldPick && !isList && String(row[withheldPick.lookup] ?? '') === String(withheldPick.picked ?? '')
+                    ? withheldPick.items.filter((w) => row[w.target] == null || row[w.target] === '')
+                    : [];
                 return (
+                  <React.Fragment key={rowIdx}>
                   <tr
-                    key={rowIdx}
                     className={cn('group', !isGhost && 'hover:bg-muted/30')}
                     {...(allowReorder && !isGhost
                       ? {
@@ -1473,7 +1743,7 @@ function GridFieldBody({
                         !isList &&
                         required &&
                         !c.computed &&
-                        (row[c.name] == null || row[c.name] === '');
+                        isEmptyCell(row[c.name]);
                       return (
                         <td
                           key={c.name}
@@ -1552,6 +1822,26 @@ function GridFieldBody({
                       </td>
                     )}
                   </tr>
+                  {withheldShown.length > 0 && (
+                    <tr data-testid={`line-items-autofill-withheld-${rowIdx}`}>
+                      <td />
+                      <td
+                        colSpan={columns.length + (hasRowActions ? 1 : 0)}
+                        className="px-2 pb-1.5 pt-0 text-xs text-muted-foreground"
+                        role="status"
+                      >
+                        {withheldShown.map((w) => {
+                          const target = columns.find((x) => x.name === w.target);
+                          return (
+                            <p key={w.target} data-withheld-target={w.target}>
+                              {withheldAutofillMessage(w, target?.label || w.target, t, displayLocale)}
+                            </p>
+                          );
+                        })}
+                      </td>
+                    </tr>
+                  )}
+                  </React.Fragment>
                 );
               })
             )}

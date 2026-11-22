@@ -21,7 +21,7 @@ import '@testing-library/jest-dom/vitest';
 // The source under test reaches `import('@objectstack/lint')`: paid here, at collection, never inside a test's clock.
 import '@objectstack/lint';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import * as React from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
@@ -119,6 +119,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/**
+ * The package list has answered and the surface has read it: the list read
+ * was made, and its answer has had a turn to land. (The package switcher's
+ * `data-pkg-list-state` said this until the switcher was removed,
+ * objectstack#36501.)
+ */
+async function listAnswered(fetchMock: ReturnType<typeof servePackages>): Promise<void> {
+  await waitFor(() => expect(packageListReads(fetchMock)).toBeGreaterThan(0), { timeout: 8000 });
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 50));
+  });
+}
+
 describe('Studio: a package id no package has renders "package not found" (objectstack#26708)', () => {
   it.each(['data', 'automations', 'interfaces', 'access'])('%s: not found, no pillars, no package actions', async (pillar) => {
     const fetchMock = servePackages();
@@ -144,35 +157,25 @@ describe('Studio: a package id no package has renders "package not found" (objec
   });
 
   it('CONTROL — a listed package renders its builder', async () => {
-    servePackages();
+    const fetchMock = servePackages();
     renderAt(`/studio/${PACKAGE_ID}/data`);
-    const header = screen.getByTestId('studio-shell-header');
-    await waitFor(() =>
-      expect(within(header).getByTestId('studio-pkg-chip')).toHaveAttribute('data-pkg-list-state', 'loaded'),
-    );
+    await listAnswered(fetchMock);
     expect(screen.queryByTestId('studio-package-not-found')).toBeNull();
     // The four pillars and, objectstack#28561, the "All metadata" area.
     expect(within(screen.getByTestId('studio-pillar-nav')).getAllByRole('link')).toHaveLength(5);
   });
 
-  it('CONTROL — a kernel package the switcher hides is installed, never "not found"', async () => {
-    servePackages();
+  it('CONTROL — a kernel package the Studio landing hides is installed, never "not found"', async () => {
+    const fetchMock = servePackages();
     renderAt(`/studio/${KERNEL_ID}/data`);
-    const header = screen.getByTestId('studio-shell-header');
-    await waitFor(() =>
-      expect(within(header).getByTestId('studio-pkg-chip')).toHaveAttribute('data-pkg-list-state', 'loaded'),
-    );
+    await listAnswered(fetchMock);
     expect(screen.queryByTestId('studio-package-not-found')).toBeNull();
   });
 
   it('CONTROL — a package list that failed to load leaves the builder as it was', async () => {
     const fetchMock = servePackages({ fail: true });
     renderAt(`/studio/${PHANTOM}/data`);
-    await waitFor(() => expect(packageListReads(fetchMock)).toBeGreaterThan(0));
-    await waitFor(() =>
-      expect(within(screen.getByTestId('studio-shell-header')).getByTestId('studio-pkg-chip'))
-        .toHaveAttribute('data-pkg-list-state', 'failed'),
-    );
+    await listAnswered(fetchMock);
     expect(screen.queryByTestId('studio-package-not-found')).toBeNull();
     expect(within(screen.getByTestId('studio-pillar-nav')).getAllByRole('link')).toHaveLength(5);
   });
@@ -217,12 +220,9 @@ describe('Studio: no copilot beside a package that is not there (objectstack#326
   });
 
   it('CONTROL — a listed package keeps its copilot', async () => {
-    servePackages();
+    const fetchMock = servePackages();
     renderAt(`/studio/${PACKAGE_ID}/data`);
-    await waitFor(() =>
-      expect(within(screen.getByTestId('studio-shell-header')).getByTestId('studio-pkg-chip'))
-        .toHaveAttribute('data-pkg-list-state', 'loaded'),
-    );
+    await listAnswered(fetchMock);
     expect(screen.queryByTestId('studio-package-not-found')).toBeNull();
     expect(screen.getByTestId('studio-chat-dock')).toBeInTheDocument();
   });
@@ -234,12 +234,9 @@ describe('Studio: no copilot beside a package that is not there (objectstack#326
     expect(screen.queryByTestId('injected-copilot')).toBeNull();
     cleanup();
 
-    servePackages();
+    const listedFetch = servePackages();
     renderAt(`/studio/${PACKAGE_ID}/data`, <StudioDesignSurface aiSlot={<div data-testid="injected-copilot" />} />);
-    await waitFor(() =>
-      expect(within(screen.getByTestId('studio-shell-header')).getByTestId('studio-pkg-chip'))
-        .toHaveAttribute('data-pkg-list-state', 'loaded'),
-    );
+    await listAnswered(listedFetch);
     expect(screen.getByTestId('injected-copilot')).toBeInTheDocument();
   });
 });

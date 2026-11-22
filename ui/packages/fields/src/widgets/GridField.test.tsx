@@ -1,9 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { UploadProvider } from './UploadProvider';
 import { Dialog, DialogContent, DialogTitle } from '@object-ui/components';
 import { formatDate, formatDateTime } from '@object-ui/core';
+import { I18nProvider } from '@object-ui/i18n';
+import { en, zh } from '@object-ui/i18n/locales';
 import { GridFieldWidget as GridField } from './grid-field/GridFieldWidget';
 import { GridField as GridFieldFace, LineItemsField, sumColumn, lookupAutofillPatch, UNTOUCHED_NEW_ROW, isUntouchedNewRow, columnHelpByField } from './GridField';
 
@@ -964,21 +966,21 @@ describe('no trailing entry row beside Add (objectstack#35507)', () => {
 describe('column header help (objectstack#35804)', () => {
   const help = { amount: 'Enter the tax-inclusive amount.' };
 
-  it('a column with help draws an info button whose accessible name is the help', () => {
+  it('a column with help draws an info button named Help and described by the help', () => {
     render(<GridField value={[]} onChange={() => {}} field={field} columnHelp={help} />);
-    const button = screen.getByRole('button', { name: 'Enter the tax-inclusive amount.' });
+    const button = screen.getByRole('button', { name: 'Help', description: 'Enter the tax-inclusive amount.' });
     expect(button.closest('th')!.textContent).toContain('Amount');
   });
 
   it('focusing the info button shows the help', async () => {
     render(<GridField value={[]} onChange={() => {}} field={field} columnHelp={help} />);
-    fireEvent.focus(screen.getByRole('button', { name: 'Enter the tax-inclusive amount.' }));
+    fireEvent.focus(screen.getByRole('button', { name: 'Help' }));
     expect((await screen.findByRole('tooltip')).textContent).toBe('Enter the tax-inclusive amount.');
   });
 
   it('the read-only table draws the same help', () => {
     render(<GridField value={[{ description: 'A', amount: 1 }]} onChange={() => {}} field={field} readonly columnHelp={help} />);
-    expect(screen.getByRole('button', { name: 'Enter the tax-inclusive amount.' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Help', description: 'Enter the tax-inclusive amount.' })).toBeTruthy();
   });
 
   it('CONTROL: a column without help draws no info button', () => {
@@ -997,6 +999,58 @@ describe('column header help (objectstack#35804)', () => {
       }),
     ).toEqual({ unit_price: 'Inline help wins.', quantity: 'The served description.' });
     expect(columnHelpByField(undefined)).toEqual({});
+  });
+});
+
+/**
+ * objectstack#36004 — a cell's column is announced by its header's accessible
+ * name, so the help must not join it. The header is named by the field label
+ * and the info button's short Help word; the help itself is the button's
+ * description, which a screen reader reads on reaching the button. Computed
+ * through jest-dom's accname matchers (dom-accessibility-api), on the editable
+ * grid and on the read-only table alike.
+ *
+ * dom-accessibility-api treats a button nested in the header as an embedded
+ * control and leaves its `aria-label` out of the header's name, so it reads the
+ * label alone whatever the button is named. A browser following accname folds
+ * that `aria-label` in, so the pin also holds every `aria-label` inside the
+ * header to the Help word: that is the text a browser adds to the column name.
+ */
+describe('column header help stays out of the column name (objectstack#36004)', () => {
+  const help = { amount: 'Enter the tax-inclusive amount.' };
+  const inLocale = (language: 'en' | 'zh', node: React.ReactNode) => (
+    <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false }} persistLanguage={false}>
+      {node}
+    </I18nProvider>
+  );
+
+  it.each([
+    ['editable grid', false],
+    ['read-only table', true],
+  ])('%s: the header is named by the label and Help; the button is described by the help', (_face, readonly) => {
+    render(
+      inLocale(
+        'en',
+        <GridField value={[{ description: 'A', amount: 1 }]} onChange={() => {}} field={field} readonly={readonly} columnHelp={help} />,
+      ),
+    );
+    const button = screen.getByTestId('line-items-column-help');
+    const header = button.closest('th')!;
+    expect(header).toHaveAccessibleName('Amount');
+    expect(Array.from(header.querySelectorAll('[aria-label]'), (el) => el.getAttribute('aria-label'))).toEqual([
+      en.fields.grid.columnHelp,
+    ]);
+    expect(button).toHaveAccessibleName(en.fields.grid.columnHelp);
+    expect(button).toHaveAccessibleDescription('Enter the tax-inclusive amount.');
+  });
+
+  it('the Help word is read from the pack in the reader\'s language', () => {
+    expect(zh.fields.grid.columnHelp).not.toBe(en.fields.grid.columnHelp);
+    render(inLocale('zh', <GridField value={[]} onChange={() => {}} field={field} columnHelp={help} />));
+    const button = screen.getByTestId('line-items-column-help');
+    expect(button).toHaveAccessibleName(zh.fields.grid.columnHelp);
+    expect(button).toHaveAccessibleDescription('Enter the tax-inclusive amount.');
+    expect(button.closest('th')).toHaveAccessibleName('Amount');
   });
 });
 
@@ -1290,6 +1344,196 @@ describe('cell faces that open under the cell (objectstack#36023)', () => {
       outside.focus();
       fireEvent.keyDown(outside, { key: 'Escape' });
       expect(onOpenChange).toHaveBeenCalledWith(false);
+    });
+  });
+});
+
+describe('the cells that edit as in the main list: people, multi-select, tags, check, rating (objectstack#36043)', () => {
+  const COLORS = [
+    { label: 'Red', value: 'red' },
+    { label: 'Green', value: 'green' },
+    { label: 'Blue', value: 'blue' },
+  ];
+  const cols = {
+    columns: [
+      { name: 'description', label: 'Description', type: 'text' as const },
+      { name: 'colors', label: 'Colors', type: 'multiselect' as const, options: COLORS },
+      { name: 'labels', label: 'Labels', type: 'tags' as const },
+      { name: 'done', label: 'Done', type: 'boolean' as const },
+      { name: 'score', label: 'Score', type: 'rating' as const },
+      { name: 'owner', label: 'Owner', type: 'user' as const },
+    ],
+  } as any;
+
+  function Stateful({ initial, onChange, field = cols }: { initial: any[]; onChange?: (v: any[]) => void; field?: any }) {
+    const [rows, setRows] = React.useState(initial);
+    return (
+      <GridField
+        value={rows}
+        onChange={(v: any[]) => {
+          setRows(v);
+          onChange?.(v);
+        }}
+        field={field}
+      />
+    );
+  }
+
+  describe('a multi-select cell', () => {
+    // A click outside writes too (the popover's own dismiss); this harness's
+    // pointer events do not reach that dismiss, so the pin leaves through Tab.
+    it('reads its option labels; the list opens under the cell, holds several picks, and leaving it writes them', async () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ description: 'A', colors: ['red'] }]} onChange={onChange} />);
+      const cell = screen.getByRole('button', { name: 'Colors' });
+      expect(cell.textContent).toBe('Red');
+      fireEvent.click(cell);
+      const panel = await screen.findByTestId('line-items-multiselect-panel');
+      fireEvent.click(within(panel).getByRole('option', { name: /Green/ }));
+      fireEvent.click(within(panel).getByRole('option', { name: /Blue/ }));
+      // Still open, and nothing written while the list is open.
+      expect(screen.getByTestId('line-items-multiselect-panel')).toBeTruthy();
+      expect(onChange).not.toHaveBeenCalled();
+      fireEvent.keyDown(panel.querySelector('input')!, { key: 'Tab' });
+      await waitFor(() => expect(screen.queryByTestId('line-items-multiselect-panel')).toBeNull());
+      expect(onChange.mock.calls.at(-1)![0][0].colors).toEqual(['red', 'green', 'blue']);
+      expect(screen.getByRole('button', { name: 'Colors' }).textContent).toBe('Red, Green, Blue');
+    });
+
+    it('Esc closes the list and writes nothing', async () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ colors: ['red'] }]} onChange={onChange} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Colors' }));
+      const panel = await screen.findByTestId('line-items-multiselect-panel');
+      fireEvent.click(within(panel).getByRole('option', { name: /Green/ }));
+      fireEvent.keyDown(panel.querySelector('input')!, { key: 'Escape' });
+      await waitFor(() => expect(screen.queryByTestId('line-items-multiselect-panel')).toBeNull());
+      expect(onChange).not.toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: 'Colors' }).textContent).toBe('Red');
+    });
+
+    // A cleared multi-value field stores `null`, and the save path counts only
+    // `null` / `''` as blank: a `[]` would send a line the user emptied.
+    it('emptied, it writes null rather than an empty list', async () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ colors: ['red'] }]} onChange={onChange} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Colors' }));
+      const panel = await screen.findByTestId('line-items-multiselect-panel');
+      fireEvent.click(within(panel).getByRole('option', { name: /Red/ }));
+      fireEvent.keyDown(panel.querySelector('input')!, { key: 'Tab' });
+      await waitFor(() => expect(screen.queryByTestId('line-items-multiselect-panel')).toBeNull());
+      expect(onChange.mock.calls.at(-1)![0][0].colors).toBeNull();
+    });
+
+    it('a required multi-select holding no option reads invalid', () => {
+      const field = { columns: [{ name: 'colors', label: 'Colors', type: 'multiselect', options: COLORS, required: true }] };
+      render(<GridField value={[{ id: 'r1', colors: [] }]} onChange={() => {}} field={field as any} />);
+      expect(screen.getByTestId('line-items-invalid-0-colors')).toBeTruthy();
+    });
+  });
+
+  describe('a tags cell', () => {
+    it('reads its tags; a new tag is added from the list, and Tab writes and moves on', async () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ labels: ['urgent'] }]} onChange={onChange} />);
+      const cell = screen.getByRole('button', { name: 'Labels' });
+      expect(cell.textContent).toBe('urgent');
+      fireEvent.click(cell);
+      const panel = await screen.findByTestId('line-items-tags-panel');
+      const search = panel.querySelector('input') as HTMLInputElement;
+      fireEvent.change(search, { target: { value: 'export' } });
+      fireEvent.keyDown(search, { key: 'Enter' });
+      fireEvent.keyDown(search, { key: 'Tab' });
+      await waitFor(() => expect(screen.queryByTestId('line-items-tags-panel')).toBeNull());
+      expect(onChange.mock.calls.at(-1)![0][0].labels).toEqual(['urgent', 'export']);
+      expect(document.activeElement).toBe(screen.getByRole('checkbox', { name: 'Done' }));
+    });
+
+    it('emptied, it writes null rather than an empty list', async () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ labels: ['urgent'] }]} onChange={onChange} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Labels' }));
+      const panel = await screen.findByTestId('line-items-tags-panel');
+      fireEvent.click(within(panel).getByRole('option', { name: /urgent/ }));
+      fireEvent.keyDown(panel.querySelector('input')!, { key: 'Tab' });
+      await waitFor(() => expect(screen.queryByTestId('line-items-tags-panel')).toBeNull());
+      expect(onChange.mock.calls.at(-1)![0][0].labels).toBeNull();
+      // It reads as an empty cell, as an emptied multi-select does.
+      expect(screen.getByRole('button', { name: 'Labels' }).textContent).toBe('—');
+    });
+  });
+
+  describe('a check cell', () => {
+    it('is a checkbox over the stored value; a click writes a boolean', () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ done: true }, { done: 'false' }]} onChange={onChange} />);
+      const [first, second] = screen.getAllByRole('checkbox', { name: 'Done' });
+      expect(first.getAttribute('aria-checked')).toBe('true');
+      expect(second.getAttribute('aria-checked')).toBe('false');
+      fireEvent.click(second);
+      expect(onChange.mock.calls.at(-1)![0][1].done).toBe(true);
+      fireEvent.click(first);
+      expect(onChange.mock.calls.at(-1)![0][0].done).toBe(false);
+    });
+
+    it('read-only, it reads as its option word', () => {
+      const field = {
+        columns: [{ name: 'done', label: 'Done', type: 'boolean', options: [{ label: 'WORD-ON', value: 'true' }, { label: 'WORD-OFF', value: 'false' }] }],
+      };
+      render(<GridField value={[{ done: true }, { done: false }]} onChange={() => {}} readonly field={field as any} />);
+      const table = screen.getByTestId('line-items-readonly');
+      expect(table.textContent).toContain('WORD-ON');
+      expect(table.textContent).toContain('WORD-OFF');
+      expect(screen.queryByRole('checkbox')).toBeNull();
+    });
+  });
+
+  describe('a rating cell', () => {
+    const filled = (cell: Element) =>
+      Array.from(cell.querySelectorAll('button svg')).filter((svg) => (svg.getAttribute('class') ?? '').includes('fill-yellow-400')).length;
+    const ratingCell = () => document.querySelector('[data-grid-cell="0:score"] [data-cell]') as HTMLElement;
+
+    it('draws five stars by default with the value filled; a click on a star sets it', () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ score: 3 }]} onChange={onChange} />);
+      const cell = ratingCell();
+      expect(cell.querySelectorAll('button')).toHaveLength(5);
+      expect(filled(cell)).toBe(3);
+      fireEvent.click(cell.querySelectorAll('button')[3]);
+      expect(onChange.mock.calls.at(-1)![0][0].score).toBe(4);
+    });
+
+    it('a digit key on the cell sets that many stars; 0 clears', () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ score: 3 }]} onChange={onChange} />);
+      fireEvent.keyDown(ratingCell(), { key: '2' });
+      expect(onChange.mock.calls.at(-1)![0][0].score).toBe(2);
+      fireEvent.keyDown(ratingCell(), { key: '0' });
+      expect(onChange.mock.calls.at(-1)![0][0].score).toBeNull();
+      // A digit above the column's stars sets nothing.
+      onChange.mockClear();
+      fireEvent.keyDown(ratingCell(), { key: '7' });
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it("draws the column's `max` stars", () => {
+      const field = { columns: [{ name: 'score', label: 'Score', type: 'rating', max: 10 }] };
+      render(<GridField value={[{ score: 8 }]} onChange={() => {}} field={field as any} />);
+      expect(ratingCell().querySelectorAll('button')).toHaveLength(10);
+      expect(filled(ratingCell())).toBe(8);
+    });
+  });
+
+  describe('a people cell', () => {
+    it("opens the main list's person picker under the cell; its Clear writes and closes at once", async () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ owner: 'u1' }]} onChange={onChange} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Owner' }));
+      const panel = await screen.findByTestId('line-items-user-panel');
+      expect(within(panel).getByTestId('lookup-in-cell')).toBeTruthy();
+      fireEvent.click(within(panel).getByTestId('lookup-in-cell-clear'));
+      await waitFor(() => expect(screen.queryByTestId('line-items-user-panel')).toBeNull());
+      expect(onChange.mock.calls.at(-1)![0][0].owner).toBeNull();
     });
   });
 });

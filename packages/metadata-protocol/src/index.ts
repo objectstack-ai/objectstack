@@ -5,6 +5,13 @@ export { ObjectStackProtocolImplementation, ConcurrentUpdateError, normalizeView
 // ObjectQL FALLBACK in `@objectstack/runtime`'s `callData` builds the SAME one
 // instead of minting a second not-found shape. See `recordNotFoundError`.
 export { recordNotFoundError } from './protocol.js';
+// The `404 OBJECT_PACKAGE_DISABLED` refusal the data plane raises for an object
+// whose owning package is disabled, exported for the same reason: `callData`'s
+// engine arms (the `aggregate` arm and the no-protocol `query` fallback) refuse
+// a relation condition on such an object with the SAME error the protocol's
+// relation-condition check throws, instead of minting a second one.
+// Exporting is enabling-only: no behaviour in this package changes.
+export { objectPackageDisabledError } from './protocol.js';
 // [#8443] The ADR-0112 disclosure rule (#8086 / #8136 / #8333), exported for
 // the SECOND seed-apply producer: `@objectstack/runtime`'s package-publish door
 // keeps a fallback apply for protocols that do not self-apply, and it reports
@@ -55,6 +62,11 @@ export { judgeOverrideWrite, overrideWriteIdentityOf, overrideWriteItemsOf, type
 // exported for the doors outside this package — `os validate` and the
 // marketplace install — so every door that lets a field in asks one judgement.
 export { judgeExtensionFieldSuffix, extensionFieldSuffixRefusalError, objectBodyExtensionFieldSuffixRefusal, type ExtensionFieldSuffixRefusal, type ExtensionFieldSuffixRule, type ExtensionFieldSuffixSubject } from './protocol-extension-field-suffix.js';
+// [ADR-0146 D10] The whole arrangement of an extended object is the paired
+// `.custom` package's: one judge of an extension's `fieldGroups` /
+// `relatedLists`, asked by the save doors here and by `os validate` /
+// `os build` and the marketplace install outside.
+export { judgeExtensionArrangement, extensionArrangementRefusalError, type ExtensionArrangementRefusal, type ExtensionArrangementSubject } from './protocol-extension-arrangement.js';
 // [ADR-0146 D10, second rule] An extension's `fields` entry re-declaring an
 // owner's field beyond the display-property whitelist: one judge, asked by the
 // save doors here and by `os validate` and the marketplace install outside.

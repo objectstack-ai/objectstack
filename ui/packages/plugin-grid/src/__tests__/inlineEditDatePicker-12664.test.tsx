@@ -105,7 +105,6 @@ function renderGrid(ds: any, language?: string) {
     type: 'object-grid',
     objectName: OBJECT,
     editable: true,
-    singleClickEdit: true,
     columns: COLUMNS,
     pagination: { pageSize: 50 },
   };
@@ -114,7 +113,7 @@ function renderGrid(ds: any, language?: string) {
       <SchemaRendererProvider dataSource={ds}>
         <div>
           <button data-testid="outside">outside</button>
-          <ObjectGrid schema={schema} dataSource={ds} />
+          <ObjectGrid cellSelection={false} schema={schema} dataSource={ds} />
         </div>
       </SchemaRendererProvider>
     </ActionProvider>

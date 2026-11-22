@@ -130,7 +130,7 @@ const OBJECTS_READERS: Record<string, { kind: Kind; why: string }> = {
   'packages/app-shell/src/views/studio-design/studio-object-records-canvas.tsx': { kind: 'off', why: 'Studio' },
   'packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx': {
     kind: 'off',
-    why: "Studio: the Data pillar's Form tab asks selectRecordFormView which form view the app opens, over the served objects (objectstack#30057)",
+    why: "Studio: an object's label as the shell serves it in this locale, for the page of an object no entry opens (objectstack#30046); the Form tab no longer reads the served form view (objectstack#36425)",
   },
   'packages/app-shell/src/views/studio-design/PackageOwdOverviewPanel.tsx': {
     kind: 'byName',

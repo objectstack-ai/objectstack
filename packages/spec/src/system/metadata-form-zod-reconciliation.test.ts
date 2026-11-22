@@ -299,14 +299,14 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
   //
   // The `object.fields` subset precedent at the top of this ledger, on the
   // field form: a curated repeater over four of `InlineGridColumnSchema`'s
-  // twenty keys. Unlike `object.fields` there is no fuller editor to defer to,
+  // twenty-one keys. Unlike `object.fields` there is no fuller editor to defer to,
   // so the long tail is authored in source, and the reason says why that is
   // the right place for each group of keys left out.
   {
     kind: 'subset',
     type: 'field',
     path: 'inlineColumns',
-    why: "a curated inline-grid column (ruling record 5861442317): `name` plus the three keys that apply to a column of any type (`label`, `width`, `defaultHidden`). An entry naming only a field is the shape the key's own describe recommends, because objectui's `hydrateColumns` completes it from the child field, so the rest is authored in source: `type`, since declaring it opts the column out of that hydration; the keys that apply to one cell type only (`options`, `reference`, `displayField`, `idField`, `autofill`, `multiple`, `accept`, `prefix`, `step`, `scale`, `computed`, `expr`), since a column takes its type from the child field at render and a sub-row here cannot be gated on it, so each would be offered on every column; and `required` / `readonlyWhen` / `requiredWhen`, which hydration copies from the child field, where the rule the server enforces lives",
+    why: "a curated inline-grid column (ruling record 5861442317): `name` plus the three keys that apply to a column of any type (`label`, `width`, `defaultHidden`). An entry naming only a field is the shape the key's own describe recommends, because objectui's `hydrateColumns` completes it from the child field, so the rest is authored in source: `type`, since declaring it opts the column out of that hydration; the keys that apply to one cell type only (`options`, `reference`, `displayField`, `idField`, `autofill`, `multiple`, `accept`, `max`, `prefix`, `step`, `scale`, `computed`, `expr`), since a column takes its type from the child field at render and a sub-row here cannot be gated on it, so each would be offered on every column; and `required` / `readonlyWhen` / `requiredWhen`, which hydration copies from the child field, where the rule the server enforces lives",
   },
   // ── The root coordinate (#19333): top-level keys no form may offer ──
   //
@@ -720,13 +720,6 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     path: ROOT_PATH,
     key: 'externalId',
     why: "graded `dead` (`liveness/field.json`): no upsert, import or seed matches on a field's `externalId`, so a control would invite an author to rely on a flag nothing reads, and `os lint` then warns on the value the form offered. The schema still parses the key, so a stored value stays valid. A seed dataset names its match field in its own `externalId`, an import mapping in its `upsertKey`",
-  },
-  {
-    kind: 'omit',
-    type: 'field',
-    path: ROOT_PATH,
-    key: 'showOnCreate',
-    why: "graded `planned` (`liveness/field.json`): no create surface reads it yet, so a switch offered now would be honoured nowhere (declared = enforced = shown). The row is offered, and this entry deleted, in the change that lands the create surfaces' readers",
   },
 
   // Measured, and deliberately NOT recorded: seven `view` keys with no

@@ -131,14 +131,17 @@ const RUNNER_SLOTS: Readonly<Record<string, Disposition>> = {
   ),
 
   // FlowNodeSchema (its `config` is judged per type below)
-  'node.id': noReader('the node id — the address of `screens.<node_id>`, `refusals.<node_id>` and `approvals.<node_id>`'),
+  'node.id': noReader(
+    'the node id — the address of `screens.<node_id>`, `refusals.<node_id>`, `approvals.<node_id>` and `nodes.<node_id>`',
+  ),
   'node.type': noReader('a node-type token'),
   'node.label': keyed(
     'screens.NODE.title',
     "a screen's fallback heading (`config.title ?? node.label`), which the one `title` key covers; an `approval` "
       + "node's step name, which the approval request it opens shows its submitter and approvers "
-      + '(`approvals.NODE.label`); on any other node it is designer-canvas text',
-    ['approvals.NODE.label'],
+      + '(`approvals.NODE.label`); on any other node the step name a drawing of the flow shows — the docs '
+      + "viewer's `type: flow` embed and the Studio canvas (`nodes.NODE.label`, ruling 7076440876)",
+    ['approvals.NODE.label', 'nodes.NODE.label'],
   ),
   'node.connectorConfig': noReader('connector and action ids, and input values the engine resolves'),
   'node.inputSchema': noReader("design-time parameter declarations for the designer's input mapping"),

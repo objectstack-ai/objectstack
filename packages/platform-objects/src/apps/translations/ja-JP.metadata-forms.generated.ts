@@ -276,9 +276,13 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "言語",
         helpText: "エディター言語（例: sql, javascript）"
       },
+      "fields.fieldHistory": {
+        label: "フィールド変更値",
+        helpText: "このフィールドの旧値 → 新値をレコードのアクティビティタイムラインに表示します。未設定はオンです（スイッチはオフに見えます）。一度オンにしてからオフにしたときだけ false が書かれ、変更は項目名だけで示されます。オンにするとメディアや JSON の項目も値を表示します。"
+      },
       "fields.trackHistory": {
         label: "履歴追跡",
-        helpText: "レコードのアクティビティタイムラインでこのフィールドを要約する"
+        helpText: "メディアや JSON の項目（画像、ファイル、json など）で、アクティビティタイムラインに旧値 → 新値を表示します。他の項目はもともと表示され、オフにしても値は隠れません。隠すには「フィールド変更値」を使います。"
       },
       "fields.visibleWhen": {
         label: "表示条件",
@@ -298,6 +302,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "enable.trackHistory": {
         label: "履歴追跡"
+      },
+      "enable.fieldHistory": {
+        label: "フィールド変更値",
+        helpText: "変更されたフィールドの旧値 → 新値をレコードのアクティビティタイムラインに表示します。未設定はオンです（スイッチはオフに見えます）。一度オンにしてからオフにしたときだけ false が書かれ、オブジェクト全体で値が表示されなくなります。"
       },
       "enable.searchable": {
         label: "検索可能"
@@ -865,6 +873,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "非表示",
         helpText: "既定 UI ビューからフィールドを非表示"
       },
+      showOnCreate: {
+        label: "作成時に表示",
+        helpText: "レコード作成時にこのフィールドを入力させます。オフにすると、作成ダイアログ、全画面の作成、アクションから開く作成には表示されません。編集、レコードページ、リストには引き続き表示されます。必須フィールドは作成時に必ず入力するため、オフにできません。"
+      },
       searchable: {
         label: "検索可能",
         helpText: "グローバル検索結果に含める"
@@ -897,9 +909,13 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "外部に返さない",
         helpText: "この項目の値を汎用データ経路では返しません。エンジンは find／findOne の結果と、作成・更新のレスポンスボディからこのキーを削除します。既定の射影でも、クライアントが ?select= で名指ししたときも同様です。保存・絞り込み・インデックスには影響しません。"
       },
+      fieldHistory: {
+        label: "フィールド変更値",
+        helpText: "このフィールドの旧値 → 新値をレコードのアクティビティタイムラインに表示します。未設定はオンです（スイッチはオフに見えます）。一度オンにしてからオフにしたときだけ false が書かれ、変更は項目名だけで示されます。オンにするとメディアや JSON の項目も値を表示します。"
+      },
       trackHistory: {
         label: "変更履歴を記録",
-        helpText: "この項目の値の変更を、レコードのアクティビティタイムラインの項目として表示します（ADR-0052 §5b）。項目ごとのオプトインです。"
+        helpText: "メディアや JSON の項目（画像、ファイル、json など）で、アクティビティタイムラインに旧値 → 新値を表示します。他の項目はもともと表示され、オフにしても値は隠れません。隠すには「フィールド変更値」を使います。"
       },
       widget: {
         label: "ウィジェット指定",

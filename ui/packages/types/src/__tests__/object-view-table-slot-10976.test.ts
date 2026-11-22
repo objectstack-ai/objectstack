@@ -67,7 +67,6 @@ describe('objectui#10976 — a withheld `table` key does not type-check', () => 
         columns: ['subject', 'stage'],
         pagination: { pageSize: 25 },
         editable: true,
-        singleClickEdit: true,
         frozenColumns: 1,
         rowHeight: 'short',
         bulkActions: ['archive'],

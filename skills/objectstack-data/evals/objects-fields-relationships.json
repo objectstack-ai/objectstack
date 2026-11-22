@@ -293,7 +293,7 @@
     {
       "id": 17,
       "prompt": "Order lines belong to orders. Anyone who can see an order should be able to add, change or remove its lines, as far as the line object's own permissions allow; nobody needs edit rights on the order itself for that. How do I declare the line's sharing?",
-      "expected_output": "`order_line` is `sharingModel: 'controlled_by_parent'` with a required `master_detail` field to `order`, plus `sharing: { controlledByParent: { writeRequiresMasterRead: true } }`: read access to the order becomes the master question for every write (insert, update, delete, re-point), and the line's own object permissions, RLS and FLS decide the rest. Without the key every line write needs edit on the order. Not `ownerMayEdit` (only the owner's by-id update, and refused beside the new key), not the key one level up (`sharing.writeRequiresMasterRead`, refused), and not on a non-`controlled_by_parent` object (refused). The platform ownership floor still binds predicate and on-behalf-of updates and deletes.",
+      "expected_output": "`order_line` is `sharingModel: 'controlled_by_parent'` with a required `master_detail` field to `order`, plus `sharing: { controlledByParent: { writeRequiresMasterRead: true } }`: read access to the order becomes the master question for every write (insert, update, delete, re-point), and the line's own object permissions, RLS and FLS decide the rest. Without the key every line write needs edit on the order. Not `ownerMayEdit` (only the owner's by-id update, and refused beside the new key), not the key one level up (`sharing.writeRequiresMasterRead`, refused), and not on a non-`controlled_by_parent` object (refused). A predicate (`multi: true`) update or delete writes the rows a by-id write of each would, all matched rows or none. The platform ownership floor still binds on-behalf-of updates and deletes, for both users.",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -444,6 +444,25 @@
         ],
         "must_not_contain": [
           "definePage"
+        ]
+      }
+    },
+    {
+      "id": 26,
+      "prompt": "Our add-on package `acme_contracts` depends on HotCRM (`hotcrm`, namespace `crm`). Its extension of `crm_account` adds a `tax_id` text field, and the package ships an `acme_contract` object whose `account` lookup points at `crm_account`. On the account record page, show Tax ID right after Industry in the Basic section, and the Contracts tab right after Opportunities. `crm_account` declares `fieldGroups: [{ key: 'basic', label: 'Basic', fields: ['name', 'industry', 'website'] }]` and `relatedLists: ['crm_contact', 'crm_opportunity', 'crm_lead', 'sys_activity']`. We cannot edit HotCRM.",
+      "expected_output": "Two `place` entries on the package's own object extension, registered in its stack's `objectExtensions`: `defineObjectExtension({ extend: 'crm_account', fields: { tax_id: Field.text({ label: 'Tax ID' }) }, place: [{ field: 'tax_id', group: 'basic', after: 'industry' }, { list: 'acme_contract', after: 'crm_opportunity' }] })`. `place` arranges only what the extension brings (its own field, its package's child list), each right after (or `before`) an item the account already has, and it applies here because the account declares `fieldGroups` and `relatedLists`. Without it the field arrives after the account's own and the Contracts tab at the end of the tabs, before the activity stream. The extension does not carry `fieldGroups` or `relatedLists` of its own (an extension has neither key), does not redeclare the account, and nothing in HotCRM is edited.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "defineObjectExtension",
+          "extend: 'crm_account'",
+          "place:",
+          "after: 'industry'",
+          "after: 'crm_opportunity'"
+        ],
+        "must_not_contain": [
+          "name: 'crm_account'",
+          "overrides:"
         ]
       }
     }

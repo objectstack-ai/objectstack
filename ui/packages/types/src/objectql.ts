@@ -1326,16 +1326,23 @@ export interface ObjectGridSchema extends BaseSchema {
   editable?: boolean;
 
   /**
-   * Enable single-click editing mode
-   * When true with editable, clicking a cell enters edit mode (instead of double-click)
+   * RETIRED (objectstack#36270, ADR-0049) — the switch between opening a cell
+   * editor on a single click and on a double click. A grid that renders
+   * editable (`editable` set and the viewer allowed to edit) now selects a cell
+   * first: a click selects it, and double-click, Enter, F2 or typing opens its
+   * editor, each committed cell saved on its own. That model has no
+   * single-click entry, so `ObjectGrid` no longer reads the key, and
+   * `@objectstack/spec` refuses it by name on `object-grid`.
    *
-   * `ObjectGrid` reads it as `schema.singleClickEdit ?? true`, so an absent key
-   * means single-click editing, as the spec's `object-grid` row says ("default true
-   * when editable"). This comment read `@default false` until objectui#6152 round 6,
-   * which mirrored the key and measured the default through the real registry.
-   * @default true
+   * `?: never`, not a deletion — this package's tombstone convention (see
+   * `resizableColumns` above). Lockstep with the Zod twin
+   * (`zod/objectql.zod.ts`, `retirementTombstone()`). `DataTableSchema`'s own
+   * `singleClickEdit`, a flag a host sets in code, is unchanged.
+   *
+   * @deprecated RETIRED (objectstack#36270) — delete the key; `editable` decides
+   * whether the grid edits.
    */
-  singleClickEdit?: boolean;
+  singleClickEdit?: never;
   
   /**
    * Grouping Configuration (Airtable-style)
@@ -1377,9 +1384,12 @@ export interface ObjectGridSchema extends BaseSchema {
    *
    * `ObjectGrid` reads it as `schema.keyboardNavigation ?? inlineEditable`, where
    * `inlineEditable` is the authored `editable` AND the viewer's write verdict on
-   * the object — the one value the grid's inline editing itself obeys. So a grid
-   * that renders editable has it on, a grid that renders read-only keeps its Tab
-   * behaviour unless this is `true`, and `false` turns it off on an editable grid.
+   * the object — the one value the grid's inline editing itself obeys. A grid
+   * that renders read-only keeps its Tab behaviour unless this is `true`. A grid
+   * that renders editable is select-first by default (objectstack#36270), and
+   * the select-first model always keeps navigation on, so `false` has no effect
+   * there. Only a host that keeps the staged model (`cellSelection={false}` on
+   * `ObjectGrid`) lets `false` turn it off on an editable grid.
    * @default true when the grid renders editable
    */
   keyboardNavigation?: boolean;

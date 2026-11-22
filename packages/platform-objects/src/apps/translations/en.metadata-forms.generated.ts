@@ -276,9 +276,13 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Language",
         helpText: "Editor language (e.g. sql, javascript)"
       },
+      "fields.fieldHistory": {
+        label: "Field History",
+        helpText: "Old → new values for this field on the record activity timeline. Unset means ON, though the switch shows off: only a switch turned on and then off writes false, which names the change by label only. On also shows a media or JSON field's values."
+      },
       "fields.trackHistory": {
         label: "Track History",
-        helpText: "Summarize this field on the record activity timeline"
+        helpText: "Opt a media or JSON field (image, file, json, …) into old → new values on the activity timeline. Every other field shows them already, and off does not hide them: use Field History."
       },
       "fields.visibleWhen": {
         label: "Visible When",
@@ -298,6 +302,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "enable.trackHistory": {
         label: "Track History"
+      },
+      "enable.fieldHistory": {
+        label: "Field History",
+        helpText: "Old → new values of changed fields on the record activity timeline. Unset means ON, though the switch shows off: only a switch turned on and then off writes false, which turns values off for the whole object."
       },
       "enable.searchable": {
         label: "Searchable"
@@ -865,6 +873,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Hidden",
         helpText: "Hide field from default UI views"
       },
+      showOnCreate: {
+        label: "Show On Create",
+        helpText: "Ask for this field when a record is created. Off: the create dialog, the full-page create and an action-opened create leave it out; editing, the record page and lists still show it. A required field is always asked for, so it cannot be turned off."
+      },
       searchable: {
         label: "Searchable",
         helpText: "Include in global search results"
@@ -897,9 +909,13 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Internal",
         helpText: "Never return this field's value on the generic data path: the engine omits the key from find/findOne results and from the create and update response bodies, on the default projection and when a client names the field in ?select=. Storage, filtering and indexing are untouched."
       },
+      fieldHistory: {
+        label: "Field History",
+        helpText: "Old → new values for this field on the record activity timeline. Unset means ON, though the switch shows off: only a switch turned on and then off writes false, which names the change by label only. On also shows a media or JSON field's values."
+      },
       trackHistory: {
         label: "Track History",
-        helpText: "Render this field's value changes as entries on the record activity timeline (ADR-0052 §5b). Opt-in per field."
+        helpText: "Opt a media or JSON field (image, file, json, …) into old → new values on the activity timeline. Every other field shows them already, and off does not hide them: use Field History."
       },
       widget: {
         label: "Widget",

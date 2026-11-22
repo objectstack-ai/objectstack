@@ -287,6 +287,26 @@ its own raw dotted key on screen, in every locale.
 For the props that have no bundle key at all, the map is the **only**
 localisation route — a document localised that way is fully localised.
 
+**A report's `label` and `description` and a dashboard widget's `title` keep
+their map entry over the bundle at the `/meta` boundary** (objectstack#36373).
+These props have a bundle key too, so `translateReport` and
+`translateDashboard` decide between the two. The map's entry for the requested
+locale is the one the panel writes for that locale — the exact tag, then an
+entry of the locale's own script where the language splits by script (a
+`zh-TW` reader never takes a Simplified `zh` entry), otherwise its base
+language or a sibling region; never `default`. When the item has a packaged
+base and that entry differs from the base's own, the slot counts as changed,
+exactly as a re-authored string does: a translation the paired `.custom`
+package ships still answers first, the base's translation never does, and with
+no pair translation the entry is served. Otherwise (no packaged base, no
+entry, or the same entry) the bundle entry is served as before. A map that repeats the package's own map
+therefore still takes a package's translation updates, and a map an admin
+edited in one language serves that edit while every other language reads its
+bundle text. This is how the report and widget panels store an edit made in a
+non-default language: `{ default: SOURCE, 'zh-CN': EDIT }`, the source text
+untouched. Dataset members are not covered: `translateDataset` keeps ADR-0149's
+bundle-first order.
+
 **A map is never extracted, and no bundle key is synthesised for one.**
 `os i18n extract` scaffolds no row for a map and no key family exists for one;
 in particular **no key is derived from a node's position in the component
@@ -1169,6 +1189,7 @@ beneath an action entry are judged the same way under either.
 | `hooks.{hook}.refusals.{code}.reasons.{reason}` | a reason that code declares under `reasons` |
 | `flows.{flow}.screens.{node}` | the `id` of a `type: 'screen'` node in that flow, nodes nested in loop, parallel and try/catch regions included |
 | `flows.{flow}.screens.{node}.fields.{field}` | a `config.fields[].name` on that screen — an object-form screen (`config.objectName`) declares none, and its input labels live under `objects.{objectName}.fields` |
+| `flows.{flow}.nodes.{node}` | the `id` of a node in that flow that is neither a `screen` nor an `approval` (those two are keyed under `screens` and `approvals`), nodes nested in loop, parallel and try/catch regions included |
 
 An unresolvable key is an **error**, not a warning: `os validate`, `os lint` and
 `os compile` each report it as `translation-target-unknown` and exit non-zero, so

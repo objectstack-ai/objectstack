@@ -26,16 +26,14 @@ import { useAdapter } from '../providers/AdapterProvider.js';
 import { usePreviewDrafts } from '../preview/PreviewModeContext.js';
 import { usePreviewFormDataSource } from '../utils/previewFormDataSource.js';
 import { PreviewDraftEmptyState } from '../preview/PreviewDraftEmptyState.js';
-import {
-  ExpressionProvider,
-  isObjectFieldListed,
-} from '../providers/ExpressionProvider.js';
+import { ExpressionProvider } from '../providers/ExpressionProvider.js';
 import { buildExpressionUser } from '../providers/expressionUser.js';
 import { useTrackRouteAsRecent } from '../hooks/useTrackRouteAsRecent.js';
 import { useHomePath } from '../hooks/useHomePath.js';
 import { readItemPreferLocal, useReadItemsByName } from '../hooks/useObjectPresence.js';
 import { useLauncherApps } from '../hooks/useLauncherApps.js';
-import { resolveRecordFormTarget, resolveRecordFormModalLayout, resolveFormViewChrome, selectRecordFormView, resolveNavigateCreateUrl, resolveNavigateEditUrl, resolvePostCreateTarget, recordFormCreateValues, readRecordFormCreateValues, RECORD_FORM_CREATE_VALUES_STATE } from '../utils/recordFormNavigation.js';
+import { recordFormFieldNames } from '../utils/recordFormFields.js';
+import { resolveRecordFormTarget, resolveRecordFormModalLayout, resolveRecordFormChrome, resolveNavigateCreateUrl, resolveNavigateEditUrl, resolvePostCreateTarget, recordFormCreateValues, readRecordFormCreateValues, RECORD_FORM_CREATE_VALUES_STATE } from '../utils/recordFormNavigation.js';
 import { deriveRecordSurface, deriveRecordFlowSurface } from '@object-ui/plugin-view/core';
 import { isPhoneViewportNow, usePhoneViewport } from '../hooks/usePhoneViewport.js';
 import { PhoneAppHome } from '../layout/PhoneAppHome.js';
@@ -69,6 +67,7 @@ import {
   navEntriesShownOncePendingReadsShow,
 } from '../hooks/useNavMemberGates.js';
 import { resolveSetupAppPath } from './ConsoleShell.js';
+import { useSetupAliasApprovalsTarget } from './setupAliasApprovals.js';
 import { APP_ROUTE_METADATA_READS, collectRoutePaths, metadataReadsForAppRoute } from './appRouteMetadataReads.js';
 import { enterAppBundle, objectViewRouteObject, prefetchObjectViewRows, readAppObjectScope } from './appObjectScope.js';
 import { preferLocal } from '../utils/preferLocal.js';
@@ -469,13 +468,17 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // so Back never returns to the alias. An effect rather than a `<Navigate>`
   // return, so a layout already on screen is not unmounted for the swap.
   const canonicalPathname = canonicalAppPathname(apps, appName, location.pathname);
+  // objectstack#35505 — the inbox under the `setup` alias names no source app:
+  // it moves to the reader's approvals host below instead of onto Setup's
+  // address (`setupAliasApprovals.ts`).
+  const setupAliasApprovalsTarget = useSetupAliasApprovalsTarget();
   useEffect(() => {
-    if (!canonicalPathname) return;
+    if (!canonicalPathname || setupAliasApprovalsTarget !== undefined) return;
     navigate(`${canonicalPathname}${location.search}${location.hash}`, {
       replace: true,
       state: location.state,
     });
-  }, [canonicalPathname, location.search, location.hash, location.state, navigate]);
+  }, [canonicalPathname, setupAliasApprovalsTarget, location.search, location.hash, location.state, navigate]);
 
   // objectui#12809 — the lazy metadata buckets the CURRENT route reads at
   // render (`appRouteMetadataReads.ts` declares them per route). This used to
@@ -654,11 +657,11 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // probe change nothing.
   //
   // ⛔ Not the rest of the Setup subtree. `/system/*` links forward onto
-  // `/apps/setup/system/*` (`SystemRedirect`, `ConsoleShell.tsx`), the server's
-  // approval links (`/system/approvals?request=`) among them, and that inbox
-  // opens records at `/apps/setup/OBJECT/record/ID` (`ApprovalsInboxPage`'s
-  // `recordHref`). A member reaches both under the Setup segment, so whether
-  // they wait on Setup's verdict is a product decision, left open on
+  // `/apps/setup/system/*` (`SystemRedirect`, `ConsoleShell.tsx`). The server's
+  // approval links (`/system/approvals?request=`) among them move on from there
+  // to the reader's own app (`setupAliasApprovals.ts`, objectstack#35505), but
+  // an older record link may still name `/apps/setup/OBJECT/record/ID`, so
+  // whether those wait on Setup's verdict is a product decision, left open on
   // objectui#12706.
   //
   // objectstack#27507 — two more wait on it: the settings pages
@@ -1245,6 +1248,10 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // objectstack#35981 — and the deployment flags (`featuresSettled`, above):
   // the chrome's navigation gates read them.
   if (!dataSource || metadataLoading || !isWorkspaceAdminResolved || !featuresSettled) return <ConsoleBootShell />;
+  // objectstack#35505 — before any app's chrome mounts (which would record
+  // Setup as the reader's last app), the alias inbox moves to its host.
+  if (setupAliasApprovalsTarget === 'waiting') return <ConsoleBootShell />;
+  if (setupAliasApprovalsTarget) return <Navigate to={setupAliasApprovalsTarget} replace state={location.state} />;
   if (routeReadsSettled) firstRouteDrawn.current = true;
 
   // ADR-0037 — preview mode renders its OWN empty/error states and never
@@ -1742,30 +1749,21 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                 // history entry carries. Each is handed as the object it is,
                 // never a merge rebuilt per render: the form re-seeds whenever
                 // `initialValues` is a new object.
-                // Honor the object's DEFAULT FORM VIEW: curated sections (field
-                // selection + order + grouping), `contentLayout: 'tabbed'` when the
-                // view is tabbed, inline child collections (master-detail), and its
-                // authored `modalSize`. When the view declares sections they drive
-                // the modal layout and win over the flat `fields` list below;
-                // otherwise `fields` (every field, raw schema order) is used as
-                // before. `formType` stays 'modal' (the container).
-                // (objectstack-ai/objectstack#1890 / ADR-0050.)
+                // objectstack-ai/objectstack#36425 — the dialog lays out by the
+                // object's field groups and follows its fields' rules. No
+                // internal form view is read: not its sections, tabs, subforms,
+                // `modalSize`, buttons, layout or `defaults`. What the layout
+                // carries is the field groups' inline child collections
+                // (master-detail) and the derived phone size.
                 //
                 // The size: objectstack-ai/objectstack#2604 D1 — create/edit follow
                 // the flow-surface derivation. This host calls it with no
                 // `viewport`, so it gets the desktop answer, a bounded modal
                 // (`size: 'auto'`) for field-heavy and light objects alike
                 // (objectstack-ai/objectstack#23734, objectui#12592); a phone gets
-                // ModalForm's full-screen sheet below `sm`. objectui#12803: an
-                // authored `FormView.modalSize` wins over that derived default on
-                // desktop, and a derived `'full'` (the phone posture) stays full.
-                // The precedence lives in `resolveRecordFormModalLayout`, not in
-                // spread order. Child tasks size to the CHILD object's def.
-                //
-                // The form view: a create uses the object's `create` form view
-                // when it declares one (objectui#13099), an edit its default.
-                // The flow is the same `editingRecord` test the `mode` above
-                // reads, so the selected view always matches the form's mode.
+                // ModalForm's full-screen sheet below `sm`. A derived `'full'`
+                // stays full (`resolveRecordFormModalLayout`). Child tasks size
+                // to the CHILD object's def.
                 ...resolveRecordFormModalLayout(
                   formObjectDef as any,
                   deriveRecordFlowSurface(
@@ -1774,30 +1772,23 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                       ? (editingRecord ? 'child-edit' : 'child-create')
                       : (editingRecord ? 'edit' : 'create'),
                   ).size,
-                  editingRecord ? 'edit' : 'create',
                 ),
                 title: editingRecord
                   ? t('form.editTitle', { object: servedObjectLabel(formObjectDef, language, objectLabel) })
                   : t('form.createTitle', { object: servedObjectLabel(formObjectDef, language, objectLabel) }),
                 open: recordFormShown,
                 onOpenChange: (open: boolean) => { if (!open) closeRecordForm(); },
-                // The list the form may draw: `isObjectFieldListed`, the same
+                // The list the form may draw: `recordFormFieldNames`, the same
                 // gate `RecordFormPage` runs. It reads the static `hidden` only
                 // (objectui#6514's declared keys; the refused `visible` is not
                 // read). A field's `visibleWhen` is evaluated by the form, where
                 // the record is bound — evaluated here, with no record, a
                 // `has()`-guarded predicate dropped the field before the form
                 // could draw it, and a form laid out from `fieldGroups` draws
-                // only listed fields.
-                fields: formObjectDef.fields
-                  ? (Array.isArray(formObjectDef.fields)
-                      ? formObjectDef.fields
-                          .filter((f: any) => typeof f === 'string' || isObjectFieldListed(f))
-                          .map((f: any) => typeof f === 'string' ? f : f.name)
-                      : Object.entries(formObjectDef.fields)
-                          .filter(([_, f]: [string, any]) => isObjectFieldListed(f))
-                          .map(([key]: [string, any]) => key))
-                  : [],
+                // only listed fields. A create leaves out a field declaring
+                // `showOnCreate: false` (`isFieldAskedOnFlow`,
+                // objectstack-ai/objectstack#36425); an edit lists it.
+                fields: recordFormFieldNames(formObjectDef.fields, editingRecord ? 'edit' : 'create'),
                 onSuccess: handleRecordFormSuccess,
                 onCancel: handleDialogCancel,
                 // The footer's 「Create more」 switch on a create, for the
@@ -1805,26 +1796,21 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                 // (objectstack-ai/objectstack#35980). ModalForm shows it on a
                 // create only.
                 createMore: true,
-                // objectstack-ai/objectstack#26843 — the selected form view's
-                // `buttons`, `layout` and `defaults` over this dialog's own
-                // defaults (`resolveFormViewChrome` states the precedence). A
-                // create's opening values: the `formLink` pre-link
-                // (objectstack-ai/objectstack#2604 D3, refresh-safe), else the
-                // values its opener's history entry carries (objectui#12291),
-                // over the form view's `defaults`; each handed on as the object
-                // it is, as the form re-seeds on a new `initialValues`.
-                ...resolveFormViewChrome(
-                  selectRecordFormView(formObjectDef as any, editingRecord ? 'edit' : 'create'),
-                  {
-                    flow: editingRecord ? 'edit' : 'create',
-                    language,
-                    submitText: editingRecord
-                      ? t('form.update', { defaultValue: 'Update' })
-                      : t('form.create', { defaultValue: 'Create' }),
-                    cancelText: t('common.cancel'),
-                    createValues: editingRecord ? undefined : formLinkValues ?? overlayCreateValues,
-                  },
-                ),
+                // The dialog's own buttons and labels (`resolveRecordFormChrome`,
+                // objectstack-ai/objectstack#36425: no form view's `buttons`,
+                // `layout` or `defaults`). A create's opening values: the
+                // `formLink` pre-link (objectstack-ai/objectstack#2604 D3,
+                // refresh-safe), else the values its opener's history entry
+                // carries (objectui#12291); each handed on as the object it is,
+                // as the form re-seeds on a new `initialValues`.
+                ...resolveRecordFormChrome({
+                  flow: editingRecord ? 'edit' : 'create',
+                  submitText: editingRecord
+                    ? t('form.update', { defaultValue: 'Update' })
+                    : t('form.create', { defaultValue: 'Create' }),
+                  cancelText: t('common.cancel'),
+                  createValues: editingRecord ? undefined : formLinkValues ?? overlayCreateValues,
+                }),
               }}
               dataSource={formDataSource ?? undefined}
             />

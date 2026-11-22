@@ -99,8 +99,8 @@ import {
 } from './flowGrouping.js';
 import { StudioRefusalStrip } from './StudioRefusalStrip.js';
 import { StudioNavItemInspector, StudioPicker } from './StudioNavItemInspector.js';
-import { PACKAGE_LIST_TOAST_ID, PackageSwitcher, STUDIO_LANDING_PATH } from './PackageSwitcher.js';
-import { StudioOpenApp, type StudioOpenAppTarget } from './StudioOpenApp.js';
+import { PACKAGE_LIST_TOAST_ID, STUDIO_LANDING_PATH } from './PackageSwitcher.js';
+import { StudioBackToApp, type StudioAppTarget } from './StudioBackToApp.js';
 import {
   ContributedNavRows,
   InterfacesNavContributionsContext,
@@ -117,6 +117,7 @@ import {
   offNavViewHeading,
   offNavViewLabel,
   offNavViewReachedByEntry,
+  offNavViewIsInternalForm,
   type OffNavType,
 } from './InterfacesNavRail.js';
 import {
@@ -219,7 +220,6 @@ import {
   Rocket,
   ChevronDown,
   Lock,
-  Home as HomeIcon,
   Shield,
   ShieldCheck,
   ShieldQuestion,
@@ -361,6 +361,7 @@ import { useMetadataRefreshNonce } from './useMetadataRefreshNonce.js';
 import { resolveSurface, findSurfaceInTree, isSameSurface, type NavNode, type Surface } from './navSurface.js';
 import { servedNavTextOf, displayNavTree, displayAppLabel, type ServedNavText } from './servedNavText.js';
 import { ServedWidgetTextContext, servedWidgetTextOf } from './servedDashboardText.js';
+import { ServedReportTextContext, servedReportTextOf } from './servedReportText.js';
 import {
   useSurfaceDeepLink,
   useSurfaceDeepLinkCapture,
@@ -437,14 +438,6 @@ import { StudioGridAddFieldButton, StudioGridAddFieldProvider, type StudioGridAd
 import { useDraftAutoSave, type DraftSend } from './useDraftAutoSave.js';
 import { FLOW_PRESETS, flowPresetTrigger, type FlowPreset } from './flowPresets.js';
 import { FormToolbar, ObjectFormDesigner } from './ObjectFormDesigner.js';
-import { formLayoutChoiceOf, useFormViewDraft } from './useFormViewDraft.js';
-import { formViewBodyOf, formViewSectionsOf } from './formViewSections.js';
-import {
-  resolveFormViewLayout,
-  type FormViewDefinition,
-  type ObjectDefinitionForFormView,
-  type RecordFormFlow,
-} from '../../utils/recordFormNavigation.js';
 import { isStudioHiddenSystemField } from './studioHiddenSystemField.js';
 import { ObjectGroupInspector } from './ObjectGroupInspector.js';
 import { ObjectValidationsPanel } from './ObjectValidationsPanel.js';
@@ -829,7 +822,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   const ensurePair = React.useCallback(async (): Promise<string> => (await ensurePairPackage()).packageId, [ensurePairPackage]);
   const baseLabel = pkgEntry?.id === packageId ? pkgEntry.name : (packageId ?? '');
 
-  // objectui#2600 — the header's pillar links, Home button and PackageSwitcher
+  // objectui#2600 — the header's pillar links and its 「‹ Back to app」 link
   // are pure SPA client navigation, so the editors' `beforeunload` guard never
   // fires; a dirty pillar unmounts silently and its unsaved edits are gone
   // (Access matrix cells, Interfaces nav). Each pillar mirrors its dirty state
@@ -1275,10 +1268,10 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
       ? { id: publishNoneReasonId, text: t('engine.studio.publishNoneTitle', locale), testId: 'publish-none-reason' }
       : null;
 
-  // Builder → running-app bridge (Airtable's Launch): the builder edits the
-  // package (the design surface), the app is its published front-end. If this
-  // package ships a published app, the header offers Open app (`StudioOpenApp`,
-  // objectstack#34593), in the same tab, mirroring the app bar's Edit app.
+  // Builder → running-app bridge: the builder edits the package (the design
+  // surface), the app is its published front-end. The header's way back to it
+  // is 「‹ Back to app」 at the left (`StudioBackToApp`, objectstack#36501), in
+  // the same tab, mirroring the app bar's Edit app.
   const shellNavigate = useNavigate();
   React.useEffect(() => {
     openAccessRef.current = () => {
@@ -1295,13 +1288,14 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // order: the Automations rail orders its groups by it. Read off the same
   // app row as `packageApp`, so the pillar adds no read of its own.
   const [packageAppObjectOrder, setPackageAppObjectOrder] = React.useState<readonly string[]>([]);
-  // objectstack#34593 — the package's PUBLISHED apps, the header's Open app
-  // targets: a draft app has no running front-end to open. Read off the same
-  // list as `packageApp`.
-  const [publishedApps, setPublishedApps] = React.useState<readonly StudioOpenAppTarget[]>([]);
+  // objectstack#36501 — the package's PUBLISHED apps, where the header's
+  // 「‹ Back to app」 goes when the author did not come from an app: a draft
+  // app has no running front-end to open. Read off the same list as
+  // `packageApp`.
+  const [publishedApps, setPublishedApps] = React.useState<readonly StudioAppTarget[]>([]);
   // Create app (package has no app yet): create a draft `app` item — the
-  // published front-end's on-ramp. The button flips to Open app after the
-  // package publish.
+  // published front-end's on-ramp. After the package publish, 「‹ Back to
+  // app」 names it.
   const [appCreating, setAppCreating] = React.useState(false);
   const [appBusy, setAppBusy] = React.useState(false);
   const [appErr, setAppErr] = React.useState<string | null>(null);
@@ -1641,37 +1635,24 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
 
         <div className="flex min-w-0 flex-1 flex-col">
           <header className={STUDIO_HEADER} data-testid="studio-shell-header">
-            {/* objectui#12459 — three columns: the package at the left, the
-                pillars centered, the package actions at the right.
+            {/* objectui#12459 — three columns: the way back to the app at the
+                left, the pillars centered, the package actions at the right.
                 objectui#12509 — below `sm` the pillars take a second row of
                 their own (`STUDIO_HEADER_PILLAR_NAV`), and on any row the
-                package chip is the piece that gives way. */}
+                app's name is the piece that gives way. */}
             <div className={cn('flex min-w-0 items-center gap-1', STUDIO_HEADER_PACKAGE_COLUMN)}>
-              {/* Never a dead end: walk back to the Studio landing
-                  (objectui#12513), where the author picks the next package.
-                  The console home stays one click away from there, through
-                  the landing's own top bar. */}
-              <button
-                type="button"
-                data-testid="studio-home"
-                onClick={() => {
-                  if (!confirmLeavePillar()) return;
-                  shellNavigate(STUDIO_LANDING_PATH);
-                }}
-                title={t('engine.studio.landingHome', locale)}
-                className={STUDIO_HEADER_ICON_BUTTON}
-              >
-                <HomeIcon className="h-4 w-4" />
-              </button>
-              <div className="flex min-w-0">
-                <PackageSwitcher
-                  packageId={packageId}
-                  tab={tab}
-                  beforeNavigate={confirmLeavePillar}
-                  app={packageApp}
-                  openEntry={pkgEntry?.id === packageId ? pkgEntry : null}
-                />
-              </div>
+              {/* objectstack#36501 — 「‹ Back to app」, the app's name and the
+                  Studio mark: Studio's one way out, to the app page the author
+                  came from. It replaced the Studio-home button, the package
+                  switcher and the top-right Open app; a different package is
+                  picked in the app, or on the Studio landing. */}
+              <StudioBackToApp
+                packageId={packageId}
+                apps={publishedApps}
+                locale={locale}
+                beforeNavigate={confirmLeavePillar}
+                navigate={shellNavigate}
+              />
             </div>
             <nav className={STUDIO_HEADER_PILLAR_NAV} data-testid="studio-pillar-nav">
               {/* objectui#11553 — the package-less scope offers its one pillar. */}
@@ -1717,20 +1698,6 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
               {/* objectstack#26708 — nothing to create, review or publish in a
                   package that is not there. */}
               {!pkgMissing && (<>
-              {/* objectstack#34593 — the way back to the running app, the
-                  mirror of the app bar's Edit app: it lands on the object (or
-                  interface) in focus, in the same tab. The canvas's Run mode
-                  stays the way to try the app without leaving the workbench.
-                  objectui#11553 — the package-less scope has no app. */}
-              {packageId !== null && (
-                <StudioOpenApp
-                  packageId={packageId}
-                  apps={publishedApps}
-                  locale={locale}
-                  beforeNavigate={confirmLeavePillar}
-                  navigate={shellNavigate}
-                />
-              )}
               {/* objectui#11553 — the package-less scope has no app to create. */}
               {packageId === null || packageApp ? null : appDraftPending ? (
                 <span
@@ -3233,7 +3200,7 @@ export function InterfacesPillar({
         // for a dashboard the server serves (so never for an unsaved one).
         // objectstack#30859 — unless the stored draft was just read at the
         // leaf's owner: that answer carries the published layer too.
-        if (current.type === 'dashboard') {
+        if (current.type === 'dashboard' || current.type === 'report') {
           const pairedLayers = body && readAt === (current.addedIn ?? packageId) ? authoredRead?.layers : null;
           if (pairedLayers) {
             const doc = (pairedLayers.effective ?? pairedLayers.code ?? null) as Record<string, unknown> | null;
@@ -3305,11 +3272,21 @@ export function InterfacesPillar({
     currentType === 'dashboard' && currentName
       ? ((findByName(metadata.dashboards, currentName) as Record<string, unknown> | undefined) ?? null)
       : null;
+  // objectstack#36373 — the report leaf's half: its served name and
+  // description, paired with the same published layer, for the report
+  // inspector's Name box (`servedReportText.ts`).
+  const servedReport =
+    currentType === 'report' && currentName
+      ? ((findByName(metadata.reports, currentName) as Record<string, unknown> | undefined) ?? null)
+      : null;
   // A dashboard leaf with a pending draft reads its published layer once, to
   // pair the served titles with: only when the server serves that dashboard,
   // so a never-published draft asks no `/layers` (objectui#11799).
   const publishedPending =
-    currentType === 'dashboard' && leafPublished.key === leafKey && !leafPublished.read && !!servedDashboard;
+    (currentType === 'dashboard' || currentType === 'report') &&
+    leafPublished.key === leafKey &&
+    !leafPublished.read &&
+    !!(servedDashboard ?? servedReport);
   React.useEffect(() => {
     if (!publishedPending || !currentType || !currentName) return;
     const key = leafKey;
@@ -3338,6 +3315,13 @@ export function InterfacesPillar({
         ? servedWidgetTextOf(leafPublished.doc, servedDashboard)
         : null,
     [currentType, leafPublished, leafKey, servedDashboard],
+  );
+  const servedReportText = React.useMemo(
+    () =>
+      currentType === 'report' && leafPublished.key === leafKey && leafPublished.read
+        ? servedReportTextOf(leafPublished.doc, servedReport)
+        : null,
+    [currentType, leafPublished, leafKey, servedReport],
   );
 
   // objectui#5813 — a local dirty flag so auto-save only arms after a real
@@ -4893,6 +4877,9 @@ export function InterfacesPillar({
       <div className="min-h-0 flex-1" />
     ) : selection && Inspector && current ? (
       <div className="min-h-0 flex-1 overflow-auto p-3">
+        {/* objectstack#36373 — a selected dashboard widget's Title box reads
+            the served (current-language) title; `null` for any other leaf. */}
+        <ServedWidgetTextContext.Provider value={servedWidgets}>
         <Inspector
           type={current.type}
           name={current.name}
@@ -4910,6 +4897,7 @@ export function InterfacesPillar({
           readOnly={leafReadOnly}
           locale={locale}
         />
+        </ServedWidgetTextContext.Provider>
       </div>
     ) : isSourcePage ? (
       // objectui#12725 — no 源码 tab: the properties say what the page IS
@@ -4934,6 +4922,7 @@ export function InterfacesPillar({
         {/* objectui#12688 — a dashboard's component list draws the served
             widget titles (display only); `null` for any other leaf. */}
         <ServedWidgetTextContext.Provider value={servedWidgets}>
+          <ServedReportTextContext.Provider value={servedReportText}>
           <DefaultInspector
             type={current.type}
             name={current.name}
@@ -4947,6 +4936,7 @@ export function InterfacesPillar({
             readOnly={leafReadOnly}
             locale={locale}
           />
+          </ServedReportTextContext.Provider>
         </ServedWidgetTextContext.Provider>
       </div>
     ) : designersUnregistered ? (
@@ -5110,13 +5100,16 @@ export function InterfacesPillar({
   // objectstack#30046 — under 视图: a list view an entry's header dropdown
   // reaches is not listed again (Scope 7); a form view reads a readable name,
   // and the heading says what the group holds (Scope 8).
+  // objectstack-ai/objectstack#36425 — an internal form view is not listed
+  // (the console no longer loads one); a public form is.
   const offNavSections = OFF_NAV_TYPES.map((type) => {
     const items = listOnlyCustomized
       ? markedOf(type)
       : itemsRead
         ? (packageItems?.byType[type] ?? []).filter(
             (item) =>
-              !navOpened.has(itemKeyOf(type, item.name)) && !(type === 'view' && offNavViewReachedByEntry(item, navOpened)),
+              !navOpened.has(itemKeyOf(type, item.name))
+              && !(type === 'view' && (offNavViewReachedByEntry(item, navOpened) || offNavViewIsInternalForm(item))),
           )
         : [];
     if (type !== 'view') return { type, items };
@@ -6521,70 +6514,18 @@ export function DataPillar({
     [formFieldsExtKey ?? formFieldsComputed],
   );
 
-  // objectstack#30057 — the form view the app's New and Edit dialogs open for
-  // this object, asked of the app's own resolver over the shell's merged
-  // objects (`formLayoutChoiceOf` → `selectRecordFormView`). With one, the
-  // Form tab lays out THAT view's sections and saves them to its draft (on a
-  // read-only base, as a declared override in its pair, ADR-0146 D2); with
-  // none, the object's field groups, as before. Where New and Edit open
-  // different form views, the author picks which one is shown.
-  const shellMetadata = useMetadata();
-  const [formFlow, setFormFlow] = React.useState<RecordFormFlow>('create');
-  const servedFormObject = current
-    ? (findByName(shellMetadata.objects, current.name) as ObjectDefinitionForFormView | undefined)
-    : undefined;
-  const formChoice = formLayoutChoiceOf(servedFormObject, formFlow);
-  const formViewCustomization = extendsBase ? customization : null;
-  const formViewId = formChoice.viewId;
-  const formView = useFormViewDraft({
-    client,
-    packageId,
-    viewId: formViewId,
-    publishNonce,
-    customization: formViewCustomization,
-    locale,
-    onDraftSaved: () => onDraftSaved?.({ type: 'view', name: formViewId }),
-  });
-  // A read-only package edits a form view only where its pair takes the override.
-  const formViewReadOnly = !formViewId || (readOnly && (formViewCustomization === null || formViewCustomization.walled));
-  const { flush: flushFormView } = useDraftAutoSave({
-    target: formView.targetKey,
-    loadedFor: formView.loadedFor,
-    dirty: formView.dirty,
-    blocked: !formView.row || formView.saving || formViewReadOnly,
-    snapshot: formView.row,
-    save: formView.save,
-  });
-  const formViewDirty = formView.dirty;
-  // Until the buffer loads, the served view's sections, read-only.
-  const formViewLayout = formChoice.view
-    ? formView.sections && !formViewReadOnly
-      ? { sections: formView.sections, onSectionsChange: formView.setSections }
-      : { sections: formView.sections ?? formViewSectionsOf(formChoice.view as Record<string, unknown>), onSectionsChange: () => {} }
-    : null;
-
   // objectui#12515 — what the Form tab's Preview renders. The draft differs
   // from the published definition when there is no published one, a pending
   // draft, or an unsaved edit; then Preview shows the draft unless the author
   // picked Published (offered only when a published version exists).
-  // objectstack#30057 — the form view's draft counts too.
   const draftDiffers =
     !hasBaseline ||
     hasDraft ||
     dirty ||
-    (extOpen !== null && (extHasDraft || extDirty)) ||
-    (formChoice.view !== null && (formView.hasDraft || formViewDirty));
+    (extOpen !== null && (extHasDraft || extDirty));
   const previewShowsDraft = !hasBaseline || (draftDiffers && previewSource === 'draft');
   const previewDraft = previewShowsDraft ? shownDraft : null;
   const previewObjectName = current?.name ?? '';
-  // objectstack#30057 — Preview lays the form out as the dialog it previews
-  // does: the chosen form view's sections (its draft beside a draft preview),
-  // through the dialog's own resolver.
-  const previewFormView =
-    formChoice.view && previewShowsDraft && formView.row ? formViewBodyOf(formView.row) : formChoice.view;
-  const previewFormLayout = resolveFormViewLayout(
-    previewFormView ? { name: previewObjectName, form: previewFormView as FormViewDefinition } : null,
-  );
   const previewDataSource = React.useMemo(
     () =>
       formPreviewSource(
@@ -6972,34 +6913,31 @@ export function DataPillar({
         return true;
       }
       // objectstack#28575 — and the base object's extension buffer the same way.
-      // objectstack#30057 — and the form view's buffer.
       if (
         saving ||
         (dirty && objHeld === null && flushObjSave()) ||
-        (extDirty && flushExtSave()) ||
-        (formViewDirty && flushFormView())
+        (extDirty && flushExtSave())
       ) {
         setSwitchTo(next);
         return true;
       }
-      if (!confirmDropUnsavedWork(dirty || extDirty || formViewDirty, locale)) return false;
+      if (!confirmDropUnsavedWork(dirty || extDirty, locale)) return false;
       setSwitchTo(null);
       setCurrent(next);
       return true;
     },
-    [current, saving, dirty, extDirty, formViewDirty, objHeld, flushObjSave, flushExtSave, flushFormView, locale],
+    [current, saving, dirty, extDirty, objHeld, flushObjSave, flushExtSave, locale],
   );
   React.useEffect(() => {
-    if (!switchTo || saving || formView.saving) return;
+    if (!switchTo || saving) return;
     if (dirty && objHeld === null && flushObjSave()) return;
     if (extDirty && flushExtSave()) return;
-    if (formViewDirty && flushFormView()) return;
     setSwitchTo(null);
     // Still dirty: the save was refused (on screen) or an edit taken meanwhile
     // is held. The author stays; the next switch asks.
-    if (dirty || extDirty || formViewDirty) return;
+    if (dirty || extDirty) return;
     setCurrent(switchTo);
-  }, [switchTo, saving, dirty, extDirty, formViewDirty, formView.saving, objHeld, flushObjSave, flushExtSave, flushFormView]);
+  }, [switchTo, saving, dirty, extDirty, objHeld, flushObjSave, flushExtSave]);
   // The live request's apply (see `requestedSurface` above). objectstack#26845
   // — another object's load replaces the buffer a held edit lives in, so it
   // goes through the rail's own switch (`openObject`): an unsent edit is sent
@@ -7277,51 +7215,18 @@ export function DataPillar({
       </button>
     </div>
   );
-  // objectstack#30057 — which layout the tab shows, and, where New and Edit
-  // open different form views, the pick between them. A pending edit of the
-  // shown view is sent before the other one loads, or the author is asked.
-  const switchFormFlow = (next: RecordFormFlow) => {
-    if (next === formFlow) return;
-    if (formViewDirty && !flushFormView() && !confirmDropUnsavedWork(true, locale)) return;
-    setFormFlow(next);
-  };
+  // objectstack-ai/objectstack#36425 — the create and edit dialogs lay out by
+  // the object's field groups, never by an internal form view, so the Form tab
+  // always edits the field groups and says so.
   const formLayoutSource = current ? (
     <div className="inline-flex items-center gap-2" data-testid="form-layout-source">
-      {formChoice.flowsDiffer && (
-        <div
-          role="group"
-          aria-label={t('engine.studio.data.form.flowLabel', locale)}
-          data-testid="form-layout-flow"
-          className="inline-flex items-center gap-0.5 rounded-md bg-muted p-0.5"
-        >
-          {(['create', 'edit'] as const).map((flow) => (
-            <button
-              key={flow}
-              type="button"
-              onClick={() => switchFormFlow(flow)}
-              aria-pressed={formFlow === flow}
-              className={formModeItem(formFlow === flow)}
-            >
-              {t(flow === 'create' ? 'engine.studio.data.form.flowCreate' : 'engine.studio.data.form.flowEdit', locale)}
-            </button>
-          ))}
-        </div>
-      )}
       <span
         data-testid="form-layout-source-chip"
-        data-source={formChoice.view ? 'form-view' : 'field-groups'}
-        data-view={formViewId || undefined}
-        title={t(
-          formChoice.view
-            ? 'engine.studio.data.form.layoutSource.formViewTitle'
-            : 'engine.studio.data.form.layoutSource.fieldGroupsTitle',
-          locale,
-        )}
+        data-source="field-groups"
+        title={t('engine.studio.data.form.layoutSource.fieldGroupsTitle', locale)}
         className="inline-flex h-6 items-center rounded bg-muted px-2 text-[11px] text-muted-foreground"
       >
-        {formChoice.view
-          ? tFormat('engine.studio.data.form.layoutSource.formView', locale, { name: formViewId || current.name })
-          : t('engine.studio.data.form.layoutSource.fieldGroups', locale)}
+        {t('engine.studio.data.form.layoutSource.fieldGroups', locale)}
       </span>
     </div>
   ) : null;
@@ -7454,7 +7359,6 @@ export function DataPillar({
         </AlertDialogContent>
       </AlertDialog>
       {extConflictDialog}
-      {formView.conflictDialog}
       <div className="relative flex min-h-0 flex-1">
         {isMobile && railOpen && (
           <div
@@ -7961,15 +7865,6 @@ export function DataPillar({
                   to trail it is each item's title. */}
               {formMode === 'layout' ? (
                 <>
-                {formChoice.view && formView.failure && (
-                  <div
-                    role="alert"
-                    data-testid="form-view-failure"
-                    className="shrink-0 border-b bg-destructive/5 px-6 py-2 text-xs text-destructive"
-                  >
-                    {plainRefusal(formView.failure.error).message}
-                  </div>
-                )}
                 <ObjectFormDesigner
                   draft={shownDraft}
                   objectName={current.name}
@@ -7982,11 +7877,10 @@ export function DataPillar({
                   // objectstack#30057 — on a base object a new field goes into
                   // the pair's extension, from the toolbar beside the mode control.
                   onAddField={canAddFields && !extendsBase ? addField : undefined}
-                  readOnly={formViewLayout ? formViewReadOnly || !formView.sections : readOnly}
+                  readOnly={readOnly}
                   modeControl={formToolbarLeading}
                   contributedFields={contributedFields}
                   draftMarkedFields={agentMarkedFields}
-                  formView={formViewLayout}
                 />
                 </>
               ) : (
@@ -8088,9 +7982,6 @@ export function DataPillar({
                           type: 'object-form',
                           objectName: current.name,
                           mode: 'create',
-                          // objectstack#30057 — the chosen form view's layout, as the dialog lays it out.
-                          ...(previewFormLayout.sections ? { sections: previewFormLayout.sections } : {}),
-                          ...(previewFormLayout.contentLayout === 'tabbed' ? { formType: 'tabbed' } : {}),
                           // Memoized above at the top of the component: this array's
                           // IDENTITY is a dependency of ObjectForm's field-generation
                           // effect, so rebuilding it inline here re-ran that effect on

@@ -450,6 +450,10 @@ export const fieldForm = defineForm({
         // UI & Visibility
         { field: 'readonly', colSpan: 1, helpText: 'Field is read-only in forms' },
         { field: 'hidden', colSpan: 1, helpText: 'Hide field from default UI views' },
+        // #36425 — whether a create asks for the field; read by every create
+        // surface of the Console (the create dialog, the full-page create, an
+        // action-opened create). The parse refuses it off on a required field.
+        { field: 'showOnCreate', colSpan: 1, helpText: 'Ask for this field when a record is created. Off: the create dialog, the full-page create and an action-opened create leave it out; editing, the record page and lists still show it. A required field is always asked for, so it cannot be turned off.' },
         { field: 'searchable', colSpan: 1, helpText: 'Include in global search results' },
         { field: 'sortable', colSpan: 1, helpText: 'Allow sorting lists by this field' },
         // #19332 G1b — the three field-level predicates. Same keys, same node, as
@@ -466,7 +470,11 @@ export const fieldForm = defineForm({
         // `string[]`, so the `app.form.ts` `requiredPermissions` face.
         { field: 'requiredPermissions', widget: 'string-tags', colSpan: 2, helpText: "Capabilities (permission-set systemPermissions) a caller must hold — every one listed — to read or edit this field (ADR-0066 D3). Without them the value is masked on read (partially, when a maskingRule is set) and edits are denied. Empty or unset: no capability gate." },
         { field: 'internal', colSpan: 1, helpText: "Never return this field's value on the generic data path: the engine omits the key from find/findOne results and from the create and update response bodies, on the default projection and when a client names the field in ?select=. Storage, filtering and indexing are untouched." },
-        { field: 'trackHistory', colSpan: 1, helpText: "Render this field's value changes as entries on the record activity timeline (ADR-0052 §5b). Opt-in per field." },
+        // [#36290] The off switch is `fieldHistory` (no default); `trackHistory`
+        // only opts a no-line type in. A two-state switch cannot show unset
+        // apart from false, so the help text says what unset means.
+        { field: 'fieldHistory', colSpan: 1, helpText: "Old → new values for this field on the record activity timeline. Unset means ON, though the switch shows off: only a switch turned on and then off writes false, which names the change by label only. On also shows a media or JSON field's values." },
+        { field: 'trackHistory', colSpan: 1, helpText: "Opt a media or JSON field (image, file, json, …) into old → new values on the activity timeline. Every other field shows them already, and off does not hide them: use Field History." },
         { field: 'widget', colSpan: 2, helpText: 'Form widget override — names a registered field component, looked up as `field:` plus this name, to render the field instead of the type default. An unregistered name degrades to the type renderer.' },
         { field: 'ackPlaintextMasking', label: 'Acknowledge plaintext at rest', colSpan: 2, visibleWhen: "data.type == 'password'", helpText: "Affirm that this generic password field's plaintext-at-rest, masked-on-read contract is intended, silencing the author-time warning (ADR-0100). No effect on any other type." },
       ],

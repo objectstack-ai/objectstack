@@ -19,7 +19,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import { ActionProvider, RecordContextProvider } from '@object-ui/react';
 import '../renderers';
@@ -76,13 +76,24 @@ const act = (name: string, label: string, extra: Record<string, unknown> = {}) =
 const ACTIONS = [act('convert', 'Convert', { variant: 'primary' }), act('log_call', 'Log call'), act('send_email', 'Send email')];
 
 /** A host bar: two slots and a claim, as the record page's top bar offers. */
-function BarHost({ claim, children }: { claim: (claimed: boolean) => void; children: React.ReactNode }) {
+function BarHost({
+  claim,
+  preview,
+  children,
+}: {
+  claim: (claimed: boolean) => void;
+  preview?: boolean;
+  children: React.ReactNode;
+}) {
   const [titleSlot, setTitleSlot] = React.useState<HTMLElement | null>(null);
   const [actionSlot, setActionSlot] = React.useState<HTMLElement | null>(null);
-  const bar = React.useMemo(() => ({ titleSlot, actionSlot, claim }), [titleSlot, actionSlot, claim]);
+  const bar = React.useMemo(
+    () => ({ titleSlot, actionSlot, claim, ...(preview ? { preview } : {}) }),
+    [titleSlot, actionSlot, claim, preview],
+  );
   return (
     <>
-      <div data-testid="bar">
+      <div data-testid="bar" data-record-top-bar="">
         <span ref={setTitleSlot} data-testid="title-slot" />
         <span ref={setActionSlot} data-testid="action-slot" />
       </div>
@@ -94,8 +105,16 @@ function BarHost({ claim, children }: { claim: (claimed: boolean) => void; child
 function renderHeader({
   schema = { type: 'page:header', actions: ACTIONS },
   bar,
+  preview,
   state,
-}: { schema?: any; bar?: (claimed: boolean) => void; state?: RecordHeaderState } = {}) {
+  hostActions = HOST_ACTIONS,
+}: {
+  schema?: any;
+  bar?: (claimed: boolean) => void;
+  preview?: boolean;
+  state?: RecordHeaderState;
+  hostActions?: unknown[];
+} = {}) {
   const header = (
     <ActionProvider>
       <RecordContextProvider
@@ -103,7 +122,7 @@ function renderHeader({
         recordId={LEAD.id}
         data={LEAD}
         objectSchema={LEAD_SCHEMA}
-        headerSystemActions={HOST_ACTIONS}
+        headerSystemActions={hostActions}
       >
         <RecordHeaderStateContext.Provider value={state ?? null}>
           <PageHeader schema={schema} />
@@ -111,7 +130,7 @@ function renderHeader({
       </RecordContextProvider>
     </ActionProvider>
   );
-  return render(bar ? <BarHost claim={bar}>{header}</BarHost> : header);
+  return render(bar ? <BarHost claim={bar} preview={preview}>{header}</BarHost> : header);
 }
 
 const inlineButtons = (root: HTMLElement) =>
@@ -349,5 +368,136 @@ describe('page:header in the host bar re-measures the width fold on another reco
     await waitFor(() => expect(inlineButtons(actionSlot)).toContain('Convert'));
     await waitFor(() => expect(inlineButtons(actionSlot)).not.toContain('Log call'));
     expect(inlineButtons(actionSlot)).toContain('Edit');
+  });
+});
+
+/** The open `⋯` menu's entries, in order. */
+async function moreEntries(root: HTMLElement): Promise<string[]> {
+  const trigger = Array.from(root.querySelectorAll('button')).find((b) => b.getAttribute('aria-label') === 'More actions');
+  expect(trigger, 'the ⋯ trigger').toBeTruthy();
+  fireEvent.pointerDown(trigger!, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+  await waitFor(() => expect(screen.getByRole('menu')).toBeTruthy());
+  return Array.from(screen.getByRole('menu').querySelectorAll('[role="menuitem"]')).map((el) => (el.textContent ?? '').trim());
+}
+
+/**
+ * objectstack#36201 / objectstack#36149 — a side preview's bar
+ * (`RecordHeaderBar.preview`): the record's name first. The row draws ONE
+ * labelled action, the primary, however wide the preview is; the rest — the
+ * host's Edit too — go into the `⋯` in their order; no copy-id icon after the
+ * name, whose full text is its tooltip; and that one action folds as well
+ * while the name is cut below sixteen characters' width.
+ */
+describe('page:header in a side preview\'s bar (objectstack#36201, objectstack#36149)', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('draws one labelled action, the primary, and Edit and the rest in the ⋯ in their order', async () => {
+    renderHeader({ bar: vi.fn(), preview: true });
+    const actionSlot = screen.getByTestId('action-slot');
+    await waitFor(() => expect(inlineButtons(actionSlot)).toContain('Convert'));
+    expect(inlineButtons(actionSlot)).toEqual(['Convert', 'More actions']);
+    expect(await moreEntries(actionSlot)).toEqual(['Log call', 'Send email', 'Edit', 'Delete']);
+  });
+
+  it('an authored maxVisible does not bring more buttons back', async () => {
+    renderHeader({ bar: vi.fn(), preview: true, schema: { type: 'page:header', actions: ACTIONS, maxVisible: 3 } });
+    const actionSlot = screen.getByTestId('action-slot');
+    await waitFor(() => expect(inlineButtons(actionSlot)).toContain('Convert'));
+    expect(inlineButtons(actionSlot)).toEqual(['Convert', 'More actions']);
+  });
+
+  it('a record with no action of its own draws no labelled button: Edit is in the ⋯', async () => {
+    renderHeader({ bar: vi.fn(), preview: true, schema: { type: 'page:header' } });
+    const actionSlot = screen.getByTestId('action-slot');
+    await waitFor(() => expect(inlineButtons(actionSlot)).toEqual(['More actions']));
+    expect(await moreEntries(actionSlot)).toEqual(['Edit', 'Delete']);
+  });
+
+  it('the host\'s edit state keeps its Cancel and Save in the row; the page\'s actions fold', async () => {
+    const editState = [
+      { name: 'sys_record_edit_cancel', label: 'Cancel', order: 99, variant: 'outline', onClick: vi.fn() },
+      { name: 'sys_record_edit_save', label: 'Save', order: 100, variant: 'primary', onClick: vi.fn() },
+    ];
+    renderHeader({ bar: vi.fn(), preview: true, hostActions: editState });
+    const actionSlot = screen.getByTestId('action-slot');
+    await waitFor(() => expect(inlineButtons(actionSlot)).toContain('Save'));
+    expect(inlineButtons(actionSlot)).toEqual(['Cancel', 'Save', 'More actions']);
+  });
+
+  it('draws no copy-id icon after the name, and the name\'s full text is its tooltip', async () => {
+    renderHeader({ bar: vi.fn(), preview: true });
+    const titleSlot = screen.getByTestId('title-slot');
+    await waitFor(() => expect(titleSlot.querySelector('h1')?.textContent).toBe('Mira Costa'));
+    expect(copyIdButton(titleSlot)).toBeUndefined();
+    expect(titleSlot.querySelector('h1 [data-record-header-name]')?.getAttribute('title')).toBe('Mira Costa');
+  });
+
+  it('CONTROL — a page\'s bar keeps the copy-id icon and draws no tooltip node', async () => {
+    renderHeader({ bar: vi.fn() });
+    const titleSlot = screen.getByTestId('title-slot');
+    await waitFor(() => expect(titleSlot.querySelector('h1')?.textContent).toBe('Mira Costa'));
+    expect(copyIdButton(titleSlot)).toBeTruthy();
+    expect(titleSlot.querySelector('[data-record-header-name]')).toBeNull();
+  });
+
+  /** The chip's copy-id icon (its label is the bundle key with no `I18nProvider`). */
+  const copyIdButton = (root: HTMLElement) =>
+    Array.from(root.querySelectorAll('button')).find((b) => /copy/i.test(b.getAttribute('aria-label') ?? ''));
+
+  /** jsdom lays nothing out: the name's drawn and full widths are stubbed. */
+  function stubName(shown: number, full: number) {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.tagName === 'H1' ? shown : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.tagName === 'H1' ? full : 0;
+    });
+  }
+
+  it('a name cut below sixteen characters\' width folds the one action too', async () => {
+    // 16 px text: sixteen characters are 256 px.
+    stubName(120, 300);
+    renderHeader({ bar: vi.fn(), preview: true });
+    const actionSlot = screen.getByTestId('action-slot');
+    await waitFor(() => expect(inlineButtons(actionSlot)).toEqual(['More actions']));
+    expect(await moreEntries(actionSlot)).toEqual(['Convert', 'Log call', 'Send email', 'Edit', 'Delete']);
+  });
+
+  it('CONTROL — a name cut, but with sixteen characters\' room, keeps the action', async () => {
+    stubName(260, 400);
+    renderHeader({ bar: vi.fn(), preview: true });
+    const actionSlot = screen.getByTestId('action-slot');
+    await waitFor(() => expect(inlineButtons(actionSlot)).toContain('Convert'));
+    expect(inlineButtons(actionSlot)).toEqual(['Convert', 'More actions']);
+  });
+
+  it('CONTROL — a short name drawn in full keeps the action', async () => {
+    stubName(80, 80);
+    renderHeader({ bar: vi.fn(), preview: true });
+    const actionSlot = screen.getByTestId('action-slot');
+    await waitFor(() => expect(inlineButtons(actionSlot)).toContain('Convert'));
+    expect(inlineButtons(actionSlot)).toEqual(['Convert', 'More actions']);
+  });
+
+  it('CONTROL — a page\'s bar never folds for the name', async () => {
+    stubName(120, 300);
+    renderHeader({ bar: vi.fn() });
+    const actionSlot = screen.getByTestId('action-slot');
+    await waitFor(() => expect(inlineButtons(actionSlot)).toContain('Send email'));
+    expect(inlineButtons(actionSlot)).toContain('Convert');
+  });
+
+  it('CONTROL — a state\'s levers (an approval\'s approve / reject) are drawn as the state draws them', async () => {
+    const group = (parts: RecordHeaderGroupParts) => (
+      <>
+        <button type="button">通过</button>
+        <button type="button">拒绝</button>
+        {parts.recordMenuItems ? <span data-testid="state-menu" /> : null}
+      </>
+    );
+    renderHeader({ bar: vi.fn(), preview: true, state: { group } });
+    const actionSlot = screen.getByTestId('action-slot');
+    await waitFor(() => expect(inlineButtons(actionSlot)).toEqual(['通过', '拒绝']));
+    expect(actionSlot.querySelector('[data-testid="state-menu"]')).toBeTruthy();
   });
 });

@@ -25,7 +25,7 @@
 // dispatcher domain files.
 //
 // The population comes from `packages/rest/src/rest-route-ledger.ts` (20
-// families) and `packages/runtime/src/route-ledger.ts` (23
+// families) and `packages/runtime/src/route-ledger.ts` (24
 // domains) because those two are enumerated from a RUNNING server and guarded
 // in both directions by their own conformance tests — so a new family or
 // domain cannot be silently absent from them, and therefore cannot be silently
@@ -76,11 +76,11 @@
 // The ledgers supply the POPULATION; the classification stays a reviewed row
 // here.
 //
-// Of the 41 ledger keys, 17 are classified by rows below (re-derived when the
+// Of the 42 ledger keys, 18 are classified by rows below (re-derived when the
 // `/ui` and `/data` domains arrived classified under ADR-0138 D2's second
 // slice, after the `forms` family and the `/notifications`, `/keys` and
-// `/share-links` domains did under its first, the `/webhooks/redeliver` domain
-// did, #22755, `/approvals/act` did, #22576, and `/i18n` left the baseline,
+// `/share-links` domains did under its first, the `/comments` domain did,
+// #36469, the `/webhooks/redeliver` domain did, #22755, `/approvals/act` did, #22576, and `/i18n` left the baseline,
 // #22432); the other 24 are enumerated one by one,
 // dated, and pinned SHRINK-ONLY in `authz-ledger-population.baseline.ts`,
 // whose MAX note dates every step down from the 34 of 40 it held on the
@@ -422,6 +422,22 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
     enforcement: 'plugin-webhooks/webhook-outbox-plugin.ts serveRedeliver — the ONE body both faces run: the caller resolved from the request\'s own credentials through the auth service (no signed-in user: 401 UNAUTHENTICATED), then the webhook-administration entitlement asked of the security service before the body is read (redeliver-entitlement.ts: update on sys_webhook; refused: 403 PERMISSION_DENIED, undecidable: 503 SERVICE_UNAVAILABLE), the caller\'s active organization threaded into messaging.redeliverHttp as the tenant (a row outside it: 404 RESOURCE_NOT_FOUND), and the redelivery veto installed with messaging before the slot is registered (a row whose subscription or signing secret is gone: 409 DELIVERY_NOT_ELIGIBLE); reached through IWebhookService.handleRedeliver by runtime/domains/webhooks.ts, which forwards the transport\'s request UNREAD, resolves the slot per request and adds no credential of its own (an absent slot or member is a typed 501, never a route miss). The two dispatcher preamble gates apply to the exact path with NO exemption: core/security/auth-gate.ts ALLOW_ROUTES does not list it (a session owing an authentication step is refused 403 first) and runtime/http-dispatcher.ts enforceProjectMembership does not skip it (a signed-in non-member of the environment is refused 403 PROJECT_MEMBERSHIP_REQUIRED first). The self-hosted raw-app mount (plugin-webhooks registerAdminRoutes) runs the same body on the same outbox',
     covers: ['dispatcher-domain:route-ledger.ts:/webhooks/redeliver'],
     note: 'The DISPATCHER domain only: on a self-hosted kernel the same path is served from the raw Hono app and never reaches the dispatcher, which is why the route-ledger row is pinned unobservable on the showcase boot. Unit- and wire-proven, not dogfood-proven: plugin-webhooks webhook-redeliver-member.test.ts drives the member on a real kernel, messaging service and outbox (every refusal the contract declares, the tenant scope, the veto, byte parity with the mount); runtime domains/webhooks-redeliver.test.ts pins the domain on the real HttpDispatcher (the request forwarded unread, POST alone claimed, 501 for an absent slot or member, the slot read per request, a signed-in non-member and a gated session stopped before the member while a member of the environment and an anonymous caller reach it); http-conformance hono-webhooks-redeliver.conformance.test.ts drives the real plugin through createHonoApp and the self-hosted mount, where a replay lands in the outbox and every refusal, anonymous first, answers the same bytes at both doors.' },
+
+  // #36469 — the `/comments` dispatcher domain (ruling A on #22438, applied to
+  // the comment doors). As `webhook-redeliver-session`, the credential IS the
+  // session: the member resolves the caller from the request's own
+  // credentials, and the dispatcher's two preamble gates apply unexempted.
+  // ⛔ Ids stay in this comment, out of the row's strings.
+  //
+  // Not HIGH_RISK: each door writes one row the caller owns or may resolve,
+  // after reading it AS THE CALLER (object grant, organization wall, the
+  // comment read gate), so it is no sibling read path around a data gate. Its
+  // proofs are the plugin-audit and plugin-security door suites and the
+  // two-door wire suite, none of which lives in this directory.
+  { id: 'comment-doors-session', summary: 'Comment doors (`DELETE /comments/reactions/:id`, `PUT /comments/:id/resolution`, `DELETE /comments/:id`) — a signed-in member removes their own reaction, resolves or reopens a thread they can read and may post on, and removes a comment they wrote with no reply under it; a row the caller cannot read answers as unknown, another member\'s row is refused 403, and an anonymous caller is refused 401 by the door itself, exactly as the self-hosted mount refuses it', state: 'enforced',
+    enforcement: 'core/security/own-row-delete-routes.ts (the unreact and own-comment delete doors) and plugin-audit/comment-routes.ts (the resolution door) — the caller resolved from the request\'s own credentials (ownRowDeleteCallerResolver: no signed-in user 401, a held sign-in 403), the row read AS THE CALLER (object grant, organization wall, comment read gate; unreadable = unknown 404), the owner column checked (403 PERMISSION_DENIED) or the posting gate asked (canWriteObject insert on sys_comment), then a system write attributed to the caller; reached through ICommentDoorsService.handleCommentDoor by runtime/domains/comments.ts, which claims exactly the three method and path shapes, forwards the transport\'s request UNREAD, resolves the slot per request and adds no credential of its own (an absent slot or member is a typed 501, never a route miss). The two dispatcher preamble gates apply with NO exemption: core/security/auth-gate.ts ALLOW_ROUTES does not list the paths and runtime/http-dispatcher.ts enforceProjectMembership does not skip them. The member runs the very registration the self-hosted mount runs (plugin-audit comment-doors-member.ts over registerCommentDoors in audit-plugin.ts)',
+    covers: ['dispatcher-domain:route-ledger.ts:/comments'],
+    note: 'The DISPATCHER domain only: on a self-hosted kernel the same paths are served from plugin-audit\'s mount on the kernel\'s http.server and never reach the dispatcher. Unit- and wire-proven, not dogfood-proven: runtime domains/comments.test.ts pins the domain on the real HttpDispatcher (the three shapes forwarded unread, every other method and path the ordinary miss, 501 for an absent slot or member, the slot read per request, the environment-scoped spelling forwarded at the wire path, a signed-in non-member and a gated session stopped before the member); http-conformance hono-comment-doors.conformance.test.ts drives the real AuditPlugin through createHonoApp on a kernel with no http.server (unreact, resolve and reopen, own-comment delete land in the store) and answers the anonymous refusal and refused bodies with the same bytes as the self-hosted mount; plugin-security comment-doors.integration.test.ts and comment-reaction-unreact-door.integration.test.ts hold the doors\' grants on the real stack.' },
 
   // ── ADR-0138 D2 — THE CLOSED LIST OF DOORS (card E2) ─────────────────────
   //

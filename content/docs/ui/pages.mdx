@@ -214,9 +214,10 @@ keys nothing changes.
   (the activity stream: when unlisted, last). An entry `{ list, label, columns }` gives one list
   its own title and child-field columns, winning over the child field's `relatedListTitle` /
   `relatedListColumns`; a built-in is written only as its bare name. To put one tab first, list
-  every tab the page keeps with that one first. A child list another package adds is hidden by a
-  `relatedLists` that does not name it (letting a package place its own list is a later change),
-  and `relatedList: false` on the child's reference field still hides a list.
+  every tab the page keeps with that one first. A child list another package adds is not hidden
+  by a `relatedLists` that does not name it: it shows where that package's extension places it
+  (below), or at the end of the tabs, before the approvals and activity-stream tabs.
+  `relatedList: false` on the child's reference field still hides a list.
 - **A field group lists its fields.** `fieldGroups` are the Details sections, in array order.
   A group lists its members, in order, in `fields`; without `fields`, its members are the fields
   whose `group` names it, the older spelling, still read.
@@ -256,6 +257,28 @@ export const Quote = ObjectSchema.create({
     'sys_attachment',
     'sys_approval_request',
     'sys_activity',
+  ],
+});
+```
+
+A package that adds to an object it does not own says where its additions go, with `place` on
+its [object extension](/docs/data-modeling/object-extensions#placing-what-you-bring): a field
+into one of the target's groups, a group of its own between the target's, a child list among
+the tabs, each right after or before a named item. Placement arranges what the target
+declares. Where the target declares no `fieldGroups` (or no `relatedLists`), its automatic
+arrangement stays and the additions still show in it. An extension places only what it brings.
+
+{/* os:check */}
+```typescript
+import { defineObjectExtension, Field } from '@objectstack/spec/data';
+
+// A contracts package adds a field and a child list to `account`, and places both.
+export const AccountContractsExtension = defineObjectExtension({
+  extend: 'account',
+  fields: { tax_id: Field.text({ label: 'Tax ID' }) },
+  place: [
+    { field: 'tax_id', group: 'basic', after: 'industry' },
+    { list: 'contract', after: 'opportunity', columns: ['name', 'amount', 'end_date'] },
   ],
 });
 ```
@@ -396,7 +419,7 @@ unknown or retired key (`description`, `icon`, `breadcrumb`, `showStar`) is refu
 | `placedActions` | — | `true` asks for every action of the object placed at `record_header` / `record_more`, read live, in place of an `actions` list, so an action another package adds is drawn without editing the page. Refused beside an authored `actions` list: keep one. The platform's user, organization and approval request pages set it |
 | `recordChrome` | `true` | Draw the title as the record chip (object label, copy-id button, the record's picture when the object names an `imageField`); `false` keeps a bare heading |
 | `showCopyId` | `true` | The copy-record-id button in the chip |
-| `maxVisible` / `mobileMaxVisible` | 3 on every header (in a record page's header bar the number, authored or not, is an upper bound: actions that do not fit the bar's width fold as well) / 2 in a phone record page's bottom bar (the Edit button counts as one), 1 elsewhere | How many actions render inline before the rest fold into the `⋯` menu |
+| `maxVisible` / `mobileMaxVisible` | 3 on every header (in a record page's header bar the number, authored or not, is an upper bound: actions that do not fit the bar's width fold as well) / 2 in a phone record page's bottom bar (the page's own actions; Edit is in the top bar's `⋯` there), 1 elsewhere | How many actions render inline before the rest fold into the `⋯` menu |
 | `aria` | — | ARIA attributes (`ariaLabel`, `ariaDescribedBy`, …) for the `<header>` element |
 
 A named action renders only if its `locations` include `record_header` (inline) or

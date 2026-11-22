@@ -12,6 +12,7 @@ import type {
   IAuditCheckpointSink,
   IAuthService,
   IClusterService,
+  ICommentDoorsService,
   ICryptoProvider,
   IDataEngine,
   IHttpServer,
@@ -70,6 +71,7 @@ import {
   type CommentDoorsEngine,
   type CommentPostingGate,
 } from './comment-routes.js';
+import { createCommentDoorMember } from './comment-doors-member.js';
 import { admitMentionRecipients } from './mention-recipient-gate.js';
 import { installActivityReadVisibility } from './activity-read-visibility.js';
 import { installActivityFieldRedaction } from './activity-field-redaction.js';
@@ -528,6 +530,16 @@ export class AuditPlugin implements Plugin {
       ...createAppActivityWriter({ getEngine: getLedgerEngine, getActorSnapshot: () => this.actorSnapshotOf }),
     });
 
+    // [#36469] The comment doors on the `comments` slot, transport-neutrally
+    // (`ICommentDoorsService.handleCommentDoor`): the runtime dispatcher's
+    // `/comments` domain forwards to it on a kernel with no `http.server` (a
+    // hosted tenant kernel), where `mountCommentDoors` has nothing to mount
+    // on. Same registration as the mount; nothing is read until a request.
+    const commentDoors: ICommentDoorsService = {
+      handleCommentDoor: createCommentDoorMember((http) => registerCommentDoors(http, ctx)),
+    };
+    ctx.registerService('comments', commentDoors);
+
     // ADR-0029 D8 — contribute this plugin's object translations to the i18n
     // service on kernel:ready (the i18n plugin may register after this one).
     if (typeof (ctx as any).hook === 'function') {
@@ -840,14 +852,16 @@ export class AuditPlugin implements Plugin {
             return undefined;
           }
         };
-        installActivityFieldRedaction(engine as any, getSecurity, ctx.logger);
-        ctx.logger.info('AuditPlugin: sys_activity field redaction installed');
         // [#26167] …and each kept row's summary is composed in the READER's
-        // language from the code the writer stored beside it. Registered after
-        // the redaction, so it runs inside it: the redaction judges the
-        // composed text by the same declared sources as the stored one.
+        // language from the code the writer stored beside it. [#36290]
+        // Registered BEFORE the redaction, so the redaction runs inside it: the
+        // redaction judges the stored text by its declared sources and narrows
+        // the field-change code to this reader first, and the summary is then
+        // composed from what it kept.
         installActivitySummaryLocale(engine as any, getI18n);
         ctx.logger.info('AuditPlugin: sys_activity reader-language summaries installed');
+        installActivityFieldRedaction(engine as any, getSecurity, ctx.logger);
+        ctx.logger.info('AuditPlugin: sys_activity field redaction installed');
         // [#21155] The compliance ledger's before/after snapshots take the same
         // narrowing, through the same answer and the same resolver: a ledger
         // reader is not field-unrestricted by default. An auditor who must see
@@ -1081,8 +1095,9 @@ export class AuditPlugin implements Plugin {
    *    grant.
    *
    * Every service the doors read is read per request, so a provider that
-   * registers after this hook is still seen. A kernel with no HTTP server
-   * mounts nothing, and says so.
+   * registers after this hook is still seen. A kernel with no HTTP server (a
+   * hosted tenant kernel) mounts nothing here: the `comments` slot serves the
+   * same doors to the dispatcher (#36469), and the line says so.
    */
   private mountCommentDoors(ctx: PluginContext): void {
     const optional = <T>(name: string): T | undefined => {
@@ -1095,28 +1110,18 @@ export class AuditPlugin implements Plugin {
     // `http.server` is the canonical name; `http-server` the deprecated alias.
     const http = optional<IHttpServer>('http.server') ?? optional<IHttpServer>('http-server');
     if (!http) {
-      ctx.logger.warn(
-        `AuditPlugin: no HTTP server is registered, so the comment doors (DELETE ${COMMENT_REACTION_REMOVE_ROUTE}, ` +
-          `PUT ${COMMENT_RESOLUTION_ROUTE}, DELETE ${COMMENT_REMOVE_ROUTE}) are not mounted: a member whose grants carry ` +
-          'no delete cannot remove their own reaction or comment, and resolves only the threads they started.',
+      // [#36469] The hosted shape: a tenant kernel owns no socket. The doors
+      // are not lost there: the `comments` slot (registered in `init()`) serves
+      // them to the runtime dispatcher's `/comments` domain, which the host's
+      // `createHonoApp` reaches.
+      ctx.logger.info(
+        `AuditPlugin: comment doors mounted on the 'comments' service for the dispatcher's /comments domain ` +
+          `(no HTTP server on this kernel): DELETE ${COMMENT_REACTION_REMOVE_ROUTE}, PUT ${COMMENT_RESOLUTION_ROUTE} ` +
+          `and DELETE ${COMMENT_REMOVE_ROUTE}`,
       );
       return;
     }
-    const getEngine = () => optional<IDataEngine>('objectql') ?? optional<IDataEngine>('data');
-    const resolveCaller = platformCallerResolver({
-      getEngine,
-      getAuth: () => optional<IAuthService>('auth'),
-      tenancy: tenancyServiceResolver(ctx),
-    });
-    registerCommentReactionRoutes(http, {
-      getEngine: () => getEngine() as unknown as CommentReactionEngine | undefined,
-      resolveCaller,
-    });
-    registerCommentDoorsRoutes(http, {
-      getEngine: () => getEngine() as unknown as CommentDoorsEngine | undefined,
-      resolveCaller,
-      getSecurity: () => optional<CommentPostingGate>('security'),
-    });
+    registerCommentDoors(http, ctx);
     ctx.logger.info(
       `AuditPlugin: comment doors mounted at DELETE ${COMMENT_REACTION_REMOVE_ROUTE}, PUT ${COMMENT_RESOLUTION_ROUTE} ` +
         `and DELETE ${COMMENT_REMOVE_ROUTE}`,
@@ -1146,6 +1151,38 @@ export class AuditPlugin implements Plugin {
     this.datasetQueryWriter = null;
     if (datasetQueryWriter) await datasetQueryWriter.stop();
   }
+}
+
+/**
+ * Register the three comment doors on `http`, over this kernel's services, each
+ * read per request. The ONE registration both faces run: the self-hosted mount
+ * on the kernel's `http.server` (`mountCommentDoors`) and the private table
+ * behind the `comments` slot's `handleCommentDoor` (`comment-doors-member.ts`),
+ * so the two cannot answer a request differently.
+ */
+function registerCommentDoors(http: IHttpServer, ctx: PluginContext): void {
+  const optional = <T>(name: string): T | undefined => {
+    try {
+      return ctx.getService<T>(name) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const getEngine = () => optional<IDataEngine>('objectql') ?? optional<IDataEngine>('data');
+  const resolveCaller = platformCallerResolver({
+    getEngine,
+    getAuth: () => optional<IAuthService>('auth'),
+    tenancy: tenancyServiceResolver(ctx),
+  });
+  registerCommentReactionRoutes(http, {
+    getEngine: () => getEngine() as unknown as CommentReactionEngine | undefined,
+    resolveCaller,
+  });
+  registerCommentDoorsRoutes(http, {
+    getEngine: () => getEngine() as unknown as CommentDoorsEngine | undefined,
+    resolveCaller,
+    getSecurity: () => optional<CommentPostingGate>('security'),
+  });
 }
 
 /**
