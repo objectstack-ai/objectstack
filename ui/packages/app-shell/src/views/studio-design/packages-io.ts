@@ -322,9 +322,8 @@ export async function ensureCustomizationPackage(baseId: string): Promise<Ensure
  *
  * ⛔ The fallback stays `HTTP <status>`, unchanged and deliberately so: it is
  * what a body-less or unparseable failure (a proxy's HTML 502) still says, and
- * `StudioDesignSurface.packageListErrorPosture` / `manageSnapshotRefresh` pin
- * that the three-state switcher and the refresh report keep working when the
- * wire answers with nothing readable.
+ * `StudioDesignSurface.packageListErrorPosture` pins that the Studio top bar
+ * keeps working when the wire answers with nothing readable.
  *
  * Concurrent callers share one request — see {@link readPackagesPayload}.
  */

@@ -119,9 +119,11 @@ describe('StudioDesignSurface — the one-line desktop hint on a phone (objectui
   it('the control: from `md` up, no hint', async () => {
     renderSurfaceAt(768);
 
-    await waitFor(() =>
-      expect(screen.getByTestId('studio-pkg-chip')).toHaveAttribute('data-pkg-list-state', 'loaded'),
-    );
+    // The header is up (its first control drawn), and the phone's line is not.
+    await screen.findByTestId('studio-back-to-app');
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
     expect(screen.queryByText(HINT)).toBeNull();
   });
 });

@@ -10,7 +10,8 @@ import { test, expect, type APIRequestContext, type Page } from '@playwright/tes
  * spec-liveness) cannot catch because the break only appears when a real user
  * drives the real controlled inputs against the real spec validator:
  *   F2 — per-keystroke identifier sanitisation (must TYPE, not fill)
- *   F1 — cross-component reactivity (create package → switcher refresh)
+ *   F1 — retired with the Studio top bar's package switcher (objectstack#36501);
+ *        a package is created on the Studio landing now
  *   F3 — label→api-name derivation on blur
  *   F4 — empty picklist row must not trip spec validation, and is not stored
  *
@@ -123,42 +124,4 @@ test('F4: adding a picklist + an empty option row does not trip spec validation,
   } finally {
     await request.delete(`${API}/api/v1/packages/${pkgId}`);
   }
-});
-
-test('F1: a newly created package appears in the switcher without a reload', async ({ page }) => {
-  const stamp = Date.now();
-  const pkgId = `com.e2e.dogfood${stamp}`;
-  const pkgName = `E2E Dogfood ${stamp}`;
-  const pkgIdPattern = pkgId.replace(/\./g, '\\.');
-  // The console's Studio surface (`/studio/:packageId/:tab`) carries the
-  // package switcher on a stock boot. The sidebar switcher (`package-switcher`)
-  // renders only for an app that declares `contextSelectors`, and no app a
-  // stock showcase boot serves declares one.
-  await page.goto(`/studio/${PKG}/data`);
-  const chip = page.getByTestId('studio-pkg-chip');
-  await chip.click();
-  await page.getByRole('button', { name: /New package/i }).click();
-  await page.getByRole('dialog').getByLabel(/^Display name/).first().fill(pkgName);
-  // The id sits in the collapsed Advanced section (objectstack#27833).
-  await page.getByTestId('package-form-advanced-toggle').click();
-  await page.getByTestId('package-form-id-input').fill(pkgId);
-  await page.getByTestId('package-form-submit').click();
-
-  // No reload: the surface moves into the new package, and the switcher's chip
-  // names it from the refreshed list (a stale list falls back to the raw id)…
-  await expect(page).toHaveURL(new RegExp(`/studio/${pkgIdPattern}/`));
-  await expect(chip).toContainText(pkgName);
-  // …and the open switcher lists it by its name, which only the refreshed list
-  // carries (each entry's accessible name is its name, then its id).
-  await chip.click();
-  await expect(page.getByRole('button', { name: new RegExp(`${pkgName}\\s*${pkgIdPattern}`) })).toBeVisible();
-
-  // Cleanup so we don't pollute the shared dev stack.
-  await page.evaluate(async (id) => {
-    const tok = localStorage.getItem('auth-session-token');
-    await fetch(`/api/v1/packages/${id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${tok}` },
-    }).catch(() => {});
-  }, pkgId);
 });
