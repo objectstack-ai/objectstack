@@ -53,10 +53,14 @@ import { builtInLocales } from '@object-ui/i18n/locales';
 const auth = vi.hoisted(() => ({ user: { id: 'u-ada', name: 'Ada', image: null as string | null } }));
 const authorship = vi.hoisted(() => ({ calls: [] as Array<[unknown, unknown]> }));
 
+/** The page's authenticated fetch: the own-comment delete door answers through it (objectstack#36191). */
+const doorFetch = vi.hoisted(() =>
+  vi.fn(async () => new Response(JSON.stringify({ success: true, data: { deleted: true } }), { status: 200 })),
+);
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useAuth: () => ({ user: auth.user, activeOrganization: null }),
-  createAuthenticatedFetch: () => vi.fn(),
+  createAuthenticatedFetch: () => doorFetch,
 }));
 
 vi.mock('@object-ui/collaboration', async (importOriginal) => {
@@ -107,6 +111,7 @@ type Pack = {
     deleteCommentConfirm: string;
     commentEditFailed: string;
     commentDeleteFailed: string;
+    commentDeleted: string;
     edited: string;
     save: string;
     cancel: string;
@@ -286,7 +291,7 @@ async function mount(block: Block, perms: MePermissionsResponse = answer(), opti
               onEdit={() => {}}
               objectNameOverride={OBJECT_NAME}
               recordIdOverride={RECORD_ID}
-              embedded
+              /* objectstack#36150 — not `embedded`: an authored page draws on the full page only. */
             />
           </MetadataCtx.Provider>
         </MemoryRouter>
@@ -434,6 +439,7 @@ describe.each<Block>(['record:activity', 'record:discussion'])(
       await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
       expect(dataSource.delete).not.toHaveBeenCalled();
       expect(view.getByText(ADA_BODY)).toBeInTheDocument();
+      expect(toast.success).not.toHaveBeenCalledWith(EN.detail.commentDeleted);
 
       fireEvent.click(deleteIn(rowOf(view, ADA_BODY))!);
       dialog = await screen.findByRole('alertdialog');
@@ -446,6 +452,8 @@ describe.each<Block>(['record:activity', 'record:discussion'])(
       await waitFor(() => expect(view.queryByText(ADA_BODY)).toBeNull());
       expect(view.getByText(GRACE_BODY)).toBeInTheDocument();
       expect(toast.error).not.toHaveBeenCalled();
+      // The delete says it went through (objectstack#36070).
+      expect(toast.success).toHaveBeenCalledWith(EN.detail.commentDeleted);
     });
 
     it("deleting the author's comment keeps another member's reply to it on the page, at once and after the feed is read again", async () => {
@@ -494,6 +502,7 @@ describe.each<Block>(['record:activity', 'record:discussion'])(
       });
       await waitFor(() => expect(toast.error).toHaveBeenCalledWith(EN.detail.commentDeleteFailed));
       expect(view.getByText(ADA_BODY)).toBeInTheDocument();
+      expect(toast.success).not.toHaveBeenCalledWith(EN.detail.commentDeleted);
     });
   },
 );
@@ -505,8 +514,24 @@ describe('each control is handed over under its own grant on sys_comment (object
     expect(deleteIn(rowOf(view, ADA_BODY))).not.toBeNull();
   });
 
-  it('without the delete grant there is no Delete, and Edit stays', async () => {
-    const { view } = await mount('record:activity', answer({ ...FULL, allowDelete: false }));
+  it('without the delete grant, Delete goes through the own-comment delete door, never the data door, and Edit stays (objectstack#36191)', async () => {
+    const dataSource = makeDataSource();
+    const { view } = await mount('record:activity', answer({ ...FULL, allowDelete: false }), { dataSource });
+    expect(editIn(rowOf(view, ADA_BODY))).not.toBeNull();
+    fireEvent.click(deleteIn(rowOf(view, ADA_BODY))!);
+    const dialog = await screen.findByRole('alertdialog');
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: EN.objectActions.deleteConfirmButton }));
+    });
+    expect(dataSource.delete).not.toHaveBeenCalled();
+    expect(
+      (doorFetch.mock.calls as unknown as Array<[unknown, { method?: string }?]>).filter(([, init]) => init?.method === 'DELETE').map(([url]) => String(url)),
+    ).toEqual([expect.stringMatching(/\/api\/v1\/comments\/c-ada$/)]);
+  });
+
+  it('without the delete grant, no Delete on the author\'s comment once another member replied to it; Edit stays', async () => {
+    const dataSource = makeDataSource([ADA_ROW, GRACE_ROW, GRACE_REPLY_ROW]);
+    const { view } = await mount('record:activity', answer({ ...FULL, allowDelete: false }), { dataSource });
     expect(editIn(rowOf(view, ADA_BODY))).not.toBeNull();
     expect(deleteIn(rowOf(view, ADA_BODY))).toBeNull();
   });

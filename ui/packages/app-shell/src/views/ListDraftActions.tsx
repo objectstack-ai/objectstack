@@ -31,11 +31,17 @@ import {
   cn,
 } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
-import type { ListViewProps } from '@object-ui/plugin-list';
+import { ConditionDiscardButton, type ListViewProps } from '@object-ui/plugin-list';
 import { ChevronDown, CopyPlus, RotateCcw, Save } from 'lucide-react';
 
-/** One part of a list that can differ from its view (`ListView`'s vocabulary). */
-export type ListPersonalizationPart = Parameters<NonNullable<ListViewProps['onPersonalizationChange']>>[0][number];
+/**
+ * One part of a list that can differ from its view: `ListView`'s vocabulary,
+ * plus the footer's calculations (objectstack#36194), a part only this page's
+ * draft knows (the grid hands the pick to the host, which holds it).
+ */
+export type ListPersonalizationPart =
+  | Parameters<NonNullable<ListViewProps['onPersonalizationChange']>>[0][number]
+  | 'summaries';
 
 /** The order the menu names the unsaved parts in: the toolbar's, then the Display panel's. */
 const LIST_DRAFT_PART_ORDER: readonly ListPersonalizationPart[] = [
@@ -44,6 +50,7 @@ const LIST_DRAFT_PART_ORDER: readonly ListPersonalizationPart[] = [
   'grouping',
   'columns',
   'hiddenFields',
+  'summaries',
   'layout',
   'rowColor',
   'inlineEdit',
@@ -76,6 +83,7 @@ export function ListDraftActions({
     grouping: t('console.objectView.personalizedParts.grouping'),
     columns: t('console.objectView.personalizedParts.columns'),
     hiddenFields: t('console.objectView.personalizedParts.hiddenFields'),
+    summaries: t('console.objectView.personalizedParts.summaries'),
     density: t('console.objectView.personalizedParts.density'),
     layout: t('console.objectView.personalizedParts.layout'),
     rowColor: t('console.objectView.personalizedParts.rowColor'),
@@ -112,18 +120,13 @@ export function ListDraftActions({
   return (
     <span className={cn('flex shrink-0 items-center gap-1', className)} data-testid="list-draft">
       {/* The wide face: Discard beside Save ▾. */}
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
+      <ConditionDiscardButton
+        label={discardLabel}
         title={discardTitle}
         data-testid="list-draft-discard"
-        className="hidden h-6 shrink-0 gap-1 px-1.5 text-[13px] font-normal text-muted-foreground shadow-none @[40rem]/list:inline-flex"
-        onClick={onDiscard}
-      >
-        <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-        {discardLabel}
-      </Button>
+        className="hidden @[40rem]/list:inline-flex"
+        onDiscard={onDiscard}
+      />
       {offersSave ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -132,7 +135,7 @@ export function ListDraftActions({
               variant="default"
               size="sm"
               data-testid="list-draft-save"
-              className="hidden h-6 shrink-0 gap-1 px-2 text-[13px] @[40rem]/list:inline-flex"
+              className="hidden h-6 shrink-0 gap-1 px-2 text-sm @[40rem]/list:inline-flex"
             >
               {saveLabel}
               <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
@@ -153,7 +156,7 @@ export function ListDraftActions({
               variant="default"
               size="sm"
               data-testid="list-draft-compact"
-              className="inline-flex h-6 shrink-0 gap-1 px-2 text-[13px] @[40rem]/list:hidden"
+              className="inline-flex h-6 shrink-0 gap-1 px-2 text-sm @[40rem]/list:hidden"
             >
               {saveLabel}
               <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
@@ -169,18 +172,13 @@ export function ListDraftActions({
           </DropdownMenuContent>
         </DropdownMenu>
       ) : (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
+        <ConditionDiscardButton
+          label={discardLabel}
           title={discardTitle}
           data-testid="list-draft-compact-discard"
-          className="inline-flex h-6 shrink-0 gap-1 px-1.5 text-[13px] font-normal text-muted-foreground shadow-none @[40rem]/list:hidden"
-          onClick={onDiscard}
-        >
-          <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-          {discardLabel}
-        </Button>
+          className="inline-flex @[40rem]/list:hidden"
+          onDiscard={onDiscard}
+        />
       )}
     </span>
   );

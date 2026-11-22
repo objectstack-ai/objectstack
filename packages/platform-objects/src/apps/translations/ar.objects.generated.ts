@@ -328,6 +328,11 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      remove_user_manager: {
+        label: "إزالة المدير",
+        confirmText: "هل تريد إزالة مدير هذا المستخدم؟ لن يتبع أحدًا حتى يُعيَّن مدير من جديد، ويتبع توجيه الموافقات ونطاق السجلات own_and_reports هذا التغيير.",
+        successMessage: "تمت إزالة المدير"
+      },
       list_platform_admins: {
         label: "مسؤولو المنصة",
         resultDialog: {

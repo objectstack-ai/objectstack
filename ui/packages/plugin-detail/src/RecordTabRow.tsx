@@ -84,7 +84,7 @@ const widthOf = (element: Element | null | undefined): number => (element ? elem
 const CountChip: React.FC<{ count: number; muted?: boolean }> = ({ count, muted }) => (
   <span
     className={cn(
-      'inline-flex h-4 shrink-0 items-center rounded bg-muted px-1 text-[10.5px] font-normal tabular-nums',
+      'inline-flex h-4 shrink-0 items-center rounded bg-muted px-1 text-xs font-normal tabular-nums',
       muted ? 'text-muted-foreground' : 'text-foreground',
     )}
     data-record-tab-count=""
@@ -117,7 +117,7 @@ const TabFace: React.FC<{ tab: RecordTab; muted?: boolean; menu?: boolean }> = (
 );
 
 const TAB_CLASS =
-  '-mb-px inline-flex h-11 sm:h-9 shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 text-[13px] transition-colors';
+  '-mb-px inline-flex h-11 sm:h-9 shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 text-sm transition-colors';
 
 /**
  * The record page's tab row (objectstack#27524, Target 8): at the bottom

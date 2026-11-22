@@ -45,23 +45,16 @@ interface UserStateAdaptersValue {
   /** objectstack#35881 — the person's last app (`ui.app.last`, `LastAppProvider`). */
   lastApp: UserDataAdapter<any> | null;
   /**
-   * objectui#12418 — the per-object list state (`ui.list.<object>`), a key
-   * FAMILY rather than one list: one row per object, loaded together by prefix
-   * in the same shared read as the three slots above. Console-internal, so it
-   * is not one of the public {@link UserStateKind}s.
-   */
-  listState: UserPreferenceFamily<any> | null;
-  /**
    * objectstack#25883 — the per-object record-page state (`ui.record.<object>`),
-   * a key family loaded by prefix in the same shared read as `listState`.
-   * Console-internal, like `listState`.
+   * a key FAMILY rather than one list: one row per object, loaded together by
+   * prefix in the same shared read as the slots above. Console-internal, so it
+   * is not one of the public {@link UserStateKind}s.
    */
   recordState: UserPreferenceFamily<any> | null;
 }
 
 interface AttachApi {
   attach(kind: UserStateKind, adapter: UserDataAdapter<any> | null): void;
-  attachListState(family: UserPreferenceFamily<any> | null): void;
   attachRecordState(family: UserPreferenceFamily<any> | null): void;
 }
 
@@ -74,7 +67,6 @@ const ReadCtx = createContext<UserStateAdaptersValue>({
   recent: null,
   flowPaletteRecents: null,
   lastApp: null,
-  listState: null,
   recordState: null,
 });
 const WriteCtx = createContext<AttachApi | null>(null);
@@ -89,7 +81,6 @@ export function UserStateAdaptersProvider({ children }: { children: ReactNode })
     recent: null,
     flowPaletteRecents: null,
     lastApp: null,
-    listState: null,
     recordState: null,
   });
 
@@ -97,9 +88,6 @@ export function UserStateAdaptersProvider({ children }: { children: ReactNode })
   const attachRef = useRef<AttachApi>({
     attach: (kind, adapter) => {
       setAdapters(prev => (prev[kind] === adapter ? prev : { ...prev, [kind]: adapter }));
-    },
-    attachListState: (family) => {
-      setAdapters(prev => (prev.listState === family ? prev : { ...prev, listState: family }));
     },
     attachRecordState: (family) => {
       setAdapters(prev => (prev.recordState === family ? prev : { ...prev, recordState: family }));
@@ -131,22 +119,6 @@ export function useAttachUserStateAdapters() {
   return useCallback(
     (kind: UserStateKind, adapter: UserDataAdapter<any> | null) => {
       ctx?.attach(kind, adapter);
-    },
-    [ctx],
-  );
-}
-
-/** The attached per-object list-state family (objectui#12418), or null. */
-export function useListStateFamily<T>(): UserPreferenceFamily<T> | null {
-  return useContext(ReadCtx).listState as UserPreferenceFamily<T> | null;
-}
-
-/** Plug the list-state family in/out. Stable across re-renders. */
-export function useAttachListStateFamily() {
-  const ctx = useContext(WriteCtx);
-  return useCallback(
-    (family: UserPreferenceFamily<any> | null) => {
-      ctx?.attachListState(family);
     },
     [ctx],
   );

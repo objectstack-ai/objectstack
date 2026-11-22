@@ -1970,10 +1970,11 @@ export function stripReadonlyWhenFieldsMulti(
  *  - The exemption. {@link stripRuntimeOwnedFields} keeps a value under
  *    `preserveAudit` as well as `isSystem`. The create-side static strip
  *    honours `isSystem` alone (the `preserveAudit` ruling below), and that is
- *    the boundary a roll-up needs: seed loads, package installs and
- *    historical imports (`treatAsHistorical` is system-only) write as the
- *    system principal and keep a pre-computed total; an in-process caller
- *    that merely sets `preserveAudit` does not.
+ *    the boundary a roll-up needs: historical imports (`treatAsHistorical`
+ *    is system-only) write as the system principal and keep a pre-computed
+ *    total; an in-process caller that merely sets `preserveAudit` does not.
+ *    (A seed load never sends one: the seed loader takes a seed record's
+ *    roll-up value out before the write, #35655.)
  *  - The seed. The runtime-owned strip judges the RAW caller payload (#6339)
  *    and runs AFTER the seed pass, which skipped the field BECAUSE the caller
  *    supplied it, so taking `task_count: 42` there would land the column

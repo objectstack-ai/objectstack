@@ -132,6 +132,10 @@ const EXPECTED_GRANT: Record<string, Grant> = {
   // asked of `sys_comment`.
   feedCommentEdit: 'update',
   feedCommentDelete: 'delete',
+  // objectstack#36191: the same Delete through the own-comment delete door,
+  // which needs no delete grant, so it asks the grant the comment was posted
+  // under (as `feedReactionRemove` does for a reaction).
+  feedCommentDeleteOwn: 'create',
   // objectui#12982: Setup's Clone of a declared sharing rule, asked of
   // `sys_sharing_rule`: it creates an organization rule.
   declarationClone: 'create',
@@ -853,6 +857,10 @@ const WRITE_SITES: Record<string, WriteSite> = {
   // the picked rows (relatedRowEdit).
   'packages/plugin-detail/src/RelatedList.tsx :: RelatedList > handleAddRecords :: batch':
     mapped(['relatedNew', 'relatedRowEdit'], RELATED_LIST),
+  // The related tab's bulk delete (objectstack#35892): one batch call to the
+  // data source, offered beside the host's row delete and read here.
+  'packages/plugin-detail/src/RelatedList.tsx :: RelatedList > handleConfirmBulkDelete :: delete':
+    mapped(['relatedRowDelete'], RELATED_LIST),
   'packages/plugin-detail/src/renderers/record-related-list.tsx :: RecordRelatedListBody :: delete': {
     ...mapped(['relatedRowDelete'], RELATED_LIST_BLOCK),
     note: "the FALLBACK remove (an `add` config, no host delete) reads the same row the host's delete reads, so it never puts back a delete the host withheld",

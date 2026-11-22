@@ -142,6 +142,16 @@ function usePackageListSession(): string {
  * previous organization) is never read as this one's.
  */
 function usePackagePosture(packageId: string | null): StudioPosture | null {
+  return usePackagePostureRead(packageId)?.posture ?? null;
+}
+
+/**
+ * {@link usePackagePosture} with the read itself: `undefined` while the
+ * package list for `packageId` is not answered yet (or `packageId` is `null`),
+ * else the answer, `posture: null` for a failed read and a package the list
+ * leaves out.
+ */
+function usePackagePostureRead(packageId: string | null): { posture: StudioPosture | null } | undefined {
   const session = usePackageListSession();
   const [verdict, setVerdict] = useState<{
     packageId: string;
@@ -164,8 +174,8 @@ function usePackagePosture(packageId: string | null): StudioPosture | null {
     };
   }, [packageId, session]);
   return packageId !== null && verdict?.packageId === packageId && verdict.session === session
-    ? verdict.posture
-    : null;
+    ? { posture: verdict.posture }
+    : undefined;
 }
 
 /**
@@ -206,6 +216,23 @@ export function useStudioDesignGate(path: string | null | undefined): string | n
  */
 export function usePackageRefusesSaves(packageId: string | null): boolean {
   return usePackagePosture(packageId) === 'view';
+}
+
+/**
+ * objectstack#36195 — {@link usePackageRefusesSaves} for a save that is not
+ * offered on a guess: `unread` while the package list for `packageId` is still
+ * being read, `refuses` when it carries the package read-only, else `takes`
+ * (`null`, a failed read and a package the list leaves out keep the fail-open
+ * answer, so the server's write gate refuses what it refuses). A list's
+ * 「Save to this view」 on a shared view waits for the answer: on a slow boot
+ * the list draws seconds before the package list lands, and a save offered in
+ * that window is a save into a package's view the server refuses.
+ */
+export function usePackageSaveRead(packageId: string | null): 'unread' | 'refuses' | 'takes' {
+  const read = usePackagePostureRead(packageId);
+  if (packageId === null) return 'takes';
+  if (read === undefined) return 'unread';
+  return read.posture === 'view' ? 'refuses' : 'takes';
 }
 
 const NO_REFUSING_PACKAGES: ReadonlySet<string> = new Set();

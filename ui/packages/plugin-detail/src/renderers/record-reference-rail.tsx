@@ -711,7 +711,7 @@ export const RecordReferenceRailRenderer: React.FC<RecordReferenceRailRendererPr
         return (
           <Card key={key} className="overflow-hidden">
             <CardHeader className="flex flex-row items-center justify-between gap-2 py-3 px-4 space-y-0 border-b">
-              <CardTitle className="text-sm font-semibold tracking-tight truncate">
+              <CardTitle className="text-sm font-medium tracking-tight truncate">
                 {title}
               </CardTitle>
               <div className="flex items-center gap-2 shrink-0">
@@ -723,7 +723,7 @@ export const RecordReferenceRailRenderer: React.FC<RecordReferenceRailRendererPr
                 {appName && parentId && !suppressViewAll && (
                   <Link
                     to={`/apps/${appName}/${entry.objectName}?filter%5B${entry.relationshipField}%5D=${encodeURIComponent(String(parentId))}`}
-                    className="inline-flex min-h-[44px] items-center text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors sm:min-h-0"
+                    className="inline-flex min-h-[44px] items-center text-xs font-medium text-muted-foreground hover:text-foreground transition-colors sm:min-h-0"
                     title={t('detail.viewAll', { defaultValue: 'View All' })}
                   >
                     {t('detail.viewAll', { defaultValue: 'View All' })}
@@ -776,7 +776,7 @@ export const RecordReferenceRailRenderer: React.FC<RecordReferenceRailRendererPr
         <button
           type="button"
           onClick={() => setShowEmpty(true)}
-          className="self-start inline-flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors px-2.5 py-1 rounded-md border border-dashed border-border/60 hover:border-border bg-background"
+          className="self-start inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2.5 py-1 rounded-md border border-dashed border-border/60 hover:border-border bg-background"
           title={emptyTitles.join(' · ')}
         >
           <span>

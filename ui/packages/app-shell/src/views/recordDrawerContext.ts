@@ -64,6 +64,11 @@ export function useRecordPane(): RecordPaneApi | null {
 export interface RecordPaneBarApi {
   /** The bar's element the record portals its panel switches into; `null` until it mounts. */
   toggleSlot: HTMLElement | null;
+  /**
+   * The bar's element the record portals its comments switch into, before its
+   * button group (objectstack#36075); `null` until it mounts.
+   */
+  commentsSlot?: HTMLElement | null;
   /** The title of the record `recordId` names, once its row has loaded. */
   reportTitle(recordId: string, title: string | undefined): void;
 }

@@ -406,10 +406,12 @@ describe('the record page on a phone (objectstack#27058)', () => {
     expect(back.textContent).toBe('#L-1');
   });
 
-  it('control: at 1440 px the desktop bar (⊟) and the header\'s own action row, no bottom bar', async () => {
+  it('control: at 1440 px the desktop bar and the header\'s own action row, no bottom bar', async () => {
     setWidth(1440);
     mountPage([`/apps/${APP}/${LEAD}/record/r-1`]);
-    await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
+    await screen.findByTestId('record-page-crumb', undefined, { timeout: 5000 });
+    // objectstack#35890 — the rail's ⊟ is retired with it.
+    expect(screen.queryByRole('group', { name: 'Panels' })).toBeNull();
     expect(actionBar()).toBeNull();
     // objectstack#35593 — the header's row is the page's one top row: its
     // group sits in the top bar's action slot.

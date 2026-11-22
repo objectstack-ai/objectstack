@@ -33,6 +33,7 @@ import { PRINT_PAGE_ATTRIBUTE, PRINT_RUNNING_ATTRIBUTE, buildPagePrintStylesheet
 import { cn } from '../../lib/utils';
 import { PageBlockGrid } from './page-block-grid';
 import { PageDescriptionContext } from './page-description-context';
+import { PageTitleDemotedContext, PageTitleHostContext } from './page-title-host-context';
 import { PageRegionPostureProvider, PageWidthProvider, usePageWidthStore } from './page-region-posture';
 import type { RendererHostProps } from '../../lib/renderer-host-props';
 
@@ -334,7 +335,7 @@ const PageLayoutRefusal: React.FC<{ kind: string; title: string; items: string[]
     className="rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive"
     data-page-refusal={kind}
   >
-    <div className="font-semibold">{title}</div>
+    <div className="font-medium">{title}</div>
     <ul className="mt-1 list-disc space-y-0.5 pl-5">
       {items.map((item, i) => (
         <li key={i}>{item}</li>
@@ -780,6 +781,10 @@ export const PageRenderer: React.FC<{
   const { language } = useObjectTranslation();
   const pageTitle = pickLocalized(schema.title ?? (schema as any).label, language);
   const pageDescription = pickLocalized(schema.description, language);
+  // objectstack#36111 — the host draws the title and the description above
+  // the page (the console's page header): this page draws neither, and an
+  // authored titled `page:header` steps its title down to an `h2`.
+  const hostOwnsTitle = React.useContext(PageTitleHostContext);
 
   // What may become an attribute on the wrapper <div>, and nothing else.
   //
@@ -871,7 +876,7 @@ export const PageRenderer: React.FC<{
       if (errors.length) {
         return (
           <div className="m-4 rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
-            <div className="font-semibold">HTML page failed to compile ({errors.length})</div>
+            <div className="font-medium">HTML page failed to compile ({errors.length})</div>
             <ul className="mt-1 list-disc space-y-0.5 pl-5">
               {errors.slice(0, 8).map((e, i) => (
                 <li key={i}>{e.message}</li>
@@ -937,10 +942,11 @@ export const PageRenderer: React.FC<{
     () => pageType === 'record' || pageHeaderOwnsTitle(schema),
     [schema, pageType],
   );
-  const showPageTitle = !!pageTitle && !headerOwnsTitle;
+  const showPageTitle = !!pageTitle && !headerOwnsTitle && !hostOwnsTitle;
   // The description is the page's own prose, not a duplicate of the header's
-  // `subtitle`, so delegating the heading does not delete it.
-  const showPageDescription = !!pageDescription && pageType !== 'record';
+  // `subtitle`, so delegating the heading does not delete it. A host that owns
+  // the title draws it in its own header.
+  const showPageDescription = !!pageDescription && pageType !== 'record' && !hostOwnsTitle;
   // When the header owns the title, it draws the description too, under the
   // title (objectui#12624). Drawn here it sat above the regions, so above the
   // title the header draws inside them.
@@ -987,7 +993,13 @@ export const PageRenderer: React.FC<{
 
         {/* Page body — type-specific layout */}
         <PageDescriptionContext.Provider value={headerDrawsDescription ? pageDescription : null}>
-          <PageWidthProvider store={pageWidthStore}>{layoutElement}</PageWidthProvider>
+          {/* The host's switch stops at this page: a page nested in it draws
+              its own title. Its authored header reads the demotion instead. */}
+          <PageTitleHostContext.Provider value={false}>
+            <PageTitleDemotedContext.Provider value={hostOwnsTitle && pageType !== 'record'}>
+              <PageWidthProvider store={pageWidthStore}>{layoutElement}</PageWidthProvider>
+            </PageTitleDemotedContext.Provider>
+          </PageTitleHostContext.Provider>
         </PageDescriptionContext.Provider>
       </div>
     </div>

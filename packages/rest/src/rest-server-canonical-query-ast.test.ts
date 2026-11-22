@@ -218,6 +218,10 @@ interface CensusEntry {
  * [#30205] 6, unchanged: a user's assigned work (`user-work-routes.ts`) hands
  * the engine no `query:` slot of its own (the counts and reads are built in
  * `@objectstack/core`), so the new module's floor is 0.
+ *
+ * [#35402] 6, unchanged: the Change Owner doors (`change-owner-routes.ts`)
+ * hand the engine no `query:` slot (each row's by-id update is built in
+ * `@objectstack/core`'s `changeRecordsOwner`), so the new module's floor is 0.
  */
 const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, number>> = {
     'rest-server.ts': 0,
@@ -250,6 +254,9 @@ const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, numb
     // [ADR-0158 U7 R1] The unit code backfill door, the record-currency one's
     // twin: no slot (the walk's queries are built inside `backfillUnitCodes`).
     'meta-unit-code-backfill-route.ts': 0,
+    // [#35402] The Change Owner doors: no slot (the by-id updates are built
+    // inside `@objectstack/core`'s `changeRecordOwner` / `changeRecordsOwner`).
+    'change-owner-routes.ts': 0,
 };
 
 const CENSUS: CensusEntry[] = [
@@ -463,6 +470,7 @@ describe('[#16638] §1 CONTROLS on the census instrument itself', () => {
         // [#28470] The sum 5 → 6: the record page's stream reads (`readStream`).
         // [#30675] The sum unchanged by the record-currency code backfill (no slot).
         // [#30237] The sum unchanged by the recycle-bin doors (no slot).
+        // [#35402] The sum unchanged by the Change Owner doors (no slot).
         expect(Object.keys(REGISTRAR_QUERY_SLOT_FLOORS).sort()).toEqual([...REST_SERVER_REGISTRAR_FILES].sort());
         expect(CENSUS.filter(({ file }) => REGISTRAR_SOURCES.has(file)).map(({ file }) => file))
             .toEqual([...REST_SERVER_REGISTRAR_FILES]);

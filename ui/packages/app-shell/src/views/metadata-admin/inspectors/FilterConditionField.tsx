@@ -34,7 +34,13 @@ export function FilterConditionField({ label, help, value, onCommit, fields, dis
   help?: string;
   value: FilterCondition | undefined;
   onCommit: (fc: FilterCondition | undefined) => void;
-  fields: Array<{ value: string; label?: string; type?: string }>;
+  /**
+   * The columns the rows may name. `multiple` is the field's declared
+   * `multiple: true`: with the type it decides which operators a row offers
+   * (`jsonColumnFilterOperators`), and which ones a stored filter can be read
+   * back as (`conditionToGroup`).
+   */
+  fields: Array<{ value: string; label?: string; type?: string; multiple?: boolean }>;
   disabled?: boolean;
   locale: SupportedLocale;
   /**

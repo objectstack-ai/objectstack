@@ -387,9 +387,54 @@ export async function computeLayeredRlsFilter(
     // app-authored policy — even one spelling the identical predicate under a
     // different name — reaches the compiler untouched (ADR-0049, and the
     // ADR-0105 F1 lesson that a token match swallows authored policies).
-    const allRlsPolicies = opts?.dropPlatformOwnershipFloor
+    //
+    // [#35917] REPLACING the floor is not DELETING its term. Layer 1 is an OR
+    // of permissive policies, so taking the floor out of an OR an authored
+    // term stands in did not hand the row to the write authority — it handed
+    // it to the authored term alone, and a row the floor alone admitted (the
+    // caller's own closed deal, beside an authored `stage == 'open'` widener)
+    // was refused by id, while the predicate write, which keeps the floor
+    // beside an authored term (`predicateWriteFloorRelief`), wrote it. So the
+    // floor comes out only where it is the OR's LAST term: there the
+    // remaining Layer 1 is null and the authority's `allow` admits the row.
+    // Where an authored term would remain, the floor stays one term of the
+    // OR: the replacement adds no row there and removes none, and the
+    // authored term still bounds every row the floor does not admit — which
+    // is ADR-0066 ① on this posture: Modify All, the `allow` it earns
+    // included, does not lift an authored write policy.
+    //
+    // "An authored term would remain" is asked exactly as the compile below
+    // answers it, so the two cannot disagree: a policy that survives pass 1
+    // carrying a `using`, or one pass 1 drops for a missing column (a deny
+    // contribution). That is the test the predicate write asks too — whether
+    // the Layer 1 composed with the floor dropped is null.
+    // Pass 1 of the field-existence net (its reasons are on the compile
+    // below), as a function so the floor decision above asks it too.
+    const fieldExistencePassOne = (
+      policies: RowLevelSecurityPolicy[],
+    ): { compilable: RowLevelSecurityPolicy[]; dropped: number } => {
+      if (!objectFields) return { compilable: policies, dropped: 0 };
+      let dropped = 0;
+      const compilable = policies.filter((p) => {
+        const targetField = this.extractTargetField(p.using);
+        if (!targetField) return true;
+        if (objectFields.has(targetField)) return true;
+        if (tenancyDisabled && targetField === 'organization_id') {
+          return false;
+        }
+        dropped++;
+        return false;
+      });
+      return { compilable, dropped };
+    };
+    const withoutFloor = opts?.dropPlatformOwnershipFloor
       ? collected.filter((p) => !isPlatformOwnershipFloorPolicy(p))
       : collected;
+    let allRlsPolicies = withoutFloor;
+    if (withoutFloor.length < collected.length) {
+      const rest = fieldExistencePassOne(withoutFloor);
+      if (rest.dropped > 0 || rest.compilable.some((p) => !!p.using)) allRlsPolicies = collected;
+    }
     if (allRlsPolicies.length > 0) {
       // Field-existence safety, in TWO passes that answer two different
       // questions. Schema-lookup failure runs neither: a schema that cannot
@@ -417,19 +462,7 @@ export async function computeLayeredRlsFilter(
       // the compiler judges the compiled tree, where a negation is a `$not`
       // node and has no spelling left to hide behind. The matcher's
       // include-direction ruling is untouched — it never sees the phantom.
-      let dropped = 0;
-      const compilable = objectFields
-        ? allRlsPolicies.filter((p) => {
-            const targetField = this.extractTargetField(p.using);
-            if (!targetField) return true;
-            if (objectFields.has(targetField)) return true;
-            if (tenancyDisabled && targetField === 'organization_id') {
-              return false;
-            }
-            dropped++;
-            return false;
-          })
-        : allRlsPolicies;
+      const { compilable, dropped } = fieldExistencePassOne(allRlsPolicies);
       // [#25234 ruling A] The declared membership keys these policies read,
       // staged before they compile. The resolver's half ran above.
       await this.stageRlsMembership(context, compilable, object);
@@ -634,19 +667,28 @@ export async function computeWriteCheckFilter(
   // when the pre-image gate kept it: the same three replacements drop it here
   // (an `allow` from the declared write authority, a `public_read_write` OWD,
   // a covering master gate), and nothing else does.
-  const floorReplaced =
-    !!preImageOpts?.dropPlatformOwnershipFloor ||
-    this.platformFloorYieldsToObjectWriteModel(meta, object, operation, preImageOpts);
-  const withCheck = writeCheckPolicies(
-    this.collectRLSPolicies(
-      permissionSets,
-      object,
-      operation,
-      (context?.positions ?? []) as string[],
-      context,
-    ),
-    { keepOwnershipFloor: !floorReplaced },
+  //
+  // [#35917] And an `allow` replaces the floor here as it does there: the
+  // floor leaves a defaulted check only where no authored `using` stands
+  // beside it, the case where the pre-image dropped it as the OR's last term.
+  // Beside an authored term it stays a term of the check, so a write the
+  // pre-image admitted by the floor alone is not refused on its new image
+  // (the floor's `using` defaulted as the check). The test is read off the
+  // collection, ahead of the field-existence net, so where the two could part
+  // — an authored policy pass 1 skips as not applicable — the check keeps the
+  // floor: a term more in an OR, never one fewer.
+  const applicable = this.collectRLSPolicies(
+    permissionSets,
+    object,
+    operation,
+    (context?.positions ?? []) as string[],
+    context,
   );
+  const floorReplaced =
+    this.platformFloorYieldsToObjectWriteModel(meta, object, operation, preImageOpts) ||
+    (!!preImageOpts?.dropPlatformOwnershipFloor &&
+      !applicable.some((p) => !isPlatformOwnershipFloorPolicy(p) && policyDeclaresClause(p, 'using')));
+  const withCheck = writeCheckPolicies(applicable, { keepOwnershipFloor: !floorReplaced });
   if (withCheck.length === 0) return null;
   // [ADR-0105 D11 / commit 1d73d45c1] Stage the app-resolved membership sets on THIS
   // context before the `check` clause compiles — the same staging the read

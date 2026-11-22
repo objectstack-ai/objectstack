@@ -28,12 +28,14 @@ import {
   RECORD_ROOT_READ_RE,
   parseCelToAst,
   parseCelToAstWithReason,
+  printCelAst,
+  COMPREHENSION_MACRO_NAMES,
   type CelAstNode,
   type FieldCelType,
 } from './cel-engine';
 import { templateEngine } from './template-engine';
-import { findTraversalConflicts, readRootMembers, traversalsOf, type RootMemberRead } from './relationship-traversal';
-import { REFERENCE_VALUE_TYPES } from '@objectstack/spec/data';
+import { findTraversalConflicts, readRootMembers, rootMemberOf, traversalsOf, type RootMemberRead } from './relationship-traversal';
+import { MULTI_OPTION_TYPES, REFERENCE_VALUE_TYPES } from '@objectstack/spec/data';
 // #13594 — the one reader of cel-js's `found no matching overload for '…'`
 // template. Both this module (which asks whether the name is ADVERTISED, to word
 // a hint) and `firstUnknownFunctionCall` (which asks whether the environment
@@ -105,6 +107,30 @@ export interface ExprSchemaHint {
    * `'flattened'` one (#29959).
    */
   fieldTypes?: Readonly<Record<string, string>>;
+  /**
+   * The fields whose stored value is a LIST: each field the caller reads
+   * through `isMultiValueField` (`@objectstack/spec/data`) and finds
+   * multi-valued — an inherently-multi option type (`multiselect`,
+   * `checkboxes`, `tags`) or a multi-capable type declared `multiple: true`
+   * (`select`, `radio`, `lookup`, `user`, `file`, `image`). Read the field's
+   * definition through that predicate, the one the record validator and the
+   * query engine shape the stored value with, so this list and the value
+   * agree.
+   *
+   * {@link fieldTypes} alone already marks the inherently-multi types; this
+   * key is what makes a `multiple: true` field a list here, since a field
+   * type does not say whether it was declared multiple. A field either names
+   * as multi-valued is a LIST SUBJECT, and a `==` / `!=` between a read of it
+   * (`record.<field>` / `previous.<field>`, in every member spelling the
+   * field-existence pass reads) and a non-null scalar literal is refused
+   * under `list-equality`: CEL compares the whole list with the scalar, so
+   * the expression answers the same constant on every row. `<field> == null`
+   * / `!= null` stays accepted. Absent ⇒ only {@link fieldTypes}' inherently
+   * multi types are list subjects: a `select` / `lookup` / `user` field
+   * declared `multiple: true` is then judged as it was before this key, not
+   * at all.
+   */
+  multiValueFields?: readonly string[];
   /**
    * Evaluation scope of the authoring site — determines whether a bare top-level
    * identifier is legal (#1928):
@@ -1411,6 +1437,158 @@ function checkAttachedLeaf(
 }
 
 /**
+ * The fields the hint names as list-valued — {@link ExprSchemaHint.multiValueFields},
+ * plus every {@link ExprSchemaHint.fieldTypes} entry whose type is an
+ * inherently-multi option type (`MULTI_OPTION_TYPES`, the half of
+ * `isMultiValueField` a type alone answers). Empty when the hint names none.
+ */
+function listSubjectsOf(schema: ExprSchemaHint | undefined): ReadonlySet<string> {
+  const out = new Set<string>(schema?.multiValueFields ?? []);
+  for (const [name, type] of Object.entries(schema?.fieldTypes ?? {})) {
+    if (MULTI_OPTION_TYPES.has(type)) out.add(name);
+  }
+  return out;
+}
+
+/**
+ * A scalar literal operand — a string, number or boolean CEL literal, never
+ * `null` and never a list or map — printed as CEL, or `undefined` for any
+ * other operand. Only a literal is judged: its value is known before
+ * evaluation, so a list compared with it is provably the same answer on every
+ * row. Another field, a variable or a call may hold a list there, so it gets
+ * no verdict (a missed catch, never a false refusal).
+ */
+function scalarLiteralOf(node: unknown): string | undefined {
+  if (!node || typeof node !== 'object') return undefined;
+  const { op, args } = node as { op?: unknown; args?: unknown };
+  if (op !== 'value') return undefined;
+  if (typeof args !== 'string' && typeof args !== 'number' && typeof args !== 'bigint' && typeof args !== 'boolean') {
+    return undefined;
+  }
+  return printCelAst(node) ?? undefined;
+}
+
+/**
+ * [#36167] `==` / `!=` between a LIST SUBJECT ({@link listSubjectsOf}) read
+ * on `record` / `previous` and a non-null scalar literal — one `list-equality`
+ * refusal per comparison, either operand order.
+ *
+ * CEL's `==` compares the whole list with the scalar: `['frontend', 'qa'] ==
+ * 'frontend'` is `false`, and so is `null == 'frontend'`, so the expression
+ * answers `false` (for `!=`, `true`) on every row whatever the list holds — a
+ * condition that never fires, or always does, with no fault and no log line.
+ * The prescription is membership, in the null-guarded spelling the Studio
+ * condition builder writes: `'a' in null` faults, so `S != null && V in S`
+ * for `==` and `S == null || !(V in S)` for `!=`.
+ *
+ * Accepted, deliberately: `S == null` / `S != null` (either side), which test
+ * whether the list is set; a list compared with a list literal or with
+ * another list subject, which is a real whole-list comparison; and an operand
+ * that is not a literal ({@link scalarLiteralOf}).
+ *
+ * The subject is read through `rootMemberOf`, the field-existence pass's own
+ * member reader, so `record.f` and `record['f']` (and `previous.…`) are
+ * judged alike, and the refusal renders the read as `<root>.<field>`. The
+ * optional spellings `record.?f` / `record[?'f']` never reach this pass
+ * against a scalar: CEL types them as an optional, and the comparison is
+ * refused as `invalid-cel` first. At a `'flattened'` (flow) site a bare `f`
+ * is the trigger record's field too, as the type pass reads it, and is
+ * rendered bare — except a name a flow variable holds
+ * ({@link ExprSchemaHint.flowVariables}), any bare name in a flow whose nodes
+ * can bind names no reader sees ({@link ExprSchemaHint.bareNamesUnproven}),
+ * and, at any site, a name a comprehension macro binds (`list.exists(f, …)`,
+ * {@link COMPREHENSION_MACRO_NAMES}) inside that macro's body, where it holds
+ * an item of the list and not the field (nor is `record.f` the field where a
+ * macro binds `record`).
+ */
+function checkListEquality(
+  ast: () => CelAstNode | null,
+  source: string,
+  schema: ExprSchemaHint | undefined,
+  errors: ExprValidationError[],
+): void {
+  const subjects = listSubjectsOf(schema);
+  if (subjects.size === 0) return;
+  // CEL has no comments: a source that spells neither operator holds no comparison.
+  if (!source.includes('==') && !source.includes('!=')) return;
+  const tree = ast();
+  if (tree == null) return;
+  // At a flattened (flow) site a bare name is the trigger record's field, as
+  // the type pass reads it — unless a flow variable holds the name
+  // (`flowVariables`), or a node can bind names no reader sees
+  // (`bareNamesUnproven`): then it is not proven to hold the list, and gets
+  // no verdict.
+  const bareSubjects = schema?.scope === 'flattened' && !schema.bareNamesUnproven
+    ? new Set([...subjects].filter((name) => !(schema.flowVariables ?? []).includes(name)))
+    : undefined;
+  // `bound`: the names the enclosing comprehension macros bind here.
+  const subjectOf = (node: unknown, bound: ReadonlySet<string>): { reference: string } | undefined => {
+    const read = rootMemberOf(node, FIELD_EXISTENCE_ROOTS);
+    if (read) {
+      return subjects.has(read.field) && !bound.has(read.root) ? { reference: `${read.root}.${read.field}` } : undefined;
+    }
+    const { op, args } = (node ?? {}) as { op?: unknown; args?: unknown };
+    return op === 'id' && typeof args === 'string' && bareSubjects?.has(args) && !bound.has(args)
+      ? { reference: args }
+      : undefined;
+  };
+  const walk = (node: unknown, bound: ReadonlySet<string>): void => {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) walk(child, bound);
+      return;
+    }
+    const { op, args } = node as { op?: unknown; args?: unknown };
+    // A comprehension macro (`list.exists(x, …)`): `rcall` [name, receiver,
+    // [variable, …body]]. The receiver is read outside the binding, the body
+    // inside it — the same reading the engine's date-text pass takes.
+    if (
+      op === 'rcall' && Array.isArray(args) && args.length === 3 && Array.isArray(args[2])
+      && COMPREHENSION_MACRO_NAMES.has(String(args[0]))
+    ) {
+      const [variable, ...body] = args[2] as unknown[];
+      const { op: vop, args: name } = (variable ?? {}) as { op?: unknown; args?: unknown };
+      walk(args[1], bound);
+      walk(body, vop === 'id' && typeof name === 'string' ? new Set([...bound, name]) : bound);
+      return;
+    }
+    if ((op === '==' || op === '!=') && Array.isArray(args) && args.length === 2) {
+      for (const side of [0, 1] as const) {
+        const read = subjectOf(args[side], bound);
+        const operand = read ? scalarLiteralOf(args[1 - side]) : undefined;
+        if (!read || operand === undefined) continue;
+        errors.push(listEqualityRefusal(source, read.reference, op, operand));
+        break;
+      }
+    }
+    for (const value of Object.values(node as Record<string, unknown>)) walk(value, bound);
+  };
+  walk(tree, new Set());
+}
+
+/** The `list-equality` refusal for `<reference> <operator> <operand>`. */
+function listEqualityRefusal(
+  source: string,
+  reference: string,
+  operator: '==' | '!=',
+  operand: string,
+): ExprValidationError {
+  const answer = operator === '==' ? 'false' : 'true';
+  const rewrite = operator === '=='
+    ? `${reference} != null && ${operand} in ${reference}`
+    : `${reference} == null || !(${operand} in ${reference})`;
+  return refusal(
+    'list-equality',
+    { reference, operator, operand, answer, rewrite },
+    source,
+    `list compared with a scalar — \`${reference}\` holds a list (a multi-value field), and \`${operator}\` ` +
+      `compares the whole list with \`${operand}\`, so the expression answers \`${answer}\` on every row ` +
+      `whatever the list holds: the condition never changes. Test membership with \`in\`: write ` +
+      `\`${rewrite}\`. To test whether the list is set, compare it with \`null\`.`,
+  );
+}
+
+/**
  * Is `name` written as a NAMESPACE in `source` — `name.x`, `name?.x`,
  * `name['x']`, `name.fn(…)` — rather than as a bare value (`name == 'x'`)?
  *
@@ -1697,6 +1875,7 @@ export function validateExpression(
     if (issue) errors.push(issue);
   } else {
     checkFieldExistence(ast, source, schema, errors);
+    checkListEquality(ast, source, schema, errors);
     checkOptionLabelTargets(ast, source, schema, errors);
     checkRoleCatalog(source, schema, errors);
     if (schema?.scope === 'record') {

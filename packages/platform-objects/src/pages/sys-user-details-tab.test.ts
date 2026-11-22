@@ -18,7 +18,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { PageSchema } from '@objectstack/spec/ui';
+import { PageSchema, RecordRelatedListProps } from '@objectstack/spec/ui';
 import { SysUserDetailPage } from './sys-user.page.js';
 
 type Rec = Record<string, unknown>;
@@ -37,6 +37,11 @@ const SECTIONS = [
     label: { en: 'Identity', 'zh-CN': '身份', 'ja-JP': 'アイデンティティ', 'es-ES': 'Identidad', 'zh-Hant': '身分', ar: 'الهوية', fr: 'Identité', 'pt-BR': 'Identidade', ru: 'Идентификация', de: 'Identität', ko: 'ID 정보' },
     // #27859: a saved Locale is shown; the renderer draws only authored sections.
     fields: ['name', 'image', 'locale'],
+  },
+  {
+    // The reporting line: who this person reports to (see the describe below).
+    label: { en: 'Reporting Line', 'zh-CN': '汇报关系', 'ja-JP': 'レポートライン', 'es-ES': 'Línea de reporte', 'zh-Hant': '匯報關係', ar: 'التسلسل الإداري', fr: 'Ligne hiérarchique', 'pt-BR': 'Linha de reporte', ru: 'Подчинённость', de: 'Berichtslinie', ko: '보고 라인' },
+    fields: ['manager_id'],
   },
   {
     // #27859: a banned user reads as banned, with the reason, not as active.
@@ -65,11 +70,12 @@ describe('sys_user_detail — the details body lives in the first tab', () => {
     expect(tabs.type).toBe('page:tabs');
   });
 
-  it('carries the `record:details` as the only child of the FIRST tab item, sections and hidden fields intact', () => {
+  it('carries the `record:details` as the FIRST child of the FIRST tab item, sections and hidden fields intact', () => {
     const first = items[0]!;
     expect((first.label as Rec).en).toBe('Details');
     const children = first.children as Rec[];
-    expect(children.map((c) => c.type)).toEqual(['record:details']);
+    // The details grid, then the Direct Reports list (pinned below).
+    expect(children.map((c) => c.type)).toEqual(['record:details', 'record:related_list']);
     const props = children[0]!.properties as Rec;
     expect(props.hideFields).toEqual(HIDE_FIELDS);
     expect(props.sections).toEqual(SECTIONS);
@@ -94,5 +100,61 @@ describe('sys_user_detail — the details body lives in the first tab', () => {
     };
     walk(components);
     expect(found).toHaveLength(1);
+  });
+});
+
+/**
+ * The reporting line is read back on the record: who this person reports to,
+ * and who reports to them.
+ *
+ * `sys_user.manager_id` is `readonly` (ADR-0092 D4) and written only by the
+ * admin endpoint behind Set Manager / Remove Manager, and the renderer draws
+ * only the sections a page names. Before, no section named it and no list
+ * showed its reverse, so an admin who had set a manager could not see it
+ * anywhere in Setup. Decision batch #127 item 1: the manager is this explicit
+ * link alone; a business unit's head is not read here.
+ */
+describe('sys_user_detail — the reporting line is shown in the Details tab', () => {
+  const parsed = PageSchema.parse(SysUserDetailPage);
+  const strip = (parsed.regions![0]!.components as Rec[]).find((c) => c.type === 'page:tabs') as Rec;
+  const details = ((strip.properties as Rec).items as Rec[])[0]!;
+  const children = details.children as Rec[];
+
+  it('a Details section names `manager_id`, and nothing hides it', () => {
+    const props = children.find((c) => c.type === 'record:details')!.properties as Rec;
+    const sections = props.sections as { label: Rec; fields: string[] }[];
+    const holding = sections.filter((s) => s.fields.includes('manager_id'));
+    expect(holding.map((s) => s.label.en)).toEqual(['Reporting Line']);
+    expect(props.hideFields).not.toContain('manager_id');
+  });
+
+  it('the Direct Reports list reads `sys_user` rows whose `manager_id` is this record\'s id', () => {
+    const lists = children.filter((c) => c.type === 'record:related_list');
+    expect(lists).toHaveLength(1);
+    const props = lists[0]!.properties as Rec;
+    expect((props.title as Rec).en).toBe('Direct Reports');
+    expect(props.objectName).toBe('sys_user');
+    expect(props.relationshipField).toBe('manager_id');
+    // The parent value the relationship field is matched against is the
+    // record's id: nothing is authored, and the props contract's default is
+    // `id` (the page envelope serves `properties` verbatim, so the default is
+    // read through the block's own schema).
+    expect(props).not.toHaveProperty('relationshipValueField');
+    const contract = RecordRelatedListProps.safeParse(props);
+    expect(contract.success, JSON.stringify(contract.error?.issues ?? [])).toBe(true);
+    expect(contract.data!.relationshipValueField).toBe('id');
+    // No authored filter narrows it, and no `add` picker: the link is the
+    // admin endpoint's to write, never a related-list insert.
+    expect(props.filter).toBeUndefined();
+    expect(props.add).toBeUndefined();
+  });
+
+  it('both labels carry the same locales as the tab they sit in', () => {
+    const tabLocales = Object.keys(details.label as Rec).sort();
+    const props = children.find((c) => c.type === 'record:details')!.properties as Rec;
+    const section = (props.sections as { label: Rec; fields: string[] }[]).find((s) => s.fields.includes('manager_id'))!;
+    const list = children.find((c) => c.type === 'record:related_list')!.properties as Rec;
+    expect(Object.keys(section.label).sort()).toEqual(tabLocales);
+    expect(Object.keys(list.title as Rec).sort()).toEqual(tabLocales);
   });
 });

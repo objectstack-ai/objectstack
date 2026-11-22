@@ -240,6 +240,21 @@ export const SysUserDetailPage: Page = {
                           fields: ['name', 'image', 'locale'],
                         },
                         {
+                          // Who this person reports to (`manager_id`, readonly
+                          // on the object: ADR-0092 D4). Shown here, not edited:
+                          // Set Manager / Remove Manager in the header write it
+                          // through the admin endpoint. Decision batch #127
+                          // item 1: the manager is this explicit link only, never
+                          // derived from a business unit's head. Not named
+                          // "Organization": the Organizations tab is membership,
+                          // not the reporting line. `primary_business_unit_id`
+                          // (same field group) stays off: it is plugin-sharing's
+                          // projection of the Business Units tab, which shows
+                          // the source rows and their primary flag.
+                          label: { en: 'Reporting Line', 'zh-CN': '汇报关系', 'ja-JP': 'レポートライン', 'es-ES': 'Línea de reporte', 'zh-Hant': '匯報關係', ar: 'التسلسل الإداري', fr: 'Ligne hiérarchique', 'pt-BR': 'Linha de reporte', ru: 'Подчинённость', de: 'Berichtslinie', ko: '보고 라인' },
+                          fields: ['manager_id'],
+                        },
+                        {
                           label: { en: 'Account Status', 'zh-CN': '账号状态', 'ja-JP': 'アカウントの状態', 'es-ES': 'Estado de la cuenta', 'zh-Hant': '帳號狀態', ar: 'حالة الحساب', fr: 'État du compte', 'pt-BR': 'Status da conta', ru: 'Статус учётной записи', de: 'Kontostatus', ko: '계정 상태' },
                           fields: ['banned', 'ban_reason', 'ban_expires'],
                         },
@@ -248,6 +263,23 @@ export const SysUserDetailPage: Page = {
                           fields: ['created_at', 'updated_at'],
                         },
                       ],
+                    },
+                  },
+                  {
+                    // The other half of the reporting line: the people whose
+                    // `manager_id` is this user. Read-only by construction:
+                    // `sys_user` opens no create or delete (`userActions`,
+                    // `apiMethods`), so the list offers neither New nor Remove;
+                    // a report's manager is changed on that report's record.
+                    type: 'record:related_list',
+                    properties: {
+                      objectName: 'sys_user',
+                      relationshipField: 'manager_id',
+                      columns: ['name', 'email'],
+                      sort: [{ field: 'name', order: 'asc' }],
+                      limit: 25,
+                      showViewAll: true,
+                      title: { en: 'Direct Reports', 'zh-CN': '直接下属', 'ja-JP': '直属の部下', 'es-ES': 'Subordinados directos', 'zh-Hant': '直屬部屬', ar: 'المرؤوسون المباشرون', fr: 'Collaborateurs directs', 'pt-BR': 'Subordinados diretos', ru: 'Прямые подчинённые', de: 'Direkte Mitarbeiter', ko: '직속 팀원' },
                     },
                   },
                 ],
@@ -718,7 +750,7 @@ export const SysUserDetailPage: Page = {
               },
               // ── Preferences ───────────────────────────────────────────
               // [#23803] This user's `sys_user_preference` rows — the console's
-              // per-user UI state (`ui.recent`, `ui.favorites`, `ui.list.<object>`
+              // per-user UI state (`ui.recent`, `ui.favorites`, `ui.record.<object>`
               // …). Setup's "User Preferences" menu entry, which listed every
               // user's rows, left the menu; this tab is where an administrator
               // reaches them now, from the user they belong to.

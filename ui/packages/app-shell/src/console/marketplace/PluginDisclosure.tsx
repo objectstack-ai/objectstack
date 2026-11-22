@@ -49,7 +49,7 @@ function PermissionGroup({
         <div className="text-xs font-medium">{label}</div>
         <div className="flex flex-wrap gap-1 mt-0.5">
           {items.map((it) => (
-            <code key={it} className="font-mono text-[11px] px-1 py-0.5 rounded bg-muted break-all">{it}</code>
+            <code key={it} className="font-mono text-xs px-1 py-0.5 rounded bg-muted break-all">{it}</code>
           ))}
         </div>
       </div>
@@ -141,7 +141,7 @@ export function PluginDisclosure({ version }: { version?: MarketplacePackageVers
             `granted-permissions-not-enforced.pin.test.ts`, which goes red the
             day the ADR-0025 materialize seam makes it a gate.
           */}
-          <div className="text-[11px] text-muted-foreground/80 leading-snug">
+          <div className="text-xs text-muted-foreground/80 leading-snug">
             {t('marketplace.disclosure.notEnforced', {
               // One string literal, not a concatenation, so `check:i18n-keys`
               // compares it against the en pack byte for byte.

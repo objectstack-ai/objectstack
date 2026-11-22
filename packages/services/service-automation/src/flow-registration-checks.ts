@@ -797,7 +797,16 @@ export function validateFlowExpressions(
     const schemaHint = typeof objectName === 'string'
         ? (() => {
             const s = this.objectSchemaResolver?.(objectName);
-            return s ? { objectName, fields: s.fields, fieldTypes: s.fieldTypes, scope: 'flattened' as const } : undefined;
+            return s
+                ? {
+                    objectName,
+                    fields: s.fields,
+                    fieldTypes: s.fieldTypes,
+                    // [#36167] A list compared with a scalar is reported (`list-equality`).
+                    ...(s.multiValueFields ? { multiValueFields: s.multiValueFields } : {}),
+                    scope: 'flattened' as const,
+                }
+                : undefined;
         })()
         : undefined;
 

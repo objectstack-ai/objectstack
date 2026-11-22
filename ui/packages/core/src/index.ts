@@ -98,6 +98,7 @@ export {
   readObjectSortability,
   isPlatformSortableField,
   filterPlatformSortableSort,
+  withHeaderSortPick,
 } from './utils/column-sortability.js';
 // [objectstack#27504] The served packaged-action activation: which declared
 // actions the installation switched off, stamped by the data layer and asked
@@ -244,6 +245,8 @@ export {
   dashboardFilterVariableDefs,
   buildFilterCondition,
   buildWidgetScopedFilter,
+  boundMemberFilterNames,
+  type DashboardFilterJsonColumnOperators,
 } from './utils/dashboard-filters.js';
 export * from './utils/merge-filters.js';
 export * from './utils/compare-to.js';

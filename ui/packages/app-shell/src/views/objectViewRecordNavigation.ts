@@ -50,7 +50,7 @@ import { deriveRecordSurface, overlayWidthFor } from '@object-ui/plugin-view/cor
 import { useNavigationOverlay } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import type { ViewNavigationConfig } from '@object-ui/types';
-import { RECORD_DRAWER_PARAM, RECORD_FORM_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_LINK_PARAM } from '../urlParams.js';
+import { RECORD_DRAWER_PARAM, RECORD_DRAWER_OBJECT_PARAM, RECORD_FORM_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_LINK_PARAM } from '../urlParams.js';
 import { RECORD_FORM_CREATE_VALUES_STATE } from '../utils/recordFormNavigation.js';
 import { viewTabLabel } from './viewTabLabel.js';
 import { listRecordDetailUrl, listRecordActionsValue } from './objectViewRecordLinks.js';
@@ -223,6 +223,16 @@ export function useObjectViewRecordNavigation({
         [activeView?.navigation, objectDef, phone, recordServed]
     );
     const drawerRecordId = searchParams.get(RECORD_DRAWER_PARAM);
+    // objectstack#36015 — the root's object when a lookup chip opened a record
+    // of another object; `null` for the listed object's own rows.
+    const drawerObjectParam = searchParams.get(RECORD_DRAWER_OBJECT_PARAM);
+    const drawerForeignObject = drawerObjectParam && drawerObjectParam !== objectDef.name ? drawerObjectParam : null;
+    // A root of another object opens only when the console knows that object
+    // and the server reads one record of it.
+    const drawerRootServed = drawerForeignObject
+        ? objects.some((o) => (o as { name?: unknown } | null)?.name === drawerForeignObject)
+            && servesRecordRead(drawerForeignObject, perms)
+        : recordServed;
     // The location as of the latest render, read when a handler runs: the
     // handlers below reach the list (its row click, its ↗, the record links it
     // publishes), which must not re-render when `?recordId=` changes
@@ -292,6 +302,7 @@ export function useObjectViewRecordNavigation({
             // `?recordId=` a phone redirect leaves behind (objectstack#27058).
             const originParams = split?.form ? split.origin : new URLSearchParams(search);
             originParams.delete(RECORD_DRAWER_PARAM);
+            originParams.delete(RECORD_DRAWER_OBJECT_PARAM);
             const originSearch = originParams.toString();
             const originState = {
               ...extraState,
@@ -350,6 +361,7 @@ export function useObjectViewRecordNavigation({
         navOverlay.close();
         const newParams = new URLSearchParams(searchParams);
         newParams.delete(RECORD_DRAWER_PARAM);
+        newParams.delete(RECORD_DRAWER_OBJECT_PARAM);
         setSearchParams(newParams);
     };
     /**
@@ -401,8 +413,32 @@ export function useObjectViewRecordNavigation({
         if (!served || mode !== 'drawer') return;
         const next = new URLSearchParams(params);
         next.set(RECORD_DRAWER_PARAM, String(recordId));
+        next.delete(RECORD_DRAWER_OBJECT_PARAM);
         setParams(next);
     }, []);
+    /**
+     * A lookup chip in the list's grid (objectstack#36015): the record it names
+     * in the side drawer over the list, which stays — the same drawer and the
+     * same URL state as the name cell's icon, its object beside `?recordId=`
+     * when it is not the listed object. A chip clicked while the drawer is
+     * open swaps its root record. The record the drawer already shows is not
+     * pushed again, so one Back still closes it after a double-click.
+     */
+    const handleOpenReferencedRecord = useCallback((targetObjectName: string, recordId: string) => {
+        const { searchParams: params, setSearchParams: setParams, mode } = panelInputs.current;
+        const own = targetObjectName === objectDef.name;
+        const shownObject = params.get(RECORD_DRAWER_OBJECT_PARAM);
+        if (params.get(RECORD_DRAWER_PARAM) === recordId && (own ? !shownObject || shownObject === objectDef.name : shownObject === targetObjectName)) return;
+        if (own) {
+            handleOpenRowInPanel(recordId);
+            return;
+        }
+        if (mode !== 'drawer') return;
+        const next = new URLSearchParams(params);
+        next.set(RECORD_DRAWER_PARAM, recordId);
+        next.set(RECORD_DRAWER_OBJECT_PARAM, targetObjectName);
+        setParams(next);
+    }, [objectDef.name, handleOpenRowInPanel]);
     /**
      * The drawer's one `⤢` 「Open as full page」 at any level of the pane's
      * stack (objectstack#35854): closes the pane (which clears `?recordId=…`)
@@ -414,7 +450,7 @@ export function useObjectViewRecordNavigation({
     const handleOpenAsPage = useCallback((path: RecordDrawerLevel[]) => {
         const target = path[path.length - 1];
         if (!target) return;
-        if (path.length === 1) {
+        if (path.length === 1 && target.objectName === objectDef.name) {
             handleDrawerClose();
             handleNavOverlayNavigate(target.recordId);
             return;
@@ -423,7 +459,7 @@ export function useObjectViewRecordNavigation({
         if (to === null) return;
         handleDrawerClose();
         navigate(to);
-    }, [handleNavOverlayNavigate, appName, objects, navigate, handleDrawerClose]);
+    }, [handleNavOverlayNavigate, appName, objects, navigate, handleDrawerClose, objectDef.name]);
     /**
      * The rows the list shows, in its order (`ListView`'s `onRowsChange`,
      * objectstack#26679), and on a grouped grid or a board its groups
@@ -463,7 +499,10 @@ export function useObjectViewRecordNavigation({
      */
     const drawerRoot = useMemo<RecordDrawerLevel | null>(
         () => {
-            if (!drawerRecordId || !recordServed) return null;
+            if (!drawerRecordId || !drawerRootServed) return null;
+            // A record of another object is no row of this list: it has no
+            // sibling set to step through.
+            if (drawerForeignObject) return { objectName: drawerForeignObject, recordId: drawerRecordId };
             const set = listSiblingSetOf(listRows, drawerRecordId);
             // The matched count belongs to the whole list, not to one group.
             const total = set && !set.scope && listTotal != null && listTotal >= set.siblings.length ? listTotal : undefined;
@@ -474,16 +513,23 @@ export function useObjectViewRecordNavigation({
                 ...(total !== undefined ? { total } : {}),
             };
         },
-        [drawerRecordId, objectDef.name, listRows, listTotal, recordServed],
+        [drawerRecordId, drawerForeignObject, drawerRootServed, objectDef.name, listRows, listTotal],
     );
     // Sync URL-based recordId to overlay state. On a phone there is no pane to
     // open: the drawer link is answered by the record's page, in its place in
     // the history (objectstack#27058).
     // A `?recordId=` link to an object with no record surface opens nothing.
     useEffect(() => {
-        const openedId = recordServed ? drawerRecordId : null;
+        const openedId = drawerRootServed ? drawerRecordId : null;
         if (phone) {
-            if (openedId) handleNavOverlayNavigate(openedId, undefined, undefined, true);
+            if (!openedId) return;
+            if (!drawerForeignObject) {
+                handleNavOverlayNavigate(openedId, undefined, undefined, true);
+                return;
+            }
+            // objectstack#36015 — a record of another object: its own page.
+            const to = expandedRecordPath(appName, objects, [{ objectName: drawerForeignObject, recordId: openedId }]);
+            if (to !== null) navigate(to, { replace: true });
             return;
         }
         if (openedId && !navOverlay.isOpen) {
@@ -491,6 +537,6 @@ export function useObjectViewRecordNavigation({
         } else if (!openedId && navOverlay.isOpen) {
             navOverlay.close();
         }
-    }, [drawerRecordId, phone, recordServed]);
-    return { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowInPanel, drawerRoot, drawerRestore, handleListRowsChange, handleListTotalChange, handleRootStep, listLabel };
+    }, [drawerRecordId, drawerForeignObject, phone, drawerRootServed]);
+    return { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowInPanel, handleOpenReferencedRecord, drawerRoot, drawerRestore, handleListRowsChange, handleListTotalChange, handleRootStep, listLabel };
 }

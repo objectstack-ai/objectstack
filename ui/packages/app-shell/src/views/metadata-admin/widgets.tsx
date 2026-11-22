@@ -93,6 +93,14 @@ export interface ObjectFieldOption {
    * column carries them (objectstack#27515). Absent when none are declared.
    */
   options?: Array<{ value: string; label: string }>;
+  /**
+   * The field's declared `multiple: true` — a `select` / `lookup` / `user`
+   * whose stored value is a list. Read by the `filter-builder` widget alone:
+   * with the type it decides which operators the runtime `FilterBuilder`
+   * offers the column (`operatorsForField`), membership and the empty checks
+   * on a list. Absent otherwise.
+   */
+  multiple?: boolean;
 }
 
 /** One entry of the source object's view catalog (`view-ref`). */
@@ -1730,6 +1738,117 @@ function StringTagsWidget({
 }
 
 /* -------------------------------------------------------------------------- */
+/* related-list-entries — chip input for an object's `relatedLists`           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The name an object's `relatedLists` entry places: the bare string, or the
+ * object form's `list` (objectstack#35897 / #35899). The spec's own reader is
+ * `relatedListEntryName`; this one also answers a half-typed draft value.
+ */
+function relatedListEntryChipName(entry: unknown): string | undefined {
+  if (typeof entry === 'string') return entry;
+  if (entry && typeof entry === 'object' && typeof (entry as { list?: unknown }).list === 'string') {
+    return (entry as { list: string }).list;
+  }
+  return undefined;
+}
+
+/**
+ * `relatedLists` on the generic object form (objectstack#35923 review M1):
+ * the `string-tags` face, over a list whose entries are a bare name OR the
+ * object form `{ list, label?, columns? }`. `string-tags` casts its value to
+ * `string[]` and renders each element as a React child, so an object entry
+ * (which Studio's record-page tabs editor writes as soon as a title or
+ * columns are set) broke the form. Here every entry keeps its stored form:
+ * add appends a bare name, remove drops one entry, and an object entry's
+ * chip shows its title and columns beside the name. Those are edited in
+ * Studio's object settings (Record page tabs), which reads the relationships.
+ */
+function RelatedListEntriesWidget({
+  id,
+  ariaLabelledBy,
+  required,
+  value,
+  onChange,
+  readOnly,
+}: WidgetProps) {
+  const locale = useMetadataLocale();
+  const entries = Array.isArray(value) ? (value as unknown[]) : [];
+  const [draft, setDraft] = React.useState('');
+  const names = entries.map(relatedListEntryChipName);
+
+  function add(raw: string) {
+    const parts = raw
+      .split(/[,\n]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (parts.length === 0) return;
+    const next = [...entries];
+    for (const p of parts) if (!names.includes(p) && !next.includes(p)) next.push(p);
+    onChange(next);
+    setDraft('');
+  }
+  function remove(idx: number) {
+    const next = entries.slice();
+    next.splice(idx, 1);
+    onChange(next.length > 0 ? next : undefined);
+  }
+
+  return (
+    <div className="rounded border border-input bg-background p-1.5">
+      <div className="flex flex-wrap items-center gap-1">
+        {entries.map((entry, i) => {
+          const name = names[i] ?? '?';
+          const details = entry && typeof entry === 'object' ? (entry as { label?: unknown; columns?: unknown }) : undefined;
+          const label = typeof details?.label === 'string' ? details.label : undefined;
+          const columns = Array.isArray(details?.columns) ? details.columns.filter((c): c is string => typeof c === 'string') : [];
+          return (
+            <span
+              key={i}
+              data-testid={`related-list-entry-${name}`}
+              className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-xs"
+            >
+              <span className="font-mono">{name}</span>
+              {label && <span>{label}</span>}
+              {columns.length > 0 && <span className="font-mono text-[10px] text-muted-foreground">[{columns.join(', ')}]</span>}
+              {!readOnly && (
+                <button
+                  type="button"
+                  aria-label={tFormat('engine.form.removeNamed', locale, { name })}
+                  onClick={() => remove(i)}
+                  className="text-muted-foreground hover:text-destructive"
+                >
+                  ×
+                </button>
+              )}
+            </span>
+          );
+        })}
+        <input
+          {...controlNaming({ id, ariaLabelledBy, required })}
+          type="text"
+          value={draft}
+          disabled={readOnly}
+          placeholder={entries.length === 0 ? t('engine.form.tagsPlaceholder', locale) : ''}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ',') {
+              e.preventDefault();
+              add(draft);
+            } else if (e.key === 'Backspace' && !draft && entries.length > 0) {
+              remove(entries.length - 1);
+            }
+          }}
+          onBlur={() => draft && add(draft)}
+          className="min-w-[8rem] flex-1 bg-transparent text-sm outline-none"
+        />
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /* multiselect — pick from a fixed option set (array of enum)                 */
 /* -------------------------------------------------------------------------- */
 
@@ -2874,7 +2993,7 @@ function groupOfStoredRules(shown: { logic: 'and' | 'or'; rules: unknown[] } | n
 export function FilterBuilderField({ value, onChange, fields, readOnly, id, ariaLabelledBy, loadError }: {
   value?: FilterElementLite[];
   onChange: (rules: FilterElementLite[]) => void;
-  fields: Array<{ name: string; label?: string; type?: string; options?: Array<{ value: string; label: string }> }>;
+  fields: Array<{ name: string; label?: string; type?: string; options?: Array<{ value: string; label: string }>; multiple?: boolean }>;
   readOnly?: boolean;
   /**
    * Why `fields` is empty, when the reason is that the catalog failed to load
@@ -2933,12 +3052,16 @@ export function FilterBuilderField({ value, onChange, fields, readOnly, id, aria
   // picklist column's value as a picker over them and stores the option's
   // `value` — the runtime list filter's control, not a second editor. Without
   // them a picklist column got a free-text box, and the label an author typed
-  // there matched no record.
+  // there matched no record. `multiple` travels too: with the type it decides
+  // the operators the builder offers (`operatorsForField`), so a list-valued
+  // column is offered membership and the empty checks, never `equals` / `in`,
+  // which the data door refuses on a list.
   const fbFields = fields.map((f) => ({
     value: f.name,
     label: f.label || f.name,
     type: f.type,
     ...(f.options ? { options: f.options } : {}),
+    ...(f.multiple === true ? { multiple: true } : {}),
   }));
   const storedRules = rulesOfStoredElements(rules);
   const summary = storedRules.length
@@ -3455,6 +3578,7 @@ export const WIDGETS = {
   'condition': ConditionWidget,
   'master-detail': MasterDetailWidget,
   'string-tags': StringTagsWidget,
+  'related-list-entries': RelatedListEntriesWidget,
   'multiselect': MultiSelectWidget,
   'code': CodeWidget,
   'secret': SecretWidget,
@@ -3567,6 +3691,7 @@ export const WIDGET_LABELLING: Record<RegisteredWidgetKey, WidgetLabelling> = {
   'condition': 'group',
   'master-detail': 'group',
   'string-tags': 'control',
+  'related-list-entries': 'control',
   'multiselect': 'group',
   'code': 'group',
   'secret': 'control',

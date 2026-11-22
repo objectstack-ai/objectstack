@@ -1945,7 +1945,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
                 aria-label={t('detail.approvalProgressLabel')}
                 className="flex items-center gap-2 w-full justify-end"
               >
-                <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+                <span className="text-xs text-muted-foreground whitespace-nowrap">
                   {progress.behavior === 'per_group'
                     ? t('detail.approvalProgressGroups', { got: progress.got, need: progress.need })
                     : t('detail.approvalProgress', { got: progress.got, need: progress.need })}
@@ -1975,7 +1975,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
                       key={g.group}
                       title={`${g.got}/${g.need}`}
                       className={cn(
-                        'inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px]',
+                        'inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs',
                         g.satisfied
                           ? 'border-emerald-300 text-emerald-700'
                           : 'border-border text-muted-foreground',

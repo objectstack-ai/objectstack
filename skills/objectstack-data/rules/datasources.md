@@ -4,7 +4,10 @@ A **datasource** (`defineDatasource`, a `*.datasource.ts` file) is a
 connection to a data store. Objects route to one via their `datasource` field.
 `default` is host-reserved (connected from `OS_DATABASE_URL`; declaring one
 named `default` is refused). Declare one under its own name only for a
-**separate** or **external** store.
+**separate** or **external** store. Share grants count only on
+`sys_record_share`'s datasource under a SQL driver; elsewhere a grant or rule
+save is refused `SHARING_NOT_ENABLED` (422), and a `sharingRules` reconcile
+aborts on it.
 
 ## `schemaMode` — who owns the schema
 
@@ -12,11 +15,11 @@ named `default` is refused). Declare one under its own name only for a
 |:--|:--|
 | `managed` (default) | ObjectStack owns the schema; DDL + migrations allowed. |
 | `external` | A mature external DB ObjectStack does **not** own; DDL forbidden; boot mismatch **fails**. |
-| `validate-only` | Like `external`, but a mismatch **warns** instead of failing boot. |
+| `validate-only` | Like `external`, but a mismatch **warns**. |
 
 ## Federated (external) objects
 
-An object on an external datasource binds to its remote table via `external`:
+Each binds to its remote table via `external`:
 
 ```typescript
 ObjectSchema.create({
@@ -24,8 +27,8 @@ ObjectSchema.create({
   datasource: 'warehouse',
   sharingModel: 'public_read',
   external: {
-    remoteName: 'customers',        // remote TABLE (object name may differ)
-    // remoteSchema: 'public',      // optional schema/namespace (pg/mysql)
+    remoteName: 'customers',        // remote TABLE
+    // remoteSchema: 'public',      // schema/namespace (pg/mysql)
     // columnMap: { cust_region: 'region' }, // remoteColumn → localField
   },
   fields: { id: { type: 'text' }, name: { type: 'text' }, region: { type: 'text' } },
@@ -33,7 +36,7 @@ ObjectSchema.create({
 ```
 
 - ❌ **`field.columnName` does not exist — on ANY object.** Authoring it is a
-  parse error everywhere.
+  parse error.
 - **Walled posture (`OS_TENANCY_POSTURE` `isolated`/`group`): every external
   object states its organization scope** — its own `organization_id` field (or
   `columnMap` onto it), `tenancy: { enabled: false }` (shared), or
@@ -42,8 +45,7 @@ ObjectSchema.create({
 
 ## Auto-connect (no `onEnable`)
 
-A declared datasource is connected **automatically at boot** when it is
-**meaningfully addressed**:
+A declared datasource connects at boot when it is **meaningfully addressed**:
 
 1. it is **external** (`schemaMode !== 'managed'`), **or**
 2. an object **explicitly** binds via `object.datasource === <name>`, **or**
@@ -77,5 +79,4 @@ A missing store, handle, instance or automation service leaves the datasource
 
 ## Writes — double opt-in
 
-Federation is read-only by default. To write, **both** gates must be on:
-`datasource.external.allowWrites: true` **and** the object's `external.writable: true`.
+To write, set `datasource.external.allowWrites: true` **and** the object's `external.writable: true`.
