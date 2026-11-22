@@ -93,7 +93,7 @@ function makeDataSource(rows: Record<string, unknown>[], fields: Record<string, 
 }
 
 function renderGrid(schema: Record<string, unknown>, ds?: any) {
-  const grid = <ObjectGrid schema={{ type: 'object-grid', pagination: { pageSize: 50 }, ...schema } as any} dataSource={ds} />;
+  const grid = <ObjectGrid cellSelection={false} schema={{ type: 'object-grid', pagination: { pageSize: 50 }, ...schema } as any} dataSource={ds} />;
   return render(
     <ActionProvider>
       {ds ? <SchemaRendererProvider dataSource={ds}>{grid}</SchemaRendererProvider> : grid}
@@ -131,14 +131,14 @@ describe('ObjectGrid — a masked column opens no inline editor (objectui#10583)
       name: 'over an object `text` field',
       render: () =>
         renderGrid(
-          { objectName: 'masked_edit_probe', columns: COLUMNS, editable: true, singleClickEdit: true },
+          { objectName: 'masked_edit_probe', columns: COLUMNS, editable: true },
           makeDataSource(ROWS, { id: { type: 'text' }, name: { type: 'text', label: 'Name' }, pin: { type: 'text', label: 'PIN' } }),
         ),
     },
     {
       name: 'over no field def (inline rows)',
       render: () =>
-        renderGrid({ data: { provider: 'value', items: ROWS }, columns: COLUMNS, editable: true, singleClickEdit: true }),
+        renderGrid({ data: { provider: 'value', items: ROWS }, columns: COLUMNS, editable: true }),
     },
   ];
 

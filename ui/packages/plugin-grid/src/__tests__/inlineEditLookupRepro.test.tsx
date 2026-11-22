@@ -95,7 +95,6 @@ function renderGrid(dataSource: any) {
     type: 'object-grid',
     objectName: OBJECT,
     editable: true,
-    singleClickEdit: true,
     columns: [
       { field: 'name', label: '作业对象', editable: false },
       { field: 'manager', label: '管理责任人', type: 'lookup' },
@@ -105,7 +104,7 @@ function renderGrid(dataSource: any) {
   return render(
     <ActionProvider>
       <SchemaRendererProvider dataSource={dataSource}>
-        <ObjectGrid schema={schema} dataSource={dataSource} />
+        <ObjectGrid cellSelection={false} schema={schema} dataSource={dataSource} />
       </SchemaRendererProvider>
     </ActionProvider>,
   );

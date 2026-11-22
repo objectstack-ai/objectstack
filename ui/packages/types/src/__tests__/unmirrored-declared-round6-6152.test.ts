@@ -69,7 +69,8 @@ const MIRRORED: ReadonlyArray<{ key: string; valid: unknown; invalid: unknown; s
   { key: 'reorderableColumns', valid: true, invalid: 'yes', slot: true },
   { key: 'rowColor', valid: { field: 'status', colors: { open: 'bg-green-200' } }, invalid: 42, slot: true },
   { key: 'rowHeight', valid: 'extra_tall', invalid: 'comfortable', slot: true },
-  { key: 'singleClickEdit', valid: false, invalid: 'no', slot: true },
+  // `singleClickEdit`, the tenth, left this list when objectstack#36270 RETIRED it
+  // (the select-first editing model has no single-click entry): see its tombstone case below.
 ];
 
 const GRID = { type: 'object-grid', objectName: 'task' };
@@ -105,11 +106,18 @@ describe('objectui#6152 round 6 — the flat `ObjectGridSchema` mirror judges te
     }
   });
 
+  it('`singleClickEdit` was mirrored here, then RETIRED (objectstack#36270): a member that refuses every value', () => {
+    expect('singleClickEdit' in ObjectGridSchema.shape).toBe(true);
+    for (const value of [true, false]) {
+      expect(codeAndPath(ObjectGridSchema.safeParse({ ...GRID, editable: true, singleClickEdit: value })))
+        .toEqual([{ code: 'invalid_type', path: ['singleClickEdit'] }]);
+    }
+  });
+
   it('the members the twin takes from the spec by name are the spec\'s, by reference', () => {
     // The row's own boolean members carry no default, so the import boundary hands
     // them back unchanged.
     expect(ObjectGridSchema.shape.reorderableColumns).toBe(SpecObjectGridPropsSchema.shape.reorderableColumns);
-    expect(ObjectGridSchema.shape.singleClickEdit).toBe(SpecObjectGridPropsSchema.shape.singleClickEdit);
     // `GroupingConfigSchema` carries a default (`order`), so the boundary rebuilds
     // it; what travels is the spec's own rule — a padded field name is refused.
     expect(codeAndPath(SpecGroupingConfigSchema.safeParse({ fields: [{ field: ' region ' }] }))).toEqual([
