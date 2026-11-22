@@ -16,7 +16,7 @@
  * 1 for the stored value and 0 for any other: a yes/no oracle on a field of an
  * object nobody may read.
  *
- * Driven against a REAL `ObjectQL` over the in-memory driver, with the real
+ * Driven against a REAL `ObjectQL` over `SqlDriver` (in-memory SQLite), with the real
  * `ObjectStackProtocolImplementation` as the protocol where the host has one.
  * Package `dp35526_b` owns `dp_beta`; package `dp35526_a` owns `dp_alpha`,
  * whose lookup `b_ref` points at `dp_beta` and `c_ref` at `dp_gamma`
@@ -41,8 +41,12 @@
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
+// The source under test reaches `@objectstack/metadata` through a dynamic
+// import; loaded here at module scope so its first load lands during
+// collection, not inside a clocked window (`pnpm check:test-source-alias`).
+import '@objectstack/metadata';
 import { ObjectQL } from '@objectstack/objectql';
-import { InMemoryDriver } from '@objectstack/driver-memory';
+import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { callData, type ActionExecutionDeps } from './action-execution.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
@@ -75,16 +79,16 @@ afterEach(async () => {
 async function makeHarness(opts: { withProtocol: boolean }) {
     const engine = new ObjectQL();
     live.push(engine);
-    engine.registerDriver(new InMemoryDriver() as any, true);
+    engine.registerDriver(new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }) as any, true);
     await engine.init();
     for (const id of [PKG_A, PKG_B, PKG_C]) engine.registry.installPackage(manifest(id), 'code');
     engine.registry.registerObject(ALPHA as any, PKG_A, undefined, 'own');
     engine.registry.registerObject(BETA as any, PKG_B, undefined, 'own');
     engine.registry.registerObject(GAMMA as any, PKG_C, undefined, 'own');
     await engine.syncSchemas();
-    const beta: any = await engine.insert('dp_beta', { name: 'beta', secret_note: SECRET }, { context: SYSTEM } as any);
-    const gamma: any = await engine.insert('dp_gamma', { name: 'gamma', note: 'open' }, { context: SYSTEM } as any);
-    await engine.insert('dp_alpha', { name: 'alpha', b_ref: beta.id, c_ref: gamma.id }, { context: SYSTEM } as any);
+    const beta: any = await engine.insert('dp_beta', { name: 'beta', secret_note: SECRET });
+    const gamma: any = await engine.insert('dp_gamma', { name: 'gamma', note: 'open' });
+    await engine.insert('dp_alpha', { name: 'alpha', b_ref: beta.id, c_ref: gamma.id });
     const services: Record<string, any> = {
         metadata: { getObject: async () => undefined },
         objectql: engine,
