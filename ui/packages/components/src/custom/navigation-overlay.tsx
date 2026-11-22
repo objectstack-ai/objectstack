@@ -302,10 +302,14 @@ export interface NavigationOverlayProps {
  * The one `storageKey` spelling every record overlay uses, keyed by object.
  *
  * `NavigationOverlay` prefixes it with `ov:` on the way to `localStorage`, so
- * the stored key is `ov:drawer-width:OBJECT`. The console's own object page
- * (`app-shell`'s `ObjectView`) has always used this spelling; after
- * objectui#9299 the five list-type renderers use it too, so one object has one
- * remembered overlay width no matter which view type the user resized it on.
+ * the stored key is `ov:drawer-width:OBJECT`. After objectui#9299 the five
+ * list-type renderers use it, so one object has one remembered overlay width
+ * no matter which of them the user resized it on. The console's own record
+ * preview (`app-shell`'s `ObjectView` and a record page's drawer) uses it only
+ * for an object that authors its drawer's width; every other object's preview
+ * shares one key of its own (objectstack#36149), so it no longer shares a
+ * width with that object's calendar, gantt, kanban, tree or grid overlay.
+ * This helper's spelling is unchanged.
  */
 export function recordOverlayWidthStorageKey(objectName: string): string {
   return `drawer-width:${objectName}`;

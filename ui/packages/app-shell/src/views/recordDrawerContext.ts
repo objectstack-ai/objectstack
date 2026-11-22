@@ -16,6 +16,7 @@
  */
 
 import { createContext, useContext } from 'react';
+import { recordOverlayWidthStorageKey } from '@object-ui/components';
 
 /** What a record link inside a drawer host calls to open a record in place. */
 export interface RecordDrawerApi {
@@ -102,3 +103,18 @@ export const RECORD_PREVIEW_DEFAULT_WIDTH = 'min(92vw, 460px)';
  * object's snake_case name).
  */
 export const RECORD_PREVIEW_WIDTH_KEY = 'drawer-width:record-preview';
+
+/**
+ * Where a record pane remembers its dragged width (objectstack#36149): the
+ * one shared key ({@link RECORD_PREVIEW_WIDTH_KEY}), unless the object (or
+ * the view that opens it) authors the pane's width — a `navigation.size`
+ * other than `auto`, or a pixel `navigation.width`. Such an object keeps its
+ * own per-object key (`recordOverlayWidthStorageKey`), so a width dragged in
+ * another object's preview never takes the place of the author's: it opens at
+ * the authored width until the reader drags this object's own pane.
+ */
+export function recordPreviewWidthKey(objectName: string, navigation: unknown): string {
+  const nav = navigation as { size?: unknown; width?: unknown } | null | undefined;
+  const authored = nav != null && (nav.width != null || (nav.size != null && nav.size !== 'auto'));
+  return authored ? recordOverlayWidthStorageKey(objectName) : RECORD_PREVIEW_WIDTH_KEY;
+}

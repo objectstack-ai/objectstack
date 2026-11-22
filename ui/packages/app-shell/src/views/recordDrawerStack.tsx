@@ -80,13 +80,13 @@ import {
 import { appRecordPath, routableObjectNames } from './RelatedRecordActionsBridge.js';
 import {
   RECORD_PREVIEW_DEFAULT_WIDTH,
-  RECORD_PREVIEW_WIDTH_KEY,
   RecordDrawerContext,
   RecordPaneBarContext,
   RecordPaneContext,
   type RecordDrawerApi,
   type RecordPaneApi,
   type RecordPaneBarApi,
+  recordPreviewWidthKey,
 } from './recordDrawerContext.js';
 
 export {
@@ -960,7 +960,7 @@ export function RecordPageDrawerHost({
         stack={stack}
         open={!!root}
         width={rootWidth}
-        storageKey={root ? RECORD_PREVIEW_WIDTH_KEY : undefined}
+        storageKey={root ? recordPreviewWidthKey(root.objectName, (rootDef as { navigation?: unknown } | undefined)?.navigation) : undefined}
         objects={objects}
         onClose={close}
         onOpenAsPage={openAsPage}

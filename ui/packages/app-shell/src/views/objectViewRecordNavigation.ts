@@ -55,7 +55,7 @@ import { RECORD_FORM_CREATE_VALUES_STATE } from '../utils/recordFormNavigation.j
 import { viewTabLabel } from './viewTabLabel.js';
 import { listRecordDetailUrl, listRecordActionsValue } from './objectViewRecordLinks.js';
 import { RECORD_PAGE_PUSHED_STATE } from './recordPagePush.js';
-import { RECORD_PREVIEW_DEFAULT_WIDTH } from './recordDrawerContext.js';
+import { RECORD_PREVIEW_DEFAULT_WIDTH, recordPreviewWidthKey } from './recordDrawerContext.js';
 import { servesRecordRead } from '../utils/recordReadServed.js';
 import {
     expandedRecordPath,
@@ -275,6 +275,10 @@ export function useObjectViewRecordNavigation({
         },
         [activeView?.navigation, objectDef, phone, recordServed]
     );
+    // objectstack#36149 — where the drawer remembers a dragged width: the
+    // shared preview key, or this object's own key when the view or the
+    // object authors the drawer's width (`recordPreviewWidthKey`).
+    const drawerWidthKey = recordPreviewWidthKey(objectDef.name, phone ? undefined : activeView?.navigation ?? objectDef.navigation);
     const drawerRecordId = searchParams.get(RECORD_DRAWER_PARAM);
     // objectstack#36015 — the root's object when a lookup chip opened a record
     // of another object; `null` for the listed object's own rows.
@@ -583,5 +587,5 @@ export function useObjectViewRecordNavigation({
             navOverlay.close();
         }
     }, [drawerRecordId, drawerForeignObject, phone, drawerRootServed]);
-    return { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowInPanel, handleOpenReferencedRecord, drawerRoot, drawerRestore, handleListRowsChange, handleListTotalChange, handleRootStep, listLabel };
+    return { listRecordActions, navOverlay, drawerWidthKey, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowInPanel, handleOpenReferencedRecord, drawerRoot, drawerRestore, handleListRowsChange, handleListTotalChange, handleRootStep, listLabel };
 }

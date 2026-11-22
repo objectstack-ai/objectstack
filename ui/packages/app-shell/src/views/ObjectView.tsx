@@ -1103,7 +1103,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // objectstack#27058 — on a phone the record is always a page: a row tap
     // navigates to it, and no pane is mounted beside or over the list.
     const phone = usePhoneViewport();
-    const { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowInPanel, handleOpenReferencedRecord, drawerRoot, drawerRestore, handleListRowsChange, handleListTotalChange, handleRootStep, listLabel } = useObjectViewRecordNavigation({
+    const { listRecordActions, navOverlay, drawerWidthKey, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowInPanel, handleOpenReferencedRecord, drawerRoot, drawerRestore, handleListRowsChange, handleListTotalChange, handleRootStep, listLabel } = useObjectViewRecordNavigation({
         activeView,
         objectDef,
         objects,
@@ -1673,6 +1673,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         <ObjectViewRecordOverlay
             navOverlay={navOverlay}
             mode={navOverlay.mode}
+            widthKey={drawerWidthKey}
             list={pageColumn}
             handleDrawerClose={handleDrawerClose}
             objectDef={objectDef}

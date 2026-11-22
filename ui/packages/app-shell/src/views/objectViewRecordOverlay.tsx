@@ -34,6 +34,7 @@ const RecordDetailView = lazy(() => import('./RecordDetailView.js').then((m) => 
 export function ObjectViewRecordOverlay({
     navOverlay,
     mode,
+    widthKey = RECORD_PREVIEW_WIDTH_KEY,
     list,
     handleDrawerClose,
     objectDef,
@@ -49,6 +50,11 @@ export function ObjectViewRecordOverlay({
     navOverlay: RecordNavigation['navOverlay'];
     /** The object's resolved mode: `drawer` draws the record over the list. */
     mode: NavigationOverlayMode;
+    /**
+     * Where the drawer remembers a dragged width (`recordPreviewWidthKey`,
+     * objectstack#36149). Absent: the side preview's shared key.
+     */
+    widthKey?: string;
     /** The list, drawn whether or not a record is open; pass a stable element. */
     list: ReactNode;
     handleDrawerClose: RecordNavigation['handleDrawerClose'];
@@ -76,8 +82,9 @@ export function ObjectViewRecordOverlay({
                  onClose={handleDrawerClose}
                  onOpenAsPage={handleOpenAsPage}
                  stepScope={stepScope}
-                 // objectstack#36149 — one remembered width for every object.
-                 storageKey={RECORD_PREVIEW_WIDTH_KEY}
+                 // objectstack#36149 — one remembered width for every object
+                 // whose width is not authored.
+                 storageKey={widthKey}
                  objects={objects}
                  renderRecord={(level) => (
                      <Suspense fallback={<SkeletonDetail />}>
