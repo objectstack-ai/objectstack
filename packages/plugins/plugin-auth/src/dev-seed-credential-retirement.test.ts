@@ -145,7 +145,7 @@ const cookieHeader = (res: Response): string =>
     .join('; ');
 
 /** One boot of the real composition over the test's database file, in `nodeEnv`. */
-async function boot(nodeEnv: string, options: { secondaryStorage?: SecondaryStorage } = {}) {
+async function boot(nodeEnv: string, options: { secondaryStorage?: SecondaryStorage; also?: Plugin } = {}) {
   process.env.NODE_ENV = nodeEnv;
   kernel = new ObjectKernel({ logger: { level: 'silent' } });
   await kernel.use(sqliteFilePlugin(join(dir!, 'app.sqlite')));
@@ -162,6 +162,7 @@ async function boot(nodeEnv: string, options: { secondaryStorage?: SecondaryStor
     } as never),
   );
   await kernel.use(new SecurityPlugin());
+  if (options.also) await kernel.use(options.also);
   await kernel.bootstrap();
   const ql = kernel.getService<ObjectQL>('objectql');
   const manager = kernel.getService<AuthManager>('auth');
@@ -330,6 +331,31 @@ describe('leaving development mode retires what the development seed issued', ()
       expect(account).toMatchObject({ sessions: 0, cachedSessions: 0, apiKeys: 0, signInAccounts: 0, authorizedApps: 0, ownedApps: 0, scimCredentials: 0 });
     }
     expect(await answers(second, issued, 'control')).toEqual({ session: issued.ids.control, key: 'admitted', resetLinks: 1 });
+  });
+
+  it('a retirement that cannot complete fails the boot, naming the account and the remedy', async () => {
+    const issued = await seedInDevelopment();
+    // The database refuses every write to `sys_api_key`, from the server's start on.
+    const refuseKeyWrites: Plugin = {
+      name: 'test.refuse-api-key-writes',
+      type: 'standard',
+      version: '1.0.0',
+      dependencies: ['com.objectstack.engine.objectql'],
+      async init() {},
+      async start(ctx: PluginContext) {
+        ctx.getService<ObjectQL>('objectql').registerHook(
+          'beforeUpdate',
+          async () => {
+            throw new Error('sys_api_key is read-only on this database');
+          },
+          { object: 'sys_api_key', packageId: 'test.refuse-api-key-writes' } as never,
+        );
+      },
+    };
+    const refused = await boot(PRODUCTION, { also: refuseKeyWrites }).then(() => undefined, (e: unknown) => e as Error);
+    expect(refused, 'the boot failed').toBeInstanceOf(Error);
+    expect(refused!.message).toContain(`user ${issued.ids.admin}`);
+    expect(refused!.message).toContain('os user set-password');
   });
 
   it('with a host secondaryStorage holding the sessions, the boot ends them there', async () => {
