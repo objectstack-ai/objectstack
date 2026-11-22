@@ -83,17 +83,9 @@ export type { TranslateFn } from './translateFn.js';
 // Convention-based object/field label i18n
 export { useObjectLabel, useSafeFieldLabel } from './useObjectLabel.js';
 
-// An app's `flows` translation group and the flow labels a surface that draws a
-// flow reads from it: the one reader for the console's runner, the Studio flow
-// designer and the docs viewer's `type: flow` embed.
-export {
-  activeFlowsBundle,
-  flowLabelTranslations,
-  useFlowLabelTranslations,
-  type FlowLabelTranslations,
-  type FlowsTranslation,
-  type TranslationResourceReader,
-} from './flowLabels.js';
+// The flow labels a surface that draws a flow reads from the app's `flows`
+// group: the Studio flow designer and the docs viewer's `type: flow` embed.
+export { flowLabelTranslations, useFlowLabelTranslations, type FlowLabelTranslations } from './flowLabels.js';
 
 // The record-named save message every record save surface toasts.
 export { recordSaveMessage, type RecordSaveMessageInput } from './recordSaveMessage.js';
@@ -203,3 +195,12 @@ export {
 // grids and the timeline's week buckets read it from the tag they format with,
 // so the week starts where the locale says and never on a hard-coded day.
 export { firstDayOfWeek, type WeekdayIndex } from './utils/index.js';
+
+// The app's `flows` translation group, read back out of the loaded resource
+// tree: the ONE reader every surface that names a flow goes through — the
+// console's flow runner and designer, and the docs viewer's flow embed.
+export {
+  activeFlowsBundle,
+  type FlowsTranslation,
+  type TranslationResourceReader,
+} from './flowsBundle.js';

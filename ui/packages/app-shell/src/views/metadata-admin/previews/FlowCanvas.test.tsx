@@ -10,14 +10,16 @@ import type { FlowProblem } from './flow-problems';
 import { browserClick, browserDrag } from './__tests__/browserClick';
 // FlowPreview reaches a dynamic `import('@objectstack/lint')`; pay its load at collection, not in a test's clock.
 import '@objectstack/lint';
-import { activeFlowsBundle, createI18n, flowLabelTranslations, I18nProvider, transformSpecTranslations } from '@object-ui/i18n';
+import { createI18n, I18nProvider, transformSpecTranslations } from '@object-ui/i18n';
 import type { TranslationData } from '@objectstack/spec/system';
 import { FlowPreview, FlowSelectionTitle, flowSelectionHeading } from './FlowPreview';
 import {
   FlowLabelTranslationsProvider,
+  flowLabelTranslations,
   useFlowLabelTranslations,
   type FlowLabelTranslations,
 } from './flow-label-translations';
+import { activeFlowsBundle } from '@object-ui/i18n';
 
 afterEach(cleanup);
 

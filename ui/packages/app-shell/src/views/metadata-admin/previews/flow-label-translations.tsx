@@ -26,7 +26,7 @@ import {
   type FlowLabelTranslations,
 } from '@object-ui/i18n';
 
-export { useFlowLabelTranslations, type FlowLabelTranslations } from '@object-ui/i18n';
+export { flowLabelTranslations, useFlowLabelTranslations, type FlowLabelTranslations } from '@object-ui/i18n';
 
 /**
  * The flow label of any flow, by name, for a surface that lists many: the
