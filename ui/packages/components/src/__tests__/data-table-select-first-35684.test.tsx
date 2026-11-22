@@ -28,6 +28,12 @@
  *   6. A touch tap opens the record and edits nothing.
  *   7. The edit-only row column is never drawn: each cell saves itself
  *      (objectstack#35685, `data-table-autosave-35685.test.tsx`).
+ *   8. In a reference cell the host names (`referenceCells`), a plain click on
+ *      a record chip opens its record through the host and selects the cell;
+ *      a click beside the chips only selects; Ctrl/Cmd+Enter opens the first
+ *      chip; the cell draws an edit button, not the open button, and the edit
+ *      button opens the editor through the same gate as double-click
+ *      (objectstack#36015).
  */
 import React from 'react';
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -355,5 +361,146 @@ describe('data-table select-first — a touch tap opens the record', () => {
     expect(t.cell(0, 0)).not.toHaveAttribute('data-selected-cell');
     fireEvent.doubleClick(t.cell(0, 0));
     expect(t.editor()).toBeNull();
+  });
+});
+
+describe('data-table select-first — a reference chip opens its record in place (objectstack#36015)', () => {
+  const ACCOUNTS = [
+    { id: '1', name: 'Alpha', account: 'acc_1', owner: 'usr_1' },
+    { id: '2', name: 'Beta', account: 'acc_2', owner: 'usr_2' },
+  ];
+  // A chip as `ReferencedRecordLink` draws it.
+  const chip = (objectName: string, recordId: string, label: string, onFollow: (id: string) => void) => (
+    <span>
+      <a
+        href={`/${objectName}/record/${recordId}`}
+        data-record-link=""
+        data-record-object={objectName}
+        data-record-id={recordId}
+        onClick={(e) => { e.preventDefault(); onFollow(recordId); }}
+      >
+        {label}
+      </a>
+    </span>
+  );
+  function renderReferences({ readOnly = false, withHost = true }: { readOnly?: boolean; withHost?: boolean } = {}) {
+    const DataTable = ComponentRegistry.get('data-table')!;
+    const openRecord = vi.fn();
+    const onFollow = vi.fn();
+    const selection: GridCellSelection = {
+      describeCell: (_row, columnKey) => (readOnly && columnKey === 'account' ? { readOnlyReason: 'Not here.' } : null),
+      ...(withHost
+        ? { referenceCells: { isReferenceColumn: (key: string) => key === 'account', openRecord } }
+        : {}),
+    };
+    const schema = {
+      type: 'data-table',
+      columns: [
+        { header: 'Name', accessorKey: 'name' },
+        { header: 'Account', accessorKey: 'account', cell: (v: string) => chip('crm_account', v, `Account ${v}`, onFollow) },
+        { header: 'Owner', accessorKey: 'owner', cell: (v: string) => chip('sys_user', v, `Person ${v}`, onFollow) },
+      ],
+      data: ACCOUNTS,
+      editable: true,
+      singleClickEdit: true,
+      searchable: false,
+      pagination: false,
+    };
+    const utils = render(
+      <GridCellSelectionProvider value={selection}>
+        <DataTable schema={schema} />
+      </GridCellSelectionProvider>,
+    );
+    const cell = (row: number, col: number) =>
+      utils.container.querySelectorAll('tbody tr')[row].querySelectorAll('td[data-grid-cell]')[col] as HTMLElement;
+    const editor = () => utils.container.querySelector('td[data-editing-cell] input');
+    const catcher = () => utils.container.querySelector<HTMLInputElement>('[data-slot="cell-type-catcher"]');
+    const editButton = (row: number, col: number) => cell(row, col).querySelector<HTMLButtonElement>('[data-testid="cell-edit-button"]');
+    return { ...utils, cell, editor, catcher, editButton, openRecord, onFollow };
+  }
+
+  it('a plain click on the chip opens its record through the host and selects the cell; the link is not followed', () => {
+    const t = renderReferences();
+    const plain = fireEvent.click(screen.getByText('Account acc_1'));
+    expect(t.openRecord).toHaveBeenCalledWith('crm_account', 'acc_1');
+    expect(t.onFollow).not.toHaveBeenCalled();
+    expect(plain).toBe(false);
+    expect(t.cell(0, 1)).toHaveAttribute('data-selected-cell');
+    // A double-click on the chip does not also edit the cell.
+    fireEvent.doubleClick(screen.getByText('Account acc_1'));
+    expect(t.editor()).toBeNull();
+  });
+
+  it('a double-click on the chip opens its record once', () => {
+    const t = renderReferences();
+    const chipText = screen.getByText('Account acc_1');
+    fireEvent.click(chipText, { detail: 1 });
+    fireEvent.click(chipText, { detail: 2 });
+    fireEvent.doubleClick(chipText, { detail: 2 });
+    expect(t.openRecord).toHaveBeenCalledTimes(1);
+    expect(t.openRecord).toHaveBeenCalledWith('crm_account', 'acc_1');
+    expect(t.editor()).toBeNull();
+  });
+
+  it('a click beside the chip only selects; a Ctrl or Cmd click follows the link', () => {
+    const t = renderReferences();
+    fireEvent.click(t.cell(1, 1));
+    expect(t.cell(1, 1)).toHaveAttribute('data-selected-cell');
+    expect(t.openRecord).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText('Account acc_2'), { ctrlKey: true });
+    fireEvent.click(screen.getByText('Account acc_2'), { metaKey: true });
+    expect(t.onFollow).toHaveBeenCalledTimes(2);
+    expect(t.openRecord).not.toHaveBeenCalled();
+  });
+
+  it('Ctrl or Cmd+Enter on a selected reference cell opens its first chip through the host', () => {
+    const t = renderReferences();
+    fireEvent.click(t.cell(1, 1));
+    fireEvent.keyDown(t.catcher()!, { key: 'Enter', ctrlKey: true });
+    expect(t.openRecord).toHaveBeenCalledWith('crm_account', 'acc_2');
+    expect(t.onFollow).not.toHaveBeenCalled();
+    expect(t.editor()).toBeNull();
+  });
+
+  it('a reference cell draws the edit button, shown on hover and while selected; it edits and draws no open button', () => {
+    const t = renderReferences();
+    const button = t.editButton(0, 1)!;
+    expect(button).toHaveAccessibleName('Edit');
+    // Asked when the pointer enters the cell.
+    expect(button.className).toContain('hidden');
+    fireEvent.pointerEnter(t.cell(0, 1));
+    expect(button.className).toMatch(/(^|\s)flex(\s|$)/);
+    expect(button.className).toContain('group-hover/cell:opacity-100');
+    fireEvent.click(t.cell(0, 1));
+    expect(t.editButton(0, 1)!.className).toContain('opacity-100');
+    expect(t.cell(0, 1).querySelector('[data-testid="cell-open-button"]')).toBeNull();
+    fireEvent.click(t.editButton(0, 1)!);
+    expect(t.editor()).not.toBeNull();
+    expect(t.openRecord).not.toHaveBeenCalled();
+  });
+
+  it('a reference cell that opens no editor draws no edit button', () => {
+    const t = renderReferences({ readOnly: true });
+    fireEvent.pointerEnter(t.cell(0, 1));
+    fireEvent.click(t.cell(0, 1));
+    expect(t.editButton(0, 1)!.className).toContain('hidden');
+  });
+
+  it('a column the host does not name (a person) keeps the link behaviour: the chip only selects, the open button opens it', () => {
+    const t = renderReferences();
+    expect(t.editButton(0, 2)).toBeNull();
+    fireEvent.click(screen.getByText('Person usr_1'));
+    expect(t.openRecord).not.toHaveBeenCalled();
+    expect(t.onFollow).not.toHaveBeenCalled();
+    expect(t.cell(0, 2)).toHaveAttribute('data-selected-cell');
+    expect(t.cell(0, 2).querySelector('[data-testid="cell-open-button"]')).not.toBeNull();
+  });
+
+  it('control: with no host reference cells, the chip only selects and no edit button is drawn', () => {
+    const t = renderReferences({ withHost: false });
+    fireEvent.click(screen.getByText('Account acc_1'));
+    expect(t.onFollow).not.toHaveBeenCalled();
+    expect(t.cell(0, 1)).toHaveAttribute('data-selected-cell');
+    expect(t.editButton(0, 1)).toBeNull();
   });
 });

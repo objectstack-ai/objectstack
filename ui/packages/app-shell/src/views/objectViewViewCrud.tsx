@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from 'react';
 import { useParams, type useNavigate } from 'react-router-dom';
 import { formatMetadataError } from '@object-ui/data-objectstack';
+import { viewSaveRefusalText } from './viewSaveRefusal.js';
 import { toast } from 'sonner';
 import type { useObjectTranslation } from '@object-ui/i18n';
 import type { useObjectListPreferences } from '../context/ListPreferencesProvider.js';
@@ -19,8 +20,8 @@ import type { usePreviewDrafts } from '../preview/PreviewModeContext.js';
 import { isSavedViewId } from '../utils/viewIdentity.js';
 import type { useConsoleActionRuntime } from '../hooks/useConsoleActionRuntime.js';
 import type { useMetadataClient } from './metadata-admin/useMetadata.js';
-import { persistRuntimeMetadata, createRuntimeMetadata, viewEnvelope } from './runtime-metadata-persistence.js';
-import type { RuntimeCreateApp } from './runtime-metadata-persistence.js';
+import { persistRuntimeMetadata, createRuntimeMetadata, saveAndPublishRuntimeMetadata, viewEnvelope } from './runtime-metadata-persistence.js';
+import type { RuntimeCreateApp, SaveAndPublishOutcome } from './runtime-metadata-persistence.js';
 import { draftBarPackageOf } from '../preview/DraftPreviewBar.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { buildAddViewSpec, setDefaultViewPatches, buildViewConfigSaveBody } from './objectViewTabs.js';
@@ -159,10 +160,12 @@ export function useObjectViewViewCrud({
             return true;
         } catch (err) {
             console.error('[ViewConfigPanel] Failed to persist view config:', err);
-            // objectui#11583: a refused save is SAID, with the door's own
-            // message, as the Create View doors do (objectui#11578).
+            // objectui#11583: a refused save is SAID, as the Create View doors
+            // do (objectui#11578), with the door's own message;
+            // objectstack#36195: a package's view in the reader's words
+            // (`viewSaveRefusalText`).
             toast.error(t('form.saveError'), {
-                description: formatMetadataError(err),
+                description: viewSaveRefusalText(err, t),
                 classNames: { description: 'whitespace-pre-line' },
             });
             return false;
@@ -187,6 +190,42 @@ export function useObjectViewViewCrud({
         dropViewDraftOnRead.current = false;
         setViewDraft(null);
     }, [savedViews, setViewDraft]);
+
+    /**
+     * objectstack#35955 — 「Save to this view」 on a shared view, after its
+     * confirm: the body is saved and published at once (ruling record
+     * 7058616478), so everyone sees it on their next read. Over a pending
+     * draft nothing is written (`'pending-draft'`, the caller says so); a
+     * refusal is said with the door's own message (`'failed'`). On
+     * `'published'` the list shows the saved body at once and keeps it until
+     * the saved views have been read again ({@link handleDraftBarChange}).
+     */
+    const handleViewSaveAndPublish = useCallback(async (view: Record<string, any>): Promise<SaveAndPublishOutcome | 'failed'> => {
+        const vid = view.id;
+        if (!metadataClient || !vid) {
+            console.warn('[ObjectView] Cannot save the view: missing metadataClient or viewId.');
+            return 'failed';
+        }
+        try {
+            const outcome = await saveAndPublishRuntimeMetadata('view', vid, buildViewConfigSaveBody(objectName, view), {
+                metadataClient,
+                dataSource,
+                objectName,
+            });
+            if (outcome === 'published') {
+                setViewDraft(view);
+                handleDraftBarChange();
+            }
+            return outcome;
+        } catch (err) {
+            console.error('[ObjectView] Failed to save and publish a view:', err);
+            toast.error(t('form.saveError'), {
+                description: formatMetadataError(err),
+                classNames: { description: 'whitespace-pre-line' },
+            });
+            return 'failed';
+        }
+    }, [metadataClient, dataSource, objectName, t, setViewDraft, handleDraftBarChange]);
 
     /**
      * Create a new view: the Create View dialog's door and the view-config
@@ -258,7 +297,7 @@ export function useObjectViewViewCrud({
             // message (the field-anchored issues of a 422, or the refusal's
             // text), and reported to the dialog as unsaved so it stays open.
             toast.error(t('form.saveError'), {
-                description: formatMetadataError(err),
+                description: viewSaveRefusalText(err, t),
                 classNames: { description: 'whitespace-pre-line' },
             });
             return false;
@@ -330,7 +369,7 @@ export function useObjectViewViewCrud({
             // message, through the channel objectui#11583 gave the view saves
             // and objectui#12398 gave Delete view.
             toast.error(t('objectViewActions.renameFailed'), {
-                description: formatMetadataError(err),
+                description: viewSaveRefusalText(err, t),
                 classNames: { description: 'whitespace-pre-line' },
             });
         }
@@ -390,7 +429,7 @@ export function useObjectViewViewCrud({
             console.error('[ViewTabBar] Failed to pin view:', err);
             // objectui#11583: a refused pin is said, with the door's message.
             toast.error(t('form.saveError'), {
-                description: formatMetadataError(err),
+                description: viewSaveRefusalText(err, t),
                 classNames: { description: 'whitespace-pre-line' },
             });
         }
@@ -424,7 +463,7 @@ export function useObjectViewViewCrud({
             console.error('[ViewTabBar] Failed to set default view:', err);
             // objectui#11583: said like its siblings, with the door's message.
             toast.error(t('form.saveError'), {
-                description: formatMetadataError(err),
+                description: viewSaveRefusalText(err, t),
                 classNames: { description: 'whitespace-pre-line' },
             });
         }
@@ -466,6 +505,7 @@ export function useObjectViewViewCrud({
     return {
         handleViewConfigSave,
         handleDraftBarChange,
+        handleViewSaveAndPublish,
         handleViewCreate,
         handleViewUpdate,
         handleViewChange,
@@ -553,7 +593,7 @@ export function useCreateViewInPlace({
         } catch (err) {
             console.error('[ObjectView] Failed to create a personal view:', err);
             toast.error(t('form.saveError'), {
-                description: err instanceof Error ? err.message : String(err),
+                description: viewSaveRefusalText(err, t),
                 classNames: { description: 'whitespace-pre-line' },
             });
             return false;

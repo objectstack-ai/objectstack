@@ -269,17 +269,17 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    */
   summaryRowLead?: (count: number) => React.ReactNode;
   /**
-   * [objectstack#35702] Wired only for a reader who may change the view: each
-   * footer cell becomes the menu that picks the column's calculation (`null` =
-   * None). The grid draws the pick at once; the host saves it on the view and
-   * hands it back as the column's `summary`. A host that answers `false`
+   * [objectstack#35702] Each footer cell becomes the menu that picks the
+   * column's calculation (`null` = None). The grid draws the pick at once; the
+   * host keeps it (on the view, or in a draft, objectstack#36194) and hands it
+   * back as the column's `summary`. A host that answers `false`
    * (or a promise of it, or one that rejects) did not save it, and the grid
    * takes the pick back.
    */
   onColumnSummaryPick?: (field: string, summary: ColumnSummaryType | null) => void | boolean | Promise<void | boolean>;
   /**
    * [objectstack#35702] The fields whose calculation `onColumnSummaryPick` can
-   * save (the columns the view itself declares); every other footer cell draws
+   * keep (the columns a saved view would carry); every other footer cell draws
    * its figure with no menu. Absent ⇒ every field column is offered.
    */
   summaryPickFields?: readonly string[];
@@ -406,6 +406,19 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    * key reaches it.
    */
   headerMenu?: boolean;
+  /**
+   * [objectstack#36015] Opens a record that a lookup cell's chip names, in
+   * place, as the HOST that owns the page does it (the list page opens it in
+   * its side drawer). With {@link cellSelection}, a single click on such a
+   * chip opens its record here and selects the cell, and the cell draws an
+   * edit button on hover and while selected. A chip naming a person
+   * (`sys_user`) is not one: it only selects. Absent ⇒ a chip only selects
+   * its cell, as before this prop existed.
+   *
+   * A RUNTIME prop, never authored metadata: the host decides it, and no node
+   * key reaches it.
+   */
+  openReferencedRecord?: (objectName: string, recordId: string) => void;
   /**
    * TWO parameters since objectui#9357, and the second is not decoration: this
    * prop reaches `useNavigationOverlay` as its `onRowClick`, and `handleClick`
@@ -774,6 +787,18 @@ function ratingScaleOf(fieldDef: unknown): number {
 }
 
 /**
+ * objectstack#36015 — whether a column's cells are reference cells whose chips
+ * open their record in place: a lookup, master-detail or tree field naming a
+ * record of any object but the person object. A chip naming a person only
+ * selects its cell.
+ */
+function opensReferenceInPlace(fieldDef: { type?: unknown; reference?: unknown } | undefined): boolean {
+  const type = fieldDef?.type;
+  if (type !== 'lookup' && type !== 'master_detail' && type !== 'tree') return false;
+  return fieldDef?.reference !== 'sys_user';
+}
+
+/**
  * objectstack#35688 — how wide a field type's editor layer starts. The layer
  * is never narrower than its cell and grows to fit this; the editor fills it.
  */
@@ -826,6 +851,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   rowOpensRecord,
   cellSelection: hostCellSelection,
   headerMenu: hostHeaderMenu,
+  openReferencedRecord,
   onBulkDelete,
   onRowSelect,
   onRowClick,
@@ -1385,6 +1411,15 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         // confirmation, so a state-machine move does not ask twice.
         confirmCommit: (row, columnKey, value) =>
           requiredPrompt.ask(row, columnKey, value, () => askStateMove(row, columnKey, value)),
+        // objectstack#36015 — a lookup cell's chip opens its record in place.
+        ...(openReferencedRecord
+          ? {
+              referenceCells: {
+                isReferenceColumn: (columnKey: string) => opensReferenceInPlace(objectFields?.[columnKey]),
+                openRecord: openReferencedRecord,
+              },
+            }
+          : {}),
       }
     : null;
   // objectstack#35685 — the state-machine confirm, the grid's next question

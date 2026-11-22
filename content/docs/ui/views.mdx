@@ -619,16 +619,35 @@ reader's right-column and panel choices on it, are described in
 
 ### A user's list state never writes the view
 
-A header sort, a filter change, grouping, the search, Hide Fields, an added field and a
-column drag apply at once and are a **draft**: they are kept nowhere and never write the
-view metadata, so they work even where the tenant's metadata is read-only. While the list
-holds a draft, **Discard** and **Save** sit at the end of the condition row (one **Save**
-whose menu also holds Discard on a narrow list or a phone).
+A header sort, a filter change, grouping, the search, Hide Fields, an added field, a
+column drag, a footer calculation picked under a column, and the Display panel's layout and
+row color apply at once and are a **draft**: they are kept nowhere and never write the view
+metadata, so they work even where the tenant's metadata is read-only. While the list holds a
+draft, **Discard** and **Save** sit at the end of the condition row (one **Save** whose menu
+also holds Discard on a narrow list or a phone).
 
-- **Save** names what is unsaved and keeps the sort, filters, columns and hidden fields:
-  **Save to this view** on a view of the user's own, or **Save as my view**, which asks a
-  name first (the view's name with "copy") and then opens the new view. Either says
-  "Saved", and the buttons go while the conditions stay.
+- **Save** names what is unsaved and keeps the sort, filters, columns, hidden fields, footer
+  calculations, layout and row color: **Save to this view**, or **Save as my view**, which
+  asks a name first (the view's name with "copy") and then opens the new view. Either says
+  "Saved", and the buttons go while the conditions stay. A view the user cannot change in
+  place (one an app package ships, or a shared view they may not edit) offers **Save as my
+  view** alone.
+- **Save to this view** on a view of the user's own saves it at once. On a shared view it is
+  offered to a user who may edit the view (an administrator, on a stored view whose package
+  takes saves; while the Console has not yet read which packages take saves, it is not
+  offered). It asks once ("everyone who uses this view will see these changes"), then
+  saves the view and publishes it in the same step, so every user sees it on their next read,
+  and says "Saved, visible to everyone". It never writes the user's row height or column
+  widths into the view. When the view already has unpublished changes (a draft saved from
+  the view settings, by anyone), nothing is saved: the Console says so and points to the view
+  settings to publish or discard that draft first. Every other change to a shared view still
+  goes to a draft that the view settings publish.
+- A footer calculation is offered on every column the saved view would carry: the columns
+  the list draws and the fields the user added. Picking the view's own calculation again
+  takes that column out of the draft.
+- When the server refuses to save a view an app package ships, the list says so in the
+  user's language (it cannot be changed directly; save it as your own view), never the
+  server's own text.
 - **Discard** puts the list back as its view declares it, the Display panel's layout and row
   color included, and removes the list's `uf_*` parameters from the address bar.
 - The draft survives opening a record and coming back. Opening another view or object,

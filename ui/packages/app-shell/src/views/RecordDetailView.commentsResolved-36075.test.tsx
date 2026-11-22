@@ -7,8 +7,12 @@
  * - The rows' `is_resolved` / `resolved_by` (#36071) reach the panel: the
  *   icon counts the unresolved threads, a resolved one is hidden until
  *   「显示已解决」 and names its resolver (an author of the discussion here).
- * - ✓ writes `{ is_resolved: true }` and nothing else on the top-level
- *   comment; the thread leaves the list and the count drops.
+ * - ✓ resolves through the resolution door (`PUT /api/v1/comments/:id/resolution`
+ *   with `{ resolved }`, objectstack#36186), on every thread, the viewer's
+ *   and others'; the thread leaves the list and the count drops.
+ * - Without the `sys_comment` delete grant, the viewer's Delete goes through
+ *   the own-comment delete door (`DELETE /api/v1/comments/:id`,
+ *   objectstack#36191), on their own comments with no reply alone.
  * - A reply into a resolved thread shows it reopened, as the platform stores.
  * - Edit and Delete on another member's comment only on the explain engine's
  *   definite allow of a by-id update of the record; an unanswered verdict
@@ -21,10 +25,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, within, act, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
+/** The page's authenticated fetch: the comment doors answer through it. */
+const doorFetch = vi.hoisted(() => vi.fn());
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useAuth: () => ({ user: { id: 'u-ada', name: 'Ada', image: null }, activeOrganization: null }),
-  createAuthenticatedFetch: () => vi.fn(),
+  createAuthenticatedFetch: () => doorFetch,
 }));
 vi.mock('@object-ui/collaboration', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -168,6 +174,7 @@ const PERMS = {
 } as MePermissionsAuthenticatedResponse;
 
 interface MountOptions {
+  perms?: MePermissionsAuthenticatedResponse;
   objectName?: string;
   pages?: unknown[];
   embedded?: boolean;
@@ -175,11 +182,11 @@ interface MountOptions {
   users?: ReadonlyArray<Record<string, unknown>>;
 }
 
-async function mount({ objectName = OBJECT_NAME, pages = [], embedded = false, rows, users }: MountOptions = {}) {
+async function mount({ perms = PERMS, objectName = OBJECT_NAME, pages = [], embedded = false, rows, users }: MountOptions = {}) {
   const dataSource = makeDataSource(rows, users);
   const rendered = render(
     <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }} persistLanguage={false}>
-      <MePermissionsProvider initialPermissions={PERMS}>
+      <MePermissionsProvider initialPermissions={perms}>
         <MemoryRouter initialEntries={[`/app/service/${objectName}/${RECORD_ID}`]}>
           <MetadataCtx.Provider value={metadataFor(pages)}>
             <RecordDetailView
@@ -235,7 +242,35 @@ function setWindowWidth(width: number) {
   window.dispatchEvent(new Event('resize'));
 }
 
+/** The doors' answers: the resolution door answers the stored resolution, the delete door `{ id, deleted }`. */
+function answerDoors() {
+  doorFetch.mockImplementation(async (url: unknown, init?: { method?: string; body?: unknown }) => {
+    const path = String(url);
+    const resolution = path.match(/\/api\/v1\/comments\/([^/]+)\/resolution$/);
+    if (resolution && init?.method === 'PUT') {
+      const resolved = JSON.parse(String(init.body)).resolved === true;
+      const data = {
+        id: decodeURIComponent(resolution[1]),
+        is_resolved: resolved,
+        resolved_by: resolved ? 'u-ada' : null,
+        resolved_at: resolved ? '2026-10-02T00:00:00.000Z' : null,
+      };
+      return new Response(JSON.stringify({ success: true, data }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    const removal = path.match(/\/api\/v1\/comments\/([^/]+)$/);
+    if (removal && init?.method === 'DELETE') {
+      return new Response(JSON.stringify({ success: true, data: { id: decodeURIComponent(removal[1]), deleted: true } }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { 'content-type': 'application/json' } });
+  });
+}
+const doorCalls = (method: string) =>
+  (doorFetch.mock.calls as Array<[unknown, { method?: string; body?: unknown }?]>)
+    .filter(([url, init]) => init?.method === method && String(url).includes('/api/v1/comments/'))
+    .map(([url, init]) => ({ url: String(url), body: init?.body === undefined ? undefined : JSON.parse(String(init.body)) }));
+
 beforeEach(() => {
+  answerDoors();
   window.localStorage.clear();
   setWindowWidth(1440);
   // The explain verdicts live in a module-level cache: each case asks afresh.
@@ -307,14 +342,15 @@ describe('resolved threads in the record comment panel (objectstack#36075)', () 
     expect(dataSource.find.mock.calls.some(([o]: [string]) => o === 'sys_user')).toBe(false);
   });
 
-  it('✓ writes is_resolved alone on the top-level comment; the thread leaves and the count drops', async () => {
+  it('✓ resolves through the resolution door with { resolved: true } alone; the thread leaves and the count drops', async () => {
     const { container, dataSource } = await openPanel();
     await waitFor(() => expect(count(container)).toBe('1'));
     const ada = commentIn(container, ADA_BODY)!;
     await act(async () => {
       fireEvent.click(ada.querySelector('[data-comment-action="resolve"]')!);
     });
-    expect(dataSource.update).toHaveBeenCalledWith('sys_comment', 'c-ada', { is_resolved: true });
+    expect(doorCalls('PUT')).toEqual([{ url: expect.stringMatching(/\/api\/v1\/comments\/c-ada\/resolution$/), body: { resolved: true } }]);
+    expect(dataSource.update).not.toHaveBeenCalled();
     await waitFor(() => expect(within(panel(container)!).queryByText(ADA_BODY)).toBeNull());
     // No unresolved thread: the icon draws no number.
     expect(count(container)).toBeNull();
@@ -323,8 +359,8 @@ describe('resolved threads in the record comment panel (objectstack#36075)', () 
   });
 
   it('a refused ✓ says so and leaves the thread where it was', async () => {
-    const { container, dataSource } = await openPanel();
-    dataSource.update.mockRejectedValueOnce(new Error('403'));
+    const { container } = await openPanel();
+    doorFetch.mockResolvedValueOnce(new Response(JSON.stringify({ success: false }), { status: 403 }));
     const ada = commentIn(container, ADA_BODY)!;
     await act(async () => {
       fireEvent.click(ada.querySelector('[data-comment-action="resolve"]')!);
@@ -334,9 +370,8 @@ describe('resolved threads in the record comment panel (objectstack#36075)', () 
     expect(count(container)).toBe('1');
   });
 
-  it('the reopen ✓ writes is_resolved false and the thread counts again', async () => {
-    stubExplain(null, true);
-    const { container, dataSource } = await openPanel();
+  it('the reopen ✓ sends { resolved: false } and the thread counts again, with no explain answer at all', async () => {
+    const { container } = await openPanel();
     await showResolved();
     const grace = await waitFor(() => {
       const el = commentIn(container, GRACE_BODY)!;
@@ -346,7 +381,7 @@ describe('resolved threads in the record comment panel (objectstack#36075)', () 
     await act(async () => {
       fireEvent.click(grace.querySelector('[data-comment-action="reopen"]')!);
     });
-    expect(dataSource.update).toHaveBeenCalledWith('sys_comment', 'c-grace', { is_resolved: false });
+    expect(doorCalls('PUT')).toEqual([{ url: expect.stringMatching(/\/api\/v1\/comments\/c-grace\/resolution$/), body: { resolved: false } }]);
     await waitFor(() => expect(count(container)).toBe('2'));
   });
 
@@ -363,6 +398,21 @@ describe('resolved threads in the record comment panel (objectstack#36075)', () 
     });
     await waitFor(() => expect(thread).not.toHaveAttribute('data-comment-thread-resolved'));
     expect(count(container)).toBe('2');
+  });
+
+  it('a viewer who reads comments but may not post one is offered no ✓: the door takes the posting gate (objectstack#36186)', async () => {
+    const readOnly = {
+      ...PERMS,
+      objects: { ...PERMS.objects, sys_comment: { ...FULL, allowCreate: false } },
+    } as MePermissionsAuthenticatedResponse;
+    const mounted = await mount({ perms: readOnly });
+    await waitFor(() => expect(button(mounted.container)).not.toBeNull());
+    fireEvent.click(button(mounted.container)!);
+    await within(panel(mounted.container)!).findByText(ADA_BODY);
+    engage(mounted.container);
+    expect(commentIn(mounted.container, ADA_BODY)!.querySelector('[data-comment-action="resolve"]')).toBeNull();
+    expect(panel(mounted.container)!.querySelector('[data-comment-action="resolve"]')).toBeNull();
+    expect(doorCalls('PUT')).toEqual([]);
   });
 });
 
@@ -428,12 +478,12 @@ describe("the row floor on another member's comment (objectstack#36075)", () => 
     );
   });
 
-  it('refused: no ✓ and no Edit on another member\'s rows, Delete still where the viewer moderates, own rows unchanged', async () => {
+  it('refused: no Edit on another member\'s rows, Delete still where the viewer moderates, ✓ still (the resolution door), own rows unchanged', async () => {
     stubExplain(true, false);
     const { container } = await openPanel();
     await showResolved();
     await waitFor(() => expect(moreOn(container, GRACE_BODY)).not.toBeNull());
-    expect(reopenOn(container, GRACE_BODY)).toBeNull();
+    expect(reopenOn(container, GRACE_BODY)).not.toBeNull();
     fireEvent.pointerDown(moreOn(container, GRACE_BODY)!, { button: 0, ctrlKey: false, pointerType: 'mouse' });
     expect(await within(document.body).findByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
     expect(within(document.body).queryByRole('menuitem', { name: 'Edit' })).toBeNull();
@@ -449,13 +499,11 @@ describe("the row floor on another member's comment (objectstack#36075)", () => 
     expect(await within(document.body).findByRole('menuitem', { name: 'Edit' })).toBeInTheDocument();
   });
 
-  it('not on a guess: no answer offers ✓ on the viewer\'s own threads alone', async () => {
+  it('✓ asks no explain: with no answer it is on the viewer\'s threads and on another member\'s', async () => {
     stubExplain(null);
     const { container } = await openPanel();
     await showResolved();
-    await waitFor(() => expect(commentIn(container, GRACE_BODY)).toBeDefined());
-    await act(async () => {});
-    expect(reopenOn(container, GRACE_BODY)).toBeNull();
+    await waitFor(() => expect(reopenOn(container, GRACE_BODY)).not.toBeNull());
     expect(commentIn(container, ADA_BODY)!.querySelector('[data-comment-action="resolve"]')).not.toBeNull();
   });
 
@@ -467,5 +515,65 @@ describe("the row floor on another member's comment (objectstack#36075)", () => 
     await act(async () => {});
     expect(moreOn(container, GRACE_BODY)).toBeNull();
     expect(moreOn(container, ADA_BODY)).not.toBeNull();
+  });
+});
+
+describe('a member without the sys_comment delete grant deletes through the own-comment delete door (objectstack#36191)', () => {
+  const MEMBER_PERMS = {
+    ...PERMS,
+    objects: { ...PERMS.objects, sys_comment: { ...FULL, allowDelete: false } },
+  } as MePermissionsAuthenticatedResponse;
+  const moreOn = (root: HTMLElement, text: string) => commentIn(root, text)?.querySelector(':scope > [data-comment-actions] [data-comment-action="more"]') ?? null;
+
+  async function openAsMember(rows?: ReadonlyArray<Record<string, unknown>>) {
+    stubExplain(true, false);
+    const mounted = await mount({ perms: MEMBER_PERMS, rows });
+    await waitFor(() => expect(button(mounted.container)).not.toBeNull());
+    fireEvent.click(button(mounted.container)!);
+    await within(panel(mounted.container)!).findByText(ADA_BODY);
+    engage(mounted.container);
+    return mounted;
+  }
+
+  it('Delete on the viewer\'s own comment goes through the door, never the data door, and the row leaves', async () => {
+    const { container, dataSource } = await openAsMember();
+    fireEvent.pointerDown(moreOn(container, ADA_BODY)!, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    fireEvent.click(await within(document.body).findByRole('menuitem', { name: 'Delete' }));
+    const dialog = await within(document.body).findByRole('alertdialog');
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    });
+    expect(doorCalls('DELETE')).toEqual([{ url: expect.stringMatching(/\/api\/v1\/comments\/c-ada$/), body: undefined }]);
+    expect(dataSource.delete).not.toHaveBeenCalled();
+    await waitFor(() => expect(within(panel(container)!).queryByText(ADA_BODY)).toBeNull());
+    expect(toast.success).toHaveBeenCalledWith('Comment deleted');
+  });
+
+  it('no Delete on another member\'s comment even where the viewer may edit the record, and none on their own once someone replied', async () => {
+    const withReply = [
+      ...ROWS,
+      { ...ROWS[2], id: 'c-linus-on-ada', parent_id: 'c-ada', body: 'Linus: on it' },
+    ];
+    const { container } = await openAsMember(withReply);
+    await showResolved();
+    await waitFor(() => expect(commentIn(container, GRACE_BODY)).toBeDefined());
+    await act(async () => {});
+    expect(moreOn(container, GRACE_BODY)).toBeNull();
+    fireEvent.pointerDown(moreOn(container, ADA_BODY)!, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    expect(await within(document.body).findByRole('menuitem', { name: 'Edit' })).toBeInTheDocument();
+    expect(within(document.body).queryByRole('menuitem', { name: 'Delete' })).toBeNull();
+  });
+
+  it('a refused door delete says so and keeps the row', async () => {
+    const { container } = await openAsMember();
+    doorFetch.mockResolvedValueOnce(new Response(JSON.stringify({ success: false }), { status: 409 }));
+    fireEvent.pointerDown(moreOn(container, ADA_BODY)!, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    fireEvent.click(await within(document.body).findByRole('menuitem', { name: 'Delete' }));
+    const dialog = await within(document.body).findByRole('alertdialog');
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    });
+    expect(toast.error).toHaveBeenCalledWith('The comment was not deleted. Please try again.');
+    expect(within(panel(container)!).getByText(ADA_BODY)).toBeInTheDocument();
   });
 });

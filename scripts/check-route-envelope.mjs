@@ -321,6 +321,14 @@ const MODULES = {
   // own-row delete door below and answers nothing itself, so it builds no body.
   'packages/plugins/plugin-audit/src/comment-reaction-routes.ts': { responses: 0, ok: 0, err: 0 },
 
+  // The comment doors (`PUT /api/v1/comments/:id/resolution`, the resolution
+  // door, and `DELETE /api/v1/comments/:id`, the own-comment delete door),
+  // mounted by `AuditPlugin` beside the unreact door. Every body they answer is
+  // written by the shared pair (`sendOk` / `sendError` / `sendServerFault`) or
+  // by the shared own-row delete door below, so the module builds none itself.
+  // Declared in the same PR that created the module.
+  'packages/plugins/plugin-audit/src/comment-routes.ts': { responses: 0, ok: 0, err: 0 },
+
   // The owner's delete door for a personal view (`DELETE /api/v1/personal-views/:id`),
   // mounted by `AuthPlugin` straight on `IHttpServer`. It supplies its part of the
   // shared own-row delete door below and answers nothing itself, so it builds no body.

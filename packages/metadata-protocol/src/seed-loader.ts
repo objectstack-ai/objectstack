@@ -777,6 +777,29 @@ function createOnlySeedColumns(dataset: Seed, externalId: string | string[]): Re
 }
 
 /**
+ * [#35655] The roll-up `summary` fields the definition declares — every one,
+ * whatever its aggregate (`count`, `sum`, `min`, `max`, `avg`) and whether or
+ * not it is declared `readonly`. A seed never stores a value for one (maintainer
+ * ruling D, record 7063117450): the engine computes it from the child rows, so
+ * {@link SeedLoaderService} takes a seed record's value for it out before the
+ * replay compare and before the write, and says so in one `warn` per dataset.
+ *
+ * Keyed on `type === 'summary'` literally, as the engine's roll-up readers
+ * are (`summaryFieldsLockedOnWrite`, `getSummaryDescriptors`). A definition
+ * the loader cannot resolve declares none, and its records are written as
+ * authored: the engine is then the one to judge the columns.
+ */
+function summaryFieldNames(definition: unknown): readonly string[] {
+  const fields = (definition as { fields?: unknown } | null | undefined)?.fields;
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return [];
+  const names: string[] = [];
+  for (const [name, field] of Object.entries(fields as Record<string, unknown>)) {
+    if (field && typeof field === 'object' && (field as { type?: unknown }).type === 'summary') names.push(name);
+  }
+  return names;
+}
+
+/**
  * [#24562] Field name → storage kind, for every field the definition declares
  * `datetime`, `date` or `time` — the fields a replay compares in their STORED
  * form (see {@link SeedLoaderService.isNoOpReplay}). Same field-type reading
@@ -1652,13 +1675,23 @@ export class SeedLoaderService implements ISeedLoaderService {
   private async resolveObjectDefinition(objectName: string): Promise<any> {
     const fromMetadata = (await this.metadata.getObject(objectName)) as any;
     if (fromMetadata?.fields) return fromMetadata;
-    try {
-      const engineSchema = (this.engine as { getSchema?(name: string): unknown }).getSchema?.(objectName) as any;
-      if (engineSchema?.fields) return engineSchema;
-    } catch {
-      // Engine may not expose a schema registry — the metadata result stands.
-    }
+    const engineSchema = this.engineSchemaOf(objectName) as any;
+    if (engineSchema?.fields) return engineSchema;
     return fromMetadata;
+  }
+
+  /**
+   * The engine's own registered schema for `objectName` — the merged one,
+   * object extensions included — or `undefined` when the engine exposes no
+   * schema registry (or its read throws).
+   */
+  private engineSchemaOf(objectName: string): unknown {
+    try {
+      return (this.engine as { getSchema?(name: string): unknown }).getSchema?.(objectName);
+    } catch {
+      // Engine may not expose a schema registry — the caller's other source stands.
+      return undefined;
+    }
   }
 
   /**
@@ -2101,6 +2134,19 @@ export class SeedLoaderService implements ISeedLoaderService {
     // `organization_id`, as it keeps the stamp.
     const organizationColumn = seedRowTenantColumn(objectDefinition) ?? DEFAULT_TENANT_FIELD;
     this.warnOnUndeclaredSeedColumns(dataset, objectDefinition);
+    // [#35655] The roll-up columns a seed never writes (`summaryFieldNames`),
+    // the values this dataset's records supplied for them, and which of them
+    // did — reported once, after the record loop. Read from the resolved
+    // definition AND the engine's merged schema: the metadata service's copy
+    // wins `resolveObjectDefinition` whenever it has `fields`, and it can lack
+    // a roll-up an object extension contributed, which the engine still
+    // computes — so a seed must not write it either.
+    const summaryFields = [...new Set([
+      ...summaryFieldNames(objectDefinition),
+      ...summaryFieldNames(this.engineSchemaOf(objectName)),
+    ])];
+    let summaryValuesDropped = 0;
+    const summaryFieldsDropped = new Set<string>();
     // How a replay compares each field (`isNoOpReplay`): [#24562] a temporal
     // field in its stored form, [#24624] a field the read path masks never by
     // its set value, [#29277] a seed blank the write door stores as `null` as
@@ -2236,6 +2282,20 @@ export class SeedLoaderService implements ISeedLoaderService {
         continue;
       }
       const record = { ...(seedResult.value as Record<string, unknown>) };
+      // [#35655] A seed never stores a roll-up (ruling D, record 7063117450).
+      // Taken out here, before anything reads the record, so every path below
+      // sees it gone: the no-op replay compare (a stored total that differs
+      // from the seed's is no difference to undo), the insert (the engine
+      // starts the column at its empty-child-list value and the child rows
+      // compute it) and the update (the row keeps the value it holds).
+      for (const field of summaryFields) {
+        if (!Object.prototype.hasOwnProperty.call(record, field)) continue;
+        if (record[field] !== undefined) {
+          summaryValuesDropped++;
+          summaryFieldsDropped.add(field);
+        }
+        delete record[field];
+      }
       // [#22301] The stored form, not a `Date`, before any hook can see it.
       seedValuesInStoredForm(record, objectDefinition);
       /**
@@ -3185,6 +3245,24 @@ export class SeedLoaderService implements ISeedLoaderService {
         .sort(([a], [b]) => a - b)
         .map(([, id]) => id),
     )];
+
+    // [#35655] Once per dataset, naming the object, the fields and the count:
+    // the seed asked for a total the platform did not store. This notice IS
+    // the report (ruling D as analysed in 7062334196, point (e); the seat's
+    // correction 7064615114): no load-result key carries it. `warn`, not
+    // `error`: nothing claimed persisted is lost — a roll-up is never the
+    // seed's to write, and the rest of every record landed.
+    if (summaryValuesDropped > 0) {
+      const fields = [...summaryFieldsDropped];
+      this.logger.warn(
+        `[SeedLoader] The ${objectName} seed supplies ${summaryValuesDropped} value(s) for the roll-up summary ` +
+          `field(s) ${fields.map((f) => `\`${f}\``).join(', ')}, which a seed never stores: the values are not ` +
+          `written, the rest of each record is, and each roll-up is computed from its child rows, so a record ` +
+          `with no children reads the empty-child-list value (0 for count and sum, empty for min, max and avg). ` +
+          `Seed the child rows the total counts, and leave the summary field out of the ${objectName} seed.`,
+        { object: objectName, fields, droppedValues: summaryValuesDropped },
+      );
+    }
 
     if (this.loadProgress) this.loadProgress.loading = undefined;
     return {
