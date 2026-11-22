@@ -130,12 +130,15 @@ export function choiceFromText(
 /**
  * Field types whose cell editor is a panel opened under the cell, which keeps
  * showing its value (objectstack#36023): a list to pick from, a calendar, a
- * clock, a palette. Typed input, long text and an address edit in place.
+ * clock, a palette, and the text box of a rich-content field (markdown, HTML,
+ * rich text), whose Enter is a new line. Typed input, long text and an
+ * address edit in place.
  */
 const PANEL_EDITOR_FIELD_TYPES: ReadonlySet<string> = new Set([
   'select', 'status', 'radio', 'multiselect', 'checkboxes', 'tags',
   'date', 'datetime', 'time', 'color',
   'lookup', 'master_detail', 'user', 'owner',
+  'markdown', 'html', 'richtext',
 ]);
 
 /** Where the cell editor of this field type draws; `undefined` leaves it to the table. */

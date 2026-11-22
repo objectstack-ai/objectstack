@@ -96,10 +96,21 @@ const DateTimePickerEditWidget = React.lazy(() =>
   import('./widgets/date-picker/DatePickerField.js').then((m) => ({ default: m.DateTimePickerField })),
 );
 
-/** The {@link EDIT_WIDGETS} entries that load lazily and need a `Suspense` boundary. */
+/**
+ * The rich-content editor (`RichTextField`, a text box over the stored
+ * markdown or HTML source), LAZY through the same `import()` `fieldWidgetMap`
+ * uses for these three types, for the list grid's cell panel
+ * ({@link IN_CELL_PANEL_EDIT_WIDGETS}).
+ */
+const RichTextPanelEditWidget = React.lazy(() =>
+  import('./widgets/RichTextField.js').then((m) => ({ default: m.RichTextField })),
+);
+
+/** The edit widgets that load lazily and need a `Suspense` boundary. */
 const LAZY_EDIT_WIDGETS: ReadonlySet<unknown> = new Set([
   DatePickerEditWidget,
   DateTimePickerEditWidget,
+  RichTextPanelEditWidget,
 ]);
 
 /**
@@ -193,6 +204,30 @@ export const INLINE_EXCLUDED_FIELD_TYPES = new Set<string>([
   'notification-topic', 'notification-channel', 'quiet-hours',
 ]);
 
+/**
+ * Members of {@link INLINE_EXCLUDED_FIELD_TYPES} that the LIST GRID's cell
+ * nevertheless edits, in a panel opened under the cell (objectstack#36023):
+ * the rich-content types, whose panel is the form's own text box over the
+ * stored source. Enter in it is a new line; the grid saves on Ctrl/Cmd+Enter
+ * or a click outside and discards on Esc.
+ *
+ * Only a host that asks for the cell face (`inCell`) gets them, so the record
+ * page's field editor, the required-fields dialogs and every other host of
+ * {@link FieldEditWidget} keep these types out, exactly as before: they ask
+ * {@link hasFieldEditWidget}, which still answers `false` for them. The
+ * exclusion set keeps them too, so `isInlineExcludedFieldType` answers as
+ * before for every host; the grid asks {@link hasInCellPanelEditWidget}.
+ *
+ * `html` is safe to edit as text here because what the cell then draws is
+ * the sanitizing renderer's output (`./widgets/sanitizedHtml.tsx`), as on
+ * every other read surface.
+ */
+const IN_CELL_PANEL_EDIT_WIDGETS: Record<string, React.ComponentType<FieldWidgetComponentProps<any>>> = {
+  markdown: RichTextPanelEditWidget,
+  html: RichTextPanelEditWidget,
+  richtext: RichTextPanelEditWidget,
+};
+
 /** Field types whose value is chosen in one discrete gesture (no free typing). */
 export const DISCRETE_EDIT_TYPES = new Set<string>([
   'boolean', 'toggle', 'select', 'status', 'radio', 'rating',
@@ -237,6 +272,17 @@ export function hasFieldEditWidget(type: string | undefined): boolean {
   if (!type) return false;
   if (isRetiredFieldType(type)) return false;
   return resolveInlineEditType(type) in EDIT_WIDGETS;
+}
+
+/**
+ * True when a field type has no in-place widget but the list grid's cell edits
+ * it in a panel under the cell (`inCell`, {@link IN_CELL_PANEL_EDIT_WIDGETS}).
+ * A retired spelling answers `false`, as {@link hasFieldEditWidget} does.
+ */
+export function hasInCellPanelEditWidget(type: string | undefined): boolean {
+  if (!type) return false;
+  if (isRetiredFieldType(type)) return false;
+  return Object.prototype.hasOwnProperty.call(IN_CELL_PANEL_EDIT_WIDGETS, resolveInlineEditType(type));
 }
 
 /**
@@ -377,7 +423,10 @@ export function FieldEditWidget(
     return null;
   }
   const resolved = field?.type ? resolveInlineEditType(field.type) : undefined;
-  const Widget = resolved ? EDIT_WIDGETS[resolved] : undefined;
+  // The cell panel's widgets answer only the host that asks for the cell face.
+  const Widget = resolved
+    ? EDIT_WIDGETS[resolved] ?? (props.inCell && hasInCellPanelEditWidget(resolved) ? IN_CELL_PANEL_EDIT_WIDGETS[resolved] : undefined)
+    : undefined;
   if (!Widget) return null;
   // `compact` is a declared widget prop (objectui#3221 closed this type), so
   // the spread no longer needs an `any` escape hatch to get past it.

@@ -28,6 +28,10 @@
  *   6. With the host's `openReferencedRecord`, a lookup chip opens the record
  *      it names through it on a single click and its cell draws an edit
  *      button; a person's chip (`sys_user`) only selects (objectstack#36015).
+ *   7. objectstack#36023: a rich-content cell (markdown, HTML, rich text)
+ *      opens a text box in a panel under the cell, which keeps its value
+ *      drawn; Enter there is a new line, Ctrl/Cmd+Enter saves and stays on the
+ *      cell, Esc discards, a click outside saves.
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -56,6 +60,12 @@ vi.mock('@object-ui/permissions', async (importOriginal) => {
 
 // Registers `object-grid`, the block under test.
 import { ObjectGridRenderer } from '../index';
+import { ObjectGrid } from '../ObjectGrid';
+import { ActionProvider } from '@object-ui/react';
+import { registerAllFields } from '@object-ui/fields';
+// The rich-content panel's widget sits behind `React.lazy` in `FieldEditWidget`
+// (`./widgets/RichTextField.js` there); loaded here so it resolves at once.
+import '../../../fields/src/widgets/RichTextField';
 import { RelatedRecordActionsProvider, type RelatedRecordActionsValue } from '@object-ui/react';
 import { __clearRecordCrudVerdictCache } from '../hooks/useRecordCrudVerdicts';
 import { __resetApprovalsServiceLatch } from '../hooks/useRowApprovalLocks';
@@ -426,5 +436,117 @@ describe('ObjectGrid cellSelection — a lookup chip opens its record in the hos
     expect(followed).toEqual([]);
     expect(g.cell(1)).toHaveAttribute('data-selected-cell');
     expect(g.cell(1).querySelector('[data-testid="cell-edit-button"]')).toBeNull();
+  });
+});
+
+describe('ObjectGrid cellSelection — a rich-content cell edits in a panel under it (objectstack#36023)', () => {
+  registerAllFields();
+  const FIELDS_RT = {
+    name: { type: 'text', label: 'Name' },
+    notes: { type: 'richtext', label: 'Notes' },
+    summary: { type: 'markdown', label: 'Summary' },
+    body: { type: 'html', label: 'Body' },
+  };
+
+  function makeDataSource() {
+    const store: Record<string, any> = {
+      r1: { id: 'r1', name: 'Alpha', notes: '<p>First</p>', summary: '# Plan', body: '<b>Hi</b>' },
+    };
+    return {
+      store,
+      find: vi.fn(async () => ({ data: Object.values(store).map((r) => ({ ...r })), total: 1, hasMore: false, pageSize: 50 })),
+      update: vi.fn(async (_object: string, id: string, changes: Record<string, any>) => {
+        store[id] = { ...store[id], ...changes };
+        return { ...store[id] };
+      }),
+      getObjectSchema: async (name: string) => ({ name, fields: { id: { type: 'text' }, ...FIELDS_RT } }),
+    } as any;
+  }
+
+  async function renderRichText() {
+    const ds = makeDataSource();
+    const utils = render(
+      <ActionProvider>
+        <ObjectGrid
+          schema={{ type: 'object-grid', objectName: 'probe', editable: true, columns: ['name', 'notes', 'summary', 'body'] } as any}
+          dataSource={ds}
+          cellSelection
+        />
+      </ActionProvider>,
+    );
+    await screen.findByText('Alpha', {}, { timeout: 5000 });
+    const cell = (col: number) => utils.container.querySelectorAll<HTMLElement>('tbody tr td[data-grid-cell]')[col];
+    const catcher = () => utils.container.querySelector<HTMLInputElement>('[data-slot="cell-type-catcher"]')!;
+    const open = async (col: number) => {
+      fireEvent.click(cell(col));
+      fireEvent.keyDown(catcher(), { key: 'Enter' });
+      const overlay = await waitFor(() => {
+        const el = cell(col).querySelector<HTMLElement>('[data-slot="cell-editor-overlay"]');
+        expect(el).not.toBeNull();
+        return el!;
+      });
+      const box = await waitFor(() => {
+        const el = overlay.querySelector<HTMLTextAreaElement>('textarea');
+        expect(el).not.toBeNull();
+        return el!;
+      });
+      return { overlay, box };
+    };
+    return { ...utils, ds, cell, open };
+  }
+
+  it('markdown, HTML and rich text open a text box under the cell, which keeps its value drawn', async () => {
+    const g = await renderRichText();
+    for (const [col, source] of [[1, '<p>First</p>'], [2, '# Plan'], [3, '<b>Hi</b>']] as const) {
+      const { overlay, box } = await g.open(col);
+      expect(overlay).toHaveAttribute('data-placement', 'below');
+      // The row's own cell is left as drawn: its rendered value, not the editor.
+      expect(g.cell(col).querySelector('[data-slot="cell-display"]')).not.toBeNull();
+      expect(g.cell(col).querySelector('[data-slot="cell-display"] textarea')).toBeNull();
+      // The panel is the text box over the stored source, never a read-only reason.
+      expect(box).toHaveValue(source);
+      expect(screen.queryByTestId('cell-readonly-reason')).toBeNull();
+      fireEvent.keyDown(box, { key: 'Escape' });
+      await waitFor(() => expect(g.cell(col).querySelector('[data-slot="cell-editor-overlay"]')).toBeNull());
+    }
+    expect(g.ds.update).not.toHaveBeenCalled();
+  });
+
+  it('Enter is a new line; Ctrl+Enter and Cmd+Enter save and the cell stays selected', async () => {
+    const g = await renderRichText();
+    let { box } = await g.open(1);
+    fireEvent.change(box, { target: { value: '<p>First</p>' } });
+    // Enter stays in the text box: nothing is written and the panel stays open.
+    expect(fireEvent.keyDown(box, { key: 'Enter' })).toBe(true);
+    expect(g.ds.update).not.toHaveBeenCalled();
+    expect(g.cell(1).querySelector('[data-slot="cell-editor-overlay"] textarea')).toBe(box);
+    fireEvent.change(box, { target: { value: '<p>First</p>\n<p>Second</p>' } });
+    fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true });
+    await waitFor(() => expect(g.ds.update).toHaveBeenCalledTimes(1));
+    expect(g.ds.update.mock.calls[0][2]).toEqual({ notes: '<p>First</p>\n<p>Second</p>' });
+    await waitFor(() => expect(g.cell(1).querySelector('[data-slot="cell-editor-overlay"]')).toBeNull());
+    expect(g.cell(1)).toHaveAttribute('data-selected-cell');
+
+    ({ box } = await g.open(2));
+    fireEvent.change(box, { target: { value: '# Plan B' } });
+    fireEvent.keyDown(box, { key: 'Enter', metaKey: true });
+    await waitFor(() => expect(g.ds.update).toHaveBeenCalledTimes(2));
+    expect(g.ds.update.mock.calls[1][2]).toEqual({ summary: '# Plan B' });
+    expect(g.cell(2)).toHaveAttribute('data-selected-cell');
+  });
+
+  it('Esc discards the edit; a click outside saves it', async () => {
+    const g = await renderRichText();
+    let { box } = await g.open(1);
+    fireEvent.change(box, { target: { value: 'thrown away' } });
+    fireEvent.keyDown(box, { key: 'Escape' });
+    await waitFor(() => expect(g.cell(1).querySelector('[data-slot="cell-editor-overlay"]')).toBeNull());
+    expect(g.ds.update).not.toHaveBeenCalled();
+
+    ({ box } = await g.open(3));
+    fireEvent.change(box, { target: { value: '<i>Kept</i>' } });
+    fireEvent.pointerDown(document.body);
+    await waitFor(() => expect(g.ds.update).toHaveBeenCalledTimes(1));
+    expect(g.ds.update.mock.calls[0][2]).toEqual({ body: '<i>Kept</i>' });
   });
 });

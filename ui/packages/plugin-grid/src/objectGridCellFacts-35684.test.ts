@@ -109,8 +109,8 @@ describe('choiceFromText — pasted text in a choice field (objectstack#35687)',
 const t = (key: string, o: Record<string, unknown> = {}) => `${key}|${Object.entries(o).map(([k, v]) => `${k}=${v}`).join(',')}`;
 
 describe('the editor, Backspace and the commit rules a cell is given (objectstack#36023)', () => {
-  it('pickers open under the cell; typed input, long text and an address edit in place', () => {
-    for (const type of ['select', 'status', 'multiselect', 'tags', 'date', 'datetime', 'time', 'color', 'lookup', 'master_detail', 'user']) {
+  it('pickers and the rich-content text box open under the cell; typed input, long text and an address edit in place', () => {
+    for (const type of ['select', 'status', 'multiselect', 'tags', 'date', 'datetime', 'time', 'color', 'lookup', 'master_detail', 'user', 'markdown', 'html', 'richtext']) {
       expect(inlineEditorPlacement(type), type).toBe('below');
     }
     for (const type of ['text', 'number', 'currency', 'percent', 'email', 'phone', 'url', 'textarea', 'address', 'rating', 'boolean', undefined]) {

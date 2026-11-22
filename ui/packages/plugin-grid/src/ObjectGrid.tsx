@@ -32,7 +32,7 @@ import { SchemaRenderer, isPermissionError, useDataScope, useNavigationOverlay, 
 // what stops a seventh site picking a convention of its own.
 import { resolveGridCellRendering } from './cellRendererResolution';
 import { isMaskedGridColumn } from './maskedColumn';
-import { formatCurrency, formatDate, getBadgeColorClasses, getBadgeHexAppearance, FieldEditWidget, hasFieldEditWidget, DISCRETE_EDIT_TYPES, coerceToSafeValue, MaskedCellRenderer, withKnownObjects, RICH_TEXT_FIELD_TYPES } from '@object-ui/fields';
+import { formatCurrency, formatDate, getBadgeColorClasses, getBadgeHexAppearance, FieldEditWidget, hasFieldEditWidget, hasInCellPanelEditWidget, DISCRETE_EDIT_TYPES, coerceToSafeValue, MaskedCellRenderer, withKnownObjects, RICH_TEXT_FIELD_TYPES } from '@object-ui/fields';
 import { useLocalization, useDisplayLocale } from '@object-ui/i18n';
 // Two resolvers, two vocabularies — the repo spells the distinction into the
 // NAMES (objectui#4167). `resolveInlineI18nLabel` is the spec's own
@@ -809,6 +809,8 @@ function cellEditorWidthClass(type: string): string {
       return 'w-full min-w-[22rem]';
     case 'textarea':
     case 'markdown':
+    case 'html':
+    case 'richtext':
     case 'code':
     case 'json':
       return 'w-full min-w-80';
@@ -3614,7 +3616,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     renderCellEditor: inlineEditable
       ? (ctx: { column: any; row: any; pendingRow: any; value: any; stage: (v: any) => void; commit: (v?: any) => void }) => {
           const fieldDef = (objectSchema as any)?.fields?.[ctx.column?.accessorKey];
-          if (!fieldDef || !hasFieldEditWidget(fieldDef.type)) return null;
+          // objectstack#36023 — a rich-content field edits in a panel under the cell.
+          if (!fieldDef || !(hasFieldEditWidget(fieldDef.type) || hasInCellPanelEditWidget(fieldDef.type))) return null;
           // objectstack#35688 — a `select` declared `multiple` draws the multi-select
           // check list (`SelectField` hands it to `MultiSelectField`): each check
           // stages, and the edit is saved when the user moves on.
