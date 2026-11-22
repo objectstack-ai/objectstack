@@ -101,6 +101,9 @@ vi.mock('../../preview/DraftChangesPanel', () => ({
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() } }));
 
+// Pay the dynamic `@objectstack/lint` load at collection, never inside a case's
+// clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';

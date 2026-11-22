@@ -2,6 +2,10 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+// Pay the dynamic `@objectstack/formula` / `@objectstack/lint` load at collection, never inside a case's
+// clocked window (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { ReportDefaultInspector } from './ReportDefaultInspector';
 import type { DatasetCatalogEntry } from '../previews/useDatasetCatalog';
 // The designer rows this suite reads in zh live in `@object-ui/i18n`'s `studio`

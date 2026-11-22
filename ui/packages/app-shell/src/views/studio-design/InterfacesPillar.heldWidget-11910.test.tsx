@@ -109,6 +109,9 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => ({}) };
 });
 
+// Pay the dynamic `@objectstack/lint` load at collection, never inside a case's
+// clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { InterfacesPillar } from './StudioDesignSurface';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';

@@ -30,6 +30,10 @@ vi.mock('../previews/useDatasetCatalog', () => ({
   }),
 }));
 
+// Pay the dynamic `@objectstack/formula` / `@objectstack/lint` load at collection, never inside a case's
+// clocked window (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { DashboardWidgetInspector } from './DashboardWidgetInspector';
 // The inspector's `engine.inspector.*` rows live in `@object-ui/i18n`'s `studio`
 // namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
