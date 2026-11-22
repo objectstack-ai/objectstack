@@ -180,7 +180,7 @@ type Door = ReturnType<typeof viewDoor>;
 /** The panel, hosted the way `handleViewConfigSave` hosts it. */
 function mountPanel(door: Door) {
   const outcomes: string[] = [];
-  const onSave = vi.fn(async (draft: Record<string, any>, saveDraft: DraftVersionGuard['save']) => {
+  const onSave = vi.fn(async (draft: Record<string, any>, saveDraft?: DraftVersionGuard['save']) => {
     try {
       const outcome = await persistRuntimeMetadata(
         'view',
