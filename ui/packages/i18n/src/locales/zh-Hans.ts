@@ -1455,7 +1455,7 @@ const zh = {
     viewAll: '查看全部',
     new: '新建',
     add: '添加',
-    activity: '活动',
+    activity: '动态',
     // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
     // panel, its tab and the strip's label; the right column's ⊟, and the
     // 动态 panel's one-line composer.
@@ -1521,7 +1521,7 @@ const zh = {
     recordTabsHidden: '已隐藏',
     bodyTableTotals: '本页合计',
     streamAll: '全部',
-    streamActivity: '活动',
+    streamActivity: '事件',
     streamDiscussion: '讨论',
     streamChanges: '变更',
     viewAllEntries: '查看全部 {{count}} 条 →',
@@ -1658,10 +1658,10 @@ const zh = {
     fieldChangesFilter: '字段变更',
     tasksOnly: '仅任务',
     leaveCommentPlaceholder: '留下评论… (Ctrl+Enter 提交)',
-    noActivity: '暂无活动记录',
-    activityAccessDenied: '您没有查看此记录活动的权限。',
+    noActivity: '暂无动态',
+    activityAccessDenied: '您没有查看此记录动态的权限。',
     commentsAccessDenied: '您没有查看此记录评论的权限。',
-    activityLoadFailed: '无法加载此记录的活动。',
+    activityLoadFailed: '无法加载此记录的动态。',
     commentsLoadFailed: '无法加载此记录的评论。',
     retryLoadFeed: '重试',
     // objectui#7149 — the rest of `ActivityTimeline`. The four chip labels the
@@ -1697,7 +1697,7 @@ const zh = {
     replyCount_other: '{{count}} 条回复',
     replyPlaceholder: '回复…',
     // 无障碍标签
-    filterActivity: '筛选活动',
+    filterActivity: '筛选动态',
     openDiscussion: '打开讨论面板',
     closeDiscussion: '关闭讨论面板',
     subscribeAriaLabel: '订阅通知',

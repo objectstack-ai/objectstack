@@ -1619,7 +1619,7 @@ const ko = {
     recordTabsHidden: "숨김",
     bodyTableTotals: "합계(이 페이지)",
     streamAll: "전체",
-    streamActivity: "활동",
+    streamActivity: "이벤트",
     streamDiscussion: "토론",
     streamChanges: "변경",
     viewAllEntries: "{{count}}개 모두 보기 →",

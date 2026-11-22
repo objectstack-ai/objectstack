@@ -1671,7 +1671,7 @@ const es = {
     recordTabsHidden: "Ocultas",
     bodyTableTotals: "Totales (esta página)",
     streamAll: "Todo",
-    streamActivity: "Actividad",
+    streamActivity: "Eventos",
     streamDiscussion: "Discusión",
     streamChanges: "Cambios",
     viewAllEntries: "Ver los {{count}} →",
