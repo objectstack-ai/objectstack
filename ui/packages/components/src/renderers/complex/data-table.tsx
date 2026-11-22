@@ -3733,7 +3733,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   // (`GridCellSelection.describeCell`), for its `aria-readonly`. Asked as a
   // cell becomes selected, and again only when what the answer reads changes:
   // the row is re-read, or the host hands the grid a new value (an answer it
-  // was waiting on arrived). Never asked per render; every render reads this.
+  // was waiting on arrived). Not asked per render (a host keeps its value
+  // stable: `GridCellSelection.describeCell`); every render reads this.
   const selectedRow = selectedPos ? paginatedData[selectedPos.rowIndex] : undefined;
   const selectedColumnKey = selectedPos ? columns[selectedPos.colIndex].accessorKey : undefined;
   const [selectedHostReadOnly, setSelectedHostReadOnly] = useState<{ row: unknown; columnKey: string } | null>(null);
@@ -5275,7 +5276,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         // objectstack#35689 — a read-only cell says so to assistive tech, in the
                         // grid only, from the table's own facts. The selected cell (the one a
                         // reader moves to) adds the host's, asked when it became selected
-                        // (`selectedHostReadOnly`: `describeCell` is never asked per render).
+                        // (`selectedHostReadOnly`: `describeCell` is not asked per render).
                         const cellReadOnly = keyboardNavigation
                           && (!isEditable || (isSelectedCell && selectedHostReadOnly !== null
                             && selectedHostReadOnly.row === row && selectedHostReadOnly.columnKey === col.accessorKey));
