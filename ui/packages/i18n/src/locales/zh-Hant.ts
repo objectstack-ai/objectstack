@@ -1623,7 +1623,7 @@ const zhHant = {
     attachmentDeleteDenied: '只有上傳者或可編輯此記錄的使用者才能刪除此附件。',
     renameAttachment: '重新命名',
     renameAttachmentTitle: '重新命名附件',
-    attachmentNameLabel: '檔案名稱',
+    attachmentNameLabel: '檔名',
     attachmentRenameDenied: '只有上傳者或可編輯此記錄的使用者才能重新命名此附件。',
     attachmentParentAccessDenied: '您無權為此記錄新增附件。',
     attachmentDownloadDenied: '您無權下載此附件。',

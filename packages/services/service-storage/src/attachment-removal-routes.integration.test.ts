@@ -14,7 +14,10 @@
  *
  * Record access is the fixture's stand-in: a `sharing` service lets the case's
  * two members edit it (the attach rule's parent-EDIT verdict), and a read
- * middleware hides the case from the outsider. The object grant and the
+ * middleware hides the case from the outsider. Two more middlewares stand in
+ * for grants the rename door's pins need: the object's edit grant on
+ * `sys_attachment` (held by BOB and DAVE only) and DAVE's missing read of
+ * `sys_user`. The object grant and the
  * administrator are plugin-security's, pinned on the real stack in the dogfood
  * suite `member-attachment-baseline.dogfood.test.ts`.
  *
@@ -30,9 +33,11 @@
  * attachment read the record Attachments panel draws its uploader column from,
  * each pinned in its own `describe` below over its own boot of the stack:
  *
- *  - the uploader renames their own attachment, and a member who can edit the
- *    record renames another's, through the update gate's parent-editor limb —
- *    both `200`, the new name stored on the row and the file untouched;
+ *  - the uploader renames their own attachment with no edit grant, and a
+ *    member holding the grant who can edit the record renames another's,
+ *    through the update gate's parent-editor limb — both `200`, the new name
+ *    stored on the row and the file untouched; without the grant, an editor of
+ *    the record is refused another's (`403 PERMISSION_DENIED`);
  *  - a member who can read the record but not edit it is refused the update
  *    gate's `403 RECORD_NOT_ACCESSIBLE`, a caller who cannot read it the unknown
  *    id's `404`, a request that names nobody `401`, and a malformed request
@@ -207,6 +212,20 @@ async function bootDoorStack(): Promise<DoorStack> {
     }
     return next();
   }, { object: CASE });
+  // The object's edit grant, as the fixture stands it in: BOB and DAVE hold
+  // one on `sys_attachment` (the member baseline carries read and create
+  // only); a caller's update without it is refused here, ahead of the
+  // attachment update gate, as plugin-security's CRUD check refuses it.
+  engine.registerMiddleware(async (op: any, next: () => Promise<void>) => {
+    const c = op.context;
+    if (op.operation === 'update' && c && !c.isSystem && c.userId !== BOB && c.userId !== DAVE) {
+      const err: any = new Error(`Permission denied: no edit grant on sys_attachment for ${c.userId}`);
+      err.code = 'PERMISSION_DENIED';
+      err.status = 403;
+      throw err;
+    }
+    return next();
+  }, { object: 'sys_attachment' });
   // User-read rights, as the fixture stands them in: DAVE reads no user row.
   engine.registerMiddleware(async (op: any, next: () => Promise<void>) => {
     const c = op.context;
@@ -377,7 +396,7 @@ describe('the rename door renames an attachment by the delete rule: its uploader
     expect([...stack.routes.keys()].filter((k) => k.startsWith('PATCH:'))).toEqual([`PATCH:${ATTACHMENT_RENAME_ROUTE}`]);
   });
 
-  it('the uploader renames their own attachment: 200, the name persists on the row, and the file is untouched', async () => {
+  it('the uploader renames their own attachment with no edit grant: 200, the name persists on the row, and the file is untouched', async () => {
     await seedFile('f_alice_rename', ALICE);
     const id = await attachAs(ALICE, 'f_alice_rename');
 
@@ -408,6 +427,15 @@ describe('the rename door renames an attachment by the delete rule: its uploader
     const answer = await rename(id, BOB, { file_name: 'named by bob.txt' });
     expect(answer.status, JSON.stringify(answer.body)).toBe(200);
     expect(await attachmentRow(id)).toMatchObject({ id, file_name: 'named by bob.txt', uploaded_by: ALICE });
+  });
+
+  it('an editor of the record without the edit grant is refused the grant\'s 403 on another member\'s attachment', async () => {
+    await seedFile('f_bob_for_alice', BOB);
+    const id = await attachAs(BOB, 'f_bob_for_alice');
+
+    const answer = await rename(id, ALICE);
+    expect([answer.status, answer.body?.error?.code], JSON.stringify(answer.body)).toEqual([403, 'PERMISSION_DENIED']);
+    expect(await attachmentRow(id)).toMatchObject({ id, file_name: 'f_bob_for_alice.txt', uploaded_by: BOB });
   });
 
   it('a member who reads the record but cannot edit it is refused the update gate\'s 403, and the name stays', async () => {
