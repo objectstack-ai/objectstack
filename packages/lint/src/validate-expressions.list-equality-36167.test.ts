@@ -141,7 +141,12 @@ describe('publish lint — list-equality at a CEL site', () => {
     expect(errors[0].message).toContain(` in ${reference}`);
   });
 
-  it.each(["stage == 'frontend'", "owner == 'u1'", "'frontend' in labels", 'watchers != null'])(
+  it.each([
+    "stage == 'frontend'", "owner == 'u1'", "'frontend' in labels", 'watchers != null',
+    // A comprehension variable named like a list field holds one item: per row.
+    "record.labels.exists(watchers, watchers == 'frontend')",
+    "record.labels.all(labels, labels != 'qa')",
+  ])(
     'CONTROL — accepts the flow start condition %s',
     (condition) => {
       expect(flowErrors(condition)).toEqual([]);
