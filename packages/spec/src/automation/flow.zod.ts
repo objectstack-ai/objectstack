@@ -1293,6 +1293,10 @@ export const FlowSchema = lazySchema(() => strictObject(
         "managedBy: 'append-only' (the audit log, the activity feed and their siblings) is refused with " +
         'PERMISSION_DENIED, and so is its delete of a record such a ledger row references, because that delete ' +
         'would change the ledger row; an insert is not judged by this rule. ' +
+        "Nor does it reach past the organization wall: a system run for a user reads and writes through that wall " +
+        "exactly what the user's own request would — with no active organization its reads of an organization's " +
+        'records return none and its writes are refused with PERMISSION_DENIED — and a run that began with no ' +
+        'trigger user is not judged by it, after an approval decision too. ' +
         'A run with no trigger user has no identity to scope to, so under user its data operations are REFUSED — ' +
         'declare system to make the elevation explicit. This covers schedule/time-relative/api triggers AND any ' +
         'record-change flow fired by a write that carried no user. Except behind an anonymous door: publish refuses ' +

@@ -897,6 +897,9 @@ export const HookSchema = lazySchema(() => strictObject(
         'organization endpoints. ' +
         "Nor does it reach a ledger: a system hook body's update, transfer, delete, purge or restore of an object " +
         "declared managedBy: 'append-only' is refused with PERMISSION_DENIED; an insert is not judged by this rule. " +
+        "Nor does it reach past the organization wall: a system hook reads and writes through that wall exactly " +
+        "what the user whose write fired it may at their own request — with no active organization its reads of an " +
+        "organization's records return none and its writes are refused with PERMISSION_DENIED. " +
         'Scope: ctx.api only — condition evaluation, the readonly strip on ctx.input, ctx.session and async are unchanged.',
     ),
 
