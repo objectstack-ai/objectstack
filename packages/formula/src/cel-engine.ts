@@ -1339,7 +1339,10 @@ export function firstTypeMismatch(
   operands: string;
   celType: FieldCelType;
   field: string | null;
-  /** [#29959] Set when a flattened condition's mismatch is a `record.<field>` / `previous.<field>` read. */
+  /**
+   * [#29959, #34946] Set when a flattened condition's mismatch (`type-mismatch`
+   * or `date-arith`) is a `record.<field>` / `previous.<field>` read.
+   */
   root?: 'record' | 'previous';
   category: 'date-arith' | 'type-mismatch';
 } | null {
@@ -1419,12 +1422,24 @@ export function firstTypeMismatch(
     }
     // [#29959] A flattened condition reads the same field as `record.<field>`
     // (and `previous.<field>`), which the bare typing above leaves `dyn`. A
-    // second pass types those roots too, for the text/boolean mismatch only:
-    // the same verdict the bare name gets. The `date-arith` verdict stays the
-    // bare name's alone, as before; the date-text family reaches the roots
-    // through `validate.ts`'s record-root pass (#34662).
+    // second pass types those roots too, for the verdicts the bare name gets
+    // here: the text/boolean mismatch, and (#34946) date/duration arithmetic
+    // against a number — `record.due_date + 1` faults on the field's text on
+    // every run exactly as `due_date + 1` does. Either names the read as
+    // written (`root`). The date-text family reaches the roots through
+    // `validate.ts`'s record-root pass (#34662), which stands down on the
+    // date-arith shape answered here ({@link recordRootReadsFaultDateArith}).
     if (scope !== 'flattened' || !RECORD_ROOT_READ_RE.test(source)) return null;
     const rootTyped = unsoundOverload(buildTypedEnv(bareTypes, 'flattened', 'timestamp', fieldCelTypes));
+    if (rootTyped && isDateArith(rootTyped)) {
+      const read = offendingRecordRead(source, fieldCelTypes, 'timestamp');
+      return {
+        operator: rootTyped[2], operands: `${rootTyped[1]} ${rootTyped[2]} ${rootTyped[3]}`,
+        celType: 'timestamp', category: 'date-arith',
+        field: read?.field ?? null,
+        ...(read ? { root: read.root } : {}),
+      };
+    }
     const r = rootTyped && textOrBool(rootTyped) ? confirmAgainstDateText(rootTyped, fieldCelTypes) : null;
     const celType = r ? textOrBool(r) : null;
     if (!r || !celType) return null;
@@ -1595,7 +1610,8 @@ export function firstDateTextVerdict(
  * name `dyn`) is date/duration arithmetic against a number ({@link isDateArith})
  * — `record.due_date + 1`. That shape is the `date-arithmetic` family's, and it
  * is exactly where the bare name's own order stops: {@link firstTypeMismatch}
- * answers `date-arith` there and the date-text check is never asked. Any other
+ * answers `date-arith` there (for the root read too, #34946) and the date-text
+ * check is never asked. Any other
  * Timestamp-typing fault — `record.end_date - record.start_date > 3` (a Duration
  * ordered against a number), `record.d >= "2026-01-01"` (the text ordering the
  * runtime answers) — leaves the bare name's mismatch check at null and the

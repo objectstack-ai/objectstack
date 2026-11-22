@@ -81,29 +81,42 @@ vi.mock('./metadata-admin/useMetadata', async (importOriginal) => ({
   useMetadataClient: () => metadataClient,
 }));
 
-// The panel, reduced to its Save: it hands the host the draft the real panel
-// produced for a label edit (live capture, objectui#10210).
-vi.mock('./ViewConfigPanel', () => ({
-  ViewConfigPanel: ({ activeView, onSave }: any) => (
-    <button
-      type="button"
-      data-testid="stub-view-config-save"
-      onClick={() =>
-        onSave({
-          label: 'Everything EDITED',
-          type: activeView.type,
-          columns: activeView.columns,
-          name: activeView.name,
-          isDefault: !!activeView.isDefault,
-          id: activeView.id,
-        })
-      }
-    >
-      save
-    </button>
-  ),
-}));
+// objectstack#36137 — the panel's draft-version guard, as the real panel hands it over.
+const panelGuardSave = vi.fn(async () => 'saved' as const);
 
+// The panel, reduced to its Save: it hands the host the draft the real panel
+// produced for a label edit (live capture, objectui#10210), with or without
+// its guard.
+vi.mock('./ViewConfigPanel', () => {
+  const editedDraft = (activeView: any) => ({
+    label: 'Everything EDITED',
+    type: activeView.type,
+    columns: activeView.columns,
+    name: activeView.name,
+    isDefault: !!activeView.isDefault,
+    id: activeView.id,
+  });
+  return {
+    ViewConfigPanel: ({ activeView, onSave }: any) => (
+      <>
+        <button type="button" data-testid="stub-view-config-save" onClick={() => onSave(editedDraft(activeView))}>
+          save
+        </button>
+        <button
+          type="button"
+          data-testid="stub-view-config-guarded-save"
+          onClick={() => onSave(editedDraft(activeView), panelGuardSave)}
+        >
+          guarded save
+        </button>
+      </>
+    ),
+  };
+});
+
+// The view's source reaches a dynamic import of `@objectstack/lint`: pay its
+// load at collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 
@@ -154,8 +167,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('ObjectView — Edit view config → Save (objectui#10210)', () => {
-  it('stages a spec-valid ViewItem envelope on the row the tab is keyed by', async () => {
+function mountObjectView() {
     render(
       <ExpressionProvider user={{ id: 'u1', name: 'Ada', profile: 'admin' }}>
         <MemoryRouter initialEntries={[`/apps/demo/${OBJECT_NAME}/view/${VIEW_ID}`]}>
@@ -168,6 +180,11 @@ describe('ObjectView — Edit view config → Save (objectui#10210)', () => {
         </MemoryRouter>
       </ExpressionProvider>,
     );
+}
+
+describe('ObjectView — Edit view config → Save (objectui#10210)', () => {
+  it('stages a spec-valid ViewItem envelope on the row the tab is keyed by', async () => {
+    mountObjectView();
     await settle();
 
     await act(async () => {
@@ -184,5 +201,22 @@ describe('ObjectView — Edit view config → Save (objectui#10210)', () => {
     expect(body.config).toMatchObject({ type: 'grid', columns: ['name'] });
     const verdict = ViewMetadataSchema.safeParse(body);
     expect(verdict.success, JSON.stringify(verdict.error?.issues)).toBe(true);
+  });
+});
+
+describe('ObjectView — the view settings save writes through the panel\'s guard (objectstack#36137)', () => {
+  it('sends the envelope through the guard the panel hands it, never straight to the client', async () => {
+    mountObjectView();
+    await settle();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('stub-view-config-guarded-save'));
+    });
+
+    expect(metadataClient.save).not.toHaveBeenCalled();
+    expect(panelGuardSave).toHaveBeenCalledTimes(1);
+    const [type, name, body, opts] = panelGuardSave.mock.calls[0] as unknown as [string, string, any, any];
+    expect([type, name, opts]).toEqual(['view', VIEW_ID, { mode: 'draft' }]);
+    expect(body).toMatchObject({ name: VIEW_ID, object: OBJECT_NAME, viewKind: 'list', label: 'Everything EDITED' });
   });
 });

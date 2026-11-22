@@ -91,10 +91,9 @@ selector handed you has a verdict; planned ids are listed, not chased.
      message, and keeps it nowhere else; a runner with no such channel keeps it in its own
      session and reports the hand-off as blocked, without the reproduction. **That
      dispatching PM session** decides the fix and dispatches it through `pm-dispatch`: an
-     in-seat `os-dev` subagent at the effort that skill's security rule sets
-     (`.claude/skills/pm-dispatch/references/execution-duties.md`: a high-severity advisory
-     fix is built at `high` with one read-only `xhigh` review of the diff, a medium-severity
-     one at `high`, anything else by difficulty), whose dispatch prompt alone carries the
+     in-seat `os-dev` subagent at the tier and effort that skill's security rule sets
+     (`.claude/skills/pm-dispatch/references/execution-duties.md`, 定档节; the values live
+     only there), whose dispatch prompt alone carries the
      reproduction, and whose PR, commit and changeset describe a hardening without the
      exploit steps. A finding that needs a contract decision first goes to the maintainer
      instead. Getting a defect fixed never requires handing anyone a working exploit.

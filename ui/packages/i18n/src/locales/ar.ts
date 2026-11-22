@@ -1441,6 +1441,7 @@ const ar = {
     updatedTime: "تاريخ التعديل",
     recordNumber: "معرّف السجل",
     clickToEdit: "انقر للتحرير",
+    setField: "تعيين {{field}}",
     back: "رجوع",
     edit: "تحرير",
     editInline: "تحرير",
@@ -3753,6 +3754,11 @@ const ar = {
     allReports: "كل التقارير",
     collapse: 'طي الشريط الجانبي',
     expand: 'توسيع الشريط الجانبي',
+  },
+  designMode: {
+    title: 'وضع التصميم',
+    leaveUnsaved: 'هل تريد مغادرة وضع التصميم؟ ستفقد التغييرات غير المحفوظة.',
+    saveFailed: 'لم يتم حفظ بعض التغييرات: {{reason}}',
   },
   topbar: {
     openAssistant: "فتح مساعد {{name}}",

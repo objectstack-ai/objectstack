@@ -1336,6 +1336,7 @@ const fr = {
     updatedTime: "Modifié le",
     recordNumber: "ID de l’enregistrement",
     clickToEdit: "Cliquez pour modifier",
+    setField: "Définir {{field}}",
     back: "Retour",
     edit: "Modifier",
     editInline: "Modifier",
@@ -3514,6 +3515,11 @@ const fr = {
     allReports: "Tous les rapports",
     collapse: 'Réduire la barre latérale',
     expand: 'Développer la barre latérale',
+  },
+  designMode: {
+    title: 'Mode conception',
+    leaveUnsaved: 'Quitter le mode conception ? Les modifications non enregistrées seront perdues.',
+    saveFailed: 'Certaines modifications n’ont pas été enregistrées : {{reason}}',
   },
   topbar: {
     openAssistant: "Ouvrir l'assistant {{name}}",

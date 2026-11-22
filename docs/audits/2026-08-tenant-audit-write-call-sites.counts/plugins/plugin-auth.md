@@ -14,25 +14,25 @@ a row or a number here — fix the code, or the census, and regenerate.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 106 |
-| Object name statically decidable | 58 |
+| Write call sites | 108 |
+| Object name statically decidable | 60 |
 | Object name chosen at run time | 48 |
 | Object name spelled inline | 47 |
-| Object name spelled through a `const` | 11 |
+| Object name spelled through a `const` | 13 |
 | Object name is an `object: string` parameter | 3 |
 | Object name is some other run-time expression | 45 |
-| Against a tenancy-enabled object | 56 |
+| Against a tenancy-enabled object | 58 |
 | Against an object declaring tenancy off | 2 |
-| Threading a tenant context | 62 |
+| Threading a tenant context | 64 |
 | Provably carrying none (options read, no context key) | 15 |
 | …and decidably tenancy-enabled | 3 |
 | Options argument unreadable | 29 |
 | …and decidably tenancy-enabled | 16 |
-| Threading a decidably elevated (`isSystem`) context | 44 |
+| Threading a decidably elevated (`isSystem`) context | 46 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 47 |
 | Receiver carried a readable engine type | 80 |
-| Receiver erased, placed by the object NAME | 24 |
+| Receiver erased, placed by the object NAME | 26 |
 | Receiver erased, placed by an `object: string` PARAMETER | 1 |
 | Receiver erased, placed by an `UNTYPED_RECEIVERS` row | 1 |
 
@@ -125,7 +125,9 @@ a row or a number here — fix the code, or the census, and regenerate.
 | `packages/plugins/plugin-auth/src/session-tombstone.ts` | `update` | `objectName` | undecidable | options unreadable | 1 |
 | `packages/plugins/plugin-auth/src/sso-client-secret.ts` | `update` | `sys_sso_provider` | disabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/sso-provider-lifecycle.ts` | `delete` | `IDP_GROUP_MAPPING_OBJECT` | undecidable | PROVABLY NONE | 1 |
+| `packages/plugins/plugin-auth/src/sso-provider-lifecycle.ts` | `update` | `sys_session` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/sso-provider-lifecycle.ts` | `delete` | `sys_user_permission_set` | enabled | elevated | 1 |
+| `packages/plugins/plugin-auth/src/sso-session-provider.ts` | `update` | `sys_session` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/sys-session-revoke.ts` | `update` | `SystemObjectName.SESSION` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/user-ban-write.ts` | `update` | `sys_user` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-auth/src/user-session-admission.ts` | `update` | `sys_user` | enabled | elevated | 2 |
