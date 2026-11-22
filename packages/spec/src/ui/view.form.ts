@@ -247,7 +247,7 @@ export const viewForm = defineForm({
             { field: 'sort', helpText: 'Allow users to sort records' },
             { field: 'search', helpText: 'Allow users to search records' },
             { field: 'filter', helpText: 'Allow users to filter records' },
-            { field: 'refresh', helpText: 'Allow users to reload the view data from the backend without a full page reload' },
+            { field: 'refresh', helpText: 'Allow users to reload the view data from the backend without a full page reload. Governs only the wide toolbar\'s Refresh button (`compactToolbar: false`): the default toolbar has no Refresh, so the toggle changes nothing there.' },
             { field: 'rowHeight', helpText: 'Allow users to toggle row height/density' },
             { field: 'group', helpText: 'Allow users to change record grouping from the toolbar. Toggle only — the grouping itself is configured in the view-level `grouping` block.' },
             { field: 'addRecordForm', helpText: 'Add records through a form instead of inline' },

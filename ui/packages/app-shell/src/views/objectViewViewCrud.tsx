@@ -414,6 +414,41 @@ export function useObjectViewViewCrud({
         }
     }, [dataSource, isSavedView, activeViewId, views, viewId, navigate, t, confirmHandler]);
 
+    /**
+     * objectstack#36011 — "Restore factory version" on a customized view of a
+     * read-only package (`ViewTabItem.customized`): after one confirm saying
+     * every user of the view sees the factory version again, the override
+     * the package's customization holds is removed
+     * (`restoreFactoryView`), and the views are read again. A refusal is
+     * said with the door's own message.
+     */
+    const handleRestoreFactoryView = useCallback(async (vid: string) => {
+        if (!dataSource || !objectName) return;
+        if (typeof (dataSource as any)?.restoreFactoryView !== 'function') return;
+        const targetView = views.find((v: any) => v.id === vid);
+        const viewLabel = targetView?.label || vid;
+        const confirmed = await confirmHandler(
+            t('console.objectView.restoreFactoryConfirm', { name: viewLabel }),
+            {
+                title: t('console.objectView.restoreFactoryTitle'),
+                confirmText: t('console.objectView.restoreFactory'),
+                cancelText: t('console.objectView.cancel'),
+            },
+        );
+        if (!confirmed) return;
+        try {
+            await (dataSource as any).restoreFactoryView(objectName, vid);
+            setRefreshKey(k => k + 1);
+            toast.success(t('console.objectView.restoreFactoryDone', { name: viewLabel }));
+        } catch (err) {
+            console.error('[ManageViews] Failed to restore the factory view:', err);
+            toast.error(t('objectViewActions.restoreFactoryFailed'), {
+                description: formatMetadataError(err),
+                classNames: { description: 'whitespace-pre-line' },
+            });
+        }
+    }, [dataSource, objectName, views, t, confirmHandler, setRefreshKey]);
+
     const handlePinView = useCallback(async (vid: string, pinned: boolean) => {
         if (!dataSource) return;
         if (!isSavedView(vid)) {
@@ -509,6 +544,7 @@ export function useObjectViewViewCrud({
         handleViewAction,
         handleRenameView,
         handleDeleteView,
+        handleRestoreFactoryView,
         handlePinView,
         handleSetDefaultView,
         handleReorderViews,
