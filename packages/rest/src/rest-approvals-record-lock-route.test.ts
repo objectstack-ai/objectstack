@@ -24,6 +24,10 @@ import { RestServer } from './rest-server.js';
 import { APPROVAL_RECORD_LOCK_PARAMS, APPROVAL_RECORD_LOCKS_PARAMS } from './approvals-routes.js';
 import { APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS } from '@objectstack/spec/contracts';
 import { unknownQueryParamMessage } from './query-allowlist.js';
+// The rest server's routes load `@objectstack/objectql` lazily, inside a
+// handler; paying that load here, at collection, keeps it out of the first
+// case's `testTimeout` window (check:test-source-alias).
+import '@objectstack/objectql';
 
 const LOCK = '/api/v1/approvals/records/:object/:recordId/lock';
 const CALLER = { userId: 'u_reader', positions: [], permissions: [] };
