@@ -496,7 +496,7 @@ describe('#36466 §7 — /meta negotiates the request tag against the held local
         label: 'Contact',
         fields: {
             id: { name: 'id', type: 'text', primaryKey: true },
-            account: { name: 'account', type: 'lookup', reference: 'account', label: 'Owning Account', required: true },
+            account: { name: 'account', type: 'lookup', reference: 'account', label: 'Parent', required: true },
         },
     };
 
