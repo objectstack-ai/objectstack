@@ -619,10 +619,10 @@ Set `deterministicEncryption: true` to allow equality queries on the ciphertext,
 
 ## 7. Auditing & Field History
 
-Object- and field-level history is opt-in metadata, not a free-form `enable.audit` block.
+Object- and field-level history is declared metadata, not a free-form `enable.audit` block.
 
-- **Object history** — set `enable.trackHistory: true` on the object (the `ObjectCapabilities` block in `object.zod.ts`) to surface the record's field changes. On the default record page they join the one Timeline stream (its Changes filter); an assigned page shows them where it places a `record:history` block.
-- **Per-field history** — set `trackHistory: true` on an individual field to render that field's value changes on the record activity timeline. (The former per-field `auditTrail` flag was pruned in 2026-06 — it had no runtime consumer.)
+- **Field-change values** — a record's activity stream shows `Field: old → new` for every changed field by default. Set `enable.fieldHistory: false` on the object to name changes by their field label only, or `fieldHistory: false` on one field to do that for the field (`trackHistory: false` does not turn values off). Credential fields never show values, and media or structured-JSON fields show them only with `fieldHistory: true` or `trackHistory: true`. A reader is served only the changes of fields they may read.
+- **Object history** — set `enable.trackHistory: true` on the object (the `ObjectCapabilities` block in `object.zod.ts`) to surface the compliance ledger's field changes. On the default record page they join the one Timeline stream (its Changes filter); an assigned page shows them where it places a `record:history` block. `enable.trackHistory` does not turn field-change values on or off. (The former per-field `auditTrail` flag was pruned in 2026-06 — it had no runtime consumer.)
 - **RLS audit** — removed (2026-07, ADR-0056 D8): the `RLSAuditConfigSchema`/`RLSAuditEventSchema` shapes were never emitted or read by the runtime RLS path and were deleted from the spec. Enforcement decisions surface today through the security plugin's fail-closed warnings and the standard audit log (`plugin-audit`), not a dedicated RLS event stream.
 
 ```yaml

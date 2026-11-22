@@ -445,6 +445,12 @@ function parseMetadata(raw: unknown): Record<string, unknown> | null {
  * `metadata`: its parameters are parent field values (the record label, a
  * changed value), and the field redaction judges the text columns, not this
  * slot. A row whose `summary` the projection did not ask for is not given one.
+ *
+ * [#36290] One code is served: a field-change code (`fieldChanges`), which the
+ * field redaction has already narrowed change by change for this reader
+ * (`activity-field-redaction.ts`), so the record page can draw one line per
+ * changed field. This middleware is registered OUTSIDE the redaction for that
+ * reason: it composes from the narrowed code, never from the stored one.
  */
 export function localizeActivityRow(
   row: Record<string, unknown>,
@@ -464,10 +470,15 @@ export function localizeActivityRow(
       }
     }
   }
-  if (stripCode) {
+  if (stripCode && !isFieldChangeCode(metadata[ACTIVITY_SUMMARY_MESSAGE_KEY])) {
     delete metadata[ACTIVITY_SUMMARY_MESSAGE_KEY];
     row.metadata = isRecord(row.metadata) ? metadata : JSON.stringify(metadata);
   }
+}
+
+/** [#36290] A code this version reads as a field-change summary — the one code served to a reader. */
+function isFieldChangeCode(value: unknown): boolean {
+  return readActivitySummaryMessage(value)?.key === 'fieldChanges';
 }
 
 /** The engine slice the summary middleware registers on. */
@@ -481,10 +492,12 @@ export interface ActivitySummaryEngine {
 
 /**
  * Install the `sys_activity` summary middleware. `getI18n` is resolved on every
- * read: the i18n service may register after this plugin. Register it AFTER the
- * field redaction (`installActivityFieldRedaction`), so it runs inside it: the
- * summary is composed from the row as stored, and the redaction then judges
- * the composed text by the same declared sources the stored one had.
+ * read: the i18n service may register after this plugin. Register it BEFORE the
+ * field redaction (`installActivityFieldRedaction`), so the redaction runs
+ * inside it [#36290]: the redaction judges the stored text by its declared
+ * sources and narrows the field-change code first, and this middleware then
+ * composes a kept summary in the reader's language from what the redaction
+ * left — a narrowed code composes only the changes this reader is served.
  */
 export function installActivitySummaryLocale(
   engine: ActivitySummaryEngine,
