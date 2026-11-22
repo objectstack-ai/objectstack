@@ -236,6 +236,7 @@
     "ObjectExtensionPlacement": "data/ObjectExtensionPlacement",
     "ObjectExtensionPlacementSchema": "data/ObjectExtensionPlacement",
     "ObjectExtensionRelatedListEntry": "data/ObjectExtensionRelatedListEntry",
+    "ObjectExtensionRelatedListEntryObject": "data/ObjectExtensionRelatedListEntryObject",
     "ObjectExtensionRelatedListEntryObjectSchema": "data/ObjectExtensionRelatedListEntryObject",
     "ObjectExtensionRelatedListEntrySchema": "data/ObjectExtensionRelatedListEntry",
     "ObjectExtensionSchema": "data/ObjectExtension",
