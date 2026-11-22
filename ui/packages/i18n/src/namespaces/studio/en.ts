@@ -375,7 +375,7 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.section.developer': 'Developer info',
   'designer.field.section.developerHint': 'The internal name the API and formulas refer to. Everyday edits do not need it.',
   'designer.field.removeConfirmTitle': 'Delete the field “{label}”?',
-  'designer.field.removeConfirmBody': 'The field leaves this object\'s draft. The change takes effect when you publish.',
+  'designer.field.removeConfirmBody': 'The field leaves this object once the change is saved and live.',
   'designer.field.section.advanced': 'Advanced',
   'designer.field.section.options': '{type} options',
   'designer.field.section.computed': 'Computed value',

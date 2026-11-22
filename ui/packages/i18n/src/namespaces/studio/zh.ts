@@ -297,7 +297,7 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.section.developer': '开发者信息',
   'designer.field.section.developerHint': '内部名在接口与公式里引用，日常改字段用不到。',
   'designer.field.removeConfirmTitle': '删除字段“{label}”？',
-  'designer.field.removeConfirmBody': '字段会从这个对象的草稿中移除，发布后生效。',
+  'designer.field.removeConfirmBody': '改动保存并生效后，这个字段会从对象中移除。',
   'designer.field.section.advanced': '高级',
   'designer.field.section.options': '{type} 选项',
   'designer.field.section.computed': '计算值',
