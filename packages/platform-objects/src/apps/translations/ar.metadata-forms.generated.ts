@@ -278,7 +278,7 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.trackHistory": {
         label: "تتبّع السجل",
-        helpText: "تلخيص هذا الحقل في الخط الزمني لنشاط السجل"
+        helpText: "عرض القيم القديمة → الجديدة لهذا الحقل في الخط الزمني لنشاط السجل (مفعّل ما لم يُوقَف)"
       },
       "fields.visibleWhen": {
         label: "مرئي عندما",
@@ -298,6 +298,9 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "enable.trackHistory": {
         label: "تتبّع السجل"
+      },
+      "enable.fieldHistory": {
+        label: "قيم تغييرات الحقل"
       },
       "enable.searchable": {
         label: "قابل للبحث"
@@ -899,7 +902,7 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       trackHistory: {
         label: "تتبّع السجل",
-        helpText: "عرض تغييرات قيمة هذا الحقل كإدخالات في الخط الزمني لنشاط السجل (ADR-0052 §5b). اشتراك اختياري لكل حقل."
+        helpText: "عرض القيم القديمة → الجديدة لهذا الحقل في الخط الزمني لنشاط السجل (ADR-0052 §5b). مفعّل ما لم يُوقَف؛ القيمة false تذكر التغيير دون قيمه."
       },
       widget: {
         label: "عنصر الواجهة",
