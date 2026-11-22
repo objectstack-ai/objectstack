@@ -236,6 +236,17 @@ export const AFFORDANCE_GRANTS = {
   feedCommentEdit: { crud: 'edit', grant: 'update' },
   /** The same rows' Delete, asked of `sys_comment`: it deletes that comment row. */
   feedCommentDelete: { crud: 'delete', grant: 'delete' },
+  /**
+   * The same Delete for a caller who holds no `delete` grant on `sys_comment`,
+   * asked of `sys_comment`: it removes the caller's own comment through the
+   * own-comment delete door (`DELETE /api/v1/comments/:id`), not the data
+   * door, so no CRUD bit is read. That door admits exactly the caller's own
+   * comment, and only one nobody replied under, and needs no `delete` grant,
+   * which no every-member set may carry (ADR-0090 D5), so it asks the grant
+   * the comment was posted under: whoever may comment may take their own
+   * comment back, as `feedReactionRemove` asks for a reaction.
+   */
+  feedCommentDeleteOwn: { crud: null, grant: 'create' },
   /** A calendar's quick-create: an empty-day click, or a time-range drag in the week / day grid. */
   calendarQuickCreate: { crud: 'create', grant: 'create' },
   /** A calendar's drag-to-reschedule: moving or resizing an event writes its date fields. */

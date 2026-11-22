@@ -98,7 +98,7 @@ Built-in (plugins register more; a `type` none runs is refused at a server's pub
 |:-----|:--------|
 | `http` | Call an HTTP API — set `timeoutMs`, or it has no timeout and warns (`flow-http-timeout-missing`). `url` and `headers` are served as written with the definition to every member who can read flows — only `signingSecret` and a start node's `secret` are withheld — so never a credential there: use a declared connector via `connector_action`. Retried after a record change: `durable: true` (outbox-queued, else sent once in the background, unretried; no response) |
 | `notify` | Send a notification (below) |
-| `connector_action` | Dispatch an action of a declared connector (§ *Integrations are declared, not coded*) or a plugin's. `connectorConfig.input` is a value-slot map like `subflow` `input`. Once evaluated, it is judged against the action's `inputSchema` (`required`, `type`, `properties`, `items`) before dispatch: a breach fails the step `VALIDATION_ERROR` (`fault`-routable); `os validate` does not judge the `inputSchema` fit yet. Retried after a record change: drop the retry, or run the flow on demand / on a schedule |
+| `connector_action` | Dispatch an action of a declared connector (§ *Integrations are declared, not coded*) or a plugin's. `connectorConfig.input` is a value-slot map like `subflow` `input`. Evaluated, it is judged against the action's `inputSchema` (`required`, `type`, `items`, a key outside listed `properties`) before dispatch: a breach fails the step `VALIDATION_ERROR` (`fault`-routable); `os validate` does not judge that fit yet. Retried after a record change: drop the retry, or run the flow on demand / on a schedule |
 | `script` | Call a **registered** function (*Valid-but-silently-wrong* #3) |
 | `screen` | Display a UI form (screen flows only). `config.fields[]`: `{ name, label, type, required, options, defaultValue }`, `type` an open widget hint; `'file'` renders the upload widget and resumes with the `sys_file` id bound to `name` — a later `create_record` / `update_record` writes it into a `file` field, which claims the file: collect first, write after the last screen. `'record_link'` (never `'record'`, an object field type) takes no input — it shows the `reference` record whose id `defaultValue` evaluates to, by display name, as a link to its record page: the result screen of a flow that created records, `{ name: 'account_link', type: 'record_link', reference: 'crm_account', defaultValue: { dialect: 'cel', source: 'account.id' } }` over a `create_record` `outputVariable: 'account'`. Both keys required; `required` / `options` / `placeholder` / `min` / `max` refused; a resume value under its name refused (`400 INVALID_SCREEN_INPUT`). A completed `end` `message` is refused and a markdown link in a screen `description` renders literally. Next / Submit and "Step N of M" are not authored: the engine reads the graph when the screen pauses and serves `progress`, which alone labels the button and draws the counter. A `decision`, `fault` edge, loop back, non-screen pause (`approval`, `wait`) or `subflow` after a screen means "Next", no count. `progress` in a node `config` is refused |
 
@@ -399,19 +399,20 @@ token implies the other:
 
 ### Inbound webhook (`api`) triggers (ADR-0041 Tier 1)
 
-Endpoint: `POST /api/v1/automation/hooks/:flowName/:hookId`. Configure it on
-the **start node `config`**:
+`POST /api/v1/automation/hooks/:flowName/:hookId`, configured on the
+**start node `config`**:
 
 | `config` key | Purpose |
-|:-------------|:--------|
+|:--|:--|
 | `hookId` | URL path token (default `'default'`). **Rotate it to revoke** a leaked endpoint |
 | `secretRef` / `secret` | HMAC-SHA256 secret, **one required** (else refused at registration and `os validate`). Ship `secretRef: 'NAME'`: an env var the deployment fills, not `OS_*`; unfilled ⇒ `503`. Never a literal |
 
-- **Signature:** `x-objectstack-signature: t=<unix seconds>,v1=<hex>` — HMAC-SHA256 of `<t>.<raw body>`; `t` within 300 s. Vendor-signed: `config.signature` replaces it (recipe 4).
-- **Idempotency:** `x-idempotency-key` dedupes retries — author the flow to be idempotent (delivery is at-least-once).
-- **Queue-backed:** the endpoint ACKs `202` and enqueues; the flow runs on the consumer.
-- The JSON body surfaces to the flow as the trigger record (`record.*` / bare fields) plus `params`.
-- **A flow name two packages hold:** the bare hook above answers `401 INVALID_SIGNATURE` whatever the signature (cause: server log only). Each package's flow is reached only at `POST /api/v1/automation/hooks/:namespace/:flowName/:hookId`, by its `manifest.namespace` (`_env` there: a flow no package ships).
+- **Signature:** `x-objectstack-signature: t=<unix seconds>,v1=<hex>` — HMAC of `<t>.<raw body>`; `t` within 300 s. Vendor-signed: `config.signature` replaces it (recipe 4).
+- **Idempotency:** `x-idempotency-key` dedupes retries — delivery is at-least-once: author the flow idempotent.
+- **Queue-backed:** it ACKs `202` and enqueues; the flow runs on the consumer.
+- The JSON body is the flow's trigger record (`record.*` / bare fields) plus `params`.
+- **A flow name two packages hold:** the bare hook answers `401 INVALID_SIGNATURE` whatever the signature (cause: server log only). Each package's flow answers only at `…/hooks/:namespace/:flowName/:hookId`, by its `manifest.namespace` (`_env`: a flow no package ships).
+- **A disabled package's flow:** that `401` at both addresses, nothing enqueued; once enabled, a sender's retry gets `202`.
 
 ### Trigger Types (start-node `config.triggerType`)
 

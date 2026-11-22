@@ -1636,6 +1636,7 @@ export class AnalyticsServicePlugin implements Plugin {
                 currencyField?: string;
                 homeAmount?: { field?: string };
               };
+              unitConfig?: { unitMode?: string; unitField?: string };
             }
           | undefined;
         if (!f) return undefined;
@@ -1653,6 +1654,13 @@ export class AnalyticsServicePlugin implements Plugin {
         const homeAmountField = recordCurrencyField !== undefined
           ? f.currencyConfig?.homeAmount?.field
           : undefined;
+        // [ADR-0158 U7 R1] …and a quantity's `unitField` ONLY under
+        // `unitMode: 'record'` on a `number`, the one shape the spec reads it
+        // under: the cube door's record-unit judgment groups by it.
+        const recordUnitField = f.type === 'number' && f.unitConfig?.unitMode === 'record'
+          && typeof f.unitConfig.unitField === 'string' && f.unitConfig.unitField !== ''
+          ? f.unitConfig.unitField
+          : undefined;
         return {
           type: f.type,
           multiple: f.multiple === true,
@@ -1660,6 +1668,7 @@ export class AnalyticsServicePlugin implements Plugin {
           defaultCurrency: fixedCurrency,
           currencyField: recordCurrencyField,
           homeAmountField,
+          unitField: recordUnitField,
         };
       },
       // #5033 — the datasource an object is bound to, used ONLY to name the

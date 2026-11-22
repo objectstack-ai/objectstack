@@ -320,9 +320,17 @@ function escapeOnlyForHiddenTooltip(): boolean {
   return !layerShown();
 }
 
-/** The app bar's trigger: the shell's one sidebar trigger (objectui#12429). */
+/**
+ * The sidebar trigger focus can go to: the first one not inside an inert
+ * region. The sidebar's own collapse button is inert while it is hidden, so
+ * this finds the page header's expand button then.
+ */
 function sidebarTrigger(): HTMLElement | null {
-  return document.querySelector<HTMLElement>('[data-sidebar="trigger"]');
+  return (
+    Array.from(document.querySelectorAll<HTMLElement>('[data-sidebar="trigger"]')).find(
+      (el) => !el.closest('[inert]'),
+    ) ?? null
+  );
 }
 
 /** Where focus lands in the float: the entry of the page in view, else the first entry. */

@@ -32,7 +32,7 @@ function Page() {
         <div>
           <h1 style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.01em', color: 'hsl(var(--foreground))', margin: 0 }}>Task Desk</h1>
           <p style={{ marginTop: 4, fontSize: 14, color: 'hsl(var(--muted-foreground))' }}>
-            Click a task to edit it in a <strong>drawer</strong>; create one in a <strong>modal</strong> — both render the platform's pre-styled <code>&lt;ObjectForm&gt;</code> overlay.
+            Click a task's title to edit it in a <strong>drawer</strong>; create one in a <strong>modal</strong> — both render the platform's pre-styled <code>&lt;ObjectForm&gt;</code> overlay.
           </p>
         </div>
         <button onClick={() => setCreating(true)}

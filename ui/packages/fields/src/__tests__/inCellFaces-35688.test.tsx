@@ -7,10 +7,11 @@
  */
 
 /**
- * objectstack#35688 (slice S2) — the faces the option, tags, date, time and
- * colour widgets draw in the list grid's cell editor (`inCell`), and the
- * `onCommit` call that ends an edit on a pick. Without `inCell` each widget
- * keeps its form face.
+ * objectstack#35688 (slices S2 and S3) — the faces the widgets draw in the
+ * list grid's cell editor (`inCell`), and the `onCommit` call that ends an
+ * edit on a pick: options, tags, dates, time and colour (S2); the typed
+ * inputs, rating and record pickers (S3, with objectstack#36023's flat typed
+ * input). Without `inCell` each widget keeps its form face.
  */
 
 import React from 'react';
@@ -23,6 +24,15 @@ import { ColorField } from '../widgets/ColorField';
 import { TimeField } from '../widgets/TimeField';
 import { DatePickerField, DateTimePickerField } from '../widgets/date-picker/DatePickerField';
 import { FieldEditWidget } from '../FieldEditWidget';
+import { TextField } from '../widgets/TextField';
+import { EmailField } from '../widgets/EmailField';
+import { PhoneField } from '../widgets/PhoneField';
+import { UrlField } from '../widgets/UrlField';
+import { NumberField } from '../widgets/NumberField';
+import { CurrencyField } from '../widgets/CurrencyField';
+import { PercentField } from '../widgets/PercentField';
+import { RatingField } from '../widgets/RatingField';
+import { LookupField } from '../widgets/LookupField';
 
 afterEach(() => cleanup());
 
@@ -278,5 +288,173 @@ describe('FieldEditWidget hands the cell face on (objectstack#35688)', () => {
     const forwarded = element!.props as Record<string, unknown>;
     expect(forwarded.inCell).toBe(true);
     expect(forwarded.onCommit).toBe(onCommit);
+  });
+});
+
+/** The typed-input face: one flat input, marked for the layer, inside a marked box. */
+function inCellInput(container: HTMLElement): HTMLInputElement {
+  const face = container.querySelector('[data-in-cell-face="input"]');
+  expect(face).not.toBeNull();
+  const input = face!.querySelector('input[data-in-cell-input]') as HTMLInputElement | null;
+  expect(input).not.toBeNull();
+  // No border, radius or fill of its own: the layer's frame is the only line.
+  expect(input!.className).toContain('border-0');
+  expect(input!.className).toContain('bg-transparent');
+  expect(input!.className).not.toContain('rounded-md');
+  return input!;
+}
+
+describe('in-cell typed inputs are the cell itself (objectstack#36023)', () => {
+  it('text: a flat input whose sizing copy follows the text, so the layer grows to the right', () => {
+    const onChange = vi.fn();
+    const { container } = render(<TextField field={{ name: 'name', type: 'text' } as never} value="Acme" onChange={onChange} inCell />);
+    const input = inCellInput(container);
+    expect(input.type).toBe('text');
+    expect(input.value).toBe('Acme');
+    const sizer = input.previousElementSibling as HTMLElement;
+    expect(sizer.getAttribute('aria-hidden')).toBe('true');
+    expect(sizer.textContent).toBe('Acme');
+    fireEvent.change(input, { target: { value: 'Acme Corporation International' } });
+    expect(onChange).toHaveBeenCalledWith('Acme Corporation International');
+  });
+
+  it('email, phone and url take the same face with their input types', () => {
+    const cases: Array<[React.ReactElement, string]> = [
+      [<EmailField field={{ name: 'e', type: 'email' } as never} value="a@b.co" onChange={() => {}} inCell />, 'email'],
+      [<PhoneField field={{ name: 'p', type: 'phone' } as never} value="+1 555" onChange={() => {}} inCell />, 'tel'],
+      [<UrlField field={{ name: 'u', type: 'url' } as never} value="https://example.com/a/long/path" onChange={() => {}} inCell />, 'url'],
+    ];
+    for (const [element, type] of cases) {
+      const { container, unmount } = render(element);
+      expect(inCellInput(container).type).toBe(type);
+      unmount();
+    }
+  });
+
+  it('number: the raw number, right-aligned', () => {
+    const onChange = vi.fn();
+    const { container } = render(<NumberField field={{ name: 'qty', type: 'number' } as never} value={1234.5} onChange={onChange} inCell />);
+    const input = inCellInput(container);
+    expect(input.type).toBe('number');
+    expect(input.value).toBe('1234.5');
+    expect(input.className).toContain('text-right');
+    fireEvent.change(input, { target: { value: '12' } });
+    expect(onChange).toHaveBeenCalledWith(12);
+  });
+
+  it('currency: the currency code, then the raw amount right-aligned (34,500.50 shows whole)', () => {
+    const { container } = render(
+      <CurrencyField field={{ name: 'amount', type: 'currency', currency: 'USD' } as never} value={34500.5} onChange={() => {}} inCell />,
+    );
+    const input = inCellInput(container);
+    expect(input.value).toBe('34500.5');
+    expect(input.className).toContain('text-right');
+    expect(container.querySelector('[data-in-cell-face="input"]')!.textContent).toContain('USD');
+  });
+
+  it('percent: the points without a slider, and no binary noise from the fraction', () => {
+    const { container } = render(<PercentField field={{ name: 'rate', type: 'percent' } as never} value={0.07} onChange={() => {}} inCell />);
+    const input = inCellInput(container);
+    expect(input.value).toBe('7');
+    expect(screen.queryByTestId('percent-slider')).toBeNull();
+    expect(container.textContent).toContain('%');
+  });
+
+  it('CONTROL: without inCell the text, number and percent widgets keep their form faces', () => {
+    const { container } = render(
+      <>
+        <TextField field={{ name: 'name', type: 'text' } as never} value="Acme" onChange={() => {}} />
+        <NumberField field={{ name: 'qty', type: 'number' } as never} value={3} onChange={() => {}} />
+        <PercentField field={{ name: 'rate', type: 'percent' } as never} value={0.07} onChange={() => {}} />
+      </>,
+    );
+    expect(container.querySelector('[data-in-cell-face]')).toBeNull();
+    expect(screen.getByTestId('percent-slider')).toBeTruthy();
+  });
+});
+
+describe('in-cell rating (objectstack#35688)', () => {
+  it('draws the stars at the cell size and no "n / max" caption; a click picks', () => {
+    const onChange = vi.fn();
+    const { container } = render(<RatingField field={{ name: 'score', type: 'rating' } as never} value={2} onChange={onChange} inCell />);
+    expect(container.textContent).not.toContain('2 / 5');
+    const stars = container.querySelectorAll('button');
+    expect(stars).toHaveLength(5);
+    expect(stars[0].querySelector('svg')!.getAttribute('class')).toContain('w-3.5');
+    fireEvent.click(stars[3]);
+    expect(onChange).toHaveBeenCalledWith(4);
+  });
+
+  it('CONTROL: the form face keeps its caption', () => {
+    const { container } = render(<RatingField field={{ name: 'score', type: 'rating' } as never} value={2} onChange={() => {}} />);
+    expect(container.textContent).toContain('2 / 5');
+  });
+});
+
+const PRIORITY = {
+  type: 'lookup',
+  name: 'priority',
+  label: 'Priority',
+  reference: 'priorities',
+  options: [
+    { label: 'High', value: 'high' },
+    { label: 'Normal', value: 'normal' },
+  ],
+} as never;
+
+describe('in-cell record picker (objectstack#35688)', () => {
+  it('shows the searchable candidate list at once, no trigger to press; a click picks and ends the edit', () => {
+    const calls: string[] = [];
+    render(
+      <LookupField
+        field={PRIORITY}
+        value={undefined}
+        onChange={(v: unknown) => calls.push(`change:${String(v)}`)}
+        onCommit={() => calls.push('commit')}
+        inCell
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /select/i })).toBeNull();
+    const panel = screen.getByTestId('lookup-in-cell');
+    expect(within(panel).getByRole('listbox')).toBeTruthy();
+    fireEvent.click(within(panel).getByText('Normal'));
+    // The value is handed over first, then the edit ends.
+    expect(calls).toEqual(['change:normal', 'commit']);
+  });
+
+  it('Enter on the active candidate picks it and does not reach the grid', () => {
+    const onGridKey = vi.fn();
+    const onChange = vi.fn();
+    render(
+      <GridEditor onGridKey={onGridKey}>
+        <LookupField field={PRIORITY} value={undefined} onChange={onChange} onCommit={() => {}} inCell />
+      </GridEditor>,
+    );
+    const box = screen.getByRole('combobox');
+    fireEvent.keyDown(box, { key: 'ArrowDown' });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(onChange).toHaveBeenCalledWith('high');
+    expect(onGridKey).not.toHaveBeenCalledWith('Enter');
+  });
+
+  it('Clear is offered while the cell holds a value, and clearing ends the edit', () => {
+    const calls: string[] = [];
+    render(
+      <LookupField
+        field={PRIORITY}
+        value="high"
+        onChange={(v: unknown) => calls.push(`change:${String(v)}`)}
+        onCommit={() => calls.push('commit')}
+        inCell
+      />,
+    );
+    fireEvent.click(screen.getByTestId('lookup-in-cell-clear'));
+    expect(calls).toEqual(['change:null', 'commit']);
+  });
+
+  it('CONTROL: without inCell the trigger stays and the list is closed', () => {
+    render(<LookupField field={PRIORITY} value={undefined} onChange={() => {}} />);
+    expect(screen.queryByTestId('lookup-in-cell')).toBeNull();
+    expect(screen.queryByRole('listbox')).toBeNull();
   });
 });

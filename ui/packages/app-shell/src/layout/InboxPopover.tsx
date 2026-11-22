@@ -459,7 +459,7 @@ export function InboxPopover({
           {n.body && (
             <div className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{n.body}</div>
           )}
-          <div className="text-[10px] text-muted-foreground mt-1">
+          <div className="text-xs text-muted-foreground mt-1">
             {timeAgo(n.created_at, displayLocale)}
           </div>
         </div>
@@ -510,7 +510,7 @@ export function InboxPopover({
               // Below `md` the trigger is a 44 px target that fills the 48 px
               // bar, so the badge sits inside it, on the glyph's corner, where
               // the bar's edge cannot cut it (objectstack#34596).
-              className="absolute -top-0.5 -right-0.5 max-md:top-1 max-md:right-1 h-4 min-w-[16px] rounded-full bg-red-500 text-[10px] leading-4 text-white text-center px-1 motion-safe:animate-in motion-safe:zoom-in-50 motion-safe:fade-in-0 motion-safe:duration-200"
+              className="absolute -top-0.5 -right-0.5 max-md:top-1 max-md:right-1 h-4 min-w-[16px] rounded-full bg-red-500 text-xs leading-4 text-white text-center px-1 motion-safe:animate-in motion-safe:zoom-in-50 motion-safe:fade-in-0 motion-safe:duration-200"
             >
               {totalBadge > 9 ? '9+' : totalBadge}
             </span>
@@ -531,7 +531,7 @@ export function InboxPopover({
       >
         {/* pr-12 keeps "Mark all read" clear of the panel's close button. */}
         <div className="flex items-center justify-between gap-2 pl-3 pr-12 pt-3 pb-1 max-sm:pr-14">
-          <SheetTitle className="text-sm font-semibold">
+          <SheetTitle className="text-sm font-medium">
             {t('sidebar.inbox', { defaultValue: 'Inbox' })}
           </SheetTitle>
           {tab === 'notifications' && unreadCount > 0 && (
@@ -590,7 +590,7 @@ export function InboxPopover({
               {unreadTopics > 0 && (
                 <span
                   key={`notif-${unreadTopics}`}
-                  className="ml-0.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] text-white motion-safe:animate-in motion-safe:zoom-in-75 motion-safe:duration-200"
+                  className="ml-0.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-500 px-1 text-xs text-white motion-safe:animate-in motion-safe:zoom-in-75 motion-safe:duration-200"
                 >
                   {unreadTopics > 9 ? '9+' : unreadTopics}
                 </span>
@@ -602,7 +602,7 @@ export function InboxPopover({
               {pendingApprovalsCount > 0 && (
                 <span
                   key={`appr-${pendingApprovalsCount}`}
-                  className="ml-0.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] text-white motion-safe:animate-in motion-safe:zoom-in-75 motion-safe:duration-200"
+                  className="ml-0.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-amber-500 px-1 text-xs text-white motion-safe:animate-in motion-safe:zoom-in-75 motion-safe:duration-200"
                 >
                   {pendingApprovalsCount > 9 ? '9+' : pendingApprovalsCount}
                 </span>
@@ -632,7 +632,7 @@ export function InboxPopover({
               >
                 {t('notifications.filterUnread', { defaultValue: 'Unread' })}
                 {unreadTopics > 0 && (
-                  <span className="ml-1 text-[10px] opacity-70">{unreadTopics}</span>
+                  <span className="ml-1 text-xs opacity-70">{unreadTopics}</span>
                 )}
               </button>
               <button
@@ -708,7 +708,7 @@ export function InboxPopover({
                                     {group.title}
                                   </span>
                                   <span
-                                    className="shrink-0 rounded-full bg-muted px-1.5 text-[10px] font-medium leading-4 text-muted-foreground"
+                                    className="shrink-0 rounded-full bg-muted px-1.5 text-xs font-medium leading-4 text-muted-foreground"
                                     aria-label={
                                       t('notifications.groupCount', {
                                         defaultValue: '{{count}} notifications',
@@ -724,7 +724,7 @@ export function InboxPopover({
                                     {group.items[0].body}
                                   </div>
                                 )}
-                                <div className="text-[10px] text-muted-foreground mt-1">
+                                <div className="text-xs text-muted-foreground mt-1">
                                   {timeAgo(group.latestCreatedAt, displayLocale)}
                                   {group.unreadCount > 0 && (
                                     <span className="ml-1">
@@ -879,7 +879,7 @@ export function InboxPopover({
                         <span className="font-medium">{a.user}</span>{' '}
                         <span className="text-muted-foreground">{a.description}</span>
                       </div>
-                      <div className="text-[10px] text-muted-foreground mt-0.5">
+                      <div className="text-xs text-muted-foreground mt-0.5">
                         {timeAgo(a.timestamp, displayLocale)} · <ActivityObjectLabel objectName={a.objectName} />
                       </div>
                     </li>

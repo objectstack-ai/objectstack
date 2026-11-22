@@ -14,23 +14,88 @@
 import type { TableColumn } from '@object-ui/types';
 
 /**
- * A key the input method owns: pressed while a composition is open
- * (`isComposing`), or the 229 a browser reports for the key that ends one
- * (Safari raises the candidate-picking Enter after `compositionend`, as 229).
- * Enter, Esc, Tab and the arrows pressed then pick or move a candidate; the
- * table must not commit, cancel or move on them.
+ * The input-method key guard the table asks before it commits, cancels or
+ * moves on Enter, Esc, Tab or an arrow. Defined once in `../../lib/ime-key`
+ * (objectstack#35996) and passed through here so the table keeps importing
+ * its key helpers from one module.
  */
-export function isImeKey(e: { nativeEvent: KeyboardEvent; keyCode?: number }): boolean {
-  return e.nativeEvent.isComposing === true || e.nativeEvent.keyCode === 229 || e.keyCode === 229;
+export { isImeKey } from '../../lib/ime-key';
+
+/**
+ * The attribute a link wears when a single click on it still follows it in a
+ * select-first grid: the row's title link (the name column). Every other link
+ * a cell draws is one of the cell's {@link cellOpenerAt openers}.
+ */
+export const OPENS_ON_CLICK_ATTRIBUTE = 'data-opens-on-click';
+
+/**
+ * The attribute a cell renderer puts on a non-link control that opens what the
+ * value points at (an image thumbnail's lightbox), so the select-first grid
+ * treats it as it treats a link.
+ */
+export const CELL_OPENER_ATTRIBUTE = 'data-cell-opener';
+
+const CELL_OPENER_SELECTOR = `a[href]:not([${OPENS_ON_CLICK_ATTRIBUTE}]), [${CELL_OPENER_ATTRIBUTE}]`;
+
+/**
+ * What a cell draws that opens something — a mail, phone or web link, a
+ * referenced record's chip, a file, an image — at or around `target`, or
+ * `null`. In a select-first grid a plain click on one only selects the cell;
+ * it is opened by a Ctrl/Cmd-click, the selected cell's open button or
+ * Ctrl/Cmd+Enter.
+ */
+export function cellOpenerAt(target: EventTarget | null, cell: Element): HTMLElement | null {
+  if (!(target instanceof Element) || !cell.contains(target)) return null;
+  const opener = target.closest<HTMLElement>(CELL_OPENER_SELECTOR);
+  return opener !== null && opener !== cell && cell.contains(opener) ? opener : null;
+}
+
+const RECORD_CHIP_SELECTOR = 'a[data-record-link][data-record-object][data-record-id]';
+
+/** The record a referenced record's chip names (`ReferencedRecordLink`'s data attributes). */
+export interface RecordChipTarget {
+  objectName: string;
+  recordId: string;
+}
+
+function chipTarget(chip: Element | null): RecordChipTarget | null {
+  const objectName = chip?.getAttribute('data-record-object') ?? '';
+  const recordId = chip?.getAttribute('data-record-id') ?? '';
+  return objectName !== '' && recordId !== '' ? { objectName, recordId } : null;
 }
 
 /**
- * A press on a control a cell draws (a record link, a phone or mail link, a
- * button, a checkbox) keeps its own click: it is not a press on the cell. A
- * disabled control (a read face's checkbox) has no click of its own.
+ * The record named by the referenced record's chip at or around `target`
+ * inside `cell`, or `null` when the press is not on one. In a reference cell
+ * of a select-first grid a plain click on a chip opens that record in place
+ * (objectstack#36015).
+ */
+export function recordChipAt(target: EventTarget | null, cell: Element): RecordChipTarget | null {
+  if (!(target instanceof Element) || !cell.contains(target)) return null;
+  const chip = target.closest(RECORD_CHIP_SELECTOR);
+  return chip !== null && cell.contains(chip) ? chipTarget(chip) : null;
+}
+
+/** The record the first chip a cell draws names, or `null` (Ctrl/Cmd+Enter in a reference cell). */
+export function firstRecordChip(cell: Element): RecordChipTarget | null {
+  return chipTarget(cell.querySelector(RECORD_CHIP_SELECTOR));
+}
+
+/** The first opener a cell draws (a cell of several chips opens the first), or `null`. */
+export function firstCellOpener(cell: Element): HTMLElement | null {
+  return cell.querySelector<HTMLElement>(CELL_OPENER_SELECTOR);
+}
+
+/**
+ * A press on a control a cell draws (the title link, a button, a checkbox)
+ * keeps its own click: it is not a press on the cell. A disabled control (a
+ * read face's checkbox) has no click of its own, and an opener
+ * ({@link cellOpenerAt}) is part of the value: a press on it is a press on
+ * the cell.
  */
 export function isCellWidgetTarget(target: EventTarget | null, cell: Element): boolean {
   if (!(target instanceof Element) || !cell.contains(target)) return false;
+  if (cellOpenerAt(target, cell) !== null) return false;
   const widget = target.closest(
     'a[href], button, input, select, textarea, label, [role="link"], [role="button"], [role="checkbox"], [role="switch"], [contenteditable]:not([contenteditable="false"])',
   );

@@ -73,18 +73,20 @@ function renderGrid(opts?: Record<string, any>) {
  * They are therefore separately observable, and each case below asserts both.
  */
 const COLUMN_COPY: Record<string, string[]> = {
-  // objectstack#35548 — the default (`compact`) row is 33px: a 32px cell and its line.
-  compact: ['px-3', 'py-1', 'h-8', 'text-[13px]', 'leading-tight'],
-  short: ['px-3', 'py-1', 'h-9', 'text-[13px]', 'leading-normal'],
-  medium: ['px-3', 'py-1.5', 'h-11', 'text-[13px]', 'leading-normal'],
+  // objectstack#36048 — the default (`compact`) cell is 36px (32px before it,
+  // objectstack#35548). It shares `short`'s floor and keeps its own leading, so
+  // the two still resolve to different copies.
+  compact: ['px-3', 'py-1', 'h-9', 'text-sm', 'leading-tight'],
+  short: ['px-3', 'py-1', 'h-9', 'text-sm', 'leading-normal'],
+  medium: ['px-3', 'py-1.5', 'h-11', 'text-sm', 'leading-normal'],
   tall: ['px-3', 'py-2.5', 'h-14', 'text-sm'],
   extra_tall: ['px-3', 'py-3.5', 'h-16', 'text-sm', 'leading-relaxed'],
 };
 
 const TABLE_COPY: Record<string, string[]> = {
-  compact: ['px-3', 'py-1', 'text-[13px]', 'leading-tight'],
-  short: ['px-3', 'py-1', 'text-[13px]', 'leading-normal'],
-  medium: ['px-3', 'py-1.5', 'text-[13px]', 'leading-normal'],
+  compact: ['px-3', 'py-1', 'text-sm', 'leading-tight'],
+  short: ['px-3', 'py-1', 'text-sm', 'leading-normal'],
+  medium: ['px-3', 'py-1.5', 'text-sm', 'leading-normal'],
   tall: ['px-3', 'py-2.5', 'text-sm'],
   extra_tall: ['px-3', 'py-3.5', 'text-sm', 'leading-relaxed'],
 };

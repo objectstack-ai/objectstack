@@ -46,6 +46,8 @@ import { datasetInvalidError, invalidMemberError } from '../dataset-refusal.js';
 import { type LikeShape } from '../like-pattern.js';
 import { textMatchPredicateSql, sqlDialectFor, type AnalyticsSqlDialect } from '../text-match-sql.js';
 import { whereContainsMembershipSql } from '../contains-membership-sql.js';
+import { refuseWhereJsonColumnComparison } from '../json-column-comparison-refusal.js';
+import { JSON_COLUMN_INCOMPATIBLE_OPERATORS } from '@objectstack/core';
 // [#25778] The per-row operand of a dataset duration measure, per dialect.
 import { durationMeasureIn, durationMeasureKey, durationOperandSql, hasDurationSql } from '../duration-measure-sql.js';
 import { scopedMeasureFilter } from '../scoped-measure-key.js';
@@ -1090,6 +1092,16 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
    * declared value shape and its dialect), so the decline fires where an
    * emitter's `'unknown'` refusal would and nowhere else.
    *
+   * [#36168] A fourth refusal reads the same population on the caller's
+   * `where`, the dataset's `filter` and the measures' `filter`s (not the read
+   * scope, which `read-scope-sql.ts` compiles): an operator of
+   * `JSON_COLUMN_INCOMPATIBLE_OPERATORS`, or implicit equality, on a JSON-stored
+   * field (`json-column-comparison-refusal.ts`). It needs no JSON function, and
+   * on a named dialect it refuses; on `'unknown'` the query is declined here
+   * instead, so a non-SQL datasource keeps its engine's answer (`driver-memory`
+   * refuses the same operators, and `driver-mongodb` answers them) rather than
+   * meeting this compiler's refusal ahead of the hand-off.
+   *
    * It reads every filter this strategy would compile through those emitters:
    * - the caller's `where`, lowered, plus the compiled dataset's own `filter`
    *   and the `filter` of each requested measure, as
@@ -1109,33 +1121,44 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     const baseTable = this.extractObjectName(cube);
     const referenceOf = relationshipReferenceOf(ctx);
     type Target = { object: string; field: string } | undefined;
-    const needsJson = (target: Target, op: string): boolean => {
-      if (!target || (op !== '$contains' && op !== '$notContains' && op !== '$empty')) return false;
-      if (hasJsonMembershipSql(sqlDialectFor(ctx, target.object))) return false;
+    // `comparisons`: whether this filter is one `buildFilterClause` compiles,
+    // and so meets the [#36168] comparison refusal (`'='` is implicit
+    // equality). A read scope is not.
+    const needsJson = (target: Target, op: string, comparisons: boolean): boolean => {
+      if (!target) return false;
+      const comparison = comparisons && (op === '=' || JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(op));
+      if (!comparison && op !== '$contains' && op !== '$notContains' && op !== '$empty') return false;
+      const dialect = sqlDialectFor(ctx, target.object);
+      if (comparison ? dialect !== 'unknown' : hasJsonMembershipSql(dialect)) return false;
       const shape = declaredValueShapeResolver(ctx, target.object)?.(target.field);
       if (op === '$empty') return shape !== undefined && expandEmptyOperator(shape).arm === 'multi_value';
       return isJsonStoredShape(shape);
     };
     // One filter condition: `$and` / `$or` / `$not` recurse, and a field key
-    // whose value is an operator object is judged operator by operator. A
-    // plain object under a field key is the nested-relation form, which its
-    // own decline above routes.
-    const carries = (node: unknown, targetOf: (key: string) => Target): boolean => {
+    // whose value is an operator object is judged operator by operator, one
+    // whose value is a comparand as implicit equality. A plain object under a
+    // field key is the nested-relation form, which its own decline above
+    // routes.
+    const carries = (node: unknown, targetOf: (key: string) => Target, comparisons = true): boolean => {
       if (!node || typeof node !== 'object' || Array.isArray(node)) return false;
       for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
         if (key === '$and' || key === '$or') {
-          if (Array.isArray(value) && value.some((child) => carries(child, targetOf))) return true;
+          if (Array.isArray(value) && value.some((child) => carries(child, targetOf, comparisons))) return true;
           continue;
         }
         if (key === '$not') {
-          if (carries(value, targetOf)) return true;
+          if (carries(value, targetOf, comparisons)) return true;
           continue;
         }
-        if (key.startsWith('$') || !value || typeof value !== 'object' || Array.isArray(value)) continue;
+        if (key.startsWith('$')) continue;
+        if (!value || typeof value !== 'object' || Array.isArray(value) || value instanceof Date) {
+          if (needsJson(targetOf(key), '=', comparisons)) return true;
+          continue;
+        }
         const ops = Object.keys(value as Record<string, unknown>);
         if (ops.length === 0 || !ops.every((op) => op.startsWith('$'))) continue;
         const target = targetOf(key);
-        if (ops.some((op) => needsJson(target, op))) return true;
+        if (ops.some((op) => needsJson(target, op, comparisons))) return true;
       }
       return false;
     };
@@ -1166,7 +1189,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     const objects = scoped
       ? [...scoped]
       : [baseTable, ...Object.keys(cube.joins ?? {}).map((alias) => cube.joins?.[alias]?.name ?? alias)];
-    return objects.some((object) => carries(ctx.getReadScope!(object), (field) => ({ object, field })));
+    return objects.some((object) => carries(ctx.getReadScope!(object), (field) => ({ object, field }), false));
   }
 
   /**
@@ -2476,6 +2499,15 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
         bind: (v) => { params.push(v); return `$${params.length}`; },
       });
     }
+
+    // [#36168] A scalar comparison or text operator on a column the host
+    // DECLARES multi-valued or JSON-stored would compare the stored JSON
+    // serialization (`tags IN ('a')` counts nothing, `$nin` counts the rows it
+    // excludes): refused `INVALID_FILTER` / 400 in the data door's words,
+    // before anything binds. `contains` / `notContains` (the membership branch
+    // below) and the null predicates above are not refused. See
+    // `json-column-comparison-refusal.ts`.
+    refuseWhereJsonColumnComparison({ ctx, target, operator });
 
     if (operator === 'in' || operator === 'notIn') {
       if (!values || values.length === 0) return null;

@@ -29,6 +29,10 @@ a public surface; until then no door binds a set to `guest`, and the record carr
 [`6413975861`](https://github.com/objectstack-ai/objectstack/issues/26020#issuecomment-6413975861),
 maintainer 「26020 Q1 A Q2 B 26001 A」) — D2: the signed-out invitation preview is admitted as a
 class-2-shaped door ([the dated note under D2's table](#d2--the-closed-list-of-doors)).
+· **Amended** (2026-11-20, ruling A on [#35848](https://github.com/objectstack-ai/objectstack/issues/35848),
+recorded on the card in [`7043884056`](https://github.com/objectstack-ai/objectstack/issues/35848#issuecomment-7043884056))
+— D2: the restriction profile `os validate --target` reads is admitted to the control-plane discovery role
+([the dated note under D2's table](#d2--the-closed-list-of-doors)).
 **Decided by**: the maintainer's ruling on [#22146](https://github.com/objectstack-ai/objectstack/issues/22146)
 (comment [`6054113537`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6054113537),
 decision batch #290 item 1, 2026-10-08, 「22146 同意」): **A on all eight questions, and G2 on the
@@ -346,6 +350,29 @@ above as "an invitation-link sign-up still owes the verification mail": a proof-
 mailbox, so a sign-up through it owes no verification mail, and a copied link, which carries no proof, still owes the
 verification mail, as Q2 B states. The refinement is the maintainer's to approve, on this note's Tier H hand-off;
 until that approval it binds nothing. The vendor accept route is unchanged by this note.
+
+**Amended 2026-11-20 — the restriction profile, in the control-plane discovery role.** Ruling A on
+[#35848](https://github.com/objectstack-ai/objectstack/issues/35848)
+(recorded on the card in [`7043884056`](https://github.com/objectstack-ai/objectstack/issues/35848#issuecomment-7043884056);
+the review record it answers is [`7038862149`](https://github.com/objectstack-ai/objectstack/pull/35838#issuecomment-7038862149),
+finding F1) admits one more route into the **discovery** role of the control-plane family below, not a door class:
+`GET {basePath}/discovery/restriction-profile`, and its environment-scoped twin
+`GET {basePath}/environments/:environmentId/discovery/restriction-profile` where environment scoping mounts it. What
+it serves: a constant open profile, a `RestrictionProfileSchema` value that restricts nothing, with
+`versions { spec, skills }`. Its `allowedFlowNodeTypes` is the profile's whole node-type vocabulary, the approvals
+plugin's `approval` / `approval_revise` included; it is not a statement of which plugins this kernel runs, so
+`os validate --target` against a self-hosted runtime does not check whether an approval flow has an executor there.
+The spec-side reader rule that says otherwise is spec-lane card [#36081](https://github.com/objectstack-ai/objectstack/issues/36081).
+The one fact it adds to what an anonymous caller already reads is the `@objectstack/spec`
+version the runtime runs, which `/discovery`'s anonymous `version` states too unless an operator stamp
+(`OS_RUNTIME_VERSION`) replaces it. It reads no query parameter, and `api.enableDiscovery: false` unmounts it with the
+rest of discovery. Why: `os validate --target <url>` reads it without a credential, so a developer can check a build
+against what a self-hosted runtime accepts before deploying, and the cloud already serves the same route without
+authentication ([#31240](https://github.com/objectstack-ai/objectstack/issues/31240#issuecomment-6716619631)). The
+carrier is the anonymous-door sweep's `discovery` row alone, as for the REST root. There is no `ALLOW_ROUTES` row:
+the handler (`packages/rest/src/discovery-routes.ts#registerDiscoveryEndpoints`) never calls `enforceAuth`, so a row in
+`isAuthGateAllowlisted` would change no answer and would only add a standing exemption, on every mount base, from the
+ADR-0069 held-user gate and from `shouldDenyAnonymous`. Ledgered in `packages/rest/src/rest-route-ledger.ts`.
 
 **Outside the guest model by construction**, and not on the list:
 
@@ -816,7 +843,8 @@ This record moved from Proposed to Accepted when all four held. All four hold:
          literally: the REST root (`packages/rest/src/rest-server.ts#RestServer.registerDiscoveryEndpoints`)
          and the dispatcher's well-known document
          (`packages/runtime/src/dispatcher-plugin.ts#createDispatcherPlugin`). They play the
-         allowlist's discovery role.
+         allowlist's discovery role, as does the restriction profile beside them
+         (`packages/rest/src/discovery-routes.ts#registerDiscoveryEndpoints`, the dated D2 note).
        - The local storage adapter's signed byte URLs
          (`packages/services/service-storage/src/local-storage-adapter.ts#LocalStorageAdapter.verifyToken`):
          the signed, expiring token an authorized upload or download mints is the credential, the

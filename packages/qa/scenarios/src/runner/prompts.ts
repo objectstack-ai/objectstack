@@ -420,6 +420,29 @@ function rowOwnership(card: Card): string[] {
   return lines;
 }
 
+/**
+ * What a confirm-gated agent action's line asks of the build. The gate
+ * (`ai.requiresConfirmation`) guards the action's own door only, and it is not
+ * widened to the raw data door (`update_record`), so without a lock an agent
+ * that meets the gate can write the target state directly. The lock is the one
+ * the objectstack-ai skill teaches (pitfall "Gating the action, not the
+ * state"): the fields made not editable for the people who run the action,
+ * written elevated by the action itself.
+ *
+ * Two limits keep it from denying a card's own operations: it is scoped to the
+ * stage the action acts on (a field permission `when`), so the same people's
+ * other changes to those fields still land (a team lead's resolve, refused by
+ * validation, meets no lock before the ticket is resolved); and an action that
+ * deletes its row locks nothing, since the same people's plain deletes are
+ * applied operations on several cards.
+ */
+const CONFIRM_FIRST_LOCK =
+  'confirm first; the confirmation guards this action’s own door only, so also lock the change it makes: ' +
+  'if it changes fields of its row, make those fields not editable for each person who runs it, at the stage it acts on ' +
+  '(a field permission `when` in their permission set), and have the action write them elevated, ' +
+  'so a plain record update cannot make that change while those people’s other changes to the same fields still land; ' +
+  'an action that deletes its row locks nothing, and those people keep their delete right';
+
 /** The runner's contract, appended to every build prompt. */
 export function dataContract(card: Card): string {
   const lines: string[] = [];
@@ -461,7 +484,7 @@ export function dataContract(card: Card): string {
   if (card.run.agentActions?.length) {
     lines.push('');
     lines.push('Business actions an AI agent may call (expose each to AI; ask before acting where marked):');
-    for (const a of card.run.agentActions) lines.push(`- \`${a.name}\` on \`${a.object}\`: ${a.summary}${a.confirm ? ' (confirm first)' : ''}`);
+    for (const a of card.run.agentActions) lines.push(`- \`${a.name}\` on \`${a.object}\`: ${a.summary}${a.confirm ? ` (${CONFIRM_FIRST_LOCK})` : ''}`);
   }
   return lines.join('\n');
 }

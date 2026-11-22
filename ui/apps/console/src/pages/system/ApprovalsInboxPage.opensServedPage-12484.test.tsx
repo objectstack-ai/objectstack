@@ -287,10 +287,13 @@ async function inboxRow(): Promise<HTMLElement> {
   return row;
 }
 
-/** The served page has drawn: its decision panel and its H1. */
+/**
+ * The served page has drawn: its decision panel and its H1, which names the
+ * request by the record it asks a decision on (objectstack#35415).
+ */
 async function servedPage(): Promise<void> {
   await screen.findByTestId('approval-decision-panel', undefined, { timeout: 8000 });
-  expect((await screen.findByRole('heading', { level: 1 }, { timeout: 8000 })).textContent).toBe(ROW.process_label);
+  expect((await screen.findByRole('heading', { level: 1 }, { timeout: 8000 })).textContent).toBe(ROW.record_title);
 }
 
 /** The served get was read; the sheet's own reads were not, and no sheet (a dialog) is mounted. */

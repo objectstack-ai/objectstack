@@ -109,31 +109,23 @@ export class AggregationFacet {
     const measureFilters = (query.aggregations ?? [])
       .map((agg) => agg.filter)
       .filter((filter): filter is NonNullable<typeof filter> => !!filter && Object.keys(filter).length > 0);
+    // Every condition this statement compiles, folded into one `where` for the primes below.
+    const primedWhere = measureFilters.length > 0 ? { $and: [...(query.where ? [query.where] : []), ...measureFilters] } : query.where;
     // [#31395] SQL Server: which columns are GUIDs, before a text operator compiles.
-    if (this.isMssql) {
-      await this.primeMssqlGuidColumns(
-        object,
-        measureFilters.length > 0 ? { $and: [...(query.where ? [query.where] : []), ...measureFilters] } : query.where,
-      );
-    }
+    if (this.isMssql) await this.primeMssqlGuidColumns(object, primedWhere);
     // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
     // the remote catalog before a comparand or a written value is bound.
-    if (this.isOracle) await this.primeOracleRawUuidColumns(object);
+    if (this.isOracle) await this.primeOracleRawUuidColumns(object, primedWhere);
     // [ADR-0155 O2] PostgreSQL: the key type a fixed-read leaf's inner read is cast to.
     // The measure filters compile with the same where compiler, so they are
     // walked too, folded as the SQL Server prime folds them.
-    await primeFixedReadLeafKeyTypes(
-      this,
-      object,
-      measureFilters.length > 0 ? { $and: [...(query.where ? [query.where] : []), ...measureFilters] } : query.where,
-      options,
-    );
+    await primeFixedReadLeafKeyTypes(this, object, primedWhere, options);
     // …and the same primes for each joined related object, whose scope
     // compiles against its own table.
     for (const join of relationJoins ?? []) {
       if (join.parent === null) continue;
       if (this.isMssql) await this.primeMssqlGuidColumns(join.parent.object, join.parent.scope);
-      if (this.isOracle) await this.primeOracleRawUuidColumns(join.parent.object);
+      if (this.isOracle) await this.primeOracleRawUuidColumns(join.parent.object, join.parent.scope);
       await primeFixedReadLeafKeyTypes(this, join.parent.object, join.parent.scope, options);
     }
     const builder = this.getBuilder(object, options);

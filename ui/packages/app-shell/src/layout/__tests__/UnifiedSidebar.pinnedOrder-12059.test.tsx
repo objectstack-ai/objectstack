@@ -275,11 +275,11 @@ describe('UnifiedSidebar — the pinned section keeps the user’s order (object
     ];
     const first = makeAdapter(initial);
     const view = render(sidebarUi(first.adapter));
-    await waitFor(() => expect(pinnedLabels()).toEqual(['Accounts', 'Leads', '📋Acme']));
+    await waitFor(() => expect(pinnedLabels()).toEqual(['Accounts', 'Leads', 'Acme']));
 
     await keyboardMove('Accounts', ['ArrowDown']);
 
-    expect(pinnedLabels()).toEqual(['Leads', 'Accounts', '📋Acme']);
+    expect(pinnedLabels()).toEqual(['Leads', 'Accounts', 'Acme']);
     await waitFor(() => expect(first.saves.length).toBeGreaterThan(0), { timeout: 2000 });
     expect(first.saves.at(-1)!.map((f) => f.id)).toEqual([
       'nav:nav_leads',
@@ -293,7 +293,7 @@ describe('UnifiedSidebar — the pinned section keeps the user’s order (object
     localStorage.clear();
     const second = makeAdapter(first.saves.at(-1)!);
     render(sidebarUi(second.adapter));
-    await waitFor(() => expect(pinnedLabels()).toEqual(['Leads', 'Accounts', '📋Acme']));
+    await waitFor(() => expect(pinnedLabels()).toEqual(['Leads', 'Accounts', 'Acme']));
   });
 
   it('a new pin goes to the end, an unpin leaves the order, and a re-pin goes to the end again', async () => {

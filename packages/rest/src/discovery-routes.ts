@@ -71,7 +71,9 @@
 // unless `OS_MCP_SERVER_ENABLED=false` opts the environment out. The serveable
 // half is the class's `probeMcpServeable`, reached through the host.
 import { isMcpServerEnabled } from '@objectstack/types';
-import { handleRouteError, sendThrownError } from './error-response.js';
+import { RestrictionProfileNodeType, type RestrictionProfile } from '@objectstack/spec/system';
+import { handleRouteError, sendDeclaredFault, sendThrownError } from './error-response.js';
+import { refuseUnknownQueryParams } from './query-allowlist.js';
 import { logError } from './log.js';
 // [#5040 E6] The `api`-metadata endpoints the OpenAPI document folds in.
 import { enrichOpenApiWithEndpoints } from './openapi-endpoints.js';
@@ -447,6 +449,80 @@ export function registerDiscoveryEndpoints(this: DiscoveryRouteHost, basePath: s
             tags: ['discovery'],
         },
     });
+
+    // [#34774] The restriction profile `os validate --target <url>` reads
+    // (`RESTRICTION_PROFILE_ROUTE`, packages/cli): `{ success: true, data }`,
+    // `data` a `RestrictionProfileSchema` value. No `enforceAuth`, as
+    // `/discovery`: the reader sends no credential. ADR-0138 D2 (amended
+    // 2026-11-20) admits it to the control-plane discovery role by the
+    // anonymous-door sweep's `discovery` row alone, with no `ALLOW_ROUTES`
+    // row. Its one new anonymous fact is the spec version; the anonymous peer
+    // is `/discovery`'s `version`, which already answers without a credential.
+    this.routeManager.register({
+        method: 'GET',
+        path: `${basePath}/discovery/restriction-profile`,
+        handler: async (req: any, res: any) => {
+            try {
+                if (refuseUnknownQueryParams(req, res, RESTRICTION_PROFILE_PARAMS)) return;
+                const spec = await servedSpecVersion();
+                if (!spec) {
+                    sendDeclaredFault(res, {
+                        code: 'SERVICE_UNAVAILABLE',
+                        status: 503,
+                        message: 'This runtime could not read the @objectstack/spec version it runs, so it publishes no restriction profile.',
+                    });
+                    return;
+                }
+                res.json({ success: true, data: openRestrictionProfile(spec) });
+            } catch (error: any) {
+                handleRouteError(res, error);
+            }
+        },
+        metadata: {
+            summary: 'Get the restriction profile this runtime publishes',
+            tags: ['discovery'],
+        },
+    });
+}
+
+/** [#34774] The restriction-profile route's closed query set: it reads none. */
+export const RESTRICTION_PROFILE_PARAMS: readonly string[] = [];
+
+/**
+ * [#34774] The open runtime restricts nothing a profile can name: every rule
+ * allows, and `allowedFlowNodeTypes` is the profile's whole (derived)
+ * vocabulary, a constant, including the approvals plugin's `approval` /
+ * `approval_revise`. It is NOT a statement of which plugins this kernel runs,
+ * so `os validate --target` against a self-hosted runtime does not check
+ * whether an approval flow has an executor there (ADR-0138 D2 note; the
+ * spec-side reader rule is card #36081). `versions.skills` is `versions.spec`: `@objectstack/skills` and
+ * `@objectstack/spec` are one `fixed` changeset group, as the MCP server's
+ * skills install line also relies on.
+ */
+function openRestrictionProfile(spec: string): RestrictionProfile {
+    return {
+        allowCode: true,
+        allowSandboxedJs: true,
+        allowScheduledAutomation: true,
+        allowedFlowNodeTypes: [...RestrictionProfileNodeType.options],
+        versions: { spec, skills: spec },
+    };
+}
+
+let servedSpecVersionCache: Promise<string | undefined> | undefined;
+
+/** [#34774] The `@objectstack/spec` this process resolves, read once, as `loadOpenApiSpec` reads its manifest. */
+function servedSpecVersion(): Promise<string | undefined> {
+    servedSpecVersionCache ??= (async () => {
+        try {
+            // @ts-ignore — node built-in, imported lazily as `loadOpenApiSpec` does
+            const { version } = (await import('module')).createRequire((import.meta as any).url)('@objectstack/spec/package.json');
+            return typeof version === 'string' && version ? version : undefined;
+        } catch {
+            return undefined;
+        }
+    })();
+    return servedSpecVersionCache;
 }
 
 /**

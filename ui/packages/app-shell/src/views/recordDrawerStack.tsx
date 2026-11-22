@@ -41,7 +41,6 @@
 import {
   Fragment,
   createContext,
-  createElement,
   useCallback,
   useContext,
   useEffect,
@@ -56,13 +55,13 @@ import {
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { ChevronRight } from 'lucide-react';
-import { getIcon } from '../utils/getIcon.js';
 import {
   NavigationOverlay,
   type NavigationOverlayMode,
   type RecordTopBarStepper,
   RecordHeaderBarContext,
   type RecordHeaderBar,
+  ObjectIconTile,
 } from '@object-ui/components';
 import { overlayWidthFor } from '@object-ui/plugin-view/core';
 import type { FieldContainerLike } from '@object-ui/core';
@@ -477,6 +476,7 @@ export function RecordStackDrawer({
   storageKey,
   objects,
   mainContent,
+  listObjectName,
   stepScope,
   onClose,
   onOpenAsPage,
@@ -490,6 +490,12 @@ export function RecordStackDrawer({
   objects: ReadonlyArray<unknown>;
   /** The list the pane opens from (`NavigationOverlay.mainContent`). */
   mainContent?: ReactNode;
+  /**
+   * The object of the list's rows (objectstack#36015): the root marks its row
+   * in the list only when it is a record of that object, not a record a lookup
+   * chip opened. Absent ⇒ the root is always the list's row.
+   */
+  listObjectName?: string;
   /**
    * The root level's set by name — the list view it came from — for the
    * counter's tooltip, unless the level names its own set (its group).
@@ -513,6 +519,7 @@ export function RecordStackDrawer({
   // reported, by level key: the breadcrumb names the record, and an ancestor
   // that was not opened with a title is still named by the one it reported.
   const [toggleSlot, setToggleSlot] = useState<HTMLElement | null>(null);
+  const [commentsSlot, setCommentsSlot] = useState<HTMLElement | null>(null);
   const [titles, setTitles] = useState<Readonly<Record<string, string>>>({});
   // objectstack#35593 / objectstack#35853 — the record header draws the
   // record's name and tags, and its button group, into the bar's record row
@@ -528,13 +535,14 @@ export function RecordStackDrawer({
   const bar = useMemo<RecordPaneBarApi>(
     () => ({
       toggleSlot,
+      commentsSlot,
       reportTitle: (recordId: string, title: string | undefined) => {
         if (!currentObject || !title) return;
         const key = `${currentObject}:${recordId}`;
         setTitles((prev) => (prev[key] === title ? prev : { ...prev, [key]: title }));
       },
     }),
-    [toggleSlot, currentObject],
+    [toggleSlot, commentsSlot, currentObject],
   );
   const defOf = (objectName: string) =>
     objects.find((o) => (o as { name?: unknown } | null)?.name === objectName);
@@ -552,10 +560,11 @@ export function RecordStackDrawer({
   const titleOf = (level: RecordDrawerLevel) => titles[levelKey(level)!] || level.title || shortId(level.recordId);
   const crumbClass =
     'min-w-0 truncate rounded px-1 hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
-  // The record row's icon: the object's, as the full page draws it.
-  const rootIconName = current ? (defOf(current.objectName) as { icon?: unknown } | undefined)?.icon : undefined;
-  const rootIcon = typeof rootIconName === 'string'
-    ? createElement(getIcon(rootIconName), { className: 'h-4 w-4 shrink-0 text-muted-foreground', 'aria-hidden': true })
+  // The record row's icon: the object's tile, as the full page draws it
+  // (objectstack#35985 — white glyph on the object's colour, gray without one).
+  const rootDef = current ? (defOf(current.objectName) as { icon?: unknown; color?: unknown } | undefined) : undefined;
+  const rootIcon = typeof rootDef?.icon === 'string'
+    ? <ObjectIconTile icon={rootDef.icon} color={typeof rootDef.color === 'string' ? rootDef.color : undefined} />
     : null;
   // objectstack#35853 — the bar's record row: the icon, then the record's
   // name and tags as the record header draws them into the slot; until it
@@ -564,7 +573,7 @@ export function RecordStackDrawer({
     <>
       {rootIcon}
       {!headerClaimed && (
-        <span className="min-w-0 truncate text-base font-semibold text-foreground" data-record-drawer-title="">
+        <span className="min-w-0 truncate text-base font-medium text-foreground" data-record-drawer-title="">
           {titleOf(current)}
         </span>
       )}
@@ -614,7 +623,7 @@ export function RecordStackDrawer({
         if (!next) onClose();
       }}
       mainContent={mainContent}
-      activeListRecordId={path[0]?.recordId ?? null}
+      activeListRecordId={path[0] && (listObjectName === undefined || path[0].objectName === listObjectName) ? path[0].recordId : null}
       storageKey={storageKey}
       onBack={depth > 0 ? () => popTo(depth - 1) : undefined}
       trail={trail}
@@ -623,6 +632,7 @@ export function RecordStackDrawer({
       recordRow={recordRow}
       onExpand={pane ? () => pane.openAsPage() : undefined}
       toggles={<span ref={setToggleSlot} className="contents" data-record-pane-toggles="" />}
+      comments={<span ref={setCommentsSlot} className="contents" data-record-pane-comments="" />}
     >
       {() => (
         <RecordDrawerContext.Provider value={api}>
@@ -656,6 +666,13 @@ export function RecordPaneBarToggles({ children }: { children: ReactNode }) {
   const bar = useContext(RecordPaneBarContext);
   if (!bar?.toggleSlot || children == null || children === false) return null;
   return createPortal(children, bar.toggleSlot);
+}
+
+/** The record's comments switch, drawn into its pane's bar before the button group (objectstack#36075). */
+export function RecordPaneBarComments({ children }: { children: ReactNode }) {
+  const bar = useContext(RecordPaneBarContext);
+  if (!bar?.commentsSlot || children == null || children === false) return null;
+  return createPortal(children, bar.commentsSlot);
 }
 
 /**

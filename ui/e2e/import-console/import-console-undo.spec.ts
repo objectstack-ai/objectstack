@@ -49,15 +49,17 @@ test.describe('Import Wizard — real console: background import + undo', () => 
       return (body.records ?? []).length;
     };
 
-    // 1) Land on the REAL object list view and find the REAL toolbar button.
+    // 1) Land on the REAL object list view and find the REAL toolbar menu:
+    //    Import is an entry of the view bar's 「Import / Export」.
     await page.goto(`/apps/${APP_NAME}/${OBJECT}`);
-    const importBtn = page.getByTestId('object-view-import-button');
-    await expect(importBtn).toBeVisible({ timeout: 20_000 });
+    const ioMenu = page.getByTestId('object-view-import-export');
+    await expect(ioMenu).toBeVisible({ timeout: 20_000 });
 
     const baseline = await countRecords();
 
     // 2) Open the wizard and upload a 3-row CSV (well under the async threshold).
-    await importBtn.click();
+    await ioMenu.click();
+    await page.getByTestId('object-view-import-button').click();
     const stamp = Date.now();
     const csv = [
       'name,email,status',
@@ -105,6 +107,7 @@ test.describe('Import Wizard — real console: background import + undo', () => 
     //    settles, making the click flaky).
     page.on('dialog', (d) => d.accept()); // accept the confirm() prompt
     await page.reload();
+    await page.getByTestId('object-view-import-export').click();
     await page.getByTestId('object-view-import-button').click();
     await page.getByTestId('import-history-toggle').click();
     await page.getByTestId(`import-history-undo-${mine.jobId}`).click();

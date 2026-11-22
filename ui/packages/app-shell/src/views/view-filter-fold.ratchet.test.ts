@@ -6,7 +6,7 @@
  *
  * **objectui#4155 (the current contract): the list toolbar's filter panel must
  * not persist ANYTHING.** Filter-panel state is transient — it belongs to the
- * session and to `writeListFilterState`'s per-browser restore, not to the
+ * session and to the list's draft (objectstack#35955), not to the
  * view's stored body. It used to write a view-customization overlay on every
  * `onFilterChange`, so opening the panel and clicking `Add filter` put an
  * incomplete `field equals ''` condition into `sys_metadata`, where it REPLACED
@@ -126,10 +126,10 @@ describe('objectui#4155 ratchet — the filter panel persists nothing', () => {
     });
 
     it('the surviving handler still keeps SESSION state — the panel is not amnesiac', () => {
-        // Since objectui#12418 the conditions are the user's own list state
-        // (`listPrefs`, a `sys_user_preference` row), not this browser's
-        // localStorage alone: still never the view's stored body.
-        expect(objectViewSrc).toMatch(/onFilterChange=\{[^}]*listPrefs\.patchView\(viewDef\.id, \{ filters/s);
+        // Since objectstack#35955 the conditions are the list's DRAFT
+        // (`listDraft`, `./listDraftStore.ts`), kept until the reader saves or
+        // discards them: still never the view's stored body.
+        expect(objectViewSrc).toMatch(/onFilterChange=\{[^}]*listDraft\.patch\(\{ filters/s);
     });
 
     it('the EXPLICIT save path is untouched — this is the control', () => {

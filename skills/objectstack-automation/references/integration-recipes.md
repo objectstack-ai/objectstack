@@ -15,7 +15,7 @@ an unset ref leaves its instance degraded until set. Keep `automation` in
   the `rest` provider's single `request`) — authored on the entry, they are refused.
 - `connectorConfig.input` is a value-slot map: a top-level CEL envelope is evaluated, any other value kept as written,
   so a value from the record is a CEL envelope. The pre-dispatch `inputSchema`
-  judgement honours OpenAPI `nullable`, reads `null` on an optional parameter
+  judgement refuses an undeclared key, honours OpenAPI `nullable`, reads `null` on an optional parameter
   as absent and names each breached path. Text is never converted: cast a
   string-held id, `path: { dialect: 'cel', source: '{"petId": int(record.vendor_id)}' }`.
 - The answer lands as `<nodeId>.<key>` (`rest` / `openapi`: `{ status, ok, body }`;
@@ -59,10 +59,10 @@ export const StripeBalanceSweep = defineFlow({
 ```
 
 `requires: ['automation', 'triggers']`. Convert Swagger 2.0 or YAML and
-dereference every `$ref` offline, in-document ones included: the loader skips a
-`$ref` parameter, request body or response and the derived schema silently
-loses it. `providerConfig.include` allowlists operation keys as the
-`mcp` provider's does (absent = every operation; a non-array or unknown entry is
+dereference every `$ref` offline, in-document too: a `$ref` response is
+silently lost; a `$ref` parameter or `$ref` / schemaless body is open input,
+sent unjudged. `providerConfig.include` allowlists operation keys as the
+`mcp` provider's does (absent = all; a non-array or unknown entry is
 fatal).
 
 ## 2 · Remote MCP server, static header — GitHub

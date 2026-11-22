@@ -446,7 +446,7 @@ export function RegistryRefField({
           <div className="min-w-0">
             <p>{t('fields.registryRef.loadFailed')}</p>
             {catalog.message ? (
-              <p data-testid={`${testId}-load-failed-cause`} className="break-words font-mono text-[10px]">
+              <p data-testid={`${testId}-load-failed-cause`} className="break-words font-mono text-xs">
                 {catalog.message}
               </p>
             ) : null}

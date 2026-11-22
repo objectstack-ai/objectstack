@@ -266,6 +266,18 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       edited_at: {
         label: "تاريخ التعديل"
       },
+      is_resolved: {
+        label: "تم الحل",
+        help: "ما إذا كانت السلسلة التي يبدأها هذا التعليق من المستوى الأعلى قد حُلّت؛ مرفوض على الرد"
+      },
+      resolved_by: {
+        label: "حُلّ بواسطة",
+        help: "من حلّ السلسلة — تسجّله المنصة، ولا يكتبه المؤلفون أبدًا"
+      },
+      resolved_at: {
+        label: "وقت الحل",
+        help: "متى حُلّت السلسلة — تسجّله المنصة، ولا يكتبه المؤلفون أبدًا"
+      },
       created_at: {
         label: "تاريخ الإنشاء"
       },

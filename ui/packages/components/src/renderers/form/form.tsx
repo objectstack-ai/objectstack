@@ -182,7 +182,7 @@ function SectionDivider({ sectionKey, anchorId, label, description, collapsible,
               ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
               : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
           )}
-          <span className="text-sm font-semibold text-foreground">{label}</span>
+          <span className="text-sm font-medium text-foreground">{label}</span>
         </div>
       )}
       {/* A section's authored blurb. Carried on the divider because a sectioned
@@ -2757,8 +2757,16 @@ ComponentRegistry.register('form',
         const key = tabKeyByFieldName.get(name);
         if (key) out.add(key);
       }
+      // A host slot whose collection the last save was refused on
+      // (objectstack#35889's placed lines): the host owns that refusal, since
+      // no field of THIS form carries it, and says so on the slot row.
+      for (const f of fields as FormFieldConfig[]) {
+        if (f?.type !== 'form-slot' || !(f as { slotRefused?: boolean }).slotRefused) continue;
+        const key = tabKeyByFieldName.get(f.name);
+        if (key) out.add(key);
+      }
       return out;
-    }, [fieldTabs, tabKeyByFieldName, rejectedFieldNames]);
+    }, [fieldTabs, tabKeyByFieldName, rejectedFieldNames, fields]);
 
     // objectstack#34615 — below `sm` a horizontal tab strip that does not fit
     // scrolls sideways inside its own box (see the strip's classes) instead of

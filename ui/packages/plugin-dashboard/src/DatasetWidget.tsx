@@ -40,7 +40,7 @@ import { useContext, useEffect, useMemo, useRef, useState, type ReactElement, ty
 // behind. It lives in `@object-ui/react` because it reads the host context —
 // see its file header for the measured dependency direction. This widget
 // layers its CHART-ONLY colour/order derivation on top, below.
-import { SchemaRenderer, useDatasetDimensionMeta, useDataInvalidation, classifyLoadError } from '@object-ui/react';
+import { SchemaRenderer, SchemaRendererContext, useDatasetDimensionMeta, useDataInvalidation, classifyLoadError } from '@object-ui/react';
 import {
   buildChartSeries,
   buildOptionColorMap,
@@ -114,6 +114,7 @@ import { metricDrillFilter, readMeasureDrillScope } from './metricDrill';
 import { sharedMeasureDrillScope, scopeDrillFilter } from './measureDrill';
 import { specDefaultWidgetType } from './widgetDispatch';
 import { DASHBOARD_WIDGET_MULTI_MEASURE_TYPES } from '@objectstack/spec/ui';
+import { SnakeCaseIdentifierSchema } from '@objectstack/spec/shared';
 
 type Row = Record<string, unknown>;
 // One RESULT-side totals grouping (the response's `totals[]`), named apart from
@@ -306,7 +307,9 @@ function boundedDateWindow(value: unknown): [string, string] | null {
  * stays in the filter untouched.
  *
  * **Which dimension gets shifted is not decided here.** Every window found is
- * lowered under the name the author wrote. Zero of them, or two, is the
+ * returned under the name the author wrote; the widget sends a key no
+ * dimension can be named under its declared dimension's name
+ * (`mapCompareWindowKeys`), a rename, never a choice. Zero of them, or two, is the
  * executor's error to raise — it names the candidates (`resolveCompareDimension`).
  * Guessing one renderer-side would trade a loud error for a quietly wrong
  * window, which is the failure class objectstack#5011 set out to end. The one
@@ -416,6 +419,130 @@ export function filterDatesField(filter: unknown, dimension?: string): boolean {
     );
   };
   return walk(filter);
+}
+
+/**
+ * Whether a comparison-window date key can be a declared dimension's name: the
+ * dataset schema's own dimension-name grammar (`SnakeCaseIdentifierSchema`)
+ * decides, the one the dataset door reads too. A related record's field
+ * (`account.founded_at`) never can, because the grammar has no dot.
+ */
+export function canBeDimensionName(key: string): boolean {
+  return SnakeCaseIdentifierSchema.safeParse(key).success;
+}
+
+/** The parts of a declared dataset dimension the window-key mapping reads. */
+export interface DeclaredDatasetDimension {
+  name: string;
+  field?: string;
+  type?: string;
+}
+
+/**
+ * The declared name each comparison-window date key is sent under, for the
+ * keys no dimension can be named (`canBeDimensionName`), such as a dotted
+ * `relationship.field` (objectstack#34350).
+ *
+ * The dataset query answers only declared dimensions, and a dimension name has
+ * no dot, so a window keyed on a related record's field is refused at the
+ * door. A dataset can still declare a date dimension OVER that path
+ * (`{ name: 'account_founded', field: 'account.founded_at', type: 'date' }`),
+ * and the window is then sent under that declared name. The door's refusal of
+ * an undeclared key is unchanged: this only finds the declaration.
+ *
+ * A key is mapped when exactly one declared dimension has `type: 'date'` and
+ * `field` equal to the key, spelled exactly. Every other key is left as it is,
+ * so the door's refusal answers for it:
+ *  - a key that can be a dimension name (`close_date`) is the author's
+ *    dimension name and never renamed here;
+ *  - no declared date dimension over the path;
+ *  - two or more, because choosing between two declarations is a guess;
+ *  - a declared name another window already uses, or that two keys would
+ *    share, because two windows on one dimension would no longer be the
+ *    windows the filter states.
+ */
+export function mapCompareWindowKeys(
+  keys: readonly string[],
+  declared: readonly DeclaredDatasetDimension[],
+): Record<string, string> {
+  const candidate = new Map<string, string>();
+  for (const key of keys) {
+    if (canBeDimensionName(key) || candidate.has(key)) continue;
+    const over = declared.filter((d) => d.type === 'date' && d.field === key);
+    if (over.length === 1) candidate.set(key, over[0].name);
+  }
+  const targets = Array.from(candidate.values());
+  const mapped: Record<string, string> = {};
+  for (const [key, name] of candidate) {
+    if (keys.includes(name) || targets.filter((t) => t === name).length > 1) continue;
+    mapped[key] = name;
+  }
+  return mapped;
+}
+
+/** The declared dimensions in a dataset definition document, as read. */
+function declaredDimensionsOf(doc: unknown): DeclaredDatasetDimension[] {
+  const def = (doc as { item?: unknown; data?: unknown } | null)?.item
+    ?? (doc as { data?: unknown } | null)?.data
+    ?? doc;
+  const dims: unknown[] = Array.isArray((def as { dimensions?: unknown } | null)?.dimensions)
+    ? (def as { dimensions: unknown[] }).dimensions
+    : [];
+  return dims.flatMap((d) => {
+    const { name, field, type } = (d ?? {}) as { name?: unknown; field?: unknown; type?: unknown };
+    return typeof name === 'string'
+      ? [{ name, ...(typeof field === 'string' ? { field } : {}), ...(typeof type === 'string' ? { type } : {}) }]
+      : [];
+  });
+}
+
+/**
+ * The declared name each comparison-window key that no dimension can be named
+ * is sent under (`mapCompareWindowKeys`), read off the dataset definition.
+ *
+ * The definition is read only when such a key exists, through the host's
+ * authenticated `apiFetch` and as the widget's reader (`?callerPackage=`,
+ * ADR-0150 D3), the read the dataset-bound chart and the report's date range
+ * make. Every other widget reads nothing and its query is unchanged.
+ * `pending` holds the query until the read answers. A failed read maps
+ * nothing, so the door's refusal of the key still answers.
+ */
+function useCompareWindowKeyMap(
+  dataset: string,
+  packageId: string | undefined,
+  keys: readonly string[],
+): { pending: boolean; map: Record<string, string> } {
+  const apiFetch = useContext(SchemaRendererContext)?.apiFetch;
+  const keysSig = JSON.stringify(keys);
+  const readKey = `${packageId ?? ''}|${dataset}|${keysSig}`;
+  const needsRead = keys.length > 0 && !!dataset;
+  const [read, setRead] = useState<{ key: string; map: Record<string, string> } | null>(null);
+
+  useEffect(() => {
+    if (!needsRead) return;
+    let cancelled = false;
+    const wanted = JSON.parse(keysSig) as string[];
+    (async () => {
+      let map: Record<string, string> = {};
+      try {
+        const doFetch = apiFetch ?? fetch;
+        const query = packageId ? `?${new URLSearchParams({ callerPackage: packageId })}` : '';
+        const res = await doFetch(`/api/v1/meta/dataset/${encodeURIComponent(dataset)}${query}`, {
+          headers: { accept: 'application/json' },
+          credentials: 'include',
+        });
+        if (res.ok) map = mapCompareWindowKeys(wanted, declaredDimensionsOf(await res.json()));
+      } catch {
+        // Mapped nothing: the key goes out as authored and the door refuses it.
+      }
+      if (!cancelled) setRead({ key: readKey, map });
+    })();
+    return () => { cancelled = true; };
+  }, [needsRead, dataset, packageId, keysSig, readKey, apiFetch]);
+
+  if (!needsRead) return { pending: false, map: {} };
+  if (!read || read.key !== readKey) return { pending: true, map: {} };
+  return { pending: false, map: read.map };
 }
 
 /** Single-value KPI widget types — rendered as a number, not a chart. */
@@ -876,14 +1003,47 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
   // tile as a widget without `compareTo` (objectstack#25970). Any date
   // condition the author wrote, a one-bound `{ $gte }` included, still goes to
   // the executor, whose refusal names the fix (`filterDatesField`).
-  const compareTo = declaredCompareTo && filterDatesField(runtimeFilter, declaredCompareTo.dimension)
-    ? declaredCompareTo
+  //
+  // A window keyed on a field no dimension can be named (a related record's
+  // `relationship.field`) goes out under the declared date dimension over that
+  // path, read off the dataset definition (`mapCompareWindowKeys`,
+  // objectstack#34350). `compareTo.dimension` names the window by either
+  // spelling, the filtered field or that declared name, and is sent as the
+  // declared name too. The query waits for that read; a widget with no such key
+  // reads nothing.
+  const pathWindowKeys = useMemo(
+    () => (declaredCompareTo
+      ? extractDateWindows(runtimeFilter).windows.map((w) => w.dimension).filter((k) => !canBeDimensionName(k))
+      : []),
+    [declaredCompareTo, runtimeFilter],
+  );
+  const windowKeys = useCompareWindowKeyMap(datasetName, packageId, pathWindowKeys);
+  const windowKeyMap = windowKeys.map;
+  const comparedDimension = declaredCompareTo?.dimension;
+  const comparedKey = comparedDimension == null
+    ? undefined
+    : Object.keys(windowKeyMap).find((key) => windowKeyMap[key] === comparedDimension) ?? comparedDimension;
+  const compareTo = declaredCompareTo && filterDatesField(runtimeFilter, comparedKey)
+    ? (comparedKey != null && windowKeyMap[comparedKey]
+      ? { ...declaredCompareTo, dimension: windowKeyMap[comparedKey] }
+      : declaredCompareTo)
     : undefined;
+  const windowKeyMapSig = JSON.stringify(windowKeyMap);
+  const compareToSig = JSON.stringify(compareTo ?? null);
   const { windows: compareWindows, rest: selectionFilter } = useMemo(
-    () => (compareTo
-      ? extractDateWindows(runtimeFilter)
-      : { windows: [] as DatasetTimeWindow[], rest: runtimeFilter }),
-    [compareTo, runtimeFilter],
+    () => {
+      if (!compareTo) return { windows: [] as DatasetTimeWindow[], rest: runtimeFilter };
+      const extracted = extractDateWindows(runtimeFilter);
+      const map = JSON.parse(windowKeyMapSig) as Record<string, string>;
+      return {
+        ...extracted,
+        windows: extracted.windows.map((w) => (map[w.dimension] ? { ...w, dimension: map[w.dimension] } : w)),
+      };
+    },
+    // `compareTo` is rebuilt each render when it is renamed, so its value is
+    // what keys this memo, never its identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [compareToSig, runtimeFilter, windowKeyMapSig],
   );
 
   // `signature` is the query an `ok` answer was read for, and `refreshing` marks
@@ -913,7 +1073,9 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
   // render-time `now` and would otherwise force a refetch loop. The
   // query-affecting options join it so editing a widget's granularity/sort in
   // the designer refetches instead of re-rendering the previous grid.
-  const signature = `${widgetType}|${packageId ?? ''}|${datasetName}|${dimensions.join(',')}|${values.join(',')}|${JSON.stringify(rawFilter ?? null)}|${JSON.stringify(compareTo ?? null)}|${dateGranularity ?? ''}|${JSON.stringify(order ?? null)}|${limit ?? ''}`;
+  const signature = `${widgetType}|${packageId ?? ''}|${datasetName}|${dimensions.join(',')}|${values.join(',')}|${JSON.stringify(rawFilter ?? null)}|${JSON.stringify(compareTo ?? null)}|${dateGranularity ?? ''}|${JSON.stringify(order ?? null)}|${limit ?? ''}`
+    // The comparison window's declared names, once read (`useCompareWindowKeyMap`).
+    + (pathWindowKeys.length > 0 ? `|${windowKeys.pending ? 'pending' : windowKeyMapSig}` : '');
 
   // ── The data-invalidation bus (objectui#10815) ───────────────────────────
   // `notifyDataChanged` from `@object-ui/react`, read the objectui#10623 /
@@ -945,6 +1107,9 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
       return;
     }
     if (values.length === 0) { setState({ status: 'idle', rows: [] }); return; }
+    // The comparison window's declared names are still being read: the query
+    // that would go out now names the key the door refuses.
+    if (windowKeys.pending) { setState({ status: 'loading', rows: [] }); return; }
     let cancelled = false;
     // A re-read of the query already on screen (the bus moved the nonce) keeps
     // the current answer up under a `RefreshIndicator` instead of swapping the

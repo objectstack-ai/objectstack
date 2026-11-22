@@ -1191,6 +1191,17 @@ export const ERROR_CODE_LEDGER = {
     'API_KEY_EXPIRED',            // past its `expires_at`, or past the one-year grace of a key signed with none
     'API_KEY_INACTIVE',           // no recorded use within the inactivity window; not revoked, a new key is the remedy
     'API_KEY_REVOKED',            // its `revoked` flag is set
+    // [#35402] 403 from the Change Owner doors (`POST /data/:object/:id/change-owner`
+    // and `POST /data/:object/change-owner`, served by `@objectstack/rest`'s
+    // `handleRouteError` passthrough), stamped by `changeOwnerOffRefusal`
+    // (`security/change-record-owner.ts`): the object does not offer the action —
+    // structurally ineligible, or its `userActions.transfer` switch is off — so the
+    // whole call is refused before any row is read, whoever asks (a holder of
+    // `modifyAllRecords` included; ruling 7000907189 points 1–3). The
+    // `CLONE_DISABLED` / `FEEDS_DISABLED` family: it names WHICH object
+    // capability is off, and it is not `PERMISSION_DENIED`, the answer the write
+    // path gives a caller who lacks the transfer grant on an object that offers it.
+    'CHANGE_OWNER_DISABLED',
     'ERR_BULK_RESULT_MISMATCH',
     'FILTER_TOKEN_UNKNOWN',       // filter references an unknown context token
     'FILTER_TOKEN_UNRESOLVED',

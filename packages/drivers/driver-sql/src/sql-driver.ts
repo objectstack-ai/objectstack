@@ -1954,10 +1954,12 @@ export class SqlDriver implements IDataDriver {
    * the object's lifetime in this driver (re-registering the object forgets
    * it). A failed catalog read records nothing: the statement is then bound as
    * before, and the next read asks again. A no-op on every other dialect, and
-   * for an object that was never registered as external.
+   * for an object that was never registered as external. Given the door's
+   * `where`, it primes the object of every composed `ReadableIds` leaf in it
+   * too, whose scope compiles against that object's own table.
    */
-  protected async primeOracleRawUuidColumns(object: string): Promise<void> {
-    return FieldMappingFacet.primeOracleRawUuidColumns.call(fieldMappingHost.of(this), object);
+  protected async primeOracleRawUuidColumns(object: string, where?: unknown): Promise<void> {
+    return FieldMappingFacet.primeOracleRawUuidColumns.call(fieldMappingHost.of(this), object, where);
   }
 
   /** The catalog read behind {@link primeOracleRawUuidColumns}: the remote table's `RAW(16)` column names. */
