@@ -5511,6 +5511,12 @@ const ja = {
       object: "オブジェクト",
       unknownType: "不明なメタデータビューの種類です。{{a}}、{{b}}、{{c}} のいずれかを指定してください。",
       unknownTypeNamed: "不明なメタデータビューの種類「{{type}}」です。{{a}}、{{b}}、{{c}} のいずれかを指定してください。",
+      condition: "条件",
+      otherwise: "それ以外",
+      conditionAnd: "かつ",
+      conditionOr: "または",
+      conditionMore: "その他の条件",
+      runsWhen: "実行条件：{{condition}}",
     },
   },
   reactPage: {

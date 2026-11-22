@@ -5569,6 +5569,12 @@ const zh = {
       object: '对象',
       unknownType: '未知的元数据视图类型。应为 {{a}}、{{b}} 或 {{c}}。',
       unknownTypeNamed: '未知的元数据视图类型“{{type}}”。应为 {{a}}、{{b}} 或 {{c}}。',
+      condition: '条件',
+      otherwise: '否则',
+      conditionAnd: '且',
+      conditionOr: '或',
+      conditionMore: '其他条件',
+      runsWhen: '运行条件：{{condition}}',
     },
   },
   reactPage: {

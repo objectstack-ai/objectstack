@@ -21,7 +21,14 @@
 import * as React from 'react';
 import { ComponentRegistry } from '@object-ui/core';
 import { useMetadataItem, resolveInlineAriaProps } from '@object-ui/react';
-import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
+import {
+  formatCurrency,
+  formatNumber,
+  resolveFieldCurrency,
+  useDisplayLocale,
+  useLocalization,
+  useObjectTranslation,
+} from '@object-ui/i18n';
 import type { AriaProps } from '@object-ui/types';
 import {
   ArrowRight,
@@ -37,6 +44,16 @@ import {
 import type { SelectOption as SpecSelectOption } from '@objectstack/spec/data';
 import { cn } from '../../lib/utils';
 import { readProps } from './readProps';
+import {
+  decisionBranches,
+  entryGuard,
+  flowSubjects,
+  readCondition,
+  subjectFieldOf,
+  type BranchGuard,
+  type ConditionContext,
+  type ConditionField,
+} from './flow-branches';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -381,17 +398,122 @@ const TECHNICAL_NODE_TYPES = new Set([
   'boundary_event',
 ]);
 
+/**
+ * How the business view reads a condition (`flow-branches.ts`): field labels
+ * and options from the flow's object as served, amounts in the reader's
+ * locale and, for a currency field, its currency.
+ */
+function useConditionContext(object: any, subjects: ReturnType<typeof flowSubjects>): ConditionContext {
+  const { t } = useObjectTranslation();
+  const locale = useDisplayLocale();
+  const { currency: tenantCurrency } = useLocalization();
+  return {
+    field(path): ConditionField | undefined {
+      const name = subjectFieldOf(path, subjects);
+      const def = getField(object, name);
+      if (!name || !def || typeof def !== 'object') return undefined;
+      return {
+        label: typeof def.label === 'string' && def.label ? def.label : name,
+        type: def.type,
+        options: Array.isArray(def.options) ? def.options : undefined,
+        currency: def.type === 'currency' ? resolveFieldCurrency(def, tenantCurrency) : undefined,
+      };
+    },
+    formatNumber(value, field) {
+      if (!field.currency) return formatNumber(value, { locale });
+      // A whole threshold reads whole (`$500,000`); a fractional one at the
+      // currency's own width.
+      const whole = Number.isInteger(value) ? { minimumFractionDigits: 0, maximumFractionDigits: 0 } : {};
+      try {
+        return formatCurrency(value, { locale, currency: field.currency, ...whole });
+      } catch {
+        return formatNumber(value, { locale });
+      }
+    },
+    words: {
+      and: t('element.metadataViewer.conditionAnd', { defaultValue: 'and' }),
+      or: t('element.metadataViewer.conditionOr', { defaultValue: 'or' }),
+      more: t('element.metadataViewer.conditionMore', { defaultValue: 'other conditions' }),
+    },
+  };
+}
+
+/** A branch's condition as text, or the neutral marker when it cannot be read; never the raw expression. */
+function ConditionText({ guard, ctx }: { guard: BranchGuard; ctx: ConditionContext }) {
+  const { t } = useObjectTranslation();
+  if (guard.kind === 'none') return null;
+  if (guard.kind === 'otherwise') {
+    return (
+      <span data-condition="otherwise" className="italic text-muted-foreground">
+        {t('element.metadataViewer.otherwise', { defaultValue: 'otherwise' })}
+      </span>
+    );
+  }
+  const text = guard.kind === 'cel' ? readCondition(guard.source, ctx) : null;
+  if (text === null) {
+    return (
+      <span data-condition="opaque" className="italic text-muted-foreground">
+        {t('element.metadataViewer.condition', { defaultValue: 'condition' })}
+      </span>
+    );
+  }
+  return (
+    <span data-condition="read" className="font-medium">
+      {text}
+    </span>
+  );
+}
+
+/** The flow's entry condition, once, above its steps. */
+function EntryCondition({ flow, ctx }: { flow: unknown; ctx: ConditionContext }) {
+  const { t } = useObjectTranslation();
+  const guard = entryGuard(flow);
+  if (guard.kind === 'none') return null;
+  return (
+    <div data-flow-entry className="mb-2 text-xs text-muted-foreground">
+      {withChips(t('element.metadataViewer.runsWhen', { defaultValue: 'Runs when {{condition}}', condition: CHIP[0] }), [
+        <ConditionText key="c" guard={guard} ctx={ctx} />,
+      ])}
+    </div>
+  );
+}
+
+/** A decision's branches: each condition (or the neutral marker) and the step it leads to. */
+function Branches({ flow, node, nodes, ctx }: { flow: unknown; node: any; nodes: any[]; ctx: ConditionContext }) {
+  const branches = decisionBranches(flow, node);
+  if (branches.length === 0) return null;
+  return (
+    <ul data-flow-branches={node.id} className="w-full space-y-1 pl-7 text-xs">
+      {branches.map((b) => {
+        const target = nodes.find((x) => x?.id === b.target);
+        return (
+          <li key={b.key} data-branch-target={b.target} className="flex flex-wrap items-center gap-1.5">
+            <ConditionText guard={b.guard} ctx={ctx} />
+            <ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+            <span>{target?.label ?? b.target}</span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 function FlowView({ name, detail }: ViewerProps) {
   const { item: flow, loading, error } = useMetadataItem('flow', name ?? null);
   const { t, ...view } = useViewStates();
+  const business = (detail ?? 'business') === 'business';
+  // The business view reads its conditions' field labels and currency from
+  // the one object the flow runs on: a second request, made once per embed.
+  const subjects = flowSubjects(flow);
+  const subject = useMetadataItem('object', business ? (subjects.object ?? null) : null);
+  const conditions = useConditionContext(subject.item, subjects);
 
   if (!name) return view.missing('name');
-  if (loading) return view.loading(name);
+  if (loading || subject.loading) return view.loading(name);
   if (error) return view.failed(name, error.message);
   if (!flow) return view.notFound(name);
 
   const allNodes: any[] = Array.isArray(flow.nodes) ? flow.nodes : [];
-  const business = (detail ?? 'business') === 'business';
   const nodes = business ? allNodes.filter((n) => !TECHNICAL_NODE_TYPES.has(n?.type)) : allNodes;
   const hiddenCount = allNodes.length - nodes.length;
 
@@ -405,12 +527,13 @@ function FlowView({ name, detail }: ViewerProps) {
         t('element.metadataViewer.steps', { defaultValue: 'Steps: {{count}}', count: allNodes.length })
       }
     >
+      {business && <EntryCondition flow={flow} ctx={conditions} />}
       {nodes.length === 0 ? (
         <Placeholder>{t('element.metadataViewer.noSteps', { defaultValue: 'No steps to show.' })}</Placeholder>
       ) : (
         <ol className="space-y-1.5">
           {nodes.map((n, i) => (
-            <li key={n?.id ?? i} className="flex items-center gap-2.5 rounded-md border bg-muted/20 px-2.5 py-2">
+            <li key={n?.id ?? i} className="flex flex-wrap items-center gap-2.5 rounded-md border bg-muted/20 px-2.5 py-2">
               <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
                 {i + 1}
               </span>
@@ -422,6 +545,7 @@ function FlowView({ name, detail }: ViewerProps) {
                   {n.type}
                 </span>
               )}
+              {business && <Branches flow={flow} node={n} nodes={allNodes} ctx={conditions} />}
             </li>
           ))}
         </ol>

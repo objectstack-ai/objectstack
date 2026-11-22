@@ -11,6 +11,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import { MetadataCtx } from '@object-ui/react';
+import { LocalizationProvider } from '@object-ui/i18n';
 import '../renderers/basic/metadata-viewer';
 
 function metaCtx(getItem: (type: string, name: string) => Promise<any>) {
@@ -193,5 +194,108 @@ describe('element:metadata_viewer', () => {
   it('degrades on an unknown view type', () => {
     render(<Viewer getItem={async () => null} properties={{ type: 'nonsense' }} />);
     expect(screen.getByText(/Unknown metadata view type/i)).toBeTruthy();
+  });
+});
+
+// objectstack#36094 — the business view draws each decision's branches with
+// its condition read from the LIVE definition: the served flow, the edges'
+// `{ dialect: 'cel', source }` envelopes, and the label and currency of the
+// field from the flow's object.
+describe('element:metadata_viewer flow branches (objectstack#36094)', () => {
+  const DEAL = {
+    name: 'crm_opportunity',
+    fields: {
+      amount: { type: 'currency', label: 'Amount' },
+      updated_by: { type: 'lookup', label: 'Updated By' },
+    },
+  };
+  const cel = (source: string) => ({ dialect: 'cel', source });
+  const approvalFlow = (threshold: number) => ({
+    name: 'opportunity_approval',
+    label: 'Large Deal Approval',
+    nodes: [
+      {
+        id: 'start', type: 'start', label: 'Start',
+        config: {
+          objectName: 'crm_opportunity',
+          condition: cel(`has(record.amount) && record.amount != null && record.amount >= 100000
+            && (!has(record.approval_status) || record.approval_status == "not_required")
+            && (!has(record.stage) || record.stage != "closed_won")`),
+        },
+      },
+      { id: 'get_opportunity', type: 'get_record', label: 'Get Opportunity', config: { objectName: 'crm_opportunity', outputVariable: 'oppRecord' } },
+      { id: 'check_high_value', type: 'decision', label: 'High Value?' },
+      { id: 'director_signoff', type: 'approval', label: 'Sales Director Sign-off' },
+      { id: 'mark_approved', type: 'update_record', label: 'Mark Approved' },
+      { id: 'check_owner', type: 'decision', label: 'Owner Submitted?' },
+      { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [
+      { id: 'e1', source: 'start', target: 'get_opportunity' },
+      { id: 'e2', source: 'get_opportunity', target: 'check_high_value' },
+      { id: 'e5', source: 'check_high_value', target: 'director_signoff', type: 'conditional',
+        condition: cel(`has(vars.oppRecord) && has(vars.oppRecord.amount)
+          && vars.oppRecord.amount != null && vars.oppRecord.amount > ${threshold}`) },
+      { id: 'e6', source: 'check_high_value', target: 'mark_approved', type: 'conditional',
+        condition: cel(`!has(vars.oppRecord) || !has(vars.oppRecord.amount)
+          || vars.oppRecord.amount == null || vars.oppRecord.amount <= ${threshold}`) },
+      { id: 'e7', source: 'director_signoff', target: 'mark_approved' },
+      { id: 'e9', source: 'mark_approved', target: 'check_owner' },
+      { id: 'e13', source: 'check_owner', target: 'end', type: 'conditional',
+        condition: cel('has(record.updated_by) && record.updated_by == vars.oppRecord.owner_id') },
+      { id: 'e14', source: 'check_owner', target: 'end', isDefault: true },
+    ],
+  });
+  const served = (flow: unknown) => vi.fn(async (type: string) => (type === 'object' ? DEAL : flow));
+  const branch = (container: HTMLElement, decision: string, target: string) =>
+    container.querySelector(`[data-flow-branches="${decision}"] [data-branch-target="${target}"]`);
+
+  it('draws a decision’s branches with the amount condition, locale-formatted, beside each target', async () => {
+    const getItem = served(approvalFlow(500000));
+    const { container } = render(<Viewer getItem={getItem} properties={{ type: 'flow', name: 'opportunity_approval' }} />);
+    await waitFor(() => expect(screen.getByText('Large Deal Approval')).toBeTruthy());
+
+    expect(branch(container, 'check_high_value', 'director_signoff')?.textContent).toBe('Amount > 500,000Sales Director Sign-off');
+    expect(branch(container, 'check_high_value', 'mark_approved')?.textContent).toBe('Amount ≤ 500,000Mark Approved');
+    // One extra request, for the flow's object.
+    expect(getItem).toHaveBeenCalledWith('object', 'crm_opportunity');
+    // The entry condition, once, with its unread terms named rather than dropped.
+    expect(container.querySelector('[data-flow-entry]')?.textContent).toBe('Runs when Amount ≥ 100,000 and other conditions');
+  });
+
+  it('draws the new amount when the served definition’s threshold changes', async () => {
+    const { container } = render(<Viewer getItem={served(approvalFlow(750000))} properties={{ type: 'flow', name: 'opportunity_approval' }} />);
+    await waitFor(() => expect(screen.getByText('Large Deal Approval')).toBeTruthy());
+    expect(branch(container, 'check_high_value', 'director_signoff')?.textContent).toBe('Amount > 750,000Sales Director Sign-off');
+    expect(container.textContent).not.toContain('500,000');
+  });
+
+  it('formats the amount in the tenant currency when one is configured', async () => {
+    const { container } = render(
+      <LocalizationProvider value={{ currency: 'USD', locale: 'en-US' }}>
+        <Viewer getItem={served(approvalFlow(500000))} properties={{ type: 'flow', name: 'opportunity_approval' }} />
+      </LocalizationProvider>,
+    );
+    await waitFor(() => expect(screen.getByText('Large Deal Approval')).toBeTruthy());
+    expect(branch(container, 'check_high_value', 'director_signoff')?.textContent).toBe('Amount > $500,000Sales Director Sign-off');
+  });
+
+  it('shows a neutral marker for a condition too complex to read, never the raw CEL', async () => {
+    const { container } = render(<Viewer getItem={served(approvalFlow(500000))} properties={{ type: 'flow', name: 'opportunity_approval' }} />);
+    await waitFor(() => expect(screen.getByText('Large Deal Approval')).toBeTruthy());
+    const opaque = branch(container, 'check_owner', 'end')!;
+    expect(opaque.querySelector('[data-condition="opaque"]')?.textContent).toBe('condition');
+    expect(container.querySelector('[data-condition="otherwise"]')?.textContent).toBe('otherwise');
+    expect(container.textContent).not.toContain('updated_by');
+    expect(container.textContent).not.toContain('has(');
+  });
+
+  it('keeps the technical view as it was: no branches, no entry condition, no object request', async () => {
+    const getItem = served(approvalFlow(500000));
+    const { container } = render(<Viewer getItem={getItem} properties={{ type: 'flow', name: 'opportunity_approval', detail: 'technical' }} />);
+    await waitFor(() => expect(screen.getByText('Mark Approved')).toBeTruthy());
+    expect(container.querySelector('[data-flow-branches]')).toBeNull();
+    expect(container.querySelector('[data-flow-entry]')).toBeNull();
+    expect(getItem).not.toHaveBeenCalledWith('object', expect.anything());
   });
 });
