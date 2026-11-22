@@ -136,7 +136,10 @@ export function ChangeOwnerDialog({ open, onOpenChange, objectDef, records, skip
   const cascades = useChangeOwnerCascadeCandidates(
     objectName,
     open && kind === 'person',
-    adapter ? (object) => adapter.getClient().data.changeOwnerCascades(object) : undefined,
+    // A client without the read (an older server's SDK) offers no cascade.
+    adapter && typeof adapter.getClient().data?.changeOwnerCascades === 'function'
+      ? (object) => adapter.getClient().data.changeOwnerCascades(object)
+      : undefined,
   );
   const cascadeCandidates = cascades.phase === 'ready' ? cascades.candidates : [];
 

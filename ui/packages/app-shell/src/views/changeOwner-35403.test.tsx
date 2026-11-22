@@ -464,3 +464,136 @@ describe('how a bulk answer reads (objectstack#35403, carried nit N1)', () => {
     expect(readChangeOwnerReport(report, rows, { ownerId: 'u_bo' })).toEqual({ moved: 0, unchanged: 1, failed: 0 });
   });
 });
+
+describe('the Change Owner dialog offers the declared cascades as ticks (objectstack#35315 phase 2)', () => {
+  let changeOwner: ReturnType<typeof vi.fn>;
+  let changeOwnerMany: ReturnType<typeof vi.fn>;
+  let changeOwnerCascades: ReturnType<typeof vi.fn>;
+  let explained: string[];
+
+  /** The explain engine's object-level `transfer` verdict: allowed on `allow`, refused elsewhere. */
+  function stubExplain(allow: string[]) {
+    explained = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: { body?: string }) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as { object: string; operation: string };
+      explained.push(`${body.object}:${body.operation}`);
+      return { ok: true, status: 200, json: async () => ({ allowed: allow.includes(body.object) }) };
+    }));
+  }
+
+  beforeEach(() => {
+    __clearObjectTransferVerdicts();
+    changeOwner = vi.fn(async () => ({ object: 'crm_account', id: 'a1', ownerId: 'u_bo', notified: false }));
+    changeOwnerMany = vi.fn();
+    changeOwnerCascades = vi.fn(async () => ({
+      object: 'crm_account',
+      cascades: [
+        { object: 'crm_opportunity', field: 'account', label: 'Opportunity', fieldLabel: 'Account' },
+        { object: 'crm_case', field: 'account', label: 'Case', fieldLabel: 'Account' },
+      ],
+    }));
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  function mountDialog(records: Array<Record<string, unknown>> = [{ id: 'a1', owner_id: 'u_amy' }], objectDef: Record<string, unknown> = { name: 'crm_account', fields: { queue: { type: 'text' } } }) {
+    const onOpenChange = vi.fn();
+    const adapter = { getClient: () => ({ data: { changeOwner, changeOwnerMany, changeOwnerCascades } }), find: vi.fn(async () => ({ data: [] })) } as any;
+    render(
+      <AdapterCtx.Provider value={adapter}>
+        <ChangeOwnerDialog open onOpenChange={onOpenChange} objectDef={objectDef as any} records={records} />
+      </AdapterCtx.Provider>,
+    );
+    return onOpenChange;
+  }
+
+  it('lists only the declared cascades the explain engine allows the caller to transfer on', async () => {
+    stubExplain(['crm_opportunity']);
+    mountDialog();
+    const list = await screen.findByTestId('change-owner-cascades');
+    expect(changeOwnerCascades).toHaveBeenCalledWith('crm_account');
+    expect(within(list).getByTestId('change-owner-cascade-crm_opportunity.account')).toBeTruthy();
+    expect(within(list).queryByTestId('change-owner-cascade-crm_case.account')).toBeNull();
+    expect(explained.sort()).toEqual(['crm_case:transfer', 'crm_opportunity:transfer']);
+  });
+
+  it('draws no cascade list when nothing is declared, or when the explain engine allows none', async () => {
+    stubExplain([]);
+    mountDialog();
+    await waitFor(() => expect(explained).toHaveLength(2));
+    await act(async () => {});
+    expect(screen.queryByTestId('change-owner-cascades')).toBeNull();
+    cleanup();
+    stubExplain(['crm_opportunity', 'crm_case']);
+    changeOwnerCascades.mockResolvedValueOnce({ object: 'crm_account', cascades: [] });
+    mountDialog();
+    await waitFor(() => expect(changeOwnerCascades).toHaveBeenCalledTimes(2));
+    await act(async () => {});
+    expect(screen.queryByTestId('change-owner-cascades')).toBeNull();
+    expect(explained).toEqual([]);
+  });
+
+  it('a ticked cascade reaches the request; an unticked one does not', async () => {
+    stubExplain(['crm_opportunity', 'crm_case']);
+    mountDialog();
+    await screen.findByTestId('change-owner-cascade-crm_case.account');
+    fireEvent.change(await screen.findByTestId('widget-change_owner_target'), { target: { value: 'u_bo' } });
+    fireEvent.click(screen.getByTestId('change-owner-cascade-crm_opportunity.account'));
+    fireEvent.click(screen.getByTestId('change-owner-submit'));
+    await waitFor(() => expect(changeOwner).toHaveBeenCalledTimes(1));
+    expect(changeOwner).toHaveBeenCalledWith('crm_account', 'a1', {
+      ownerId: 'u_bo',
+      cascade: [{ object: 'crm_opportunity', field: 'account' }],
+    });
+  });
+
+  it('a bulk change carries the ticks too, and draws each cascade outcome with every refused row', async () => {
+    stubExplain(['crm_opportunity']);
+    changeOwnerMany.mockResolvedValueOnce({
+      object: 'crm_account', field: 'owner_id', ownerId: 'u_bo', updated: 2, failed: 0, failures: [], notified: false,
+      cascade: [{
+        object: 'crm_opportunity', field: 'account', updated: 3, failed: 1, remaining: 4,
+        failures: [{ id: 'o9', code: 'PERMISSION_DENIED', message: 'not yours to move' }],
+      }],
+    });
+    mountDialog([{ id: 'a1', owner_id: 'u_amy' }, { id: 'a2', owner_id: 'u_cy' }]);
+    fireEvent.click(await screen.findByTestId('change-owner-cascade-crm_opportunity.account'));
+    fireEvent.change(await screen.findByTestId('widget-change_owner_target'), { target: { value: 'u_bo' } });
+    fireEvent.click(screen.getByTestId('change-owner-submit'));
+    const report = await screen.findByTestId('change-owner-cascade-report');
+    expect(changeOwnerMany).toHaveBeenCalledWith('crm_account', ['a1', 'a2'], {
+      ownerId: 'u_bo',
+      cascade: [{ object: 'crm_opportunity', field: 'account' }],
+    });
+    expect(within(report).getByText('console.changeOwner.cascadeReport {"object":"Opportunity","field":"Account","moved":3,"failed":1}')).toBeTruthy();
+    expect(within(report).getByText('console.changeOwner.cascadeRemaining {"count":4}')).toBeTruthy();
+    expect(within(report).getAllByTestId('change-owner-cascade-failure').map((li) => li.textContent)).toEqual([
+      'console.changeOwner.failure {"id":"o9","message":"not yours to move"}',
+    ]);
+  });
+
+  it('one record whose cascade left a row behind keeps the dialog open on the report instead of a toast', async () => {
+    stubExplain(['crm_opportunity']);
+    changeOwner.mockResolvedValueOnce({
+      object: 'crm_account', id: 'a1', ownerId: 'u_bo', notified: false,
+      cascade: [{ object: 'crm_opportunity', field: 'account', updated: 0, failed: 1, remaining: 0, failures: [{ id: 'o1', code: 'PERMISSION_DENIED', message: 'no' }] }],
+    });
+    const onOpenChange = mountDialog();
+    fireEvent.click(await screen.findByTestId('change-owner-cascade-crm_opportunity.account'));
+    fireEvent.change(await screen.findByTestId('widget-change_owner_target'), { target: { value: 'u_bo' } });
+    fireEvent.click(screen.getByTestId('change-owner-submit'));
+    await screen.findByTestId('change-owner-cascade-report');
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+  });
+
+  it('a queue target asks for no cascade', async () => {
+    stubExplain(['crm_opportunity']);
+    mountDialog();
+    await screen.findByTestId('change-owner-cascades');
+    fireEvent.click(screen.getByTestId('change-owner-kind-queue'));
+    await act(async () => {});
+    expect(screen.queryByTestId('change-owner-cascades')).toBeNull();
+  });
+});
