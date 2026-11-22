@@ -994,8 +994,12 @@ the host's data source (`dataSource.update`) with no callback to wire.
 - **Per-field read-only**: which cells open is decided by the **field definition**,
   not by a column key — a field marked `readonly`, and computed/binary field types
   (formula, autonumber, file, …), never open an editor
-  (`isFieldInlineEditable`, `src/inline-edit-options.ts:82`). There is no
+  (`isFieldInlineEditable` in `src/inline-edit-options.ts`). There is no
   `editable` key on `ListColumn`.
+- **Rich text edits in a panel**: a `markdown`, `html` or `richtext` cell opens
+  the record form's text box in a panel under the cell (Enter is a new line,
+  Ctrl/Cmd+Enter saves, Escape discards, a click outside saves); the cell keeps
+  showing its value and the row its height.
 - **Visual feedback**: editable cells show a hover state
 - **Automatic focus**: the input is focused and selected when editing begins
 
