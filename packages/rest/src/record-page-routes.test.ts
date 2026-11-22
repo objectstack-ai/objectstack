@@ -37,6 +37,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import { RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES, RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES, RecordPageResponseSchema } from '@objectstack/spec/api';
 import { RestServer } from './rest-server.js';
+// The server reaches `@objectstack/objectql` only through a dynamic import inside a
+// handler; paid here at module scope so the first load lands during collection,
+// not inside a clocked window (`pnpm check:test-source-alias`).
+import '@objectstack/objectql';
 import { RECORD_PAGE_PARAMS } from './record-page-routes.js';
 import { unknownQueryParamMessage } from './query-allowlist.js';
 
