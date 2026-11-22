@@ -6458,6 +6458,12 @@ export const ObjectExtensionPlacementSchema = lazySchema(() => z.union([
   ObjectExtensionListPlacementSchema,
   ObjectExtensionGroupPlacementSchema,
 ]));
+/** A field placement as an author writes it. */
+export type ObjectExtensionFieldPlacement = z.input<typeof ObjectExtensionFieldPlacementSchema>;
+/** A group placement as an author writes it. */
+export type ObjectExtensionGroupPlacement = z.input<typeof ObjectExtensionGroupPlacementSchema>;
+/** A list placement as an author writes it. */
+export type ObjectExtensionListPlacement = z.input<typeof ObjectExtensionListPlacementSchema>;
 /** One `place` entry as an author writes it. */
 export type ObjectExtensionPlacement = z.input<typeof ObjectExtensionPlacementSchema>;
 /** One `place` entry after parse. */

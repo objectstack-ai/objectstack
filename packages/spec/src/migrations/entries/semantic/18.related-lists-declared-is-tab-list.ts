@@ -27,7 +27,7 @@ export const entry: SemanticMigration = {
     + 'approvals and stream tabs always closed the strip in a fixed order. Now, on a declared non-empty '
     + 'relatedLists, a side list no entry names shows no tab, a child list another package adds included: '
     + 'it is hidden until the parent names it, which a build accepts only when that package is in the '
-    + 'parent\'s stack (letting a package place its own list is a later change); the attachments tab shows only when '
+    + 'parent\'s stack (since #35901 such a list is no longer hidden: see object-extension-place-and-cross-package-lists); the attachments tab shows only when '
     + "'sys_attachment' is listed (and the object enables files, as before); the approvals tab, when "
     + 'unlisted, follows the listed tabs and still shows whenever the record has requests; the stream '
     + 'tab, when unlisted, still closes the strip. Body tables a field group places stay at their group; '
