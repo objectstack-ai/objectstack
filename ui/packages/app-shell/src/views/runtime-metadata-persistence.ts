@@ -538,16 +538,9 @@ export async function saveAndPublishRuntimeMetadata(
   name: string,
   body: any,
   ctx: RuntimePersistCtx,
-  /**
-   * objectstack#36372 — the package the draft is written into and published
-   * from (`?package=` on all three writes). Omitted, every write names no
-   * package and addresses the name's one holding package, as before.
-   */
-  options: { packageId?: string } = {},
 ): Promise<SaveAndPublishOutcome> {
-  const bound = options.packageId ? { packageId: options.packageId } : {};
   try {
-    await ctx.metadataClient.save(type, name, body, { mode: 'draft', ifNoneMatch: '*', ...bound });
+    await ctx.metadataClient.save(type, name, body, { mode: 'draft', ifNoneMatch: '*' });
   } catch (err) {
     if (isDraftVersionConflict(err)) {
       return 'pending-draft';
@@ -555,12 +548,10 @@ export async function saveAndPublishRuntimeMetadata(
     throw err;
   }
   try {
-    await (options.packageId
-      ? ctx.metadataClient.publish(type, name, bound)
-      : ctx.metadataClient.publish(type, name));
+    await ctx.metadataClient.publish(type, name);
   } catch (err) {
     try {
-      await ctx.metadataClient.reset(type, name, { state: 'draft', ...bound });
+      await ctx.metadataClient.reset(type, name, { state: 'draft' });
     } catch (discardErr) {
       // The draft this call wrote stays pending: the view settings' draft
       // bar shows it, and its Discard removes it.
@@ -666,11 +657,26 @@ export async function saveDashboardInPlace(
   target: Exclude<DashboardSaveTarget, { kind: 'refused' }>,
   ctx: RuntimePersistCtx,
 ): Promise<SaveAndPublishOutcome> {
-  return saveAndPublishRuntimeMetadata(
-    'dashboard',
-    name,
-    body,
-    ctx,
-    target.kind === 'unbound' ? {} : { packageId: target.packageId },
-  );
+  if (target.kind === 'unbound') return saveAndPublishRuntimeMetadata('dashboard', name, body, ctx);
+  return saveAndPublishRuntimeMetadata('dashboard', name, body, {
+    ...ctx,
+    metadataClient: boundToPackage(ctx.metadataClient, target.packageId),
+  });
+}
+
+/**
+ * `client` with `packageId` named on every write {@link saveAndPublishRuntimeMetadata}
+ * makes (`save`, `publish`, `reset`: `?package=` on the draft, the publish and
+ * the discard of a refused publish), so the one door serves a package-bound save
+ * unchanged. Only those three: they are all the door calls.
+ */
+function boundToPackage(client: any, packageId: string): any {
+  return {
+    save: (type: string, name: string, body: unknown, options: Record<string, unknown> = {}) =>
+      client.save(type, name, body, { ...options, packageId }),
+    publish: (type: string, name: string, options: Record<string, unknown> = {}) =>
+      client.publish(type, name, { ...options, packageId }),
+    reset: (type: string, name: string, options: Record<string, unknown> = {}) =>
+      client.reset(type, name, { ...options, packageId }),
+  };
 }
