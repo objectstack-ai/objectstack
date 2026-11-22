@@ -60,9 +60,31 @@ const deal = {
   }],
 };
 
+/**
+ * [#35384] An object whose rule carries an AUTHORED message: the sentence is
+ * metadata (`objects.<o>._validations.<rule>.message`), served by `/meta`'s
+ * `translateObjectValidations`.
+ */
+const task = {
+  name: 'lsl_task',
+  label: 'Task',
+  fields: {
+    id: { name: 'id', type: 'text' as const, primaryKey: true },
+    due: { name: 'due', type: 'text' as const, label: 'Due' },
+  },
+  validations: [{
+    type: 'script',
+    name: 'task_needs_due',
+    message: 'A task needs a due date.',
+    condition: "record.due == null || record.due == ''",
+    fields: ['due'],
+  }],
+};
+
 /** The deployment ships `zh-CN` rows only. */
 const ZH_CN = {
   objects: {
+    lsl_task: { label: '任务', _validations: { task_needs_due: { message: '任务必须设置截止日期。' } } },
     lsl_account: { label: '客户', fields: { name: { label: '名称' } } },
     lsl_deal: {
       label: '商机',
@@ -147,7 +169,7 @@ async function makeEngine(i18n: ReturnType<typeof servedI18n>) {
   const engine = new ObjectQL();
   engine.registerDriver(makeStubDriver(), true);
   await engine.init();
-  for (const o of [account, deal]) engine.registry.registerObject(o as any);
+  for (const o of [account, deal, task]) engine.registry.registerObject(o as any);
   engine.setI18nService(i18n);
   return engine;
 }
@@ -211,5 +233,36 @@ describe('a refusal in the declared sourceLocale names labels as authored', () =
     expect(field.fields[0].label).toBe('金额');
     expect(option.fields[0].message).toBe('Invalid transition for 阶段: 赢单 → 草稿');
     for (const word of ['客户', '商机', '所属客户']) expect(object.message).toContain(word);
+  });
+});
+
+/**
+ * [#35384] The authored rule message resolves by the same rule: through
+ * `translateObject` over the metadata route's `ResolveOptions`, so an `en`
+ * write in a deployment authored in English reads the sentence as written —
+ * what `/meta` serves the same rule's `message` as for an `en` request
+ * (`packages/rest/src/meta-i18n-declared-fallback-chain.test.ts` §6 pins that
+ * half) — never the `zh-CN` row `t()` falls back to.
+ */
+describe('an authored rule message in the declared sourceLocale reads as authored', () => {
+  const refusal = async (declared: Parameters<typeof servedI18n>[0], locale: string) =>
+    refused((await makeEngine(servedI18n(declared))).insert('lsl_task', { due: '' }, { context: { locale } as any }));
+
+  it('an en write reads the authored English sentence', async () => {
+    const err = await refusal(SOURCE_EN, 'en');
+    expect(err.code).toBe('VALIDATION_FAILED');
+    expect(err.fields[0]).toMatchObject({ field: 'due', code: 'rule_violation', message: 'A task needs a due date.' });
+  });
+
+  it('CONTROL: a zh-CN write still reads the zh-CN row', async () => {
+    const err = await refusal(SOURCE_EN, 'zh-CN');
+    expect(err.code).toBe('VALIDATION_FAILED');
+    expect(err.fields[0]).toMatchObject({ field: 'due', code: 'rule_violation', message: '任务必须设置截止日期。' });
+  });
+
+  it('CONTROL: with no sourceLocale declared, an en write walks to the zh-CN row as before', async () => {
+    const err = await refusal({ defaultLocale: 'zh-CN' }, 'en');
+    expect(err.code).toBe('VALIDATION_FAILED');
+    expect(err.fields[0]).toMatchObject({ field: 'due', code: 'rule_violation', message: '任务必须设置截止日期。' });
   });
 });

@@ -40,6 +40,12 @@
  *
  *  - `metadata.old` / `metadata.new`: every key the reader is not served is
  *    DROPPED, key by key — the approval snapshot's shape.
+ *  - [#36290] `metadata.summary_message` of a field-change summary: every
+ *    change of a field the reader is not served is DROPPED, change by change,
+ *    by the same answer, and a reference field's change by the reference rule
+ *    below; the summary is then re-composed from the changes kept instead of
+ *    being dropped whole, so a reader reads the lines of the fields they may
+ *    read and never a value of one they may not.
  *  - `summary` / `record_label`: a text cannot be split back into fields, so
  *    each one is served whole or DROPPED whole. The writer declares, in the
  *    row's own `metadata`, which parent fields each was composed from
@@ -223,6 +229,14 @@ import {
  */
 export { resolveServedFields } from './served-fields.js';
 import { omitSideCopyFromCopy, sideCopyColumnsOf } from './side-copy-columns.js';
+import {
+  ACTIVITY_SUMMARY_MESSAGE_KEY,
+  composeActivitySummary,
+  readActivitySummaryMessage,
+  type ActivitySummaryFieldChange,
+  type ActivitySummaryLocale,
+  type ActivitySummaryMessage,
+} from './activity-summary-message.js';
 
 const ACTIVITY_OBJECT = 'sys_activity';
 const SYSTEM_CTX = { isSystem: true } as const;
@@ -679,6 +693,10 @@ export async function redactActivityRows(
    * the middleware always hands it in; without it no source is judged as a
    * reference. */
   referenceTitles?: ReferenceTitlesServedFor,
+  /** [#36290] The registered definition of a parent object, for the field
+   * labels a narrowed field-change summary is re-composed with; without it
+   * the summary names each field by its machine key. */
+  getObjectDef?: (object: string) => unknown,
 ): Promise<void> {
   const list = (Array.isArray(rows) ? rows : rows ? [rows] : []) as unknown[];
   if (list.length === 0) return;
@@ -733,11 +751,46 @@ export async function redactActivityRows(
     const servedWhole = (sources: string[] | 'unknown') =>
       sourcesServed(sources, servedSet, () => restrictedOn(object, servedSet));
 
+    /** [#36290] The field-change code, narrowed to this reader; `null` when the row has none to serve. */
+    let narrowedChanges: Extract<ActivitySummaryMessage, { key: 'fieldChanges' }> | null = null;
     if (metadata) {
       let changed = false;
       for (const side of ['old', 'new'] as const) {
         const snapshot = metadata[side];
         if (isRecord(snapshot) && dropUnservedKeys(snapshot, servedSet)) changed = true;
+      }
+      // [#36290, ruling 7076513167] The field-change code is served to a
+      // reader narrowed change by change, by the answer `old` / `new` are
+      // narrowed by: a change of a field this reader is not served is dropped,
+      // and a reference field's change is kept only for a reader served the
+      // referenced record's title ({@link referenceTitlesPerRead}), the rule
+      // the summary text is judged by. A code this version cannot read is
+      // dropped (fail closed). Every other code is left to the summary
+      // middleware, which strips it for every non-system reader.
+      if (ACTIVITY_SUMMARY_MESSAGE_KEY in metadata) {
+        const stored = metadata[ACTIVITY_SUMMARY_MESSAGE_KEY];
+        const code = readActivitySummaryMessage(stored);
+        if (isRecord(stored) && stored.key === 'fieldChanges' && code?.key !== 'fieldChanges') {
+          delete metadata[ACTIVITY_SUMMARY_MESSAGE_KEY];
+          changed = true;
+        } else if (code?.key === 'fieldChanges') {
+          const kept: ActivitySummaryFieldChange[] = [];
+          for (const change of code.changes) {
+            if (!servedSet.has(change.field)) continue;
+            if (referenceTitles && !(await referenceTitles(object, [change.field]))) continue;
+            kept.push(change);
+          }
+          if (kept.length === 0) {
+            delete metadata[ACTIVITY_SUMMARY_MESSAGE_KEY];
+            changed = true;
+          } else {
+            narrowedChanges = { ...code, changes: kept };
+            if (kept.length !== code.changes.length) {
+              metadata[ACTIVITY_SUMMARY_MESSAGE_KEY] = narrowedChanges;
+              changed = true;
+            }
+          }
+        }
       }
       if (kindSources !== null && !(await servedWhole(kindSources))) {
         delete metadata[ACTIVITY_KIND_KEY];
@@ -756,9 +809,38 @@ export async function redactActivityRows(
       const sources = provenance[col];
       const served = (await servedWhole(sources))
         && (!referenceTitles || sources === 'unknown' || (await referenceTitles(object, sources)));
-      if (!served) delete row[col];
+      if (served) continue;
+      // [#36290] A field-change summary is not dropped whole when some of its
+      // changes are this reader's: it is re-composed from the narrowed code,
+      // so the reader reads the lines of the fields they may read. The text is
+      // composed from the served changes alone; the summary middleware then
+      // re-composes it in the reader's language from the same code.
+      if (col === 'summary' && narrowedChanges) {
+        row.summary = composeActivitySummary(narrowedChanges, authoredLabelsLocale(getObjectDef)) ?? '';
+        continue;
+      }
+      delete row[col];
     }
   }
+}
+
+/**
+ * [#36290] The locale a narrowed field-change summary is composed in on this
+ * seam: no bundle (every key misses), so each field is named by its authored
+ * label, else its machine key, and each value by the text the writer stored.
+ */
+function authoredLabelsLocale(getObjectDef?: (object: string) => unknown): ActivitySummaryLocale {
+  return {
+    translate: () => undefined,
+    locale: undefined,
+    getObjectDef: (object) => {
+      try {
+        return getObjectDef?.(object) ?? null;
+      } catch {
+        return null;
+      }
+    },
+  };
 }
 
 /**
@@ -816,7 +898,9 @@ export function installActivityFieldRedaction(
           servedFor,
           logger,
         );
-        await redactActivityRows(list, security, ctx.context, logger, servedFor, restrictedFor, referenceTitles);
+        await redactActivityRows(list, security, ctx.context, logger, servedFor, restrictedFor, referenceTitles, (object) =>
+          typeof engine.getSchema === 'function' ? engine.getSchema(object) : undefined,
+        );
       } catch (err) {
         // A redaction failure must never fall open into a leak.
         logger.warn(

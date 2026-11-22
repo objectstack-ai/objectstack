@@ -526,6 +526,16 @@ export const OperationSchema = z
     values: z.record(MachineNameSchema, ScalarSchema).optional(),
     /** The persona the agent acts for. */
     actingAs: MachineNameSchema,
+    /**
+     * The card's own agent action this write is designed to go through
+     * (`run.agentActions[].name`, on this operation's object; the loader holds
+     * that). An action body writes as the platform, so a build may withhold
+     * the verb from the persona's set and route the write through it: the
+     * Build grant check then leaves the write to the run, never a pass
+     * (`gradePersonaGrants` in `score/scenario-tags.ts`). Absent ⇒ the write
+     * is measured against the persona's grant. A `refused` write takes none.
+     */
+    via: MachineNameSchema.optional(),
     outcome: OutcomeSchema,
   })
   .superRefine((op, ctx) => {
