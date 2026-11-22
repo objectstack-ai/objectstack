@@ -274,10 +274,13 @@ export function ObjectViewTitleSwitcher({
                     </button>
                 </PopoverTrigger>
                 {/* The dropdown's body (objectstack#35553): the views, grouped, and
-                    「Add view」, which turns it into the in-place create card. */}
+                    「Add view」, which turns it into the in-place create card.
+                    w-80, not w-72 (objectstack#36371): a personal row's hidden
+                    actions keep their width, and 「Make shared」 is a sixth
+                    icon, so at w-72 a two-word name broke onto three lines. */}
                 <PopoverContent
                     align="start"
-                    className="w-72 p-0"
+                    className="w-80 p-0"
                     data-testid="list-view-switcher-menu"
                     aria-label={t('view.switcher.label', { defaultValue: 'Views' })}
                 >
