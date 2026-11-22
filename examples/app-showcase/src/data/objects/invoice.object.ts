@@ -5,10 +5,13 @@ import { cel, P } from '@objectstack/spec';
 
 /**
  * Product — a small price-book / catalog. The invoice line's `product` lookup
- * points here; selecting a product auto-fills the line's `description` and
- * `unit_price` (the line-item grid copies matching field names from the chosen
- * record — the catalog typeahead every invoicing tool has: QuickBooks
- * "Product/Service", Stripe price catalog, NetSuite item column).
+ * points here; selecting a product auto-fills the line's `description` and,
+ * when the currencies match, its `unit_price` (the line-item grid copies
+ * matching field names from the chosen record — the catalog typeahead every
+ * invoicing tool has: QuickBooks "Product/Service", Stripe price catalog,
+ * NetSuite item column). The catalog price is in the home currency; on an
+ * invoice in another currency the line's price stays empty and the grid says
+ * why, since nothing converts it.
  */
 export const Product = ObjectSchema.create({
   name: 'showcase_product',
@@ -374,8 +377,10 @@ export const InvoiceLine = ObjectSchema.create({
         { name: 'amount' },
       ],
     }),
-    // Catalog lookup. Picking a product auto-fills `description` + `unit_price`
-    // (the grid copies same-named fields from the selected product record).
+    // Catalog lookup. Picking a product auto-fills `description`, and
+    // `unit_price` when the currencies match (the grid copies same-named
+    // fields from the selected product record; a home-currency price is not
+    // copied onto a line in another currency).
     // Line sort position — stamped by the grid on drag-reorder so the order
     // persists. Excluded from the editable columns (it's not hand-entered).
     position: Field.number({ label: 'Position', defaultValue: 0 }),
