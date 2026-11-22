@@ -4213,6 +4213,32 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
             (rowOpensRecord !== false || cardSelecting) && 'cursor-pointer hover:bg-accent/50',
             cardSelected && 'border-primary bg-primary/5',
           )}
+          // objectstack#36044 — while a selection is open the card owns every tap
+          // inside it: a tap on a link, a referenced record's chip, an image or
+          // a button the card draws ticks or unticks the card and opens nothing,
+          // as phone apps do in selection mode. The cells stop their own clicks
+          // from reaching the card, so the card takes them first, in the capture
+          // phase. The row's 「⋮」 opens on pointer-down, which the card cancels
+          // first. The click that ends the long press that started the selection
+          // is swallowed here too, whatever it landed on. A node a portal draws
+          // (an open menu) is not the card's.
+          onPointerDownCapture={(event) => {
+            if (!cardSelecting || event.target === event.currentTarget) return;
+            if (!event.currentTarget.contains(event.target as Node)) return;
+            event.preventDefault();
+          }}
+          onClickCapture={(event) => {
+            const press = longPress.current;
+            if (!cardSelecting && !press.fired) return;
+            if (!event.currentTarget.contains(event.target as Node)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            if (press.fired) {
+              press.fired = false;
+              return;
+            }
+            toggleCardRow(row);
+          }}
           onPointerDown={(event) => {
             const press = longPress.current;
             // A fresh press never inherits the last one's flag: a long press
