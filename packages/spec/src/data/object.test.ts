@@ -14,6 +14,7 @@ import { collectDroppedRefinements } from '../../scripts/lib/dropped-refinements
 import { Field } from './field.zod';
 import { defineStack } from '../stack.zod';
 import { isMaskedOnReadFieldType } from './masked-field-types';
+import { CONTROLLED_BY_PARENT_MASTER_INVALID, type ControlledByParentMasterShape } from './controlled-by-parent-master';
 import type { StateMachineValidation } from './validation.zod';
 
 describe('ObjectCapabilities', () => {
@@ -1635,7 +1636,13 @@ describe('ObjectSchema refuses a controlled_by_parent object without exactly one
     ({ name: 'cbp_line', sharingModel: 'controlled_by_parent' as const, fields });
   const issuesOf = (input: unknown) => {
     const r = ObjectSchema.safeParse(input);
-    return r.success ? [] : r.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message }));
+    return r.success
+      ? []
+      : r.error.issues.map((i) => ({
+          path: i.path.join('.'),
+          message: i.message,
+          params: (i as { params?: Record<string, unknown> }).params,
+        }));
   };
 
   it('ACCEPTS one required master_detail — through the raw parse and through the builder', () => {
@@ -1653,7 +1660,7 @@ describe('ObjectSchema refuses a controlled_by_parent object without exactly one
     const issues = issuesOf(cbp({ parent: { type: 'lookup', reference: 'cbp_header', required: true } }));
     expect(issues).toHaveLength(1);
     expect(issues[0].path).toBe('sharingModel');
-    expect(issues[0].message).toMatch(/^Object 'cbp_line' declares sharingModel 'controlled_by_parent' but no required `master_detail` field, nor a single `master_detail` declared `required: false`\. ADR-0055 §1:/);
+    expect(issues[0].message).toMatch(/^Object 'cbp_line' declares sharingModel 'controlled_by_parent' but no required `master_detail` field, nor a single `master_detail` declared `required: false`\. Since @objectstack\/spec 18, /);
     expect(issues[0].message).toContain("`parent` is a required `lookup`");
     // The builder path refuses it too — the HotCRM shape.
     expect(() => ObjectSchema.create(cbp({ parent: Field.lookup('cbp_header', { label: 'Header', required: true }) }))).toThrow(
@@ -1692,10 +1699,33 @@ describe('ObjectSchema refuses a controlled_by_parent object without exactly one
       b: { type: 'master_detail', reference: 'master_b', required: true },
     }));
     expect(two.map((i) => i.path)).toEqual(['fields']);
-    expect(two[0].message).toMatch(/^Object 'cbp_line' declares sharingModel 'controlled_by_parent' with 2 required `master_detail` fields \(`a`, `b`\)\. ADR-0055 §1:/);
+    expect(two[0].message).toMatch(/^Object 'cbp_line' declares sharingModel 'controlled_by_parent' with 2 required `master_detail` fields \(`a`, `b`\)\. Since @objectstack\/spec 18, /);
     // Both refusals date themselves: 17.7.0 accepts either shape, so each names the release that refuses it.
-    expect(two[0].message).toContain('since @objectstack/spec 18, a controlled-by-parent object derives');
-    expect(none[0].message).toContain('since @objectstack/spec 18, a controlled-by-parent object derives');
+    expect(two[0].message).toContain('Since @objectstack/spec 18, a controlled-by-parent object derives');
+    expect(none[0].message).toContain('Since @objectstack/spec 18, a controlled-by-parent object derives');
+  });
+
+  it('stamps every refusal with the machine-readable code and its shape, and cites no ADR in the message', () => {
+    const SHAPES: Array<[ControlledByParentMasterShape, Record<string, unknown>]> = [
+      ['no-master', { title: { type: 'text' } }],
+      ['required-lookup-only', { parent: { type: 'lookup', reference: 'cbp_header', required: true } }],
+      ['several-masters', {
+        a: { type: 'master_detail', reference: 'master_a', required: false },
+        b: { type: 'master_detail', reference: 'master_b', required: false },
+      }],
+      ['several-required-masters', {
+        a: { type: 'master_detail', reference: 'master_a', required: true },
+        b: { type: 'master_detail', reference: 'master_b', required: true },
+      }],
+      ['master-not-writable', { parent: { type: 'master_detail', reference: 'cbp_header', required: true, system: true } }],
+    ];
+    for (const [shape, fields] of SHAPES) {
+      const issues = issuesOf(cbp(fields));
+      expect(issues, shape).toHaveLength(1);
+      expect(issues[0].params, shape).toEqual({ code: CONTROLLED_BY_PARENT_MASTER_INVALID, shape });
+      expect(issues[0].message, shape).not.toMatch(/ADR-/);
+    }
+    expect(CONTROLLED_BY_PARENT_MASTER_INVALID).toBe('CONTROLLED_BY_PARENT_MASTER_INVALID');
   });
 
   it('judges controlled_by_parent only — every other sharing model keeps its relations as authored', () => {

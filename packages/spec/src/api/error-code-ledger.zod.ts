@@ -1907,6 +1907,14 @@ export const ERROR_CODE_LEDGER = {
     // tree answers with it, the thrown value is the boundary.
     'CONNECTOR_UPSTREAM_CHANGED',
     'CONNECTOR_UPSTREAM_UNAVAILABLE',
+    // `door: 'none'` on the `PLUGIN_UI_REQUIRED_KEY_MISSING` reading below: the
+    // `controlled_by_parent` master refusal's code (`data/controlled-by-parent-master.ts`),
+    // stamped on the zod ISSUE as `params.code` beside `params.shape` by
+    // `ObjectSchema`'s refinement and `defineStack`'s extension-merge gate, never
+    // on a thrown error. It rides the envelope of whichever door parses the
+    // object and has no `status` of its own; the Studio settings tab keys its
+    // localized wording on it.
+    'CONTROLLED_BY_PARENT_MASTER_INVALID',
     'EXTERNAL_SCHEMA_MISMATCH',
     'EXTERNAL_SCHEMA_MODE_VIOLATION',
     'EXTERNAL_WRITE_FORBIDDEN',
