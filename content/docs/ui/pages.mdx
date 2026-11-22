@@ -180,41 +180,38 @@ replacement.
 ### The synthesized default
 
 A record page needs no authoring. With no page assigned, the Console synthesizes one from
-the object: a header, the record's **details**, and a right column of
-panels: the related lists, then the attachments of an object with `enable: { files: true }`,
-then **Approvals** when the record has approval requests, and **动态** (Activity) last. On a
-narrow screen the same panels follow the details in one column, so **动态** ends the page. A
-relationship whose child field declares `relatedList: 'primary'` is part of the record's body:
-its list is a full-width table in the details, after the first field section, with no panel of
-its own. **动态** is one stream: the discussion, the activity and, with
-`enable: { trackHistory: true }`, the record's field changes; there is no separate History tab.
-Its panel shows a one-line composer and the newest entries, and its header opens the whole
-stream (`?related=timeline`), filtered by All / Activity / Discussion / Changes. A related
-panel's header opens that list's whole table the same way (`?related=<object>.<field>`).
-Each of those faces is also a tab: a row of tabs closes the record header, **Overview** first,
-then one tab per related panel in the reader's order, then **动态** last, each with its count. The
-row shows as many tabs as its width fits and folds the rest into a **+N** menu; the open tab
-is always on the row, and **Overview** or Esc returns to the page.
+the object: a header, the record's **details** (the **Details** tab), and one tab per related
+list, then **Attachments** for an object with `enable: { files: true }`, **Approvals** when the
+record has approval requests, and **动态** (Activity) last, each with its count. A relationship
+whose child field declares `relatedList: 'primary'` is part of the record's body: its list is a
+full-width table in the details, after the first field section, with no tab of its own. **动态**
+(`?related=timeline`) holds the record's system entries: its activity and, with
+`enable: { trackHistory: true }`, its field changes; there is no separate History tab. On the
+desktop the record's comments are not in it but in the comment panel, opened from the
+comments icon in the record header ([the record's comment panel](/docs/frontend/plugins/plugin-detail#the-records-comment-panel)); on a phone they are still
+in **动态**, with its All / Activity / Discussion / Changes filter. A list's tab is that list's
+whole table (`?related=<object>.<field>`). The tab row shows as many tabs as its width fits and folds the
+rest into a **+N** menu; the open tab is always on the row. The related tabs are the reader's
+to arrange: move one before or after its neighbour, hide one, and bring hidden ones back. The
+arrangement is kept per user and object, never in the object's declaration.
 Moving a child table into the record's body is therefore a one-word change on the
 relationship field, not a page-authoring task, and `relatedList: false` leaves a child off the
 page.
 
-The Console lays the page out by the width of the surface it occupies (the full page, the split
-pane or the drawer), never by the viewport, and by one rule. From 760 px the details sit beside
-the right column, 320 px wide; from 1120 px the right column is 380 px and a details section
-takes up to three field columns. Below 760 px (the split pane, a phone) the page is one column:
-the details, then the right column's panels in their order. The **⊟** switch at the end of the
-record header's actions (`⌘⇧,`) hides the right column for the reader, per object. The related
-panels are the reader's to arrange, too: drag a panel's **⠿** handle (or **⌥↑** / **⌥↓** on it)
-to reorder, hide a panel from its header, and bring hidden panels back from the column's last
-line. The arrangement is kept per user and object, never in the object's declaration.
+The Console lays the page out by the width of the surface it occupies, never by the viewport.
+On a full page wide enough for a 320 px details column beside 400 px of tabs, the details are
+pinned in a left column and the other tabs sit beside them, opening on the first: the column
+is 400 px wide, narrows toward 320 px when the page is tight, and can be dragged (or moved with
+←/→ on its edge); the width is kept per object, in the browser. A page without other tabs, or one
+whose details hold a related table, draws the details across the page. Narrower full pages,
+the drawer and a phone draw one column: the tab row, **Details** first, and the open tab
+under it.
 
-The related panels load in steps, and the details never wait for them. The page asks every
-panel's count in one request set, sent beside the record read, and the panels show
-placeholders until those counts land. A panel counted at 0 reads no rows, and two or more of
-them fold into one line. A panel above 0 reads its first three rows once it scrolls into view,
-asking only for the record's name field and one status or date field. In a drawer, the record
-that **↑** / **↓** would show next has its related counts read ahead.
+The related lists load in steps, and the details never wait for them. The page asks every
+list's count in one request set, sent beside the record read, and draws each list's tab
+before those counts land; a list counted at 0 reads no rows, and its tab is muted, with no
+number. A list reads its rows when its tab opens. In a drawer, the record that **↑** / **↓**
+would show next has its related counts read ahead.
 
 ### Slotted pages
 
@@ -232,9 +229,10 @@ synthesizer fills in the rest. A slotted page authors `slots`, not `regions`:
 
 Each slot takes one component or an array of them, and replaces its part whole: there is no
 deep merge. There is no `tabs` slot: the page's panels are composed from the object's fields
-and relationship flags. To change which related lists appear or their order, set `relatedList` /
-`relatedList: 'primary'` on the child's reference field; a page that needs its own strip is
-`kind: 'full'`, drawn as authored. `slots.tabs`, `slots.related` and `slots.relatedLists` are
+and relationship flags. To choose which related lists and built-in tabs appear and in what
+order, list them in the object's `relatedLists` (the built-ins by object name: `sys_attachment`,
+`sys_approval_request`, `sys_activity`); `relatedList: false` on the child's reference field
+still hides a list. A page that needs its own strip is `kind: 'full'`, drawn as authored. `slots.tabs`, `slots.related` and `slots.relatedLists` are
 refused by name, and `os migrate meta --from 17` drops a stored `slots.tabs`.
 
 {/* os:check */}
@@ -257,6 +255,28 @@ const accountDetailPage = {
 
 Use a slotted page to change one or two parts of an otherwise standard record page, and a
 `full` page for a record page that looks nothing like the default.
+
+### Where an authored page applies
+
+A `kind: 'full'` record page is drawn on the **desktop full page** only. On a phone (any window
+narrower than 768 px, a narrowed desktop window included), and in every embedded record view (the
+side drawer or split pane a list opens a record in, and an interface page's preview), the record
+takes the platform's standard page for its object, whether or not the object has an authored page; **Open full page** from the
+drawer lands on the authored one. There is no setting that keeps an authored page on the phone
+or in the drawer.
+
+What carries over is what the object declares: its field groups and their order, field
+permissions and visibility, the actions placed at `record_header` and `record_more`, one tab per
+child table, the stage and the approval state. What does not is the page's own layout and
+anything that lives only on it: its tabs and sections, a related list or block placed only on
+the page, a banner, and `record_section` actions, which the standard page does not draw. To keep
+such an action reachable off the full page, add `record_more` to its `locations`, and leave it
+out of the page header's `actions` list so the full page still draws it once.
+
+A slotted page is the standard page with its slots filled, so its slots apply on every surface.
+A page named in the URL (`…/record/:id/page/:pageName`, print pages and other named routes) is
+drawn wherever that route renders. The platform's approval request and user pages keep their
+own page on every surface.
 
 ### The discussion panel is composed, never appended
 

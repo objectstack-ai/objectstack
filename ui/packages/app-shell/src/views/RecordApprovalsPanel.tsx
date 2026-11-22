@@ -176,9 +176,10 @@ export function approverChips(
  * The step a request or a timeline row names, as a reader should see it: the
  * authored step label when there is one, else the node's machine name
  * prettified, else nothing. The headline and every timeline row draw their
- * step through this one rule, so the two cannot drift (objectui#13248).
+ * step through this one rule, so the two cannot drift (objectui#13248); so
+ * does the record header's 「审批中 · 当前步骤」 tag (objectstack#35890).
  */
-function stepDisplayText(
+export function stepDisplayText(
   label: string | null | undefined,
   machineName: string | null | undefined,
 ): string | null {
@@ -351,7 +352,7 @@ export const RecordApprovalsPanel: React.FC<RecordApprovalsPanelProps> = ({
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           {(headline.round ?? 1) > 1 && (
-            <Badge variant="outline" className="text-[11px] text-muted-foreground">
+            <Badge variant="outline" className="text-xs text-muted-foreground">
               {tr('roundChip', 'Round {{n}}', { n: headline.round })}
             </Badge>
           )}
@@ -380,7 +381,7 @@ export const RecordApprovalsPanel: React.FC<RecordApprovalsPanelProps> = ({
             visible to every record reader, not just approvers. */}
         {pendingRequest && (pendingRequest.pending_approvers || []).length > 0 && (
           <div>
-            <div className="text-[11px] text-muted-foreground mb-1">
+            <div className="text-xs text-muted-foreground mb-1">
               {tr('waitingOn', 'Waiting on')}
             </div>
             <div className="flex flex-wrap gap-1">
@@ -388,7 +389,7 @@ export const RecordApprovalsPanel: React.FC<RecordApprovalsPanelProps> = ({
                 <Badge
                   key={`${chip.label}-${chip.group ?? ''}-${i}`}
                   variant="outline"
-                  className="text-[11px]"
+                  className="text-xs"
                   /* The raw `position:…` reference belongs on hover, not as the
                      primary identification — `77f846a8b`. */
                   title={chip.title}
@@ -412,7 +413,7 @@ export const RecordApprovalsPanel: React.FC<RecordApprovalsPanelProps> = ({
                 <Button
                   variant="outline"
                   size={isMobile ? 'lg' : 'sm'}
-                  className={isMobile ? 'gap-1.5 px-4' : 'h-6 gap-1 px-2 text-[11px]'}
+                  className={isMobile ? 'gap-1.5 px-4' : 'h-6 gap-1 px-2 text-xs'}
                   disabled={reminding}
                   onClick={() => void handleRemind()}
                 >
@@ -428,7 +429,7 @@ export const RecordApprovalsPanel: React.FC<RecordApprovalsPanelProps> = ({
             history cannot tell (the engine mirrors fields as `runAs:'system'`,
             and decisions live in sys_approval_action, not record history). */}
         <div>
-          <div className="text-[11px] text-muted-foreground mb-2">
+          <div className="text-xs text-muted-foreground mb-2">
             {tr('history', 'Activity')}
           </div>
           <ApprovalActionTimeline actions={actions} loading={actionsLoading} stepText={actionStepText} />

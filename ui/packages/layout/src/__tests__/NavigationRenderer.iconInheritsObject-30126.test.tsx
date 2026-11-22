@@ -94,11 +94,12 @@ describe('objectstack#30126 — NavigationRenderer draws the inherited icon', ()
     await waitFor(() => expect(glyphOf('Starred projects')).toContain('lucide-star'));
   });
 
-  it('controls: an object with no icon and a dashboard row keep the generic icon, as every row does with no resolver', async () => {
+  it('controls: an object with no icon keeps the generic icon, as every object row does with no resolver; a dashboard row never takes an object’s', async () => {
     const { unmount } = renderNav(items, { resolveTargetIcon: icons });
     const generic = 'lucide-file-text';
     expect(glyphOf('Notes')).toBe(generic);
-    expect(glyphOf('Overview')).toBe(generic);
+    // objectstack#36141 — a dashboard with no icon draws its kind's, never the object's it is named like.
+    await waitFor(() => expect(glyphOf('Overview')).toContain('lucide-layout-dashboard'));
     unmount();
 
     renderNav(items);

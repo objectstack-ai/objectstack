@@ -11,7 +11,7 @@
 
 import { lazy, Suspense, useEffect, useMemo, type ReactNode } from 'react';
 import { Route, useParams, useLocation, Navigate } from 'react-router-dom';
-import { DefaultAppContent, ENVIRONMENT_SCOPE_QUERY, LauncherAppsProvider, LoadingScreen, setupMetadataStudioPath, useAdapter } from '@object-ui/app-shell';
+import { DefaultAppContent, ENVIRONMENT_SCOPE_QUERY, LauncherAppsProvider, LoadingFallback, LoadingScreen, setupMetadataStudioPath, useAdapter } from '@object-ui/app-shell';
 import { AdapterCtx } from '@object-ui/react';
 import { MePermissionsProvider, ServerReadScope, releaseMePermissionsRequest, startMePermissionsRequest } from '@object-ui/permissions';
 import { createAuthenticatedFetch, useAuth } from '@object-ui/auth';
@@ -456,7 +456,10 @@ export function ConsolePermissionsScope({ children }: { children: ReactNode }) {
       endpoint={endpoint}
       fetcher={authFetch}
       requestKey={requestKey}
-      loadingFallback={<LoadingScreen />}
+      // objectstack#35981 — the console's boot fallback: on an app route, the
+      // chrome's empty frame while the answer is out (it draws no navigation
+      // entry, which is what the answer decides); the splash on `/home`.
+      loadingFallback={<LoadingFallback />}
       // Without this, the provider's error state renders `loadingFallback` too —
       // an eternal spinner with a `retry` nobody can reach. The provider already
       // re-attempts a transient failure (a cold environment kernel answers 503 +

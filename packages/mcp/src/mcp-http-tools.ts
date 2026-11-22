@@ -427,7 +427,7 @@ export interface McpDataBridge {
    * `input.terms`, ranked and capped at `opts.maxResults`. Runs AS the
    * principal: the host reads the docs through the ADR-0046 §6.7 docs-audience
    * gate, so a page the caller may not read is never searched. On an OAuth
-   * grant the principal is the agent envelope, judged on the token's grant.
+   * grant the audience is the delegating person's own permission sets.
    *
    * OPTIONAL: a host that cannot read docs for the caller omits both doc
    * members ({@link searchPackageDocs}, {@link readPackageDoc}) and neither
@@ -3315,10 +3315,10 @@ export function packageDocToolsServed(
  * - **No second gate.** Neither tool judges what the caller may read: the
  *   host's members read the `doc` items through the `/meta/doc` docs-audience
  *   gate (ADR-0046 §6.7) as the principal, so a page the caller may not read
- *   is neither found nor read, and reads as not found. On an OAuth grant the
- *   principal is the agent envelope, so the docs audience is judged on the
- *   token's grant, not the person's own permission sets; both descriptions
- *   say so.
+ *   is neither found nor read, and reads as not found. On an OAuth grant that
+ *   reaches these tools (the gate above), the docs audience is the delegating
+ *   person's own permission sets, never wider (ADR-0090 D10); both
+ *   descriptions say so.
  * - **The search is a substring match**, stated in the description: no
  *   server-side doc search exists, so the honest search is a term found in a
  *   page's title, a heading or its text (case aside). Pages that contain more
@@ -3348,7 +3348,7 @@ export function registerPackageDocTools(
         + 'aside. Pages that contain more of the terms come first, then pages where the terms sit higher (title, '
         + `then heading, then text), then by title; at most ${PACKAGE_DOC_SEARCH_MAX_RESULTS}, each with an excerpt `
         + 'and, where the page has one, the url to cite. Only pages this connection may read are searched; on an '
-        + 'OAuth connection that is judged on the connection\'s grant, not on the person\'s own permission sets. '
+        + 'OAuth connection, those the person\'s own permission sets open, never more. '
         + `Read a page with ${READ_PACKAGE_DOC_TOOL_NAME}.`,
       inputSchema: strictToolInput(
         {
@@ -3382,7 +3382,7 @@ export function registerPackageDocTools(
         'Read one page of an installed app\'s manual by its name (the name search_package_docs answers): its '
         + 'title, its manual, its Markdown content and, where the page has one, its url to cite. Send package when '
         + 'two apps ship a page of that name. A page this connection may not read answers as not found; on an OAuth '
-        + 'connection that is judged on the connection\'s grant, not on the person\'s own permission sets.',
+        + 'connection, the person\'s own permission sets decide, never more.',
       inputSchema: strictToolInput(
         {
           surface: `this ${READ_PACKAGE_DOC_TOOL_NAME} call`,

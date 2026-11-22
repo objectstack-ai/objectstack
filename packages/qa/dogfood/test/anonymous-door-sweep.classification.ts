@@ -302,8 +302,10 @@ export const OUTSIDE_FAMILIES: readonly OutsideFamily[] = [
     id: 'discovery',
     reason:
       "the discovery documents (the REST root and the dispatcher's well-known document): the allowlist's " +
-      'discovery role, at the two spellings isAuthGateAllowlisted does not name literally',
-    match: routeIs('GET /api/v1', 'GET /.well-known/objectstack'),
+      'discovery role, at the two spellings isAuthGateAllowlisted does not name literally; and the open ' +
+      'restriction profile os validate --target reads with no credential, admitted to the same role by the ' +
+      'ADR-0138 D2 amendment of 2026-11-20',
+    match: routeIs('GET /api/v1', 'GET /.well-known/objectstack', 'GET /api/v1/discovery/restriction-profile'),
   },
   {
     id: 'oauth-discovery-metadata',

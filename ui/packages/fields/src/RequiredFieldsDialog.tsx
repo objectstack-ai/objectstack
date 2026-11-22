@@ -259,7 +259,7 @@ export function RequiredFieldsDialog({
         {(recordName || (changes && changes.length > 0)) && (
           <div className="flex flex-col gap-2 rounded-md border bg-muted/40 px-3 py-2" data-required-fields-change="">
             {recordName && (
-              <p className="min-w-0 break-words text-sm font-semibold">{recordName}</p>
+              <p className="min-w-0 break-words text-sm font-medium">{recordName}</p>
             )}
             {changes && changes.length > 0 && (
               <dl className="flex flex-col gap-1 text-sm">

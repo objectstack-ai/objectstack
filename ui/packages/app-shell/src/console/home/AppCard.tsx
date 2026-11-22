@@ -125,7 +125,7 @@ export function AppCard({ app, onClick, isFavorite, index = 0 }: AppCardProps) {
           <div className="flex items-center gap-2">
             <h3 className="font-semibold text-base sm:text-lg leading-tight truncate">{label}</h3>
             {app.isDefault && (
-              <Badge variant="secondary" className="shrink-0 text-[10px] px-1.5 py-0">
+              <Badge variant="secondary" className="shrink-0 text-xs px-1.5 py-0">
                 {t('home.appCard.default', { defaultValue: 'Default' })}
               </Badge>
             )}

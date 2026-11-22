@@ -56,7 +56,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { MetadataCtx } from '@object-ui/react';
 
@@ -195,7 +195,7 @@ function renderDetail(opts: { objects: any[]; pages: any[]; comments?: Array<Rec
           onEdit={() => {}}
           objectNameOverride={OBJECT_NAME}
           recordIdOverride={RECORD_ID}
-          embedded
+          /* objectstack#36150 — not `embedded`: an authored page draws on the full page only. */
         />
       </MetadataCtx.Provider>
     </MemoryRouter>,
@@ -216,6 +216,7 @@ async function settled() {
 
 beforeEach(() => {
   cleanup();
+  window.localStorage.clear();
   // Unrelated chrome on this view reaches for the platform API; in jsdom that
   // is a real socket. Answer it locally so the feed read is the only asynchrony.
   vi.stubGlobal(
@@ -281,17 +282,22 @@ describe('objectui#7298 — the discussion panel is composed, never appended', (
     expect(composerCount()).toBe(0);
   });
 
-  it('the SYNTHESIZED default page still shows the discussion — its 动态 stream declares it', async () => {
-    // No authored page ⇒ `buildDefaultPageSchema`, which composes the 动态
-    // stream itself (objectstack#27055: discussion, activity and changes in
-    // one `record:activity`; its whole face is the 动态 tab since
-    // objectstack#27524). The ruling removes the host's append, not the
-    // default page's discussion.
+  it('the SYNTHESIZED default page still shows the discussion — in its comment panel', async () => {
+    // No authored page ⇒ `buildDefaultPageSchema`. The ruling removes the
+    // host's append, not the default page's discussion: since objectstack#36075
+    // the default page's comments are its comment panel's, opened from the
+    // header's comments icon, with the composer at the panel's foot.
     renderDetail({ objects: OBJECTS_FEEDS_ON, pages: [], comments: ONE_COMMENT, search: '?related=timeline' });
     await settled();
 
+    const button = await waitFor(() => {
+      const el = document.querySelector('[data-comments-button]');
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    fireEvent.click(button);
     await waitFor(() => expect(count(COMMENT_MARKER)).toBeGreaterThan(0));
-    expect(composerCount()).toBeGreaterThan(0);
+    expect(document.querySelector('[data-comments-panel] [data-comments-composer] textarea')).not.toBeNull();
   });
 });
 

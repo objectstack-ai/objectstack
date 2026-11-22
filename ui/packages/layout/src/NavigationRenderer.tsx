@@ -35,7 +35,7 @@ import {
   PinOff,
   Star,
 } from 'lucide-react';
-import { getLazyIcon, ObjectIconTile } from '@object-ui/components';
+import { getLazyIcon, NeutralIconTile, ObjectIconTile } from '@object-ui/components';
 import {
   DndContext,
   closestCenter,
@@ -239,8 +239,8 @@ export type NavTargetLabelResolver = (target: NavLabelTarget) => string | undefi
  * What a navigation entry that names no `icon` draws instead: the icon of the
  * object it opens. An `object` entry opens an object's list (a `viewName`
  * picks the list, not the object), so the object page's own icon is the one
- * that says which list the row leads to. Every other entry keeps the
- * renderer's generic icon.
+ * that says which list the row leads to. Every other entry draws its kind's
+ * icon ({@link NAV_KIND_ICON}) on the neutral tile.
  */
 export type NavIconTarget = { kind: 'object'; objectName: string };
 
@@ -281,6 +281,33 @@ export function resolveNavItemIcon(
     if (typeof icon === 'string' && icon.trim() !== '') return icon;
   }
   return undefined;
+}
+
+/**
+ * The icon a navigation entry that is not an object draws when it names none
+ * (objectstack#36141): one glyph per kind, drawn on the neutral tile. An
+ * `object` entry has no row here: it draws its object's icon, else the
+ * generic one ({@link resolveIcon}). Groups and separators draw no icon.
+ */
+export const NAV_KIND_ICON: Readonly<Record<Exclude<NavigationItem['type'], 'object' | 'group' | 'separator'>, string>> = {
+  dashboard: 'layout-dashboard',
+  report: 'chart-column',
+  page: 'file',
+  url: 'external-link',
+  component: 'layout-grid',
+  doc: 'book-open',
+  action: 'zap',
+};
+
+/**
+ * The icon name the row of a non-object entry draws on its neutral tile: its
+ * own `icon` when it names one ({@link resolveNavItemIcon}), else its kind's
+ * ({@link NAV_KIND_ICON}). `undefined` for an `object` entry, a group and a
+ * separator, whose icons are decided elsewhere.
+ */
+export function resolveNavKindIcon(item: NavigationItem): string | undefined {
+  if (item.type === 'object' || item.type === 'group' || item.type === 'separator') return undefined;
+  return resolveNavItemIcon(item) ?? NAV_KIND_ICON[item.type];
 }
 
 /**
@@ -1811,7 +1838,6 @@ function NavigationItemRenderer({
   // one Radix Tooltip per row was a measurable part of every drawer open
   // (objectstack#29141).
   const rowTooltip = (label: string) => (isMobile ? undefined : label);
-  const navIconClass = cn('shrink-0', isMobile ? 'h-5 w-5' : 'h-4 w-4');
   // The initial open state (objectui#13336): see `groupOpensOnFirstView`.
   const activeNavId = React.useContext(ActiveNavIdContext);
   const initialOpen = React.useMemo(() => groupOpensOnFirstView(item, activeNavId), [item, activeNavId]);
@@ -1946,7 +1972,7 @@ function NavigationItemRenderer({
     // which leads to the prop, instead of "clicking does nothing", which for
     // three releases led nowhere.
     if (!onAction) return null;
-    const Icon = resolveIcon(item.icon);
+    const Icon = resolveIcon(resolveNavKindIcon(item));
     // Through `resolveNavItemLabel`, not `resolveLabel`: an action entry's
     // `label` may be absent too (objectui#9868), and that is where the absent
     // arm lives — as is the inline-locale-map read (objectui#11201), which
@@ -1961,8 +1987,7 @@ function NavigationItemRenderer({
           className={cn(mobileBtnClass, dragActivator && 'cursor-grab')}
           {...(dragActivator ? dragActivatorProps(dragActivator) : {})}
         >
-          {/* eslint-disable-next-line react-hooks/static-components -- resolveIcon returns a stable icon component from a static registry, not a component created during render */}
-          <Icon className={navIconClass} />
+          <NeutralIconTile glyph={Icon} size={isMobile ? 'md' : 'sm'} className="-mx-0.5" />
           <span>{actionLabel}</span>
           {item.badge != null && (
             <Badge variant={item.badgeVariant ?? 'default'} className="ml-auto text-[10px] px-1.5 py-0">
@@ -2000,11 +2025,13 @@ function NavigationItemRenderer({
   // An `object` entry with no `icon` draws its object's icon, so each list in
   // the menu is told apart the way its own page header shows it.
   // objectstack#35985 — an `object` entry is drawn as its object's tile (a
-  // white glyph on the object's palette colour); every other entry keeps the
-  // line icon, since only objects carry a colour.
-  const iconName = resolveNavItemIcon(item, resolveTargetIcon);
+  // white glyph on the object's palette colour), one with a `viewName` too.
+  // objectstack#36141 — every other entry is drawn on the neutral tile, with
+  // its own icon else its kind's, so the column is one shape throughout and
+  // colour says only which object a row opens.
   const objectTarget: NavIconTarget | null =
     item.type === 'object' && item.objectName ? { kind: 'object', objectName: item.objectName } : null;
+  const iconName = objectTarget ? resolveNavItemIcon(item, resolveTargetIcon) : resolveNavKindIcon(item) ?? resolveNavItemIcon(item);
   const Icon = resolveIcon(iconName);
   const { href, external } = resolveHref(item, basePath, templateContext);
   const isActive = activeNavId !== null && item.id === activeNavId;
@@ -2021,8 +2048,7 @@ function NavigationItemRenderer({
           className="-mx-0.5"
         />
       ) : (
-        // eslint-disable-next-line react-hooks/static-components -- resolveIcon returns a stable icon component from a static registry, not a component created during render
-        <Icon className={navIconClass} />
+        <NeutralIconTile icon={iconName} glyph={Icon} size={isMobile ? 'md' : 'sm'} className="-mx-0.5" />
       )}
       <span>{itemLabel}</span>
       {item.badge != null && (

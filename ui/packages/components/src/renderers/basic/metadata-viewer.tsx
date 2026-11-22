@@ -78,8 +78,8 @@ function Shell({
         <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-2">
-            <span className="text-sm font-semibold leading-tight">{title}</span>
-            <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{hint}</span>
+            <span className="text-sm font-medium leading-tight">{title}</span>
+            <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">{hint}</span>
           </div>
           {subtitle && <div className="mt-0.5 text-xs text-muted-foreground">{subtitle}</div>}
         </div>
@@ -336,12 +336,12 @@ function StateMachineView({ object, name }: ViewerProps) {
             >
               <Chip value={s} />
               {isInitial && (
-                <span className="inline-flex items-center gap-1 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400">
+                <span className="inline-flex items-center gap-1 rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400">
                   <CircleDot className="h-3 w-3" /> {t('element.metadataViewer.initial', { defaultValue: 'initial' })}
                 </span>
               )}
               {isFinal ? (
-                <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   <Flag className="h-3 w-3" /> {t('element.metadataViewer.final', { defaultValue: 'final' })}
                 </span>
               ) : (
@@ -411,14 +411,14 @@ function FlowView({ name, detail }: ViewerProps) {
         <ol className="space-y-1.5">
           {nodes.map((n, i) => (
             <li key={n?.id ?? i} className="flex items-center gap-2.5 rounded-md border bg-muted/20 px-2.5 py-2">
-              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary">
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
                 {i + 1}
               </span>
               <span className="text-sm">
                 {n?.label ?? n?.id ?? t('element.metadataViewer.untitledStep', { defaultValue: '(step)' })}
               </span>
               {n?.type && (
-                <span className="ml-auto rounded border bg-background px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                <span className="ml-auto rounded border bg-background px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
                   {n.type}
                 </span>
               )}
@@ -427,7 +427,7 @@ function FlowView({ name, detail }: ViewerProps) {
         </ol>
       )}
       {business && hiddenCount > 0 && (
-        <div className="mt-2 text-[11px] text-muted-foreground">
+        <div className="mt-2 text-xs text-muted-foreground">
           {withChips(
             t('element.metadataViewer.hiddenSteps', {
               defaultValue: 'Technical steps hidden: {{count}} · set {{setting}} to show all',

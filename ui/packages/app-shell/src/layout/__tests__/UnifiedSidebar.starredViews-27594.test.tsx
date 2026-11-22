@@ -206,7 +206,7 @@ describe('objectstack#27594 — a starred view is a row of the sidebar Favorites
   it('draws the view of this app with its object\'s icon, at its address; a view of another app is not drawn here', async () => {
     const { adapter } = makeAdapter([HOT, ELSEWHERE, RECORD]);
     render(sidebarUi(adapter));
-    await waitFor(() => expect(favoriteLabels()).toEqual(['Hot Leads', '📋Acme']));
+    await waitFor(() => expect(favoriteLabels()).toEqual(['Hot Leads', 'Acme']));
 
     const hot = within(favoritesSection()).getByRole('link', { name: 'Hot Leads' });
     expect(hot).toHaveAttribute('href', '/apps/crm/crm_lead/view/hot_leads');
@@ -217,11 +217,11 @@ describe('objectstack#27594 — a starred view is a row of the sidebar Favorites
   it('a keyboard reorder of the rows is saved in the store, a favorite of another app keeps its place, and the next load draws it', async () => {
     const first = makeAdapter([HOT, ELSEWHERE, RECORD]);
     const view = render(sidebarUi(first.adapter));
-    await waitFor(() => expect(favoriteLabels()).toEqual(['Hot Leads', '📋Acme']));
+    await waitFor(() => expect(favoriteLabels()).toEqual(['Hot Leads', 'Acme']));
 
     await keyboardMove('Hot Leads', ['ArrowDown']);
 
-    expect(favoriteLabels()).toEqual(['📋Acme', 'Hot Leads']);
+    expect(favoriteLabels()).toEqual(['Acme', 'Hot Leads']);
     await waitFor(() => expect(first.saves.length).toBeGreaterThan(0), { timeout: 2000 });
     expect(first.saves.at(-1)!.map((f) => f.id)).toEqual([
       'record:account:1',
@@ -233,6 +233,6 @@ describe('objectstack#27594 — a starred view is a row of the sidebar Favorites
     localStorage.clear();
     const second = makeAdapter(first.saves.at(-1)!);
     render(sidebarUi(second.adapter));
-    await waitFor(() => expect(favoriteLabels()).toEqual(['📋Acme', 'Hot Leads']));
+    await waitFor(() => expect(favoriteLabels()).toEqual(['Acme', 'Hot Leads']));
   });
 });

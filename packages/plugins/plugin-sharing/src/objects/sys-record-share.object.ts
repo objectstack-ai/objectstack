@@ -12,8 +12,10 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *
  * Enforcement lives in `@objectstack/plugin-sharing`:
  *   - For objects with `sharingModel: 'private'`, the engine middleware
- *     AND-s `{$or:[{owner_id:userId},{id:{$in:[grantedRecordIds]}}]}`
- *     into every `find` against that object.
+ *     AND-s `{$or:[{owner_id:userId},{id:{$in:SharedRecordIds.read(object,userId)}}]}`
+ *     into every `find` against that object: the share-grant leaf
+ *     (ADR-0155), which the driver evaluates as a semi-join on this table,
+ *     so every grant counts and none is read into memory.
  *   - For objects with `sharingModel: 'private' | 'read'`, the same
  *     middleware enforces edit/delete by checking ownership OR a share
  *     row with `access_level in ('edit','full')`. `full` is no longer
@@ -314,8 +316,8 @@ export const SysRecordShare = ObjectSchema.create({
 
   indexes: [
     // Hot path: "all records visible to user U on object O" — the
-    // middleware reads (object_name, recipient_type, recipient_id) to
-    // build the `id IN (...)` predicate on every find.
+    // share-grant leaf's semi-join (ADR-0155) reads (object_name,
+    // recipient_type, recipient_id) inside every sharing-scoped statement.
     { fields: ['object_name', 'recipient_type', 'recipient_id'] },
     // "all grants on this record" — used by the share-management UI
     // and by canEdit() to look up explicit grants.

@@ -25,6 +25,7 @@
 import * as React from 'react';
 import { toast } from 'sonner';
 import { Badge } from '@object-ui/components';
+import { formatDateTime } from '@object-ui/core';
 import { createAuthenticatedFetch } from '@object-ui/auth';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { useObjectTranslation } from '@object-ui/react';
@@ -49,13 +50,16 @@ const ACTION_DOT: Record<string, string> = {
 };
 
 /**
- * `locale` is REQUIRED: the timeline's action times used to be formatted with
- * no tag, i.e. in the MACHINE's locale (objectui#9909). The timeline passes
- * `useDisplayLocale()`.
+ * An action's time in the record page's one datetime face: core's compact
+ * face, the one the page's highlight chips and every `datetime` cell draw
+ * (objectstack#35415), in the host's display zone. `locale` is REQUIRED: the
+ * timeline's action times used to be formatted with no tag, i.e. in the
+ * MACHINE's locale (objectui#9909). The timeline passes `useDisplayLocale()`.
  */
 function formatDate(s: string | null | undefined, locale: string): string {
   if (!s) return '—';
-  try { return new Date(s).toLocaleString(locale); } catch { return s; }
+  const text = formatDateTime(s, { locale, style: 'compact' });
+  return text === '—' ? s : text;
 }
 
 export interface ApprovalActionTimelineProps {
@@ -157,7 +161,7 @@ export function ApprovalActionTimeline({ actions, loading = false, stepText }: A
             {isViaOverrideRow(a) && (
               <Badge
                 variant="outline"
-                className="gap-1 border-amber-500/60 px-1.5 py-0 text-[10px] font-medium text-amber-700 dark:text-amber-400"
+                className="gap-1 border-amber-500/60 px-1.5 py-0 text-xs font-medium text-amber-700 dark:text-amber-400"
                 title={tr('viaOverrideHint', 'The actor held no approver slot on this step — admitted by the admin-override path.')}
                 data-testid="via-override-chip"
               >
@@ -170,7 +174,7 @@ export function ApprovalActionTimeline({ actions, loading = false, stepText }: A
                 · {actionStepText(a)}
               </span>
             )}
-            <span className="ml-auto text-muted-foreground text-[10px]">
+            <span className="ml-auto text-muted-foreground text-xs">
               {formatDate(a.created_at, displayLocale)}
             </span>
           </div>
@@ -192,7 +196,7 @@ export function ApprovalActionTimeline({ actions, loading = false, stepText }: A
                   key={att.id || i}
                   type="button"
                   onClick={() => void openAttachment(att)}
-                  className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                  className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
                   title={att.name || att.id}
                 >
                   <Paperclip className="h-3 w-3" />

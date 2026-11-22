@@ -70,13 +70,13 @@ export default function AppDocsIndex() {
                 >
                   <BookOpen className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
                   <div className="min-w-0">
-                    <div className="text-sm font-semibold">{card.label}</div>
+                    <div className="text-sm font-medium">{card.label}</div>
                     {card.description ? (
                       <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
                         {card.description}
                       </div>
                     ) : card.subtitle ? (
-                      <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground/70">
+                      <div className="mt-0.5 truncate font-mono text-xs text-muted-foreground/70">
                         {card.subtitle}
                       </div>
                     ) : null}

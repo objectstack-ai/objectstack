@@ -27,7 +27,7 @@ ComponentRegistry.register('kbd',
         {keys.map((key, idx) => (
           <kbd
             key={idx}
-            className="pointer-events-none inline-flex h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground opacity-100"
+            className="pointer-events-none inline-flex h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-xs font-medium text-muted-foreground opacity-100"
             {...kbdProps}
             {...(idx === 0 ? { 'data-obj-id': dataObjId, 'data-obj-type': dataObjType, style } : {})}
           >

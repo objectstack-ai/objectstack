@@ -251,6 +251,9 @@ const MODULES = {
   'packages/rest/src/user-work-routes.ts': { responses: 0, ok: 0, err: 0 },
   // #30237: the recycle-bin doors answer only through the shared writers.
   'packages/rest/src/recycle-bin-routes.ts': { responses: 0, ok: 0, err: 0 },
+  // #35402: the Change Owner doors answer only through the shared writers (and
+  // `handleRouteError`, the `/data` write door's own classification of a throw).
+  'packages/rest/src/change-owner-routes.ts': { responses: 0, ok: 0, err: 0 },
   // #3636 put the right envelope on this module's three read routes but built it
   // inline in four places, so it carried a ratchet at 5 / 4 / 1 until those
   // collapsed behind a local `sendOk` — and then onto the shared one.
@@ -317,6 +320,14 @@ const MODULES = {
   // `AuditPlugin` straight on `IHttpServer`. It supplies its part of the shared
   // own-row delete door below and answers nothing itself, so it builds no body.
   'packages/plugins/plugin-audit/src/comment-reaction-routes.ts': { responses: 0, ok: 0, err: 0 },
+
+  // The comment doors (`PUT /api/v1/comments/:id/resolution`, the resolution
+  // door, and `DELETE /api/v1/comments/:id`, the own-comment delete door),
+  // mounted by `AuditPlugin` beside the unreact door. Every body they answer is
+  // written by the shared pair (`sendOk` / `sendError` / `sendServerFault`) or
+  // by the shared own-row delete door below, so the module builds none itself.
+  // Declared in the same PR that created the module.
+  'packages/plugins/plugin-audit/src/comment-routes.ts': { responses: 0, ok: 0, err: 0 },
 
   // The owner's delete door for a personal view (`DELETE /api/v1/personal-views/:id`),
   // mounted by `AuthPlugin` straight on `IHttpServer`. It supplies its part of the

@@ -250,7 +250,7 @@ function MenuRow({
       onClick={onOpen}
       data-testid={testId}
       className={cn(
-        'flex w-full items-center gap-3 rounded-sm px-2 py-1.5 text-left text-[13px] hover:bg-muted max-sm:min-h-11',
+        'flex w-full items-center gap-3 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted max-sm:min-h-11',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
       )}
     >
@@ -288,7 +288,7 @@ function SubPage({
           onClick={onBack}
           data-testid="options-back"
           className={cn(
-            'flex min-w-0 items-center gap-1 rounded-sm px-1.5 py-1 text-[13px] font-medium hover:bg-muted max-sm:min-h-11',
+            'flex min-w-0 items-center gap-1 rounded-sm px-1.5 py-1 text-sm font-medium hover:bg-muted max-sm:min-h-11',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           )}
         >
@@ -394,7 +394,7 @@ function ViewNameField({ t, viewName }: { t: ViewSettingsPopoverProps['t']; view
   const title = t('list.optionsMenu.viewName', { defaultValue: 'View name' });
   if (!onRename) {
     return (
-      <div className="border-b px-3 py-2 text-[13px] font-medium break-words" data-testid="options-view-name">
+      <div className="border-b px-3 py-2 text-sm font-medium break-words" data-testid="options-view-name">
         {label}
       </div>
     );
@@ -432,7 +432,7 @@ function ViewNameField({ t, viewName }: { t: ViewSettingsPopoverProps['t']; view
             setDraft(label);
           }
         }}
-        className="h-8 text-[13px] font-medium max-sm:h-11"
+        className="h-8 text-sm font-medium max-sm:h-11"
         data-testid="options-view-name-input"
       />
     </div>
@@ -571,7 +571,7 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
       {viewName && <ViewNameField t={t} viewName={viewName} />}
       {fieldsOffered && (
         <div className="border-b p-1" data-testid="options-columns">
-          <p className="px-2 pb-0.5 pt-1 text-[11px] text-muted-foreground">
+          <p className="px-2 pb-0.5 pt-1 text-xs text-muted-foreground">
             {t('list.optionsMenu.shownColumns', { defaultValue: 'Shown columns' })}
           </p>
           <FieldList
@@ -589,7 +589,7 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
             onClick={() => setPage('fields')}
             data-testid="options-add-column"
             className={cn(
-              'flex w-full items-center gap-1.5 rounded-sm px-2 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground max-sm:min-h-11',
+              'flex w-full items-center gap-1.5 rounded-sm px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-muted hover:text-foreground max-sm:min-h-11',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
             )}
           >
@@ -630,7 +630,7 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
             title={t('grid.toolbar.densityCycleShortHint', { defaultValue: 'Click to cycle' })}
             data-testid="view-settings-density-cycle"
             className={cn(
-              'flex w-full items-center gap-3 rounded-sm px-2 py-1.5 text-left text-[13px] hover:bg-muted max-sm:min-h-11',
+              'flex w-full items-center gap-3 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted max-sm:min-h-11',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
             )}
           >
@@ -726,7 +726,7 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
         action={rowColorConfig ? clearAction(() => setRowColorConfig(undefined), 'options-color-clear') : undefined}
       >
         <div className="p-3">
-          <label className="mb-1 block text-[11px] text-muted-foreground">
+          <label className="mb-1 block text-xs text-muted-foreground">
             {t('list.colorByField', { defaultValue: 'Color by field' })}
           </label>
           <ColorFieldPicker
@@ -762,7 +762,7 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
                 onClick={() => setMode(mode)}
                 data-testid={`options-row-height-${mode}`}
                 className={cn(
-                  'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[13px] hover:bg-muted max-sm:min-h-11',
+                  'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted max-sm:min-h-11',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                   active ? 'font-medium text-foreground' : 'text-foreground/90',
                 )}
@@ -880,7 +880,7 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
           <ChevronDown className="hidden h-3 w-3 opacity-60 @[56rem]/list:inline" aria-hidden="true" />
           {changedCount > 0 && (
             <span
-              className="flex h-4 min-w-[16px] items-center justify-center text-[10px] font-medium text-muted-foreground tabular-nums"
+              className="flex h-4 min-w-[16px] items-center justify-center text-xs font-medium text-muted-foreground tabular-nums"
               data-testid="toolbar-display-count"
             >
               {changedCount}

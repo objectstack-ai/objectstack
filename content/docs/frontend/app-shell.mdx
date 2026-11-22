@@ -74,9 +74,13 @@ of its own to it, in particular **no sidebar toggle**. If you want one, render i
 
 Pass `showHeader={false}` to draw no header at all, for a page that draws its own top bar:
 the shell then renders no `<header>` element and does not mount `navbar`. It defaults to
-`true`, and leaving `navbar` out alone still draws the (empty) bar. The Console uses it on
-a phone (below 768 px): a record page's own top bar, with its back link to the object's
-list, is the page's only bar there, and every other route keeps the app bar.
+`true`, and leaving `navbar` out alone still draws the (empty) bar. The Console draws the
+app bar only on a phone (below 768 px) and on an app's docs pages, which mount no sidebar.
+From 768 px up an app page starts at the window's top: the sidebar's head carries the app
+menu, search and the notification bell, its foot the account menu, the content area the
+standing banners, and the page header its own buttons (objectstack#36112). On a phone a
+record page's own top bar, with its back link to the object's list, is the page's only bar,
+and every other route keeps the app bar.
 
 ### Content Area
 

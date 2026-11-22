@@ -921,7 +921,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
           <div
             className={cn(
               'flex-1 min-w-0 break-words',
-              frameless ? 'py-1 text-[13px] leading-6' : 'text-sm py-1',
+              frameless ? 'py-1 text-sm leading-6' : 'text-sm py-1',
             )}
           >
             {displayValue}
@@ -1093,7 +1093,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
   // plain heading — the author's declaration holds on every face. An untitled
   // section is the grid alone.
   if (frameless) {
-    const titleRow = 'flex min-h-11 sm:min-h-9 w-full items-center justify-between gap-2 py-1.5 text-left text-[13px] font-semibold text-foreground';
+    const titleRow = 'flex min-h-11 sm:min-h-9 w-full items-center justify-between gap-2 py-1.5 text-left text-sm font-medium text-foreground';
     return (
       <section className={cn('@container min-w-0', className)} data-detail-section-face="frameless">
         {section.title && !section.collapsible && (
@@ -1152,7 +1152,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
       <Card className={cn(section.showBorder === false ? 'border-none shadow-none' : '', className)}>
         {section.title && (
           <CardHeader className={cn('py-3 px-4 sm:py-4 sm:px-6', headerColorClass(section.headerColor))}>
-            <CardTitle className="flex items-center justify-between text-base font-semibold tracking-tight">
+            <CardTitle className="flex items-center justify-between text-base font-medium tracking-tight">
               <div className="flex items-center gap-2">
                 {section.icon && <SectionIcon name={section.icon} />}
                 <span>{section.title}</span>
@@ -1197,7 +1197,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
           "relative py-3 px-4 sm:py-4 sm:px-6 cursor-pointer hover:bg-muted/50 transition-colors",
           headerColorClass(section.headerColor)
         )}>
-          <CardTitle className="text-base font-semibold tracking-tight">
+          <CardTitle className="text-base font-medium tracking-tight">
             <CollapsibleTrigger asChild>
               <button
                 type="button"

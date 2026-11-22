@@ -7,9 +7,8 @@
 // shapes today's filter has for a caller with one grant on the record (`[id]`)
 // and with none (the share arm left out), and ⛔ never carries the leaf.
 //
-// The sharing service's read filter is replaced here by the shape the step-6
-// producer writes, `{ $or: [owner match, { id: { $in: leaf } }] }`: no producer
-// on main writes the leaf yet (plugin-sharing is untouched on this card). The
+// The sharing service's read filter is the step-6 producer's own,
+// `{ $or: [owner match, { id: { $in: leaf } }] }` (ADR-0155 plan step 6). The
 // rest is the real SecurityPlugin and the real SharingService, over an engine
 // double that records its reads.
 import { describe, it, expect, vi } from 'vitest';
@@ -45,7 +44,8 @@ const SHARE_ROWS = [
   { id: 's3', object_name: OBJECT, record_id: UNSHARED, recipient_type: 'user', recipient_id: 'u_other', access_level: 'read' },
 ];
 
-function makeEngine() {
+/** `legacy`: the object is stored by a driver that does not evaluate share grants (ADR-0155 R2). */
+function makeEngine(storage: 'sql' | 'legacy' = 'sql') {
   const tables: Record<string, any[]> = {
     [OBJECT]: [row(SHARED), row(UNSHARED)],
     sys_record_share: SHARE_ROWS.map((r) => ({ ...r })),
@@ -71,6 +71,9 @@ function makeEngine() {
     _middlewares: [] as any[],
     registerMiddleware(mw: any) { this._middlewares.push(mw); },
     getSchema: (name: string) => (name === OBJECT ? SCHEMA : undefined),
+    getDriverForObject: () => (storage === 'legacy'
+      ? { name: 'legacy', supports: {} }
+      : { name: 'sql', supports: { fixedReadLeaves: ['SharedRecordIds'] } }),
     async find(object: string, options: any = {}) {
       reads.push({ object, where: options.where });
       const hits = (tables[object] ?? []).filter((r) => matches(r, options.filter ?? options.where));
@@ -83,8 +86,8 @@ function makeEngine() {
   };
 }
 
-async function makeStack() {
-  const engine = makeEngine();
+async function makeStack(storage: 'sql' | 'legacy' = 'sql') {
+  const engine = makeEngine(storage);
   let security: any;
   let sharing: SharingService;
   const errors: string[] = [];
@@ -106,9 +109,6 @@ async function makeStack() {
   await plugin.init(ctx);
   await plugin.start(ctx);
   sharing = new SharingService({ engine: engine as any, securityService: () => security });
-  // The step-6 producer's shape (see the header): the owner match OR the leaf.
-  (sharing as any).buildReadFilter = async (object: string, context: any) =>
-    ({ $or: [{ owner_id: context.userId }, { id: { $in: SharedRecordIds.read(object, context.userId) } }] });
   const explain = (operation: 'read' | 'update', target: { recordId?: string; recordIds?: string[] }) =>
     security.explain({ object: OBJECT, operation, ...target }, { ...READER_CTX });
   return { engine, explain, errors, sharing };
@@ -227,5 +227,29 @@ describe('[ADR-0155 Q2] the explainer resolves the share-grant leaf at the recor
     const decision = await explain('read', { recordId: SHARED });
     expect(decision.record).toMatchObject({ recordId: SHARED, visible: false, decidedBy: 'sharing' });
     expect(sharingLayer(decision).record.rowFilter).toBeUndefined();
+  });
+});
+
+describe('[ADR-0155 ② ruled R2] the explainer says why a share on the record admits nothing', () => {
+  it('on an object whose storage does not evaluate share grants: the shares are neutral, the record is excluded, and the detail names the reason', async () => {
+    const { engine, explain } = await makeStack('legacy');
+    const decision = await explain('read', { recordId: SHARED });
+    const record = sharingLayer(decision).record;
+    // The scope carries no share arm there, so nothing of the leaf is resolved.
+    expect(record.rowFilter).toEqual({ owner_id: U_READER });
+    expect(record.matchesRecord).toBe(false);
+    expect(decision.record).toMatchObject({ recordId: SHARED, visible: false });
+    const shares = record.rules.filter((r: any) => r.kind === 'record_share');
+    expect(shares.map((r: any) => r.effect)).toEqual(['neutral', 'neutral']);
+    expect(record.detail).toContain('Share grants do not count on this object, so no share attached to the record is consulted');
+    expect(record.detail).toContain("stored by driver 'legacy'");
+    expect(shareReads(engine).some((r) => JSON.stringify(r.where).includes('"recipient_id"'))).toBe(false);
+  });
+
+  it('CONTROL: where they count, the same shares admit the caller and no sentence is added', async () => {
+    const { explain } = await makeStack('sql');
+    const record = sharingLayer(await explain('read', { recordId: SHARED })).record;
+    expect(record.rules.filter((r: any) => r.kind === 'record_share').map((r: any) => r.effect)).toEqual(['admits', 'admits']);
+    expect(record.detail).not.toContain('Share grants do not count');
   });
 });

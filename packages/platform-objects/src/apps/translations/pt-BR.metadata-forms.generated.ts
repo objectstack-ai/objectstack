@@ -77,8 +77,8 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Nomes de campos deste objeto, os mais importantes primeiro — a primeira entrada vence onde só cabe uma (ADR-0085). Define as colunas padrão das listas e das listas relacionadas, os cartões, as pré-visualizações de registros filhos, o cartão flutuante do registro e o seletor de registros. Um nome que não seja um campo deste objeto é recusado na publicação."
       },
       relatedLists: {
-        label: "Listas relacionadas",
-        helpText: "Ordem de negócio das listas relacionadas deste objeto na página do registro, as mais importantes primeiro. Cada entrada é o nome de um objeto filho (por exemplo task), ou objeto.campo quando esse filho tem mais de um relacionamento com este objeto. As listas indicadas vêm primeiro; as demais seguem na ordem derivada. Um nome que não corresponde a nenhum relacionamento que aponte para este objeto não posiciona nada, por isso salvar ou validar o objeto o recusa."
+        label: "Abas da página do registro",
+        helpText: "As abas da página do registro depois da visão geral, em ordem. Cada entrada é o nome de um objeto filho (por exemplo task), object.field quando esse filho tem mais de uma relação com este objeto, uma aba integrada (sys_attachment, sys_approval_request, sys_activity) ou uma entrada com título e colunas próprios, definida nas configurações do objeto no Studio. Assim que algo é listado, uma lista relacionada que nenhuma entrada nomeia não mostra aba, inclusive uma lista que outro pacote adiciona, até que este objeto a nomeie; os anexos só aparecem quando listados. Vazio: todas as listas aparecem na ordem padrão. Um nome que não corresponde a nenhuma relação que aponte para este objeto é recusado ao salvar o objeto."
       },
       searchableFields: {
         label: "Campos pesquisáveis",

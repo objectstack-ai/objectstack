@@ -26,6 +26,7 @@ import { SharingService, buildSharingMiddleware } from '@objectstack/plugin-shar
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
+import { resolveFixedReadLeavesInMemory } from './shared-record-ids-in-memory.testkit.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 
 // ── metadata ───────────────────────────────────────────────────────────────
@@ -260,7 +261,12 @@ async function makeStack(opts: { schema?: Record<string, unknown>; withoutHierar
       let result: any[] | undefined;
       await securityMw(opCtx, async () => {
         await sharingMw(opCtx, async () => {
-          result = await engine.find(OBJECT, { where: opCtx.ast.where });
+          // [ADR-0155 plan step 6] The share-grant leaf in the scoped `where`,
+          // resolved here once for the statement, as a driver's semi-join is
+          // (`shared-record-ids-in-memory.testkit.ts`): this double is no driver.
+          result = await engine.find(OBJECT, {
+            where: resolveFixedReadLeavesInMemory(opCtx.ast.where, (table) => engine._tables[table]),
+          });
         });
       });
       if (!result) throw new Error('a middleware swallowed the find');

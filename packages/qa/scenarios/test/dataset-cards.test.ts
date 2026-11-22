@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { loadScenarioFile, readCapabilityAreas, type LoadedScenario } from '../src/index.js';
+import { ASK_KINDS, askKindCounts, askTurns, loadScenarioFile, readCapabilityAreas, type AskKind, type LoadedScenario } from '../src/index.js';
 import { namespacedScenario } from '../src/runner/namespace.js';
 import { buildPrompt, datasetQuestionPrompt, promptLanguageGaps } from '../src/runner/prompts.js';
 import { scoreGraph } from '../src/score/index.js';
@@ -164,5 +164,124 @@ describe('the Build half checks each declared dataset on a built artifact', () =
     expect(fails((a) => a.datasets[0].dimensions.pop())).toEqual([['dataset-dimension:trip_plan.trip_status', 'missing']]);
     expect(fails((a) => (a.datasets[0].object = 'demotravel_employee'))).toEqual([['dataset:trip_plan', 'on demotravel_employee, not demotravel_trip_request']]);
     expect(fails((a) => a.datasets.pop()).map(([c]) => c)).toEqual(['dataset:claim_lines', 'dataset-measure:claim_lines.line_amount', 'dataset-dimension:claim_lines.expense_type']);
+  });
+});
+
+// ── Ask kinds: every question of a dataset card names the kind it asks, as many times as the README table states ──
+
+const question = (c: RawCard, id: string) => c.run.questions.find((x: { id: string }) => x.id === id);
+/** Strip the kind from every question and dataset question of the card but `keep`: the card then names exactly one kind. */
+const onlyKind = (c: RawCard, keep: { askKind?: string }) => {
+  for (const q of [...c.run.questions, ...c.run.datasetQuestions]) if (q !== keep) delete q.askKind;
+};
+/** Strip every kind from the card: a card written before ask kinds existed. */
+const noKinds = (c: RawCard) => {
+  for (const q of [...c.run.questions, ...(c.run.datasetQuestions ?? [])]) delete q.askKind;
+};
+
+describe('the dataset cards name the kind of every question they ask, and ask every kind at least twice', () => {
+  const counts = (id: (typeof DATASET_CARDS)[number]) => {
+    const { card } = load(id);
+    return askKindCounts(card!.card, card!.personaTruths);
+  };
+
+  it.each(DATASET_CARDS)('%s: every question and dataset question names its kind', (id) => {
+    const c = load(id).card!.card;
+    expect([...c.run.questions, ...c.run.datasetQuestions!].filter((q) => q.askKind === undefined).map((q) => q.id)).toEqual([]);
+  });
+
+  it('across the two cards no kind is asked fewer than twice', () => {
+    const a = counts('order_to_cash');
+    const b = counts('travel_expense');
+    const short = ASK_KINDS.filter((k) => a[k] + b[k] < 2);
+    expect(short).toEqual([]);
+  });
+
+  it('a turn whose persona truth is withheld is a `forbidden` ask; the same question asked as a persona who may see it is the kind it names', () => {
+    const { card } = load('travel_expense');
+    const turns = askTurns(card!.card, card!.personaTruths).filter((t) => t.question === 'department_budgets');
+    expect(turns).toEqual([
+      { question: 'department_budgets', persona: 'employee', askKind: 'forbidden' },
+      { question: 'department_budgets', persona: 'dept_manager', askKind: 'group_sum' },
+    ]);
+  });
+
+  /**
+   * The figures the card README's "What the open dataset cards ask, per kind" table states
+   * (docs/qa/scenarios/README.md). A card edit that moves one fails here: change both together.
+   */
+  const STATED: Record<AskKind, [number, number]> = {
+    count: [3, 3],
+    group_sum: [2, 3],
+    top_n: [1, 1],
+    time_range: [1, 1],
+    join: [2, 2],
+    owner_latest: [2, 1],
+    business_term: [2, 2],
+    ambiguous: [2, 2],
+    forbidden: [1, 2],
+    unanswerable: [1, 1],
+  };
+
+  it('each card asks each kind as many times as the README table states', () => {
+    const a = counts('order_to_cash');
+    const b = counts('travel_expense');
+    expect(Object.fromEntries(ASK_KINDS.map((k) => [k, [a[k], b[k]]]))).toEqual(STATED);
+  });
+});
+
+/** [case, card, mutation, the refusal's path, its message]. */
+const KIND_REFUSALS: Array<[string, (typeof DATASET_CARDS)[number], (c: RawCard) => void, string, RegExp]> = [
+  ['a question with no kind on a card that names one kind, on a dataset question', 'order_to_cash', (c) => onlyKind(c, dq(c, 'dq_bookings')), 'run.questions[0].askKind', /a card that names one ask kind names the kind of every question it asks/],
+  ['a dataset question with no kind on a card that names one kind, on a question', 'order_to_cash', (c) => onlyKind(c, question(c, 'open_receivables')), 'run.datasetQuestions[0].askKind', /a card that names one ask kind names the kind of every question it asks/],
+  ['a kind outside the closed set', 'order_to_cash', (c) => (question(c, 'open_receivables').askKind = 'trend'), 'run.questions[0].askKind', /Invalid option|expected one of/],
+  ['`top_n` on a truth that does not rank', 'order_to_cash', (c) => (question(c, 'open_receivables').askKind = 'top_n'), 'run.questions[0].askKind', /its truth is a `topN`/],
+  ['`count` on a grouped truth', 'order_to_cash', (c) => (question(c, 'receivables_aging').askKind = 'count'), 'run.questions[1].askKind', /with no `groupBy`/],
+  ['`group_sum` on a ranking', 'order_to_cash', (c) => (question(c, 'top_accounts_billed').askKind = 'group_sum'), 'run.questions[3].askKind', /with a `groupBy`/],
+  ['`time_range` with no window', 'order_to_cash', (c) => (question(c, 'receivables_aging').askKind = 'time_range'), 'run.questions[1].askKind', /filters with `in_window`/],
+  ['`join` with no relation path', 'order_to_cash', (c) => (question(c, 'receivables_aging').askKind = 'join'), 'run.questions[1].askKind', /relation path/],
+  ['`owner_latest` that groups by nobody', 'order_to_cash', (c) => (question(c, 'open_receivables').askKind = 'owner_latest'), 'run.questions[0].askKind', /groups by a person field/],
+  ['`owner_latest` that groups by a field that names no person (a status)', 'order_to_cash', (c) => (question(c, 'orders_by_status').askKind = 'owner_latest'), 'run.questions[2].askKind', /groups by a person field/],
+  ['`owner_latest` across a lookup that ends on no person (a product category)', 'order_to_cash', (c) => (question(c, 'booked_by_category').askKind = 'owner_latest'), 'run.questions[5].askKind', /groups by a person field/],
+  ['`unanswerable` on a question the seed answers', 'order_to_cash', (c) => (question(c, 'open_receivables').askKind = 'unanswerable'), 'run.questions[0].askKind', /only a question whose truth is `unanswerable`/],
+  ['an unanswerable truth named another kind', 'order_to_cash', (c) => (question(c, 'september_commission').askKind = 'count'), 'run.questions[9].askKind', /its kind is `unanswerable`/],
+  ['`business_term` on a question with a truth', 'order_to_cash', (c) => (question(c, 'open_receivables').askKind = 'business_term'), 'run.questions[0].askKind', /ask it as a dataset question/],
+  ['`forbidden` declared on a question one of its personas may see', 'travel_expense', (c) => (question(c, 'department_budgets').askKind = 'forbidden'), 'run.questions[8].askKind', /asked only as personas it is withheld from/],
+  ['a `metric_selected` dataset question named `ambiguous`', 'order_to_cash', (c) => (dq(c, 'dq_bookings').askKind = 'ambiguous'), 'run.datasetQuestions[0].askKind', /its kind is `business_term`/],
+  ['an `asked_back` dataset question named `business_term`', 'order_to_cash', (c) => (dq(c, 'dq_revenue').askKind = 'business_term'), 'run.datasetQuestions[2].askKind', /its kind is `ambiguous`/],
+  ['a `fallback_labelled` dataset question named `forbidden`', 'order_to_cash', (c) => (dq(c, 'dq_payment_count').askKind = 'forbidden'), 'run.datasetQuestions[4].askKind', /never `forbidden`/],
+];
+
+describe('the loader refuses an ask kind that does not fit its question, at `askKind`', () => {
+  it.each(KIND_REFUSALS)('%s', (_name, id, mutate, path, message) => {
+    const { card, refusals } = load(id, mutate);
+    expect(card).toBeUndefined();
+    const hit = refusals.filter((r) => r.path === path);
+    expect(hit.map((r) => r.message).join(' | ')).toMatch(message);
+  });
+
+  it('`owner_latest` across a lookup that ends on a person loads: the overdue balance grouped by the account owner', () => {
+    const { refusals } = load('order_to_cash', (c) => (question(c, 'overdue_by_owner').askKind = 'owner_latest'));
+    expect(refusals).toEqual([]);
+  });
+
+  it('`forbidden` declared on a question asked only as a persona it is withheld from loads', () => {
+    const { refusals } = load('travel_expense', (c) => Object.assign(question(c, 'department_budgets'), { askKind: 'forbidden', personas: ['employee'] }));
+    expect(refusals).toEqual([]);
+  });
+
+  it('a card that asks no dataset question may leave its questions unnamed', () => {
+    const { refusals } = load('order_to_cash', (c) => {
+      delete c.run.datasetQuestions;
+      noKinds(c);
+    });
+    expect(refusals).toEqual([]);
+  });
+
+  it('a card that asks dataset questions and names no kind loads, as a card written before ask kinds did', () => {
+    const { card, refusals } = load('order_to_cash', noKinds);
+    expect(refusals).toEqual([]);
+    expect(card!.card.run.datasetQuestions!.length).toBeGreaterThan(0);
+    expect([...card!.card.run.questions, ...card!.card.run.datasetQuestions!].filter((q) => q.askKind !== undefined)).toEqual([]);
   });
 });

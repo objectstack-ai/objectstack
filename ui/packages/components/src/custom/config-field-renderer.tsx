@@ -309,7 +309,7 @@ export function ConfigFieldRenderer({
     return (
       <div>
         {content}
-        <p className="text-[10px] text-muted-foreground mt-0.5 mb-1">{field.helpText}</p>
+        <p className="text-xs text-muted-foreground mt-0.5 mb-1">{field.helpText}</p>
       </div>
     );
   }

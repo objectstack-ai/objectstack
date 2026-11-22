@@ -15,13 +15,14 @@ import {
   resolveDashboardFilterDefs,
   dashboardFilterVariableDefs,
   buildWidgetScopedFilter,
+  boundMemberFilterNames,
   mergeFilters,
   toDomProps,
   chartCategoryKey,
   chartMeasureKey,
   chartConfigPresentation,
 } from '@object-ui/core';
-import { cn, Card, CardHeader, CardTitle, CardContent, Button, getLazyIcon, Empty, EmptyTitle, EmptyDescription } from '@object-ui/components';
+import { cn, Card, CardHeader, CardTitle, CardContent, Button, getLazyIcon, Empty, EmptyTitle, EmptyDescription, ChartSkeleton } from '@object-ui/components';
 import { forwardRef, useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, Fragment } from 'react';
 import type { HTMLAttributes } from 'react';
 import { Lock, RefreshCw } from 'lucide-react';
@@ -49,6 +50,7 @@ import type { DashboardChartRenderSchema } from './chartRenderHandoff';
 import { useDashboardAutoRefresh, type DashboardAutoRefresh } from './useDashboardAutoRefresh';
 import { DashboardFilterBar } from './DashboardFilterBar';
 import { DatasetQueryCoalescerContext, useDatasetQueryCoalescer } from './datasetQueryBatch';
+import { filterFieldSource, jsonColumnOperatorsFor, useFilterFieldFacts, warnFilterLoweredWithoutFacts, type FilterFieldSource } from './filterFieldFacts';
 
 /**
  * One `header.actions[]` entry, as the node's declaration types it: the spec's
@@ -422,6 +424,20 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
       [schema.globalFilters, schema.dateRange]
     );
     const { variables: filterValues, setVariable: setFilterValue, resetVariables: resetFilterValues } = usePageVariables();
+    // objectstack#35992 — a `select` / `lookup` filter bound to a field holding
+    // several values is lowered to `$contains` per member, which needs the
+    // bound field's definition: read once per widget source (a dataset's base
+    // object, or a `provider: 'object'` widget's object) when the dashboard
+    // declares such a filter at all (`./filterFieldFacts`).
+    const filterFieldSources: FilterFieldSource[] = [];
+    if (filterDefs.some((def) => def.type === 'select' || def.type === 'lookup')) {
+      const entries: DashboardWidgetSlotEntry[] = schema.widgets ?? [];
+      for (const entry of entries) {
+        const source = isSlotComponentEntry(entry) ? undefined : filterFieldSource(entry);
+        if (source) filterFieldSources.push(source);
+      }
+    }
+    const filterFieldFactsFor = useFilterFieldFacts(dataSource, filterFieldSources, dashboardPackageId);
 
     // ── i18n: convention-based label resolution for dashboard / widget /
     // action text. The dashboard name (`schema.name`) keys all lookups; when
@@ -1074,8 +1090,22 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
         // are needed downstream.
         // Widget arm only: `filterBindings` and `filter` are widget keys, and
         // the node a component entry becomes takes no filter (objectui#11598).
+        //
+        // A `select` / `lookup` filter that binds this widget is lowered
+        // against the bound field's definition (objectstack#35992): while that
+        // definition is in flight the widget's query is HELD (a skeleton draws
+        // instead), so no `=` / `$in` the server refuses on a field holding
+        // several values goes out first. A definition that cannot be read
+        // keeps the `=` / `$in` lowering, and says so per filter.
+        const fieldSource = widgetArm ? filterFieldSource(widgetArm) : undefined;
+        const memberFilters = widgetArm && fieldSource ? boundMemberFilterNames(widgetArm, filterDefs, filterValues) : [];
+        const fieldFacts = fieldSource && memberFilters.length > 0 ? filterFieldFactsFor(fieldSource) : undefined;
+        if (fieldSource && fieldFacts?.status === 'unavailable') {
+            for (const name of memberFilters) warnFilterLoweredWithoutFacts(name, fieldSource, fieldFacts.reason);
+        }
+        const holdForFieldFacts = fieldFacts?.status === 'pending';
         const scopedFilter = widgetArm && filterDefs.length > 0
-            ? buildWidgetScopedFilter(widgetArm, filterDefs, filterValues)
+            ? buildWidgetScopedFilter(widgetArm, filterDefs, filterValues, undefined, jsonColumnOperatorsFor(fieldFacts))
             : undefined;
         const componentSchema = ((): SchemaRendererProps['schema'] => {
             // No cast (objectui#11466): `getComponentSchema` returns
@@ -1183,7 +1213,11 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
                 )}
                 <CardContent className="p-0">
                     <div className={cn("h-full w-full", datasetMetric ? "p-3 sm:p-4" : "p-3 sm:p-4 md:p-6", designMode && "pointer-events-none")}>
-                        {datasetWidget
+                        {holdForFieldFacts
+                          ? <div className="h-full w-full" aria-busy="true" data-testid="dashboard-widget-filter-pending">
+                              <ChartSkeleton className="h-full" />
+                            </div>
+                          : datasetWidget
                           ? <DatasetWidget
                               widget={datasetWidget}
                               dataSource={dataSource}

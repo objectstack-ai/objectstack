@@ -414,6 +414,11 @@ const DISPOSITIONS: Record<string, Disposition> = {
   // [#30205] The hand-over answers per-field counts and failed row ids, never a record.
   'POST /api/v1/security/users/:id/assigned-work/transfer': { kind: 'no-record-echo', why: 'Transfer report: per-field counts and failed row ids (id, code, refusal sentence), never a record body.' },
 
+  // [#35402] The Change Owner doors answer the record's new owner, or a
+  // per-row report of failed ids — never the record they wrote.
+  [`POST ${D}/:object/:id/change-owner`]: { kind: 'no-record-echo', why: 'Change Owner receipt: object, id, the new owner id or queue and whether the owner was notified; never a record body.' },
+  [`POST ${D}/:object/change-owner`]: { kind: 'no-record-echo', why: 'Change Owner report: per-field count and failed row ids (id, code, refusal sentence), never a record body.' },
+
   // [#30237] The recycle bin's acts answer receipts: the restore's is read
   // field by field (`restoreReceipt`), so a row written back is named by its
   // object and id, never served.
