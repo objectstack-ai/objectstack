@@ -81,8 +81,13 @@ const SETTING_KEYS = [
   'enable.clone',
 ] as const;
 
-/** A key name in parentheses, ASCII or full-width: `(nameField)`, `(enable.*)`, `(files)`. */
-const PAREN_KEY = /[(（]\s*[A-Za-z][\w.*]*\s*[)）]/u;
+/**
+ * A key name in parentheses, ASCII or full-width: a camelCase, dotted or
+ * snake_case token (`(nameField)`, `(enable.*)`), or one of the one-word
+ * capability keys the titles used to carry (`(files)`). A plain word such as
+ * `(default)` is prose, not a key.
+ */
+const PAREN_KEY = /[(（]\s*(?:[a-z]+[A-Z_.*][\w.*]*|files|feeds|activities|searchable|clone|master-detail)\s*[)）]/u;
 
 describe('ObjectSettingsPanel — business wording (objectstack#36512)', () => {
   it.each([
@@ -165,8 +170,9 @@ describe('ObjectSettingsPanel — business settings first, developer options las
     const dev = screen.getByTestId('developer-options-section');
     expect(all[all.length - 1]).toBe(dev);
     expect(within(dev).getByText(t('engine.studio.settings.developer', 'en-US'))).toBeTruthy();
-    // Expanded with no switch: nothing in it is a disclosure control.
-    expect(dev.querySelector('[aria-expanded]')).toBeNull();
+    // Expanded with no switch: nothing in it is a disclosure control (a
+    // picker's own combobox aside).
+    expect(dev.querySelector('[aria-expanded]:not([role="combobox"])')).toBeNull();
     expect(dev.querySelector('details')).toBeNull();
     expect(within(dev).getByTestId('object-name-input')).toBeTruthy();
     expect(within(dev).getByTestId('object-access-posture')).toBeTruthy();
