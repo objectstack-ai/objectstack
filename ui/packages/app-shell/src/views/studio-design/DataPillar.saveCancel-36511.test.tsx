@@ -181,7 +181,7 @@ describe('Data pillar — Save and Cancel in the top bar, live at once (objectst
     expect(writes.some((w) => w.url.pathname.includes('publish-drafts'))).toBe(false);
 
     await waitFor(() => expect(screen.queryByTestId('studio-save')).toBeNull());
-    expect(toast.success).toHaveBeenCalledWith(tFormat('engine.studio.save.done', 'en', { items: 'Task' }));
+    expect(toast.success).toHaveBeenCalledWith(tFormat('engine.studio.save.done', 'en', { items: 'Task' }), { id: 'studio-save' });
   });
 
   it('Cancel sends nothing and puts the page back as the server holds it', async () => {

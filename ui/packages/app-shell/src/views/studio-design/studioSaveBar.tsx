@@ -38,6 +38,9 @@ import { LINT_DEBOUNCE_MS } from '../metadata-admin/CelPredicateField.js';
 /** Past the editors' expression check of the last keystroke, and its report. */
 const VERDICT_SETTLE_MS = LINT_DEBOUNCE_MS + 50;
 
+/** The sonner id of a landed Save's toast: a second Save updates it in place (objectstack#28984). */
+export const STUDIO_SAVE_TOAST_ID = 'studio-save';
+
 /** What one buffer's Save did. */
 export type StudioSaveResult =
   /** The item was written and is live. */
@@ -183,7 +186,7 @@ export function useStudioSaveCoordinator(locale: string): StudioSaveCoordinator 
         description: lines.join('\n'),
       });
     } else if (saved.length > 0) {
-      toast.success(tFormat('engine.studio.save.done', locale, { items: names(saved) }));
+      toast.success(tFormat('engine.studio.save.done', locale, { items: names(saved) }), { id: STUDIO_SAVE_TOAST_ID });
     }
   }, [dirtyEntries, locale, readDirty]);
   const cancel = React.useCallback(() => {

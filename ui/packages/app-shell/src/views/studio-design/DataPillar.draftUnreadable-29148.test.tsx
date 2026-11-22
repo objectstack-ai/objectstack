@@ -224,6 +224,7 @@ describe('DataPillar — a pair extension draft the server refuses to read is no
     const popover = await screen.findByTestId('add-field-popover');
     await userEvent.type(within(popover).getByTestId('add-field-label-input'), 'Region');
     await userEvent.click(within(popover).getByTestId('add-field-create'));
+    await pressStudioSave();
     await waitFor(() => expect(extensionSaves()).toHaveLength(1), { timeout: 8000 });
     expect(extensionSaves()[0]![3]).toMatchObject({ mode: 'draft', packageId: PAIR });
   });

@@ -344,6 +344,7 @@ describe('Studio adds an action to an installed app’s object, in its customiza
     fireEvent.click(screen.getByRole('button', { name: L('engine.studio.new') }));
     fireEvent.click(await screen.findByTestId('action-preset-change_choice'));
     await outlastDebounce();
+    await pressStudioSave();
     await waitFor(() => expect(saves().filter(([type]) => type === 'object').length).toBeGreaterThan(0));
     const [, , body] = saves().filter(([type]) => type === 'object').at(-1)!;
     const names = (body.actions as Array<Record<string, unknown>>).map((a) => a.name);

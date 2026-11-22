@@ -256,6 +256,8 @@ describe('the Form tab lays out the form the app opens (objectstack#30057)', () 
     expect(screen.queryByText(OFF_FORM)).toBeNull();
 
     await userEvent.click(screen.getByTestId('form-designer-add-section-footer'));
+    // The object's field groups are the object page's: sent by the top bar's Save (objectstack#36511).
+    await pressStudioSave();
     await waitFor(() => expect(saves().length).toBe(1), { timeout: 4000 });
     const [type, name, body] = saves()[0];
     expect([type, name]).toEqual(['object', OBJECT]);

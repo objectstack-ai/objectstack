@@ -2,16 +2,13 @@
 
 /**
  * objectstack#27511 — an object switch in the Data pillar's rail never drops
- * an edit still inside the autosave's debounce.
+ * an unsaved edit with nothing on screen.
  *
- * The autosave sends 1.5 s after the last edit, and its timer sends nothing
- * once the open object has changed (objectui#11232): the rail's switch reloads
- * the one buffer the edit lives in. So an edit made less than 1.5 s before a
- * click on another object was dropped with nothing on screen, and reverted on
- * the next visit. The switch now sends the pending edit first with the
- * autosave's own `flush` and opens the next object once its save has landed; a
- * save already in flight is waited out the same way; an edit that cannot be
- * sent (its save was refused) is the author's to drop, and the switch asks.
+ * objectstack#36511 — the object page saves with the top bar's Save, so a
+ * switch sends nothing: the rail's switch reloads the one buffer the edit lives
+ * in, and an edit Save has not sent (or whose save was refused) is the
+ * author's to drop, so the switch asks. A saved edit leaves nothing to ask
+ * about.
  *
  * The client is a server double that records every save and can hold or
  * refuse one; the records grid is a double that draws only its "+" column.
@@ -68,7 +65,14 @@ const mockClient = vi.hoisted(() => ({
     if (draft) return { item: JSON.parse(JSON.stringify(draft)) as Record<string, unknown> };
     throw Object.assign(new Error(`No pending draft exists for ${type}/${name}.`), { code: 'NO_DRAFT', status: 404 });
   }),
-  publish: vi.fn(async () => ({})), reset: vi.fn(async () => ({})),
+  // The Save's own publish (objectstack#36511): the draft goes live.
+  publish: vi.fn(async (_type: string, name: string, _opts?: unknown) => {
+    const draft = server.drafts.get(name);
+    if (draft) server.active.set(name, draft);
+    server.drafts.delete(name);
+    return {};
+  }),
+  reset: vi.fn(async () => ({})),
   save: vi.fn(async (_type: string, name: string, item: unknown) => {
     const body = JSON.parse(JSON.stringify(item)) as Record<string, unknown>;
     server.saves.push({ name, body });
@@ -182,58 +186,48 @@ async function openTask(): Promise<void> {
   await waitFor(() => expect(fieldCount()).toHaveTextContent('2 fields'), SLOW);
 }
 
-/** Waits past the autosave's debounce: what was sent by then is what will be. */
+/** Lets time pass: what was sent by then is what will be. */
 async function pastDebounce(ms = 2500): Promise<void> {
   await act(async () => {
     await new Promise((r) => setTimeout(r, ms));
   });
 }
 
-describe('Data pillar — an object switch inside the autosave debounce (objectstack#27511)', () => {
-  it('sends the pending edit to its own object first, then opens the next one', async () => {
+describe('Data pillar — an object switch over an unsaved edit (objectstack#27511, objectstack#36511)', () => {
+  it('sends nothing: the switch asks; declined, the edit stays; agreed, Note opens and Task is as stored', async () => {
     await openTask();
     await addFieldFromGrid();
-    // Inside the debounce: nothing has been sent yet.
-    expect(server.saves).toEqual([]);
     fireEvent.click(screen.getByRole('button', { name: /Note/ }));
-
-    await waitFor(() => expect(fieldCount()).toHaveTextContent('1 field'), SLOW);
-    await pastDebounce();
-    // Exactly one save, to Task, carrying the edit; nothing was sent as Note's.
-    expect(savesRead()).toEqual([['acme_task', ['title', 'status', 'new_field']]]);
-    expect(confirmSpy).not.toHaveBeenCalled();
-
-    // The edit is Task's draft: back on Task, it is there.
-    fireEvent.click(screen.getByRole('button', { name: /Task/ }));
-    await waitFor(() => expect(fieldCount()).toHaveTextContent('3 fields'), SLOW);
-  }, 30000);
-
-  it('waits out a save in flight, and opens the next object once it lands', async () => {
-    await openTask();
-    let release!: () => void;
-    server.saveHold = new Promise<void>((r) => (release = r));
-    await addFieldFromGrid();
-    // The timer sends it, and the save is held in flight.
-    await waitFor(() => expect(server.saves).toHaveLength(1), SLOW);
-
-    fireEvent.click(screen.getByRole('button', { name: /Note/ }));
-    await pastDebounce(300);
-    // Still on Task while its save is in flight.
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
     expect(fieldCount()).toHaveTextContent('3 fields');
 
-    await act(async () => {
-      release();
-      await new Promise((r) => setTimeout(r, 0));
-    });
+    confirmSpy.mockReturnValue(true);
+    fireEvent.click(screen.getByRole('button', { name: /Note/ }));
     await waitFor(() => expect(fieldCount()).toHaveTextContent('1 field'), SLOW);
-    await pastDebounce();
+    expect(server.saves).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: /Task/ }));
+    await waitFor(() => expect(fieldCount()).toHaveTextContent('2 fields'), SLOW);
+  }, 30000);
+
+  it('a saved edit is the stored object: the switch opens Note at once, and Task keeps the edit', async () => {
+    await openTask();
+    await addFieldFromGrid();
+    await pressStudioSave();
     expect(savesRead()).toEqual([['acme_task', ['title', 'status', 'new_field']]]);
+    expect(mockClient.publish).toHaveBeenCalledWith('object', 'acme_task', { packageId: PKG });
+
+    fireEvent.click(screen.getByRole('button', { name: /Note/ }));
+    await waitFor(() => expect(fieldCount()).toHaveTextContent('1 field'), SLOW);
+    expect(confirmSpy).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: /Task/ }));
+    await waitFor(() => expect(fieldCount()).toHaveTextContent('3 fields'), SLOW);
   }, 30000);
 
   it('an edit whose save was refused is not dropped silently: the switch asks, and a declined ask keeps it', async () => {
     await openTask();
     server.refuse = true;
     await addFieldFromGrid();
+    await pressStudioSave();
     await waitFor(() => expect(server.saves).toHaveLength(1), SLOW);
     await pastDebounce(300);
 

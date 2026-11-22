@@ -219,6 +219,7 @@ describe('DataPillar in a zh-CN console — the object buffer is the authored do
     renderZh();
 
     await relabel('Severity', 'Level');
+    await pressStudioSave();
     await waitFor(() => expect(objectSaves().length).toBeGreaterThan(0), { timeout: 8000 });
     const { name, body, opts } = objectSaves().at(-1)!;
     expect(name).toBe(OBJECT);
@@ -232,6 +233,7 @@ describe('DataPillar in a zh-CN console — the object buffer is the authored do
     renderZh();
 
     await relabel('Severity', 'Level');
+    await pressStudioSave();
     await waitFor(() => expect(objectSaves().length).toBeGreaterThan(0), { timeout: 8000 });
     expectAuthoredBody(objectSaves().at(-1)!.body, 'Level');
   });

@@ -1,14 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectstack#28984 — a landed Studio draft autosave names what it saved.
+ * objectstack#28984 — a landed Studio save names what it saved.
  *
- * The only feedback a landed draft autosave gave was the top bar's
- * "Saved HH:MM", which names nothing; only feedback that names the item counts
- * as write feedback (ruling 6545938831 ② on #28345). The Data pillar now
- * toasts "Draft saved: LABEL" when the draft save lands, and keeps the hint.
+ * Only feedback that names the item counts as write feedback (ruling
+ * 6545938831 ② on #28345). objectstack#36511 — the object page saves with the
+ * top bar's Save, which writes the draft and makes it live, and toasts "Saved,
+ * live now: LABEL" when it lands.
  *
- * Driven through the pillar's real autosave and a real `MetadataClient` over a
+ * Driven through the pillar's real Save and a real `MetadataClient` over a
  * fetch double, with sonner's real `Toaster` mounted, so the assertions read
  * the toasts a user would see:
  *
@@ -37,11 +37,17 @@ const objectDef = {
 };
 
 const puts: string[] = [];
-const server = { refuse: false };
+const server = { refuse: false, draft: null as unknown, live: null as unknown };
 
 const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+  // The Save's own publish of the item (objectstack#36511): its draft goes live.
+  if (init?.method === 'POST') {
+    server.live = server.draft;
+    return new Response('{"success":true}', { status: 200 });
+  }
   if (init?.method === 'PUT') {
     puts.push(String(url));
+    server.draft = JSON.parse(String(init.body));
     if (server.refuse) {
       return new Response(
         JSON.stringify({ success: false, error: { code: 'VALIDATION_ERROR', message: 'The draft was refused by the server.' } }),
@@ -60,7 +66,7 @@ const client = new MetadataClient({ baseUrl: 'http://test.local', fetch: fetchIm
 Object.assign(client, {
   list: vi.fn(async () => [{ name: 'showcase_task', label: 'Task' }]),
   listDrafts: vi.fn(async () => []),
-  layered: vi.fn(async () => ({ effective: objectDef, code: objectDef })),
+  layered: vi.fn(async () => ({ effective: server.live ?? objectDef, code: objectDef, overlay: server.live })),
   getDraft: vi.fn(async () => null),
 });
 
@@ -89,8 +95,8 @@ import { tFormat } from '../metadata-admin/i18n';
 const dataSource = createEmptyDataSource();
 registerBuiltinInspectors();
 
-const SAID = tFormat('engine.studio.draftSaved', 'en', { item: 'Task' });
-const TOAST_ID = 'studio-draft-saved:object:showcase_task';
+const SAID = tFormat('engine.studio.save.done', 'en', { items: 'Task' });
+const TOAST_ID = 'studio-save';
 
 afterEach(() => {
   act(() => {
@@ -99,6 +105,7 @@ afterEach(() => {
   cleanup();
   puts.length = 0;
   server.refuse = false;
+  server.draft = server.live = null;
   fetchImpl.mockClear();
   vi.restoreAllMocks();
 });
@@ -127,20 +134,16 @@ function controlUnder(label: string): HTMLInputElement {
   return lab.parentElement!.querySelector('input') as HTMLInputElement;
 }
 
-/** Waits past the autosave's 1.5 s debounce and the save's round trip. */
-async function pastAutosave(): Promise<void> {
-  await act(async () => {
-    await new Promise((r) => setTimeout(r, 2300));
-  });
-}
+/** The top bar's Save, and its round trip. */
+const pastAutosave = pressStudioSave;
 
-describe('Studio Data pillar — a landed draft autosave names what it saved (objectstack#28984)', () => {
-  it('a landed save toasts the object by its label, and the top-bar hint stays', async () => {
+describe('Studio Data pillar — a landed Save names what it saved (objectstack#28984)', () => {
+  it('a landed save toasts the object by its label', async () => {
     const success = vi.spyOn(toast, 'success');
     mount();
     fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
     await addFieldFromFormToolbar();
-    await screen.findByTestId('data-saved-at', undefined, { timeout: 5000 });
+    await pressStudioSave();
     expect(puts.some((u) => u.includes('mode=draft')), `PUTs: ${puts.join(' | ')}`).toBe(true);
 
     await waitFor(() => expect(savedToasts()).toHaveLength(1));
@@ -154,12 +157,12 @@ describe('Studio Data pillar — a landed draft autosave names what it saved (ob
     mount();
     fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
     await addFieldFromFormToolbar();
+    await pressStudioSave();
     await screen.findByTestId('studio-refusal', undefined, { timeout: 5000 });
-    expect(puts.length, 'the autosave never sent: the harness is dead').toBeGreaterThan(0);
+    expect(puts.length, 'the Save never sent: the harness is dead').toBeGreaterThan(0);
 
     expect(savedToasts()).toEqual([]);
     expect(success.mock.calls.filter(([, opts]) => (opts as { id?: string } | undefined)?.id === TOAST_ID)).toEqual([]);
-    expect(screen.queryByTestId('data-saved-at')).toBeNull();
   });
 
   it('saving one object again keeps one toast on screen, under one id', async () => {
