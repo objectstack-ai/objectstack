@@ -276,9 +276,13 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Sprache",
         helpText: "Sprache des Editors (z. B. sql, javascript)"
       },
+      "fields.fieldHistory": {
+        label: "Feldänderungswerte",
+        helpText: "Alte → neue Werte dieses Felds in der Aktivitätszeitleiste des Datensatzes. Nicht gesetzt bedeutet AN, auch wenn der Schalter aus wirkt: Nur ein ein- und wieder ausgeschalteter Schalter schreibt false, dann wird die Änderung nur mit dem Feldnamen genannt. Eingeschaltet zeigt auch ein Medien- oder JSON-Feld seine Werte."
+      },
       "fields.trackHistory": {
         label: "Verlauf verfolgen",
-        helpText: "Dieses Feld in der Aktivitätszeitleiste des Datensatzes zusammenfassen"
+        helpText: "Lässt ein Medien- oder JSON-Feld (Bild, Datei, json, …) alte → neue Werte in der Aktivitätszeitleiste zeigen. Alle anderen Felder zeigen sie ohnehin, und Ausschalten verbirgt sie nicht: dafür gibt es Feldänderungswerte."
       },
       "fields.visibleWhen": {
         label: "Sichtbar wenn",
@@ -298,6 +302,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "enable.trackHistory": {
         label: "Verlauf verfolgen"
+      },
+      "enable.fieldHistory": {
+        label: "Feldänderungswerte",
+        helpText: "Alte → neue Werte geänderter Felder in der Aktivitätszeitleiste des Datensatzes. Nicht gesetzt bedeutet AN, auch wenn der Schalter aus wirkt: Nur ein ein- und wieder ausgeschalteter Schalter schreibt false, dann zeigt das ganze Objekt keine Werte."
       },
       "enable.searchable": {
         label: "Durchsuchbar"
@@ -897,9 +905,13 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Intern",
         helpText: "Den Wert dieses Felds nie über den allgemeinen Datenpfad zurückgeben: Die Engine lässt den Schlüssel in Ergebnissen von find/findOne und in den Antworttexten von create und update weg, bei der Standardprojektion und wenn ein Client das Feld in ?select= nennt. Speicherung, Filterung und Indizierung bleiben unberührt."
       },
+      fieldHistory: {
+        label: "Feldänderungswerte",
+        helpText: "Alte → neue Werte dieses Felds in der Aktivitätszeitleiste des Datensatzes. Nicht gesetzt bedeutet AN, auch wenn der Schalter aus wirkt: Nur ein ein- und wieder ausgeschalteter Schalter schreibt false, dann wird die Änderung nur mit dem Feldnamen genannt. Eingeschaltet zeigt auch ein Medien- oder JSON-Feld seine Werte."
+      },
       trackHistory: {
         label: "Verlauf verfolgen",
-        helpText: "Wertänderungen dieses Felds als Einträge in der Aktivitätszeitleiste des Datensatzes darstellen (ADR-0052 §5b). Pro Feld einzeln zu aktivieren."
+        helpText: "Lässt ein Medien- oder JSON-Feld (Bild, Datei, json, …) alte → neue Werte in der Aktivitätszeitleiste zeigen. Alle anderen Felder zeigen sie ohnehin, und Ausschalten verbirgt sie nicht: dafür gibt es Feldänderungswerte."
       },
       widget: {
         label: "Widget",

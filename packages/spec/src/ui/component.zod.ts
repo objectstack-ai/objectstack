@@ -856,7 +856,7 @@ export const PageHeaderProps = strictObject({
     'How many header actions render as inline buttons before the rest fold into the overflow menu. Renderer default when unset: 3 on every header. In a record page\'s header bar the number, authored or not, is an upper bound: actions that do not fit the bar\'s width fold as well, so a narrow drawer shows fewer.',
   ),
   mobileMaxVisible: z.number().int().positive().optional().describe(
-    'The `maxVisible` budget on mobile viewports. Renderer default when unset: 2 in a record page\'s bottom action bar on a phone, where the host\'s Edit counts as one, 1 on any other header.',
+    'The `maxVisible` budget on mobile viewports. Renderer default when unset: 2 in a record page\'s bottom action bar on a phone, 1 on any other header. The phone bar holds the page\'s own actions: the record\'s Edit is not one of them, it is in the overflow menu at the top bar\'s right end.',
   ),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),

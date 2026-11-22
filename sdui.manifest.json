@@ -3539,7 +3539,7 @@
         {
           "name": "mobileMaxVisible",
           "type": "number",
-          "description": "The same inline-button budget on mobile viewports, where horizontal room is scarce. A positive integer, defaulting to 1, or 2 in a record page's bottom action bar on a phone, where the host's Edit counts as one; the desktop half is Max Inline Actions, and the overflow routing rules stated there apply unchanged."
+          "description": "The same inline-button budget on mobile viewports, where horizontal room is scarce. A positive integer, defaulting to 1, or 2 in a record page's bottom action bar on a phone, which holds the page's actions (the record's Edit is in the top bar's overflow menu there); the desktop half is Max Inline Actions, and the overflow routing rules stated there apply unchanged."
         }
       ]
     },
