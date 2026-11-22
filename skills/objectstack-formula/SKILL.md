@@ -82,14 +82,21 @@ transforms — see objectstack-data), not an expression dialect.
 | Key existence (NOT null-safety) | `has(record.foo)` |
 | Null check | `record.foo == null` or `isBlank(record.foo)` |
 
+**`==` / `!=` between a list field and a scalar is refused** (`list-equality`, "list compared with a
+scalar": one constant on every row) — `multiselect` / `checkboxes` / `tags`, or `select` / `lookup` /
+`user` with `multiple: true`. Test membership behind a null guard; `in` and `.exists()` fault on `null`:
+
+```text
+record.tags == 'vip'                             # REFUSED
+record.tags != null && 'vip' in record.tags      # RIGHT, or … && record.tags.exists(t, t == 'vip')
+record.tags == null || !('vip' in record.tags)   # RIGHT, replaces != 'vip'
+```
+
 The org context is `{ id, tier }` — there is no `os.org.slug` or `os.org.name`.
 The evaluator also binds the current user as `current_user` (alias `user`) per
 ADR-0068 — spec field docs write predicates like `current_user.positions`.
 
 ### `has()` is NOT a null check
-
-`has(record.x)` is **true whenever the key exists**, even when its value is
-`null`.
 
 Every server-evaluated predicate — validation rules, `requiredWhen`, option
 `visibleWhen`, `readonlyWhen`, hook `condition`, the flow trigger record —
@@ -278,8 +285,7 @@ P`!isBlank(record.po_number)`;
 
 Conditional requiredness: [objectstack-data](../objectstack-data/SKILL.md#conditional-field-rules).
 
-❌ Salesforce-flavor — **fails CEL compile**: `os build` errors with a
-located message, and the flow engine throws if it ever reaches runtime:
+❌ Salesforce-flavor — **fails CEL compile**:
 
 ```ts
 "status = 'qualified'"
@@ -321,8 +327,7 @@ P`previous.status != 'escalated' && record.status == 'escalated'`
 `record` is the record's **state**, not this write's diff: stored row ⊕
 payload, so `record.status == 'escalated'` is true on *every* update of an
 already-escalated record. Comparing against `previous` is the only way to say
-"just became". Hook `condition`s and validation predicates bind the same two
-roots — one scope, one meaning, whichever surface reads it.
+"just became".
 
 **Where `previous` is bound, and where it is not:**
 
@@ -356,8 +361,7 @@ P`previous.status != 'done' && record.status == 'done'`
 A predicate (`multi: true`) write is N record changes, so every record-scoped
 declaration on it is evaluated **per row** — `previous` is that row's own
 pre-write state, `record` its real state, not the bare payload (ADR-0058,
-bulk-write Addenda I and II). Record-change flow triggers ride the same
-dispatch. `before*` is no exception to the *condition*; the asymmetry is what a
+bulk-write Addenda I and II). `before*` is no exception to the *condition*; the asymmetry is what a
 `before*` handler WRITES: one `updateMany` takes one SET clause, so every row's
 dispatch carries the one payload and a rewrite made on any row applies to every
 matched row (D3). A rewrite *decided* per row must assign the same key set on
@@ -369,8 +373,7 @@ batch whole, before any write, when two rows disagree
 Above 10 000 matched rows the platform refuses a predicate write on an object
 with per-row hooks in either phase — one ceiling for `before*` and `after*`,
 checked before the first dispatch (ADR-0058 Addendum II, D6) — rather than fan
-out that many handler runs inside one write; paginate the write. It is a
-refusal, never a silent downgrade to one hook call.
+out that many handler runs inside one write; paginate the write.
 
 ---
 
@@ -388,7 +391,6 @@ When migrating Salesforce-flavor metadata, apply these rules in order:
 | `AND` | `&&` |
 | `OR` | `\|\|` |
 | `NOT(x)` | `!x` |
-| `"abc"` | `'abc'` |
 | `IF(c, a, b)` | `c ? a : b` |
 | `ISBLANK(x)` | `isBlank(record.x)` |
 | `CONCAT(a, b)` | `coalesce(a, '') + coalesce(b, '')` |
