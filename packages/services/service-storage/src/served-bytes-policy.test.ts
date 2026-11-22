@@ -166,10 +166,17 @@ describe('the local raw byte route answers stored bytes by the allow-list rule',
     expect(res.headers['x-content-type-options']).toBe('nosniff');
   });
 
-  it('control: a PNG and a PDF are inline under their type, with nosniff and the sandbox CSP', async () => {
+  it('control: an ordinary PNG and PDF still preview, inline under their own type', async () => {
     for (const [type, name] of [['image/png', 'pixel.png'], ['application/pdf', 'doc.pdf']]) {
       const res = await fetchRaw(type, name);
       expect(res.headers['content-type'], type).toBe(type);
+      expect(res.headers['content-disposition'], type).toMatch(/^inline;/);
+    }
+  });
+
+  it('an allow-listed PNG or PDF is inline with nosniff and the sandbox CSP', async () => {
+    for (const [type, name] of [['image/png', 'pixel.png'], ['application/pdf', 'doc.pdf']]) {
+      const res = await fetchRaw(type, name);
       expect(res.headers['content-disposition'], type).toMatch(/^inline;/);
       expect(res.headers['x-content-type-options'], type).toBe('nosniff');
       expect(res.headers['content-security-policy'], type).toBe(STORED_BYTES_CONTENT_SECURITY_POLICY);
@@ -198,9 +205,16 @@ describe('the S3 signed download URL bakes in the same type and disposition', ()
     expect((await baked('text/html', undefined)).ResponseContentDisposition).toBe('attachment');
   });
 
-  it('control: a PNG is signed inline under its type', async () => {
-    const input = await baked('IMAGE/PNG', 'pixel.png');
+  it('control: an ordinary PNG is still signed inline under its type', async () => {
+    const input = await baked('image/png', 'pixel.png');
     expect(input.ResponseContentDisposition).toMatch(/^inline;/);
     expect(input.ResponseContentType).toBe('image/png');
+  });
+
+  it('the type is baked by its essence, and is baked even when the caller names none', async () => {
+    expect((await baked('IMAGE/PNG; x=1', 'pixel.png')).ResponseContentType).toBe('image/png');
+    const none = await baked(undefined, 'blob');
+    expect(none.ResponseContentType).toBe('application/octet-stream');
+    expect(none.ResponseContentDisposition).toMatch(/^attachment;/);
   });
 });

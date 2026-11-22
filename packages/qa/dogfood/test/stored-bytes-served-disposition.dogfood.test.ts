@@ -104,17 +104,15 @@ describe('stored bytes are served by the inline allow-list rule on a real boot',
     expect(res.headers.get('content-disposition')).toMatch(/^attachment;/);
   });
 
-  it('control: an allow-listed PNG is still served inline under its type, with nosniff and the sandbox CSP', async () => {
+  it('control: an ordinary PNG still previews, inline under its own type and bytes', async () => {
     const res = await uploadAndFetch('pixel.png', 'image/png', PNG);
     expect(res.headers.get('content-type')).toBe('image/png');
     expect(res.headers.get('content-disposition')).toMatch(/^inline;/);
-    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
-    expect(res.headers.get('content-security-policy')).toBe(SANDBOX_CSP);
     expect(Buffer.from(await res.arrayBuffer()).equals(PNG), 'the stored bytes, unchanged').toBe(true);
   });
 
-  it('control: an allow-listed PDF and plain text are served inline, with nosniff and the sandbox CSP', async () => {
-    for (const [name, type, bytes] of [['doc.pdf', 'application/pdf', PDF], ['notes.txt', 'text/plain', TEXT]] as const) {
+  it('an allow-listed PNG, PDF or plain text is served inline, with nosniff and the sandbox CSP', async () => {
+    for (const [name, type, bytes] of [['pixel.png', 'image/png', PNG], ['doc.pdf', 'application/pdf', PDF], ['notes.txt', 'text/plain', TEXT]] as const) {
       const res = await uploadAndFetch(name, type, bytes);
       expect(res.headers.get('content-type'), name).toBe(type);
       expect(res.headers.get('content-disposition'), name).toMatch(/^inline;/);
