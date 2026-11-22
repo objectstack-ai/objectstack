@@ -138,6 +138,7 @@
  *   flows.<flow>.notices.<node_id>.message                     (#28251)
  *   flows.<flow>.records.<node_id>.fields.<field>              (ruling 6913660232)
  *   flows.<flow>.approvals.<node_id>.label                     (#24916)
+ *   flows.<flow>.nodes.<node_id>.label                         (ruling 7076440876)
  *     ^ walked because the ledger's `flows` row is `live` and warns no
  *       author; a group the ledger does warn on is left out of the walk
  *       (see `authorWarnedTranslationGroups`)
@@ -185,7 +186,7 @@ import {
 import { FLOW_REGION_SLOTS_BY_TYPE, flowScreenFieldOptionKey, isFlowTextEnvelopeShaped, templateSlotSource } from '@objectstack/spec/automation';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { deriveFieldGroupLayout } from '@objectstack/spec/data';
-import { APPROVAL_NODE_TYPE } from '@objectstack/spec/automation';
+import { APPROVAL_NODE_TYPE, isFlowTechnicalNodeType } from '@objectstack/spec/automation';
 import { expandViewContainer, InlineLocaleMapSchema } from '@objectstack/spec/ui';
 import { authorWarnedProperties } from './lint-liveness-properties.js';
 import { walkPageComponents } from './page-walk.js';
@@ -2290,6 +2291,51 @@ function collectFlowNodesDeep(nodes: unknown): any[] {
   return out;
 }
 
+
+/** The label a decision's fall-through branch carries (`DEFAULT_BRANCH_LABEL` in the engine). */
+const DECISION_DEFAULT_BRANCH = 'default';
+
+/**
+ * The folded technical steps a business-altitude flow drawing still names: the
+ * top-level `FLOW_TECHNICAL_NODE_TYPES` node a top-level decision's branch
+ * leads to, in edge order, each once.
+ *
+ * Mirrors which out-edges the docs viewer lists as branches
+ * (`decisionBranches`, `ui/packages/components/src/renderers/basic/flow-branches.ts`):
+ * every out-edge of a decision with no `config.conditions`; otherwise a
+ * default edge (`isDefault`, or the `default` label) and an edge whose label a
+ * condition claims. The viewer finds the target among the top-level nodes
+ * only, so a region's nested node is not one.
+ */
+function decisionBranchTechnicalTargets(flow: any, topLevel: any[]): { id: string; label: unknown }[] {
+  const edges: any[] = Array.isArray(flow?.edges) ? flow.edges : [];
+  const byId = new Map<string, any>();
+  for (const node of topLevel) {
+    if (node && typeof node === 'object' && typeof node.id === 'string' && node.id) byId.set(node.id, node);
+  }
+  const seen = new Set<string>();
+  const targets: { id: string; label: unknown }[] = [];
+  for (const node of topLevel) {
+    if (!node || typeof node !== 'object' || node.type !== 'decision' || typeof node.id !== 'string') continue;
+    const conditions: any[] = Array.isArray(node.config?.conditions)
+      ? node.config.conditions.filter((c: unknown) => c !== null && typeof c === 'object' && !Array.isArray(c))
+      : [];
+    for (const edge of edges) {
+      if (!edge || typeof edge !== 'object' || edge.source !== node.id || typeof edge.target !== 'string') continue;
+      const listed =
+        conditions.length === 0 ||
+        edge.isDefault === true ||
+        edge.label === DECISION_DEFAULT_BRANCH ||
+        conditions.some((c) => typeof edge.label === 'string' && c.label === edge.label);
+      if (!listed) continue;
+      const target = byId.get(edge.target);
+      if (!target || !isFlowTechnicalNodeType(target.type) || seen.has(target.id)) continue;
+      seen.add(target.id);
+      targets.push({ id: target.id, label: target.label });
+    }
+  }
+  return targets;
+}
 /**
  * Emit the screen-flow copy surface (#7646, resolver landed in #11287).
  *
@@ -2531,6 +2577,34 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
       // No id, no key: the request's `current_step` could not name the node.
       if (!nodeId) continue;
       pushOptional(out, ['flows', flowName, 'approvals', nodeId, 'label'], node.label, 'flow', scope);
+    }
+
+    // [ruling 7076440876] `flows.<flow>.nodes.<node_id>.label` — the label of
+    // every step the docs viewer's `type: flow` embed draws at its default
+    // altitude (`detail: business`): a top-level node whose type
+    // `isFlowTechnicalNodeType` does not fold away, the one table that viewer
+    // reads. A `screen` and an `approval` are drawn too, but their label is
+    // keyed already (`screens.<node_id>.title`, `approvals.<node_id>.label`),
+    // so they are not asked twice. Start and end nodes are asked like any
+    // other step: the viewer draws the author's words for them, not its own.
+    // A region's nested nodes (ADR-0031) are not drawn by that embed, so they
+    // are accepted by `os validate` but not demanded here.
+    const topLevel: any[] = Array.isArray(flow.nodes) ? flow.nodes : [];
+    for (const node of topLevel) {
+      if (!node || typeof node !== 'object') continue;
+      if (node.type === SCREEN_NODE_TYPE || node.type === APPROVAL_NODE_TYPE) continue;
+      if (isFlowTechnicalNodeType(node.type)) continue;
+      const nodeId = typeof node.id === 'string' && node.id.length > 0 ? node.id : undefined;
+      // No id, no key: nothing could address the step.
+      if (!nodeId) continue;
+      pushOptional(out, ['flows', flowName, 'nodes', nodeId, 'label'], node.label, 'flow', scope);
+    }
+    // The same embed lists each drawn decision's branches and names the step a
+    // branch leads to by its label, folded technical steps included (a
+    // decision whose branch runs a `script` first). Those folded targets are
+    // drawn words too, so they are asked once each, after the drawn steps.
+    for (const target of decisionBranchTechnicalTargets(flow, topLevel)) {
+      pushOptional(out, ['flows', flowName, 'nodes', target.id, 'label'], target.label, 'flow', scope);
     }
   }
 }

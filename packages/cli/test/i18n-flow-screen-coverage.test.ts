@@ -61,6 +61,13 @@ vi.mock('@objectstack/lint', async (importOriginal) => ({
 
 import { collectExpectedEntries, extractTranslations } from '../src/utils/i18n-bundle-extract.js';
 import { computeI18nCoverage, type CoverageIssue, type CoverageReport } from '../src/utils/i18n-coverage.js';
+
+/**
+ * The `flows.<flow>.nodes.<node_id>.label` family (ruling 7076440876) is
+ * demanded beside this file's own and pinned by `i18n-flow-node-coverage.test.ts`;
+ * these pins measure their family, so they read every key but that one.
+ */
+const notNodeLabel = (key: string) => !/^flows\.[^.]+\.nodes\./.test(key);
 import {
   FLOW_SCREEN_COPY_KEYS,
   FLOW_SCREEN_FIELD_COPY_KEYS,
@@ -123,12 +130,13 @@ const hotCrmLike = (flowTranslations?: Record<string, unknown>) => ({
 
 /** Only the user's own metadata; `os lint` folds the platform baseline away. */
 const userIssues = (report: CoverageReport): CoverageIssue[] =>
-  report.issues.filter((i) => i.source !== 'metadataForm');
+  report.issues.filter((i) => i.source !== 'metadataForm' && notNodeLabel(i.key));
 
 const flowKeys = (config: any) =>
   collectExpectedEntries(config)
     .filter((e) => e.path[0] === 'flows')
-    .map((e) => e.path.join('.'));
+    .map((e) => e.path.join('.'))
+    .filter(notNodeLabel);
 
 describe('the screen-flow gap a green i18n gate could not see (#11485)', () => {
   it('reports every untranslated wizard string on a tree whose objects are done', () => {
@@ -153,7 +161,7 @@ describe('the screen-flow gap a green i18n gate could not see (#11485)', () => {
 
   it('attributes them to the flow bucket so `os lint` renders `i18n/missing-flow`', () => {
     const zh = computeI18nCoverage(hotCrmLike()).issues.filter(
-      (i) => i.locale === 'zh-CN' && i.key.startsWith('flows.'),
+      (i) => i.locale === 'zh-CN' && i.key.startsWith('flows.') && notNodeLabel(i.key),
     );
 
     expect(zh.length).toBeGreaterThan(0);

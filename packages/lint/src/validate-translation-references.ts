@@ -128,6 +128,14 @@
  * node, is pointed at `approvals.<node_id>.label` rather than told only that
  * the node is not a screen.
  *
+ * `flows.<name>.nodes.<node_id>.label` (ruling 7076440876) is judged against
+ * every other node: the id must name a node of the flow, at any depth, that is
+ * neither a `screen` nor an `approval`. Those two already carry their label
+ * under their own key, so a `nodes` key over one is pointed at
+ * `screens.<node_id>.title` or `approvals.<node_id>.label`, and a `screens` or
+ * `approvals` key written over any other node is pointed at
+ * `nodes.<node_id>.label`. An id the flow does not declare is an orphan.
+ *
  * `hooks.<name>.refusals.<CODE>.message` (#26170) is judged against the hook's
  * refusal catalogue: the hook must be one the stack defines (or a sibling
  * package's, through the artifact carrier), and the code one its `refusals`
@@ -2418,7 +2426,8 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
                 ? approvalRedirect('screen', nodeId, flowName)
                 : otherType
                   ? `Translations are keyed to screen "${nodeId}", which flow "${flowName}" ` +
-                    `declares as a \`${otherType}\` node, not a \`screen\`, so nothing resolves these keys.`
+                    `declares as a \`${otherType}\` node, not a \`screen\`; its label is keyed ` +
+                    `\`nodes.${nodeId}.label\`.`
                   : `Translations are keyed to screen "${nodeId}", which flow "${flowName}" ` +
                     `declares no screen node for, so the wizard step keeps its source-locale heading.` +
                     suggest(nodeId, flow.screens.keys()),
@@ -2556,11 +2565,35 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
                 `\`screen\` node; its heading is keyed \`screens.${nodeId}.title\`.`
               : nodeType
                 ? `Translations are keyed to approval step "${nodeId}", which flow "${flowName}" declares as a ` +
-                  `\`${nodeType}\` node, not an \`approval\`, so nothing resolves this key.`
+                  `\`${nodeType}\` node, not an \`approval\`; its label is keyed \`nodes.${nodeId}.label\`.`
                 : `Translations are keyed to approval step "${nodeId}", which flow "${flowName}" declares no ` +
                   `node for, so the step keeps its source-locale label.` +
                   suggest(nodeId, flow.approvals),
             `Approval-step translations are keyed by the \`id\` of an \`approval\` node.`,
+          );
+        }
+        // ── flows.<name>.nodes.<node_id> (ruling 7076440876) ──────────────
+        // Any node but a `screen` or an `approval`, at any depth: those two
+        // carry their label under a key of their own, so a `nodes` key over
+        // one is pointed there rather than accepted as a second key.
+        for (const nodeId of Object.keys(asRecord(rawFlow.nodes))) {
+          const nodeType = flow.screens.has(nodeId) ? SCREEN_NODE_TYPE : flow.otherNodes.get(nodeId);
+          if (nodeType && nodeType !== SCREEN_NODE_TYPE && nodeType !== APPROVAL_NODE_TYPE) continue;
+          orphan(
+            `${inLocale} · flow "${flowName}" · node "${nodeId}"`,
+            `${flowPath}.nodes.${nodeId}`,
+            nodeType === SCREEN_NODE_TYPE
+              ? `Translations are keyed to node "${nodeId}", which flow "${flowName}" declares as a ` +
+                `\`screen\` node; its heading is keyed \`screens.${nodeId}.title\`.`
+              : nodeType === APPROVAL_NODE_TYPE
+                ? approvalRedirect('node', nodeId, flowName)
+                : `Translations are keyed to node "${nodeId}", which flow "${flowName}" does not declare, so ` +
+                  `its drawn step keeps its authored label.` +
+                  suggest(
+                    nodeId,
+                    [...flow.otherNodes].filter(([, type]) => type !== APPROVAL_NODE_TYPE).map(([id]) => id),
+                  ),
+            `Node-label translations are keyed by a node's \`id\`, not its \`label\`.`,
           );
         }
       }
@@ -2640,10 +2673,11 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
 }
 
 /**
- * The verdict for a `screens` / `refusals` key written over an `approval`
- * node: the step's one translatable string is its label, under `approvals`.
+ * The verdict for a `screens` / `refusals` / `nodes` key written over an
+ * `approval` node: the step's one translatable string is its label, under
+ * `approvals`.
  */
-function approvalRedirect(group: 'screen' | 'refusal', nodeId: string, flowName: string): string {
+function approvalRedirect(group: 'screen' | 'refusal' | 'node', nodeId: string, flowName: string): string {
   return (
     `Translations are keyed to ${group} "${nodeId}", which flow "${flowName}" declares as an ` +
     `\`approval\` node; its step label is keyed \`approvals.${nodeId}.label\`.`
