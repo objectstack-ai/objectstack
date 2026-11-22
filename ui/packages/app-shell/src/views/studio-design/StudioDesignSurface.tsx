@@ -361,6 +361,7 @@ import { useMetadataRefreshNonce } from './useMetadataRefreshNonce.js';
 import { resolveSurface, findSurfaceInTree, isSameSurface, type NavNode, type Surface } from './navSurface.js';
 import { servedNavTextOf, displayNavTree, displayAppLabel, type ServedNavText } from './servedNavText.js';
 import { ServedWidgetTextContext, servedWidgetTextOf } from './servedDashboardText.js';
+import { ServedReportTextContext, servedReportTextOf } from './servedReportText.js';
 import {
   useSurfaceDeepLink,
   useSurfaceDeepLinkCapture,
@@ -3233,7 +3234,7 @@ export function InterfacesPillar({
         // for a dashboard the server serves (so never for an unsaved one).
         // objectstack#30859 — unless the stored draft was just read at the
         // leaf's owner: that answer carries the published layer too.
-        if (current.type === 'dashboard') {
+        if (current.type === 'dashboard' || current.type === 'report') {
           const pairedLayers = body && readAt === (current.addedIn ?? packageId) ? authoredRead?.layers : null;
           if (pairedLayers) {
             const doc = (pairedLayers.effective ?? pairedLayers.code ?? null) as Record<string, unknown> | null;
@@ -3305,11 +3306,21 @@ export function InterfacesPillar({
     currentType === 'dashboard' && currentName
       ? ((findByName(metadata.dashboards, currentName) as Record<string, unknown> | undefined) ?? null)
       : null;
+  // objectstack#36373 — the report leaf's half: its served name and
+  // description, paired with the same published layer, for the report
+  // inspector's Name box (`servedReportText.ts`).
+  const servedReport =
+    currentType === 'report' && currentName
+      ? ((findByName(metadata.reports, currentName) as Record<string, unknown> | undefined) ?? null)
+      : null;
   // A dashboard leaf with a pending draft reads its published layer once, to
   // pair the served titles with: only when the server serves that dashboard,
   // so a never-published draft asks no `/layers` (objectui#11799).
   const publishedPending =
-    currentType === 'dashboard' && leafPublished.key === leafKey && !leafPublished.read && !!servedDashboard;
+    (currentType === 'dashboard' || currentType === 'report') &&
+    leafPublished.key === leafKey &&
+    !leafPublished.read &&
+    !!(servedDashboard ?? servedReport);
   React.useEffect(() => {
     if (!publishedPending || !currentType || !currentName) return;
     const key = leafKey;
@@ -3338,6 +3349,13 @@ export function InterfacesPillar({
         ? servedWidgetTextOf(leafPublished.doc, servedDashboard)
         : null,
     [currentType, leafPublished, leafKey, servedDashboard],
+  );
+  const servedReportText = React.useMemo(
+    () =>
+      currentType === 'report' && leafPublished.key === leafKey && leafPublished.read
+        ? servedReportTextOf(leafPublished.doc, servedReport)
+        : null,
+    [currentType, leafPublished, leafKey, servedReport],
   );
 
   // objectui#5813 — a local dirty flag so auto-save only arms after a real
@@ -4893,6 +4911,9 @@ export function InterfacesPillar({
       <div className="min-h-0 flex-1" />
     ) : selection && Inspector && current ? (
       <div className="min-h-0 flex-1 overflow-auto p-3">
+        {/* objectstack#36373 — a selected dashboard widget's Title box reads
+            the served (current-language) title; `null` for any other leaf. */}
+        <ServedWidgetTextContext.Provider value={servedWidgets}>
         <Inspector
           type={current.type}
           name={current.name}
@@ -4910,6 +4931,7 @@ export function InterfacesPillar({
           readOnly={leafReadOnly}
           locale={locale}
         />
+        </ServedWidgetTextContext.Provider>
       </div>
     ) : isSourcePage ? (
       // objectui#12725 — no 源码 tab: the properties say what the page IS
@@ -4934,6 +4956,7 @@ export function InterfacesPillar({
         {/* objectui#12688 — a dashboard's component list draws the served
             widget titles (display only); `null` for any other leaf. */}
         <ServedWidgetTextContext.Provider value={servedWidgets}>
+          <ServedReportTextContext.Provider value={servedReportText}>
           <DefaultInspector
             type={current.type}
             name={current.name}
@@ -4947,6 +4970,7 @@ export function InterfacesPillar({
             readOnly={leafReadOnly}
             locale={locale}
           />
+          </ServedReportTextContext.Provider>
         </ServedWidgetTextContext.Provider>
       </div>
     ) : designersUnregistered ? (

@@ -2847,6 +2847,7 @@ const en = {
       enterSwitchApp: 'Switch app',
       enterApplyTheme: 'Apply theme',
       enterOpen: 'Open',
+      currentPage: 'Current page',
     },
     ai: {
       pendingDrafts: {
@@ -6002,6 +6003,7 @@ const en = {
       dragSort: 'Drag to change the sort priority',
       viewOwn: 'Part of this view; it cannot be removed here',
       viewFilter: 'View filter',
+      relationPath: '{{lookup}} › {{field}}',
     },
   },
   sortBuilder: {

@@ -379,6 +379,82 @@ async function readReferenceTitles(
     return titles;
 }
 
+/** The field widget that declares a text column as a recipient id whose kind a sibling names. */
+const RECIPIENT_PICKER_WIDGET = 'recipient-picker';
+
+/** The sibling a `recipient-picker` field reads its recipient kind from, as the console's face reads it. */
+const RECIPIENT_KIND_FIELD = 'recipient_type';
+
+/**
+ * The directory object each RECORD recipient kind names, stored by record id:
+ * the kinds the console's `recipient-picker` face names by an exact-id record
+ * read (`RECIPIENT_RECORD_KINDS` in objectui's `@object-ui/fields`). A kind not
+ * listed has no record directory to read — a registry kind (`position`), a
+ * kind with no directory at all (`group`) or a record-relative one (`field`) —
+ * so its hit keeps the stored value.
+ */
+const RECIPIENT_DIRECTORY_OBJECTS: Readonly<Record<string, string>> = Object.freeze({
+    user: 'sys_user',
+    team: 'sys_team',
+    business_unit: 'sys_business_unit',
+    unit_and_subordinates: 'sys_business_unit',
+});
+
+/**
+ * The recipient-kind sibling of a primary-title pointer that is a recipient id
+ * (`widget: 'recipient-picker'`, the kind read from `recipient_type`, which the
+ * field declares in `dependsOn`), or `undefined` for any other pointer. The
+ * declaration the console's face reads, read the same way, so a search hit
+ * names the recipient the record page and the list already name.
+ */
+function recipientKindFieldOf(field: any, hasField: (name: string) => boolean): string | undefined {
+    if (field?.type !== 'text' || field.widget !== RECIPIENT_PICKER_WIDGET) return undefined;
+    if (!Array.isArray(field.dependsOn) || !field.dependsOn.includes(RECIPIENT_KIND_FIELD)) return undefined;
+    return hasField(RECIPIENT_KIND_FIELD) ? RECIPIENT_KIND_FIELD : undefined;
+}
+
+/** The directory object a row's recipient kind names, or `undefined` for a kind with no record directory. */
+function recipientDirectoryOf(row: any, kindField: string): string | undefined {
+    const kind = row?.[kindField];
+    return typeof kind === 'string' && Object.prototype.hasOwnProperty.call(RECIPIENT_DIRECTORY_OBJECTS, kind)
+        ? RECIPIENT_DIRECTORY_OBJECTS[kind]
+        : undefined;
+}
+
+/**
+ * The titles of the recipients `rows` name, by directory object — the second
+ * half of `searchAll`'s title for an object whose primary-title pointer is a
+ * recipient id (`recipientKindFieldOf`). The ids are grouped by the directory
+ * their row's kind names, and each directory is read once, `id $in` over its
+ * ids, by {@link readReferenceTitles}: the searcher's own read under the same
+ * gates and the same dispositions as a reference pointer's title — a refused
+ * reader keeps the bare id, a read that fails propagates.
+ */
+async function readRecipientTitles(
+    engine: RecordReadHost['engine'],
+    rows: any[],
+    pointer: string,
+    kindField: string,
+    context: unknown,
+    canReadObject: ((object: string) => Promise<boolean> | boolean) | undefined,
+): Promise<Map<string, Map<string, string>>> {
+    const idsByDirectory = new Map<string, Set<string>>();
+    for (const row of rows) {
+        const directory = recipientDirectoryOf(row, kindField);
+        const id = row?.[pointer];
+        if (!directory || id == null || typeof id === 'object' || !String(id).trim()) continue;
+        let ids = idsByDirectory.get(directory);
+        if (!ids) idsByDirectory.set(directory, (ids = new Set()));
+        ids.add(String(id));
+    }
+    const titles = new Map<string, Map<string, string>>();
+    for (const [directory, ids] of idsByDirectory) {
+        const read = await readReferenceTitles(engine, directory, [...ids], context, canReadObject);
+        if (read.size > 0) titles.set(directory, read);
+    }
+    return titles;
+}
+
 /** The body of `ObjectStackProtocolImplementation#searchAll`; the method's docblock there is its contract. */
 export async function searchAll(
     this: Pick<RecordReadHost, 'engine' | 'getMetaItems' | 'getServicesRegistry'>,
@@ -569,6 +645,15 @@ export async function searchAll(
         const titleTarget = typeof titlePointer === 'string' && hasField(titlePointer)
             ? referenceTargetOf(fieldByName.get(titlePointer))
             : undefined;
+        // A pointer that is a RECIPIENT id (`widget: 'recipient-picker'`, a
+        // text column whose kind the row's `recipient_type` names, as on
+        // `sys_record_share`) names a principal in the directory its kind
+        // names: titled by that directory record's title, read as the
+        // searcher by `readRecipientTitles`, the bare id kept for a refused
+        // reader and for a kind with no record directory.
+        const recipientKindField = typeof titlePointer === 'string' && hasField(titlePointer) && !titleTarget
+            ? recipientKindFieldOf(fieldByName.get(titlePointer), hasField)
+            : undefined;
         const renderTitle = (row: any, referenceTitles?: Map<string, string>): string => {
             if (typeof titlePointer === 'string' && hasField(titlePointer)) {
                 const v = row[titlePointer];
@@ -725,8 +810,12 @@ export async function searchAll(
                     if (read.size > 0) referenceTitles = read;
                 }
             }
+            const recipientTitles = recipientKindField && typeof titlePointer === 'string'
+                ? await readRecipientTitles(this.engine, hitRows, titlePointer, recipientKindField, request.context, canReadObject)
+                : undefined;
             for (const row of hitRows) {
-                const title = renderTitle(row, referenceTitles);
+                const directory = recipientTitles && recipientKindField ? recipientDirectoryOf(row, recipientKindField) : undefined;
+                const title = renderTitle(row, referenceTitles ?? (directory ? recipientTitles?.get(directory) : undefined));
                 // Build snippet from first searchable field that contains a
                 // term. [#7643] `undefined` is a CORRECT answer here, not a
                 // miss: a companion (pinyin) hit matches the normalized

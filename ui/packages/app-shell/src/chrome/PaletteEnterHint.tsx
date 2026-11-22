@@ -9,7 +9,8 @@
 /**
  * The ⌘K palette's footer (objectstack#36286): what Enter does to the entry
  * the keyboard is on — open the record, create one, switch app, apply a
- * theme, or open the page the entry names.
+ * theme, add the current page to the favorites or take it off, or open the
+ * page the entry names.
  *
  * The entry is named by its cmdk `value`, and every palette entry's value
  * starts with the word for its kind (`record …`, `create …`, `app …`); the
@@ -21,7 +22,18 @@ import { Kbd } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 
 /** What Enter does, by the leading word of the selected entry's value. */
-export type PaletteEnterAction = 'openRecord' | 'create' | 'switchApp' | 'applyTheme' | 'open';
+export type PaletteEnterAction =
+  | 'openRecord'
+  | 'create'
+  | 'switchApp'
+  | 'applyTheme'
+  | 'addFavorite'
+  | 'removeFavorite'
+  | 'open';
+
+/** The leading word of a current-page favorites row's value (`PaletteCurrentPage`). */
+export const FAVORITE_ADD_KIND = 'favorite-add';
+export const FAVORITE_REMOVE_KIND = 'favorite-remove';
 
 const ACTION_BY_KIND: Record<string, PaletteEnterAction> = {
   record: 'openRecord',
@@ -29,6 +41,8 @@ const ACTION_BY_KIND: Record<string, PaletteEnterAction> = {
   create: 'create',
   app: 'switchApp',
   theme: 'applyTheme',
+  [FAVORITE_ADD_KIND]: 'addFavorite',
+  [FAVORITE_REMOVE_KIND]: 'removeFavorite',
 };
 
 /** The action Enter runs on the entry whose cmdk value is `value`; `null` when nothing is selected. */
@@ -52,6 +66,11 @@ export function PaletteEnterHint({ value }: { value: string | null | undefined }
         return t('console.commandPalette.enterSwitchApp', { defaultValue: 'Switch app' });
       case 'applyTheme':
         return t('console.commandPalette.enterApplyTheme', { defaultValue: 'Apply theme' });
+      // The favorites entry's own words, as the page's menu shows them.
+      case 'addFavorite':
+        return t('common.addToFavorites', { defaultValue: 'Add to favorites' });
+      case 'removeFavorite':
+        return t('common.removeFromFavorites', { defaultValue: 'Remove from favorites' });
       default:
         return t('console.commandPalette.enterOpen', { defaultValue: 'Open' });
     }

@@ -264,3 +264,33 @@ describe('a list opens a record one way: the name opens the page, the icon besid
     },
   );
 });
+
+/**
+ * objectstack#36149 — the list host hands its preview the width key the
+ * navigation resolved (`drawerWidthKey` → `widthKey`): the shared preview key
+ * for a view that authors no width, the object's own key for one that
+ * authors a size. Without that hand-over every preview reads the shared key.
+ */
+describe('the list preview remembers its width under the key its navigation resolves (objectstack#36149)', () => {
+  const SHARED = 'ov:drawer-width:record-preview';
+  const paneWidth = () =>
+    (document.querySelector('[data-record-drawer-card]') as HTMLElement | null)?.style.getPropertyValue('--ov-w').trim();
+  afterEach(() => window.localStorage.clear());
+
+  it('a view that authors `size: xl` opens at its size, not at the shared remembered width', async () => {
+    window.localStorage.setItem(SHARED, '600');
+    await openList(objectsWith({ size: 'xl' }));
+    fireEvent.click(panelIconOf('Alpha'));
+    await screen.findByRole('dialog', undefined, { timeout: 5000 });
+    expect(paneWidth()).toMatch(/^min\(92vw, \d+px\)$/);
+    expect(paneWidth()).not.toBe('600px');
+  });
+
+  it('CONTROL: a view that authors no width opens at the shared remembered width', async () => {
+    window.localStorage.setItem(SHARED, '600');
+    await openList(objectsWith());
+    fireEvent.click(panelIconOf('Alpha'));
+    await screen.findByRole('dialog', undefined, { timeout: 5000 });
+    expect(paneWidth()).toBe('600px');
+  });
+});

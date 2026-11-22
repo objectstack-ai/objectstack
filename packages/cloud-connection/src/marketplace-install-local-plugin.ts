@@ -7435,10 +7435,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         }
         let bind: typeof import('@objectstack/runtime')['bindAppArtifactHandlers'] | undefined;
         let schedule: typeof import('@objectstack/runtime')['scheduleAppArtifactJobs'] | undefined;
+        let i18nReader: typeof import('@objectstack/runtime')['hookRefusalI18nReader'] | undefined;
         try {
             const mod: any = await import('@objectstack/runtime');
             if (typeof mod?.bindAppArtifactHandlers === 'function') bind = mod.bindAppArtifactHandlers;
             if (typeof mod?.scheduleAppArtifactJobs === 'function') schedule = mod.scheduleAppArtifactJobs;
+            if (typeof mod?.hookRefusalI18nReader === 'function') i18nReader = mod.hookRefusalI18nReader;
         } catch { /* reported below */ }
         if (!bind) {
             ctx.logger?.warn?.(
@@ -7446,11 +7448,26 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 + 'every door refuses those actions and the hooks never fire. Upgrade @objectstack/runtime alongside @objectstack/cloud-connection.',
             );
         } else {
+            if (!i18nReader) {
+                ctx.logger?.warn?.(
+                    `[MarketplaceInstallLocal] this runtime has no hookRefusalI18nReader — the declared hook and action refusals of ${manifestId} `
+                    + 'answer in their declared language for every caller. Upgrade @objectstack/runtime alongside @objectstack/cloud-connection.',
+                );
+            }
             const bound = bind(ql, manifest, {
                 appId: manifestId,
                 logger: ctx.logger,
                 source: 'MarketplaceInstallLocal',
                 withholdHooksWithoutBody: true,
+                // The kernel services `AppPlugin.start` hands the same binder for a
+                // boot artifact, so an installed package's handlers are answered
+                // as that boot's are: a declared hook or action refusal in the
+                // caller's language (read from the `i18n` service at refusal time,
+                // where the package's translations were loaded), `ctx.text` in the
+                // organization's, and the platform doors a body reaches. Without
+                // them every installed package's refusal took its declared sentence.
+                ...(i18nReader ? { i18n: i18nReader(ctx) } : {}),
+                getService: (name: string) => ctx.getService(name),
             });
             // A runtime that predates the option binds a hook with no `body` by
             // name, as before — say so rather than answer as if it withheld it.

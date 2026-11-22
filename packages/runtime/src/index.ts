@@ -184,6 +184,11 @@ export {
     collectJobNameCollisions,
     collectHooksWithoutBody,
 } from './app-artifact-handlers.js';
+// The `i18n` reader both binder doors hand `bindAppArtifactHandlers`, so a
+// declared hook or action refusal is answered in the caller's language: read
+// from the kernel at refusal time. `AppPlugin.start` passes it; install-local
+// (`@objectstack/cloud-connection`) passes the same one on install and rehydrate.
+export { hookRefusalI18nReader } from './sandbox/hook-refusal-catalogue.js';
 export type {
     AppArtifactHandlerBinding,
     AppArtifactHandlerBindingOptions,

@@ -88,9 +88,21 @@ vi.mock('sonner', () => ({
     info: vi.fn(),
   },
 }));
-vi.mock('./metadata-admin/inspectors/DashboardWidgetInspector', () => ({
-  DashboardWidgetInspector: (p: any) => <div data-testid="stub-widget-inspector">{p.selection.id}</div>,
-}));
+vi.mock('./metadata-admin/inspectors/DashboardWidgetInspector', async () => {
+  // objectstack#36373: the stub reads the served title the real panel reads.
+  const { useServedWidgetText } = await import('./studio-design/servedDashboardText');
+  return {
+    DashboardWidgetInspector: (p: any) => {
+      const pair = useServedWidgetText()?.widgets.get(p.selection.id);
+      return (
+        <div data-testid="stub-widget-inspector">
+          {p.selection.id}
+          <span data-testid="stub-widget-served-title">{pair ? `${pair.served} ← ${pair.authored}` : 'none'}</span>
+        </div>
+      );
+    },
+  };
+});
 vi.mock('./metadata-admin/inspectors/DashboardDefaultInspector', () => ({
   DashboardDefaultInspector: (p: any) => (
     <div data-testid="stub-default-inspector">
@@ -233,6 +245,14 @@ describe('DashboardView in-page edit (objectstack#36372)', () => {
     await openEdit();
     await waitFor(() => expect(queryDataset).toHaveBeenCalled());
     expect(queryDataset.mock.calls.every((c: unknown[]) => (c[2] as { callerPackage?: string })?.callerPackage === 'crm')).toBe(true);
+  });
+
+  it('the card panel reads the served title beside the stored one (objectstack#36373)', async () => {
+    mount();
+    await openEdit();
+    fireEvent.click(screen.getByTestId('dashboard-preview-widget-widget_total'));
+    // The pair the title box shows and writes by: served for the session, authored as stored.
+    expect(screen.getByTestId('stub-widget-served-title')).toHaveTextContent('Total (served) ← Total (stored)');
   });
 
   it('Add card appends a card and selects it', async () => {

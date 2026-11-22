@@ -852,14 +852,16 @@ export class AuditPlugin implements Plugin {
             return undefined;
           }
         };
-        installActivityFieldRedaction(engine as any, getSecurity, ctx.logger);
-        ctx.logger.info('AuditPlugin: sys_activity field redaction installed');
         // [#26167] …and each kept row's summary is composed in the READER's
-        // language from the code the writer stored beside it. Registered after
-        // the redaction, so it runs inside it: the redaction judges the
-        // composed text by the same declared sources as the stored one.
+        // language from the code the writer stored beside it. [#36290]
+        // Registered BEFORE the redaction, so the redaction runs inside it: the
+        // redaction judges the stored text by its declared sources and narrows
+        // the field-change code to this reader first, and the summary is then
+        // composed from what it kept.
         installActivitySummaryLocale(engine as any, getI18n);
         ctx.logger.info('AuditPlugin: sys_activity reader-language summaries installed');
+        installActivityFieldRedaction(engine as any, getSecurity, ctx.logger);
+        ctx.logger.info('AuditPlugin: sys_activity field redaction installed');
         // [#21155] The compliance ledger's before/after snapshots take the same
         // narrowing, through the same answer and the same resolver: a ledger
         // reader is not field-unrestricted by default. An auditor who must see

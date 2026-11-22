@@ -157,7 +157,6 @@ function renderGrid(server: ReturnType<typeof makeServer>) {
     type: 'object-grid',
     objectName: OBJECT,
     editable: true,
-    singleClickEdit: true,
     columns: [
       { field: 'title', label: 'Title', editable: false },
       { field: 'estimate_hours', label: 'Estimate', type: 'number' },
@@ -168,7 +167,7 @@ function renderGrid(server: ReturnType<typeof makeServer>) {
     <ActionProvider>
       <SchemaRendererProvider dataSource={server.dataSource}>
         {/* Row Edit/Delete handlers: the per-row save button exists. */}
-        <ObjectGrid schema={schema} dataSource={server.dataSource} onEdit={() => {}} onDelete={() => {}} />
+        <ObjectGrid cellSelection={false} schema={schema} dataSource={server.dataSource} onEdit={() => {}} onDelete={() => {}} />
       </SchemaRendererProvider>
     </ActionProvider>,
   );

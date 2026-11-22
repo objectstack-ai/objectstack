@@ -32,6 +32,11 @@ describe('ObjectCapabilities', () => {
     // The record-reader approval tier is opt-IN (#8652: default OFF, the
     // downstream project opts in): an absent flag grants nothing.
     expect(result.approvalsVisibleToReaders).toBe(false);
+    // [#36290] Field-change values are on unless turned off, and the flag has
+    // NO default: a parsed body never materializes it, so a built artifact or
+    // a stored definition can always tell an authored `false` from silence.
+    expect('fieldHistory' in result).toBe(false);
+    expect(ObjectCapabilities.parse({ fieldHistory: false }).fieldHistory).toBe(false);
   });
 
   it('should accept custom capability values', () => {
