@@ -1306,6 +1306,9 @@ const fr = {
     dragToReorder: "Glisser pour réorganiser",
     defaultView: "Vue par défaut",
     defaultBadge: "par défaut",
+    customizedBadge: "personnalisée",
+    customizedTitle: "Modifiée ici : tout le monde voit cette copie au lieu de la version fournie par son paquet.",
+    restoreFactory: "Restaurer la version d’origine",
     tabActionsFor: "Actions de vue pour {{name}}",
     readonlyAriaLabel: "Vue en lecture seule",
     readonlyTooltip: "Vue système — définie dans le code, en lecture seule.",
@@ -2846,6 +2849,10 @@ const fr = {
       delete: "Supprimer",
       deleteViewTitle: "Supprimer la vue",
       deleteViewConfirm: "Supprimer la vue \"{{name}}\" ? Ceci est irréversible.",
+      restoreFactory: "Restaurer",
+      restoreFactoryTitle: "Restaurer la version d’origine",
+      restoreFactoryConfirm: "Restaurer la vue \"{{name}}\" à la version fournie par son paquet ? Toutes les personnes qui utilisent cette vue verront de nouveau la version d’origine ; le nom, l’épinglage et la vue par défaut modifiés ici sont supprimés.",
+      restoreFactoryDone: "Version d’origine de \"{{name}}\" restaurée",
       bulkDeleteConfirm: "Supprimer {{count}} enregistrements sélectionnés ? Ceci est irréversible.",
       bulkDeleteConfirm_one: "Supprimer {{count}} enregistrement sélectionné ? Ceci est irréversible.",
       bulkDeleteConfirm_many: "Supprimer {{count}} d'enregistrements sélectionnés ? Ceci est irréversible.",
@@ -3873,6 +3880,7 @@ const fr = {
   objectViewActions: {
     renameFailed: "Impossible de renommer la vue",
     deleteFailed: "Impossible de supprimer la vue",
+    restoreFactoryFailed: "Impossible de restaurer la version d’origine",
   },
   dashboardActions: {
     printDialogOpening: "Ouverture de la boîte de dialogue d'impression de votre navigateur (ce n'est pas un export PDF)",

@@ -1301,6 +1301,9 @@ const zhHant = {
     dragToReorder: '拖動排序',
     defaultView: '預設檢視',
     defaultBadge: '預設',
+    customizedBadge: '已自訂',
+    customizedTitle: '已在此處修改：所有人看到的是這份副本，而不是其軟體包內建的版本。',
+    restoreFactory: '還原出廠版本',
     tabActionsFor: '{{name}} 的檢視操作',
     readonlyAriaLabel: '只讀檢視',
     readonlyTooltip: '系統檢視 — 由程式碼定義，只讀。',
@@ -2852,6 +2855,10 @@ const zhHant = {
       delete: '刪除',
       deleteViewTitle: '刪除檢視',
       deleteViewConfirm: '確定要刪除檢視 "{{name}}" 嗎？此操作無法撤銷。',
+      restoreFactory: '還原',
+      restoreFactoryTitle: '還原出廠版本',
+      restoreFactoryConfirm: '將檢視 "{{name}}" 還原為其軟體包內建的版本？此檢視的所有使用者都將重新看到出廠版本，在此處修改的名稱、固定和預設設定將被移除。',
+      restoreFactoryDone: '已還原 "{{name}}" 的出廠版本',
       bulkDeleteConfirm: '確定要刪除選中的 {{count}} 條記錄嗎？此操作無法撤銷。',
       bulkDeleteConfirm_one: '確定要刪除選中的 {{count}} 條記錄嗎？此操作無法撤銷。',
       bulkDeleteConfirm_other: '確定要刪除選中的 {{count}} 條記錄嗎？此操作無法撤銷。',
@@ -4072,6 +4079,7 @@ const zhHant = {
   objectViewActions: {
     renameFailed: '重新命名檢視失敗',
     deleteFailed: '刪除檢視失敗',
+    restoreFactoryFailed: '還原出廠版本失敗',
   },
   dashboardActions: {
     printDialogOpening: '正在開啟瀏覽器列印對話方塊（不是匯出 PDF）',

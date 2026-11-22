@@ -1575,6 +1575,9 @@ const en = {
     dragToReorder: 'Drag to reorder',
     defaultView: 'Default view',
     defaultBadge: 'default',
+    customizedBadge: 'customized',
+    customizedTitle: 'Changed here: everyone sees this copy instead of the version its package ships.',
+    restoreFactory: 'Restore factory version',
     tabActionsFor: 'View actions for {{name}}',
     readonlyAriaLabel: 'Read-only view',
     readonlyTooltip: 'System view — defined in code, read-only.',
@@ -3356,6 +3359,10 @@ const en = {
       delete: 'Delete',
       deleteViewTitle: 'Delete view',
       deleteViewConfirm: 'Are you sure you want to delete the view "{{name}}"? This cannot be undone.',
+      restoreFactory: 'Restore',
+      restoreFactoryTitle: 'Restore factory version',
+      restoreFactoryConfirm: 'Restore the view "{{name}}" to the version its package ships? Everyone who uses this view will see the factory version again, and the name, pin and default changed here are removed.',
+      restoreFactoryDone: 'Restored the factory version of "{{name}}"',
       bulkDeleteConfirm: 'Delete {{count}} selected records? This cannot be undone.',
       bulkDeleteConfirm_one: 'Delete {{count}} selected record? This cannot be undone.',
       bulkDeleteConfirm_other: 'Delete {{count}} selected records? This cannot be undone.',
@@ -4718,6 +4725,7 @@ const en = {
   objectViewActions: {
     renameFailed: 'Failed to rename view',
     deleteFailed: 'Failed to delete view',
+    restoreFactoryFailed: 'Failed to restore the factory version',
   },
   dashboardActions: {
     printDialogOpening: 'Opening your browser’s print dialog (not a PDF export)',

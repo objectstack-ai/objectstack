@@ -7152,6 +7152,71 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     }
   }
 
+  /**
+   * Restore the factory version of a view a read-only package ships: remove
+   * the override its customization pair holds (ADR-0146 D2, "Restore package
+   * original" = delete the overriding item from `.custom`), so every user of
+   * the view is served the package's own view again.
+   *
+   * The override is the one {@link updateView} writes
+   * ({@link viewCustomizationHome}): the served read names the shipping
+   * package (`_packageId`) and carries the declaration (`overrides` naming
+   * that package). The pair is the ensure door's answer for that package, the
+   * same home `updateView` wrote into; the pair's draft of the view, then its
+   * row, are deleted there (`DELETE /meta/view/NAME?package=PAIR`, the door
+   * Studio's restore takes). Nothing is deleted at the package that ships the
+   * view, and the pair package itself stays.
+   *
+   * @throws when the served view is not an override of the package it is
+   *   served under (nothing is sent); when a delete is refused, with the
+   *   server's reason on the message's next line (`formatMetadataError`);
+   *   and when the pair held no row of the view, so nothing was restored.
+   */
+  async restoreFactoryView(
+    objectName: string,
+    viewName: string,
+  ): Promise<DeleteViewResult> {
+    await this.connect();
+    const read: any = await this.client.meta.getItem('view', viewName);
+    const current: Record<string, any> = (read && (read.item || read)) || {};
+    const base = current._packageId;
+    const declared = current.overrides;
+    if (typeof base !== 'string' || base === '' || !declared || declared.package !== base) {
+      throw new Error(
+        `restoreFactoryView: view "${viewName}" on object "${objectName}" is not a customization of a package's view,` +
+          ' so it has no factory version to restore. Nothing was removed.',
+      );
+    }
+    const pair = (await this.client.packages.ensureCustomization(base)).packageId;
+    const metaClient = this.metadataClient();
+    try {
+      let draft: ViewHomeDeleteOutcome;
+      let published: ViewHomeDeleteOutcome;
+      try {
+        draft = readViewDeleteReceipt(await metaClient.reset('view', viewName, { state: 'draft', packageId: pair }));
+        published = readViewDeleteReceipt(await metaClient.reset('view', viewName, { packageId: pair }));
+      } catch (err) {
+        throw Object.assign(
+          new Error(
+            `restoreFactoryView: the factory version of view "${viewName}" was NOT restored:` +
+              ` removing its customization from "${pair}" failed.\n` +
+              formatMetadataError(err),
+          ),
+          { cause: err },
+        );
+      }
+      if (!published.removed) {
+        throw new Error(
+          `restoreFactoryView: the factory version of view "${viewName}" was NOT restored:` +
+            ` "${pair}" holds no customization of it, so nothing was removed.`,
+        );
+      }
+      return { deleted: true, draft, published };
+    } finally {
+      this.invalidateViewKeys(objectName, viewName);
+    }
+  }
+
 
   /**
    * Get an application definition by name or ID.

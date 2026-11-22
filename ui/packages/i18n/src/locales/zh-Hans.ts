@@ -1301,6 +1301,9 @@ const zh = {
     dragToReorder: '拖动排序',
     defaultView: '默认视图',
     defaultBadge: '默认',
+    customizedBadge: '已定制',
+    customizedTitle: '已在此处修改：所有人看到的是这份副本，而不是其包自带的版本。',
+    restoreFactory: '恢复出厂版本',
     tabActionsFor: '{{name}} 的视图操作',
     readonlyAriaLabel: '只读视图',
     readonlyTooltip: '系统视图 — 由代码定义，只读。',
@@ -2852,6 +2855,10 @@ const zh = {
       delete: '删除',
       deleteViewTitle: '删除视图',
       deleteViewConfirm: '确定要删除视图 "{{name}}" 吗？此操作无法撤销。',
+      restoreFactory: '恢复',
+      restoreFactoryTitle: '恢复出厂版本',
+      restoreFactoryConfirm: '将视图 "{{name}}" 恢复为其包自带的版本？此视图的所有用户都将重新看到出厂版本，在此处修改的名称、固定和默认设置将被移除。',
+      restoreFactoryDone: '已恢复 "{{name}}" 的出厂版本',
       bulkDeleteConfirm: '确定要删除选中的 {{count}} 条记录吗？此操作无法撤销。',
       bulkDeleteConfirm_one: '确定要删除选中的 {{count}} 条记录吗？此操作无法撤销。',
       bulkDeleteConfirm_other: '确定要删除选中的 {{count}} 条记录吗？此操作无法撤销。',
@@ -4072,6 +4079,7 @@ const zh = {
   objectViewActions: {
     renameFailed: '重命名视图失败',
     deleteFailed: '删除视图失败',
+    restoreFactoryFailed: '恢复出厂版本失败',
   },
   dashboardActions: {
     printDialogOpening: '正在打开浏览器打印对话框（不是导出 PDF）',

@@ -1306,6 +1306,9 @@ const pt = {
     dragToReorder: "Arrastar para reordenar",
     defaultView: "Exibição padrão",
     defaultBadge: "padrão",
+    customizedBadge: "personalizada",
+    customizedTitle: "Alterada aqui: todos veem esta cópia em vez da versão que o pacote fornece.",
+    restoreFactory: "Restaurar versão de fábrica",
     tabActionsFor: "Ações de exibição para {{name}}",
     readonlyAriaLabel: "Exibição somente leitura",
     readonlyTooltip: "Exibição do sistema — definida no código, somente leitura.",
@@ -2845,6 +2848,10 @@ const pt = {
       delete: "Excluir",
       deleteViewTitle: "Excluir exibição",
       deleteViewConfirm: "Excluir a exibição \"{{name}}\"? Isso não pode ser desfeito.",
+      restoreFactory: "Restaurar",
+      restoreFactoryTitle: "Restaurar versão de fábrica",
+      restoreFactoryConfirm: "Restaurar a exibição \"{{name}}\" para a versão que o pacote fornece? Todos que usam esta exibição verão a versão de fábrica novamente, e o nome, a fixação e o padrão alterados aqui serão removidos.",
+      restoreFactoryDone: "Versão de fábrica de \"{{name}}\" restaurada",
       bulkDeleteConfirm: "Excluir {{count}} registros selecionados? Isso não pode ser desfeito.",
       bulkDeleteConfirm_one: "Excluir {{count}} registro selecionado? Isso não pode ser desfeito.",
       bulkDeleteConfirm_many: "Excluir {{count}} de registros selecionados? Isso não pode ser desfeito.",
@@ -3872,6 +3879,7 @@ const pt = {
   objectViewActions: {
     renameFailed: "Não foi possível renomear a exibição",
     deleteFailed: "Não foi possível excluir a exibição",
+    restoreFactoryFailed: "Não foi possível restaurar a versão de fábrica",
   },
   dashboardActions: {
     printDialogOpening: "Abrindo a caixa de diálogo de impressão do navegador (não é uma exportação para PDF)",
