@@ -11,8 +11,13 @@ import { test, expect, type APIRequestContext } from '@playwright/test';
  * (`packages/qa/dogfood/test/stored-bytes-served-disposition.dogfood.test.ts`).
  * Neither can see what a browser does with them; this file can:
  *   • a PNG draws (the image document's image has a width);
+ *   • a plain-text file shows its words;
  *   • a WAV plays (the media document's player reaches HAVE_METADATA);
  *   • an HTML file is handed to the browser as a download, not rendered.
+ *
+ * A PDF is not pinned here: the headless shell this lane runs has no PDF
+ * viewer and saves every PDF, so no reading of it here could tell inline from
+ * attachment.
  *
  * Live-only (needs the storage service + a real backend).
  */
@@ -71,6 +76,12 @@ test('an allow-listed PNG opened from its link draws in place', async ({ page, r
   const url = await storedFileLink(request, 'pixel.png', 'image/png', PNG);
   await page.goto(url);
   await expect.poll(() => page.evaluate(() => document.querySelector('img')?.naturalWidth ?? 0)).toBeGreaterThan(0);
+});
+
+test('an allow-listed plain-text file opened from its link shows its words in place', async ({ page, request }) => {
+  const url = await storedFileLink(request, 'notes.txt', 'text/plain', Buffer.from('plain words\n'));
+  await page.goto(url);
+  await expect(page.locator('body')).toContainText('plain words');
 });
 
 test('an allow-listed WAV opened from its link plays in place under the media policy', async ({ page, request }) => {
