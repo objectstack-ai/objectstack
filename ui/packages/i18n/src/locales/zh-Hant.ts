@@ -1303,6 +1303,9 @@ const zhHant = {
     dragToReorder: '拖動排序',
     defaultView: '預設檢視',
     defaultBadge: '預設',
+    customizedBadge: '已定製',
+    customizedTitle: '已在此處修改：所有人看到的是這份副本，而不是其包自帶的版本。',
+    restoreFactory: '恢復出廠版本',
     tabActionsFor: '{{name}} 的檢視操作',
     readonlyAriaLabel: '只讀檢視',
     readonlyTooltip: '系統檢視 — 由程式碼定義，只讀。',
@@ -1455,7 +1458,7 @@ const zhHant = {
     viewAll: '檢視全部',
     new: '新建',
     add: '新增',
-    activity: '活動',
+    activity: '動態',
     // objectstack#27524 — 動態 (was 時間線), the record page's stream: its
     // panel, its tab and the strip's label; the right column's ⊟, and the
     // 動態 panel's one-line composer.
@@ -1521,7 +1524,7 @@ const zhHant = {
     recordTabsHidden: '已隱藏',
     bodyTableTotals: '本頁合計',
     streamAll: '全部',
-    streamActivity: '活動',
+    streamActivity: '事件',
     streamDiscussion: '討論',
     streamChanges: '變更',
     viewAllEntries: '檢視全部 {{count}} 條 →',
@@ -1658,10 +1661,10 @@ const zhHant = {
     fieldChangesFilter: '欄位變更',
     tasksOnly: '僅任務',
     leaveCommentPlaceholder: '留下評論… (Ctrl+Enter 提交)',
-    noActivity: '暫無活動記錄',
-    activityAccessDenied: '您沒有檢視此記錄活動的權限。',
+    noActivity: '暫無動態',
+    activityAccessDenied: '您沒有檢視此記錄動態的權限。',
     commentsAccessDenied: '您沒有檢視此記錄評論的權限。',
-    activityLoadFailed: '無法載入此記錄的活動。',
+    activityLoadFailed: '無法載入此記錄的動態。',
     commentsLoadFailed: '無法載入此記錄的評論。',
     retryLoadFeed: '重試',
     // objectui#7149 — the rest of `ActivityTimeline`. The four chip labels the
@@ -1697,7 +1700,7 @@ const zhHant = {
     replyCount_other: '{{count}} 條回覆',
     replyPlaceholder: '回覆…',
     // 無障礙標籤
-    filterActivity: '篩選活動',
+    filterActivity: '篩選動態',
     openDiscussion: '開啟討論面板',
     closeDiscussion: '關閉討論面板',
     subscribeAriaLabel: '訂閱通知',
@@ -2860,6 +2863,10 @@ const zhHant = {
       delete: '刪除',
       deleteViewTitle: '刪除檢視',
       deleteViewConfirm: '確定要刪除檢視 "{{name}}" 嗎？此操作無法撤銷。',
+      restoreFactory: '恢復',
+      restoreFactoryTitle: '恢復出廠版本',
+      restoreFactoryConfirm: '將檢視 "{{name}}" 恢復為其包自帶的版本？此檢視的所有使用者都將重新看到出廠版本，在此處修改的名稱、固定和預設設定將被移除。',
+      restoreFactoryDone: '已恢復 "{{name}}" 的出廠版本',
       bulkDeleteConfirm: '確定要刪除選中的 {{count}} 條記錄嗎？此操作無法撤銷。',
       bulkDeleteConfirm_one: '確定要刪除選中的 {{count}} 條記錄嗎？此操作無法撤銷。',
       bulkDeleteConfirm_other: '確定要刪除選中的 {{count}} 條記錄嗎？此操作無法撤銷。',
@@ -4081,6 +4088,7 @@ const zhHant = {
   objectViewActions: {
     renameFailed: '重新命名檢視失敗',
     deleteFailed: '刪除檢視失敗',
+    restoreFactoryFailed: '恢復出廠版本失敗',
   },
   dashboardActions: {
     printDialogOpening: '正在開啟瀏覽器列印對話方塊（不是匯出 PDF）',

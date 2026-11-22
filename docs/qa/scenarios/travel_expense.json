@@ -867,7 +867,7 @@
         {"id": "as_116_2", "claim": "c116", "step": 2, "approver": "e13", "decision": "pending", "decided_on": null, "comment": null},
         {"id": "as_117_1", "claim": "c117", "step": 1, "approver": "e14", "decision": "rejected", "decided_on": "2026-10-29", "comment": "Trip purpose does not match the approved request."},
         {"id": "as_118_1", "claim": "c118", "step": 1, "approver": "e09", "decision": "approved", "decided_on": "2026-10-30", "comment": null},
-        {"id": "as_118_2", "claim": "c118", "step": 2, "approver": "e13", "decision": "approved", "decided_on": "2026-11-02", "comment": null}
+        {"id": "as_118_2", "claim": "c118", "step": 2, "approver": "e13", "decision": "approved", "decided_on": "2026-10-31", "comment": null}
       ]
     },
     "questions": [

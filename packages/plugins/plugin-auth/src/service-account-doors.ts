@@ -48,7 +48,9 @@
  * its hooks) stay the vendor's.
  *
  * The owner defaults to the caller and must be a member of the organization
- * today. The name is the only description an account carries.
+ * today, with an account that is active ({@link isAccountableOwnerActive}):
+ * an AI service account runs only while its owner's account does. The name is
+ * the only description an account carries.
  *
  * ## What create-key writes
  *
@@ -72,6 +74,7 @@ import {
   generateApiKey,
   isAuthzStoreUnavailableError,
   isGrantActive,
+  isUserBanInForce,
   readRequestedApiKeyExpiry,
   signApiKeyExpiry,
   AuthzStoreUnavailableError,
@@ -194,6 +197,30 @@ export async function isOrganizationAdministrator(
 ): Promise<boolean> {
   const rows = await activeMemberships(engine, userId, nowMs, organizationId);
   return rows.some((m) => isOrgAdminGrade(m.role));
+}
+
+/**
+ * [ADR-0151 D6] Is the person `ownerId` active, so they can be accountable for
+ * an AI service account? An AI service account runs only while its accountable
+ * owner's account is active, and this is the one check of it that register,
+ * set-owner and resume (`service-account-lifecycle.ts`) share: the owner's
+ * user row exists and holds no ban in force, whichever door wrote the ban (an
+ * administrator's ban, the organization's directory deactivating or deleting
+ * the person). A timed ban that has expired holds no longer.
+ */
+export async function isAccountableOwnerActive(
+  engine: ServiceAccountDataEngine,
+  ownerId: string,
+  nowMs: number,
+): Promise<boolean> {
+  const [owner] = await readRows(engine, USER_OBJECT, { id: ownerId }, ['id', 'banned', 'ban_expires']);
+  return owner !== undefined && !isUserBanInForce(owner as never, nowMs);
+}
+
+/** The sentence an owner who is not active is refused with, by register and set-owner. */
+export function inactiveOwnerMessage(ownerId: string): string {
+  return `The accountable owner '${ownerId}' is disabled: banned by an administrator, or deactivated by the `
+    + 'organization\'s directory. Name a person whose account is active.';
 }
 
 /** A refusal a write hook threw as `VALIDATION_FAILED`, passed through with its fields; else `undefined`. */
@@ -356,6 +383,15 @@ export async function runRegisterServiceAccount(
       ? 'You are not a member of this organization, so you cannot be the AI service account\'s accountable owner. '
         + 'Name a person who is (ownerId).'
       : `The accountable owner '${ownerId}' is not a member of this organization. Name a person who is.`;
+    return {
+      status: 400,
+      body: { success: false, error: { code: 'VALIDATION_FAILED', message, fields: [{ field: 'ownerId', code: 'invalid_value', message }] } },
+    };
+  }
+  // ...and whose account is active: an account registered to a disabled
+  // owner would run with nobody accountable for it.
+  if (!(await isAccountableOwnerActive(engine, ownerId, nowMs))) {
+    const message = inactiveOwnerMessage(ownerId);
     return {
       status: 400,
       body: { success: false, error: { code: 'VALIDATION_FAILED', message, fields: [{ field: 'ownerId', code: 'invalid_value', message }] } },

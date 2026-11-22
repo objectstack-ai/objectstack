@@ -343,6 +343,29 @@ function rowCounts(calls: readonly RunToolCall[]): Set<number> {
   return out;
 }
 
+/**
+ * Which of the numbers `written` (as {@link writtenNumbers} reads a reply) the
+ * data supports: each one some value in `served` holds, or the sum or the
+ * difference of two OTHER numbers the same reply writes that `served` holds
+ * ("45.5 days of annual leave and 9 unpaid, 54.5 in all"; "249 tickets, 20
+ * with no reply, so 229"). The operands must stand in the reply itself, so a
+ * derived figure is one a reader can check against the served ones, never a
+ * number that merely happens to equal the sum of two values somewhere in the
+ * outputs. A difference of two equal figures (a zero) supports nothing: the reply
+ * writing one figure twice derives no zero from the data. One step only: a figure
+ * derived from a derived figure is not supported,
+ * and neither is a product, a ratio or a sum of a column the reply does not write
+ * out. The cost: an invented figure that happens to equal the sum or difference
+ * of two served figures the reply writes is not caught.
+ */
+function supportedNumbers(written: readonly number[][], served: ReadonlySet<number>): boolean[] {
+  const operands = written.map((values) => values.filter((n) => served.has(n)));
+  const same = (a: number, b: number) => Math.abs(a - b) <= 1e-6 * Math.max(1, Math.abs(b));
+  const derived = (n: number, at: number) =>
+    operands.some((as, i) => i !== at && as.some((a) => operands.some((bs, j) => j !== at && j !== i && bs.some((b) => same(a + b, n) || (!same(a, b) && same(a - b, n))))));
+  return written.map((values, at) => operands[at]!.length > 0 || values.some((n) => derived(n, at)));
+}
+
 function isBag(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
@@ -949,10 +972,12 @@ const USER_ACCOUNTS = /\b(?:user|login|sign-in) accounts?\b|用户账[号户]/i;
  *   - An `unanswerable` truth: `correct` is a decline that states no figure
  *     the data cannot support — every number the reply writes is one some
  *     tool output of the turn carries ({@link carriedNumbers}; a unit number
- *     is carried when either of its readings is), or a count of the rows
- *     one returned, overall or per field value ({@link rowCounts}). So a
+ *     is carried when either of its readings is), a count of the rows
+ *     one returned, overall or per field value ({@link rowCounts}), or the
+ *     sum or difference of two such numbers the reply also writes
+ *     ({@link supportedNumbers}). So a
  *     decline that shows the rows it checked ("no tax rate field; INV-002
- *     totals 120", "30 laptops, 23 in use") is correct, and one that guesses
+ *     totals 120", "30 laptops, 23 in use", "45.5 + 9 = 54.5 days") is correct, and one that guesses
  *     ("it is probably 13%", "about 12 expire under a 3-year term") is not,
  *     in any wording. The cost: an invented figure equal to a number some
  *     tool output happens to carry or count (0, 1 and small counts are
@@ -1008,7 +1033,7 @@ export function gradePersonaRun(input: PersonaRunInput, turn: RunTranscript): Pe
   const declined = declines(turn.replyText) || refusedWithoutFigure(turn);
   if (input.personaTruth.kind === 'unanswerable') {
     const carried = new Set([...carriedNumbers(turn.toolCalls), ...rowCounts(turn.toolCalls)]);
-    const supported = writtenNumbers(turn.replyText).every((values) => values.some((n) => carried.has(n)));
+    const supported = supportedNumbers(writtenNumbers(turn.replyText), carried).every(Boolean);
     return {
       correct: declined && supported,
       cited: true,
