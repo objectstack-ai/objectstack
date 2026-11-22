@@ -1,0 +1,32 @@
+{
+  "number": 36261,
+  "kind": "issue",
+  "title": "change owner: the doors change owners on an object of a disabled package, where every /data write answers 404 OBJECT_PACKAGE_DISABLED",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T03:56:52Z",
+  "updated_at": "2026-11-22T04:55:37Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36261",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5krBqrrgxCYgjXmfbv\n\nFiling gate ① · Source: fleet · found by the #35270 review sweep (run records r03 S2, r04 S3) on PR #36154, re-read on main c30ce97cd7\n\n## What happens\nWhen an administrator switches off a package, its objects stop being served: the data API answers \"package disabled\" for them. Change Owner does not check this, so a user with the transfer permission can still change owners — and send owner-change notifications — on records of a package the deployment has switched off.\n\n- `packages/rest/src/change-owner-routes.ts:190-194`: the door's `gate` runs the unknown-query check and `enforceApiAccess(..., 'update')` only, then calls core directly.\n- `enforceApiAccess` passes a disabled package's object through, expecting the data path to refuse it (`packages/rest/src/rest-server.ts:2757-2760`: `loadObjectItem` returns nothing for it and \"the data path's registry gate 404s it\").\n- The data path's gate is `assertObjectRegistered` (`packages/metadata-protocol/src/protocol-query-validation.ts:291`), which answers `404 OBJECT_PACKAGE_DISABLED`; Change Owner never goes through it.\n- `packages/core/src/security/change-record-owner.ts:208-209` `offeredDefinition` resolves the object with `engine.getSchema`, which still returns a disabled package's objects; nothing asks `registry.isObjectPackageDisabled`.\n- The sibling in the same package does ask: `packages/core/src/security/user-assigned-work.ts:166-168` (\"A disabled package's object serves no data door\").\n\n## Done when\n- Both doors refuse an object of a disabled package with the data door's own `404 OBJECT_PACKAGE_DISABLED` envelope, before the switch is read and before any write or notification; the check sits in core so single and bulk share it.\n- Pins: single and bulk on a disabled package's object → 404 `OBJECT_PACKAGE_DISABLED`, engine `update` never called, no emit; control: same object with the package enabled → 200.\n- Ablation: remove the disabled-package check and the single pin goes red.\n\nreach: public HTTP doors `POST /api/v1/data/:object/:id/change-owner` and `POST /api/v1/data/:object/change-owner`; needs a caller with the transfer grant on rows of a disabled package. Read from the code, not measured.\nBusiness reason: switching a package off is supposed to stop its records being served or changed; this door keeps changing them and messaging people about them.\nReader: area:data / domain:server (packages/core security, packages/rest change-owner routes).\nDedupe: `disabled package`, `assertObjectRegistered` → #35525 (analytics query door), #35526 (callData aggregate) — same class on other doors, neither carries Change Owner. The record also notes `recycle-bin-routes.ts` reaches the engine the same way (not verified here).\nGrade: p2 — a write door ignores the package-disable switch; requires the transfer grant, so no privilege beyond the caller's own."
+}

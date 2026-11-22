@@ -1,0 +1,32 @@
+{
+  "number": 36258,
+  "kind": "issue",
+  "title": "change owner: a hand-away whose read-back is out of the caller's scope is answered 404 RECORD_NOT_FOUND (bulk lists it as failed), though the engine says the write landed",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T03:55:18Z",
+  "updated_at": "2026-11-22T04:55:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36258",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5krBqrrgxCYgjXmfbv\n\nFiling gate ① · Source: fleet · found by the #35270 review sweep (run records r03 S1, r04 S2) on PR #36154, re-read on main c30ce97cd7\n\n## What happens\nWhen someone hands a record away to another person with Change Owner, and the storage behind the object stops showing them the record once it is no longer theirs, the action answers \"record not found\" even though the hand-over succeeded. In a bulk hand-over the same record is listed as failed. The new owner is not notified for the single case. On the built-in SQL storage the record stays visible to the caller right after the write, so this does not show today; it shows on storage whose read-back applies the caller's row access (for example an OData-backed object).\n\n`packages/core/src/security/change-record-owner.ts:303-305` (single) and `:363-365` (bulk) turn a `null` / `undefined` / `0` answer from `engine.update` into `404 RECORD_NOT_FOUND`. The engine documents a `null` read-back after a by-id update as a write that landed and moved the row out of the caller's scope, naming this very case (`packages/objectql/src/engine-update.ts:878-883`: \"reassigning `owner_id` away from yourself under an owner-scoped policy, reads back null while having succeeded. Reading either as 'not found' would answer 404 to a write that landed\"). The engine refuses a missing row itself before the write. The unit doubles answer `null` for a missing row (`change-record-owner.test.ts`, `change-owner-routes.test.ts`), so the pins exercise a branch production never takes for that reason.\n\n## Done when\n- A `null` read-back is treated as moved (or existence is probed before the write, as `protocol.updateData` does): single answers 200 and notifies when asked; bulk counts the row under `updated`.\n- The test doubles throw `RECORD_NOT_FOUND` for a missing row, as the engine does.\n- Pins: (a) a double whose update resolves `null` for an existing row → single 200 + notify called, bulk `updated: 1, failed: 0`; (b) missing row → 404 from the engine's own throw.\n- Ablation: restore the `written === null` → `recordNotFoundError` branch and pin (a) goes red.\n\nreach: public HTTP doors `POST /api/v1/data/:object/:id/change-owner` and `POST /api/v1/data/:object/change-owner`; live only on a driver whose read-back is row-scoped. Read from the code, not measured.\nBusiness reason: a user who hands a record to a colleague is told it failed when it worked, may retry, and the colleague gets no notice.\nReader: area:data / domain:server (packages/core security, change-owner).\nDedupe: `change owner` / `change-owner` / `readback null 404` → #35403, #35399, #35315 (console and hand-over cards, none carries this); 0 matches for the defect.\nGrade: p3 — dead on the first-party SQL drivers today; wrong answer, no data loss."
+}

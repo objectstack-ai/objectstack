@@ -2,8 +2,8 @@
   "number": 36082,
   "kind": "issue",
   "title": "ui(grid): the whole-set footer and group aggregations send a raw sum over a record-mode quantity the engine now refuses (unit twin of #32334)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-21T12:41:57Z",
-  "updated_at": "2026-11-21T22:20:51Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T04:59:26Z",
+  "closed_at": "2026-11-22T04:58:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36082",
   "body": "repo:objectstack#7 · os-tesla · session_01L9qibvMi1U7R2kBd3JbTPu\n\nFiling gate: ① a product defect with a named landing and a named producer · Source: fleet (L1 7062716121 on PR #36060, R2 item 1)\n\n## 维护者速读\n- 问题：PR #36060 让引擎拒绝「不按单位分组就求和」的按行单位数量（例如一行 10 千克、一行 10 磅）。列表和表格底部的合计行会把所有列的合计放进同一个查询，它只跳过按行币种的金额，不认识按行单位的数量。\n- 影响：一旦带单位的数量字段上线，某列底部选了合计，整条合计查询就被拒，其他列的合计也会悄悄变成「当前页合计」，标签却还是「整个视图」。和已修的 #32334（币种版）是同一个问题。\n- 这一步做什么：底部合计查询像跳过按行币种金额一样，跳过按行单位数量上的 sum/avg/min/max。\n- 要你做的：无。\n\n## What will go wrong\n`useWholeSetSummary` (`ui/packages/plugin-grid/src/useWholeSetSummary.ts`) builds one ungrouped whole-set query through `compileWholeSetSummaryQuery`. Since #32334 (PR #32492) it leaves out a money aggregate over a `record`-mode currency amount (`recordCurrencyAggregates.ts`: `requiredCurrencyGrouping`, `honestGroupAggregations`; `useColumnSummary` skips record mode). No file under `ui/**` reads `unitConfig`.\n\nPR #36060 (ADR-0158 U7 R1) makes the engine refuse `sum`/`avg`/`min`/`max` over a `number` with `unitConfig: { unitMode: 'record' }` unless grouped by its `unitField` (`INVALID_FIELD` / 400). Once both are on main, a list or grid view with `summary: 'sum'` on such a quantity column sends a query the engine refuses. Every other summarised column in that view then falls back from its whole-set figure to the current page's figure, under a label that reads as the view's total, and grouped views lose their group aggregates the same way. That is #32334's defect on quantities.\n\nreach: a named producer (`compileWholeSetSummaryQuery` sends an ungrouped aggregate for any summarised number column). Read from code, not run: the refusal is not on main until #36060 merges, and `unitConfig` has not shipped in a release yet (changeset `35489-unit-config.md` pending).\n\n## Business reason\nA warehouse or purchasing user who adds a Quantity sum to a goods-receipt view, where rows carry KGM, LBR or H87, would read page totals as whole-view totals on every other column, with nothing on screen saying the figures changed meaning.\n\n## Ask\n- The whole-set summary and group aggregations leave out `sum`/`avg`/`min`/`max` over a `record`-mode quantity, the way they leave out a record-mode currency amount, so the other columns keep their whole-set figures. A per-unit total grouped by the unit field is a product choice, not part of this card.\n- Pins: a view with one record-mode quantity sum and one plain-number sum; the plain column keeps its whole-set figure and no refused request is sent; an ablation each.\n\n## Order\nAfter PR #36060 merges (it adds the refusal). It should land before `unitConfig` ships in a release, so users get both together.\n\nGrading: area:ux · Bug · the unit twin of #32334.\nSuggested grade: p2 (wrong totals shown as whole-view totals with no error, on the release that ships units).\n\nDedupe: `repo:objectstack-ai/objectstack is:issue useWholeSetSummary` (10 hits, #32334 the currency twin, closed), `whole-set summary record-mode` (#32334, #31912, closed), `unitConfig grid summary` (only the triage seat post) → no card for the quantity case."

@@ -2,8 +2,8 @@
   "number": 33946,
   "kind": "issue",
   "title": "lint: split rule-explanations.ts into one file per rule with a generated index, move-only (hot-file card E)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:fleet",
     "domain:server",
-    "pm:queue",
     "priority:p3",
     "tooling"
   ],
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-15T14:45:53Z",
-  "updated_at": "2026-11-19T06:09:47Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T06:47:24Z",
+  "closed_at": "2026-11-22T06:47:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33946",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jRsWwTRkuRCyQwvpAG\n\nFiling gate ③: maintainer-directed. On 2026-11-15 the maintainer chose 「今天改规则,并立全部 6 张卡」 on the hot-file serialization decision card (consequence as shown: 取消 protocol.ts 独占、关闭 #25467 和 #24586;卡 A 到 F 交各车道立卡,大 PR 和上限门禁仍逐个等您批准). Measurements: the hot-file analysis report (project artifact), re-runnable on request. Cross-lane rule (2026-11-15): no live seat in the owning lane, so `domain:server` seat 5 files and builds it; the owning lane is notified.\n\n## Card E (lane: server per the report; triage confirms)\n\n`packages/lint/src/rule-explanations.ts` is one large file every new lint rule edits. Split it into one file per rule with a generated index.\n\n- Move-only; the generated index is checked by a gate that already exists or by the build (no new gate unless named).\n- Done when: two PRs that each add a rule do not conflict on the explanations, and every rule's explanation text is byte-identical before/after.\n- Large-PR approval as card D."

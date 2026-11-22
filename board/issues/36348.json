@@ -1,0 +1,33 @@
+{
+  "number": 36348,
+  "kind": "issue",
+  "title": "AI-built apps: objects the AI creates get their colour tile — the AI service passes the blueprint's color to the object, as it already passes icon",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:cloud",
+    "domain:cloud",
+    "enhancement",
+    "pm:queue",
+    "priority:p2",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-22T07:26:46Z",
+  "updated_at": "2026-11-22T07:33:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36348",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nSplit out of #35985 by the maintainer's decision (Sales, 2026-11-22 07:25Z: 「同意 35985」, which picked 「现在关卡，AI 带色另开卡」).\n\n## What the user sees today\n\n#35985 gave every object a colour, picked from a small fixed palette (`ObjectSchema.color`). The icon is drawn as a white glyph on a coloured rounded tile, the same in menus, titles, lookup chips and search (PRs #36012, #36042, #36089, all merged). An object a person creates by hand, or one declared in a package, shows its colour.\n\nAn app the AI builds does not: its new objects come out without a colour, so every tile falls back to the neutral face. The AI writes a `color` in its blueprint, but the step that turns the blueprint into objects passes `icon` and drops `color`. That step is in the AI service, not in this repository.\n\n## What to do\n\n- Wherever the AI service materialises a blueprint object, pass the blueprint's `color` through to `ObjectSchema.color`, exactly as it passes `icon`. A value outside the palette is dropped (the schema refuses it), not guessed.\n- No platform change is expected here. If the AI service needs a platform hook, say so on this card first.\n\n## Acceptance\n\n- Ask the AI for an app with three new objects. The three objects show three different colour tiles in the app menu, on the record page title and on a lookup chip, matching the colours the blueprint chose.\n- An object the AI creates with no colour still shows the neutral tile, unchanged.\n\nContext: #35985 (closed by this split), #36099 (the CLI `os explain object` colour row, separate)."
+}

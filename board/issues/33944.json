@@ -2,8 +2,8 @@
   "number": 33944,
   "kind": "issue",
   "title": "inventory gate-rewritten committed artifacts (pinned JSON, generated translations, ledgers) with 7-day overlaps and a destination each (hot-file card C)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:fleet",
     "domain:server",
-    "pm:queue",
     "priority:p3",
     "tooling"
   ],
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-15T14:45:07Z",
-  "updated_at": "2026-11-19T06:09:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T06:46:00Z",
+  "closed_at": "2026-11-22T06:46:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33944",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jRsWwTRkuRCyQwvpAG\n\nFiling gate ③: maintainer-directed. On 2026-11-15 the maintainer chose 「今天改规则,并立全部 6 张卡」 on the hot-file serialization decision card (consequence as shown: 取消 protocol.ts 独占、关闭 #25467 和 #24586;卡 A 到 F 交各车道立卡,大 PR 和上限门禁仍逐个等您批准). Measurements: the hot-file analysis report (project artifact), re-runnable on request. Cross-lane rule (2026-11-15): no live seat in the owning lane, so `domain:server` seat 5 files and builds it; the owning lane is notified.\n\n## Card C (owning lane: devx)\n\nInventory every committed artifact that a gate makes PRs rewrite (e.g. `engine-double-contract.pinned.json`, platform-objects `*.generated.ts` translations, count ledgers).\n\nFor each: path, the gate that rewrites it, PR touches in the last 7 days, measured textual overlaps among them, and a destination: not committed (generated in CI), sharded, or an os-regen merge driver. Deliverable: a report on this card plus one follow-up card per artifact whose destination is not \"leave\". No code in this card."

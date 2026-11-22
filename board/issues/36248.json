@@ -1,0 +1,31 @@
+{
+  "number": 36248,
+  "kind": "issue",
+  "title": "cloud: check that the hosted Console page installs crypto.randomUUID on a non-secure origin like the released console's index.html (follow-up of #35645)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cloud",
+    "priority:p3",
+    "repo:cloud",
+    "status:parked"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T03:22:25Z",
+  "updated_at": "2026-11-22T03:22:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36248",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5krBqrrgxCYgjXmfbv\n\nFiling gate ④ · Source: fleet · ruling parameter 4 of #35645 (record 7073468878, maintainer 「A 关卡,不改代码」 2026-11-22T03:19Z; standing line 「需要转给 cloud的，应该立 cloud 车道卡」). Parked cloud-lane card.\n\n## Why\n#35645 was closed without a code change. The one guarantee for a non-secure origin (plain http, not localhost) is the inline script `installInsecureOriginRandomUuid` in `ui/apps/console/index.html` (objectui#4563). It installs `crypto.randomUUID` before any module loads. The decision thread measured the released console (`@objectstack/console@18.6.0`) on Chromium.\n- With the script, list sorting works.\n- With the script stripped from the page, a list with a configured sort does not render at all (\"crypto.randomUUID is not a function\", thrown by `toSortItems`).\n\nThe cloud-hosted Console page was not measured. If it is served from a different HTML shell, the guarantee may be missing there.\n\n## Done when\n- Read where the hosted Console's HTML comes from. Then confirm one of two things: it carries the same inline script ahead of the module scripts, or it is never served on a non-secure origin.\n- If it is served on a non-secure origin without the script, add the script, or serve it from the console's own `index.html`, and pin it the way `insecure-origin-crypto.placement.test.ts` does.\n\nreach: hosted Console on a non-secure origin; not measured (seat containers cannot reach `*.objectos.app`).\nBusiness reason: if the guarantee is missing, a hosted customer on plain http sees lists with a configured sort fail to render.\nReader: the cloud lane.\nDedupe: `installInsecureOriginRandomUuid cloud`, `randomUUID hosted console` → only #35645.\nGrade: p3, parked."
+}

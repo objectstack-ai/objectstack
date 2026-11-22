@@ -1,0 +1,34 @@
+{
+  "number": 36298,
+  "kind": "pull_request",
+  "title": "fix(plugin-detail): the record drawer's per-field save asks for the fields a change makes required",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T05:01:49Z",
+  "updated_at": "2026-11-22T06:44:33Z",
+  "closed_at": "2026-11-22T06:44:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T06:44:31Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36298",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XTRdLmK9YYgMSCJ7NH2PuUY)_\nFixes #35995\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 在看板、日历、甘特图自带的记录抽屉里改一个字段，若这次改动让另一个空字段变成必填，现在会先弹出填写小窗，填好后一次保存；以前直接被服务器拒绝。\n- 属于「记录页行内编辑」这一组体验修复：让抽屉和记录页、列表单元格、看板拖拽用同一个填写小窗。\n- 出错时影响仅限这个抽屉的保存：小窗点取消什么都不写，可直接撤回本次改动；不触发必填的改动照旧立即保存。\n- 无\n\n## What changes\n\n`InlineEditSaveBar`'s callback mode (the record overlay, `RecordDetailPanel` / `RecordDetailDrawer`) now runs the same `collectRequiredWhenPromptFields` check with the same `fillable` test as the atomic mode before its first `onFieldSave`. When fields come back it writes nothing and opens the shared `RequiredFieldsDialog`; Save sends the changed field plus the typed values in ONE `dataSource` update with `If-Match` at the version the edit session began on; Cancel closes the dialog and keeps the draft; a 409 opens the same conflict dialog the atomic mode opens, over the fill-in dialog (Cancel comes back to the typed values, Overwrite resends both at the server's version). A change that makes nothing required still goes through `onFieldSave` at once.\n\n- `ui/packages/plugin-detail/src/InlineEditSaveBar.tsx` — the ask runs in both modes when the DataSource props are present; the callback mode's ask carries the edit session's starting version (`RequiredAsk.ifMatch`); the plain callback save's 409 still reads as a refusal (the conflict dialog's overwrite writes through the DataSource, which is not the path that refused). The edit-base block moved above `handleSave` unchanged so the save can read it.\n- `ui/packages/plugin-detail/src/RecordDetailPanel.tsx` — hands the bar `dataSource`, `objectName`, `recordId` and `data` (all existing props) and wraps the bar alone in a `RecordContextProvider` carrying the panel's `objectSchema`, so the bar knows the object's fields. No new prop, no new callback shape.\n- One `@object-ui/plugin-detail` patch changeset.\n\nMeasured caller set (Zone 2.1): the callback mode has exactly one caller, `RecordDetailPanel` (`RecordDetailDrawer` renders it). It is the overlay of `ObjectKanban`, `ObjectCalendar`, `ObjectGantt` and `ObjectTree` (the tree passes no `onFieldSave`, so it is read-only) when the host routes no row click. Inside the console a list row click opens `RecordDetailView` in the drawer stack (`objectViewRecordOverlay.tsx`), whose bar is the atomic mode and already asks since the shared prompt landed; that file is untouched here.\n\n## Tests\n\n- The pin in `InlineEditSaveBar.requiredPrompt-35956.test.tsx` that said the callback mode never asks now says it asks and writes nothing yet.\n- A new top-level `describe` in the same file (the component's shared harness, per the ruling that a new pin goes into that file): Save writes once with both fields and `ifMatch` and never calls `onFieldSave`; the guard is the version the edit began on even after the host re-reads the record mid-edit; Cancel writes nothing and keeps the edit; CONTROL — a change that makes nothing required goes through `onFieldSave` at once; a 409 keeps the fill-in dialog open under the conflict dialog and Overwrite resends both at the server's version; CONTROL — with no data source handed over it never asks; and one test through the real `RecordDetailPanel` + `DetailView` (double-click, edit, Save → dialog → one guarded update).\n\n<details><summary>Readings</summary>\n\nRecorded at the commit named in the report; see the `os-dev-report` comment on the card for the full gate list.\n\n- `vitest run InlineEditSaveBar.requiredPrompt-35956.test.tsx` — Test Files 1 passed, Tests 15 passed.\n- 25 plugin-detail test files naming `InlineEditSaveBar` / `RecordDetailPanel` / `RecordDetailDrawer` — Test Files 25 passed, Tests 163 passed, 10 skipped.\n- Ablation (via `scripts/ablation-replace.mjs`, restored to the HEAD blob with `git diff HEAD` empty): restoring the old `!onFieldSave &&` guard turns 6 tests red (the flipped pin, Save, the version guard, Cancel, the 409 and the panel test) while both CONTROLs stay green.\n\n</details>\n\n## Acceptance notes\n\n- The dialog's single write goes through the data source, not through the host's `onFieldSave`. The kanban and the calendar re-read on the data source's mutation event, as they do for any write; a host that only patches its own list inside `onFieldSave` does not see that patch for this one write. The panel's `record` is the host's snapshot (`navigation.selectedRecord`) either way, as it already is after a per-field save.\n- Without a data source on the overlay there is no one write to put the values in, so it saves field by field as before (pinned as a CONTROL).\n- Handing the bar `data` also turns on two existing behaviours in the overlay: the changed-elsewhere notice, and a server refusal naming a record field reading as a field hint (labelled with the machine name, since the panel passes no `fieldLabelFor`).\n- 375 px / dark: the dialog is the shared one, unchanged here; no browser check was run for this PR.\n\n## Verification\n\nFiles to read first, by risk: `InlineEditSaveBar.tsx` (`handleSave`'s ask and the 409 gate), `RecordDetailPanel.tsx` (the record context around the bar), the new `describe` at the end of the test file.\n\nTwo-minute check: `cd ui && pnpm exec vitest run packages/plugin-detail/src/__tests__/InlineEditSaveBar.requiredPrompt-35956.test.tsx` — expect 15 passed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FEkQ5oLLK7uoxp33riiBJL\n"
+}

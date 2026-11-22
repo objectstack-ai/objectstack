@@ -2,8 +2,8 @@
   "number": 36076,
   "kind": "issue",
   "title": "评论（三）手机：记录页右上角评论图标进整页，列表只列第一层、点进去回复；输入框固定在底部；长按评论出操作面板",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-21T12:22:23Z",
-  "updated_at": "2026-11-21T22:27:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T03:16:15Z",
+  "closed_at": "2026-11-22T03:16:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 2,
   "locked": false,

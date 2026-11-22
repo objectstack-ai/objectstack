@@ -1,0 +1,36 @@
+{
+  "number": 36303,
+  "kind": "pull_request",
+  "title": "test(e2e): live specs find the list's create button by its test id",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T05:09:00Z",
+  "updated_at": "2026-11-22T06:44:33Z",
+  "closed_at": "2026-11-22T06:44:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T06:44:31Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36303",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1X1QBTiid6jzY5s75cQnqNzC)_\n\nFixes #36251\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感：只改夜间端到端测试里找“新建”按钮的方式，产品界面一个字不动。\n- 为什么做：列表的新建按钮现在写成“新建＋对象名”，七个夜间测试还按旧的“新建”两个字找，开场就超时。\n- 出错会怎样：只影响夜间测试结果，不影响用户；改回一行即可撤回。\n- 要你做什么：无。\n\n## What changes\n\nSeven live e2e specs clicked the list's create button by an exact accessible name: `/^New$/i` in the two the card names, `/^(New|新建)$/i` in five more. Since #36113 the button reads New plus the object's singular name (for example \"New Invoice\"), so all seven time out before their first step. Each now clicks `getByTestId('object-view-new-button')`, the handle the button already carries (`ui/packages/app-shell/src/views/objectViewHeaderChrome.tsx`) and that `ui/e2e/list-header-narrow-35446.spec.ts` and the app-shell unit tests already read. No product file changes; no test id was added.\n\nFiles, one line each:\n- `ui/e2e/live/form-view-subforms.spec.ts`, `ui/e2e/live/grid-file-upload.spec.ts` (named by the card)\n- `ui/e2e/live/cascading-options.spec.ts`, `field-conditional-rules.spec.ts`, `grid-conditional-rules.spec.ts`, `grid-parent-rules.spec.ts`, `required-when-submit.spec.ts` (same locator, same nightly lane; folded in so the card's second done-when line holds, declared in the claim)\n\nAfter this change, no live spec under `ui/e2e/live/` names the create button by text (`grep -rn \"name: /^(New\\|name: /^New\" ui/e2e/live` finds nothing). No changeset: the `ui` workspace root is private and `ui/e2e/**` ships in no package (`skip-changeset`).\n\n## Why\n\nA false red in the nightly live lane hides any real failure in the seven specs it guards. A test id does not move when the button's words change, and the button's words now vary per object.\n\n## Tests\n\nLive lane, run locally on the CI-shaped rig (the `Live E2E UI` job's steps): workspace backend on :4010 via `ui/e2e/live/ci/start-backend.sh`, console `vite build` then `vite preview` on :5190, at head `60612f17`.\n\n<details><summary>Fixed head: the seven specs, 8 passed</summary>\n\n```text\n✓ 1 cascading-options.spec.ts:50 province options re-filter live as country changes, and the stale value clears (4.1s)\n✓ 2 cascading-options.spec.ts:76 the server rejects an out-of-set option value, and accepts an in-set one (121ms)\n✓ 3 field-conditional-rules.spec.ts:35 header fields react to Status via CEL visibleWhen / readonlyWhen / requiredWhen (3.9s)\n✓ 4 form-view-subforms.spec.ts:20 New OBJECT modal renders relationship-derived subforms and submits an atomic batch (4.9s)\n✓ 5 grid-conditional-rules.spec.ts:15 a line cell flags required per row from a row-scoped requiredWhen (5.7s)\n✓ 6 grid-file-upload.spec.ts:36 inline line-item grid uploads a per-row file and persists it in the batch (5.0s)\n✓ 7 grid-parent-rules.spec.ts:18 a line locks when the header status becomes \"paid\" and unlocks when it changes back (3.8s)\n✓ 8 required-when-submit.spec.ts:14 requiredWhen blocks submit with a field error, and relaxes when FALSE (4.2s)\n8 passed (33.2s) · os-verify-lock VERDICT command-exit 0\n```\n</details>\n\n<details><summary>Control: origin/main's copies of two specs on the same rig, 2 failed</summary>\n\n```text\n✘ cascading-options.spec.ts:50 (31.3s) - waiting for getByRole('button', { name: /^(New|新建)$/i }).first()\n✘ form-view-subforms.spec.ts:20 (31.2s) - waiting for getByRole('button', { name: /^New$/i }).first()\n2 failed · 1 passed · os-verify-lock VERDICT command-exit 1\n```\nThe control leg was restored with `git checkout HEAD --` and `git diff HEAD` read empty after it.\n</details>\n\n<details><summary>Local gate subset (dispatch-gates --commands), all exit 0 at 60612f17</summary>\n\n\n```text\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0\npnpm check:adr-anchors :: exit 0\npnpm check:cross-package-test-inputs :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:engine-double-contract :: exit 0\npnpm check:gitlink-declared :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:published-files :: exit 0\npnpm check:query-options-erasure :: exit 0\npnpm check:refd-timer-probe :: exit 0\npnpm check:registry-log-declared :: exit 0\npnpm check:rest-log-spy-declared :: exit 0\npnpm check:tier-file-adoption :: exit 0\npnpm check:type-check-coverage :: exit 0\npnpm check:type-check-debt :: exit 0\npnpm check:undeclared-dep-imports :: exit 0\npnpm check:watch-hint-literal :: exit 0\npnpm check:where-matcher :: exit 0\n```\n\n</details>\n\n## Acceptance notes\n\n- The five extra specs were not counted by the card (its grep matched `/^New$/i` only); they break on the same label change and run in the same nightly lane. Folded in as a bounded in-place fix; the claim on the card names them.\n\n## Verification\n\nTwo-minute check: `git grep -n \"object-view-new-button\" -- ui/e2e/live` lists seven lines, and `git grep -nE \"name: /\\^\\(?New\" -- ui/e2e/live` lists none. Read first: `ui/e2e/live/form-view-subforms.spec.ts` (the card's first spec).\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no names added)\n- [x] 3. No formatter ran; `pnpm lint` passes. (CI)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (publishes nothing)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English. (the 维护者速读 block is the fleet's Chinese quick-read channel)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FEkQ5mp8b4Q3FDYZBs8MKd\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5mp8b4Q3FDYZBs8MKd)_\n"
+}

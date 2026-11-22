@@ -2,9 +2,9 @@
   "number": 36139,
   "kind": "pull_request",
   "title": "fix(plugin-auth): a guarded increment is one atomic conditional write",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -22,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-21T16:04:11Z",
-  "updated_at": "2026-11-21T17:01:54Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 2,
+  "updated_at": "2026-11-22T06:44:32Z",
+  "closed_at": "2026-11-22T06:44:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T06:44:30Z",
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/36139",
   "body": "Clause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感:登录与组织功能的表现不变,只是认证存储层的一种计数写入在多实例同时调用时也守住了它的前置条件。\n- 安全席位派发的加固单,替认证插件补齐其所依赖的认证库对这类写入的约定。\n- 出错的话,相关写入会报错而非静默放行;可随整个变更直接撤回,不涉及数据迁移。\n- 无。\n\n## What changes\n\nHardening rule: **a guarded increment is one atomic conditional write.**\n\n- `packages/plugins/plugin-auth/src/objectql-adapter.ts`, the factory adapter's `incrementOne`: each attempt reads the guarded row, computes the new values, and writes them with ONE predicate update (`multi: true`) whose condition is the caller's `where` (selector and guard), the row id, and every incremented counter at the value read. The affected count decides: `1` is this call's write; `0` re-reads (the guard no longer matching answers `null`; an unguarded counter is recomputed from the new value); anything else is refused by name; contention outlasting 5 attempts throws. This is better-auth's stated contract for the method. Answer shapes are unchanged (the updated row, or `null`). The native `incrementOne` / `consumeOne` stay, with a note on why they must.\n- Five in-package engine doubles (`impersonation-bearer-rotation`, `accept-invitation-adopt-membership`, `list-user-invitations-verification`, `org-create-posture-gate`, `remove-user-atomicity` tests) now serve the engine's predicate update path behind the producer's own `assertEngineUpdateDispatch`, and their matchers take `$and`. They only ever served by-id updates; the real engine serves both.\n- `scripts/engine-double-contract.pinned.json` / `.baseline.json`: the org-create posture double's `update` now opens with the producer's dispatch predicate, so it moves from the shrink-only DEBT ledger to the pinned ledger (`--write`, plus the stale DEBT row removed).\n- `.changeset/sec2-4ghv.md`: `patch` for `@objectstack/plugin-auth`.\n\nNo engine or driver change was needed: the engine's predicate path already lowers to one `UPDATE … WHERE …` statement and answers its affected count.\n\n## Why\n\nbetter-auth states the contract for `incrementOne`: the `where` clause is both selector and guard, and the conditional write must be atomic. The adapter now enforces exactly that rule.\n\n## Tests\n\nNew top-level suite in `src/objectql-adapter.test.ts`: two ObjectQL engines, each with its own SQL driver connection to ONE SQLite file, both paused after their first guarded read so both see the guard hold before either writes. Three concurrency pins (one per guard shape better-auth issues against the method), a sequential control, and a null-counter case.\n\n<details><summary>Red on base, green after, ablations (SQLite, the committed pins)</summary>\n\n- Base (`objectql-adapter.ts` at `db9e34ad`, new pins in place): 3 failed | 2 passed — all three concurrency pins red, the sequential control and the null-counter case green.\n- Fix (`e986331f`): 5 passed.\n- Ablation A — the counters-as-read terms dropped from the conditional write's predicate: 1 failed (the unguarded-increment pin). Restored, blob equal to HEAD.\n- Ablation B — the caller's guard dropped from the conditional write's predicate: 1 failed (the guard-on-a-stored-value pin). Restored, blob equal to HEAD.\n- Ablation C — an affected count of 0 read as written: 3 failed (all three concurrency pins). Restored, blob equal to HEAD.\n- The guard-on-the-counter pin is held by either term (guard and counter-as-read), so only C turns it red alone.\n</details>\n\n<details><summary>Package suite and typecheck</summary>\n\n- `@objectstack/plugin-auth` full suite at `4f58e2fc`: Test Files 291 passed (291), Tests 6189 passed, 10 skipped. Later commits change one return-type annotation in five test doubles and two gate ledgers.\n- `pnpm --filter @objectstack/plugin-auth typecheck` at `3ab85b9e`: exit 0 (`check:test-typecheck: OK`, ledger unchanged).\n- Before the doubles were taught the predicate path, the first full run had 41 failures in 12 files, every one in a fake engine that served only by-id updates (the same 12 files pass 305/305 on base and 305/305 after the double fix).\n</details>\n\n## Acceptance notes\n\n- The committed pins run on SQLite (the package's test setup). The same five cases were also measured once against a local PostgreSQL 16 (two engines, two connection pools, one database per case): red 3/5 on base, green 5/5 with the fix. Not committed, because this package's CI job provisions no Postgres and a cell nobody provisions would only ever skip.\n- The pins call the factory-wrapped adapter with the exact call shapes the vendor issues; they do not drive the HTTP routes end to end across two processes.\n\n## Verification\n\nTwo-minute check: `pnpm --filter @objectstack/plugin-auth exec vitest run --maxWorkers=2 src/objectql-adapter.test.ts -t \"a guarded increment is one atomic\"` — expect 5 passed. Revert `objectql-adapter.ts` to `main` and the three concurrency cases go red.\n\nRead first: `objectql-adapter.ts` `incrementOne` (the conditional write and the attempt loop), then the new suite at the end of `objectql-adapter.test.ts`, then one of the doubles (`impersonation-bearer-rotation.test.ts` `update`).\n\nL2: the contract-tier review is owed to the security seat (not requested here).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017xRBcU63t9HUySVRZqa3bk\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017xRBcU63t9HUySVRZqa3bk)_\n"

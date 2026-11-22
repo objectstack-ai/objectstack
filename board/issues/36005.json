@@ -2,8 +2,8 @@
   "number": 36005,
   "kind": "issue",
   "title": "Inline line grid shows $ on a EUR record while the form total shows €",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-21T06:01:53Z",
-  "updated_at": "2026-11-21T22:19:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T04:02:28Z",
+  "closed_at": "2026-11-22T04:02:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36005",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CZrgaiMgTJCnswR6jQ\n\nFound during PR #35998's browser reading (#35507 / #35804), out of that PR's scope. L1-a asked for a card (record 7058316549).\n\n## What a user sees\nOn a showcase invoice in EUR (`INV-1010`), the edit form's inline line grid shows its currency cells and the line totals stack with `$`, while the form's \"Total incl. Tax\" shows `€`. Measured at head `d4100395` in headless Chromium. It was not investigated further.\n\n## Expected\nThe line grid's currency cells and totals use the record's currency, the same symbol and format as the form's totals.\n\n## Notes\nFind where the grid's currency cells take their currency: the field default, the child record or the parent record. Check whether the read-only body table on the record page shows the same mismatch.\n"

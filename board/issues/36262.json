@@ -1,0 +1,32 @@
+{
+  "number": 36262,
+  "kind": "issue",
+  "title": "change owner: the queue-target check looks for a field named queue instead of a provisioned queue column, so an external object gets a queue write instead of the 400",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T03:57:18Z",
+  "updated_at": "2026-11-22T04:55:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36262",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5krBqrrgxCYgjXmfbv\n\nFiling gate ① · Source: fleet · found by the #35270 review sweep (run records r04 S5, r03 N4) on PR #36154, re-read on main c30ce97cd7\n\n## What happens\nChange Owner can move a record into an ownership queue only if the object has queue storage. It decides that by looking for a field named `queue` in the object's definition, not by asking whether the column really exists in storage. So an external (federated) object that has an owner — where the platform lists a `queue` field but has no column for it — is sent a queue write instead of the documented \"this object has no queue\" refusal; and an object whose fields are registered as a list is refused with a sentence that is not true.\n\n- `packages/core/src/security/change-record-owner.ts:213-218`: `asRecord(def.fields)` + `hasOwnProperty(fields, 'queue')`.\n- The engine's own test is storage provenance: `packages/objectql/src/assignment-rules.ts:303-305` `carriesQueueColumn` = `resolveInjectedColumnProvenance(schema, 'queue') === 'injected-provisioned'`, used at `:332`, `:352`, `:621`.\n- The injection plan registers `queue` wherever it registers `owner_id` (`packages/spec/src/data/injected-system-columns.ts:137-142`), so on a registered object the 400 arm practically never fires for the class that lacks storage.\n- What the remote driver answers for the queue write was not traced.\n\n## Done when\n- The queue-target check uses the same provenance test as the engine (`carriesQueueColumn` or `resolveInjectedColumnProvenance(def, 'queue') === 'injected-provisioned'`), so array- and record-shaped `fields` answer alike.\n- Pins: a federated object with an owner and an unprovisioned injected `queue` → 400 \"no ownership queue column\", no update call; an array-shaped `fields` registration with a provisioned queue → admitted; control: a local object with a provisioned queue → admitted.\n- Ablation: restore the field-name test and the federated pin goes red.\n\nreach: public HTTP doors `POST /api/v1/data/:object[/:id]/change-owner` with a `queue` target, on a writable external object that declares an owner, or an object registered with array-shaped fields. Read from the code, not measured.\nBusiness reason: a queue hand-over on an external object should fail clearly; instead it is pushed to the remote system with an unknown result.\nReader: area:data / domain:server (packages/core security, change-owner).\nDedupe: `change owner`, `queue column`, `carriesQueueColumn` → no open card carries it.\nGrade: p3 — narrow object class (external objects with an owner, or array-shaped registration)."
+}

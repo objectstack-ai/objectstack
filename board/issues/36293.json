@@ -1,0 +1,34 @@
+{
+  "number": 36293,
+  "kind": "pull_request",
+  "title": "fix(components): the edit form's subtotal reads the record's currency, as the record page does",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T04:47:06Z",
+  "updated_at": "2026-11-22T06:44:36Z",
+  "closed_at": "2026-11-22T06:44:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T06:44:34Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36293",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XP3RHGWUG7UH3fNa4tBa9UC)_\n\nPart of #36249\n\nBuilds Done-when item 2 only. Item 1 (a product's price copied across currencies) stays open on the card for the maintainer's rule.\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n在编辑发票表单里，欧元发票的小计原来显示成没有货币符号的「230.00」，现在显示「€230.00」，和记录页、含税合计一致。\n这是多币种发票的后续问题，替在示例应用里录入外币发票的用户解决小计看不出币种的问题。\n只影响编辑表单里汇总金额的显示，不改存储的数字；出问题可以直接撤回，回到原来的无符号显示。\n卡片的另一半（选产品时把本币单价原样抄进欧元明细）需要你定规则，选项和建议在报告里。\n\n## What changes\n\n- `ui/packages/components/src/renderers/form/form.tsx`: `RECORD_CURRENCY_WIDGET_TYPES` gains `summary`. The form renderer hands the live form record (`dependentValues`) to a registered widget only when its type is in that set; `currency` and `formula` were in it, `summary` was not. `SummaryField` already formats a roll-up that declares its currency (ADR-0144 D6 as amended) with `resolveFieldCurrency(field, tenant, dependentValues)`, the same call the record page's cell (`FormulaCellRenderer` → `CurrencyCellRenderer`) makes; with no record, a `record`-mode config resolves to no code and `formatCurrency` prints a bare `230.00`. Now the edit form's subtotal is drawn by that same code path with the record it needs. The fix is in the shared host, so every `summary` field that declares a currency on any form (New / Edit, drawer, modal) gets it; the showcase fixture was already right (PR #36233 declared `currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' }` on `total`).\n- `ui/packages/fields/src/__tests__/parentCurrency.faces-31912.test.tsx`: a new top-level `describe` in the existing D6 harness drives the real form renderer with the real `SummaryField` / `CurrencyField` / `TextField`: a EUR record's subtotal reads `€230.00` and its tax-inclusive total `€276.00`; a USD record reads `$230.00` / `$276.00`.\n- `.changeset/36249-form-subtotal-currency.md`: `@object-ui/components` patch.\n\nRead first, by risk: (1) the one-line set change in `form.tsx` (`SummaryField` spreads no leftover props onto the DOM, so the new prop leaks nowhere); (2) the new `describe` at the end of the faces harness.\n\nTwo-minute check: `pnpm --dir ui exec vitest run packages/fields/src/__tests__/parentCurrency.faces-31912.test.tsx` passes 11/11; remove `'summary'` from the set and the two new cases fail with `expected 'Subtotal230.00' to contain '€230.00'`.\n\n## Tests\n\n<details><summary>Pin and ablation at d5c341f1f3</summary>\n\n- With the fix: `Test Files 1 passed (1)`, `Tests 11 passed (11)`.\n- Ablation (`scripts/ablation-replace.mjs`, anchor hit x1 -> x0, blob 44f1fec7 -> cee0c300): `Tests 2 failed | 9 passed (11)`, `AssertionError: expected 'Subtotal230.00' to contain '€230.00'` and `expected 'Subtotal230.00' to contain '$230.00'`. The tax-inclusive total cases stayed green in both legs (that face already had the record). Restored: blob == HEAD, `git diff HEAD` empty. The ui test config aliases `@object-ui/components` to `src`, so no rebuild sits between the mutation and the run.\n\n</details>\n\n## Acceptance notes\n\n- Item 1 of the card (a picked product's home-currency `unit_price` copied into a EUR line) is not built here, as the claim says. The measurement and the options go to the seat in the report.\n- Before this change a home-currency (USD) invoice's subtotal was also bare on the edit form (`230.00`); it now reads `$230.00`, the record page's format.\n- Seen while verifying, not fixed here: the showcase `en` translation bundle labels `showcase_invoice.total` \"Total\" while the object metadata labels it \"Subtotal\", so the record page and the edit form show the pre-tax roll-up as \"Total\" next to \"Total incl. Tax\", and the line-grid stack calls the same figure \"Subtotal\". Listed in the report for the seat.\n\n## Verification\n\n<details><summary>Booted showcase, INV-1010 (EUR), edit form, 1280 px</summary>\n\nOwn stack: `objectstack dev --seed-admin --fresh -p 4361` in `examples/app-showcase` on this branch's build, the Console from this tree's source (`vite --port 5361`, `DEV_PROXY_TARGET` at the backend), admin, Playwright with the preinstalled Chromium. Both servers stopped after.\n\n- Before (the fix ablated in the source the Console serves): edit form `total` reads `Total 230.00`; `Total incl. Tax €276.00`; the line-grid stack `Subtotal €230.00`.\n- After: edit form `total` reads `Total €230.00`; the tax-inclusive total unchanged at `€276.00`.\n- Record page on the same boot: `Total €230.00`.\n- Screenshots in the project files: `build-seat4/36249/before-edit-form-1280.png`, `after-edit-form-1280.png`.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FEkQ5okniknzVVR3KTSVr1\n"
+}

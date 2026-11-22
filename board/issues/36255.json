@@ -1,0 +1,31 @@
+{
+  "number": 36255,
+  "kind": "issue",
+  "title": "专题：仪表盘和报表的使用体验（查看明细、搭建面板、筛选、图表类型，对照 Attio）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "pm:epic",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T03:47:06Z",
+  "updated_at": "2026-11-22T03:49:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36255",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点（父单），由维护者直派，承父单 objectstack-ai/objectstack#34571（专题：控制台核心页面体验）。⛔ 不是认领。优先级 p2（协调席定的，维护者未指定）。\n\n## 维护者速读\n\n- **这是什么**：仪表盘和报表在界面上怎么看、怎么点、怎么搭。数字算得对不对归 objectstack-ai/objectstack#36230，不在这里。\n- **结论**：我们的仪表盘布局比 Attio 丰富（网格、全局筛选、数字卡片）。差在四处：点图表看明细、搭建面板的用词和引导、筛选的反馈、销售流程类的专用图表。\n- **已定并立了子卡的只有一张**：查看明细改成居中弹窗（见「子卡」）。\n- **其余十项是候选**，每项都有实测依据，但维护者还没有逐项同意，没有立卡。见「候选子卡」。\n\n## 维护者说过的（2026-11-22，按先后）\n\n- 「然后完整的测试 attio 的 reports 和 dashboard，对照我们的功能提出优化改进意见。」\n- 「我们的用户体验如何向 attio 靠拢，比如查看明细用弹出窗口，以及其中的细节。」\n- 「按 8 点立卡」（指查看明细的 8 点做法）\n- 「是否建议报表优化开专题卡」「报表、仪表盘还有很多细节」\n- 「仪表盘、报表专题卡」\n\n## 实测对照（主干 `6c7c6db250`，本机环境 HotCRM 6.5.0；Attio 同日浏览器实测，1440 宽）\n\n我们的仪表盘和报表编辑面板：\n\n![我们的仪表盘：全局筛选、数字卡片、网格布局](https://github.com/objectstack-ai/objectstack/blob/15120fcda94755093f419bdfb05ab433618f928b/reports/2026-11-22-ours-dashboard.jpg?raw=true)\n\n![我们的报表编辑面板：字段是内部名，页面标题变成英文](https://github.com/objectstack-ai/objectstack/blob/15120fcda94755093f419bdfb05ab433618f928b/reports/2026-11-22-ours-report-editor.jpg?raw=true)\n\nAttio 的仪表盘和搭建面板：\n\n![Attio 仪表盘：每张图占满一行](https://github.com/objectstack-ai/objectstack/blob/15120fcda94755093f419bdfb05ab433618f928b/reports/2026-11-22-attio-dashboard.jpg?raw=true)\n\n![Attio 搭建面板：来源、筛选、指标、分组、图表类型](https://github.com/objectstack-ai/objectstack/blob/15120fcda94755093f419bdfb05ab433618f928b/reports/2026-11-22-attio-report-builder.jpg?raw=true)\n\n| | Attio | 我们 |\n|---|---|---|\n| 仪表盘布局 | 每张图占满一行 | 网格，顶部三个全局筛选，有数字卡片 |\n| 点图表看明细 | 任意图表的任意一块都能点，居中弹窗 | 只有数字卡片和汇总表的数字能点，右侧抽屉 |\n| 搭建 | 选完数据来源立刻出图；缺什么就在图的位置写一句（「至少选两个阶段」），并自动打开下一个要填的下拉 | 右侧编辑面板加实时预览；应用里没有新建报表、新建仪表盘的入口 |\n| 面板用词 | 业务名称 | 字段显示内部名（`total_amount`、`stage`），图表类型写 `bar`，「行（维度）」「值（度量）」 |\n| 报表类型 | 现状分析、历史值、漏斗、阶段停留、阶段变化 | 汇总（图加汇总表） |\n| 时间范围 | 时间类报表图上方有一排：7 天、1 月、3 月、6 月、12 月、全部，对比，按月或按周 | 仪表盘全局筛选有 17 个预设加自定义；单张报表页上没有 |\n| 图表卡片菜单 | 下载成图片、编辑、复制、复制到别的仪表盘、刷新（带上次刷新时间）、删除 | 页面右上角一个「全部刷新」 |\n| 计算值 | 图下方可展开「计算值」表，可下载 | 报表页图和表一起显示 |\n\n## 子卡\n\n- 查看明细改成居中弹窗（8 点）：本专题第一张子卡，立卡后在评论里补编号。\n\n## 候选子卡（都有实测依据，等维护者逐项定，未立卡）\n\n1. **报表编辑面板换成业务用词**：字段显示标签，图表类型用中文，「行（维度）」「值（度量）」改成「分组」「指标」，数据集不带内部名。\n2. **缺陷：打开报表编辑面板，页面标题从「各阶段商机」变成「Opportunities by Stage」**，副标题也变英文。\n3. **空状态文案**：换了时间筛选后，没数据的卡片写「该组件已成功加载，只是查询目前没有返回任何记录。数据源： opportunity_metrics」。是工程用语，还带内部名。\n4. **全局筛选的反馈**：把时间从「本季度」换成「上季度」，四张数字卡片和上面两张图完全不变（它们各自写死了时间范围），只有一张图变成空。用户看不出筛选对哪些卡片起作用。筛选也不进地址栏，分享链接带不走。\n5. **销售流程类的专用图表**：Attio 有漏斗（每个阶段标转化率）、阶段停留（平均停了几天）、阶段变化（按月多少条进入各阶段）。我们名叫「各负责人商机漏斗」的报表是一张矩阵表加一根横条。\n\n![Attio 漏斗：每个阶段上方是转化率](https://github.com/objectstack-ai/objectstack/blob/15120fcda94755093f419bdfb05ab433618f928b/reports/2026-11-22-attio-funnel.jpg?raw=true)\n\n![我们的「商机漏斗」报表：矩阵表加一根横条](https://github.com/objectstack-ai/objectstack/blob/15120fcda94755093f419bdfb05ab433618f928b/reports/2026-11-22-ours-funnel-report.jpg?raw=true)\n\n6. **单张报表页的时间范围快捷切换**（7 天、1 月、3 月……加对比、粒度）。\n7. **图表卡片自己的菜单**：下载成图片、单独刷新、上次刷新时间、复制。\n8. **搭建时一步一步引导**：缺哪一项就在图的位置写明，并自动打开那一项；有默认值的直接出图。\n9. **应用里新建报表和仪表盘的入口**：现在左侧「数据洞察」「报表」两组里没有新建。是不是只能在 Studio 里建，没有确认。\n10. **报表页版式**：有的报表图在上表在下，有的反过来；内容卡片外面还套了一层卡片。\n\n## 不在本专题\n\n- 数字对不对、数据集查询、同比环比：objectstack-ai/objectstack#36230。\n- 下钻「在列表中打开」的地址写法：objectstack-ai/objectstack#35438（归 #36230）。本专题的明细弹窗保留这个入口，用它现有的能力。\n- 仪表盘的网格布局和全局筛选的预设清单，现在比 Attio 好，不改。\n\n## 协调席自己加的（不是维护者原话）\n\n- 十项候选的划分和排序。\n- 「不在本专题」的边界。\n- 优先级 p2。\n\n## 没有核对的\n\n- Attio 的「历史值」报表没有点进去；阶段停留和阶段变化只各搭了一张默认图。\n- Attio 仪表盘里的图能不能拖动调整大小、并排，没有试。\n- 我们的仪表盘还有哪些卡片类型（表格、排行等），只看了「高管总览」一个仪表盘的上半部分。\n- 我们在 Studio 里新建报表、仪表盘的流程，没有走。\n- 手机上的仪表盘和报表，没有看。\n\nReader: `domain:ui` 车道，父单不派发；子卡各自派发。\n\nDedupe: `专题 报表 仪表盘 体验`、`报表 编辑面板 用词`（objectstack，open）→ 都是 0。相关：#36230（数字准确，不重叠）、#35438。"
+}

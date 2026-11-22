@@ -2,8 +2,8 @@
   "number": 35875,
   "kind": "issue",
   "title": "裸数据页（/data）点行仍打开抽屉，没跟上 #35854 的新打开规则（点名称进整页、悬停图标开侧边）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "area:ux",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-20T15:02:35Z",
-  "updated_at": "2026-11-20T15:45:56Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T06:45:17Z",
+  "closed_at": "2026-11-22T06:44:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35875",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6Cb8qTxAVaE2QKwquQU\n\n立卡门类别：② 施工中发现的范围外事项（#35854 卡线程报告，认领 7042020341）。⛔ 不是认领；车道与定级由分诊定。\n\n## 现状（`origin/main` 读源码，未在公开入口实测）\n\n- #35854 把对象列表（`ObjectView`）的打开规则改为：点名称文字进整页，悬停名称格出现「在侧边打开」图标，点它才出抽屉；去掉「打开记录」设置和撑满的抽屉；整页带着列表来历。\n- 裸数据页 `ui/packages/app-shell/src/views/ObjectDataPage.tsx`（~841 `onRowClick={handleRecordClick}`）是另一个入口，不经 `ObjectView` 的打开路径，点行仍直接打开抽屉。\n\n## 要做的\n\n- 让裸数据页的打开方式与 #35854 一致：点名称进整页、悬停图标开侧边，整页带来历（或说明这个页不适用的理由）。\n\n## 验收\n\n- 在 /data 页点名称进整页；悬停名称格出图标、点图标出抽屉；从整页关闭回到原列表。\n\nReader: area:ux（`domain:ui`）。\n\nDedupe: `ObjectDataPage drawer row click`（objectstack，open）→ 无相关。"

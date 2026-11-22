@@ -1,0 +1,31 @@
+{
+  "number": 36362,
+  "kind": "issue",
+  "title": "设计模式（一）模式本身：页头「编辑应用」进入，顶上一条栏只有「设计模式」和取消、保存，跨页面保持",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T08:11:24Z",
+  "updated_at": "2026-11-22T08:11:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36362",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#36359（专题：运行界面的设计模式，维护者直派）。⛔ 不是认领。优先级 p2（协调席定的，维护者未指定）。\n\n本卡属于「运行界面的设计模式」这套方案，总说明和全部效果图在 objectstack-ai/objectstack#36359。\n\n## 维护者说过的（2026-11-22）\n\n- 「你看一下右侧这个设计模式」（指 Twenty 的 Layout customization），随后：「按这个改，重画」\n- 「设计模式中顶部的字是不是太多了，而且不需要 studio 打开了」\n- 「你先立已经决定的卡」\n\n## 效果图（设计板图 49 的图四）\n\n![全局设计模式](https://github.com/objectstack-ai/objectstack/blob/b3583aa509be265d5bb8af55ae8bd0c152fb6df5/runtime-edit/2026-11-22-board49-fig4.jpg?raw=true)\n\n## 现状（主干 `6c7c6db250`）\n\n- 页头右上角有「编辑应用」按钮（`ui/packages/app-shell/src/layout/ShellPageActions.tsx` 的 `EditAppButton`），点了跳到 Studio。\n- 运行界面没有任何「模式」的概念。\n\n## 要做的\n\n1. 「编辑应用」按钮改成进入**设计模式**，不再跳 Studio。只有系统管理员看得到这个按钮（现有的显示条件不放宽）。\n2. 进入后页面最上面出现一条栏：左边「设计模式」四个字，右边「取消」「保存」。**栏里不放别的**：不写应用名，不写说明，不放去 Studio 的按钮。\n3. 模式是全局的：在模式里点菜单换页面，模式一直在。\n4. 模式里收集到的改动统一处理：点「保存」一次写入、对所有人生效；点「取消」全部不要并退出。有未保存的改动时关页面或刷新，浏览器提示会丢改动。\n5. 没有任何改动时「保存」是灰的。\n6. 模式里个人的「收藏」那一组先隐藏，只留应用自己的菜单（避免把个人的东西当成应用的来改）。\n7. 本卡只做模式这个壳和一个扩展点：别的卡（菜单编辑、页头按钮）往里登记自己的改动，模式负责统一保存和取消。本卡合并时模式里可以还没有任何可改的东西。\n\n## 不做的\n\n- 不做菜单编辑、页头按钮（同专题的另外两张卡）。\n- 不做撤销和改动记录、不做「用在没发布的应用上」（专题里列为等维护者定）。\n- 不动 Studio。\n- 不改手机：手机上不显示「编辑应用」。\n\n## 验收\n\n- 系统管理员在任意页面点页头的「编辑应用」：不跳 Studio，顶上出现一条栏，只有「设计模式」和「取消」「保存」。\n- 普通成员：没有「编辑应用」按钮；直接输入带模式参数的地址也进不了模式。\n- 模式里从「客户」列表点到「商机」列表再点到仪表盘：栏一直在。\n- 点「取消」：栏消失，回到平时的界面。\n- 模式里左侧栏没有「收藏」一组；退出后回来。\n- 窗口宽度 1280 和 1440 各看一次：栏不换行、不挡页头。\n- PR 正文附模式里和平时的截图各一张。\n\n## 协调席自己加的（不是维护者原话）\n\n- 第 4 项里「关页面时提示会丢改动」、第 5 项、第 6 项、第 7 项的扩展点做法。\n- 「不做的」四条。\n- 只有系统管理员能进（维护者没有规定是谁，这一批先这样）。\n\n## 没有核对的\n\n- 「编辑应用」按钮现在的显示条件具体是什么（哪种权限），没有读。\n- 运行界面还有一个旧的「编辑应用」页面的路由（`edit-app/:editAppName`，`ui/packages/app-shell/src/console/AppContent.tsx`），还在不在用、要不要一起处理，没有查。\n- 保存后正在用的其他人是立刻看到还是要刷新。\n\nReader: `domain:ui` 车道。`ui/packages/app-shell/src/layout/ShellPageActions.tsx`、`ConsoleLayout.tsx`。参照 Twenty 的 Layout customization（本机源码跑的，AGPL，⛔ 只看界面行为，不读不抄它的代码）。\n\nDedupe: `设计模式 菜单`、`运行界面 编辑菜单`（objectstack，open）→ 都是 0。"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 36266,
+  "kind": "issue",
+  "title": "pm-dispatch: the xhigh '30 minutes unattended' arm names no clock or reading, outranks the size line, and conflicts with the high-severity build line",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "bug",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-22T03:59:15Z",
+  "updated_at": "2026-11-22T06:49:30Z",
+  "closed_at": "2026-11-22T06:49:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36266",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5krBqrrgxCYgjXmfbv\n\nFiling gate ① · Source: fleet · found by the #35270 review sweep (run records r09 S1, r10 N2) on PR #35591, re-read on main c30ce97cd7\n\n## What happens\nThe dispatch rules say the most expensive reasoning setting is only for builds \"expected to run unattended for over 30 minutes\", but they never say how that time is measured or estimated. The only recorded timing the rules define is a lane's end-to-end time from dispatch to pushed branch, and ordinary medium and large builds already run around that long. Read literally, a seat can justify the expensive setting for almost every medium and large card — the opposite of what the rule was written for — and two rules give different answers for a long high-severity security fix.\n\n- `.claude/skills/pm-dispatch/references/execution-duties.md:127`: 「`xhigh` 只给预计无人值守逾 30 分钟的施工(多为 XL),或实测记录显示 `xhigh` 有增益的卡型」 — no clock, no reading named; 「多为 XL」 is a hint, not a bound.\n- `:128` 「两条压过尺寸行」 makes it outrank the size line (`:126`, M/L → `high`).\n- The file's own clocks: `:176` ~45 minutes without remote output is only the probe threshold; `:181` the lane baseline = dispatch → pushed branch end to end. A seat citing that baseline satisfies the template's 「时长读数」 (`SKILL.md:318`).\n- Order against `:130-131` not stated: a high-severity fix that is also a long build is `xhigh` by `:127` and 「`high` 施工」 by `:131`.\n- `:138` 「读数记记录卡」 and `:127` 「实测记录」 name a record no file defines (where it lives, what counts as a gain).\n\n## Done when\n- `:127` names the clock (model-active time, or the lane's recorded per-size reading) and what a seat cites for it; the line says which of `:127` and `:130-131` wins for a long high-severity fix; the record card of `:127` / `:138` gets a place and a form (or a pointer).\n- Pins: `scripts/pm/check-skill-line-ratchet.mjs` rows for the touched lines move with the edit; the skill gates pass.\n- Ablation: a grep pin (or the ratchet's byte check) for the named clock phrase on `:127` fails if the clause is removed.\n\nreach: internal fleet skill text (`.claude/skills/pm-dispatch/**`), read by every dispatching seat when setting effort; drives model cost.\nBusiness reason: the rule meant to cut reasoning cost can be read to raise it on most medium and large cards.\nReader: area:fleet (pm-dispatch skill owner).\nDedupe: `pm-dispatch effort`, `xhigh`, `30 minutes unattended` → #35270 (open parent card; its body does not carry this), #35905, #35230 (neither).\nGrade: p3 — rule-text ambiguity; cost, not correctness of shipped code."
+}

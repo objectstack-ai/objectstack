@@ -4,7 +4,7 @@
   "title": "fix(objectql): a state machine judges every write from the stored state, a clear included",
   "state": "open",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,6 +12,7 @@
   },
   "labels": [
     "documentation",
+    "pm:awaiting-merge",
     "size/m",
     "tests",
     "tooling"
@@ -22,11 +23,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-21T15:25:25Z",
-  "updated_at": "2026-11-21T17:09:46Z",
+  "updated_at": "2026-11-22T08:13:25Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/36127",
   "body": "Clause-②: no (narrowing)\nMetadata-protocol: none\nSkills-docs: follow-up #36161\n\n## 维护者速读\n\n- 用户能看到的变化:带状态机的记录,清空状态字段现在和其他状态变更一样要过状态机;状态机没允许的清空会被拒绝,接口仍返回原来的\"非法状态变更\"错误。\n- 为什么做:让状态机说到做到,任何一串写入都不能把记录带出状态机本来一步就会拒绝离开的状态。\n- 出错会怎样:原本依赖清空状态字段的应用会在清空时收到 400;作者在该状态的目标里加上空值即可恢复,改动可直接撤回。\n- 要你做什么:无。\n\n## What changes\n\nA `state_machine` validation now judges every update from the record's **stored** state, and clearing the state field (writing `null` or `''`) is a transition like any other — a transition to the empty value `''`. A clear from a state that has a key in `transitions` is refused unless that state lists `''` among its targets. The refusal is the existing one, unchanged in shape and code: `VALIDATION_FAILED` / 400, field code `invalid_transition`, `constraint: { from, to: '' }`.\n\n- Producer: `checkStateMachine` in `packages/objectql/src/validation/rule-validator.ts` (the one evaluator every write path calls: insert, update by id, multi-row update, the validate dry-run).\n- Docs: `content/docs/protocol/objectql/state-machine.mdx`, *Enforcement semantics*, now states the enforced rule and how to keep a state clearable (`paused: ['open', '']`).\n- Changeset: `.changeset/sec2-v5c7.md`, `patch` on `@objectstack/objectql`, with its BREAKING banner and its ADR-0087 disposition (`not-required`).\n\nUnchanged: a write that does not touch the state field, an unchanged value, a declared transition, a stored state with no key in `transitions` (still lenient), inserts and `initialStates`, and the seed / historical-import exemptions.\n\n## Why\n\nA declared state machine is a promise that the record cannot be moved by a sequence of writes the machine would refuse as one write. The empty value is a value the field can hold, so moving to it is a transition the machine has to admit.\n\n## Tests\n\nNew file `packages/objectql/src/engine-state-machine-stored-state.test.ts`: the real `ObjectQL` engine over a store-backed driver, a state field that is not `required`, run through both the update-by-id and the multi-row door (16 cases).\n\n- Refused, asserting `code` + `status` + field code + `constraint`: a clear written as `null` and as `''` from a declared dead-end, with the state still stored and the next move out of it still refused; a clear from a state that does not list `''`; the same for an elevated caller.\n- Controls: the direct illegal transition is still refused; a declared transition lands; a clear the machine lists lands; an empty field written empty again, and a write that leaves the state alone, are not judged.\n\n<details><summary>Red on base, green after, guard ablation</summary>\n\n- Base (`db9e34ad`, the file restored from base, blob verified on disk): `Tests 8 failed | 8 passed (16)` — every refusal case red, every control green. Restored, blob equal to HEAD, `git diff HEAD` empty.\n- Fix: `Tests 16 passed (16)`.\n- Ablation 1 (the clear judged as a transition, reverted to the old exemption) via `scripts/ablation-replace.mjs`, anchor 1 → 0: `Tests 8 failed | 8 passed (16)`; restored, blob == HEAD, `git diff HEAD` empty.\n- Ablation 2 (the clear's target spelled as the empty value, reverted to the raw value): `Tests 10 failed | 6 passed (16)` (the listed-clear control goes red as well); restored, blob == HEAD, `git diff HEAD` empty.\n- Through the REST door on a real `bootStack` engine (a scratch measurement, not committed): red on base; on the fix the clear answers `400 VALIDATION_FAILED`, field `invalid_transition`, `constraint {from: closed, to: \"\"}`, the state stays stored, and the next move out of the dead-end answers the same refusal.\n- `pnpm --filter @objectstack/objectql test`: `Test Files 626 passed (626)`, `Tests 14241 passed (14241)`. `pnpm --filter @objectstack/objectql typecheck`: exit 0.\n\n</details>\n\n## Acceptance notes\n\n- Contract-tier (L2) review of this change is owed to the security seat.\n- Narrowing: an app that clears a state field on purpose needs `''` in that state's targets; the refusal's `from`/`to` pair names the state.\n\n## Verification\n\nTwo-minute check: `pnpm --filter @objectstack/objectql exec vitest run src/engine-state-machine-stored-state.test.ts` — expect `16 passed`.\n\nRead first, by risk: `packages/objectql/src/validation/rule-validator.ts` (`checkStateMachine`, the update arm), then the new test file, then the changeset.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (Not touched.)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017xRBcSYaW9hZEkvXQFhPpn)_\n\n<!-- signed: security#2 · sunhaolin · session_017xRBcW9L8Noz9BxEwjwiov -->\n"

@@ -1,0 +1,32 @@
+{
+  "number": 36264,
+  "kind": "issue",
+  "title": "analytics: the #36184 changeset declares the multi-value filter refusal for the dataset door only; /analytics/query and native /analytics/sql refuse it too",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T03:58:17Z",
+  "updated_at": "2026-11-22T04:55:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36264",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5krBqrrgxCYgjXmfbv\n\nFiling gate ① · Source: fleet · found by the #35270 review sweep (run records r07 S1, r08 S1) on PR #36184, re-read on main c30ce97cd7\n\n## What happens\nThe next release notes will tell API users that only the dataset query endpoint now rejects certain filters on multi-value fields. In fact two more public analytics endpoints reject them too: the general analytics query and the native-SQL arm of the SQL preview. A client of those endpoints that filters a tags-like field with equality or \"in\" will start getting a 400 after upgrading, and the release notes will not mention it. The change itself is right; the breaking-change notice is too narrow.\n\n- `.changeset/36168-dataset-json-column-refusal.md:12` (BREAKING paragraph) names `POST /api/v1/analytics/dataset/query` \"and every other caller of the dataset query\"; `:7` `Clause-②: no (narrowing)` likewise. The changeset is still unreleased on main.\n- The refusal sits in the native strategy's filter compiler (`packages/services/service-analytics/src/strategies/native-sql-strategy.ts:2510` `refuseWhereJsonColumnComparison`), fed by `baseCtx.declaredValueShape` (`analytics-service.ts:1738`, `:1764`), which `callCtx` hands every door: `query()` (`:2637`, ctx at `:2717`) and `generateSql()` (`:4004`, ctx at `:4038`).\n- So `POST /api/v1/analytics/query` with such a `where`, and `POST /api/v1/analytics/sql` on the native strategy, move from 200 to 400; r08 also lists a `timeDimensions[].dateRange` on such a member (`native-sql-strategy.ts:1678-1682`, the window compiled through the same `compileFilterNode`).\n\n## Done when\n- The changeset's BREAKING paragraph and its `Clause-②` reason name `POST /api/v1/analytics/query`, the native arm of `POST /api/v1/analytics/sql`, and the `dateRange` position, before the release that consumes it.\n- Pins: one service-level test drives `svc.query` and `svc.generateSql` on a named SQL dialect with `{ tags: { $in: ['a'] } }` on a `multiple: true` field → `400 INVALID_FILTER`; control: `$contains` → 200. (Today only strategy-level `generateSql` pins cover the compile.)\n- Ablation: remove `declaredValueShape` from the context `query()` builds and the `svc.query` pin goes red.\n\nreach: public HTTP doors `POST /api/v1/analytics/query` and `POST /api/v1/analytics/sql` (native strategy); release-notes text. Read from the code, not measured.\nBusiness reason: integrators who call the general analytics endpoint get an unannounced breaking change on upgrade.\nReader: area:reports / domain:server (service-analytics) — prose plus one pin.\nDedupe: `36184`, `36168`, `json column analytics` → #36190 (single-value media fields), #36189 (preview $contains) — neither carries the declaration.\nGrade: p2 — a breaking change on two public doors goes undeclared unless fixed before the next release; text-only fix."
+}

@@ -2,8 +2,8 @@
   "number": 34804,
   "kind": "issue",
   "title": "checklist api-backend.automation-namespace-address acceptance[8]: re-point Allow to the automation domain's GET after #33026",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "area:fleet",
     "domain:devx",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-17T10:57:25Z",
-  "updated_at": "2026-11-19T04:13:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T06:48:59Z",
+  "closed_at": "2026-11-22T06:48:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34804",
   "body": "qa#1 · os-justin · session_01QSeKYpxQpmErd1ixfkgbYh\n\nKind: stale spec, so this is a re-point card (`checklist-test` §5). The product is right; the clause is old.\n\n- acceptance[8].verify (rev 5) expects `DELETE` on the addressed runs list to answer 405 with `Allow: GET, HEAD`. That is the transport's answer: the clause cites the Hono adapter adding HEAD.\n- Since #33026 (PR #33926), the addressed `/automation/:ns/:name/(runs|trigger)` shapes are handed to `dispatch()`. The automation domain answers exactly as on the bare path: 405 with `Allow: GET` (`automationRouteAllow`, `packages/runtime/src/domains/automation-address.ts`) and the dispatcher envelope `{\"success\":false,\"error\":{\"code\":\"METHOD_NOT_ALLOWED\",\"message\":\"Method not allowed\",\"httpStatus\":405}}`. That shape is pinned by `packages/runtime/src/automation-every-verb.hono.integration.test.ts`.\n- Measured in two runs this round, both reproduced:\n  - at `f6f5b50a` (#34801), twice;\n  - at `f02f4f63` (#34802), three times.\n  `DELETE /api/v1/automation/showcase/showcase_batch_reminders/runs` → 405 `allow: GET`, byte-identical to the bare `DELETE /api/v1/automation/showcase_batch_reminders/runs`. `HEAD` on the same path answers 200.\n\nRe-point acceptance[8].verify to read \"405 with `Allow: GET` in the dispatcher envelope, identical to the bare path\", drop the Hono-adapter HEAD sentence, cite #33026, then bump the revision and add a `history` line.\n\nSeparate and minor, not part of this card: whether a domain 405 should also list the HEAD it actually serves.\n\nQA-source: #34802 · api-backend.automation-namespace-address · acceptance[8]\nQA-source: #34801 · api-backend.automation-namespace-address · acceptance[8]"

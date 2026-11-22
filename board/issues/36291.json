@@ -1,0 +1,35 @@
+{
+  "number": 36291,
+  "kind": "pull_request",
+  "title": "fix(plugin-grid): skip the fill-in pre-read when the edited column cannot open the dialog",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T04:44:15Z",
+  "updated_at": "2026-11-22T06:45:25Z",
+  "closed_at": "2026-11-22T06:45:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T06:45:23Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36291",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XURgXCZHcjPoyo5g9cMEATi)_\nFixes #36025\n\nClause-②: yes (widening)\nMetadata-protocol: none\n\n## 维护者速读\n\n- 列表用户在有「条件必填」字段的对象上改单元格时:改动与该条件无关的列,保存前不再多等一次读取请求;改条件相关的列,弹窗照旧。\n- 属于「列表内联编辑补填必填项」那条线的收尾优化,替所有在列表里改数据的用户省掉一次无用请求。\n- 出错的话,某次本该弹出的补填对话框可能不弹,保存交给服务端判定并给出拒绝提示;改动可直接撤回。\n- 无。\n\n## What changes\n\n- `@object-ui/fields` gains `requiredWhenPromptAsksOn(objectFields, changedKeys, { fillable })`: whether writing those keys can make `collectRequiredWhenPromptFields` ask for anything, judged on metadata alone. It reuses the operand harvest `requiredWhenPromptReads` already uses (`collectPredicateFieldRefs`, `record.x` / `data.x` / `previous.x`), plus one walk over the engine's own parse (`parseCelToAst` from `@objectstack/formula`) for what a harvest cannot name.\n- `@object-ui/plugin-grid`'s cell prompt (`ask` in `objectGridRequiredPrompt.tsx`) asks it before the pre-read: when the edited column cannot open the dialog, the commit goes straight to the next question (the state confirm) with no `findOne`. Rows that lack no key, and hosts with no `read`, are unchanged.\n- The read stays for every column when an askable field's `requiredWhen` reads the clock (`now()`, `today()`, `daysFromNow()`, `daysAgo()`) or the acting user (`current_user`, `user`, `ctx`, `os` roots), per the card's ruling; and also when it reads the record as a whole (`record[\"stage\"]`, `size(record)`), does not parse, or is in another dialect, because its operands cannot be listed.\n- Measured exception to the card's premise: an askable field that is ALSO statically `required: true` is asked for on any commit while it is empty (`resolveFieldRuleState` answers `required` from the static flag whatever the predicate says). Skipping its read would have changed what the user sees, so such a field keeps the read for every column; pinned on both layers.\n\n## Tests\n\n- `ui/packages/fields/src/requiredWhenPrompt.test.ts`: a new top-level describe for `requiredWhenPromptAsksOn`, including the premise itself (for an unrelated key the collector asks nothing whatever the record holds), the operand spellings, clock and user roots, whole-record / unparseable / other-dialect, the static-required exception, the askable narrowing, and a record field named `user`.\n- `ui/packages/plugin-grid/src/__tests__/ObjectGrid.requiredPrompt-35956.test.tsx`: a new top-level describe in the existing harness: (a) committing a column no predicate reads sends no `findOne` and saves at once; (b) committing an operand reads once and the dialog opens as before; (c) a clock predicate and a user predicate keep the read; (d) a statically required field still opens the dialog on an unrelated column.\n\n<details><summary>Readings at 7bc608a4</summary>\n\n- `pnpm exec vitest run --maxWorkers=2 packages/fields/src/requiredWhenPrompt.test.ts packages/plugin-grid/src/__tests__/ObjectGrid.requiredPrompt-35956.test.tsx` (root `ui/`, under the verify lock): Test Files 2 passed (2), Tests 42 passed (42), lock VERDICT command-exit 0.\n- Ablation of pin (a), via `scripts/ablation-replace.mjs`, deleting the gate line in `ask` (anchor x1 to x0, blob 69b41ffe12b0 to 9910829062a5): Tests 1 failed / 15 passed (16), the one red is \"committing a column no predicate reads sends no findOne, and the change saves at once\"; restored, blob == HEAD 69b41ffe12b0, `git diff HEAD` empty. The subject resolves through the `ui/vitest.config.mts` source alias, so no `dist` leg applies.\n\n</details>\n\n## Acceptance notes\n\n- Observation, not filed: a field carrying both `required: true` and `requiredWhen` is asked for in the list dialog on any cell commit while it is empty, which this PR keeps unchanged. Whether the engine would refuse that commit was not measured.\n- The user half of the ruling is inert on this surface today: the prompt evaluates `requiredWhen` with no acting user bound, so a user-reading predicate faults to not-required. The read is kept for it anyway, as ruled.\n\n## Verification\n\nRead first (by risk):\n1. `ui/packages/fields/src/requiredWhenPrompt.ts`: `requiredWhenPromptAsksOn` and `readsBeyondNamedFields`, the judgment the skip rests on.\n2. `ui/packages/plugin-grid/src/objectGridRequiredPrompt.tsx`: the one gate line in `ask`, placed after the no-read branch.\n\nTwo-minute check: from the repo root, `pnpm --dir ui exec vitest run packages/plugin-grid/src/__tests__/ObjectGrid.requiredPrompt-35956.test.tsx`; expect 16 passed, including \"committing a column no predicate reads sends no findOne\".\n\nLocal gates: the 39 families `dispatch-gates --commands` derives for this diff, reconciled with `--ran` (39 accounted, 38 run, 1 NOT MEASURED: `check:type-check-debt`, exit 3, its closure build never got the shared lock). `pnpm --dir ui exec vitest run scripts/`, the package `type-check` of both packages and their full `test` runs are NOT MEASURED locally (the shared verify lock timed out repeatedly); CI's Type Check UI, Test UI and Lint & Repo Gates carry them.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5oY5WCqqqBMtn9qt7m)_\n<!-- signed: repo:objectstack#4 · os-project-manager · session_01FEkQ5oY5WCqqqBMtn9qt7m -->\n"
+}

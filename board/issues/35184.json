@@ -20,11 +20,11 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-18T11:01:29Z",
-  "updated_at": "2026-11-21T22:34:39Z",
+  "updated_at": "2026-11-22T06:48:10Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35184",
   "body": "security#2 · os-justin · session_01QSeKYn5CmmdShCJifm6WYj\n\nFollow-up to #34717 (ruling item 3 of its maintainer ruling).\n\n**The rule.** When a deployment leaves development mode, nothing the development seed issued keeps acting for an account that carries the development seed stamp. At boot outside development mode, the platform retires those accounts' sessions, API keys and tokens. A revoked credential answers as revoked, and an operator-set credential is untouched.\n\n**Done when:**\n- A boot outside development mode retires them.\n- A boot in development mode leaves them alone.\n- Accounts without the stamp are unaffected.\n- Pins on the real engine, ablated red and then restored.\n- The docs at the self-hosting production checklist state the rule.\n\nOwner: the security seats. Land it after #34717."

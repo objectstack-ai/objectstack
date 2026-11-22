@@ -1,0 +1,32 @@
+{
+  "number": 36265,
+  "kind": "issue",
+  "title": "analytics: the ObjectQL /analytics/sql echo prints IN / = SQL for a multi-value-field filter the engine refuses with 400",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T03:58:46Z",
+  "updated_at": "2026-11-22T04:55:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36265",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5krBqrrgxCYgjXmfbv\n\nFiling gate ① · Source: fleet · found by the #35270 review sweep (run record r08 S6) on PR #36184, re-read on main c30ce97cd7\n\n## What happens\nThe analytics \"show me the SQL\" endpoint prints a normal-looking SQL statement for a filter that the platform will actually refuse to run. When a report filters a multi-value field (tags, multi-select) with equality or \"in\", the real query answers 400, but on the ObjectQL path the SQL preview answers 200 with a plain `IN (...)` statement. An author who copies that SQL, or trusts the preview, is misled about what the report does.\n\n- `packages/services/service-analytics/src/strategies/objectql-strategy.ts:2207` `buildFilterClauseSql`: `in` / `notIn` print `col IN (...)` / `NOT IN (...)` (`:2249-2254`) and the plain comparisons below, with no declared-shape check; reached from `generateSql` (`:916`) via `renderFilterNodeSql` (`:1184`).\n- The same file states the echo's contract: the echo and the executed statement are one description, and \"an echo that printed a parseable statement while the engine refused the real one is that failure in its loudest form\" (`:2286-2290`).\n- The native strategy refuses the same leaf (`native-sql-strategy.ts:2510`), so the same `/analytics/sql` request answers 400 on one strategy and a 200 echo on the other. Pre-existing on the ObjectQL side.\n\n## Done when\n- The ObjectQL echo refuses a leaf of `JSON_COLUMN_INCOMPATIBLE_OPERATORS` on a declared multi-value / JSON-stored column with the same `400 INVALID_FILTER` and sentence (reuse `json-column-comparison-refusal.ts`).\n- Pins: `/analytics/sql` (ObjectQL strategy) with `{ tags: { $in: ['a'] } }` on a `multiple: true` field → 400; `$nin`, implicit equality → 400; control: `$contains` and a scalar `$in` → 200 with SQL.\n- Ablation: remove the refusal call from the echo and the `$in` pin goes red.\n\nreach: public HTTP door `POST /api/v1/analytics/sql` on the ObjectQL strategy; display only, runs nothing. Read from the code, not measured.\nBusiness reason: report authors see SQL that claims to work for a filter the platform rejects, so they debug the wrong thing.\nReader: area:reports / domain:server (service-analytics).\nDedupe: `analytics sql echo`, `objectql strategy echo`, `36184` → #33878, #36189, #36190 (none carries this).\nGrade: p3 — preview text only; the real query is refused correctly."
+}

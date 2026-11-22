@@ -1,0 +1,32 @@
+{
+  "number": 36245,
+  "kind": "issue",
+  "title": "schema sync: removing a literal defaultValue from a field leaves the physical column DEFAULT on every SQL database an earlier release created, so unset writes keep storing the old default",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T03:17:52Z",
+  "updated_at": "2026-11-22T03:54:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36245",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5krBqrrgxCYgjXmfbv\n\nFiling gate ① · Source: fleet · found by seat 4's area a4-B while building #35123 to the maintainer's ruling B (record 7073270426). Measured; fork report on #35123: 7073430021.\n\n## What happens\nWhen a field's metadata drops a literal `defaultValue`, schema sync does not remove the physical `DEFAULT` the column got when an earlier release created the table. The removal does nothing on any existing SQL database, and nothing says so. An insert that leaves the field unset still stores the old default.\n\nThe case in hand: `sys_notification_preference.digest` was created with `DEFAULT 'none'`, which is also in the 18.0.0 upgrade fixture. Ruling B on #35123 removes that default so that an unset digest stores empty (follow the organisation) and `'none'` means an explicit off. On an upgraded database, every writer that leaves digest unset would still store `'none'`. Those writers are the Setup grid, the page, the API, flows and agents. That is the silent opt-out the ruling rejected.\n\nMeasured on main a5a5312ff4, with a real SqlDriver on a file database over two boots (a4-B's dev).\n\n## Done when\n- Schema sync drops a physical column `DEFAULT` that the metadata no longer declares, and changes one whose declared literal changed. A fresh database and an upgraded one then agree.\n- Pins:\n  - A field whose `defaultValue` is removed between two boots stores null on an unset insert after the second boot.\n  - A field whose default is kept is unchanged.\n  - One ablation for each.\n- Read first: which drivers (SQLite / libSQL, Postgres, MySQL) can alter a column default in place, and what this means for a column `NOT NULL` with that default (#33724's in-place relax is the precedent).\n\n## Afterwards\n#35123 ships with a stopgap: a before-insert hook on `sys_notification_preference` writes digest null when the caller leaves it unset. When this card merges, remove that hook and its pin in the same PR (or a follow-up named here).\n\nreach: every object whose literal `defaultValue` is removed or changed after a release created its table. Measured on one, the rest read from code.\nBusiness reason: a metadata change that looks applied has no effect on customers' existing databases, so behaviour differs between new and upgraded installations.\nReader: the SQL driver / schema-sync lane (`packages/plugins/driver-sql` or wherever column sync lives).\nDedupe: `physical column DEFAULT`, `defaultValue removed`, `schema sync retrofit` → none.\nGrade: p2. The one live case (#35123) has a stopgap; the class is silent."
+}

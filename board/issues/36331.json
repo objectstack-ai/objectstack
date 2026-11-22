@@ -1,0 +1,32 @@
+{
+  "number": 36331,
+  "kind": "issue",
+  "title": "cli: `os db orphans --delete` and `os secret orphans --delete` in a non-interactive shell without `--yes` delete nothing, print \"Aborted\", and exit 0 — the migrate family exits 1",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T06:21:02Z",
+  "updated_at": "2026-11-22T06:50:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36331",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5oY5WCqqqBMtn9qt7m\n\n## What happens\n\n`os db orphans --delete --export FILE` and `os secret orphans --delete --export FILE`, run without `--yes` where stdin is not a terminal (a script, CI, a cron job), print `Aborted — no export was written and no row was deleted.` and return exit 0. A script reads success; nothing was deleted.\n\nRead from source on main (reach not measured at a running deployment):\n\n- `packages/cli/src/commands/db/orphans.ts:233-236` — text face: `const ok = await confirm(...)`; `if (!ok) { printInfo('Aborted — ...'); return; }` (exit 0). The `--json` face of the same branch already exits 1 with `confirmation_required`.\n- `packages/cli/src/commands/secret/orphans.ts:398` — the same shape.\n- The shared `confirm` answers `false` when `!process.stdin.isTTY` (`packages/cli/src/commands/db/orphans.ts:402`, \"non-interactive → require --yes\").\n\n## Why it is a defect\n\nThe `os migrate` family settled this in #24949: a run that did not get its confirmation applies nothing and exits 1, naming `--yes`; `packages/cli/test/migrate-confirmation-exit.pin.test.ts` pins it, but its roster reads only `src/commands/migrate/**`, so the two `orphans --delete` commands are outside it. Found while dispatching PR #36304 (`os migrate list-preferences`, which joined that roster).\n\n## Done when\n\n- Both commands, text face, non-TTY, no `--yes`: exit 1 with a line naming `--yes`; nothing exported or deleted (as today).\n- An interactive \"no\" answer may stay exit 0 or follow the migrate family: the dev reads how the family treats it and matches it.\n- A pin covers both commands (extending the confirmation pin's population, or a sibling pin), with an ablation.\n\nOut of scope: any change to what the commands delete or export.\n\nPrecedent: #24949."
+}

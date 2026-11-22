@@ -1,0 +1,31 @@
+{
+  "number": 36269,
+  "kind": "issue",
+  "title": "Record page field area: only groups whose object declares collapse get the right-hand fold arrow; the #36147 card asked for every group to fold",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "needs-user-decision",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-22T04:01:15Z",
+  "updated_at": "2026-11-22T04:55:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36269",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFollow-up from #36147 (PR #36234). This card needs a maintainer decision before anyone builds it.\n\n## What the user sees\n\nCard #36147 says: 「有分组的对象：分组标题在左、箭头在最右；点了折叠，再点展开」 (every grouped object: title left, arrow far right, click folds, click again opens). The ruling 7066516044 keeps \"the group chevron on the right\" unchanged under every option.\n\nPR #36234 draws that arrow only on a group whose object declares `collapse` (ADR-0085 §5; `packages/spec/src/data/field-group-layout.ts`, where an undeclared group resolves to `'none'`, meaning no toggle), plus the new 系统信息 group, which is always folded. No CRM group declares `collapse` today, so on the CRM record page the maintainer will see group titles with no arrow and no folding. Only showcase's declared groups and 系统信息 fold.\n\n## The question\n\n- (a) Keep the metadata meaning: a group folds only when the object declares `collapse`. The apps (CRM, HotCRM) add `collapse` to the groups that should fold. The platform is unchanged.\n- (b) Make every group on the synthesized record page foldable (open by default) when nothing is declared. Here `'none'` stops meaning \"no toggle\" on this surface, which changes what the metadata promises, and forms and the designer would read the same key differently.\n\nThe seat's reviewers lean to (a), but it is the maintainer's call: per the 11-21 rule, a product disagreement goes through the Fable review and then a decision card.\n\n## Also owed before #36151 removes the phone's Edit button\n\nThe L2 on #36234 notes that card #36147's open question 2 (tap-to-edit on a phone per field type) was answered for one type, in emulation only. Run a tap-to-edit check per type (lookup, select, date, long text) before #36151 lands."
+}

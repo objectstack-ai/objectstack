@@ -1,0 +1,37 @@
+{
+  "number": 36252,
+  "kind": "issue",
+  "title": "Skill text: lint-rules.md still says line-items-inline-edit and two sibling rules trigger on inlineEdit; the lint now reads the parent object's field groups",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T03:32:41Z",
+  "updated_at": "2026-11-22T05:47:20Z",
+  "closed_at": "2026-11-22T05:45:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36252",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5krBqrrgxCYgjXmfbv\n\nFiling gate ① · Source: fleet · out-of-scope finding of the dev on #36224 (PR #36250, seat 4 area a4-I). Same family as #36224. This is a separate card because `skills/objectstack-data/references/lint-rules.md` has no byte headroom left in that PR.\n\n## What happens\nIn `skills/objectstack-data/references/lint-rules.md`, three lint rule rows still say they trigger on `inlineEdit`: `line-items-inline-edit` and two siblings. The lint itself now reads the parent object's field groups instead. An author or agent who follows the skill text checks the wrong key, and cannot predict when the rule fires.\n\n## Done when\nThe three rows describe the trigger the lint actually reads: the parent object's field groups. Each claim is checked against the lint source. The file stays within its byte budget, trimming elsewhere if needed. If a skills eval pins the old wording, it is updated in the same PR.\n\nreach: skills text read by authors and agents; read from the file against the lint source by the dev, not run.\nBusiness reason: wrong guidance makes authors and the AI chase a setting that no longer matters.\nReader: skills (objectstack-data).\nDedupe: `lint-rules.md line-items-inline-edit inlineEdit` → only #36224 / PR #36250.\nGrade: p3."
+}

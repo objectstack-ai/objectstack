@@ -1,0 +1,37 @@
+{
+  "number": 36251,
+  "kind": "issue",
+  "title": "Live e2e specs form-view-subforms and grid-file-upload time out at the list's create button: matcher /^New$/i no longer matches its accessible name",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T03:32:35Z",
+  "updated_at": "2026-11-22T06:45:43Z",
+  "closed_at": "2026-11-22T06:44:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36251",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFiling gate: ① a broken test with a named producer, found by the #36005 card thread while paying L1-d's S1 on PR #36233 (run against `df7a9112` on a CI-shaped rig: backend on :4010, console via vite preview). No product defect.\n\n## What fails\n\nTwo specs in `ui/e2e/live/` fail before any of their own steps, timing out at `page.getByRole('button', { name: /^New$/i })`:\n- `ui/e2e/live/form-view-subforms.spec.ts:29`\n- `ui/e2e/live/grid-file-upload.spec.ts:45`\n\nThe list's create button no longer has exactly \"New\" as its accessible name. With the matcher relaxed to `/^New/i` in a throwaway local copy, both specs pass (2 passed). They are not in the PR CI lanes, so nothing caught it.\n\n## Done when\n\n- Both specs locate the create button by a stable handle (a test id, or the name the button has now), not an exact-text regex that a label change breaks.\n- Confirm no other live spec uses an exact create-button name (on `main`, `git grep \"name: /^New$/i\"` finds only these two).\n- Both specs pass in one run of the live lane; record the run.\n\nReader: `domain:ui` (e2e live lane). Related: #36005 (PR #36233).\n\nDedupe: `live e2e New button matcher`, `form-view-subforms timeout` (objectstack issues, open) → none."
+}

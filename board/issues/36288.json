@@ -1,0 +1,34 @@
+{
+  "number": 36288,
+  "kind": "pull_request",
+  "title": "fix(console): About names the ObjectStack version first, then the console build",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T04:43:19Z",
+  "updated_at": "2026-11-22T06:26:42Z",
+  "closed_at": "2026-11-22T06:26:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T06:26:40Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36288",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1X6okWxYPWAsooBsJoAhnT1u)_\n\nFixes #35280\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 控制台用户打开「帮助 → 关于」时,先看到 ObjectStack 版本号(如 18.5.0),再看到原有的控制台构建号;以前只有构建号。\n- 属于控制台体验修缮:管理员和支持人员查版本、做升级核对时不必再去调接口。\n- 若读取失败,版本一行会用文字说明「未知版本」,不会留空;改动只在对话框内,可直接撤回。\n- 无。\n\n## What changes\n\nHelp → About now opens on an **ObjectStack version** row, then the existing **Console build** row.\n\n- The version is the `version` the discovery document answers, shown verbatim (an operator's `OS_RUNTIME_VERSION` stamp included, per ruling A on #34774). It is read through the shell's adapter (`useAdapter().getDiscovery()`), which returns the document the adapter's `connect()` already holds from the console's one shared discovery read (`getSharedDiscovery`). Opening the dialog sends no new request, and no second version source is added.\n- While the read is in flight the row shows `common.loading`. When discovery cannot be read (the adapter answers `null`) or names no version, the row says so in words: \"Unknown version (the server did not report one)\". The field is never empty.\n- New keys `help.aboutVersion` and `help.aboutVersionUnknown` in all eleven packs (zh-Hant regenerated with `gen:zh-hant`). `help.aboutDescription` now names both rows.\n- `AboutDialog.tsx`'s module doc no longer says the shell has no request that reads the runtime version.\n- The bug-report and feature-request templates' Version hint now points at \"the ObjectStack version shown under About\".\n- No server, `packages/spec` or discovery-shape change. No props or exports change.\n\nFiles to read first, by risk:\n\n1. `ui/packages/app-shell/src/layout/AboutDialog.tsx`: the `useRuntimeVersion` hook (the read, the `undefined`/`null`/string states) and the two `dl` rows.\n2. `ui/packages/app-shell/src/layout/__tests__/AppHeader.aboutBuild-12970.test.tsx`: the new top-level describe.\n3. `ui/packages/i18n/src/locales/en.ts`: the three `help.about*` lines (the other ten packs mirror them).\n\nTwo-minute check: run `pnpm --dir ui exec vitest run packages/app-shell/src/layout/__tests__/AppHeader.aboutBuild-12970.test.tsx`. You should see 15 tests pass. Or open Help → About in a running console: the first row is \"ObjectStack version\" with the same value as `GET /api/v1/discovery`, and \"Console build\" is the second row.\n\n## Tests\n\nThe new pins are a top-level describe in the existing About harness, `AppHeader.aboutBuild-12970.test.tsx`. They are not in a sibling file because AGENTS.md puts a new pin into a component's existing shared harness (ruling record 6583487846). The new cases check:\n\n- Discovery answering `18.5.0`, and a stamped `18.6.0-rc.2+deploy.41`, fills the first row with exactly that text. The `dt` order is version then build, and the build row still shows its sha.\n- Discovery that cannot be read (`null`), that names no version, or that names an empty version shows `help.aboutVersionUnknown`, never an empty field.\n- While the read is pending the row shows `common.loading`.\n\n<details><summary>Local runs at head 32984388e, under the shared verify lock</summary>\n\n- The pin file: Test Files 1 passed (1), Tests 15 passed (15).\n- `pnpm --dir ui exec vitest run packages/i18n/`: Test Files 105 passed (105), Tests 1962 passed, 13 skipped. This covers the key-parity suites.\n- `pnpm --filter @object-ui/i18n type-check` exit 0. `pnpm --filter @object-ui/app-shell type-check` exit 0 (both `tsc` programs, including `tsconfig.test.json`).\n\n</details>\n\n<details><summary>Ablation, one mutation per leg, each landed and restored on disk by scripts/ablation-replace.mjs</summary>\n\nEach mutation was restored and checked: blob equals HEAD 0aabb5984a63 and `git diff HEAD` is empty.\n\n| Mutation | Pin file result |\n|---|---|\n| read: `setVersion(discoveryVersion(discovery))` becomes `setVersion(null)` | 2 failed, 13 passed |\n| fallback: `help.aboutVersionUnknown` becomes `common.loading` | 3 failed, 12 passed |\n| loading: loading text becomes `null` | 1 failed, 14 passed |\n| order: build row moved above the version row | 2 failed, 13 passed |\n\n</details>\n\n## Acceptance notes\n\n- The discovery read reuses the adapter the help menu already holds. Nothing in the shell kept the parsed discovery document in React state: `useDiscovery` in `@object-ui/react` reads `SchemaRendererContext`, which the console header does not sit under. `adapter.getDiscovery()` is the existing holder.\n- `.github/ISSUE_TEMPLATE/**` is not a governed surface: it has no row in `GOVERNED_SURFACES`, which holds only `.github/workflows/**`. The wording change is in this PR.\n- No `content/docs/frontend` page or package README names the About dialog, so no docs page changes.\n- Not measured locally:\n  - `pnpm check:type-check-debt`: exit 3, PREREQUISITE NOT MET. Its closure build never got the verify lock (queue-timeout).\n  - `pnpm --dir ui exec vitest run scripts/`: lock queue-timeout, exit 99. This diff touches no `ui/scripts/` file.\n  - CI's Test UI and the type-check lanes run both of these.\n\n## Verification\n\n<details><summary>Local gate subset (derived by dispatch-gates --commands from this diff)</summary>\n\n- 46 of the 48 derived commands, plus `pnpm check:changeset-fixed`, exited 0. This includes `check:adr-0087-registration --base origin/main`, `check-empty-changeset`, `check-changeset-no-major`, `check:nul-bytes`, `check:cross-package-test-inputs`, `check:published-files`, `check:type-check-coverage` and `check:undeclared-dep-imports`.\n- Two commands were not measured, both listed above.\n- `ui` `check:new-line-citations`: 0 new citations.\n- `overlap-check`: VERDICT clean (main and #36234 / #36223, which share the locale files, merge cleanly).\n\n</details>\n\nSession: session_01FEkQ5oK4fFfnLADcipbEeT · dispatched by repo:objectstack#4 area a4-H.\n"
+}

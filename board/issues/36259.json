@@ -1,0 +1,32 @@
+{
+  "number": 36259,
+  "kind": "issue",
+  "title": "change owner: answers 'moved' and notifies the new owner when a readonlyWhen lock kept owner_id unchanged; notified is true whenever emit returns",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T03:56:06Z",
+  "updated_at": "2026-11-22T04:55:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36259",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5krBqrrgxCYgjXmfbv\n\nFiling gate ① · Source: fleet · found by the #35270 review sweep (run records r03 M1, r04 S4) on PR #36154, re-read on main c30ce97cd7\n\n## What happens\nChange Owner can tell the user a record moved, and tell the named person \"a record was assigned to you\", when the record did not move. This happens when the object locks the owner field under a condition (for example \"owner is read-only once the case is closed\"): the platform quietly skips the locked field and the action still reports success. The answer is built from what was asked, not from what was saved. The same pattern reports `notified: true` whenever the messaging call returns, even when nothing was delivered (topic muted, channel unavailable).\n\n- `packages/core/src/security/change-record-owner.ts:302` / `:362`: `engine.update(object, changeSet, { where: { id }, context })` with neither `strictReadonlyWrites` nor `onFieldsDropped`.\n- `:306-310` (single) and `:348-357` (bulk): `ownerId` / `queue` copied from the request; any non-throwing update counts as moved.\n- The engine strips a caller key that a TRUE `readonlyWhen` locks and answers the stored row (`engine-update.ts`, `everyCallerKeyDropped` `:480`; `strictReadonlyWrites` documented `:345-372`, read `:437`). Only a static `readonly: true` makes an object ineligible for Change Owner, so a conditional lock is reachable from metadata alone.\n- Queue target: only `queue` lands, the owner stays, the receipt says `ownerId: null`.\n- `notified`: `:259-279` returns `true` after `await messaging.emit(...)` without reading its result; `service-messaging/src/messaging-service.ts:244-251` documents the delivered / enqueued counts that say whether anything went out.\n\n## Done when\n- Each owner write passes `strictReadonlyWrites: true` (a stripped `owner_id` / `queue` becomes that row's refusal with its own code), or the written row is compared with the target and a mismatch is a failure.\n- `notified` is true only when the emit result reports a delivered or enqueued row.\n- Pins: an object with `owner_id.readonlyWhen` true for the record → single answers a refusal (not 200), bulk lists the row under `failures`, no notification sent; a queue-target case where `owner_id` is stripped; an emit that resolves with zero delivered/enqueued → `notified: false`.\n- Ablation: drop `strictReadonlyWrites` from the update options and the readonlyWhen pin goes red.\n\nreach: public HTTP doors `POST /api/v1/data/:object/:id/change-owner` and `POST /api/v1/data/:object/change-owner` plus the client's `data.changeOwner` / `changeOwnerMany`; reachable from ordinary field metadata. Read from the code, not measured.\nBusiness reason: users and admins are told ownership changed when it did not, and a colleague is told a record is theirs that is not — work falls through the cracks with no error to notice.\nReader: area:data / domain:server (packages/core security, change-owner).\nDedupe: `change owner`, `owner readonlyWhen`, `notified emit` → #35403, #35399, #35315, #35802 (none carries this); 0 matches for the defect.\nGrade: p2 — false success and a false notification on a shipped door, reachable from metadata; no privilege gained."
+}

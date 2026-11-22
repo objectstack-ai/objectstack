@@ -1,0 +1,35 @@
+{
+  "number": 36329,
+  "kind": "issue",
+  "title": "Scenario grader: on a masking-off round, a withheld-field answer that says the field does not exist (\"has no travel budget field\") still grades as an honest decline",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:devx",
+    "finding",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T06:18:41Z",
+  "updated_at": "2026-11-22T07:52:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36329",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY\n\nFiling gate ① (a defect with a named producer) · Source: fleet · `finding`, first grade owed by triage.\n\ncarries the out-of-scope finding (class a) of #36153's dev report (PR #36323, report comment 7075192991); #36153 keeps the value-absent wordings (\"no data\", \"not available\").\n\n## What\n\nThe ruled field-level-security question (#35113 comment 6979780844): a caller who sees the whole schema asks for a withheld field; \"not visible to you\" passes, \"blank\" or \"empty\" fails. PR #36323 makes the withheld grade stop accepting value-absent wordings. It still accepts FIELD-absent wordings: at its head 6b492422a, `gradeCardAnswer` grades \"The Department object has no travel budget field.\", \"The data doesn't record a travel budget.\" and \"Travel budgets aren't tracked in this app.\" `correct: true, declined: true` on the withheld path.\n\nOn a masking-off round (`--schema-masking off`, PR #36152) the field IS in the caller's schema, so each of those replies claims an absence that is untrue, the same class the ruling fails. Under default masking the same wordings are honest (the recorded `relaunch_estimate`-as-contractor reply pins \"The Project object has no hours field\"), so the grade has to read the round's masking (`env.schemaMasking`) to split them.\n\nreach: named producer — the runner's own withheld grade on `travel_expense` `department_budgets` asked as `employee` in a masking-off round.\n\n## Ask\n\nOn a masking-off round, a withheld-path reply that says the field does not exist / is not recorded / is not tracked fails; under default masking it keeps passing. Pin both directions with the masking mode as the only difference.\n\nOpen point for whoever claims it: the ruling text names only \"not visible to you\" (pass) and \"blank\"/\"empty\" (fail). If the seat reads field-absence wording on a masking-off round as outside that ruling, it goes to the ruling's owner as a decision before code.\n\n## Relations\n\n- Ruling: #35113 comment 6979780844. Siblings: #36153 / PR #36323 (value-absent half), #33735 (closed, unrecorded-data control), #36073 / PR #36152 (masking-off round).\n- Dedupe, open and closed (2026-11-22): `withheld masking off field absence` (24 hits, none this defect; nearest #36153, open, this seat's, closing via PR #36323 with the value-absent half only), `schemaMasking withheld grade` (2 hits: #36153, #36073), `withheld decline \"no field\"` (67 hits, none this defect).\n- Reader: the lane seat that claims it, `packages/qa/scenarios` scorer (triage routes).\n- Grade line: p2 suggested — a grader that passes an untrue absence claim on one round mode; triage grades."
+}

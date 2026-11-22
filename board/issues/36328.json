@@ -1,0 +1,32 @@
+{
+  "number": 36328,
+  "kind": "issue",
+  "title": "review follow-ups of PR #36325",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T06:18:08Z",
+  "updated_at": "2026-11-22T06:47:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36328",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5miLqNucRZevceHwNh\n\nFiling gate ① (follow-ups of one PR) · Source: fleet · residuals of PR #36325 (card #35609), from its os-dev report 7075209014 (out_of_scope_findings).\n\n## Items\n- [ ] Doc drift: `ObjectQLPlugin.refreshReloadedPackages`' docblock (`packages/objectql/src/plugin.ts`) still says items removed from the artifact stay registered until restart. Stale since #33050 for package-body items, and after #36325 for object extensions too. Done when the docblock says what a reload withdraws now (package-body items and extension layers) and what it still keeps until restart (owned objects, per `ingestReloadedObjects`' own docblock).\n- [ ] Inferred, not exercised: a withdrawal of an extension layer (the #36325 re-register path, an uninstall, an `object_extension` item delete) is not asked the ADR-0144 run-end record-currency follow door, which judges registered layers only. If another package's amount field follows a currency-code field that the withdrawn layer brought, the pair is left unjudged. Done when this is measured (withdraw such a layer, read what the follow door and the served amount answer) and either judged at withdrawal like at registration, or recorded as not reachable.\n\nreach: item 1 is shipped source text only; item 2 read from code (`withdrawObjectExtension` and the ADR-0144 run-end door), not measured.\nBusiness reason: item 1 misleads the next developer about reload; item 2 could leave an amount following a currency field that no longer exists, with no refusal.\nReader: a domain:server lane (objectql registry).\nDedupe: `refreshReloadedPackages` → 1 open hit (#35609, the card this PR fixes); `withdrawal currency follow` → 3 open hits (#35609 and two seat posts, none on this mechanism).\nGrade: p3 · area:package · Bug · doc drift and an inferred, unmeasured gap · reach read · evidence read.\n"
+}

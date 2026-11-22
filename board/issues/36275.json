@@ -1,0 +1,35 @@
+{
+  "number": 36275,
+  "kind": "issue",
+  "title": "Platform checklist: rewrite records-forms.master-detail-body-tables for the group-placed rule (a child is a tab by default; a parent field group draws it as a body table)",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "documentation",
+    "domain:docs",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T04:18:20Z",
+  "updated_at": "2026-11-22T04:20:38Z",
+  "closed_at": "2026-11-22T04:20:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36275",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5krBqrrgxCYgjXmfbv\n\nFiling gate ① · Source: fleet · this replaces #35846. Seat 4's area a4-I found its premise had moved (release comment 7074089131, analysis in the os-dev-report on #35701).\n- #35846's done-when cites the 2026-11-20 ADR-0035 note of PR #35845, which the maintainer closed unmerged.\n- After #35921, a master-detail child is a tab by default. It is drawn as a body table only where a field group of the parent names it (#35590).\n- Reordering the old text would write another wrong assertion.\n\n## Problem\n`docs/qa/platform-checklist/areas/records-forms.json`, item `records-forms.master-detail-body-tables`, still describes the old default in its title, its example, step 2 and its counter-example: every master-detail child is drawn as a body table in the overview.\n\n## Done when\n- The item states the rule on main:\n  - A master-detail child is a related-list tab by default.\n  - Where a field group of the parent names the child, the group draws the child's table at its place in the record's details.\n  - The entry form inlines the child's rows there too.\n  - A child that no group names stays a tab, whatever `inlineEdit` says.\n- The example uses a showcase parent that already declares such a group. Name the object and the group, read from `examples/`.\n- The counter-example is a child that no group names, shown as a tab.\n- Sources cite #35921 and the spec's `fieldGroups[].relatedList`. They do not cite #35845.\n- `records-forms.json` validates under the checklist's schema and lint, and no other item changes.\n\nreach: the platform checklist item that runners execute; read against main by a4-I's dev.\nBusiness reason: a checklist run against the old default fails a correct product, or passes a wrong one.\nReader: docs/qa (platform checklist).\nDedupe: `master-detail-body-tables`: #35846 only.\nGrade: p3."
+}

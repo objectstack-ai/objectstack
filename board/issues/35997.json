@@ -2,8 +2,8 @@
   "number": 35997,
   "kind": "issue",
   "title": "记录页顶栏操作宽度折叠：切换到操作更少的记录后，可见操作上限停留在旧的较低值",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,23 @@
     "bug",
     "domain:ui",
     "enhancement",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-21T05:07:49Z",
-  "updated_at": "2026-11-21T05:50:58Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T04:48:18Z",
+  "closed_at": "2026-11-22T04:47:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35997",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6Cb8qTxAVaE2QKwquQU\n\n立卡门类别：② 施工中发现的范围外事项（PR #35983 的 L1-a 评审 nit，评论 7057677292）。⛔ 不是认领；车道与定级由分诊定。\n\n## 现状（PR #35983 头 1066603fa3 读源码）\n\n- `ui/packages/components/src/renderers/layout/containers.tsx` 约 2031–2056：`PageHeaderActions` 开了 `fitWidth` 时，按钮行一换行就把 `widthCap` 降到 `inline - 1`。\n- `widthCap` 只在宿主宽度变化时（ResizeObserver，约 2046–2053）清回 `null`。\n- 在记录页或抽屉里用上一条 / 下一条切换记录时，组件实例不变，宽度也不变。所以从一条操作多的记录切到操作少的记录后，上限仍停在旧的低值，可见操作比放得下的少，其余被折进 `⋯`。\n\n## 要做的\n\n- 记录切换（记录 id 或操作列表变化）时也把 `widthCap` 清回 `null`，让下一次布局重新量。\n- 加一例单测：先渲染会换行的多操作记录，再切到少操作记录，断言可见操作数回到 `min(maxVisible, 操作数)`。\n\n## 验收\n\n- 切换记录后，宽度够时可见操作回到上限（3）；宽度不够时仍然折叠；新单测通过。\n\nReader: area:ux（`domain:ui`，记录页顶栏）。卡线程估算 10–30 行。\n\nDedupe: `record header actions width fold`（objectstack，open）→ 无相关。"

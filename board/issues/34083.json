@@ -2,8 +2,8 @@
   "number": 34083,
   "kind": "issue",
   "title": "pm-dispatch: retire the old L2 seat spelling review#N and its stubs after one seat cycle; rename the L2 scripts",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "area:fleet",
     "domain:skills",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-15T18:03:24Z",
-  "updated_at": "2026-11-19T06:09:14Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T06:44:18Z",
+  "closed_at": "2026-11-22T06:44:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34083",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jSnGTcRAGCDp8LNU7H\n\nFollow-up of #34021 (PR #34052): that card keeps the old names readable for one cycle; this card carries their retirement. #34021 keeps everything else.\n\nFiling gate ③: maintainer-directed — the rename the maintainer ruled on 2026-11-15 (ruling record on #34021, comment 6897685514) was to be done 「一步到位」; the aliases exist only so running seats, open PRs and posted records do not break mid-cycle.\n\n## Items\n\n1. Retire the old L2 seat word `review` and seat spelling `review#N` from every reader PR #34052 taught both spellings: `SEAT_BARE_LANES` and `L2_REVIEW_LANE_WORDS` (`scripts/pm/mailbox-open.mjs`), the signature lane alternation (`SIGNATURE_LANE_SOURCE`, `scripts/pm/check-half-states.mjs`), `HANDOFF_TARGET` (`scripts/pm/record-recognisers.mjs`), the roster title token (`scripts/pm/fleet-roster.mjs`), and `check-owed-reviews.mjs`. Flip each both-spelling self-test case to refuse the old one.\n2. Delete the two one-line stubs `.claude/skills/pm-dispatch/references/lanes/review.md` and `references/review-checklist.md`, and their ratchet rows; drop the alias sentence in `lanes/l2-review.md`.\n3. Rename `scripts/pm/check-owed-reviews.mjs` and `scripts/pm/verify-review-tier.mjs` (both are L2-only tools whose names say only \"review\"), with `package.json` wiring and every reference moved in the same PR.\n4. Noted by the #34021 dev: `check-owed-reviews.mjs` still bars an L2 seat on the PR's own account (`reviewSeatsOf`, `isBarred`). Once PR #33938 lands, check that this agrees with the L2 charter text and fix whichever side is wrong.\n\n## Restart-when\n\nItems 1–2 start only after one full seat cycle in which no open seat post, mailbox PR or seat signature spells `review#N`, and no new comment writes it. Measure with `node scripts/pm/fleet-roster.mjs` and a comment search over that cycle. Items 3 and 4 may go first."

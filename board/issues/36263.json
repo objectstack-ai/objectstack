@@ -1,0 +1,32 @@
+{
+  "number": 36263,
+  "kind": "issue",
+  "title": "spec: the Change Owner default reads only the flat sharingModel, so a controlled_by_parent detail declared under security.sharingModel offers Change Owner",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T03:57:49Z",
+  "updated_at": "2026-11-22T04:55:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36263",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5krBqrrgxCYgjXmfbv\n\nFiling gate ① · Source: fleet · found by the #35270 review sweep (run record r04 S6) on PR #36154, re-read on main c30ce97cd7\n\n## What happens\nA detail object whose access follows its parent record (\"controlled by parent\") should have Change Owner off unless its author turns it on. The check reads the sharing setting from only one of the two places an object can declare it. An object that declares it in its `security` block (the nested spot) is treated as an ordinary object, so Change Owner is offered on it, while every access check treats it as following its parent.\n\n- `packages/spec/src/data/user-action-transfer.ts:185-187` `derivedTransferDefault`: `obj.sharingModel !== 'controlled_by_parent'` — flat spot only; used at `:205` by `resolveUserActionTransfer`, which `change-record-owner.ts:181` `changeOwnerOffReason` reads.\n- The access gates read both spots: `packages/plugins/plugin-sharing/src/sharing-service.ts:270`, `:307`, `:1790` (`schema?.sharingModel ?? schema?.security?.sharingModel`).\n- The sibling in core reads both and says why: `packages/core/src/security/user-assigned-work.ts:84-96` (`accessFollowsMaster`, \"a raw-registered object can reach the registry without the parse, which is why the nested spot is read\").\n- No privilege is gained: an owner change still needs the same grant as a plain `owner_id` edit. The ruled default is missed for that shape.\n\n## Done when\n- `derivedTransferDefault` reads `sharingModel ?? security.sharingModel`, the one resolution every reader shares.\n- Pins (spec): an object with only `security.sharingModel: 'controlled_by_parent'` → `resolveUserActionTransfer(...).enabled === false`; with `userActions.transfer: true` → enabled; flat-spot control unchanged. One core pin: Change Owner on such an object → 403 `CHANGE_OWNER_DISABLED`.\n- Ablation: revert to the flat-only read and the nested-spot pin goes red.\n\nreach: public HTTP Change Owner doors and `os lint` / console readers of `userActions.transfer`; only objects that declare `controlled_by_parent` in the nested `security` block. Read from the code, not measured.\nBusiness reason: on child records whose access follows the parent, owner hand-over is supposed to be off by default; for some objects it is on, against the rule the maintainer set.\nReader: area:spec / domain:spec (packages/spec user-action-transfer).\nDedupe: `transfer controlled_by_parent`, `derivedTransferDefault` → #35399, #35315, #35403 (none carries this).\nGrade: p3 — wrong default on one declaration shape; no privilege gained."
+}

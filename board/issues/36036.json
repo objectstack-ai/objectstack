@@ -2,8 +2,8 @@
   "number": 36036,
   "kind": "issue",
   "title": "Stage menu: after a 409 re-read, recompute the fields to fill in from the new record",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-21T09:32:36Z",
-  "updated_at": "2026-11-21T09:48:49Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T06:27:26Z",
+  "closed_at": "2026-11-22T06:26:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36036",
   "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFollow-up from #35956 PR 2 (PR #36032, L1-a ACCEPT 7060596963, nit N1). Under epic #34571.\n\n## What happens today\n\nThe record header's stage menu decides which required fields to ask for when the reader picks a stage. If the save comes back 409 (someone else changed the record), the dialog shows its note and re-reads the record, but it keeps the list of fields it chose when the stage was picked. If the other writer just filled one of those fields, the reader's next \"Move\" writes the reader's value over it. The old form did the same, so this is not a regression from PR #36032.\n\n## To do\n\n1. After the 409 re-read, recompute the fields to fill in from the new record (`collectRequiredWhenPromptFields` on the re-read row), dropping any field that now has a value.\n2. If nothing is left to fill in, the dialog shows only the record, the stage and the move button.\n3. Pin it with a test: a 409 where the other writer filled one required field, then a move that does not send that field.\n\n## Acceptance\n\n- After a 409, a move never overwrites a field another writer filled in the meantime.\n\nBlocked-by: #36032"

@@ -13,18 +13,20 @@
   "labels": [
     "area:ux",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-21T05:42:05Z",
-  "updated_at": "2026-11-21T05:51:04Z",
+  "updated_at": "2026-11-22T07:46:05Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36002",
   "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nSplit from PR #35918 (#35878, two-row list toolbar) by the seat, from its declaration review record 7058088095 (nit N1). Under epic #35547.\n\n## What is left\n\nThe maintainer ruled 「刷新去掉」 for the default (compact) list toolbar, and #35918 does that. The view key `userActions.refresh` still has a live reader in the wide toolbar (`compactToolbar: false`), so the spec accept set and the liveness ledger don't move. Two leftovers stay in `ui/packages/plugin-list/src/ListView.tsx` (read at `7b4adb10`):\n- `displayOffered` still counts `toolbarFlags.showRefresh` (near :6835). When Refresh was the panel's only reason to show, the panel now opens with only its footer.\n- The Refresh comment (near :7439–7443) still says it \"sits in the panel's footer\".\n\n## To do\n\n1. Drop the `showRefresh` term from `displayOffered`, fix the comment, and say in the key's describe that it governs only the wide toolbar's Refresh.\n2. Decide, under ADR-0049 (enforce or remove), whether `userActions.refresh` should mean anything in the default toolbar. If it should not, that is a spec note on the key; if a retirement is proposed, it is its own card.\n\n## Acceptance\n\n- A view whose only display option was Refresh no longer opens an empty Display panel in the default toolbar.\n- The key's describe matches what it does.\n\nBlocked-by: #35918.\nReader: area:ux (ui/packages/plugin-list), `domain:ui`."

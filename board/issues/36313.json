@@ -1,0 +1,31 @@
+{
+  "number": 36313,
+  "kind": "issue",
+  "title": "plugin-auth: boot-time dev-seed retirement records revocations as admin_password_reset; add a dev_seed_retired reason (after #36311)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T05:36:55Z",
+  "updated_at": "2026-11-22T06:14:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36313",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5kt9AD1TPLy7Y9oa9D\n\nFiling gate: ② follow-up from a landing PR (PR #36311, card #35184; seat 4's call 2026-11-22T05:36Z to keep the existing reason in that PR and hold a dedicated one here). Source: fleet. ⛔ Not a claim; not to be dispatched by area a4-E.\n\n## Why\n\nPR #36311 retires, at a boot outside development mode, the sessions and API keys of accounts still on their development-seed credential. It records them with the existing revoke reason `admin_password_reset`, so an audit reader sees \"admin password reset\" for a revocation no administrator made.\n\n## Work\n\n- Add a value such as `dev_seed_retired` to `sys_api_key.revoked_reason` (platform-objects select: value, label in every locale, field description, the reason vocabulary pin) and name it in `sys_session.revoke_reason`'s description.\n- Have the boot-time retirement in `@objectstack/plugin-auth` (`dev-seed-credential-retirement.ts`) write it instead of `admin_password_reset`.\n- Keep the restore semantics of a retired key the same as today's (a platform administrator's act).\n\n## Done when\n\nA retired session and key read `dev_seed_retired` in the record and in the console, in every locale; the retirement pins assert it; no other revocation path changes.\n\nLand after PR #36311."
+}

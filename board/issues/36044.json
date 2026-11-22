@@ -2,8 +2,8 @@
   "number": 36044,
   "kind": "issue",
   "title": "Phone list cards: while selecting, a tap on a link cell opens the link instead of ticking the card",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-21T10:45:24Z",
-  "updated_at": "2026-11-21T11:49:18Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T06:46:19Z",
+  "closed_at": "2026-11-22T06:44:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36044",
   "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFollow-up from #35883 / #35884 (PR #36024, the phone list cards and the floating selection bar). Under epic #35880.\n\n## What happens\n\nOn the phone list, after 「⋮ More」 → 「Select」 (or a long press), the cards are in selection mode and a tap ticks a card. A tap that lands on a link cell inside the card (an email, a phone number, a URL, a lookup name) opens the link instead of ticking the card.\n\n## Expected\n\nWhile a selection is open, every tap on a card ticks or unticks it, links included, as phone apps do in selection mode. Links work again when the selection ends.\n\n## To do\n\n1. While the list publishes an open selection, cards swallow taps on their link cells and toggle the card instead.\n2. Pin it: in selection mode, a tap on a card's email cell ticks the card and opens nothing; after × the same tap opens the link.\n\n## Acceptance\n\n- In selection mode on the phone, no tap on a card opens a link or a record; each tap toggles the card.\n\nBlocked-by: #36024"

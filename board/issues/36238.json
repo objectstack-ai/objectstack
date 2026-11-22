@@ -1,0 +1,29 @@
+{
+  "number": 36238,
+  "kind": "issue",
+  "title": "专题：记录负责人变更与离职交接（记录和列表上直接改负责人；离职交接按同一个开关转记录）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T03:08:01Z",
+  "updated_at": "2026-11-22T03:08:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36238",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\n立卡门类别：专题父单（`tracking`，无 pm 状态，不派发；子卡各自定级派发）。维护者 2026-11-22：「同意开专题」「剩下5个也开」「专题不需要挂靠，在分区下就行」。\n\n## 目标\n有权限的人能在记录和列表上直接改负责人；员工离职时，交接按同一个开关只转该转的记录。\n\n## 完成标准\n- 默认表单只读显示负责人；记录页和列表都有「更改负责人」，可以批量，可以通知新负责人。\n- 离职交接里的负责人字段跟随对象级开关 `userActions.transfer`：开关关着的对象不转，但面板上仍显示数量。\n\n## 子卡\n- #35315（p1）默认表单不显示负责人，也没有「更改负责人」。下面挂着 #35403（p1，控制台的按钮和对话框，三步里的第 3 步）。\n- #35399（p1）离职交接名单跟随转移开关。\n\n## 待维护者定的\n- 你之前问过这条链的等级，还没定。现在三张都是 p1。\n- #35315 还挂着「阻塞」，但它的第 1、2 步（#35401、#35402）都已关闭，分诊会在本轮解除阻塞。"
+}

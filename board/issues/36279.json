@@ -1,0 +1,34 @@
+{
+  "number": 36279,
+  "kind": "pull_request",
+  "title": "fix(plugin-detail): summary chip honours percentDisplay plain",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T04:32:18Z",
+  "updated_at": "2026-11-22T05:45:10Z",
+  "closed_at": "2026-11-22T05:45:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T05:45:06Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36279",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XTRdLmK9YYgMSCJ7NH2PuUY)_\nFixes #36078\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 看记录页的用户:标题旁的摘要小标签里,百分比字段设成「只显示数字」时,以前仍画进度条,改后只显示百分数;其他情况不变。\n- 为什么做:让记录页和列表对同一个百分比字段显示一致,解决胜率、利润率这类比率被误读成进度的问题。\n- 出错会怎样:最坏是摘要小标签多画或少画一条进度条,数值文字不受影响,可直接撤回本次改动。\n- 要你做什么:无。\n\n## What changes\n\nThe record header's `summaryFields` chip now honours a percent field's `percentDisplay` (the `percentDisplay` describe in `packages/spec/src/data/field.zod.ts`: `plain` = \"the percentage as text alone, with no bar\"). In `DetailView`'s chip percent arm, the bar's fill value is computed only when the merged field bag (view entry over object schema, the same `percentField` bag the arm already reads `scale` and `max` from) does not say `plain`; with `plain`, the chip falls through to the plain Badge branch, so the text (`formatPercent`, unchanged) and the accessible name (`Label: 40%`, unchanged) stay and only the bar goes. Because the arm is chosen by `armType`, a `formula` whose `returnType` is `percent` takes the same path and its own `percentDisplay` counts too.\n\nThe bar-or-not rule is the literal `percentDisplay === 'plain'` test, inline in `PercentCellRenderer` (`@object-ui/fields`) and not exported, so this is a local read of the one key, not a second copy of an exported helper and not a published-export change.\n\nNo `packages/spec` change. Changeset: `@object-ui/plugin-detail` patch.\n\nRead first (by risk):\n1. `ui/packages/plugin-detail/src/DetailView.tsx`, the hunk guarding `summaryChipPercentPoints` with `percentField.percentDisplay !== 'plain'`.\n2. `ui/packages/plugin-detail/src/__tests__/summaryChip.percentPlain-36078.test.tsx`.\n\nTwo-minute check: `pnpm --dir ui exec vitest run packages/plugin-detail/src/__tests__/summaryChip.percentPlain-36078.test.tsx` (spec, formula and client built) prints 7 passed.\n\n## Tests\n\nNew `summaryChip.percentPlain-36078.test.tsx` (7 cases), stored value `0.4`:\n- percent field `plain` reads `40%`, accessible name `Probability: 40%`, no bar track;\n- percent formula (`returnType: 'percent'`) `plain`: same;\n- `plain` declared on the object schema only (no view entry), judged after an arrival probe: same;\n- CONTROL: percent field with no `percentDisplay`, and with `bar`, draws the bar filled to `40%`;\n- CONTROL: percent formula with no `percentDisplay`, and with `bar`, draws the bar;\n- CONTROL: a view entry `bar` over an object schema `plain` draws the bar (precedence).\n\n## Acceptance notes\n\n- Directions on the base tree were predicted before the first run and the ablation matched them: the three `plain` cases red, the four controls green.\n- Overlap: `overlap-check.mjs` names open PR #36234 as sharing `DetailView.tsx`; it merges cleanly with this branch.\n- No out-of-scope findings.\n\n## Verification\n\nAll readings at head `4bf99c41`.\n\n<details><summary>Targeted tests (under the shared verify lock)</summary>\n\n- `pnpm --dir ui exec vitest run --maxWorkers=2 packages/plugin-detail/src/__tests__/summaryChip`: Test Files 10 passed, 1 skipped (11); Tests 106 passed, 8 skipped. The existing `summaryChip*` pins stay green.\n- `pnpm --dir ui exec vitest run --maxWorkers=2 packages/plugin-detail/src/__tests__/percentDisplayRelay-28255.test.tsx packages/plugin-grid/src/__tests__/percentAbsentScale.fiveFaces-9843.test.tsx packages/plugin-detail/src/__tests__/DetailView`: Test Files 25 passed (25); Tests 170 passed (170).\n- `pnpm --filter @object-ui/plugin-detail run type-check`: exit 0 (after building the `@object-ui/plugin-detail^...` closure); `tsconfig.test.json --listFilesOnly` includes the new test file.\n- The full `@object-ui/plugin-detail` suite (405 test files) is declared to CI's `Test UI`, not run locally.\n\n</details>\n\n<details><summary>Ablation (one, on the committed fix)</summary>\n\n`node scripts/ablation-replace.mjs` replaced the guard `if (percentField.percentDisplay !== 'plain') {` with an always-true guard: anchor 1 to 0, blob `c62b65de4f71` to `915375fad2c8`. The new file then read 3 failed, 4 passed: exactly the three `plain` cases red, all four controls green. Restore: blob after restore equals HEAD (`c62b65de4f71`), `git diff HEAD` empty, marker count 0. The test imports `../DetailView` from source, so no build sits between the mutation and the run.\n\n</details>\n\n<details><summary>Derived gates</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands` derived 38 commands for this diff; 37 ran locally with exit 0; `pnpm check:type-check-debt` is NOT MEASURED (its closure build never acquired the shared verify lock, exit 3 PREREQUISITE NOT MET) and is CI's `Lint & Repo Gates`. `--ran` reconciliation: 38 derived, 37 run, 1 NOT-MEASURED, 0 UNRUN. Also `pnpm --dir ui run check:new-line-citations`: 0 new citations.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5oLLK7uoxp33riiBJL)_\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 36237,
+  "kind": "issue",
+  "title": "expression check: == / != on a list field reached through a lookup hop (record.account.labels == 'a') is refused at no door, because the schema hint carries no hop target's field shapes",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T03:06:08Z",
+  "updated_at": "2026-11-22T03:54:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36237",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5krBqrrgxCYgjXmfbv\n\nFiling gate ① · Source: fleet · gap declared in PR #36207's body (Part of #36167), round 3, final-head comment 7073315874 (finding S3 of the seat's contract review of #36207). The PR leaves it out on purpose and names this card as the carrier.\n\n## What happens\nAfter #36207, `validateExpression` refuses `==` / `!=` on a list-valued field of the record itself (`record.labels == 'a'`). The same comparison on a list field reached through a lookup hop (`record.account.labels == 'a'`) is not judged: `ExprSchemaHint` carries the root object's field shapes but no hop target's, so neither the validator nor any other door sees that `labels` on the target is a list. CEL then answers the comparison as a constant, and the condition silently never (or always) matches, which is #36167's defect one hop away.\n\n## Done when\nA `==` / `!=` with a list-valued field on a hop target is refused at the same doors as the root case, or the condition's author is told at save. Two routes, for the claimant to choose and say in the PR:\n- a new `ExprSchemaHint` member carrying hop targets' field shapes (a producer contract change: read `contract-review.md`, likely Clause-② narrowing ⇒ maintainer lands), or\n- a lint pass beside `refuseUndeclaredHopField`, which already resolves hop targets.\nPins: one hop to a `multiple: true` field refused, one hop to a scalar field accepted; an ablation each.\n\nreach: any CEL condition (validation rule, flow condition, visibility) that compares a lookup target's multi-value field, by code reading in the contract review; to be measured once by the claimant.\nBusiness reason: an author writes a condition that looks right and never fires, with no error anywhere.\nReader: the expression / validator lane (`packages/spec` expression hint, `packages/core` or wherever `refuseUndeclaredHopField` lives).\nDedupe: `ExprSchemaHint hop`, `refuseUndeclaredHopField list` → only #36167 / PR #36207.\nGrade: p2 (same silent-mismatch class as #36167, rarer shape)."
+}

@@ -2,8 +2,8 @@
   "number": 36147,
   "kind": "issue",
   "title": "记录的字段区统一成一列：右侧预览、手机记录页、宽屏左栏共用一个组件，不管多宽都只排一列；分组箭头在右",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-21T16:36:38Z",
-  "updated_at": "2026-11-21T17:29:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T04:47:41Z",
+  "closed_at": "2026-11-22T04:47:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

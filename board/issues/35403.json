@@ -13,18 +13,20 @@
   "labels": [
     "area:ux",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-19T08:07:51Z",
-  "updated_at": "2026-11-21T21:49:02Z",
+  "updated_at": "2026-11-22T07:24:09Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35403",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CZrgaiMgTJCnswR6jQ\n\nBlocked-by: #35401\nBlocked-by: #35402\n\nFiling gate: split of #35315 (p1) on seat 5's word, phase 1 part 3 of 3. Direction and scope ruled by the maintainer on #35315: comments 7000556646 and 7000907189 (points 1, 6, Acceptance additions). Nested under #35315; grade inherited.\nReader: `domain:ui` · area:ux (ux-2).\n\n## 维护者速读\n\n- 用户能看到什么变化：有转移权限的人在记录页和列表（批量）上看到「更改负责人」按钮，弹窗里选新负责人、可选通知；默认表单上负责人只读显示。\n- 为什么做：应用改用平台默认表单后，目前没有地方能改负责人。\n- 出错会怎样：按钮该隐藏时露出会被服务端拒绝，该显示时缺失则无法转移；回滚即撤销。\n- 要你做什么：无。\n\n## Ask\n\n- **Visibility** = structural eligibility ∧ object switch (helper from #35401) ∧ the record's explain `transfer` verdict (not recomputed client-side).\n- **Record action** titled \"Change Owner\" (i18n'd); the dialog's field uses the object's own owner label; new owner = a person, or a queue where the object carries the queue column; optional notify. Calls the #35402 endpoint.\n- **Bulk action** on list views, same dialog, showing the endpoint's per-row report.\n- **Default form:** `owner_id` shows read-only with the action beside it; the default form stays free of editable system fields (`plugin-form` sanitize).\n- Cascade options are phase 2, not here.\n\n## Done when\n\nPins: no action on `ownership: 'none'`, `managedBy` and `sys_*` objects, even for a platform admin; a `controlled_by_parent` detail shows none by default and shows it with `userActions.transfer: true`; a switched-off `private` object shows none for a `modifyAllRecords` holder; edit without transfer sees `owner_id` read-only and no action; bulk report renders per-row failures.\n\n⛔ Not a claim."

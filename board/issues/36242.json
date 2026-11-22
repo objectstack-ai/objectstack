@@ -1,0 +1,29 @@
+{
+  "number": 36242,
+  "kind": "issue",
+  "title": "专题：种子数据（装进去就是对的：关联正确、被拒的行构建时报出、演示数据日期可刷新）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T03:10:20Z",
+  "updated_at": "2026-11-22T03:10:20Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36242",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\n立卡门类别：专题父单（`tracking`，无 pm 状态，不派发；子卡各自定级派发）。维护者 2026-11-22：「同意开专题」「剩下5个也开」「专题不需要挂靠，在分区下就行」。\n\n## 目标\n示例和种子数据装进去就是对的：关联字段写对，被规则拒收的行在构建时就报出来，旧的演示数据能把日期刷新到今天。\n\n## 完成标准\n- 通过扩展加的关联字段，种子写进去的是目标记录的 id；`os validate` 和 `os build` 能报出被包自身校验规则拒收的种子行，写明文件、行号和规则名。\n- 新组织重放种子出错时记为警告；文档和技能与当前的种子行为一致。\n- 演示数据的日期能重新对齐到今天，或者明确定下不做。\n\n## 子卡\n- #35254（p1）种子给另一个包通过扩展加的关联字段写入的是原始键，不是记录 id。\n- #35653 种子行在构建时从不按包自身的校验规则检查。\n- #36122 数据技能的 seeds.md 还说种子里的汇总值按原样存储。\n- #35413 种子保存入口的收尾：恢复入口跳过了未知对象检查等。\n- #35086 新组织重放种子出错只记在 info 级别。\n- #32679（暂停）把已安装演示数据的日期对齐到今天。\n\n## 待维护者定的\n- #35413：恢复一个对象已不存在的种子版本，是否像保存入口一样拒绝。\n- #32679：要不要做「刷新演示数据」的日期对齐，还是继续暂停。\n- #35653：先只报告；以后是否在发布时直接拒绝这类种子行（现行裁定对种子行不开例外）。"
+}

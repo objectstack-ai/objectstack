@@ -1,0 +1,35 @@
+{
+  "number": 36267,
+  "kind": "issue",
+  "title": "pm-dispatch: 'security by consequence, not label' grants the xhigh diff review only to advisory fixes, so a private-repo security issue of the same severity gets none",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "bug",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-22T03:59:52Z",
+  "updated_at": "2026-11-22T08:15:40Z",
+  "closed_at": "2026-11-22T08:15:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36267",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5krBqrrgxCYgjXmfbv\n\nFiling gate ① · Source: fleet · found by the #35270 review sweep (run records r09 S2, r10 S3) on PR #35591, re-read on main c30ce97cd7\n\n## What happens\nThe dispatch rules say security work is graded \"by consequence, not by label\", but the next line grants the extra security review only to fixes of a public-repository security advisory. A vulnerability in a private repository is tracked as an ordinary issue with a `security` label, not an advisory, so a cross-tenant or privilege fix there gets no adversarial review at all — the same consequence, a lower bar, decided only by where the record is kept.\n\n- `.claude/skills/pm-dispatch/references/execution-duties.md:130`: 「安全按后果不按标签:仅高危公告(跨租户或越权读写、提权、认证绕过)的修复得 `xhigh`」.\n- `:131` the `xhigh` short adversarial diff review rides that 公告 arm only.\n- `:132`: 「带 `security` 标签而非公告修复的卡(依赖、UX、文案)按难度定」 — the examples show the intent; the criterion covers every non-advisory security card.\n- `references/security-findings.md:16-19` and `:29-30`: a public repo's finding is an advisory; a private repo's finding is a `security`-labelled issue handled by that repo's lane under these same rules. A mistakenly public card under takeover is also label-marked (`security-findings.md` §3/§9).\n\n## Done when\n- `:130-132` key on the finding's consequence whatever the carrier (advisory, private-repo `security` issue, taken-over card), and `:132` is scoped to `security`-labelled cards that fix no finding (deps, UX, copy).\n- Pins: ratchet rows for the touched lines updated; skill gates pass.\n- Ablation: a grep pin that `:132` names \"fixes no finding\" (or equivalent) fails if the scope clause is dropped.\n\nreach: internal fleet skill text, read by every repo lane that fixes a security finding, including private repos.\nBusiness reason: a serious security fix in a private repository can ship without the extra review the same fix gets in a public one.\nReader: area:fleet (pm-dispatch skill owner); copy the security seat.\nDedupe: `security advisory effort`, `xhigh`, `35591` → #35270 (open parent, does not carry this), #32004 (seat card).\nGrade: p3 — rule text; the gap is review depth on a subset of security fixes."
+}

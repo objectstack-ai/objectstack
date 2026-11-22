@@ -2,8 +2,8 @@
   "number": 35846,
   "kind": "issue",
   "title": "Platform checklist: master-detail body-tables item still states the old overview order",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,21 @@
     "bug",
     "documentation",
     "domain:docs",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-20T11:18:24Z",
-  "updated_at": "2026-11-20T11:47:44Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T04:21:04Z",
+  "closed_at": "2026-11-22T04:20:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35846",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CZrgaiMgTJCnswR6jQ\n\nFollow-up of #35742 (PR #35824, ADR note PR #35845). Found during the seat's contract review of #35845. #35701, the planned home for the other stale records-forms.json prose, is unclaimed in `pm:queue`, so this is a separate card.\n\n## Problem\nThe platform checklist item `records-forms.master-detail-body-tables` in `docs/qa/platform-checklist/areas/records-forms.json` still states the old overview order and cites the 2026-11-19 ADR-0035 amendment. After #35824 the details column reads: header strip, the field sections drawn open, the body tables, then the trailing closed sections (ADR-0035 note of 2026-11-20, #35845). Stale lines on `main`:\n- ~7210 `title`: \"… a table in the record overview by default: above the field sections, …\"\n- ~7236 a step `clause`: \"the Tasks table is drawn in the overview's left column, under the header strip's stage bar and key fields and above the first field section\"\n- ~7260 a step `clause`: \"the drawer draws the same overview: the Tasks table above the field sections\"\n\n## Done when\n- The item's title and both clauses state the new order: after the open field sections, and before trailing closed sections.\n- The item's rulings or sources cite #35742 and the 2026-11-20 ADR-0035 note next to the 11-19 amendment.\n- `records-forms.json` validates under the checklist's own schema and lint. No other item changes.\n\n## Not in scope\n- The other stale prose planned for #35701 (spec migration entry).\n- Running the item. Its next run records whatever it finds.\n"

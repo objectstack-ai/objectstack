@@ -2,8 +2,8 @@
   "number": 34084,
   "kind": "issue",
   "title": "pm(dispatch-gates): the import-graph reach does not start from child scripts a gate spawns",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:fleet",
     "domain:skills",
     "finding",
-    "pm:queue",
     "priority:p3",
     "tooling"
   ],
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-15T18:09:45Z",
-  "updated_at": "2026-11-19T06:03:14Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T06:45:11Z",
+  "closed_at": "2026-11-22T06:45:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34084",
   "body": "domain:skills#1 · os-steve · session_01ADHkmPd7uRqHauEehGPr19\n\nFiling gate: ① a follow-up owed by work in flight: should-fix S1 of the at-tier contract review 6898932707 on PR #34080 (card #33848), outside that card's acceptance. ⛔ Not a claim.\n\n## 维护者速读\n\n- **现象:** `dispatch-gates --commands` 现在会沿反向 import 图找出改动模块的所有导入者,但起点只取每个门禁族声明的 `entry.files`。门禁脚本用 `spawnSync('node', [path])` 起的子脚本,其 import 闭包没有走到;改了子脚本才会加载的模块,对应门禁可能不被派生。\n- **要做的:** 把门禁 self-test 里显式起的子脚本(字面量路径)也作为起点走 import 闭包;读不出的路径按“多派生”处理。\n- **受管文件:** 否(`scripts/pm/**`)。\n\n## What is wrong\n\nPR #34080 seeds the import-graph reach from `entry.files` only. A gate that spawns a child script (`spawnSync('node', [path])`, `execFileSync(process.execPath, [path])`) runs that child's import closure too, but the walk never starts from the child. The run key does not cover it for self-test families. The review measured no live miss (`check:pm-dispatch-gates` was derived on the replay), so this is a latent gap.\n\n## What lands\n\n1. A literal child-script path spawned by a gate's files is a seed of the reach; a computed path widens toward deriving more.\n2. One fixture row (a gate that spawns a child whose import changes) and one ablation.\n\n`scripts/pm/dispatch-gates.mjs`, `scripts/pm/dispatch-gates.self-test.mjs`; `skip-changeset`; `Clause-②: no`. Serial after PR #34080 and the held #34002 (same file). Dedupe: `is:issue dispatch-gates spawned child` → none. **New.**\n"

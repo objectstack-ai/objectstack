@@ -14,18 +14,20 @@
     "area:ai",
     "docs",
     "domain:skills",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-22T01:11:21Z",
-  "updated_at": "2026-11-22T01:48:15Z",
+  "updated_at": "2026-11-22T07:56:22Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36217",
   "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5krBqrrgxCYgjXmfbv\n\nFiling gate ① · Source: fleet · follow-up owed by PR #36207 (Part of #36167; its body declares `Skills-docs: follow-up owed — skills/objectstack-formula/SKILL.md`).\n\n## What happens\nOnce PR #36207 lands, `validateExpression` refuses `==` / `!=` when one side is a list-valued field: a list type (multiselect, checkboxes, tags) or a select / lookup / user field declared `multiple: true`. CEL answers such a comparison as a constant, so it never or always matches. `skills/objectstack-formula/SKILL.md` lists `==` / `!=` in its operator table (l.77) and shows equality examples (l.131-136), but it says nothing about list subjects. An agent following the skill will author a condition the validator now refuses.\n\n## Done when\nThe skill's operator table, or a short note beside it, says that `==` / `!=` on a list-valued field is refused, and shows the membership form (`'x' in record.tags`, `record.tags.exists(t, t == 'x')`) with the refusal it replaces. Add an eval case if the skills lane requires one.\n\nreach: the published `objectstack-formula` skill, read by every authoring agent. The text was read at origin/main.\nBusiness reason: agents writing conditions on multi-value fields hit a validation refusal with no guidance in the skill.\nReader: domain:skills lane.\nDedupe: `objectstack-formula list equality` → 0 hits.\nGrade: p2. It is a documentation companion to the p1 narrowing (#36167) and lands after #36207 merges."

@@ -1,0 +1,34 @@
+{
+  "number": 36270,
+  "kind": "issue",
+  "title": "Inline edit: move the other grids (related lists, dashboard tables, record picker, authored object-grid, ObjectView's grid) to select-first and per-cell save, retiring the pending-changes bar and Save All",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-22T04:10:50Z",
+  "updated_at": "2026-11-22T07:37:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36270",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5krBqrrgxCYgjXmfbv\n\nFiling gate ④ · Source: fleet · child of epic #35683 (list inline edit redo). Seat 1's premise note on #35827 (7039688829) names this \"later card\" as the one #35827 waits for. No card carried it, so #35827 was put back in the queue on a wrong prerequisite.\n\n## What happens today\nUnder #35685's first slice, per-cell autosave switches on only where the select-first cell model does: the grids a `ListView` draws, the scope of the maintainer's record 7035276698 on #35683. Every other grid keeps the pending-changes bar and \"Save All\":\n- related lists\n- dashboard tables\n- the record picker\n- authored `object-grid` nodes\n- `ObjectView`'s own grid\n\nSo the same table behaves two ways depending on where it is drawn, and `ObjectGrid` keeps wiring `defaultBatchSave` (`onBatchSave`, `data-table.tsx:3275`) for them.\n\n## Done when\n- Each grid above uses the select-first cell model and saves each cell on its own, the same way as the list (#35683's design).\n- The pending-changes bar and \"Save All\" no longer appear in those grids.\n- Then #35827 retires the `onBatchSave` slot.\n- Pins: one related list and one dashboard table, where an edited cell saves on its own and no \"Save All\" is drawn, each with an ablation.\n- Read first:\n  - Which of these grids actually offer inline edit today?\n  - Does a related list inside a parent form that is saved together (#35590's group-placed children) need to keep a batch save? If so, this needs a ruling before build.\n\nreach: every non-list grid that offers inline edit; read from code (seat 1, #35685).\nBusiness reason: the same table saves differently depending on where it is drawn.\nReader: domain:ui (ui/packages/plugin-grid, components data-table).\nDedupe: `\"Save All\" related list per-cell`, `select-first related lists inline edit` → only #35827 and #35683.\nGrade: p2 (epic child)."
+}

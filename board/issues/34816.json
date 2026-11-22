@@ -2,8 +2,8 @@
   "number": 34816,
   "kind": "issue",
   "title": "pm-dispatch: execution-duties says a narrowing card is Clause-② no, AGENTS.md allows yes (narrowing): align the declaration rule",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,21 @@
     "documentation",
     "domain:skills",
     "finding",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-17T11:21:48Z",
-  "updated_at": "2026-11-19T04:13:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T06:51:31Z",
+  "closed_at": "2026-11-22T06:51:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34816",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ①: two rule texts disagree on how a PR that both narrows a published accept set and widens a public surface declares `Clause-②`. Seen by L1 on PR #34753 (comment 6946488378). Dedupe: `Clause-② narrowing declaration`; no open card.\n\nSuggested-grade: p3 · domain:skills · tooling\n\n## The two texts\n\n- `.claude/skills/pm-dispatch/references/execution-duties.md` (around line 116 on main): 「收窄已发布接受集的卡是 `Clause-②: no`,不移车道;入队前欠一次契约审核档 L2 审核。」\n- `AGENTS.md` and the dispatch template allow `Clause-②: yes (narrowing)` for a change that narrows.\n\nPR #34753 narrows one path (a resume answered 200 now answers 409) and adds an optional public key, and declared `yes (narrowing)`; PR #34750 narrows only and declared `no (narrowing)`. Both readings passed L1 and L2, so the declaration is not mechanically decidable from the texts today.\n\n## What is wanted\n\nAlign the two texts in one place (which arm a narrowing-plus-widening PR writes, and whether `no (narrowing)` and `yes (narrowing)` are both legal), and point the other at it. Text only; no gate change.\n"

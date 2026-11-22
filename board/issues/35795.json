@@ -2,8 +2,8 @@
   "number": 35795,
   "kind": "issue",
   "title": "List inline edit: do not open a cell editor while the row's approval lock is still being read, and read locks in one batch",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,24 @@
   "labels": [
     "area:ux",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-20T08:18:54Z",
-  "updated_at": "2026-11-20T10:51:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T07:17:11Z",
+  "closed_at": "2026-11-22T07:17:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35795",
   "body": "repo:objectstack#1 · os-sales · session_01L6bhgTC8kn7AdeMpMmyhJG\n\nFiling gate: ④ child of the coordination parent #35683 (list inline-edit redo). Source: the contract review of PR #35747 (record 7034067196, finding S3 and nit N2), which the seat ruled carried to a follow-up card.\n\n## What is left\n\nPR #35747 reads a row's approval lock when a cell of that row is selected (`ui/packages/plugin-grid/src/hooks/useRowApprovalLocks.ts`, one `GET /api/v1/approvals/records/:object/:id/lock` per row), and a locked record's cell says 「此记录正在审批中，已锁定。」 instead of opening an editor. Read at PR #35747 head `fb141148`:\n\n- The read is sent on a double-click's first press and needed on its second, so it has one double-click interval to answer. When it is slower, the editor opens on a locked record, and only the save is refused (the server's `beforeUpdate` hook). The row's `approval_status` column stands in until the read answers, but a view with authored columns fetches it only when a column or a predicate names it, so most saved views have no stand-in.\n- The per-record permission verdict has the same window, since the list asks for verdicts when the first cell is selected (objectui#34208's lazy posture).\n- Arrow-key navigation sends one lock read per row passed. The lock route has no batch form (`packages/rest/src/approvals-routes.ts`), unlike the explain read the list already batches by `recordIds`.\n\n## Why\n\nA user double-clicks a cell on a record in approval, types a value, and only then learns the record was locked. #35684 asks for the opposite: a cell that cannot be edited says so before the user types (「能进编辑、保存被拒」 is what it rules out). No data is harmed today: the server refuses the write.\n\n## Done when\n\n- While a row's lock or record verdict is still being read, a double-click, Enter, F2 or typing on that row's cell waits for the answer, or opens nothing and says the record is being checked, instead of opening an editor that a lock will refuse.\n- The lock is read for a page of rows in one request (a batch form of the approvals lock route, or the lock projected with the list's own read), so moving the selection with the arrow keys sends no request per row. A route change is a server and REST surface change and is declared as one.\n- Pins: a slow lock read (fake timers) does not open an editor on a locked row; a page of rows sends one lock read.\n\nBlocked-by: #35747\n\nGrading: area:ux · Task · p2 · reach: list users editing records that go through approval · evidence: read on the PR #35747 branch at `fb141148`; the L2 record 7034067196, S3 and N2.\n\nReader: the seat's next area thread for epic #35683, or the `domain:ui` lane with the approvals owner for the route.\n\nDedupe: `approval lock inline` (objectstack issues, open) → 11, none about the list cell's lock read (#35684 is the parent removal; #35599 is the master-detail server half)."

@@ -1,7 +1,7 @@
 {
   "number": 35381,
   "kind": "issue",
-  "title": "[PM seat] repo:objectstack · seat 6 — 🟢 sunhaolin · 由 sunhaolin 账户的项目负责 · area:ai p1+p2",
+  "title": "[PM seat] repo:objectstack · seat 6 — ⏳ vacant · sunhaolin clocked out",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,18 +13,16 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "sunhaolin"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-19T07:26:18Z",
-  "updated_at": "2026-11-21T15:40:20Z",
+  "updated_at": "2026-11-22T03:17:18Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35381",
-  "body": "repo:objectstack#6 · sunhaolin · session_017xRBcSPM86QhYAcidhG5Bu\n\n⚠️ **Project-seat stub.** This post is the seat, **`repo:objectstack` seat 6** (the whole-repo lane). Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/objectstack.md` and `references/area-lease.md` (⛔ not copied here). Posture and ledger live in the project.\n\n## Current PM — 🟢 sunhaolin\n\n- **Account:** `sunhaolin` · **Session:** `session_017xRBcSPM86QhYAcidhG5Bu` · **Seated:** 2026-11-21T15:38Z, on the maintainer's summons in this session: `/pm-dispatch objectstack`, then 「你处理 area:ai 所有的 p2 任务」 and 「area:ai p1 p2  你都可以派」.\n- **Intake:** open `area:ai` cards at `priority:p1` and `priority:p2` that land in objectstack-ai/objectstack. Cards held by another seat's claim are not touched; `domain:cloud` cards stay with the `repo:cloud` seats; eval runs stay with the eval seat.\n- **Mailbox:** PR #36130 (subscribed). **Patrol:** `trig_01RaWLcZXFQpRP3DZAhpBZZx` · `17 */1 * * *` (hourly during in-flight work).\n- **Successor-of:** seat 6's previous holder `hotlong` · `session_01Q4EjjNq58cmHeqckjZkTFE` (clocked out; this is a new holder, not a continued shift).\n\n## Leases\n\nNone. Fewer than 15 claimable cards on this intake, so no areas (`area-lease.md` threshold); cards are claimed one by one.\n\n## Hot-file serial queue\n\n- `packages/qa/scenarios/src/runner/observe.ts` + `orchestrate.ts` grading: #35907 (p1, chain head) folded with #34214 in one PR; any later grading card waits behind it.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`, `mailbox-open.mjs`). ⛔ No GitHub MCP writes.\n- Publication: objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n"
+  "body": "repo:objectstack#6 · sunhaolin · session_017xRBcSPM86QhYAcidhG5Bu\n\n⚠️ **Project-seat stub.** This post is the seat, **`repo:objectstack` seat 6** (the whole-repo lane). Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/objectstack.md` and `references/area-lease.md` (⛔ not copied here).\n\n## Current PM — ⏳ vacant\n\n- **Previous holder:** `sunhaolin` · `session_017xRBcSPM86QhYAcidhG5Bu`, seated 2026-11-21T15:39Z on the maintainer's 「你处理 area:ai 所有的 p2 任务」 / 「area:ai p1 p2  你都可以派」, clocked out 2026-11-22T03:11Z on 「当前任务处理完，合并后就下班」. `check-handover.mjs` exit 0 before this write.\n- **Intake when reseated:** open `area:ai` cards at p1 and p2 landing in objectstack-ai/objectstack (other seats' claims untouched; eval runs stay with the eval seat; `domain:cloud` with the `repo:cloud` seats).\n- **Mailbox:** PR #36130 closed at clock-out. **Patrol:** `trig_01RaWLcZXFQpRP3DZAhpBZZx` deleted at clock-out.\n\n## Ledger at clock-out\n\n- Landed: #35907 + #34214 (PR #36140), #36073 (PR #36152), #34988 (PR #36143, Tier H, merged by the approver). Closed completed: #35005 (its items were already on main).\n- In the decision inbox: #35801 (MCP device grant, seat recommends B), #34770 (PR #36158 draft, forks 1/2/4, claim released with `Resume-from: claude/issue-34770-skill-router-budget@b2226e0e`).\n- Held: #36079 `pm:on-hold` until a `@objectstack/scenarios` release carries PR #36077.\n- Filed this shift: #36153 (`finding`, the withheld grade's decline wording; first touch owed by triage).\n- Not taken: #34869 (the eval seat's daily round, unclaimed on the board), #34411 (`domain:cloud`).\n\n## Leases\n\nNone.\n\n## Hot-file serial queue\n\n- None (the scenario grading chain #35907 → #34214 landed).\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`, `mailbox-open.mjs`). ⛔ No GitHub MCP writes.\n- Publication: objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n"
 }

@@ -1,0 +1,29 @@
+{
+  "number": 36241,
+  "kind": "issue",
+  "title": "专题：控制台首屏速度（首包变小、启动请求不再串行）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T03:09:36Z",
+  "updated_at": "2026-11-22T03:09:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36241",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\n立卡门类别：专题父单（`tracking`，无 pm 状态，不派发；子卡各自定级派发）。维护者 2026-11-22：「同意开专题」「剩下5个也开」「专题不需要挂靠，在分区下就行」。\n\n## 目标\n控制台任意页面的首屏都要快：首包更小，启动时的请求不再一个接一个地等。\n\n## 完成标准\n- 首屏不再预先下载表格、表单和记录详情的代码；GridField 移出常驻包，常驻包的体积上限调回去。\n- 启动链路上串行往返的次数减少，me 和本地化请求不再重复发；托管环境的首屏明显低于现在的 9 到 10 秒。\n\n## 子卡\n- #35455（p1）首屏大约串行往返 6 次，测试环境要 9 到 10 秒。云端 cloud#4563 的第 2 步在等它。\n- #33581（p1）表格、表单和记录详情的代码仍在首屏包里，压缩后约 287 KB。\n- #36102 把 GridField 从常驻包里拆出去，再把体积上限调回来。\n\n## 待维护者定的\n- #36102：之前的裁定（方案 B）把常驻包的体积上限放宽了约 8 KB。GridField 拆出后是否收回这 8 KB。\n- #35455 和 #33581 都改启动链路，先做哪个？云端在等的是 #35455。"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 36341,
+  "kind": "pull_request",
+  "title": "fix(console): keep the browser copies of favorites, recents, last app and the pinned list view per organization",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T06:29:23Z",
+  "updated_at": "2026-11-22T07:37:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36341",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XURgXCZHcjPoyo5g9cMEATi)_\nFixes #36244\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 同时属于两个组织的用户，用同一个浏览器切换组织后，不再在新组织里先看到旧组织的收藏、最近访问、上次应用和固定视图；单组织与无组织部署的用户原有内容保留。\n- 为个人设置清点中您接受的建议（p2）：浏览器里的副本跟服务器一样按组织分开保存。\n- 出错时最坏是某个组织里的收藏或固定视图首次显示为空、等服务器读回后恢复；不涉及他人数据，撤回本改动即回到原行为。\n- 无（交接模式提交：本地测试未跑完，等 CI 结论）。\n\n## What changes\n\n- `scopedKey(base, userId, orgId?)` (`UserStateAdapters`) spells `BASE:u:USER:o:ORG` when an organization is active; without one (no organization feature, a preview, the boot before an organization is known) it is the user-only key as before.\n- The organization is `ActiveOrganizationStorage`'s id, read synchronously (`useOrganizationScope`): the same id the console stamps on the `sys_user_preference` reads as `X-Tenant-ID`, and the one `switchOrganization` stores before the switch reloads the console, so the first paint after a switch reads the new organization's copy.\n- `FavoritesProvider`, `RecentItemsProvider`, `LastAppProvider`, `FlowPaletteRecentsProvider` read and write their browser copy under that key, and re-load when the organization changes. `FavoritesProvider`'s hydrate push-back now reads this organization's local copy, so it can only carry this organization's own nav-pin extras into its row.\n- The pinned list view (`list.view.pinned`) is read through `usePinnedListView` (new, `views/pinnedListView.ts`), whose slot is `os:pref:list.view.pinned@object:OBJECT@org:ORG`. Only this preference is keyed this way; the `os:pref` mechanism and every other workspace preference are unchanged.\n- **Carry-over rule (Done-when 4):** an organization that finds no copy of its own adopts the copy kept before the organization was part of the key (the user-only `ui.*` copy, and the per-object pin slot): the value moves under that organization's key and the old key is removed, so exactly one organization, the first to read it, inherits it. A single-organization person keeps everything; a deployment with no organization keeps the user-only key unchanged. The first reader is in practice the organization the old copy mirrors: every hydrate rewrote it with the active organization's row, and the first page-load on this code boots into the organization the browser last held.\n- Sign-out and change-of-user purges are allowlist sweeps (`@object-ui/auth`); the new keys are not on either allowlist, so they are swept exactly as today's are. A pin in `signOutPurge.test.tsx` holds that for all five new spellings.\n\n## Tests\n\nReach measured once, before the fix, with a unit harness (no running console with two memberships in this container): real `ActiveOrganizationStorage`, a fake server answering one `ui.favorites` row per stamped organization, favorite + nav pin in A, switch (remount) to B. On base `c30ce97c`:\n\n- B's first paint: `[\"object:a_obj\",\"nav:a_menu\"]` (A's list).\n- B's server row after hydrate: `[\"nav:a_menu\"]` (A's nav pin pushed into B).\n- Pinned view: B read `\"pv_in_org_a\"`; after pinning in B, back in A read `\"pv_in_org_b\"`; one key `os:pref:list.view.pinned@object:crm_lead`.\n\nBoth mechanisms reproduce. New pins: `FavoritesProvider.test.tsx`, `RecentItemsProvider.test.tsx`, `FlowPaletteRecentsProvider.test.tsx` (new top-level describes), `LastAppProvider.test.tsx` (new, no harness existed), `views/pinnedListView-36244.test.tsx`, `signOutPurge.test.tsx`.\n\n**NOT MEASURED locally**: the new and touched test files, the four ablations (scopedKey ignoring the organization; no adoption; pin slot ignoring the organization; no pin adoption) and the app-shell type-check were scripted but never got a turn on the shared verify lock before the handover; CI's `Test UI` / `Type Check UI` are the first reading.\n\n## Acceptance notes\n\n- The `os:pref:*` pin slot carries no user. The organization in the slot does not change that, but a different account signing in on the same browser runs the change-of-user purge, which sweeps every `os:pref:*` key, so a second account does not read the first's pin.\n- On a browser that holds no active organization yet (first boot, or after the server answered none), the copy is the user-only one until the organization resolves, then the organization adopts it; that boot window also costs one extra preference read when the organization arrives.\n- Quiet hours (`notificationPreferences`) still use the user-only key: out of this card.\n\n## Verification\n\nTwo-minute check: `pnpm --dir ui exec vitest run packages/app-shell/src/views/pinnedListView-36244.test.tsx` — 3 passing tests expected.\n\nFiles to read first: `ui/packages/app-shell/src/context/UserStateAdapters.tsx` (`readScopedCopy`, `useOrganizationScope`), `ui/packages/app-shell/src/views/pinnedListView.ts`, `ui/packages/app-shell/src/context/FavoritesProvider.tsx` (hydrate).\n\nLocal gates: 36 of 37 derived `check:*` families exit 0; `check:type-check-debt` NOT MEASURED (its closure build never got the lock); `pnpm --dir ui exec vitest run scripts/` not run.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FEkQ5oY5WCqqqBMtn9qt7m\n"
+}

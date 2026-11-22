@@ -1,0 +1,32 @@
+{
+  "number": 36274,
+  "kind": "issue",
+  "title": "verify: a bootStack-booted seed resolves an extension lookup that os dev stores as the raw natural key, so the harness cannot pin #35254-class seed defects",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T04:17:16Z",
+  "updated_at": "2026-11-22T04:50:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36274",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5miLqNucRZevceHwNh\n\nFiling gate ① · Source: fleet · found by seat 4 area a4-C's dev on #35254 (os-dev report 7074066106, out_of_scope_findings[0]); PR #36272.\n\n## What happens\n`@objectstack/verify` resolves a seed differently from `os dev`, so a verify-based test passes while the real boot stores wrong data. On the #35254 shape (a module adds a lookup to the app's object through `objectExtensions` and seeds it by the target's natural key), `os dev --fresh` stored the raw natural key with origin/main's seed-loader resolver, while a dogfood test booting `bootStack(artifact, { extraPlugins: [MetadataPlugin({ artifactSource: local-file })] })` over the same two-package artifact stored the target's id with that same resolver (built into dist, marker proven). After boot, that harness read the extension field ABSENT from `metadata.getObject` and PRESENT in `getSchema`, as `os dev` does, so the difference is elsewhere in the boot; the cause is not established. Both reporting consumers on #35254 (hotcrm#2668 and comment 7057556568) saw verify pass while `os dev` was wrong.\n\n## Where\nStart from the seed path `bootStack` drives (`packages/verify`) versus the one `os dev` drives (`packages/metadata-protocol/src/seed-loader.ts` via the runtime), with PR #36272's pin shape and the resolver of origin/main before it as the red leg.\n\n## Done when\nThe cause is named, and a verify-booted test of the #35254 shape goes RED on the pre-#36272 resolver (so the harness can pin seed defects the real boot shows); or, if the harness deliberately seeds through another path, that path is named in verify's docs and the dogfood guidance says seed behaviour needs a real-boot pin.\n\nreach: named producers (hotcrm#2668; the second consumer in #35254 comment 7057556568), both measured green in verify and wrong on `os dev`.\nBusiness reason: app authors and the fleet trust a green verify run; on seeds it can be green while every real boot stores broken links, so a defect ships with a passing test.\nReader: a domain:server lane (verify harness / seed loader).\nDedupe: `verify bootStack seed os dev` → 137 hits, `bootStack artifactSource seed` → 4 hits, `verify harness seed differs` → 255 hits; open hits on this mechanism: #35254 only (the defect itself, fixed by #36272); the rest closed or unrelated.\nGrade: p2 · area:package · Bug · false green on a test harness for seed data (an instrument), no wrong data by itself · reach measured once · evidence measured.\n"
+}

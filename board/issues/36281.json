@@ -1,0 +1,37 @@
+{
+  "number": 36281,
+  "kind": "issue",
+  "title": "lint: field/embedded-sub-fields fix hint still says a child object plus inlineEdit: 'grid' gives inline editing; the rule now needs a parent field group naming the child",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "bug",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T04:38:00Z",
+  "updated_at": "2026-11-22T06:46:32Z",
+  "closed_at": "2026-11-22T06:44:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36281",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5krBqrrgxCYgjXmfbv\n\nFiling gate ① · Source: fleet · out-of-scope finding of the dev on #36252 (PR #36280, seat 4 area a4-I). It is code, outside that text-only PR's paths.\n\n## What happens\n`packages/lint/src/data-model-rules.ts` (around line 1117): the `field/embedded-sub-fields` rule's fix hint, which `os lint` prints to the author, still says to create a child object and set `inlineEdit: 'grid'` to get inline editing. The spec's `EMBEDDED_JSON_TYPED_LIST` text and the rule's own description now say a parent field group's `relatedList` must name the child (#35921, #36224). An author who follows the printed hint gets a child that is a tab, with no lines in the parent form.\n\n## Done when\nThe fix hint names the parent field group (`fieldGroups[].relatedList`) as what inlines the child, and says `inlineEdit` only picks how rows are edited, the same wording as the spec text. A pin asserts the hint, with an ablation. Check for other lint hints that still teach `inlineEdit` as the switch (`grep -n \"inlineEdit\" packages/lint/src`).\n\nreach: every author whose object trips `field/embedded-sub-fields`; read from code.\nBusiness reason: the tool's own advice leads authors to a form with no line items.\nReader: domain:devx / packages/lint.\nDedupe: `embedded-sub-fields inlineEdit hint` → none.\nGrade: p3."
+}

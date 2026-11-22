@@ -1,0 +1,36 @@
+{
+  "number": 36233,
+  "kind": "pull_request",
+  "title": "fix(showcase): a EUR invoice's line grid, line table and Subtotal draw in the invoice's currency, not $ (#36005)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T03:00:06Z",
+  "updated_at": "2026-11-22T04:02:29Z",
+  "closed_at": "2026-11-22T04:02:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T04:02:27Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36233",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuEXU9PqjXNGk94JDwtaFjTX)_\n\nrepo:objectstack#1 · os-sales · session_01L6bhgTqpQZctiVye1J87J9\n\nFixes #36005\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 欧元发票 INV-1010：编辑表单的明细表单价、金额，记录页（发票文档页）的明细表，以及「小计」，原来都显示 `$`，现在跟「含税总额」一样显示 `€`。日元发票显示 `¥` 且不带小数。\n- 原因不在界面代码：平台早已支持「明细跟随发票币种」（ADR-0144 修订，Sales 裁定 A），只是示例应用 showcase 的发票明细没有声明，于是落到本位币美元。这次只改示例的元数据和测试。\n- 随之生效的平台规则（Sales 已裁定，席位判为小事）：发票一旦有明细行，币种锁定，改币种会被拒绝，需先删明细；没有币种的发票不能保存带价格的明细。新建发票表单会自动预填组织币种（USD），日常录单不受影响。\n\n## What changes\n\n- `examples/app-showcase/src/data/objects/invoice.object.ts`: `showcase_invoice_line.unit_price` and `amount` declare `currencyConfig: { currencyMode: 'record', currencyField: 'invoice.currency_code' }` (ADR-0144 D2 as amended, #31743 ruling A); `showcase_invoice.total` (the Subtotal roll-up) declares `{ currencyMode: 'record', currencyField: 'currency_code' }` (D6 as amended). The stale comment that said lines could not follow the invoice is replaced.\n- The Console needed no change: the line grid's `columnCurrencies`, the form totals' `totalsCurrency` and `LineItemsPanel` (`record:line_items`) already resolve a following amount through `parentCurrencyFieldsOf` / `followedColumnCurrencies` (#31912). The record page's read-only line table had the same `$` and the same cause, so it is fixed by the same declaration.\n- New pin `examples/app-showcase/test/invoice-line-currency-follows-invoice.test.ts` (the three declarations and the path they name).\n- Test fixtures that wrote priced lines under an invoice with no `currency_code` now give the invoice `USD` (a following amount under a blank code is refused `ERR_CURRENCY_CODE_REQUIRED`): `examples/app-showcase/test/paid-invoice-line-lock.test.ts` (also hands its bare engine the home currency the showcase `.env` pins) and four dogfood files (`master-detail-batch-atomic`, `showcase-invoice-cbp`, `showcase-mcp-record-files`, `showcase-readonly-when-parent`). What each test asserts is unchanged.\n- Checklist `records-forms.multi-currency-invoice` revision 4: `knownGaps[0]` no longer says the lines stay in the home currency; `steps[2]` PATCHes a lineless USD draft instead of seed INV-1002 (one line, so its code is now locked). No clause changed.\n\nNo changeset: both touched packages (`@objectstack/example-showcase`, the dogfood suite) are `private`, so nothing publishes (`skip-changeset`).\n\n## Small calls (dev thread, Sales 22:19:27Z rule)\n\n1. The currency lock and the blank-code refusal now apply on the showcase invoice. They are the platform's ruled behaviour (ADR-0144 D2 as amended), not new rules; the seat accepted this reading in the claim (7072977562).\n2. The planned checklist item `records-forms.master-detail-child-follows-parent-currency` is not promoted here: promotion needs a run in which it passes. The showcase invoice is now its fixture.\n\n## Verification\n\n- Browser, stock `pnpm dev -- --fresh` boot of the showcase, console built from this tree, admin, 1280 px, before (main 48c732c4) and after (this branch), files in `/mnt/project-files/build-seat1/36005/`:\n  - Edit form line grid on INV-1010 (EUR): before `$ 46` / `$230.00` beside \"Total incl. Tax €276.00\"; after `€ 46` / `€230.00` (`before-edit-form-grid-1280.png`, `after-edit-form-1280.png`).\n  - Record page line table: before `$46.00` / `$230.00`; after `€46.00` / `€230.00`. The Subtotal on the record page: before a bare `230`, after `€230.00` (`before-record-line-table-1280.png`, `after-record-line-table-1280.png`).\n  - API on the same boot: PATCH INV-1010 `currency_code` EUR → USD answers 400 naming `showcase_invoice_line` (the lock); a lineless USD draft PATCHed to EUR answers 200; a line with only the required fields under a code-less invoice answers 201, a priced one 400 `ERR_CURRENCY_CODE_REQUIRED`; JPY INV-1008 stores `amount_home` 1593.73 as before. The New Invoice form pre-fills Currency `USD`.\n- `examples/app-showcase`: `pnpm validate` OK, `pnpm typecheck` clean, `vitest run` 49 files / 554 tests passed.\n- `packages/qa/dogfood`: the 24 test files that name `showcase_invoice`: all pass after the fixture edits (four failed before them, all on `ERR_CURRENCY_CODE_REQUIRED`).\n- `pnpm check:platform-checklist` OK.\n\n## Follow-ups (not in this PR)\n\n- Picking a product on a EUR invoice copies the product's `unit_price` (a home-currency amount) into the line as euros: a price-list currency question, for a separate card.\n- The edit form draws the `total` Subtotal as a plain `230.00` (no symbol) both before and after; the record page draws it `€230.00`.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset. (nothing publishes)\n- [x] 6. `packages/spec` touched: regenerated. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English (the 维护者速读 block is the maintainer's summary, in the maintainer's language).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgTqpQZctiVye1J87J9)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgTqpQZctiVye1J87J9\n<!-- signed: repo:objectstack#1 · os-sales · session_01L6bhgTqpQZctiVye1J87J9 -->\n"
+}

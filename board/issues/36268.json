@@ -1,0 +1,35 @@
+{
+  "number": 36268,
+  "kind": "issue",
+  "title": "pm-dispatch: area-lease.md:47 says same-area cards that do not fold run serially, while execution-duties.md:32-33 sends them to the overlap check",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "bug",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-22T04:00:21Z",
+  "updated_at": "2026-11-22T06:50:01Z",
+  "closed_at": "2026-11-22T06:50:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36268",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5krBqrrgxCYgjXmfbv\n\nFiling gate ① · Source: fleet · found by the #35270 review sweep (run records r09 S4, r10 N1) on PR #35591, re-read on main c30ce97cd7\n\n## What happens\nTwo dispatch rule files give different answers to \"can two cards in the same area be worked at the same time?\". One says: if they cannot be folded into one pull request, run them one after another. The other says: check whether their files overlap, and run them in parallel if they do not. Read by the letter at claim time, an area would serialise all its work, which slows every area for no reason.\n\n- `.claude/skills/pm-dispatch/references/area-lease.md:47`: 「认领必答:同区卡过 `execution-duties.md` 折叠五门即默认合一 PR,否则串行」 — covers every same-area pair, non-fold answer flatly \"serial\".\n- `references/execution-duties.md:32`: fold-or-serial is owed only when ≥2 claimable cards share a mechanism or a hot file; `:33` 「不折叠则排队与否照 `area-lease.md` 重叠检查」.\n- `area-lease.md:37` (overlap check), `:41` (one dev per card or coupled group, disjoint file surfaces) and `:45` (each area fills every free dev slot) run an area's work in parallel. The two files point at each other for the answer.\n\n## Done when\n- `area-lease.md:47` keeps the scope of `execution-duties.md:32` (one mechanism or a shared hot file) and sends the non-fold case to the overlap check instead of \"serial\".\n- Pins: ratchet rows for the touched line updated; skill gates pass.\n- Ablation: a grep pin that `area-lease.md:47` no longer ends 「否则串行」 without the overlap-check pointer fails if reverted.\n\nreach: internal fleet skill text, read by every area seat at claim time.\nBusiness reason: a literal reading halves an area's throughput by serialising unrelated cards.\nReader: area:fleet (pm-dispatch skill owner).\nDedupe: `area-lease`, `fold-or-serial`, `35591` → #35232, #35270 (neither carries this).\nGrade: p3 — rule-text conflict; one-line fix."
+}

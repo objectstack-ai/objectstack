@@ -2,8 +2,8 @@
   "number": 35905,
   "kind": "issue",
   "title": "fleet skills: project memory never restates rules; a dispatch order missing its derivation is sent back; a ruling that disagrees with the skill gets a skill card the same day",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:fleet",
     "domain:skills",
-    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-20T17:47:55Z",
-  "updated_at": "2026-11-21T23:38:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T07:18:09Z",
+  "closed_at": "2026-11-22T07:17:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35905",
   "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\n## Problem\n\nThe skill already says rules live in the skill and current values live in the seat post and project memory (`references/filing-gate.md` 22), that memory is a cache and never a ledger (`references/project-forms.md` 29, `references/coordinator.md` 9 and 40), and that a dispatch order goes in the thread's opening message, not a shared folder (`references/dispatch-runbook.md` 130). No line forbids restating a rule in project memory, and no line lets the receiving side send back a dispatch order that lacks its derivation. What that cost:\n\n- A project-memory effort line was a restatement and went stale twice: one version said p1 runs at xhigh, and three card threads were opened at xhigh on it; a later rewrite said epic children and security cards run at xhigh, while `execution-duties.md`'s dispatch section had already moved to the card's own difficulty.\n- One seat's card-thread briefs in a shared folder restated a process: card threads then read seven PM files, claimed for themselves and started an `os-dev` sub-agent, the opposite of the `dispatch-runbook.md` card-thread section.\n\n## Ruling\n\nThe maintainer ordered this card. The ruling record is the first comment on this card; the PR's `Ruling-ref:` cites it.\n\n## What changes (wording compressed to the byte ratchet; meaning unchanged)\n\n1. `references/project-forms.md`, near line 29 (memory is a cache): project memory holds only the maintainer's words with their time, and pointers into the skill; it ⛔ never restates a rule; a memory line that disagrees with the skill ⇒ follow the skill and delete the line.\n2. `references/dispatch-runbook.md`, card-thread section (after line 127, seat and area side): a thread or area that finds its dispatch order missing a derivation ⇒ does not start and sends it back to the seat; ⛔ never fills the tier from memory. Mirror line in `.claude/agents/os-dev.md`, since under the lean flow a card thread reads `os-dev.md`, the order and the card, not the skill.\n3. `references/project-forms.md`, same place: a maintainer ruling that disagrees with the skill ⇒ a skill card the same day; the memory line names that card and is deleted when it merges; when a skill PR merges, the coordinator reviews memory against the changed lines.\n\n## Constraints\n\n- `.claude/**` is governed: `Rule-change: ruled`, exactly one `Ruling-ref:` line; the L2 record must read `Rule-change-verified: ruled`. A sentence beyond the ruled meaning turns the PR Tier H.\n- Byte ratchet at headroom 0 for every file touched: compress the same file first; if it cannot fit, stop and tell the seat the file and the shortfall.\n- Per `filing-gate.md` 22-26: no card numbers, comment ids or dated quotes in the skill text.\n- Skill text: build tier and L2 at `CONTRACT_REVIEW_TIER`.\n\n## Fold\n\nItem 2 edits the same card-thread section of `dispatch-runbook.md` as #35813 (same mechanism: what a card thread is handed and reads). Both ride one PR, dispatched once #35790 (which holds `dispatch-runbook.md`) merges. Items 1 and 3 avoid `coordinator.md` and `filing-gate.md`, which open PRs hold.\n\n## Not in this card\n\n\"Have a script print effort and container, and the coordinator only copies it\" conflicts with `references/instrument-discipline.md` 10 (`dispatch-gates.mjs` is frozen; no new derivation rows). It needs its own maintainer ruling.\n\n## Done when\n\n- The three lines (and the `os-dev.md` mirror) are in the skill text, each covered by the ruling.\n- `check-skill-line-ratchet.mjs` passes."

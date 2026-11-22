@@ -1,0 +1,34 @@
+{
+  "number": 36244,
+  "kind": "issue",
+  "title": "Console: the browser copies of favorites, recent items and last app, and the pinned list view, are not kept per organization — one person in two organizations sees and saves one organization's choices in the other",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T03:14:59Z",
+  "updated_at": "2026-11-22T07:29:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36244",
+  "body": "repo:objectstack#4 (personal-settings inventory thread) · os-project-manager · session_01FEkQ5nmcZiFktDAYk1ThTQ\n\nFiling gate ③ · Source: maintainer · Leehom, 2026-11-22T03:12:56Z, on the personal-settings inventory ([project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1X6VWCndRPsGpoSP7YVEHXR5)): 「接受你的建议，开p2卡，派发处理」. The suggestion he accepted: one card that makes the two browser-side stores below carry the organization.\n\n## What happens\n\nOn the server a person's console state is per organization: `sys_user_preference` is unique on `(user_id, key)` per organization (ADR-0120 D1, #8323), and `sys_personal_view` rows sit behind the organization wall. Two browser-side stores do not follow that, so a person who belongs to two organizations and uses one browser gets one organization's choices in the other. Both readings are by code reading on main `a5a5312f`; neither was reproduced in a running console.\n\n**1. The browser copies of `ui.favorites`, `ui.recent`, `ui.app.last` and `ui.flow.palette.recents` are keyed by user only.** `scopedKey(base, userId)` in `ui/packages/app-shell/src/context/UserStateAdapters.tsx` spells the key `<base>:u:<userId>`, and `FavoritesProvider`, `RecentItemsProvider`, `LastAppProvider` and `FlowPaletteRecentsProvider` all use it. Switching organization reloads the console (`WorkspaceSwitcher.handleSwitch`), and after the reload in organization B:\n\n- the first paint draws organization A's favorites, recent items and last app from the browser copy, until the server read answers;\n- `FavoritesProvider`'s hydrate step merges every local nav-pin favorite the server row lacks into the list and pushes the result back (`localNavExtras`, `pushBack`), so A's pinned navigation items are written into B's `ui.favorites` row;\n- when the server read fails, A's list stays on screen, and the next change saves it into B's row.\n\n**2. The pinned list view is one browser slot per object, with no organization.** `LIST_PINNED_VIEW_PREFERENCE` (`list.view.pinned`, `ui/packages/app-shell/src/utils/workspacePreference.ts`) is stored under `os:pref:list.view.pinned@object:<object>`. The value can be the id of a personal view (`sys_personal_view`), which exists in one organization only. After a switch the pin names a view the list does not offer, so the list opens its declared default; pinning a view in B then overwrites the pin the person set in A.\n\n## Done when\n\n- First, measure reach once, before any fix: one person with memberships in two organizations, one browser. Record what is shown and what is written to `sys_user_preference` in B after favoriting and pinning in A. If either mechanism does not reproduce, say so on the card instead of fixing it.\n- The browser copies of the four `ui.*` slots are kept per (user, organization). After a switch, B's first paint never shows A's list, and nothing from A is written to B's server row.\n- The pinned list view is kept per organization: a pin set in A is still there on return to A, and B holds its own.\n- A person in a single organization, and a deployment with no organization feature, lose nothing: the copy and the pin they have today keep working after the change. The developer proposes how an existing unscoped browser value is carried (for example adopted once by the first organization that reads it) and states it in the PR.\n- Pins, each with an ablation: favorites pinned in A are absent from B's first paint and from B's saved row; a pinned view in A survives a round trip through B; the single-organization case keeps its existing copy and pin.\n\n## Not in this card\n\n- Quiet hours per person across organizations (raised in the same inventory, not asked for).\n- The other `os:pref:*` workspace preferences (column widths, row height, tab order, sidebar): #36133 keeps them per browser.\n- Any server object or `packages/spec` change. If one turns out to be needed, report the fork instead of widening.\n- Observation for the claimant, not a requirement: the `os:pref:*` slot carries no user either, so a pinned personal-view id can be read by a second account on the same browser (it then matches no view and falls back). Mention in Acceptance notes what the fix does about it.\n\nreach: people who belong to two or more organizations and use one browser for both; read from code, to be measured once by the claimant (first bullet above).\nBusiness reason: the maintainer's words above. A person working in two organizations should not find one organization's pinned menu items saved into the other, or lose their pinned view each time they switch.\nReader: a `domain:ui` lane (console shell and list page): `ui/packages/app-shell/src/context/{UserStateAdapters,FavoritesProvider,RecentItemsProvider,LastAppProvider,FlowPaletteRecentsProvider}.tsx`, `ui/packages/app-shell/src/utils/workspacePreference.ts` and the list page's pinned-view reader.\nDedupe: `favorites organization localStorage` (14, all QA run records and checklist cards, none on this), `\"list.view.pinned\" organization` (0), `\"ui.favorites\"` (7, all closed, none on this), `\"pinned view\" organization in:title` (0).\nGrade: p2, set by the maintainer (Ruling-ref in the first comment).\nGrading line: area:ux · Bug · one person's own state shown and saved under the wrong organization, no other person's data involved · multi-organization users on a shared browser · read"
+}

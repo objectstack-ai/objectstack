@@ -1,0 +1,34 @@
+{
+  "number": 36351,
+  "kind": "pull_request",
+  "title": "fix(fields): a pick leaves an amount in another currency empty and says why",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T07:49:37Z",
+  "updated_at": "2026-11-22T07:51:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36351",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbDp9TQDrBRFrgCwckUd7BG3)_\n\nrepo:objectstack#7 · zhuangjianguo · session_01QsR2jTM6Q7J3o7taPraVR2\n\nFixes #36249\n\nBuilds Done-when item 1 as ruled. Item 2 landed in PR #36293.\n\nClause-②: yes (narrowing) — a cross-currency price copy that happens today stops and the line is left empty with a stated reason (ruled B); the new `@object-ui/i18n` keys widen the typed locale surface\nMetadata-protocol: semantic\nSkills-docs: follow-up owed — skills/objectstack-data/rules/field-types.md\nRuling-ref: 7075336705 (maintainer 「B 币种不同就不填并说明」, 2026-11-22T06:26Z, card #36249)\n\n## 维护者速读\n\n在外币发票（例如欧元发票）里选产品时，单价不再把本币价格原样抄成欧元，而是留空，并在该行下方写明产品原价和两种币种，由用户手动填写；本币发票照旧自动填。\n这是多币种发票卡片的第一项，按你选的方案（币种不同就不填并说明）执行。\n如果规则有误，外币明细的单价会多一步手填，本币单据不受影响；可以直接撤回这一个合并。\n无\n\n## What changes\n\n- **One rule, three fill paths.** `crossCurrencyRefusal` in `ui/packages/fields/src/widgets/lookupAutofill.ts` decides whether a picked value may be copied into the field it fills. An amount is a `currency` field or a `formula` returning `currency`. Both in the home currency: copies, also with no home currency configured. Otherwise it copies only when both sides name the same known code (`fixed`, the record's code, or the `master_detail` parent's code; the home currency counts as its configured code). A `number` copies as before. A target following a record with no code yet is not filled. Nothing converts.\n  - Grid same-named copy and grid declared pairs: `planLookupAutofill` (`GridField.tsx`). The picked value's currency is its field's on the referenced object, which the lookup cell already reads for its labels and now hands to `onSelectRecord` as a second argument. The cell's currency is the column's: `columnCurrencies` (a line following its header) or the home currency.\n  - Record form declared pairs, on a pick and on the opening fill: `LookupField.tsx` via `planDeclaredLookupAutofill`. Target definitions are stamped on the lookup's field by the record form (`withLookupAutofillTargets`, applied in `recordFormStamp.ts`, the one step every layout draws through). A target following its parent's currency reads the parent's code with `useFollowedParentRecord`, as the amount box does. The opening fill waits for the referenced schema and the parent read.\n- **The reason.** A note under the line (grid) or under the lookup (form) names the field, the picked amount in its own currency and the field's currency, while the pick still stands and the field is still empty. Three new `lookup.autofill*` sentences in all 11 packs (zh-Hant generated) and in `FIELD_DEFAULTS`.\n- **Contract text.** The describes of `FieldSchema.lookupAutofill` and the grid column key `autofill` state the rule; the spec pin of the `autofill` describe follows; references regenerated. `content/docs/data-modeling/fields.mdx` gains a Currency rule bullet. Showcase comments say \"when the currencies match\"; seeds unchanged.\n- Not done, as ruled: no conversion, no per-currency price, no build-time refusal.\n\nRead first, by risk: (1) `crossCurrencyRefusal` and `amountCurrencyOf` in `lookupAutofill.ts`; (2) the currency context and opening-fill wait in `LookupField.tsx`; (3) `gridAutofillCurrency` in `GridField.tsx`.\n\nTwo-minute check: `pnpm --dir ui exec vitest run packages/fields/src/widgets/GridField.lookupAutofill-28245.test.tsx` passes; in it, a EUR line's pick leaves the price `null` and shows the note naming `$100.00` and EUR, and a USD line fills `100`.\n\n## Tests\n\n<details><summary>Local runs at 1e8a71d8</summary>\n\n- Under `os-verify-lock`: `pnpm --filter @object-ui/fields run type-check`, `pnpm --filter @object-ui/plugin-form run type-check`, then `pnpm exec vitest run --maxWorkers=1` (from `ui/`) on `GridField.lookupAutofill-28245.test.tsx`, `GridField.test.tsx`, `ObjectForm.lookupAutofill-28245.test.tsx` and every `LookupField*` test: `Test Files 27 passed (27)`, `Tests 288 passed (288)`, VERDICT command-exit 0.\n- New pins: the rule's truth table; an amount's currency per mode; same-named copy and declared pair on a EUR line (price withheld, description fills, reason listed) and a USD line (fills); a header with no code; through the grid (EUR line: price `null`, note names `$100.00` and EUR; USD line fills `100`); through `ObjectForm` (EUR quote: price empty, note; USD quote fills `100`; the opening fill on a EUR quote fills no price).\n- Ablation (`scripts/ablation-replace.mjs`, `lookupAutofill.ts`, anchor `if (!source || !target) return undefined;` x1 to x0, mutation makes every pick copy): `Tests 7 failed | 26 passed (33)` over the two new-pin files. Restored blob `0ce4a7231bed` equals HEAD, `git diff HEAD` empty. The tests import the source directly (vitest aliases `@object-ui/*` to `src`), so no dist sits between the mutation and the run.\n- Spec: `pnpm --filter @objectstack/spec build && gen:schema && gen:docs && check:generated`: all 14 generated artifacts up to date, VERDICT command-exit 0.\n\n</details>\n\n## Acceptance notes\n\n- A record form drawn outside `ObjectForm` (a bare SDUI form) carries no target stamp, so its lookup copies as before; every record-form layout goes through `gateFormFields` and is covered.\n- When the referenced object's schema could not be read, a numeric picked value counts as \"currency unknown\": it still copies into a home-currency field and is withheld from a field in another currency.\n\n## Verification\n\n<details><summary>Gates</summary>\n\nDerived gate sweep (`dispatch-gates --commands`, 119 commands) running at 1e8a71d8; results and the dogfood battery (owed by the narrowing arm) follow in this body.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QsR2jTM6Q7J3o7taPraVR2\n<!-- signed: repo:objectstack#7 · zhuangjianguo · session_01QsR2jTM6Q7J3o7taPraVR2 -->\n"
+}

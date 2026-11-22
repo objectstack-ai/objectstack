@@ -1,0 +1,37 @@
+{
+  "number": 36254,
+  "kind": "pull_request",
+  "title": "chore(pm-dispatch): L2 contract review runs at high, on the review sweep readings",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T03:43:53Z",
+  "updated_at": "2026-11-22T05:45:09Z",
+  "closed_at": "2026-11-22T05:45:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-22T05:45:06Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36254",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XEj2DWDMnuvddhRR7m3AuUP)_\n\nPart of #35270\n\nClause-②: no\nMetadata-protocol: none\nRule-change: ruled\nRuling-ref: ruling record 7073045669 on #35270, point 4 (the maintainer's 「B 只测审核这一项」, 2026-11-22 02:38Z): \"recall at `high` not below recall at `xhigh` means the line goes to `high`; otherwise it stays `xhigh`. That change is a governed PR and goes to the maintainer.\" The readings and the maintainer's 「C」 (2026-11-22 03:36Z, to the option 「C 到此为止，按 10 次的读数定」) are measurement record 7073679594 on #35270.\n\n## 维护者速读\n\n- 用户能看到什么变化:产品用户无感;合并前的契约审核(L2)从 xhigh 改为 high,每次审核大约快三分之一、省三分之一 token。\n- 为什么做:#35270 的审核实测(10 次)里,high 找到旧审核主要问题 13/18,xhigh 10/18,5 个 PR 没有一个是 xhigh 更多;按卡上规则改 high。\n- 出错会怎样:只改一行规则文字;若之后发现 high 漏得多,改回这一行即可。\n- 要你做什么：这是受治理的规则改动（Tier H），按你选的 C 交你批准后合并。L1 ACCEPT 7073925159，契约 PASS 7073840983（head 68838fd8）。\n\n## What changes\n\n`.claude/skills/pm-dispatch/references/execution-duties.md` line 128, in place:\n\n- Before: `此外只有 L2 审核/四轴分析/ADR/红线复读与高危公告修复 diff 复核 \\`xhigh\\`;两条压过尺寸行。`\n- After: `此外只有四轴分析/ADR/红线复读与高危公告修复 diff 复核 \\`xhigh\\`,L2 审核 \\`high\\`;两条压过尺寸行。`\n\nL2 review leaves the `xhigh` list and is named at `high` on the same line. This includes the per-head reviewer subagent, which is where the level is spent. Nothing else in the `xhigh` list moves:\n- four-axis analysis;\n- ADR work, held by the standing order on line 101, which changes only on the maintainer's own word;\n- the red-line re-read (decision 二 of ruling record 7024443457);\n- the read-only diff review of a high-severity advisory fix (the security sweep was not run, ruling 7073045669 point 3).\n\n`lanes/l2-review.md` line 7 already holds the L2 seat session at `high` and names no separate level for the reviewer, so it is not edited. A grep of `.claude/**`, `skills/**` and `docs/qa/**` finds no other line that puts L2 review at `xhigh`.\n\n`scripts/pm/check-skill-line-ratchet.mjs`: the `execution-duties.md` row moves 20148 → 20154 bytes, the measured delta of this edit (+6). The row comment names 7073679594 a \"ruling record\"; it is the measurement record, and the ruling is record 7073045669 (point 4). The comment wording is left as it is so the head does not move.\n\n## Why\n\nThe effort rule kept L2 review at `xhigh` until #35270's review sweep measured it (`execution-duties.md` line 138: effort values come from this repository's own measurements). Measurement record 7073679594:\n\n- 5 old L2 heads with known findings, one fresh read-only contract-tier subagent per run, given only a throwaway checkout and the PR body as it stood.\n- Major-finding recall: 13/18 at `high`, 10/18 at `xhigh`. `high` was not below `xhigh` at any head: 2 ties, 3 heads where `high` found more.\n- Nits: 5/14 at `high`, 3/14 at `xhigh`.\n- Extra findings: 33 at `high`, 37 at `xhigh`. False findings: 0 at `high`, 1 at `xhigh`.\n- Cost: `xhigh` took a mean 25.8 minutes against 16.6, and +52% output tokens.\n- Where `xhigh` did better: it graded one known security-relevant finding at should-fix, where `high` named the same finding as a nit.\n- The maintainer chose to settle on these 10 runs rather than the 30 approved: 「C」.\n\n## Verification\n\n- `pnpm check:pm-skill-ratchet`: exit 0. `execution-duties.md is 20154 bytes (ceiling 20154; headroom 0)`.\n- `node scripts/pm/check-skill-line-ratchet.mjs --self-test`: 116 cases pass.\n- `pnpm check:pm-skill-id-lint`: exit 0, 131 files clean.\n- `pnpm check:pm-governed-prose`: exit 0.\n- The derived family list (`dispatch-gates.mjs --commands`, 41 commands) at head `68838fd8`: 39 exit 0.\n  - `pnpm --filter @objectstack/lint run check:doc-formula-expressions`: exit 3, NOT MEASURED (prerequisite: lint and formula are not built in this checkout). CI runs it.\n  - `pnpm check:pm-governed-merges`: exit 1, pre-existing. The `--self-test` battery \"#11705 end to end, against the REAL generator\" registers 5 cases against a floor of 7; the same failure reproduces on `origin/main` without this change.\n\nNo changeset: `.claude/**` and `scripts/pm/**` are not published (`skip-changeset`).\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no names added)\n- [x] 3. No formatter ran. `pnpm lint` was not run locally (rule text only); CI runs it.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (publishes nothing)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English. (the 速读 block is the maintainer's channel)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FEkQ5kgMVeVvkxHzGr8Lsg\n\n<!-- signed: repo:objectstack#4 · os-project-manager · session_01FEkQ5krBqrrgxCYgjXmfbv -->\n"
+}

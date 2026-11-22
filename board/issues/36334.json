@@ -1,0 +1,32 @@
+{
+  "number": 36334,
+  "kind": "issue",
+  "title": "skills: objectstack-ui never teaches navigation: { openNewTab: true }, the replacement for a list's retired new_window",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "documentation",
+    "domain:skills",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-22T06:24:27Z",
+  "updated_at": "2026-11-22T06:50:20Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36334",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5kDGa1ViantgrfH797\n\nFiling gate ① · Source: fleet · from the contract review of PR #36302 (#35870 skills half): nit N2 in record 7074880702 and again in delta PASS 7075275019 (N4 there adds weight). The seat asked for it to be filed as p3 on pm:queue and not dispatched.\n\n## What happens\nAfter #35854, `navigation.mode` on an object's list no longer picks how a record opens. The spec's `@deprecated` JSDoc on `mode` (`packages/spec/src/ui/view.zod.ts`) and the ADR-0087 D3 entry `navigation-mode-record-open-deprecated` both give `navigation: { openNewTab: true }` as the replacement for a list that declared `new_window`. PR #36302's step 5 of `skills/objectstack-ui/rules/record-page.md` now tells authors to omit `drawer`, `page` and `new_window`. No file in the bundle teaches `openNewTab`, so an author who wants records to open in a new tab gets no route.\n\n## Done when\n`skills/objectstack-ui` teaches, in one short clause where step 5 names `new_window` (or the `navigation.md` Surface bullet), that a list that wants records in a new tab writes `navigation: { openNewTab: true }`. Each sentence must match the spec describe and the migration entry. The token ratchet must hold: `rules/record-page.md` has about 3 tokens of headroom, so pay the bytes in the same file. No eval change unless a case asks about new tabs.\n\nreach: AI authors using the objectstack-ui skill; read from the skill files and the spec.\nBusiness reason: an author asking for \"open in a new tab\" today gets no taught key and may re-declare the retired `new_window`.\nReader: skills (objectstack-ui).\nDedupe: `openNewTab skills` gives only #35870 (the parent, whose skills half is PR #36302).\nGrade: p3."
+}

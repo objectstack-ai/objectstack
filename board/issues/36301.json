@@ -1,0 +1,32 @@
+{
+  "number": 36301,
+  "kind": "issue",
+  "title": "messaging: the approval Slack DM's link is built as origin + in-app path with no Console mount, so it likely opens the same 404 the approval e-mail did before #36247",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T05:06:16Z",
+  "updated_at": "2026-11-22T06:14:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36301",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5krBqrrgxCYgjXmfbv\n\nFiling gate ① · Source: fleet · raised by area a4-B while landing PR #36247 (#34862). Read from source on main b57f778b18, not measured.\n\n## What happens\n`packages/services/service-messaging/src/slack-channel.ts:130-168`: `slackDmText` links the DM title to `absoluteLink(n.actionUrl, origin)`, which is `origin + actionUrl` when `actionUrl` is a path. For an approval, `actionUrl` is the in-app route `/system/approvals?request=ID`, which the Console routes on under its mount (`AuthConfig.uiBasePath`, default `/_console`). The DM link carries no mount, so on a default deployment it should land on the same \"not found\" page the approval e-mail link opened before #36247.\n\n## Done when\n- The Slack DM link opens the Console page under its mount, read from the same one source #36247 uses (the auth service's `getConsoleUrl` / `AuthConfig.uiBasePath`), not a new constant.\n- A sub-path deployment is not prefixed twice (same rule as `consolePageLink`).\n- Measured on a real `os dev` boot with a Slack sink or a captured DM payload: before / after link.\n- Coordinate with #35844 (same function, origin source). One PR may take both; if so, say so on both cards.\n\nreach: approvers who get approvals in Slack; read from source.\nBusiness reason: the one link in the approval DM may open an error page.\nReader: service-messaging; plugin-approvals wiring.\nDedupe: `slack DM link console`, `slack-channel console mount`, `slack link 404` → only #35844 (origin, not mount; related, not the same).\nGrade: p2."
+}

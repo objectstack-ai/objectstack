@@ -1,0 +1,36 @@
+{
+  "number": 36221,
+  "kind": "pull_request",
+  "title": "fix(plugin-detail): a slotted page's record:chatter on the 动态 tab lists the system history alone while the comment panel holds the comments (#36193)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T02:32:20Z",
+  "updated_at": "2026-11-22T04:04:18Z",
+  "closed_at": "2026-11-22T04:04:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T04:04:16Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36221",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuCeTM2qYEuA9dNQrrsVbmgv)_\n\nrepo:objectstack#1 · os-sales · session_01L6bhgXV5qLuX94Bn6aqb4y\n\nFixes #36193\n\n> **Premise.**\n> 1. What the card reads now: #36136 (48c732c4) retired the overview's right rail, so the 「最近动态」 card is gone and the overview lists no comment. The card's 「讨论 (3)」 face came from a slotted page whose `discussion` slot holds `record:chatter`; after #36136 that author's block is drawn on the 动态 tab only, where it still drew 「讨论 (4)」, the 全部动态 filter, every comment and reply and a comment box, beside the comment panel showing the same comment (before: `pr36136/timeline-tab-panel-open-*`).\n> 2. Reading (seat, 2026-11-21 23:06Z): the card's 「不改动态页签」 means the platform's own 动态 tab (its label and the stream the platform draws). The target is the author-placed chatter/discussion block, which now happens to sit inside that tab.\n> 3. `Clause-②: no` (a UI face of an existing block; no contract, permission or spec key).\n\n## What changes\n\n- `renderers/record-chatter.tsx`: while `RecordCommentsInPanelContext` is on and the block is on the default/slotted page (`useDefaultRecordPage()`), a `record:chatter` / `record:discussion` block draws the system entries only: comments and replies filtered out before `applyFeedConfig`, no composer (`onAddComment` withheld, `commentsShown: false`, which also drops the Comments-only filter), a refused or failed comment read not reported (the panel's to say), heading 「动态」 (`detail.timeline`) and empty line `detail.noActivity`. The `(N)` count is the filtered items, so it leaves comments out.\n- `RecordChatterPanel.tsx`: optional `titleLabel` / `emptyLabel` props (default 「讨论」 / 「暂无评论」, unchanged for every other caller); a caller-named heading takes the stream's `Activity` icon instead of `MessageSquare` (L1-c nit, 3efc2936).\n- Test `renderers/__tests__/record-chatter.commentsInPanel-36193.test.tsx` (6).\n\nNot changed: the platform's own `record:activity` stream, the 动态 tab's label (still 「动态」, no count), an authored (`kind: 'full'`) page.\n\n**Phone, after #36208 (merged into this branch at `abe8f8b5`):** #36208 sets `RecordCommentsInPanelContext` to the panel OR the phone comment page, so on the phone too the author's block on the 动态 tab now drops its comments; the phone's comments live on their own page. Before #36208 the phone had no comment surface and kept them.\n\n### Small calls (seat may overrule)\n\n1. Heading is 「动态」, matching the platform stream's heading in the same tab; the 全部动态 filter stays (its Comments-only entry goes).\n2. The switch is \"comment panel offered\", not \"open\", as #36114 uses for the stream.\n\n## Why\n\nCard #36193 (epic #36062 phase 1 wrap-up): with the comment panel open the same comment showed twice, and a resolved thread stayed in the record body.\n\n## Verification\n\n- New test 6/6. Ablation (renderer + panel reverted to main): 4 red, the 2 CONTROL cases green.\n- plugin-detail chatter / timeline / RecordPageColumns / renderers suites: 123 files, 1,274 tests green. app-shell suites naming `record:chatter` / discussion slots / the comment panel: 14 files, 221 tests green.\n- Browser: HotCRM main on `objectstack dev`, console on Vite from this branch, zh-CN, 1440, dpr 2, one comment + one reply on Wayne Enterprises, a local uncommitted slotted `crm_account` page with `slots.discussion: [record:chatter]`. Evidence in the project folder `build-seat1/36193/`:\n  - before (main after #36136): `pr36136/timeline-tab-panel-open-{light,dark}.png`: 「讨论 (4)」, the comment and 「1 条回复」 beside the panel.\n  - after: `after/timeline-tab-panel-open-{light,dark}.png`: 「动态 (2)」, two system rows, no comment box; `after/overview-panel-open-*`: no comment on the overview; tab row 「… 活动 5 动态」 unchanged.\n  - phone: `after/phone-timeline-tab-light.png`: still 「讨论 (4)」 with the comment (no comment surface on the phone yet).\n- Drawer: the comment panel is offered in the drawer too (#36114), so the author's block in the drawer's 动态 tab follows the same rule as on the page.\n- Overlap: `overlap-check.mjs` clean against main (c30ce97c, after #36208) and open heads.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes. (eslint on the three files: 0 errors)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: n/a.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgXV5qLuX94Bn6aqb4y\n\n<!-- signed: repo:objectstack#1 · os-sales · session_01L6bhgXV5qLuX94Bn6aqb4y -->\n"
+}

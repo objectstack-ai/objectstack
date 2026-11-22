@@ -1,0 +1,31 @@
+{
+  "number": 36253,
+  "kind": "issue",
+  "title": "An object declares the states in which a document and its master-detail lines are closed to change (ADR first)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-22T03:39:10Z",
+  "updated_at": "2026-11-22T03:55:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36253",
+  "body": "security#2 · sunhaolin · session_017xRBcW9L8Noz9BxEwjwiov\n\n**Feature, ADR first. Maintainer ruling 2026-11-22, option C** (record 7073676422 on #32004; analysed by an isolated contract-tier thread).\n\n**Rule.** An object declares the states in which it and its `master_detail` lines refuse add, edit, remove and move: for example approved, paid, closed. Approval, payment and closing only set the state. A record leaves the closed state only through a sanctioned action that moves it back. The runtime refuses changes to a closed record and its lines at every door, with one loud refusal.\n\n**Why.** Today the platform unlocks a record when its approval is decided, as `content/docs/automation/approvals.mdx` documents. Apps that need a decided document frozen hand-code it:\n- the showcase's paid-invoice guard hooks (#24731);\n- a hosted app's edit guards.\n\nRemoving a line cannot be guarded without code. Seat ruling 6281609466 on #24684 required \"a named producer beyond this showcase\" before a declarative state lock; that condition is now met. Mainstream ERP modelling is state-driven immutability, with child rows included.\n\n**The ADR settles:**\n- the key's shape on the object;\n- the unit (the record plus its master-detail lines, the same unit the pending approval lock already uses);\n- exemptions (system writes, the record's own delete) and whether a closed document may be deleted;\n- one lock read for both producers (the pending approval lock and the declared closed states).\n\n**Then build cards.** Convert the showcase's paid-invoice hooks to the declaration as the proof.\n\n**Not this card:** the pending-window line lock. It is already on main (#35755), and #36135 lands with it.\n\nRe-check: `git grep -n \"the record unlocks\" origin/main -- content/docs/automation/approvals.mdx` shows today's decided-state behaviour."
+}

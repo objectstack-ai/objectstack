@@ -1,0 +1,37 @@
+{
+  "number": 36307,
+  "kind": "pull_request",
+  "title": "fix(lint): field/embedded-sub-fields fix names the field group that inlines the child",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T05:15:09Z",
+  "updated_at": "2026-11-22T06:44:36Z",
+  "closed_at": "2026-11-22T06:44:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T06:44:34Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36307",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XC63go34oEMBFaBgqpoDC8N)_\nFixes #36281\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:作者给「组合/重复」字段声明了子字段时,检查工具打印的修复建议以前说「建子对象并设成表格内联编辑」就能在父表单里编辑明细;现在改成「建子对象,并在父对象的字段分组里点名它」,同时说明内联方式只决定怎么编辑行。\n- 为什么做:属于「检查工具的建议要和平台真实规则一致」这条线,替照着建议改元数据的作者和 AI 解决「照做之后父表单里没有明细行、子对象只是一个标签页」的问题。\n- 出错会怎样:只改一句提示文字和两处测试,规则何时触发、级别和位置都不变;写错的话作者看到的仍是一句不准的建议,直接回退这个 PR 即可。\n- 要你做什么:无。\n\n## What changes\n\nState at head `bc156e739` (one commit).\n\n- `packages/lint/src/data-model-rules.ts`: the `field/embedded-sub-fields` fix line. It said the child object plus \"`inlineEdit: 'grid'` edits it inline\". Since the parent-field-group rule (#35889, with #35921), a child is inlined in the parent's form only when a field group of the parent names it in `relatedList`; the FK's `inlineEdit` only picks grid or form. The line now reads: \"Make the typed list a child object whose `master_detail` field points back here, name it in a `fieldGroups[].relatedList` here (`inlineEdit` only picks how rows are edited), and remove the key.\" (193 characters, under the 200 cap.) This follows the spec text `EMBEDDED_JSON_TYPED_LIST` and the rule's `os explain` paragraph, which already name the field group.\n- Message text only: the rule id, severity, path and when it fires are unchanged.\n- `packages/lint/src/data-model-rules.fix-lines.test.ts`: the exact-text pin of this fix line is updated to the new text (it asserts the hint text, nothing else).\n- `packages/lint/src/data-model-rules.embedded-sub-fields.test.ts`: new top-level `describe` in the rule's existing harness file: the fix names `master_detail`, `fieldGroups[].relatedList` and \"`inlineEdit` only picks how rows are edited\", and no longer carries `inlineEdit: 'grid'`.\n- `.changeset/36281-embedded-sub-fields-hint.md`: `@objectstack/lint` patch.\n\nRead first: `packages/lint/src/data-model-rules.ts` (the one changed string, R14), then the new `describe` at the end of `data-model-rules.embedded-sub-fields.test.ts`.\n\nTwo-minute check: `pnpm --filter @objectstack/lint exec vitest run src/data-model-rules.embedded-sub-fields.test.ts src/data-model-rules.fix-lines.test.ts` shows 2 files, 26 tests passed.\n\n## Tests\n\nAll readings at head `bc156e739`.\n\n<details><summary>Targeted tests, typecheck, whole lint package</summary>\n\n- `pnpm --filter @objectstack/lint exec vitest run --maxWorkers=2 src/data-model-rules.embedded-sub-fields.test.ts src/data-model-rules.fix-lines.test.ts`: Test Files 2 passed (2), Tests 26 passed (26).\n- `pnpm --filter @objectstack/lint typecheck`: exit 0 (tsc --noEmit, then check:test-typecheck OK).\n- `pnpm --filter @objectstack/lint exec vitest run --maxWorkers=2`: Test Files 224 passed (224), Tests 9409 passed, 5 skipped (9414).\n\n</details>\n\n<details><summary>Ablation (one-time, not kept)</summary>\n\n`node scripts/ablation-replace.mjs` swapped the new second half of the fix back to \"`inlineEdit: 'grid'` edits it inline\": anchor 1 to 0, blob f16e42de7f96 to 1f785d0f961a. Both pins went red: \"routes to `fieldGroups[].relatedList` and gives `inlineEdit` only the form factor\" and \"field/embedded-sub-fields: one line, whatever the type, the keys or the names\" (2 failed, 24 passed). Restored: blob equals HEAD (f16e42de7f96), `git diff HEAD` empty. Vitest reads `src/` through the relative import, so no rebuild was needed.\n\n</details>\n\n<details><summary>Gates run locally</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands` derived 63 commands for this diff. 61 exit 0 (`check:docs-transcript-drift` and `check:lean-entry-closure` after building lint and objectql; first run exit 3, prerequisite). 2 NOT MEASURED, exit 3 prerequisite: `check:dual-build-cjs-loads` (needs a full `pnpm build`; CI runs it) and `check-plugin-teardown-shape.mjs --self-test` (checker health only; needs an unshallowed clone). `--ran` reconciliation: 63 derived, 61 run, 2 NOT-MEASURED, 0 UNRUN, exit 0.\n\n</details>\n\n## Acceptance notes\n\n- Other `inlineEdit` hits in `packages/lint/src` (non-test), left as they are: `data-model-rules.ts` doc comments near the bulk rule, the group map and R5 already say the field group, not `inlineEdit`, inlines the child; `validate-field-consumers.ts` reads `inlineEdit` only as the form factor (grid or form); `showcase-shape.fixtures.ts` sets `inlineEdit: true` on a list view, a different key.\n- Outside `packages/lint`, `content/docs/data-modeling/field-types.mdx` says \"`inlineEdit: 'grid'` edits the rows as an inline grid on the parent's form (where a field group of the parent names the child)\". It states the group condition, so it is not wrong, only ordered the old way. Not changed here (not on this card's file surface).\n- The pin went into the rule's existing harness file as a top-level `describe`, not a new card-named file (AGENTS.md: a new pin for a component with a shared harness goes into that file).\n\n## Verification\n\nLocal only; CI runs the full farm. Net added lines: +28 / -4 (net +24) against merge base 76cb3666.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5kDGa1ViantgrfH797)_\n"
+}

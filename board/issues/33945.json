@@ -2,8 +2,8 @@
   "number": 33945,
   "kind": "issue",
   "title": "ui i18n: split the 11 large locale files by feature namespace with a script, move-only (hot-file card D)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:fleet",
     "domain:server",
     "enhancement",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-15T14:45:29Z",
-  "updated_at": "2026-11-19T06:09:50Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T06:46:34Z",
+  "closed_at": "2026-11-22T06:46:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33945",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jRsWwTRkuRCyQwvpAG\n\nFiling gate ③: maintainer-directed. On 2026-11-15 the maintainer chose 「今天改规则,并立全部 6 张卡」 on the hot-file serialization decision card (consequence as shown: 取消 protocol.ts 独占、关闭 #25467 和 #24586;卡 A 到 F 交各车道立卡,大 PR 和上限门禁仍逐个等您批准). Measurements: the hot-file analysis report (project artifact), re-runnable on request. Cross-lane rule (2026-11-15): no live seat in the owning lane, so `domain:server` seat 5 files and builds it; the owning lane is notified.\n\n## Card D (owning lane: ui)\n\nSplit the 11 large `ui/packages/i18n` locale files by feature namespace, with a script, so new copy adds files instead of editing the shared large ones.\n\n- Move-only: no key or value changes; the script proves key-set and value identity per locale before/after.\n- Update loaders and the i18n gates (en drift, key census, zh-Hant generation) to the new layout in the same PR.\n- ⛔ A PR over 3,000 lines needs the maintainer's approval before it opens (the ruling keeps large PRs one by one): measure the diff size first and ask through the seat."

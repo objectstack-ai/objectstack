@@ -1,0 +1,30 @@
+{
+  "number": 36369,
+  "kind": "issue",
+  "title": "fix(messaging): the one-time digest conversion rewrites only rows that held none before its claim (follow-up of #36326)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T08:14:01Z",
+  "updated_at": "2026-11-22T08:14:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36369",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5pb2t8Z8C64PkPyVt1\n\nFollow-up of PR #36326 (#35123, ruling B 7073270426), carried from contract review 7076382062. Filed under the maintainer's 2026-11-22 07:49Z rule that should-fix items go to their own card.\n\n**S1 (should-fix).** `packages/services/service-messaging/src/preference-digest-conversion.ts`: the one-time conversion of legacy digest `none` to unset re-reads `where: { digest: 'none' }` after each batch, and its compare-and-set only checks that the row still holds `none`. During the boot pass, a row that newly holds `none` (a new row with an explicit `none`, a member re-picking `none`, or a write from a not-yet-upgraded node in a rolling deploy) is also rewritten to unset, which ruling B item 4 forbids (from then on `none` is a member's real choice). The window is the length of the boot pass. Fix suggested by the review: take the id set before the ledger claim and rewrite only that snapshot, paging by an id cursor instead of re-reading the filter. This also covers the case where the claim fails after the read and the next boot converts a `none` written in between.\n\n**Also on this card (optional, from the same review):**\n- The Notification Settings page has no \"follow the organization again\" action for digest or quiet hours; once a member saves either from the page they cannot return to following the organization from the page (the Setup grid can clear the field). Visible behaviour: the seat decides whether to add it.\n- `QUIET_HOURS_OFF` is spelled in both `preference-resolver.ts` and `ui/…/myPreferences.ts` with no pin tying them together.\n\nDone when: S1 converts only the pre-claim snapshot, pinned by a test that writes `none` during the pass and sees it survive (ablation red); the optional items are either done or split off."
+}

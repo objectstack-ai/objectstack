@@ -14,18 +14,20 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-21T10:53:42Z",
-  "updated_at": "2026-11-21T11:49:21Z",
+  "updated_at": "2026-11-22T07:49:08Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36046",
   "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFound by #35688 S3's browser run (PR #36045; evidence `build-seat1/35688/S3/browser-evidence.md` in the project folder). Both predate S3. Under epic #35683.\n\n## What happens\n\n1. After a user is picked in a people cell of the main list, the cell shows the raw user id until the next fetch of the list, instead of the person's name.\n2. The people cell's avatar initials can render as `A(` (a bracket taken as the second initial) for some display names.\n\n## To do\n\n1. After a people pick commits, the cell shows the picked person's name (and avatar) at once, from the pick itself, without waiting for a re-fetch.\n2. Initials take letters only: skip brackets, punctuation and spaces; fall back to one letter.\n3. Pin both: a pick shows the name before any refetch; a display name such as \"Alice (Sales)\" gives `AS` or `A`, never `A(`.\n\n## Acceptance\n\n- Picking a person in a list cell never shows an id, and initials never contain punctuation."

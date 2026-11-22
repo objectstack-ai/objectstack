@@ -1,0 +1,34 @@
+{
+  "number": 36257,
+  "kind": "pull_request",
+  "title": "fix(studio): kanban card click-to-open offers only Default and Don't open",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T03:53:01Z",
+  "updated_at": "2026-11-22T04:37:39Z",
+  "closed_at": "2026-11-22T04:37:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T04:37:37Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36257",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XP3RHGWUG7UH3fNa4tBa9UC)_\nFixes #35936\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 在 Studio 里编辑看板视图的作者:卡片设置「点击打开」以前列出四种方式,现在只列「默认」和「不打开」;已经存了侧边抽屉、记录页或新窗口的视图会显示该值并标「已弃用」,选「默认」即可清掉。\n- 承接对象列表「打开记录」新规则(点名称进整页、悬停图标开侧边):列表视图上的打开方式已废弃,这里不再让作者选一个不生效的选项。\n- 出错的话只影响这个下拉的显示,不改任何已存数据,打开视图不写入;可以直接撤回。\n- 无\n\n## What changes\n\n- The kanban card section of Studio's list-view inspector (`KanbanCardSection` in `ObjectListViewInspector.tsx`) offers `navigation.mode` as Default (no key) and `none` only. `drawer`, `page` and `new_window` parse on an object's list and change nothing since the deprecation in #35854, so they are no longer offered.\n- A view that already stores one of those three draws it as one extra row, first, flagged with the existing `engine.form.deprecated` flag through `flagUnknownValue` (`drawer (deprecated)` / `drawer（已弃用）`), the same rule `InspectorSelectField` applies to a stored value its roster does not offer. Picking Default removes the key. Opening the view writes nothing. A value outside the spec union keeps its raw monospace row, as before.\n- The studio catalogue (`en`, `zh`) drops `engine.studio.inspector.listView.kanbanCard.mode.drawer`, `.mode.page` and `.mode.newWindow`: the flagged row shows the stored value, not the old label, so nothing reads them.\n- No spec change: `navigation.mode` stays as #35854 left it, and page blocks keep every mode.\n\n**Read first** (by risk):\n1. `ObjectListViewInspector.tsx`, the `OFFERED_NAVIGATION_MODES` constant and the click-to-open `SelectContent`: the only behaviour change.\n2. `StudioDesignSurface.kanbanCardSelection-12725.test.tsx`, the new top-level `describe` \"click to open offers only the default and none on an object's list\".\n\n**Two-minute check**: `pnpm --dir ui exec vitest run packages/app-shell/src/views/studio-design/StudioDesignSurface.kanbanCardSelection-12725.test.tsx` prints `Tests  19 passed (19)`.\n\n## Tests\n\n- Rewritten: the case that picked `drawer` now picks `none` and expects `navigation: { mode: 'none' }`.\n- New, in the file's shared harness (a fourth view `showcase_task.legacy` storing `navigation: { mode: 'drawer' }`):\n  - a view with no stored mode lists exactly Default, Don't open;\n  - a stored `drawer` shows on the trigger as `drawer (deprecated)`, the list is that row then Default, Don't open, and no draft is saved after the 1.5 s autosave debounce has passed;\n  - picking Default saves the body without `navigation` (equal to the board's config) and it parses as `ListViewSchema`.\n\nReadings on head `3bcbac0518` (shared box, all under `scripts/pm/os-verify-lock.sh` except the `check:*` gates):\n\n<details><summary>Test and type-check readings</summary>\n\n- `pnpm --dir ui exec vitest run --maxWorkers=2 packages/app-shell/src/views/studio-design/StudioDesignSurface.kanbanCardSelection-12725.test.tsx`: `Test Files  1 passed (1)`, `Tests  19 passed (19)`, lock `VERDICT command-exit 0`.\n- `pnpm --dir ui exec vitest run --maxWorkers=2 packages/i18n/`: `Test Files  105 passed (105)`, `Tests  1962 passed | 13 skipped (1975)`, exit 0.\n- `pnpm --filter @object-ui/app-shell run type-check`: exit 0. `pnpm --filter @object-ui/i18n run type-check`: exit 0.\n- `pnpm --dir ui run check:i18n-keys`, `check:i18n-drift`, `check:i18n-dead-keys`: exit 0 each.\n\n</details>\n\n<details><summary>Ablation (one, then restored)</summary>\n\nCommitted first, then `node scripts/ablation-replace.mjs` re-offered `drawer` by adding `{ mode: 'drawer', … }` to `OFFERED_NAVIGATION_MODES` (anchor 1 to 0, blob `222e503bd324` to `dc45cfc280a8`). The file went red: `Tests  2 failed | 17 passed (19)`, the two failures being \"a view with no stored mode is offered exactly the default and none\" and \"a stored drawer shows flagged deprecated, …\". The tool restored the file: blob back to `222e503bd324`, `git diff HEAD` empty.\n\n</details>\n\n## Acceptance notes\n\n- Wording: the card asks for a row marked 「已废弃」; the row uses the existing sourced flag `engine.form.deprecated`, which reads 「（已弃用）」 in zh. Same meaning; reusing it avoids a second deprecated-flag dialect in the studio catalogue.\n- The flagged row stays selectable (re-picking the current value changes nothing), as `InspectorSelectField` documents for every stale-value row, rather than disabled as the dispatch's suggested route proposed.\n- The card names 11 locale packs. The three keys lived only in the studio namespace, which ships `en` and `zh` (every other language falls back to `en`), so they were deleted from those two files.\n- Other Studio surfaces for an object list's `navigation.mode` (not page blocks): no other bespoke inspector offers the modes. The generic metadata form for a view labels `navigation.mode` from the spec's JSON Schema and its zh help text already says 「[已弃用]」; its select was not driven in a browser here (not measured), and it is not changed.\n\n## Verification\n\n<details><summary>Derived gate set and reconciliation</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands` on this diff: 38 commands. All 38 ran locally with exit 0; `pnpm check:type-check-debt` first got no lock turn (exit 3, NOT MEASURED) and was re-run inside a lock hold: exit 0, `check-type-check-coverage --re-measure: OK`.\n- `dispatch-gates --ran` with exit codes: `38 derived famil(ies) accounted for — 38 run, 0 NOT-MEASURED (a DERIVED zero …)`.\n- `node scripts/pm/overlap-check.mjs --branch=claude/issue-35936-kanban-open-mode`: `VERDICT clean exit 0` before each push.\n- The full farm (Lint & Repo Gates, Test UI, Type Check UI, …) is CI's.\n\n</details>\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5okniknzVVR3KTSVr1)_\n"
+}

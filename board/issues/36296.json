@@ -1,0 +1,34 @@
+{
+  "number": 36296,
+  "kind": "pull_request",
+  "title": "fix(plugin-detail): after a 409, the stage menu asks what the re-read record needs",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T04:54:45Z",
+  "updated_at": "2026-11-22T06:26:42Z",
+  "closed_at": "2026-11-22T06:26:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T06:26:40Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36296",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XTRdLmK9YYgMSCJ7NH2PuUY)_\n\nFixes #36036\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 记录详情页抬头的阶段下拉菜单:保存遇到「别人刚改过这条记录」后,弹窗按重新读到的记录重算要填的字段,别人已填好的字段不再出现,也不会被覆盖;之前会被覆盖。\n- 属于「记录页阶段推进」这一组改进的收尾,补上前一张卡(阶段弹窗改用共享补填对话框)评审时留下的一个缺口。\n- 出错时最坏是弹窗仍要求填写已被别人填好的字段(即回到改动前的行为);只改一个界面文件,可直接撤回。\n- 无\n\n## What changes\n\n- `useStageChange` (`ui/packages/plugin-detail/src/renderers/recordPathStageChange.tsx`): the header stage menu's dialog no longer shows the field list frozen at the pick. Each render it asks `collectRequiredWhenPromptFields` (the one shared evaluator, unchanged, same `fillable`) against the record as it stands. After a 409 the re-read row arrives through the record context, so the list follows it: a field another writer filled leaves the dialog, and the dialog sends only the fields it shows, so the move no longer carries it.\n- A value the reader typed for a pick-time field that is no longer asked is also kept out of the chained-requirement check (`moreFields`). Otherwise a typed `loss_reason: other` would still ask for `loss_detail` after the other writer stored a different reason.\n- When nothing is left, the dialog is the move's confirmation again: record name, the stage row, \"Move this record to X?\", Cancel and Move, plus the 409 note at its foot.\n- Why compute at render and not in the 409 handler: on the record page `RecordContext.refresh` is `handleManualRefresh`, a synchronous `notifyDataChanged({ objectName: '*' })` that returns `undefined`. `await ctx.refresh()` resolves before the re-read lands, and the handler's `record` closure is still the pre-409 row. A recompute inside the handler would read the stale row.\n\n## Tests\n\nNew top-level `describe('#36036 …')` in the component's existing harness file `RecordStageMenu-35891.test.tsx`, which already holds the `#35956` block. Its host models the page's refresh: the notice returns at once and the re-read row lands on a later tick.\n\n1. 409 where the other writer filled `loss_reason` → the field leaves, the description becomes the confirmation, no textbox. Move sends `{ stage: 'closed_lost' }` with the new `ifMatch` and no `loss_reason`.\n2. CONTROL: a 409 that filled nothing (only the name changed) keeps `loss_reason` and the typed `Price`, and sends both with the new version.\n3. Chained: typed `other` brought in `loss_detail`; the other writer stored a different reason → both leave, Move sends the stage alone.\n\n<details><summary>Local runs (head 00948a77)</summary>\n\nAll under `scripts/pm/os-verify-lock.sh` (shared box), head `00948a77`:\n\n- `pnpm exec turbo run build --filter='@object-ui/plugin-detail^...' --concurrency=2`: `Tasks: 52 successful, 52 total`\n- `pnpm --filter @object-ui/plugin-detail run type-check` (`tsc --noEmit && tsc -p tsconfig.test.json`; the test project compiles the tests): exit 0\n- `pnpm --filter @object-ui/plugin-detail test`: `Test Files 403 passed | 1 skipped (404)` · `Tests 3729 passed | 18 skipped (3747)` · `VERDICT command-exit 0`\n- `RecordStageMenu-35891.test.tsx` alone: `Tests 25 passed (25)` (22 existing + 3 new)\n- `pnpm --dir ui exec vitest run --maxWorkers=2 scripts/`: `Test Files 172 passed | 2 skipped (174)` · `Tests 5122 passed | 2 skipped (5124)` · `VERDICT command-exit 0`\n- `dispatch-gates --commands` (38 families) run and reconciled with `--ran`: 38 derived, 37 run at exit 0, 1 NOT MEASURED. `pnpm check:type-check-debt` exited 3 (PREREQUISITE NOT MET: its whole-workspace re-measure never got a turn on the shared lock). This is a declared narrowing; CI runs it.\n- `overlap-check.mjs`: `VERDICT clean exit 0` against origin/main a6756a28.\n\n</details>\n\n<details><summary>Ablations (one-off, under the verify lock, via scripts/ablation-replace.mjs; restored, blob == HEAD, git diff HEAD empty)</summary>\n\n- `fields={asked.map(label)}` → `fields={stage.fields.map(label)}` (the pre-fix frozen list): `Tests 2 failed | 1 passed | 22 skipped (25)`. Legs 1 and 3 red, the control green.\n- `{ ...sendable(values), [statusField]` → `{ ...values, [statusField]`: `Tests 1 failed | 2 passed | 22 skipped (25)`. Only the chained leg is red.\n\n`@object-ui/*` resolves to source through the ui vitest alias table, and the test imports `../RecordStageMenu` relatively, so no `dist/` sits in the path.\n\n</details>\n\n## Acceptance notes\n\n- Test placement: the claim's file surface named \"a new card-named test\". The pin went into the existing `RecordStageMenu-35891.test.tsx` as a top-level `describe` instead, per AGENTS.md (\"A new pin for a component that already has a shared harness file goes into that file as a top-level `describe`, not a new file\"). That file is where the `#35956` pin for this same dialog already lives.\n- Observation, not filed (read inference only): in an `embedded` record view (list drawer, split preview), `RecordDetailView` passes `refresh={undefined}` to the header's `RecordContextProvider`. There the 409 branch's `ctx?.refresh?.()` re-reads nothing, so a second Move would carry the same stale `ifMatch`. Not reproduced. Whether the stage menu renders in embedded mode was not measured.\n\n## Verification\n\n- Read first: (1) `recordPathStageChange.tsx` `renderFieldsDialog`, the `asked` / `noLongerAsked` / `sendable` lines (the risk hunk: what the dialog shows and sends). (2) The `#36036` describe's `mountReRead` host, which must model the page's refresh honestly (the row lands after the notice returns).\n- Two-minute check: `pnpm --filter @object-ui/plugin-detail exec vitest run --root ../.. --maxWorkers=2 packages/plugin-detail/src/__tests__/RecordStageMenu-35891.test.tsx -t 36036`. Expect 3 passed.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5oLLK7uoxp33riiBJL)_\n"
+}

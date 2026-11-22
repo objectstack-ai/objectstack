@@ -1,0 +1,37 @@
+{
+  "number": 36330,
+  "kind": "pull_request",
+  "title": "docs(skills): a card filed from a scenario-eval round leaves eval-run off",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T06:18:41Z",
+  "updated_at": "2026-11-22T07:46:13Z",
+  "closed_at": "2026-11-22T07:46:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-22T07:46:11Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36330",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbCxiFE11rsKwyNffJZKYqJs)_\n\nFixes #35614\nClause-②: no\nMetadata-protocol: none\nRule-change: yes\n\n## 维护者速读\n\n- 用户无感:评测席从评测轮里立出的问题卡,今后不再带评测记录的标签,像普通卡一样进入分诊。\n- 替评测轮补上测试运行早已有的同一条规则:带着记录标签的卡会被所有巡查跳过,缺陷就没人读到。\n- 出错最坏是评测席照旧给问题卡打记录标签、那张卡不被巡查看到;改动只是技能里的一句话,可直接撤回。\n- 这句改了立卡时该打什么标签,属于车队规则改动,需要你本人审阅并合并。\n\n## What changes\n\n`.claude/skills/scenario-eval/SKILL.md` section 6 (the findings routing table) gains one sentence, the twin of the QA runner's rule (`docs/qa/platform-checklist/RUNNER.md`: \"A defect card does not carry `qa-run`; it enters triage first-touch normally\", and its `checklist-test` mirror 「缺陷卡不挂 `qa-run`,…,照常进首触」):\n\n> 立出的卡 ⛔ 不挂 `eval-run`,照常进首触。\n\nWhy it matters: the patrols (first-touch sweep and the grade row among them) skip `eval-run`, so a finding card filed with that label beside it is read by no patrol. A security finding gets no card at all, so the sentence does not reach it.\n\nThe growth is paid inside the same section, with no rule dropped (13817 -> 13813 bytes, 165 -> 165 lines):\n\n- the security row no longer restates what Results and Findings carry; it points to section 5, which states both (leak flags as a count only; the Findings line is the fixed sentence of `security-findings.md` section 4). The row keeps 只照 `security-findings.md` and ⛔ 不写内容、不立公开卡.\n- the leak sentence is tightened (是评分误判还是真泄露 -> 评分误判与真泄露; 最后一行 -> 末行), same meaning.\n\nRead first (by risk):\n\n1. The security row hunk: confirm section 5 still carries everything the row used to restate (lines 133 and 135-136 of the new file).\n2. The new sentence on line 158.\n\nTwo-minute verification: `git diff origin/main...HEAD -- .claude/skills/scenario-eval/SKILL.md` shows two changed lines; `grep -n 'eval-run' .claude/skills/scenario-eval/SKILL.md` answers line 125 (the record's own label) and line 158 (the new rule).\n\n## Tests\n\nNo test or gate reads this section: `git grep -c -I -e \"scenario-eval/SKILL\" -- ':!*.md'` has zero hits (exit 1), while the control spelling `pm-dispatch/SKILL` hits 24 files on the same tree, so no pin to extend. Prose only, so no ablation.\n\n## Acceptance notes\n\n- Premise correction: the card asks to keep the file \"at or under its line ceiling\". No ceiling governs this file: `scripts/pm/check-skill-line-ratchet.mjs` CEILINGS does not list `.claude/skills/scenario-eval/SKILL.md`, and neither does the issue-id lint's scan set. The growth was paid anyway (net -4 bytes) as the dispatch asked, with no ceiling edit.\n- `Rule-change: yes`: the sentence changes which labels a filer writes. The maintainer's reopen words on the card (「影响评测的卡不能关，这个会影响到AI的开发效果」) keep the card open; they do not order this text, so no `ruled` line is claimed. Under that declaration this PR lands the Tier H way.\n\n## Verification\n\nGate union on head `8e913182` (merged with origin/main `99fbaa6d`), derived with `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` and reconciled with `--ran`: \"18 derived famil(ies) accounted for — 18 run, 0 NOT-MEASURED (a DERIVED zero — all 18 recorded an exit code and none of them is 3)\".\n\n<details><summary>Local gate readings (exit code captured before any pipe)</summary>\n\n- `node scripts/check-closing-keyword-parity.mjs` :: exit 0\n- `node scripts/check-closing-keyword-parity.mjs --self-test` :: exit 0\n- `node scripts/check-comment-mask-corpus.mjs` :: exit 0\n- `node scripts/pm/check-harness-current.mjs --self-test` :: exit 0\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions` :: exit 0\n- `pnpm check:adr-anchors` :: exit 0\n- `pnpm check:agent-test-spelling` :: exit 0\n- `pnpm check:cross-package-test-inputs` :: exit 0\n- `pnpm check:doc-authoring` :: exit 0\n- `pnpm check:driver-memory-census` :: exit 0\n- `pnpm check:gitlink-declared` :: exit 0\n- `pnpm check:nul-bytes` :: exit 0\n- `pnpm check:pm-governed-merges` :: exit 0\n- `pnpm check:pm-record-recognisers` :: exit 0\n- `pnpm check:pm-settings-deny-roster` :: exit 0\n- `pnpm check:refd-timer-probe` :: exit 0\n- `pnpm check:skill-frame-sync` :: exit 0\n- `pnpm check:watch-hint-literal` :: exit 0\n- `pnpm check:pm-governed-prose` :: exit 0\n- `node scripts/pm/check-skill-line-ratchet.mjs` :: exit 0\n- `pnpm check:skill-top-level-keys` :: exit 0\n- `node scripts/check-skill-links.mjs` :: exit 0\n- `node scripts/pm/check-skill-id-lint.mjs` :: exit 0\n\nThe last five are beyond the derivation (the skill gates the card names). `check:doc-formula-expressions` first exited 3 (PREREQUISITE: `@objectstack/formula` / `@objectstack/lint` not built); it was rebuilt under the verify lock and re-run green. CI owns the full farm.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QsR2jTeURPvEm465RcoYEC\n\n<!-- signed: repo:objectstack#7 · zhuangjianguo · session_01QsR2jTeURPvEm465RcoYEC -->\n"
+}

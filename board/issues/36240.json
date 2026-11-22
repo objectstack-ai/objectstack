@@ -1,0 +1,29 @@
+{
+  "number": 36240,
+  "kind": "issue",
+  "title": "专题：通知渠道（站内、邮件、Slack 送达可靠；个人偏好与免打扰；Teams、企业微信的范围）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T03:09:03Z",
+  "updated_at": "2026-11-22T03:09:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36240",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\n立卡门类别：专题父单（`tracking`，无 pm 状态，不派发；子卡各自定级派发）。维护者 2026-11-22：「同意开专题」「剩下5个也开」「专题不需要挂靠，在分区下就行」。\n\n## 目标\n通知按每个人的偏好，可靠地送到站内、邮件和 Slack；Teams 和企业微信做到什么范围由维护者决定。\n\n## 完成标准\n- 个人设的「不汇总」「不设免打扰」能覆盖组织默认；偏好和 Slack 绑定列表不再有静默的一万行上限。\n- Slack 绑定提议有冷却时间，被限流时回 429，过期的提议不再挡住别人；只用组织令牌的部署不需要填占位令牌。\n- Teams 和企业微信有明确的版本划分和开工结论。\n\n## 子卡\n- #35123（p1）成员自己设的「不汇总」或空的免打扰时段，回落成了组织默认。\n- #35136 读取组织偏好时有一万行上限，而且不排序。\n- #35791 只用组织级 Slack 令牌时，插件仍要求一个静态机器人令牌。\n- #35809 Slack 绑定提议没有按人冷却。\n- #35810 已失效的 Slack 绑定提议挡住了同邮箱的下一个人。\n- #35861 管理员的 Slack 绑定列表最多只返回一万条。\n- #35530 站内收件箱角标的查询没有 created_at 索引。\n- #35668 调研：Teams 个人通知。\n- #35669 调研：企业微信应用消息渠道。\n\n## 待维护者定的\n- #35123：方案 A，个人明确设的「不汇总」和空免打扰覆盖组织默认；方案 B，保留回落并写明。\n- #35668 / #35669：两者各放进哪个版本、要不要开工。企业微信还要定走自有渠道还是走 bridges（#27314）。\n- #35136 / #35861：两个一万行上限按同一种办法修，改成按顺序分页。"
+}

@@ -20,11 +20,11 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T03:41:26Z",
-  "updated_at": "2026-11-19T03:50:56Z",
+  "updated_at": "2026-11-22T04:47:15Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35307",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CZiaBg6rk7dpy1s9Me\n\nFiling gate: ② out-of-scope finding owed by the L1 ACCEPT of PR #35292 (comment 6998964493, 范围外去向 (a)), from the #34175 os-dev report. ⛔ Not a claim; triage sets lane and grade.\n\n## What the user sees\n\nIn the ⌘K palette and global search, a `sys_record_share` hit is titled by a raw principal id (a user, role or group id), not by who the record is shared with.\n\n## Why (read from source and the built spec; not measured at a public door)\n\n- `sys_record_share.nameField` is `recipient_id`, a `Field.text` polymorphic principal id paired with `recipient_type`, not a lookup.\n- PR #35292 (#34175) makes `searchAll` follow a reference-typed `nameField` (lookup / master_detail / user / tree) to the target's ADR-0079 title. A text field is not a reference, so this producer, which #34175 named, is not changed by that fix. `canServeApiOperation({ apiMethods: ['get','list'] }, 'search')` answers true, so the object is searchable.\n\n## Fix direction (a different design from #34175)\n\nTitle the hit through a `recipient_type`-keyed directory read (user / role / group), the same read the console's recipient-picker face performs, run as the searcher, with the bare id kept for a refused reader (the #34175 rule).\n\n## Reader\n\n`packages/metadata-protocol` record reads (`domain:server`), or whoever owns the record-share surface.\n\nDedupe: open-issue search `record share palette title`, `recipient_id raw id`, `search title polymorphic recipient` → none."

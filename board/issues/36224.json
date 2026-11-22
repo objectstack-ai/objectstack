@@ -1,0 +1,37 @@
+{
+  "number": 36224,
+  "kind": "issue",
+  "title": "Skill text: master-detail inline editing still says `inlineEdit: true` puts the child grid in the parent form; since #35921 a parent field group must name it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T02:36:09Z",
+  "updated_at": "2026-11-22T05:46:22Z",
+  "closed_at": "2026-11-22T05:45:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36224",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFiling gate: ① a product defect (AI taught wrong) with a named landing. Source: the #35902 slice-2 card thread, found while writing PR #36222 and left out of it because it is form entry and spans three other files.\n\n## What is stale\n\nSince #35921 (#35889), a master-detail child is a tab by default, and it goes into the parent's form or field area only when a parent field group names it (`fieldGroups[].relatedList`). Three skill texts still teach the old rule, that `inlineEdit: true` on the child alone puts the child grid into the parent form:\n- `skills/objectstack-data/rules/relationships.md`, section \"Inline Editing\".\n- `skills/objectstack-ui/rules/list-views.md:370`.\n- `skills/objectstack-ui/SKILL.md:48`.\n\n## Why\n\nAn AI build that follows these lines writes `inlineEdit: true` and expects line items in the parent's form. On main it gets a tab, so the invoice and quote forms that users fill in have no lines.\n\n## Done when\n\n- The three places teach the current rule (a parent group names the child list; `inlineEdit` controls in-place editing only), each with one minimal example and the \"without it, nothing changes\" line.\n- An eval case: 「新建报价单时在表单里直接录明细」 produces the group pointing at the child list.\n- The bytes are paid for by stale text in the same files (ratchet ceilings unchanged). `domain:skills` PR.\n\nReader: `domain:skills`; epic #35896 neighbour (`Skills-docs` follow-up of #35921).\n\nDedupe: `inlineEdit 子表 表单 技能`, `inlineEdit master detail skill` (objectstack issues, open) → none; #35902 covers tabs and groups, not form entry."
+}
