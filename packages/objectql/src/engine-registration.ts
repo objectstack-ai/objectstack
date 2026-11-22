@@ -415,6 +415,12 @@ export class RegistrationFacet {
                   // applied by the registry fold after every contributor's
                   // fields are merged (`applyExtensionPlacements`).
                   place: ext.place,
+                  // [ADR-0146 D10] The whole arrangement the paired `.custom`
+                  // package declares — applied by the registry fold, last
+                  // (`applyCustomArrangement`), which skips any other
+                  // package's and names it.
+                  fieldGroups: ext.fieldGroups,
+                  relatedLists: ext.relatedLists,
               };
               // Register as extension (namespace is undefined since we're targeting by FQN)
               this._registry.registerObject(stampPackage(extDef, id, version), id, undefined, 'extend', priority);

@@ -16,8 +16,15 @@
  * 2. **A base field changes only within a display-property whitelist** (Q7).
  *    {@link BASE_FIELD_DISPLAY_WHITELIST} is that whitelist: the closed constant
  *    the write gate reads, never a judgement it makes.
+ * 3. **Only the paired `.custom` package arranges the whole record page**
+ *    (maintainer, verbatim: 「软件包字段、子表自定义分三种，原始软件包，继承软件包和环境管理员覆盖，
+ *    继承软件包 我记得已经有一套标准，只能申明插入位置，原始软件包、环境管理员 应该可以申明完整的配置」).
+ *    {@link CUSTOM_ARRANGEMENT_KEYS} are the two keys its object extension
+ *    writes, in an object's own shape; any other package's extension places
+ *    what it brings with `place`, and is refused these keys at publish, at
+ *    `os validate` and at the install door.
  *
- * Constants and one pure predicate, imports nothing. The shape that carries a
+ * Constants and pure predicates, imports nothing. The shape that carries a
  * per-field patch is `ObjectExtensionSchema.fieldPatches`
  * (`data/object.zod.ts`), its keys derived from the whitelist below; the merge
  * that applies it is not declared in `packages/spec`.
@@ -71,6 +78,15 @@ export function isExtensionFieldName(name: unknown): boolean {
  * enters by a recorded decision, because widening a published whitelist is
  * reversible and narrowing it is not. `field-customization.test.ts` checks that
  * every member exists on `FieldSchema` and that none is structural.
+ *
+ * `hidden` was measured against the test and stays OUT: it is not display-only.
+ * A hidden field is left out of the object's search companion column, so the
+ * stored `__search` value changes; a form's required verdict reads it
+ * (`required && hidden !== true`), so a validation verdict changes; and the
+ * default `search` and export columns drop it. The environment keeps a base
+ * field off the record page and the forms in its arrangement instead: the
+ * paired `.custom` extension's `fieldGroups` lists the field in a group whose
+ * `visibleWhen` is false ({@link CUSTOM_ARRANGEMENT_KEYS}).
  */
 export const BASE_FIELD_DISPLAY_WHITELIST = Object.freeze({
   /** Keys of the base field itself. */
@@ -83,3 +99,33 @@ export const BASE_FIELD_DISPLAY_WHITELIST = Object.freeze({
 export type BaseFieldDisplayProperty = (typeof BASE_FIELD_DISPLAY_WHITELIST.field)[number];
 /** A key of one base field option the extension may patch. */
 export type BaseFieldOptionDisplayProperty = (typeof BASE_FIELD_DISPLAY_WHITELIST.option)[number];
+
+/**
+ * [ADR-0146 D10] The keys of an object extension only a base's paired
+ * `.custom` package writes: the whole field arrangement and the whole tab
+ * list of the extended object, each in the shape an object declares it in
+ * (`ObjectExtensionSchema.fieldGroups` / `.relatedLists`). Written, a key
+ * replaces what the owner declares and the other extensions' `place` entries
+ * add to, whole; not written, that arrangement stays.
+ *
+ * The ONE list: the registry fold that applies the keys, and the judge that
+ * refuses them outside `.custom` (publish, `os validate` / `os build`, the
+ * install door), read it through {@link extensionArrangementKeys}.
+ */
+export const CUSTOM_ARRANGEMENT_KEYS = Object.freeze(['fieldGroups', 'relatedLists'] as const);
+
+/** One of {@link CUSTOM_ARRANGEMENT_KEYS}. */
+export type CustomArrangementKey = (typeof CUSTOM_ARRANGEMENT_KEYS)[number];
+
+/**
+ * [ADR-0146 D10] The {@link CUSTOM_ARRANGEMENT_KEYS} an object extension body
+ * writes, in the list's order. A key counts as written when the body carries
+ * any value under it (an empty array included: it declares an arrangement
+ * with nothing in it); `undefined` and `null` do not. Tolerant of an unparsed
+ * body, so every door and the fold share one reading.
+ */
+export function extensionArrangementKeys(extension: unknown): CustomArrangementKey[] {
+  if (typeof extension !== 'object' || extension === null || Array.isArray(extension)) return [];
+  const body = extension as Record<string, unknown>;
+  return CUSTOM_ARRANGEMENT_KEYS.filter((key) => body[key] !== undefined && body[key] !== null);
+}

@@ -46,13 +46,14 @@
  */
 
 import { BASE_FIELD_DISPLAY_WHITELIST, isInjectedColumnDefinition, materializeTreeSelfReferences, provisionPrimary, resolveInjectedSystemColumns } from '@objectstack/spec/data';
-import type { ObjectOwnership, ServiceObject } from '@objectstack/spec/data';
+import type { ObjectOwnership, RelatedListsArrangement, ServiceObject } from '@objectstack/spec/data';
 import { QUEUE_FIELD_DEF, applyAuditFieldGovernance, fieldPatchTargetMisses, isCodeArtifactBody, isTenantAuthored } from '@objectstack/metadata-core';
 import type { FieldPatchTargetMiss } from '@objectstack/metadata-core';
 import { scalarOverridesPackagedBase } from '@objectstack/spec/system';
 import { SEARCH_COMPANION_FIELD, provisionSearchCompanion } from './search-companion.js';
 import { applyExtensionPlacements, fieldGroupKeysOf, placementContributorsOf } from './registry-extension-placement.js';
 import type { ExtensionPlacementNote } from './registry-extension-placement.js';
+import { applyCustomArrangement, relatedListsArrangementOf, rememberRelatedListsArrangement } from './registry-custom-arrangement.js';
 import { applyProtection } from '@objectstack/spec/shared';
 import { isObjectLessActionKey, standaloneActionOwnerKey } from './action-governance.js';
 import { recordCurrencyFollowRefusal, recordCurrencySummaryRefusal } from './record-currency-aggregate-door.js';
@@ -784,6 +785,17 @@ export class ObjectRegistrationFacet {
   }
 
   /**
+   * [ADR-0146 D10] The body of `SchemaRegistry#getRelatedListsArrangement`;
+   * the method's docblock there is its contract. Read off the served fold's
+   * own body ({@link resolveObject}), so this answer and the served
+   * `relatedLists` cannot disagree.
+   */
+  static getRelatedListsArrangement(this: Pick<ObjectRegistrationHost, 'resolveObject' | 'resolveObjectKey'>, name: string): RelatedListsArrangement | undefined {
+    const fqn = this.resolveObjectKey(name);
+    return fqn === undefined ? undefined : relatedListsArrangementOf(this.resolveObject(fqn));
+  }
+
+  /**
    * [#34901] The body of `SchemaRegistry#getWithheldExtensionFields`; the
    * method's docblock there is its contract. Read off
    * {@link withholdDisabledExtensions}, the one reading of what a disable
@@ -960,11 +972,24 @@ export class ObjectRegistrationFacet {
       merged = placed.object;
       this.reportExtensionPlacements(placed.notes);
     }
+    // [ADR-0146 D10] The third layer, last: where the base's paired `.custom`
+    // package writes `fieldGroups` or `relatedLists`, that key replaces the
+    // arrangement the owner and the placements above gave, whole.
+    const arranged = applyCustomArrangement(merged, contributors, {
+      objectName: String(merged.name ?? baseDefinition.name ?? ''),
+      ownerPackageId: contributors.find((c) => c.ownership === 'own')?.packageId,
+    });
+    merged = arranged.object;
+    this.reportExtensionPlacements(arranged.notes);
     if (tenantRules) this.reportChangedRuleCopies(contributors, baseDefinition);
     // A picklist-bound field is served with its list's options resolved onto
     // it — here, in the fold every object read and the write door share, so
     // the set a client is offered and the set a write is judged by are one.
-    return this.finishServedObject(merged, layer, picklistReferrerOf(contributors));
+    const served = this.finishServedObject(merged, layer, picklistReferrerOf(contributors));
+    // …and what the `.custom` tab list says that `relatedLists` cannot travels
+    // beside the body it describes ({@link getRelatedListsArrangement}).
+    rememberRelatedListsArrangement(served, arranged.relatedLists);
+    return served;
   }
 
   /**

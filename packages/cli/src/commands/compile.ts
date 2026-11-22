@@ -96,6 +96,10 @@ import { findOverrideDeclarationRefusals } from '../utils/override-declarations.
 // `os validate` step 3a-iv runs, over the save and install doors' own judge
 // (`judgeExtensionFieldSuffix`).
 import { findExtensionFieldSuffixRefusals } from '../utils/extension-field-suffix.js';
+// [ADR-0146 D10] …and the arrangement of an extended object, the paired
+// `.custom` package's alone: the same walk and the same doors' judge
+// (`judgeExtensionArrangement`).
+import { findExtensionArrangementRefusals } from '../utils/extension-arrangement.js';
 
 // [#29051] An undeclared top-level flow cycle — the walk `os validate` step
 // 3a-vii runs, over the automation engine's own judge.
@@ -931,6 +935,28 @@ export default class Compile extends Command {
         printBulletList(
           suffixRefusals.map((r) => `${r.path} [${r.code}] ${r.message}`),
           { noun: 'extension-field refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
+      }
+
+      // 3b-iii-bis-2. [ADR-0146 D10] An extended object's whole arrangement
+      //     is the paired `.custom` package's, at build time — the SAME call
+      //     `os validate` makes at its step 3a-iv-bis
+      //     (`judgeExtensionArrangement`): `fieldGroups` or `relatedLists` on
+      //     an `objectExtensions` entry of any other package is refused, with
+      //     the prescription naming `place`, and no artifact is written.
+      const arrangementRefusals = findExtensionArrangementRefusals(result.data as Record<string, unknown>);
+      if (arrangementRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({ success: false, errors: arrangementRefusals, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
+          this.exit(1);
+        }
+        const n = arrangementRefusals.length;
+        console.log('');
+        printError(`${n} object extension key${n > 1 ? 's declare' : ' declares'} an arrangement only a paired \`.custom\` package declares (ADR-0146 D10)`);
+        printBulletList(
+          arrangementRefusals.map((r) => `${r.path} [${r.code}] ${r.message}`),
+          { noun: 'extension-arrangement refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
         );
         this.exit(1);
       }

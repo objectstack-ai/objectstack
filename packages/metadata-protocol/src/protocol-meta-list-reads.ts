@@ -49,7 +49,7 @@ import { storedEntryRow } from './protocol-stored-overlay-types.js';
 import { viewIdentityPatch } from './protocol-view-normalization.js';
 import { isServedOverrideRowOf, type ServedOverrideRow } from './served-override.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
-import { packagelessRowWithheld, withWithheldFieldsDecoration } from './protocol-meta-item-face.js';
+import { packagelessRowWithheld, withServedObjectDecorations } from './protocol-meta-item-face.js';
 import {
     declinesPackageLessRowAt,
     disabledExactAddressHolder,
@@ -1100,13 +1100,15 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
         // is judged as stored, without it, then served with it.
         //
         // [#34901] …and, on the EFFECTIVE served list of objects only, the
-        // fields a disabled package withholds ({@link withWithheldFieldsDecoration});
-        // never the per-package layer (a package's export) or the execution face.
+        // fields a disabled package withholds and [ADR-0146 D10] what the
+        // paired `.custom` tab list says beside `relatedLists`
+        // ({@link withServedObjectDecorations}); never the per-package layer
+        // (a package's export) or the execution face.
         items: audience === 'served'
             ? governed.map((it) => {
                 const listed = decorateListedItem(request.type, it);
                 return request.type === 'object' && layer === 'effective'
-                    ? withWithheldFieldsDecoration(host.engine?.registry, listed)
+                    ? withServedObjectDecorations(host.engine?.registry, listed)
                     : listed;
             })
             : governed,
