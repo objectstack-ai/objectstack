@@ -1426,6 +1426,16 @@ bar's middle zone, centered between the left group and the utility cluster. In
 the `home`, `orgs` and `studio` frames, and below `lg` (as an icon button), it
 sits at the utility cluster's left edge.
 
+Inside an app, while the query finds records, the palette shows the selected
+hit on the right, read-only: its title and the object's declared
+`highlightFields`, as the record pointer card draws them (a palette narrower
+than 45rem shows the results alone). Once something is typed, the end of the
+list offers "New OBJECT" for the app's objects the query names and "Create
+"words" as OBJECT" for up to three of them, the page's own object first; each
+opens the object's create page (`/apps/APP/OBJECT/new`), the second with the
+words in its title field. An object is offered exactly where its list offers
+New. A footer names what Enter does to the selected entry.
+
 ```tsx
 import { useCommandPalette } from '@object-ui/app-shell';
 

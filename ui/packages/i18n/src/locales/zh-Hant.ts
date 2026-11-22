@@ -2358,6 +2358,14 @@ const zhHant = {
       systemTheme: '系統主題',
       actions: '操作',
       openFullSearch: '開啟完整搜尋頁面',
+      create: '新建',
+      createAs: '新建「{{query}}」為{{object}}',
+      previewEmpty: '選中一條記錄即可檢視詳情。',
+      enterOpenRecord: '開啟記錄',
+      enterCreate: '新建',
+      enterSwitchApp: '切換應用',
+      enterApplyTheme: '應用主題',
+      enterOpen: '開啟',
     },
     ai: {
       pendingDrafts: {
