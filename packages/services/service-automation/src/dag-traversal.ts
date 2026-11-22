@@ -1049,9 +1049,10 @@ export function celScope(
     variables: Map<string, unknown>,
     context?: AutomationContext,
 ): { extra: Record<string, unknown> } {
-    // No variable key writes outside the run's own scope object
-    // (`./scope-key-segments.ts`): prototype-free containers, and a key with a
-    // skipped segment binds nothing.
+    // No variable key reaches a prototype (`./scope-key-segments.ts`):
+    // prototype-free containers, and a key with a skipped segment binds
+    // nothing. A dotted tail whose head names a value the run holds is still
+    // written into that value.
     const vars = scopeContainer();
     for (const [key, value] of variables) {
         // Convert "step.result" keys into nested object paths.

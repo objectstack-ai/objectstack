@@ -1,14 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The scope a flow's conditions, value envelopes and text holes read is built
- * so that no variable key can write outside the run's own scope object
- * (`./scope-key-segments.ts` states the rule and why a key is skipped rather
- * than refused).
+ * No variable key the scope a flow's conditions, value envelopes and text
+ * holes read is built from reaches a prototype, and the containers the builder
+ * creates have none (`./scope-key-segments.ts` states the rule and why a key
+ * is skipped rather than refused).
  *
  * Read the engine pins first: a run is handed record keys and node output keys
- * the way its entrances hand them, and afterwards a fresh object of the process
- * must inherit nothing. The builder pins below them hold each half of the rule
+ * the way its entrances hand them, and afterwards a fresh object must inherit
+ * nothing. The builder pins below them hold each half of the rule
  * on its own, and the controls hold that an ordinary dotted key still nests.
  */
 
@@ -62,14 +62,14 @@ async function runWith(context: Record<string, unknown>, cond: string, source?: 
     return engine.execute('csk_flow', context as any);
 }
 
-describe('a run: no variable key writes outside the run scope object', () => {
+describe('a run: no variable key reaches a prototype', () => {
     it('a run with the key __proto__.x leaves ({}).x undefined', async () => {
         const result = await runWith({ record: { name: 'a', '__proto__.x': true } }, "record.name == 'a'");
         expect(result.success, JSON.stringify(result)).toBe(true);
         expect(inherited('x')).toBeUndefined();
     });
 
-    it('a key with a constructor or prototype segment stays inside the run scope, a walk into a held value included', async () => {
+    it('a key with a constructor or prototype segment reaches no prototype, through a held value included', async () => {
         const record = {
             name: 'a',
             'constructor.prototype.cskProbeA': true,
@@ -81,7 +81,7 @@ describe('a run: no variable key writes outside the run scope object', () => {
         expect(inherited('cskProbeA')).toBeUndefined();
     });
 
-    it("a key that descends into a variable's own object value leaves a fresh object unchanged", async () => {
+    it("a key whose head names a held value reaches no prototype", async () => {
         // `record` is a plain object the run holds; the walk enters it.
         const result = await runWith({ record: { name: 'a', 'record.__proto__.cskProbeB': true } }, "name == 'a'");
         expect(result.success, JSON.stringify(result)).toBe(true);
@@ -118,6 +118,10 @@ describe('the CEL scope builder', () => {
         expect(Object.getPrototypeOf(vars.step)).toBeNull();
         expect(Object.getPrototypeOf(vars.a)).toBeNull();
         expect(Object.getPrototypeOf(vars.a.b)).toBeNull();
+    });
+
+    it('the skipped set names __proto__, so the case below cannot run empty', () => {
+        expect(SCOPE_KEY_SKIPPED_SEGMENTS.has('__proto__')).toBe(true);
     });
 
     it.each([...SCOPE_KEY_SKIPPED_SEGMENTS])('binds nothing for a key with a %s segment, wherever it sits', (segment) => {

@@ -1,10 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// FLOW CONDITION SCOPE KEYS — the scope a flow's conditions and value
-// envelopes read is built so that no variable key can write outside the run's
-// own scope object. Driven through a REAL boot: a plain member's requests on
-// the public doors that hand a run its variable keys, then a process-wide read
-// that must find nothing.
+// FLOW CONDITION SCOPE KEYS — no variable key the scope a flow's conditions
+// and value envelopes read is built from reaches a prototype. Driven through a
+// REAL boot: a plain member's requests on the public doors that hand a run its
+// variable keys, then a check that a fresh object inherits nothing.
 //
 // The doors, each with its own probe name:
 //   • the record that starts a record-triggered flow (`POST` / `PATCH /data`);
@@ -35,7 +34,7 @@ const SYS = { context: { isSystem: true } } as const;
 const PROBES = ['fcsk_rec_post', 'fcsk_rec_patch', 'fcsk_params', 'fcsk_resume_inputs', 'fcsk_resume_output'] as const;
 type Probe = (typeof PROBES)[number];
 
-/** What `({}).<probe>` reads, i.e. what every object in the process inherits. */
+/** What `({}).<probe>` reads: what a fresh object inherits. */
 const inherited = (probe: Probe): unknown => ({} as Record<string, unknown>)[probe];
 
 const Item = ObjectSchema.create({
@@ -148,7 +147,7 @@ const fixtureStack = defineStack({
   flows: [recordFlow, paramsFlow, screenFlow],
 });
 
-describe('a flow condition scope: no variable key writes outside the run scope object', () => {
+describe('a flow condition scope: no variable key reaches a prototype', () => {
   let stack: VerifyStack;
   let ql: any;
   let member: string;
@@ -179,7 +178,6 @@ describe('a flow condition scope: no variable key writes outside the run scope o
 
   it('the record that starts a record-triggered flow, created through the data door', async () => {
     const res = await stack.apiAs(member, 'POST', `/data/${OBJ}`, { name: 'fcsk-post', '__proto__.fcsk_rec_post': true });
-    // Measured: the data door refuses a key that is not a field of the object.
     expect(res.status, await res.clone().text()).toBe(400);
     expect(inherited('fcsk_rec_post')).toBeUndefined();
   });
@@ -195,7 +193,6 @@ describe('a flow condition scope: no variable key writes outside the run scope o
     const res = await stack.apiAs(member, 'POST', `/automation/${PARAMS_FLOW}/trigger`, {
       params: { label: 'fcsk-params', '__proto__.fcsk_params': true },
     });
-    // Measured: the run seeds only the declared input, and its condition reads it.
     expect(res.status, await res.clone().text()).toBeLessThan(300);
     expect(await marks('fcsk-params')).toBe(1);
     expect(inherited('fcsk_params')).toBeUndefined();
@@ -213,7 +210,7 @@ describe('a flow condition scope: no variable key writes outside the run scope o
     const resume = (runId: string, body: Record<string, unknown>) =>
       stack.apiAs(member, 'POST', `/automation/${SCREEN_FLOW}/runs/${runId}/resume`, body);
 
-    it('its inputs bag, judged by a field predicate before the bag is refused', async () => {
+    it('its inputs bag', async () => {
       const runId = await pause();
       const res = await resume(runId, { inputs: { note: 'fcsk-in', '__proto__.fcsk_resume_inputs': true } });
       expect(res.status, await res.clone().text()).toBe(400);
