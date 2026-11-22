@@ -89,6 +89,10 @@
  *    (`resolveFieldPath`, relationship hops from the child), so a column the
  *    FK's `relatedListColumns` accepts is accepted here too; a path the graph
  *    cannot answer is left unjudged, as there.
+ *  - [#35901] An object extension's list placement (`place: [{ list,
+ *    columns }]`, at the top level and in each package body) carries its
+ *    columns as an entry does; they are judged the same way, against the
+ *    child the placement names.
  */
 
 import {
@@ -203,6 +207,43 @@ export function validateRelatedListRefs(stack: AnyRec, options?: RelatedListRefO
     injectedByObject.set(obj.name, injectedColumnsFor(obj));
   }
 
+  /**
+   * [#35899] A list entry's own `columns`, judged against the child whose rows
+   * the list shows (a `relatedLists` object entry, and since #35901 an object
+   * extension's list placement): each must be a field of the child, an
+   * injected column, or a relationship path from it that resolves.
+   */
+  const judgeColumns = (child: string, columns: readonly unknown[], name: string, subject: string, where: string, path: string): void => {
+    const fields = fieldsByObject.get(child);
+    if (!fields) return;
+    const injected = injectedByObject.get(child) ?? new Set<string>();
+    columns.forEach((column, c) => {
+      if (typeof column !== 'string' || fields.has(column) || injected.has(column)) return;
+      let message =
+        `${subject}.columns[${c}] '${column}' is not a field of '${child}', ` +
+        `the child whose rows the list '${name}' shows, so the column would draw empty.`;
+      if (column.includes('.')) {
+        // A relationship path from the child, judged as `relatedListColumns` judges one.
+        graph ??= indexServedObjectGraph(stack);
+        const verdict = resolveFieldPath(graph, child, column);
+        if (!verdict || isUnjudgeable(verdict)) return;
+        const account = describeFieldPathVerdict(verdict, column, `${subject}.columns[${c}]`);
+        if (!account) return; // the path resolves
+        message = `${account.message} The path is walked from '${child}', the child whose rows the list '${name}' shows, so the column would draw empty.`;
+      }
+      findings.push({
+        severity: 'error',
+        rule: RELATED_LIST_COLUMN_UNKNOWN,
+        where,
+        path: `${path}.columns[${c}]`,
+        message,
+        hint:
+          `Name a field of '${child}' (a related-list column is a field of the child object), ` +
+          'or drop the entry\'s columns and let them derive.',
+      });
+    });
+  };
+
   // Parent name → its inbound relationships, in child then field order.
   const inbound = new Map<string, NamedInboundRelationship[]>();
   for (const [child, fields] of fieldsByObject) {
@@ -294,34 +335,7 @@ export function validateRelatedListRefs(stack: AnyRec, options?: RelatedListRefO
         // [#35899] The entry's own columns: fields of every child it names whose fields are known.
         const children = [...new Set(namedBy(name).map((r) => r.child))];
         for (const child of children) {
-          const fields = fieldsByObject.get(child);
-          if (!fields) continue;
-          const injected = injectedByObject.get(child) ?? new Set<string>();
-          entry.columns.forEach((column, c) => {
-            if (typeof column !== 'string' || fields.has(column) || injected.has(column)) return;
-            let message =
-              `Object '${parentName}' relatedLists[${i}].columns[${c}] '${column}' is not a field of '${child}', ` +
-              `the child whose rows the list '${name}' shows, so the column would draw empty.`;
-            if (column.includes('.')) {
-              // A relationship path from the child, judged as `relatedListColumns` judges one.
-              graph ??= indexServedObjectGraph(stack);
-              const verdict = resolveFieldPath(graph, child, column);
-              if (!verdict || isUnjudgeable(verdict)) return;
-              const account = describeFieldPathVerdict(verdict, column, `Object '${parentName}' relatedLists[${i}].columns[${c}]`);
-              if (!account) return; // the path resolves
-              message = `${account.message} The path is walked from '${child}', the child whose rows the list '${name}' shows, so the column would draw empty.`;
-            }
-            findings.push({
-              severity: 'error',
-              rule: RELATED_LIST_COLUMN_UNKNOWN,
-              where: `object "${parentName}" › relatedLists`,
-              path: `${path}.columns[${c}]`,
-              message,
-              hint:
-                `Name a field of '${child}' (a related-list column is a field of the child object), ` +
-                'or drop the entry\'s columns and let them derive.',
-            });
-          });
+          judgeColumns(child, entry.columns, name, `Object '${parentName}' relatedLists[${i}]`, `object "${parentName}" › relatedLists`, path);
         }
       });
     }
@@ -344,6 +358,34 @@ export function validateRelatedListRefs(stack: AnyRec, options?: RelatedListRefO
         });
       });
     }
+  }
+
+  // [#35901] An object extension's list placement carries `columns` as a
+  // `relatedLists` entry does, and they are judged the same way, against the
+  // child the placement names (its package's own, so in view where the
+  // extension is authored). The top level and each package body.
+  const extensionBodies: Array<[string, unknown]> = [
+    ['', stack.objectExtensions],
+    ...(Array.isArray(stack.packages)
+      ? stack.packages.map((entry, i): [string, unknown] => [
+        `packages[${i}].manifest.`,
+        isRec(entry) && isRec(entry.manifest) ? entry.manifest.objectExtensions : undefined,
+      ])
+      : []),
+  ];
+  for (const [at, extensions] of extensionBodies) {
+    if (!Array.isArray(extensions)) continue;
+    extensions.forEach((ext, j) => {
+      if (!isRec(ext) || typeof ext.extend !== 'string' || !Array.isArray(ext.place)) return;
+      const target = ext.extend;
+      ext.place.forEach((entry, k) => {
+        if (!isRec(entry) || typeof entry.list !== 'string' || !Array.isArray(entry.columns)) return;
+        const list = entry.list;
+        const child = list.includes('.') ? list.slice(0, list.indexOf('.')) : list;
+        const path = `${at}objectExtensions[${j}].place[${k}]`;
+        judgeColumns(child, entry.columns, list, `Object extension of '${target}' place[${k}]`, `object extension of "${target}" › place`, path);
+      });
+    });
   }
   return findings;
 }
