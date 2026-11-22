@@ -1575,6 +1575,9 @@ const en = {
       includeCurrent: 'Include the current filters and sort',
       scopeShared: 'Shared',
       scopeHint: 'Shared views are seen by everyone who can see this list',
+      // objectstack#36409 — a shared view's name already taken, and a view that is gone.
+      shareNameTaken: 'An unpublished draft already uses this view’s name, so nothing was shared. Give the view another name and try again.',
+      viewGone: 'The view you opened is no longer available, so the list shows its default view.',
       create: 'Create',
     },
     dragToReorder: 'Drag to reorder',

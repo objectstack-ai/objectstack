@@ -1300,6 +1300,9 @@ const zh = {
       includeCurrent: '包含当前的筛选和排序',
       scopeShared: '共享',
       scopeHint: '共享视图对能看到此列表的所有人可见',
+      // objectstack#36409 — a shared view's name already taken, and a view that is gone.
+      shareNameTaken: '一个尚未发布的草稿已经用了这个视图的名称，所以没有共享。请换个名称再试。',
+      viewGone: '你打开的视图已不存在，列表显示的是默认视图。',
       create: '创建',
     },
     dragToReorder: '拖动排序',

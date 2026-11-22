@@ -1410,6 +1410,9 @@ const ar = {
       includeCurrent: 'تضمين عوامل التصفية والفرز الحالية',
       scopeShared: 'مشترك',
       scopeHint: 'العروض المشتركة يراها كل من يمكنه رؤية هذه القائمة',
+      // objectstack#36409 — a shared view's name already taken, and a view that is gone.
+      shareNameTaken: 'توجد مسودة غير منشورة تستخدم اسم هذا العرض بالفعل، لذلك لم تتم المشاركة. غيّر اسم العرض وحاول مرة أخرى.',
+      viewGone: 'العرض الذي فتحته لم يعد متاحًا، لذا تعرض القائمة العرض الافتراضي.',
       create: 'إنشاء',
     },
     dragToReorder: "اسحب لإعادة الترتيب",

@@ -100,7 +100,9 @@ import { useObjectViewListRenderer } from './objectViewListRenderer.js';
 import { ListDraftActions } from './ListDraftActions.js';
 import { viewSaveRefusalText } from './viewSaveRefusal.js';
 import { listDraftPreference, listDraftScope, useListDraft } from './listDraftStore.js';
-import { useObjectViewViewCrud } from './objectViewViewCrud.js';
+import { useObjectViewViewCrud, useRuntimeCreateApp } from './objectViewViewCrud.js';
+import { mayShareViews, useViewSharing } from './objectViewViewSharing.js';
+import { useCanAuthorMetadata } from '../hooks/useCanAuthorMetadata.js';
 import {
     PERSONAL_VIEW_OBJECT,
     buildInPlaceViewConfig,
@@ -717,6 +719,17 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         ? (requestedViewId.includes('.') ? requestedViewId : `${objectDef.name}.${requestedViewId}`)
         : null;
     const viewAccess = useMetaItemRefusal('view', missedViewName);
+    // objectstack#36409 — a view the address names that the server says is
+    // gone (deleted, or never there): the list opens its default view, and
+    // says why once per name.
+    const goneViewNoticed = useRef<string | null>(null);
+    useEffect(() => {
+        if (!viewAccess.absent || !missedViewName || goneViewNoticed.current === missedViewName) return;
+        goneViewNoticed.current = missedViewName;
+        toast.info(t('view.switcher.viewGone', {
+            defaultValue: 'The view you opened is no longer available, so the list shows its default view.',
+        }));
+    }, [viewAccess.absent, missedViewName, t]);
     const activeViewId = resolvedViewId || pinnedViewId || defaultViewId || views[0]?.id;
     const baseView = views.find((v: any) => v.id === activeViewId) || views[0];
     const activeView = viewDraft && viewDraft.id === baseView?.id
@@ -1143,6 +1156,24 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         listSeedRef,
     });
 
+    // objectstack#36409 — only an administrator holding the shared view's write
+    // capability creates a shared view, and it is published at once
+    // (`./objectViewViewSharing.ts`).
+    const canAuthorMetadata = useCanAuthorMetadata();
+    const canShareViews = mayShareViews(isAdmin, canAuthorMetadata);
+    const sharingApp = useRuntimeCreateApp(t);
+    const viewSharing = useViewSharing({
+        objectName: objectDef.name,
+        objectDef,
+        metadataClient,
+        dataSource,
+        app: sharingApp,
+        routeViewId: viewId,
+        navigate,
+        refresh: () => setRefreshKey((k) => k + 1),
+        t,
+    });
+
     // objectstack#27594: the list title is the view switcher, which replaced the
     // view tab strip; the view items `ManageViewsDialog` lists come with it.
     const { viewTabItems, titleSwitcher, refusingPackages } = useObjectViewTitleSwitcher({
@@ -1175,10 +1206,10 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
             }),
             savePersonal: personalViews.save,
             openPersonal: openPersonalView,
-            createShared: handleViewCreate,
+            createShared: viewSharing.createShared,
             clearSourceListState,
             canCreatePersonal: canCreatePersonalView,
-            canCreateShared: isAdmin,
+            canCreateShared: canShareViews,
             hasUnsavedConditions: listDraftParts.some((part) => part === 'filters' || part === 'sort'),
         },
         onRenamePersonalView: personalViewsReady && personalGrant('update')

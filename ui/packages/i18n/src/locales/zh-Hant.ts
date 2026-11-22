@@ -1300,6 +1300,9 @@ const zhHant = {
       includeCurrent: '包含當前的篩選和排序',
       scopeShared: '共享',
       scopeHint: '共享檢視對能看到此列表的所有人可見',
+      // objectstack#36409 — a shared view's name already taken, and a view that is gone.
+      shareNameTaken: '一個尚未釋出的草稿已經用了這個檢視的名稱，所以沒有共享。請換個名稱再試。',
+      viewGone: '你開啟的檢視已不存在，列表顯示的是預設檢視。',
       create: '建立',
     },
     dragToReorder: '拖動排序',

@@ -1273,6 +1273,9 @@ const ko = {
       includeCurrent: '현재 필터와 정렬 포함',
       scopeShared: '공유',
       scopeHint: '공유 보기는 이 목록을 볼 수 있는 모든 사람에게 표시됩니다',
+      // objectstack#36409 — a shared view's name already taken, and a view that is gone.
+      shareNameTaken: '게시되지 않은 초안이 이미 이 보기의 이름을 사용하고 있어 공유하지 않았습니다. 보기 이름을 바꾸고 다시 시도하세요.',
+      viewGone: '연 보기가 더 이상 없으므로 목록에 기본 보기가 표시됩니다.',
       create: '만들기',
     },
     dragToReorder: "드래그하여 순서 변경",

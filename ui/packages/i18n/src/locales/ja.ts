@@ -1273,6 +1273,9 @@ const ja = {
       includeCurrent: '現在のフィルターと並べ替えを含める',
       scopeShared: '共有',
       scopeHint: '共有ビューはこのリストを見られる全員に表示されます',
+      // objectstack#36409 — a shared view's name already taken, and a view that is gone.
+      shareNameTaken: '未公開の下書きがすでにこのビューの名前を使っているため、共有しませんでした。ビューの名前を変えてもう一度お試しください。',
+      viewGone: '開いたビューはもう存在しないため、リストは既定のビューを表示しています。',
       create: '作成',
     },
     dragToReorder: "ドラッグして並べ替え",

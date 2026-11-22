@@ -1273,6 +1273,9 @@ const de = {
       includeCurrent: 'Aktuelle Filter und Sortierung übernehmen',
       scopeShared: 'Geteilt',
       scopeHint: 'Geteilte Ansichten sieht jeder, der diese Liste sehen kann',
+      // objectstack#36409 — a shared view's name already taken, and a view that is gone.
+      shareNameTaken: 'Ein unveröffentlichter Entwurf verwendet bereits den Namen dieser Ansicht, daher wurde nichts geteilt. Geben Sie der Ansicht einen anderen Namen und versuchen Sie es erneut.',
+      viewGone: 'Die geöffnete Ansicht ist nicht mehr verfügbar, daher zeigt die Liste ihre Standardansicht.',
       create: 'Erstellen',
     },
     dragToReorder: "Zum Neuanordnen ziehen",

@@ -1305,6 +1305,9 @@ const pt = {
       includeCurrent: 'Incluir os filtros e a ordenação atuais',
       scopeShared: 'Compartilhada',
       scopeHint: 'Visualizações compartilhadas são vistas por todos que podem ver esta lista',
+      // objectstack#36409 — a shared view's name already taken, and a view that is gone.
+      shareNameTaken: 'Um rascunho não publicado já usa o nome desta visualização, então nada foi compartilhado. Dê outro nome à visualização e tente novamente.',
+      viewGone: 'A visualização que você abriu não está mais disponível, então a lista mostra a visualização padrão.',
       create: 'Criar',
     },
     dragToReorder: "Arrastar para reordenar",

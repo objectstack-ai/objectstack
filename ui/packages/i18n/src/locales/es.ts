@@ -1310,6 +1310,9 @@ const es = {
       includeCurrent: 'Incluir los filtros y el orden actuales',
       scopeShared: 'Compartida',
       scopeHint: 'Las vistas compartidas las ve cualquiera que pueda ver esta lista',
+      // objectstack#36409 — a shared view's name already taken, and a view that is gone.
+      shareNameTaken: 'Un borrador sin publicar ya usa el nombre de esta vista, así que no se compartió nada. Ponle otro nombre a la vista e inténtalo de nuevo.',
+      viewGone: 'La vista que abriste ya no está disponible, así que la lista muestra su vista predeterminada.',
       create: 'Crear',
     },
     dragToReorder: "Arrastrar para reordenar",

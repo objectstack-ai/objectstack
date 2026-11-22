@@ -1305,6 +1305,9 @@ const fr = {
       includeCurrent: 'Inclure les filtres et le tri actuels',
       scopeShared: 'Partagée',
       scopeHint: 'Les vues partagées sont visibles par tous ceux qui voient cette liste',
+      // objectstack#36409 — a shared view's name already taken, and a view that is gone.
+      shareNameTaken: 'Un brouillon non publié utilise déjà le nom de cette vue, donc rien n’a été partagé. Donnez un autre nom à la vue et réessayez.',
+      viewGone: 'La vue ouverte n’est plus disponible, la liste affiche donc sa vue par défaut.',
       create: 'Créer',
     },
     dragToReorder: "Glisser pour réorganiser",
