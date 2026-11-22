@@ -465,6 +465,11 @@ export interface ListViewProps {
    */
   onBulkChangeOwner?: (records: any[]) => void;
   /**
+   * objectstack#35403 — forwarded to `ObjectGrid`: `false` holds the bulk
+   * Change Owner entry back while `onBulkChangeOwner` keeps the rows selectable.
+   */
+  bulkChangeOwnerOffered?: boolean;
+  /**
    * A host-drawn node rendered FIRST in the toolbar row's left group, before
    * the user filters, in a `min-w-0 flex-1` wrapper: it takes the width the
    * right-hand tool cluster leaves (objectui#12440). The console passes its

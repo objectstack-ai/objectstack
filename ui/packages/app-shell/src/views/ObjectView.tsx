@@ -112,7 +112,7 @@ import {
 } from './personalViews.js';
 import { PersonalViewNameDialog } from './PersonalViewNameDialog.js';
 import { ChangeOwnerDialog } from './ChangeOwnerDialog.js';
-import { changeOwnerEligibleRows, useListChangeOwnerOffered } from './changeOwner.js';
+import { changeOwnerEligibleRows, changeOwnerObjectOffer, useListChangeOwnerOffered } from './changeOwner.js';
 import { parseListStateParams } from './userFilterUrlState.js';
 import { FILTER_FOLD_REFUSAL_KEYS } from './viewFilterFold.js';
 
@@ -295,6 +295,10 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     const [pageColumnEl, setPageColumnEl] = useState<HTMLDivElement | null>(null);
     const listSelecting = useListPageSelecting(pageColumnEl);
     const bulkChangeOwnerOffered = useListChangeOwnerOffered(objectDef as any, listSelecting);
+    // The rows take a selection wherever the object offers the action — facts 1
+    // and 2, read client-side with no request — so the question above can be
+    // asked at all; the verdict then decides whether the bar draws the entry.
+    const bulkChangeOwnerReachable = useMemo(() => changeOwnerObjectOffer(objectDef as any).enabled, [objectDef]);
     const changeOwnerScope = usePredicateScope();
     const [bulkChangeOwner, setBulkChangeOwner] = useState<{ rows: Record<string, unknown>[]; skipped: number } | null>(null);
     const openBulkChangeOwner = useCallback((records: any[]) => {
@@ -1294,7 +1298,8 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
             // 「Save as my view」 alone).
             draftsSummaries: !isEnvironmentList && !!activeView,
         },
-        onBulkChangeOwner: bulkChangeOwnerOffered ? openBulkChangeOwner : undefined,
+        onBulkChangeOwner: bulkChangeOwnerReachable ? openBulkChangeOwner : undefined,
+        bulkChangeOwnerOffered,
     });
 
     // objectstack#25992 slice 9: the merged views and the plugin's `ObjectViewSchema`
