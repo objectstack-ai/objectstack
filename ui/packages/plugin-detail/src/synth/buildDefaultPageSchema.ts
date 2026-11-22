@@ -23,7 +23,7 @@
  * the existing DetailView output.
  */
 
-import { deriveFieldGroupLayout, isRecordPageBuiltinTab, relatedListEntryName, type RecordPageBuiltinTab } from '@objectstack/spec/data';
+import { deriveFieldGroupLayout, isRecordPageBuiltinTab, readRelatedListsArrangement, relatedListEntryName, type RecordPageBuiltinTab } from '@objectstack/spec/data';
 import { RECORD_HIGHLIGHTS_MAX } from '@objectstack/spec/ui';
 import type { SelectOptionKind, ServiceObject } from '@objectstack/spec/data';
 import { detectStatusField } from '@object-ui/types';
@@ -111,6 +111,13 @@ export interface ObjectDefLike {
    * columns) is the host's `related` option. See {@link buildDefaultTabs}.
    */
   relatedLists?: readonly unknown[];
+  /**
+   * The served read's `_relatedListsArrangement` decoration (ADR-0146 D10),
+   * present when the base's paired `.custom` package arranges this object's
+   * tabs. Read only through the spec's `readRelatedListsArrangement`, for
+   * `unlisted` (whether an unlisted attachments tab is still drawn).
+   */
+  _relatedListsArrangement?: unknown;
   // NOTE: the per-surface `detail` hints block was REMOVED from the spec by
   // ADR-0085 — presentation intent is declared via the top-level semantic
   // roles above (stageField / highlightFields / fieldGroups). Per-page
@@ -1092,7 +1099,9 @@ function synthTabs(
   }
   // objectstack#34590 — the 动态 tab closes the strip.
   if (timeline.length > 0) items.push({ label: 'Activity stream', value: 'timeline', children: timeline });
-  return componentNode('page:tabs', { items: arrangeDeclaredTabs(def?.relatedLists, items) });
+  return componentNode('page:tabs', {
+    items: arrangeDeclaredTabs(def?.relatedLists, items, readRelatedListsArrangement(def)?.unlisted === 'shown'),
+  });
 }
 
 /** The tab value each built-in tab name draws (objectstack#35897). */
@@ -1119,10 +1128,17 @@ const BUILTIN_TAB_VALUES: Readonly<Record<RecordPageBuiltinTab, string>> = {
  *    the end of the tabs: after the listed tabs, before a trailing run of
  *    listed approvals / stream tabs, in the order passed.
  *
+ * `unlistedShown` (ADR-0146 D10): the list is the base's paired `.custom`
+ * package's, laid over an object that declared none, so every tab the
+ * automatic list showed still shows. The one difference here: an unlisted
+ * attachments tab is drawn too, at the end of the tabs after the unlisted
+ * related ones (the served read's `_relatedListsArrangement` decoration,
+ * `unlisted: 'shown'`). `false` for every object without that decoration.
+ *
  * Which related lists exist is the host's: `deriveRelatedLists` drops the
  * unlisted side lists. A pure, stable reorder of the tabs already built.
  */
-function arrangeDeclaredTabs(declared: readonly unknown[] | undefined, items: any[]): any[] {
+function arrangeDeclaredTabs(declared: readonly unknown[] | undefined, items: any[], unlistedShown = false): any[] {
   if (!Array.isArray(declared) || declared.length === 0) return items;
   const [overview, ...tabs] = items;
   const names = declared.map((entry) => relatedListEntryName(entry));
@@ -1140,7 +1156,7 @@ function arrangeDeclaredTabs(declared: readonly unknown[] | undefined, items: an
     if (builtin) {
       const at = names.indexOf(builtin);
       if (at !== -1) return at;
-      if (builtin === 'sys_attachment') return null;
+      if (builtin === 'sys_attachment') return unlistedShown ? unlistedRelated : null;
       return builtin === 'sys_activity' ? unlisted + 1 : unlisted;
     }
     if (value.startsWith('related:')) {

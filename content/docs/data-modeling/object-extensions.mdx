@@ -70,6 +70,7 @@ check that spelling first.
 | `pluralLabel` | Same as `label`. |
 | `description` | Same as `label`. |
 | `place` | **Applied once, after every extension's fields are merged.** Says where the fields, groups and child lists this extension brings go on the target — [below](#placing-what-you-bring). |
+| `fieldGroups`, `relatedLists` | **Only in a base's paired `.custom` package. Each replaces, whole.** The complete field arrangement and the complete tab list of the target, applied last — [below](#arranging-the-whole-record-page). In any other package they are refused, and `place` is the key to use. |
 | `priority` | Not merged — it *orders* the merge. `0`–`999`, default `200`. |
 
 Added fields are ordinary fields, so everything on the
@@ -78,17 +79,19 @@ Added fields are ordinary fields, so everything on the
 
 ### What an extension may **not** contribute
 
-The merge carries the nine keys above and nothing else. These five are not
+The merge carries the keys above and nothing else. The first three below are not
 "unsupported yet" — there is no slot for them to arrive through, and the schema rejects
-each one by name with the alternative to use instead:
+each one by name with the alternative to use instead. The last two are the paired
+`.custom` package's alone: in any other package the save, publish and install doors,
+`os validate` and `os build` refuse them, naming `place`:
 
 | Key you might reach for | Declare this instead |
 |:---|:---|
 | `actions` | A top-level action with `objectName: '<target>'` in the same stack — it stays in the stack's top-level `actions`, and the engine's schema registry attaches it to the target object wherever the object is served, whichever package registers first; a target no loaded package registers fails the boot |
 | `hooks` | A top-level hook in the stack that defines the target object — a hook follows the ownership of its object, and `defineStack()` refuses a top-level hook bound to an object the stack does not define, an extended one included |
 | `listViews` | A top-level `view` in the stack that defines the target object — `defineStack()` refuses a top-level `view` whose `list` or `form` data source is an object the stack does not define, an extended one included |
-| `fieldGroups` | A `place` entry: `{ group: { key, label }, after: '<group>' }` adds a group of your own, and `{ field, group, after: '<field>' }` puts a field of yours into one of the target's groups — [below](#placing-what-you-bring) |
-| `relatedLists` | A `place` entry `{ list, after: '<tab>' }` for a child object of your own package that points at the target — [below](#placing-what-you-bring). The target's own tab list stays its owner's |
+| `fieldGroups` (outside a `.custom` package) | A `place` entry: `{ group: { key, label }, after: '<group>' }` adds a group of your own, and `{ field, group, after: '<field>' }` puts a field of yours into one of the target's groups — [below](#placing-what-you-bring) |
+| `relatedLists` (outside a `.custom` package) | A `place` entry `{ list, after: '<tab>' }` for a child object of your own package that points at the target — [below](#placing-what-you-bring). The target's own tab list stays its owner's, and the environment's |
 
 The same holds for any other key: the extension schema is strict, so an unknown key
 fails at authoring time with a prescription rather than being dropped in silence.
@@ -272,6 +275,8 @@ D10). The object is extended, never replaced:
   pair on first use.
 - **An object takes no `overrides` declaration.** Declaring one on an object is refused,
   naming the extension as the route.
+- **The pair may arrange the whole record page.** Its extension, and no other package's,
+  writes `fieldGroups` and `relatedLists` — [below](#arranging-the-whole-record-page).
 
 {/* os:check */}
 ```typescript
@@ -294,6 +299,74 @@ export default defineStack({
   objectExtensions: [AccountRegionExtension],
 });
 ```
+
+### Arranging the whole record page
+
+A record page is arranged in three layers, and each has its own way to say where things go:
+
+| Layer | What it writes | Scope |
+|:---|:---|:---|
+| The package that owns the object | `fieldGroups` and `relatedLists` on the object | The whole arrangement |
+| A package that extends it | `place` on its extension | Only the fields, groups and child lists it brings |
+| The environment, in the base's paired `.custom` package | `fieldGroups` and `relatedLists` on its extension | The whole arrangement, over both layers above |
+
+So on an installed object the customer may move a vendor field to another group, reorder
+the groups, and reorder or hide tabs, without touching the vendor's package:
+
+{/* os:check */}
+```typescript
+import { defineObjectExtension, Field } from '@objectstack/spec/data';
+
+export const LeadPageExtension = defineObjectExtension({
+  extend: 'crm_lead',
+  fields: { region__c: Field.text({ label: 'Region' }) },
+  // The whole field arrangement: the two groups swapped, `status` moved to `contact`.
+  fieldGroups: [
+    { key: 'contact', label: 'Contact', fields: ['email', 'phone', 'status'] },
+    { key: 'basic', label: 'Basics', fields: ['name', 'company', 'region__c'] },
+  ],
+  // The whole tab list: events before tasks, the notes tab hidden.
+  relatedLists: ['crm_event', 'crm_task', { list: 'crm_note', hidden: true }],
+});
+```
+
+Both keys take the shape an object declares them in ([field groups](/docs/data-modeling/objects),
+`relatedLists`), and a group may list any field the object has, whoever declares it: the
+vendor's, another package's extension's, the pair's own `__c` fields. A group's
+`relatedList` may place any body table.
+
+- **Each key replaces, whole.** Written, `fieldGroups` replaces the groups the owner
+  declares and the other extensions' `place` entries add to; `relatedLists` replaces the
+  tab list the same way. Nothing is merged entry by entry. A key the extension does not
+  write keeps the owner's arrangement with the placements, so writing only `relatedLists`
+  leaves the field groups alone.
+- **A field the arrangement does not list is never dropped.** It shows after the last
+  group, whatever group its owner or another extension had put it in: a field a later
+  version of the base adds, or one a package installed later brings, appears there until
+  the arrangement lists it. A group that lists `fields` shows exactly its list.
+- **A tab the arrangement does not name still shows, after the listed ones.** That is the
+  reverse of an object's own `relatedLists`, where leaving a list out hides it. Hiding is
+  written: `{ list: 'crm_note', hidden: true }` hides that list's tab, whichever package
+  brings the list, and a bare child name hides every list of that child. `hidden` is
+  accepted only here; an object's own `relatedLists` refuses it. A list the object's owner
+  hides by leaving it out of its own `relatedLists` stays hidden until the arrangement
+  names it. The three built-in tabs are written as their bare names and keep their own
+  rules; they are not hidden here.
+- **A reader's own tab order comes on top.** Each person's dragged order and hidden tabs
+  (kept per user) are laid over this list, as they are over an object's. A tab the
+  environment hides is not offered to them.
+- **Taking it away restores the page.** Remove a key, or uninstall or disable the pair,
+  and the owner's arrangement with the placements is served again. Nothing is rewritten in
+  the base or in another package.
+- **Only the pair writes these keys.** In any other package's extension they are refused
+  at save and publish, by `os validate` and `os build`, and at install, with the
+  prescription to use `place`. Within one extension, a `place` entry beside the key that
+  would replace it is refused too: list the item in the arrangement instead.
+- **Hiding a field is written in the arrangement.** `hidden` is not a display property a
+  `fieldPatches` entry may set: a hidden field is also left out of the search index and
+  out of a form's required check, so it is more than display. To keep a vendor field off
+  the record page and the forms, list it in a group whose `visibleWhen` is false:
+  `{ key: 'off_page', label: 'Not shown', fields: ['fax'], visibleWhen: 'false' }`.
 
 ---
 
