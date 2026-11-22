@@ -1527,6 +1527,8 @@ const de = {
     pathStageChangeConflict: 'Jemand anderes hat diesen Datensatz geändert; die aktuelle Version wird jetzt angezeigt. Klicken Sie erneut auf die Phase, wenn die Verschiebung weiterhin gilt.',
     pathStageChangeDenied: 'Sie sind nicht berechtigt, die Phase dieses Datensatzes zu ändern.',
     pathStageChangeFailed: 'Die Phase konnte nicht geändert werden.',
+    stageChangeStartsHeading: 'Beim Speichern dieser Änderung starten diese Flows:',
+    stageChangeStartsApproval: 'startet eine Genehmigung',
     inlineEditRecordChanged: "Dieser Datensatz wurde während Ihrer Bearbeitung an anderer Stelle geändert. Ihre ungespeicherten Änderungen bleiben erhalten, und Speichern schreibt sie über die neueste Version.",
     stageMenuTrigger: 'Phase: {{stage}}. Phase ändern',
     stageMenuCurrent: 'aktuelle Phase',

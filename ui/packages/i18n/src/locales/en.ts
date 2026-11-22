@@ -1655,6 +1655,8 @@ const en = {
     pathStageChangeConflict: 'Someone else changed this record, and the latest version is now shown. Press the stage again if the move still applies.',
     pathStageChangeDenied: "You don't have permission to change this record's stage.",
     pathStageChangeFailed: 'The stage could not be changed.',
+    stageChangeStartsHeading: 'Saving this change starts these flows:',
+    stageChangeStartsApproval: 'starts an approval',
     inlineEditRecordChanged: 'This record was changed elsewhere while you were editing. Your unsaved changes are kept, and Save writes them over the latest version.',
     stageMenuTrigger: 'Stage: {{stage}}. Change stage',
     stageMenuCurrent: 'current stage',

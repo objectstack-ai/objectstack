@@ -1527,6 +1527,8 @@ const ko = {
     pathStageChangeConflict: '다른 사용자가 이 레코드를 변경하여 최신 버전을 표시합니다. 이동이 여전히 필요하면 단계를 다시 누르세요.',
     pathStageChangeDenied: '이 레코드의 단계를 변경할 권한이 없습니다.',
     pathStageChangeFailed: '단계를 변경할 수 없습니다.',
+    stageChangeStartsHeading: '저장하면 다음 플로가 시작됩니다:',
+    stageChangeStartsApproval: '승인 시작',
     inlineEditRecordChanged: "편집하는 동안 이 레코드가 다른 곳에서 변경되었습니다. 저장하지 않은 변경 사항은 유지되며, 저장하면 최신 버전에 덮어씁니다.",
     stageMenuTrigger: '단계: {{stage}}. 단계 변경',
     stageMenuCurrent: '현재 단계',

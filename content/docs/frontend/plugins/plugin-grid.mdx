@@ -487,8 +487,14 @@ row whose new value would sort it elsewhere stays in place until the next load
   confirm that names the field and both values and says saving may trigger
   related automation ("Status changes from On Hold to Active. Saving may
   trigger related automation."). Cancel writes nothing and the cell keeps the
-  value it had; Change saves it as any commit is saved. The confirm does not
-  list the flows. A host asks this through `GridCellSelection.confirmCommit`.
+  value it had; Change saves it as any commit is saved. Under that sentence the
+  confirm names the flows the move would start, each by its label in the
+  reader's language and a flow that starts an approval marked so, as the
+  server's `POST /api/v1/automation/_record-starts` answers them (the record
+  page's stage confirm reads the same answer, through `@object-ui/plugin-detail`'s
+  `useRecordUpdateStarts`). A read that fails or names no flow leaves the
+  sentence alone (objectstack#35928). A host asks this through
+  `GridCellSelection.confirmCommit`.
 - **A change that makes other fields required asks for them** (objectstack#35956).
   When the new value makes a field's `requiredWhen` true while that field is
   still empty (a win reason on "Won", say), nothing is written yet: a dialog

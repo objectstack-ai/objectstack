@@ -145,7 +145,17 @@ beforeEach(() => {
   perms.writeDenied = [];
 });
 
-afterEach(() => cleanup());
+// objectstack#35928 — the stage confirm asks which flows the move would start.
+// Answered here as a deployment without that read (501), so the confirm reads as
+// it does without it and no request leaves for the network.
+beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 501, json: async () => ({}) })));
+});
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe('#35891 the stage tag opens a menu of every stage', () => {
   it('lists every stage in order, the current one checked', () => {
@@ -638,5 +648,77 @@ describe('#35891 the keyboard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'go' }));
     const dialog = await screen.findByRole('alertdialog');
     await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus());
+  });
+});
+
+// objectstack#35928 — under its sentence the confirm names the flows the move
+// would start (`POST /api/v1/automation/_record-starts`, read through
+// `../stageChangeStarts`, the reader the list cell's confirm shares); no flows,
+// a refused read and a malformed answer leave the sentence alone.
+describe('#35928 the stage menu\'s dialog names the flows the move starts', () => {
+  const CLOSURE = { name: 'closure', label: 'Closure Sign-off', startsApproval: true };
+  const NOTIFY = { name: 'notify_owner', label: 'Notify Owner', startsApproval: false };
+  type StartsAnswer = { status: number; body: unknown } | 'network-error';
+
+  /** The global `fetch`, answering the read with `answer` and recording every request. */
+  function installStartsFetch(answer: StartsAnswer) {
+    const calls: Array<{ url: string; body: any }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
+      calls.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (answer === 'network-error') throw new TypeError('Failed to fetch');
+      return { ok: answer.status < 400, status: answer.status, json: async () => answer.body };
+    }));
+    return calls;
+  }
+  const listed = (flows: unknown[]): StartsAnswer => ({ status: 200, body: { success: true, data: { flows } } });
+  const startsCalls = (calls: Array<{ url: string }>) => calls.filter((c) => c.url === '/api/v1/automation/_record-starts');
+  /** Let an answer that arrived land before reading that nothing was drawn for it. */
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  async function openConfirm(): Promise<HTMLElement> {
+    mount();
+    fireEvent.click(item(openMenu(), 'Negotiation'));
+    return screen.findByRole('dialog');
+  }
+
+  it('list: asks for the record and the move, and names each flow under the sentence, approval marked', async () => {
+    const calls = installStartsFetch(listed([CLOSURE, NOTIFY]));
+    const dialog = await openConfirm();
+    const list = await within(dialog).findByTestId('stage-change-starts');
+    expect(within(dialog).getByText('Move this record to Negotiation?')).toBeInTheDocument();
+    expect(list).toHaveTextContent('Saving this change starts these flows:');
+    const closure = list.querySelector('[data-stage-change-start="closure"]')!;
+    const notify = list.querySelector('[data-stage-change-start="notify_owner"]')!;
+    expect(closure).toHaveTextContent('Closure Sign-off');
+    expect(closure.querySelector('[data-stage-change-start-approval]')).toHaveTextContent('starts an approval');
+    expect(notify).toHaveTextContent('Notify Owner');
+    expect(notify.querySelector('[data-stage-change-start-approval]')).toBeNull();
+    expect(startsCalls(calls).map((c: any) => c.body)).toEqual([{ object: 'crm_opportunity', recordId: 'o1', changes: { stage: 'negotiation' } }]);
+  });
+
+  it('empty: no flows answered draws no list, and the sentence stands alone', async () => {
+    const calls = installStartsFetch(listed([]));
+    const dialog = await openConfirm();
+    await waitFor(() => expect(startsCalls(calls)).toHaveLength(1));
+    await settle();
+    expect(within(dialog).queryByTestId('stage-change-starts')).toBeNull();
+    expect(within(dialog).getByText('Move this record to Negotiation?')).toBeInTheDocument();
+  });
+
+  it('failure: a refused read, a network error and a malformed answer each draw no list', async () => {
+    const answers: StartsAnswer[] = [
+      { status: 404, body: { success: false, error: { code: 'RECORD_NOT_FOUND', message: 'no' } } },
+      'network-error',
+      { status: 200, body: { flows: [CLOSURE] } },
+    ];
+    for (const answer of answers) {
+      const calls = installStartsFetch(answer);
+      const dialog = await openConfirm();
+      await waitFor(() => expect(startsCalls(calls)).toHaveLength(1));
+      await settle();
+      expect(within(dialog).queryByTestId('stage-change-starts')).toBeNull();
+      expect(within(dialog).getByText('Move this record to Negotiation?')).toBeInTheDocument();
+      cleanup();
+    }
   });
 });

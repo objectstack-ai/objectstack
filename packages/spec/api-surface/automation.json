@@ -365,6 +365,8 @@
     "normalizeFlowFunctionEntry (function)",
     "parseFlowNodeRegions (function)",
     "predicateSlotRefusal (function)",
+    "recordChangeTriggerFiresOnUpdate (function)",
+    "recordChangeTriggerHookEvents (function)",
     "reservedFlowNodeTypeRefusal (function)",
     "resolveFlowNodeExpressions (function)",
     "resolveFlowNodeValueSlots (function)",

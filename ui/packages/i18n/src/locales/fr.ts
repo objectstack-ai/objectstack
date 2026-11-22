@@ -1577,6 +1577,8 @@ const fr = {
     pathStageChangeConflict: "Quelqu'un d'autre a modifié cet enregistrement ; la dernière version est maintenant affichée. Cliquez à nouveau sur l'étape si le changement s'applique toujours.",
     pathStageChangeDenied: "Vous n'avez pas l'autorisation de modifier l'étape de cet enregistrement.",
     pathStageChangeFailed: "L'étape n'a pas pu être modifiée.",
+    stageChangeStartsHeading: "L'enregistrement de cette modification démarre ces flux :",
+    stageChangeStartsApproval: 'démarre une approbation',
     inlineEditRecordChanged: "Cet enregistrement a été modifié ailleurs pendant votre modification. Vos modifications non enregistrées sont conservées, et Enregistrer les écrit sur la dernière version.",
     stageMenuTrigger: "Étape : {{stage}}. Changer d'étape",
     stageMenuCurrent: 'étape actuelle',

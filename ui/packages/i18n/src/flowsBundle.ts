@@ -8,16 +8,17 @@
 
 /**
  * The app's `flows` translation group, read back out of the i18next resource
- * tree the console already loaded — the ONE reader of that group in the
- * console. Module-internal (not re-exported from `utils/index` or the package
- * entry).
+ * tree the host already loaded — the ONE reader of that group in the UI.
  *
- * Three surfaces read it, all for the flow a run belongs to: `FlowRunner`
- * (the paused screen's field copy and option labels, the flow's label, the
- * resume's terminal toasts) and the two flow-LAUNCH hosts through
- * `launchConsoleFlow` (a straight-through run's terminal toasts,
- * objectui#12075). They read it through this module so the three cannot
- * disagree about where the bundle lives.
+ * Every surface that names a flow in the reader's language reads it through
+ * this module, so none can disagree about where the bundle lives: the
+ * console's `FlowRunner` (the paused screen's field copy and option labels,
+ * the flow's label, the resume's terminal toasts), the two flow-LAUNCH hosts
+ * through `launchConsoleFlow` (objectui#12075), the flow designer's label
+ * translations, and the stage-change confirms of the list cell and the record
+ * page, which name the flows a move would start (objectstack#35928). It lives
+ * here rather than in `@object-ui/app-shell` because the confirms' packages
+ * do not depend on the console.
  *
  * The provider's `loadLanguage` hands the app's translation payload to
  * i18next (`transformSpecTranslations` forwards `flows` verbatim under the app
