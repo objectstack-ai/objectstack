@@ -279,9 +279,11 @@ or parent editor). It answers `{ id, file_name }` (200), with the name trimmed.
 Only the name the attachment is listed under changes. The stored `sys_file`,
 its bytes and the file name a download carries stay as they were uploaded.
 
-The console's Attachments tab offers Rename to a reader who holds the delete
-grant on `sys_attachment`: on the rows they uploaded, and on every row when
-they also hold the edit grant.
+The console's Attachments tab offers Rename and Delete on every row the reader
+uploaded, through these two doors, with no grant beyond the member baseline. On
+another user's row it offers Rename to a holder of the edit grant on
+`sys_attachment`, and Delete, through the data API, to a holder of the delete
+grant.
 
 ## Download — authenticated & parent-scoped
 
