@@ -4,6 +4,7 @@
 '@objectstack/metadata-protocol': minor
 '@objectstack/cli': minor
 '@objectstack/cloud-connection': minor
+'@objectstack/lint': minor
 '@object-ui/app-shell': minor
 '@object-ui/plugin-detail': minor
 ---
@@ -36,6 +37,7 @@ objectExtensions: [{
 - **Any other package writing either key is refused**, once at each door: saving or publishing the extension, `os validate` and `os build`, and installing the package (`VALIDATION_ERROR`; 400 at save and publish, 422 at install). Each refusal names the key, the object and the package and prescribes `place`. A code-registered extension that reaches the registry anyway is not applied, and the boot log says so. Within one extension, a `place` entry beside the arrangement key that would replace it is refused at parse.
 - **One merge, every reader.** The record page, the forms, the preview and Studio read the served object, so they show one arrangement. Removing a key, or uninstalling or disabling the `.custom` package, serves the owner's arrangement with the placements again.
 - **Served reads say what the reader cannot derive.** Where a `.custom` package writes `relatedLists`, the served object carries the read decoration `_relatedListsArrangement` (`{ packageId, hidden, unlisted }`): the lists the environment hides, and whether an unlisted list shows. The record page's tab reader and the default page synthesis read it; with no decoration served they answer exactly as before. A reader's own tab order (kept per user) is still laid over this list, and a tab the environment hides is not offered to them.
+- **A group the arrangement brings is a translation anchor.** `os validate`'s translation-reference rule reads an extension's `fieldGroups` too, so a bundle's `_sections` key for a group the `.custom` arrangement declares is not reported as naming nothing.
 - **`hidden` on a field is not a display property a `fieldPatches` entry may set.** A hidden field is also left out of the search index and out of a form's required check, so the display whitelist is not widened. To keep a vendor field off the record page and the forms, list it in a group whose `visibleWhen` is false.
 
 What to check in an app: nothing changes until a `.custom` package writes one of the two keys. A package other than a `.custom` one that wrote `fieldGroups` or `relatedLists` on an extension was already refused at parse, and is still refused, now by the save, publish, install, `os validate` and `os build` doors, with the same prescription.

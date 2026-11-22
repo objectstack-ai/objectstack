@@ -22,9 +22,9 @@
  *    whatever group the owner or another extension had put it in. Replaced
  *    whole means their membership statements are replaced in either
  *    spelling: a group that lists `fields` shows exactly its list, so a
- *    field of theirs that no list names loses a `group` naming such a group,
- *    and a listed field's own `group` is rewritten to the group that lists
- *    it. The arrangement's own statements stay the object's rule: a field
+ *    field of theirs that no list names loses a `group` naming such a group
+ *    or a group the arrangement does not have, and a listed field's own
+ *    `group` is rewritten to the group that lists it. The arrangement's own statements stay the object's rule: a field
  *    the `.custom` extension declares keeps its `group`, and a group that
  *    lists no `fields` keeps the fields whose `group` names it. A `group`
  *    naming a group that now places a body table is taken off. The served
@@ -197,16 +197,20 @@ export function applyCustomArrangement(
     // stated is replaced too, in either spelling. A group that lists `fields`
     // shows exactly its list: a listed field's own `group` follows the group
     // that lists it, and a field of the object or of another extension that
-    // no list names loses a `group` naming a listing group, so it shows after
-    // the last group. The arrangement's own statements stay: a field this
+    // no list names loses a `group` naming a listing group, or a group the
+    // arrangement does not have (a placement's `group` names the owner's
+    // group, which is gone with the owner's list), so it shows after the
+    // last group. The arrangement's own statements stay: a field this
     // extension declares keeps its `group`, and a group that lists no
     // `fields` keeps the fields whose `group` names it. No field names a
     // group that places a body table (a refusal on an object parse).
     const listedIn = new Map<string, string>();
+    const groupKeys = new Set<string>();
     const listingGroups = new Set<string>();
     const tableGroups = new Set<string>();
     for (const group of groups) {
       if (typeof group.key !== 'string') continue;
+      groupKeys.add(group.key);
       if (typeof group.relatedList === 'string') {
         tableGroups.add(group.key);
         continue;
@@ -228,7 +232,8 @@ export function applyCustomArrangement(
           continue;
         }
         const own = Object.prototype.hasOwnProperty.call(declaredHere, name);
-        if (tableGroups.has(field.group) || (listingGroups.has(field.group) && !own)) {
+        const replaced = !groupKeys.has(field.group) || listingGroups.has(field.group);
+        if (tableGroups.has(field.group) || (replaced && !own)) {
           const { group: _replaced, ...rest } = field;
           fields = { ...(fields ?? record.fields), [name]: rest };
         }

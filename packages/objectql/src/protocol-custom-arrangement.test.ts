@@ -143,7 +143,10 @@ afterEach(() => {
 const AUTHORED = new Set(['name', 'company', 'status', 'email', 'phone', 'fax', 'crm_tax_id', 'region__c']);
 /** The derived layout as `[group key | null for the trailing bucket, authored members]`. */
 const layout = (body: any): Array<[string | null, string[]]> =>
-  (deriveFieldGroupLayout(body) ?? []).map((section) => [section.key ?? null, section.fields.filter((f) => AUTHORED.has(f))]);
+  (deriveFieldGroupLayout(body) ?? [])
+    .map((section): [string | null, string[]] => [section.key ?? null, section.fields.filter((f) => AUTHORED.has(f))])
+    // The trailing bucket also carries the object's system fields; with no authored member it is not a reading.
+    .filter(([key, members]) => key !== null || members.length > 0);
 
 const servedObject = async (protocol: any) => (await protocol.getMetaItem({ type: 'object', name: OBJ })).item;
 
