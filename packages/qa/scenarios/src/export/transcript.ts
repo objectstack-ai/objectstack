@@ -113,6 +113,8 @@ export function buildTranscript(original: LoadedScenario, record: ScenarioRunRec
             question: q.question,
             ...(q.persona ? { persona: q.persona, hidden: { values: hiddenValues(scenario, q.persona) } } : {}),
             objectLabels: labels,
+            // Graded as the run graded it: under the masking the record states, never the exporter's environment.
+            ...(record.env.schemaMasking === 'off' ? { schemaMasking: 'off' as const } : {}),
             turn: recorded,
           });
           if (!same(regrade, q.grade)) throw new TranscriptRefusal(`the recorded reply for \`${key}\` grades differently from the run record: the recording is not this run's`);
