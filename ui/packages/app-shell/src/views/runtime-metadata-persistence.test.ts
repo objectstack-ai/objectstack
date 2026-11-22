@@ -114,6 +114,7 @@ describe('runtime-metadata-persistence seam (ADR-0034)', () => {
 
     expect(metadataClient.save).toHaveBeenCalledWith('view', 'view_123', body, {
       mode: 'draft',
+      ifNoneMatch: '*',
     });
     expect(id).toBe('view_123');
   });
@@ -243,7 +244,7 @@ describe('runtime-metadata-persistence seam (ADR-0034)', () => {
       const id = await createRuntimeMetadata('view', env.name, env, { metadataClient });
       // Row key (URL segment), returned id, and body.name are the SAME value.
       expect(id).toBe('acct.mine');
-      expect(metadataClient.save).toHaveBeenCalledWith('view', 'acct.mine', env, { mode: 'draft' });
+      expect(metadataClient.save).toHaveBeenCalledWith('view', 'acct.mine', env, { mode: 'draft', ifNoneMatch: '*' });
       expect(env.name).toBe('acct.mine');
     });
   });
