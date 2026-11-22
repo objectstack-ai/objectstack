@@ -1,11 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectstack#36137 — every Console writer of a view draft is pinned, so a
- * view settings save that lands between 「Save to this view」's draft write and
- * its publish is refused instead of being published with it (ruling record
+ * objectstack#36137 — the view settings save and the view create are pinned,
+ * so a view settings save that lands between 「Save to this view」's draft write
+ * and its publish is refused instead of being published with it (ruling record
  * 7058616478 on objectstack#35955: a pending draft is never published on
- * someone else's behalf).
+ * someone else's behalf). The draft half of `ObjectStackAdapter.updateView`
+ * (rename, pin, set as default) is not pinned and is not pinned here.
  *
  * The door is a `fetch` double of the `/meta` draft door, answering the way
  * `DraftConflictDialog.test.tsx` records it was measured to answer (a draft
@@ -341,6 +342,7 @@ describe('a view create carries the first-write pin (objectstack#36137)', () => 
     expect(env.name).toBe(VIEW_ID);
     await expect(createRuntimeMetadata('view', env.name, env, { metadataClient: door.client })).rejects.toMatchObject({
       status: 409,
+      code: 'METADATA_CONFLICT',
     });
     expect(door.puts).toEqual([expect.objectContaining({ ifNoneMatch: '*', status: 409 })]);
     expect(door.draftOf(VIEW_ID)?.body).toEqual(pending);
