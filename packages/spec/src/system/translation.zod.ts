@@ -2065,8 +2065,9 @@ const appTranslationDataShape = () => ({
     surface: 'this flow translation',
     history: TRANSLATION_HISTORY,
     aliases: {
-      name: 'label', title: 'label', steps: 'screens', screen: 'screens', pages: 'screens',
-      node: 'nodes',
+      name: 'label', title: 'label', screen: 'screens', pages: 'screens',
+      // A step's name is a node label: `steps.<node_id>.label` means `nodes`.
+      node: 'nodes', steps: 'nodes', step: 'nodes',
       refusal: 'refusals', ends: 'refusals',
       approval: 'approvals',
       notice: 'notices', saveNotices: 'notices',
