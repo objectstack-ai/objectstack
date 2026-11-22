@@ -96,6 +96,7 @@ import { bindRecordShareCascade } from './record-share-cascade.js';
 import { createDeclaredSharingRuleSource } from './declared-sharing-rules.js';
 import { normalizeTenancyPosture, postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { inProcessSessionReadInput } from '@objectstack/types';
+import type { ShareLinkLabelProtocol } from '@objectstack/types';
 import { backfillStoredDeclarationPackagesAtBoot } from './stored-declaration-package-backfill.js';
 import { registeredObjectNames, reportInertShareGrantHolders, shareGrantRegistrationRefusal } from './share-arm-boot.js';
 
@@ -1228,6 +1229,24 @@ export class SharingServicePlugin implements Plugin {
             registerShareLinkRoutes(http, this.linkService, engine as SharingEngine, {
               basePath: this.options.shareLinkBasePath,
               contextFromRequest: verifiedContextFromRequest,
+              // The resolve answer's object label, in the request's locale. Read
+              // per request: the i18n plugin may register after this one.
+              i18n: () => {
+                try {
+                  return ctx.getService<II18nService>('i18n');
+                } catch {
+                  return undefined;
+                }
+              },
+              // The metadata protocol, for the object's packaged base (a renamed
+              // object keeps its rename, as on the meta door).
+              protocol: () => {
+                try {
+                  return ctx.getService<ShareLinkLabelProtocol>('protocol');
+                } catch {
+                  return undefined;
+                }
+              },
             });
             ctx.logger.info(
               'SharingServicePlugin: share-link routes mounted at ' +
