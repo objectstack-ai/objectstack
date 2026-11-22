@@ -337,6 +337,16 @@ the page, a banner, and `record_section` actions, which the standard page does n
 such an action reachable off the full page, add `record_more` to its `locations`, and leave it
 out of the page header's `actions` list so the full page still draws it once.
 
+So the record's title and its main button should come from the object, which both pages read.
+The title is the object's `nameField` (the name lists, search and lookups show too); leave the
+header's `title` out, or set it to that one field's `{field}` token. The order of the header
+actions and the primary button are declared on the actions: `order` (lower first) and
+`variant: 'primary'` on the main one; the header's `actions` list then only chooses which ones
+the full page draws. A header that should read differently on every surface goes in a slotted
+page's `header` slot. `os validate`, `os build`, `os lint` and publishing a page warn, without
+refusing, when a full page's header title or action order differs from what the standard page
+draws (`os explain record-page-header-title-differs`, `os explain record-page-header-actions-differ`).
+
 A slotted page is the standard page with its slots filled, so its slots apply on every surface.
 A page named in the URL (`…/record/:id/page/:pageName`, print pages and other named routes) is
 drawn wherever that route renders. The platform's approval request and user pages keep their
