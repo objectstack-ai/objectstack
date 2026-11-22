@@ -30,7 +30,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { resolveEnvironmentMembershipEnforcement } from '@objectstack/core';
+import { resolveEnvironmentMembershipEnforcement, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS } from '@objectstack/core';
 import { RestServer } from './rest-server.js';
 import type { RestEnvRegistry, RestKernelManager } from './rest-server.js';
 // Clocked windows measure behaviour, never loading: the source under test
@@ -56,7 +56,7 @@ function recordingProtocol(env: string, reached: Reached[]): any {
     };
     return {
         getMetaItem: async () => undefined,
-        getMetaItems: async () => ({ items: [] }),
+        getMetaItems: record('getMetaItems', { items: [] }),
         findData: record('findData', { records: [{ id: `${env}_row` }], total: 1 }),
         createData: record('createData', { id: `${env}_new` }),
     };
@@ -99,7 +99,14 @@ function engine(spec: EngineSpec, membershipReads: unknown[]): any {
     });
 }
 
-function wiring(userId: string, spec: EngineSpec) {
+interface WiringOpts {
+    /** Environments whose kernel carries NO `auth` service (default: none). */
+    noAuthIn?: string[];
+    /** The session is held by an active ADR-0069 gate. */
+    gated?: boolean;
+}
+
+function wiring(userId: string, spec: EngineSpec, opts: WiringOpts = {}) {
     const reached: Reached[] = [];
     const membershipReads: unknown[] = [];
     const kernelManager: RestKernelManager = {
@@ -109,10 +116,16 @@ function wiring(userId: string, spec: EngineSpec) {
                     // The SHARED auth: every environment's kernel accepts the
                     // same platform session.
                     if (name === 'auth') {
+                        if (opts.noAuthIn?.includes(environmentId)) throw new Error(`no auth service in ${environmentId}`);
                         return {
+                            ...(opts.gated ? { isAuthGateActive: () => true } : {}),
                             api: {
                                 getSession: async () => ({
-                                    user: { id: userId, email: `${userId}@example.test` },
+                                    user: {
+                                        id: userId,
+                                        email: `${userId}@example.test`,
+                                        ...(opts.gated ? { authGate: { code: 'PASSWORD_EXPIRED', message: 'Your password has expired.' } } : {}),
+                                    },
                                     session: { userId },
                                 }),
                             },
@@ -188,16 +201,21 @@ const ROUTES: RouteCase[] = [
     { family: 'write', method: 'POST', body: { name: 'x' }, downstream: 'createData' },
 ];
 
-async function drive(table: Map<string, Handler>, route: RouteCase, mount: 'scoped' | 'unscoped') {
-    const key = `${route.method} ${mount === 'scoped' ? SCOPED : BASE}/data/:object`;
+async function drive(
+    table: Map<string, Handler>,
+    route: RouteCase,
+    mount: 'scoped' | 'unscoped',
+    door: { pattern: string; concrete: string; params: Record<string, string> } = DATA_DOOR,
+) {
+    const key = `${route.method} ${mount === 'scoped' ? SCOPED : BASE}${door.pattern}`;
     const handler = table.get(key);
     if (!handler) throw new Error(`route not mounted: ${key}`);
-    const url = mount === 'scoped' ? `${BASE}/environments/${ENV_B}/data/account` : `${BASE}/data/account`;
+    const url = mount === 'scoped' ? `${BASE}/environments/${ENV_B}${door.concrete}` : `${BASE}${door.concrete}`;
     const req: any = {
         method: route.method,
         path: url,
         url,
-        params: { object: 'account', ...(mount === 'scoped' ? { environmentId: ENV_B } : {}) },
+        params: { ...door.params, ...(mount === 'scoped' ? { environmentId: ENV_B } : {}) },
         query: {},
         body: route.body,
         headers: {
@@ -221,6 +239,10 @@ async function drive(table: Map<string, Handler>, route: RouteCase, mount: 'scop
 }
 
 const MOUNTS = ['scoped', 'unscoped'] as const;
+
+const DATA_DOOR = { pattern: '/data/:object', concrete: '/data/account', params: { object: 'account' } };
+const META_DOOR = { pattern: '/meta/:type', concrete: '/meta/object', params: { type: 'object' } };
+const META_READ: RouteCase = { family: 'meta list read', method: 'GET', downstream: 'getMetaItems' };
 
 describe('every data door judges environment membership', () => {
     for (const mount of MOUNTS) {
@@ -270,6 +292,52 @@ describe('every data door judges environment membership', () => {
                 // level (`handleRouteError`); a throw would carry it on itself.
                 const answered = thrown ? { status: thrown.status, code: thrown.code } : { status, code: body?.code };
                 expect(answered).toEqual({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+                expect(w.reached).toEqual([]);
+            });
+        }
+    }
+});
+
+describe('every metadata door judges environment membership', () => {
+    for (const mount of MOUNTS) {
+        it(`${mount} ${META_READ.family}: a signed-in non-member is refused 403 PROJECT_MEMBERSHIP_REQUIRED and the protocol is never reached`, async () => {
+            const w = wiring(OUTSIDER, { registersMembership: true, members: [MEMBER] });
+            const { status, body } = await drive(makeServer(w, true), META_READ, mount, META_DOOR);
+            expect(status).toBe(403);
+            expect(body?.error?.code).toBe('PROJECT_MEMBERSHIP_REQUIRED');
+            expect(w.reached).toEqual([]);
+        });
+
+        it(`${mount} ${META_READ.family}: the member is served (control)`, async () => {
+            const w = wiring(MEMBER, { registersMembership: true, members: [MEMBER] });
+            const { status } = await drive(makeServer(w, true), META_READ, mount, META_DOOR);
+            expect(status).toBeLessThan(300);
+            expect(w.reached).toEqual([{ env: ENV_B, method: 'getMetaItems' }]);
+        });
+    }
+});
+
+describe('the membership judgment yields to the two answers ordered before it', () => {
+    for (const mount of MOUNTS) {
+        for (const route of ROUTES) {
+            it(`${mount} ${route.family}: a credential anchored in another environment keeps the anonymous-deny answer, and no membership is read`, async () => {
+                // The target environment's kernel carries no auth service, so
+                // the default environment's validates the session: anchored
+                // elsewhere.
+                const w = wiring(OUTSIDER, { registersMembership: true, members: [MEMBER] }, { noAuthIn: [ENV_B] });
+                const { status, body } = await drive(makeServer(w, true), route, mount);
+                expect(status).toBe(ANONYMOUS_DENY_STATUS);
+                expect(body).toEqual(ANONYMOUS_DENY_BODY);
+                expect(w.membershipReads).toEqual([]);
+                expect(w.reached).toEqual([]);
+            });
+
+            it(`${mount} ${route.family}: a session the ADR-0069 gate holds keeps the gate's answer, and no membership is read`, async () => {
+                const w = wiring(OUTSIDER, { registersMembership: true, members: [MEMBER] }, { gated: true });
+                const { status, body } = await drive(makeServer(w, true), route, mount);
+                expect(status).toBe(403);
+                expect(body?.error?.code).toBe('PASSWORD_EXPIRED');
+                expect(w.membershipReads).toEqual([]);
                 expect(w.reached).toEqual([]);
             });
         }

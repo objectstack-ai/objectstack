@@ -3613,9 +3613,14 @@ export class RestServer {
             // naming the environment must not pre-empt. `undefined` and
             // `'platform'` are not environments on this server (see
             // `credentialAnchoredElsewhere`). A session the ADR-0069 gate
-            // holds is answered by that gate first, as the dispatcher orders
-            // its two gates. A read that cannot answer throws the loud outage,
-            // re-raised by the net below.
+            // holds is not judged here, for two reasons: `enforceAuth` reads
+            // the gate off the context, so a refusal here (no context) would
+            // replace the gate's own code — the remediation a gated user
+            // acts on — with the membership one; and the dispatcher orders
+            // its two gates the same way, so a gated caller gets the gate's
+            // answer at both doors. The gate itself refuses that session on
+            // every data door. A read that cannot answer throws the loud
+            // outage, re-raised by the net below.
             if (
                 this.environmentMembershipEnforced
                 && environmentId !== undefined && environmentId !== 'platform'

@@ -29,9 +29,15 @@
  *     asked is asked, and a fault refuses.
  *  5. The membership read, as the platform (the caller's id is the `where`,
  *     not the reader), on EVERY request — an admission is never reused, so a
- *     removal takes effect on the caller's next request. A read that throws ⇒
- *     {@link AuthzStoreUnavailableError}: fail closed, loud and retriable,
- *     never "allowed" and never the membership refusal.
+ *     removal takes effect on the caller's next request, on every replica, and
+ *     a store that cannot answer refuses that request whoever was admitted a
+ *     moment ago. ⛔ A future cache here must first meet the
+ *     authorization-cache rule in `resolve-authz-context.ts` (cache a success
+ *     only behind seams that observe the writes it depends on, TTL as the
+ *     residual bound) — and the writes that change this answer land in the
+ *     control plane, which the request's engine need not observe. A read that
+ *     throws ⇒ {@link AuthzStoreUnavailableError}: fail closed, loud and
+ *     retriable, never "allowed" and never the membership refusal.
  *  6. A row ⇒ admitted (`null`); none ⇒ the refusal: `403`,
  *     `PROJECT_MEMBERSHIP_REQUIRED`, with the environment and the user as
  *     context.
