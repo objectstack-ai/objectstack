@@ -39,7 +39,7 @@ import { foldFilterGroupToSpecRules, type FilterFoldRefusal } from './viewFilter
 import { buildViewConfigSaveBody } from './objectViewTabs.js';
 import { columnsWithSummaries, type DraftColumnSummaries } from './columnSummaryWrite.js';
 import type { ListSortRule, ListUrlState } from './userFilterUrlState.js';
-import type { ListViewPreference } from '../context/ListPreferencesProvider.js';
+import type { ListViewPreference } from './listDraftStore.js';
 
 /** The object a personal view is a row of. */
 export const PERSONAL_VIEW_OBJECT = 'sys_personal_view';
@@ -164,7 +164,7 @@ export function personalViewPanelFilters(
 export interface PersonalViewListState {
   /** The toolbar state the address carries (`uf_*`); an absent part is the view's own. */
   url: Pick<ListUrlState, 'filters' | 'sort' | 'grouping'>;
-  /** The reader's stored state for the view (`ui.list.<object>`), if any. */
+  /** The list's draft with the reader's layout (`listDraftPreference`), if any. */
   preference?: ListViewPreference;
   /**
    * The open view's own conditions when the Filter panel holds them as rows

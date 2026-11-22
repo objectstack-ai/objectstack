@@ -1,16 +1,18 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Sign-out clears the per-user list state and list filters the console wrote
- * for the signed-out user, on every sign-out path, and leaves the server-side
- * preference rows alone.
+ * Sign-out clears the list layout this browser keeps for the signed-out user,
+ * on every sign-out path, and the keys an earlier Console wrote list state
+ * under with it.
  *
- * The keys are written here by their real writers — `ListPreferencesProvider`
- * (`list-state:USER:OBJECT`) and `listFilterStorage` (`list-filters:USER:OBJECT:VIEW`)
- * — and removed by signing out through the real `AuthProvider`
- * (`@object-ui/auth`). `@object-ui/app-shell` depends on `@object-ui/auth`, so
- * the sweep cannot import these spellings; filling the keys by running their
- * writers is what keeps the two ends from drifting.
+ * The layout key is written here by its real writer — `useObjectListLayout`
+ * (`list-layout:USER:OBJECT`, objectstack#35955) — and removed by signing out
+ * through the real `AuthProvider` (`@object-ui/auth`). `@object-ui/app-shell`
+ * depends on `@object-ui/auth`, so the sweep cannot import this spelling;
+ * filling the key by running its writer is what keeps the two ends from
+ * drifting. The retired spellings (`list-state:USER:OBJECT`, the cache of the
+ * retired server row `ui.list.<object>`, and `list-filters:USER:OBJECT:VIEW`)
+ * have no writer left, so they are planted by hand.
  *
  * The sign-in page language stays: the two keys are imported from
  * `@object-ui/i18n` here, so a spelling that changes there fails this file
@@ -28,25 +30,15 @@ import {
   type AuthContextValue,
 } from '@object-ui/auth';
 import { LOCALE_SEED_STORAGE_KEY, LOCALE_STORAGE_KEY } from '@object-ui/i18n';
-import type { UserPreferenceFamily } from '@object-ui/data-objectstack';
-import {
-  ListPreferencesProvider,
-  localListStateKey,
-  useObjectListPreferences,
-  type ObjectListPreference,
-} from '../ListPreferencesProvider';
-import { UserStateAdaptersProvider, useAttachListStateFamily } from '../UserStateAdapters';
-import { buildListFilterKey, writeListFilterState } from '../../views/listFilterStorage';
+import { listLayoutStorageKey, resetListLayoutStoreForTests, useObjectListLayout } from '../../views/listLayoutStore';
 
 const ORG = { id: 'org_a', name: 'Acme', slug: 'acme' };
 const ALICE = { id: 'u_alice', name: 'Alice', email: 'alice@test.com' };
 const OBJECT = 'account';
-const VIEW = 'all';
-const GROUP = { id: 'root', logic: 'and', conditions: [{ id: 'c1', field: 'name', operator: 'contains', value: 'x' }] };
+const VIEW = 'account.all';
 
-/** The keys this file's writers produce for Alice. */
-const LIST_STATE_KEY = localListStateKey(ALICE.id, OBJECT);
-const LIST_FILTER_KEY = buildListFilterKey(ALICE.id, OBJECT, VIEW)!;
+/** The key this file's writer produces for Alice. */
+const LAYOUT_KEY = listLayoutStorageKey(ALICE.id, OBJECT)!;
 
 /** The real client clears `TokenStorage` on sign-out; this double does too. */
 function authClient(getSession: () => Promise<unknown>): AuthClient {
@@ -64,37 +56,10 @@ function authClient(getSession: () => Promise<unknown>): AuthClient {
   } as unknown as AuthClient;
 }
 
-/** The server-side list-state family: one row per object, never asked to change at sign-out. */
-function serverFamily(): UserPreferenceFamily<ObjectListPreference> & {
-  load: ReturnType<typeof vi.fn>;
-  save: ReturnType<typeof vi.fn>;
-} {
-  return {
-    prefix: 'ui.list.',
-    load: vi.fn().mockResolvedValue({}),
-    save: vi.fn().mockResolvedValue(undefined),
-  };
-}
-
-/** Attaches the family while a user is signed in, as the console's bridge does. */
-function FamilyBridge({ family }: { family: UserPreferenceFamily<ObjectListPreference> }) {
-  const { user } = useAuth();
-  const attach = useAttachListStateFamily();
-  useEffect(() => {
-    if (!user?.id) {
-      attach(null);
-      return;
-    }
-    attach(family);
-    return () => attach(null);
-  }, [user?.id, family, attach]);
-  return null;
-}
-
-/** What one committed render showed: the session, and the list state it offered. */
+/** What one committed render showed: the session, and the layout it offered. */
 interface Committed {
   auth: AuthContextValue;
-  prefs: ReturnType<typeof useObjectListPreferences>;
+  layout: ReturnType<typeof useObjectListLayout>;
 }
 
 /** The last committed render's view, written as one object so its two halves never come from two renders. */
@@ -102,9 +67,9 @@ const committed: { current: Committed | null } = { current: null };
 
 function Probe() {
   const auth = useAuth();
-  const prefs = useObjectListPreferences(OBJECT);
+  const layout = useObjectListLayout(OBJECT);
   useEffect(() => {
-    committed.current = { auth, prefs };
+    committed.current = { auth, layout };
   });
   return <span data-testid="user">{auth.user?.name ?? 'none'}</span>;
 }
@@ -113,75 +78,34 @@ function auth(): AuthContextValue {
   return committed.current!.auth;
 }
 
-function renderConsole(client: AuthClient, family = serverFamily()) {
+/** Sign in, and return the layout handle of a committed render that holds Alice's session. */
+async function signIn(client: AuthClient) {
   const view = render(
     <AuthProvider authUrl="/api/auth" client={client}>
-      <UserStateAdaptersProvider>
-        <FamilyBridge family={family} />
-        <ListPreferencesProvider>
-          <Probe />
-        </ListPreferencesProvider>
-      </UserStateAdaptersProvider>
+      <Probe />
     </AuthProvider>,
   );
-  return { view, family };
-}
-
-/**
- * Sign in, and return the list state of a committed render that holds Alice's
- * session AND reports her stored state read.
- *
- * Both facts are read from ONE snapshot, and the patch goes through that
- * snapshot. The snapshot is written after commit, so it trails the screen: a
- * signed-out render reports `ready` (no user to wait for), and Alice's first
- * render precedes the bridge attaching her family. A patch through either is
- * written to this browser only and queues no server save.
- */
-async function signIn(client: AuthClient, family = serverFamily()) {
-  const rendered = renderConsole(client, family);
-  const prefs = await waitFor(() => {
-    const view = committed.current;
-    expect(view?.auth.user?.id).toBe(ALICE.id);
-    expect(view?.prefs.ready).toBe(true);
-    return view!.prefs;
+  const layout = await waitFor(() => {
+    const seen = committed.current;
+    expect(seen?.auth.user?.id).toBe(ALICE.id);
+    return seen!.layout;
   });
-  expect(rendered.view.getByTestId('user').textContent).toBe('Alice');
-  return { ...rendered, prefs };
+  expect(view.getByTestId('user').textContent).toBe('Alice');
+  return { view, layout };
 }
 
-/** Sign in, then write a filter group and a search term through the real writers. */
-async function signInAndFilter(client: AuthClient) {
-  const { prefs, ...rendered } = await signIn(client);
-  act(() => {
-    prefs.patchView(VIEW, { filters: GROUP });
-  });
-  writeListFilterState(LIST_FILTER_KEY, { search: 'term' });
-  // The search write has landed past its debounce; the list state is written
-  // at once, and is what the user's server row holds once its save is sent.
-  await waitFor(() => expect(localStorage.getItem(LIST_FILTER_KEY)).not.toBeNull());
-  const userState = JSON.parse(localStorage.getItem(LIST_STATE_KEY)!) as ObjectListPreference;
-  expect(userState).not.toEqual({});
-  return { ...rendered, userState };
-}
-
-/**
- * The server-side row is the user's state on every device: whatever is sent
- * to it, before or after the sign-out, is the state the user left, never a
- * cleared one.
- */
-function expectServerRowsKept(
-  family: ReturnType<typeof serverFamily>,
-  userState: ObjectListPreference,
-) {
-  // Sent by its debounce or by the flush: `signOut()` flushes it before the
-  // session ends, and a session that ends any other way flushes it as the
-  // family detaches. Sent either way, before the sign-out settles.
-  expect(family.save).toHaveBeenCalled();
-  for (const [, value] of family.save.mock.calls) expect(value).toEqual(userState);
+/** Sign in, drag a width through the real writer, and plant the keys an earlier Console left. */
+async function signInAndArrange(client: AuthClient) {
+  const signedIn = await signIn(client);
+  act(() => signedIn.layout.patchView(VIEW, { widths: { name: 240 } }));
+  expect(JSON.parse(localStorage.getItem(LAYOUT_KEY)!)).toEqual({ perView: { [VIEW]: { widths: { name: 240 } } } });
+  localStorage.setItem(`list-state:${ALICE.id}:${OBJECT}`, JSON.stringify({ viewOrder: [VIEW] }));
+  localStorage.setItem(`list-filters:${ALICE.id}:${OBJECT}:${VIEW}`, JSON.stringify({ search: 'term' }));
+  return signedIn;
 }
 
 function listKeysLeft(): string[] {
-  return Object.keys(localStorage).filter((k) => k.startsWith('list-state:') || k.startsWith('list-filters:'));
+  return Object.keys(localStorage).filter((k) => /^(list-layout|list-state|list-filters):/.test(k));
 }
 
 beforeEach(() => {
@@ -189,6 +113,7 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   TokenStorage.clear();
+  resetListLayoutStoreForTests();
 });
 
 afterEach(() => {
@@ -196,12 +121,17 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('sign-out clears the signed-out user’s list state and list filters', () => {
-  it('signOut() removes every list-state and list-filters key and keeps the sign-in page language', async () => {
+describe('sign-out clears the list layout this browser keeps for the signed-out user (objectstack#35955)', () => {
+  it('signOut() removes every list-layout key, and the retired list-state and list-filters keys, and keeps the sign-in page language', async () => {
     const client = authClient(async () => ({ user: ALICE, session: { token: 'tok-alice' } }));
-    const { family, userState } = await signInAndFilter(client);
+    await signInAndArrange(client);
     localStorage.setItem(LOCALE_STORAGE_KEY, 'de');
     localStorage.setItem(LOCALE_SEED_STORAGE_KEY, 'de');
+    expect(listKeysLeft().sort()).toEqual([
+      `list-filters:${ALICE.id}:${OBJECT}:${VIEW}`,
+      LAYOUT_KEY,
+      `list-state:${ALICE.id}:${OBJECT}`,
+    ]);
 
     await act(async () => {
       await auth().signOut();
@@ -210,45 +140,12 @@ describe('sign-out clears the signed-out user’s list state and list filters', 
     expect(listKeysLeft()).toEqual([]);
     expect(localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('de');
     expect(localStorage.getItem(LOCALE_SEED_STORAGE_KEY)).toBe('de');
-    expectServerRowsKept(family, userState);
-  });
-
-  it('signOut() saves the last list change under the session, before the session ends', async () => {
-    // What happened, in order: the save is sent and settles while the session
-    // still exists. Sent after `client.signOut()`, the server would refuse it
-    // and the user's last list change would be lost on every device.
-    const events: string[] = [];
-    const client = authClient(async () => ({ user: ALICE, session: { token: 'tok-alice' } }));
-    (client.signOut as ReturnType<typeof vi.fn>).mockImplementation(async () => {
-      events.push('session ended');
-      TokenStorage.clear();
-    });
-    const family = serverFamily();
-    family.save.mockImplementation(async () => {
-      events.push('save sent');
-      // A server answer arrives in a later task, never in the same one.
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      events.push('save settled');
-    });
-    const { prefs } = await signIn(client, family);
-    act(() => {
-      prefs.patchView(VIEW, { filters: GROUP });
-    });
-    const userState = JSON.parse(localStorage.getItem(LIST_STATE_KEY)!) as ObjectListPreference;
-
-    await act(async () => {
-      await auth().signOut();
-    });
-
-    expect(events).toEqual(['save sent', 'save settled', 'session ended']);
-    expect(family.save).toHaveBeenCalledWith(`ui.list.${OBJECT}`, userState);
-    expect(listKeysLeft()).toEqual([]);
   });
 
   it('a session read that answers no session removes them too', async () => {
     let live = true;
     const client = authClient(async () => (live ? { user: ALICE, session: { token: 'tok-alice' } } : null));
-    const { view, family, userState } = await signInAndFilter(client);
+    const { view } = await signInAndArrange(client);
 
     live = false;
     await act(async () => {
@@ -257,39 +154,18 @@ describe('sign-out clears the signed-out user’s list state and list filters', 
 
     expect(view.getByTestId('user').textContent).toBe('none');
     expect(listKeysLeft()).toEqual([]);
-    expectServerRowsKept(family, userState);
   });
 
-  it('a search typed just before sign-out is not written after it', async () => {
+  it('with nobody signed in, a layout change writes nothing back', async () => {
     const client = authClient(async () => ({ user: ALICE, session: { token: 'tok-alice' } }));
-    await signInAndFilter(client);
-
-    writeListFilterState(LIST_FILTER_KEY, { search: 'typed-at-sign-out' });
+    await signInAndArrange(client);
     await act(async () => {
       await auth().signOut();
     });
-    // Past the write debounce.
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 400));
-    });
+    await waitFor(() => expect(committed.current?.auth.user ?? null).toBeNull());
 
-    expect(listKeysLeft()).toEqual([]);
-  });
-
-  it('a search typed just before a session read answers no session is not written after it', async () => {
-    let live = true;
-    const client = authClient(async () => (live ? { user: ALICE, session: { token: 'tok-alice' } } : null));
-    await signInAndFilter(client);
-
-    writeListFilterState(LIST_FILTER_KEY, { search: 'typed-at-expiry' });
-    live = false;
-    await act(async () => {
-      await auth().refreshSession();
-    });
-    // Past the write debounce.
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 400));
-    });
+    act(() => committed.current!.layout.patchView(VIEW, { widths: { name: 300 } }));
+    act(() => committed.current!.layout.setViewOrder([VIEW]));
 
     expect(listKeysLeft()).toEqual([]);
   });

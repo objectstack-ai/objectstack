@@ -2933,7 +2933,7 @@
       "title": "User-built FilterBuilder/SortBuilder toolbar merges with the view filter, restores across nav, and reproduces rows from the URL",
       "since": "v16",
       "status": "active",
-      "revision": 14,
+      "revision": 15,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2955,8 +2955,8 @@
         "open Filter in the condition row under the view bar (since objectstack#35878 the bar has no Filter or Sort button: the row is always there, with a dashed 「Filter」 button while no filter of the reader's own is set and a 「+」 after the filter chips once one is, both data-testid condition-add-filter; Sort is the row's first control, the dashed 「Sort」 button or, once sorted, the one sort chip 「Sorted by X +N」, data-testid condition-sort, ui/packages/plugin-list/src/conditions/ListConditionControls.tsx). Since objectstack#35549 / #35550 each opens the shared field list (the fields the view shows first, a search box, a type icon per row): Filter → a field → its values applies at once, with no Apply, and each condition shows as a chip in the condition row under the view bar; Sort → the direction on top → a field adds a level, the sort chip before the filter chips counting it as 「+N」. The full builders are one click further, behind the field list's footer: 「Advanced filter」 opens the FilterBuilder (no 「Where」 label any more) and 「All sort levels」 the SortBuilder. Add 2 conditions that leave at least TWO rows, so the sort clause has an order to read — on the stock seed priority = high AND estimate_hours > 4 leaves ONE row on in_progress, a single-datapoint for acceptance[1] (QA run #24616): check the count first and pick a pair that keeps ≥ 2; open the SortBuilder and add a sort (due_date desc); type a term into the list's quick search that keeps rows (acceptance[2] reads it back; QA run #29890 used 'pipeline'); capture the data request",
         "assert the request's `filter` param is the MERGE of the view's stored rule AND the two toolbar conditions (buildEffectiveFilter/mergeFilterNodes), and `sort` carries the toolbar sort (e.g. sort=-due_date) — the console spells its list params without a `$`; the returned rows satisfy view-filter AND toolbar conditions",
         "navigate away via an in-app nav link to another object (the link carries no query string, so the URL state is dropped), then navigate back to showcase_task in_progress through the Tasks nav entry and the view switcher (it lands on /view/showcase_task.in_progress). ⛔ Not the sidebar's 'In-Progress Tasks' Data Slices link: it opens /showcase_task/data?filter[status]=in_progress, a different surface from the saved view; screenshot; confirm the list opens as the view declares it: no toolbar filter chip, the view's own sort, an empty search, and no 「Discard」/「Save」 at the condition row's end (objectstack#35955: opening another object drops the draft). Then build the two conditions, the sort and the search again, open a record from the list and come back with the browser's Back: confirm the conditions, the sort and the search are all still there, with 「Discard」 and 「Save」 at the condition row's end",
-        "read where the toolbar filter and sort are kept: nowhere durable. Since objectstack#35955 they are the list's DRAFT, held in this tab's memory (ui/packages/app-shell/src/views/listDraftStore.ts): the signed-in user's sys_user_preference row keyed ui.list.showcase_task (GET /api/v1/data/sys_user_preference filtered to that key) gains no filters, sort or search from the change — it holds only what is remembered for the reader (perView.<view>.columnState.widths, rowHeight, viewOrder) — and localStorage gains no list-filters:<userId>:showcase_task:<viewId> key. Reload the page: the list opens as the view declares it",
-        "sign out through the account menu (the avatar menu's Log out, user.logout in ui/packages/app-shell/src/layout/AppHeader.tsx; never by clearing storage). That Log out itself removes the signed-out user's list-state:* and list-filters:* keys from localStorage (purgeSignedOutUserClientState, ui/packages/auth/src/ActiveOrganizationStorage.ts, run by AuthProvider's sign-out), so the first account's keys are gone by the time the second signs in; the clause holds by that wipe AND by the user-keyed row. Sign in as the SECOND account; open the same object+view; confirm the first account's cached toolbar filter does NOT appear",
+        "read where the toolbar filter and sort are kept: nowhere durable. Since objectstack#35955 they are the list's DRAFT, held in this tab's memory (ui/packages/app-shell/src/views/listDraftStore.ts): no sys_user_preference row is written — no Console writes a ui.list.<object> row any more (GET /api/v1/data/sys_user_preference shows no ui.list.showcase_task row changed) — and localStorage gains no filter, sort or search: the one list key it holds for the reader is list-layout:<userId>:showcase_task, which carries only the column widths, the row height and the tab order (ui/packages/app-shell/src/views/listLayoutStore.ts). Reload the page: the list opens as the view declares it",
+        "sign out through the account menu (the avatar menu's Log out, user.logout in ui/packages/app-shell/src/layout/AppHeader.tsx; never by clearing storage). That Log out itself removes the signed-out user's list-layout:* keys (and any list-state:* or list-filters:* key an earlier Console left) from localStorage (purgeSignedOutUserClientState, ui/packages/auth/src/ActiveOrganizationStorage.ts, run by AuthProvider's sign-out), so the first account's keys are gone by the time the second signs in; the clause holds by that wipe AND because no filter is stored anywhere. Sign in as the SECOND account; open the same object+view; confirm the first account's cached toolbar filter does NOT appear",
         "userFilters/URL: where UserFilters are hosted (an interface page or the userFilters surface — NOT a bare object list, ADR-0053), apply a quick-filter; copy the URL; open it in a fresh tab; confirm the uf_<field> params (comma-joined, URI-encoded) reproduce the same rows and uf__tab carries the active preset (ADR-0047)",
         "negative sweep: confirm tabs-element userFilters (preset chips, uf__tab) do NOT leak onto the bare object list view — dropdown chips the object view itself declares are allowed there (ADR-0047 amendment) and their uf_<field> params are not a leak",
         "shared-view save (objectstack#35955): as the seeded admin on the in_progress saved view (a stored view the showcase package takes saves into), change the sort, pick Kanban in the Display panel's layout and a row colour, open a record and come back with Back (the layout and the row colour are part of the draft and are still there), then set the row height to Spacious on the options menu's Row height level. Press 「Save」 at the condition row's end (Save to this view): it asks once, 「Save to this view?」, saying everyone who uses the view will see the changes. Confirm; capture the two writes: PUT /api/v1/meta/view/<view> as a draft carrying If-None-Match: *, then POST /api/v1/meta/view/<view>/publish. The console toasts 「Saved, visible to everyone」 and the condition row's 「Discard」/「Save」 go away. Sign in as the second account and open the same view: it shows the saved sort and the Kanban layout, with the second account's own row height. Back as the admin, change something in the view settings and save it there as a draft without publishing it; change the sort and press 「Save」 again: the console says the view has unpublished changes, to publish or discard them in the view settings first, and writes nothing. Discard that settings draft afterwards"
@@ -2983,7 +2983,7 @@
         {
           "clause": "the list state is never shared across accounts — the draft is never written to the user's sys_user_preference row or to browser storage, so a second account on the same browser never reads the first account's filters (a filter value can be sensitive)",
           "oracle": "dom",
-          "verify": "with account A's toolbar filter on screen, read A's ui.list.showcase_task preference row (no filters or sort in it) and localStorage (no list-filters:* key for the view), then sign A out through the account menu's Log out and sign in as account B on the same browser and confirm B's view opens with no A-authored toolbar filter",
+          "verify": "with account A's toolbar filter on screen, read A's sys_user_preference rows (no ui.list.* row written) and localStorage (no filter, sort or search in any key; list-layout:<A's user id>:showcase_task holds the widths, row height and tab order only), then sign A out through the account menu's Log out and sign in as account B on the same browser and confirm B's view opens with no A-authored toolbar filter",
           "evidence": "A's preference row + localStorage keys + B's clean toolbar"
         },
         {
@@ -3017,7 +3017,7 @@
       },
       "source": [
         "objectui: packages/plugin-list/src/ListView.tsx (buildEffectiveFilter, convertFilterGroupToAST, mergeFilterNodes; $filter + $orderby assembly)",
-        "objectui: packages/app-shell/src/views/listDraftStore.ts (objectstack#35955 — the list's draft: filters, sort, grouping, search and columns, held in the tab's memory for one reader, object and view); packages/app-shell/src/context/ListPreferencesProvider.tsx (the per-user ui.list.<object> sys_user_preference row, which since objectstack#35955 a list change writes only column widths, row height and the view order to)",
+        "objectui: packages/app-shell/src/views/listDraftStore.ts (objectstack#35955 — the list's draft: filters, sort, grouping, search and columns, held in the tab's memory for one reader, object and view); packages/app-shell/src/views/listLayoutStore.ts (objectstack#35955 — the reader's column widths, row height and tab order, kept in this browser only under list-layout:<user id>:<object>; the ui.list.<object> sys_user_preference row is retired)",
         "objectui: packages/app-shell/src/views/userFilterUrlState.ts (uf_* params, ADR-0047)",
         "ADR-0053 (userFilters belong to interface pages, suppressed on object list views); examples/app-showcase/src/ui/views/task.view.ts",
         "cross-ref: records-forms.list-view-capabilities (saved-view-filter / userFilters negative)"
@@ -3105,6 +3105,12 @@
           "revision": 14,
           "date": "2026-11-21",
           "change": "steps[8], acceptance[5] and negative[4] added for the shared-view save (objectstack#35955 PR 2): Save to this view on a stored view an administrator may edit asks once, then saves the draft and publishes it; the saver's row height stays theirs; a pending view draft is never published on anyone's behalf. steps[8] also reads the Display panel's layout and row colour back across a record round trip, since they are now part of the draft. Not loosened: every earlier clause is unchanged",
+          "ref": "#35955"
+        },
+        {
+          "revision": 15,
+          "date": "2026-11-21",
+          "change": "steps[4], steps[5], acceptance[3] (verify) and source[1] re-pointed (objectstack#35955 PR 3): the ui.list.<object> sys_user_preference row is retired, so no Console writes it; the one list key the reader keeps is list-layout:<user id>:<object> in this browser, with the widths, row height and tab order only, and sign-out removes it with any list-state:* / list-filters:* key an earlier Console left. Not loosened: nothing of a toolbar filter, sort or search is stored anywhere, and a second account still sees none of the first account's",
           "ref": "#35955"
         }
       ]
@@ -3604,7 +3610,7 @@
       "title": "Grid personalization persists across reload: column resize/reorder/pin, row-height, group-by (with API-true totals), row-color",
       "since": "v16",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3630,7 +3636,7 @@
       "steps": [
         "open showcase_task grid; screenshot",
         "resize a column (reorder two columns only on a grid that sets reorderableColumns; there is no runtime pin control — acceptance[0]), and set a row height on the Row height level of the list's options menu (the toolbar's options trigger, then 行高 / Row height: three choices, 紧凑 / 标准 / 宽松 — Compact / Standard / Spacious, ui/packages/plugin-list/src/components/ViewSettingsPopover.tsx; a gallery's Row height level picks its card size the same way) — three modes, stored as rowHeight compact / medium / tall (the spec's five row heights compact/short/medium/tall/extra_tall narrow onto these three: objectui core normalize-list-view.ts DENSITY_MODE_TO_ROW_HEIGHT / ROW_HEIGHT_TO_DENSITY_MODE)",
-        "reload; confirm the column widths and row-height restored — they persist in the signed-in user's own list preference, sys_user_preference ui.list.showcase_task (perView.<view>.columnState.widths / rowHeight, objectui#12418). A column ORDER is not: since objectstack#35955 it is the list's unsaved draft, so a reload reopens on the view's own order unless it was saved into a view, with localStorage grid-columns-showcase_task[-<viewId>] as the component's cache; the old per-view override through dataSource.updateViewConfig is retired (objectui#12504). Also reload in a FRESH browser context as the same user: the layout follows the user",
+        "reload; confirm the column widths and row-height restored — they are kept in this browser for the signed-in user, localStorage list-layout:<userId>:showcase_task (perView.<view>.widths / rowHeight, objectstack#35955; before it the user's sys_user_preference ui.list.showcase_task row, objectui#12418). A column ORDER is not: since objectstack#35955 it is the list's unsaved draft, so a reload reopens on the view's own order unless it was saved into a view, with localStorage grid-columns-showcase_task[-<viewId>] as the component's cache; the old per-view override through dataSource.updateViewConfig is retired (objectui#12504). Also open the list in a FRESH browser context as the same user: the layout does NOT follow the user there — it opens on the view's own widths and row height, by design (objectstack#35955)",
         "group-by status ('Add group field' pre-selects the first field, Title, and groups at once, so switch it to Status). A runtime grouping lives in the list's URL (uf__group, ui/packages/app-shell/src/views/objectViewListUrlState.ts), not in sys_user_preference: reloading that URL keeps it, a reload of the bare list URL reopens on the view's own grouping by design, and steps[6] reads it that way (QA run #33861). Confirm per-group headers appear and each group shows its record count — summarizeField (estimate_hours) is declared on the KANBAN config of task.view.ts, not on the grid, so grid groups carry counts; clear grouping and confirm the headers are removed cleanly",
         "cross-check each group's count against a direct per-group server count (GET /api/v1/data/showcase_task filtered to that status, read its total)",
         "read the row-color rule the stock Grid view declares — rowColor on priority with the colors map low slate / medium blue / high amber / urgent red (examples/app-showcase/src/ui/views/task.view.ts); there is no runtime row-color authoring control — and confirm rows paint by it (useRowColor, the -100 tint of each name)",
@@ -3646,7 +3652,7 @@
         {
           "clause": "the toolbar row height persists across reload (Compact / Standard / Spacious — the runtime control offers three modes over the spec's five rowHeight values)",
           "oracle": "dom",
-          "verify": "the reloaded grid renders at the chosen density (ObjectGrid rowHeightMode), and the preference row's rowHeight reads compact / medium / tall for the three modes",
+          "verify": "the reloaded grid renders at the chosen density (ObjectGrid rowHeightMode), and the list-layout entry's rowHeight reads compact / medium / tall for the three modes",
           "evidence": "before/after screenshots"
         },
         {
@@ -3662,10 +3668,10 @@
           "evidence": "post-reload screenshot"
         },
         {
-          "clause": "the column state follows the USER, not the browser: since objectui#12418 widths and row height persist in the user's own sys_user_preference row (ui.list.<object>, perView.<view>.columnState / rowHeight), so they restore for that user in a fresh browser and never for another account; the component's localStorage key grid-columns-<object>[-<view>] carries no user id and is only a cache under that row",
+          "clause": "the column state is the reader's in THIS browser: since objectstack#35955 widths and row height are kept in localStorage list-layout:<userId>:<object> (perView.<view>.widths / rowHeight), keyed by the signed-in user's id, so they restore for that user in this browser, never for another account here, and do not follow the user to a fresh browser; no sys_user_preference row is written. The component's own localStorage key grid-columns-<object>[-<view>] carries no user id and is only its cache: the page hands the grid the reader's layout, or none",
           "oracle": "dom",
-          "verify": "the sys_user_preference ui.list.showcase_task row carries the widths / row height under the signed-in user's user_id, and the same user in a fresh browser context sees them restored; a second account on the same browser does not (objectui app-shell/src/context/ListPreferencesProvider.tsx). The localStorage grid-columns-<object>[-<view>] key carries no user id and is only the cache",
-          "evidence": "the preference row + the fresh-context restore + the second account's default layout"
+          "verify": "localStorage list-layout:<userId>:showcase_task carries the widths / row height under the signed-in user's id, and GET /api/v1/data/sys_user_preference shows no ui.list.showcase_task row written; the same user in a fresh browser context opens on the view's own widths and row height; a second account on the same browser does not see the first account's (ui/packages/app-shell/src/views/listLayoutStore.ts)",
+          "evidence": "the list-layout entry + no preference row + the fresh-context default + the second account's default layout"
         }
       ],
       "negative": [
@@ -3679,7 +3685,7 @@
       "source": [
         "objectui: packages/plugin-grid/src/ObjectGrid.tsx (columnState + saveColumnState localStorage grid-columns-*, rowHeightMode, schema.grouping, useRowColor, useColumnSummary)",
         "objectui: packages/components/src/renderers/complex/data-table.tsx (the underlying table)",
-        "objectui: packages/app-shell/src/views/listFilterStorage.ts (documents grid-columns-* is NOT user-scoped by design)",
+        "objectui: packages/app-shell/src/views/listLayoutStore.ts (list-layout:<user id>:<object>, the reader's widths, row height and tab order in this browser, objectstack#35955); packages/plugin-grid/src/objectGridColumnState.ts (grid-columns-* is NOT user-scoped by design: the component's cache)",
         "examples/app-showcase/src/ui/views/task.view.ts",
         "packages/spec/src/ui/component.zod.ts#ObjectGridPropsSchema (reorderableColumns is a grid component prop, not a ListView key) + packages/spec/src/ui/view.zod.ts#ListColumnSchema (pinned is declared per column by the author) + objectui packages/plugin-grid/src/ObjectGrid.tsx (reorderableColumns defaults false; the persisted columnState holds widths and order)"
       ],
@@ -3736,6 +3742,12 @@
           "revision": 9,
           "date": "2026-11-21",
           "change": "steps[2], steps[6] and acceptance[0] (clause, verify) re-pointed to the list draft (objectstack#35955): a column order is the list's unsaved draft, kept only by Save into a view, so it no longer comes back after a reload; the widths and the row height still persist in the user's ui.list.<object> row. Not loosened: widths and row height must still survive a reload and follow the user to a fresh browser",
+          "ref": "#35955"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-21",
+          "change": "steps[2], acceptance[1] (verify), acceptance[4] (clause, verify, evidence) and source[2] re-pointed (objectstack#35955 PR3, Sales ruling D1 on #35955): column widths and row height are kept in this browser only, localStorage list-layout:<user id>:<object>, and the ui.list.<object> row is retired. Changed on purpose: they no longer follow the user to a fresh browser. Not loosened: they still survive a reload in the same browser and never reach another account",
           "ref": "#35955"
         }
       ]

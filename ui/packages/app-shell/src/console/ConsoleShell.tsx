@@ -41,21 +41,16 @@ import { FlowPaletteRecentsProvider } from '../context/FlowPaletteRecentsProvide
 import { LastAppProvider, LAST_APP_PREFERENCE_KEY } from '../context/LastAppProvider.js';
 import {
   UserStateAdaptersProvider,
-  useAttachListStateFamily,
   useAttachRecordStateFamily,
   useAttachUserStateAdapters,
 } from '../context/UserStateAdapters.js';
-import {
-  LIST_PREFERENCE_PREFIX,
-  ListPreferencesProvider,
-} from '../context/ListPreferencesProvider.js';
 import {
   RECORD_PREFERENCE_PREFIX,
   RecordPreferencesProvider,
 } from '../context/RecordPreferencesProvider.js';
 import { ThemeProvider } from '../chrome/ThemeProvider.js';
-import { LoadingScreen } from '../chrome/LoadingScreen.js';
 import { RedirectWithSplash } from '../chrome/RedirectWithSplash.js';
+import { ConsoleBootFallback } from './ConsoleBootShell.js';
 import { RemediationOverlay } from './RemediationOverlay.js';
 import { HostNavigationBridge } from './HostNavigationBridge.js';
 import { ConsoleElementApiOpen } from './ConsoleElementApiOpen.js';
@@ -71,8 +66,13 @@ import { getRuntimeConfig } from '../runtime-config.js';
 // /_console load (framework#2615 P3). Delegate to the branded, boot-safe
 // splash (logo + product name + step list) that the rest of the shell already
 // uses, so the cold load looks like the product from the first frame.
+//
+// objectstack#35981 — on an app route, once the session has answered with a
+// user, the console chrome's empty frame instead (`ConsoleBootShell`): the
+// gates after the session read (the adapter, the organization list, the
+// permission answer) decide nothing the frame shows.
 export function LoadingFallback() {
-  return <LoadingScreen />;
+  return <ConsoleBootFallback />;
 }
 
 /**
@@ -203,7 +203,6 @@ function ConsoleShellProviders({ children }: { children: ReactNode }) {
               <RecentItemsProvider>
                 <FlowPaletteRecentsProvider>
                   <LastAppProvider>
-                  <ListPreferencesProvider>
                     <RecordPreferencesProvider>
                       {/* objectstack#36112 — inside an app from 768 px up the three
                           are drawn at the top of the content area instead
@@ -241,7 +240,6 @@ function ConsoleShellProviders({ children }: { children: ReactNode }) {
                       <NotificationSnackbar />
                       <NotificationAlerts />
                     </RecordPreferencesProvider>
-                  </ListPreferencesProvider>
                   </LastAppProvider>
                 </FlowPaletteRecentsProvider>
               </RecentItemsProvider>
@@ -388,7 +386,6 @@ function UserStateBridge() {
   const { user } = useAuth();
   const dataSource = useAdapter();
   const attach = useAttachUserStateAdapters();
-  const attachListState = useAttachListStateFamily();
   const attachRecordState = useAttachRecordStateFamily();
 
   useEffect(() => {
@@ -397,7 +394,6 @@ function UserStateBridge() {
       attach('recent', null);
       attach('flowPaletteRecents', null);
       attach('lastApp', null);
-      attachListState(null);
       attachRecordState(null);
       return;
     }
@@ -422,35 +418,27 @@ function UserStateBridge() {
       userId: user.id,
       key: LAST_APP_PREFERENCE_KEY,
     });
-    // objectui#12418 — every object's list state, `ui.list.<object>`: a key
-    // family, loaded by prefix in the same one read as the three slots above.
-    const listState = createObjectStackUserPreferenceFamily({
-      dataSource,
-      userId: user.id,
-      prefix: LIST_PREFERENCE_PREFIX,
-    });
     attach('favorites', favorites);
     attach('recent', recent);
     attach('flowPaletteRecents', flowPaletteRecents);
     attach('lastApp', lastApp);
     // objectstack#25883 — every object's record-page state, `ui.record.<object>`
-    // ("show empty fields"): a second key family in the same one read.
+    // ("show empty fields"): a key family loaded by prefix in the same one
+    // read as the slots above.
     const recordState = createObjectStackUserPreferenceFamily({
       dataSource,
       userId: user.id,
       prefix: RECORD_PREFERENCE_PREFIX,
     });
-    attachListState(listState);
     attachRecordState(recordState);
     return () => {
       attach('favorites', null);
       attach('recent', null);
       attach('flowPaletteRecents', null);
       attach('lastApp', null);
-      attachListState(null);
       attachRecordState(null);
     };
-  }, [user?.id, dataSource, attach, attachListState, attachRecordState]);
+  }, [user?.id, dataSource, attach, attachRecordState]);
 
   return null;
 }
@@ -492,7 +480,7 @@ export function RequireOrganization({ children }: { children: ReactNode }) {
   // looking at is dropped and nothing replaces it until `/organizations`
   // renders at transition priority. Measured on the three sibling gates #6506
   // fixed: 41-147 ms of empty `#root`, a white flash on 67/87 boots. The
-  // replacement paints the SAME `LoadingScreen` this gate was already showing,
+  // replacement paints the SAME fallback this gate was already showing,
   // so the handoff changes no pixels.
   if (orgFeatureEnabled && !activeOrganization)
     return <RedirectWithSplash to="/organizations" replace />;

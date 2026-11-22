@@ -124,6 +124,7 @@ import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 import { toast } from 'sonner';
 import { resetListDraftStoreForTests } from './listDraftStore';
+import { listLayoutStorageKey, resetListLayoutStoreForTests } from './listLayoutStore';
 
 const OBJECT = 'showcase_task';
 const CUSTOM_PACKAGE = 'com.example.showcase.custom';
@@ -218,6 +219,7 @@ beforeEach(() => {
   packageList.answer = () => Promise.resolve(PACKAGES);
   localStorage.clear();
   resetListDraftStoreForTests();
+  resetListLayoutStoreForTests();
   meta.client.save.mockReset().mockResolvedValue({});
   meta.client.publish.mockReset().mockResolvedValue({});
   meta.client.reset.mockReset().mockResolvedValue({});
@@ -231,8 +233,8 @@ afterEach(() => {
 
 describe('objectstack#35955 — Save to this view on a shared view: confirm, then save and publish at once', () => {
   it('an admin confirms: the draft is written over no pending draft and published; the reader\'s row height stays theirs', async () => {
-    // The reader's own row height (kept for them, never a draft) differs from the view's.
-    localStorage.setItem(`list-state:u1:${OBJECT}`, JSON.stringify({ perView: { [SHARED.name]: { rowHeight: 'tall' } } }));
+    // The reader's own row height (their layout in this browser, never a draft) differs from the view's.
+    localStorage.setItem(listLayoutStorageKey('u1', OBJECT)!, JSON.stringify({ perView: { [SHARED.name]: { rowHeight: 'tall' } } }));
     mount(SHARED.name);
     await settle();
     await waitFor(() => expect(listProps.current).not.toBeNull());
@@ -397,7 +399,7 @@ describe('objectstack#35955 — the layout and the row colour the reader picks a
 
 describe('objectstack#36194 + objectstack#36195 — a shared view\'s Save to this view carries the footer calculations, and waits for the package list', () => {
   it('a footer calculation picked is a part of the draft, saved into the view with no write of its own; the reader\'s row height stays theirs', async () => {
-    localStorage.setItem(`list-state:u1:${OBJECT}`, JSON.stringify({ perView: { [SHARED.name]: { rowHeight: 'tall' } } }));
+    localStorage.setItem(listLayoutStorageKey('u1', OBJECT)!, JSON.stringify({ perView: { [SHARED.name]: { rowHeight: 'tall' } } }));
     mount(SHARED.name);
     await settle();
     await waitFor(() => expect(typeof listProps.current?.onColumnSummaryPick).toBe('function'));

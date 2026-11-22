@@ -47,7 +47,7 @@ function mount() {
     setViewDraft,
     setRefreshKey,
     confirmHandler: vi.fn() as unknown as Args['confirmHandler'],
-    listPrefs: { setViewOrder: vi.fn() } as unknown as Args['listPrefs'],
+    listLayout: { setViewOrder: vi.fn() } as unknown as Args['listLayout'],
     views: [],
     activeViewId: 'crm_account.team',
     baseView: { id: 'crm_account.team' } as Args['baseView'],
