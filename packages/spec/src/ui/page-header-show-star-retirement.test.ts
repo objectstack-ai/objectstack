@@ -11,7 +11,9 @@
  * record context (`onToggleFavorite`), and no reference host does — the
  * console's favorites entry is the header's ⋯ overflow menu. So `true` (the
  * default) drew nothing and `false` hid nothing. No producer writes the key in
- * this repo or in objectui's apps and examples.
+ * this repo or in objectui's apps and examples. Since objectstack#36246 the
+ * console wires that toggle on its record pages, and the star still answers
+ * the host's toggle, never the key.
  *
  * Bookkeeping shapes, pinned below:
  *   1. A `retiredKey()` tombstone on `PageHeaderProps`, a `strictObject` — the
