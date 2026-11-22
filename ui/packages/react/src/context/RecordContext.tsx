@@ -157,8 +157,9 @@ export interface RecordContextValue<TData = any, TObjectSchema = any> {
    * The host's opt-in to the header's Refresh entry (the first item of its
    * `⋯` menu): present, `page:header` draws the entry and calls this when it
    * is picked; absent, the header draws none. A host that keeps the entry off
-   * a surface (a drawer) leaves it out. It is the affordance, not the way a
-   * renderer re-reads the record: that is {@link RecordContextValue.reread}.
+   * a surface (a drawer) leaves it out. It also re-reads the record: a
+   * renderer that needs a re-read calls {@link RecordContextValue.reread}
+   * when the host provides one, and this otherwise.
    */
   refresh?: () => void | Promise<void>;
   /**
@@ -167,7 +168,8 @@ export interface RecordContextValue<TData = any, TObjectSchema = any> {
    * it: after a write it made, and after a `409 CONCURRENT_UPDATE` refusal, so
    * the next write carries the stored version. A host provides it wherever it
    * reads the record, drawers included, whether or not it offers
-   * {@link RecordContextValue.refresh}. It may be a notice that returns before
+   * {@link RecordContextValue.refresh}; a renderer falls back to `refresh`
+   * when a host provides only that. It may be a notice that returns before
    * the re-read row lands; the row reaches readers through `data` afterwards.
    */
   reread?: () => void | Promise<void>;

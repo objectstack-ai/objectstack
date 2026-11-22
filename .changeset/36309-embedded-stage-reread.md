@@ -13,4 +13,4 @@ The record header's stage menu also draws in a record drawer (the list's drawer,
 
 `RecordContextValue` now keeps the two apart. `refresh` stays the host's opt-in to the header's Refresh entry and is still left out in a drawer. The new `reread` reads the record again with no affordance of its own; the record view provides it on the page and in a drawer alike, and the stage menu and `record:path`'s stage press call it after a move and after a 409. On the record page nothing changes: `reread` publishes the same `'*'` notice the Refresh entry does.
 
-A host that mounts `RecordContextProvider` and wants the stage surfaces to re-read after a write passes `reread`; passing only `refresh` now draws the Refresh entry without the stage surfaces calling it.
+A host that mounts `RecordContextProvider` with only `refresh` keeps its behaviour: the stage surfaces call `reread` when the host provides it and `refresh` otherwise. Nothing to migrate; a host that wants the re-read without the Refresh entry passes `reread` alone.

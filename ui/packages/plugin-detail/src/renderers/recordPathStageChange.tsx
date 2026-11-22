@@ -58,8 +58,8 @@
  *
  * The fields asked are judged against the record AS IT STANDS, on every
  * render, not frozen at the pick (objectstack#36036). A 409 re-reads the
- * record (`RecordContextValue.reread`, which every host provides, a drawer
- * included), and the re-read row reaches this hook later through the record
+ * record (`RecordContextValue.reread`, else the host's `refresh`; the record
+ * view provides `reread` on the page and in a drawer alike), and the re-read row reaches this hook later through the record
  * context (the page's re-read is a bus notice, not a fetch it can await), so
  * the list follows that row when it lands: a field another writer filled in
  * the meantime leaves the dialog, the move no longer sends it, and a value the
@@ -212,6 +212,9 @@ export function useStageChange(
 ): StageChange {
   const collectFields = options.collectFields === true;
   const ctx = useRecordContext();
+  // The record's re-read after a move or a 409: the host's `reread`, else its
+  // `refresh` (a host that provides only `refresh` keeps re-reading).
+  const rereadRecord = async () => { await (ctx?.reread ?? ctx?.refresh)?.(); };
   const inline = useInlineEdit();
   const perms = usePermissions();
   const { t } = useDetailTranslation();
@@ -289,12 +292,12 @@ export function useStageChange(
     setBusy(true);
     try {
       await updateVia(dataSource, objectName!, recordId!, { [statusField!]: stage.value }, ifMatchOf());
-      await ctx?.reread?.();
+      await rereadRecord();
     } catch (err) {
       setRefusal(stageRefusalLines(err, statusField!, labelOf, t));
       // A stale token means the reader is looking at an old record: show the
       // current one, so a second press is judged against what is stored.
-      if (isConcurrentUpdateError(err)) await ctx?.reread?.();
+      if (isConcurrentUpdateError(err)) await rereadRecord();
     } finally {
       setBusy(false);
     }
@@ -315,7 +318,7 @@ export function useStageChange(
       await updateVia(dataSource, objectName!, recordId!, { ...values, [statusField!]: stage.value }, ifMatchOf());
     } catch (err) {
       const concurrent = isConcurrentUpdateError(err);
-      if (concurrent) await ctx?.reread?.();
+      if (concurrent) await rereadRecord();
       const named = concurrent ? [] : (extractFieldErrors(err) ?? []).filter((e) => !!e.message);
       if (named.length > 0 && !declaredUserMessage(err)) throw err;
       const line = stageRefusalLines(err, statusField!, labelOf, t).join(' ');
@@ -324,7 +327,7 @@ export function useStageChange(
       setBusy(false);
     }
     setTarget(null);
-    await ctx?.reread?.();
+    await rereadRecord();
   };
 
   const dialog = collectFields
