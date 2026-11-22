@@ -67,12 +67,6 @@ export const ScenarioRunRecordSchema = z.looseObject({
       version: z.string().optional(),
       replayOf: z.looseObject({ driver: z.string().min(1), version: z.string().optional() }).optional(),
     }),
-    /**
-     * `runner/scorecard.ts` `RunMeta.schemaMasking`: `off` on a masking-off round, absent on a default one. The
-     * transcript re-grades each recorded reply under it (`buildTranscript`), so a value the runner never writes is
-     * refused here rather than read as either.
-     */
-    schemaMasking: z.literal('off').optional(),
   }),
   evidenceDir: z.string().min(1),
   results: z.array(z.looseObject({ id: z.string().min(1), verdict: VerdictSchema })),

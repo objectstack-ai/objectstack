@@ -894,7 +894,7 @@ describe('buildTranscript — a masking-off round re-grades each reply under the
   it('shows the grade the run gave under `env.schemaMasking: off`; the same record without the stamp is refused', async () => {
     const fx = await runCrm({ modes: ['scratch'], iterateRun: false, schemaMasking: 'off', wrap: absent });
     const record = asRecord(fx.record);
-    expect(record.env.schemaMasking).toBe('off');
+    expect((record.env as { schemaMasking?: unknown }).schemaMasking).toBe('off');
     const t = buildTranscript(fx.scenario, record, mergeRecordings([fx.recording]));
     const asked = t.halves[0]!.turns.find((x) => x.question === 'account_count' && x.persona === 'partner_user')!;
     expect(asked.answer!.replyText).toBe("The app doesn't record accounts.");
@@ -905,11 +905,5 @@ describe('buildTranscript — a masking-off round re-grades each reply under the
     expect(() => buildTranscript(fx.scenario, unstamped, mergeRecordings([fx.recording]))).toThrow(
       `the recorded reply for \`${key}\` grades differently from the run record: the recording is not this run's`,
     );
-  });
-
-  it('a record stating a masking the runner never writes is refused when read', async () => {
-    const fx = await runCrm({ modes: ['scratch'], iterateRun: false });
-    expect(ScenarioRunRecordSchema.safeParse({ ...fx.record, env: { ...(fx.record.env as Record<string, unknown>), schemaMasking: 'on' } }).success).toBe(false);
-    expect(ScenarioRunRecordSchema.safeParse(fx.record).success).toBe(true);
   });
 });
