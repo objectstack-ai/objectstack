@@ -484,6 +484,54 @@ describe('the menu under the design mode (objectstack#36363)', () => {
     expect(screen.getByTestId('design-mode-bar')).toBeInTheDocument();
   });
 
+  // L1-e review 7084606001: on the real event order. dnd-kit's pointer sensor,
+  // once a drag is active, stops the click that follows in the document's
+  // capture phase without cancelling it, so a handler on React's root never
+  // sees it and the link's default (a full navigation) would run.
+  it('the click a real pointer drag ends with is cancelled before dnd-kit stops it', async () => {
+    storedNav.current = ACCOUNTS_CONTRIBUTED();
+    start();
+    await flush();
+    const leads = linkOf('leads');
+    const pointer = (type: string, target: EventTarget, x: number) => {
+      const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: 10, button: 0, buttons: 1 });
+      Object.defineProperty(event, 'isPrimary', { value: true });
+      Object.defineProperty(event, 'pointerType', { value: 'mouse' });
+      act(() => {
+        target.dispatchEvent(event);
+      });
+    };
+    let stoppedInDocument = false;
+    const watch = () => {
+      stoppedInDocument = true;
+    };
+    pointer('pointerdown', leads, 10);
+    pointer('pointermove', document, 30); // past the 5 px activation distance
+    pointer('pointermove', document, 40);
+    pointer('pointerup', document, 40);
+    const released = linkOf('leads'); // the link under the pointer when it is released
+    document.addEventListener('click', watch); // bubble: reached only if dnd-kit did not stop it
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+    act(() => {
+      released.dispatchEvent(click);
+    });
+    document.removeEventListener('click', watch);
+    // dnd-kit takes its click listener off 50 ms after the drag; wait before
+    // asserting, so a failure here leaves no listener to the next case.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 350));
+    });
+    expect(stoppedInDocument).toBe(false); // dnd-kit stopped it, as in the browser
+    expect(click.defaultPrevented).toBe(true); // and its default is cancelled
+
+    // A plain click afterwards is a click again.
+    const plain = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+    act(() => {
+      linkOf('leads').dispatchEvent(plain);
+    });
+    expect(screen.queryByTestId('design-mode-bar')).toBeInTheDocument();
+  });
+
   it('adding and moving stay open under zh-CN', async () => {
     session.language = 'zh-CN';
     start();

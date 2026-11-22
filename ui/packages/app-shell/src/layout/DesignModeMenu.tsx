@@ -285,8 +285,11 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
     return out;
   }, [menu]);
 
-  // The click that ends a pointer drag lands on the dragged entry's link: it
-  // is not a click, so it opens nothing (a refused drop included).
+  // The click that ends a pointer drag lands on the dragged entry's link when
+  // the drop moved nothing (a drop refused on another package's entry, say):
+  // it is not a click, so it opens nothing. dnd-kit stops that click's
+  // propagation in the document's capture phase but leaves its default (a full
+  // navigation), so the default is cancelled before it, on the window.
   const lastDragEnd = React.useRef(0);
   const dragging = React.useRef(false);
   const onDragStart = () => {
@@ -296,7 +299,14 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
     dragging.current = false;
     lastDragEnd.current = Date.now();
   };
-  const justDragged = React.useCallback(() => dragging.current || Date.now() - lastDragEnd.current < 300, []);
+  React.useEffect(() => {
+    const onClick = (event: MouseEvent) => {
+      const justDragged = dragging.current || Date.now() - lastDragEnd.current < 300;
+      if (justDragged && event.target instanceof Element && event.target.closest('[data-design-menu-link]')) event.preventDefault();
+    };
+    window.addEventListener('click', onClick, true);
+    return () => window.removeEventListener('click', onClick, true);
+  }, []);
 
   const onDragEnd = (event: DragEndEvent) => {
     endDrag();
@@ -338,7 +348,6 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
         basePath={basePath}
         resolveTargetIcon={resolveTargetIcon}
         fixed={contributed(id)}
-        justDragged={justDragged}
         actions={
           <EntryActions
             label={labelOf(entry)}
@@ -465,7 +474,6 @@ function MenuLeaf({
   basePath,
   resolveTargetIcon,
   fixed,
-  justDragged,
   actions,
 }: {
   id: string;
@@ -476,8 +484,6 @@ function MenuLeaf({
   resolveTargetIcon?: NavTargetIconResolver;
   /** Another package's entry: not dragged. */
   fixed: boolean;
-  /** Whether a drag is under way or has just ended: the click it ends with opens nothing. */
-  justDragged: () => boolean;
   actions: React.ReactNode;
 }) {
   const sortable = useSortable({ id, disabled: fixed });
@@ -488,15 +494,13 @@ function MenuLeaf({
       : resolveNavKindIcon(item) ?? resolveNavItemIcon(item);
   const icon = React.createElement(getIcon(iconName), { className: 'h-4 w-4' });
   const { href, external } = resolveHref(item, basePath);
-  // The editor's drag is dnd-kit's alone. The browser's own drag of the link
-  // is off: dropped anywhere dnd-kit does not move it (another package's
-  // entry, say), it would open the link as a new document and leave the mode.
+  // The editor's drag is dnd-kit's alone: the browser's own drag of the link
+  // is off too. `data-design-menu-link` marks the link whose post-drag click
+  // the editor cancels.
   const link = {
     draggable: false,
     onDragStart: (event: React.DragEvent) => event.preventDefault(),
-    onClickCapture: (event: React.MouseEvent) => {
-      if (justDragged()) event.preventDefault();
-    },
+    'data-design-menu-link': '',
     ...sortable.attributes,
     ...sortable.listeners,
   };
