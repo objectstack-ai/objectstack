@@ -11,6 +11,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import { MetadataCtx } from '@object-ui/react';
+import { createI18n, I18nProvider, transformSpecTranslations } from '@object-ui/i18n';
+import type { TranslationData } from '@objectstack/spec/system';
 import '../renderers/basic/metadata-viewer';
 
 function metaCtx(getItem: (type: string, name: string) => Promise<any>) {
@@ -193,5 +195,80 @@ describe('element:metadata_viewer', () => {
   it('degrades on an unknown view type', () => {
     render(<Viewer getItem={async () => null} properties={{ type: 'nonsense' }} />);
     expect(screen.getByText(/Unknown metadata view type/i)).toBeTruthy();
+  });
+});
+
+
+/**
+ * A `type: flow` embed names the flow and each step the spec lets a package
+ * translate in the reader's language: `flows.<flow>.label` and an `approval`
+ * node's `flows.<flow>.approvals.<node_id>.label`, read from the package bundle
+ * the host loaded, through the resolution the Studio flow designer uses. A step
+ * with no key (start, decision, notify, end) and a key the bundle does not
+ * carry fall back to the authored text.
+ */
+describe('element:metadata_viewer flow embed: package label translations (flows.FLOW.label, approvals.STEP.label)', () => {
+  const OPPORTUNITY_APPROVAL = {
+    name: 'opportunity_approval',
+    label: 'Large Deal Approval',
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start' },
+      { id: 'get_opportunity', type: 'get_record', label: 'Get Opportunity' },
+      { id: 'manager_review', type: 'approval', label: 'Sales Manager Review' },
+      { id: 'check_high_value', type: 'decision', label: 'High Value (> $500K)?' },
+      { id: 'director_signoff', type: 'approval', label: 'Sales Director Sign-off' },
+      { id: 'notify_approved', type: 'notify', label: 'Email Owner — Approved' },
+      { id: 'end', type: 'end', label: 'End' },
+    ],
+  };
+
+  function zhCN(data: TranslationData) {
+    const instance = createI18n({ defaultLanguage: 'zh-CN', detectBrowserLanguage: false });
+    instance.addResourceBundle('zh-CN', 'translation', transformSpecTranslations(data as Record<string, unknown>), true, true);
+    return instance;
+  }
+
+  function renderIn(data: TranslationData, flow = OPPORTUNITY_APPROVAL) {
+    const getItem = vi.fn(async () => flow);
+    return render(
+      <I18nProvider instance={zhCN(data)} persistLanguage={false}>
+        <Viewer getItem={getItem} properties={{ type: 'flow', name: flow.name }} />
+      </I18nProvider>,
+    );
+  }
+
+  it('draws the translated flow label and approval-step labels; a step with no key keeps its authored label', async () => {
+    renderIn({
+      flows: {
+        opportunity_approval: {
+          label: '大额商机审批',
+          approvals: { manager_review: { label: '销售经理审核' }, director_signoff: { label: '销售总监签批' } },
+        },
+      },
+    });
+    await waitFor(() => expect(screen.getByText('大额商机审批')).toBeTruthy());
+    expect(screen.queryByText('Large Deal Approval')).toBeNull();
+    expect(screen.getByText('销售经理审核')).toBeTruthy();
+    expect(screen.getByText('销售总监签批')).toBeTruthy();
+    expect(screen.queryByText('Sales Manager Review')).toBeNull();
+    expect(screen.queryByText('Sales Director Sign-off')).toBeNull();
+    // start, decision, notify and end have no key in the spec's flows group.
+    for (const authored of ['Start', 'High Value (> $500K)?', 'Email Owner — Approved', 'End']) {
+      expect(screen.getByText(authored)).toBeTruthy();
+    }
+  });
+
+  it('falls back to the authored text where the bundle carries no key', async () => {
+    // The flow is in the bundle, but neither its label nor one approval step is.
+    renderIn({ flows: { opportunity_approval: { approvals: { manager_review: { label: '销售经理审核' } } } } });
+    await waitFor(() => expect(screen.getByText('Large Deal Approval')).toBeTruthy());
+    expect(screen.getByText('销售经理审核')).toBeTruthy();
+    expect(screen.getByText('Sales Director Sign-off')).toBeTruthy();
+    cleanup();
+
+    // The bundle translates another flow only: everything stays authored.
+    renderIn({ flows: { other_flow: { label: '其他流程' } } });
+    await waitFor(() => expect(screen.getByText('Large Deal Approval')).toBeTruthy());
+    expect(screen.getByText('Sales Manager Review')).toBeTruthy();
   });
 });
