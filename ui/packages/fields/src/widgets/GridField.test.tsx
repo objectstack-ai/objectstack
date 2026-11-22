@@ -1008,6 +1008,12 @@ describe('column header help (objectstack#35804)', () => {
  * description, which a screen reader reads on reaching the button. Computed
  * through jest-dom's accname matchers (dom-accessibility-api), on the editable
  * grid and on the read-only table alike.
+ *
+ * dom-accessibility-api treats a button nested in the header as an embedded
+ * control and leaves its `aria-label` out of the header's name, so it reads the
+ * label alone whatever the button is named. A browser following accname folds
+ * that `aria-label` in, so the pin also holds every `aria-label` inside the
+ * header to the Help word: that is the text a browser adds to the column name.
  */
 describe('column header help stays out of the column name (objectstack#36004)', () => {
   const help = { amount: 'Enter the tax-inclusive amount.' };
@@ -1029,7 +1035,10 @@ describe('column header help stays out of the column name (objectstack#36004)', 
     );
     const button = screen.getByTestId('line-items-column-help');
     const header = button.closest('th')!;
-    expect(header).toHaveAccessibleName(`Amount ${en.fields.grid.columnHelp}`);
+    expect(header).toHaveAccessibleName('Amount');
+    expect(Array.from(header.querySelectorAll('[aria-label]'), (el) => el.getAttribute('aria-label'))).toEqual([
+      en.fields.grid.columnHelp,
+    ]);
     expect(button).toHaveAccessibleName(en.fields.grid.columnHelp);
     expect(button).toHaveAccessibleDescription('Enter the tax-inclusive amount.');
   });
@@ -1040,7 +1049,7 @@ describe('column header help stays out of the column name (objectstack#36004)', 
     const button = screen.getByTestId('line-items-column-help');
     expect(button).toHaveAccessibleName(zh.fields.grid.columnHelp);
     expect(button).toHaveAccessibleDescription('Enter the tax-inclusive amount.');
-    expect(button.closest('th')).toHaveAccessibleName(`Amount ${zh.fields.grid.columnHelp}`);
+    expect(button.closest('th')).toHaveAccessibleName('Amount');
   });
 });
 
