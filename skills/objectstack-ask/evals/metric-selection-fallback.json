@@ -203,12 +203,12 @@
     },
     {
       "id": 21,
-      "prompt": "The user asks: \"How many sales orders are in each status?\" You called `list_datasets({ terms: ['sales orders', 'status'] })`. The answer lists one dataset, `order_book` (label Order Book, `object: 'sales_order'`), with `matches: []`; its one measure is `booked_amount`, labelled Booked Amount, and its one dimension is `order_status`, labelled Order Status. The answer carries `candidates: [{ term: 'status', dataset: 'order_book', member: 'dimensions.order_status' }]` and nothing for 'sales orders'. Its `nextStep` has `decision: 'candidates_only'`, `terms: ['status']` and this `note`: \"status\" matches no member exactly; it may name a grouping: Order Status (dataset: Order Book). A possible grouping is not a question: do not ask the user about it, and it does not stop a matched measure; group the answer only as the question asks. \"sales orders\" equals no measure and has no possible reading. For those words, use the object query tools (query_records, aggregate_records) and say in the answer that no governed metric was used for them. `list_objects` shows `sales_order`. What do you do next, and how does the answer open?",
-      "expected_output": "The word for the thing measured, sales orders, has no match and no candidates, so this is the fallback, and nobody is asked anything: the user named the number (a count of sales orders), and one listed object holds those records. The word for the grouping has only a dimension among its candidates, which is at most a possible grouping and is no reason to ask; the `note` says the same. Calls `describe_object({ objectName: 'sales_order' })` and reads the fields, then `aggregate_records` once for a count grouped by the status field, instead of paging `query_records`. The reply carries no question back: it opens with one line saying the figures are not from a governed metric, computed from the Sales Order object's status field, then shows the count per status label. Because `sales_order` is the `object` of the listed dataset Order Book, it adds one line naming that dataset and its measure (Booked Amount), so the user can ask for the governed figure. No dataset query is made: no measure matched.",
+      "prompt": "The user asks: \"How many sales orders are in each status?\" You called `list_datasets({ terms: ['sales orders', 'status'] })`. The answer lists one dataset, `order_book` (label Order Book, `object: 'sales_order'`), with `matches: []`; its one measure is `booked_amount`, labelled Booked Amount, and its one dimension is `order_status`, labelled Order Status. The answer carries `candidates: [{ term: 'status', dataset: 'order_book', member: 'dimensions.order_status' }]` and nothing for 'sales orders'. Its `nextStep` has `decision: 'candidates_only'`, `terms: ['status']` and this `note`: \"status\" matches no member exactly; it may name a grouping: Order Status (dataset: Order Book). A possible grouping is not a question: do not ask the user about it, and it does not stop a matched measure; group the answer only as the question asks. \"sales orders\" equals no measure and has no possible reading. For those words, use the object query tools (query_records, aggregate_records) and say in the answer that no governed metric was used for them. Only when the question has no word for a thing measured, ask the user which number they mean instead. `list_objects` shows `sales_order`. What do you do next, and how does the answer open?",
+      "expected_output": "The word for the thing measured, sales orders, has no match and no candidates, so this is the fallback, and nobody is asked anything: the user named the number (a count of sales orders), and one listed object holds those records. The word for the grouping has only a dimension among its candidates, which is at most a possible grouping and is no reason to ask; the `note` says the same, and its closing condition does not apply, because this question has a word for the thing measured. Calls `describe_object({ objectName: 'sales_order' })` and reads the fields, then `aggregate_records` once for a count grouped by the status field, instead of paging `query_records`. The reply carries no question back: it opens with one line saying the figures are not from a governed metric, computed from the Sales Order object's status field, then shows the count per status label. Because `sales_order` is the `object` of the listed dataset Order Book, it adds one line naming that dataset and its measure (Booked Amount), so the user can ask for the governed figure. No dataset query is made: no measure matched.",
       "files": [],
       "assertions": {
         "must_contain": ["describe_object", "aggregate_records", "status"],
-        "must_not_contain": ["query_dataset(", "Do you mean", "do you mean", "Which number", "which number"]
+        "must_not_contain": ["query_dataset(", "Do you mean", "do you mean", "Which number do you", "which number do you", "Which number would you", "which number would you"]
       }
     },
     {
@@ -218,7 +218,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["describe_object", "aggregate_records"],
-        "must_not_contain": ["query_dataset(", "Do you mean", "do you mean", "Which number", "which number"]
+        "must_not_contain": ["query_dataset(", "Do you mean", "do you mean", "Which number do you", "which number do you", "Which number would you", "which number would you"]
       }
     },
     {
@@ -228,7 +228,17 @@
       "files": [],
       "assertions": {
         "must_contain": ["list_datasets", "number of claims"],
-        "must_not_contain": ["'claims'", "\"claims\"", "list_objects(", "describe_object(", "aggregate_records("]
+        "must_not_contain": ["['claims'", "[\"claims\"", ", 'claims']", ", \"claims\"]", "list_objects(", "describe_object(", "aggregate_records("]
+      }
+    },
+    {
+      "id": 24,
+      "prompt": "The user says: \"Break it down by stage for the west region.\" You called `list_datasets({ terms: ['stage', 'west region'] })`. The answer lists one dataset, `pipeline` (label Pipeline, `object: 'opportunity'`), with `matches: [{ term: 'stage', member: 'dimensions.stage', matchedOn: 'name' }]`; its measures are `open_amount`, labelled Open Amount, and `deal_count`, labelled Deals, and its dimensions are `stage`, labelled Stage, and `owner`, labelled Owner. 'west region' matched nothing in any dataset, and the answer has no `candidates`. Its `nextStep` has `decision: 'no_measure'`, `terms: ['stage', 'west region']` and this `note`: \"stage\" equals a grouping, not a number: Stage (dataset: Pipeline). \"west region\" equals no measure and has no possible reading. Answer with the object query tools (query_records, aggregate_records) and say in the answer that no governed metric was used. Only when the question has no word for a thing measured, ask the user which number they mean instead. `list_objects` shows `opportunity`. What do you do next?",
+      "expected_output": "The question has no word for a thing measured: stage is what to group by and the west region is what to filter by, and neither says which number to break down. The `note` sends the unmatched word to the object query tools, and then says that when the question has no word for a thing measured the user is asked which number they mean instead; that condition holds here, so the fallback is not taken. The skill's table says the same: no word for a thing measured, only grouping or filter words, is a question about the number, and a grouping is not a number. The reply is that question alone: it asks which number the user wants by Stage for the west region, as in \"Which number would you like broken down by Stage for the west region?\" No tool is called until the user answers: no object is described, nothing is aggregated, and no dataset is queried. No measure is picked for the user and no figure is stated; this is not the fallback, so the reply does not say that no governed metric was used.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["?"],
+        "must_not_contain": ["describe_object(", "aggregate_records(", "query_records(", "query_dataset("]
       }
     }
   ]

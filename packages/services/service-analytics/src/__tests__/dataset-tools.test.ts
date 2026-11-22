@@ -1291,12 +1291,23 @@ const ASK_FIRST: Record<string, string> = {
   'ja-JP': '使う前にどれを指しているかユーザーに確認してください。代わりに選ばないでください',
 };
 const FOUR_LOCALES = [ADMIN, { ...ADMIN, locale: 'zh-CN' }, { ...ADMIN, locale: 'zh-TW' }, { ...ADMIN, locale: 'ja-JP' }] as ExecutionContext[];
-/** The question owed to a grouping that stands alone (D3 rule 5), by the locale the context names. */
-const WHICH_NUMBER: Record<string, string> = {
-  en: 'ask the user which number they mean',
-  'zh-CN': '问用户想看哪个数字',
-  'zh-TW': '問使用者想看哪個數字',
-  'ja-JP': 'どの数値を知りたいかユーザーに確認してください',
+/** The question owed outright when every word sent is a grouping (D3 rule 5), by the locale the context names. */
+const GROUPING_ALONE: Record<string, string> = {
+  en: 'A grouping alone is no answer: ask the user which number they mean.',
+  'zh-CN': '只有分组维度还不能回答：问用户想看哪个数字。',
+  'zh-TW': '只有分組維度還不能回答：問使用者想看哪個數字。',
+  'ja-JP': 'グループ分けだけでは回答になりません：どの数値を知りたいかユーザーに確認してください。',
+};
+/**
+ * The same question as a condition, after the fallback sentence of a note that
+ * also names a grouping: the executor cannot tell a word for a thing measured
+ * from a filter value, so the client, which read the question, judges it.
+ */
+const ONLY_IF_NO_NUMBER: Record<string, string> = {
+  en: 'Only when the question has no word for a thing measured, ask the user which number they mean instead.',
+  'zh-CN': '只有当问题本身没有说要看哪个数字时，才改为问用户想看哪个数字。',
+  'zh-TW': '只有當問題本身沒有說要看哪個數字時，才改為問使用者想看哪個數字。',
+  'ja-JP': '質問そのものがどの数値も指していない場合に限り、代わりにどの数値を知りたいかユーザーに確認してください。',
 };
 
 type ListOut = Awaited<ReturnType<ReturnType<AnalyticsService['datasetTools']>['listDatasets']>>;
@@ -1408,20 +1419,53 @@ describe('[#34919] list_datasets nextStep on examples/app-crm — the decision e
   });
 
   // [#34996] One object answers "库存周转 by 销售阶段" through the fallback, so the
-  // note carries the fallback and no question: a note that said both was read as
-  // "ask". The grouping word is still named as the grouping it equals.
-  it('a mixed no_measure note falls back for the unknown word and asks nothing: the grouping does not stand alone', async () => {
+  // note carries the fallback and never the outright question: a note that said
+  // both was read as "ask". The grouping word is still named as the grouping it
+  // equals. The executor cannot know that 库存周转 is the word for the thing
+  // measured, so the question survives as ONE conditional sentence after the
+  // fallback, for the client to judge: only when the question names no number.
+  it('a mixed no_measure note falls back for the unknown word; the question is a condition, never outright', async () => {
     for (const ctx of FOUR_LOCALES) {
       const out = await ask(['库存周转', '销售阶段'], ctx);
       const where = String(ctx.locale ?? 'en');
       expect(out.nextStep, where).toMatchObject({ decision: 'no_measure', terms: ['库存周转', '销售阶段'] });
-      expect(out.nextStep!.note, where).toContain('query_records');
-      expect(out.nextStep!.note, where).toContain('Stage');
-      expect(out.nextStep!.note, `${where} ⇒ no question`).not.toContain(WHICH_NUMBER[where]);
-      // The control, same locale: alone, the grouping word still asks which number is meant, and sends nobody to the object tools.
+      const note = out.nextStep!.note;
+      expect(note, where).toContain('query_records');
+      expect(note, where).toContain('Stage');
+      expect(note, `${where} ⇒ no outright question`).not.toContain(GROUPING_ALONE[where]);
+      expect(note, `${where} ⇒ the condition`).toContain(ONLY_IF_NO_NUMBER[where]);
+      expect(note.indexOf('query_records'), `${where} ⇒ fallback first`).toBeLessThan(note.indexOf(ONLY_IF_NO_NUMBER[where]));
+      // The control, same locale: alone, the grouping word asks outright which number is meant, and sends nobody to the object tools.
       const alone = (await ask(['销售阶段'], ctx)).nextStep!.note;
-      expect(alone, `${where} ⇒ alone asks`).toContain(WHICH_NUMBER[where]);
+      expect(alone, `${where} ⇒ alone asks`).toContain(GROUPING_ALONE[where]);
+      expect(alone, where).not.toContain(ONLY_IF_NO_NUMBER[where]);
       expect(alone, where).not.toContain('query_records');
+    }
+  });
+
+  // [#34996] The same note serves a call with no word for a thing measured: a
+  // grouping and a filter value ("break it down by sales stage for the west
+  // region"). The words alone do not tell it from the case above, which is why
+  // the condition is written in the client's terms and is the last sentence.
+  it('a grouping beside a filter value gets the same note: the condition is what makes it right for a question with no number', async () => {
+    for (const ctx of FOUR_LOCALES) {
+      const where = String(ctx.locale ?? 'en');
+      const out = await ask(['sales stage', 'west region'], ctx);
+      expect(out.nextStep, where).toMatchObject({ decision: 'no_measure', terms: ['sales stage', 'west region'] });
+      expect(out.candidates ?? [], where).toEqual([]);
+      const note = out.nextStep!.note;
+      expect(note.endsWith(ONLY_IF_NO_NUMBER[where]), `${where} ⇒ the condition closes the note`).toBe(true);
+      expect(note, where).not.toContain(GROUPING_ALONE[where]);
+      // Controls. An unknown word with no grouping beside it has nothing to ask about: the fallback, no condition.
+      const unknown = (await ask(['west region'], ctx)).nextStep!;
+      expect(unknown, where).toMatchObject({ decision: 'no_measure', terms: ['west region'] });
+      expect(unknown.note, where).toContain('query_records');
+      expect(unknown.note, where).not.toContain(ONLY_IF_NO_NUMBER[where]);
+      // A matched measure beside both settles which number is meant: neither form of the question.
+      const measured = (await ask(['商机数', 'sales stage', 'west region'], ctx)).nextStep!;
+      expect(measured, where).toMatchObject({ decision: 'one_measure', terms: ['商机数'] });
+      expect(measured.note, where).not.toContain(ONLY_IF_NO_NUMBER[where]);
+      expect(measured.note, where).not.toContain(GROUPING_ALONE[where]);
     }
   });
 
@@ -1643,8 +1687,9 @@ describe('[#35005] list_datasets nextStep — a grouping or time word with a can
   // [#34996] "How many sales orders this quarter?" with no order-count measure:
   // "sales orders" is unknown and "this quarter" is near a dimension. The object
   // tools answer the count, so the note offers the grouping, sends the unknown
-  // word to its labelled fallback and asks nothing.
-  it('a grouping candidate beside an unknown word: the unknown word falls back and nobody is asked which number', async () => {
+  // word to its labelled fallback and never asks outright; the question is left
+  // as the closing condition, for a question that names no number.
+  it('a grouping candidate beside an unknown word: the unknown word falls back and the question is only the closing condition', async () => {
     for (const ctx of FOUR_LOCALES) {
       const out = await ask(['sales orders', 'this quarter'], ctx);
       expect(out.nextStep, loc(ctx)).toMatchObject({ decision: 'candidates_only', terms: ['this quarter'] });
@@ -1653,13 +1698,18 @@ describe('[#35005] list_datasets nextStep — a grouping or time word with a can
       expect(note, loc(ctx)).toContain(GROUPING_OFFER[loc(ctx)]);
       expect(note, loc(ctx)).toContain('sales orders');
       expect(note, loc(ctx)).toContain('query_records');
-      expect(note, `${loc(ctx)} ⇒ no question`).not.toContain(WHICH_NUMBER[loc(ctx)]);
+      expect(note, `${loc(ctx)} ⇒ no outright question`).not.toContain(GROUPING_ALONE[loc(ctx)]);
+      expect(note.endsWith(ONLY_IF_NO_NUMBER[loc(ctx)]), `${loc(ctx)} ⇒ the condition closes the note`).toBe(true);
+      expect(note.indexOf('query_records'), `${loc(ctx)} ⇒ fallback first`).toBeLessThan(note.indexOf(ONLY_IF_NO_NUMBER[loc(ctx)]));
       expect(note, loc(ctx)).not.toContain(ASK_BEFORE_COMPUTING[loc(ctx)]);
-      // The control, same locale: with no unknown word beside it, the grouping candidate still asks which number.
-      expect((await ask(['this quarter'], ctx)).nextStep!.note, `${loc(ctx)} ⇒ alone asks`).toContain(WHICH_NUMBER[loc(ctx)]);
-      // And a word that equals a dimension beside the candidate is a second grouping, not a fallback: still asked.
+      // The control, same locale: with no unknown word beside it, the grouping candidate still asks outright which number.
+      const alone = (await ask(['this quarter'], ctx)).nextStep!.note;
+      expect(alone, `${loc(ctx)} ⇒ alone asks`).toContain(GROUPING_ALONE[loc(ctx)]);
+      expect(alone, loc(ctx)).not.toContain(ONLY_IF_NO_NUMBER[loc(ctx)]);
+      // And a word that equals a dimension beside the candidate is a second grouping, not a fallback: still asked outright.
       const groupings = (await ask(['this quarter', 'industry'], ctx)).nextStep!.note;
-      expect(groupings, `${loc(ctx)} ⇒ two groupings ask`).toContain(WHICH_NUMBER[loc(ctx)]);
+      expect(groupings, `${loc(ctx)} ⇒ two groupings ask`).toContain(GROUPING_ALONE[loc(ctx)]);
+      expect(groupings, loc(ctx)).not.toContain(ONLY_IF_NO_NUMBER[loc(ctx)]);
       expect(groupings, loc(ctx)).not.toContain('query_records');
     }
   });
@@ -1672,6 +1722,8 @@ describe('[#35005] list_datasets nextStep — a grouping or time word with a can
       expect(out.nextStep, loc(ctx)).toMatchObject({ decision: 'candidates_only', terms: ['销售'] });
       expect(out.nextStep!.note, loc(ctx)).toContain(ASK_BEFORE_COMPUTING[loc(ctx)]);
       expect(out.nextStep!.note, loc(ctx)).toContain('query_records');
+      // No grouping in the call: the which-number condition has nothing to be about.
+      expect(out.nextStep!.note, loc(ctx)).not.toContain(ONLY_IF_NO_NUMBER[loc(ctx)]);
     }
   });
 });

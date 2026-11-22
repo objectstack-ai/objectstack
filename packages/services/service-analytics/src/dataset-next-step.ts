@@ -93,24 +93,34 @@ import type { PlatformLocaleTag } from '@objectstack/spec/system';
  * its fallback. A reported `candidates_only` word whose candidates are all
  * dimensions is offered the same way, and when every word sent is a grouping
  * the note asks which number is meant, as a grouping word does (D3 rule 5; the
- * next section says when). (`several_measures` asks before anything is computed, so its
+ * next section says when, and what an unknown word beside it changes). (`several_measures` asks before anything is computed, so its
  * note needs no such tail.) Two words that equal the same measure are one
  * metric, and the note says so.
  *
- * ## A grouping beside a word that falls back asks nothing
+ * ## A grouping beside an unknown word: the fallback, and the question only for a question with no number
  *
- * [#34996] "Which number is meant" (D3 rule 5) is the question for a grouping
- * that stands alone: every word sent equals only a dimension, or has only
- * dimensions among its candidates. An unknown word beside it (no measure, no
- * dimension, no candidate) is in rule 4, the labelled fallback to the object
- * query tools, and that fallback computes the number the user named: "sales
- * orders" beside "status" is a count of sales orders by status, as it was
- * before any dataset listed a `status` dimension (M2, ruled A: the fallback
- * answers what the object tools answer today). So the note then carries the
- * fallback sentence and no question: `["sales orders", "status"]` and
- * `["库存周转", "销售阶段"]` fall back, and `["销售阶段"]` or `["this quarter"]`
- * alone still ask which number is meant. One note never says both: a reader
- * told to answer and to ask in one breath asks.
+ * [#34996] "Which number is meant" (D3 rule 5) is the question for a question
+ * that names no number. This file sees words, not which of them is the word
+ * for the thing measured, so it writes that question outright only where the
+ * words settle it: every word sent equals only a dimension, or has only
+ * dimensions among its candidates (`["销售阶段"]`, `["this quarter"]`).
+ *
+ * An unknown word beside a grouping (no measure, no dimension, no candidate)
+ * is read as the word for the thing measured, which is rule 4: the labelled
+ * fallback to the object query tools. `["sales orders", "status"]` is a count
+ * of sales orders by status, as it was before any dataset listed a `status`
+ * dimension (M2, ruled A: the fallback answers what the object tools answer
+ * today). That reading is a presumption, and it is wrong when the unknown
+ * word is a filter value or a second grouping and the question names no
+ * number at all (`["stage", "west region"]`, "break it down by stage for the
+ * west region"): rule 5 still governs there, and only the client, which read
+ * the question, can tell. So the note for a grouping beside an unknown word
+ * carries the fallback sentence and then ONE conditional sentence, in the
+ * client's terms: ask which number is meant only when the question itself
+ * names none (`noNumberTail`). The unconditional question (`groupingTail`) is
+ * never written beside a fallback sentence: a reader told to answer and to
+ * ask in one breath asks, which is what a question that named its number
+ * got until this section.
  *
  * ## An incomplete catalogue
  *
@@ -165,6 +175,12 @@ interface DatasetToolCopy {
   readonly unknownHit: (term: string) => string;
   readonly fallbackTail: string;
   readonly groupingTail: string;
+  /**
+   * After the fallback sentence of a note that also names a grouping: the
+   * which-number question is owed only when the question itself names no
+   * number. The condition is the client's to judge; this file cannot.
+   */
+  readonly noNumberTail: string;
   readonly partialTail: string;
   /** After a `one_measure` note: the left-out words with a measure among their candidates are asked about before use. */
   readonly leftCandidateTail: string;
@@ -192,6 +208,7 @@ const COPY: Readonly<Record<NextStepLocale, DatasetToolCopy>> = {
     unknownHit: (t) => `"${t}" equals no measure and has no possible reading.`,
     fallbackTail: 'Answer with the object query tools (query_records, aggregate_records) and say in the answer that no governed metric was used.',
     groupingTail: 'A grouping alone is no answer: ask the user which number they mean.',
+    noNumberTail: 'Only when the question has no word for a thing measured, ask the user which number they mean instead.',
     partialTail: 'The catalogue was incomplete (see warning): a measure missing from this answer may still exist, so repeat the warning in the answer.',
     leftCandidateTail: 'For each word above with possible readings, ask the user which one is meant before using it; do not pick one.',
     leftFallbackTail: 'For those words, use the object query tools (query_records, aggregate_records) and say in the answer that no governed metric was used for them.',
@@ -215,6 +232,7 @@ const COPY: Readonly<Record<NextStepLocale, DatasetToolCopy>> = {
     unknownHit: (t) => `「${t}」没有匹配任何指标，也没有可能的候选。`,
     fallbackTail: '改用对象查询工具（query_records、aggregate_records）回答，并在回答中注明未使用治理指标（非指标口径）。',
     groupingTail: '只有分组维度还不能回答：问用户想看哪个数字。',
+    noNumberTail: '只有当问题本身没有说要看哪个数字时，才改为问用户想看哪个数字。',
     partialTail: '数据集目录不完整（见 warning）：这里没有列出的指标仍可能存在，请在回答中转述该警告。',
     leftCandidateTail: '上面有候选的词，先问用户指的是哪一个再使用；不要替用户选。',
     leftFallbackTail: '这些词改用对象查询工具（query_records、aggregate_records），并在回答中注明它们未使用治理指标（非指标口径）。',
@@ -238,6 +256,7 @@ const COPY: Readonly<Record<NextStepLocale, DatasetToolCopy>> = {
     unknownHit: (t) => `「${t}」沒有符合任何指標，也沒有可能的候選。`,
     fallbackTail: '改用物件查詢工具（query_records、aggregate_records）回答，並在回答中註明未使用治理指標（非指標口徑）。',
     groupingTail: '只有分組維度還不能回答：問使用者想看哪個數字。',
+    noNumberTail: '只有當問題本身沒有說要看哪個數字時，才改為問使用者想看哪個數字。',
     partialTail: '資料集目錄不完整（見 warning）：這裡沒有列出的指標仍可能存在，請在回答中轉述該警告。',
     leftCandidateTail: '上面有候選的詞，先問使用者指的是哪一個再使用；不要替使用者選。',
     leftFallbackTail: '這些詞改用物件查詢工具（query_records、aggregate_records），並在回答中註明它們未使用治理指標（非指標口徑）。',
@@ -261,6 +280,7 @@ const COPY: Readonly<Record<NextStepLocale, DatasetToolCopy>> = {
     unknownHit: (t) => `「${t}」はどの指標にも一致せず、候補もありません。`,
     fallbackTail: 'オブジェクトのクエリツール（query_records、aggregate_records）で回答し、管理された指標を使っていないことを回答に明記してください。',
     groupingTail: 'グループ分けだけでは回答になりません：どの数値を知りたいかユーザーに確認してください。',
+    noNumberTail: '質問そのものがどの数値も指していない場合に限り、代わりにどの数値を知りたいかユーザーに確認してください。',
     partialTail: 'データセットのカタログは不完全です（warning を参照）：ここにない指標が存在する可能性があるため、回答でその警告を伝えてください。',
     leftCandidateTail: '候補のある上記の語は、使う前にどれを指しているかユーザーに確認してください。代わりに選ばないでください。',
     leftFallbackTail: 'これらの語にはオブジェクトのクエリツール（query_records、aggregate_records）を使い、管理された指標を使っていないことを回答に明記してください。',
@@ -463,23 +483,31 @@ export function composeDatasetNextStep(source: DatasetNextStepSource): DatasetNe
       // whose candidates are all dimensions is offered as a grouping, and
       // when every word sent is a grouping the note asks which number is
       // meant, as a grouping word does (D3 rule 5). An unknown word beside
-      // it falls back instead (rule 4), and the note asks nothing.
+      // it falls back instead (rule 4), and the question is left to the one
+      // case the client can see: a question that names no number.
       const asked = reported.filter((r) => !r.groupingOnly);
+      const beside = readings.some(fallsBack);
       for (const r of asked) sentences.push(copy.candidateHit(r.term, members(r.candidates)));
       if (asked.length > 0) sentences.push(copy.candidateTail);
       sentences.push(...groupingCandidateSentences(reported, copy, members));
-      if (asked.length === 0 && !readings.some(fallsBack)) sentences.push(copy.groupingTail);
+      if (asked.length === 0 && !beside) sentences.push(copy.groupingTail);
       sentences.push(...leftOutSentences(decision, readings, copy, members));
+      if (asked.length === 0 && beside) sentences.push(copy.noNumberTail);
       break;
     }
     case 'no_measure': {
       for (const r of reported) {
         sentences.push(r.dimensions.length > 0 ? copy.groupingHit(r.term, members(r.dimensions)) : copy.unknownHit(r.term));
       }
-      // A word for a thing measured that names nothing falls back (D3 rule 4),
-      // grouping word beside it or not; only when every word is a grouping
-      // does the note ask which number is meant (rule 5).
-      sentences.push(reported.some(fallsBack) ? copy.fallbackTail : copy.groupingTail);
+      // An unknown word falls back (D3 rule 4), grouping word beside it or
+      // not; only when every word is a grouping does the note ask outright
+      // which number is meant (rule 5). Beside a grouping, the fallback is
+      // followed by that question as a condition the client judges.
+      if (!reported.some(fallsBack)) sentences.push(copy.groupingTail);
+      else {
+        sentences.push(copy.fallbackTail);
+        if (reported.some((r) => r.dimensions.length > 0)) sentences.push(copy.noNumberTail);
+      }
       break;
     }
   }

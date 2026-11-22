@@ -58,7 +58,7 @@ wrote its business definition) outranks a number you work out yourself.
 | One word matches several measures, in one dataset or in two | Ask the user which one they mean. List each candidate's label, its dataset's label and its description. Do not pick one. |
 | A word with a measure among its `candidates` | Ask the same way; with one candidate, ask whether it is the one meant. |
 | A word whose `candidates` are all dimensions | At most a possible grouping: never ask about it, and it never stops a matched measure. |
-| No word for a thing measured, only grouping words | A grouping is not a number: ask which number is meant. |
+| No word for a thing measured, only grouping or filter words | A grouping is not a number: ask which number is meant. |
 | No match and no candidates for the word for a thing measured | Step 4, without asking: a grouping word's match, or another word's, is no reason to ask. |
 | `membersWithheld: true` on a dataset | Say that it has members (measures or groupings) you may not read; the metric asked for may be among them. Do not say the metric does not exist. |
 
