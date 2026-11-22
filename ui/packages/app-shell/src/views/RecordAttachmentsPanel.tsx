@@ -294,6 +294,14 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
   const perms = usePermissions();
   const canUpload = resolveAffordance('attachmentUpload', { objectName: 'sys_attachment', perms }).allowed;
   const canDelete = resolveAffordance('attachmentDelete', { objectName: 'sys_attachment', perms }).allowed;
+  /**
+   * Rename asks the delete grant AND the edit grant. The rename door writes a
+   * non-uploader's rename through the engine as the caller, so the object's
+   * edit grant is required there before the delete rule is consulted; offering
+   * Rename to a delete-only reader would offer a door the server refuses. With
+   * no provider mounted `can` answers `true`, and the server remains the gate.
+   */
+  const canRename = canDelete && perms.can('sys_attachment', 'update');
 
   // Same base-URL convention as RecordDetailView's raw API fetches: the
   // Vite dev console proxies same-origin `/api` unless VITE_SERVER_URL
@@ -523,10 +531,11 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
   );
 
   /**
-   * Rename: offered beside Delete, to the same reader (`canDelete`), because
-   * the server renames by the attachment delete rule — the uploader, or an
-   * editor of the record. The dialog closes on a stored name and stays open
-   * on a refusal, which the panel's error line names.
+   * Rename: offered beside Delete, to a reader who may delete and holds the
+   * edit grant (`canRename`), because the server renames by the attachment
+   * delete rule — the uploader, or an editor of the record — and writes an
+   * editor's rename as the caller. The dialog closes on a stored name and
+   * stays open on a refusal, which the panel's error line names.
    */
   const [renaming, setRenaming] = React.useState<AttachmentRow | null>(null);
   const handleRename = React.useCallback(
@@ -850,7 +859,7 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
                       <Download className="mr-2 h-4 w-4" />
                       {t('detail.downloadAttachment', { defaultValue: 'Download' })}
                     </DropdownMenuItem>
-                    {canDelete && (
+                    {canRename && (
                       <DropdownMenuItem
                         onSelect={() => {
                           setError(null);

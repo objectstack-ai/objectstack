@@ -72,7 +72,7 @@ const OWN_ROW = {
   uploaded_by: ME,
 };
 
-type Grant = { allowCreate?: boolean; allowDelete?: boolean };
+type Grant = { allowCreate?: boolean; allowEdit?: boolean; allowDelete?: boolean };
 
 /** A `/me/permissions` answer for an authenticated caller with this `sys_attachment` grant. */
 function payload(grant: Grant): MePermissionsAuthenticatedResponse {
@@ -88,7 +88,7 @@ function payload(grant: Grant): MePermissionsAuthenticatedResponse {
       sys_attachment: {
         allowRead: true,
         allowCreate: grant.allowCreate ?? false,
-        allowEdit: false,
+        allowEdit: grant.allowEdit ?? false,
         allowDelete: grant.allowDelete ?? false,
       },
     },
@@ -264,19 +264,29 @@ describe('RecordAttachmentsPanel — write affordances follow the sys_attachment
   });
 });
 
-describe('RecordAttachmentsPanel — Rename is offered to the reader who may delete (objectstack#35724)', () => {
+describe('RecordAttachmentsPanel — Rename is offered to the reader who may delete and edit (objectstack#35724)', () => {
   // The server renames by the attachment delete rule (uploader or parent
-  // editor), so the row menu offers Rename exactly where it offers Delete.
+  // editor) and writes an editor's rename as the caller, which needs the edit
+  // grant; so the row menu offers Rename where it offers Delete, and only to a
+  // reader who also holds the edit grant.
   it('a reader who may not delete sees no Rename, on the own row and on another\'s', async () => {
-    renderWithGrant({ allowCreate: true });
+    renderWithGrant({ allowCreate: true, allowEdit: true });
     await rowsLoaded();
 
     expect(await rowMenuItems('mine.pdf')).not.toContain('Rename');
     expect(await rowMenuItems('others.pdf')).not.toContain('Rename');
   });
 
-  it('a reader who may delete sees Rename beside Delete on every row', async () => {
+  it('a reader who may delete but holds no edit grant sees Delete and no Rename, on the own row and on another\'s', async () => {
     renderWithGrant({ allowDelete: true });
+    await rowsLoaded();
+
+    expect(await rowMenuItems('mine.pdf')).toEqual(['Download', 'Delete attachment']);
+    expect(await rowMenuItems('others.pdf')).toEqual(['Download', 'Delete attachment']);
+  });
+
+  it('a reader who may delete and edit sees Rename beside Delete on every row', async () => {
+    renderWithGrant({ allowDelete: true, allowEdit: true });
     await rowsLoaded();
 
     expect(await rowMenuItems('mine.pdf')).toEqual(['Download', 'Rename', 'Delete attachment']);
