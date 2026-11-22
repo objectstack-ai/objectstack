@@ -14,26 +14,26 @@ a row or a number here — fix the code, or the census, and regenerate.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 106 |
+| Write call sites | 107 |
 | Object name statically decidable | 58 |
-| Object name chosen at run time | 48 |
+| Object name chosen at run time | 49 |
 | Object name spelled inline | 47 |
 | Object name spelled through a `const` | 11 |
-| Object name is an `object: string` parameter | 3 |
+| Object name is an `object: string` parameter | 4 |
 | Object name is some other run-time expression | 45 |
 | Against a tenancy-enabled object | 56 |
 | Against an object declaring tenancy off | 2 |
-| Threading a tenant context | 62 |
+| Threading a tenant context | 63 |
 | Provably carrying none (options read, no context key) | 15 |
 | …and decidably tenancy-enabled | 3 |
 | Options argument unreadable | 29 |
 | …and decidably tenancy-enabled | 16 |
-| Threading a decidably elevated (`isSystem`) context | 44 |
+| Threading a decidably elevated (`isSystem`) context | 45 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 47 |
 | Receiver carried a readable engine type | 80 |
 | Receiver erased, placed by the object NAME | 24 |
-| Receiver erased, placed by an `object: string` PARAMETER | 1 |
+| Receiver erased, placed by an `object: string` PARAMETER | 2 |
 | Receiver erased, placed by an `UNTYPED_RECEIVERS` row | 1 |
 
 ## Subtractions the census could NOT defend — enforced
@@ -74,6 +74,7 @@ a row or a number here — fix the code, or the census, and regenerate.
 | `packages/plugins/plugin-auth/src/demo-staff.ts` | `update` | `sys_user` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/demo-staff.ts` | `insert` | `sys_user_permission_set` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/demo-staff.ts` | `insert` | `sys_user_position` | enabled | elevated | 1 |
+| `packages/plugins/plugin-auth/src/dev-seed-credential-retirement.ts` | `delete` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/dev-seed-credential.ts` | `update` | `SystemObjectName.USER` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/ensure-default-organization.ts` | `insert` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/ensure-default-organization.ts` | `update` | `sys_member` | enabled | elevated | 1 |
