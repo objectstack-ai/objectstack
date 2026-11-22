@@ -19,7 +19,9 @@
  *   - a click on any other cell opens nothing;
  *   - the page's way back (`useRecordPageReturn().toList`, the top bar's ✕)
  *     lands on the data page with its conditions;
- *   - a list-only object draws no icon.
+ *   - a list-only object draws no icon;
+ *   - on a phone the page is pushed over the data page (the history-state
+ *     marker the page's 「‹」 reads to go back), as the object list's is.
  *
  * Driven through the real `ObjectDataPage`, the real `ListView` grid and the
  * real `MePermissionsProvider`. The record body is not what this file reads,
@@ -67,6 +69,7 @@ vi.mock('./metadata-admin/useMetadata', async (importOriginal) => ({
 import '@objectstack/lint';
 import { ObjectDataPage } from './ObjectDataPage';
 import { useRecordPageReturn } from './recordDrawerStack';
+import { isRecordPagePushed } from './recordPagePush';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 
 const OBJECT_NAME = 'demo_account';
@@ -139,6 +142,7 @@ function RecordPageProbe() {
   return (
     <div data-testid="record-page">
       <output data-testid="record-from">{JSON.stringify(from ?? null)}</output>
+      <output data-testid="record-pushed">{String(isRecordPagePushed(location.state))}</output>
       <output data-testid="record-position">
         {position ? `${position.index + 1}/${position.total}` : ''}
       </output>
@@ -150,6 +154,11 @@ function RecordPageProbe() {
 }
 
 let openSpy: ReturnType<typeof vi.fn>;
+const DESKTOP_WIDTH = window.innerWidth;
+
+function setViewportWidth(width: number): void {
+  Object.defineProperty(window, 'innerWidth', { value: width, configurable: true, writable: true });
+}
 let findOne: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
@@ -171,6 +180,7 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  setViewportWidth(DESKTOP_WIDTH);
   window.history.replaceState(null, '', '/');
 });
 
@@ -237,7 +247,20 @@ describe('objectstack#35875 — the bare data page opens a record by the list\'s
     });
     // The page's top bar counts the record among the data page's matched rows.
     expect(screen.getByTestId('record-position').textContent).toBe(`1/${MATCHED}`);
+    // A desktop opens the page in place of the list: nothing is pushed over it.
+    expect(screen.getByTestId('record-pushed').textContent).toBe('false');
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('on a phone the name pushes the page over the data page, so the page\'s 「‹」 goes back to it', async () => {
+    setViewportWidth(390);
+    await mountDataPage();
+    fireEvent.click(screen.getByText('Acme'));
+    await screen.findByTestId('record-page', undefined, { timeout: 5000 });
+    expect(pathname()).toBe(`/apps/sales/${OBJECT_NAME}/record/a1`);
+    expect(screen.getByTestId('record-pushed').textContent).toBe('true');
+    expect(JSON.parse(screen.getByTestId('record-from').textContent ?? 'null')?.pathname)
+      .toBe(`${DATA_PATH}?${new URLSearchParams(DATA_SEARCH).toString()}`);
   });
 
   it('the name cell\'s hover icon opens the side drawer over the list, which stays', async () => {

@@ -71,6 +71,7 @@ import { RecordDetailView } from './RecordDetailView.js';
 import { OpenInSidePanelButton } from './objectViewOpenAsPage.js';
 import { listOriginOf, listShownRowsOf, type ListShownRows } from './objectViewRecordNavigation.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
+import { RECORD_PAGE_PUSHED_STATE } from './recordPagePush.js';
 import { PageHeader } from '../layout/PageHeader.js';
 import { useMetadataClient } from './metadata-admin/useMetadata.js';
 import { createRuntimeMetadata, viewEnvelope } from './runtime-metadata-persistence.js';
@@ -459,10 +460,14 @@ export function ObjectDataPage({ dataSource, objects }: any) {
             total: listTotalRef.current,
             recordId: String(id),
           }),
+          // A phone pushes the page over this list, so the page's 「‹」 goes
+          // back in the history to this list's entry, as the object list's
+          // page does (`useObjectViewRecordNavigation`).
+          ...(phone ? { [RECORD_PAGE_PUSHED_STATE]: true } : {}),
         },
       });
     },
-    [recordServed, recordUrl, navigate],
+    [recordServed, recordUrl, navigate, phone],
   );
   // The name cell's 「在侧边打开」: the record in the side drawer over the list,
   // for a row with a record surface on a desktop. A phone opens every record
