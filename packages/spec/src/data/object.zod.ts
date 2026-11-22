@@ -6701,6 +6701,25 @@ export type ObjectExtensionRelatedListEntry = z.input<typeof ObjectExtensionRela
 export type ObjectExtensionRelatedListEntryParsed = z.infer<typeof ObjectExtensionRelatedListEntrySchema>;
 
 /**
+ * [ADR-0146 D10] A `.custom` arrangement's group keys are unique, as an
+ * object's are. Judged here, in the extension's own refinement, and not as a
+ * `.refine()` on the `fieldGroups` array: that would be a new position at
+ * which a rule reaches the runtime and not the published JSON Schema
+ * (`dropped-refinements.baseline.json`), where this refinement is already
+ * one recorded position for the whole extension.
+ */
+function refuseDuplicateExtensionFieldGroupKeys(fieldGroups: unknown, ctx: z.RefinementCtx): void {
+  if (!Array.isArray(fieldGroups)) return;
+  const keys = fieldGroups.map((group) => (group as { key?: unknown } | null | undefined)?.key);
+  if (new Set(keys).size === keys.length) return;
+  ctx.addIssue({
+    code: 'custom',
+    path: ['fieldGroups'],
+    message: 'fieldGroups[].key must be unique within an object extension',
+  });
+}
+
+/**
  * [ADR-0146 D10] Refuse a `.custom` tab list that says two things about one
  * list: an entry that shows a list another entry hides. The hiding entry
  * hides every list it names (a bare child name, all of that child's lists),
@@ -7023,10 +7042,7 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
    * `@objectstack/metadata-protocol`, at publish, `os validate` / `os build`
    * and install). See {@link objectExtensionFieldGroupsDescription}.
    */
-  fieldGroups: z.array(ObjectFieldGroupSchema).refine(
-    (groups) => new Set(groups.map(g => g.key)).size === groups.length,
-    { message: 'fieldGroups[].key must be unique within an object extension' },
-  ).optional().describe(objectExtensionFieldGroupsDescription()),
+  fieldGroups: z.array(ObjectFieldGroupSchema).optional().describe(objectExtensionFieldGroupsDescription()),
 
   /**
    * [ADR-0146 D10] The whole tab list of the extended object's record page,
@@ -7055,6 +7071,7 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
   // [ADR-0146 D10] The `.custom` arrangement: the object's own two membership
   // rules, over the fields this extension adds (a base field's `group` is
   // not in this body; the registry fold lets the list win over it)…
+  refuseDuplicateExtensionFieldGroupKeys(extension.fieldGroups, ctx);
   refuseFieldsInRelatedListGroups(extension.fieldGroups, extension.fields, ctx);
   refuseFieldGroupMembershipConflicts(extension.fieldGroups, extension.fields, ctx);
   // …one statement per list…
