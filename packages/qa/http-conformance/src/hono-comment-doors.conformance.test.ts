@@ -116,7 +116,7 @@ async function bootKernel(opts: { selfHosted: boolean; audit?: boolean }) {
         );
         return { commentId: String(comment.id), reactionId: String(reaction.id) };
     };
-    const stored = (object: string, id: string) => objectql.findOne(object, { where: { id }, context: SYSTEM } as any);
+    const stored = (object: string, id: string) => objectql.findOne(object, { where: { id }, context: { ...SYSTEM } });
     return { kernel, seed, stored };
 }
 

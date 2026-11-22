@@ -32,6 +32,10 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Paid during collection, not inside a case's clock: the dispatcher reaches
+// `standalone-stack.ts`, whose dynamic `@objectstack/metadata` import would
+// otherwise load inside the first case that gets that far (check:test-source-alias).
+import '@objectstack/metadata';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext, KernelResolver } from '../http-dispatcher.js';
 
