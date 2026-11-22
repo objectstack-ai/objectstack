@@ -158,7 +158,7 @@ describe('the edits replayed on the stored menu (objectstack#36363, review 70812
   it('a move to another group takes the stored entry there, after the entry before it', () => {
     const out = rebaseMenuEdits(SERVED, moveEntry(SERVED, 'b', 'g', 0), STORED);
     expect(out.map((e) => e.id)).toEqual(['a', 'hidden', 'g']);
-    expect(out[2].children).toEqual([STORED[2], STORED[3].children![0]]);
+    expect(out[2].children).toEqual([STORED[2], (STORED[3].children as Menu)[0]]);
   });
 
   it('a group the stored menu lacks puts the entry at the top level', () => {
