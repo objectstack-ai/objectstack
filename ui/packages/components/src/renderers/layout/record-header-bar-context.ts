@@ -101,6 +101,14 @@ export interface RecordHeaderState {
    * declaration, unchanged.
    */
   title?: RecordHeaderTitle;
+  /**
+   * The record-page pins the header draws (objectstack#36366), where the host
+   * holds them ahead of the object as served: the design mode's staged pins.
+   * A header that places the object's actions itself (`placedActions: true`)
+   * reads these over the object's `pinnedActions.record`. Absent: the
+   * object's own.
+   */
+  pinnedActions?: readonly string[];
 }
 
 /**

@@ -22,7 +22,7 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import { ComponentRegistry, ExpressionEvaluator, declaredNameField, isElementDataSourceConfig, evalRowPredicate, formatTitleTemplate, hasDeclaredPredicate, getRecordDisplayName, isActionSwitchedOff, recordDisplayValueAt, resolveNameField, toPredicateRecord } from '@object-ui/core';
 import type { ComponentInput } from '@object-ui/core';
-import { actionRendersAt, detectStatusField, placedHeaderActions, resolveDeclaredActionIds } from '@object-ui/types';
+import { actionRendersAt, detectStatusField, pinnedHeaderActions, placedHeaderActions, resolveDeclaredActionIds } from '@object-ui/types';
 import type { DeclaredActionsRefusal } from '@object-ui/types';
 import { useRecordContext, useAction, useCapabilityGate, usePredicateScope, usePageVariables, useInlineEdit, useActionTextLocalizer, useMetadataItem, reportUnresolvableVisibilityPredicate, resolveInlineAriaProps, buildNodeEvaluationScope } from '@object-ui/react';
 import { renderChildren, renderNodeSlot, cn } from '../../lib/utils';
@@ -2094,10 +2094,15 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
   // The record's state (objectstack#35593): when the host hands a `group`,
   // the row is what that group draws — the record's row unchanged, or the
   // state's own levers with the record's actions in their `⋯`.
-  const stateGroup = React.useContext(RecordHeaderStateContext)?.group;
+  const recordHeaderState = React.useContext(RecordHeaderStateContext);
+  const stateGroup = recordHeaderState?.group;
   // objectstack#36151 — the phone host's top-bar slot for the `⋯`: handed, the
   // bottom bar keeps the action buttons alone. `undefined` = no such slot.
   const phoneMoreSlot = React.useContext(PageHeaderPhoneContext)?.more;
+  // objectstack#36366 — the host's record-page pins (the design mode's staged
+  // ones) over the object's own, keyed on content for the memo below.
+  const hostPinnedActions = recordHeaderState?.pinnedActions;
+  const hostPinsKey = hostPinnedActions ? JSON.stringify(hostPinnedActions) : '';
   // Record-level inline-edit session (objectui#2572 item 4): while a shared
   // inline draft is active, header actions flagged `disableDuringInlineEdit`
   // (the host's Edit CTA) grey out so the classic form-edit surface can't be
@@ -2226,8 +2231,15 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       reportRefusedPlacedActions(headerObjectName);
       return [];
     }
-    // The ONE placed-header reader the synthesized header reads too.
-    if (drawsPlacedActions) return placedHeaderActions<any>(registered);
+    // The ONE placed-header reader the synthesized header reads too, with the
+    // object's record-page pins applied as it applies them (objectstack#36366).
+    if (drawsPlacedActions) {
+      return pinnedHeaderActions<any>(
+        placedHeaderActions<any>(registered),
+        hostPinnedActions ?? (headerActionsObjectMeta as any)?.pinnedActions?.record,
+        'record',
+      );
+    }
     const declared = resolveDeclaredActionIds<any>(authoredHeaderActions, registered);
     if (declared.kind === 'refused') {
       reportRefusedHeaderActions(headerObjectName, declared);
@@ -2257,6 +2269,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       }
     }
     return declared.actions;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `hostPinnedActions` is keyed on content by `hostPinsKey`
   }, [
     authoredHeaderActions,
     headerActionsObjectMeta,
@@ -2265,6 +2278,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     headerObjectName,
     placedRefused,
     drawsPlacedActions,
+    hostPinsKey,
   ]);
 
   // ── Action predicates: ONE dialect, ONE entry (objectui#3521) ──────────────

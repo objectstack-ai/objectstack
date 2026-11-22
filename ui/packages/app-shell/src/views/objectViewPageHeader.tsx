@@ -34,6 +34,9 @@ import { PageHeader } from '../layout/PageHeader.js';
 import { ManagedByBadge } from '../components/ManagedByBadge.js';
 import { EnvironmentListToolbar } from '../environment/EnvironmentListToolbar.js';
 import { ListHeaderActionBar } from './objectViewHeaderLaunchGate.js';
+import { pinnedHeaderActions, type ActionBarSchema } from '@object-ui/types';
+import { DesignModeHeaderPins, useObjectPins } from '../layout/DesignModeHeaderPins.js';
+import type { PinCandidate } from '../layout/designModeHeaderPins.js';
 import type { useObjectViewToolbarAffordances } from './objectViewToolbarAffordances.js';
 import type { useObjectViewHeaderToolbar } from './objectViewHeaderToolbar.js';
 import type { useObjectViewHeaderChrome } from './objectViewHeaderChrome.js';
@@ -107,19 +110,30 @@ export function ObjectViewPageBarActions({
     barEnd,
 }: ObjectViewPageBarProps & { barEnd?: ObjectViewBarEnd }) {
     const description = objectDef.description ? objectDesc(objectDef) : undefined;
-    const exportDoor = barEnd?.exportDoor;
+    // objectstack#36366 — the object's list-page pins (`pinnedActions.list`):
+    // the header's buttons, in order, the page's Import and Export among them
+    // (`$import`, `$export`). Absent: the header's own choice, as before.
+    // Under the design mode the pins staged there are drawn (`useObjectPins`).
+    const objectPins = useObjectPins(objectDef);
+    const listPins = isEnvironmentList ? undefined : objectPins.list;
+    const importPinned = !!listPins?.includes('$import') && importShown;
+    const exportPinned = !!listPins?.includes('$export') && !!barEnd?.exportDoor;
+    // A pinned Import or Export is a button of its own, out of the menus.
+    const importInMenus = importShown && !importPinned;
+    const exportDoor = exportPinned ? undefined : barEnd?.exportDoor;
     // 「Import / Export」 is drawn at the view bar's end while it fits; folded,
     // and on the page bar, its entries are ⋮ More's.
-    const ioAtEnd = !!barEnd && !barEnd.folded && (importShown || !!exportDoor);
+    const ioAtEnd = !!barEnd && !barEnd.folded && (importInMenus || !!exportDoor);
     const ioInMore = !ioAtEnd;
     // The ⋮ menu: the description (no longer a resident subtitle), Import and
     // the favorites entry — the page's once-in-a-while acts.
-    const moreShown = !!description || !!listFavorite || (ioInMore && (importShown || !!exportDoor));
+    const moreShown = !!description || !!listFavorite || (ioInMore && (importInMenus || !!exportDoor));
+    const drawsToolbar = !!listActions?.some((a: any) => a.locations?.includes('list_toolbar'));
     return (
         <>
             {ioAtEnd && (
               <ObjectViewImportExportMenu
-                importShown={importShown}
+                importShown={importInMenus}
                 setShowImport={setShowImport}
                 importDisabled={importDisabled}
                 exportDoor={exportDoor}
@@ -127,15 +141,55 @@ export function ObjectViewPageBarActions({
               />
             )}
 
-            {/* Schema-driven toolbar actions */}
-            {listActions?.some((a: any) => a.locations?.includes('list_toolbar')) && (
-              isEnvironmentList ? (
-                <EnvironmentListToolbar
-                  actions={headerToolbarActions}
-                  entitlements={environmentEntitlements}
-                />
-              ) : (
-              <ListHeaderActionBar schema={toolbarBar} />
+            {listPins ? (
+              <PinnedListHeaderActions
+                pins={listPins}
+                toolbarBar={drawsToolbar ? toolbarBar : undefined}
+                importButton={importPinned ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="shadow-none h-7 gap-1 px-2 text-sm font-normal"
+                    onClick={() => setShowImport(true)}
+                    disabled={importDisabled}
+                    title={t('console.objectView.importTitle')}
+                    data-testid="object-view-import-pinned"
+                  >
+                    <Upload className="h-3.5 w-3.5" />
+                    <span>{t('console.objectView.import')}</span>
+                  </Button>
+                ) : null}
+                exportButton={exportPinned && barEnd?.exportDoor ? (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="shadow-none h-7 gap-1 px-2 text-sm font-normal"
+                        data-testid="object-view-export-pinned"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        <span>{t('list.export', { defaultValue: 'Export' })}</span>
+                        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-56">
+                      <ExportMenuItems exportDoor={barEnd.exportDoor} t={t} />
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                ) : null}
+              />
+            ) : (
+              /* Schema-driven toolbar actions */
+              drawsToolbar && (
+                isEnvironmentList ? (
+                  <EnvironmentListToolbar
+                    actions={headerToolbarActions}
+                    entitlements={environmentEntitlements}
+                  />
+                ) : (
+                <ListHeaderActionBar schema={toolbarBar} />
+                )
               )
             )}
 
@@ -145,7 +199,7 @@ export function ObjectViewPageBarActions({
             {moreShown && (
               <ObjectViewMoreMenu
                 description={description}
-                importShown={ioInMore && importShown}
+                importShown={ioInMore && importInMenus}
                 setShowImport={setShowImport}
                 importDisabled={importDisabled}
                 exportDoor={ioInMore ? exportDoor : undefined}
@@ -154,8 +208,80 @@ export function ObjectViewPageBarActions({
               />
             )}
 
+            {/* objectstack#36366 — the design mode's 「Header buttons」, last. */}
+            {!isEnvironmentList && (
+              <DesignModeHeaderPins
+                objectDef={objectDef}
+                page="list"
+                actions={(headerToolbarActions ?? []) as Record<string, unknown>[]}
+                builtins={listPinBuiltins(importShown, !!barEnd?.exportDoor, t)}
+              />
+            )}
         </>
     );
+}
+
+/** The list page's built-ins this reader is offered to pin: its Import and its Export, where the page draws them. */
+function listPinBuiltins(importShown: boolean, exportShown: boolean, t: ObjectViewPageBarProps['t']): PinCandidate[] {
+    return [
+        ...(importShown ? [{ id: '$import', label: String(t('console.objectView.import')) }] : []),
+        ...(exportShown ? [{ id: '$export', label: String(t('list.export', { defaultValue: 'Export' })) }] : []),
+    ];
+}
+
+/**
+ * objectstack#36366 — the list header's pinned buttons, in pin order: each
+ * pinned action of the toolbar (`pinnedHeaderActions`), and the page's pinned
+ * Import and Export where they are offered. Every other toolbar action is in
+ * the toolbar's own ⋯ menu, drawn after them. A pin naming nothing this
+ * reader is offered draws nothing.
+ */
+function PinnedListHeaderActions({
+    pins,
+    toolbarBar,
+    importButton,
+    exportButton,
+}: {
+    pins: readonly string[];
+    toolbarBar?: ActionBarSchema;
+    importButton: ReactNode;
+    exportButton: ReactNode;
+}) {
+    const arranged = pinnedHeaderActions<any>((toolbarBar?.actions ?? []) as any[], pins, 'list');
+    const byName = new Map<string, any>();
+    for (const action of arranged) {
+        if (action?.component !== 'action:menu' && typeof action?.name === 'string') byName.set(action.name, action);
+    }
+    const rest = arranged.filter((action) => action?.component === 'action:menu');
+    // Runs of adjacent pinned actions share one bar, so a built-in pinned
+    // between two actions sits between their buttons.
+    const parts: ReactNode[] = [];
+    let run: any[] = [];
+    const flush = () => {
+        if (run.length === 0 || !toolbarBar) return;
+        parts.push(
+            <ListHeaderActionBar
+                key={`run-${parts.length}`}
+                schema={{ ...toolbarBar, actions: run, maxVisible: run.length, mobileMaxVisible: run.length }}
+            />,
+        );
+        run = [];
+    };
+    for (const pin of pins) {
+        if (pin === '$import' || pin === '$export') {
+            flush();
+            const button = pin === '$import' ? importButton : exportButton;
+            if (button) parts.push(<span key={pin} className="contents">{button}</span>);
+            continue;
+        }
+        const action = byName.get(pin);
+        if (action) run.push(action);
+    }
+    flush();
+    if (rest.length > 0 && toolbarBar) {
+        parts.push(<ListHeaderActionBar key="rest" schema={{ ...toolbarBar, actions: rest }} />);
+    }
+    return <>{parts}</>;
 }
 
 export interface ObjectViewMoreMenuProps extends Pick<ObjectViewPageBarProps, 'importShown' | 'setShowImport' | 'importDisabled' | 'listFavorite' | 't'> {
