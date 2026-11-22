@@ -3891,6 +3891,11 @@ describe('validateTranslationReferences — object-branch coverage vs the schema
       ghost: { _tabs: { ghost_tab: { label: 'Ghost' } } },
       path: 'translations[0].en.objects.crm_lead._tabs.ghost_tab',
     },
+    _relatedLists: {
+      kind: 'reference-checked',
+      ghost: { _relatedLists: { ghost_list: { label: 'Ghost' } } },
+      path: 'translations[0].en.objects.crm_lead._relatedLists.ghost_list',
+    },
     _validations: {
       kind: 'reference-checked',
       ghost: { _validations: { ghost_rule: { message: 'Ghost' } } },

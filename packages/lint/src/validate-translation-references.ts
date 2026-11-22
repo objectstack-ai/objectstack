@@ -1137,18 +1137,22 @@ function contributedNavItemsByApp(stack: AnyRec): Map<string, unknown[]> {
  * its declared keys: `extend`, `priority`, `fields`, `validations`, `indexes`,
  * `label`, `pluralLabel`, `description`, and the arrangement keys the base's
  * paired `.custom` package writes, `fieldGroups` and `relatedLists`
- * (ADR-0146 D10). Everything else is refused BY NAME at the extension level
+ * (ADR-0146 D10), and `place`, which positions the items the extension brings.
+ * Everything else is refused BY NAME at the extension level
  * with authoring guidance (`actions`, `listViews`, `hooks` carry their own
  * `guidance` text; `views`, `sections` and `tabs` fall to the shared
  * unknown-key refusal). Measured against the schema rather than read off the
  * merge: each of those six produced an extension-level `unrecognized_keys`
  * issue, while `fields`, `validations` and `fieldGroups` parsed.
  *
- * ⇒ THREE of this rule's rungs are reachable through an extension:
- * `objects.<obj>.fields.*`, `objects.<obj>._validations.*`, and
+ * ⇒ FOUR of this rule's rungs are reachable through an extension:
+ * `objects.<obj>.fields.*`, `objects.<obj>._validations.*`,
  * `objects.<obj>._sections.*` for the groups a `.custom` arrangement brings
- * (`fieldGroups[].key` is the section anchor, ADR-0085). `indexes` and
- * `relatedLists` are not translatable here; `label` / `pluralLabel` /
+ * (`fieldGroups[].key` is the section anchor, ADR-0085), and
+ * `objects.<obj>._relatedLists.*` for a labelled tab entry it brings: an
+ * object-form entry of a `.custom` arrangement's `relatedLists`, or a list
+ * placement in `place`, each titling a tab of the served target by its
+ * `list`. `indexes` is not translatable; `label` / `pluralLabel` /
  * `description` are leaf copy on an object that already resolved, and this
  * rule checks no leaf. ⛔ Do not grow this fold to `_views` / `_tabs` /
  * `_actions` "for symmetry": an extension cannot contribute any of them, so a
@@ -1402,6 +1406,17 @@ function buildUniverse(stack: AnyRec): Universe {
       for (const group of extension.fieldGroups) {
         const key = strName(group.key);
         if (key) facts.sections.add(key);
+      }
+      // `_relatedLists.<list>` is keyed by a labelled entry's `list`: a
+      // `.custom` arrangement's `relatedLists` entry (ADR-0146 D10) and a
+      // list placement's `place` entry each title a tab of the target, and
+      // the served target carries that entry, which `translateObject`
+      // translates as it does the target's own.
+      for (const entry of extension.relatedListEntries) {
+        const list = strName(entry.list);
+        if (!list) continue;
+        facts.relatedListNames.add(list);
+        if (typeof entry.label === 'string' && entry.label.length > 0) facts.relatedListLabels.add(list);
       }
     }
   }

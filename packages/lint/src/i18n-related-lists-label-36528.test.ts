@@ -75,6 +75,30 @@ describe('validateTranslationReferences — _relatedLists', () => {
     }
   });
 
+  it('resolves a key over a labelled entry an extension brings: a `.custom` arrangement or a list placement', () => {
+    const translations = [{ 'zh-CN': { objects: { account: { _relatedLists: { quote: { label: '报价' } } } } } }];
+    const arrangement = {
+      objects: [ACCOUNT],
+      objectExtensions: [{ extend: 'account', relatedLists: [{ list: 'quote', label: 'Quotes' }, 'contact'] }],
+      translations,
+    };
+    expect(validateTranslationReferences(arrangement)).toEqual([]);
+    const placement = {
+      objects: [ACCOUNT],
+      objectExtensions: [{ extend: 'account', place: [{ list: 'quote', after: 'contact', label: 'Quotes' }] }],
+      translations,
+    };
+    expect(validateTranslationReferences(placement)).toEqual([]);
+    // Control: the same extension entry with no label titles nothing.
+    const unlabelled = {
+      objects: [ACCOUNT],
+      objectExtensions: [{ extend: 'account', place: [{ list: 'quote', after: 'contact' }] }],
+      translations,
+    };
+    expect(validateTranslationReferences(unlabelled).map((f) => f.path))
+      .toEqual(['translations[0]["zh-CN"].objects.account._relatedLists.quote']);
+  });
+
   it('flags every key on an object that declares no relatedLists', () => {
     const findings = validateTranslationReferences({
       objects: [{ ...ACCOUNT, relatedLists: undefined }],
