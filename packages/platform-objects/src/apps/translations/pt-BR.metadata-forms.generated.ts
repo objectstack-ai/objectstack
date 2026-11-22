@@ -469,6 +469,18 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Alterar proprietário",
         helpText: "A ação Alterar proprietário, individual e em massa: ativada, é oferecida; desativada, fica oculta. Não definida: ativada, exceto desativada em um objeto de detalhe controlled_by_parent. Oferecida apenas em um objeto cujos registros têm um proprietário reatribuível (ownership user ou não definido, sem managedBy, não é um objeto sys_, owner_id não é somente leitura e, em um objeto externo, está declarado ou mapeado); ativá-la em qualquer outro objeto é recusado. Controla apenas a ação, não uma edição simples de owner_id. Um objeto {enabled, visibleWhen, disabledWhen} armazenado é editado chave por chave; escreva um no código-fonte para condicionar a ação a cada registro."
       },
+      pinnedActions: {
+        label: "Ações fixadas",
+        helpText: "Quais ações cada cabeçalho de página mostra como botões, em ordem, no máximo 3 por página; qualquer outra ação do cabeçalho vai para o menu Mais. Sem definir: cada cabeçalho escolhe os botões pela ordem das ações, como antes."
+      },
+      "pinnedActions.list": {
+        label: "Página de lista",
+        helpText: "Nomes de ações colocadas na barra de ferramentas da lista, ou $import / $export, na ordem em que aparecem. No máximo 3. O os validate recusa um nome que não é ação deste objeto ou não está na barra da lista; esse nome não mostra botão."
+      },
+      "pinnedActions.record": {
+        label: "Página de registro",
+        helpText: "Nomes de ações colocadas no cabeçalho do registro ou no menu Mais dele, na ordem em que aparecem. No máximo 3. O os validate recusa um nome que não é ação deste objeto ou não está na página de registro; esse nome não mostra botão."
+      },
       editMode: {
         label: "Modo de edição",
         helpText: "Intenção de interação de edição para os registros deste objeto. Ausente, o renderizador escolhe seu próprio padrão. Intenção entre renderizadores, não estilo."

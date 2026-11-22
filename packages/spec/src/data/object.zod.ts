@@ -33,6 +33,8 @@ import { RECORD_PAGE_BUILTIN_TABS, relatedListEntryHidden, relatedListEntryName,
 import { refuseStageFieldWithoutKinds } from './stage-field-kinds';
 // [#32763] The `icon` leaf, shared with the AI blueprint object.
 import { OBJECT_COLOR_SCHEMA, OBJECT_ICON_SCHEMA } from './object-icon';
+// [#36366] The header buttons per page type, shared with the object extension.
+import { OBJECT_PINNED_ACTIONS_SCHEMA } from './object-pinned-actions';
 // The masked-on-read declaration (#20141); `warnGenericPasswordFields` reads its
 // `password` exemption rather than restating it. No runtime cycle: that module's
 // only imports are type-only.
@@ -4047,6 +4049,8 @@ const ObjectSchemaBase = strictObject(
   icon: OBJECT_ICON_SCHEMA,
   // [#35985] The colour of the square the icon is drawn on, from a closed palette.
   color: OBJECT_COLOR_SCHEMA,
+  // [#36366] The actions each page header shows as buttons (list, record), at most 3 each.
+  pinnedActions: OBJECT_PINNED_ACTIONS_SCHEMA,
 
   /**
    * Taxonomy & Organization
@@ -6920,12 +6924,12 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
   guidance: {
     // The merge in `objectql/src/engine.ts` copies EXACTLY the declared keys
     // (extend / fields / fieldPatches / label / pluralLabel / description /
-    // validations / indexes / priority) onto the extension def. Anything else
+    // pinnedActions / validations / indexes / priority) onto the extension def. Anything else
     // is not "unsupported yet" — there is no slot for it to arrive through.
     actions:
       '`actions` cannot be contributed through an object extension — the merge carries ' +
-      '`fields`, `label`, `pluralLabel`, `description`, `validations` and `indexes`, and ' +
-      'applies `fieldPatches`, and nothing else. ' +
+      '`fields`, `label`, `pluralLabel`, `description`, `pinnedActions`, `validations` and ' +
+      '`indexes`, and applies `fieldPatches`, and nothing else. ' +
       "Declare a top-level action with `objectName: '<target>'` in the same stack: " +
       '`defineStack()` accepts it because the stack extends the target, keeps it in the ' +
       'top-level `actions`, and the engine\'s schema registry attaches it to the target ' +
@@ -7034,6 +7038,14 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
   
   /** Override description */
   description: z.string().optional().describe('Override description for the extended object'),
+
+  /**
+   * [#36366] Override the extended object's pinned header actions, as on the
+   * object itself (`ObjectSchema.pinnedActions`). A fold scalar like `label`:
+   * the last extender by `priority` wins, and a value the tenant authored on
+   * the base stays (ADR-0029 D9.2a).
+   */
+  pinnedActions: OBJECT_PINNED_ACTIONS_SCHEMA,
   
   /** Additional validation rules to add */
   validations: z.array(ValidationRuleSchema).optional().describe('Additional validation rules to merge into the target object'),

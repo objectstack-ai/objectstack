@@ -755,6 +755,18 @@ export const objectForm = defineForm({
             { field: 'transfer', label: 'Change Owner', widget: 'json', helpText: 'The Change Owner action, single and bulk: on offers it, off hides it. Unset: on, except off on a controlled_by_parent detail. Offered only on an object whose records have a reassignable owner (ownership user or unset, no managedBy, not a sys_ object, owner_id not readonly and, on an external object, declared or mapped); turning it on anywhere else is refused. It gates the action only, not a plain edit of owner_id. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate the action on each record.' },
           ],
         },
+        // [#36366] The header buttons per page type. Each arm is a list of names
+        // (the `string-tags` face): action names of the object, or the list
+        // page's `$import` / `$export`. The design mode edits it on the page.
+        {
+          field: 'pinnedActions',
+          type: 'composite',
+          helpText: 'Which actions each page header shows as buttons, in order, at most 3 per page; every other action the header places goes to its More menu. Unset: each header picks its buttons by the actions\' order, as before.',
+          fields: [
+            { field: 'list', label: 'List page', widget: 'string-tags', helpText: 'Action names placed on the list toolbar, or $import / $export, in the order they are drawn. At most 3. os validate refuses a name that is no action of this object or is not placed on the list toolbar; such a name draws no button.' },
+            { field: 'record', label: 'Record page', widget: 'string-tags', helpText: 'Action names placed in the record header or its More menu, in the order they are drawn. At most 3. os validate refuses a name that is no action of this object or is not placed on the record page; such a name draws no button.' },
+          ],
+        },
         { field: 'editMode', type: 'select', helpText: "Edit-interaction intent for records of this object. Absent, the renderer picks its own default. Cross-renderer intent, not styling.", options: [
           { label: 'Modal — edit form as a dialog over the current view', value: 'modal' },
           { label: 'Page — navigate to a dedicated full-page edit route', value: 'page' },

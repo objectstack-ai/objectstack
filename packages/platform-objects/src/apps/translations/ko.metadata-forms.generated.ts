@@ -469,6 +469,18 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "소유자 변경",
         helpText: "소유자 변경 작업(단건 및 일괄): 켜면 제공하고 끄면 숨깁니다. 설정하지 않으면 켜짐이며, controlled_by_parent 상세 개체에서는 꺼짐입니다. 레코드에 재할당 가능한 소유자가 있는 개체(ownership이 user이거나 미설정, managedBy 없음, sys_ 개체 아님, owner_id가 읽기 전용 아님, 외부 개체에서는 owner_id가 선언되거나 매핑됨)에서만 제공됩니다. 다른 개체에서 켜면 거부됩니다. 작업만 제어하며 owner_id의 일반 편집에는 영향을 주지 않습니다. 저장된 {enabled, visibleWhen, disabledWhen} 개체는 키별로 편집됩니다. 레코드마다 작업을 제어하려면 소스에 작성하세요."
       },
+      pinnedActions: {
+        label: "고정 작업",
+        helpText: "각 페이지 헤더에 버튼으로 순서대로 표시할 작업입니다. 페이지당 최대 3개이며, 헤더에 배치된 나머지 작업은 「더 보기」 메뉴로 갑니다. 설정하지 않으면 각 헤더는 이전처럼 작업 순서에 따라 버튼을 고릅니다."
+      },
+      "pinnedActions.list": {
+        label: "목록 페이지",
+        helpText: "목록 도구 모음에 배치된 작업 이름 또는 $import / $export를 표시 순서대로 지정합니다. 최대 3개. 이 개체의 작업이 아니거나 목록 도구 모음에 배치되지 않은 이름은 os validate가 거부하며, 그런 이름은 버튼으로 표시되지 않습니다."
+      },
+      "pinnedActions.record": {
+        label: "레코드 페이지",
+        helpText: "레코드 헤더 또는 그 「더 보기」 메뉴에 배치된 작업 이름을 표시 순서대로 지정합니다. 최대 3개. 이 개체의 작업이 아니거나 레코드 페이지에 배치되지 않은 이름은 os validate가 거부하며, 그런 이름은 버튼으로 표시되지 않습니다."
+      },
       editMode: {
         label: "편집 모드",
         helpText: "이 객체 레코드의 편집 상호 작용 의도입니다. 없으면 렌더러가 자체 기본값을 고릅니다. 스타일이 아니라 렌더러 간 공통 의도입니다."
