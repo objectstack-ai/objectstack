@@ -487,6 +487,7 @@ const de = {
       openRow: "Zeile öffnen",
       duplicateRow: "Zeile duplizieren",
       removeRow: "Zeile entfernen",
+      columnHelp: "Hilfe",
     },
   },
   table: {

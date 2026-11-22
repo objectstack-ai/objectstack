@@ -496,6 +496,7 @@ const es = {
       openRow: "Abrir fila",
       duplicateRow: "Duplicar fila",
       removeRow: "Quitar fila",
+      columnHelp: "Ayuda",
     },
   },
   table: {

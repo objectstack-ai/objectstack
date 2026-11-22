@@ -487,6 +487,7 @@ const ja = {
       openRow: "行を開く",
       duplicateRow: "行を複製",
       removeRow: "行を削除",
+      columnHelp: "ヘルプ",
     },
   },
   table: {

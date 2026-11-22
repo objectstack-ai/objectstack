@@ -498,6 +498,7 @@ const ru = {
       openRow: "Открыть строку",
       duplicateRow: "Дублировать строку",
       removeRow: "Удалить строку",
+      columnHelp: "Помощь",
     },
   },
   table: {

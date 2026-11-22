@@ -487,6 +487,7 @@ const ko = {
       openRow: "행 열기",
       duplicateRow: "행 복제",
       removeRow: "행 삭제",
+      columnHelp: "도움말",
     },
   },
   table: {

@@ -500,6 +500,7 @@ const zh = {
       openRow: '打开行',
       duplicateRow: '复制行',
       removeRow: '删除行',
+      columnHelp: '帮助',
     },
   },
   table: {
