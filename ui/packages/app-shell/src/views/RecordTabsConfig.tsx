@@ -54,9 +54,7 @@ import { useObjectTranslation } from '@object-ui/i18n';
 import { isRecordPageBuiltinTab, relatedListEntryName } from '@objectstack/spec/data';
 import { registerUnsavedEdits } from '../chrome/unsavedEdits.js';
 import { useStudioDesignGate } from '../hooks/useStudioDesignGate.js';
-import { fetchDefaultLocale, isSameLanguage } from '../layout/designModeMenuSave.js';
 import { relatedListEntryNames, type DerivedRelatedList } from '../utils/deriveRelatedLists.js';
-import { useMetadataClient } from './metadata-admin/useMetadata.js';
 import { studioPillarItemPath } from './studio-design/metadataArea.js';
 import { entryDetails } from './studio-design/relatedListVocabulary.js';
 import {
@@ -70,9 +68,13 @@ import {
   type RecordTabsDraft,
   type RecordTabsEdit,
 } from './recordTabsConfig.js';
-import { consoleRecordTabsDoors, readStoredRelatedLists, saveRecordTabs } from './recordTabsConfigSave.js';
+import { consoleRecordTabsDoors, saveRecordTabs } from './recordTabsConfigSave.js';
+import type { RecordTabsIo } from './recordTabsConfigIo.js';
 
 type ObjectLike = Record<string, unknown> & { name?: string };
+
+/** The metadata client, the stored list and the default language: loaded with the edit state (`recordTabsConfigIo.tsx`). */
+const RecordTabsConfigIo = React.lazy(() => import('./recordTabsConfigIo.js'));
 
 /** The record's 「…」 entry's name: the host action it is drawn as. */
 export const RECORD_TABS_CONFIG_ACTION = 'sys_configure_tabs';
@@ -123,7 +125,6 @@ export interface RecordTabsConfig {
 /** The record page's tab configuration for the object on screen. */
 export function useRecordTabsConfig({ objectDef, objects, enabled, canRead, titleOf }: RecordTabsConfigInput): RecordTabsConfig {
   const { t, language } = useObjectTranslation();
-  const client = useMetadataClient();
   const objectName = typeof objectDef?.name === 'string' ? objectDef.name : '';
   const packageId = objectPackageId(objectDef);
   const studioPath = recordTabsStudioPath(objectDef);
@@ -156,25 +157,16 @@ export function useRecordTabsConfig({ objectDef, objects, enabled, canRead, titl
   });
   React.useEffect(() => (dirty ? registerUnsavedEdits(leaveMessage) : undefined), [dirty, leaveMessage]);
 
-  // The stored list and the deployment's default language, for the rename gate.
-  const [stored, setStored] = React.useState<{ objectName: string; lists: unknown[] | null } | null>(null);
-  const [defaultLocale, setDefaultLocale] = React.useState<string | null>(null);
+  // The metadata client, the stored list and the deployment's default
+  // language (the rename gate), from the edit state's lazily loaded part.
+  const [io, setIo] = React.useState<RecordTabsIo | null>(null);
   React.useEffect(() => {
-    if (!active || !packageId) return undefined;
-    let cancelled = false;
-    void readStoredRelatedLists(objectName, packageId, client as never).then((lists) => {
-      if (!cancelled) setStored({ objectName, lists });
-    });
-    void fetchDefaultLocale().then((code) => {
-      if (!cancelled) setDefaultLocale(code);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [active, objectName, packageId, client]);
+    if (!active) setIo(null);
+  }, [active]);
+  const client = io?.client ?? null;
 
   const save = React.useCallback(async () => {
-    if (!session || !catalog || !packageId || saving) return;
+    if (!session || !catalog || !packageId || !client || saving) return;
     setSaving(true);
     try {
       await saveRecordTabs(
@@ -190,7 +182,7 @@ export function useRecordTabsConfig({ objectDef, objects, enabled, canRead, titl
             defaultValue: "This object's package cannot be written, so its tabs cannot be saved here.",
           }),
         },
-        consoleRecordTabsDoors(client as never),
+        consoleRecordTabsDoors(client),
       );
       setHeld(null);
     } catch (error) {
@@ -210,11 +202,18 @@ export function useRecordTabsConfig({ objectDef, objects, enabled, canRead, titl
     [session, catalog, objectDef],
   );
 
-  const storedLists = stored?.objectName === objectName ? stored.lists : null;
-  const sourceLanguage = !!defaultLocale && isSameLanguage(language, defaultLocale);
+  const storedLists = io?.stored?.objectName === objectName ? io.stored.lists : null;
+  const sourceLanguage = io?.sourceLanguage ?? false;
 
   const bar = session ? (
-    <RecordTabsConfigBar dirty={dirty} saving={saving} onCancel={cancel} onSave={() => void save()} />
+    <>
+      <RecordTabsConfigBar dirty={dirty} saving={saving} ready={!!client} onCancel={cancel} onSave={() => void save()} />
+      {packageId && (
+        <React.Suspense fallback={null}>
+          <RecordTabsConfigIo objectName={objectName} packageId={packageId} language={language} onIo={setIo} />
+        </React.Suspense>
+      )}
+    </>
   ) : null;
   const editor =
     session && catalog ? (
@@ -242,11 +241,14 @@ export function useRecordTabsConfig({ objectDef, objects, enabled, canRead, titl
 export function RecordTabsConfigBar({
   dirty,
   saving,
+  ready = true,
   onCancel,
   onSave,
 }: {
   dirty: boolean;
   saving: boolean;
+  /** What a save writes through has loaded. */
+  ready?: boolean;
   onCancel: () => void;
   onSave: () => void;
 }) {
@@ -257,6 +259,7 @@ export function RecordTabsConfigBar({
       role="region"
       aria-label={title}
       data-testid="record-tabs-config-bar"
+      data-ready={ready ? 'true' : 'false'}
       className="flex h-12 min-w-0 shrink-0 items-center gap-2 bg-primary px-3 text-primary-foreground sm:px-4"
     >
       <PanelsTopLeft className="h-4 w-4 shrink-0" aria-hidden="true" />
@@ -278,7 +281,7 @@ export function RecordTabsConfigBar({
           variant="secondary"
           size="sm"
           className="h-8"
-          disabled={!dirty || saving}
+          disabled={!dirty || saving || !ready}
           onClick={onSave}
           data-testid="record-tabs-config-save"
         >
@@ -513,6 +516,14 @@ export function RecordTabsEditor({
                 />
               );
             })}
+            {/* Another package's lists: placed by that package, after this object's own (objectstack#35901). */}
+            {catalog.candidates
+              .filter((candidate) => candidate.fromPackage !== undefined)
+              .map((candidate) => (
+                <li key={candidate.id} className={cn(CHIP, 'bg-muted/40 text-muted-foreground')} data-record-tabs-tab={candidate.id}>
+                  <TabChipBody id={candidate.id} label={labelOf(candidate.id)} fixedReason={contributed} disabled={disabled} />
+                </li>
+              ))}
             {catalog.files && !draft.attachmentsHidden && (
               <li className={cn(CHIP, 'bg-background')} data-record-tabs-tab="sys_attachment">
                 <TabChipBody

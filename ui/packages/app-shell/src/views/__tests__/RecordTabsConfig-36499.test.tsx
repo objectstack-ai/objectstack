@@ -17,7 +17,7 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const session = vi.hoisted(() => ({ language: 'en', defaultLocale: 'en', gate: true as boolean }));
@@ -91,10 +91,16 @@ const OBJECTS = [
   { name: 'case', label: 'Case', _packageId: 'app.crm', fields: { account: lookup } },
 ];
 
-function Harness({ objectDef = OBJECTS[0] as Record<string, unknown> }: { objectDef?: Record<string, unknown> }) {
+function Harness({
+  objectDef = OBJECTS[0] as Record<string, unknown>,
+  objects = OBJECTS,
+}: {
+  objectDef?: Record<string, unknown>;
+  objects?: Record<string, unknown>[];
+}) {
   const config = useRecordTabsConfig({
     objectDef,
-    objects: OBJECTS,
+    objects,
     enabled: true,
     titleOf: (list) => list.title || `${list.childLabel}s`,
   });
@@ -134,9 +140,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function open() {
-  render(<Harness />);
+async function open(objects?: Record<string, unknown>[]) {
+  render(<Harness objects={objects} />);
   fireEvent.click(screen.getByText('enter'));
+  // The client, the stored list and the default language load with the edit state.
+  await waitFor(() => expect(screen.getByTestId('record-tabs-config-bar')).toHaveAttribute('data-ready', 'true'));
   await flush();
 }
 
@@ -161,6 +169,16 @@ describe('「Configure tabs」 (objectstack#36499)', () => {
     expect(shown).toEqual(['contact.account', 'task.account', 'sys_approval_request', 'sys_activity']);
     expect(screen.getByTestId('record-tabs-hidden').querySelector('[data-record-tabs-hidden-tab="case.account"]')).not.toBeNull();
     expect(screen.getByTestId('record-tabs-field-groups')).toHaveAttribute('href', expect.stringContaining('/studio/app.crm/data'));
+  });
+
+  it("another package's list is drawn fixed after the object's own tabs: no move, hide or rename", async () => {
+    await open([...OBJECTS, { name: 'ext_ticket', label: 'Ticket', _packageId: 'other.pkg', fields: { account: lookup } }]);
+    const editor = screen.getByTestId('record-tabs-editor');
+    const shown = Array.from(editor.querySelectorAll('[data-record-tabs-tab]')).map((el) => el.getAttribute('data-record-tabs-tab'));
+    expect(shown).toEqual(['contact.account', 'task.account', 'ext_ticket.account', 'sys_approval_request', 'sys_activity']);
+    const ticket = editor.querySelector('[data-record-tabs-tab="ext_ticket.account"]') as HTMLElement;
+    expect(within(ticket).queryAllByRole('button')).toEqual([]);
+    expect(ticket.querySelector('[data-record-tabs-fixed]')).not.toBeNull();
   });
 
   it('hide → the Hidden area → restore; Cancel writes nothing', async () => {
