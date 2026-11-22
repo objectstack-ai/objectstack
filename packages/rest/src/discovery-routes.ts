@@ -13,6 +13,11 @@
  * meets the host's ordinary not-found answer; the machine-readable document
  * stays. `rest-docs-viewer-retired.pin.test.ts` pins both halves.
  *
+ * [#36198] The restriction profile, `GET {basePath}/discovery/restriction-profile`,
+ * is the one route here that is NOT mounted twice: the discovery registrar
+ * mounts it on the unscoped base only (ADR-0138 D2, as amended 2026-11-22), and
+ * its registration below says why.
+ *
  * A MOVE, not a redesign. The two functions below are the bodies of
  * `RestServer#registerDiscoveryEndpoints` and
  * `RestServer#registerOpenApiEndpoints` as they stood, each re-indented one
@@ -458,31 +463,45 @@ export function registerDiscoveryEndpoints(this: DiscoveryRouteHost, basePath: s
     // anonymous-door sweep's `discovery` row alone, with no `ALLOW_ROUTES`
     // row. Its one new anonymous fact is the spec version; the anonymous peer
     // is `/discovery`'s `version`, which already answers without a credential.
-    this.routeManager.register({
-        method: 'GET',
-        path: `${basePath}/discovery/restriction-profile`,
-        handler: async (req: any, res: any) => {
-            try {
-                if (refuseUnknownQueryParams(req, res, RESTRICTION_PROFILE_PARAMS)) return;
-                const spec = await servedSpecVersion();
-                if (!spec) {
-                    sendDeclaredFault(res, {
-                        code: 'SERVICE_UNAVAILABLE',
-                        status: 503,
-                        message: 'This runtime could not read the @objectstack/spec version it runs, so it publishes no restriction profile.',
-                    });
-                    return;
+    //
+    // [#36198] Mounted on the UNSCOPED base only (ADR-0138 D2, as amended
+    // 2026-11-22). This registrar also runs for the environment-scoped base,
+    // and the handler reads no host input: mounted there it answered this
+    // constant for any environment id, including on a host that enforces a
+    // narrower profile and serves it through its own route on the unscoped
+    // path, which wins there by mount order. Nothing reads the scoped path
+    // (`os validate --target` fetches the unscoped route at the URL's origin),
+    // so it is not mounted, and a request to it meets the host's ordinary
+    // not-found answer. A server under `projectResolution: 'required'`
+    // registers the scoped base alone, so it mounts no restriction-profile
+    // route. `discovery-schema-conformance.test.ts` pins all three shapes.
+    if (!isScoped) {
+        this.routeManager.register({
+            method: 'GET',
+            path: `${basePath}/discovery/restriction-profile`,
+            handler: async (req: any, res: any) => {
+                try {
+                    if (refuseUnknownQueryParams(req, res, RESTRICTION_PROFILE_PARAMS)) return;
+                    const spec = await servedSpecVersion();
+                    if (!spec) {
+                        sendDeclaredFault(res, {
+                            code: 'SERVICE_UNAVAILABLE',
+                            status: 503,
+                            message: 'This runtime could not read the @objectstack/spec version it runs, so it publishes no restriction profile.',
+                        });
+                        return;
+                    }
+                    res.json({ success: true, data: openRestrictionProfile(spec) });
+                } catch (error: any) {
+                    handleRouteError(res, error);
                 }
-                res.json({ success: true, data: openRestrictionProfile(spec) });
-            } catch (error: any) {
-                handleRouteError(res, error);
-            }
-        },
-        metadata: {
-            summary: 'Get the restriction profile this runtime publishes',
-            tags: ['discovery'],
-        },
-    });
+            },
+            metadata: {
+                summary: 'Get the restriction profile this runtime publishes',
+                tags: ['discovery'],
+            },
+        });
+    }
 }
 
 /** [#34774] The restriction-profile route's closed query set: it reads none. */
