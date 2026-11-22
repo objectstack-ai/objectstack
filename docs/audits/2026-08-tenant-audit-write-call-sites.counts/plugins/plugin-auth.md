@@ -31,8 +31,8 @@ a row or a number here — fix the code, or the census, and regenerate.
 | Threading a decidably elevated (`isSystem`) context | 46 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 47 |
-| Receiver carried a readable engine type | 81 |
-| Receiver erased, placed by the object NAME | 25 |
+| Receiver carried a readable engine type | 80 |
+| Receiver erased, placed by the object NAME | 26 |
 | Receiver erased, placed by an `object: string` PARAMETER | 1 |
 | Receiver erased, placed by an `UNTYPED_RECEIVERS` row | 1 |
 

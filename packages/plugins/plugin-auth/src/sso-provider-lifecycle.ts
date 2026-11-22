@@ -521,7 +521,7 @@ async function revokeSessions(engine: IDataEngine, sessions: Record<string, unkn
   const result: unknown = await withSystemContext(engine).update(
     SESSION_OBJECT,
     { expires_at: new Date(now - 1000), revoked_at: new Date(now), revoke_reason: SSO_PROVIDER_DELETED_REVOKE_REASON },
-    { where: { id: { $in: ids }, revoked_at: null }, multi: true, context: { isSystem: true } } as never,
+    { where: { id: { $in: ids }, revoked_at: null }, multi: true, context: { isSystem: true } },
   );
   return countOf(result, ids.length);
 }
@@ -548,7 +548,7 @@ async function deleteGrants(engine: IDataEngine, grants: Record<string, unknown>
       where: { id: { $in: ids } },
       multi: true,
       context: { isSystem: true, tenantId: tenant || undefined },
-    } as never);
+    });
     removed += countOf(result, ids.length);
   }
   return removed;
