@@ -120,6 +120,7 @@ import {
   type PromptChoice,
 } from './prompts.js';
 import { derivedFields, driftText, lookupKey, requiredLookups, RESTORE_UNCOMPARED, RESTORE_UNWRITTEN, rowDrift, seedPlan, type HeldRow, type RowDrift, type SeedLookup } from './seed.js';
+import type { SchemaMasking } from './schema-masking.js';
 import type { ParsedTurn } from './transcript.js';
 
 // ── What the orchestrator needs from the outside world ──────────────────────
@@ -203,6 +204,15 @@ export interface RunOptions {
    * card instead.
    */
   promptChoice?: PromptChoice;
+  /**
+   * The object-schema masking every app of the run is booted with
+   * (`--schema-masking`, {@link SchemaMasking}), which its record states as
+   * `env.schemaMasking`. Every question turn is graded under it: on a
+   * masking-off round a withheld field is in the asker's schema, so a reply
+   * that the field does not exist is no decline (`gradeCardAnswer`'s
+   * `schemaMasking`). Absent ⇒ `on`, the default, graded as before.
+   */
+  schemaMasking?: SchemaMasking;
 }
 
 // ── The record of one card ──────────────────────────────────────────────────
@@ -1730,7 +1740,9 @@ export async function restoreSeededRows(
  * The guardrails are graded over every turn that ran, each ask and each
  * confirmation turn included.
  * Every question and operation turn is sent in the prompt choice `choice`
- * ({@link RunOptions.promptChoice}); absent ⇒ the default prompts.
+ * ({@link RunOptions.promptChoice}); absent ⇒ the default prompts. Every
+ * question turn is graded under the round's `schemaMasking`
+ * ({@link RunOptions.schemaMasking}); absent ⇒ masked.
  */
 export async function runHalf(
   scenario: LoadedScenario,
@@ -1742,6 +1754,7 @@ export async function runHalf(
   askRepeats = 1,
   choice?: PromptChoice,
   fresh?: FreshCopy,
+  schemaMasking?: SchemaMasking,
 ): Promise<RunHalf> {
   assertAskRepeats(askRepeats);
   const { card } = scenario;
@@ -1825,6 +1838,7 @@ export async function runHalf(
               question: q.id,
               ...(persona ? { persona, hidden: { values: hiddenValues(scenario, persona) } } : {}),
               ...(objectLabels ? { objectLabels } : {}),
+              ...(schemaMasking !== undefined ? { schemaMasking } : {}),
               turn,
             });
           } catch (e) {
@@ -2065,7 +2079,7 @@ async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: P
   // A build whose authoring turn did not finish is not measured: no seed, no Run, no iterate on it.
   if (mode.build.notMeasured) return { mode };
   const builtArtifact = ops.readArtifact(dir);
-  if (builtArtifact !== undefined) mode.run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'run' }, labels, builtArtifact, opts.askRepeats, opts.promptChoice, freshBoot(ops, dir)));
+  if (builtArtifact !== undefined) mode.run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'run' }, labels, builtArtifact, opts.askRepeats, opts.promptChoice, freshBoot(ops, dir), opts.schemaMasking));
 
   const iterated = iteratedScenario(scenario);
   const build = await buildHalf(iterated, dir, ops, async () => (await driver.author({ ...ref, phase: 'iterate', step: 'author', cwd: dir, prompt: iteratePrompt(card, opts.promptChoice), tier: card.tier })).turn, iterated);
@@ -2076,7 +2090,7 @@ async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: P
   const after = ops.readArtifact(dir);
   mode.iterate = { build, ...(builtArtifact !== undefined && after !== undefined ? { changeSize: changeSize(builtArtifact, after) } : {}) };
   if (opts.iterateRun !== false && after !== undefined) {
-    const run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'iterate-run' }, labels, after, opts.askRepeats, opts.promptChoice, freshBoot(ops, dir)));
+    const run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'iterate-run' }, labels, after, opts.askRepeats, opts.promptChoice, freshBoot(ops, dir), opts.schemaMasking));
     if (run) mode.iterate.run = run;
   }
   return { mode, ...(buildPassed(mode.build) ? { verified: builtArtifact } : {}) };
@@ -2220,7 +2234,7 @@ async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: 
     // The app holds the agent's iterate, made live through its doors, which a host booted again would not hold:
     // a fresh copy is a blank host with what the app serves now installed the same way (`iteratedManifest`).
     const fresh = copyOf(iteratedManifest(manifest, served));
-    mode.iterate.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'template', phase: 'iterate-run' }, labels, served, opts.askRepeats, opts.promptChoice, fresh);
+    mode.iterate.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'template', phase: 'iterate-run' }, labels, served, opts.askRepeats, opts.promptChoice, fresh, opts.schemaMasking);
   });
   return mode;
 }
@@ -2341,7 +2355,7 @@ async function doorMode(original: LoadedScenario, driver: AgentDriver, ops: Proj
     // What the environment serves now is the build, as a person meets it.
     const served = withoutItems(await app.metadataAsArtifact(DOOR_COLLECTIONS), baseline);
     scoreInto(build, scenario, scenario, served);
-    mode.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'door', phase: 'run' }, labels, served, opts.askRepeats, opts.promptChoice);
+    mode.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'door', phase: 'run' }, labels, served, opts.askRepeats, opts.promptChoice, undefined, opts.schemaMasking);
   } catch (e) {
     mode.findings.push(`boot/run: ${errText(e)}`);
   } finally {
@@ -2374,7 +2388,7 @@ async function askMode(original: LoadedScenario, driver: AgentDriver, ops: Proje
     mode,
     verified,
     async (app, { fresh }) => {
-      mode.run = await runHalf(scenario, app, driver, { card: scenario.card.id, mode: 'ask', phase: 'run' }, labels, verified!.artifact, opts.askRepeats, opts.promptChoice, fresh);
+      mode.run = await runHalf(scenario, app, driver, { card: scenario.card.id, mode: 'ask', phase: 'run' }, labels, verified!.artifact, opts.askRepeats, opts.promptChoice, fresh, opts.schemaMasking);
     },
     { managedFallback: true },
   );
