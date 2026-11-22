@@ -68,6 +68,7 @@ import '@objectstack/objectql';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_STATUS } from '@objectstack/core';
 import { RestServer } from './rest-server.js';
+import { securityDefaultPermissionSets } from '@objectstack/plugin-security';
 
 /**
  * The unscoped mount base, and the `/meta` prefix on it. The `DOORS` table
@@ -702,4 +703,67 @@ describe('#30675 — the data doors refuse on their own capability, not `manage_
             }
         },
     );
+});
+
+/**
+ * [objectstack#36371] Only an administrator makes a list view everyone sees.
+ * A shared view is `view` metadata, so the door that shares one is this
+ * surface's save (the Console saves `?mode=draft` and publishes at once), the
+ * door that unshares one is the delete, and the publish promotes it. Driven
+ * with the systemPermissions the SHIPPED sets grant, not hand-written ones: a
+ * member (`member_default`), an organization administrator (that baseline
+ * plus `organization_admin`, which withholds `manage_metadata`) and the
+ * platform administrator (`admin_full_access`, the control). The Console asks
+ * the same capability before it offers Shared (`useCanAuthorMetadata`), so the
+ * organization administrator's refusal here is why that control is hidden.
+ */
+describe('#36371 — sharing a list view is an administrator\'s act', () => {
+    const grants = (...names: string[]): string[] => {
+        const held = new Set<string>();
+        for (const name of names) {
+            const set = securityDefaultPermissionSets.find((ps) => ps.name === name);
+            if (!set) throw new Error(`no shipped permission set named ${name}`);
+            for (const capability of set.systemPermissions ?? []) held.add(capability);
+        }
+        return [...held];
+    };
+    const VIEW = { type: 'view', name: 'account.team_pipeline' };
+    const viewDoor = (protocolMethod: string): Door => {
+        const door = DOORS.find((d) => d.protocolMethod === protocolMethod)!;
+        return {
+            ...door,
+            params: { ...VIEW },
+            ...(protocolMethod === 'saveMetaItem'
+                ? { body: { name: VIEW.name, object: 'account', viewKind: 'list', label: 'Team pipeline', config: { type: 'grid', data: { provider: 'object', object: 'account' } } } }
+                : {}),
+        };
+    };
+    const SHARE_DOORS = ['saveMetaItem', 'publishMetaItem', 'deleteMetaItem'].map(viewDoor);
+
+    it.each([
+        ['a member', ['member_default']],
+        ['an organization administrator', ['member_default', 'organization_admin']],
+    ] as const)('%s is refused each share door 403 FORBIDDEN, and nothing is written', async (_who, sets) => {
+        const systemPermissions = grants(...sets);
+        expect(systemPermissions).not.toContain('manage_metadata');
+        for (const door of SHARE_DOORS) {
+            const stack = boot({ userId: 'u_member', systemPermissions });
+            const out = await stack.knock(door);
+            expect(out.status, door.label).toBe(403);
+            expect(out.body, door.label).toMatchObject({ error: { code: 'FORBIDDEN' } });
+            expect(stack.calls[door.protocolMethod], door.label).toBe(0);
+        }
+    });
+
+    it('the control: the platform administrator reaches each share door', async () => {
+        const systemPermissions = grants('admin_full_access');
+        expect(systemPermissions).toContain('manage_metadata');
+        for (const door of SHARE_DOORS) {
+            const stack = boot({ userId: 'u_admin', systemPermissions });
+            const out = await stack.knock(door);
+            expect(out.status, door.label).not.toBe(403);
+            expect(out.status, door.label).not.toBe(401);
+            expect(stack.calls[door.protocolMethod], door.label).toBe(1);
+        }
+    });
 });

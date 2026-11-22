@@ -100,7 +100,9 @@ import { useObjectViewListRenderer } from './objectViewListRenderer.js';
 import { ListDraftActions } from './ListDraftActions.js';
 import { viewSaveRefusalText } from './viewSaveRefusal.js';
 import { listDraftPreference, listDraftScope, useListDraft } from './listDraftStore.js';
-import { useObjectViewViewCrud } from './objectViewViewCrud.js';
+import { useObjectViewViewCrud, useRuntimeCreateApp } from './objectViewViewCrud.js';
+import { mayShareViews, useViewSharing } from './objectViewViewSharing.js';
+import { useCanAuthorMetadata } from '../hooks/useCanAuthorMetadata.js';
 import {
     PERSONAL_VIEW_OBJECT,
     buildInPlaceViewConfig,
@@ -698,6 +700,17 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         ? (requestedViewId.includes('.') ? requestedViewId : `${objectDef.name}.${requestedViewId}`)
         : null;
     const viewAccess = useMetaItemRefusal('view', missedViewName);
+    // objectstack#36371 — a view the address names that the server says is
+    // gone (unshared or deleted while the reader had it open): the list opens
+    // its default view, and says why once per name.
+    const goneViewNoticed = useRef<string | null>(null);
+    useEffect(() => {
+        if (!viewAccess.absent || !missedViewName || goneViewNoticed.current === missedViewName) return;
+        goneViewNoticed.current = missedViewName;
+        toast.info(t('view.switcher.viewGone', {
+            defaultValue: 'The view you opened is no longer available, so the list shows its default view.',
+        }));
+    }, [viewAccess.absent, missedViewName, t]);
     const activeViewId = resolvedViewId || pinnedViewId || defaultViewId || views[0]?.id;
     const baseView = views.find((v: any) => v.id === activeViewId) || views[0];
     const activeView = viewDraft && viewDraft.id === baseView?.id
@@ -1124,6 +1137,33 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         listSeedRef,
     });
 
+    // objectstack#36371 — only an administrator holding the shared view's write
+    // capability shares views: creates one shared, makes one of their own
+    // shared, or unshares one (`./objectViewViewSharing.ts`).
+    const canAuthorMetadata = useCanAuthorMetadata();
+    const canShareViews = mayShareViews(isAdmin, canAuthorMetadata);
+    const sharingApp = useRuntimeCreateApp(t);
+    const viewTabItemsRef = useRef<ReadonlyArray<{ id: string; label?: unknown }>>([]);
+    const viewSharing = useViewSharing({
+        objectName: objectDef.name,
+        objectDef,
+        metadataClient,
+        dataSource,
+        app: sharingApp,
+        personalViews,
+        savedViews,
+        viewIds: views.map((v: any) => String(v.id)),
+        labelOf: (id) => String(viewTabItemsRef.current.find((item) => item.id === id)?.label ?? id),
+        activeViewId,
+        routeViewId: viewId,
+        navigate,
+        pinnedViewId,
+        setPinnedViewId: setPinnedViewChoice,
+        refresh: () => setRefreshKey((k) => k + 1),
+        confirmHandler,
+        t,
+    });
+
     // objectstack#27594: the list title is the view switcher, which replaced the
     // view tab strip; the view items `ManageViewsDialog` lists come with it.
     const { viewTabItems, titleSwitcher, refusingPackages } = useObjectViewTitleSwitcher({
@@ -1156,17 +1196,28 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
             }),
             savePersonal: personalViews.save,
             openPersonal: openPersonalView,
-            createShared: handleViewCreate,
+            createShared: viewSharing.createShared,
             clearSourceListState,
             canCreatePersonal: canCreatePersonalView,
-            canCreateShared: isAdmin,
+            canCreateShared: canShareViews,
             hasUnsavedConditions: listDraftParts.some((part) => part === 'filters' || part === 'sort'),
         },
         onRenamePersonalView: personalViewsReady && personalGrant('update')
             ? (id: string) => setPersonalViewDialog({ mode: 'rename', viewId: id })
             : undefined,
         onDeletePersonalView: personalViewsReady ? (id: string) => { void handleDeletePersonalView(id); } : undefined,
+        onMakeSharedView: canShareViews && personalViewsReady
+            ? (id: string) => { void viewSharing.makeShared(id); }
+            : undefined,
+        // Unsharing makes the view one of the reader's own, so it needs their create.
+        onUnshareView: canShareViews && personalViewsReady && personalGrant('create')
+            ? (id: string) => { void viewSharing.unshare(id); }
+            : undefined,
     });
+    // Read when an unshare asks for the view's name, after this render.
+    useEffect(() => {
+        viewTabItemsRef.current = viewTabItems;
+    }, [viewTabItems]);
 
     // objectstack#35974 — the view panel is read-only on a view a read-only
     // package ships, judged from the SAME answer that drew its Manage views
