@@ -1291,6 +1291,13 @@ const ASK_FIRST: Record<string, string> = {
   'ja-JP': '使う前にどれを指しているかユーザーに確認してください。代わりに選ばないでください',
 };
 const FOUR_LOCALES = [ADMIN, { ...ADMIN, locale: 'zh-CN' }, { ...ADMIN, locale: 'zh-TW' }, { ...ADMIN, locale: 'ja-JP' }] as ExecutionContext[];
+/** The question owed to a grouping that stands alone (D3 rule 5), by the locale the context names. */
+const WHICH_NUMBER: Record<string, string> = {
+  en: 'ask the user which number they mean',
+  'zh-CN': '问用户想看哪个数字',
+  'zh-TW': '問使用者想看哪個數字',
+  'ja-JP': 'どの数値を知りたいかユーザーに確認してください',
+};
 
 type ListOut = Awaited<ReturnType<ReturnType<AnalyticsService['datasetTools']>['listDatasets']>>;
 
@@ -1400,11 +1407,22 @@ describe('[#34919] list_datasets nextStep on examples/app-crm — the decision e
     expect((await ask(['商机数', '商机金额'])).nextStep!.note).toContain('Each is its own metric');
   });
 
-  it('a mixed no_measure note falls back for the unknown word and still asks which number the grouping word means', async () => {
-    const out = await ask(['库存周转', '销售阶段']);
-    expect(out.nextStep).toMatchObject({ decision: 'no_measure', terms: ['库存周转', '销售阶段'] });
-    expect(out.nextStep!.note).toContain('query_records');
-    expect(out.nextStep!.note).toContain('ask the user which number they mean');
+  // [#34996] One object answers "库存周转 by 销售阶段" through the fallback, so the
+  // note carries the fallback and no question: a note that said both was read as
+  // "ask". The grouping word is still named as the grouping it equals.
+  it('a mixed no_measure note falls back for the unknown word and asks nothing: the grouping does not stand alone', async () => {
+    for (const ctx of FOUR_LOCALES) {
+      const out = await ask(['库存周转', '销售阶段'], ctx);
+      const where = String(ctx.locale ?? 'en');
+      expect(out.nextStep, where).toMatchObject({ decision: 'no_measure', terms: ['库存周转', '销售阶段'] });
+      expect(out.nextStep!.note, where).toContain('query_records');
+      expect(out.nextStep!.note, where).toContain('Stage');
+      expect(out.nextStep!.note, `${where} ⇒ no question`).not.toContain(WHICH_NUMBER[where]);
+      // The control, same locale: alone, the grouping word still asks which number is meant, and sends nobody to the object tools.
+      const alone = (await ask(['销售阶段'], ctx)).nextStep!.note;
+      expect(alone, `${where} ⇒ alone asks`).toContain(WHICH_NUMBER[where]);
+      expect(alone, where).not.toContain('query_records');
+    }
   });
 
   it('a word with two matches ⇒ several_measures, the note naming each by its label and its dataset\'s label', async () => {
@@ -1620,6 +1638,41 @@ describe('[#35005] list_datasets nextStep — a grouping or time word with a can
       expect(note, loc(ctx)).not.toContain(ASK_BEFORE_COMPUTING[loc(ctx)]);
     }
     expect((await ask(['this quarter'])).nextStep!.note).toContain('ask the user which number they mean');
+  });
+
+  // [#34996] "How many sales orders this quarter?" with no order-count measure:
+  // "sales orders" is unknown and "this quarter" is near a dimension. The object
+  // tools answer the count, so the note offers the grouping, sends the unknown
+  // word to its labelled fallback and asks nothing.
+  it('a grouping candidate beside an unknown word: the unknown word falls back and nobody is asked which number', async () => {
+    for (const ctx of FOUR_LOCALES) {
+      const out = await ask(['sales orders', 'this quarter'], ctx);
+      expect(out.nextStep, loc(ctx)).toMatchObject({ decision: 'candidates_only', terms: ['this quarter'] });
+      expect(out.candidates).toEqual([{ term: 'this quarter', dataset: 'sales_metrics', member: 'dimensions.quarter' }]);
+      const note = out.nextStep!.note;
+      expect(note, loc(ctx)).toContain(GROUPING_OFFER[loc(ctx)]);
+      expect(note, loc(ctx)).toContain('sales orders');
+      expect(note, loc(ctx)).toContain('query_records');
+      expect(note, `${loc(ctx)} ⇒ no question`).not.toContain(WHICH_NUMBER[loc(ctx)]);
+      expect(note, loc(ctx)).not.toContain(ASK_BEFORE_COMPUTING[loc(ctx)]);
+      // The control, same locale: with no unknown word beside it, the grouping candidate still asks which number.
+      expect((await ask(['this quarter'], ctx)).nextStep!.note, `${loc(ctx)} ⇒ alone asks`).toContain(WHICH_NUMBER[loc(ctx)]);
+      // And a word that equals a dimension beside the candidate is a second grouping, not a fallback: still asked.
+      const groupings = (await ask(['this quarter', 'industry'], ctx)).nextStep!.note;
+      expect(groupings, `${loc(ctx)} ⇒ two groupings ask`).toContain(WHICH_NUMBER[loc(ctx)]);
+      expect(groupings, loc(ctx)).not.toContain('query_records');
+    }
+  });
+
+  // [#34996] The several-matches and measure-candidate questions are untouched
+  // by the above: an unknown word beside them changes nothing about the ask.
+  it('an unknown word beside a measure candidate does not remove the question about that candidate', async () => {
+    for (const ctx of FOUR_LOCALES) {
+      const out = await ask(['销售', 'sales orders'], ctx);
+      expect(out.nextStep, loc(ctx)).toMatchObject({ decision: 'candidates_only', terms: ['销售'] });
+      expect(out.nextStep!.note, loc(ctx)).toContain(ASK_BEFORE_COMPUTING[loc(ctx)]);
+      expect(out.nextStep!.note, loc(ctx)).toContain('query_records');
+    }
   });
 });
 

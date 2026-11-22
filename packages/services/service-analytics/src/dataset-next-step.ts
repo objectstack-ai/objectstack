@@ -91,10 +91,26 @@ import type { PlatformLocaleTag } from '@objectstack/spec/system';
  * measure and offers 行业 as a possible grouping, with no question;
  * `["库存周转", "金额"]` asks about 金额's candidates and names 库存周转 with
  * its fallback. A reported `candidates_only` word whose candidates are all
- * dimensions is offered the same way, and with no measure word beside it the
- * note asks which number is meant, as a grouping word does (D3 rule 5). (`several_measures` asks before anything is computed, so its
+ * dimensions is offered the same way, and when every word sent is a grouping
+ * the note asks which number is meant, as a grouping word does (D3 rule 5; the
+ * next section says when). (`several_measures` asks before anything is computed, so its
  * note needs no such tail.) Two words that equal the same measure are one
  * metric, and the note says so.
+ *
+ * ## A grouping beside a word that falls back asks nothing
+ *
+ * [#34996] "Which number is meant" (D3 rule 5) is the question for a grouping
+ * that stands alone: every word sent equals only a dimension, or has only
+ * dimensions among its candidates. An unknown word beside it (no measure, no
+ * dimension, no candidate) is in rule 4, the labelled fallback to the object
+ * query tools, and that fallback computes the number the user named: "sales
+ * orders" beside "status" is a count of sales orders by status, as it was
+ * before any dataset listed a `status` dimension (M2, ruled A: the fallback
+ * answers what the object tools answer today). So the note then carries the
+ * fallback sentence and no question: `["sales orders", "status"]` and
+ * `["库存周转", "销售阶段"]` fall back, and `["销售阶段"]` or `["this quarter"]`
+ * alone still ask which number is meant. One note never says both: a reader
+ * told to answer and to ask in one breath asks.
  *
  * ## An incomplete catalogue
  *
@@ -293,6 +309,12 @@ interface TermReading {
   readonly groupingOnly: boolean;
 }
 
+/**
+ * An unknown word: it equals no measure and no dimension and has no candidate,
+ * so it takes the labelled fallback to the object query tools (D3 rule 4).
+ */
+const fallsBack = (r: TermReading): boolean => r.decision === 'no_measure' && r.dimensions.length === 0;
+
 /** The member a `kind.name` pointer names in `entry`, as the entry lists it, or `undefined`. */
 function memberOf(entry: DatasetToolCatalogEntry, pointer: string): (NamedMember & { kind: string }) | undefined {
   const dot = pointer.indexOf('.');
@@ -384,7 +406,7 @@ function leftOutSentences(
   for (const r of asked) sentences.push(copy.candidateHit(r.term, members(r.candidates)));
   if (asked.length > 0) sentences.push(copy.leftCandidateTail);
   sentences.push(...groupingCandidateSentences(leftOut, copy, members));
-  const unknown = readings.filter((r) => r.decision === 'no_measure' && r.dimensions.length === 0);
+  const unknown = readings.filter(fallsBack);
   for (const r of unknown) sentences.push(copy.unknownHit(r.term));
   if (unknown.length > 0) sentences.push(copy.leftFallbackTail);
   for (const r of readings) {
@@ -439,13 +461,14 @@ export function composeDatasetNextStep(source: DatasetNextStepSource): DatasetNe
     case 'candidates_only': {
       // A word with a measure among its candidates is asked about; a word
       // whose candidates are all dimensions is offered as a grouping, and
-      // with no such measure word beside it the note asks which number is
-      // meant, as a grouping word does (D3 rule 5).
+      // when every word sent is a grouping the note asks which number is
+      // meant, as a grouping word does (D3 rule 5). An unknown word beside
+      // it falls back instead (rule 4), and the note asks nothing.
       const asked = reported.filter((r) => !r.groupingOnly);
       for (const r of asked) sentences.push(copy.candidateHit(r.term, members(r.candidates)));
       if (asked.length > 0) sentences.push(copy.candidateTail);
       sentences.push(...groupingCandidateSentences(reported, copy, members));
-      if (asked.length === 0) sentences.push(copy.groupingTail);
+      if (asked.length === 0 && !readings.some(fallsBack)) sentences.push(copy.groupingTail);
       sentences.push(...leftOutSentences(decision, readings, copy, members));
       break;
     }
@@ -453,11 +476,10 @@ export function composeDatasetNextStep(source: DatasetNextStepSource): DatasetNe
       for (const r of reported) {
         sentences.push(r.dimensions.length > 0 ? copy.groupingHit(r.term, members(r.dimensions)) : copy.unknownHit(r.term));
       }
-      // A word for a thing measured that names nothing falls back (D3 rule 4);
-      // a grouping word asks which number is meant (rule 5), beside the
-      // fallback too when the words are mixed.
-      if (reported.some((r) => r.dimensions.length === 0)) sentences.push(copy.fallbackTail);
-      if (reported.some((r) => r.dimensions.length > 0)) sentences.push(copy.groupingTail);
+      // A word for a thing measured that names nothing falls back (D3 rule 4),
+      // grouping word beside it or not; only when every word is a grouping
+      // does the note ask which number is meant (rule 5).
+      sentences.push(reported.some(fallsBack) ? copy.fallbackTail : copy.groupingTail);
       break;
     }
   }
