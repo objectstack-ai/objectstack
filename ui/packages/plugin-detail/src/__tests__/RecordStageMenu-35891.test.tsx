@@ -18,6 +18,8 @@
  * - A reader who may not edit (no field grant, a page that may not edit, an
  *   approval lock) sees the plain tag.
  * - The keyboard: Enter on the tag opens, arrows move, Enter picks, Esc closes.
+ * - After a 409 the dialog asks what the re-read record needs (#36036): a field
+ *   another writer filled meanwhile leaves the dialog and the move.
  *
  * `@object-ui/*` resolves to source through the root vitest alias table.
  */
@@ -410,6 +412,120 @@ describe('#35956 the stage menu opens the shared fill-in dialog', () => {
     fireEvent.click(item(openMenu(), 'Closed Lost'));
     dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByRole('textbox')).toHaveValue('');
+  });
+});
+
+describe('#36036 after a 409 re-read, the stage dialog asks what the re-read record needs', () => {
+  const NEXT_VERSION = '2026-11-20T12:05:00.000Z';
+  const conflict = () => Object.assign(new Error('CONCURRENT_UPDATE'), { code: 'CONCURRENT_UPDATE', status: 409 });
+  const STORED = { id: 'o1', name: 'Wayne deal', stage: 'prospecting', loss_reason: null, loss_detail: null, updated_at: VERSION };
+  // A typed loss reason of "other" makes one more field required in turn.
+  const CHAINED = {
+    ...OPPORTUNITY,
+    fields: {
+      ...OPPORTUNITY.fields,
+      loss_detail: {
+        type: 'text',
+        label: 'Loss Detail',
+        requiredWhen: 'has(record.loss_reason) && record.loss_reason == "other"',
+      },
+    },
+  } as unknown as typeof OPPORTUNITY;
+
+  /**
+   * The page's refresh as the record page wires it: a notice that returns at
+   * once, the re-read row landing in the record context afterwards.
+   */
+  function mountReRead(reread: Record<string, unknown>, schema: typeof OPPORTUNITY = OPPORTUNITY) {
+    let calls = 0;
+    const dataSource = makeDataSource(async () => {
+      calls += 1;
+      if (calls === 1) throw conflict();
+      return {};
+    });
+    const refresh = vi.fn();
+    function Host() {
+      const [row, setRow] = React.useState<Record<string, unknown>>(STORED);
+      refresh.mockImplementation(() => { setTimeout(() => setRow(reread), 0); });
+      return (
+        <RecordContextProvider
+          objectName="crm_opportunity"
+          recordId="o1"
+          data={row}
+          objectSchema={schema}
+          dataSource={dataSource as any}
+          refresh={refresh}
+        >
+          <InlineEditProvider canEdit>
+            <RecordStageMenu field="stage" label="Prospecting" tag={<span>Prospecting</span>} />
+          </InlineEditProvider>
+        </RecordContextProvider>
+      );
+    }
+    render(<Host />);
+    return { dataSource, refresh };
+  }
+
+  const fieldsShown = (dialog: HTMLElement) =>
+    Array.from(dialog.querySelectorAll('[data-required-fields-field]')).map((el) => el.getAttribute('data-required-fields-field'));
+
+  async function typeAndHitConflict(dialog: HTMLElement, dataSource: ReturnType<typeof makeDataSource>, refresh: ReturnType<typeof vi.fn>) {
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(dialog.querySelector('[data-required-fields-refusal]')).toHaveTextContent('Someone else changed this record'));
+  }
+
+  it('another writer filled the asked field: it leaves the dialog, and the next Move does not send it', async () => {
+    const { dataSource, refresh } = mountReRead({ ...STORED, loss_reason: 'Budget cut', updated_at: NEXT_VERSION });
+    fireEvent.click(item(openMenu(), 'Closed Lost'));
+    const dialog = await screen.findByRole('dialog');
+    expect(fieldsShown(dialog)).toEqual(['loss_reason']);
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'Price' } });
+    await typeAndHitConflict(dialog, dataSource, refresh);
+    // Nothing is left to fill: the record, the stage and the move button.
+    await waitFor(() => expect(fieldsShown(dialog)).toEqual([]));
+    expect(within(dialog).getByText('Move this record to Closed Lost?')).toBeInTheDocument();
+    expect(dialog.querySelector('[data-required-fields-change-row="stage"]')).toHaveTextContent('Stage:Closed Lost');
+    expect(within(dialog).queryByRole('textbox')).toBeNull();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(2));
+    expect(dataSource.update).toHaveBeenLastCalledWith(
+      'crm_opportunity', 'o1', { stage: 'closed_lost' }, { ifMatch: NEXT_VERSION },
+    );
+  });
+
+  it('control: a 409 where the asked field is still empty keeps it, with the typed value, and sends it', async () => {
+    const { dataSource, refresh } = mountReRead({ ...STORED, name: 'Wayne deal (renamed)', updated_at: NEXT_VERSION });
+    fireEvent.click(item(openMenu(), 'Closed Lost'));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'Price' } });
+    await typeAndHitConflict(dialog, dataSource, refresh);
+    await waitFor(() => expect(within(dialog).getByText('Wayne deal (renamed)')).toBeInTheDocument());
+    expect(fieldsShown(dialog)).toEqual(['loss_reason']);
+    expect(within(dialog).getByRole('textbox')).toHaveValue('Price');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(2));
+    expect(dataSource.update).toHaveBeenLastCalledWith(
+      'crm_opportunity', 'o1', { stage: 'closed_lost', loss_reason: 'Price' }, { ifMatch: NEXT_VERSION },
+    );
+  });
+
+  it('a value typed for the filled field no longer asks for the field it chained in', async () => {
+    const { dataSource, refresh } = mountReRead({ ...STORED, loss_reason: 'Budget cut', updated_at: NEXT_VERSION }, CHAINED);
+    fireEvent.click(item(openMenu(), 'Closed Lost'));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'other' } });
+    await waitFor(() => expect(fieldsShown(dialog)).toEqual(['loss_reason', 'loss_detail']));
+    const detail = dialog.querySelector('[data-required-fields-field="loss_detail"]') as HTMLElement;
+    fireEvent.change(within(detail).getByRole('textbox'), { target: { value: 'Went with a competitor' } });
+    await typeAndHitConflict(dialog, dataSource, refresh);
+    await waitFor(() => expect(fieldsShown(dialog)).toEqual([]));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(2));
+    expect(dataSource.update).toHaveBeenLastCalledWith(
+      'crm_opportunity', 'o1', { stage: 'closed_lost' }, { ifMatch: NEXT_VERSION },
+    );
   });
 });
 

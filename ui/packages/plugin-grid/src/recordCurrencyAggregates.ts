@@ -7,57 +7,94 @@
  */
 
 /**
- * ADR-0144 D6 on the grid: a raw money aggregate over a `record`-mode amount
- * is honest only inside one currency. A group bucketed by the amount's code
- * field holds one currency, so its `sum` / `avg` / `min` / `max` stand; any
- * other set of rows mixes currencies, and adding 100 USD to 100 EUR answers a
- * number that is no amount at all. Consolidated totals belong to the home
- * field, an ordinary `dynamic` amount that totals unchanged.
+ * One rule on the grid for a measure whose unit each record names itself: a
+ * raw aggregate over it is honest only inside one unit, so it needs the rows
+ * grouped by the field holding that unit. Two measures read the rule:
  *
- * The counts are currency-free and always stand.
+ *   - ADR-0144 D6, a `record`-mode amount (`currencyConfig.currencyMode:
+ *     'record'`): the unit is the currency code in its `currencyField`.
+ *     Adding 100 USD to 100 EUR answers a number that is no amount at all.
+ *     Consolidated totals belong to the home field, an ordinary `dynamic`
+ *     amount that totals unchanged.
+ *   - ADR-0158 U7 R1, a `record`-mode quantity (a `number` declaring
+ *     `unitConfig: { unitMode: 'record', unitField }`): the unit is the code
+ *     in its `unitField`. 10 KGM and 10 LBR summed to 20. The engine refuses
+ *     such an aggregate unless the query groups by `unitField`
+ *     (`record-unit-aggregate-door.ts` in `@objectstack/objectql`), and this
+ *     module reads the field exactly as that door's `recordUnitFieldOf` does.
+ *
+ * A group bucketed by that field holds one unit, so its `sum` / `avg` /
+ * `min` / `max` stand; any other set of rows mixes units. The counts are
+ * unit-free and always stand.
  */
 import { recordCurrencyField } from '@object-ui/i18n';
 import type { GroupAggregationConfig } from './useGroupedData';
 
-const MONEY_AGGREGATES = new Set(['sum', 'avg', 'min', 'max']);
+/** The aggregates that read the measure itself: ADR-0144 Open item 10, ADR-0158 Open item 12. */
+const MEASURE_AGGREGATES = new Set(['sum', 'avg', 'min', 'max']);
 
-/** Whether `type` aggregates the amounts themselves (not a count of rows). */
-export function isMoneyAggregate(type: string): boolean {
-  return MONEY_AGGREGATES.has(type);
+/** Whether `type` aggregates the measure itself (not a count of rows). */
+export function isMeasureAggregate(type: string): boolean {
+  return MEASURE_AGGREGATES.has(type);
 }
 
-/** Any object field def; only its `currencyConfig` is read. */
-type CurrencyFieldLike = object | null | undefined;
+/** Any object field def; only its `type`, `currencyConfig` and `unitConfig` are read. */
+type MeasureFieldLike = object | null | undefined;
 
 /**
- * The code field a money aggregate over `field` needs to be grouped by, or
- * `undefined` when `field` is not a `record`-mode amount (any aggregate over
- * it is honest as it stands).
+ * [ADR-0158 U7 R1] The unit field of a `record`-mode quantity, or
+ * `undefined`: a `number` field declaring `unitConfig: { unitMode: 'record',
+ * unitField }` with a non-empty `unitField`, the reading the engine's
+ * aggregate door makes. A `fixed`-mode quantity has one unit for every row,
+ * and a number with no `unitConfig` has none to mix.
  */
-export function requiredCurrencyGrouping(
+export function recordUnitField(def: unknown): string | undefined {
+  if (def === null || typeof def !== 'object') return undefined;
+  const { type, unitConfig } = def as { type?: unknown; unitConfig?: unknown };
+  if (type !== 'number' || unitConfig === null || typeof unitConfig !== 'object') return undefined;
+  const { unitMode, unitField } = unitConfig as { unitMode?: unknown; unitField?: unknown };
+  return unitMode === 'record' && typeof unitField === 'string' && unitField !== '' ? unitField : undefined;
+}
+
+/**
+ * The field naming each record's unit of `def`'s measure — a `record`-mode
+ * amount's code field, or a `record`-mode quantity's unit field — or
+ * `undefined` when every row of `def` is in one unit.
+ */
+export function recordMeasureUnitField(def: MeasureFieldLike): string | undefined {
+  return recordCurrencyField(def as Parameters<typeof recordCurrencyField>[0]) ?? recordUnitField(def);
+}
+
+/**
+ * The field a measure aggregate over `field` needs to be grouped by, or
+ * `undefined` when `type` reads no measure or `field` is in one unit (any
+ * aggregate over it is honest as it stands).
+ */
+export function requiredAggregateGrouping(
   field: string,
   type: string,
-  objectFields: Readonly<Record<string, CurrencyFieldLike>> | undefined,
+  objectFields: Readonly<Record<string, MeasureFieldLike>> | undefined,
 ): string | undefined {
-  if (!isMoneyAggregate(type)) return undefined;
-  return recordCurrencyField(objectFields?.[field] as Parameters<typeof recordCurrencyField>[0] | undefined);
+  if (!isMeasureAggregate(type)) return undefined;
+  return recordMeasureUnitField(objectFields?.[field]);
 }
 
 /**
  * The group-header aggregations the grid may draw: every configured one,
- * minus each money aggregate over a `record`-mode amount whose code field is
- * not among the grouping fields. Dropped before the rows are bucketed and
- * before the server is asked, so neither path computes a cross-currency sum.
+ * minus each measure aggregate over a `record`-mode amount or quantity whose
+ * unit field is not among the grouping fields. Dropped before the rows are
+ * bucketed and before the server is asked, so neither path adds amounts in
+ * different currencies or quantities in different units.
  */
 export function honestGroupAggregations(
   aggregations: GroupAggregationConfig[] | undefined,
-  objectFields: Readonly<Record<string, CurrencyFieldLike>> | undefined,
+  objectFields: Readonly<Record<string, MeasureFieldLike>> | undefined,
   groupingFields: readonly string[],
 ): GroupAggregationConfig[] | undefined {
   if (!aggregations || aggregations.length === 0) return aggregations;
   const kept = aggregations.filter(({ field, type }) => {
-    const code = requiredCurrencyGrouping(field, type, objectFields);
-    return code === undefined || groupingFields.includes(code);
+    const unit = requiredAggregateGrouping(field, type, objectFields);
+    return unit === undefined || groupingFields.includes(unit);
   });
   return kept.length === aggregations.length ? aggregations : kept;
 }
