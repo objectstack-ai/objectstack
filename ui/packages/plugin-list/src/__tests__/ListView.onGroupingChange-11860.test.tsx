@@ -37,8 +37,8 @@ import { ListView } from '../ListView';
 /** A partial stub: only the members the list's mount path calls. */
 const dataSource = {
   find: vi.fn().mockResolvedValue([]),
-  // objectstack#36204 — the declared types "Add group field" picks by: it
-  // adds the first single select (`status`) at once.
+  // objectstack#36204 — the declared types the Group editors offer by:
+  // `status`, the one select, is the field offered.
   getObjectSchema: vi.fn().mockResolvedValue({
     name: 'contacts',
     fields: {
@@ -66,10 +66,17 @@ function schemaWith(extra: Partial<ListViewSchema> = {}): ListViewSchema {
   } as ListViewSchema;
 }
 
-/** Wait until the object's declaration is read: the Group editors pick by its types. */
+/** Wait until the object's declaration is read: the Group editors offer by its types. */
 async function definitionRead() {
   await vi.waitFor(() => expect(dataSource.getObjectSchema).toHaveBeenCalled());
   await act(async () => {});
+}
+
+/** "Add group field" opens the field dropdown (objectstack#36204); pick `label` in it. */
+async function pickNewLevel(label: string) {
+  fireEvent.click(screen.getByTestId('grouping-add'));
+  const listbox = await screen.findByRole('listbox');
+  fireEvent.click(within(listbox).getByRole('option', { name: label }));
 }
 
 function mount(schema: ListViewSchema, onGroupingChange: (g: GroupingConfig | undefined) => void) {
@@ -103,7 +110,7 @@ describe('ListView reports a user grouping change to its host (objectui#11860)',
     await vi.waitFor(() => expect(screen.getByTestId('group-field-list')).toBeInTheDocument());
     await definitionRead();
 
-    fireEvent.click(screen.getByTestId('grouping-add'));
+    await pickNewLevel('Status');
     expect(onGroupingChange).toHaveBeenCalledTimes(1);
     const added = onGroupingChange.mock.calls[0][0] as GroupingConfig;
     expectSpecShape(added);
@@ -143,7 +150,8 @@ describe('ListView reports a user grouping change to its host (objectui#11860)',
     // Grouping is a level of the Display menu.
     fireEvent.click(within(content).getByTestId('options-row-group'));
     await definitionRead();
-    fireEvent.click(await within(content).findByTestId('grouping-add'));
+    await within(content).findByTestId('grouping-add');
+    await pickNewLevel('Status');
     expect(onGroupingChange).toHaveBeenCalledTimes(1);
     expectSpecShape(onGroupingChange.mock.calls[0][0]);
     expect(onGroupingChange.mock.calls[0][0].fields[0].field).toBe('status');

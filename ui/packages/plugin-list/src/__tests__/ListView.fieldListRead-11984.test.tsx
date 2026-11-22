@@ -356,7 +356,9 @@ describe('every field list ListView and its toolbar offer asks the field read (o
       const sweep = await sweepToolbar();
       expect(fieldListsOf(sweep)).toEqual(FIELD_LIST_TRIGGERS[layout]);
       for (const name of FIELD_LIST_TRIGGERS[layout]) {
-        expect(sweep.offered.get(name), name).toContain('Secret Note');
+        // The Group editor offers only fields that can group (objectstack#36204):
+        // the textarea `secret_note` is not one, the select `secret_status` is.
+        expect(sweep.offered.get(name), name).toContain(name === 'Group' ? 'Secret Status' : 'Secret Note');
       }
       expect(sweep.toolbarText).toContain('Secret Status');
     });
@@ -500,10 +502,10 @@ describe('each field list, one pin per position (objectui#11984)', () => {
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
     await waitFor(async () => expect(await hideFields()).toEqual(FIELD_LABELS));
     expect(chips()).toEqual(['Status', 'Secret Status']);
-    // The level's own field is offered in its own dropdown, so all five are:
-    // the select fields first, as the Group editors rank them (objectstack#36204).
+    // The Group editor offers the select fields only (objectstack#36204), so
+    // both selects are, the unreadable one included.
     const group = await inPopover(toolbarButton(/^group/i), (c) => comboboxOptions(within(c).getByTestId('grouping-field-0')));
-    expect(group).toEqual(['Status', 'Secret Status', 'Title', 'Priority', 'Secret Note']);
+    expect(group).toEqual(['Status', 'Secret Status']);
   });
 });
 
@@ -521,19 +523,23 @@ describe('a stored configuration on an unreadable field is kept as stored (objec
     const content = await openPopover(toolbarButton(/^group/i));
     const level = within(content).getByTestId('grouping-field-0');
     expect(level).toHaveTextContent('secret_note');
-    // The select field first, as the Group editors rank them (objectstack#36204).
-    expect(await comboboxOptions(level)).toEqual(['secret_note', 'Status', 'Title', 'Priority']);
+    // The Group editor offers the readable select alone (objectstack#36204).
+    expect(await comboboxOptions(level)).toEqual(['secret_note', 'Status']);
     expect(onGroupingChange).not.toHaveBeenCalled();
-    // "Add group field" seeds a readable field (the first readable select,
-    // objectstack#36204), and the new level does not offer the unreadable one.
+    // "Add group field" opens the field dropdown (objectstack#36204), which
+    // does not offer the unreadable field; the pick is the new level.
     fireEvent.click(within(content).getByTestId('grouping-add'));
+    expect(onGroupingChange).not.toHaveBeenCalled();
+    const offered = await screen.findByRole('listbox');
+    expect(within(offered).getAllByRole('option').map(text)).toEqual(['Status']);
+    fireEvent.click(within(offered).getByRole('option', { name: 'Status' }));
     expect(onGroupingChange).toHaveBeenLastCalledWith({
       fields: [
         { field: 'secret_note', order: 'asc', collapsed: false },
         { field: 'status', order: 'asc', collapsed: false },
       ],
     });
-    expect(await comboboxOptions(within(content).getByTestId('grouping-field-1'))).toEqual(['Status', 'Title', 'Priority']);
+    expect(await comboboxOptions(within(content).getByTestId('grouping-field-1'))).toEqual(['Status']);
     // Its own level can be removed.
     fireEvent.click(within(content).getByTestId('grouping-remove-0'));
     expect(onGroupingChange).toHaveBeenLastCalledWith({ fields: [{ field: 'status', order: 'asc', collapsed: false }] });

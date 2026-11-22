@@ -1288,6 +1288,7 @@ const en = {
     layout: 'Layout',
     resetToViewDefault: 'Reset to view default',
     addGroup: 'Add group field',
+    noGroupableFields: 'No field here can group the list',
     collapsedByDefault: 'Collapsed by default',
     removeGroup: 'Remove',
     groupingUnstoredNotice: 'This list cannot be grouped by {{fields}}: its value is calculated when shown, not stored. The list is shown without that grouping.',

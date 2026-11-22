@@ -993,6 +993,7 @@ const de = {
     layout: "Layout",
     resetToViewDefault: "Auf Standard der Ansicht zurücksetzen",
     addGroup: "Gruppenfeld hinzufügen",
+    noGroupableFields: "Kein Feld eignet sich zum Gruppieren",
     collapsedByDefault: "Standardmäßig eingeklappt",
     removeGroup: "Entfernen",
     groupingUnstoredNotice: "Diese Liste kann nicht nach {{fields}} gruppiert werden: Der Wert wird bei der Anzeige berechnet und nicht gespeichert. Die Liste wird ohne diese Gruppierung angezeigt.",

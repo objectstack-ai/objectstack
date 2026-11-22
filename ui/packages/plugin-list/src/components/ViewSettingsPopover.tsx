@@ -100,33 +100,29 @@ export interface ViewSettingsField {
   groupable?: boolean;
   /**
    * The field's type in the object's declaration, and whether it holds many
-   * values (`multiple: true`). The Group editors rank and pick by them
-   * (objectstack#36204); absent ⇒ ranked with the fields that suit grouping
-   * least, and never added by "Add group field" on its own.
+   * values (`multiple: true`). The Group editors offer a field by them
+   * (objectstack#36204); absent ⇒ not offered there while types are known.
    */
   type?: string;
   multiple?: boolean;
 }
 
 /**
- * objectstack#36204 — the types whose values many records share, so grouping
- * by one gives a few groups worth reading: single select and radio (a status
- * is one), a person, a linked record, a tick, a date. A field holding many
- * values (`multiple: true`) is not among them. The Group editors list these
- * fields first; the rest (a name, a free text, a number: nearly one value per
- * record) follow, still offered.
+ * objectstack#36204 — the types a list can be grouped by, as the maintainer
+ * set them: single select and radio (a status is a `select`), a tick
+ * (`boolean`, `toggle`), a person (`user`) and a linked record (`lookup`,
+ * `master_detail`, `tree`), each holding one value. Text, numbers, dates and
+ * many-valued fields are not offered.
  */
-const GROUP_FRIENDLY_TYPES = new Set([
+const GROUPABLE_TYPES = new Set([
   'select', 'radio',
-  'user', 'lookup', 'master_detail', 'tree',
   'boolean', 'toggle',
-  'date', 'datetime',
+  'user', 'lookup', 'master_detail', 'tree',
 ]);
-/** The single-choice types "Add group field" groups by on its own. */
-const GROUP_DEFAULT_TYPES = new Set(['select', 'radio']);
 
-function suitsGrouping(f: ViewSettingsField): boolean {
-  return !!f.type && GROUP_FRIENDLY_TYPES.has(f.type) && f.multiple !== true;
+/** Whether the Group editors offer a field of this declaration (`GROUPABLE_TYPES`, one value). */
+export function isGroupableField(f: Pick<ViewSettingsField, 'type' | 'multiple'>): boolean {
+  return !!f.type && GROUPABLE_TYPES.has(f.type) && f.multiple !== true;
 }
 
 /**
@@ -136,40 +132,20 @@ function suitsGrouping(f: ViewSettingsField): boolean {
  * already names a withheld field still shows: `GroupingEditor` mounts a value
  * its options do not carry, so the level can be removed.
  *
- * objectstack#36204 — in the reader's column order (`order`, as
- * `orderFields` reads it), the fields that suit grouping first
- * (`GROUP_FRIENDLY_TYPES`), then the rest, each part in that order.
+ * objectstack#36204 — and, while the fields' types are known (`typesKnown`,
+ * the default), only those of a groupable type (`isGroupableField`), in the
+ * reader's column order (`order`, as `orderFields` reads it). With no type
+ * known at all (the host has no object definition) every field is offered,
+ * as before: nothing tells them apart.
  */
 export function groupFieldOptions(
   fields: readonly ViewSettingsField[],
   order?: readonly string[],
+  typesKnown = true,
 ): Array<{ value: string; label: string }> {
-  const offered = orderFields(fields, order).filter((f) => f.groupable !== false);
-  return [...offered.filter(suitsGrouping), ...offered.filter((f) => !suitsGrouping(f))]
+  return orderFields(fields, order)
+    .filter((f) => f.groupable !== false && (!typesKnown || isGroupableField(f)))
     .map((f) => ({ value: f.name, label: f.label || f.name }));
-}
-
-/**
- * objectstack#36204 — the field "Add group field" adds, as `GroupingEditor`'s
- * `pickAddField`: of the fields no level uses yet, the first single select or
- * radio (`GROUP_DEFAULT_TYPES`, single-valued) in the order the editor lists
- * them, a shown column before a hidden one. None ⇒ `undefined`: the editor
- * opens its field dropdown and groups by nothing until a field is picked,
- * where it used to group by the first column, a name as a rule, one group per
- * record.
- */
-export function pickGroupAddField(
-  fields: readonly ViewSettingsField[],
-  hidden?: ReadonlySet<string>,
-): (remaining: ReadonlyArray<{ value: string }>) => string | undefined {
-  const byName = new Map(fields.map((f) => [f.name, f]));
-  return (remaining) => {
-    const candidates = remaining.filter((option) => {
-      const f = byName.get(option.value);
-      return !!f && !!f.type && GROUP_DEFAULT_TYPES.has(f.type) && f.multiple !== true;
-    });
-    return (candidates.find((option) => !hidden?.has(option.value)) ?? candidates[0])?.value;
-  };
 }
 
 export type ViewSettingsDensityMode = 'compact' | 'comfortable' | 'spacious';
@@ -236,6 +212,13 @@ export interface ViewSettingsPopoverProps {
   showGroup?: boolean;
   groupingConfig?: any;
   setGroupingConfig?: (next: any) => void;
+  /**
+   * objectstack#36204 — the fields the Group level offers, as the host works
+   * them out for both Group editors, and whether it is still reading their
+   * types. Absent ⇒ `groupFieldOptions(allFields, fieldOrder)`.
+   */
+  groupOptions?: Array<{ value: string; label: string }>;
+  groupOptionsLoading?: boolean;
 
   showColor?: boolean;
   rowColorConfig?: { field: string; colors?: Record<string, string> } | undefined;
@@ -568,6 +551,8 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
     showGroup,
     groupingConfig,
     setGroupingConfig,
+    groupOptions,
+    groupOptionsLoading,
     showColor,
     rowColorConfig,
     setRowColorConfig,
@@ -762,13 +747,16 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
         <div className="p-3">
           <GroupingEditor
             value={groupingConfig as any}
-            fieldOptions={groupFieldOptions(allFields, fieldOrder)}
-            pickAddField={pickGroupAddField(allFields, hiddenFields)}
+            fieldOptions={groupOptions ?? groupFieldOptions(allFields, fieldOrder)}
+            askFieldOnAdd
+            fieldOptionsLoading={groupOptionsLoading}
+            fieldLabel={fieldLabel}
             maxLevels={3}
             labels={{
               addGroup: t('list.addGroup', 'Add group field'),
               collapseTitle: t('list.collapsedByDefault', 'Collapsed by default'),
               removeTitle: t('list.removeGroup', 'Remove'),
+              noFields: t('list.noGroupableFields', { defaultValue: 'No field here can group the list' }),
             }}
             onChange={(next) => setGroupingConfig(next as any)}
           />

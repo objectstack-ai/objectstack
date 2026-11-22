@@ -1114,6 +1114,7 @@ const ar = {
     layout: "التخطيط",
     resetToViewDefault: "إعادة التعيين إلى الإعدادات الافتراضية للعرض",
     addGroup: "إضافة حقل مجموعة",
+    noGroupableFields: "لا يوجد حقل يمكن التجميع حسبه",
     collapsedByDefault: "مطوي افتراضياً",
     removeGroup: "إزالة",
     groupingUnstoredNotice: "لا يمكن تجميع هذه القائمة حسب {{fields}}: تُحسب القيمة عند العرض ولا تُخزَّن. تُعرض القائمة دون هذا التجميع.",

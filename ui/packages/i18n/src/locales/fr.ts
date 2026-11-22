@@ -1021,6 +1021,7 @@ const fr = {
     layout: "Disposition",
     resetToViewDefault: "Rétablir les valeurs par défaut de la vue",
     addGroup: "Ajouter un champ de groupe",
+    noGroupableFields: "Aucun champ ne permet de grouper",
     collapsedByDefault: "Réduit par défaut",
     removeGroup: "Supprimer",
     groupingUnstoredNotice: "Cette liste ne peut pas être regroupée par {{fields}} : sa valeur est calculée à l’affichage et n’est pas stockée. La liste est affichée sans ce regroupement.",

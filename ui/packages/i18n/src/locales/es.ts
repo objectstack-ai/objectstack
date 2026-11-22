@@ -1026,6 +1026,7 @@ const es = {
     layout: "Diseño",
     resetToViewDefault: "Restablecer los valores predeterminados de la vista",
     addGroup: "Agregar campo de grupo",
+    noGroupableFields: "Ningún campo sirve para agrupar",
     collapsedByDefault: "Contraído por defecto",
     removeGroup: "Eliminar",
     groupingUnstoredNotice: "Esta lista no se puede agrupar por {{fields}}: su valor se calcula al mostrarse y no se almacena. La lista se muestra sin esa agrupación.",

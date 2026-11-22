@@ -1021,6 +1021,7 @@ const pt = {
     layout: "Layout",
     resetToViewDefault: "Restaurar o padrão da exibição",
     addGroup: "Adicionar campo de grupo",
+    noGroupableFields: "Nenhum campo pode agrupar a lista",
     collapsedByDefault: "Recolhido por padrão",
     removeGroup: "Remover",
     groupingUnstoredNotice: "Esta lista não pode ser agrupada por {{fields}}: o valor é calculado ao ser exibido e não é armazenado. A lista é exibida sem esse agrupamento.",

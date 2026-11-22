@@ -31,14 +31,25 @@ export interface GroupingEditorProps {
   /** Available fields to group by. */
   fieldOptions: Array<{ value: string; label: string }>;
   /**
-   * The field "Add group field" adds, chosen from the fields no level uses
-   * yet (`remaining`, in `fieldOptions` order). Returning `undefined` adds no
-   * level: a row with an open field dropdown appears instead, and the level is
-   * written only once a field is picked there; closing the dropdown without a
-   * pick drops the row and writes nothing (objectstack#36204). Absent, the
-   * first remaining field is added at once.
+   * objectstack#36204 — "Add group field" adds no field by itself: it opens a
+   * row whose field dropdown is already open, listing the fields no level
+   * uses yet, and the level is written only once a field is picked there.
+   * Closing the dropdown without a pick drops the row and writes nothing.
+   * Absent, the first unused field is added at once, as before.
    */
-  pickAddField?: (remaining: Array<{ value: string; label: string }>) => string | undefined;
+  askFieldOnAdd?: boolean;
+  /**
+   * The field options are still being worked out (the host has not read the
+   * fields' types yet). With no option to offer, "Add group field" is drawn
+   * disabled, without the `noFields` reason, until they arrive.
+   */
+  fieldOptionsLoading?: boolean;
+  /**
+   * The label of a field a level holds that `fieldOptions` does not carry (a
+   * view grouped by a field the host does not offer). Absent, or answering
+   * `undefined`, the level shows the field's name.
+   */
+  fieldLabel?: (field: string) => string | undefined;
   /** Maximum nesting depth. Airtable defaults to 3. */
   maxLevels?: number;
   className?: string;
@@ -49,6 +60,12 @@ export interface GroupingEditorProps {
     removeTitle?: string;
     ascendingTitle?: string;
     descendingTitle?: string;
+    /**
+     * objectstack#36204 — with no field to offer, "Add group field" is drawn
+     * disabled and this says why. Absent, the editor draws no add button
+     * then, as before.
+     */
+    noFields?: string;
   };
 }
 
@@ -79,7 +96,9 @@ export function GroupingEditor({
   value,
   onChange,
   fieldOptions,
-  pickAddField,
+  askFieldOnAdd,
+  fieldOptionsLoading,
+  fieldLabel,
   maxLevels = 3,
   className,
   labels,
@@ -87,10 +106,11 @@ export function GroupingEditor({
   const L = { ...DEFAULT_LABELS, ...(labels || {}) };
   const current = value?.fields ?? [];
   const usedFields = new Set(current.map((g) => g.field));
-  // objectstack#36204 — "Add group field" found no field to add by itself
-  // (`pickAddField` answered `undefined`): a row asking for one is open, and
-  // nothing is written until a field is picked in it.
+  // objectstack#36204 — "Add group field" was pressed with `askFieldOnAdd`:
+  // a row asking for a field is open, and nothing is written until a field is
+  // picked in it.
   const [askingField, setAskingField] = React.useState(false);
+  const noFieldsId = React.useId();
   const remaining = fieldOptions.filter((f) => !usedFields.has(f.value));
 
   const writeFields = (next: GroupingFieldEntry[]) => {
@@ -131,7 +151,7 @@ export function GroupingEditor({
               <SelectContent>
                 {isOutsideOptions && (
                   <SelectItem value={g.field} data-testid={`grouping-field-outside-options-${idx}`}>
-                    {g.field}
+                    {fieldLabel?.(g.field) || g.field}
                   </SelectItem>
                 )}
                 {fieldOptions
@@ -223,17 +243,38 @@ export function GroupingEditor({
           data-testid="grouping-add"
           className="flex h-7 items-center gap-1 self-start rounded-md border border-dashed border-input bg-background px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground max-sm:h-11"
           onClick={() => {
-            const field = pickAddField ? pickAddField(remaining) : remaining[0].value;
-            if (field === undefined) {
+            if (askFieldOnAdd) {
               setAskingField(true);
               return;
             }
-            writeFields([...current, { field, order: 'asc', collapsed: false }]);
+            writeFields([...current, { field: remaining[0].value, order: 'asc', collapsed: false }]);
           }}
         >
           <Plus className="h-3 w-3" />
           {L.addGroup}
         </button>
+      )}
+      {/* objectstack#36204 — nothing to offer: the button stays, disabled, and
+          says why (`labels.noFields`), or waits for the options to load. */}
+      {current.length < maxLevels && fieldOptions.length === 0 && (fieldOptionsLoading || labels?.noFields) && (
+        <div className="flex flex-col items-start gap-1">
+          <button
+            type="button"
+            disabled
+            aria-disabled="true"
+            aria-describedby={!fieldOptionsLoading ? noFieldsId : undefined}
+            data-testid="grouping-add"
+            className="flex h-7 cursor-not-allowed items-center gap-1 rounded-md border border-dashed border-input bg-background px-2 text-xs text-muted-foreground opacity-50 max-sm:h-11"
+          >
+            <Plus className="h-3 w-3" />
+            {L.addGroup}
+          </button>
+          {!fieldOptionsLoading && (
+            <p id={noFieldsId} data-testid="grouping-no-fields" className="text-xs text-muted-foreground">
+              {labels?.noFields}
+            </p>
+          )}
+        </div>
       )}
     </div>
   );
