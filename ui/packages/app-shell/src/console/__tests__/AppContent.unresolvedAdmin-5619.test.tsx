@@ -40,6 +40,10 @@
  * and the lazily-imported pages are stubbed.
  */
 
+// The chrome's lint helpers load `@objectstack/lint` lazily: pay that load
+// during collection, not inside a case's clocked window
+// (scripts/check-test-source-alias.mjs).
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import React from 'react';
@@ -176,7 +180,7 @@ describe('AppContent holds every admin-dependent decision until the verdict land
     expect(isHolding()).toBe(true);
   });
 
-  it('lands the admin on the first-run surface once the verdict resolves', () => {
+  it('lands the admin on the first-run surface once the verdict resolves', async () => {
     viewer.isResolved = false;
     const { rerender } = renderConsoleAt('/apps/setup');
     expect(isHolding()).toBe(true);
@@ -193,11 +197,11 @@ describe('AppContent holds every admin-dependent decision until the verdict land
       </MemoryRouter>,
     );
 
-    expect(screen.getByTestId('create-first-app-btn')).toBeInTheDocument();
+    expect(await screen.findByTestId('create-first-app-btn')).toBeInTheDocument();
     expect(pathname()).toBe('/apps/setup');
   });
 
-  it('withholds the chrome — and the admin nav it carries — until the verdict lands', () => {
+  it('withholds the chrome — and the admin nav it carries — until the verdict lands', async () => {
     // The hide-affordance shape, at the mount point that owns it. `UnifiedSidebar`
     // and `AppHeader` build their admin cluster from this verdict; rendering them
     // during the window is what dropped the entry and added it back.
@@ -219,7 +223,7 @@ describe('AppContent holds every admin-dependent decision until the verdict land
       </MemoryRouter>,
     );
 
-    expect(screen.getByTestId('console-layout')).toHaveAttribute('data-active-app', 'crm');
+    expect(await screen.findByTestId('console-layout')).toHaveAttribute('data-active-app', 'crm');
     expect(screen.getByTestId('app-chrome')).toBeInTheDocument();
   });
 
@@ -234,14 +238,17 @@ describe('AppContent holds every admin-dependent decision until the verdict land
     expect(pathname()).toBe('/home');
   });
 
-  it('MUST NOT CHANGE — a resolved viewer with an accessible app enters it with no extra wait', () => {
+  it('MUST NOT CHANGE — a resolved viewer with an accessible app enters it with no extra wait', async () => {
     // The cost boundary: resolution gates the surface, it does not delay a
-    // viewer whose verdict is already in hand.
+    // viewer whose verdict is already in hand. objectstack#35981 — the chrome
+    // also waits for the deployment flags (`/auth/config`), which its
+    // navigation gates read; the mock answers them at once, so the only wait
+    // left is that answer's promise, never the admin verdict.
     metadataApps = [{ name: 'crm', label: 'CRM', navigation: [] }];
     viewer.isAdmin = true;
     viewer.isResolved = true;
     renderConsoleAt('/apps/crm');
 
-    expect(screen.getByTestId('console-layout')).toHaveAttribute('data-active-app', 'crm');
+    expect(await screen.findByTestId('console-layout')).toHaveAttribute('data-active-app', 'crm');
   });
 });

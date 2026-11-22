@@ -332,15 +332,29 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // it empty until the fetch resolves so predicates default to "visible"
   // and we don't briefly hide UI on slow networks.
   const [features, setFeatures] = useState<Record<string, any>>({});
+  // objectstack#35981 — whether that answer (or its failure) is in. The
+  // readiness gate below holds the chrome on it: the chrome's navigation
+  // gates bind `features`, and a navigation predicate that names a flag not
+  // bound yet FAULTS and withholds its entry (objectui#12700), so a chrome
+  // mounted before the answer would hide a flag-gated entry and then draw it.
+  // Until the chrome stopped waiting for the route's own reads, that answer
+  // was in first only by timing.
+  const [featuresSettled, setFeaturesSettled] = useState(false);
   useEffect(() => {
     let cancelled = false;
+    if (typeof getAuthConfig !== 'function') {
+      setFeaturesSettled(true);
+      return;
+    }
     getAuthConfig()
       .then((cfg) => {
         if (cancelled) return;
         setFeatures((cfg?.features as Record<string, any>) ?? {});
+        setFeaturesSettled(true);
       })
       .catch(() => {
         /* leave empty — predicates default to visible */
+        if (!cancelled) setFeaturesSettled(true);
       });
     return () => {
       cancelled = true;
@@ -1226,7 +1240,10 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // objectstack#35981 — while the gate holds, the console chrome's empty frame
   // (`ConsoleBootShell`), not the full-screen splash: it names no app and draws
   // no navigation entry, which is exactly what the inputs above decide.
-  if (!dataSource || metadataLoading || !isWorkspaceAdminResolved) return <ConsoleBootShell />;
+  //
+  // objectstack#35981 — and the deployment flags (`featuresSettled`, above):
+  // the chrome's navigation gates read them.
+  if (!dataSource || metadataLoading || !isWorkspaceAdminResolved || !featuresSettled) return <ConsoleBootShell />;
   if (routeReadsSettled) firstRouteDrawn.current = true;
 
   // ADR-0037 — preview mode renders its OWN empty/error states and never

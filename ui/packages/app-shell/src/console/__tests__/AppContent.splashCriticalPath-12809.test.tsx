@@ -140,9 +140,11 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function createServer() {
+function createServer({ holdConfig = false }: { holdConfig?: boolean } = {}) {
   const list = deferred<AuthOrganization[]>();
   const member = deferred<unknown>();
+  const config = deferred<{ features: Record<string, unknown> }>();
+  if (!holdConfig) config.resolve({ features: {} });
   const client = {
     getSession: vi.fn(async () => ({
       // `role: 'user'`, no positions: the verdict needs the member row.
@@ -150,7 +152,7 @@ function createServer() {
       session: { token: 'tok-12809', activeOrganizationId: ORG.id },
     })),
     signOut: vi.fn(async () => undefined),
-    getConfig: vi.fn(async () => ({ features: {} })),
+    getConfig: vi.fn(() => config.promise),
     listOrganizations: vi.fn(() => list.promise),
     // `get-full-organization`: never answers. The splash must not wait on it.
     getActiveOrganization: vi.fn(() => new Promise(() => {})),
@@ -163,6 +165,7 @@ function createServer() {
     answerMember: () => act(async () => {
       member.resolve({ id: 'm1', organizationId: ORG.id, userId: USER, role: 'member' });
     }),
+    answerConfig: () => act(async () => { config.resolve({ features: { cloudManaged: false } }); }),
   };
 }
 
@@ -244,6 +247,25 @@ describe('the console splash waits for the critical path only (objectui#12809)',
     expect(client.getActiveOrganization).not.toHaveBeenCalled();
     expect(askedTypes()).toEqual(new Set(['object']));
     for (const type of ['dashboard', 'report', 'page']) expect(meta.status[type]).toBeUndefined();
+  });
+
+  it('objectstack#35981 — the chrome also waits for the deployment flags its navigation gates read', async () => {
+    // A navigation predicate naming a flag (`features.cloudManaged != true`)
+    // faults while no flags are bound and withholds its entry (objectui#12700):
+    // a chrome mounted before `/auth/config` answers would hide such an entry
+    // and then draw it. Once the chrome stopped waiting for the route's own
+    // reads, nothing but timing had put that answer first.
+    const { client, answerList, answerMember, answerConfig } = createServer({ holdConfig: true });
+    boot(client, '/apps/crm/account');
+    await waitFor(() => expect(client.listOrganizations).toHaveBeenCalledTimes(1));
+    await answerList();
+    await answerMember();
+    expect(bootShellUp()).toBe(true);
+    expect(screen.queryByTestId('console-layout')).not.toBeInTheDocument();
+
+    await answerConfig();
+    expect(bootShellUp()).toBe(false);
+    expect(screen.getByTestId('console-layout')).toBeInTheDocument();
   });
 
   it('CONTROL: a later route whose bucket has not landed shows its skeleton inside the chrome, then its content', async () => {
