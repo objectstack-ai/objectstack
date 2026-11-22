@@ -39,7 +39,6 @@ import { FormOwnerLineContext } from './formOwnerLineContext';
 /** The owner column, as the spec names it (`SystemFieldName.OWNER_ID`). */
 const OWNER_FIELD = 'owner_id';
 
-
 /** The `user` widget the owner is displayed with, read-only (lazy until drawn). */
 const UserWidget = getLazyFieldWidget('user');
 
