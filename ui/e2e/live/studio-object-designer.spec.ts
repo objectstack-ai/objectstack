@@ -26,7 +26,6 @@ import { test, expect, type APIRequestContext, type Page } from '@playwright/tes
 // The area opens a create page on a WRITABLE package only: the showcase is
 // provided by code, so its create URL lands on the type's list, and every
 // test that opens the designer authors a package of its own first.
-const PKG = 'com.example.showcase';
 const newObjectIn = (pkg: string) => `/studio/${pkg}/metadata/object/new?package=${pkg}`;
 const API = process.env.LIVE_API_URL || 'http://localhost:3000';
 

@@ -163,8 +163,10 @@ describe('「‹ Back to app」 returns to the app page the author came from (ob
   it('an app other than the package\'s own is the one named and returned to', async () => {
     rememberAppReturnPage({ path: '/apps/service/opportunity', app: 'service', label: 'Service desk' });
     renderAt(`/studio/${OWN}/data`);
-    fireEvent.click(await backLink());
+    const link = await backLink();
+    // Read the name while the header is still on screen; the click leaves Studio.
     expect(within(header()).getByTestId('studio-back-app-name')).toHaveTextContent('Service desk');
+    fireEvent.click(link);
     expect(await screen.findByTestId('running-app')).toHaveTextContent(/^\/apps\/service\/opportunity$/);
   });
 });

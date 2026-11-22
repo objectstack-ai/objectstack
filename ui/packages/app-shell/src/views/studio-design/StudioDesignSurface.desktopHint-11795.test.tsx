@@ -14,7 +14,7 @@ import '@testing-library/jest-dom/vitest';
 // collection, not inside a case's clocked window (`check:test-source-alias`).
 import '@objectstack/lint';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const PACKAGE_ID = 'app.b2r4';
