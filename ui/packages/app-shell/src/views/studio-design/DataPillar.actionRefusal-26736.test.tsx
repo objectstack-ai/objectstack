@@ -63,6 +63,8 @@ function serverIssues(body: Record<string, unknown>): Array<{ path: string; mess
 }
 
 const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+  // objectstack#36511 — the Save's own publish of the item, and a refused one's discard.
+  if (init?.method === 'POST' || init?.method === 'DELETE') return new Response('{"success":true}', { status: 200 });
   if (init?.method === 'PUT') {
     const body = JSON.parse(String(init.body)) as Record<string, unknown>;
     puts.push(body);
@@ -145,13 +147,6 @@ afterEach(() => {
 
 const L = (key: string) => t(key, 'en');
 
-/** Past the autosave's 1.5 s debounce. */
-async function outlastDebounce(): Promise<void> {
-  await act(async () => {
-    await new Promise((r) => setTimeout(r, 2300));
-  });
-}
-
 async function mountOnView(def: Record<string, unknown>, tabKey: string): Promise<void> {
   objectDef = def;
   render(
@@ -180,7 +175,7 @@ describe('Studio data page — a refused action save is shown at the action, and
     // Any edit: the label of the first action, which the list selects.
     const labelInput = (await screen.findByText(L('engine.inspector.action.label'), { selector: 'label' })).parentElement!.querySelector('input')!;
     fireEvent.change(labelInput, { target: { value: 'Archive now' } });
-    await outlastDebounce();
+    await pressStudioSave();
     expect(puts).toHaveLength(1);
 
     // The refusal names the action, not "the server refused this draft".
@@ -199,7 +194,7 @@ describe('Studio data page — a refused action save is shown at the action, and
     // and clear the flat key; the next autosave is accepted, the strip goes.
     fireEvent.click(expose);
     fireEvent.click(expose);
-    await outlastDebounce();
+    await pressStudioSave();
     expect(puts).toHaveLength(2);
     expect(lastSentAction('showcase_task_send')).not.toHaveProperty('aiExposed');
     expect(serverIssues(puts[1])).toEqual([]);
@@ -212,11 +207,11 @@ describe('Studio data page — a Type switch is held until its input is filled (
     await mountOnView({ name: 'showcase_task', label: 'Task', fields: [{ name: 'title', label: 'Title', type: 'text' }], actions: [SEND] }, 'engine.studio.data.tab.actions');
 
     await pick(L('engine.inspector.action.type'), L('engine.inspector.action.type.api'));
-    await outlastDebounce();
+    await pressStudioSave();
     expect(puts, 'an api action with no endpoint is held, not sent').toEqual([]);
     expect(screen.queryByTestId('studio-refusal')).toBeNull();
     expect(within(await screen.findByTestId('studio-held')).getByTestId('studio-held-message')).toHaveTextContent(
-      tFormat('engine.studio.held.line', 'en', {
+      tFormat('engine.studio.held.lineExplicit', 'en', {
         clause: tFormat('engine.studio.held.actionNeedsInput', 'en', {
           input: L('engine.inspector.action.target.api.label'),
           action: 'Send',
@@ -226,7 +221,7 @@ describe('Studio data page — a Type switch is held until its input is filled (
 
     const endpoint = screen.getByText(`${L('engine.inspector.action.target.api.label')} *`, { selector: 'label' }).parentElement!.querySelector('input')!;
     fireEvent.change(endpoint, { target: { value: '/api/v1/send' } });
-    await outlastDebounce();
+    await pressStudioSave();
     expect(puts).toHaveLength(1);
     // The body the script had is gone with the switch, so the server accepts it.
     expect(lastSentAction('showcase_task_send')).not.toHaveProperty('body');

@@ -41,6 +41,8 @@ const objectDef = {
 const puts: unknown[] = [];
 
 const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+  // objectstack#36511 — the Save's own publish of the item, and a refused one's discard.
+  if (init?.method === 'POST' || init?.method === 'DELETE') return new Response('{"success":true}', { status: 200 });
   if (init?.method === 'PUT') {
     puts.push(JSON.parse(String(init.body)));
     return new Response(JSON.stringify({ success: true }), {
@@ -113,17 +115,15 @@ describe('Studio data page — a held Picklist reads as a sentence (objectui#117
     await userEvent.click(controlUnder('Type'));
     await userEvent.click(await screen.findByRole('option', { name: /^Picklist$/ }));
 
-    // Past the autosave's 1.5 s debounce: the guard holds the save.
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 2300));
-    });
+    // Save pressed (objectstack#36511): the guard holds it.
+    await pressStudioSave();
     expect(puts, 'the guard must hold this save').toEqual([]);
 
     expect(screen.queryByTestId('studio-refusal'), 'held, not refused (objectui#11786)').toBeNull();
     const held = await screen.findByTestId('studio-held');
     const message = within(held).getByTestId('studio-held-message');
     expect(message).toHaveTextContent(
-      tFormat('engine.studio.held.line', 'en', {
+      tFormat('engine.studio.held.lineExplicit', 'en', {
         clause: tFormat('engine.studio.held.needsOptions', 'en', { field: label }),
       }),
     );
@@ -145,9 +145,7 @@ describe('Studio data page — a held Picklist reads as a sentence (objectui#117
     const apiName = (controlUnder('API name') as HTMLInputElement).value;
     await userEvent.click(controlUnder('Type'));
     await userEvent.click(await screen.findByRole('option', { name: /^Picklist$/ }));
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 2300));
-    });
+    await pressStudioSave();
     const strip = await screen.findByTestId('studio-held');
 
     // The rail's own header close (the field inspector inside carries another).

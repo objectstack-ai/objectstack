@@ -261,6 +261,7 @@ describe('Data pillar field properties — a copilot write while the field is op
     const label = within(rail).getByTestId('field-label-input');
     fireEvent.change(label, { target: { value: 'Renewal total' } });
     fireEvent.blur(label);
+    await pressStudioSave({ settle: false });
     await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 8000 });
     const before = draftReadsOf('showcase_task');
 
@@ -278,10 +279,10 @@ describe('Data pillar field properties — a copilot write while the field is op
     await act(async () => {
       landSave();
     });
-    // Only the pillar's load installs the drafted field; the save's own
-    // verdict re-read (the other draft read here) installs no buffer.
+    // The pillar's load, once, installs the drafted field (objectstack#36511:
+    // the Save publishes, so no draft verdict is re-read after it).
     expect(await screen.findByText('Impact scope', undefined, { timeout: 8000 })).toBeInTheDocument();
-    expect(draftReadsOf('showcase_task')).toBe(before + 2);
+    expect(draftReadsOf('showcase_task')).toBe(before + 1);
   });
 
   it('CONTROL: a pulse re-reads the open object only, never another one in the rail', async () => {

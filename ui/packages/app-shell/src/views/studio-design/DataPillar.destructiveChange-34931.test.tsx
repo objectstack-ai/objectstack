@@ -36,6 +36,8 @@ const refused = (status: number, code: string, message: string) =>
 const puts: Array<{ url: string; body: { fields: Array<{ name: string }> } }> = [];
 let answers: Response[] = [];
 const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+  // objectstack#36511 — the Save's own publish of the item, and a refused one's discard.
+  if (init?.method === 'POST' || init?.method === 'DELETE') return new Response('{"success":true}', { status: 200 });
   if (init?.method !== 'PUT') return json(404, null);
   puts.push({ url, body: JSON.parse(String(init.body)) });
   return answers.shift() ?? json(200, { success: true });
@@ -98,7 +100,7 @@ afterEach(() => {
 const card = (label: string) => screen.queryByText(label)?.closest('.cursor-grab') ?? null;
 const fieldNames = (i: number) => puts[i].body.fields.map((f) => f.name);
 
-/** Open the Form tab, remove Place, and let the autosave send it. */
+/** Open the Form tab, remove Place, and Save it, agreeing to Save's question (objectstack#36511). */
 async function removePlace(first: Response) {
   answers = [first];
   render(
@@ -110,6 +112,8 @@ async function removePlace(first: Response) {
   fireEvent.click((await screen.findByText('Place')).closest('.cursor-grab') as HTMLElement);
   fireEvent.click(await screen.findByRole('button', { name: 'Remove “Place”' }));
   fireEvent.click(within(await screen.findByRole('alertdialog')).getByTestId('field-remove-confirm-action'));
+  window.confirm = vi.fn(() => true);
+  await pressStudioSave();
   await waitFor(() => expect(puts).toHaveLength(1), { timeout: 4000 });
   expect(fieldNames(0)).toEqual(['title']);
 }
@@ -138,7 +142,8 @@ describe('Data pillar — a destructive object draft save is confirmed, not dead
     await removePlace(refused(409, 'DESTRUCTIVE_CHANGE', LOST));
     fireEvent.click(within(await screen.findByTestId('object-destructive-confirm')).getByTestId('object-destructive-keep'));
     await waitFor(() => expect(card('Place')).not.toBeNull());
-    await new Promise((r) => setTimeout(r, 2300));
+    // Nothing is left to save: the page is the stored object again.
+    expect(screen.queryByTestId('studio-save')).toBeNull();
     expect(puts).toHaveLength(1);
     expect(screen.queryByTestId('object-destructive-confirm')).toBeNull();
   });
@@ -147,7 +152,6 @@ describe('Data pillar — a destructive object draft save is confirmed, not dead
     await removePlace(refused(422, 'INVALID_METADATA', 'Field place is invalid'));
     expect(await screen.findByTestId('studio-refusal')).toBeInTheDocument();
     expect(screen.queryByTestId('object-destructive-confirm')).toBeNull();
-    await new Promise((r) => setTimeout(r, 2300));
     expect(puts).toHaveLength(1);
   });
 });

@@ -34,6 +34,8 @@ const objectDef = {
 const puts: Array<Record<string, unknown>> = [];
 
 const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+  // objectstack#36511 — the Save's own publish of the item, and a refused one's discard.
+  if (init?.method === 'POST' || init?.method === 'DELETE') return new Response('{"success":true}', { status: 200 });
   if (init?.method === 'PUT') {
     puts.push(JSON.parse(String(init.body)) as Record<string, unknown>);
     return new Response(JSON.stringify({ success: true }), {
@@ -83,13 +85,6 @@ afterEach(() => {
   fetchImpl.mockClear();
 });
 
-/** Past the autosave's 1.5 s debounce. */
-async function outlastDebounce(): Promise<void> {
-  await act(async () => {
-    await new Promise((r) => setTimeout(r, 2300));
-  });
-}
-
 /** The inspector control under a visible label. */
 function controlUnder(label: string): HTMLElement {
   const lab = screen.getByText(label, { selector: 'label' });
@@ -124,12 +119,12 @@ async function addRollup(): Promise<{ name: string; label: string }> {
   return { name, label };
 }
 
-const heldLine = (clause: string) => tFormat('engine.studio.held.line', 'en', { clause });
+const heldLine = (clause: string) => tFormat('engine.studio.held.lineExplicit', 'en', { clause });
 
 describe('Studio data page — a Rollup is held until it is set up (objectstack#27461)', () => {
   it('sends no save for the bare roll-up; names each missing input in turn; a count lets the save go', async () => {
     const { name, label } = await addRollup();
-    await outlastDebounce();
+    await pressStudioSave();
 
     expect(puts, 'an unconfigured roll-up is not sent').toEqual([]);
     expect(screen.queryByTestId('studio-refusal')).toBeNull();
@@ -141,7 +136,7 @@ describe('Studio data page — a Rollup is held until it is set up (objectstack#
     const child = controlUnder(t('designer.field.summary.object', 'en')) as HTMLInputElement;
     fireEvent.change(child, { target: { value: 'showcase_task' } });
     fireEvent.blur(child);
-    await outlastDebounce();
+    await pressStudioSave();
     expect(puts, 'a child object alone is not a roll-up yet').toEqual([]);
     expect(message()).toHaveTextContent(needs('designer.field.summary.function'));
 
@@ -149,6 +144,7 @@ describe('Studio data page — a Rollup is held until it is set up (objectstack#
     fireEvent.click(
       within(await screen.findByRole('listbox')).getByRole('option', { name: t('designer.field.summary.fn.count', 'en') }),
     );
+    await pressStudioSave();
     await waitFor(() => expect(puts.length).toBe(1), { timeout: 4000 });
     expect(lastSentField(name)).toEqual(
       expect.objectContaining({ type: 'summary', summaryOperations: { object: 'showcase_task', function: 'count' } }),

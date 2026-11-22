@@ -294,6 +294,7 @@ describe.each(CASES)('Data pillar on an object with $title (objectui#11780)', ({
     act(() => dnd.onDragEnd!({ active: { id: 'f:industry' }, over: { id: 'f:name' } }));
 
     // The auto-save sends the draft the designer committed.
+    await pressStudioSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 5000 });
     const body = mockClient.save.mock.calls.at(-1)![2] as { fields: Record<string, Record<string, unknown>> };
 
@@ -320,6 +321,7 @@ describe.each(CASES)('Data pillar on an object with $title (objectui#11780)', ({
 
     expect(seenColumns[seenColumns.length - 1]).toBe(before);
     // The edit was real: the draft the pillar saves carries the new label.
+    await pressStudioSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 5000 });
     expect(mockClient.save.mock.calls.at(-1)![2].label).toBe('Account (renamed)');
   });

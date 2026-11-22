@@ -71,6 +71,8 @@ function doorRefusal(body: Row): string[] {
 const puts: Array<{ body: Row; status: number }> = [];
 
 const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+  // objectstack#36511 — the Save's own publish of the item, and a refused one's discard.
+  if (init?.method === 'POST' || init?.method === 'DELETE') return new Response('{"success":true}', { status: 200 });
   if (init?.method === 'PUT') {
     const body = JSON.parse(String(init.body)) as Row;
     const refused = doorRefusal(body);
@@ -170,13 +172,6 @@ function renderData() {
 
 const fieldCountShown = () => screen.getByText(/^\d+ fields$/).textContent;
 
-/** Past the autosave's 1.5 s debounce. */
-async function outlastDebounce(): Promise<void> {
-  await act(async () => {
-    await new Promise((r) => setTimeout(r, 2300));
-  });
-}
-
 /** What every PUT the page sent carried for `tier` and `status`. */
 function sentFields(): Array<{ tier: unknown; status: unknown; status_code: number }> {
   return puts.map((p) => {
@@ -188,11 +183,11 @@ function sentFields(): Array<{ tier: unknown; status: unknown; status_code: numb
 const SERVED_STATUS = JSON.stringify((SERVED.fields as Record<string, Row>).status);
 
 describe('Studio data page — a picklist-bound field is saved without its served options (objectui#10202)', () => {
-  it('the draft autosave (an added field) sends no bound field with `options`, and the inline select byte-identical', async () => {
+  it('the Save (an added field) sends no bound field with `options`, and the inline select byte-identical', async () => {
     renderData();
     await waitFor(() => expect(fieldCountShown()).toBe('3 fields'), { timeout: 8000 });
     await addFieldFromGrid();
-    await outlastDebounce();
+    await pressStudioSave();
     await waitFor(() => expect(puts.length).toBeGreaterThan(0), { timeout: 4000 });
 
     for (const sent of sentFields()) {
@@ -206,6 +201,7 @@ describe('Studio data page — a picklist-bound field is saved without its serve
     renderData();
     await waitFor(() => expect(fieldCountShown()).toBe('3 fields'), { timeout: 8000 });
     fireEvent.click(await screen.findByRole('button', { name: 'Reverse columns' }, { timeout: 8000 }));
+    await pressStudioSave();
     await waitFor(() => expect(puts.length).toBeGreaterThan(0), { timeout: 4000 });
 
     const first = puts[0];

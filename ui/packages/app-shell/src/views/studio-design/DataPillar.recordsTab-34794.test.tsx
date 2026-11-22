@@ -161,6 +161,7 @@ describe('Data pillar Records tab (objectstack#34794)', () => {
     expect(screen.getByTestId('grid-add-column')).toBeInTheDocument();
     await userEvent.click(toolbarAdd);
     await completeAddFieldPopover({ label: 'Agenda' });
+    await pressStudioSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 8000 });
     const calls = mockClient.save.mock.calls as unknown as Array<[string, string, { fields: Record<string, unknown> }]>;
     expect(Object.keys(calls.at(-1)![2].fields)).toContain('agenda');

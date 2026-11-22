@@ -18,7 +18,7 @@
  * request carries a choice type without options.
  *
  * The held save must also say why on screen, naming the field, and adding one
- * option must let the next autosave go (the control that proves the pillar is
+ * option must let the next Save go (the control that proves the pillar is
  * not simply refusing every select).
  *
  * Since objectui#11786 the pillar asks the same guard before sending, so "held"
@@ -57,6 +57,8 @@ let served: Record<string, unknown> = objectDef;
 const puts: Array<{ url: string; body: Record<string, unknown> }> = [];
 
 const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+  // objectstack#36511 — the Save's own publish of the item, and a refused one's discard.
+  if (init?.method === 'POST' || init?.method === 'DELETE') return new Response('{"success":true}', { status: 200 });
   if (init?.method === 'PUT') {
     puts.push({ url, body: JSON.parse(String(init.body)) as Record<string, unknown> });
     return new Response(JSON.stringify({ success: true }), {
@@ -133,13 +135,6 @@ function choiceWithoutOptions(): WireField[] {
   );
 }
 
-/** Past the autosave's 1.5 s debounce. */
-async function outlastDebounce(): Promise<void> {
-  await act(async () => {
-    await new Promise((r) => setTimeout(r, 2300));
-  });
-}
-
 /** The inspector control under a visible label. */
 function controlUnder(label: string): HTMLElement {
   const lab = screen.getByText(label, { selector: 'label' });
@@ -148,7 +143,7 @@ function controlUnder(label: string): HTMLElement {
 
 /** The held line naming `label`'s missing options (objectui#11786). */
 function heldOptionsLine(label: string): string {
-  return tFormat('engine.studio.held.line', 'en', {
+  return tFormat('engine.studio.held.lineExplicit', 'en', {
     clause: tFormat('engine.studio.held.needsOptions', 'en', { field: label }),
   });
 }
@@ -175,18 +170,19 @@ describe('Studio data page — a new choice field is not sent without options (o
     ['select', /^Picklist$/],
     ['radio', /^Radio$/],
   ] as const) {
-    it(`add a field, type it \`${type}\`, wait out the autosave: no request carries it without options`, async () => {
+    it(`add a field, type it \`${type}\`, press Save: no request carries it without options`, async () => {
       const fieldName = await addFieldAndType(typeLabel);
       const fieldLabel = (controlUnder('Label') as HTMLInputElement).value;
-      await outlastDebounce();
+      await pressStudioSave();
       expect(choiceWithoutOptions()).toEqual([]);
 
       // The held save says why, and names the field.
       expect(await screen.findByTestId('studio-held-message')).toHaveTextContent(heldOptionsLine(fieldLabel));
 
-      // CONTROL: one option lets the next autosave go, and the banner clears.
+      // CONTROL: one option lets the next Save go, and the banner clears.
       const before = puts.length;
       fireEvent.change(screen.getByPlaceholderText('value'), { target: { value: 'open' } });
+      await pressStudioSave();
       await waitFor(() => expect(puts.length).toBeGreaterThan(before), { timeout: 4000 });
       const sent = wireFields(puts[puts.length - 1].body).find((f) => f.name === fieldName);
       expect(sent?.type).toBe(type);
@@ -219,7 +215,7 @@ describe('Studio data page — an object that already stores an empty select (ob
     const labelBox = controlUnder('Label') as HTMLInputElement;
     fireEvent.change(labelBox, { target: { value: 'Headline' } });
     fireEvent.blur(labelBox);
-    await outlastDebounce();
+    await pressStudioSave();
 
     // Held: nothing reached the wire, and the banner names the STORED field.
     expect(puts).toEqual([]);
@@ -228,6 +224,7 @@ describe('Studio data page — an object that already stores an empty select (ob
     // Cleared on screen: the stored field's own inspector carries the editor.
     await selectCard('Status');
     fireEvent.change(screen.getByPlaceholderText('value'), { target: { value: 'open' } });
+    await pressStudioSave();
     await waitFor(() => expect(puts.length).toBe(1), { timeout: 4000 });
     const sent = wireFields(puts[0].body);
     expect(sent.find((f) => f.name === 'status')?.options).toEqual([expect.objectContaining({ value: 'open' })]);
