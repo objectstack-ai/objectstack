@@ -16,6 +16,7 @@
 import { describe, it, expect } from 'vitest';
 import { cellReadOnlyKind, inlineTyping, choiceFromText, inlineEditorPlacement, clearRefusalText, cellValueRefusal, type CellReadOnlyInputs } from './objectGridCellFacts';
 import { fieldInlineReadOnlyKind, isFieldInlineEditable } from './inline-edit-options';
+import { RICH_TEXT_FIELD_TYPES, hasInCellPanelEditWidget } from '@object-ui/fields';
 
 const OPEN: CellReadOnlyInputs = {
   fieldDef: { type: 'text' },
@@ -115,6 +116,18 @@ describe('the editor, Backspace and the commit rules a cell is given (objectstac
     }
     for (const type of ['text', 'number', 'currency', 'percent', 'email', 'phone', 'url', 'textarea', 'address', 'rating', 'boolean', undefined]) {
       expect(inlineEditorPlacement(type), String(type)).toBeUndefined();
+    }
+  });
+
+  it('every rich-content type the display table serves edits in a panel under the cell', () => {
+    // One list (`RICH_TEXT_FIELD_TYPES`, the keys `RichTextField` serves) decides
+    // all three answers, so a type added to it can never draw in the cell yet
+    // read as not editable in a list.
+    expect(RICH_TEXT_FIELD_TYPES.length).toBeGreaterThan(0);
+    for (const type of RICH_TEXT_FIELD_TYPES) {
+      expect(hasInCellPanelEditWidget(type), type).toBe(true);
+      expect(inlineEditorPlacement(type), type).toBe('below');
+      expect(fieldInlineReadOnlyKind({ type }), type).toBeNull();
     }
   });
 

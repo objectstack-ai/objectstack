@@ -69,6 +69,9 @@ import {
   isRetiredFieldType,
   reportRetiredFieldType,
 } from './field-type-alias.js';
+// The rich-content types' one list (the keys `RichTextField` serves); its
+// module is already in the eager closure through `getCellRenderer`.
+import { RICH_TEXT_FIELD_TYPES } from './widgets/richTextDisplay.js';
 
 /**
  * The platform date picker (objectui#12622, objectui#12642), the face the
@@ -222,11 +225,10 @@ export const INLINE_EXCLUDED_FIELD_TYPES = new Set<string>([
  * the sanitizing renderer's output (`./widgets/sanitizedHtml.tsx`), as on
  * every other read surface.
  */
-const IN_CELL_PANEL_EDIT_WIDGETS: Record<string, React.ComponentType<FieldWidgetComponentProps<any>>> = {
-  markdown: RichTextPanelEditWidget,
-  html: RichTextPanelEditWidget,
-  richtext: RichTextPanelEditWidget,
-};
+const IN_CELL_PANEL_EDIT_WIDGETS: Readonly<Record<string, React.ComponentType<FieldWidgetComponentProps<any>>>> =
+  // Derived from the one list of the keys `RichTextField` serves, so a type
+  // added to the display table gets its cell panel with no second spelling.
+  Object.fromEntries(RICH_TEXT_FIELD_TYPES.map((type) => [type, RichTextPanelEditWidget]));
 
 /** Field types whose value is chosen in one discrete gesture (no free typing). */
 export const DISCRETE_EDIT_TYPES = new Set<string>([

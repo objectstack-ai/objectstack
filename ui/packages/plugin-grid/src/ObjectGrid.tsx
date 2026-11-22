@@ -803,14 +803,13 @@ function opensReferenceInPlace(fieldDef: { type?: unknown; reference?: unknown }
  * is never narrower than its cell and grows to fit this; the editor fills it.
  */
 function cellEditorWidthClass(type: string): string {
+  // objectstack#36023 — a rich-content field's text box, as wide as a textarea's.
+  if ((RICH_TEXT_FIELD_TYPES as readonly string[]).includes(type)) return 'w-full min-w-80';
   switch (type) {
     case 'address':
     case 'location':
       return 'w-full min-w-[22rem]';
     case 'textarea':
-    case 'markdown':
-    case 'html':
-    case 'richtext':
     case 'code':
     case 'json':
       return 'w-full min-w-80';
