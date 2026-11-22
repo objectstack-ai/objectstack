@@ -3475,7 +3475,7 @@ const ko = {
       iconHint: 'Lucide 아이콘 이름(예: "briefcase").',
       done: '완료',
       none: '추가할 항목이 없습니다',
-      loading: '불러오는 중…',
+      loading: '로딩 중…',
       notListed: '이 앱의 패키지가 목록에 없어 메뉴를 저장할 수 없습니다.',
       pendingDraft: '이 앱에는 Studio에 게시되지 않은 변경 사항이 있습니다. 그곳에서 게시하거나 취소한 뒤 다시 저장하세요.',
       noVersion: '이 앱의 패키지에 버전이 없어 메뉴를 사용자 지정할 수 없습니다.',

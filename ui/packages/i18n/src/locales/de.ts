@@ -3472,7 +3472,7 @@ const de = {
       add: 'Hinzufügen',
       name: 'Name',
       icon: 'Symbol',
-      iconHint: 'Ein Lucide-Symbolname, z. B. "briefcase".',
+      iconHint: 'Ein Lucide-Symbolname, z. B. „briefcase“.',
       done: 'Fertig',
       none: 'Nichts zum Hinzufügen',
       loading: 'Wird geladen…',
