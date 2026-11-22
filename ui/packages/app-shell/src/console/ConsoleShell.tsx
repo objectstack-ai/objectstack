@@ -41,14 +41,9 @@ import { FlowPaletteRecentsProvider } from '../context/FlowPaletteRecentsProvide
 import { LastAppProvider, LAST_APP_PREFERENCE_KEY } from '../context/LastAppProvider.js';
 import {
   UserStateAdaptersProvider,
-  useAttachListStateFamily,
   useAttachRecordStateFamily,
   useAttachUserStateAdapters,
 } from '../context/UserStateAdapters.js';
-import {
-  LIST_PREFERENCE_PREFIX,
-  ListPreferencesProvider,
-} from '../context/ListPreferencesProvider.js';
 import {
   RECORD_PREFERENCE_PREFIX,
   RecordPreferencesProvider,
@@ -203,7 +198,6 @@ function ConsoleShellProviders({ children }: { children: ReactNode }) {
               <RecentItemsProvider>
                 <FlowPaletteRecentsProvider>
                   <LastAppProvider>
-                  <ListPreferencesProvider>
                     <RecordPreferencesProvider>
                       {/* objectstack#36112 — inside an app from 768 px up the three
                           are drawn at the top of the content area instead
@@ -241,7 +235,6 @@ function ConsoleShellProviders({ children }: { children: ReactNode }) {
                       <NotificationSnackbar />
                       <NotificationAlerts />
                     </RecordPreferencesProvider>
-                  </ListPreferencesProvider>
                   </LastAppProvider>
                 </FlowPaletteRecentsProvider>
               </RecentItemsProvider>
@@ -388,7 +381,6 @@ function UserStateBridge() {
   const { user } = useAuth();
   const dataSource = useAdapter();
   const attach = useAttachUserStateAdapters();
-  const attachListState = useAttachListStateFamily();
   const attachRecordState = useAttachRecordStateFamily();
 
   useEffect(() => {
@@ -397,7 +389,6 @@ function UserStateBridge() {
       attach('recent', null);
       attach('flowPaletteRecents', null);
       attach('lastApp', null);
-      attachListState(null);
       attachRecordState(null);
       return;
     }
@@ -422,35 +413,27 @@ function UserStateBridge() {
       userId: user.id,
       key: LAST_APP_PREFERENCE_KEY,
     });
-    // objectui#12418 — every object's list state, `ui.list.<object>`: a key
-    // family, loaded by prefix in the same one read as the three slots above.
-    const listState = createObjectStackUserPreferenceFamily({
-      dataSource,
-      userId: user.id,
-      prefix: LIST_PREFERENCE_PREFIX,
-    });
     attach('favorites', favorites);
     attach('recent', recent);
     attach('flowPaletteRecents', flowPaletteRecents);
     attach('lastApp', lastApp);
     // objectstack#25883 — every object's record-page state, `ui.record.<object>`
-    // ("show empty fields"): a second key family in the same one read.
+    // ("show empty fields"): a key family loaded by prefix in the same one
+    // read as the slots above.
     const recordState = createObjectStackUserPreferenceFamily({
       dataSource,
       userId: user.id,
       prefix: RECORD_PREFERENCE_PREFIX,
     });
-    attachListState(listState);
     attachRecordState(recordState);
     return () => {
       attach('favorites', null);
       attach('recent', null);
       attach('flowPaletteRecents', null);
       attach('lastApp', null);
-      attachListState(null);
       attachRecordState(null);
     };
-  }, [user?.id, dataSource, attach, attachListState, attachRecordState]);
+  }, [user?.id, dataSource, attach, attachRecordState]);
 
   return null;
 }

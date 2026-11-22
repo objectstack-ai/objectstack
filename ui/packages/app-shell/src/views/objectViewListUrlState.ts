@@ -27,11 +27,6 @@ import {
     type ListUrlState,
     type ListSortRule,
 } from './userFilterUrlState.js';
-import type {
-    useObjectListPreferences,
-    ListFilterGroupPreference,
-    ListSortPreference,
-} from '../context/ListPreferencesProvider.js';
 import {
     claimListDraft,
     discardListDraft,
@@ -39,6 +34,8 @@ import {
     readListDraft,
     takeDocumentReload,
     type ListDraft,
+    type ListFilterGroupPreference,
+    type ListSortPreference,
 } from './listDraftStore.js';
 import { parseUrlEqualityFilterTriples } from './drillUrlFilters.js';
 import { selectFilterParams } from './objectViewHelpers.js';
@@ -140,7 +137,6 @@ export function useObjectViewListUrlState({
     objectDef,
     activeView,
     viewResolving,
-    listPrefs,
     listDraft,
     perms,
     user,
@@ -156,7 +152,6 @@ export function useObjectViewListUrlState({
      * `activeView` is only the view the page falls back to meanwhile.
      */
     viewResolving: boolean;
-    listPrefs: ReturnType<typeof useObjectListPreferences>;
     /** objectstack#35955 — the open list's unsaved changes (`./listDraftStore.ts`). */
     listDraft: ListDraft;
     perms: ReturnType<typeof usePermissions>;
@@ -183,10 +178,7 @@ export function useObjectViewListUrlState({
      *    the Filter panel's conditions, the search term, the sort and the
      *    grouping the reader changed and has not saved, kept while they open
      *    a record and come back; the view's own for every part the draft
-     *    lacks. Nothing the reader stored earlier is read: their stored sort
-     *    and filters (objectui#12418) no longer apply. The seed still waits
-     *    for the stored state to be read (`listPrefs.ready`): the column
-     *    widths and the row height are kept there.
+     *    lacks. Nothing the reader stored earlier is read.
      *
      * A RELOAD is neither (objectstack#35955): the first list a reloaded page
      * seeds opens as its view declares it, and the write-back strips the
@@ -262,7 +254,7 @@ export function useObjectViewListUrlState({
     // (just dropped) draft, never from the `uf_*` params, whoever wrote them,
     // and its write-back strips them all.
     const resetPendingRef = useRef(false);
-    if (listIdentityKey && listPrefs.ready && !viewResolving && listSeedRef.current?.key !== listIdentityKey) {
+    if (listIdentityKey && !viewResolving && listSeedRef.current?.key !== listIdentityKey) {
         // objectstack#35955 — this list is the one on screen: a draft held
         // for another view or object goes.
         const draftScope = listDraftScope(user?.id, objectName ?? '', String(activeView.id));
@@ -324,12 +316,11 @@ export function useObjectViewListUrlState({
             toast.warning(t('console.objectView.linkFilterRefused'));
         }
         // Once per list identity, by design: later URL writes are the list's
-        // own changes, already on screen. (`listPrefs.ready` and
-        // `viewResolving` because the seed is taken only once the user's own
-        // state has been read and the view the address names is resolved; a
+        // own changes, already on screen. (`viewResolving` because the seed is
+        // taken only once the view the address names is resolved; a
         // resolution that ends on the fall-back keeps the identity unchanged.)
         // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
-    }, [listIdentityKey, listPrefs.ready, viewResolving]);
+    }, [listIdentityKey, viewResolving]);
     /**
      * objectstack#30073 — the Filter panel's group as the list last reported
      * it, held with the list identity it came from. The address cannot say

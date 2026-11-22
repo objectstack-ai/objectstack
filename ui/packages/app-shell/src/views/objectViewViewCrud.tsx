@@ -14,7 +14,7 @@ import { formatMetadataError } from '@object-ui/data-objectstack';
 import { viewSaveRefusalText } from './viewSaveRefusal.js';
 import { toast } from 'sonner';
 import type { useObjectTranslation } from '@object-ui/i18n';
-import type { useObjectListPreferences } from '../context/ListPreferencesProvider.js';
+import type { useObjectListLayout } from './listLayoutStore.js';
 import { PREVIEW_QUERY_FLAG, PREVIEW_QUERY_VALUE } from '../preview/PreviewModeContext.js';
 import type { usePreviewDrafts } from '../preview/PreviewModeContext.js';
 import { isSavedViewId } from '../utils/viewIdentity.js';
@@ -74,7 +74,7 @@ export function useObjectViewViewCrud({
     setRefreshKey,
     confirmHandler,
     savedViews,
-    listPrefs,
+    listLayout,
     views,
     activeViewId,
     baseView,
@@ -94,15 +94,15 @@ export function useObjectViewViewCrud({
     setRefreshKey: Dispatch<SetStateAction<number>>;
     confirmHandler: ReturnType<typeof useConsoleActionRuntime>['confirmHandler'];
     savedViews: Parameters<typeof buildViewTabs>[0]['savedViews'];
-    listPrefs: ReturnType<typeof useObjectListPreferences>;
+    listLayout: ReturnType<typeof useObjectListLayout>;
     views: ReturnType<typeof buildViewTabs>;
     activeViewId: string | undefined;
     baseView: ReturnType<typeof buildViewTabs>[number];
 }) {
     const createApp = useRuntimeCreateApp(t);
     // objectui#12504 — no toolbar control writes the shared view. The sort and
-    // the column layout (objectui#12418), the density and the Hide Fields
-    // popover (objectui#12474) are the user's own list state (`listPrefs`), and
+    // the columns are the list's draft (`./listDraftStore.ts`), the widths and
+    // the density the reader's layout in this browser (`listLayout`), and
     // the shared view is written only by an explicit save
     // (`handleViewConfigSave`, below). The toolbar-to-view writer that lived
     // here, `persistViewPatch`, retired with the adapter method it was the last
@@ -113,7 +113,7 @@ export function useObjectViewViewCrud({
      * There is deliberately NO `persistViewFilter` here (objectui#4155).
      *
      * The list toolbar's filter panel is the USER's state — it belongs to the
-     * session and to that user's own list state (`listPrefs`, objectui#12418),
+     * session and to the list's draft (`./listDraftStore.ts`),
      * not to the view's stored body. It used to persist: every `onFilterChange` the panel
      * emitted was folded and written to the view overlay, so merely opening the
      * panel and clicking `Add filter` wrote an incomplete `field equals ''`
@@ -470,20 +470,16 @@ export function useObjectViewViewCrud({
     }, [dataSource, objectName, savedViews, isSavedView, t]);
 
     /**
-     * A drag in Manage Views reorders the tabs FOR THIS USER (objectui#12418).
-     *
-     * It used to write `viewOrder:<object>` to this browser and then PATCH a
-     * `sortOrder` onto every saved view's shared row, "so other sessions /
-     * users can pick up the order": one user's drag reordered the tabs for
-     * everyone, and under a walled posture the metadata write was refused. The
-     * order is now the user's preference (the `ui.list.<object>` row, through
-     * `listPrefs`), and nothing here writes `/meta/view`. The authored order —
-     * the declared sequence, then a stored `sortOrder` — stays every user's
-     * default, and the view editor is where an author changes it.
+     * A drag in Manage Views reorders the tabs FOR THIS READER, in this
+     * browser (`listLayout`, `./listLayoutStore.ts`). Nothing here writes
+     * `/meta/view` or any other server row: the authored order — the declared
+     * sequence, then a stored `sortOrder` — stays every user's default, and
+     * the view editor is where an author changes it.
      */
+    const setViewOrder = listLayout.setViewOrder;
     const handleReorderViews = useCallback((orderedIds: string[]) => {
-        listPrefs.setViewOrder(orderedIds);
-    }, [listPrefs.setViewOrder]);
+        setViewOrder(orderedIds);
+    }, [setViewOrder]);
 
     const handleConfigView = useCallback((vid: string) => {
         // System (metadata-defined) views are read-only — opening the
