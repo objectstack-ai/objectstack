@@ -1618,7 +1618,7 @@
         {
           "name": "inlineEdit",
           "type": "boolean",
-          "description": "Offer the per-field double-click / pencil inline-edit affordances in the detail body. On by default, and an OPT-OUT only: the value is combined with the object's own editability (system, engine-owned, append-only and better-auth objects are not user-editable unless they opened userActions.edit) and with the server's effective API operation set for the object, so `false` always wins while `true` cannot open editing the platform refuses. The edit session and the atomic Save bar are hosted by the page, so one draft spans the highlights strip and this body."
+          "description": "Offer the per-field edit affordances in the detail body. On the default record page a click on a value (or its pencil) edits that field alone in place and saves it on Enter or a click elsewhere; on a page an author laid out a double-click (or the pencil) enters the page's whole-record edit session, saved together by its Save bar. On by default, and an OPT-OUT only: the value is combined with the object's own editability (system, engine-owned, append-only and better-auth objects are not user-editable unless they opened userActions.edit) and with the server's effective API operation set for the object, so `false` always wins while `true` cannot open editing the platform refuses. The whole-record session and its atomic Save bar are hosted by the page, so that one draft spans the highlights strip and this body."
         },
         {
           "name": "showHeader",
