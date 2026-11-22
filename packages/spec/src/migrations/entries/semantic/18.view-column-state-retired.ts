@@ -24,7 +24,7 @@ export const entry: SemanticMigration = {
     + 'every flattened overlay (a view body with no container slot) — in `views` (stack sources, and '
     + 'every stored row, replayed on each read before it is served or badged) and in the '
     + 'assembled-manifest view item channel. The delete is lossless for what anyone sees: the '
-    + 'maintainer ruled the stored layout is not carried forward (#35955, every reader goes back to '
+    + 'maintainer ruled the stored layout is not carried forward (every reader goes back to '
     + 'the view\'s own columns and widths), and no reader applies it any more. The judgment left is '
     + 'about the rows it empties. An overlay row that held nothing but its identity and the key — the '
     + 'shape a column drag on a system view wrote before the overlay writer retired — is left '
