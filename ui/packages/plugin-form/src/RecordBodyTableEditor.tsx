@@ -44,6 +44,7 @@ import { usePermissions } from '@object-ui/permissions';
 import {
   extractFieldErrors,
   extractWriteErrorMessage,
+  useInlineEdit,
   useRecordContext,
 } from '@object-ui/react';
 import { buildMasterDetailEditBatch, idOf, isBlankRow, type ChildSchema } from './masterDetailTx';
@@ -297,7 +298,18 @@ export const RecordBodyTableEditor: React.FC<RecordBodyTableEditorProps> = ({ ob
   // (`columnCurrencies`), and any other money column is in its own field's
   // currency (`columnFields`). A pick copies an amount only into a column in
   // the same currency.
-  const headerRow = record?.data as Record<string, unknown> | undefined;
+  //
+  // The record is read as the user has it in the open edit, not as stored:
+  // the edit state saves a code change on the record and its new lines in one
+  // batch, so a code staged in the inline draft is the code the lines are
+  // saved under. A live value is `{ ...data, ...draft }` (InlineEditContext).
+  const inline = useInlineEdit();
+  const savedRow = record?.data as Record<string, unknown> | undefined;
+  const draftRow = inline?.draft;
+  const headerRow = useMemo<Record<string, unknown> | undefined>(
+    () => (draftRow && Object.keys(draftRow).length > 0 ? { ...(savedRow ?? {}), ...draftRow } : savedRow),
+    [savedRow, draftRow],
+  );
   const lineColumnCurrencies = useMemo(
     () => followedColumnCurrencies(
       parentCurrencyFieldsOf(childSchema?.fields as Record<string, unknown> | undefined, relationshipField),

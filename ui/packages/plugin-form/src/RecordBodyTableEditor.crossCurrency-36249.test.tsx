@@ -9,13 +9,15 @@
  * judges a pick's amount by each line column's own currency, as the other
  * hosts do (objectstack#36249): a line price following a EUR invoice withholds
  * a home-currency price, and a pick between two amounts in the same currency
- * fills as before.
+ * fills as before. The record is judged as the user has it in the open edit:
+ * a currency code staged in the inline draft, not yet saved, is the code the
+ * new lines are saved under.
  */
 
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { RecordContextProvider, SchemaRendererContext } from '@object-ui/react';
+import { InlineEditProvider, RecordContextProvider, SchemaRendererContext, useInlineEdit } from '@object-ui/react';
 import { LocalizationProvider } from '@object-ui/i18n';
 import { registerAllFields } from '@object-ui/fields';
 import {
@@ -57,9 +59,20 @@ const withPrice = (schema: typeof LINE_SCHEMA | typeof PRODUCT_SCHEMA, price: Re
   fields: { ...schema.fields, unit_price: price },
 });
 
+/** Stages the record's currency in the inline draft, as the record page's edit does. */
+function StageCurrency({ code }: { code: string }) {
+  const inline = useInlineEdit();
+  const setField = inline?.setField;
+  React.useEffect(() => {
+    setField?.('currency_code', code);
+  }, [setField, code]);
+  return null;
+}
+
 function mount(
   invoiceCurrency: string,
   schemas: { line?: Record<string, unknown>; product?: Record<string, unknown> } = {},
+  draftCurrency?: string,
 ) {
   const lineSchema = schemas.line ?? LINE_SCHEMA;
   const productSchema = schemas.product ?? PRODUCT_SCHEMA;
@@ -97,9 +110,12 @@ function mount(
           dataSource={ds as never}
           data={{ id: 'i1', currency_code: invoiceCurrency } as never}
         >
-          <RecordEditSessionContext.Provider value={session}>
-            <RecordBodyTableEditor objectName="fx_line" relationshipField="invoice" />
-          </RecordEditSessionContext.Provider>
+          <InlineEditProvider>
+            {draftCurrency ? <StageCurrency code={draftCurrency} /> : null}
+            <RecordEditSessionContext.Provider value={session}>
+              <RecordBodyTableEditor objectName="fx_line" relationshipField="invoice" />
+            </RecordEditSessionContext.Provider>
+          </InlineEditProvider>
         </RecordContextProvider>
       </SchemaRendererContext.Provider>
     </LocalizationProvider>,
@@ -157,6 +173,23 @@ describe('RecordBodyTableEditor — a pick does not copy an amount across curren
 
   it('a line following a USD invoice: the home price fills as before, with no note', async () => {
     const { ds, rows } = mount('USD');
+    await pickWidget(ds);
+    await waitFor(() => expect(rows()?.[0]).toMatchObject({ product: 'p1', description: 'A widget', unit_price: 100 }));
+    expect(screen.queryByTestId('line-items-autofill-withheld-0')).toBeNull();
+  });
+
+  it('an invoice stored in USD with EUR staged in the open edit: the home price is withheld', async () => {
+    const { ds, rows } = mount('USD', {}, 'EUR');
+    await pickWidget(ds);
+    await waitFor(() => expect(rows()?.[0]).toMatchObject({ product: 'p1', description: 'A widget' }));
+    expect(rows()![0].unit_price ?? null).toBeNull();
+    const note = await screen.findByTestId('line-items-autofill-withheld-0');
+    expect(note.textContent).toContain('$100.00');
+    expect(note.textContent).toContain('EUR');
+  });
+
+  it('an invoice stored in EUR with USD staged in the open edit: the home price fills, with no note', async () => {
+    const { ds, rows } = mount('EUR', {}, 'USD');
     await pickWidget(ds);
     await waitFor(() => expect(rows()?.[0]).toMatchObject({ product: 'p1', description: 'A widget', unit_price: 100 }));
     expect(screen.queryByTestId('line-items-autofill-withheld-0')).toBeNull();
