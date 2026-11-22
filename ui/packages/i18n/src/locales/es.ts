@@ -5762,6 +5762,12 @@ const es = {
       object: "Objeto",
       unknownType: "Tipo de vista de metadatos desconocido. Se esperaba {{a}}, {{b}} o {{c}}.",
       unknownTypeNamed: "Tipo de vista de metadatos desconocido «{{type}}». Se esperaba {{a}}, {{b}} o {{c}}.",
+      condition: "condición",
+      otherwise: "en otro caso",
+      conditionAnd: "y",
+      conditionOr: "o",
+      conditionMore: "otras condiciones",
+      runsWhen: "Se ejecuta cuando {{condition}}",
     },
   },
   reactPage: {

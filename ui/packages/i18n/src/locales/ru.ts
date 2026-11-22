@@ -5933,6 +5933,12 @@ const ru = {
       object: "Объект",
       unknownType: "Неизвестный тип представления метаданных. Ожидается {{a}}, {{b}} или {{c}}.",
       unknownTypeNamed: "Неизвестный тип представления метаданных «{{type}}». Ожидается {{a}}, {{b}} или {{c}}.",
+      condition: "условие",
+      otherwise: "иначе",
+      conditionAnd: "и",
+      conditionOr: "или",
+      conditionMore: "другие условия",
+      runsWhen: "Запускается, когда {{condition}}",
     },
   },
   reactPage: {
