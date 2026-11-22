@@ -117,12 +117,13 @@ describe('deriveCrudCases — objects on an external datasource are not exercise
     expect(cases.find((x) => x.object === 'side_task')?.blocked).toBeFalsy();
   });
 
-  // A managed SQL or memory datasource runs on verify's stand-in, so its
-  // objects are exercised (`verify.managed-datasource-stand-in.test.ts`). One
-  // whose engine has no stand-in keeps its real driver, so verify withholds
-  // its own writes from its objects; the app's seed, hooks and flows still
-  // reach that real store, and the reason says so.
-  it('exercises an object on a managed SQL datasource, and withholds one on an engine with no stand-in', () => {
+  // Every managed datasource on an engine the platform ships runs on verify's
+  // stand-in, `mongodb` included, so its objects are exercised
+  // (`verify.managed-datasource-stand-in.test.ts`), and so is an object that
+  // requires one. A managed datasource on a plugin's driver id never reaches
+  // derive in a run: `bootStack` refuses that boot before it composes, so
+  // derive carries no second gate for it.
+  it('exercises objects on managed datasources of every shipped engine, mongodb included', () => {
     const config = {
       datasources: [
         { name: 'pg', driver: 'postgres', schemaMode: 'managed' },
@@ -137,17 +138,14 @@ describe('deriveCrudCases — objects on an external datasource are not exercise
       ],
     };
     const cases = deriveCrudCases(config);
-    expect(cases.find((x) => x.object === 'pg_task')?.blocked).toBeFalsy();
-    expect(cases.find((x) => x.object === 'doc_task')?.blocked).toBe(
-      'managed datasource "docs" (driver "mongodb"): not exercised — verify has no ephemeral stand-in for ' +
-        "this engine, so it withholds its own writes; the app's seed, hooks and flows still write to the " +
-        'real database',
-    );
-    expect(cases.find((x) => x.object === 'plug_task')?.blocked).toContain(
-      'managed datasource "plug" (driver "acme-plugin-driver"): not exercised',
-    );
-    expect(cases.find((x) => x.object === 'doc_note')?.blocked).toContain(
-      'required relational target "doc_task" is withheld on purpose — managed datasource "docs"',
+    for (const object of ['pg_task', 'doc_task', 'plug_task', 'doc_note']) {
+      const c = cases.find((x) => x.object === object);
+      expect(c?.blocked, object).toBeFalsy();
+    }
+    expect(cases.find((x) => x.object === 'doc_task')?.body).toHaveProperty('title');
+    // The required target is created first and its id threaded in.
+    expect(cases.findIndex((x) => x.object === 'doc_task')).toBeLessThan(
+      cases.findIndex((x) => x.object === 'doc_note'),
     );
   });
 });

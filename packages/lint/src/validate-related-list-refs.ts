@@ -62,10 +62,56 @@
  * the sentence is `fieldGroupBodyTableRefusal`'s, the one `defineStack` writes.
  * `relatedLists` entries are not judged this way: they order body tables and
  * side cards alike.
+ *
+ * ## The built-in tabs and an entry's own columns (#35897, #35899)
+ *
+ * A `relatedLists` entry is a bare name or `{ list, label?, columns? }`; the
+ * name is read through `relatedListEntryName` (`@objectstack/spec/data`).
+ *
+ *  - The three built-in tab names (`RECORD_PAGE_BUILTIN_TABS`:
+ *    `sys_attachment`, `sys_approval_request`, `sys_activity`) name the record
+ *    page's own tabs, never a child, so they are not judged as one.
+ *    `sys_attachment` on an object that does not enable files draws nothing:
+ *    `related-list-attachments-off` at `warning`, since turning files on
+ *    later makes the entry live, and the entry is not wrong in itself.
+ *  - `sys_comment` and `sys_audit_log` are parts of the activity stream
+ *    (`RELATED_LIST_BUILTIN_PART_OF`), not tabs: `related-list-stream-part`
+ *    at `warning`, prescribing `sys_activity`, in place of the unknown-name
+ *    verdict such a name would otherwise earn where the platform object is
+ *    in view.
+ *  - An object entry's `columns` are fields of the child it names: each is
+ *    judged against every child that entry names whose fields are known (the
+ *    authored fields and the registry-injected columns, as
+ *    `relatedListColumns` is judged in `validate-object-field-refs`), and a
+ *    miss is `related-list-column-unknown` at `error`: the list would draw an
+ *    empty column. A child left unjudged above is left unjudged here. A
+ *    dotted column (`account.industry`) keeps that family's path resolution
+ *    (`resolveFieldPath`, relationship hops from the child), so a column the
+ *    FK's `relatedListColumns` accepts is accepted here too; a path the graph
+ *    cannot answer is left unjudged, as there.
+ *  - [#35901] An object extension's list placement (`place: [{ list,
+ *    columns }]`, at the top level and in each package body) carries its
+ *    columns as an entry does; they are judged the same way, against the
+ *    child the placement names.
  */
 
-import { fieldGroupBodyTableRefusal, type NamedInboundRelationship } from '@objectstack/spec/data';
-import { objectsAsServed, recordsOf } from './object-graph.js';
+import {
+  fieldGroupBodyTableRefusal,
+  isRecordPageBuiltinTab,
+  relatedListEntryName,
+  RELATED_LIST_BUILTIN_PART_OF,
+  type NamedInboundRelationship,
+} from '@objectstack/spec/data';
+import {
+  describeFieldPathVerdict,
+  indexServedObjectGraph,
+  isUnjudgeable,
+  objectsAsServed,
+  recordsOf,
+  resolveFieldPath,
+  type ObjectGraph,
+} from './object-graph.js';
+import { injectedColumnsFor } from './system-fields.js';
 
 /** A related-list entry that matches no inbound relationship of its object. */
 export const RELATED_LIST_REF_UNKNOWN = 'related-list-ref-unknown';
@@ -73,9 +119,23 @@ export const RELATED_LIST_REF_UNKNOWN = 'related-list-ref-unknown';
 /** A field group's `relatedList` naming a relationship that is not a body table. */
 export const RELATED_LIST_GROUP_NOT_BODY = 'related-list-group-not-body';
 
+/** A `relatedLists` object entry's `columns` naming no field of the child it names. */
+export const RELATED_LIST_COLUMN_UNKNOWN = 'related-list-column-unknown';
+
+/** `relatedLists` names `sys_attachment` on an object that does not enable files. */
+export const RELATED_LIST_ATTACHMENTS_OFF = 'related-list-attachments-off';
+
+/** `relatedLists` names a part of the activity stream (`sys_comment`, `sys_audit_log`) as a tab. */
+export const RELATED_LIST_STREAM_PART = 'related-list-stream-part';
+
 export interface RelatedListRefFinding {
-  /** Always `error`: the same verdict `defineStack` gives. */
-  severity: 'error';
+  /**
+   * `error` for a name or column that places nothing (the verdict `defineStack`
+   * gives for a name); `warning` for a built-in tab entry that draws nothing
+   * on this object today (`related-list-attachments-off`,
+   * `related-list-stream-part`).
+   */
+  severity: 'error' | 'warning';
   /** Diagnostic rule id. */
   rule: string;
   /** Human-readable location, e.g. `object "crm_lead" › relatedLists`. */
@@ -132,14 +192,57 @@ export function validateRelatedListRefs(stack: AnyRec, options?: RelatedListRefO
 
   // Child object name → its fields by name, as served (see the header).
   const fieldsByObject = new Map<string, Map<string, AnyRec>>();
+  // Child object name → the registry-injected columns it carries (#35899: an entry's `columns`).
+  const injectedByObject = new Map<string, ReadonlySet<string>>();
   const merge = (child: string, fields: AnyRec[]): void => {
     const byName = fieldsByObject.get(child) ?? new Map<string, AnyRec>();
     for (const f of fields) if (typeof f.name === 'string') byName.set(f.name, f);
     fieldsByObject.set(child, byName);
   };
+  // The graph a dotted column's relationship hops are walked on (built on first need).
+  let graph: ObjectGraph | undefined;
   for (const obj of objectsAsServed(stack).objects) {
-    if (typeof obj.name === 'string') merge(obj.name, recordsOf(obj.fields));
+    if (typeof obj.name !== 'string') continue;
+    merge(obj.name, recordsOf(obj.fields));
+    injectedByObject.set(obj.name, injectedColumnsFor(obj));
   }
+
+  /**
+   * [#35899] A list entry's own `columns`, judged against the child whose rows
+   * the list shows (a `relatedLists` object entry, and since #35901 an object
+   * extension's list placement): each must be a field of the child, an
+   * injected column, or a relationship path from it that resolves.
+   */
+  const judgeColumns = (child: string, columns: readonly unknown[], name: string, subject: string, where: string, path: string): void => {
+    const fields = fieldsByObject.get(child);
+    if (!fields) return;
+    const injected = injectedByObject.get(child) ?? new Set<string>();
+    columns.forEach((column, c) => {
+      if (typeof column !== 'string' || fields.has(column) || injected.has(column)) return;
+      let message =
+        `${subject}.columns[${c}] '${column}' is not a field of '${child}', ` +
+        `the child whose rows the list '${name}' shows, so the column would draw empty.`;
+      if (column.includes('.')) {
+        // A relationship path from the child, judged as `relatedListColumns` judges one.
+        graph ??= indexServedObjectGraph(stack);
+        const verdict = resolveFieldPath(graph, child, column);
+        if (!verdict || isUnjudgeable(verdict)) return;
+        const account = describeFieldPathVerdict(verdict, column, `${subject}.columns[${c}]`);
+        if (!account) return; // the path resolves
+        message = `${account.message} The path is walked from '${child}', the child whose rows the list '${name}' shows, so the column would draw empty.`;
+      }
+      findings.push({
+        severity: 'error',
+        rule: RELATED_LIST_COLUMN_UNKNOWN,
+        where,
+        path: `${path}.columns[${c}]`,
+        message,
+        hint:
+          `Name a field of '${child}' (a related-list column is a field of the child object), ` +
+          'or drop the entry\'s columns and let them derive.',
+      });
+    });
+  };
 
   // Parent name → its inbound relationships, in child then field order.
   const inbound = new Map<string, NamedInboundRelationship[]>();
@@ -193,8 +296,48 @@ export function validateRelatedListRefs(stack: AnyRec, options?: RelatedListRefO
     };
 
     if (Array.isArray(obj.relatedLists)) {
-      obj.relatedLists.forEach((entry, i) =>
-        judge(entry, `relatedLists[${i}]`, 'relatedLists', `${objPath}.relatedLists[${i}]`));
+      obj.relatedLists.forEach((entry, i) => {
+        const path = `${objPath}.relatedLists[${i}]`;
+        const name = relatedListEntryName(entry);
+        if (name === undefined) return;
+        if (isRecordPageBuiltinTab(name)) {
+          const enable = isRec(obj.enable) ? obj.enable : undefined;
+          if (name === 'sys_attachment' && enable?.files !== true) {
+            findings.push({
+              severity: 'warning',
+              rule: RELATED_LIST_ATTACHMENTS_OFF,
+              where: `object "${parentName}" › relatedLists`,
+              path,
+              message:
+                `Object '${parentName}' relatedLists[${i}] 'sys_attachment' places the attachments tab, but ` +
+                `'${parentName}' does not enable files (enable.files), so the record page draws no attachments tab.`,
+              hint: "Set enable: { files: true } on the object to show attachments, or remove 'sys_attachment'.",
+            });
+          }
+          return;
+        }
+        const partOf = RELATED_LIST_BUILTIN_PART_OF[name];
+        if (partOf !== undefined) {
+          findings.push({
+            severity: 'warning',
+            rule: RELATED_LIST_STREAM_PART,
+            where: `object "${parentName}" › relatedLists`,
+            path,
+            message:
+              `Object '${parentName}' relatedLists[${i}] '${name}' is part of the record page's activity stream, ` +
+              `not a tab of its own, so it places nothing; the stream's tab is '${partOf}'.`,
+            hint: `Write '${partOf}' to place the activity stream tab (activities, discussion and field changes in one stream).`,
+          });
+          return;
+        }
+        judge(name, `relatedLists[${i}]`, 'relatedLists', path);
+        if (!isRec(entry) || !Array.isArray(entry.columns)) return;
+        // [#35899] The entry's own columns: fields of every child it names whose fields are known.
+        const children = [...new Set(namedBy(name).map((r) => r.child))];
+        for (const child of children) {
+          judgeColumns(child, entry.columns, name, `Object '${parentName}' relatedLists[${i}]`, `object "${parentName}" › relatedLists`, path);
+        }
+      });
     }
     if (Array.isArray(obj.fieldGroups)) {
       obj.fieldGroups.forEach((group, i) => {
@@ -215,6 +358,34 @@ export function validateRelatedListRefs(stack: AnyRec, options?: RelatedListRefO
         });
       });
     }
+  }
+
+  // [#35901] An object extension's list placement carries `columns` as a
+  // `relatedLists` entry does, and they are judged the same way, against the
+  // child the placement names (its package's own, so in view where the
+  // extension is authored). The top level and each package body.
+  const extensionBodies: Array<[string, unknown]> = [
+    ['', stack.objectExtensions],
+    ...(Array.isArray(stack.packages)
+      ? stack.packages.map((entry, i): [string, unknown] => [
+        `packages[${i}].manifest.`,
+        isRec(entry) && isRec(entry.manifest) ? entry.manifest.objectExtensions : undefined,
+      ])
+      : []),
+  ];
+  for (const [at, extensions] of extensionBodies) {
+    if (!Array.isArray(extensions)) continue;
+    extensions.forEach((ext, j) => {
+      if (!isRec(ext) || typeof ext.extend !== 'string' || !Array.isArray(ext.place)) return;
+      const target = ext.extend;
+      ext.place.forEach((entry, k) => {
+        if (!isRec(entry) || typeof entry.list !== 'string' || !Array.isArray(entry.columns)) return;
+        const list = entry.list;
+        const child = list.includes('.') ? list.slice(0, list.indexOf('.')) : list;
+        const path = `${at}objectExtensions[${j}].place[${k}]`;
+        judgeColumns(child, entry.columns, list, `Object extension of '${target}' place[${k}]`, `object extension of "${target}" › place`, path);
+      });
+    });
   }
   return findings;
 }

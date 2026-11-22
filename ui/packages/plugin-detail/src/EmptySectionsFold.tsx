@@ -13,6 +13,7 @@ import { usePrintPage, useRecordPagePreferences } from '@object-ui/react';
 import type { DetailViewSection } from '@object-ui/types';
 import { hasCellValue } from './emptiness';
 import { useDetailTranslation } from './useDetailTranslation';
+import { useEmptyFieldTotal, useRecordFieldList } from './recordFieldList';
 
 export interface EmptySectionsFoldProps {
   /** The sections the body draws, as handed to each `DetailSection`. */
@@ -233,5 +234,37 @@ export const EmptySectionsLine: React.FC<EmptySectionsLineProps> = ({
       {sections.map((section, index) => (revealed || !folded[index] ? renderSection(section, index) : null))}
       {line}
     </>
+  );
+};
+
+/**
+ * The field list's last row (objectstack#36147): every empty field of every
+ * group the list holds, folded into one 「显示 N 个空字段」 row. The groups
+ * hide their own empty rows and report them (`useReportEmptyFields`); this
+ * row reads the total and reveals them all in place, then reads 「隐藏空字段」.
+ * Draws nothing when no group holds an empty row, and outside a field list.
+ */
+export const EmptyFieldsRow: React.FC = () => {
+  const { t } = useDetailTranslation();
+  const list = useRecordFieldList();
+  const total = useEmptyFieldTotal();
+  if (!list || total === 0) return null;
+  const shown = list.showEmpty;
+  return (
+    <div className="-ml-2" data-empty-fields-row="" data-empty-fields-count={total}>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        aria-expanded={shown}
+        onClick={list.toggleShowEmpty}
+        className="h-11 sm:h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+      >
+        {shown ? <EyeOff className="h-3.5 w-3.5 mr-1.5" /> : <Eye className="h-3.5 w-3.5 mr-1.5" />}
+        {shown
+          ? t('detail.hideEmptyFields', { defaultValue: 'Hide empty fields' })
+          : t('detail.showEmptyFields', { count: total, defaultValue: 'Show {{count}} empty fields' })}
+      </Button>
+    </div>
   );
 };

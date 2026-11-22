@@ -39,9 +39,12 @@ const writesInquiry = writesRecordsOf(OBJECT);
 
 // The record header's Edit CTA and the record body's inline-edit pencils carry
 // no test id; their accessible names are the `detail.edit` and
-// `detail.editInlineHint` strings, en or zh.
+// `detail.editInlineHint` strings, en or zh, or `detail.clickToEdit` on the
+// record page's field list (objectstack#36147), where the pencil is the
+// keyboard's way in, `sr-only` until focused, so it is counted, not seen.
 const editButton = (page: Page) => page.getByRole('button', { name: /^(Edit|编辑)$/ });
-const inlineEditPencils = (page: Page) => page.getByRole('button', { name: /^(Double-click to edit|双击编辑)$/ });
+const inlineEditPencils = (page: Page) =>
+  page.getByRole('button', { name: /^(Double-click to edit|双击编辑|Click to edit|点击编辑)$/ });
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -116,7 +119,7 @@ test('a member who may read but not write an inquiry gets a read-only form and n
   await test.step('control, as the admin: the same form is editable and its save persists', async () => {
     await page.goto(recordPath(id));
     await expect(editButton(page)).toBeVisible({ timeout: 30_000 });
-    await expect(inlineEditPencils(page).first()).toBeVisible();
+    await expect.poll(() => inlineEditPencils(page).count(), { timeout: 30_000 }).toBeGreaterThan(0);
 
     await page.goto(formPath(id));
     const dialog = page.getByRole('dialog');

@@ -328,6 +328,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      remove_user_manager: {
+        label: "マネージャーを解除",
+        confirmText: "このユーザーのマネージャーを解除しますか?マネージャーを再設定するまで、このユーザーには報告先がありません。承認ルーティングと own_and_reports レコードスコープもこの変更に従います。",
+        successMessage: "マネージャーを解除しました"
+      },
       list_platform_admins: {
         label: "プラットフォーム管理者",
         resultDialog: {

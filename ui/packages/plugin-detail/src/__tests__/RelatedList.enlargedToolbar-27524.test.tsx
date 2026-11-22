@@ -10,24 +10,29 @@
  * The record page's related tab (the enlarged related list,
  * `RelatedListEnlargedContext`).
  *
- * objectstack#35601 — no filter, sort, options or condition row, and the count
- * only in the tab title. The right end carries two entries: 「↗」 (the child's
- * list under this record's condition, on an empty list too) and 「+ 添加」,
- * the one add entry, decided by the relationship when the page authored no
+ * objectstack#35601 — the count only in the tab title, and 「+ 添加」, the one
+ * add entry, at the right end. objectstack#35892 took 「↗」 (open in list)
+ * away, put the list's name at the left and the list page's condition row
+ * under it (`RelatedList.tab-35892.test.tsx`). The add entry is decided by the relationship when the page authored no
  * `add`: a `lookup` child opens a picker of the child object whose first row is
  * 「新建」; a `master_detail` child with a catalog opens a picker of the
  * catalog; one with none creates a row directly. A pick of several is ONE
  * transactional batch: all rows or none. A stateful child is grouped by its
- * status, completed last. The reader's header sort is remembered.
+ * status, completed last. The reader's header sort holds for this visit only
+ * (objectstack#35892, ruling 7064083597): it is no longer remembered.
  */
 
-import { describe, it, expect, vi, beforeAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 import { FilterScopeProvider, RecordContextProvider, RecordPagePreferencesProvider, type RecordPagePreference } from '@object-ui/react';
 import { ComponentRegistry } from '@object-ui/core';
 import { RelatedList } from '../RelatedList';
+import { resetRelatedTabConditionsForTests } from '../relatedTabConditions';
+
+// The related tab's conditions live in module memory for the visit (objectstack#35892).
+afterEach(() => resetRelatedTabConditionsForTests());
 import { RelatedListEnlargedContext } from '../relatedListCompact';
 
 /**
@@ -156,28 +161,28 @@ async function pickThree() {
   fireEvent.click(within(dialog).getByTestId('record-picker-confirm'));
 }
 
-describe('the related tab carries 「↗」 and 「+ 添加」 alone (objectstack#35601)', () => {
-  it('no filter, chips, export or New; the count is not repeated; ↗ opens the list', async () => {
+describe('the related tab names its list and carries 「+ 添加」, with no 「↗」 (objectstack#35601, objectstack#35892)', () => {
+  it('no filter box, chips, export, New or 「↗」; the count is not repeated; the name leads the row', async () => {
     const onViewAll = vi.fn();
     renderList({ onViewAll });
     await waitFor(() => expect(screen.getByText('Send quote')).toBeInTheDocument());
     const bar = toolbar();
     expect(bar.getAttribute('role')).toBe('toolbar');
     const controls = Array.from(bar.querySelectorAll('button')).map((b) => b.getAttribute('aria-label') || b.textContent);
-    expect(controls).toEqual(['View All', 'Add']);
+    expect(controls).toEqual(['Add']);
+    expect(document.querySelector('[data-related-enlarged-title]')?.textContent).toBe('Tasks');
     expect(within(bar).queryByRole('searchbox')).toBeNull();
     expect(bar.querySelector('[data-related-chip], [data-related-enlarged-export]')).toBeNull();
     expect(screen.queryByTestId('related-list-new')).toBeNull();
     expect(document.querySelector('[data-related-enlarged-status]')).toBeNull();
     expect(screen.queryByLabelText('2 records')).toBeNull();
-    fireEvent.click(bar.querySelector('[data-related-open-list]')!);
-    expect(onViewAll).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('[data-related-open-list]')).toBeNull();
   });
 
-  it('an empty list keeps both entries', async () => {
+  it('an empty list keeps its add entry', async () => {
     renderList({ rows: [] });
     await waitFor(() => expect(document.querySelector('[data-related-enlarged-empty]')).not.toBeNull());
-    expect(toolbar().querySelector('[data-related-open-list]')).not.toBeNull();
+    expect(document.querySelector('[data-related-open-list]')).toBeNull();
     expect(addButton()).not.toBeNull();
   });
 
@@ -376,7 +381,7 @@ describe('a stateful child is grouped by its status on the related tab (objectst
   });
 });
 
-describe('the related tab remembers the reader\'s header sort (objectstack#35601)', () => {
+describe('the related tab no longer remembers the reader\'s header sort (objectstack#35601 → objectstack#35892)', () => {
   function store(initial: RecordPagePreference = {}) {
     const states: Record<string, RecordPagePreference> = { lead: initial };
     return {
@@ -385,7 +390,7 @@ describe('the related tab remembers the reader\'s header sort (objectstack#35601
     };
   }
 
-  it('a header click is written to the record-page preference of the parent object', async () => {
+  it('a header click is not written to the record-page preference: it holds for this visit (objectstack#35892)', async () => {
     const preferences = store();
     render(
       <RecordPagePreferencesProvider value={preferences}>
@@ -408,14 +413,11 @@ describe('the related tab remembers the reader\'s header sort (objectstack#35601
     );
     await waitFor(() => expect(screen.getByText('Send quote')).toBeInTheDocument());
     fireEvent.click(document.querySelector('[data-sort-header="subject"]')!);
-    await waitFor(() => expect(preferences.update).toHaveBeenCalled());
-    expect(preferences.update.mock.calls.at(-1)).toEqual([
-      'lead',
-      { relatedLists: { 'task.lead': { sort: { field: 'subject', order: 'desc' } } } },
-    ]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(preferences.update).not.toHaveBeenCalled();
   });
 
-  it('a remembered sort is the one the list reads by', async () => {
+  it('a sort an earlier version remembered is no longer read: the list reads in its declared order (objectstack#35892)', async () => {
     const preferences = store({ relatedLists: { 'task.lead': { sort: { field: 'subject', order: 'desc' } } } });
     const ds = dataSourceFor();
     render(
@@ -437,12 +439,10 @@ describe('the related tab remembers the reader\'s header sort (objectstack#35601
         </RecordContextHarness>
       </RecordPagePreferencesProvider>,
     );
-    await waitFor(() => {
-      const last = ds.find.mock.calls.filter(([r]: [string]) => r === 'task').at(-1);
-      expect(JSON.stringify(last?.[1]?.$orderby)).toContain('subject');
-    });
-    const last = ds.find.mock.calls.filter(([r]: [string]) => r === 'task').at(-1);
-    expect(JSON.stringify(last?.[1]?.$orderby)).toContain('desc');
+    await waitFor(() => expect(screen.getByText('Send quote')).toBeInTheDocument());
+    for (const [resource, params] of ds.find.mock.calls as Array<[string, any]>) {
+      if (resource === 'task') expect(params?.$orderby).toBeUndefined();
+    }
   });
 });
 

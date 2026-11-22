@@ -102,7 +102,7 @@ import {
 } from '@object-ui/data-objectstack';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { NavigationModeSchema, resolveI18nLabel, type I18nLabel, type NavigationMode } from '@objectstack/spec/ui';
-import { InspectorReorderButtons, InspectorShell } from '../metadata-admin/inspectors/_shared.js';
+import { flagUnknownValue, InspectorReorderButtons, InspectorShell } from '../metadata-admin/inspectors/_shared.js';
 import { FieldsListEditor } from '../metadata-admin/previews/FieldsListEditor.js';
 import { FieldListRowNameOnHover } from '../metadata-admin/previews/ViewColumnPanes.js';
 import { useObjectFields } from '../metadata-admin/previews/useObjectFields.js';
@@ -1060,18 +1060,17 @@ const KANBAN_FIELDS_LABEL_ID = 'studio-list-view-kanban-fields';
 const UNSET = '__unset__';
 
 /**
- * The copy of each `navigation.mode` the spec declares (`NavigationModeSchema`).
- * Keyed by the spec's own union, so a member the spec adds or retires is a
- * compile error here — `modal`, `split` and `popover` left with
- * objectstack#26677 (a side-by-side pane is a reader's preference, not
- * metadata).
+ * The `navigation.mode` values the click-to-open select offers, besides the
+ * default (no key): only `none`. On an object's list the key is deprecated
+ * (objectstack#35854) — the record name opens the full page and the hover icon
+ * the side panel, for every reader — so `drawer`, `page` and `new_window`
+ * still parse and change nothing, and offering them would let an author pick a
+ * setting the board ignores. A stored one is drawn, flagged deprecated, so it
+ * can be seen and cleared; opening the view writes nothing.
  */
-const NAVIGATION_MODE_LABEL_KEYS: Record<NavigationMode, string> = {
-  drawer: 'engine.studio.inspector.listView.kanbanCard.mode.drawer',
-  page: 'engine.studio.inspector.listView.kanbanCard.mode.page',
-  new_window: 'engine.studio.inspector.listView.kanbanCard.mode.newWindow',
-  none: 'engine.studio.inspector.listView.kanbanCard.mode.none',
-};
+const OFFERED_NAVIGATION_MODES: ReadonlyArray<{ mode: NavigationMode; labelKey: string }> = [
+  { mode: 'none', labelKey: 'engine.studio.inspector.listView.kanbanCard.mode.none' },
+];
 
 /**
  * objectui#12725 — the 看板卡片 section of a kanban view: what each card on
@@ -1083,8 +1082,8 @@ const NAVIGATION_MODE_LABEL_KEYS: Record<NavigationMode, string> = {
  *    show on cards"), ordered;
  *  - title → `kanban.titleField`, optional: empty removes the key, and the
  *    card shows the record's display name, as the spec describes;
- *  - click to open → `navigation.mode` (`NavigationModeSchema`); the default
- *    removes the key;
+ *  - click to open → `navigation.mode`, offering only `none`
+ *    ({@link OFFERED_NAVIGATION_MODES}); the default removes the key;
  *  - group by → `kanban.groupByField`, required by the spec. Every field of
  *    the object is offered: the spec's check refuses only a padded name, and
  *    a field's name is never padded.
@@ -1222,17 +1221,24 @@ function KanbanCardSection({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
+            {/* A stored value the select does not offer: drawn first and flagged,
+                as `InspectorSelectField` draws one (objectui#8488), so the
+                trigger never goes blank and 默认 below clears it. */}
+            {mode && !OFFERED_NAVIGATION_MODES.some((o) => o.mode === mode) && (
+              <SelectItem value={mode}>
+                <span className="font-mono">
+                  {NavigationModeSchema.options.includes(mode as never)
+                    ? flagUnknownValue(mode, t('engine.form.deprecated', locale), locale)
+                    : mode}
+                </span>
+              </SelectItem>
+            )}
             <SelectItem value={UNSET}>
               <span className="text-muted-foreground">{t('engine.studio.inspector.listView.kanbanCard.openDefault', locale)}</span>
             </SelectItem>
-            {mode && !NavigationModeSchema.options.includes(mode as never) && (
-              <SelectItem value={mode}>
-                <span className="font-mono">{mode}</span>
-              </SelectItem>
-            )}
-            {NavigationModeSchema.options.map((m) => (
-              <SelectItem key={m} value={m}>
-                {t(NAVIGATION_MODE_LABEL_KEYS[m], locale)}
+            {OFFERED_NAVIGATION_MODES.map((o) => (
+              <SelectItem key={o.mode} value={o.mode}>
+                {t(o.labelKey, locale)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -1363,8 +1369,16 @@ export function ObjectListViewInspector({
       ? { status: 'loading' }
       : loaded(
           // `options` ride along for the filter's picklist value picker
-          // (objectstack#27515); the other pickers read name, label and type.
-          fields.map((f) => ({ name: f.name, label: f.label, type: f.type, ...(f.options ? { options: f.options } : {}) })),
+          // (objectstack#27515), `multiple` for its operator set (a list-valued
+          // column takes membership and the empty checks only); the other
+          // pickers read name, label and type.
+          fields.map((f) => ({
+            name: f.name,
+            label: f.label,
+            type: f.type,
+            ...(f.options ? { options: f.options } : {}),
+            ...(f.multiple ? { multiple: true } : {}),
+          })),
         );
   const labelOf = (name: string) => fields.find((f) => f.name === name)?.label ?? name;
   const sort = sortEntriesOf(body.sort);

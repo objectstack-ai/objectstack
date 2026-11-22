@@ -237,7 +237,7 @@ export function ManagedByBadge({ managedBy, label, className }: ManagedByBadgePr
             data-testid="managed-by-badge"
             data-bucket={managedBy}
             className={cn(
-              'gap-1 font-normal text-[11px] leading-none py-0.5 px-1.5 cursor-help',
+              'gap-1 font-normal text-xs leading-none py-0.5 px-1.5 cursor-help',
               variant.tone,
               className,
             )}
@@ -247,7 +247,7 @@ export function ManagedByBadge({ managedBy, label, className }: ManagedByBadgePr
           </Badge>
         </TooltipTrigger>
         <TooltipContent side="bottom" align="start" className="max-w-xs text-xs leading-relaxed">
-          <p className="font-semibold mb-1">{title}</p>
+          <p className="font-medium mb-1">{title}</p>
           <p className="text-muted-foreground">{body}</p>
         </TooltipContent>
       </Tooltip>

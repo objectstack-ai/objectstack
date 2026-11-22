@@ -328,6 +328,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      remove_user_manager: {
+        label: "移除经理",
+        confirmText: "要移除该用户的经理吗?在重新设置经理之前,该用户不向任何人汇报;审批路由与 own_and_reports 记录范围会随之变化。",
+        successMessage: "已移除经理"
+      },
       list_platform_admins: {
         label: "平台管理员",
         resultDialog: {

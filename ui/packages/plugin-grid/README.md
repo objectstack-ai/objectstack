@@ -1127,6 +1127,20 @@ const persistence = (
    - Save all changes at once using "Save All" button
    - Cancel individual row changes or all changes
 
+### Export
+
+The toolbar's Export menu (offered when the schema declares `exportOptions`) and
+the table's own CSV button (`operations.export: true`) are both offered only
+while the object's resolved export verdict is open:
+`isObjectExportOffered(objectSchema, effectiveApiOperations)` from
+`@object-ui/core`, which is the object's `userActions.exportCsv` over its
+`managedBy` default, ANDed with the caller's effective `export` API operation.
+An object that sets `userActions.exportCsv: false` gets neither entry, in any
+format; one that does not set it keeps them, since every `managedBy` bucket
+defaults it on. `operations.export: false` on the schema closes them too. The
+setting hides the entries and is not a permission: who may export is the
+permission set's `allowExport`.
+
 ## TypeScript Support
 
 The schema and column types come from `@object-ui/types`; this package exports the

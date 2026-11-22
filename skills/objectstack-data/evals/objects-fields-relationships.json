@@ -24,13 +24,12 @@
     {
       "id": 2,
       "prompt": "Model invoices with line items, and let invoices be tagged with many tags where each tagging records who added it and when. A rep who owns a line item but can only read the invoice may still correct that line.",
-      "expected_output": "Line items: `invoice_line` with a `master_detail` field to `invoice`, `required: true`, `deleteBehavior: 'cascade'` (or `'restrict'` — `set_null` is refused on master_detail), `inlineEdit` on that relationship, and a `summary` roll-up field on the parent. Tagging carries attributes, so it is a junction object (`invoice_tag`) with two `lookup` fields plus `added_by` / `added_at` — not a `multiple: true` lookup (an array of ids) and not a `many_to_many` type, which does not exist. The line object is `sharingModel: 'controlled_by_parent'` with `sharing: { controlledByParent: { ownerMayEdit: true } }` (by-id update only; every other write still needs master edit). `added_by` is `type: 'user'` — never a `lookup` to a `user` object, which does not exist.",
+      "expected_output": "Line items: `invoice_line` with a `master_detail` field to `invoice`, `required: true`, `deleteBehavior: 'cascade'` (or `'restrict'` — `set_null` is refused on master_detail), and a `summary` roll-up field on the parent. Tagging carries attributes, so it is a junction object (`invoice_tag`) with two `lookup` fields plus `added_by` / `added_at` — not a `multiple: true` lookup (an array of ids) and not a `many_to_many` type, which does not exist. The line object is `sharingModel: 'controlled_by_parent'` with `sharing: { controlledByParent: { ownerMayEdit: true } }` (by-id update only; every other write still needs master edit). `added_by` is `type: 'user'` — never a `lookup` to a `user` object, which does not exist.",
       "files": [],
       "assertions": {
         "must_contain": [
           "master_detail",
           "deleteBehavior",
-          "inlineEdit",
           "summary",
           "lookup",
           "ownerMayEdit",
@@ -430,6 +429,21 @@
         "must_not_contain": [
           "name: 'exchange_rate'",
           "event: 'afterInsert'"
+        ]
+      }
+    },
+    {
+      "id": 25,
+      "prompt": "`quote_line` 通过 `master_detail` 字段 `quote` 归属 `quote`。新建报价单时要在表单里直接录明细，和报价单一起保存。该怎么声明？",
+      "expected_output": "On the PARENT `quote` object, a field group that names the child: `fieldGroups: [..., { key: 'lines', label: '明细', relatedList: 'quote_line' }]` (such a group holds no fields). The standard create/edit form of `quote` then enters the lines at that group and saves quote + lines in one atomic transaction, and the record page draws the same table there. Without the group nothing changes: `quote_line` is a tab and the form has no lines, whatever `inlineEdit` on `quote_line.quote` says; `inlineEdit` only picks how the rows are edited (`'grid'` / `'form'`, `true` or absent picks by the child's shape). No custom page and no form view is needed. If either object declares `enable.apiMethods`, it must list `'bulk'`.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "fieldGroups",
+          "relatedList: 'quote_line'"
+        ],
+        "must_not_contain": [
+          "definePage"
         ]
       }
     }

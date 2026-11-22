@@ -119,10 +119,11 @@ function canBeDimensionName(key: string): boolean {
  * comparison is either dropped or refused again.
  *
  * A key that cannot be a dimension name (a dotted `relationship.field`, or any
- * key the dimension-name grammar refuses) gets no declare-it remedy, because
- * no declaration can carry that name. Its sentence says what the comparison
- * needs instead: the dashboard's date field must be a field of the dataset's
- * own object that a declared date dimension names. When the keys are mixed,
+ * key the dimension-name grammar refuses) gets no declare-it-named-so remedy,
+ * because no declaration can carry that name. Its sentence names the remedy
+ * that does exist: one date dimension declared OVER that field, under any
+ * name, named in the query. A dashboard compare widget sends its window under
+ * that declared name itself (objectstack#34350). When the keys are mixed,
  * each kind gets its own sentence, scoped to the keys it is true for.
  */
 export function compareWindowRemedy(undeclared: readonly UndeclaredSelectionMember[]): string {
@@ -145,9 +146,12 @@ export function compareWindowRemedy(undeclared: readonly UndeclaredSelectionMemb
         ? `${quotedList(unnameable)} cannot be a dimension name`
         : `${quotedList(unnameable)} cannot be dimension names`)
         + ' (a dimension name is a snake_case identifier, with no dot, so a related record\'s field is never one), '
-        + `so no date dimension can be declared under ${single ? 'it' : 'them'}: this comparison cannot run on a dataset query `
-        + `unless ${!single ? 'each of those date fields' : one ? 'the dashboard\'s date field' : 'that date field'} `
-        + 'is a field of the dataset\'s own object that a declared date dimension names.',
+        + `so no date dimension can be declared under ${single ? 'it' : 'them'}. `
+        + `Declare one date dimension over ${single ? 'it' : 'each'} instead, with \`type: 'date'\` and \`field\` set to `
+        + 'that field, under any snake_case name (a related record\'s field needs its relationship '
+        + 'in the dataset\'s `include`), and name '
+        + `${single ? 'that dimension' : 'those dimensions'} in \`timeDimensions\` (and in \`compareTo.dimension\`, if set): `
+        + `a dashboard compare widget sends ${single ? 'its window under that declared name' : 'each window under its declared name'} itself.`,
     );
   }
   if (nameable.length > 0) {
@@ -192,7 +196,7 @@ export function listMemberNames(names: readonly string[]): string {
  * comparison window's date key ({@link compareWindowRemedy}), the refusal also
  * says what the compare widget needs: a date dimension named after the key,
  * or, for a key no dimension can be named (a related record's field), a date
- * field of the dataset's own object.
+ * dimension declared over that field under another name.
  *
  * The select-or-declare sentence covers only the members it can fix. A
  * comparison window's date key that cannot be a dimension name is never

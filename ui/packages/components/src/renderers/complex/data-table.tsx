@@ -15,7 +15,7 @@ import { DisabledReasonMenuLabel, menuItemReasonAria, useDisabledReason } from '
 import { useGridFieldAuthoring } from '../../context/gridFieldAuthoring';
 import { useGridCellSelection } from '../../context/gridCellSelection';
 import { useGridHeaderMenu } from '../../context/gridHeaderMenu';
-import { caretToEnd, cellOpenerAt, defaultTyping, defaultValueFromText, firstCellOpener, firstEditorControl, isCellWidgetTarget, isCommandLetter, isImeKey, isPrintableKey } from './dataTableCellSelection';
+import { caretToEnd, cellOpenerAt, defaultTyping, defaultValueFromText, firstCellOpener, firstEditorControl, firstRecordChip, isCellWidgetTarget, isCommandLetter, isImeKey, isPrintableKey, recordChipAt } from './dataTableCellSelection';
 import { useHorizontalOverflow, HOVER_SCROLLBAR_CLASSES } from '../../custom/use-horizontal-overflow';
 import { ActiveListRow, listRecordIdOf } from '../../custom/record-list-face';
 import { describeIgnoredBind, describeNonArrayData } from './dataTableBindDiagnostic';
@@ -114,7 +114,7 @@ function builtInEditorWidthClass(type: TableColumnType | undefined): string | un
  * its own. `data-in-cell-face="input"` on its box flattens the layer.
  */
 const BUILT_IN_FLAT_INPUT_CLASS =
-  'h-[calc(var(--radix-popper-anchor-height,2rem)-4px)] rounded-none border-0 bg-transparent px-2.5 py-0 text-[13px] md:text-[13px] shadow-none focus-visible:ring-0 focus-visible:ring-offset-0';
+  'h-[calc(var(--radix-popper-anchor-height,2rem)-4px)] rounded-none border-0 bg-transparent px-2.5 py-0 text-sm shadow-none focus-visible:ring-0 focus-visible:ring-offset-0';
 
 const NUMERIC_EDIT_TYPES = new Set<TableColumnType>(['number', 'currency', 'percent']);
 
@@ -1467,6 +1467,63 @@ function CellOpenButton({ label, onOpen }: { label: string; onOpen: (cell: HTMLE
 }
 
 /**
+ * objectstack#36015 — a reference cell's edit button: drawn while the pointer
+ * is over the cell, and while the cell is selected, when the cell opens an
+ * editor. `editable` is asked when the pointer enters the cell or the cell is
+ * selected, never per render. It takes no focus, so typing carries on in the
+ * cell; the keyboard's ways in are Enter, F2 and typing.
+ */
+function CellEditButton({
+  label,
+  selected,
+  editable,
+  onEdit,
+}: {
+  label: string;
+  selected: boolean;
+  editable: () => boolean;
+  onEdit: () => void;
+}) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const editableRef = useRef(editable);
+  editableRef.current = editable;
+  const [allowed, setAllowed] = useState(false);
+  useLayoutEffect(() => {
+    if (selected) setAllowed(editableRef.current());
+  }, [selected]);
+  useEffect(() => {
+    const host = ref.current?.closest<HTMLElement>('td');
+    if (!host) return undefined;
+    const measure = () => setAllowed(editableRef.current());
+    host.addEventListener('pointerenter', measure);
+    return () => host.removeEventListener('pointerenter', measure);
+  }, []);
+  return (
+    <button
+      ref={ref}
+      type="button"
+      tabIndex={-1}
+      aria-label={label}
+      title={label}
+      data-testid="cell-edit-button"
+      className={cn(
+        'absolute right-1 top-1/2 z-20 size-5 -translate-y-1/2 items-center justify-center rounded border bg-background text-muted-foreground shadow-sm transition-opacity hover:text-foreground',
+        allowed ? 'flex' : 'hidden',
+        selected ? 'opacity-100' : 'opacity-0 group-hover/cell:opacity-100',
+      )}
+      onMouseDown={(e) => e.preventDefault()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation();
+        onEdit();
+      }}
+    >
+      <Pencil className="size-3" aria-hidden="true" />
+    </button>
+  );
+}
+
+/**
  * objectstack#35685 — why a list cell's save was refused, said on that cell:
  * the server's reasons, one line each, and, when the refusal names a field the
  * list cannot edit, the way to the record where it can be finished.
@@ -2726,7 +2783,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       <span className="inline-flex items-center shrink-0">
         <Arrow className="h-3 w-3 ml-0.5 text-primary" />
         {activeSort.length > 1 && (
-          <span className="text-[10px] font-medium text-primary tabular-nums leading-none">
+          <span className="text-xs font-medium text-primary tabular-nums leading-none">
             {index + 1}
           </span>
         )}
@@ -3686,6 +3743,11 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
 
   const factsOf = (row: any, col: TableColumn) => cellSelection?.describeCell?.(row, col.accessorKey) ?? null;
 
+  // objectstack#36015 — the host's reference cells: a chip in one opens its
+  // record in place on a single click, and the cell draws an edit button.
+  const referenceCells = cellSelection?.referenceCells ?? null;
+  const isReferenceColumn = (col: TableColumn) => !!referenceCells?.isReferenceColumn(col.accessorKey);
+
   // objectstack#36015 — while set, a click on a cell's opener follows it: the
   // open button or Ctrl/Cmd+Enter is clicking it on the reader's behalf.
   const followingOpenerRef = useRef(false);
@@ -3882,8 +3944,15 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     }
     setCellNotice(null);
     if (onCatcher && e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
-      // objectstack#36015 — Ctrl/Cmd+Enter opens what the selected cell draws.
-      if (openCellOpener(e.currentTarget)) e.preventDefault();
+      // objectstack#36015 — Ctrl/Cmd+Enter opens what the selected cell draws;
+      // in a reference cell, its first chip's record, in place.
+      const chip = isReferenceColumn(col) ? firstRecordChip(e.currentTarget) : null;
+      if (chip && referenceCells) {
+        e.preventDefault();
+        referenceCells.openRecord(chip.objectName, chip.recordId);
+      } else if (openCellOpener(e.currentTarget)) {
+        e.preventDefault();
+      }
       return;
     }
     const next = navigationTarget(e, rowIndex, colIndex);
@@ -4598,7 +4667,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         )}
                         {/* The full label on hover wherever the cell is too narrow
                             for it and the ellipsis cuts it (objectstack#29945). */}
-                        <span className="text-[13px] font-medium text-muted-foreground whitespace-nowrap truncate" title={col.header || undefined}>{col.header}</span>
+                        <span className="text-xs font-medium text-muted-foreground whitespace-nowrap truncate" title={col.header || undefined}>{col.header}</span>
                         {fieldAuthoring?.columnMarks?.[col.accessorKey]}
                         {isColumnSortable(col) && getSortIcon(col.accessorKey)}
                         {editColumnEnabled && (
@@ -4668,7 +4737,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                 </TableHead>
               ) : (
                 <TableHead className="w-24 text-right bg-background">
-                  <span className="text-[13px] font-medium text-muted-foreground whitespace-nowrap">{t('common.actions')}</span>
+                  <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">{t('common.actions')}</span>
                 </TableHead>
               ))}
               {addColumnEnabled && (
@@ -5116,7 +5185,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                               // objectstack#36015 — a single click selects, and Ctrl/Cmd+C copies
                               // the selected cell, so the copy buttons a value draws are not drawn.
                               selectFirst && "group/cell [&_[data-cell-copy]]:hidden",
-                              !autosaves && hasPendingChange && "font-semibold text-amber-700 dark:text-amber-400",
+                              !autosaves && hasPendingChange && "font-medium text-amber-700 dark:text-amber-400",
                               cellError !== undefined && "ring-2 ring-inset ring-destructive",
                               isFrozen && ['sticky z-10 bg-background', STICKY_ROW_TINT],
                               isFrozen && colIndex === frozenColumns - 1 && scrolledX && FROZEN_EDGE_SHADOW,
@@ -5148,6 +5217,11 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                               e.preventDefault();
                               e.stopPropagation();
                               selectCell(rowIndex, colIndex);
+                              // A reference cell's chip opens its record in place: the
+                              // list's side drawer, with the list and its selection kept.
+                              // A double-click's second click opens it no second time.
+                              const chip = isReferenceColumn(col) && e.detail <= 1 ? recordChipAt(e.target, e.currentTarget) : null;
+                              if (chip && referenceCells) referenceCells.openRecord(chip.objectName, chip.recordId);
                             } : undefined}
                             onMouseDown={selectFirst ? (e) => {
                               // The double-click is the edit gesture here, so its second
@@ -5161,6 +5235,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                 // the second click. A touch never edits in place. A word the
                                 // browser selected on the way is not a text selection.
                                 if (isEditing || isTouchPress(e) || isCellWidgetTarget(e.target, e.currentTarget)) return;
+                                // objectstack#36015 — the first click on a reference chip opened
+                                // its record; the second does not also edit the cell.
+                                if (isReferenceColumn(col) && recordChipAt(e.target, e.currentTarget) !== null) return;
                                 window.getSelection?.()?.removeAllRanges();
                                 e.stopPropagation();
                                 if (!togglesCell(row, col)) attemptEdit(rowIndex, colIndex);
@@ -5278,8 +5355,18 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                 }}
                               />
                             )}
-                            {isSelectedCell && !isEditing && (
+                            {isSelectedCell && !isEditing && !isReferenceColumn(col) && (
                               <CellOpenButton label={t('table.open')} onOpen={openCellOpener} />
+                            )}
+                            {selectFirst && !isEditing && isReferenceColumn(col) && (
+                              // objectstack#36015 — a reference cell's chip opens its record,
+                              // so the open button's place holds the edit button.
+                              <CellEditButton
+                                label={t('table.edit')}
+                                selected={isSelectedCell}
+                                editable={() => readOnlyReasonOf(row, col) === null}
+                                onEdit={() => attemptEdit(rowIndex, colIndex)}
+                              />
                             )}
                             {cellNotice?.rowIndex === rowIndex && cellNotice.colIndex === colIndex && (
                               <CellNotice text={cellNotice.text} onDismiss={() => setCellNotice(null)} />
@@ -5688,7 +5775,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                       data-column-key={col.accessorKey}
                       data-testid={figure != null ? `data-table-summary-${col.accessorKey}` : undefined}
                       className={cn(
-                        "h-8 px-3 py-0 whitespace-nowrap text-[13px] font-medium text-muted-foreground tabular-nums bg-background",
+                        "h-8 px-3 py-0 whitespace-nowrap text-xs font-medium text-muted-foreground tabular-nums bg-background",
                         col.align === 'right' && 'text-right',
                         col.align === 'center' && 'text-center',
                         isFrozen && 'sticky z-20',

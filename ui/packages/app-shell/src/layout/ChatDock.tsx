@@ -481,7 +481,7 @@ export function ChatDockPanel({
           close is the drawer's 「×」 in both presentations, and the
           conversation is kept for the next open. */}
       <div className="flex h-11 shrink-0 items-center justify-between border-b px-3" data-testid="chat-dock-header">
-        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-foreground/80">
+        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground/80">
           <MessagesSquare className="size-3.5" />
           {title ?? t('console.ai.dock.title', { defaultValue: 'AI Assistant' })}
         </span>
@@ -627,7 +627,7 @@ export function ChatDockMobileSheet({
               SheetContent's built-in close ✕ (absolute right-4) so a thumb can't
               confuse the two. `pr-8` still reserves room for that ✕. */}
           <div className="flex items-center gap-1 pr-8">
-            <SheetTitle className="inline-flex items-center gap-1.5 text-sm font-semibold">
+            <SheetTitle className="inline-flex items-center gap-1.5 text-sm font-medium">
               <MessagesSquare className="size-4" />
               {title ?? t('console.ai.dock.title', { defaultValue: 'AI Assistant' })}
             </SheetTitle>

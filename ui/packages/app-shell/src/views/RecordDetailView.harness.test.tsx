@@ -1577,7 +1577,8 @@ describe('RecordDetailView.relatedListTitlePlural-11733', () => {
  *      for it; since objectstack#29188 it shows the load-failure notice, not
  *      the empty state;
  *   5. a refused `sys_comment` read beside an answered `sys_activity` read
- *      keeps the activity rows and says the comments are withheld.
+ *      keeps the activity rows and says the comments are withheld (since
+ *      objectstack#36075 in the comment panel, which holds the comments).
  *
  * The harness is `RecordDetailView.feedLoading.test.tsx`'s: the synthesized
  * record page composes `record:discussion`, so the panel arrives through the
@@ -1809,14 +1810,25 @@ describe('RecordDetailView.feedRefusal-11195', () => {
           }),
       });
 
+      window.localStorage.clear();
       renderDetail(dataSource);
 
       expect(await screen.findByText('Stage moved to qualified')).toBeTruthy();
-      const notice = await screen.findByTestId('activity-access-denied');
-      expect(notice.textContent).toContain(COMMENTS_DENIED);
-      expect(notice.textContent).not.toContain(ACTIVITY_DENIED);
-      expect(notice.querySelector('[data-denied-source="comments"]')).not.toBeNull();
-      expect(notice.querySelector('[data-denied-source="activity"]')).toBeNull();
+      // The 动态 stream holds no comments, so their refusal is not its to say.
+      expect(screen.queryByTestId('activity-access-denied')).toBeNull();
+      const button = await waitFor(() => {
+        const el = document.querySelector('[data-comments-button]');
+        expect(el).not.toBeNull();
+        return el as HTMLElement;
+      });
+      // The icon names no count for comments it may not read.
+      expect(button.querySelector('[data-comments-count]')).toBeNull();
+      fireEvent.click(button);
+      const panel = document.querySelector('[data-comments-panel]') as HTMLElement;
+      expect(panel.querySelector('[data-comments-note="denied"]')).not.toBeNull();
+      expect(panel.textContent).toContain(COMMENTS_DENIED);
+      expect(panel.textContent).not.toContain(ACTIVITY_DENIED);
+      expect(panel.querySelector('[data-comments-composer]')).toBeNull();
     });
   });
 });
@@ -1943,8 +1955,14 @@ describe('RecordDetailView.relatedListsOrder-27241', () => {
       expect(cardOrder(container)).toEqual(['showcase_task.project', 'showcase_note.project', 'showcase_call.project']);
     });
 
-    it('with relatedLists: the declared lists first in that order, the rest after them in the derived order', async () => {
+    it('with relatedLists: only the declared lists, in that order; an unlisted side list draws nothing (objectstack#35897)', async () => {
       const { container } = renderPage(objectsWith(['showcase_call', 'showcase_note.project']));
+      await waitFor(() => expect(cardOrder(container)).toHaveLength(2), { timeout: 5000 });
+      expect(cardOrder(container)).toEqual(['showcase_call.project', 'showcase_note.project']);
+    });
+
+    it('with relatedLists listing every list: the declared order, nothing dropped (control)', async () => {
+      const { container } = renderPage(objectsWith(['showcase_call', 'showcase_note.project', 'showcase_task']));
       await waitFor(() => expect(cardOrder(container)).toHaveLength(3), { timeout: 5000 });
       expect(cardOrder(container)).toEqual(['showcase_call.project', 'showcase_note.project', 'showcase_task.project']);
     });
@@ -2145,16 +2163,14 @@ describe('RecordDetailView.bodyTablePredicate-27478', () => {
 // ── RecordDetailView.relatedCountsFirst-27056 ───────────────────────────────
 
 /**
- * objectstack#27056, as objectstack#35595/#35596 lay the page out — the related
- * lists load counts first and never block the details. Every list is a tab;
- * the 概览 tab's right rail lists, under 「其他相关」, the lists that have
- * records, with their first three rows. Measured:
+ * objectstack#27056, as objectstack#35890 lays the page out — the related
+ * lists load counts first and never block the details. Every list is a tab
+ * (the right rail that previewed their first rows is retired). Measured:
  *
  *  - the details draw from the record read alone, while every related read is
  *    still out, with every list's tab drawn (no number yet) and no rail card;
  *  - the six counts go out as ONE request set, before any of them answers;
- *  - once they answer, rows are read for the lists counted above 0 only, three
- *    rows each — never for a list counted at 0.
+ *  - once they answer, no list's rows are read while its tab is closed.
  */
 
 describe('RecordDetailView.relatedCountsFirst-27056', () => {
@@ -2334,7 +2350,7 @@ describe('RecordDetailView.relatedCountsFirst-27056', () => {
       expect(container.querySelector('[data-record-summary-other]')).toBeNull();
     });
 
-    it('asks the six counts as one request set, then three rows of each list counted above 0 only', async () => {
+    it('asks the six counts as one request set, and no list\'s rows while its tab is closed (objectstack#35890: no rail)', async () => {
       const { container } = renderPage();
       await idle();
       // One request set: every list's count, all out before any answered, and
@@ -2347,25 +2363,14 @@ describe('RecordDetailView.relatedCountsFirst-27056', () => {
         for (const r of reads.filter((read) => !read.answered)) r.answer();
       });
       await idle();
-      const rowReads = reads.filter(isRowRead);
-      // Every list counted above 0; never the second, counted at 0.
-      const withRecords = CHILDREN.filter((c) => TOTALS[c] > 0);
-      expect(rowReads.map((r) => r.object).sort()).toEqual([...withRecords].sort());
-      for (const r of rowReads) expect(r.query.$top).toBe(3);
-      expect(reads.some((r) => r.object === C2 && isRowRead(r))).toBe(false);
-
-      await act(async () => {
-        for (const r of reads.filter((read) => !read.answered)) r.answer();
-      });
-      await idle();
-      const rail = column(container, 'right')!;
-      const rowsOf = (c: string) =>
-        rail.querySelector(`[data-record-summary-card="${c}.account"]`)?.querySelectorAll('[data-record-summary-row]') ?? [];
-      expect(rowsOf(C1)).toHaveLength(3);
-      expect(rowsOf(C3)).toHaveLength(2);
-      // CONTROL: the list counted at 0 has no rail card at all, but keeps its tab.
-      expect(rail.querySelector(`[data-record-summary-card="${C2}.account"]`)).toBeNull();
+      // objectstack#35890 — the rail that drew three rows of each list is
+      // retired: on 「详情」 no list's rows are read, counted above 0 or not.
+      expect(reads.filter(isRowRead)).toEqual([]);
+      expect(column(container, 'right')).toBeNull();
+      expect(container.querySelector('[data-record-summary-card]')).toBeNull();
+      // CONTROL: the list counted at 0 keeps its tab, marked empty.
       expect(container.querySelector(`[data-record-tab="${C2}.account"]`)?.hasAttribute('data-record-tab-empty')).toBe(true);
+      expect(container.querySelector(`[data-record-tab="${C1}.account"]`)?.hasAttribute('data-record-tab-empty')).toBe(false);
     });
   });
 });
@@ -2623,7 +2628,8 @@ describe('RecordDetailView.recordTabRowUrl-27524', () => {
  *   - the premise, re-read live: the spec refuses each such page at `regions`;
  *   - a `full` page whose region places nothing, and one with no `regions`,
  *     draw the explanation naming the page, and no page body at all;
- *   - the record drawer draws the same explanation;
+ *   - the record drawer draws the standard page, with no explanation: an
+ *     authored page applies on the desktop full page only (objectstack#36150);
  *   - CONTROLS: the same page placing a component draws that page; a `slotted`
  *     page with no slots, and no assigned page, draw the default record page.
  */
@@ -2756,10 +2762,11 @@ describe('RecordDetailView.recordPagePlacesNoComponent-32478', () => {
     expect(panel.textContent).not.toContain('"{{name}}"');
   });
 
-  it('the record drawer explains it the same way', async () => {
+  it('the record drawer draws the standard page and no explanation: the authored page does not apply there (objectstack#36150)', async () => {
     const { container } = await mount([PLACES_NOTHING], true);
-    expect((await screen.findByTestId('record-page-places-no-component')).textContent).toContain(PAGE);
-    expect(container.querySelector('[data-page-type]')).toBeNull();
+    await waitFor(() => expect(container.querySelector('[data-page-type="record"]')).not.toBeNull());
+    expect(container.querySelector(`[aria-label="${PAGE}"]`)).toBeNull();
+    expect(screen.queryByTestId('record-page-places-no-component')).toBeNull();
   });
 
   it('CONTROL: the same page placing a component draws that page, and no explanation', async () => {
@@ -3022,7 +3029,9 @@ describe('RecordDetailView.recordEditState-35599', () => {
 
   const headerButton = (label: string) =>
     (Array.from(document.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === label) as HTMLButtonElement | undefined) ?? null;
-  const pencils = (container: HTMLElement) => container.querySelectorAll('button[aria-label="Double-click to edit"]').length;
+  // The field list's pencil is named for a click (objectstack#36147), every other face's for a double-click.
+  const pencils = (container: HTMLElement) =>
+    container.querySelectorAll('button[aria-label="Double-click to edit"], button[aria-label="Click to edit"]').length;
   const editor = (container: HTMLElement, id: string) => container.querySelector(`[data-body-table-editor="${id}"]`) as HTMLElement | null;
   const cells = (scope: HTMLElement, label: string) => Array.from(scope.querySelectorAll(`input[aria-label="${label}"]`)) as HTMLInputElement[];
   const summaryInput = (container: HTMLElement) =>
@@ -3051,9 +3060,13 @@ describe('RecordDetailView.recordEditState-35599', () => {
     fireEvent.change(cells(tasks, 'Subject')[0], { target: { value: 'Visit' } });
   }
 
-  /** The pencil of the Summary field (the inline-edit entry), on the details column. */
+  /**
+   * The pencil of the Summary field (the inline-edit entry), on the details
+   * column: the keyboard's way in on the field list, named for a click
+   * (objectstack#36147).
+   */
   const summaryPencil = (container: HTMLElement) =>
-    (Array.from(container.querySelectorAll('[data-record-column="details"] button[aria-label="Double-click to edit"]')) as HTMLElement[])
+    (Array.from(container.querySelectorAll('[data-record-column="details"] button[aria-label="Click to edit"]')) as HTMLElement[])
       .find((b) => (b.closest('.group')?.textContent ?? '').includes('Summary')) ?? null;
   const saveBar = () => document.querySelector('[role="region"][aria-label="Edit fields"]') as HTMLElement | null;
   const detailInputValues = (container: HTMLElement) =>

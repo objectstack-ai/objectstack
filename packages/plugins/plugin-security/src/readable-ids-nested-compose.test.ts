@@ -412,14 +412,18 @@ describe('[ADR-0139 D6 as amended] a two-level controlled_by_parent chain compos
         // and the grandparent inside that one.
         const reads = statements.filter(readsTable(child));
         expect(reads, all).toHaveLength(1);
-        expect(reads[0].match(/in \(select/gi) ?? [], all).toHaveLength(2);
+        expect(reads[0].match(/in \(select .id. from/gi) ?? [], all).toHaveLength(2);
         expect(reads[0], all).toMatch(new RegExp(`in \\(select .id. from .${PARENT}. where .grand. in \\(select .id. from .${GRAND}.`, 'i'));
+        // [ADR-0155 plan step 6] …and the grandparent's share arm inside that
+        // one, as the share-grant semi-join: the third subquery of the statement.
+        expect(reads[0].match(/in \(select .record_id. from .sys_record_share./gi) ?? [], all).toHaveLength(1);
         // No statement reads the parent or the grandparent on its own: the
         // leaf stands where the pre-resolved id list stood at every level, so
-        // neither is pre-scanned. What else the driver ran is plugin-sharing
-        // reading the share rows to answer the grandparent's scope.
+        // neither is pre-scanned. Nor the share rows: the grandparent's scope
+        // carries them as the semi-join above, never as a read of their own.
         expect(statements.filter(readsTable(PARENT)), all).toHaveLength(0);
         expect(statements.filter(readsTable(GRAND)), all).toHaveLength(0);
+        expect(statements.filter(readsTable('sys_record_share')), all).toHaveLength(0);
       }
     }
   });

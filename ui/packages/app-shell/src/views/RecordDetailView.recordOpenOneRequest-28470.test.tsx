@@ -183,8 +183,18 @@ beforeEach(() => {
   __resetRecordApprovalsStore();
   RelatedCountStore._reset();
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+  window.localStorage.clear();
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.localStorage.clear(); });
+
+/** objectstack#36075 — the record's comments are drawn in the comment panel, opened from the header's icon. */
+async function openComments(container: HTMLElement, held: Held[]) {
+  const button = container.querySelector('[data-comments-button]') as HTMLElement | null;
+  expect(button, 'the header offers the comments icon').not.toBeNull();
+  await act(async () => { fireEvent.click(button!); });
+  await settle(held);
+  return container.querySelector('[data-comments-panel]') as HTMLElement;
+}
 
 async function boot(answers: Answers = {}) {
   const { fetch, held } = heldTransport(answers);
@@ -232,11 +242,15 @@ describe('objectstack#28470 — one record open is one request', () => {
     });
     expect(page.body.related).toEqual([expect.objectContaining({ object: CHILD, field: 'contact', expand: ['owner'] })]);
 
-    // Every part is drawn from the payload: the comment, the attachment row
-    // and its badge's count.
-    expect(view.container.textContent).toContain('hello from the payload');
-    expect(view.container.textContent).toContain('contract.pdf');
+    // Every part is drawn from the payload: the attachment badge's count at
+    // open (objectstack#35890: no rail card draws the rows on 「详情」), and the
+    // comment in the comment panel, which reads nothing more as it opens.
     expect(RelatedCountStore.get('sys_attachment', recordAttachmentsCountField(OBJECT), 'c1')).toBe(3);
+    expect(view.container.querySelector('[data-record-summary-card]')).toBeNull();
+    const before = held.length;
+    const panel = await openComments(view.container, held);
+    expect(panel.textContent).toContain('hello from the payload');
+    expect(held.slice(before).filter((h) => !isMeta(h))).toEqual([]);
   });
 
   it('reads the mention list on the composer\'s first focus, once', async () => {
@@ -245,15 +259,11 @@ describe('objectstack#28470 — one record open is one request', () => {
     await settle(held);
     expect(mentionReads(held)).toEqual([]);
 
-    // objectstack#35595 / #35596 — the 概览 rail's 动态 card is read-only; the
-    // composer is the 动态 tab's.
-    expect(view.container.querySelector('[data-record-summary-card="timeline"] textarea')).toBeNull();
-    const tab = view.container.querySelector('[role="tab"][data-record-tab="timeline"]') as HTMLElement;
-    await act(async () => { fireEvent.click(tab); });
-    await settle(held);
+    // Since objectstack#36075 the composer is the comment panel's.
+    const panel = await openComments(view.container, held);
     expect(mentionReads(held)).toEqual([]);
-    const editor = view.container.querySelector('[data-related-enlarged="timeline"] textarea') as HTMLTextAreaElement | null;
-    expect(editor, 'the 动态 tab draws the composer').not.toBeNull();
+    const editor = panel.querySelector('[data-comments-composer] textarea') as HTMLTextAreaElement | null;
+    expect(editor, 'the comment panel draws the composer').not.toBeNull();
     await act(async () => { fireEvent.focus(editor!); });
     await settle(held);
     expect(mentionReads(held)).toHaveLength(1);
@@ -267,9 +277,17 @@ describe('objectstack#28470 — one record open is one request', () => {
     const { held, open } = await boot({ activity: { error: { code: 'PERMISSION_DENIED', status: 403, message: 'No.' } } });
     const view = open();
     await settle(held);
-    expect(view.container.querySelector('[data-denied-source="activity"]')).not.toBeNull();
-    expect(view.container.textContent).toContain('hello from the payload');
+    const panel = await openComments(view.container, held);
+    expect(panel.textContent).toContain('hello from the payload');
     expect(streamReads(held)).toEqual([]);
+    // Drawn on the 动态 tab (objectstack#35890: no rail card on 「详情」).
+    const tab = view.container.querySelector('[role="tab"][data-record-tab="timeline"]') as HTMLElement;
+    await act(async () => { fireEvent.click(tab); });
+    await settle(held);
+    const face = view.container.querySelector('[data-related-enlarged="timeline"]') as HTMLElement;
+    expect(face.querySelector('[data-denied-source="activity"]')).not.toBeNull();
+    // The refused part is not asked again when its tab opens.
+    expect(streamReads(held).filter((o) => o === 'sys_activity')).toEqual([]);
   });
 
   // ── Ablations: the detectors above see each retired read ──────────────
@@ -283,7 +301,7 @@ describe('objectstack#28470 — one record open is one request', () => {
     expect([...new Set(streamReads(held))].sort()).toEqual(['sys_activity', 'sys_attachment', 'sys_comment']);
   });
 
-  // objectstack#35596 retired the bare-id ablation: the 概览 rail draws a
-  // related row's name and key value only, never its lookups, so no surface
-  // on the page's open resolves a related row's owner to probe for.
+  // objectstack#35596 retired the bare-id ablation, and objectstack#35890 the
+  // rail itself: no surface on the page's open resolves a related row's owner
+  // to probe for.
 });

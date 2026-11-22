@@ -5,27 +5,22 @@
  * its full menu floats over the content (objectstack#35062, ruling 6973617688:
  * one collapsed look at 768 px and up).
  *
- * - Collapsed by hand on a wide window, and folded on its own on a narrow one,
- *   the sidebar takes no width and leaves no icon column; nothing in it is
- *   reachable.
+ * - Collapsed by hand on a wide window, and collapsed by default on a narrow
+ *   one (below 1280 px, objectstack#36112), the sidebar takes no width and
+ *   leaves no icon column; nothing in it is reachable.
  * - Resting the pointer on the window's left edge floats the full menu, its
  *   labels and groups, after the hover delay; moving away folds it back. A
  *   press on the edge floats it at once. Neither changes the collapsed state,
  *   which a reload keeps.
- * - The app bar's trigger and ⌘B float the menu and move focus into it, on a
- *   sidebar the reader collapsed as on the fold; Esc folds it and gives focus
- *   back to the trigger. "Keep sidebar open", at the foot of the floated menu,
- *   puts the sidebar back beside the content, and a reload keeps it there;
- *   chosen from the keyboard, focus stays in the menu, and turning it off on
- *   the fold gives focus to the trigger.
+ * - ⌘B floats the menu and moves focus into it, on either window; Esc folds it
+ *   and gives focus back where it was.
+ * - The page header's expand button (a sidebar trigger) docks the sidebar
+ *   beside the content as the reader's choice, on either window, and a reload
+ *   keeps it there (ruling 7069868269 on objectstack#36112): there is no
+ *   "Keep sidebar open" control.
  * - Choosing an entry navigates, folds the menu and leaves the sidebar
  *   collapsed.
- * - "Keep sidebar open" still turns the fold off; the edge is drawn only while
- *   the sidebar is hidden, never on a phone.
- *
- * Ruling 6973617688 names the trigger beside the edge with no carve-out for a
- * hand collapse; the area seat's order of 2026-11-18 on PR #35187 applies it to
- * both collapsed states.
+ * - The edge is drawn only while the sidebar is hidden, never on a phone.
  *
  * The test DOM computes no Tailwind and no layout, so widths are read as the
  * class that sets them; the rendered widths are measured in a browser on the
@@ -111,7 +106,7 @@ import { SidebarProvider, useSidebar } from '@object-ui/components';
 import { UnifiedSidebar } from '../UnifiedSidebar';
 import { useResponsiveSidebar } from '../../hooks/useResponsiveSidebar';
 import {
-  CONSOLE_SIDEBAR_KEEP_OPEN_PREFERENCE,
+  CONSOLE_SIDEBAR_NARROW_OPEN_PREFERENCE,
   RAIL_OVERLAY_FRAME_NO_GAP,
   SIDEBAR_EDGE_ZONE,
   SIDEBAR_FLOAT_CLOSE_DELAY_MS,
@@ -119,7 +114,7 @@ import {
   primeConsoleSidebarOpen,
   readWideWindowOpen,
 } from '../consoleSidebarRail';
-import { writeWorkspacePreference } from '../../utils/workspacePreference';
+import { readWorkspacePreference, writeWorkspacePreference } from '../../utils/workspacePreference';
 
 /**
  * Size the test window: happy-dom's own viewport, so `innerWidth`, the
@@ -138,7 +133,7 @@ function Fold() {
   return null;
 }
 
-/** The app bar's trigger, reduced to what the sidebar reads: `data-sidebar="trigger"` and the toggle. */
+/** The page header's expand button, reduced to what the sidebar reads: `data-sidebar="trigger"` and the toggle. */
 function Trigger() {
   const { toggleSidebar } = useSidebar();
   return (
@@ -233,6 +228,9 @@ const frame = () => screen.getByTestId('console-sidebar-frame');
 const edge = () => screen.queryByTestId('console-sidebar-edge');
 const trigger = () => within(screen.getByTestId('app-bar')).getByRole('button', { name: 'Toggle sidebar' });
 const keepOpen = () => screen.queryByTestId('sidebar-keep-open');
+const narrowChoice = () => readWorkspacePreference(CONSOLE_SIDEBAR_NARROW_OPEN_PREFERENCE, 'user');
+/** ⌘B, which the provider's listener answers on the window. */
+const commandB = () => fireEvent.keyDown(window, { key: 'b', metaKey: true });
 const tokens = (el: Element) => el.className.split(/\s+/).filter(Boolean);
 const sidebarCookie = () => /(?:^|;\s*)sidebar_state=(\w+)/.exec(document.cookie)?.[1];
 
@@ -248,6 +246,14 @@ function expectHidden() {
   expect(panel()).toHaveAttribute('inert');
   expect(tokens(frame())).toEqual(['contents']);
   expect(edge()).not.toBeNull();
+}
+
+/** Docked beside the content: expanded, no float, no edge. */
+function expectDocked() {
+  expect(sidebarRoot()).toHaveAttribute('data-state', 'expanded');
+  expect(panel()).not.toHaveAttribute('data-console-rail');
+  expect(tokens(frame())).toEqual(['contents']);
+  expect(edge()).toBeNull();
 }
 
 /** The full menu floats over the content: expanded, above the page, the gap still at no width. */
@@ -280,47 +286,44 @@ afterEach(() => {
 });
 
 describe('a collapsed console sidebar is hidden, with no icon column (objectstack#35062)', () => {
-  it('collapsed by hand at 1600 px it takes no width and nothing in it is reachable; the trigger floats it, and "Keep sidebar open" docks it again, after a reload too', () => {
+  it('collapsed by hand at 1600 px it takes no width and nothing in it is reachable; ⌘B floats it, the expand button docks it again, after a reload too', () => {
     renderShell(1600);
-    expect(sidebarRoot()).toHaveAttribute('data-state', 'expanded');
-    expect(edge(), 'no edge beside an expanded sidebar').toBeNull();
-    expect(keepOpen(), 'no "Keep sidebar open" beside an expanded wide sidebar').toBeNull();
+    expectDocked();
+    expect(keepOpen(), 'no "Keep sidebar open" (objectstack#36112)').toBeNull();
 
     fireEvent.click(trigger());
     expectHidden();
     expect(readWideWindowOpen()).toBe(false);
 
-    // The trigger floats the menu on a hand collapse too, and changes nothing the reader chose.
-    fireEvent.click(trigger());
+    // ⌘B floats the menu on a hand collapse, and changes nothing the reader chose.
+    commandB();
     expectFloat();
+    expect(keepOpen()).toBeNull();
     expect(readWideWindowOpen()).toBe(false);
     expect(sidebarCookie()).toBe('false');
+    commandB();
+    expectHidden();
 
-    // The way back beside the content: "Keep sidebar open", at the foot of the float.
-    expect(keepOpen()).toHaveAttribute('aria-pressed', 'false');
-    fireEvent.click(keepOpen()!);
-    expect(sidebarRoot()).toHaveAttribute('data-state', 'expanded');
-    expect(panel()).not.toHaveAttribute('data-console-rail');
-    expect(tokens(frame())).toEqual(['contents']);
-    expect(edge()).toBeNull();
-    expect(keepOpen()).toBeNull();
+    // The way back beside the content: the expand button.
+    fireEvent.click(trigger());
+    expectDocked();
     expect(readWideWindowOpen()).toBe(true);
     expect(sidebarCookie()).toBe('true');
 
     reload(1600);
-    expect(sidebarRoot()).toHaveAttribute('data-state', 'expanded');
-    expect(panel()).not.toHaveAttribute('data-console-rail');
+    expectDocked();
   });
 
-  it('folded on its own at 1280 px it is hidden the same way', () => {
-    renderShell(1280);
+  it('collapsed by default at 1024 px it is hidden the same way', () => {
+    renderShell(1024);
     expectHidden();
   });
 
-  it('the edge is a strip at the window’s left edge, below the top bar', () => {
-    renderShell(1280);
+  it('the edge is a strip at the window’s left edge, its full height (no top bar above it, objectstack#36112)', () => {
+    renderShell(1024);
     for (const token of SIDEBAR_EDGE_ZONE.split(' ')) expect(tokens(edge()!)).toContain(token);
-    expect(tokens(edge()!)).toContain('!top-12');
+    expect(tokens(edge()!)).toEqual(expect.arrayContaining(['top-0', 'h-svh']));
+    expect(tokens(edge()!)).not.toContain('!top-12');
     expect(edge()).toHaveAttribute('aria-hidden', 'true');
   });
 
@@ -332,47 +335,35 @@ describe('a collapsed console sidebar is hidden, with no icon column (objectstac
     expect(edge()).toBeNull();
   });
 
-  it('"Keep sidebar open" still turns the fold off at 1280 px', () => {
-    writeWorkspacePreference(CONSOLE_SIDEBAR_KEEP_OPEN_PREFERENCE, 'user', 'on');
-    renderShell(1280);
-    expect(sidebarRoot()).toHaveAttribute('data-state', 'expanded');
-    expect(panel()).not.toHaveAttribute('data-console-rail');
-    expect(edge()).toBeNull();
-    // Collapsed there by hand, it is hidden like any other collapse.
+  it('at 1024 px the expand button docks the sidebar as the narrow-window choice, after a reload too; the collapse button takes it back', () => {
+    renderShell(1024);
+    expectHidden();
+    fireEvent.click(trigger());
+    expectDocked();
+    expect(narrowChoice()).toBe('on');
+    expect(readWideWindowOpen(), 'the wide-window choice is not touched').toBeUndefined();
+    reload(1024);
+    expectDocked();
+
+    // The sidebar's own collapse button (a trigger too) collapses it, and that is kept.
     fireEvent.click(trigger());
     expectHidden();
-    // The trigger floats it; "Keep sidebar open" docks it, and a reload keeps it docked.
-    fireEvent.click(trigger());
-    expectFloat();
-    expect(keepOpen()).toHaveAttribute('aria-pressed', 'false');
-    fireEvent.click(keepOpen()!);
-    expect(sidebarRoot()).toHaveAttribute('data-state', 'expanded');
-    expect(panel()).not.toHaveAttribute('data-console-rail');
-    expect(keepOpen()).toHaveAttribute('aria-pressed', 'true');
-    reload(1280);
-    expect(sidebarRoot()).toHaveAttribute('data-state', 'expanded');
-    expect(panel()).not.toHaveAttribute('data-console-rail');
+    expect(narrowChoice()).toBe('off');
+    reload(1024);
+    expectHidden();
   });
 
-  it('"Keep sidebar open" in the fold\'s float docks the sidebar and turns the fold off, after a reload too', () => {
-    renderShell(1280);
-    fireEvent.click(trigger());
-    expectFloat();
-    expect(sidebarCookie(), 'the float is not the reader’s state').toBe('false');
-    fireEvent.click(keepOpen()!);
-    expect(sidebarRoot()).toHaveAttribute('data-state', 'expanded');
-    expect(panel()).not.toHaveAttribute('data-console-rail');
-    expect(keepOpen()).toHaveAttribute('aria-pressed', 'true');
-    reload(1280);
-    expect(sidebarRoot()).toHaveAttribute('data-state', 'expanded');
-    expect(panel()).not.toHaveAttribute('data-console-rail');
+  it('a stored "keep open" from before reads as expanded on a narrow window', () => {
+    writeWorkspacePreference(CONSOLE_SIDEBAR_NARROW_OPEN_PREFERENCE, 'user', 'on');
+    renderShell(1024);
+    expectDocked();
   });
 });
 
 describe('the left edge floats the full menu over the content (objectstack#35062)', () => {
   it('after the hover delay, with its labels and groups; moving away folds it back', () => {
     vi.useFakeTimers();
-    renderShell(1280);
+    renderShell(1024);
     hoverEdge(SIDEBAR_FLOAT_OPEN_DELAY_MS - 1);
     expectHidden();
     act(() => {
@@ -408,7 +399,7 @@ describe('the left edge floats the full menu over the content (objectstack#35062
 
   it('a pointer that leaves the edge before the delay floats nothing', () => {
     vi.useFakeTimers();
-    renderShell(1280);
+    renderShell(1024);
     hoverEdge(SIDEBAR_FLOAT_OPEN_DELAY_MS / 2);
     fireEvent.pointerLeave(edge()!, { pointerType: 'mouse' });
     act(() => {
@@ -419,7 +410,7 @@ describe('the left edge floats the full menu over the content (objectstack#35062
 
   it('a press on the edge floats it at once, and it stays until a press outside', () => {
     vi.useFakeTimers();
-    renderShell(1280);
+    renderShell(1024);
     fireEvent.click(edge()!);
     expectFloat();
     fireEvent.pointerMove(screen.getByText('The page'), { pointerType: 'mouse' });
@@ -464,42 +455,42 @@ describe('the left edge floats the full menu over the content (objectstack#35062
     expectHidden();
   });
 
-  it('a window that turns wide or narrow ends a float over a sidebar collapsed by hand, and it stays collapsed', () => {
-    writeWorkspacePreference(CONSOLE_SIDEBAR_KEEP_OPEN_PREFERENCE, 'user', 'on');
-    renderShell(1280);
-    fireEvent.click(trigger());
-    fireEvent.click(edge()!);
-    expectFloat();
-    // Wide, with no wide-window choice kept yet: the float is not one.
-    resizeTo(1600);
-    expectHidden();
-    expect(readWideWindowOpen()).toBe(false);
-
-    fireEvent.click(edge()!);
-    expectFloat();
-    // Narrow and kept open: the fold stays off, and so does the float.
-    resizeTo(1280);
-    expectHidden();
-  });
-
-  it('a window that narrows past the fold width under a float folds the sidebar, hidden', () => {
+  it('a window that turns narrow or wide ends a float over a sidebar collapsed by hand, and it stays collapsed', () => {
     renderShell(1600);
     fireEvent.click(trigger());
     fireEvent.click(edge()!);
     expectFloat();
-    resizeTo(1280);
+    // Narrow, with no narrow-window choice kept: collapsed, and the float is not one.
+    resizeTo(1024);
+    expectHidden();
+    expect(narrowChoice()).toBeUndefined();
+
+    fireEvent.click(edge()!);
+    expectFloat();
+    // Wide again: the reader's wide-window choice, collapsed.
+    resizeTo(1600);
+    expectHidden();
+    expect(readWideWindowOpen()).toBe(false);
+  });
+
+  it('a window that narrows past the threshold under a float collapses the sidebar, hidden', () => {
+    renderShell(1600);
+    fireEvent.click(trigger());
+    fireEvent.click(edge()!);
+    expectFloat();
+    resizeTo(1279);
     expectHidden();
     expect(readWideWindowOpen()).toBe(false);
   });
 });
 
-describe('the trigger floats the collapsed menu, and the keyboard walks it (objectstack#35062)', () => {
-  it('collapsed by hand at 1600 px, the trigger floats it and moves focus in; Esc folds it and focus goes back to the trigger', () => {
+describe('⌘B floats the collapsed menu, the expand button docks it, and the keyboard walks it (objectstack#35062, objectstack#36112)', () => {
+  it('collapsed by hand at 1600 px, ⌘B floats it and moves focus in; Esc folds it and focus goes back to the trigger', () => {
     renderShell(1600);
     fireEvent.click(trigger());
     expectHidden();
     act(() => trigger().focus());
-    fireEvent.click(trigger());
+    commandB();
     expectFloat();
     expect(panel(), 'focus moves into the floated menu').toContainElement(document.activeElement as HTMLElement);
 
@@ -509,37 +500,11 @@ describe('the trigger floats the collapsed menu, and the keyboard walks it (obje
     expect(readWideWindowOpen()).toBe(false);
   });
 
-  it('collapsed by hand at 1600 px, "Keep sidebar open" chosen from the keyboard docks it, and focus stays in the menu', () => {
-    renderShell(1600);
-    fireEvent.click(trigger());
-    act(() => trigger().focus());
-    fireEvent.click(trigger());
-    expectFloat();
-    act(() => keepOpen()!.focus());
-    fireEvent.click(keepOpen()!);
-    expect(panel()).not.toHaveAttribute('data-console-rail');
-    expect(keepOpen(), 'the control goes with the float').toBeNull();
-    expect(panel(), 'focus stays in the docked menu').toContainElement(document.activeElement as HTMLElement);
-  });
-
-  it('at 1280 px, "Keep sidebar open" turned off from the keyboard folds it, and focus goes to the trigger', () => {
-    renderShell(1280);
-    fireEvent.click(trigger());
-    fireEvent.click(keepOpen()!);
-    expect(keepOpen()).toHaveAttribute('aria-pressed', 'true');
-    act(() => keepOpen()!.focus());
-    fireEvent.click(keepOpen()!);
-    expectHidden();
-    expect(keepOpen(), 'the control goes with the sidebar').toBeNull();
-    expect(document.activeElement, 'focus goes to the trigger').toBe(trigger());
-  });
-
-  it('collapsed by hand, the trigger floats it even when React renders between the capture phase and the trigger’s own click handler', () => {
-    renderShell(1600);
-    fireEvent.click(trigger());
+  it('at 1024 px, the expand button docks it even when React renders between the capture phase and the trigger’s own click handler', () => {
+    renderShell(1024);
     expectHidden();
     // A browser runs a microtask checkpoint after each listener, so React may
-    // render the capture phase's note before the trigger's own handler runs.
+    // render the capture phase's choice before the trigger's own handler runs.
     // Here the click stops after the capture phase and renders (act), and the
     // provider's toggle comes after, on its own.
     const stopAfterCapture = (event: Event) => event.stopPropagation();
@@ -550,47 +515,50 @@ describe('the trigger floats the collapsed menu, and the keyboard walks it (obje
       document.body.removeEventListener('click', stopAfterCapture, true);
     }
     expectHidden();
+    expect(narrowChoice()).toBe('on');
     fireEvent.click(screen.getByTestId('provider-toggle'));
-    expectFloat();
-    expect(readWideWindowOpen()).toBe(false);
+    expectDocked();
+    expect(narrowChoice()).toBe('on');
   });
 
   it('collapsed by hand at 1600 px, ⌘B floats it and folds it again', () => {
     renderShell(1600);
-    fireEvent.keyDown(window, { key: 'b', metaKey: true });
+    commandB();
     expectHidden();
-    fireEvent.keyDown(window, { key: 'b', metaKey: true });
+    commandB();
     expectFloat();
     expect(sidebarCookie()).toBe('false');
-    fireEvent.keyDown(window, { key: 'b', metaKey: true });
+    commandB();
     expectHidden();
     expect(readWideWindowOpen()).toBe(false);
   });
 
-  it('at 1280 px the trigger floats it and moves focus in; Esc folds it and focus goes back to the trigger', () => {
-    renderShell(1280);
+  it('at 1024 px ⌘B floats it and moves focus in; Esc folds it and focus goes back to the trigger', () => {
+    renderShell(1024);
     act(() => trigger().focus());
-    fireEvent.click(trigger());
+    commandB();
     expectFloat();
     expect(panel(), 'focus moves into the floated menu').toContainElement(document.activeElement as HTMLElement);
+    expect(narrowChoice(), 'the float is not the reader’s choice').toBeUndefined();
 
     fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
     expectHidden();
     expect(document.activeElement, 'focus goes back to the trigger').toBe(trigger());
   });
 
-  it('⌘B floats it too', () => {
-    renderShell(1280);
-    fireEvent.keyDown(window, { key: 'b', metaKey: true });
+  it('at 1024 px ⌘B floats it and folds it again', () => {
+    renderShell(1024);
+    commandB();
     expectFloat();
-    fireEvent.keyDown(window, { key: 'b', metaKey: true });
+    commandB();
     expectHidden();
+    expect(narrowChoice()).toBeUndefined();
   });
 
   it('an entry chosen from the keyboard navigates, folds it, and gives focus back to the trigger', () => {
-    renderShell(1280);
+    renderShell(1024);
     act(() => trigger().focus());
-    fireEvent.click(trigger());
+    commandB();
     const entry = within(panel()).getByRole('link', { name: 'Contacts' });
     act(() => entry.focus());
     // A keyboard activation's click counts no presses.

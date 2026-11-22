@@ -328,6 +328,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      remove_user_manager: {
+        label: "Quitar gerente",
+        confirmText: "¿Quitar el gerente de este usuario? No reportará a nadie hasta que se vuelva a asignar un gerente; el enrutamiento de aprobaciones y el ámbito de registros own_and_reports siguen el cambio.",
+        successMessage: "Gerente quitado"
+      },
       list_platform_admins: {
         label: "Administradores de la plataforma",
         resultDialog: {

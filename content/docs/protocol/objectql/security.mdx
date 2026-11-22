@@ -286,8 +286,10 @@ starts the column as for an empty child list. That covers a flow's `create_recor
 `os build` report such a step as the `flow-update-summary-field` warning, which never blocks a
 build, though like every warning it makes `os validate --strict` and `os lint --strict` exit 1
 (a roll-up declared `readonly: true` is the `flow-update-readonly-field` error). Rule 1 below
-holds for it: seed data, package installs and the roll-up's own recompute write it from a
-system context. See [Calculation types](/docs/data-modeling/fields#calculation-types).
+holds for it: the roll-up's own recompute and a historical import (`treatAsHistorical: true`)
+write it from a system context. Seed data, including the seed data a package install loads,
+does not: the seed loader takes a seed record's value for a roll-up out before the write, and the
+child records compute it. See [Calculation types](/docs/data-modeling/fields#calculation-types).
 
 Five rules decide whether a given value survives:
 

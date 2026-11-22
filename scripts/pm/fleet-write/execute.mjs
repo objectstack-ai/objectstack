@@ -365,8 +365,11 @@
  * FAILED, naming the status alone, with
  * `ADVISORY_LIST_ACCESS_REMEDY` on a refusal; a page that never reached the
  * platform ⇒ FAILED with `ADVISORY_LIST_UNREACHED` and the row status
- * `not reached`; every page's `Link` is read through `advisoryListNextCursor`,
- * and a link it refuses ⇒ FAILED; a short page whose link names no next page,
+ * `not reached`; every page's `Link` is read through `advisoryListNextCursor`:
+ * a link naming the collection by numeric id has the repository's own id read
+ * once (`GET /repos/{repo}`, `advisoryListRepoIdOf`; unread ⇒ FAILED naming
+ * its status), and a link it refuses ⇒ FAILED with the link's shape beside the
+ * sentence (`advisoryListLinkShape`, ⛔ never a value); a short page whose link names no next page,
  * or a full one whose link names none, ends the walk, and a short page that
  * still names one ⇒ FAILED with `ADVISORY_LIST_SHORT_PAGE_NEXT`; a full page
  * with a next link is followed only on the cursor it admits, ⛔ never the link
@@ -518,6 +521,24 @@
  * card), a mixed pull or a repository outside `lowRisk.repos` requests exactly
  * as the path-only plan, and the verdict row says why.
  *
+ * The `.claude/**` declaration split (maintainer ruling 2026-11-19 on #35321):
+ * the plan chains `applyRuleChangeSplit` last, as the register's
+ * `governedTierFor` does, so the path-only plan reads a `.claude/**` pull
+ * Tier H — a path list cannot say what its body declares. When EVERY governed
+ * hit is a row carrying `ruleChange` for the target and no path sits under
+ * `.claude/settings*.json` or `.claude/hooks/` (`ruleChangeReadable`), the
+ * follow-up reads the body off the pull answer (`pullLowRiskReading`) and,
+ * when the body declares a seat value (`none`, or `ruled` with its
+ * `Ruling-ref:` line), the record stage through the queue guard's one reader
+ * (`readLowRiskRecordStage`, card labels left unread) — the record must stand
+ * at its tier, read a clean PASS and carry the same `Rule-change-verified:`
+ * value (`ruleChangeReadingFor`). Only then does it request nobody. ⛔ Fail
+ * closed: `Rule-change: yes`, no line, a settings or hooks path, a record
+ * absent, unread or not verifying, a mixed pull, or a repository outside
+ * `ruleChange.repos` requests exactly as the path-only plan, and the verdict
+ * row says why. A record carried from an older head is refused here (no
+ * checkout diffs the hops), so it requests too.
+ *
  * ## The step summary — what a person reads back
  *
  * `$GITHUB_STEP_SUMMARY` gets one table per run: request id · sender and its
@@ -575,6 +596,7 @@ import { isEntrypoint } from '../../invoked-as.mjs';
 // The register and the approver list, READ — never restated here (the ops.mjs header, "The governed-review follow-up").
 import {
   applyLowRiskArm,
+  applyRuleChangeSplit,
   applyWorkflowSplit,
   fetchTimelineOver,
   GOVERNED_TIER_H,
@@ -592,6 +614,7 @@ import {
   pullPathsFrom,
   readWorkflowDiff,
   repoIdForSlug,
+  RULE_CHANGE_RULING,
   slugFromRemote,
 } from '../check-governed-merges.mjs';
 import {
@@ -675,12 +698,15 @@ import {
   ADVISORY_READ_SENDER_GATES,
   advisoryListCall,
   advisoryListDisplay,
+  advisoryListLinkShape,
   advisoryListNextCursor,
   advisoryListPadded,
   advisoryListPageFailure,
   advisoryListPagePath,
   advisoryListPlaintext,
   advisoryListProjection,
+  advisoryListRepoIdOf,
+  advisoryListRepoIdUnreadText,
   advisoryReadCall,
   advisoryReadFenceFailures,
   advisoryReadFenceText,
@@ -919,21 +945,27 @@ export function reviewedLogins(json) {
  * keeps them H, so a path-only call answers as before. `lowRiskVerdict` is that verdict, or null when no arm row
  * was hit, for the row's words.
  *
+ * The same reading is handed to `applyRuleChangeSplit` LAST (the `.claude/**` declaration split): with no reading the
+ * split row is Tier H, so a path-only call requests the approvers for a `.claude/**` pull; only a reading whose body
+ * declares a seat value and whose record verifies it moves that row to S. `ruleChangeVerdict` is the split's
+ * verdict, or null when no split row was hit.
+ *
  * Logins are matched as GitHub matches them, case-insensitively; the answer keeps `approvers`' own spelling and order.
  */
 export function governedReviewPlan({ paths, repo, author = null, requested = [], assigned = [], reviewed = [], approvers = GOVERNED_APPROVERS, workflowDiff = null, lowRisk = null } = {}) {
   const repoId = repoIdForSlug(repo);
   const matched = repoId ? governedPathsIn(Array.isArray(paths) ? paths : [], repoId) : [];
-  const read = matched.length === 0 ? [] : applyLowRiskArm(applyWorkflowSplit(matched, repoId, workflowDiff), repoId, lowRisk);
+  const read = matched.length === 0 ? [] : applyRuleChangeSplit(applyLowRiskArm(applyWorkflowSplit(matched, repoId, workflowDiff), repoId, lowRisk), repoId, lowRisk);
   const tier = matched.length === 0 ? null : landingTierOf(read);
   const lowRiskVerdict = read.find((s) => s?.lowRiskVerdict)?.lowRiskVerdict ?? null;
+  const ruleChangeVerdict = read.find((s) => s?.ruleChangeVerdict)?.ruleChangeVerdict ?? null;
   const lower = (list) => (Array.isArray(list) ? list : []).map((l) => String(l).toLowerCase());
   const have = new Set([...lower(requested), ...lower(assigned), ...lower(reviewed)]);
   const list = Array.isArray(approvers) ? approvers : [];
   const covered = list.filter((a) => have.has(a.toLowerCase()));
   const missing = tier === GOVERNED_TIER_H ? list.filter((a) => !have.has(a.toLowerCase())) : [];
   const isAuthor = (a) => typeof author === 'string' && a.toLowerCase() === author.toLowerCase();
-  return { repoId, matched, tier, lowRiskVerdict, covered, toRequest: missing.filter((a) => !isAuthor(a)), toAssign: missing.filter(isAuthor) };
+  return { repoId, matched, tier, lowRiskVerdict, ruleChangeVerdict, covered, toRequest: missing.filter((a) => !isAuthor(a)), toAssign: missing.filter(isAuthor) };
 }
 
 /** The words the follow-up's verdict row prints for a plan — what was hit, who is covered, what will be sent. Pure. */
@@ -980,6 +1012,24 @@ export function lowRiskArmReadable(plan) {
   if (others.length > 0) return { read: false, why: `another governed row is hit too (${others.map((s) => `\`${s.glob}\``).join(', ')}), so the path-only tier stands` };
   const outside = armRows.filter((s) => !(Array.isArray(s.lowRisk.repos) && s.lowRisk.repos.includes(plan.repoId)));
   if (outside.length > 0) return { read: false, why: `${plan.repoId} is not in the row's lowRisk.repos (${(outside[0].lowRisk.repos ?? []).join(', ')}), so the path-only tier stands` };
+  return { read: true, why: null };
+}
+
+/**
+ * Whether the `.claude/**` declaration split may be READ for this plan (header: "The governed-review follow-up"): a
+ * Tier H plan whose EVERY governed hit is a row carrying `ruleChange` for this repository, and whose split did not
+ * already decide by path (a settings or hooks file). Pure; the same `{ read, why }` shape as `lowRiskArmReadable`,
+ * and a cost gate only — it can keep a plan H, never move one to S.
+ */
+export function ruleChangeReadable(plan) {
+  const hits = Array.isArray(plan?.matched) ? plan.matched : [];
+  const splitRows = hits.filter((s) => s?.ruleChange);
+  if (plan?.tier !== GOVERNED_TIER_H || splitRows.length === 0) return { read: false, why: null };
+  const others = hits.filter((s) => !s?.ruleChange);
+  if (others.length > 0) return { read: false, why: `another governed row is hit too (${others.map((s) => `\`${s.glob}\``).join(', ')}), so the path-only tier stands` };
+  const outside = splitRows.filter((s) => !(Array.isArray(s.ruleChange.repos) && s.ruleChange.repos.includes(plan.repoId)));
+  if (outside.length > 0) return { read: false, why: `${plan.repoId} is not in the row's ruleChange.repos (${(outside[0].ruleChange.repos ?? []).join(', ')}), so the path-only tier stands` };
+  if (plan.ruleChangeVerdict?.byPath === true) return { read: false, why: `${plan.ruleChangeVerdict.reasons.join('; ')}` };
   return { read: true, why: null };
 }
 
@@ -1095,6 +1145,48 @@ export async function lowRiskReadingFor({ repo, pull, paths, files, pr, api, t, 
     fetchTimeline: makeTimelineReader(reader),
   });
   return pullLowRiskReading(pr, paths, { timeline, changesets, catalogFiles, record: stage.record, cardLabels: stage.cardLabels });
+}
+
+/**
+ * The `.claude/**` declaration split's reading for ONE pull (header: "The governed-review follow-up"): the body off
+ * the pull answer `pr` (`pullLowRiskReading`, the reading the register's split takes), and — only when that body
+ * leaves the split's RECORD STAGE pending, so a `yes` or an absent line pays for nothing — the record stage through
+ * the queue guard's `readLowRiskRecordStage`, imported, ⛔ no second reader, over the guard's own comment reader on
+ * the relay's token, card labels left unread (they are the low-risk arm's conjunct, not this split's). No checkout is
+ * handed to it, so a record carried from an older head is refused, never re-tested here. A recogniser load that
+ * fails or a thread that does not read is NOT MEASURED, so Tier H. Never throws.
+ */
+export async function ruleChangeReadingFor({ repo, pull, paths, pr, api, t, loadRecognisers = loadRecordRecognisers }) {
+  const first = pullLowRiskReading(pr, paths);
+  const plan = governedReviewPlan({ paths, repo, lowRisk: first });
+  if (plan.ruleChangeVerdict?.recordStage !== LOW_RISK_RECORD_STAGE.pending) return first;
+  let recognisers;
+  try {
+    recognisers = await loadRecognisers();
+  } catch (error) {
+    recognisers = { available: false, reason: `the recogniser load threw: ${String(error?.message ?? error).split('\n')[0]}` };
+  }
+  const reader = { apiUrl: api, slug: repo, token: t?.token ?? '', fetchImpl: t?.fetch ?? globalThis.fetch };
+  const stage = await readLowRiskRecordStage({
+    pr: pull,
+    pull: pr,
+    headSha: pr?.head?.sha ?? null,
+    paths,
+    repo: plan.repoId,
+    recognisers,
+    fetchComments: makeCommentReader(reader),
+    withCardLabels: false,
+  });
+  return pullLowRiskReading(pr, paths, { record: stage.record });
+}
+
+/** The words the split's verdict adds to the verdict row: Tier S and the ruling, or every reason it is H. Pure. */
+export function ruleChangeReadingText(plan) {
+  const v = plan?.ruleChangeVerdict;
+  if (!v) return '';
+  if (v.tier === GOVERNED_TIER_S) return ` · \`.claude/**\` declaration split read: Tier S on \`Rule-change: ${v.declared}\`, verified on the record (${RULE_CHANGE_RULING})`;
+  const reasons = v.measured ? v.reasons : [v.reason];
+  return ` · \`.claude/**\` declaration split read: Tier H, fail closed — ${reasons.join('; ')}`;
 }
 
 /**
@@ -1844,6 +1936,8 @@ export async function advisoryListAction(req, { payload, index, api, t, seal = s
   const items = [];
   const seen = new Set();
   let status = null;
+  // The repository's own numeric id, read at most once, and only when a next link names the collection by one.
+  let repoId = null;
   for (const state of ADVISORY_LIST_STATES) {
     let after = null;
     let ended = false;
@@ -1863,8 +1957,17 @@ export async function advisoryListAction(req, { payload, index, api, t, seal = s
         items.push(item);
       }
       // Every page's Link is read, a short one's too: a short page that still names a next page is not the last.
-      const next = advisoryListNextCursor(r.link ?? null, { api, repo: payload.repo, state });
-      if (next.fail) return { ok: false, status: r.status, why: next.fail, notes: [] };
+      let next = advisoryListNextCursor(r.link ?? null, { api, repo: payload.repo, state, repoId });
+      if (next.needsRepoId) {
+        // The link names the collection by a numeric id: read the repository's own id ONCE, never trust the link's.
+        const own = await rest(api, `/repos/${payload.repo}`, { method: 'GET' }, t);
+        if (own.status === 0) return { ok: false, status: ADVISORY_READ_UNREACHED_STATUS, why: ADVISORY_LIST_UNREACHED, notes: [] };
+        repoId = advisoryListRepoIdOf(own, payload.repo);
+        if (repoId === null) return { ok: false, status: own.status, why: advisoryListRepoIdUnreadText(own.status), notes: [] };
+        next = advisoryListNextCursor(r.link ?? null, { api, repo: payload.repo, state, repoId });
+      }
+      // A refusal prints the link's SHAPE beside the fixed sentence (`advisoryListLinkShape`): ⛔ never a value of it.
+      if (next.fail) return { ok: false, status: r.status, why: `${next.fail}; ${advisoryListLinkShape(r.link ?? null, { api, repo: payload.repo, state, repoId })}`, notes: [] };
       if (r.json.length < ADVISORY_LIST_PAGE_SIZE) {
         if (next.after !== null) return { ok: false, status: r.status, why: ADVISORY_LIST_SHORT_PAGE_NEXT, notes: [] };
         ended = true;
@@ -2273,6 +2376,22 @@ async function requestGovernedReview({ index, op, pull, payload, api, t, log, ro
       return { ok: true };
     }
   }
+  // The `.claude/**` declaration split (header): read only when every governed hit is that row in its ruleChange.repos
+  // and no settings or hooks path decided it; a body declaring a seat value over a record that verifies it sends
+  // nothing, and every other outcome — `yes`, no line, a record that does not verify, unread — requests as before.
+  const splitReadable = ruleChangeReadable(plan);
+  if (splitReadable.why) readingWords += ` · \`.claude/**\` declaration split not read: ${splitReadable.why}`;
+  if (splitReadable.read) {
+    lowRisk = await ruleChangeReadingFor({ repo, pull, paths, pr: pr.json, api, t });
+    plan = governedReviewPlan({ approvers, paths, repo, workflowDiff: reading, lowRisk });
+    readingWords += scrub(ruleChangeReadingText(plan), [token]);
+    if (plan.tier !== GOVERNED_TIER_H) {
+      const text = `${governedReviewText(plan, { approvers, repo, files: read.files.length })}${readingWords}`;
+      rows.push({ action: index, op, call: FILES, status: 200, result: text });
+      log(`  · action ${index} ${op}: ${text}${renamed}`);
+      return { ok: true };
+    }
+  }
   const reviews = await rest(api, `/repos/${repo}/pulls/${pull}/reviews?per_page=100`, {}, t);
   if (reviews.status !== 200 || !Array.isArray(reviews.json)) {
     return failed(`GET /repos/${repo}/pulls/${pull}/reviews`, reviews.status, `${reviews.call} -> HTTP ${reviews.status}${reviews.detail ? ` (${reviews.detail})` : ''}: the pull's reviews could not be read, so who has already reviewed is unknown and no review was requested — its diff hits a Tier H surface; read it on the board and request by hand`);
@@ -2616,7 +2735,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // 45 → 50 with the arm's record stage on the relay: nine H variants of the stage in one plan case, twelve in one run case (the record
   // without its line first), the record on the card thread, the recogniser seam, and the stage's cost on a pull-read H.
   // 50 → 52 with every card the pull names: five H variants of a second card in one run case, and its clean control.
-  "the governed-review follow-up: after pr_ready alone — a pr_create summons NOBODY and never reads the pull's files, because a human is asked only at the seat's hand-off (pr_request_reviewers after ACCEPT + a same-head PASS); after pr_ready the pull's file list is read in full, a Tier H hit requests review from every GOVERNED_APPROVERS account not already requested, assigned or reviewed — the pull's own author assigned instead, never requested; a Tier S or ungoverned diff sends nothing and says so; a workflow-only pull in split.repos is judged by the queue guard's reading, merge base → head, and requests only when it says H or cannot be read; a skills-only pull in lowRisk.repos is judged by the low-risk arm's own reading — pull, file statuses, timeline, changesets and catalog modes, then the review record's `Security-touching:` line and the card's labels — and requests only when it says H or cannot be read; an unreadable or truncated list, an unreadable pull or review list, or a refused write is a FAILED action": 52,
+  // 52 → 62 (#35612): the `.claude/**` declaration split on the plan — `none` over a verifying record plans nobody, and
+  // `yes`, no line, settings/hooks, an unread, non-verifying or FAIL record, a mixed pull each plan both; the readable
+  // gate, the words, four runs, and hotcrm on the `workflows` row (its plan and its run).
+  "the governed-review follow-up: after pr_ready alone — a pr_create summons NOBODY and never reads the pull's files, because a human is asked only at the seat's hand-off (pr_request_reviewers after ACCEPT + a same-head PASS); after pr_ready the pull's file list is read in full, a Tier H hit requests review from every GOVERNED_APPROVERS account not already requested, assigned or reviewed — the pull's own author assigned instead, never requested; a Tier S or ungoverned diff sends nothing and says so; a workflow-only pull in split.repos is judged by the queue guard's reading, merge base → head, and requests only when it says H or cannot be read; a skills-only pull in lowRisk.repos is judged by the low-risk arm's own reading — pull, file statuses, timeline, changesets and catalog modes, then the review record's `Security-touching:` line and the card's labels — and requests only when it says H or cannot be read; an unreadable or truncated list, an unreadable pull or review list, or a refused write is a FAILED action": 62,
   // 17 → 21 with the head fence: a stale head, the embedded copy never trusted, a run naming no pull, a pull unread.
   "the run_rerun_failed: the five fences judged HERE on the run and its pull, read immediately before ONE bodiless POST — the pull's current head by its own GET, never the run's embedded copy, and a run naming no pull refused by name; each refused with the POST not sent and accepted on the measured run; a run, pull, baseline or fence that fails is zero writes; the 201 confirmed only by reading attempt 2 back with its failed jobs queued or in progress, naming their job ids; attempt 2 never seen, a failed job completed, or a job list unread is FAILED; no annotation": 21,
   "the pr_enqueue_front: the pull's own GET, its whole file list and its base's queue read immediately before ONE enqueuePullRequest mutation with jump true and the expected head — open, ready, its head, not Version Packages, no governed path, at most the human-merge line count, a queue read whole with no jumped entry; each fence refused with the mutation not sent; GraphQL errors FAILED naming the missing grant; the 200 confirmed only by reading the queue back with the pull jumped and nothing ahead; queued without the jump or behind another is FAILED, never re-sent; the queue read unpaced; no annotation": 20,
@@ -2633,7 +2755,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the mailbox branch delete: the pull's own answer, the open pulls on its head and the ref read immediately before ONE DELETE of the ref under the App token — an open, unlabelled, other-headed or forked pull, an open pull on that head, a ref moved off the pull's head, or a read that does not answer is zero writes with every failing fence named; the DELETE lands only when the ref reads back absent, a ref already gone an idempotent landing and one still there FAILED; and mailbox-open's close stroke — comment, close, delete — leaves no branch, while a head outside claude/mailbox-* sends no DELETE": 7,
   "an issue_create's title and body on a private repository: they reach no log line, row, step summary or annotation when the stroke lands, when the platform refuses it with a message quoting either — the row keeps the status, withholds that message and prints one that quotes nothing —, when the transport fails, or when the payload is refused for an over-cap or ill-typed body — the refusal names the key and the byte count alone": 8,
   "advisory_read: ONE GET after the sender gate and nothing written; the read, advisory and sender fences judged on that answer — target-write by the maintainer's ruling, a sender off the advisory's collaborators sealed for, one without write refused before the GET, any other gate closed — then the answer sealed to the seat's key and emitted as notice parts the reader parses back, opening byte for byte for that key and read alone; a failed or unsealed seal and an over-cap answer FAILED with nothing emitted; ⛔ the marker in the summary, description and vulnerabilities, and the advisory's id, reach no log line, row, step summary or annotation, and the sealed answer alone carries no marker": 18,
-  "advisory_list: the row's gate before any request, then one walk per listed state on the platform's own cursor, nothing written; a short page or a full one with no next link ends a walk; a refused, unreached or off-shape page, a next link off this API's collection, a repeated advisory, the page cap and the channel's cap each FAILED with nothing emitted; each advisory projected to five fields, the JSON padded and sealed to the seat's key as exactly ten notice parts the reader parses back and opens; ⛔ the marker, every listed id, the cursor and the count reach no log line, row, step summary or annotation, and the row reads the same whatever the count": 22,
+  "advisory_list: the row's gate before any request, then one walk per listed state on the platform's own cursor, nothing written; a short page or a full one with no next link ends a walk; a refused, unreached or off-shape page, a next link off this API's collection, a repeated advisory, the page cap and the channel's cap each FAILED with nothing emitted; each advisory projected to five fields, the JSON padded and sealed to the seat's key as exactly ten notice parts the reader parses back and opens; ⛔ the marker, every listed id, the cursor and the count reach no log line, row, step summary or annotation, and the row reads the same whatever the count": 27,
   "advisory_note: the relay's key judged against the committed half before any request; the advisory's GET and its fences, the open, the section judged again and the mask (sparing the note's own notice), a second GET immediately before ONE PATCH of { description } — the text read, byte for byte, the separator and the section — then that PATCH's answer and a GET after it read back byte for byte; a key, fence, open, section, race, cap, refusal or read-back failure each FAILED with no write or no second one, and no byte of the note, the description or the key on any line, row, summary, annotation, pace line or real process's output": 25,
 });
 // Raised 17 → 18 with the governed-review follow-up battery, 18 → 19 with the run_rerun_failed battery, 19 → 20 with the
@@ -3006,7 +3128,7 @@ export async function selfTest() {
       t("…the pull's own author, when it is an uncovered approver, is ASSIGNED and never requested — the other approver is requested as before", pick(planPair({ paths: ['AGENTS.md'], repo: REPO, author: A2 })), [GOVERNED_TIER_H, [A1], [A2], []]);
       t('…an approver already requested, assigned or holding a submitted review is covered — the H43 union — and matched case-insensitively', pick(planPair({ paths: ['skills/x/SKILL.md'], repo: REPO, author: A2, requested: [A1.toUpperCase()], assigned: [A2] })), [GOVERNED_TIER_H, [], [], [A1, A2]]);
       t("…a submitted review covers its author's slot; a pending (unsubmitted) one does not", [reviewedLogins([{ state: 'COMMENTED', user: { login: 'x' } }, { state: 'PENDING', user: { login: 'y' } }]), planPair({ paths: ['CLAUDE.md'], repo: REPO, reviewed: [A1] }).toRequest], [['x'], [A2]]);
-      t('…a Tier S diff (the .claude/** row alone) is tier S and sends nothing; an ungoverned diff is tier null; a mixed S+H diff is H', [planPair({ paths: ['.claude/skills/pm-dispatch/SKILL.md'], repo: REPO }), planPair({ paths: ['packages/core/src/a.ts'], repo: REPO }), planPair({ paths: ['.claude/agents/os-dev.md', 'docs/NORTH-STAR.md'], repo: REPO })].map((p) => [p.tier, p.toRequest.length + p.toAssign.length]), [[GOVERNED_TIER_S, 0], [null, 0], [GOVERNED_TIER_H, 2]]);
+      t('…a `.claude/**` diff on its path list alone is tier H and plans both (the declaration split, unread, fails closed — #35612); an ungoverned diff is tier null; a mixed diff is H', [planPair({ paths: ['.claude/skills/pm-dispatch/SKILL.md'], repo: REPO }), planPair({ paths: ['packages/core/src/a.ts'], repo: REPO }), planPair({ paths: ['.claude/agents/os-dev.md', 'docs/NORTH-STAR.md'], repo: REPO })].map((p) => [p.tier, p.toRequest.length + p.toAssign.length]), [[GOVERNED_TIER_H, 2], [null, 0], [GOVERNED_TIER_H, 2]]);
       t('…a target outside GOVERNED_REPOS has no governing row: repoId null, tier null, nothing to send', (({ repoId, tier, toRequest }) => [repoId, tier, toRequest])(planPair({ paths: ['docs/adr/0001-x.md'], repo: 'objectstack-ai/elsewhere' })), [null, null, []]);
       t('…the register is scoped per repository: a workflow path is Tier H on objectui and ungoverned on objectos', [planPair({ paths: ['.github/workflows/ci.yml'], repo: 'objectstack-ai/objectui' }).tier, planPair({ paths: ['.github/workflows/ci.yml'], repo: 'objectstack-ai/objectos' }).tier], [GOVERNED_TIER_H, null]);
       t('…a rename OUT of a governed path counts by its old name (pullPathsFrom reads previous_filename)', planPair({ paths: pullPathsFrom([{ filename: 'docs/agents.md', previous_filename: 'AGENTS.md' }]).paths, repo: REPO }).tier, GOVERNED_TIER_H);
@@ -3030,8 +3152,8 @@ export async function selfTest() {
       t('…the file list, the pull and its reviews were read first, in that order, and the rows say the verdict and the landing', [both.seen.map((s) => s.call), both.rows.slice(1).map((r) => [r.action, r.op, r.call, r.status, r.result])], [[PERM, PULL, GRAPHQL, FILES, PULL, REVIEWS, REQUEST], [[1, 'pr_ready', FILES, 200, `governed review: Tier H (\`docs/NORTH-STAR.md\`×1) — requesting \`${A1}\`, \`${A2}\``], [1, 'pr_ready', REQUEST, 201, `#${N} ${URL} · review requested from ${A1}, ${A2}`]]]);
       const none = await runPair(ready([{ op: 'comment', issue: 1, body: 'after' }]), { ...allowed, [PULL]: pullOf(), ...readied, [FILES]: files('packages/core/src/a.ts', 'README.md'), [`POST /repos/${REPO}/issues/1/comments`]: { status: 201, json: { id: 1 } } });
       t('a non-governed diff: the file list is read, NOTHING is requested, the row says so, and the later action runs', [none.exit, writes(none.seen).map((s) => s.call), none.rows[1]?.result, none.seen.filter((s) => s.call === PULL).length], [EXIT_OK, [GRAPHQL, `POST /repos/${REPO}/issues/1/comments`], 'governed review: no governed row hit across 2 file(s) — no review requested', 1]);
-      const tierS = await runPair(ready(), { ...allowed, [PULL]: pullOf(), ...readied, [FILES]: files('.claude/skills/pm-dispatch/SKILL.md') });
-      t("a Tier S diff (.claude/** alone) requests nobody — it lands on a seat's review of record", [tierS.exit, writes(tierS.seen).map((s) => s.call), tierS.rows[1]?.result], [EXIT_OK, [GRAPHQL], "governed review: Tier S (`.claude/**`×1) lands on a seat's review of record — no review requested"]);
+      const tierS = await runPair(ready(), { ...allowed, [PULL]: pullOf(), ...readied, [FILES]: files('.claude/skills/pm-dispatch/SKILL.md'), [REVIEWS]: reviewsBy(), [REQUEST]: requestedAnswer([A1, A2]) });
+      t('⛔ a `.claude/**` pull whose body declares no `Rule-change:` line requests BOTH — the declaration split reads it Tier H, and the row says why (#35612)', [tierS.exit, writes(tierS.seen).map((s) => s.call), tierS.rows[1]?.result.includes('· `.claude/**` declaration split read: Tier H, fail closed — the PR body carries no `Rule-change:` line')], [EXIT_OK, [GRAPHQL, REQUEST], true], tierS.rows[1]?.result);
       const authored = await runPair(ready(), { ...allowed, ...tierH, [PULL]: pullOf({ author: A2 }), [REQUEST]: requestedAnswer([A1]), [ASSIGN]: assignedAnswer([A2]) });
       t('⭐ the author-identity branch: a pull authored by an approver requests the OTHER approver and ASSIGNS the author — never a request naming the author', [authored.exit, writes(authored.seen).slice(1).map((s) => [s.call, s.body]), authored.rows.map((r) => r.result).slice(1)], [EXIT_OK, [[REQUEST, { reviewers: [A1] }], [ASSIGN, { assignees: [A2] }]], [`governed review: Tier H (\`docs/NORTH-STAR.md\`×1) — requesting \`${A1}\` and assigning the author \`${A2}\` (a request naming the author is a 422)`, `#${N} ${URL} · review requested from ${A1}`, `#${N} ${URL} · assignees ${A2}`]]);
       const covered = await runPair(ready(), { ...allowed, ...tierH, [PULL]: pullOf({ requested: [A1] }), [REVIEWS]: reviewsBy(A2) });
@@ -3116,7 +3238,7 @@ export async function selfTest() {
       t('⛔ unreadable-workflow-pull-requests: no checkout, a commit missing after the fetch, git throwing, a fetch that throws, a checkout of another repository or a refused compare — each requests BOTH approvers exactly as today, and its row says UNREAD with the fail-closed words', Object.entries(unreadable).map(([k, r]) => [k, r.exit, writes(r.seen).map((s) => s.call), r.rows[1]?.result.includes('workflow split UNREAD') && r.rows[1]?.result.includes('fail closed, the path-only tier H stands')]), Object.keys(unreadable).map((k) => [k, EXIT_OK, [GRAPHQL, REQUEST], true]), Object.values(unreadable).map((r) => r.rows[1]?.result).join(' | '));
       const mixedCalls = [];
       const mixed = await runPair(ready(), wfAnswers(HEAD_S, { [FILES]: files(WF, '.claude/agents/os-dev.md') }), { git: fakeGit(mixedCalls, { present: [MB, HEAD_S] }) });
-      t('⛔ mixed-workflow-pull-requests: a workflow edit beside another governed row (.claude/**) is never split — no compare, no git, both requested, the row naming the other row', [mixed.exit, mixed.seen.some((s) => s.call.includes('/compare/')), mixedCalls.length, writes(mixed.seen).map((s) => s.call), mixed.rows[1]?.result.endsWith('· workflow split not read: another governed row is hit too (`.claude/**`), so the path-only tier stands')], [EXIT_OK, false, 0, [GRAPHQL, REQUEST], true], mixed.rows[1]?.result);
+      t('⛔ mixed-workflow-pull-requests: a workflow edit beside another governed row (.claude/**) is never split — no compare, no git, both requested, the row naming the other row', [mixed.exit, mixed.seen.some((s) => s.call.includes('/compare/')), mixedCalls.length, writes(mixed.seen).map((s) => s.call), mixed.rows[1]?.result.includes('· workflow split not read: another governed row is hit too (`.claude/**`), so the path-only tier stands')], [EXIT_OK, false, 0, [GRAPHQL, REQUEST], true], mixed.rows[1]?.result);
       const UI = 'objectstack-ai/objectui';
       const uiN = (p) => p.replace(REPO, UI);
       const uiCalls = [];
@@ -3285,11 +3407,56 @@ export async function selfTest() {
       t('⛔ unreadable-skills-pull-requests: no checkout, an unread timeline, a refused compare, a head past the fetch cap, a checkout of another repository, a fetch that throws, a head the fetch cannot bring, or no head sha — each requests BOTH approvers exactly as today, and its row says Tier H, fail closed, with the reason', Object.entries(armUnread).map(([k, [r, why]]) => [k, r.exit, writes(r.seen).map((s) => s.call), r.rows[1]?.result.includes('low-risk skills arm read: Tier H, fail closed') && r.rows[1]?.result.includes(why)]), Object.keys(armUnread).map((k) => [k, EXIT_OK, [GRAPHQL, REQUEST], true]), Object.values(armUnread).map(([r]) => r.rows[1]?.result).join(' | '));
       const armMixedCalls = [];
       const armMixed = await runPair(ready(), armAnswers({ [FILES]: armFiles(SK, CS, '.claude/agents/os-dev.md') }), { git: armGit(armMixedCalls) });
-      t('⛔ mixed-skills-pull-requests: a skills edit beside another governed row (.claude/**) is not read — no timeline, no compare, no git, both requested, the row naming the other row', [armMixed.exit, armMixed.seen.some((s) => s.call === TIMELINE || s.call === ARM_COMPARE), armMixedCalls.length, writes(armMixed.seen).map((s) => s.call), armMixed.rows[1]?.result.endsWith('· low-risk skills arm not read: another governed row is hit too (`.claude/**`), so the path-only tier stands')], [EXIT_OK, false, 0, [GRAPHQL, REQUEST], true], armMixed.rows[1]?.result);
+      t('⛔ mixed-skills-pull-requests: a skills edit beside another governed row (.claude/**) is not read — no timeline, no compare, no git, both requested, the row naming the other row', [armMixed.exit, armMixed.seen.some((s) => s.call === TIMELINE || s.call === ARM_COMPARE), armMixedCalls.length, writes(armMixed.seen).map((s) => s.call), armMixed.rows[1]?.result.includes('· low-risk skills arm not read: another governed row is hit too (`.claude/**`), so the path-only tier stands')], [EXIT_OK, false, 0, [GRAPHQL, REQUEST], true], armMixed.rows[1]?.result);
       const armUiCalls = [];
       const armUi = await runPair({ ...ready(), repo: UI_REPO }, { [uiRepo(PERM)]: allowed[PERM], ...readied, [uiRepo(PULL)]: { status: 200, json: armPullJson() }, [uiRepo(FILES)]: armFiles(SK, CS), [uiRepo(REVIEWS)]: reviewsBy(), [uiRepo(REQUEST)]: requestedAnswer([A1, A2]) }, { git: armGit(armUiCalls) });
       t('⛔ objectui-skills-pull-requests: a skills pull on a repository outside lowRisk.repos is not read — no timeline, no compare, no git, both requested, the row naming lowRisk.repos', [armUi.exit, armUi.seen.some((s) => s.call.includes('/timeline') || s.call.includes('/compare/')), armUiCalls.length, writes(armUi.seen).map((s) => s.call), armUi.rows[1]?.result.endsWith("· low-risk skills arm not read: objectui is not in the row's lowRisk.repos (objectstack), so the path-only tier stands")], [EXIT_OK, false, 0, [GRAPHQL, uiRepo(REQUEST)], true], armUi.rows[1]?.result);
       t('no annotation is emitted for the follow-up — pr_ready is not an annotated op', [both.annotations, authored.logs.some((l) => l.startsWith('::notice'))], [[], false]);
+
+      // ⚖️ The `.claude/**` declaration split on the relay (#35612): the plan chains `applyRuleChangeSplit` on the same
+      // reading, so a body declaring `yes`, nothing, or a settings/hooks path plans both approvers, and a declared `none`
+      // over a record that verifies it plans nobody. Each pinned with the control one step away.
+      const CL = '.claude/skills/pm-dispatch/SKILL.md';
+      const RC_BODY = (line) => `Fixes #1\n\nClause-②: no\nMetadata-protocol: none\n${line === null ? '' : `${line}\n`}`;
+      const rcRecord = (value = 'none', over = {}) => ({ measured: true, reason: null, located: 'found', where: 'PR', id: 900, carried: null, securityTouching: null, ruleChangeVerified: value === null ? { state: 'missing' } : { state: 'read', value }, ruleChangeCarried: null, recordLeg: { state: 'stands', reason: null }, ...over });
+      const rcRead = (line, record = rcRecord()) => pullLowRiskReading(armPullJson({ body: RC_BODY(line) }), [CL], record === null ? {} : { record });
+      const rcPlan = (paths, reading) => planPair({ paths, repo: REPO, lowRisk: reading });
+      t('⭐ split plan: `Rule-change: none` over a record that verifies it is Tier S and plans NOBODY; the control — the same pull read on its path list alone — plans both', [rcPlan([CL], rcRead('Rule-change: none')), rcPlan([CL], null)].map((p) => [p.tier, p.toRequest, p.ruleChangeVerdict?.declared ?? null]), [[GOVERNED_TIER_S, [], 'none'], [GOVERNED_TIER_H, [A1, A2], null]]);
+      const rcVariants = {
+        'Rule-change: yes': [rcPlan([CL], rcRead('Rule-change: yes')), 'declares `Rule-change: yes`'],
+        'no Rule-change line': [rcPlan([CL], rcRead(null)), 'carries no `Rule-change:` line'],
+        'a settings path': [rcPlan(['.claude/settings.json'], rcRead('Rule-change: none')), 'the harness permission set'],
+        'a hooks path beside the wording': [rcPlan([CL, '.claude/hooks/guard-main-checkout.sh'], rcRead('Rule-change: none')), 'a harness hook'],
+        'none, the record not read yet': [rcPlan([CL], rcRead('Rule-change: none', null)), 'its contract-review record was not read'],
+        'none, the record verifying yes': [rcPlan([CL], rcRead('Rule-change: none', rcRecord('yes'))), 'reads `Rule-change-verified: yes`'],
+        'none, the record a FAIL': [rcPlan([CL], rcRead('Rule-change: none', rcRecord('none', { recordLeg: { state: 'not-pass', reason: 'it reads FAIL' } }))), 'does not read a clean PASS'],
+        'none, AGENTS.md beside it': [rcPlan([CL, 'AGENTS.md'], rcRead('Rule-change: none')), null],
+      };
+      t('⛔ split plan: `yes`, no line, a settings or hooks path, a record unread, verifying another value or a FAIL, or another Tier H row beside it plans BOTH, and the words name the reason', Object.entries(rcVariants).map(([k, [plan, why]]) => [k, plan.tier, plan.toRequest, why === null || ruleChangeReadingText(plan).includes(why)]), Object.keys(rcVariants).map((k) => [k, GOVERNED_TIER_H, [A1, A2], true]), Object.values(rcVariants).map(([plan]) => ruleChangeReadingText(plan)).join(' | '));
+      t('ruleChangeReadable: the split row alone in objectstack is read; another row beside it, a settings/hooks path, or a non-split plan is not — with the words why', [ruleChangeReadable(planPair({ paths: [CL], repo: REPO })), ruleChangeReadable(planPair({ paths: [CL, 'AGENTS.md'], repo: REPO })).why, ruleChangeReadable(planPair({ paths: ['.claude/hooks/x.sh'], repo: REPO })).why?.includes('a harness hook'), ruleChangeReadable(planPair({ paths: ['AGENTS.md'], repo: REPO })), ruleChangeReadable(planPair({ paths: ['ui/.claude/x.md'], repo: REPO }))], [{ read: true, why: null }, 'another governed row is hit too (`AGENTS.md`), so the path-only tier stands', true, { read: false, why: null }, { read: false, why: null }]);
+      t('the split words: Tier S names the declared value and the ruling; no split row adds nothing', [ruleChangeReadingText(rcPlan([CL], rcRead('Rule-change: none'))), ruleChangeReadingText(planPair({ paths: ['AGENTS.md'], repo: REPO }))], [` · \`.claude/**\` declaration split read: Tier S on \`Rule-change: none\`, verified on the record (${RULE_CHANGE_RULING})`, '']);
+
+      // The run: pr_ready on a `.claude/**` pull through the fake platform — the body off the pull answer, then the record
+      // off the pull's thread (and the card's) through the guard's own reader.
+      const rcAnswers = (line, rows, extra = {}) => ({ ...allowed, ...readied, [PULL]: { status: 200, json: armPullJson({ body: RC_BODY(line) }) }, [FILES]: files(CL), [REVIEWS]: reviewsBy(), [REQUEST]: requestedAnswer([A1, A2]), [THREAD(N)]: { status: 200, json: rows }, [THREAD(1)]: { status: 200, json: [] }, ...extra });
+      const rcNone = await runPair(ready(), rcAnswers('Rule-change: none', [reviewOfRecord('Rule-change-verified: none')]));
+      t('⭐ pr_ready on a `.claude/**` pull declaring `Rule-change: none`, its record on the head verifying it: NO request, both threads read, no card label, the row says Tier S on the declaration', [rcNone.exit, writes(rcNone.seen).map((s) => s.call), [THREAD(N), THREAD(1)].every((c) => rcNone.seen.some((s) => s.call === c)), rcNone.seen.some((s) => s.call === CARD_LABELS || s.call === REVIEWS), rcNone.rows[1]?.result.startsWith('governed review: Tier S (`.claude/**`×1)') && rcNone.rows[1]?.result.includes('declaration split read: Tier S on `Rule-change: none`')], [EXIT_OK, [GRAPHQL], true, false, true], rcNone.rows[1]?.result);
+      const rcYes = await runPair(ready(), rcAnswers('Rule-change: yes', [reviewOfRecord('Rule-change-verified: yes')]));
+      t('⛔ the control: the same pull declaring `Rule-change: yes` requests BOTH and reads no thread — the body alone decides it', [rcYes.exit, writes(rcYes.seen).map((s) => s.call), writes(rcYes.seen)[1]?.body, rcYes.seen.some((s) => s.call === THREAD(N)), rcYes.rows[1]?.result.includes('declares `Rule-change: yes`')], [EXIT_OK, [GRAPHQL, REQUEST], { reviewers: [A1, A2] }, false, true], rcYes.rows[1]?.result);
+      const rcUnverified = await runPair(ready(), rcAnswers('Rule-change: none', [reviewOfRecord('Rule-change-verified: yes')]));
+      t('⛔ `Rule-change: none` over a record that verifies `yes` requests BOTH, the row naming the record', [rcUnverified.exit, writes(rcUnverified.seen).map((s) => s.call), rcUnverified.rows[1]?.result.includes('reads `Rule-change-verified: yes`')], [EXIT_OK, [GRAPHQL, REQUEST], true], rcUnverified.rows[1]?.result);
+      const rcNoRecord = await runPair(ready(), rcAnswers('Rule-change: none', []));
+      t('⛔ `Rule-change: none` with no record on the head yet requests BOTH — the record is what lands it', [rcNoRecord.exit, writes(rcNoRecord.seen).map((s) => s.call), rcNoRecord.rows[1]?.result.includes('no contract-review record names this head')], [EXIT_OK, [GRAPHQL, REQUEST], true], rcNoRecord.rows[1]?.result);
+
+      // ⚖️ hotcrm on the `workflows` row (2026-11-19, card #35321 item 4): a hotcrm workflow pull is Tier H and outside
+      // split.repos, so the relay requests the approver there — the row naming split.repos — and the control: an
+      // ungoverned hotcrm path requests nobody (#35612 item 5).
+      const HOT = 'objectstack-ai/hotcrm';
+      const hot = (p) => p.replace(REPO, HOT);
+      const HOT_WF = '.github/workflows/ci.yml';
+      t('hotcrm plan: a workflow path is Tier H and plans both; an ungoverned path plans nobody', [planPair({ paths: [HOT_WF], repo: HOT }), planPair({ paths: ['packages/crm/src/a.ts'], repo: HOT })].map((p) => [p.repoId, p.tier, p.toRequest]), [['hotcrm', GOVERNED_TIER_H, [A1, A2]], ['hotcrm', null, []]]);
+      const hotRun = await runPair({ ...ready(), repo: HOT }, { [hot(PERM)]: allowed[PERM], ...readied, [hot(PULL)]: pullOf(), [hot(FILES)]: files(HOT_WF), [hot(REVIEWS)]: reviewsBy(), [hot(REQUEST)]: requestedAnswer([A1, A2]) });
+      t('⭐ hotcrm-workflow-pull-requests: pr_ready on a hotcrm workflow pull requests BOTH at the hotcrm pull, no compare read, the row naming split.repos', [hotRun.exit, writes(hotRun.seen).map((s) => s.call), writes(hotRun.seen)[1]?.body, hotRun.seen.some((s) => s.call.includes('/compare/')), hotRun.rows[1]?.result.endsWith("· workflow split not read: hotcrm is not in the row's split.repos (objectstack), so the path-only tier stands")], [EXIT_OK, [GRAPHQL, hot(REQUEST)], { reviewers: [A1, A2] }, false, true], hotRun.rows[1]?.result);
     }
 
     // ── the transfer ────────────────────────────────────────────────────────
@@ -4449,6 +4616,11 @@ export async function selfTest() {
       const SEAT = pair();
       const list = (extra = {}) => ({ op: 'advisory_list', public_key: SEAT.spki, ...extra });
       const pageKey = (state, after = null) => `GET ${advisoryListPagePath(REPO, state, after)}`;
+      // A made-up repository id, answered by the repository's own read; the walk reads it only for a numeric next link.
+      const REPO_ID_NUMBER = 4242;
+      const REPO_ID = String(REPO_ID_NUMBER);
+      const REPO_READ = `GET /repos/${REPO}`;
+      const ownRepo = { [REPO_READ]: { status: 200, json: { id: REPO_ID_NUMBER, full_name: REPO, description: MARKER } } };
       // Made-up ids: `GHSA-<k in base 36>-2345-wxyz`, naming no real advisory.
       const idOf = (k) => `GHSA-${k.toString(36).padStart(4, '0')}-2345-wxyz`;
       // A listed advisory carrying the marker in every field but the five that cross.
@@ -4552,10 +4724,30 @@ export async function selfTest() {
       const offLinks = [`<https://evil.test/repos/${REPO}/security-advisories?state=draft&per_page=100&after=${encodeURIComponent(CURSOR)}>; rel="next"`, `<${API}/repositories/1/security-advisories?state=draft&per_page=100&after=${encodeURIComponent(CURSOR)}>; rel="next"`, nextLink('closed', CURSOR), nextLink('draft', `${CURSOR} ${MARKER}`)];
       const off = [];
       for (const link of offLinks) {
-        const r = await listRun([list()], { ...allowed, ...empty, [pageKey('draft')]: pageOf(items(10, 100, 'draft'), link) });
-        off.push([r.exit, r.seen.filter((s) => s.call.includes('state=draft')).length, r.annotations.length, r.rows[0]?.result]);
+        const r = await listRun([list()], { ...allowed, ...ownRepo, ...empty, [pageKey('draft')]: pageOf(items(10, 100, 'draft'), link) });
+        off.push([r.exit, r.seen.filter((s) => s.call.includes('state=draft')).length, r.annotations.length, r.rows[0]?.result?.startsWith(`FAILED: ${ADVISORY_LIST_CURSOR_REFUSED}; link shape: 1 rel="next" link(s); `), r.logs.some((l) => l.includes('link shape: '))]);
       }
-      t("⛔ a next link off this API's collection — another host, the numeric repository path, another state, a cursor outside its shape — is FAILED with the one sentence: no second page asked, nothing sealed, no part", off, offLinks.map(() => [EXIT_ACTION_FAILED, 1, 0, `FAILED: ${ADVISORY_LIST_CURSOR_REFUSED}`]));
+      t("⛔ a next link off this API's collection — another host, the numeric path of another repository's id, another state, a cursor outside its shape — is FAILED with the one sentence and the link's shape beside it, in the row and the job log: no second page asked, nothing sealed, no part", off, offLinks.map(() => [EXIT_ACTION_FAILED, 1, 0, true, true]));
+      // ⭐ The REAL next-link shape: the collection by the repository's numeric id, per_page, state, the cursor and a page.
+      const realLink = (state, after, id = REPO_ID) => `<${API}/repositories/${id}/security-advisories?per_page=100&state=${state}&after=${encodeURIComponent(after)}&page=2>; rel="next"`;
+      const real = await listRun([list()], { ...allowed, ...ownRepo, ...empty, [pageKey('triage')]: pageOf(items(10, 100, 'triage'), realLink('triage', CURSOR)), [pageKey('triage', CURSOR)]: pageOf(items(110, 5, 'triage')), [pageKey('draft')]: pageOf(items(200, 100, 'draft'), realLink('draft', 'AAAA')), [pageKey('draft', 'AAAA')]: pageOf(items(300, 7, 'draft')) });
+      t("⭐ the REAL next-link shape — the collection named by the repository's numeric id — is followed on its cursor once the repository's own id, read ONCE for the whole listing, equals the link's: two states walk a second page each on the relay's own path, the listing lands sealed and emitted as ten parts, 212 listed", [real.exit, real.seen.map((s) => s.call), real.rows.map((x) => [x.call, x.status, x.result]), real.annotations.length, (() => {
+        try {
+          return JSON.parse(opens(real)).count;
+        } catch {
+          return null;
+        }
+      })(), writes(real.seen).length], [EXIT_OK, [PERM, pageKey('triage'), REPO_READ, pageKey('triage', CURSOR), pageKey('draft'), pageKey('draft', 'AAAA'), pageKey('closed')], [[CALL, 200, ADVISORY_LIST_LANDED]], ADVISORY_READ_MAX_PARTS, 212, 0]);
+      const otherId = await listRun([list()], { ...allowed, ...ownRepo, ...empty, [pageKey('draft')]: pageOf(items(10, 100, 'draft'), realLink('draft', CURSOR, '4243')) });
+      t("⛔ …and a numeric link naming ANY other id is FAILED with the one sentence and its shape saying the id is another repository's — the id read, no second page, nothing sealed — ⛔ the link's id is never taken", [otherId.exit, otherId.seen.map((s) => s.call), otherId.annotations.length, otherId.rows[0]?.result], [EXIT_ACTION_FAILED, [PERM, pageKey('triage'), pageKey('draft'), REPO_READ], 0, `FAILED: ${ADVISORY_LIST_CURSOR_REFUSED}; link shape: 1 rel="next" link(s); on the relay's API origin; path /repositories/ID/security-advisories (ID another repository's); query names [per_page,state,after,page]; state the walk's; after in its shape`]);
+      const idUnread = [];
+      for (const answer of [{ status: 403, json: { message: MARKER } }, { status: 200, json: { id: REPO_ID_NUMBER, full_name: 'someone/else' } }, { status: 200, json: { id: String(REPO_ID_NUMBER), full_name: REPO } }]) {
+        const r = await listRun([list()], { ...allowed, ...empty, [REPO_READ]: answer, [pageKey('draft')]: pageOf(items(10, 100, 'draft'), realLink('draft', CURSOR)) });
+        idUnread.push([r.exit, r.seen.map((s) => s.call), r.annotations.length, r.rows[0]?.result]);
+      }
+      const idThrown = await listRun([list()], { ...allowed, ...empty, [REPO_READ]: { throws: `fetch failed holding ${MARKER}` }, [pageKey('draft')]: pageOf(items(10, 100, 'draft'), realLink('draft', CURSOR)) });
+      t("⛔ a repository read that refuses, names another repository or carries no numeric id is FAILED naming its status alone, and one that never reached the platform is FAILED as unreached — no second page, nothing sealed, the answer's message printed nowhere", [idUnread, [idThrown.exit, idThrown.rows.map((x) => [x.status, x.result]), idThrown.annotations.length]], [[[EXIT_ACTION_FAILED, [PERM, pageKey('triage'), pageKey('draft'), REPO_READ], 0, `FAILED: ${advisoryListRepoIdUnreadText(403)}`], [EXIT_ACTION_FAILED, [PERM, pageKey('triage'), pageKey('draft'), REPO_READ], 0, `FAILED: ${advisoryListRepoIdUnreadText(200)}`], [EXIT_ACTION_FAILED, [PERM, pageKey('triage'), pageKey('draft'), REPO_READ], 0, `FAILED: ${advisoryListRepoIdUnreadText(200)}`]], [EXIT_ACTION_FAILED, [[ADVISORY_READ_UNREACHED_STATUS, `FAILED: ${ADVISORY_LIST_UNREACHED}`]], 0]]);
+      t("…the paged walk on the /repos/ spelling never reads the repository: the id is read only for a link that names the collection by one", [paged.seen.some((s) => s.call === REPO_READ), real.seen.filter((s) => s.call === REPO_READ).length], [false, 1]);
       const twice = await listRun([list()], { ...allowed, ...empty, [pageKey('draft')]: pageOf(items(10, 100, 'draft'), nextLink('draft', CURSOR)), [pageKey('draft', CURSOR)]: pageOf(items(109, 5, 'draft')) });
       t('⛔ an advisory listed twice across the pages is FAILED — the walk is not one listing — nothing sealed, no part', [twice.exit, twice.annotations.length, twice.rows[0]?.result], [EXIT_ACTION_FAILED, 0, `FAILED: ${ADVISORY_LIST_REPEATED}`]);
       const huge = await listRun([list()], { ...allowed, ...empty, [pageKey('triage')]: pageOf(items(10, 100, 'triage'), nextLink('triage', 'AAAA')), [pageKey('triage', 'AAAA')]: pageOf(items(110, 100, 'triage'), nextLink('triage', 'BBBB')), [pageKey('triage', 'BBBB')]: pageOf(items(210, 50, 'triage')) });
@@ -4596,7 +4788,7 @@ export async function selfTest() {
       const emitted = swept.map(({ r, paceLines }) => [...(r.logs ?? []), ...(r.lines ?? []), r.summary ?? '', JSON.stringify(r.rows ?? []), ...(r.annotations ?? []).map((n) => relayAdvisoryReadAnnotationMessage(n)), ...paceLines].join('\n'));
       const ids = Array.from({ length: 400 }, (_, k) => idOf(k));
       const leaks = emitted.map((text, i) => (text.includes('ADVISORY MARKER') || ids.some((id) => text.includes(id)) || text.includes(CURSOR) || text.includes(encodeURIComponent(CURSOR)) ? i : null)).filter((i) => i !== null);
-      t("⛔ THE MARKER TEST: across every run of this battery — landed, paged, exact, short-with-next, any-case relation, field-fenced, null-dated, empty and large, capped, off-link, repeated, over-cap, fenced, unreached, gated, unsealed, refused — the marker, every listed advisory's id and the cursor reach NO log line, row, step summary, annotation or pace-log line", [swept.length, leaks], [40, []], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('ADVISORY MARKER') || ids.some((id) => l.includes(id)) || l.includes(CURSOR))).join(' | '));
+      t("⛔ THE MARKER TEST: across every run of this battery — landed, paged, exact, short-with-next, any-case relation, field-fenced, null-dated, empty and large, capped, off-link with its shape, the real numeric shape, another id, an unread or unreached repository id, repeated, over-cap, fenced, unreached, gated, unsealed, refused — the marker, every listed advisory's id and the cursor reach NO log line, row, step summary, annotation or pace-log line", [swept.length, leaks], [46, []], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('ADVISORY MARKER') || ids.some((id) => l.includes(id)) || l.includes(CURSOR))).join(' | '));
       t('…positive control: the answers served carried the marker, the ids and the cursor, the cursor reached the platform on the second page — where it belongs — and the generic row printer, given a served item, WOULD print the marker and its id', [JSON.stringify(served).includes('ADVISORY MARKER') && JSON.stringify(served).includes(idOf(1)), paged.seen.some((s) => s.call.includes(encodeURIComponent(CURSOR))), resultOf({}, item(1, 'draft')).includes('ADVISORY MARKER') && resultOf({}, item(1, 'draft')).includes(idOf(1))], [true, true, true]);
     }
 

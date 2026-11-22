@@ -80,6 +80,46 @@ Keys that merely hide/re-arrange correct information (`hideRelatedTab`, `showRef
 > ([ADR-0035](./0035-config-driven-master-detail.md)'s amendment of the same
 > date).
 
+> **Note (2026-11-20, [#35897](https://github.com/objectstack-ai/objectstack/issues/35897) and
+> [#35899](https://github.com/objectstack-ai/objectstack/issues/35899), epic
+> [#35896](https://github.com/objectstack-ai/objectstack/issues/35896)).** The maintainer's
+> words on the epic: 「但是你看右侧，他显示哪些子表都是通过tab配置出来的。删除tab就是不现实。」
+> (that is, removing a tab means not showing it), 「其实除了 overview，我们直接用 relatedLists
+> 是不是就可以。」 and 「三个内置项，是不是可以直接用对应的对象名」, then 「按对象名这版，立专题」.
+> So a **declared** `relatedLists` is now the object's record-page TAB LIST, not only an order:
+> the related lists it names show, in its order, and a side list it leaves out shows no tab.
+> The attachments, approvals and activity-stream tabs are placed in it by the platform object
+> each draws (`sys_attachment`, `sys_approval_request`, `sys_activity`), and an entry may give
+> its list a title and columns on the parent (`{ list, label, columns }`). This is the one
+> place §2's "keys that merely hide/re-arrange correct information are rejected at this
+> layer" yields, by that ruling: the key still passes both admission tests as the 2026-10-28
+> note reads them (which relationships matter on this object is business intent; it binds
+> every record surface and names no page), and showing is now part of that intent rather
+> than a page toggle. The guard keeps its force for every other key: no per-page show/hide
+> switch (`hideRelatedTab`, `showReferenceRail`) returns, and an undeclared `relatedLists`
+> shows every list as before. Body tables stay the field groups' to place (`fieldGroups[]
+> .relatedList`); the FK's `relatedList: false` still hides a list everywhere. A child list
+> another package adds is no exception: once `relatedLists` is declared it shows no tab until
+> the parent names it, and a build accepts that name only when the package is in the parent's
+> stack. Letting an extension package place its own list is the epic's child card
+> [#35901](https://github.com/objectstack-ai/objectstack/issues/35901).
+
+> **Note (2026-11-22, [#35901](https://github.com/objectstack-ai/objectstack/issues/35901), epic
+> [#35896](https://github.com/objectstack-ai/objectstack/issues/35896)).** The previous note's last
+> sentence is superseded. An extension package now says where the fields, groups and child lists it
+> brings go (`ObjectExtensionSchema.place`, applied once by the registry fold, ADR-0146 D10's note of
+> the same date), and a child list another package brings is **not** hidden by the parent's declared
+> `relatedLists`: placed, it sits where its package puts it; unplaced, it shows at the end of the
+> tabs (the maintainer: 「装了就自动排在末尾」, ruling 7073014077, flipping ruling 7072511859). The
+> parent's tab list still decides everything the parent's own package and package-less metadata
+> bring. The ruling's consequence, for the approver: the parent cannot hide another package's list.
+> It can move it by naming it in its own `relatedLists`; only `relatedList: false` on that package's
+> FK hides it, and that FK is the other package's to set. Placement arranges what the parent declares (「父对象声明了才生效」): a group or field placement
+> applies only where the parent declares `fieldGroups`, so §5's derivation is unchanged: an
+> extension's group lands among the declared groups (after or before one of them, or last) and a
+> field it places lands inside a group's member list, never above the parent's own fields on a
+> parent that declares no groups.
+
 ### 3. Deletions (all evidenced zero-author)
 
 - **`detail` block removed from `ObjectSchema`** — all three typed keys. `renderViaSchema` retires *together with* the legacy monolith renderer path in objectui (separate execution PR; the key is only that path's steering wheel, deleting it alone saves nothing). `hideReferenceRail`/`hideRelatedTab` are removed outright (the former is a proven no-op for spec authors; the latter's raison d'être — overriding rail/tab dedup — died with the rail).

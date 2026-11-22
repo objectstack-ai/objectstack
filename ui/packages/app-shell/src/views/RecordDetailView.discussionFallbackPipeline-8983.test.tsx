@@ -66,6 +66,12 @@
  * `onLoadMore` renders a button that does nothing, which reads as "paging
  * works" to every assertion that only counts it.
  *
+ * ⚠️ SINCE objectstack#36075 the synthesized default page draws the record's
+ * comments in its comment panel, not in the 动态 stream. The synthesized route
+ * is read here as both of its surfaces: the stream (system entries, on the
+ * pipeline's declared config) and the panel (every comment, oldest first, a
+ * conversation read to its end rather than a paged feed).
+ *
  * ## Resolution
  *
  * Nothing here resolves through any `dist/`: `./RecordDetailView` is this
@@ -253,7 +259,7 @@ function renderDetail(fixture: Fixture, pages: any[]) {
           onEdit={() => {}}
           objectNameOverride={OBJECT_NAME}
           recordIdOverride={RECORD_ID}
-          embedded
+          /* objectstack#36150 — not `embedded`: an authored page draws on the full page only. */
         />
       </MetadataCtx.Provider>
     </MemoryRouter>,
@@ -316,8 +322,28 @@ async function readSurface(fixture: Fixture, pages: any[]) {
 }
 
 const viaAuthoredBlock = (fixture: Fixture) => readSurface(fixture, [AUTHORED_PAGE_WITH_DISCUSSION]);
-/** No authored page ⇒ the synthesized default, which composes the block. */
-const viaSynthesizedBlock = (fixture: Fixture) => readSurface(fixture, []);
+/**
+ * No authored page ⇒ the synthesized default. Its comments are the comment
+ * panel's (objectstack#36075): what the stream draws is read before the panel
+ * opens, then what the panel draws.
+ */
+async function viaSynthesizedBlock(fixture: Fixture) {
+  renderDetail(fixture, []);
+  await settled();
+  const stream = { rows: renderedRows(fixture), loadMore: loadMoreCount() };
+  const button = await waitFor(() => {
+    const el = document.querySelector('[data-comments-button]');
+    expect(el).not.toBeNull();
+    return el as HTMLElement;
+  });
+  fireEvent.click(button);
+  const panel = document.querySelector('[data-comments-panel]') as HTMLElement;
+  await waitFor(() => expect(panel.querySelectorAll('[data-comment-thread]').length).toBeGreaterThan(0));
+  const panelRows = Array.from(panel.querySelectorAll('[data-comment-thread] > [data-comment-item] p')).map(
+    (el) => el.textContent ?? '',
+  );
+  return { stream, panelRows };
+}
 
 function readPreFixShape(fixture: Fixture) {
   render(<PreFixFallbackShape items={feedAsTheViewBuildsIt(fixture)} />);
@@ -326,6 +352,7 @@ function readPreFixShape(fixture: Fixture) {
 
 beforeEach(() => {
   cleanup();
+  window.localStorage.clear();
   // Unrelated chrome on this view reaches for the platform API; in jsdom that
   // is a real socket. Answer it locally so the feed reads are the only
   // asynchrony under test.
@@ -359,9 +386,11 @@ describe('both composition routes render the same feed (objectui#8983)', () => {
     // node DECLARES `showCompleted: true` — a stream shows what happened. It
     // still runs the one pipeline: the completed row is there because the
     // declared config says so, and the paging case below holds the window.
+    // Its comments are the comment panel's (objectstack#36075).
     cleanup();
     const synthesized = await viaSynthesizedBlock(fixture);
-    expect(synthesized.rows).toEqual([...expected, TASK_MARKER]);
+    expect(synthesized.stream.rows).toEqual([TASK_MARKER]);
+    expect(synthesized.panelRows).toEqual(expected);
 
     // PRE-FIX CONTROL — the same feed, the shape the retired fallback had.
     cleanup();
@@ -381,11 +410,14 @@ describe('both composition routes render the same feed (objectui#8983)', () => {
     expect(authored.rows).toEqual(expected);
     expect(authored.loadMore).toBe(1);
 
+    // The synthesized page's comment panel is a conversation, read to its
+    // end: every comment, oldest first, and the stream holds none of them to
+    // page (objectstack#36075).
     cleanup();
     const synthesized = await viaSynthesizedBlock(fixture);
-    expect(synthesized.rows).toEqual(expected);
-    expect(synthesized.loadMore).toBe(1);
-    expect(authored.rows).toEqual(synthesized.rows);
+    expect(synthesized.stream.rows).toEqual([]);
+    expect(synthesized.stream.loadMore).toBe(0);
+    expect(synthesized.panelRows).toEqual(Array.from({ length: 25 }, (_, i) => commentMarker(i + 1)));
 
     // PRE-FIX CONTROL — no pipeline, so no window and no paging affordance.
     cleanup();
@@ -409,7 +441,8 @@ describe('both composition routes render the same feed (objectui#8983)', () => {
 
     cleanup();
     const synthesized = await viaSynthesizedBlock(fixture);
-    expect(synthesized.rows).toEqual(expected);
+    expect(synthesized.stream.rows).toEqual([]);
+    expect(synthesized.panelRows).toEqual(expected);
 
     cleanup();
     const preFix = readPreFixShape(fixture);

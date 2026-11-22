@@ -377,7 +377,7 @@ export function ShareDialog({
                     <SelectItem key={opt.value} value={opt.value} className="text-xs">
                       <div className="flex flex-col">
                         <span>{opt.label}</span>
-                        <span className="text-[10px] text-muted-foreground">
+                        <span className="text-xs text-muted-foreground">
                           {opt.help}
                         </span>
                       </div>
@@ -479,7 +479,7 @@ export function ShareDialog({
               />
             ))}
             {revokedLinks.length > 0 && (
-              <li className="pt-2 text-[10px] uppercase tracking-wide text-muted-foreground">
+              <li className="pt-2 text-xs uppercase tracking-wide text-muted-foreground">
                 {t('shareDialog.revokedHeading', { defaultValue: 'Revoked' })}
               </li>
             )}
@@ -527,18 +527,18 @@ function LinkRow({ link, copied, onCopy, onRevoke, publicBaseUrl, disabled }: Li
       )}
       data-testid="share-link-row"
     >
-      <Badge variant="secondary" className="text-[10px] capitalize">
+      <Badge variant="secondary" className="text-xs capitalize">
         {link.audience.replace('_', ' ')}
       </Badge>
-      <Badge variant="outline" className="text-[10px] capitalize">
+      <Badge variant="outline" className="text-xs capitalize">
         {link.permission}
       </Badge>
       <div className="min-w-0 flex-1">
-        <div className="truncate font-mono text-[11px]" title={url}>
+        <div className="truncate font-mono text-xs" title={url}>
           {url}
         </div>
         {link.label && (
-          <div className="truncate text-[10px] text-muted-foreground">{link.label}</div>
+          <div className="truncate text-xs text-muted-foreground">{link.label}</div>
         )}
       </div>
       {!disabled && (
@@ -568,7 +568,7 @@ function LinkRow({ link, copied, onCopy, onRevoke, publicBaseUrl, disabled }: Li
         </>
       )}
       {disabled && (
-        <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+        <span className="flex items-center gap-1 text-xs text-muted-foreground">
           <ShieldOff className="h-3 w-3" />
           {t('shareDialog.revokedBadge', { defaultValue: 'revoked' })}
         </span>

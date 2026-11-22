@@ -52,6 +52,8 @@ import { AggregationNodeSchema, SEARCH_COMPANION_FIELD } from '@objectstack/spec
 // [#35138] ADR-0079's one reading of an object's name field
 // (`nameField ?? displayNameField ?? derived`), which names a lookup group.
 import { resolveDisplayField } from '@objectstack/spec/data';
+// [#36167] Which served fields hold a list, read as the publish gate reads them.
+import { isMultiValueField } from '@objectstack/spec/data';
 // [#23529] The catalogue's spelling of `PERMISSION_DENIED`, the code whose
 // `details` `errorResultFromThrown` withholds. Imported, never hand-spelled.
 import { StandardErrorCode, type ErrorCode } from '@objectstack/spec/api';
@@ -427,7 +429,7 @@ export interface McpDataBridge {
    * `input.terms`, ranked and capped at `opts.maxResults`. Runs AS the
    * principal: the host reads the docs through the ADR-0046 §6.7 docs-audience
    * gate, so a page the caller may not read is never searched. On an OAuth
-   * grant the principal is the agent envelope, judged on the token's grant.
+   * grant the audience is the delegating person's own permission sets.
    *
    * OPTIONAL: a host that cannot read docs for the caller omits both doc
    * members ({@link searchPackageDocs}, {@link readPackageDoc}) and neither
@@ -957,6 +959,24 @@ function servedFieldOf(fields: Record<string, unknown>, name: unknown): Record<s
   if (typeof name !== 'string' || !Object.prototype.hasOwnProperty.call(fields, name)) return undefined;
   const def = fields[name];
   return def !== null && typeof def === 'object' ? (def as Record<string, unknown>) : undefined;
+}
+
+/**
+ * [#36167] The fields of the served definition `def` that hold a list, read
+ * through `isMultiValueField` (`@objectstack/spec/data`), the predicate the
+ * publish gate reads them with, among the field names the tool judges with;
+ * `undefined` when there is no definition.
+ */
+function multiValueFieldsOfServed(
+  def: Record<string, unknown> | null,
+  judged: readonly string[],
+): string[] | undefined {
+  const map = fieldMapOf(def ?? undefined);
+  if (!map) return undefined;
+  return judged.filter((name) => {
+    const field = servedFieldOf(map, name);
+    return typeof field?.type === 'string' && isMultiValueField({ type: field.type, multiple: field.multiple === true });
+  });
 }
 
 /**
@@ -2867,6 +2887,10 @@ interface GatePassContext {
  * or an object it does not serve, adds none; a target it does not serve is
  * not judged, as at the gate.
  *
+ * [#36167] The subject's definition is read once, by the handler, which also
+ * hands its list-valued fields to the shared validator; `subject` is that read
+ * (`null` when the bridge serves none).
+ *
  * [#33147] The field being authored resolves through the same served
  * definition, and nothing else: a field the caller is not served reads as
  * one the object does not declare, so the answer never says whether it
@@ -2887,11 +2911,10 @@ async function gatePassFindings(
   site: AuthoredExpressionSite,
   objectName: string,
   expression: string,
+  subject: Record<string, unknown> | null,
   context: GatePassContext,
 ): Promise<{ errors: GatePassFinding[]; warnings: GatePassFinding[] }> {
-  if (!bridge.servedObjectDefinitionOf) return NO_GATE_PASS_FINDINGS;
-  const subject = await bridge.servedObjectDefinitionOf(objectName);
-  if (!subject) return NO_GATE_PASS_FINDINGS;
+  if (!bridge.servedObjectDefinitionOf || !subject) return NO_GATE_PASS_FINDINGS;
   const { authoredExpressionHopTargets, judgeAuthoredSiteExpression } = await import('@objectstack/lint');
   const targets: Array<Record<string, unknown>> = [];
   const hops = site === 'flow_condition' ? [] : authoredExpressionHopTargets(subject, expression);
@@ -3315,10 +3338,10 @@ export function packageDocToolsServed(
  * - **No second gate.** Neither tool judges what the caller may read: the
  *   host's members read the `doc` items through the `/meta/doc` docs-audience
  *   gate (ADR-0046 §6.7) as the principal, so a page the caller may not read
- *   is neither found nor read, and reads as not found. On an OAuth grant the
- *   principal is the agent envelope, so the docs audience is judged on the
- *   token's grant, not the person's own permission sets; both descriptions
- *   say so.
+ *   is neither found nor read, and reads as not found. On an OAuth grant that
+ *   reaches these tools (the gate above), the docs audience is the delegating
+ *   person's own permission sets, never wider (ADR-0090 D10); both
+ *   descriptions say so.
  * - **The search is a substring match**, stated in the description: no
  *   server-side doc search exists, so the honest search is a term found in a
  *   page's title, a heading or its text (case aside). Pages that contain more
@@ -3348,7 +3371,7 @@ export function registerPackageDocTools(
         + 'aside. Pages that contain more of the terms come first, then pages where the terms sit higher (title, '
         + `then heading, then text), then by title; at most ${PACKAGE_DOC_SEARCH_MAX_RESULTS}, each with an excerpt `
         + 'and, where the page has one, the url to cite. Only pages this connection may read are searched; on an '
-        + 'OAuth connection that is judged on the connection\'s grant, not on the person\'s own permission sets. '
+        + 'OAuth connection, those the person\'s own permission sets open, never more. '
         + `Read a page with ${READ_PACKAGE_DOC_TOOL_NAME}.`,
       inputSchema: strictToolInput(
         {
@@ -3382,7 +3405,7 @@ export function registerPackageDocTools(
         'Read one page of an installed app\'s manual by its name (the name search_package_docs answers): its '
         + 'title, its manual, its Markdown content and, where the page has one, its url to cite. Send package when '
         + 'two apps ship a page of that name. A page this connection may not read answers as not found; on an OAuth '
-        + 'connection that is judged on the connection\'s grant, not on the person\'s own permission sets.',
+        + 'connection, the person\'s own permission sets decide, never more.',
       inputSchema: strictToolInput(
         {
           surface: `this ${READ_PACKAGE_DOC_TOOL_NAME} call`,
@@ -3837,6 +3860,23 @@ export function registerObjectTools(
           }
           const { role, scope, slot, optionLabels, traversalHydration, gatePasses, faultOutcome: outcomeOf } =
             VALIDATE_SITE_MAP[site ?? 'formula'];
+          // The gate's envelope verdict first: `validateExpression` treats a
+          // blank source as "not authored" and answers ok, while the save gate
+          // refuses it. Each issue is the spec schema's own (code and message),
+          // so the tool and the gate cannot drift apart on this rule.
+          const slotParse = slot.safeParse(expression);
+          // [#32872, #36167] The subject as this caller is served it, read once
+          // where the gate judges the site with passes of its own: those passes
+          // read it, and so does the list-valued field set below.
+          const subject = slotParse.success && gatePasses && bridge.servedObjectDefinitionOf
+            ? await bridge.servedObjectDefinitionOf(objectName)
+            : null;
+          // [#36167] The object's list-valued fields, which the publish gate
+          // hands the shared validator (`ExprSchemaHint.multiValueFields`), so
+          // `record.<list> == <scalar>` is refused here as `list-equality` in
+          // the gate's words. `describeObject`'s projection carries no
+          // `multiple`; the served definition does. Absent, as before.
+          const multiValueFields = multiValueFieldsOfServed(subject, fields);
           const faultOutcome = outcomeOf?.({
             severity: severity ?? 'error',
             triggerKind: triggerKind ?? 'record_change',
@@ -3854,6 +3894,7 @@ export function registerObjectTools(
             fieldTypes,
             scope,
             ...(optionFields ? { optionFields } : {}),
+            ...(multiValueFields ? { multiValueFields } : {}),
             // [#32640] The gate's relationship-traversal checks, where it runs them.
             ...(traversalHydration ? { traversalHydration } : {}),
             ...(faultOutcome ? { faultOutcome } : {}),
@@ -3867,11 +3908,6 @@ export function registerObjectTools(
             // on the same flow). Absent, the hint is byte for byte as before.
             ...(variables !== undefined ? { flowVariables: variables.map((v) => v.name) } : {}),
           } as const;
-          // The gate's envelope verdict first: `validateExpression` treats a
-          // blank source as "not authored" and answers ok, while the save gate
-          // refuses it. Each issue is the spec schema's own (code and message),
-          // so the tool and the gate cannot drift apart on this rule.
-          const slotParse = slot.safeParse(expression);
           const result = slotParse.success
             ? validateExpression(role, expression, hint)
             : {
@@ -3887,7 +3923,7 @@ export function registerObjectTools(
           // flow condition, every other pass the gate runs there, in the
           // gate's own words.
           const gate = slotParse.success && gatePasses
-            ? await gatePassFindings(bridge, (name) => guard(name) === undefined, gatePasses, objectName, expression, {
+            ? await gatePassFindings(bridge, (name) => guard(name) === undefined, gatePasses, objectName, expression, subject, {
                 severity,
                 field,
                 triggerKind,

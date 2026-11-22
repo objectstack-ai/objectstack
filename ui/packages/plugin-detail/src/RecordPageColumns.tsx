@@ -9,26 +9,32 @@
 import * as React from 'react';
 import { cn } from '@object-ui/components';
 import type { FieldContainerLike } from '@object-ui/core';
-import { SchemaRenderer, toRenderableSchema, useRecordContext } from '@object-ui/react';
+import { SchemaRenderer, toRenderableSchema, useRecordContext, useRecordPagePreferences } from '@object-ui/react';
 import {
+  RECORD_PAGE_DETAILS_MIN_WIDTH,
+  RECORD_PAGE_PINNED_GAP,
+  RECORD_PAGE_TABS_MIN_WIDTH,
   RECORD_PAGE_TIMELINE_PANEL,
+  clampDetailsWidth,
+  recordPagePinsDetails,
   relatedListIdsIn,
   type DefaultPageColumns,
   type RecordPageTier,
 } from './synth/recordPageColumns';
 import { useDetailTranslation } from './useDetailTranslation';
 import { RecordBodyTablesContext, RelatedEnlargeContext, RelatedListEnlargedContext } from './relatedListCompact';
-import { ApprovalBandContext, DefaultRecordPageContext, DetailsColumnCapContext } from './defaultRecordPage';
+import { ApprovalBandOnceScope, DefaultRecordPageContext, DetailsColumnCapContext } from './defaultRecordPage';
 import { RECORD_TAB_OVERVIEW, RecordTabRow, type RecordTab, type RecordTabArrangeEdit } from './RecordTabRow';
 import {
-  RECORD_SUMMARY_APPROVALS,
-  RECORD_SUMMARY_ATTACHMENTS,
-  RecordSummaryRail,
-  approvalSummaryRows,
+  RECORD_TAB_APPROVALS,
+  RECORD_TAB_ATTACHMENTS,
+  approvalsHoldPendingRequest,
   useRecordAttachmentCount,
-} from './RecordSummaryRail';
+} from './recordTabBadges';
 import { RecordTimelineCountContext } from './recordTimelineStream';
 import { createRecordBodyFields, RecordBodyFieldsContext } from './recordBodyFields';
+import { createEmptyFieldTally, RecordFieldListContext, type RecordFieldList } from './recordFieldList';
+import { EmptyFieldsRow } from './EmptySectionsFold';
 import { RecordTimelineCountProbe } from './renderers/record-activity';
 import {
   editRelatedArrangement,
@@ -52,15 +58,31 @@ export interface RecordPageColumnsProps {
    */
   footer?: React.ReactNode;
   /**
-   * The reader's right-column switch ⊟ (objectstack#27052; objectstack#27524,
-   * Target 4): off, a tier with a right column draws the details alone, the
-   * full width. The stack has no right column — its panels follow the
-   * details — so it does not read the switch. Absent: on.
+   * Whether the page is a full page — not a drawer or a pane — which may pin
+   * its details to a left column (objectstack#35890; `recordPagePinsDetails`).
+   * Absent: not.
+   */
+  fullPage?: boolean;
+  /**
+   * The width the reader dragged the pinned left column to, from the host's
+   * preference store (per person, per object), and the setter that keeps a
+   * new one. Absent: 400, and a drag holds for this view only.
+   */
+  detailsWidth?: number;
+  onDetailsWidthChange?: (width: number) => void;
+  /**
+   * Told the tab on screen whenever it changes: `RECORD_TAB_OVERVIEW` for the
+   * details as a tab, else the open tab's id — addressed, or implied (the
+   * first of the row on a pinned page whose address names none).
+   */
+  onShownTabChange?: (id: string) => void;
+  /**
+   * @deprecated The right rail it switched is gone (objectstack#35890); ignored.
    */
   rightColumn?: boolean;
   /**
-   * Whether the 概览 tab draws its right rail at all (objectstack#35596: a
-   * drawer draws none). Absent: it does.
+   * @deprecated The right rail is gone at every width (objectstack#35890);
+   * ignored. A full page says so with `fullPage`.
    */
   rail?: boolean;
   /**
@@ -76,15 +98,17 @@ export interface RecordPageColumnsProps {
    * Open a panel's whole face in place — a related list's `object.field`, or
    * `timeline` for the 动态 stream — the host's `?related=`. It is what a
    * tab of the tab row does (objectstack#27524, Target 8); absent, the page
-   * draws no tab row.
+   * draws no tab row. `replace`: the address takes the id in place of its
+   * entry, adding none to the history (a pinned page narrowed out of its
+   * layout keeps the tab it implied, objectstack#35890).
    */
-  onEnlargeRelated?: (id: RelatedCardId) => void;
+  onEnlargeRelated?: (id: RelatedCardId, options?: { replace?: boolean }) => void;
   /**
    * The active tab (the host's `?related=`, objectstack#27524, Target 9): a
    * related list's full table, or the 动态 stream in full (`timeline`), drawn
-   * at the page's full width under the record header and its tab row, until
-   * Esc or 「概览」 (`onCloseEnlargedRelated`). An id naming nothing on the
-   * page draws the page.
+   * under the record header and its tab row, until Esc or 「详情」
+   * (`onCloseEnlargedRelated`). An id naming nothing on the page draws the
+   * page.
    */
   enlargedRelated?: RelatedCardId;
   onCloseEnlargedRelated?: () => void;
@@ -209,17 +233,6 @@ function relatedNodeTitle(node: any): string {
   return typeof p.title === 'string' && p.title ? p.title : p.objectName;
 }
 
-/**
- * Grid templates. Literal strings, so Tailwind's scanner emits each one:
- * details | the right column at 320 px, or 380 px in the wide tier
- * (objectstack#27524, Target 6).
- */
-const GRID_TEMPLATE = {
-  twoColumn: 'grid-cols-[minmax(0,1fr)_20rem]',
-  wide: 'grid-cols-[minmax(0,1fr)_23.75rem]',
-  oneColumn: 'grid-cols-1',
-} as const;
-
 /** Each node of a column, drawn as a sibling of the others: a related-list
  *  stack is the lists sharing a DOM parent (`RelatedListEmptyFold`), so no
  *  per-node wrapper may sit between a list and its column. */
@@ -232,28 +245,26 @@ function drawNodes(nodes: any[]): React.ReactNode {
 /**
  * The details column's nodes (objectstack#35253): the synthesized page splits
  * its details around a body table, one `record:details` per run of sections,
- * and the record's approval band is drawn by the FIRST part alone — above the
- * table — so the page shows one band, not one per part. A context provider
- * adds no DOM, so the column's siblings stay siblings (`drawNodes`).
+ * and the record's approval band is drawn once per page — by the first details
+ * body that reaches the band's place (`ApprovalBandOnceScope`), above the
+ * table. objectstack#35483 / objectstack#35484 — the same rule as a page drawn
+ * as written: a first `record:details` that draws no body (withheld by its
+ * `requiredPermissions`, or drawing its own header) leaves the band to the next
+ * part instead of taking it off the page. A context provider adds no DOM, so
+ * the column's siblings stay siblings (`drawNodes`).
  */
 function drawDetailsNodes(nodes: any[]): React.ReactNode {
-  const firstDetails = nodes.findIndex((node) => node?.type === 'record:details');
-  return nodes.map((node, index) => {
-    const key = (node && typeof node === 'object' && node.id) || index;
-    const drawn = <SchemaRenderer key={key} schema={toRenderableSchema(node)} />;
-    if (node?.type !== 'record:details' || index === firstDetails) return drawn;
-    return (
-      <ApprovalBandContext.Provider key={key} value={false}>
-        {drawn}
-      </ApprovalBandContext.Provider>
-    );
-  });
+  return <ApprovalBandOnceScope>{drawNodes(nodes)}</ApprovalBandOnceScope>;
 }
 
 const LINE_BUTTON =
   'rounded-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
-/** 「默认顺序已更新 · 恢复默认」 — the reader's order was laid over an older default (rule 5). */
+/**
+ * 「默认顺序已更新 · 恢复默认」 — the reader's order was laid over an older
+ * default (rule 5). Under the tab row since the rail it closed went
+ * (objectstack#35890); the hidden lists and the reset live in 「更多」.
+ */
 const RelatedDefaultChangedHint: React.FC<{ onRestore: () => void }> = ({ onRestore }) => {
   const { t } = useDetailTranslation();
   return (
@@ -268,41 +279,6 @@ const RelatedDefaultChangedHint: React.FC<{ onRestore: () => void }> = ({ onRest
 };
 
 /**
- * The rail's foot line (objectstack#27055 rule 6, objectstack#27241):
- * 「已隐藏 N 张 · 显示」 and, while the arrangement is not the default one,
- * 「恢复默认顺序」 (the default order, every list shown). Draws nothing for a
- * default arrangement. 「更多」 holds the same reset (objectstack#35783).
- */
-const RelatedFootLine: React.FC<{
-  hiddenCount: number;
-  onShowHidden: () => void;
-  rearranged: boolean;
-  onRestoreDefault: () => void;
-}> = ({ hiddenCount, onShowHidden, rearranged, onRestoreDefault }) => {
-  const { t } = useDetailTranslation();
-  if (hiddenCount === 0 && !rearranged) return null;
-  return (
-    <p className="text-xs text-muted-foreground" data-related-foot-line="">
-      {hiddenCount > 0 && (
-        <span data-related-hidden-line="">
-          {t('detail.relatedHiddenCount', { count: hiddenCount, defaultValue: '{{count}} hidden' })}
-          {' · '}
-          <button type="button" className={LINE_BUTTON} onClick={onShowHidden}>
-            {t('detail.relatedShowHidden', { defaultValue: 'Show' })}
-          </button>
-        </span>
-      )}
-      {hiddenCount > 0 && rearranged && ' · '}
-      {rearranged && (
-        <button type="button" className={LINE_BUTTON} onClick={onRestoreDefault} data-related-restore-default-order="">
-          {t('detail.relatedRestoreDefaultOrder', { defaultValue: 'Restore default order' })}
-        </button>
-      )}
-    </p>
-  );
-};
-
-/**
  * A column stacks its blocks 16 px apart. A related list folded into its
  * stack's empty line stays MOUNTED with its content `hidden`
  * (`RelatedListStackSlot`), which leaves a zero-height root that a flex gap
@@ -311,35 +287,176 @@ const RelatedFootLine: React.FC<{
  */
 const COLUMN_STACK = 'flex min-w-0 flex-col gap-4 [&>*:has(>[hidden]:only-child)]:hidden';
 
+/** The nearest ancestor of `el` that scrolls vertically, or `null`. */
+function scrollParentOf(el: HTMLElement): HTMLElement | null {
+  const view = el.ownerDocument.defaultView;
+  if (!view) return null;
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    const overflowY = view.getComputedStyle(node).overflowY;
+    if (overflowY === 'auto' || overflowY === 'scroll') return node;
+  }
+  return null;
+}
+
+/** The content-box width of `el`, measured before paint and on every resize; 0 while unknown. */
+function useContentWidth(el: HTMLElement | null): number {
+  const [width, setWidth] = React.useState(0);
+  React.useLayoutEffect(() => {
+    if (!el) return undefined;
+    const measure = () => setWidth(el.clientWidth);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [el]);
+  return width;
+}
+
+/** Below this, the pinned columns are not bounded: the page scrolls as one. */
+const PINNED_MIN_HEIGHT = 360;
+
+/**
+ * The height the pinned columns take so each scrolls on its own
+ * (objectstack#35890, card item 2): the rest of the scroller the page sits in,
+ * below the columns' top and above the paddings under them, so the page
+ * itself does not scroll. `null` — the columns flow with the page — with no
+ * scrolling ancestor (a test environment) or less room than
+ * {@link PINNED_MIN_HEIGHT}.
+ */
+function usePinnedHeight(grid: HTMLElement | null, frame: HTMLElement | null): number | null {
+  const [height, setHeight] = React.useState<number | null>(null);
+  React.useLayoutEffect(() => {
+    if (!grid || !frame) {
+      setHeight(null);
+      return undefined;
+    }
+    const scroller = scrollParentOf(frame);
+    if (!scroller) {
+      setHeight(null);
+      return undefined;
+    }
+    const view = frame.ownerDocument.defaultView!;
+    const measure = () => {
+      const top = grid.getBoundingClientRect().top - scroller.getBoundingClientRect().top - scroller.clientTop
+        + scroller.scrollTop;
+      const below = (parseFloat(view.getComputedStyle(frame).paddingBottom) || 0)
+        + (parseFloat(view.getComputedStyle(scroller).paddingBottom) || 0);
+      const room = Math.floor(scroller.clientHeight - top - below);
+      setHeight(room >= PINNED_MIN_HEIGHT ? room : null);
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(scroller);
+    observer.observe(frame);
+    return () => observer.disconnect();
+  }, [grid, frame]);
+  return height;
+}
+
+/** How far one arrow-key press moves the pinned left column's edge. */
+const DETAILS_WIDTH_KEY_STEP = 16;
+
+/**
+ * The pinned left column's drag handle (objectstack#35890: 「左栏宽 400，可以
+ * 拖宽，拖过的宽度按人记住」), sitting in the gap between the columns: a
+ * vertical separator, dragged with the pointer or moved with ← → (Home / End
+ * to either end). `onPreview` follows the drag; `onCommit` keeps the width
+ * once the drag ends.
+ */
+const DetailsWidthHandle: React.FC<{
+  width: number;
+  max: number;
+  onPreview: (width: number | null) => void;
+  onCommit: (width: number) => void;
+}> = ({ width, max, onPreview, onCommit }) => {
+  const { t } = useDetailTranslation();
+  const drag = React.useRef<{ x: number; width: number; last: number } | null>(null);
+  const clamp = (w: number) => Math.round(Math.max(RECORD_PAGE_DETAILS_MIN_WIDTH, Math.min(w, max)));
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={t('detail.detailsColumnResize', { defaultValue: 'Resize details column' })}
+      aria-valuenow={width}
+      aria-valuemin={RECORD_PAGE_DETAILS_MIN_WIDTH}
+      aria-valuemax={max}
+      tabIndex={0}
+      className="group relative flex cursor-col-resize touch-none justify-center focus-visible:outline-none"
+      data-record-details-resize=""
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        drag.current = { x: event.clientX, width, last: width };
+      }}
+      onPointerMove={(event) => {
+        const start = drag.current;
+        if (!start) return;
+        start.last = clamp(start.width + event.clientX - start.x);
+        onPreview(start.last);
+      }}
+      onPointerUp={(event) => {
+        const start = drag.current;
+        drag.current = null;
+        event.currentTarget.releasePointerCapture?.(event.pointerId);
+        onPreview(null);
+        if (start && start.last !== start.width) onCommit(start.last);
+      }}
+      onPointerCancel={() => {
+        drag.current = null;
+        onPreview(null);
+      }}
+      onKeyDown={(event) => {
+        const next =
+          event.key === 'ArrowLeft' ? width - DETAILS_WIDTH_KEY_STEP
+          : event.key === 'ArrowRight' ? width + DETAILS_WIDTH_KEY_STEP
+          : event.key === 'Home' ? RECORD_PAGE_DETAILS_MIN_WIDTH
+          : event.key === 'End' ? max
+          : null;
+        if (next === null) return;
+        event.preventDefault();
+        if (clamp(next) !== width) onCommit(clamp(next));
+      }}
+    >
+      <span
+        aria-hidden="true"
+        className="h-full w-px bg-border transition-colors group-hover:bg-primary/60 group-focus-visible:bg-ring"
+      />
+    </div>
+  );
+};
+
 /**
  * The synthesized default record page, laid out by the width it has
  * (objectstack#26678; one rule since objectstack#27524, Target 6): one record
- * header, the record's tab row (objectstack#35595: 概览, one tab per related
- * list in the reader's arrangement, 附件, 审批, then 动态 last — every tab
- * there at first paint, an empty list muted with no number, the width the
- * row's only fold), then the open tab's face.
+ * header, the record's tab row (objectstack#35595: 「详情」, one tab per
+ * related list in the reader's arrangement, 附件, 审批, then 动态 last — every
+ * tab there at first paint, an empty list muted with no number, the width the
+ * row's only fold), then the open tab's face drawn the full width. A page with
+ * only the details draws no tab row.
  *
- * 概览 draws a strip the page places (`record:path`, `record:highlights`, a
- * slotted page's `highlights`; the default page places none since
- * objectstack#35891) across the whole width, then the details and the right
- * rail — the summary of the other tabs
- * (`RecordSummaryRail`, objectstack#35596: 审批, 附件, 最近动态, then the
- * lists with records; a card with nothing to show is not drawn, and a rail
- * known to have none folds away). Every other tab draws its block in full in
- * place of all three.
+ * Pinned (objectstack#35890, figure 41; `recordPagePinsDetails` — a full page
+ * with room for both columns, another tab, and no related table among the
+ * fields): the details are a left column (400 px, dragged by the reader, and
+ * narrowing on their own to leave the tabs 400 — `clampDetailsWidth`), no
+ * longer a tab. Beside them sit the tab row without 「详情」 and the open
+ * tab, the first of the row when the address names none. The two scroll
+ * apart. Narrowed out of the pinned layout, the page keeps the tab it showed:
+ * the implied one is written to the address (`onEnlargeRelated` with
+ * `replace`).
  *
- *  - `two-column` / `wide`: details | the rail (320 / 380 px). The wide tier
- *    lets a details section take three field columns (two otherwise,
- *    `DetailsColumnCapContext`). The reader's ⊟ (`rightColumn`) takes the
- *    rail out; the details then take the row. A host that draws no rail (a
- *    drawer, `rail={false}`) draws the details alone.
- *  - `stack`: ONE column — the details, then the rail.
+ * A strip the page places (`record:path`, `record:highlights`, a slotted
+ * page's `highlights`; the default page places none since objectstack#35891)
+ * sits atop the details. The right rail of summary cards (objectstack#35596)
+ * is gone, at every width: each tab's count carries what it said.
  *
  * The frame mirrors the record page frame `PageRenderer` draws (its padding
  * and background, the header nodes 16 px apart), so the header sits where an
  * authored page's would. The nodes are the page's own — the same
  * `page:header`, `record:details`, `record:activity` and
- * `record:related_list` nodes its tab strip holds — so every tier shows the
+ * `record:related_list` nodes its tab strip holds — so every width shows the
  * same header and the same sections. `data-record-columns-shown` names the
  * columns drawn side by side.
  */
@@ -347,8 +464,10 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   tier,
   columns,
   footer,
-  rightColumn = true,
-  rail = true,
+  fullPage = false,
+  detailsWidth,
+  onDetailsWidthChange,
+  onShownTabChange,
   relatedArrangement,
   onRelatedArrangementChange,
   onEnlargeRelated,
@@ -360,15 +479,34 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   const { t } = useDetailTranslation();
   const ctx = useRecordContext();
   const bodyTableIds = React.useMemo(() => new Set(relatedListIdsIn(columns.details)), [columns.details]);
-  // objectstack#35941 — the details sections report the rows they draw, and
-  // the meta line closing the details column reads them: the owner is left
-  // off that line when a section already draws `owner_id`.
   const [bodyFields] = React.useState(createRecordBodyFields);
+  // objectstack#36147 — the field area is one list: its groups fold every
+  // empty row into the list's last row, shown or not by the reader's one
+  // per-object choice (objectstack#25883), or this view's own without a store.
+  const [emptyFields] = React.useState(createEmptyFieldTally);
+  const recordPagePreferences = useRecordPagePreferences();
+  const preferenceObject = typeof ctx?.objectName === 'string' && ctx.objectName ? ctx.objectName : undefined;
+  const [localShowEmpty, setLocalShowEmpty] = React.useState(false);
+  const showEmpty =
+    recordPagePreferences && preferenceObject
+      ? recordPagePreferences.get(preferenceObject).showEmptyFields === true
+      : localShowEmpty;
+  const fieldList = React.useMemo<RecordFieldList>(
+    () => ({
+      showEmpty,
+      toggleShowEmpty: () => {
+        if (recordPagePreferences && preferenceObject) {
+          recordPagePreferences.update(preferenceObject, { showEmptyFields: !showEmpty });
+        } else {
+          setLocalShowEmpty((shown) => !shown);
+        }
+      },
+      emptyFields,
+    }),
+    [showEmpty, recordPagePreferences, preferenceObject, emptyFields],
+  );
   const hasTimeline = columns.timeline.length > 0;
-  const wide = tier === 'wide';
-  const besideDetails = tier !== 'stack';
 
-  // ── The right column's blocks: the related lists, 附件 and 审批 ──
   const approvalsNode = columns.related.find((node) => node?.type === 'record:approvals');
   const attachmentsNode = columns.related.find((node) => node?.type === 'record:attachments');
   const panelNodes = new Map<RelatedCardId, any>();
@@ -376,13 +514,7 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
     const id = relatedNodeId(node);
     if (id && !panelNodes.has(id)) panelNodes.set(id, node);
   }
-  const hasPanels = hasTimeline || columns.related.length > 0;
-  // objectstack#35596 — the rail is the 概览 tab's, and a drawer draws none.
-  const drawsPanels = rail && hasPanels && (!besideDetails || rightColumn);
 
-  // ── The reader's arrangement of the related lists, read for the tab row ──
-  // A host without a preference store keeps the reader's choices here, for
-  // this view.
   const [localArrangement, setLocalArrangement] = React.useState<RelatedArrangement | undefined>(undefined);
   const arrangement = onRelatedArrangementChange ? relatedArrangement : localArrangement;
   const onArrangementChange = onRelatedArrangementChange ?? setLocalArrangement;
@@ -390,9 +522,6 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   const defaultOrder = Array.from(panelNodes.keys());
   const resolved = resolveRelatedArrangement(defaultOrder, arrangement, now);
 
-  // ── The related lists' counts, one set for the tabs and the rail ──
-  // The hidden lists are counted too: their tabs sit in the row's dropdown
-  // with their counts.
   const countTargets: RelatedCountTarget[] = [];
   for (const id of [...resolved.order, ...resolved.hidden]) {
     const target = relatedCountTargetOf(panelNodes.get(id));
@@ -407,14 +536,9 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
     const state = counts.stateOf(id);
     return state.kind === 'counted' ? state.count : null;
   };
-  // objectstack#35595 — 附件 counts the record's files; 审批 carries a dot
-  // while an approval waits.
   const attachmentCount = useRecordAttachmentCount(!!attachmentsNode);
-  const approvalPending = !!approvalsNode && approvalSummaryRows(nodeProps(approvalsNode).approvals, undefined) !== null;
+  const approvalPending = !!approvalsNode && approvalsHoldPendingRequest(nodeProps(approvalsNode).approvals);
 
-  // ── The 动态 stream's size, for its card and its tab ──
-  // Held per record, so a pane stepping to the next record never shows the
-  // last one's number; kept while neither face that reports it is drawn.
   const recordKey = ctx?.recordId === undefined || ctx?.recordId === null ? '' : String(ctx.recordId);
   const [timelineCount, setTimelineCount] = React.useState<{ record: string; count: number | null }>({
     record: recordKey,
@@ -428,94 +552,128 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   }, []);
   const streamCount = timelineCount.record === recordKey ? timelineCount.count : null;
 
-  // ── The active tab: the open face ──
-  // A related list, 附件, 审批 or the 动态 stream in full — body tables (in the
-  // details) open in place too (their ⤢), and take a tab of their own while
-  // open.
-  let enlarged: React.ReactNode = null;
-  let activeTab = RECORD_TAB_OVERVIEW;
-  let openBodyTable: RecordTab | null = null;
+  // ── The tabs after 「详情」, in the row's order ──────────────────────────
   const attachmentsTitle = t('detail.attachments', { defaultValue: 'Attachments' });
   const approvalsTitle = t('detail.approvalsPanelTitle', { defaultValue: 'Approvals' });
+  const timelineTitle = t('detail.timeline', { defaultValue: 'Activity' });
+  const panelTab = (id: RelatedCardId): RecordTab => ({
+    id,
+    label: relatedNodeTitle(panelNodes.get(id)),
+    count: countOf(id),
+  });
+  const arrangedTab = (id: RelatedCardId, index: number): RecordTab => ({
+    ...panelTab(id),
+    arrange: { before: index > 0, after: index < resolved.order.length - 1 },
+  });
+  // A body table the details draw (a field group places it) opens as a tab of
+  // its own while it is open: it has no tab of its own otherwise.
+  const bodyTableNode =
+    enlargedRelated && !panelNodes.has(enlargedRelated)
+      ? columns.details.find((n) => relatedNodeId(n) === enlargedRelated)
+      : undefined;
+  const otherTabs: RecordTab[] = resolved.order.map(arrangedTab);
+  if (bodyTableNode) otherTabs.push({ id: enlargedRelated!, label: relatedNodeTitle(bodyTableNode) });
+  if (attachmentsNode) otherTabs.push({ id: RECORD_TAB_ATTACHMENTS, label: attachmentsTitle, count: attachmentCount });
+  if (approvalsNode) otherTabs.push({ id: RECORD_TAB_APPROVALS, label: approvalsTitle, dot: approvalPending });
+  if (hasTimeline) otherTabs.push({ id: RECORD_PAGE_TIMELINE_PANEL, label: timelineTitle, count: streamCount });
+  const hiddenTabs = resolved.hidden.map(panelTab);
+
+  // ── Pinned or not: the page content's own width decides ────────────────
+  const [contentEl, setContentEl] = React.useState<HTMLDivElement | null>(null);
+  const [frameEl, setFrameEl] = React.useState<HTMLDivElement | null>(null);
+  const [gridEl, setGridEl] = React.useState<HTMLDivElement | null>(null);
+  const contentWidth = useContentWidth(contentEl);
+  const pinned = recordPagePinsDetails(contentWidth, columns, fullPage) && otherTabs.length > 0;
+  const pinnedHeight = usePinnedHeight(pinned ? gridEl : null, frameEl);
+  // objectstack#36147 — the field area is one column wherever it is drawn
+  // beside other tabs or as one of them: a drawer, a phone, a narrow page and
+  // the pinned left column. Only a full page whose details are its only face
+  // (no other tab, objectstack#35890 item 4) keeps laying them out by width.
+  const detailsFillPage = fullPage && otherTabs.length === 0 && resolved.hidden.length === 0;
+
+  // The open tab: the address's when it names one this page has; pinned, the
+  // first of the row otherwise (it is implied, never written, until the page
+  // narrows out of the pinned layout).
+  // A list the reader hid still opens: from its item in 「更多」, or from an
+  // address that names it (card acceptance: 「带页签参数的链接仍然打开对应页签」).
+  const requested =
+    enlargedRelated && (otherTabs.some((tab) => tab.id === enlargedRelated) || resolved.hidden.includes(enlargedRelated))
+      ? enlargedRelated
+      : undefined;
+  const impliedTab = pinned && !requested ? otherTabs[0].id : undefined;
+  const openTab = requested ?? impliedTab;
+  const activeTab = openTab ?? RECORD_TAB_OVERVIEW;
+
+  // Esc leaves a tab for 「详情」; pinned, the details are on screen already.
+  const closeFace = pinned ? undefined : onCloseEnlargedRelated;
   const blockFace = (id: string, title: string, node: any) => (
-    <EnlargedFace id={id} title={title} onClose={onCloseEnlargedRelated}>
+    <EnlargedFace id={id} title={title} onClose={closeFace}>
       <SchemaRenderer schema={toRenderableSchema(node)} />
     </EnlargedFace>
   );
-  if (enlargedRelated === RECORD_PAGE_TIMELINE_PANEL && hasTimeline) {
-    activeTab = RECORD_PAGE_TIMELINE_PANEL;
-    enlarged = (
-      <EnlargedFace
-        id={RECORD_PAGE_TIMELINE_PANEL}
-        title={t('detail.timeline', { defaultValue: 'Activity' })}
-        onClose={onCloseEnlargedRelated}
-      >
+  let face: React.ReactNode = null;
+  if (openTab === RECORD_PAGE_TIMELINE_PANEL) {
+    face = (
+      <EnlargedFace id={RECORD_PAGE_TIMELINE_PANEL} title={timelineTitle} onClose={closeFace}>
         <RecordTimelineCountContext.Provider value={reportTimelineCount}>
           {drawNodes(columns.timeline)}
         </RecordTimelineCountContext.Provider>
       </EnlargedFace>
     );
-  } else if (enlargedRelated === RECORD_SUMMARY_ATTACHMENTS && attachmentsNode) {
-    activeTab = RECORD_SUMMARY_ATTACHMENTS;
-    enlarged = blockFace(RECORD_SUMMARY_ATTACHMENTS, attachmentsTitle, attachmentsNode);
-  } else if (enlargedRelated === RECORD_SUMMARY_APPROVALS && approvalsNode) {
-    activeTab = RECORD_SUMMARY_APPROVALS;
-    enlarged = blockFace(RECORD_SUMMARY_APPROVALS, approvalsTitle, approvalsNode);
-  } else if (enlargedRelated) {
-    const node = [...columns.related, ...columns.details].find((n) => relatedNodeId(n) === enlargedRelated);
+  } else if (openTab === RECORD_TAB_ATTACHMENTS && attachmentsNode) {
+    face = blockFace(RECORD_TAB_ATTACHMENTS, attachmentsTitle, attachmentsNode);
+  } else if (openTab === RECORD_TAB_APPROVALS && approvalsNode) {
+    face = blockFace(RECORD_TAB_APPROVALS, approvalsTitle, approvalsNode);
+  } else if (openTab) {
+    const node = panelNodes.get(openTab) ?? bodyTableNode;
     if (node) {
-      activeTab = enlargedRelated;
-      if (!panelNodes.has(enlargedRelated)) openBodyTable = { id: enlargedRelated, label: relatedNodeTitle(node) };
-      enlarged = (
-        <EnlargedFace id={enlargedRelated} title={relatedNodeTitle(node)} onClose={onCloseEnlargedRelated}>
+      face = (
+        <EnlargedFace id={openTab} title={relatedNodeTitle(node)} onClose={closeFace}>
           {enlargedRelatedList(node)}
         </EnlargedFace>
       );
     }
   }
 
-  // ── The tab row (objectstack#35595): 概览, every related list, 附件, 审批, 动态 ──
-  // Every related list has its tab whether or not it has records — muted and
-  // without a number at 0 — so no tab moves when the counts land; the width
-  // is the row's only fold (「更多 N ▾」, `RecordTabRow`). 动态 is the row's
-  // last tab (objectstack#34590).
-  const panelTab = (id: RelatedCardId): RecordTab => ({
-    id,
-    label: relatedNodeTitle(panelNodes.get(id)),
-    count: countOf(id),
-  });
-  // objectstack#35783 — a shown list's tab is the reader's to move one place
-  // either way among the lists, or to hide; the other tabs stay where they are.
-  const arrangedTab = (id: RelatedCardId, index: number): RecordTab => ({
-    ...panelTab(id),
-    arrange: { before: index > 0, after: index < resolved.order.length - 1 },
-  });
-  const tabs: RecordTab[] = [{ id: RECORD_TAB_OVERVIEW, label: t('detail.recordTabOverview', { defaultValue: 'Overview' }) }];
-  tabs.push(...resolved.order.map(arrangedTab));
-  if (openBodyTable) tabs.push(openBodyTable);
-  if (attachmentsNode) tabs.push({ id: RECORD_SUMMARY_ATTACHMENTS, label: attachmentsTitle, count: attachmentCount });
-  if (approvalsNode) tabs.push({ id: RECORD_SUMMARY_APPROVALS, label: approvalsTitle, dot: approvalPending });
-  if (hasTimeline) {
-    tabs.push({ id: RECORD_PAGE_TIMELINE_PANEL, label: t('detail.timeline', { defaultValue: 'Activity' }), count: streamCount });
-  }
-  const hiddenTabs = resolved.hidden.map(panelTab);
+  // Narrowed out of the pinned layout on the same record, the page keeps the
+  // tab it showed rather than falling back to 「详情」 (card acceptance:
+  // 「当前选中的页签不丢」): the implied tab goes into the address, replacing
+  // the entry, so Back still leaves the record.
+  const shownBefore = React.useRef<{ record: string; implied: string | undefined }>({ record: recordKey, implied: undefined });
+  const otherTabIds = otherTabs.map((tab) => tab.id).join('\n');
+  React.useEffect(() => {
+    const before = shownBefore.current;
+    shownBefore.current = { record: recordKey, implied: impliedTab };
+    if (pinned || !before.implied || before.record !== recordKey || enlargedRelated) return;
+    if (!otherTabIds.split('\n').includes(before.implied)) return;
+    onEnlargeRelated?.(before.implied, { replace: true });
+  }, [pinned, impliedTab, recordKey, enlargedRelated, otherTabIds, onEnlargeRelated]);
+
+  // The host reads which tab is on screen (the 动态 tab reads its window when
+  // it is, addressed or implied).
+  React.useEffect(() => {
+    onShownTabChange?.(activeTab);
+  }, [activeTab, onShownTabChange]);
+
+  const tabs: RecordTab[] = pinned
+    ? otherTabs
+    : [{ id: RECORD_TAB_OVERVIEW, label: t('detail.recordTabOverview', { defaultValue: 'Details' }) }, ...otherTabs];
   const selectTab = (id: string) => {
     if (id === RECORD_TAB_OVERVIEW) onCloseEnlargedRelated?.();
-    else onEnlargeRelated?.(id);
+    else if (id !== impliedTab) onEnlargeRelated?.(id);
   };
   const editArrangement = (edit: RelatedArrangementEdit) =>
     onArrangementChange(editRelatedArrangement(defaultOrder, arrangement, edit, now));
   const arrangeTab = (id: string, edit: RecordTabArrangeEdit) => {
     if (edit === 'hide') {
       editArrangement({ kind: 'hide', id });
-      // The open list hidden: its face goes with its tab, back to 概览.
-      if (id === activeTab) onCloseEnlargedRelated?.();
+      if (id === requested) onCloseEnlargedRelated?.();
     } else {
       editArrangement({ kind: edit === 'move-before' ? 'move-up' : 'move-down', id });
     }
   };
   const tabRow =
-    onEnlargeRelated && tabs.length + hiddenTabs.length > 1 ? (
+    onEnlargeRelated && (pinned ? tabs.length + hiddenTabs.length > 0 : tabs.length + hiddenTabs.length > 1) ? (
       <RecordTabRow
         tabs={tabs}
         hiddenTabs={hiddenTabs}
@@ -527,97 +685,97 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
         }
       />
     ) : null;
+  const defaultChangedHint = tabRow && resolved.defaultChanged ? (
+    <RelatedDefaultChangedHint onRestore={() => editArrangement({ kind: 'restore-default-order' })} />
+  ) : null;
+  // A face without the 动态 tab open still names the stream's count on its
+  // tab (objectstack#27524): counted from the feed the host holds.
+  const probesTimelineCount = hasTimeline && !!tabRow && activeTab !== RECORD_PAGE_TIMELINE_PANEL;
 
-  // The provenance line closes the details column in every tier
-  // (objectstack#27055): it describes the record the details show.
-  const detailsColumn = (
-    <div className={COLUMN_STACK} data-record-column="details">
+  const details = (
+    <>
+      {/* objectstack#35595 — a strip the page places is the details' top. */}
+      {columns.strip.length > 0 && (
+        <div className="flex min-w-0 flex-col gap-4" data-record-overview-strip="">
+          {drawNodes(columns.strip)}
+        </div>
+      )}
       {drawDetailsNodes(columns.details)}
       {footer}
-    </div>
+      <EmptyFieldsRow />
+    </>
   );
-  // objectstack#35596 — a rail with nothing to show takes no column: once
-  // every card is KNOWN to be absent (no approval waiting, no files, a
-  // counted stream with no entries, every list counted with no records — a
-  // refused count draws no card either — and nothing at the foot), the
-  // details take the row. While a count is still out the column stays, so a
-  // page whose cards land does not shift. A slotted chatter stream reports
-  // no count, so its card always draws.
-  const streamCounted = columns.timeline.some((node) => node?.type === 'record:activity');
-  const railKnownEmpty =
-    !approvalPending
-    && (!attachmentsNode || attachmentCount === 0)
-    && (!hasTimeline || (streamCounted && streamCount === 0))
-    && resolved.order.every((id) => {
-      const state = counts.stateOf(id);
-      return state.kind !== 'pending' && !(state.kind === 'counted' && state.count > 0);
-    })
-    && resolved.hidden.length === 0
-    && !resolved.rearranged
-    && !resolved.defaultChanged;
-  const drawsRail = drawsPanels && !railKnownEmpty;
-  const rightPanels = drawsRail ? (
-    <aside
-      className={COLUMN_STACK}
-      data-record-column="right"
-      aria-label={t('detail.relatedColumn', { defaultValue: 'Right column' })}
-    >
-      {/* objectstack#35596 — the 概览 tab's summary of the other tabs: 审批,
-          附件, 最近动态, then 「其他相关」 (the lists with records), each card
-          absent while it has nothing to show. The foot line keeps a reader's
-          hidden lists one click from coming back. */}
-      <RecordSummaryRail
-        related={resolved.order.map((id) => ({ id, node: panelNodes.get(id), count: countOf(id) }))}
-        approvals={approvalsNode}
-        attachments={attachmentsNode ? { count: attachmentCount } : null}
-        timeline={columns.timeline}
-        timelineCount={streamCount}
-        onTimelineCount={reportTimelineCount}
-        onOpen={onEnlargeRelated ? selectTab : undefined}
-        fieldsOf={relatedFieldsOf}
-        footer={
-          <>
-            {resolved.defaultChanged && (
-              <RelatedDefaultChangedHint onRestore={() => editArrangement({ kind: 'restore-default-order' })} />
-            )}
-            <RelatedFootLine
-              hiddenCount={resolved.hidden.length}
-              onShowHidden={() => editArrangement({ kind: 'show-hidden' })}
-              rearranged={resolved.rearranged}
-              onRestoreDefault={() => editArrangement({ kind: 'restore-default-arrangement' })}
-            />
-          </>
-        }
-      />
-    </aside>
-  ) : null;
-  // A face with no 动态 card drawn — another tab open, the right column
-  // switched off, or a drawer — still names the stream's count on the 动态
-  // tab (objectstack#27524): counted from the feed the host holds.
-  // A rail folded away for want of cards still learns of a new entry: the
-  // probe counts for it, and the rail comes back with its 最近动态 card.
-  const probesTimelineCount = hasTimeline && activeTab !== RECORD_PAGE_TIMELINE_PANEL
-    && ((!!tabRow && (enlarged !== null || !drawsPanels)) || (enlarged === null && drawsPanels && !drawsRail));
-  // Folded away, the rail keeps the size its card last read: a probe that
-  // cannot count (no feed held by the host — the stream reads its own) says
-  // nothing rather than unknown, so the rail does not come back empty.
-  const railFolded = enlarged === null && drawsPanels && !drawsRail;
-  const reportProbedCount = React.useCallback(
-    (count: number | null) => {
-      if (count !== null) reportTimelineCount(count);
-    },
-    [reportTimelineCount],
+
+  // The pinned left column's width: the reader's dragged one (the host's
+  // preference store, or this view's own), narrowed to leave the tabs room.
+  const [localDetailsWidth, setLocalDetailsWidth] = React.useState<number | undefined>(undefined);
+  const askedDetailsWidth = onDetailsWidthChange ? detailsWidth : localDetailsWidth;
+  const [dragWidth, setDragWidth] = React.useState<number | null>(null);
+  const leftWidth = dragWidth ?? clampDetailsWidth(askedDetailsWidth, contentWidth);
+  const maxLeftWidth = Math.max(
+    RECORD_PAGE_DETAILS_MIN_WIDTH,
+    contentWidth - RECORD_PAGE_PINNED_GAP - RECORD_PAGE_TABS_MIN_WIDTH,
   );
-  const sideBySide = besideDetails && drawsRail;
-  const template = sideBySide ? (wide ? GRID_TEMPLATE.wide : GRID_TEMPLATE.twoColumn) : GRID_TEMPLATE.oneColumn;
+  const commitDetailsWidth = (width: number) => (onDetailsWidthChange ?? setLocalDetailsWidth)(width);
+  const bounded = pinnedHeight !== null;
+
+  let body: React.ReactNode;
+  if (pinned) {
+    body = (
+      <div
+        ref={setGridEl}
+        className="grid min-h-0"
+        style={{
+          gridTemplateColumns: `${leftWidth}px ${RECORD_PAGE_PINNED_GAP}px minmax(0,1fr)`,
+          ...(bounded ? { height: pinnedHeight } : {}),
+        }}
+        data-record-columns=""
+        data-record-columns-shown="details tabs"
+      >
+        <div
+          className={cn(COLUMN_STACK, bounded && 'min-h-0 overflow-y-auto overscroll-contain')}
+          data-record-column="details"
+        >
+          {details}
+        </div>
+        <DetailsWidthHandle width={leftWidth} max={maxLeftWidth} onPreview={setDragWidth} onCommit={commitDetailsWidth} />
+        <div
+          className={cn('flex min-w-0 flex-col gap-4', bounded && 'min-h-0 overflow-y-auto overscroll-contain')}
+          data-record-column="tabs"
+        >
+          {tabRow}
+          {defaultChangedHint}
+          {probesTimelineCount && <RecordTimelineCountProbe nodes={columns.timeline} onCount={reportTimelineCount} />}
+          {face}
+        </div>
+      </div>
+    );
+  } else {
+    body = (
+      <>
+        {tabRow}
+        {defaultChangedHint}
+        {probesTimelineCount && <RecordTimelineCountProbe nodes={columns.timeline} onCount={reportTimelineCount} />}
+        {face ?? (
+          <div className="grid grid-cols-1 items-start gap-6" data-record-columns="" data-record-columns-shown="details">
+            <div className={COLUMN_STACK} data-record-column="details">
+              {details}
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
 
   return (
     <RecordBodyFieldsContext.Provider value={bodyFields}>
     <DefaultRecordPageContext.Provider value>
     <RecordBodyTablesContext.Provider value={bodyTableIds}>
     <RelatedEnlargeContext.Provider value={onEnlargeRelated ?? null}>
-    <DetailsColumnCapContext.Provider value={sideBySide && !wide ? 2 : 3}>
+    <RecordFieldListContext.Provider value={fieldList}>
+    <DetailsColumnCapContext.Provider value={detailsFillPage ? 3 : 1}>
       <div
+        ref={setFrameEl}
         // objectstack#35745 — the top is 12px at every width: the header sits
         // right above, and the host's scroller adds no top padding of its own,
         // so the tab row follows the header as a list's view bar follows its
@@ -625,36 +783,15 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
         className={cn('w-full bg-background px-3 pb-3 pt-3 md:px-4 md:pb-4 lg:px-6 lg:pb-6', className)}
         data-page-type="record"
         data-record-page-tier={tier}
+        data-record-page-pinned={pinned ? '' : undefined}
       >
-        <div className="flex flex-col gap-4">
+        <div ref={setContentEl} className="flex flex-col gap-4">
           {drawNodes(columns.header)}
-          {tabRow}
-          {probesTimelineCount && (
-            <RecordTimelineCountProbe nodes={columns.timeline} onCount={railFolded ? reportProbedCount : reportTimelineCount} />
-          )}
-          {enlarged ?? (
-            <>
-              {/* objectstack#35595 — the stage path and the key fields are the
-                  概览 tab's top, across the whole width (both columns), and
-                  no other tab's. */}
-              {columns.strip.length > 0 && (
-                <div className="flex min-w-0 flex-col gap-4" data-record-overview-strip="">
-                  {drawNodes(columns.strip)}
-                </div>
-              )}
-              <div
-                className={cn('grid items-start gap-6', template)}
-                data-record-columns=""
-                data-record-columns-shown={sideBySide ? 'details right' : 'details'}
-              >
-                {detailsColumn}
-                {rightPanels}
-              </div>
-            </>
-          )}
+          {body}
         </div>
       </div>
     </DetailsColumnCapContext.Provider>
+    </RecordFieldListContext.Provider>
     </RelatedEnlargeContext.Provider>
     </RecordBodyTablesContext.Provider>
     </DefaultRecordPageContext.Provider>
