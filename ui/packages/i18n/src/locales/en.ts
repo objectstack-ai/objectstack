@@ -804,6 +804,8 @@ const en = {
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: 'Saving…',
     cellSaved: 'Saved',
+    // objectstack#35689 — what the list's live region says when cells saved.
+    cellSavedAnnouncement: 'Saved: {{fields}}',
     openRecordToFinish: 'Open the record to finish this change',
   },
   grid: {

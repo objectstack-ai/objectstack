@@ -543,6 +543,7 @@ const fr = {
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "Enregistrement…",
     cellSaved: "Enregistré",
+    cellSavedAnnouncement: "Enregistré : {{fields}}",
     openRecordToFinish: "Ouvrir la fiche pour terminer la modification",
   },
   grid: {

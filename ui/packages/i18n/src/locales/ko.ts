@@ -536,6 +536,7 @@ const ko = {
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "저장 중…",
     cellSaved: "저장됨",
+    cellSavedAnnouncement: "저장됨: {{fields}}",
     openRecordToFinish: "레코드를 열어 변경을 완료하세요",
   },
   grid: {

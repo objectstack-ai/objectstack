@@ -553,6 +553,7 @@ const ru = {
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "Сохранение…",
     cellSaved: "Сохранено",
+    cellSavedAnnouncement: "Сохранено: {{fields}}",
     openRecordToFinish: "Откройте запись, чтобы завершить изменение",
   },
   grid: {
