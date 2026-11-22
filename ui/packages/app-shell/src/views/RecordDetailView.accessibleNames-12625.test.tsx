@@ -201,8 +201,8 @@ describe('objectui#12625 — the record page names its regions, header actions a
     expect(header).toHaveAttribute('aria-expanded', 'true');
     await user.click(header);
     expect(header).toHaveAttribute('aria-expanded', 'false');
-    // CONTROL: the non-collapsible group shows its heading but is no button.
-    expect(screen.getByText('Address')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Address' })).toBeNull();
+    // A group that declares no collapse folds on the default record page too,
+    // starting open (objectstack#36269).
+    expect(screen.getByRole('button', { name: 'Address' })).toHaveAttribute('aria-expanded', 'true');
   });
 });
