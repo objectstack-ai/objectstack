@@ -21,7 +21,7 @@ The `strict` column is the one the campaign schedules against; it counts both th
 
 | Dir | Sites | strict | passthrough | catchall | strip |
 |---|---|---|---|---|---|
-| `ui/` | 228 | 217 | 6 | 0 | 5 |
+| `ui/` | 227 | 217 | 6 | 0 | 4 |
 
 ## `ui/` — sites
 
@@ -44,9 +44,9 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `report.zod.ts` | 4 |
 | `responsive.zod.ts` | 1 |
 | `sharing.zod.ts` | 1 |
-| `view.zod.ts` | 63 |
+| `view.zod.ts` | 62 |
 | `widget.zod.ts` | 1 |
-| **total** | **228** |
+| **total** | **227** |
 
 ## `ui/` — open
 
@@ -54,21 +54,21 @@ Per file, how many of its sites still silently discard unknown keys. The `Class`
 column that decides the bucket split is hand-written in the ledger; the arithmetic
 over it is here.
 
-**5 strip of 228**, in 4 file(s).
+**4 strip of 227**, in 4 file(s).
 
 | File | Strip | Sites |
 |---|---|---|
 | `action-params.zod.ts` | 1 | 1 |
 | `app.zod.ts` | 1 | 20 |
-| `view.zod.ts` | 2 | 63 |
+| `view.zod.ts` | 1 | 62 |
 | `widget.zod.ts` | 1 | 1 |
-| **total** | **5** | **228** |
+| **total** | **4** | **227** |
 
 | Bucket | Sites |
 |---|---|
 | authorable — the ruling's forced scope | 1 |
 | unresolved — needs a per-schema verdict | 0 |
-| wire / open — out of forced scope | 2 |
+| wire / open — out of forced scope | 1 |
 | no door — no carrier, ADR-0049 territory | 1 |
 | no gate — carrier live, no parse | 0 |
 | covered — no carrier, no parse, guarded at every consumer | 1 |

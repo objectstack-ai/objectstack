@@ -24,7 +24,7 @@
 import * as React from 'react';
 import { useObjectTranslation } from '@object-ui/react';
 import { translateFlow, type TranslationBundle } from '@objectstack/spec/system';
-import { activeFlowsBundle } from '../../../utils/flowsBundle.js';
+import { activeFlowsBundle } from '@object-ui/i18n';
 
 /** A flow's translated labels in one language. Every member answers `undefined` where the bundle carries nothing. */
 export interface FlowLabelTranslations {

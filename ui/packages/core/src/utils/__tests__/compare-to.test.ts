@@ -303,3 +303,32 @@ describe('compareToTrendLabelKey', () => {
     });
   });
 });
+
+// objectstack#35395 — `{current_iso_week}` is a period key, not a date macro;
+// left as written the comparison series filtered the same week as the current one.
+describe('compare-to on the {current_iso_week} period key', () => {
+  const filter = { cost_week: '{current_iso_week}', alt: '${current_iso_week}' };
+  const run = (kind: 'previousPeriod' | 'previousYear', now: Date) =>
+    shiftFilterByCompareTo(filter, { kind }, now);
+
+  it('previousPeriod compares with last week’s key, never this week’s', () => {
+    const out = run('previousPeriod', new Date(2026, 4, 25, 12)); // Mon, 2026-W22
+    expect(out).toEqual({ cost_week: '2026-W21', alt: '2026-W21' });
+  });
+
+  it('previousPeriod steps week 1 back into the previous ISO year’s last week', () => {
+    // 2026 starts on a Thursday → 53 weeks; 2025 starts on a Wednesday, not leap → 52.
+    expect(run('previousPeriod', new Date(2027, 0, 4, 12)).cost_week).toBe('2026-W53');
+    expect(run('previousPeriod', new Date(2026, 0, 1, 12)).cost_week).toBe('2025-W52');
+  });
+
+  it('previousYear resolves the key of the same day one year earlier', () => {
+    expect(run('previousYear', new Date(2026, 4, 25, 12)).cost_week).toBe('2025-W21');
+    // Fri 2027-01-01 is 2026-W53; one year earlier, Thu 2026-01-01, is 2026-W01.
+    expect(run('previousYear', new Date(2027, 0, 1, 12)).cost_week).toBe('2026-W01');
+  });
+
+  it('labels the previousPeriod delta as vs last week', () => {
+    expect(compareToTrendLabelKey({ kind: 'previousPeriod' }, filter)).toBe('vsLastWeek');
+  });
+});
