@@ -166,7 +166,8 @@ import { nodeConfigLocksRecord, recordHeldByLockingApproval } from './lifecycle-
 import { PendingApproverReadGrantSource, type PendingApproverReadGrants } from './pending-approver-read-grant.js';
 // The ADR-0043 pages — the ONE copy of their text, rendered by the plugin's
 // self-hosted mount and by `handleActionPage` alike.
-import { renderConfirmPage, renderResultPage } from './action-link-pages.js';
+import { APPROVALS_INBOX_PATH, renderConfirmPage, renderResultPage } from './action-link-pages.js';
+import { consolePageLink, type ConsolePageComposer } from './public-base-url.js';
 import { APPROVAL_EMAIL_CHANNELS, EMAILED_APPROVAL_TOPICS } from './approval-email-templates.js';
 import { enMessages } from './translations/messages.js';
 import {
@@ -574,7 +575,8 @@ type ApprovalNotificationPayload = {
   readonly actionUrl: string;
   /**
    * [#30509] The same request page as `actionUrl`, prefixed with the
-   * deployment's public origin when one resolves (`publicBaseUrl`), for a
+   * deployment's public origin when one resolves (`publicBaseUrl`) and
+   * [#34862] the Console's mount (`consolePageLink`), for a
    * channel read outside the Console: the approval e-mail's link
    * (`approval-email-templates.ts`). Set by `notify()` beside the
    * deep-linked `actionUrl` on the notices that go by e-mail
@@ -2024,6 +2026,14 @@ export interface ApprovalServiceOptions {
    */
   publicBaseUrl?: string;
   /**
+   * [#34862] The auth service's Console page composer (`getConsoleUrl`,
+   * `${origin}${uiBasePath}${path}`), read for the Console's MOUNT only: the
+   * approval e-mail's link and the action-link pages' inbox link open a
+   * Console page under {@link publicBaseUrl} plus that mount
+   * (`consolePageLink`). Absent, or answering nothing, they carry no mount.
+   */
+  getConsoleUrl?: ConsolePageComposer;
+  /**
    * [ADR-0105 D9] The tenancy posture in force. Cross-organization approver
    * targeting is a `group`-posture capability; the resolver refuses the
    * declaration under any other posture rather than silently ignoring it.
@@ -2213,6 +2223,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
   private automation?: ApprovalResumeSurface;
   private messaging?: ApprovalMessagingSurface;
   private publicBaseUrl: string;
+  private readonly getConsoleUrl?: ConsolePageComposer;
   private tenancyPosture?: () => string | undefined;
   private fieldVisibility?: FieldVisibilitySource;
   /** [#23637] Lazily-resolved object-level read admission ({@link attachObjectReadAdmission}). */
@@ -2267,6 +2278,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     this.automation = opts.automation;
     this.messaging = opts.messaging;
     this.publicBaseUrl = (opts.publicBaseUrl ?? '').replace(/\/$/, '');
+    this.getConsoleUrl = opts.getConsoleUrl;
     this.tenancyPosture = opts.tenancyPosture;
     this.fieldVisibility = opts.fieldVisibility;
     this.messageTranslator = opts.messageTranslator;
@@ -2559,7 +2571,10 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
           ...payload,
           actionUrl,
           // [#30509] The e-mail's link: only the notices that go by e-mail carry it.
-          ...(EMAILED_APPROVAL_TOPICS.has(event.topic) ? { approvalUrl: `${this.publicBaseUrl}${actionUrl}` } : {}),
+          // [#34862] A Console page, so under the Console's mount as well.
+          ...(EMAILED_APPROVAL_TOPICS.has(event.topic)
+            ? { approvalUrl: consolePageLink(this.publicBaseUrl, this.getConsoleUrl, actionUrl) }
+            : {}),
         };
       }
       // A dedup key names ONE event: a notice split per name keys each part by
@@ -8094,7 +8109,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     if (request.method === 'GET') {
       const token = new URL(request.url).searchParams.get('token') ?? '';
       const peek = await this.peekActionToken(token);
-      if (!peek.ok) return actionPageResponse(renderResultPage(peek.reason, peek.request));
+      if (!peek.ok) return actionPageResponse(renderResultPage(peek.reason, peek.request, this.approvalsInboxLink()));
       return actionPageResponse(renderConfirmPage({
         request: peek.request, action: peek.action, approverId: peek.approverId,
         token, actPath: ACTION_PAGE_PATH,
@@ -8109,10 +8124,22 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
         token = String(fields[fields.length - 1] ?? '');
       } catch { /* not a form body: no token, told "invalid" below */ }
       const out = await this.redeemActionToken(token);
-      if (!out.ok) return actionPageResponse(renderResultPage(out.reason, out.request));
-      return actionPageResponse(renderResultPage(out.action === 'approve' ? 'approved' : 'rejected', out.request));
+      if (!out.ok) return actionPageResponse(renderResultPage(out.reason, out.request, this.approvalsInboxLink()));
+      return actionPageResponse(
+        renderResultPage(out.action === 'approve' ? 'approved' : 'rejected', out.request, this.approvalsInboxLink()),
+      );
     }
     return new Response(null, { status: 405, headers: { Allow: 'GET, POST' } });
+  }
+
+  /**
+   * [#34862] The action-link pages' "Open the Approvals Inbox" link: the
+   * Console's inbox under the approval links' base and the Console's mount,
+   * built as the plugin's raw-app mount builds it (`consolePageLink`), so the
+   * two doors still answer the same bytes.
+   */
+  private approvalsInboxLink(): string {
+    return consolePageLink(this.publicBaseUrl, this.getConsoleUrl, APPROVALS_INBOX_PATH);
   }
 
   /**
