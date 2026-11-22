@@ -190,10 +190,11 @@
       "note": "renderer."
     },
     "showOnCreate": {
-      "status": "planned",
+      "status": "live",
       "verifiedAt": "2026-11-22",
-      "evidence": "packages/spec/src/data/field.zod.ts#showOnCreate (the parse refuses `showOnCreate: false` beside `required: true`, at every door that parses a field)",
-      "note": "PLANNED, contract-first spec half of the card that retires the internal create and edit forms: the key and its parse-time refusal land first, the readers second. The readers are every create surface of the Console (the create dialog, the full-page create, an action-opened create), which leave a `showOnCreate: false` field out; editing, the record page and lists ignore it by contract. Flip to `live` on the commit that lands those readers, citing them."
+      "evidenceScope": "in-repo",
+      "evidence": "ui/packages/app-shell/src/utils/recordFormNavigation.ts#isFieldAskedOnFlow (the rule: a create leaves out a `showOnCreate: false` field, an edit lists it); ui/packages/app-shell/src/utils/recordFormFields.ts#recordFormFieldNames (the one field list every Console create surface hands its form: the create dialog in ui/packages/app-shell/src/console/AppContent.tsx, the full-page create in ui/packages/app-shell/src/views/RecordFormPage.tsx, an action-opened create in ui/packages/app-shell/src/hooks/useActionModal.tsx); packages/spec/src/data/field.zod.ts#showOnCreate (the parse refuses `showOnCreate: false` beside `required: true`, at every door that parses a field)",
+      "note": "renderer: every create surface of the Console leaves a `showOnCreate: false` field out, read through one list, since the change that stopped those surfaces loading internal form views and laid them out by field groups; editing, the record page and lists ignore the key by contract. The Studio field inspector offers the switch, locked on for a required field."
     },
     "internal": {
       "status": "live",
