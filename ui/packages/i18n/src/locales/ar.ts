@@ -1126,6 +1126,15 @@ const ar = {
     inlineEditLabel: "حرّر السجلات مباشرة (انقر خلية للتحرير)",
     // The list's Options menu.
     optionsMenu: {
+      // objectstack#36370 — a board's own settings.
+      kanbanLaneField: "الأعمدة حسب",
+      kanbanLanes: "الأعمدة الظاهرة",
+      kanbanCardFields: "حقول البطاقة",
+      kanbanAddCardField: "إضافة حقل",
+      kanbanShowFieldLabels: "إظهار أسماء الحقول",
+      kanbanHideEmptyFields: "إخفاء الحقول الفارغة",
+      kanbanSummary: "ملخص العمود",
+      kanbanHiddenLanes: "الأعمدة المخفية",
       viewName: 'اسم العرض',
       fields: 'الحقول',
       fieldsShown: 'الحقول المعروضة: {{count}}',
@@ -1173,6 +1182,15 @@ const ar = {
     },
   },
   kanban: {
+    // objectstack#36370 — the lane header's 「+」 and 「⋯」 menu, and an empty lane's create row.
+    laneMenu: {
+      actions: "إجراءات العمود {{column}}",
+      collapse: "طي العمود",
+      expand: "توسيع العمود",
+      hide: "إخفاء العمود",
+      createIn: "سجل جديد في {{column}}",
+      create: "جديد",
+    },
     uncategorized: "غير مصنّف",
     loadMore: "تحميل المزيد",
     columns: "أعمدة",
@@ -3012,6 +3030,7 @@ const ar = {
       },
       linkFilterRefused: 'لم يُطبَّق عامل التصفية في هذا الرابط، لأنه يذكر حقلًا لا يمكنك التصفية حسبه هنا، لذا تعرض القائمة طريقة العرض دونه.',
       personalizedParts: {
+        kanban: "إعدادات اللوحة",
         filters: "عوامل التصفية",
         search: "البحث",
         sort: "الترتيب",

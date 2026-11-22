@@ -36,8 +36,15 @@ import { isEmptyValue } from '@object-ui/core';
  * and every board whose node carries no `summarizeField` render the header
  * exactly as they did before.
  */
+/**
+ * objectstack#36370 — the calculations a lane statistic computes on the board:
+ * the list footer's that read the lane's own cards (`ColumnSummary` in the
+ * spec), `count` and a number field's `sum`, `avg`, `min` and `max`.
+ */
+export type KanbanLaneStatisticType = 'count' | 'sum' | 'avg' | 'min' | 'max';
+
 export interface KanbanColumnSummary {
-  /** The record field each lane totals — the view's `summarizeField`. */
+  /** The record field each lane totals — the view's `summarizeField`. Empty for a count. */
   field: string;
   /** The field's display label: the tooltip and the screen-reader name of the total. */
   label: string;
@@ -47,6 +54,16 @@ export interface KanbanColumnSummary {
    * field keeps its declared `scale`. No format code of its own.
    */
   renderTotal: (total: number) => ReactNode;
+  /**
+   * objectstack#36370 — what the lane computes (absent ⇒ `sum`, the
+   * `summarizeField` total) and where it is drawn: `header`, beside the count
+   * (absent; the `summarizeField` total, as before), or `foot`, under the
+   * lane's cards (the view's `kanban.summary`).
+   */
+  type?: KanbanLaneStatisticType;
+  placement?: 'header' | 'foot';
+  /** The calculation's name at the foot (「Sum」, 「Count」), beside `label`. */
+  typeLabel?: string;
 }
 
 export const KanbanColumnSummaryContext = createContext<KanbanColumnSummary | null>(null);
@@ -101,4 +118,35 @@ export function sumLaneField(
     widest = Math.max(widest, fractionDigitsOf(value));
   }
   return widest === 0 ? total : Number(total.toFixed(widest));
+}
+
+/**
+ * objectstack#36370 — a lane's statistic over its cards: the count of cards,
+ * or `type` over `field`'s values. The values are read as {@link sumLaneField}
+ * reads them (an empty value is no value; a non-number makes the result
+ * unknowable, `null`). `avg`, `min` and `max` over a lane with no value are
+ * `null`: there is nothing to average.
+ */
+export function laneStatistic(
+  cards: ReadonlyArray<Record<string, unknown>>,
+  field: string,
+  type: KanbanLaneStatisticType,
+): number | null {
+  if (type === 'count') return cards.length;
+  if (type === 'sum') return sumLaneField(cards, field);
+  const values: number[] = [];
+  for (const card of cards) {
+    const raw = card[field];
+    if (isEmptyValue(raw)) continue;
+    const value = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : Number.NaN;
+    if (!Number.isFinite(value)) return null;
+    values.push(value);
+  }
+  if (values.length === 0) return null;
+  if (type === 'min') return Math.min(...values);
+  if (type === 'max') return Math.max(...values);
+  const total = sumLaneField(cards, field);
+  if (total === null) return null;
+  const widest = Math.max(...values.map(fractionDigitsOf));
+  return Number((total / values.length).toFixed(Math.min(widest + 2, 20)));
 }

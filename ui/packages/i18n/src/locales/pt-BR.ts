@@ -1033,6 +1033,15 @@ const pt = {
     inlineEditLabel: "Editar registros em linha (clique em uma célula para editar)",
     // The list's Options menu.
     optionsMenu: {
+      // objectstack#36370 — a board's own settings.
+      kanbanLaneField: "Colunas por",
+      kanbanLanes: "Colunas visíveis",
+      kanbanCardFields: "Campos do cartão",
+      kanbanAddCardField: "Adicionar campo",
+      kanbanShowFieldLabels: "Mostrar nomes dos campos",
+      kanbanHideEmptyFields: "Ocultar campos vazios",
+      kanbanSummary: "Resumo da coluna",
+      kanbanHiddenLanes: "Colunas ocultas",
       viewName: 'Nome da visualização',
       fields: 'Campos',
       fieldsShown: 'Exibidos: {{count}}',
@@ -1077,6 +1086,15 @@ const pt = {
     },
   },
   kanban: {
+    // objectstack#36370 — the lane header's 「+」 and 「⋯」 menu, and an empty lane's create row.
+    laneMenu: {
+      actions: "Ações da coluna {{column}}",
+      collapse: "Recolher coluna",
+      expand: "Expandir coluna",
+      hide: "Ocultar coluna",
+      createIn: "Novo registro em {{column}}",
+      create: "Novo",
+    },
     uncategorized: "Sem categoria",
     loadMore: "Carregar mais",
     columns: "colunas",
@@ -2793,6 +2811,7 @@ const pt = {
       },
       linkFilterRefused: 'O filtro deste link não foi aplicado. Ele cita um campo pelo qual você não pode filtrar aqui, então a lista mostra a visualização sem ele.',
       personalizedParts: {
+        kanban: "Configurações do quadro",
         filters: "Filtros",
         search: "Pesquisa",
         sort: "Ordenação",

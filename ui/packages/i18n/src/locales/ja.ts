@@ -1005,6 +1005,15 @@ const ja = {
     inlineEditLabel: "レコードをインラインで編集(セルをクリックして編集)",
     // The list's Options menu.
     optionsMenu: {
+      // objectstack#36370 — a board's own settings.
+      kanbanLaneField: "列の分け方",
+      kanbanLanes: "表示する列",
+      kanbanCardFields: "カードの項目",
+      kanbanAddCardField: "項目を追加",
+      kanbanShowFieldLabels: "項目名を表示",
+      kanbanHideEmptyFields: "空の項目を隠す",
+      kanbanSummary: "列の集計",
+      kanbanHiddenLanes: "非表示の列",
       viewName: 'ビュー名',
       fields: 'フィールド',
       fieldsShown: '{{count}} 件表示中',
@@ -1048,6 +1057,15 @@ const ja = {
     },
   },
   kanban: {
+    // objectstack#36370 — the lane header's 「+」 and 「⋯」 menu, and an empty lane's create row.
+    laneMenu: {
+      actions: "{{column}} 列の操作",
+      collapse: "列を折りたたむ",
+      expand: "列を展開",
+      hide: "列を非表示",
+      createIn: "{{column}} に新規作成",
+      create: "新規",
+    },
     uncategorized: "未分類",
     loadMore: "さらに読み込む",
     columns: "カラム",
@@ -2726,6 +2744,7 @@ const ja = {
       },
       linkFilterRefused: 'このリンクのフィルターは適用されませんでした。ここでは絞り込めないフィールドが含まれているため、ビュー本来の内容を表示しています。',
       personalizedParts: {
+        kanban: "ボードの設定",
         filters: "フィルター",
         search: "検索",
         sort: "並べ替え",

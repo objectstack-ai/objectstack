@@ -1033,6 +1033,15 @@ const fr = {
     inlineEditLabel: "Modifier les enregistrements en ligne (cliquez sur une cellule pour modifier)",
     // The list's Options menu.
     optionsMenu: {
+      // objectstack#36370 — a board's own settings.
+      kanbanLaneField: "Colonnes par",
+      kanbanLanes: "Colonnes visibles",
+      kanbanCardFields: "Champs de la carte",
+      kanbanAddCardField: "Ajouter un champ",
+      kanbanShowFieldLabels: "Afficher les noms des champs",
+      kanbanHideEmptyFields: "Masquer les champs vides",
+      kanbanSummary: "Synthèse de colonne",
+      kanbanHiddenLanes: "Colonnes masquées",
       viewName: 'Nom de la vue',
       fields: 'Champs',
       fieldsShown: 'Affichés : {{count}}',
@@ -1077,6 +1086,15 @@ const fr = {
     },
   },
   kanban: {
+    // objectstack#36370 — the lane header's 「+」 and 「⋯」 menu, and an empty lane's create row.
+    laneMenu: {
+      actions: "Actions de la colonne {{column}}",
+      collapse: "Réduire la colonne",
+      expand: "Développer la colonne",
+      hide: "Masquer la colonne",
+      createIn: "Nouvel enregistrement dans {{column}}",
+      create: "Nouveau",
+    },
     uncategorized: "Non catégorisé",
     loadMore: "Charger plus",
     columns: "colonnes",
@@ -2794,6 +2812,7 @@ const fr = {
       },
       linkFilterRefused: 'Le filtre de ce lien n’a pas été appliqué. Il cite un champ sur lequel vous ne pouvez pas filtrer ici, la liste affiche donc la vue sans ce filtre.',
       personalizedParts: {
+        kanban: "Réglages du tableau",
         filters: "Filtres",
         search: "Recherche",
         sort: "Tri",
