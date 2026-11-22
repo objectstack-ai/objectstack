@@ -9,7 +9,8 @@
  *    administrator without it (an organization administrator) is not offered
  *    a Shared choice the server refuses.
  *  - Create, shared: saved and published in one act, never left as a draft; a
- *    refused save publishes nothing.
+ *    refused save publishes nothing, and a name a pending draft holds is said
+ *    (`shareNameTaken`).
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -87,5 +88,20 @@ describe('objectstack#36409 — Create, shared', () => {
         expect(created).toBe(false);
         expect(r.metadataClient.publish).not.toHaveBeenCalled();
         expect(toast.error).toHaveBeenCalled();
+    });
+
+    it('a name an unpublished draft already holds: told so, reported unsaved, nothing published', async () => {
+        const r = rig();
+        r.metadataClient.save.mockRejectedValueOnce(Object.assign(new Error('pending'), { status: 409, code: 'METADATA_CONFLICT' }));
+        let created = true;
+        await act(async () => {
+            created = await r.result.current.createShared({ type: 'grid', label: 'Hot leads', name: 'hot_leads' });
+        });
+        expect(created).toBe(false);
+        expect(r.metadataClient.publish).not.toHaveBeenCalled();
+        expect(r.refresh).not.toHaveBeenCalled();
+        expect(r.navigate).not.toHaveBeenCalled();
+        const [, options] = toast.error.mock.calls[0] as unknown as [string, { description: string }];
+        expect(options.description).toContain('An unpublished draft already uses this view’s name');
     });
 });
