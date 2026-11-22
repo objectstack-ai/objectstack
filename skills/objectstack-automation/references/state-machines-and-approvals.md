@@ -1,16 +1,16 @@
 ## State Machines & Approvals
 
-A record's **state machine** locks the legal transitions of its status field
-so that automation cannot drive a record into an illegal state. Unmarked
-blocks are fragments.
+A record's **state machine** locks its status field's legal transitions so
+automation cannot drive it into an illegal state. Unmarked blocks are
+fragments.
 
 ### State Machine — a `state_machine` validation rule (ADR-0020)
 
 Since **ADR-0020** there is **no `workflow` metadata type** and no
 `object.stateMachines` map. A record state machine is **one `state_machine`
 validation rule** in the object's `validations` array: a flat `field` +
-`{ from: [allowedTo] }` transition table. It is **enforced on the write path** —
-an update whose `field` moves to a state not listed for the current state is
+`{ from: [allowedTo] }` transition table. It is **enforced on the write path**:
+an update moving `field` to a state not listed for the current one is
 rejected with the rule's `message`.
 
 <!-- os:check -->
@@ -34,27 +34,28 @@ const rule: StateMachineValidation = {
 ```
 
 Notes:
-- **One rule per field.** Parallel lifecycles (e.g. `status` + `payment_status`)
-  are N separate `state_machine` rules.
-- **`initialStates`** gates INSERT: a record created with its state field
-  outside this list is rejected. `transitions` only governs updates, so a
-  machine that runs on insert without it is refused at publish
+- **One rule per field.** Parallel lifecycles (`status` + `payment_status`)
+  are separate `state_machine` rules.
+- **`initialStates`** gates INSERT: a record created in a state outside
+  this list is rejected. `transitions` only governs updates, so a
+  machine running on insert without it is refused at publish
   (`state-machine-no-initial-states`); an update-only machine
   (`events: ['update']`) needs none.
 - **Conditional transitions / side effects are NOT part of the machine.** A
-  guard is expressed as a sibling `script` / `conditional` validation rule;
-  "do something when the state changes" is a **record-triggered Flow**
-  (ADR-0019) — a `record_change` flow whose start-node condition gates on the
-  transition.
+  guard is a sibling `script` / `conditional` rule; a reaction to
+  a state change is a `record_change` flow (ADR-0019) whose start-node
+  condition gates on the transition.
 - **Introspection:** `GET /api/v1/meta/object/:name/state/:field?from=:state`
-  returns the legal next states so UIs/agents can read the transition table
-  instead of hard-coding it (`next: null` = no FSM governs the field, **or**
-  `?from=` was omitted — always pass `from`).
-- **An unlisted `from` state is NOT guarded.** An update whose current state is
-  not a key of `transitions` is treated leniently (no lock) — list every state
-  you want guarded rather than relying on an implicit "any → any".
-- Predicate conditions in sibling rules evaluate against the merged record in
-  the **`record.<field>`** CEL scope (bare field names do not resolve).
+  returns the legal next states for UIs/agents to read (`next: null` = no
+  FSM governs the field, **or** `?from=` was omitted — always pass `from`).
+- **An unlisted `from` state is NOT guarded.** An update whose current state
+  is not a key of `transitions` passes — list every state to guard.
+- **Clearing the field is a transition to `''`.** An update to `null` or `''`
+  is judged from the stored state: a clearable state lists `''` in its
+  targets, e.g. `paused: ['open', '']`; from any other listed state it is
+  refused (`invalid_transition`, `constraint.to: ''`).
+- Sibling-rule predicates read the merged record in the **`record.<field>`**
+  CEL scope (bare field names do not resolve).
 - **An AI-gated irreversible transition** pairs this rule with a lock on
   `field`: **objectstack-ai** → Common Pitfalls.
 
