@@ -27,6 +27,8 @@
  *      panel under the cell, which keeps its value drawn; a commit the browser
  *      or the host refuses keeps the editor and the input, says why under it,
  *      and Escape discards.
+ *   5. objectstack#35689: a picker's panel under the cell hands the focus back
+ *      to the cell when it closes, by Esc and by a pick.
  */
 import React from 'react';
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -429,5 +431,48 @@ describe('data-table select-first — clearing, the panel under the cell, a refu
     expect(document.activeElement).toBe(t.cell(0, 0));
     expect(t.cell(0, 0)).toHaveClass('outline-none');
     expect(frame(0, 0)).toBeNull();
+  });
+});
+
+describe('data-table select-first keys — the focus after a picker panel closes (objectstack#35689)', () => {
+  // A picker as a host injects it: options that commit on a pick.
+  const renderPicker = () => renderTable(
+    {
+      renderCellEditor: (ctx: { commit: (v?: unknown) => void }) => (
+        <div role="group" aria-label="Pick a name">
+          <button type="button" data-testid="pick-omega" onClick={() => ctx.commit('Omega')}>Omega</button>
+          <button type="button" onClick={() => ctx.commit('Sigma')}>Sigma</button>
+        </div>
+      ),
+    },
+    { describeCell: (_row, key) => (key === 'name' ? { editor: 'below' } : null) },
+  );
+  const panel = (t: ReturnType<typeof renderTable>) => t.cell(0, 0).querySelector('[data-slot="cell-editor-overlay"]');
+
+  it('Esc in the panel closes it, and the focus is back on the cell, still selected', () => {
+    const t = renderPicker();
+    t.select(0, 0);
+    fireEvent.keyDown(t.catcher(), { key: 'Enter' });
+    expect(panel(t)).toHaveAttribute('data-placement', 'below');
+    const option = t.container.querySelector<HTMLButtonElement>('[data-testid="pick-omega"]')!;
+    option.focus();
+    fireEvent.keyDown(option, { key: 'Escape' });
+    expect(panel(t)).toBeNull();
+    expect(t.selected()).toBe('0:0');
+    expect(document.activeElement).toBe(t.catcher());
+    expect(t.onCellChange).not.toHaveBeenCalled();
+  });
+
+  it('a pick commits, closes the panel, and the focus is back on the cell', () => {
+    const t = renderPicker();
+    t.select(0, 0);
+    fireEvent.keyDown(t.catcher(), { key: 'Enter' });
+    const option = t.container.querySelector<HTMLButtonElement>('[data-testid="pick-omega"]')!;
+    option.focus();
+    fireEvent.click(option);
+    expect(t.onCellChange).toHaveBeenLastCalledWith(0, 'name', 'Omega', ROWS[0]);
+    expect(panel(t)).toBeNull();
+    expect(t.selected()).toBe('0:0');
+    expect(document.activeElement).toBe(t.catcher());
   });
 });

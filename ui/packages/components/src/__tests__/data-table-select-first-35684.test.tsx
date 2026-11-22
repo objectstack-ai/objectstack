@@ -34,6 +34,9 @@
  *      chip; the cell draws an edit button, not the open button, and the edit
  *      button opens the editor through the same gate as double-click
  *      (objectstack#36015).
+ *   9. objectstack#35689: a touch tap or double-tap never edits in place, the
+ *      edit button included; in the grid a read-only cell carries
+ *      `aria-readonly`, on the cell and on the focus inside it.
  */
 import React from 'react';
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -502,5 +505,69 @@ describe('data-table select-first — a reference chip opens its record in place
     expect(t.onFollow).not.toHaveBeenCalled();
     expect(t.cell(0, 1)).toHaveAttribute('data-selected-cell');
     expect(t.editButton(0, 1)).toBeNull();
+  });
+});
+
+describe('data-table select-first — a touch never edits in place (objectstack#35689)', () => {
+  it('a touch tap opens the record; a touch double-tap neither selects nor edits', () => {
+    const t = renderTable();
+    fireEvent.pointerDown(t.cell(0, 1), { pointerType: 'touch' });
+    fireEvent.click(t.cell(0, 1), { detail: 1 });
+    fireEvent.pointerDown(t.cell(0, 1), { pointerType: 'touch' });
+    fireEvent.click(t.cell(0, 1), { detail: 2 });
+    fireEvent.doubleClick(t.cell(0, 1));
+    expect(t.onRowClick).toHaveBeenCalled();
+    expect(t.editor()).toBeNull();
+    expect(t.cell(0, 1)).not.toHaveAttribute('data-selected-cell');
+    expect(t.onCellChange).not.toHaveBeenCalled();
+  });
+
+  it("a tap on a reference cell's edit button, on a cell not selected, edits nothing; a mouse click on it edits", () => {
+    const openRecord = vi.fn();
+    const t = renderTable({ selection: { referenceCells: { isReferenceColumn: (key) => key === 'site', openRecord } } });
+    const button = () => t.cell(0, 3).querySelector<HTMLButtonElement>('[data-testid="cell-edit-button"]')!;
+    // A finger reaching the cell does not draw the button.
+    fireEvent.pointerEnter(t.cell(0, 3), { pointerType: 'touch' });
+    expect(button().className).toContain('hidden');
+    // Drawn for a mouse before, a tap on it is still not an edit.
+    fireEvent.pointerEnter(t.cell(0, 3), { pointerType: 'mouse' });
+    expect(button().className).toMatch(/(^|\s)flex(\s|$)/);
+    fireEvent.pointerDown(button(), { pointerType: 'touch' });
+    fireEvent.click(button());
+    expect(t.editor()).toBeNull();
+    expect(t.cell(0, 3)).not.toHaveAttribute('data-selected-cell');
+    // CONTROL: the mouse's click on the same button edits.
+    fireEvent.pointerDown(button(), { pointerType: 'mouse' });
+    fireEvent.click(button());
+    expect(t.editor()).not.toBeNull();
+  });
+});
+
+describe('data-table select-first — a read-only cell says so in the grid (objectstack#35689)', () => {
+  it("the selected cell reads the host's facts: aria-readonly on the cell and on its focus; an editable one carries none", () => {
+    const t = renderTable({
+      selection: { describeCell: (_row, key) => (key === 'amount' ? { readOnlyReason: 'This value is calculated.' } : null) },
+    });
+    expect(t.container.querySelector('table')).toHaveAttribute('role', 'grid');
+    fireEvent.click(t.cell(0, 1));
+    expect(t.cell(0, 1)).toHaveAttribute('aria-readonly', 'true');
+    expect(t.catcher()).toHaveAttribute('aria-readonly', 'true');
+    expect(document.activeElement).toBe(t.catcher());
+    fireEvent.keyDown(t.catcher()!, { key: 'ArrowLeft' });
+    expect(t.cell(0, 0)).not.toHaveAttribute('aria-readonly');
+    expect(t.catcher()).not.toHaveAttribute('aria-readonly');
+  });
+
+  it("every cell of a table that edits nothing is read-only, by the table's own facts", () => {
+    const t = renderTable({ extra: { editable: false } });
+    const cells = [...t.container.querySelectorAll('td[data-grid-cell]')];
+    expect(cells.length).toBe(ROWS.length * 4);
+    for (const td of cells) expect(td).toHaveAttribute('aria-readonly', 'true');
+  });
+
+  it('CONTROL: outside the grid no cell carries aria-readonly', () => {
+    const t = renderTable({ selection: null, extra: { editable: false } });
+    expect(t.container.querySelector('table')).not.toHaveAttribute('role');
+    expect(t.container.querySelector('[aria-readonly]')).toBeNull();
   });
 });
