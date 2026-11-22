@@ -8,15 +8,15 @@
  * `DesignModeProvider`, `DesignModeBar`, `saveAppMenu`. The metadata client
  * and the package doors are fakes that record what is written; the
  * deployment's languages (`GET /api/v1/i18n/locales`) are a stubbed fetch.
- * `DndContext` is the real one, its `onDragEnd` kept so that a drop can be
- * played without the pointer geometry jsdom does not have.
+ * `DndContext` is the real one, its `onDragStart` and `onDragEnd` kept so
+ * that a drag can be played without the pointer geometry jsdom does not have.
  */
 
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { SidebarProvider } from '@object-ui/components';
 
 const session = vi.hoisted(() => ({ language: 'en', defaultLocale: 'en' }));
@@ -30,6 +30,7 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
 }));
 
 const dragEnd = vi.hoisted(() => ({ current: null as null | ((event: unknown) => void) }));
+const dragStart = vi.hoisted(() => ({ current: null as null | ((event: unknown) => void) }));
 vi.mock('@dnd-kit/core', async (importOriginal) => {
   const real = await importOriginal<typeof import('@dnd-kit/core')>();
   const { createElement } = await import('react');
@@ -37,6 +38,7 @@ vi.mock('@dnd-kit/core', async (importOriginal) => {
     ...real,
     DndContext: (props: React.ComponentProps<typeof real.DndContext>) => {
       dragEnd.current = props.onDragEnd as never;
+      dragStart.current = props.onDragStart as never;
       return createElement(real.DndContext, props);
     },
   };
@@ -142,6 +144,10 @@ function Harness() {
   );
 }
 
+function Where() {
+  return <span data-testid="where">{useLocation().pathname}</span>;
+}
+
 function Enter() {
   const mode = useDesignMode();
   return (
@@ -163,6 +169,8 @@ function SwitchApp() {
 
 const flush = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 const entry = (id: string) => screen.getByTestId(`design-menu-entry-${id}`);
+/** The link the entry `id` is drawn as (dnd-kit gives it the role of a button). */
+const linkOf = (id: string) => entry(id).querySelector('a')!;
 /** The entries of the group `id` (the top level for `null`), in order. */
 function order(): unknown[] {
   const list = screen.getByTestId('design-mode-menu').querySelector('ul')!;
@@ -392,6 +400,88 @@ describe('the menu under the design mode (objectstack#36363)', () => {
     await flush();
     const nav = (written[0][3] as { navigation: Array<{ id: string; children?: Array<{ id: string }> }> }).navigation;
     expect(nav[1].children!.map((c) => c.id)).toEqual(['leads']);
+  });
+
+  // L1-e review 7083961269 (1): contributions are appended when the app is
+  // served, so an own entry put at or past them is drawn before them.
+  const ACCOUNTS_CONTRIBUTED = () =>
+    NAVIGATION.map((e) => (e.id === 'sales' ? { ...e, children: (e.children ?? []).filter((c) => c.id !== 'accounts') } : e));
+
+  it("「Add menu item」 at the end of a group that ends with another package's entries holds the row, and puts the pick, before them", async () => {
+    storedNav.current = ACCOUNTS_CONTRIBUTED();
+    start();
+    await flush();
+    fireEvent.click(screen.getByTestId('design-menu-add-sales'));
+    expect(order()).toEqual(['home', ['sales', ['leads', '…', 'accounts']], ['insights', []]]);
+    const picker = await screen.findByTestId('design-menu-picker');
+    fireEvent.click(within(picker).getByRole('button', { name: 'Objects' }));
+    await flush();
+    fireEvent.click(within(picker).getByRole('button', { name: 'Cases' }));
+    await flush();
+    expect(order()).toEqual(['home', ['sales', ['leads', 'nav_item_1', 'accounts']], ['insights', []]]);
+    fireEvent.click(screen.getByTestId('design-mode-save'));
+    await flush();
+    await flush();
+    const nav = (written[0][3] as { navigation: Array<{ id: string; children?: Array<{ id: string }> }> }).navigation;
+    expect(nav[1].children!.map((c) => c.id)).toEqual(['leads', 'nav_item_1']);
+  });
+
+  it("「Add an item after」 on another package's entry, and 「Move to group」 into its group, land before it", async () => {
+    storedNav.current = ACCOUNTS_CONTRIBUTED();
+    start();
+    await flush();
+    await act_on('accounts', 'Add an item after');
+    expect(order()).toEqual(['home', ['sales', ['leads', '…', 'accounts']], ['insights', []]]);
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    await flush();
+    const trigger = within(entry('home')).getByTestId('design-menu-actions');
+    fireEvent.pointerDown(trigger, { button: 0, pointerType: 'mouse' });
+    await flush();
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Move to group' }));
+    await flush();
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Sales' }));
+    await flush();
+    expect(order()).toEqual([['sales', ['leads', 'home', 'accounts']], ['insights', []]]);
+  });
+
+  it("dropped on the end of a group that ends with another package's entries, an entry lands before them", async () => {
+    storedNav.current = ACCOUNTS_CONTRIBUTED();
+    start();
+    await flush();
+    act(() => dragEnd.current!({ active: { id: 'home' }, over: { id: 'design-menu-end:sales' } }));
+    expect(order()).toEqual([['sales', ['leads', 'home', 'accounts']], ['insights', []]]);
+  });
+
+  // L1-e review 7083961269 (2): the browser's own drag of an entry's link
+  // would, dropped where the editor does not move it, open the link as a new
+  // document; and the click a drag ends with is no click.
+  it("an entry's link is not dragged by the browser, and the click a drag ends with opens nothing", async () => {
+    storedNav.current = ACCOUNTS_CONTRIBUTED();
+    render(
+      <MemoryRouter initialEntries={['/apps/crm']}>
+        <Harness />
+        <Where />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByText('enter'));
+    await flush();
+    const leads = linkOf('leads');
+    expect(leads).toHaveAttribute('draggable', 'false');
+    expect(fireEvent.dragStart(leads)).toBe(false); // the native drag is refused
+    expect(fireEvent.dragStart(linkOf('accounts'))).toBe(false);
+
+    // Control: a plain click opens the entry's page, in the app.
+    fireEvent.click(linkOf('home'));
+    const opened = screen.getByTestId('where').textContent;
+    expect(opened).not.toBe('/apps/crm');
+
+    // A drag of leads refused on another package's entry, then the click it ends with.
+    act(() => dragStart.current!({ active: { id: 'leads' } }));
+    act(() => dragEnd.current!({ active: { id: 'leads' }, over: { id: 'accounts' } }));
+    fireEvent.click(leads);
+    expect(screen.getByTestId('where').textContent).toBe(opened);
+    expect(order()).toEqual(['home', ['sales', ['leads', 'accounts']], ['insights', []]]);
+    expect(screen.getByTestId('design-mode-bar')).toBeInTheDocument();
   });
 
   it('adding and moving stay open under zh-CN', async () => {

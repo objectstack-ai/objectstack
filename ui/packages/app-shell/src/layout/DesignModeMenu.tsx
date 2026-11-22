@@ -244,6 +244,22 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
     const beside = place ? (siblingsAt(menu, place.parentId) ?? [])[place.index + by] : undefined;
     return typeof beside?.id === 'string' && contributed(beside.id);
   };
+  /**
+   * Where the group `parentId` of `list` ends for the app's own entries: before
+   * the run of other packages' entries that closes it (its length when none).
+   * Contributions are appended to a group when the app is served, so an own
+   * entry put at or past that run is stored, and served, before it; the editor
+   * puts it there too, so it shows where everyone will see it.
+   */
+  const ownEndOf = (list: Menu, parentId: string | null): number => {
+    const siblings = siblingsAt(list, parentId) ?? [];
+    let end = siblings.length;
+    while (end > 0 && typeof siblings[end - 1]?.id === 'string' && contributed(String(siblings[end - 1].id))) end -= 1;
+    return end;
+  };
+  /** The entry `id` moved to the own end of the group `parentId`. */
+  const moveToOwnEnd = (id: string, parentId: string | null): Menu =>
+    moveEntry(menu, id, parentId, ownEndOf(removeEntry(menu, id), parentId));
 
   const labelOf = React.useCallback(
     (entry: MenuEntry) =>
@@ -269,13 +285,27 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
     return out;
   }, [menu]);
 
+  // The click that ends a pointer drag lands on the dragged entry's link: it
+  // is not a click, so it opens nothing (a refused drop included).
+  const lastDragEnd = React.useRef(0);
+  const dragging = React.useRef(false);
+  const onDragStart = () => {
+    dragging.current = true;
+  };
+  const endDrag = () => {
+    dragging.current = false;
+    lastDragEnd.current = Date.now();
+  };
+  const justDragged = React.useCallback(() => dragging.current || Date.now() - lastDragEnd.current < 300, []);
+
   const onDragEnd = (event: DragEndEvent) => {
+    endDrag();
     const id = String(event.active.id);
     const overId = event.over ? String(event.over.id) : null;
     if (!overId || overId === id) return;
     const endParent = parentOfEndZone(overId);
     if (endParent !== undefined) {
-      update(moveEntry(menu, id, endParent, Number.POSITIVE_INFINITY));
+      update(moveToOwnEnd(id, endParent));
       return;
     }
     const from = placeOf(menu, id);
@@ -287,7 +317,7 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
   };
 
   const startAdd = (at: AddAt) => {
-    setAddAt(at);
+    setAddAt({ parentId: at.parentId, index: Math.min(at.index, ownEndOf(menu, at.parentId)) });
   };
   const pick = (entry: MenuEntry) => {
     if (!addAt) return;
@@ -308,6 +338,7 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
         basePath={basePath}
         resolveTargetIcon={resolveTargetIcon}
         fixed={contributed(id)}
+        justDragged={justDragged}
         actions={
           <EntryActions
             label={labelOf(entry)}
@@ -320,7 +351,7 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
             atTopLevel={place?.parentId === null}
             onUp={() => update(moveBy(menu, id, -1))}
             onDown={() => update(moveBy(menu, id, 1))}
-            onMoveTo={(groupId) => update(moveEntry(menu, id, groupId, Number.POSITIVE_INFINITY))}
+            onMoveTo={(groupId) => update(moveToOwnEnd(id, groupId))}
             onAddBefore={() => place && startAdd({ parentId: place.parentId, index: place.index })}
             onAddAfter={() => place && startAdd({ parentId: place.parentId, index: place.index + 1 })}
             onRename={() => setRenaming(id)}
@@ -382,7 +413,13 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
     <SidebarGroup data-testid="design-mode-menu">
       <SidebarGroupLabel className={HIDDEN_ICON_LABEL_NOT_FOCUSABLE}>{t('designMode.menu.title', { defaultValue: 'Menu' })}</SidebarGroupLabel>
       <SidebarGroupContent>
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          onDragCancel={endDrag}
+        >
           <SortableContext items={leafIds} strategy={verticalListSortingStrategy}>
             <SidebarMenu>{renderEntries(menu, null, 0)}</SidebarMenu>
           </SortableContext>
@@ -428,6 +465,7 @@ function MenuLeaf({
   basePath,
   resolveTargetIcon,
   fixed,
+  justDragged,
   actions,
 }: {
   id: string;
@@ -438,6 +476,8 @@ function MenuLeaf({
   resolveTargetIcon?: NavTargetIconResolver;
   /** Another package's entry: not dragged. */
   fixed: boolean;
+  /** Whether a drag is under way or has just ended: the click it ends with opens nothing. */
+  justDragged: () => boolean;
   actions: React.ReactNode;
 }) {
   const sortable = useSortable({ id, disabled: fixed });
@@ -448,6 +488,18 @@ function MenuLeaf({
       : resolveNavKindIcon(item) ?? resolveNavItemIcon(item);
   const icon = React.createElement(getIcon(iconName), { className: 'h-4 w-4' });
   const { href, external } = resolveHref(item, basePath);
+  // The editor's drag is dnd-kit's alone. The browser's own drag of the link
+  // is off: dropped anywhere dnd-kit does not move it (another package's
+  // entry, say), it would open the link as a new document and leave the mode.
+  const link = {
+    draggable: false,
+    onDragStart: (event: React.DragEvent) => event.preventDefault(),
+    onClickCapture: (event: React.MouseEvent) => {
+      if (justDragged()) event.preventDefault();
+    },
+    ...sortable.attributes,
+    ...sortable.listeners,
+  };
   return (
     <SidebarMenuItem
       ref={sortable.setNodeRef}
@@ -457,12 +509,12 @@ function MenuLeaf({
     >
       <SidebarMenuButton asChild tooltip={label} className={fixed ? undefined : 'cursor-grab'}>
         {external ? (
-          <a href={href} target="_blank" rel="noopener noreferrer" {...sortable.attributes} {...sortable.listeners}>
+          <a href={href} target="_blank" rel="noopener noreferrer" {...link}>
             {icon}
             <span>{label}</span>
           </a>
         ) : (
-          <Link to={href} {...sortable.attributes} {...sortable.listeners}>
+          <Link to={href} {...link}>
             {icon}
             <span>{label}</span>
           </Link>
