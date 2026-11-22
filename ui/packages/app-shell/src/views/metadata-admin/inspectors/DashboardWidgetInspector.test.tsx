@@ -65,10 +65,10 @@ function renderWidget(extra: Record<string, unknown> = {}, props: Record<string,
 describe('DashboardWidgetInspector — dataset binding', () => {
   it('shows the Dataset picker; dimensions/values appear only once a dataset is bound', () => {
     const { rerender } = renderWidget();
-    expect(screen.getByText('Dataset')).toBeInTheDocument();
+    expect(screen.getByText('Data source')).toBeInTheDocument();
     // Dimensions/Values sections are gated behind a bound dataset.
-    expect(screen.queryByText('Dimensions')).not.toBeInTheDocument();
-    expect(screen.queryByText('Values (measures)')).not.toBeInTheDocument();
+    expect(screen.queryByText('Group by')).not.toBeInTheDocument();
+    expect(screen.queryByText('Metrics')).not.toBeInTheDocument();
 
     rerender(
       <DashboardWidgetInspector
@@ -79,10 +79,10 @@ describe('DashboardWidgetInspector — dataset binding', () => {
       />,
     );
     // Sections now present, and the bound members render in the lists.
-    expect(screen.getByText('Dimensions')).toBeInTheDocument();
-    expect(screen.getByText('Values (measures)')).toBeInTheDocument();
+    expect(screen.getByText('Group by')).toBeInTheDocument();
+    expect(screen.getByText('Metrics')).toBeInTheDocument();
     expect(screen.getByText('stage')).toBeInTheDocument();
-    expect(screen.getByText('revenue')).toBeInTheDocument();
+    expect(screen.getByText('revenue · Sum')).toBeInTheDocument();
   });
 
   it('no longer renders the removed inline object query fields', () => {
@@ -96,8 +96,8 @@ describe('DashboardWidgetInspector — dataset binding', () => {
 
   it('renders Chinese labels under zh-CN', () => {
     renderWidget({ dataset: 'sales_pipeline' }, { locale: 'zh-CN' });
-    expect(screen.getByText('数据集绑定')).toBeInTheDocument();
-    expect(screen.getByText('维度')).toBeInTheDocument();
+    expect(screen.getByText('数据来源')).toBeInTheDocument();
+    expect(screen.getByText('分组')).toBeInTheDocument();
   });
 
   it('the Dataset label resolves to the combo trigger, not to nothing (#3997)', () => {
@@ -110,15 +110,15 @@ describe('DashboardWidgetInspector — dataset binding', () => {
     // the atom's own pins live in `_shared.labels.test.tsx`.
     renderWidget({ dataset: 'sales_pipeline' });
 
-    const label = screen.getByText('Dataset');
+    const label = screen.getByText('Data source');
     const forId = label.getAttribute('for');
     expect(forId).toBeTruthy();
 
-    const trigger = screen.getByLabelText('Dataset');
+    const trigger = screen.getByLabelText('Data source');
     expect(trigger).toBe(document.getElementById(forId!));
     expect(trigger.tagName).toBe('BUTTON');
     expect(trigger).toHaveAttribute('role', 'combobox');
-    expect(trigger).toHaveAccessibleName('Dataset');
+    expect(trigger).toHaveAccessibleName('Data source');
     // Exactly one element answers that id — the trigger, not a wrapper.
     expect(document.querySelectorAll(`[id="${forId}"]`)).toHaveLength(1);
 
@@ -230,17 +230,19 @@ describe('DashboardWidgetInspector — dashboard filter bindings (framework#2501
 
   it('hides the section when the dashboard declares no filters', () => {
     renderWidget();
-    expect(screen.queryByText('Dashboard filter bindings')).not.toBeInTheDocument();
+    expect(screen.queryByText('Follows the filters at the top of the page')).not.toBeInTheDocument();
   });
 
   it('renders one row per dashboard filter (dateRange + each globalFilter)', () => {
     renderFiltered();
-    expect(screen.getByText('Dashboard filter bindings')).toBeInTheDocument();
+    expect(screen.getByText('Follows the filters at the top of the page')).toBeInTheDocument();
     expect(screen.getByTestId('widget-filter-binding-dateRange')).toBeInTheDocument();
     const region = screen.getByTestId('widget-filter-binding-region');
     expect(within(region).getByText('Region')).toBeInTheDocument();
-    // Default placeholder names the filter's own field.
-    expect(within(region).getByText('Default (region)')).toBeInTheDocument();
+    // The bound dataset declares no `region` dimension, so the empty face
+    // reads "Default field" — never the machine name (objectstack#36373).
+    expect(within(region).getByText('Default field')).toBeInTheDocument();
+    expect(within(region).queryByText('Default (region)')).not.toBeInTheDocument();
   });
 
   it('unticking Apply patches filterBindings[name] = false; re-ticking removes the entry', () => {

@@ -220,17 +220,24 @@ describe('objectui#12688 — a widget changed or added in the draft draws its au
   });
 });
 
-describe('objectui#12688 — every editor keeps the authored widget title on the same zh-CN session', () => {
-  it("the widget inspector's Title input reads the authored title", async () => {
+/**
+ * objectstack#36373 restates this case: the inspector's Title box reads the
+ * title in the session's language, as the canvas and the list beside it do.
+ * objectui#12688 kept the authored English here because an edit then wrote
+ * the source; an edit now writes the session language's entry
+ * (`servedLabel.ts`), so the box can show what the page shows.
+ */
+describe('objectstack#36373 — the widget inspector reads the served title on the same zh-CN session', () => {
+  it("the widget inspector's Title input reads the served title, not the English source", async () => {
     const inspector = await componentList('zh', '任务数与平均进度');
 
     fireEvent.click(within(inspector).getByRole('button', { name: '任务数与平均进度' }));
 
-    expect(await screen.findByDisplayValue('Task Count vs Avg Progress', undefined, { timeout: 8000 })).toHaveAttribute(
+    expect(await screen.findByDisplayValue('任务数与平均进度', undefined, { timeout: 8000 })).toHaveAttribute(
       'id',
       'widget-title',
     );
-    expect(screen.queryByDisplayValue('任务数与平均进度')).toBeNull();
+    expect(screen.queryByDisplayValue('Task Count vs Avg Progress')).toBeNull();
   });
 });
 

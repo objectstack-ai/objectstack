@@ -242,7 +242,7 @@ describe('Publish refuses while a new widget is held, naming it (objectui#11910)
     // The surface folds the inspector beside its chat dock, so the widget's
     // inspector is read from the page rather than from an aside.
     await userEvent.click(screen.getByRole('combobox', { name: t('engine.inspector.widget.dataset', 'en') }));
-    await userEvent.click(await screen.findByRole('option', { name: /sales_ds/ }));
+    await userEvent.click(await screen.findByRole('option', { name: 'Sales' }));
     const adds = await screen.findAllByRole('button', { name: t('engine.form.addFieldPlain', 'en') });
     expect(adds.length, 'the dimensions and measures editors').toBe(2);
     fireEvent.click(adds[1]);

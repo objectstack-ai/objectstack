@@ -254,7 +254,7 @@ describe('a chart type picked before its axes is held until both axes are picked
     const report = vi.fn();
     mountPillar(report);
     const inspector = await ready('Order');
-    await pick(inspector, L('engine.inspector.report.chartType'), 'bar');
+    await pick(inspector, L('engine.inspector.report.chartType'), L('engine.inspector.widget.type.bar'));
     await outlastDebounce();
 
     const clauseX = tFormat('engine.studio.held.reportChartNeedsInput', 'en', { input: x });
@@ -267,7 +267,7 @@ describe('a chart type picked before its axes is held until both axes are picked
     fireEvent.click(within(screen.getByTestId('studio-held')).getByRole('button', { name: L('engine.studio.refusal.show') }));
     await waitFor(() => expect(document.activeElement).toBe(within(inspector).getByRole('combobox', { name: x })));
 
-    await pick(inspector, x, 'Stage (stage)');
+    await pick(inspector, x, 'Stage');
     await outlastDebounce();
     expect(reportSaves(), 'one axis is not enough').toEqual([]);
     expect(screen.getByTestId('studio-held-message')).toHaveTextContent(
@@ -279,8 +279,8 @@ describe('a chart type picked before its axes is held until both axes are picked
     const report = vi.fn();
     mountPillar(report);
     const inspector = await ready('Order');
-    await pick(inspector, L('engine.inspector.report.chartType'), 'bar');
-    await pick(inspector, x, 'Stage (stage)');
+    await pick(inspector, L('engine.inspector.report.chartType'), L('engine.inspector.widget.type.bar'));
+    await pick(inspector, x, 'Stage');
     await pick(inspector, y, /^Revenue/);
     await waitFor(() => expect(reportSaves()).toHaveLength(1), { timeout: 4000 });
     const [sent] = reportSaves();

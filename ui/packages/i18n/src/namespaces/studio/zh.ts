@@ -541,7 +541,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.widget.height': '高度',
   'engine.inspector.widget.remove': '删除组件',
   // Dataset binding (ADR-0021) — governed cross-object semantic layer.
-  'engine.inspector.widget.datasetSection': '数据来源',
+  'engine.inspector.widget.datasetSection': '数据',
   'engine.inspector.widget.dataset': '数据来源',
   'engine.inspector.widget.datasetPlaceholder': '选择数据来源…',
   'engine.inspector.widget.datasetHint': '卡片从这里取数；每个人只能看到自己有权限的记录。',

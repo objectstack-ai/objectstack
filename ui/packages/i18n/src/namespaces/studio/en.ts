@@ -627,7 +627,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.widget.height': 'Height',
   'engine.inspector.widget.remove': 'Remove widget',
   // Dataset binding (ADR-0021) — governed cross-object semantic layer.
-  'engine.inspector.widget.datasetSection': 'Data source',
+  'engine.inspector.widget.datasetSection': 'Data',
   'engine.inspector.widget.dataset': 'Data source',
   'engine.inspector.widget.datasetPlaceholder': 'Choose a data source…',
   'engine.inspector.widget.datasetHint': 'The widget reads its numbers from here; everyone sees only the records they have access to.',

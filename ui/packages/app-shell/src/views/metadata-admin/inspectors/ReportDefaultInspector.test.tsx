@@ -75,11 +75,13 @@ describe('ReportDefaultInspector — dataset binding (9.0 single form)', () => {
       />,
     );
     expect(labelledInput('Label').value).toBe('Pipeline');
-    expect(screen.getByText('Dataset')).toBeInTheDocument();
+    expect(screen.getByText('Data source')).toBeInTheDocument();
     // The bound measure and dimension rows show.
-    expect(screen.getByText('Values (measures)')).toBeInTheDocument();
-    expect(screen.getByText('total_amount')).toBeInTheDocument();
-    expect(screen.getByText('Rows (dimensions)')).toBeInTheDocument();
+    expect(screen.getByText('Metrics')).toBeInTheDocument();
+    // A bound measure row reads `LABEL · AGGREGATE` in words; with no label
+    // declared the label is the name (objectstack#36373).
+    expect(screen.getByText('total_amount · Sum')).toBeInTheDocument();
+    expect(screen.getByText('Group by')).toBeInTheDocument();
     expect(screen.getByText('stage')).toBeInTheDocument();
   });
 
@@ -110,8 +112,9 @@ describe('ReportDefaultInspector — dataset binding (9.0 single form)', () => {
     // Two add-popovers (values + rows) — open the first (values).
     const addButtons = screen.getAllByText(/add field/i);
     fireEvent.click(addButtons[0]);
-    // The popover item shows the measure's label ('deal_count · count').
-    fireEvent.click(screen.getByText('deal_count · count'));
+    // The popover item shows the measure's label and its aggregate in the
+    // designer locale ('deal_count · Count').
+    fireEvent.click(screen.getByText('deal_count · Count'));
     expect(onPatch).toHaveBeenCalledWith({ values: ['total_amount', 'deal_count'] });
   });
 
@@ -139,7 +142,7 @@ describe('ReportDefaultInspector — dataset binding (9.0 single form)', () => {
         readOnly={false}
       />,
     );
-    expect(screen.getByText('Columns (across dimensions)')).toBeInTheDocument();
+    expect(screen.getByText('Group columns by')).toBeInTheDocument();
     expect(screen.getByText('close_quarter')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Remove close_quarter' }));
     expect(onPatch).toHaveBeenCalledWith({ columns: [] });
@@ -154,7 +157,7 @@ describe('ReportDefaultInspector — dataset binding (9.0 single form)', () => {
         readOnly={false}
       />,
     );
-    expect(screen.queryByText('Columns (across dimensions)')).not.toBeInTheDocument();
+    expect(screen.queryByText('Group columns by')).not.toBeInTheDocument();
   });
 
   it('falls back to a manual dataset input when the catalog is empty', () => {
@@ -167,7 +170,7 @@ describe('ReportDefaultInspector — dataset binding (9.0 single form)', () => {
         readOnly={false}
       />,
     );
-    const input = labelledInput('Dataset');
+    const input = labelledInput('Data source');
     expect(input).toBeInTheDocument();
     expect(input.tagName).toBe('INPUT');
   });
@@ -181,8 +184,8 @@ describe('ReportDefaultInspector — dataset binding (9.0 single form)', () => {
         readOnly={false}
       />,
     );
-    expect(screen.queryByText('Dataset')).not.toBeInTheDocument();
-    expect(screen.queryByText('Values (measures)')).not.toBeInTheDocument();
+    expect(screen.queryByText('Data source')).not.toBeInTheDocument();
+    expect(screen.queryByText('Metrics')).not.toBeInTheDocument();
   });
 
   it('renders Chinese labels under zh-CN', () => {
@@ -196,7 +199,7 @@ describe('ReportDefaultInspector — dataset binding (9.0 single form)', () => {
       />,
     );
     expect(screen.getByText('报表类型')).toBeInTheDocument();
-    expect(screen.getByText('数据集')).toBeInTheDocument();
+    expect(screen.getByText('数据来源')).toBeInTheDocument();
   });
 
   it('disables inputs when readOnly', () => {
@@ -224,7 +227,7 @@ describe('ReportDefaultInspector — dataset binding (9.0 single form)', () => {
  * was a correct `value` prop that reached no pixels.
  */
 describe('ReportDefaultInspector — a dataset the catalog no longer lists (objectui#8488)', () => {
-  const datasetTrigger = () => screen.getByRole('combobox', { name: 'Dataset' });
+  const datasetTrigger = () => screen.getByRole('combobox', { name: 'Data source' });
 
   it('shows the stored dataset name, flagged, instead of a blank binding', () => {
     render(
@@ -250,9 +253,9 @@ describe('ReportDefaultInspector — a dataset the catalog no longer lists (obje
         readOnly={false}
       />,
     );
-    // `datasetOptions` labels a catalogued dataset `LABEL (NAME)`; the point of
-    // the case is the absence of the flag, not the label's own spelling.
-    expect(datasetTrigger().textContent).toBe('Sales metrics (sales_metrics)');
+    // objectstack#36373 — a catalogued dataset reads as its label alone; the
+    // point of the case is the absence of the flag, not the label's spelling.
+    expect(datasetTrigger().textContent).toBe('Sales metrics');
     expect(screen.queryByText(/not found/), 'nothing is flagged').toBeNull();
   });
 });
