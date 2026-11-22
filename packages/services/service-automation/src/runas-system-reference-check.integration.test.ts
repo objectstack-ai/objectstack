@@ -100,7 +100,7 @@ describe("a runAs:'system' flow's record writes keep the reference check (#28881
   let kernel: ObjectKernel;
   let ql: ObjectQL;
   let automation: AutomationEngine;
-  let memberCtx: { userId: string; tenantId: string; positions: string[]; permissions: string[] };
+  let memberCtx: { userId: string; tenantId: string; positions: string[]; permissions: string[]; accessible_org_ids: string[] };
 
   afterEach(async () => {
     try { await kernel?.shutdown(); } catch { /* noop */ }
@@ -132,7 +132,10 @@ describe("a runAs:'system' flow's record writes keep the reference check (#28881
 
     const orgs = await ql.find('sys_organization', { context: SYS });
     const tenantId = String(orgs[0].id);
-    memberCtx = { userId: MEMBER, tenantId, positions: ['org_member'], permissions: ['member_default', 'task_write'] };
+    // The member's membership set rides the trigger context, as the request
+    // resolver carries it: the organization wall judges the run by the
+    // member's own door.
+    memberCtx = { userId: MEMBER, tenantId, positions: ['org_member'], permissions: ['member_default', 'task_write'], accessible_org_ids: [tenantId] };
 
     for (const id of [MEMBER, OTHER, DELETED]) {
       await ql.insert('sys_user', { id, name: id, email: `${id}@example.test` }, { context: SYS });

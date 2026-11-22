@@ -114,17 +114,17 @@ const remoteDriver = {
   async connect() {},
   async disconnect() {},
   async checkHealth() { return true; },
-  async find(object: string, query: any = {}) {
+  async find(_object: string, query: any = {}) {
     return remoteRows.filter((r) => matches(r, query.where)).map((r) => project(r, query.fields));
   },
-  async findOne(object: string, query: any = {}) {
+  async findOne(_object: string, query: any = {}) {
     const hit = remoteRows.find((r) => matches(r, query.where));
     return hit ? project(hit, query.fields) : null;
   },
-  async count(object: string, query: any = {}) {
+  async count(_object: string, query: any = {}) {
     return remoteRows.filter((r) => matches(r, query.where)).length;
   },
-  async update(object: string, id: string | number, data: Row) {
+  async update(_object: string, id: string | number, data: Row) {
     const row = remoteRows.find((r) => r.id === id);
     if (!row) return null;
     Object.assign(row, data, { id: row.id });

@@ -252,6 +252,9 @@ describe('the #5494 admission flip: row content, not caller, decides (real Secur
     tenantId: '',
     positions: ['org_member'],
     permissions: ['member_default', 'task_delete'],
+    // The member's membership set, as the request resolver carries it: the
+    // organization wall judges the run by the member's own door.
+    accessible_org_ids: [] as string[],
   };
 
   async function bootWithSecurity() {
@@ -292,6 +295,7 @@ describe('the #5494 admission flip: row content, not caller, decides (real Secur
     const orgs = await ql.find('sys_organization', { context: { isSystem: true } });
     expect(orgs.map((o: any) => o.slug)).toEqual(['default']);
     MEMBER_CTX.tenantId = String(orgs[0].id);
+    MEMBER_CTX.accessible_org_ids = [MEMBER_CTX.tenantId];
     // [#28881] The member is a real account: a system run's write stamps its
     // trigger user as `owner_id`, and that write keeps the reference check, so
     // a trigger user that resolves to no `sys_user` row is refused.

@@ -23,7 +23,7 @@ describe('a system run carries what the organization wall reads about its caller
   it('the caller’s membership set and posture rung ride the run’s data context', () => {
     const ctx = resolveRunDataContext(
       system({ userId: 'u_alice', tenantId: 'org_a', accessible_org_ids: ['org_a', 'org_b'], posture: 'PLATFORM_ADMIN' }),
-    ) as Record<string, unknown>;
+    ) as unknown as Record<string, unknown>;
     expect(ctx).toMatchObject({
       isSystem: true,
       userId: 'u_alice',
@@ -38,12 +38,12 @@ describe('a system run carries what the organization wall reads about its caller
   });
 
   it('an empty membership set is carried as such: it is the answer the wall reads', () => {
-    const ctx = resolveRunDataContext(system({ userId: 'u_alice', accessible_org_ids: [] })) as Record<string, unknown>;
+    const ctx = resolveRunDataContext(system({ userId: 'u_alice', accessible_org_ids: [] })) as unknown as Record<string, unknown>;
     expect(ctx.accessible_org_ids).toEqual([]);
   });
 
   it('a run for no caller carries none of them', () => {
-    const ctx = resolveRunDataContext(system({ accessible_org_ids: ['org_a'], posture: 'PLATFORM_ADMIN' })) as Record<string, unknown>;
+    const ctx = resolveRunDataContext(system({ accessible_org_ids: ['org_a'], posture: 'PLATFORM_ADMIN' })) as unknown as Record<string, unknown>;
     expect(ctx.accessible_org_ids).toBeUndefined();
     expect(ctx.posture).toBeUndefined();
   });
@@ -55,13 +55,13 @@ describe('a system run carries what the organization wall reads about its caller
 
   it('a decided segment of a run that began for no caller is marked as having none', () => {
     const ctx = resolveRunDataContext(system({ userId: 'u_decider', triggerUserId: null }));
-    expect((ctx as Record<string, unknown>).userId).toBe('u_decider');
+    expect((ctx as unknown as Record<string, unknown>).userId).toBe('u_decider');
     expect(runCallerOf(ctx)).toBeNull();
   });
 
   it('a decided segment of a run that began for a caller names that caller, not the decider', () => {
     const ctx = resolveRunDataContext(system({ userId: 'u_decider', triggerUserId: 'u_alice' }));
-    expect((ctx as Record<string, unknown>).userId).toBe('u_decider');
+    expect((ctx as unknown as Record<string, unknown>).userId).toBe('u_decider');
     expect(runCallerOf(ctx)).toBe('u_alice');
   });
 });

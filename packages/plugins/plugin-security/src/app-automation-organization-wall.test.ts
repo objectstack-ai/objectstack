@@ -212,15 +212,15 @@ describe('an app-authored elevation sees through the organization wall what its 
   describe('the door’s facts', () => {
     it('a context without the caller’s permission sets has them resolved before the wall is asked', async () => {
       const deps = depsFor(UNION);
-      await applyAppAutomationOrganizationWall({ object: 'task', operation: 'find', context: systemFlow(), ast: { object: 'task' } }, deps);
+      await applyAppAutomationOrganizationWall({ object: 'task', operation: 'find', context: systemFlow(), ast: { object: 'task' } } as any, deps);
       expect(deps.completeCaller).toHaveBeenCalledOnce();
-      const [completed] = deps.callerLayer0.mock.calls[0] as unknown as [Record<string, unknown>];
+      const [completed] = vi.mocked(deps.callerLayer0).mock.calls[0] as unknown as [Record<string, unknown>];
       expect(completed).toMatchObject({ isSystem: false, userId: 'u_alice', permissions: [] });
     });
 
     it('a context that carries them is used as it is', async () => {
       const deps = depsFor(DENY);
-      await applyAppAutomationOrganizationWall({ object: 'task', operation: 'find', context: actionBody(), ast: { object: 'task' } }, deps);
+      await applyAppAutomationOrganizationWall({ object: 'task', operation: 'find', context: actionBody(), ast: { object: 'task' } } as any, deps);
       expect(deps.completeCaller).not.toHaveBeenCalled();
     });
 
