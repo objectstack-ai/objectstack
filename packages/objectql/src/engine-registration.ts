@@ -411,6 +411,10 @@ export class RegistrationFacet {
                   description: ext.description,
                   validations: ext.validations,
                   indexes: ext.indexes,
+                  // [#35901] Where its own fields, groups and child lists go —
+                  // applied by the registry fold after every contributor's
+                  // fields are merged (`applyExtensionPlacements`).
+                  place: ext.place,
               };
               // Register as extension (namespace is undefined since we're targeting by FQN)
               this._registry.registerObject(stampPackage(extDef, id, version), id, undefined, 'extend', priority);

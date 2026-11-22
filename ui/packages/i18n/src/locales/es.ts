@@ -3508,7 +3508,6 @@ const es = {
     starred: "Destacados",
     removeFromFavorites: "Quitar {{name}} de favoritos",
     allReports: "Todos los informes",
-    keepOpen: "Mantener la barra lateral abierta",
     collapse: 'Contraer la barra lateral',
     expand: 'Expandir la barra lateral',
   },

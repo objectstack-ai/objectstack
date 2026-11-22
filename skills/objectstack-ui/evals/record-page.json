@@ -25,14 +25,15 @@
     {
       "id": 2,
       "prompt": "Contracts should open as a full page, not the side drawer. Reps also keep asking for records to open beside the list — add that to the contract object too.",
-      "expected_output": "One declaration: `navigation: { mode: 'page' }` on the contract list view. A pane beside the list is no longer offered: the split pane is retired. How a record opens is each reader's own choice in the list's Display menu (Open records: drawer, the default, or full page), kept in the browser and offered for drawer-mode objects only, so nothing is authored for it; `split`, `modal` and `popover` were removed in @objectstack/spec 18.3.0 and are refused.",
+      "expected_output": "Nothing to author. On an object's list the record's name opens the full page and the hover icon beside it opens the drawer over the list, for every reader. `navigation.mode` is deprecated there: `page` and `drawer` still parse and change nothing, so the contract list view declares neither. A pane beside the list is not offered: `split`, `modal` and `popover` were removed in @objectstack/spec 18.3.0 and are refused.",
       "files": [],
       "assertions": {
         "must_contain": [
-          "navigation: { mode: 'page' }",
-          "Display menu"
+          "icon"
         ],
         "must_not_contain": [
+          "mode: 'page' },",
+          "mode: 'page',",
           "mode: 'split'",
           "mode: 'modal'",
           "mode: 'popover'",
