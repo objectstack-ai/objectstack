@@ -15,7 +15,7 @@ import type { SemanticMigration } from '../../types.js';
 // Known gap, left to the job binder and not judged at composition: a residual
 // job whose name a package body's job also carries (with other content) is read
 // as that body's copy and composes, and the boot schedules neither of the two
-// enabled jobs. A follow-up card carries the question.
+// enabled jobs. #36431 carries the question.
 export const entry: SemanticMigration = {
   id: 'stack-residual-extension-registered-and-jobs-judged',
   surface:

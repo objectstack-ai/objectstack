@@ -3721,8 +3721,8 @@ function composedPackageBodies(composedPackages: unknown): Record<string, unknow
  * (`jobNameCollisions`, `@objectstack/runtime`) schedules neither — read from
  * code, not driven. Two package bodies each declaring the name meet the same
  * binder outcome and compose too (cross-package reuse, ADR-0048 §3.4). Whether
- * composition should refuse a job name shared across packages is a follow-up
- * card's question, not this door's.
+ * composition should refuse a job name shared across packages is #36431's
+ * question, not this door's.
  */
 function residualEntryPredicate(composedPackages: unknown): (key: string, entry: unknown) => boolean {
   const bodies = composedPackageBodies(composedPackages);
