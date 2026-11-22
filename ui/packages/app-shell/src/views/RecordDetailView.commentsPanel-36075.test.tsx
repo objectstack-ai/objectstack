@@ -352,6 +352,8 @@ describe('the side preview has no comments (objectstack#36225)', () => {
 
   it('a hand-written page’s object: the preview draws the standard page, with no icon (objectstack#36150)', async () => {
     const { container } = await mount({ pages: [AUTHORED_PAGE], embedded: true });
+    // The standard page is laid out (its tab row is drawn) before anything is asked of it.
+    await within(container).findByRole('tab', { name: /^Activity/ });
     await act(async () => {});
     expect(within(container).getByText(`Case ${RECORD_ID}`)).toBeInTheDocument();
     expect(button(container)).toBeNull();
