@@ -4,9 +4,8 @@
  * `showOnCreate` — whether a field is asked for when a record is created.
  *
  * The key is an authorable field key (absent = asked for), and the one pair it
- * cannot form is `showOnCreate: false` beside `required: true`: every create
- * surface would leave the field out and the write door would refuse every
- * insert without it. The refusal is asserted as a full `safeParse` failure
+ * cannot form is `showOnCreate: false` beside `required: true`: a required
+ * field is always asked for on create, with or without a `defaultValue`. The refusal is asserted as a full `safeParse` failure
  * located at `['showOnCreate']`; every control is a full `safeParse` success,
  * never mere absence of `unrecognized_keys`.
  */
@@ -40,7 +39,7 @@ describe('Field.showOnCreate', () => {
     );
     expect(issues).toHaveLength(1);
     expect(issues[0].code).toBe('custom');
-    expect(issues[0].message).toMatch(/^`showOnCreate: false` leaves this field off every create surface/);
+    expect(issues[0].message).toMatch(/^`showOnCreate: false` would leave this field off every create surface/);
   });
 
   it('refuses the pair when the field declares a `defaultValue` too', () => {
