@@ -176,7 +176,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "حظر المستخدم",
-        description: "هل تريد حظر هذا المستخدم؟ سيُسجَّل خروجه ولن يتمكن من تسجيل الدخول، وستُرفض مفاتيح API الخاصة به إلى أن يُلغى الحظر، وكذلك رموز الوصول عبر OAuth وتحديثات الرموز. تعود المفاتيح للعمل بعد إلغاء الحظر.",
+        description: "هل تريد حظر هذا المستخدم؟ سيُسجَّل خروجه ولن يتمكن من تسجيل الدخول، وستُرفض مفاتيح API الخاصة به إلى أن يُلغى الحظر، وكذلك رموز الوصول عبر OAuth وتحديثات الرموز. تعود المفاتيح للعمل بعد إلغاء الحظر. يؤدي الحظر أيضًا إلى تعليق حسابات خدمة الذكاء الاصطناعي التي يكون مسؤولًا عنها، وتعطيل تطبيقات OAuth التي سجّلها، وإلغاء بيانات اعتماد SCIM التي أصدرها؛ ولا يعيد رفع الحظر أيًا من ذلك.",
         successMessage: "تم حظر المستخدم",
         params: {
           banReason: {
@@ -496,6 +496,10 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       revoke_reason: {
         label: "سبب الإلغاء",
         help: "سبب إلغاء الجلسة (idle_timeout، absolute_max، concurrent_cap، ip_not_allowed، user_revoked، admin، organization_membership_ended، admin_password_reset، password_reset، …)."
+      },
+      sso_provider_id: {
+        label: "مزوّد SSO",
+        help: "مزوّد SSO الذي سُجّل الدخول من خلاله في هذه الجلسة، إن وُجد. حذف ذلك المزوّد يُنهي الجلسة. يُدار من قِبل النظام."
       },
       active_organization_id: {
         label: "المؤسسة النشطة"

@@ -89,6 +89,7 @@ import { SIDEBAR_EDGE_ZONE, useConsoleSidebarRail, useConsoleSidebarRailPanel } 
 import { SidebarItemMenu, sidebarItemDesignPath, favoriteDesignPath } from './SidebarItemMenu.js';
 import { SortableFavoriteRows, type FavoriteRowDragProps } from './SortableFavoriteRows.js';
 import { favoriteAppSegment } from './listViewFavorites.js';
+import { useDesignModeActive } from './designMode.js';
 import { electSidebarArea, type SidebarAreaRoute } from './sidebarAreaElection.js';
 import type { FavoriteItem } from '../hooks/useFavorites.js';
 import { usePhoneAppHomeSlot } from './PhoneAppHome.js';
@@ -210,6 +211,10 @@ export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false
   // sidebar starts at the top of the window and carries the app menu, the
   // search and the bell in its head, and the account at its foot.
   const shellChrome = rail.desktop && context === 'app';
+  // objectstack#36362 — while the design mode is on, its bar is above the
+  // sidebar, and the menu shows the app's own entries only: the person's
+  // Favorites are not the app's to change.
+  const designMode = useDesignModeActive();
   const { openCommandPalette } = useCommandPalette();
   const hasCommandPalette = useCommandPaletteProviderMounted();
 
@@ -695,14 +700,14 @@ export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false
              checkPermission={checkPerm}
              checkCapability={checkCap}
              checkDocTarget={checkDocTarget}
-             enablePinning={!isMobile}
+             enablePinning={!isMobile && !designMode}
              // On a phone no row draws a per-entry control (objectui#1055),
              // the drawer's or the app home's; the pins that once offered an
              // entry to the bottom bar are gone with it (objectstack#35882).
              renderItemAction={isMobile ? undefined : renderNavItemAction}
              // The app home lists the menu alone: no Favorites section there
-             // (objectstack#35881).
-             extraFavorites={where === 'home' ? undefined : contentFavoriteRows}
+             // (objectstack#35881), nor while the design mode is on (objectstack#36362).
+             extraFavorites={where === 'home' || designMode ? undefined : contentFavoriteRows}
              pinnedOrder={pinnedIds}
              onPinnedReorder={reorderPins}
              resolveTargetLabel={resolveNavTargetLabel}
@@ -721,7 +726,7 @@ export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false
     <Sidebar
       ref={sidebarRef}
       collapsible={railPanel.collapsible}
-      className={cn(!rail.desktop && CONSOLE_BELOW_TOP_BAR, railPanel.panelClassName)}
+      className={cn((!rail.desktop || designMode) && CONSOLE_BELOW_TOP_BAR, railPanel.panelClassName)}
       {...railPanel.panelProps}
     >
       {/* Mobile-only drawer header — the app's glyph and name (objectui#12201
@@ -935,7 +940,7 @@ export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false
       <div
         data-testid="console-sidebar-edge"
         aria-hidden="true"
-        className={cn(SIDEBAR_EDGE_ZONE, rail.desktop ? 'top-0 h-svh' : CONSOLE_BELOW_TOP_BAR)}
+        className={cn(SIDEBAR_EDGE_ZONE, rail.desktop && !designMode ? 'top-0 h-svh' : CONSOLE_BELOW_TOP_BAR)}
         {...railPanel.edgeZoneProps}
       />
     )}

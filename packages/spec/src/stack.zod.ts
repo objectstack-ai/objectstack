@@ -1086,7 +1086,11 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
     enableProjectScoping: z.boolean().optional(),
     /** Environment id resolution strategy when scoping is on. */
     projectResolution: z.enum(['required', 'optional', 'auto']).optional(),
-    /** Per-environment membership 403 gate (dispatcher). Undefined → default. */
+    /**
+     * The environment-membership 403 gate on every data door — the runtime
+     * dispatcher and the REST server alike. `false` turns it off at every door
+     * (ADR-0135 D9). Undefined → on exactly when `enableProjectScoping` is.
+     */
     enforceProjectMembership: z.boolean().optional(),
   }).optional().describe('Server-facing API config consumed by objectstack serve/dev'),
 

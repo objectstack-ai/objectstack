@@ -35,6 +35,8 @@ import { ConnectionBanner } from './ConnectionBanner.js';
 import { useGoHomeShortcut } from '../chrome/goHomeShortcut.js';
 import { useHomePath } from '../hooks/useHomePath.js';
 import { AppHeader } from './AppHeader.js';
+import { DesignModeProvider, useDesignModeController } from './designMode.js';
+import { DesignModeBar } from './DesignModeBar.js';
 import { useResponsiveSidebar } from '../hooks/useResponsiveSidebar.js';
 import { usePhoneNavDrawerHistory } from './usePhoneNavDrawerHistory.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
@@ -202,6 +204,9 @@ export function ConsoleLayout({
   }, [activeAppName, rememberApp]);
   const { apps: metadataApps } = useMetadata();
   const appBasePath = `/apps/${appAddressSegment(metadataApps, activeApp) ?? activeAppName}`;
+  // objectstack#36362 — the app's design mode, held here so it stays on from
+  // page to page of the app; never on a phone, which has no 「Edit app」.
+  const designMode = useDesignModeController({ appName: activeAppName, appBasePath, enabled: !phone });
   // objectstack#30043 — the page in view, handed to the dock as its
   // `context.surface` (cloud#1610's shape): the object of a list, the object
   // and record id of a record page, the dashboard, report or page. Read off the
@@ -257,6 +262,7 @@ export function ConsoleLayout({
     <PhoneAppHomeSlotProvider>
     {/* objectstack#35883 — a page's own phone top row, drawn by the app bar. */}
     <PhonePageBarProvider>
+    <DesignModeProvider value={designMode}>
     <AppShell
       sidebar={
         docsPage ? undefined : (
@@ -273,8 +279,14 @@ export function ConsoleLayout({
       // own instead, objectstack#28483). An app's docs pages keep it at every
       // width: they mount no sidebar (objectstack#35424), so the bar is still
       // where their account, search and bell are.
-      showHeader={(phone || docsPage) && !recordPageOwnsTopBar}
+      //
+      // objectstack#36362 — while the design mode is on, its bar takes the
+      // top slot instead, across the whole window, on every route.
+      showHeader={designMode.active || ((phone || docsPage) && !recordPageOwnsTopBar)}
       navbar={
+        designMode.active ? (
+          <DesignModeBar mode={designMode} />
+        ) : (
           <AppHeader
             variant="app"
             appName={appLabel}
@@ -283,6 +295,7 @@ export function ConsoleLayout({
             activeAppName={activeAppName}
             onAppChange={onAppChange}
           />
+        )
       }
       // objectui#12463 — from `lg` up the inset is a flex column: the banners
       // box (`shrink-0`, below) keeps its height and the route slot (below)
@@ -373,6 +386,7 @@ export function ConsoleLayout({
       {/* Under `md` the drawer is a bottom sheet (no room for a rail on a phone). */}
       {chatDock.sheet}
     </AppShell>
+    </DesignModeProvider>
     </PhonePageBarProvider>
     </PhoneAppHomeSlotProvider>
     </CommandPaletteProvider>

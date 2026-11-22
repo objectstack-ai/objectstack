@@ -137,6 +137,17 @@ pick and the in-cell colour face after a swatch.
 A host that passes neither gets the form faces unchanged; `ObjectGrid` passes
 both.
 
+`inCell` also unlocks the rich-content types (`markdown`, `html`, `richtext`):
+they stay in `INLINE_EXCLUDED_FIELD_TYPES` and `hasFieldEditWidget` answers
+`false` for them, so every other host keeps them out, while
+`hasInCellPanelEditWidget(type)` answers `true` and `FieldEditWidget` draws the
+form's rich-text box for them (loaded lazily) when the host asks for the cell
+face. A select-first list grid (`cellSelection`) opens it in a panel under the
+cell, where Enter is a new line, Ctrl/Cmd+Enter saves, Esc discards and a click
+outside saves; a grid without `cellSelection` opens it over the cell, where
+Ctrl/Cmd+Enter does nothing and a click outside keeps the text as a pending
+change for the grid's save buttons.
+
 ### Resolving declared action params
 
 An action param is declared either inline (`name` + `type`) or field-backed

@@ -91,6 +91,21 @@
  * the keyboard on an impersonation session, and their cloud user id read
  * from their linked `objectstack-cloud` account, never from the request.
  *
+ * ── What a ban ends beside the ban ─────────────────────────────────────────
+ *
+ * A banned account keeps nothing running in its name
+ * (`removed-account-registrations.ts`, `service-account-owner-leaves.ts`).
+ * After the ban write, the door suspends every AI service account the person
+ * is accountable for (`banned`, reason `Accountable owner banned by an
+ * administrator`), disables every OAuth application the account registered
+ * and revokes every SCIM credential it minted, each revoke recorded against
+ * the administrator as a reset records it. It answers what it ended under
+ * `revoked`, as the administrator's forced reset does: counts only, `failed`
+ * and `complete`. The ban has landed by then, so a step that fails does not
+ * undo it: the answer says it is not complete, it is reported once to `warn`,
+ * and banning the account again retries it. An unban lifts the ban only: no
+ * account is resumed, no application enabled, no credential restored.
+ *
  * ── The admin audit row ─────────────────────────────────────────────────────
  *
  * A ban or an unban that committed writes the sibling doors' admin audit row
@@ -109,6 +124,8 @@ import {
 } from './last-local-credential.js';
 import { writeAdminAudit, type AdminActor, type EndpointResult } from './admin-user-endpoints.js';
 import { applyUserBan, applyUserUnban, type UserBanWriter } from './user-ban-write.js';
+import { endRegistrationsOfARemovedAccount } from './removed-account-registrations.js';
+import { suspendAccountsOfBannedOwner } from './service-account-owner-leaves.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import { readUserSource } from './sso-only-local-password.js';
 import {
@@ -204,6 +221,65 @@ const HOST_UNANSWERED_DEACTIVATION: EndpointResult = {
   },
 };
 
+/** What a ban ended beside the ban itself, answered as the forced reset answers its `revoked`. */
+export interface BanEnded {
+  /** The AI service accounts the person is accountable for, suspended by this ban. */
+  serviceAccounts: number;
+  /** The OAuth applications the account registered, now disabled. */
+  ownedApps: number;
+  /** The SCIM connection credentials the account minted, now revoked. */
+  scimCredentials: number;
+  /** The steps that could not finish (a read or a write refused). */
+  failed: number;
+  /** `true` only when every step finished; never for a step that could not be measured. */
+  complete: boolean;
+}
+
+/**
+ * End what the banned account ran in its name (module header): suspend the AI
+ * service accounts it is accountable for, disable the OAuth applications it
+ * registered and revoke the SCIM credentials it minted. Never throws.
+ */
+async function endWhatTheBannedAccountRan(deps: AdminBanEndpointDeps, actor: AdminActor, userId: string): Promise<BanEnded> {
+  const warn = (message: string): void => deps.logger?.warn(message);
+  const engine = deps.getDataEngine?.();
+  if (!engine || typeof engine.find !== 'function') {
+    warn(
+      `[AuthPlugin] ban of user ${userId}: the AI service accounts they are accountable for, the OAuth applications `
+        + 'they registered and the SCIM credentials they minted were NOT ended: the data engine offers no read '
+        + 'surface. The ban itself landed. Remedy: wire the ObjectQL engine into the auth plugin, then ban again.',
+    );
+    return { serviceAccounts: 0, ownedApps: 0, scimCredentials: 0, failed: 0, complete: false };
+  }
+  const suspension = await suspendAccountsOfBannedOwner(engine, userId);
+  const registrations = await endRegistrationsOfARemovedAccount(engine, userId, {
+    actorId: actor.id,
+    act: 'banning an account',
+    warn,
+  });
+  const failed = suspension.failed.length + (suspension.readError !== undefined ? 1 : 0)
+    + (registrations.error !== undefined ? 1 : 0);
+  const ended: BanEnded = {
+    serviceAccounts: suspension.suspended.length,
+    ownedApps: registrations.ownedApps.length,
+    scimCredentials: registrations.scimCredentials.length,
+    failed,
+    complete: failed === 0,
+  };
+  if (!ended.complete) {
+    warn(
+      `[AuthPlugin] ban of user ${userId}: ending what the account ran INCOMPLETE — ${ended.serviceAccounts} AI `
+        + `service account(s) suspended, ${ended.ownedApps} registered OAuth application(s) disabled, `
+        + `${ended.scimCredentials} minted SCIM credential(s) revoked, ${failed} step(s) refused`
+        + `${registrations.error !== undefined ? ` (${registrations.error})` : ''}. The ban itself landed; what was `
+        + 'not ended still works. Remedy: ban the user again, or suspend the remaining AI service accounts whose '
+        + 'accountable_user_id is this user, disable the remaining OAuth applications and revoke the remaining SCIM '
+        + 'credentials by hand.',
+    );
+  }
+  return ended;
+}
+
 /** The admin audit row for a ban or an unban that committed; never fails the answer. */
 const auditBan = (
   deps: AdminBanEndpointDeps,
@@ -211,10 +287,28 @@ const auditBan = (
   userId: string,
   event: 'user.admin_banned' | 'user.admin_unbanned',
   host: EnvironmentUserHostOutcome | undefined,
+  ended?: BanEnded,
 ): Promise<void> =>
   writeAdminAudit(
     { getDataEngine: () => deps.getDataEngine?.(), logger: deps.logger },
-    { action: 'update', actor, recordId: userId, metadata: { event, hostNotified: host?.notified === true } },
+    {
+      action: 'update',
+      actor,
+      recordId: userId,
+      metadata: {
+        event,
+        hostNotified: host?.notified === true,
+        // What the ban ended beside itself, counts only, as the forced reset records them.
+        ...(ended
+          ? {
+              suspendedServiceAccounts: ended.serviceAccounts,
+              revokedOwnedApps: ended.ownedApps,
+              revokedScimCredentials: ended.scimCredentials,
+              revocationComplete: ended.complete,
+            }
+          : {}),
+      },
+    },
   );
 
 const isRefused = (outcome: unknown): outcome is EnvironmentUserHostRefused =>
@@ -313,7 +407,9 @@ export async function runAdminBanUser(
   });
   // Sign the banned user out everywhere, exactly as the vendor handler does.
   await ctx.internalAdapter.deleteUserSessions(userId);
-  await auditBan(deps, actor, userId, 'user.admin_banned', host);
+  // ...and end what the account ran in its name; an unban restores none of it.
+  const revoked = await endWhatTheBannedAccountRan(deps, actor, userId);
+  await auditBan(deps, actor, userId, 'user.admin_banned', host, revoked);
 
   return {
     status: 200,
@@ -325,6 +421,7 @@ export async function runAdminBanUser(
         banReason,
         ...(banExpires ? { banExpires: banExpires.toISOString() } : {}),
         ...(host ? { host } : {}),
+        revoked,
       },
     },
   };

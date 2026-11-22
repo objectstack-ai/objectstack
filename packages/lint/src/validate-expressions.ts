@@ -3006,6 +3006,14 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
      * for byte what it was.
      */
     flowBare?: FlowBareNames,
+    /**
+     * [#36167] The source compiles to a query filter rather than being
+     * evaluated as CEL (a sharing rule's `condition`), handed to the shared
+     * validator as `ExprSchemaHint.filterCompiled`, so the `list-equality`
+     * prescription is the membership spelling that lowers there
+     * (`record.<field>.contains(…)`). Absent, the call is byte for byte what it was.
+     */
+    filterCompiled?: boolean,
   ): void => {
     if (raw == null) return;
     // Absent unless this is a served-row site on an object that declares a
@@ -3029,6 +3037,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           ...(flowBare ? { flowVariables: flowBare.variables } : {}),
           ...(flowBare?.unproven ? { bareNamesUnproven: true } : {}),
           ...(flowBare?.timeRelativeSweep ? { timeRelativeSweep: true } : {}),
+          ...(filterCompiled ? { filterCompiled: true } : {}),
         }
         : { scope, ...roots });
     for (const e of res.errors) {
@@ -4728,7 +4737,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // `sharing.zod.ts` maps it back to `condition` in its rejection message;
     // `predicate` is refused with no rename at all. #4984 removed exactly this
     // pair one file over; this was the same read left behind (#5017).
-    check(where, sharingRule.condition, ruleObj, 'record');
+    // [#36167] Compiled to a query filter (`compileCelToFilter`), never
+    // evaluated as CEL: the list-equality prescription is spelled to lower.
+    check(where, sharingRule.condition, ruleObj, 'record', undefined, undefined, undefined, undefined, undefined, undefined, true);
   }
 
   // ── Hook `condition` predicates (record-scoped gate) ───────────────

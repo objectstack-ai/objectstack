@@ -63,8 +63,12 @@ by-id write and a predicate write both take that replacement unless an
 app-authored `using` policy for the write applies to the caller; then the write
 keeps the floor beside that policy, so a row the caller created stays writable
 and the policy bounds every other row. A write made on another user's behalf
-keeps the floor. A `controlled_by_parent` detail's by-id write is
-judged by its master gate instead of the floor. An app-authored policy is never
+keeps the floor. A `controlled_by_parent` detail's write, by id or by
+predicate, is judged by its master gate instead of the floor: a caller who may
+edit the master (or read it, where the detail declares
+`writeRequiresMasterRead`) writes the detail rows under it whoever created
+them, and a predicate write that reaches a master the caller may not write
+under is refused whole. An app-authored policy is never
 replaced. The Layer 0 tenant wall always ANDs on top. See
 [Sharing & OWD](/docs/permissions/sharing-rules#how-viewallrecords--modifyallrecords-interact-with-the-owd)
 and `plugin-security/src/security-plugin.ts` (`computeLayeredRlsFilter`).

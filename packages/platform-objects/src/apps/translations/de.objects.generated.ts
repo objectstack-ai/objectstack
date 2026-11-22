@@ -176,7 +176,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "Benutzer sperren",
-        description: "Diesen Benutzer sperren? Er wird abgemeldet, kann sich nicht anmelden, und seine API-Schlüssel werden bis zur Entsperrung abgelehnt, ebenso seine OAuth-Zugriffstoken und Token-Aktualisierungen. Nach der Entsperrung funktionieren die Schlüssel wieder.",
+        description: "Diesen Benutzer sperren? Er wird abgemeldet, kann sich nicht anmelden, und seine API-Schlüssel werden bis zur Entsperrung abgelehnt, ebenso seine OAuth-Zugriffstoken und Token-Aktualisierungen. Nach der Entsperrung funktionieren die Schlüssel wieder. Die Sperre setzt außerdem die KI-Dienstkonten aus, für die der Benutzer verantwortlich ist, deaktiviert die von ihm registrierten OAuth-Anwendungen und widerruft die von ihm erstellten SCIM-Anmeldedaten; das Entsperren stellt nichts davon wieder her.",
         successMessage: "Benutzer gesperrt",
         params: {
           banReason: {
@@ -496,6 +496,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       revoke_reason: {
         label: "Widerrufsgrund",
         help: "Warum die Sitzung widerrufen wurde (idle_timeout, absolute_max, concurrent_cap, ip_not_allowed, user_revoked, admin, organization_membership_ended, admin_password_reset, password_reset, …)."
+      },
+      sso_provider_id: {
+        label: "SSO-Anbieter",
+        help: "Der SSO-Anbieter, über den diese Sitzung angemeldet wurde, falls vorhanden. Das Löschen dieses Anbieters beendet die Sitzung. Vom System verwaltet."
       },
       active_organization_id: {
         label: "Aktive Organisation"
