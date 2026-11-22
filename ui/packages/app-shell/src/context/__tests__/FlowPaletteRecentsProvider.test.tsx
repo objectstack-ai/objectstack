@@ -6,7 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
@@ -16,6 +16,7 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
   useAuth: () => ({ user: mockUser.current, isAuthenticated: !!mockUser.current, isLoading: false }),
 }));
 
+import { ActiveOrganizationStorage } from '@object-ui/auth';
 import {
   FlowPaletteRecentsProvider,
   useFlowPaletteRecents,
@@ -151,5 +152,49 @@ describe('FlowPaletteRecentsProvider', () => {
       'new',
       'fallback',
     ]);
+  });
+});
+
+// objectstack#36244 — the browser copy is kept per (user, organization); the
+// organization is the one the real `ActiveOrganizationStorage` holds.
+describe('FlowPaletteRecentsProvider — kept per organization (objectstack#36244)', () => {
+  function bootIn(orgId: string) {
+    ActiveOrganizationStorage.set(orgId);
+    const paints: string[][] = [];
+    const view = renderHook(
+      () => {
+        const value = useFlowPaletteRecents();
+        paints.push(value.recents);
+        return value;
+      },
+      { wrapper },
+    );
+    return { view, firstPaint: paints[0] };
+  }
+
+  beforeEach(() => {
+    localStorage.clear();
+    mockUser.current = { id: 'user-1', name: 'Alice', email: 'a@x' } as any;
+    localStorage.setItem('auth-session-user-id', 'user-1');
+  });
+
+  afterEach(() => {
+    ActiveOrganizationStorage.clear();
+    localStorage.clear();
+  });
+
+  it("the node types used in A are absent from B's first paint, and A keeps them", () => {
+    const a = bootIn('org_a');
+    act(() => a.view.result.current.recordRecent('screen'));
+    a.view.unmount();
+
+    expect(bootIn('org_b').firstPaint).toEqual([]);
+    expect(bootIn('org_a').firstPaint).toEqual(['screen']);
+  });
+
+  it('a single organization keeps the copy kept before the organization was part of the key', () => {
+    localStorage.setItem('flow-palette-recents:u:user-1', JSON.stringify(['http']));
+    expect(bootIn('org_a').firstPaint).toEqual(['http']);
+    expect(localStorage.getItem('flow-palette-recents:u:user-1')).toBeNull();
   });
 });

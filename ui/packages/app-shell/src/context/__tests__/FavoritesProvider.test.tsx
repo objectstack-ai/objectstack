@@ -6,7 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
@@ -18,6 +18,7 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 }));
 
 // Imported after the mock is set up.
+import { ActiveOrganizationStorage } from '@object-ui/auth';
 import {
   FavoritesProvider,
   useFavorites,
@@ -409,5 +410,98 @@ describe('FavoritesProvider', () => {
       expect(byType.object).toBe(20);
       expect(byType.nav).toBe(20);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// objectstack#36244 — the browser copy is kept per (user, organization), like
+// the `sys_user_preference` row it mirrors. The organization is the one
+// `ActiveOrganizationStorage` holds (the real one, not mocked here); a switch
+// reloads the console, so each organization is a fresh mount.
+// ---------------------------------------------------------------------------
+
+describe('FavoritesProvider — kept per organization (objectstack#36244)', () => {
+  /** The server: one `ui.favorites` row per organization, as the request's organization names it. */
+  const rows = new Map<string, FavoriteItem[]>();
+  const perOrgAdapter: UserDataAdapter<FavoriteItem> = {
+    load: async () => rows.get(ActiveOrganizationStorage.get() ?? '') ?? [],
+    save: async (items) => {
+      rows.set(ActiveOrganizationStorage.get() ?? '', items);
+    },
+  };
+
+  /** Boot the console in `orgId`; `firstPaint` is the list the first render drew. */
+  function bootIn(orgId: string) {
+    ActiveOrganizationStorage.set(orgId);
+    const paints: string[][] = [];
+    const view = renderHook(
+      () => {
+        const harness = useTestHarness();
+        paints.push(harness.favs.favorites.map((f) => f.id));
+        return harness;
+      },
+      { wrapper },
+    );
+    return { view, firstPaint: paints[0] };
+  }
+
+  /** Attach the server adapter and wait for its read to land. */
+  async function hydrate(view: ReturnType<typeof bootIn>['view']) {
+    const loads = vi.spyOn(perOrgAdapter, 'load');
+    act(() => view.result.current.attach('favorites', perOrgAdapter));
+    await waitFor(() => expect(loads).toHaveBeenCalled());
+    await act(async () => {});
+    loads.mockRestore();
+  }
+
+  beforeEach(() => {
+    rows.clear();
+    // The pointer `ActiveOrganizationStorage` resolves its per-user key from.
+    localStorage.setItem('auth-session-user-id', 'user-1');
+  });
+
+  afterEach(() => {
+    ActiveOrganizationStorage.clear();
+    localStorage.clear();
+  });
+
+  it("favorites and a nav pin set in A are absent from B's first paint and from B's saved row", async () => {
+    const a = bootIn('org_a');
+    await hydrate(a.view);
+    act(() => {
+      a.view.result.current.favs.addFavorite({ id: 'nav:a_menu', label: 'A menu', href: '', type: 'nav', navId: 'a_menu', pinned: true });
+      a.view.result.current.favs.addFavorite({ id: 'object:a_obj', label: 'A obj', href: '/a', type: 'object' });
+    });
+    a.view.unmount(); // flushes the pending save
+    await waitFor(() => expect(rows.get('org_a')?.map((f) => f.id).sort()).toEqual(['nav:a_menu', 'object:a_obj']));
+
+    const b = bootIn('org_b');
+    expect(b.firstPaint).toEqual([]);
+    await hydrate(b.view);
+    act(() => b.view.result.current.favs.addFavorite({ id: 'object:b_obj', label: 'B obj', href: '/b', type: 'object' }));
+    b.view.unmount();
+    await waitFor(() => expect(rows.get('org_b')).toBeDefined());
+    expect(rows.get('org_b')!.map((f) => f.id)).toEqual(['object:b_obj']);
+
+    // Back in A, its own copy paints first, untouched by B.
+    const back = bootIn('org_a');
+    expect(back.firstPaint.sort()).toEqual(['nav:a_menu', 'object:a_obj']);
+  });
+
+  it('a single organization keeps the copy kept before the organization was part of the key, adopted once', () => {
+    const before: FavoriteItem[] = [
+      { id: 'object:contact', label: 'Contact', href: '/c', type: 'object', favoritedAt: '2024-01-01' },
+      { id: 'nav:home', label: 'home', href: '', type: 'nav', navId: 'home', pinned: true, favoritedAt: '2024-01-01' },
+    ];
+    localStorage.setItem('objectui-favorites:u:user-1', JSON.stringify(before));
+
+    const only = bootIn('org_a');
+    expect(only.firstPaint).toEqual(['object:contact', 'nav:home']);
+    expect(JSON.parse(localStorage.getItem('objectui-favorites:u:user-1:o:org_a')!)).toEqual(before);
+    expect(localStorage.getItem('objectui-favorites:u:user-1')).toBeNull();
+    only.view.unmount();
+
+    // Adopted by one organization only: a second one starts empty.
+    expect(bootIn('org_b').firstPaint).toEqual([]);
   });
 });

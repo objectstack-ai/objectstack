@@ -31,6 +31,9 @@ import {
 } from '@object-ui/auth';
 import { LOCALE_SEED_STORAGE_KEY, LOCALE_STORAGE_KEY } from '@object-ui/i18n';
 import { listLayoutStorageKey, resetListLayoutStoreForTests, useObjectListLayout } from '../../views/listLayoutStore';
+import { pinnedListViewScope } from '../../views/pinnedListView';
+import { LIST_PINNED_VIEW_PREFERENCE, workspacePreferenceStorageKey } from '../../utils/workspacePreference';
+import { scopedKey } from '../UserStateAdapters';
 
 const ORG = { id: 'org_a', name: 'Acme', slug: 'acme' };
 const ALICE = { id: 'u_alice', name: 'Alice', email: 'alice@test.com' };
@@ -168,5 +171,28 @@ describe('sign-out clears the list layout this browser keeps for the signed-out 
     act(() => committed.current!.layout.setViewOrder([VIEW]));
 
     expect(listKeysLeft()).toEqual([]);
+  });
+});
+
+describe('sign-out clears the per-organization browser copies too (objectstack#36244)', () => {
+  it("signOut() removes the organization's copies of favorites, recents, last app, palette recents and the pinned view", async () => {
+    const client = authClient(async () => ({ user: ALICE, session: { token: 'tok-alice' } }));
+    await signIn(client);
+    // Spelled by the key builders the providers write through, so a spelling
+    // that moves there moves here.
+    const keys = [
+      scopedKey('objectui-favorites', ALICE.id, ORG.id),
+      scopedKey('objectui-recent-items', ALICE.id, ORG.id),
+      scopedKey('ui.app.last', ALICE.id, ORG.id),
+      scopedKey('flow-palette-recents', ALICE.id, ORG.id),
+      workspacePreferenceStorageKey(LIST_PINNED_VIEW_PREFERENCE, pinnedListViewScope(OBJECT, ORG.id)),
+    ];
+    for (const key of keys) localStorage.setItem(key, '[]');
+
+    await act(async () => {
+      await auth().signOut();
+    });
+
+    expect(keys.filter((key) => localStorage.getItem(key) !== null)).toEqual([]);
   });
 });
