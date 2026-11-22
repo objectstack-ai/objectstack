@@ -300,7 +300,7 @@ function TemporalPicker({
       }}
       onClick={opensPopover ? (e) => {
         domProps.onClick?.(e);
-        if (open) return;
+        if (open || disabled) return;
         setOpenedFromBox(true);
         setOpen(true);
       } : domProps.onClick}
