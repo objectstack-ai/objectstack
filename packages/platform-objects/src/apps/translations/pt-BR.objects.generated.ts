@@ -497,6 +497,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         label: "Motivo da revogação",
         help: "Por que a sessão foi revogada (idle_timeout, absolute_max, concurrent_cap, ip_not_allowed, user_revoked, admin, organization_membership_ended, admin_password_reset, password_reset, …)."
       },
+      sso_provider_id: {
+        label: "Provedor de SSO",
+        help: "O provedor de SSO pelo qual esta sessão foi iniciada, se houver. Excluir esse provedor encerra a sessão. Gerenciado pelo sistema."
+      },
       active_organization_id: {
         label: "Organização ativa"
       },
