@@ -62,6 +62,9 @@ vi.mock('./metadata-admin/useMetadata', async (importOriginal) => ({
   useMetadataClient: () => ({ save: vi.fn(async () => ({})), get: vi.fn(async () => null) }),
 }));
 
+// The page reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { ObjectDataPage } from './ObjectDataPage';
 import { useRecordPageReturn } from './recordDrawerStack';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
