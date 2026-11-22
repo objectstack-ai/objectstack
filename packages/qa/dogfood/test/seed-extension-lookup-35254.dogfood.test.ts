@@ -16,7 +16,8 @@
 // Two packages, composed the way a deployment receives them:
 //   - `qa_ext_app` (app) owns `qa_ext_order` and seeds order `O-1`, with its own
 //     authored lookup `account_ref` set by name (the CONTROL);
-//   - `qa_ext_mod` (module) owns `qa_ext_quote`, adds `quote_ref`
+//   - `qa_ext_mod` (module, built with the app's objects as `artifactObjects`)
+//     owns `qa_ext_quote`, adds `quote_ref`
 //     (→ `qa_ext_quote`) to `qa_ext_order`, seeds the quote, then
 //     - `update` mode: sets `O-1.quote_ref` by the quote's name;
 //     - `upsert` mode: inserts order `O-2` with `quote_ref` by the quote's name.
@@ -71,7 +72,7 @@ const modulePackage = defineStack({
     { object: 'qa_ext_order', externalId: 'name', mode: 'upsert', records: [{ name: 'O-2', quote_ref: QUOTE, account_ref: ACCOUNT }] },
     { object: 'qa_ext_quote', externalId: 'name', mode: 'upsert', records: [{ name: QUOTE }] },
   ],
-} as never);
+} as never, { artifactObjects: ['qa_ext_account', 'qa_ext_order'] } as never);
 
 describe('[#35254] an artifact boot resolves a seed lookup an object extension adds', () => {
   const artifact = composeStacks([appPackage, modulePackage], { manifest: 'preserve' }) as any;
