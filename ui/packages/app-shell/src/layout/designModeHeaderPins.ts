@@ -173,3 +173,33 @@ export function pinsRefusal(
   }
   return null;
 }
+
+/**
+ * Whether a record page's header reads the object's pins: the synthesized
+ * header (no authored page, or one with no `page:header` node of its own, as
+ * a slotted page that leaves its header slot alone), or an authored
+ * `page:header` with `placedActions: true`. A `page:header` authored with its
+ * own `actions` list keeps that list, and one with neither draws none of the
+ * object's actions: neither reads pins, so the design mode offers no
+ * 「Header buttons」 on them.
+ */
+export function headerReadsPins(page: unknown): boolean {
+  const headers: Record<string, unknown>[] = [];
+  const seen = new Set<unknown>();
+  const walk = (node: unknown): void => {
+    if (node === null || typeof node !== 'object' || seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      node.forEach(walk);
+      return;
+    }
+    const rec = node as Record<string, unknown>;
+    if (rec.type === 'page:header') headers.push(rec);
+    Object.values(rec).forEach(walk);
+  };
+  walk(page);
+  return headers.every((h) => {
+    const props = (h.properties ?? {}) as Record<string, unknown>;
+    return (h.placedActions ?? props.placedActions) === true && (h.actions ?? props.actions) === undefined;
+  });
+}

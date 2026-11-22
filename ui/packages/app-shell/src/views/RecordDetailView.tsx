@@ -74,6 +74,7 @@ import { matchAppBySegment, resolveHostAppSegment } from '../utils/appRoute.js';
 import { hostInConsolePath } from '../utils/hostInConsolePath.js';
 import { useShellPageActionsSlot, useShellSidebarExpandSlot } from '../layout/shellPageActionsSlot.js';
 import { DesignModeHeaderPins, useObjectPins } from '../layout/DesignModeHeaderPins.js';
+import { headerReadsPins } from '../layout/designModeHeaderPins.js';
 import { useDesignModeActive } from '../layout/designMode.js';
 import { recycleBinRefusalLabelsOf, recycleBinRestoreOf } from '../utils/recycleBinRestore.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
@@ -5985,7 +5986,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       )
       : undefined;
   // objectstack#36366 — under the design mode the group ends with
-  // 「Header buttons」 (the record row, or the approval's levers, unchanged).
+  // 「Header buttons」 (the record row, or the approval's levers, unchanged),
+  // on a header that reads the pins: not on one authored with its own
+  // `actions` list, nor on one that draws none of the object's actions.
+  const headerTakesPins = headerReadsPins(assignedPage ?? assignedSlots);
   const recordHeaderState: RecordHeaderState = {
     tags: approvalTag || (headerBarForRecord ? stateLockChip : null) ? (
       <>
@@ -5997,7 +6001,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       ? (parts: RecordHeaderGroupParts) => (
         <>
         {approvalGroup ? approvalGroup(parts) : parts.recordRow}
-        {parts.face === 'row' && (
+        {parts.face === 'row' && headerTakesPins && (
           <DesignModeHeaderPins
             objectDef={objectDef as any}
             page="record"
