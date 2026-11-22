@@ -403,8 +403,10 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
     // when a record is created.
     // [#36290] `field` 85 → 86: `fieldHistory`, the field's own switch for
     // old → new values on the record activity timeline (false turns them off).
+    // [#35315] `field` 86 → 87: `transferBehavior`, whether Change Owner on the
+    // referenced record can cascade along the reference.
     const CARD_PROPERTY_COUNTS: Record<string, number> = {
-        agent: 24, app: 24, dashboard: 21, dataset: 17, field: 86, flow: 24,
+        agent: 24, app: 24, dashboard: 21, dataset: 17, field: 87, flow: 24,
         hook: 24, object: 51, page: 28, position: 14, report: 24, skill: 17, tool: 14,
     };
 

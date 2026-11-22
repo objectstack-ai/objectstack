@@ -240,6 +240,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "삭제 동작",
         helpText: "참조된 레코드가 삭제될 때 일어나는 일"
       },
+      "fields.transferBehavior": {
+        label: "Transfer Behavior",
+        helpText: "Whether Change Owner on the referenced record can also move the records that point at it through this field"
+      },
       "fields.multiple": {
         label: "다중",
         helpText: "여러 레코드 선택 허용"
@@ -756,6 +760,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       deleteBehavior: {
         label: "삭제 동작",
         helpText: "참조된 레코드가 삭제될 때 일어나는 일"
+      },
+      transferBehavior: {
+        label: "Transfer Behavior",
+        helpText: "Whether Change Owner on the referenced record can also move the records that point at it through this field"
       },
       relatedListFilter: {
         label: "관련 목록 필터",

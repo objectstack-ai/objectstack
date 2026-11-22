@@ -18,6 +18,10 @@
  */
 
 export const jaJPGeneratedSourceHashes: Readonly<Record<string, string>> = {
+  "metadataForms.field.fields.transferBehavior.helpText": "4794a6116648e502",
+  "metadataForms.field.fields.transferBehavior.label": "32c75a203e894f81",
+  "metadataForms.object.fields.fields.transferBehavior.helpText": "4794a6116648e502",
+  "metadataForms.object.fields.fields.transferBehavior.label": "32c75a203e894f81",
   "objects.sys_email.fields.bcc_addresses.label": "8674899b7b6d5126",
   "objects.sys_email.fields.cc_addresses.label": "02946d952cf15623",
   "objects.sys_email.fields.message_id.label": "14cd089a4062f4b1",

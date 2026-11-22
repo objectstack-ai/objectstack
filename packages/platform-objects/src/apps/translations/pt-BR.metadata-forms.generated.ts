@@ -240,6 +240,10 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Comportamento na exclusão",
         helpText: "O que acontece quando o registro referenciado é excluído"
       },
+      "fields.transferBehavior": {
+        label: "Transfer Behavior",
+        helpText: "Whether Change Owner on the referenced record can also move the records that point at it through this field"
+      },
       "fields.multiple": {
         label: "Múltiplo",
         helpText: "Permitir selecionar vários registros"
@@ -756,6 +760,10 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       deleteBehavior: {
         label: "Comportamento na exclusão",
         helpText: "O que acontece quando o registro referenciado é excluído"
+      },
+      transferBehavior: {
+        label: "Transfer Behavior",
+        helpText: "Whether Change Owner on the referenced record can also move the records that point at it through this field"
       },
       relatedListFilter: {
         label: "Filtro da lista relacionada",

@@ -240,6 +240,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "刪除行為",
         helpText: "被參照記錄刪除時的處理方式"
       },
+      "fields.transferBehavior": {
+        label: "Transfer Behavior",
+        helpText: "Whether Change Owner on the referenced record can also move the records that point at it through this field"
+      },
       "fields.multiple": {
         label: "多選",
         helpText: "允許選擇多筆記錄"
@@ -756,6 +760,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       deleteBehavior: {
         label: "刪除行為",
         helpText: "被參照記錄刪除時的處理方式"
+      },
+      transferBehavior: {
+        label: "Transfer Behavior",
+        helpText: "Whether Change Owner on the referenced record can also move the records that point at it through this field"
       },
       relatedListFilter: {
         label: "關聯清單篩選",
