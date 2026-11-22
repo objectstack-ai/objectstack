@@ -202,6 +202,38 @@ export function resolveEffectiveCrudAffordances(
   return out;
 }
 
+/**
+ * Whether the console offers an object's data Export entry, the CSV, XLSX or
+ * JSON download of its data (objectstack#35619). The entries that read this
+ * one verdict are the grid's Export menu and its table CSV button, the list
+ * view's Export (the wide toolbar and the Display panel) and a dataset
+ * report's Export. A view's export of the picture it draws, such as the Gantt
+ * chart's PNG / PDF, does not read it.
+ *
+ * It is the resolved `exportCsv` bit: the object's `userActions.exportCsv` over
+ * its `managedBy` default (ADR-0103 offers export in every bucket, so `false`
+ * is the only way to close it), ANDed with the server's effective `export`
+ * operation when a set is handed down.
+ *
+ * Export is a read, not a write, so it has no row in `AFFORDANCE_GRANTS` and
+ * asks no `can(object, verb)`. The caller's export grant, the permission set's
+ * opt-in `allowExport`, reaches the client through the effective `export`
+ * operation, which the server derives from `list` ∧ `allowExport`. A
+ * `can(object, 'export')` question would read `allowRead` instead. The setting
+ * hides an entry and refuses no export request.
+ *
+ * @param effectiveApiOperations OPTIONAL server-resolved effective API operation
+ *   set for this object (`/me/permissions` `apiOperations`, objectstack#3391).
+ *   `undefined` (old backend / unrestricted object / no provider) leaves the
+ *   object's own bit as the verdict.
+ */
+export function isObjectExportOffered(
+  obj: SchemaLike | null | undefined,
+  effectiveApiOperations?: readonly string[] | null,
+): boolean {
+  return resolveEffectiveCrudAffordances(obj, effectiveApiOperations).exportCsv;
+}
+
 /** True only when a `userActions` flag (bare boolean or #2614 object form) opts the write in. */
 export function isWriteOptedIn(v: UserActionOverride | undefined | null): boolean {
   return v === true || (typeof v === 'object' && v !== null && v.enabled === true);

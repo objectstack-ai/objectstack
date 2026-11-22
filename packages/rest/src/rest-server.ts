@@ -344,6 +344,7 @@ import {
 } from './security-routes.js';
 // [#30205] A user's assigned work: the per-object counts and the bounded hand-over.
 import { registerUserWorkEndpoints, type UserWorkRouteHost } from './user-work-routes.js';
+import { registerChangeOwnerEndpoints, type ChangeOwnerRouteHost } from './change-owner-routes.js';
 // [#30237] The recycle bin's doors under `{data}/:object/recycle-bin`.
 import { registerRecycleBinEndpoints, type RecycleBinRouteHost } from './recycle-bin-routes.js';
 // [#23050 slice 7] The discovery and OpenAPI routes' bodies moved to one module — see its header.
@@ -5208,6 +5209,11 @@ export class RestServer {
                 this.registerRecycleBinEndpoints(bp);
             }
             this.registerDataActionEndpoints(bp);
+            // [#35402] The Change Owner doors: `POST {data}/:object/change-owner` is a
+            // two-segment literal beside the greedy CRUD matchers, so it registers
+            // before them, as the data actions do; `:id/change-owner` is a deeper
+            // literal under `:id`, like `:id/clone`.
+            this.registerChangeOwnerEndpoints(bp);
             // [#27627] `POST /data/:object/:id/page` — a deeper literal under
             // `:id`, like `:id/clone`, so it shadows no CRUD route either way.
             this.registerRecordPageEndpoints(bp);
@@ -6546,6 +6552,40 @@ export class RestServer {
             enforceAuth: (...a) => this.enforceAuth(...a),
         };
         registerUserWorkEndpoints.call(host, basePath);
+    }
+
+    /**
+     * [#35402] Register the Change Owner doors:
+     *
+     *   POST {basePath}/data/:object/:id/change-owner   body: { ownerId | queue, notify? }
+     *   POST {basePath}/data/:object/change-owner       body: { ids, ownerId | queue, notify? }
+     *
+     * The first hands one record to a person or an ownership queue, the second
+     * up to 500 records with a per-row report; both as the caller, each row by
+     * an ordinary by-id update, on an object that offers the action
+     * (`userActions.transfer`). `@objectstack/core`'s `change-record-owner.ts`
+     * holds the rules.
+     */
+    private registerChangeOwnerEndpoints(basePath: string): void {
+        // [#35402] The body lives in `change-owner-routes.ts`. This literal hands it
+        // every member it reads (see `ChangeOwnerRouteHost`); the engine provider
+        // FIELD goes as a getter, read when a handler reads it.
+        const readObjectQLProvider = () => this.objectQLProvider;
+        const host: ChangeOwnerRouteHost = {
+            config: this.config,
+            routeManager: this.routeManager,
+            get objectQLProvider() { return readObjectQLProvider(); },
+            resolveProtocol: (...a) => this.resolveProtocol(...a),
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
+            resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            enforceAuth: (...a) => this.enforceAuth(...a),
+            enforceApiAccess: (...a) => this.enforceApiAccess(...a),
+            resolveMessagingService: async (environmentId, req) => {
+                if (!this.kernelServiceProvider) return undefined;
+                return this.kernelServiceProvider('messaging', await this.resolveRequestEnvironmentId(environmentId, req));
+            },
+        };
+        registerChangeOwnerEndpoints.call(host, basePath);
     }
 
     /**

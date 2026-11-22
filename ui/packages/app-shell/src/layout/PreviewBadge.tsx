@@ -47,7 +47,7 @@ export function PreviewBadge({ className }: PreviewBadgeProps) {
       aria-label={tooltip}
       data-testid="platform-preview-badge"
       className={cn(
-        'shrink-0 cursor-default select-none rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
+        'shrink-0 cursor-default select-none rounded-md px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide',
         className,
       )}
     >

@@ -7,11 +7,10 @@ import type { RowCrudPredicates } from './object.zod';
 /**
  * Which objects offer the dedicated Change Owner action: the structural test,
  * the object switch `userActions.transfer`, and the one resolution the server's
- * Change Owner endpoint and the console's action will both read (maintainer
- * ruling 7000907189, point 1). Neither reader exists yet — they are the server
- * card #35402 and the console card #35403 — so nothing at runtime reads the
- * switch today; the liveness ledger grades it `planned` and warns an author
- * who sets it to `true` or uses the object form.
+ * Change Owner endpoint and the console's action both read (maintainer
+ * ruling 7000907189, point 1). The server's endpoint (`@objectstack/core`'s
+ * `change-record-owner.ts`, card #35402) refuses an object this resolves off;
+ * the console's action is card #35403.
  *
  * ## Visibility is three facts, and only two live here
  *
@@ -195,10 +194,10 @@ function derivedTransferDefault(obj: AnyRec): boolean {
  * `sharingModel` implies, the same collapse the CRUD entries take onto their
  * `managedBy` default.
  *
- * The one resolution, for the two readers still to come (cards #35402 and
- * #35403): the server's Change Owner endpoint will refuse an object this
- * answers `enabled: false` for, and the console will show the action only where
- * it answers `true` — both then asking the caller's transfer verdict per record.
+ * The one resolution, for its two readers: the server's Change Owner endpoint
+ * (card #35402) refuses an object this answers `enabled: false` for, and the
+ * console (card #35403) shows the action only where it answers `true` — both
+ * then asking the caller's transfer verdict per record.
  */
 export function resolveUserActionTransfer(def: unknown): UserActionTransferResolution {
   if (!isTransferEligible(def)) return { enabled: false };

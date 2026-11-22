@@ -59,6 +59,7 @@ import { resolveKeyedI18nLabel, getRecordDisplayName, appRouteSegment } from '..
 import { appAddressSegment, filterActiveApps } from '../utils/appRoute.js';
 import { navigationNames } from '../console/appObjectScope.js';
 import { getIcon } from '../utils/getIcon.js';
+import { AppMark } from '../layout/AppMark.js';
 import { useRecentItems } from '../context/RecentItemsProvider.js';
 import { useRecentItemLabel } from '../hooks/useRecentItemLabel.js';
 import { recentItemObject } from '../console/home/recentItemTypeLabel.js';
@@ -713,14 +714,14 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
             <CommandGroup heading={t('console.commandPalette.switchApp')}>
               {appItems
                 .map(app => {
-                  const Icon = getIcon(app.icon);
                   return (
                     <CommandItem
                       key={app.name}
                       value={`app ${resolveKeyedI18nLabel(app.label, t)} ${app.name}`}
                       onSelect={() => runCommand(() => confirmUnsavedLeave(() => onAppChange(appAddressSegment(apps, app) ?? app.name)))}
                     >
-                      <Icon className="mr-2 h-4 w-4" />
+                      {/* objectstack#36157 — the app's own mark, as the switcher draws it. */}
+                      <AppMark app={app} size="sm" className="mr-2" />
                       <span>{resolveKeyedI18nLabel(app.label, t)}</span>
                       {app.name === activeApp?.name && (
                         <span className="ml-auto text-xs text-muted-foreground">{t('console.commandPalette.current')}</span>

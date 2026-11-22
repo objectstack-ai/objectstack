@@ -36,8 +36,10 @@
  *
  * ## Why the splash, and why it cannot itself flicker
  *
- * The component renders the SAME `LoadingScreen` the gate one line above was
- * already rendering, so the handoff changes no pixels: the transition now runs
+ * The component renders the SAME fallback the gate one line above was
+ * already rendering (`ConsoleBootFallback`: the splash, or on an app route
+ * after the session read the console's frame, objectstack#35981), so the
+ * handoff changes no pixels: the transition now runs
  * underneath an unchanged screen instead of underneath a blank one. That is
  * also why this is not "add a spinner" — a different holding image would
  * introduce a visual change where today there is a blank, and the goal is for
@@ -52,7 +54,7 @@
  */
 
 import { Navigate } from 'react-router-dom';
-import { LoadingScreen } from './LoadingScreen.js';
+import { ConsoleBootFallback } from '../console/ConsoleBootShell.js';
 
 export interface RedirectWithSplashProps {
   /** Where to go — the same value a bare `<Navigate to={…}>` would take. */
@@ -66,8 +68,10 @@ export function RedirectWithSplash({ to, replace }: RedirectWithSplashProps) {
     <>
       {/* Order is not load-bearing — `<Navigate>` renders null — but the
           splash is written first so the element that OCCUPIES the screen reads
-          first at every call site. */}
-      <LoadingScreen />
+          first at every call site. objectstack#35981 — the boot gates' own
+          fallback, so on an app route after the session read it is the
+          console's frame those gates were showing, and the splash elsewhere. */}
+      <ConsoleBootFallback />
       <Navigate to={to} replace={replace} />
     </>
   );

@@ -135,7 +135,7 @@ export default function DocsIndex() {
           <div className="flex flex-col gap-8">
             {groups.map((group) => (
               <section key={group.app ?? '_other'} aria-labelledby={`docs-group-${group.app ?? '_other'}`} data-testid="docs-group">
-                <h2 id={`docs-group-${group.app ?? '_other'}`} className="mb-3 text-sm font-semibold text-foreground/90">
+                <h2 id={`docs-group-${group.app ?? '_other'}`} className="mb-3 text-sm font-medium text-foreground/90">
                   {group.label ?? t('help.otherDocs', { defaultValue: 'Other documentation' })}
                 </h2>
                 <ul className="grid items-stretch gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -161,7 +161,7 @@ function BookCardLink({ card }: { card: BookCard }) {
       to={`/docs/${card.slug}`}
       className="flex h-full flex-col gap-1 rounded-lg border border-border p-4 hover:bg-muted/50"
     >
-      <span className="text-sm font-semibold">{card.label}</span>
+      <span className="text-sm font-medium">{card.label}</span>
       {card.description ? <span className="line-clamp-2 text-sm text-muted-foreground">{card.description}</span> : null}
       <span className="mt-auto pt-1 text-xs text-muted-foreground/80">
         {t('help.articleCount', {

@@ -68,7 +68,7 @@ beforeEach(() => RelatedCountStore._reset());
 afterEach(() => cleanup());
 
 describe('the record page tab row (objectstack#27524, Target 8)', () => {
-  it('sits at the bottom of the header: 概览, the panels in the reader\'s order, then 动态 (objectstack#34590)', () => {
+  it('sits at the bottom of the header: 详情, the panels in the reader\'s order, then 动态 (objectstack#34590)', () => {
     const stored = editRelatedArrangement(DEFAULT, undefined, { kind: 'move', id: 'call.lead_id', to: 0 }, Date.now());
     const { container } = render(
       <RecordPageColumns
@@ -82,7 +82,8 @@ describe('the record page tab row (objectstack#27524, Target 8)', () => {
     // objectstack#34590 supersedes objectstack#27524 Target 8's 动态-second: 「「动态」在最后」
     expect(tabIds()).toEqual(['overview', 'call.lead_id', 'task.lead_id', 'note.parent_id', RECORD_PAGE_TIMELINE_PANEL]);
     expect(activeTab()).toBe('overview');
-    expect(document.querySelector('[data-record-tab="overview"]')?.textContent).toBe('Overview');
+    // objectstack#35890 — the first tab holds only the fields now: 「详情」.
+    expect(document.querySelector('[data-record-tab="overview"]')?.textContent).toBe('Details');
     // After the header nodes, before the page's columns.
     const frame = container.querySelector('[data-page-type="record"] > div')!;
     const children = Array.from(frame.children);
@@ -108,7 +109,7 @@ describe('the record page tab row (objectstack#27524, Target 8)', () => {
     expect(document.querySelector('[data-record-tab-more]')?.textContent).toBe('More 1');
   });
 
-  it('each panel tab carries its count — the hidden ones counted too — and 动态 the stream\'s size', async () => {
+  it('each panel tab carries its count — the hidden ones counted too', async () => {
     const find = vi.fn(async (objectName: string, _query?: Record<string, unknown>) => ({ data: [{ id: 'x' }], total: objectName === 'task' ? 2 : objectName === 'note' ? 0 : 5 }));
     const dataSource = { find, getObjectSchema: vi.fn(async () => ({ fields: {} })) };
     const stored = editRelatedArrangement(DEFAULT, undefined, { kind: 'hide', id: 'call.lead_id' }, Date.now());
@@ -132,11 +133,10 @@ describe('the record page tab row (objectstack#27524, Target 8)', () => {
     expect(tabCount('note.parent_id')).toBeNull();
     expect(document.querySelector('[data-record-tab="note.parent_id"]')?.hasAttribute('data-record-tab-empty')).toBe(true);
     expect(document.querySelector('[data-record-tab-more]')?.textContent).toBe('More 1');
-    await waitFor(() => expect(tabCount(RECORD_PAGE_TIMELINE_PANEL)).toBe('7'));
     // The hidden list was counted as well: its tab sits in the dropdown with its count.
     const counted = find.mock.calls.filter((call) => call[1]?.$count === true);
     expect(counted.map((call) => call[0]).sort()).toEqual(['call', 'note', 'task']);
-    // One count set feeds the tabs and the rail: no relationship is counted twice.
+    // One count set feeds the tabs: no relationship is counted twice.
     expect(counted).toHaveLength(3);
   });
 
@@ -298,11 +298,11 @@ describe('the enlarged state is the active tab (objectstack#27524, Target 9)', (
     expect(tabCount(RECORD_PAGE_TIMELINE_PANEL)).toBeNull();
   });
 
-  it('the right column switched off names the 动态 count too', async () => {
+  it('with no rail at any width (objectstack#35890), the details face names the 动态 count from the feed the host holds', async () => {
     const items = [{ id: 'c1', type: 'comment', actor: 'Ada', body: 'hi', createdAt: '2026-10-30T10:00:00Z' }];
     const { container } = render(
       <DiscussionContextProvider items={items as never} loading={false}>
-        <RecordPageColumns tier="wide" columns={columnsOf()} rightColumn={false} onEnlargeRelated={vi.fn()} />
+        <RecordPageColumns tier="wide" columns={columnsOf()} onEnlargeRelated={vi.fn()} />
       </DiscussionContextProvider>,
     );
     expect(container.querySelector('[data-record-column="right"]')).toBeNull();

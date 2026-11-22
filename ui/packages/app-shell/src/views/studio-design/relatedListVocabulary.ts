@@ -29,6 +29,13 @@
 import React from 'react';
 import { useMetadata } from '@object-ui/react';
 import {
+  isRecordPageBuiltinTab,
+  relatedListEntryName,
+  RECORD_PAGE_BUILTIN_TABS,
+  type RecordPageBuiltinTab,
+  type RelatedListEntryInput,
+} from '@objectstack/spec/data';
+import {
   deriveRelatedLists,
   relatedListEntryNames,
   type DerivedRelatedList,
@@ -97,6 +104,91 @@ export function acceptRelatedListEntries(
     out.push(entry);
   }
   return out;
+}
+
+/**
+ * [#35897 · #35899] The pre-write check of the object's TAB LIST
+ * (`relatedLists`): keep, in order and once per name, each entry that is one
+ * of the record page's built-in tabs (`sys_attachment`, `sys_approval_request`,
+ * `sys_activity`) or names at least one inbound relationship. A relationship
+ * entry keeps its object form (`{ list, label?, columns? }`); a built-in is
+ * written as its bare name, the only spelling the spec admits. A field
+ * group's `relatedList` takes no built-in, so it keeps
+ * {@link acceptRelatedListEntries}.
+ */
+export function acceptTabListEntries(
+  entries: readonly unknown[],
+  all: readonly DerivedRelatedList[],
+): RelatedListEntryInput[] {
+  const out: RelatedListEntryInput[] = [];
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    const name = relatedListEntryName(entry);
+    if (name === undefined || seen.has(name)) continue;
+    if (isRecordPageBuiltinTab(name)) {
+      seen.add(name);
+      out.push(name);
+      continue;
+    }
+    if (relationshipsNamedBy(name, all).length === 0) continue;
+    seen.add(name);
+    out.push(entry as RelatedListEntryInput);
+  }
+  return out;
+}
+
+/** The record page's built-in tabs, in their default order. */
+export const BUILTIN_TABS: readonly RecordPageBuiltinTab[] = RECORD_PAGE_BUILTIN_TABS;
+
+/** The i18n key naming one built-in tab. */
+export function builtinTabLabelKey(name: RecordPageBuiltinTab): string {
+  return `engine.studio.settings.relatedListsBuiltin.${name}`;
+}
+
+/**
+ * One entry with its own title and columns: the bare name when it carries
+ * neither (the spelling an entry without details is written in), else the
+ * object form with only the keys that carry something.
+ */
+export function entryWithDetails(
+  name: string,
+  details: { label?: string; columns?: readonly string[] },
+): RelatedListEntryInput {
+  const label = details.label?.trim() ? details.label : undefined;
+  const columns = details.columns && details.columns.length > 0 ? [...details.columns] : undefined;
+  if (label === undefined && columns === undefined) return name;
+  return { list: name, ...(label !== undefined ? { label } : {}), ...(columns !== undefined ? { columns } : {}) };
+}
+
+/** An entry's own title and columns (none for a bare name). */
+export function entryDetails(entry: unknown): { label?: string; columns?: string[] } {
+  if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return {};
+  const { label, columns } = entry as { label?: unknown; columns?: unknown };
+  return {
+    ...(typeof label === 'string' ? { label } : {}),
+    ...(Array.isArray(columns) ? { columns: columns.filter((c): c is string => typeof c === 'string') } : {}),
+  };
+}
+
+/**
+ * The fields of the child objects one entry names, as column choices: name and
+ * label, in the child's declared order (one child, or the first child when an
+ * entry somehow names two). `undefined` when the catalog does not serve the
+ * child's fields, so an editor cannot tell a real column from a misspelling.
+ */
+export function childColumnChoices(
+  named: readonly DerivedRelatedList[],
+  catalog: readonly ObjectDoc[],
+): Array<{ name: string; label: string }> | undefined {
+  const child = named[0]?.childObject;
+  if (!child) return undefined;
+  const doc = catalog.find((o) => o.name === child);
+  const fields = doc?.fields;
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return undefined;
+  return Object.entries(fields as Record<string, unknown>).map(([name, def]) => {
+    const label = def && typeof def === 'object' ? (def as { label?: unknown }).label : undefined;
+    return { name, label: typeof label === 'string' && label ? label : name };
+  });
 }
 
 /** What a related list is called in an editor row: its title, else the child's label. */

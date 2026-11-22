@@ -244,7 +244,7 @@ export const ViewSwitcherDropdown: React.FC<ListViewSwitcherProps> = ({
               data-testid={`view-switcher-list-${view}`}
               onClick={() => handleViewChange(view)}
               className={cn(
-                'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[13px] transition-colors hover:bg-muted max-sm:min-h-11',
+                'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted max-sm:min-h-11',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                 active ? 'font-medium text-foreground' : 'text-foreground/90',
               )}

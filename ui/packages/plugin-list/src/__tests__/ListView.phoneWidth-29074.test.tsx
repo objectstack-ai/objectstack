@@ -75,13 +75,14 @@ afterEach(() => {
 });
 
 describe('list bar touch targets below sm (objectstack#29074)', () => {
-  it('Filter, Sort, Display and the phone search trigger are 44 px below sm and keep h-7 from sm up', async () => {
+  it('Filter, Sort and Display are 44 px below sm and keep h-7 from sm up; the phone search pill is 44 px', async () => {
     mount();
     await screen.findByTestId('grid-stub');
-    for (const id of ['toolbar-display-trigger', 'phone-search-trigger']) {
-      const el = screen.getByTestId(id);
-      expect(tokens(el), id).toEqual(expect.arrayContaining(['h-7', 'min-w-7', ...PHONE_TOUCH_TARGET.split(' ')]));
-    }
+    const display = screen.getByTestId('toolbar-display-trigger');
+    expect(tokens(display)).toEqual(expect.arrayContaining(['h-7', 'min-w-7', ...PHONE_TOUCH_TARGET.split(' ')]));
+    // objectstack#35883 — the phone search is a pill of the phone toolbar,
+    // 44 px at its one width (it is not drawn from `sm` up).
+    expect(tokens(screen.getByTestId('phone-search-trigger'))).toEqual(expect.arrayContaining(['h-11', 'min-w-11', 'sm:hidden']));
     // Filter and Sort are the condition row's since objectstack#35878: 24 px
     // from `sm` up, the same 44 px below it.
     for (const id of ['condition-add-filter', 'condition-sort']) {

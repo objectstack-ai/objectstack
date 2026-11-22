@@ -52,7 +52,7 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
       imageField: { label: '记录图片字段' },
       isSystem: { label: '系统内置' },
       highlightFields: { label: '重点字段' },
-      relatedLists: { label: '相关列表顺序' },
+      relatedLists: { label: '记录页页签' },
       searchableFields: { label: '可搜索字段' },
       fieldGroups: { label: '字段分组' },
       'fieldGroups.key': { label: '键' },

@@ -271,8 +271,6 @@ const BACKLOG: Array<[file: string, key: string]> = [
   ['packages/plugin-gantt/src/GanttView.tsx', 'div · setSelectedTaskId'],
   ['packages/plugin-gantt/src/GanttView.tsx', 'div · setSelectedTaskId'],
   ['packages/plugin-gantt/src/GanttView.tsx', 'div · setSelectedTaskId'],
-  // The mobile card list.
-  ['packages/plugin-grid/src/ObjectGrid.tsx', 'div · handleClick'],
   ['packages/plugin-grid/src/VirtualGrid.tsx', 'div · getSelection,trim,toString,intersectsNode,getRangeAt,onRowClick'],
   ['packages/plugin-view/src/ManageViewsDialog.tsx', 'div · onRowClick'],
 ];

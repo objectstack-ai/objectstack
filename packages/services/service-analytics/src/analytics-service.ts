@@ -3283,7 +3283,16 @@ export class AnalyticsService implements IAnalyticsService {
             const previewCube = previewEvaluationCube(q, cube);
             const declaredType = (field: string) => this.sourceFieldMeta?.(dataset.object, field)?.type;
             const whereColumns = previewWhereColumns(q, cube);
-            const rowFilters = lowerPreviewRowFilters(q, previewCube, declaredType, whereColumns);
+            // [#36168] …with the declared value shape, so a scalar comparison
+            // on a multi-valued or JSON-stored field is refused as the live
+            // faces refuse it (`json-column-comparison-refusal.ts`).
+            const declaredShape = (field: string) => {
+              const meta = this.sourceFieldMeta?.(dataset.object, field);
+              return typeof meta?.type === 'string' && meta.type !== ''
+                ? { type: meta.type, multiple: meta.multiple === true }
+                : undefined;
+            };
+            const rowFilters = lowerPreviewRowFilters(q, previewCube, declaredType, whereColumns, declaredShape);
             // [#28765, #28798] …and a selection asking one column for two
             // values under one name (raw beside its own bucket, or two buckets
             // of it), with the refusal the ObjectQL strategy gives both live

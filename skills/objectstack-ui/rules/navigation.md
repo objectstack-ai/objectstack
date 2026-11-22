@@ -20,6 +20,7 @@ on all but `separator`): `group` `expanded`, `children[]`; `object`
 `action` `actionDef` (`{actionName, params?}`); `component` `componentRef`
 (a colon-joined registry key, `metadata:resource`), `params?`; `doc` `book?` /
 `doc?` (one required).
+An `object` item's icon sits on its object's `color` tile.
 
 > **`requiresObject` / `requiresService`** hide an item whose optional
 > system object or kernel service is missing — never hard-code conditional UI.
@@ -94,7 +95,7 @@ export const CrmApp = App.create({
 
 ## Three Run Modes: Object Nav vs Filters Slice vs Interface Pages (ADR-0047 / objectui ADR-0055)
 
-Object list UI has **three run modes**, selected by the navigation item shape:
+The nav item's shape selects the mode:
 
 | | Data mode (`type: 'object'`) | Bare slice (`type: 'object'` + `filters`) | Interface mode (`type: 'page'`) |
 |:--|:--|:--|:--|
@@ -119,8 +120,8 @@ navigation pointing at objects. Escalate only on explicit signals:
   workbench / "Airtable interface-like").
 
 Ambiguity resolves to **no page and no view** — data mode is a functional
-superset; a missing page costs polish, a superfluous page (or a view authored
-for a one-off slice) is a permanently-maintained duplicate asset.
+superset; a missing page costs polish, a superfluous page (or one-off view)
+is a permanently-maintained duplicate asset.
 
 > One-sentence rule: prefer the object's default view over a pinned
 > `viewName`; prefer URL `filters` over authoring a view for one-off slices;
@@ -177,9 +178,9 @@ at runtime from the client viewport, because an author
   in a modal).
 - **Column count.** Not authored. The form grid follows its **real rendered width**
   via container queries — the same form is 1 column in a narrow drawer and up to 4
-  on a wide page. Author *grouping* with `fieldGroups` + `Field.group`.
+  on a wide page. Author *grouping* with `fieldGroups`.
 - **`sections` are the escape hatch — reach for them last.** The ladder, in
-  order: (1) **derive** — declare `fieldGroups` + `Field.group` and author no
+  order: (1) **derive** — declare `fieldGroups` and author no
   `sections` at all; (2) **reference** — when one surface needs a local
   arrangement, a section may name a declared group, `{ group: 'contact_info' }`,
   and inherits its members, label and presentation (restating a key the group
