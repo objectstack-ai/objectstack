@@ -536,6 +536,7 @@ const de = {
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "Wird gespeichert…",
     cellSaved: "Gespeichert",
+    cellSavedAnnouncement: "Gespeichert: {{fields}}",
     openRecordToFinish: "Datensatz öffnen, um die Änderung abzuschließen",
   },
   grid: {
@@ -2615,6 +2616,14 @@ const de = {
       systemTheme: "Systemdesign",
       actions: "Aktionen",
       openFullSearch: "Vollständige Suchseite öffnen",
+      create: "Erstellen",
+      createAs: "„{{query}}“ als {{object}} erstellen",
+      previewEmpty: "Wählen Sie einen Datensatz, um seine Details zu sehen.",
+      enterOpenRecord: "Datensatz öffnen",
+      enterCreate: "Erstellen",
+      enterSwitchApp: "App wechseln",
+      enterApplyTheme: "Design anwenden",
+      enterOpen: "Öffnen",
       searching: "Suche…",
       records: "Datensätze",
       recentRecords: "Zuletzt angesehen",

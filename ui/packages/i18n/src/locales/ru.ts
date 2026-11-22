@@ -553,6 +553,7 @@ const ru = {
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "Сохранение…",
     cellSaved: "Сохранено",
+    cellSavedAnnouncement: "Сохранено: {{fields}}",
     openRecordToFinish: "Откройте запись, чтобы завершить изменение",
   },
   grid: {
@@ -2765,6 +2766,14 @@ const ru = {
       systemTheme: "Системная тема",
       actions: "Действия",
       openFullSearch: "Открыть полную страницу поиска",
+      create: "Создать",
+      createAs: "Создать «{{query}}» как {{object}}",
+      previewEmpty: "Выберите запись, чтобы увидеть подробности.",
+      enterOpenRecord: "Открыть запись",
+      enterCreate: "Создать",
+      enterSwitchApp: "Переключить приложение",
+      enterApplyTheme: "Применить тему",
+      enterOpen: "Открыть",
       searching: "Поиск…",
       records: "Записи",
       recentRecords: "Недавно просмотренные",

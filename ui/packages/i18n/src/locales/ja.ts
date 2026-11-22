@@ -536,6 +536,7 @@ const ja = {
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "保存中…",
     cellSaved: "保存しました",
+    cellSavedAnnouncement: "保存しました：{{fields}}",
     openRecordToFinish: "レコードを開いて変更を完了してください",
   },
   grid: {
@@ -2617,6 +2618,14 @@ const ja = {
       systemTheme: "システムテーマ",
       actions: "アクション",
       openFullSearch: "完全な検索ページを開く",
+      create: "新規作成",
+      createAs: "「{{query}}」を{{object}}として作成",
+      previewEmpty: "レコードを選択すると詳細が表示されます。",
+      enterOpenRecord: "レコードを開く",
+      enterCreate: "作成",
+      enterSwitchApp: "アプリを切り替え",
+      enterApplyTheme: "テーマを適用",
+      enterOpen: "開く",
       searching: "検索中…",
       records: "レコード",
       recentRecords: "最近閲覧",

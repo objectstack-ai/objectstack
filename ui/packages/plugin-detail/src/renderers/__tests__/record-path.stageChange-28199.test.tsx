@@ -111,7 +111,7 @@ function mount(opts: MountOptions = {}) {
       data={{ id: 'q1', status: 'draft', updated_at: VERSION }}
       objectSchema={opts.objectSchema ?? OBJECT_SCHEMA}
       dataSource={dataSource as any}
-      refresh={refresh}
+      reread={refresh}
     >
       <InlineEditProvider canEdit={opts.canEdit ?? true}>
         {opts.editing && <EnterEditing />}
@@ -330,7 +330,7 @@ function mountNode(node: unknown, opts: Omit<MountOptions, 'allowStageChange'> =
       data={{ id: 'q1', status: 'draft', updated_at: VERSION }}
       objectSchema={opts.objectSchema ?? QUOTE_DEF}
       dataSource={dataSource as any}
-      refresh={refresh}
+      reread={refresh}
     >
       <InlineEditProvider canEdit={opts.canEdit ?? true}>
         <SchemaRenderer schema={node as never} />
