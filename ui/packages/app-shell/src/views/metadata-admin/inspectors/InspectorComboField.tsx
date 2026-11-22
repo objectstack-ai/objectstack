@@ -126,6 +126,12 @@ export type InspectorComboFieldProps = InspectorComboFieldNaming & {
   /** Render the trigger value in a monospace font. */
   mono?: boolean;
   /**
+   * Keep each labelled option's value (the machine name) off the list and
+   * reachable on hover only, as the option's title. For the panels that speak
+   * business wording (the report and dashboard-widget panels).
+   */
+  nameOnHover?: boolean;
+  /**
    * The face of the empty value, for a target whose absence means something
    * (a `report` nav item with no `reportName` opens the report index,
    * objectstack#27525). Given, the list leads with a row of this text that
@@ -162,6 +168,7 @@ export function InspectorComboField({
   loading,
   allowCustom = true,
   mono,
+  nameOnHover,
   emptyLabel,
   className,
 }: InspectorComboFieldProps) {
@@ -276,7 +283,9 @@ export function InspectorComboField({
                 {g.items.map((o) => (
                   <CommandItem key={o.value} value={o.value} onSelect={() => commit(o.value)}>
                     <Check className={cn('h-3.5 w-3.5', o.value === value ? 'opacity-100' : 'opacity-0')} />
-                    {o.label && o.label !== o.value ? (
+                    {o.label && o.label !== o.value && nameOnHover ? (
+                      <span className="truncate" title={o.value}>{o.label}</span>
+                    ) : o.label && o.label !== o.value ? (
                       <>
                         <span className="truncate">{o.label}</span>{' '}
                         <span className="ml-1 truncate font-mono text-[10px] text-muted-foreground">{o.value}</span>
