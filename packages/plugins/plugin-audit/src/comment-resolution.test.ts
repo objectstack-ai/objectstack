@@ -85,6 +85,27 @@ describe('stampCommentResolution — the arms the real-engine pins do not reach'
     expect(data.resolved_by).toBeNull();
     expect(typeof data.resolved_at).toBe('string');
   });
+  it('a system write attributed to a caller (the resolution door) records that caller as the resolver', async () => {
+    const data: Record<string, unknown> = { is_resolved: true };
+    await stampCommentResolution({
+      input: { data },
+      previous: { is_resolved: false },
+      session: { isSystem: true },
+      provenance: { attributedUserId: 'u_door_caller' },
+    });
+    expect(data.resolved_by).toBe('u_door_caller');
+    expect(typeof data.resolved_at).toBe('string');
+  });
+  it("an attribution never outranks a non-system write's own session user", async () => {
+    const data: Record<string, unknown> = { is_resolved: true };
+    await stampCommentResolution({
+      input: { data },
+      previous: { is_resolved: false },
+      session: { userId: 'u_session' },
+      provenance: { attributedUserId: 'u_other' },
+    });
+    expect(data.resolved_by).toBe('u_session');
+  });
   it('a non-boolean is_resolved is left to the record validator, unstamped', async () => {
     const data: Record<string, unknown> = { is_resolved: 'yes' };
     await stampCommentResolution({ input: { data }, previous: { is_resolved: false }, session: { userId: 'u' } });

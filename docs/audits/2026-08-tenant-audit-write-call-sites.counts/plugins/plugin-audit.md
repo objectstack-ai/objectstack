@@ -14,24 +14,24 @@ a row or a number here — fix the code, or the census, and regenerate.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 20 |
-| Object name statically decidable | 14 |
+| Write call sites | 21 |
+| Object name statically decidable | 15 |
 | Object name chosen at run time | 6 |
 | Object name spelled inline | 11 |
-| Object name spelled through a `const` | 3 |
+| Object name spelled through a `const` | 4 |
 | Object name is an `object: string` parameter | 0 |
 | Object name is some other run-time expression | 6 |
-| Against a tenancy-enabled object | 14 |
+| Against a tenancy-enabled object | 15 |
 | Against an object declaring tenancy off | 0 |
-| Threading a tenant context | 15 |
+| Threading a tenant context | 16 |
 | Provably carrying none (options read, no context key) | 0 |
 | …and decidably tenancy-enabled | 0 |
 | Options argument unreadable | 5 |
 | …and decidably tenancy-enabled | 4 |
-| Threading a decidably elevated (`isSystem`) context | 15 |
+| Threading a decidably elevated (`isSystem`) context | 16 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 5 |
-| Receiver carried a readable engine type | 20 |
+| Receiver carried a readable engine type | 21 |
 | Receiver erased, placed by the object NAME | 0 |
 | Receiver erased, placed by an `object: string` PARAMETER | 0 |
 | Receiver erased, placed by an `UNTYPED_RECEIVERS` row | 0 |
@@ -58,6 +58,7 @@ a row or a number here — fix the code, or the census, and regenerate.
 | `packages/plugins/plugin-audit/src/auth-event-audit.ts` | `insert` | `sys_audit_log` | enabled | options unreadable | 1 |
 | `packages/plugins/plugin-audit/src/comment-parent-pair-backfill.ts` | `update` | `sys_comment` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/comment-resolution.ts` | `update` | `sys_comment` | enabled | elevated | 1 |
+| `packages/plugins/plugin-audit/src/comment-routes.ts` | `update` | `sys_comment` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/credential-use-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/data-export-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/dataset-query-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
