@@ -23,6 +23,9 @@ vi.mock('../previews/useObjectFields', () => ({
   useObjectFields: () => ({ fields: [], loading: false, error: null }),
 }));
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { ObjectFieldInspector } from './ObjectFieldInspector';
 
 afterEach(cleanup);

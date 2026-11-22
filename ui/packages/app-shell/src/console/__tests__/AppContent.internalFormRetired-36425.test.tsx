@@ -162,6 +162,8 @@ vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [] 
 })));
 afterAll(() => vi.unstubAllGlobals());
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
 import { AppContent } from '../AppContent';
 
 const lastModal = () => probe.modalSchemas[probe.modalSchemas.length - 1];

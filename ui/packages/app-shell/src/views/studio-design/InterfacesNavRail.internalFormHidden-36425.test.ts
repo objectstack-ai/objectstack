@@ -12,6 +12,8 @@
  * the Interfaces pillar draws its rail from.
  */
 import { describe, expect, it, vi } from 'vitest';
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
 import { loadPackageSurfaces, viewBindingOf, type PackageSurfaceClient } from './packageSurfaces';
 import { offNavViewIsInternalForm } from './InterfacesNavRail';
 
