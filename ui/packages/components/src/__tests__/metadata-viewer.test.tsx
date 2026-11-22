@@ -270,6 +270,22 @@ describe('element:metadata_viewer flow branches (objectstack#36094)', () => {
     expect(container.textContent).not.toContain('500,000');
   });
 
+  it('waits for the flow’s object before drawing a condition, so none is drawn unread first', async () => {
+    let release!: (object: unknown) => void;
+    const objectServed = new Promise((resolve) => {
+      release = resolve;
+    });
+    const getItem = vi.fn((type: string) => (type === 'object' ? objectServed : Promise.resolve(approvalFlow(500000))));
+    const { container } = render(<Viewer getItem={getItem} properties={{ type: 'flow', name: 'opportunity_approval' }} />);
+    await waitFor(() => expect(getItem).toHaveBeenCalledWith('object', 'crm_opportunity'));
+    expect(container.querySelector('[data-condition]')).toBeNull();
+    expect(container.textContent).toContain('Loading');
+    release(DEAL);
+    await waitFor(() =>
+      expect(branch(container, 'check_high_value', 'director_signoff')?.textContent).toBe('Amount > 500,000Sales Director Sign-off'),
+    );
+  });
+
   it('formats the amount in the tenant currency when one is configured', async () => {
     const { container } = render(
       <LocalizationProvider value={{ currency: 'USD', locale: 'en-US' }}>
