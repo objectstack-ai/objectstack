@@ -438,7 +438,7 @@ export const objectForm = defineForm({
             // named the `auditTrail` / `dataQuality` / `encryptionConfig` family
             // pruned in 2026-06 as dead in both layers (see the FieldSchema
             // tombstone); at-rest protection is `type: 'secret'`, not a flag.
-            { field: 'trackHistory', type: 'boolean', helpText: 'Summarize this field on the record activity timeline' },
+            { field: 'trackHistory', type: 'boolean', helpText: "Show this field's old → new values on the record activity timeline (on unless turned off)" },
             { field: 'visibleWhen', type: 'code', language: 'expression', helpText: 'CEL predicate — field is shown only when TRUE' },
             { field: 'readonlyWhen', type: 'code', language: 'expression', helpText: 'CEL predicate — field is read-only when TRUE (enforced server-side)' },
             { field: 'requiredWhen', type: 'code', language: 'expression', helpText: 'CEL predicate — field is required when TRUE (enforced server-side)' },

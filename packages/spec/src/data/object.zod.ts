@@ -289,8 +289,9 @@ const CAPABILITIES_HISTORY =
  *
  * Opt-out flags (`feeds`, `activities`, `clone`, `searchable`, `apiEnabled`)
  * default to `true`: absent block/flag = enabled, and consumers gate on
- * explicit `false` only. Opt-in flags (`trackHistory`, `files`,
- * `approvalsVisibleToReaders`) default to `false`.
+ * explicit `false` only. Opt-in flags (`files`,
+ * `approvalsVisibleToReaders`) default to `false`. `trackHistory` has no
+ * default since #36290: absent and `true` read differently (see its note).
  *
  * `.strict()`: unknown keys (incl. the retired `trash` / `mru`, #2377) are
  * rejected with guidance, not stripped (#1535).
@@ -324,21 +325,27 @@ export const ObjectCapabilities = strictObject({
   guidance: { ...CAPABILITIES_RETIRED_KEY_GUIDANCE, ...CAPABILITIES_AI_WRITE_ARM_GUIDANCE },
 }, {
   /**
-   * History tracking (Audit Trail) master switch — opt-in.
+   * History tracking (Audit Trail) switch — three readings, no default
+   * (#36290, ruling 7076513167, reversing ADR-0052 §5b.1's opt-in default).
    *
-   * Contract: `true` surfaces the record's field changes (audit-trail UI) in
-   * the console. On the synthesized record page they join the record's one
-   * timeline stream, beside its discussion and activity, under the stream's
-   * Changes filter; that page has no separate History tab. A page an author
-   * assigns is drawn as authored: a `record:history` or `record:activity`
-   * block placed there shows the record's field changes from its own activity
-   * (`sys_activity`), and neither reads this flag. Pair with per-field
-   * `trackHistory: true` to select which field diffs render as human-readable
-   * timeline summaries (ADR-0052 §5b). Audit *capture* into `sys_audit_log` is
+   * - **absent** — the record's activity stream (`sys_activity`) shows each
+   *   changed field's old → new values, the default for every object. A
+   *   field turns its own values off with `trackHistory: false`.
+   * - **`false`** — off for the object: a change names the changed fields,
+   *   never their values.
+   * - **`true`** — values on, and the console also surfaces the compliance
+   *   ledger's field changes (audit-trail UI) on the synthesized record page,
+   *   in the record's one timeline stream under its Changes filter, for a
+   *   reader the ledger serves; the derived `history` API verb needs it too.
+   *
+   * A page an author assigns is drawn as authored: a `record:history` or
+   * `record:activity` block placed there shows the record's field changes
+   * from its own activity, and neither reads this flag. Who reads a value is
+   * the field's read rule, per reader. Audit *capture* into `sys_audit_log` is
    * a compliance ledger and stays on regardless of this flag; retention is
    * governed by data lifecycle (ADR-0057), not by hiding the UI.
    */
-  trackHistory: z.boolean().default(false).describe('Show the record\'s field changes (audit-trail UI): on the default record page they join the record\'s one timeline stream, under its Changes filter. On an authored page, a record:history or record:activity block shows the record\'s field changes from its own activity, and neither reads this flag. Pair with per-field trackHistory to pick which field diffs are summarized; audit capture itself is always on for compliance'),
+  trackHistory: z.boolean().optional().describe('Field change history. Absent: the record\'s activity stream shows each changed field\'s old → new values (a field opts out with trackHistory: false). false: off for this object, a change names its fields only. true: values on, and on the default record page the compliance ledger\'s field changes join the record\'s one timeline stream, under its Changes filter, for a reader the ledger serves; the derived history API verb needs true. On an authored page, a record:history or record:activity block shows the record\'s field changes from its own activity, and neither reads this flag. Who reads a value is the field\'s read rule; audit capture itself is always on for compliance'),
 
   /** Enable global search indexing */
   searchable: z.boolean().default(true).describe('Index records for global search'),

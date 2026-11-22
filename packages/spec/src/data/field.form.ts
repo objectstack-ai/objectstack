@@ -466,7 +466,7 @@ export const fieldForm = defineForm({
         // `string[]`, so the `app.form.ts` `requiredPermissions` face.
         { field: 'requiredPermissions', widget: 'string-tags', colSpan: 2, helpText: "Capabilities (permission-set systemPermissions) a caller must hold — every one listed — to read or edit this field (ADR-0066 D3). Without them the value is masked on read (partially, when a maskingRule is set) and edits are denied. Empty or unset: no capability gate." },
         { field: 'internal', colSpan: 1, helpText: "Never return this field's value on the generic data path: the engine omits the key from find/findOne results and from the create and update response bodies, on the default projection and when a client names the field in ?select=. Storage, filtering and indexing are untouched." },
-        { field: 'trackHistory', colSpan: 1, helpText: "Render this field's value changes as entries on the record activity timeline (ADR-0052 §5b). Opt-in per field." },
+        { field: 'trackHistory', colSpan: 1, helpText: "Show this field's old → new values on the record activity timeline (ADR-0052 §5b). On unless turned off; false names the change without its values." },
         { field: 'widget', colSpan: 2, helpText: 'Form widget override — names a registered field component, looked up as `field:` plus this name, to render the field instead of the type default. An unregistered name degrades to the type renderer.' },
         { field: 'ackPlaintextMasking', label: 'Acknowledge plaintext at rest', colSpan: 2, visibleWhen: "data.type == 'password'", helpText: "Affirm that this generic password field's plaintext-at-rest, masked-on-read contract is intended, silencing the author-time warning (ADR-0100). No effect on any other type." },
       ],

@@ -2734,7 +2734,7 @@ export const FieldSchema = lazySchema(() => {
    * (`@objectstack/plugin-audit` audit-writers), satisfying enforce-or-remove
    * (ADR-0049). See ADR-0052 §5b.
    */
-  trackHistory: z.boolean().optional().describe("Render this field's value changes as human-readable entries on the record activity timeline (ADR-0052 §5b). Opt-in per field."),
+  trackHistory: z.boolean().optional().describe("Whether this field's old → new values show on the record activity timeline (ADR-0052 §5b). On unless turned off: absent shows them (unless the object sets enable.trackHistory: false), false names the change without its values. A credential field never shows values; a media or structured-JSON field shows them only with an explicit true. Who reads a value is this field's read rule."),
 
   // Pruned 2026-06 (dead in both layers — aspirational governance with no runtime
   // consumer; encryption/masking implied at-rest protection that never happened —

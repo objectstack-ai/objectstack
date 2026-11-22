@@ -235,9 +235,13 @@ describe('[#21081] sys_activity value-bearing columns are served through the sec
     expect(blob).not.toContain(V.masked2);
   });
 
-  it('masked: a summary composed from that field is dropped, and one composed from served fields is kept', async () => {
+  it('masked: a milestone composed from that field is dropped, a field-change summary keeps only the served changes, and one composed from served fields is kept', async () => {
     const rows = byChange(await read(MASKED_READER));
-    expect(rows.allTracked).not.toHaveProperty('summary');
+    // [#36290] Re-composed from the changes this reader is served, never dropped whole.
+    expect(String(rows.allTracked?.summary)).toContain(V.open2);
+    expect(String(rows.allTracked?.summary)).toContain(V.unserved2);
+    expect(String(rows.allTracked?.summary)).not.toContain(V.masked2);
+    expect(String(rows.allTracked?.summary)).not.toContain('Masked');
     expect(rows.milestone).not.toHaveProperty('summary');
     expect(String(rows.openOnly?.summary)).toContain(V.open3);
     expect(String(rows.created?.summary)).toContain('item');
@@ -252,6 +256,49 @@ describe('[#21081] sys_activity value-bearing columns are served through the sec
     expect(tracked.old).not.toHaveProperty('f_masked');
     expect(tracked.new).not.toHaveProperty('f_masked');
     expect(tracked.new).toHaveProperty('f_open', V.open2);
+  });
+
+  // ── [#36290] the field-change code, served narrowed change by change ────
+
+  /** The served field-change code of a row, or `undefined`. */
+  const codeOf = (row: Row | undefined) =>
+    typeof row?.metadata === 'string' ? JSON.parse(row.metadata).summary_message : undefined;
+
+  it('[#36290] at rest the field-change code names every changed field, with both values', async () => {
+    const code = codeOf(byChange(await read(SYS)).allTracked);
+    expect(code?.key).toBe('fieldChanges');
+    expect(code.changes.map((c: Row) => c.field)).toEqual(['f_masked', 'f_unserved', 'f_open']);
+    expect(JSON.stringify(code)).toContain(V.masked2);
+    expect(JSON.stringify(code)).toContain(V.unserved2);
+  });
+
+  it('[#36290] masked: the code is served without the change of the field served masked', async () => {
+    const code = codeOf(byChange(await read(MASKED_READER)).allTracked);
+    expect(code?.key).toBe('fieldChanges');
+    expect(code.changes.map((c: Row) => c.field)).toEqual(['f_unserved', 'f_open']);
+    expect(JSON.stringify(code)).not.toContain(V.masked1);
+    expect(JSON.stringify(code)).not.toContain(V.masked2);
+  });
+
+  it('[#36290] not served: the code and the summary are served without the change of the field not served', async () => {
+    const row = byChange(await read(UNSERVED_READER)).allTracked;
+    const code = codeOf(row);
+    expect(code.changes.map((c: Row) => c.field)).toEqual(['f_masked', 'f_open']);
+    expect(JSON.stringify(code)).not.toContain(V.unserved2);
+    expect(String(row?.summary)).toContain(V.masked2);
+    expect(String(row?.summary)).not.toContain(V.unserved2);
+    expect(String(row?.summary)).not.toContain('Unserved');
+  });
+
+  it('[#36290] control: a reader served every field is served the whole code', async () => {
+    const code = codeOf(byChange(await read(CONTROL)).allTracked);
+    expect(code.changes.map((c: Row) => c.field)).toEqual(['f_masked', 'f_unserved', 'f_open']);
+  });
+
+  it('[#36290] a code other than a field-change code is still never served to a reader', async () => {
+    const rows = byChange(await read(CONTROL));
+    expect(codeOf(rows.created)).toBeUndefined();
+    expect(codeOf(byChange(await read(SYS)).created)?.key).toBe('activityCreated');
   });
 
   // ── a field not served ──────────────────────────────────────────────────
@@ -433,7 +480,9 @@ const refObjects = [
     fields: { title: { name: 'title', label: 'Title', type: 'text' as const } },
   },
   {
-    name: REF_TITLED, label: 'Reference Titled', nameField: 'target',
+    // [#36290] Values off, so its update is summarized by the record label —
+    // the text this scene judges — not by a field change.
+    name: REF_TITLED, label: 'Reference Titled', nameField: 'target', enable: { trackHistory: false },
     fields: { name: { name: 'name', label: 'Name', type: 'text' as const }, target: refLookup(REF_TARGET) },
   },
   {
@@ -623,8 +672,14 @@ describe('an activity text naming a referenced record by its title is served onl
     expect(String(control?.summary)).toContain(ids.unexposed);
     const withheld = await updatedAs(TITLE_WITHHELD);
     expect(withheld).toBeTruthy();
-    expect(withheld).not.toHaveProperty('summary');
+    // [#36290] Judged change by change: the change naming the exposed
+    // target's title is dropped, the one naming the unexposed target by its id
+    // (whose title field this reader IS served) is kept.
+    expect(String(withheld?.summary)).toContain(ids.unexposed);
+    expect(String(withheld?.summary)).not.toContain('Open');
     expect(JSON.stringify(withheld)).not.toContain(T.one);
+    const code = JSON.parse(String(withheld?.metadata)).summary_message;
+    expect(code.changes.map((c: Row) => c.field)).toEqual(['hidden']);
   });
 
   it('findOne: the by-id read is judged like the list', async () => {

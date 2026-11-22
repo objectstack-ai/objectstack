@@ -667,6 +667,119 @@ describe('audit writers — declarative trackHistory activity (ADR-0052 §5b)', 
   });
 });
 
+describe('[#36290] a changed field shows old → new unless the object or the field turns it off', () => {
+  const DEAL_FIELDS: Record<string, any> = {
+    id: { type: 'text' },
+    name: { type: 'text', label: 'Name' },
+    amount: { type: 'currency', label: 'Amount' },
+    note: { type: 'textarea', label: 'Note' },
+    quiet: { type: 'text', label: 'Quiet', trackHistory: false },
+    api_token: { type: 'secret', label: 'API Token' },
+    payload: { type: 'json', label: 'Payload' },
+    payload_opted: { type: 'json', label: 'Payload Opted', trackHistory: true },
+  };
+  const schemaWith = (summary: Record<string, any> = { type: 'text' }) => ({
+    sys_audit_log: SINGLE_TENANT.sys_audit_log,
+    sys_activity: {
+      ...Object.fromEntries(SINGLE_TENANT.sys_activity.map((f) => [f, { type: 'text' }])),
+      summary,
+    },
+    deal: DEAL_FIELDS,
+  });
+
+  async function updateDeal(
+    previous: Record<string, any>,
+    result: Record<string, any>,
+    { objectDef = {}, summary }: { objectDef?: Record<string, any>; summary?: Record<string, any> } = {},
+  ) {
+    const { engine, fire, created } = makeEngine(schemaWith(summary), { deal: { label: 'Deal', ...objectDef } });
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterUpdate', {
+      object: 'deal',
+      input: { id: 'deal-1' },
+      result: { id: 'deal-1', name: 'D-1', ...result },
+      previous: { id: 'deal-1', name: 'D-1', ...previous },
+      session: {},
+    });
+    const activity = created.find((c) => c.object === 'sys_activity');
+    expect(activity).toBeDefined();
+    return { summary: activity!.row.summary as string, metadata: JSON.parse(activity!.row.metadata) };
+  }
+
+  it('an object and a field that say nothing show the values', async () => {
+    const { summary, metadata } = await updateDeal({ amount: 100 }, { amount: 200 });
+    expect(summary).toBe('Amount: 100 → 200');
+    expect(metadata.summary_message).toEqual({
+      key: 'fieldChanges',
+      object: 'deal',
+      changes: [{ field: 'amount', from: { text: '100' }, to: { text: '200' } }],
+    });
+  });
+
+  it('an object that sets enable.trackHistory: false names the field, never its values', async () => {
+    const { summary, metadata } = await updateDeal({ amount: 100 }, { amount: 200 }, { objectDef: { enable: { trackHistory: false } } });
+    expect(summary).toBe('Updated Deal "D-1": Amount');
+    expect(metadata.summary_message.key).toBe('activityUpdatedFields');
+  });
+
+  it('a field that sets trackHistory: false is named by label only, beside a field that shows its values', async () => {
+    const quietOnly = await updateDeal({ quiet: 'q-before' }, { quiet: 'q-after' });
+    expect(quietOnly.summary).toBe('Updated Deal "D-1": Quiet');
+    expect(quietOnly.summary).not.toContain('q-after');
+    const mixed = await updateDeal({ quiet: 'q-before', amount: 1 }, { quiet: 'q-after', amount: 2 });
+    expect(mixed.summary).toBe('Amount: 1 → 2');
+    expect(JSON.stringify(mixed.metadata.summary_message)).not.toContain('q-after');
+  });
+
+  it('a credential field is named by label only, never by its mask', async () => {
+    const { summary, metadata } = await updateDeal({ api_token: 'tok-before' }, { api_token: 'tok-after' });
+    expect(summary).toBe('Updated Deal "D-1": API Token');
+    expect(JSON.stringify(metadata.summary_message)).not.toContain('•');
+    expect(JSON.stringify({ summary, metadata })).not.toContain('tok-after');
+  });
+
+  it('a structured-JSON field shows values only when it opts in with trackHistory: true', async () => {
+    const plain = await updateDeal({ payload: { a: 1 } }, { payload: { a: 2 } });
+    expect(plain.summary).toBe('Updated Deal "D-1": Payload');
+    const opted = await updateDeal({ payload_opted: 'p1' }, { payload_opted: 'p2' });
+    expect(opted.summary).toBe('Payload Opted: p1 → p2');
+  });
+
+  it('a long value still fits a bounded summary column, and the code keeps a bounded copy of each side', async () => {
+    const before = 'b'.repeat(3000);
+    const after = 'a'.repeat(3000);
+    const { summary, metadata } = await updateDeal({ note: before }, { note: after }, { summary: { type: 'text', maxLength: 500 } });
+    expect(summary.length).toBeLessThanOrEqual(500);
+    expect(summary.startsWith('Note: ')).toBe(true);
+    const [change] = metadata.summary_message.changes;
+    expect(change.field).toBe('note');
+    expect(change.to.text.length).toBe(1000);
+    expect(change.to.text.endsWith('…')).toBe(true);
+  });
+
+  it('many changes fit a bounded summary column by leaving trailing changes out of the stored sentence only', async () => {
+    const fields = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`f${i}`, { type: 'text', label: `Field ${i}` }]));
+    const { engine, fire, created } = makeEngine(
+      { ...schemaWith({ type: 'text', maxLength: 500 }), many: { id: { type: 'text' }, name: { type: 'text' }, ...fields } },
+      { many: { label: 'Many' } },
+    );
+    installAuditWriters(engine as any, 'test.audit');
+    const prev = Object.fromEntries(Object.keys(fields).map((k) => [k, `old-value-of-${k}`]));
+    const next = Object.fromEntries(Object.keys(fields).map((k) => [k, `new-value-of-${k}`]));
+    await fire('afterUpdate', {
+      object: 'many',
+      input: { id: 'm-1' },
+      result: { id: 'm-1', name: 'M', ...next },
+      previous: { id: 'm-1', name: 'M', ...prev },
+      session: {},
+    });
+    const row = created.find((c) => c.object === 'sys_activity')!.row;
+    expect(row.summary.length).toBeLessThanOrEqual(500);
+    expect(row.summary.endsWith('; …')).toBe(true);
+    expect(JSON.parse(row.metadata).summary_message.changes).toHaveLength(30);
+  });
+});
+
 describe('audit writers — the generic update summary names the changed fields (#25787)', () => {
   // A campaign whose roll-up counters a hook bumps once per enrolled member —
   // plain number fields, none `trackHistory`'d (the measured HotCRM shape).

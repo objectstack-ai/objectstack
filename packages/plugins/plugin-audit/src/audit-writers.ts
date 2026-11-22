@@ -987,12 +987,13 @@ function planTrackedLookupReads(
   fields: Record<string, any> | undefined | null,
   oldVals: Record<string, any> | null,
   newVals: Record<string, any> | null,
+  showsValues: ChangeValuesShown,
 ): Map<string, Set<string>> {
   const byObject = new Map<string, Set<string>>();
   if (!fields || !newVals) return byObject;
   for (const key of Object.keys(newVals)) {
     const field = fields[key];
-    if (!field || field.trackHistory !== true) continue;
+    if (!field || !showsValues(key, field)) continue;
     if (typeof field.type !== 'string' || !REFERENCE_FIELD_TYPES.has(field.type)) continue;
     const reference = referenceTargetForSummary(field);
     if (!reference) continue;
@@ -1029,8 +1030,10 @@ function planLabelLookupRead(
 }
 
 /**
- * ADR-0052 §5b — declarative activity. For fields declared `trackHistory: true`,
- * render the diff the writer already captured as a human-readable timeline
+ * ADR-0052 §5b — declarative activity. For every changed field whose values
+ * are shown ({@link changeValuesShownFor}: on unless the object or the field
+ * turns them off, #36290), render the diff the writer already captured as a
+ * human-readable timeline
  * summary ("Stage: Proposal → Closed Won"; multiple changes joined by "; "),
  * using the field label, select option labels and referenced record titles.
  * Returns null when no tracked field changed, so the caller falls back to the
@@ -1071,24 +1074,120 @@ function renderTrackedChangeSummary(
   oldVals: Record<string, any> | null,
   newVals: Record<string, any> | null,
   locale: ActivitySummaryLocale,
+  showsValues: ChangeValuesShown,
   lookupTitles?: Map<string, Map<string, string>>,
+  maxLength?: number,
 ): { text: string; fields: string[]; message: ActivitySummaryMessage } | null {
   if (!fields || !newVals) return null;
   const changes: ActivitySummaryFieldChange[] = [];
   for (const key of Object.keys(newVals)) {
     const field = fields[key];
-    if (!field || field.trackHistory !== true) continue;
+    if (!field || !showsValues(key, field)) continue;
     const reference = referenceTargetForSummary(field);
     const titlesFor = reference ? lookupTitles?.get(reference) : undefined;
     changes.push({
       field: key,
-      from: summaryValueOf(field, oldVals ? oldVals[key] : undefined, titlesFor),
-      to: summaryValueOf(field, newVals[key], titlesFor),
+      from: boundedChangeValue(summaryValueOf(field, oldVals ? oldVals[key] : undefined, titlesFor), MAX_CHANGE_VALUE_TEXT),
+      to: boundedChangeValue(summaryValueOf(field, newVals[key], titlesFor), MAX_CHANGE_VALUE_TEXT),
     });
   }
   if (changes.length === 0) return null;
   const message: ActivitySummaryMessage = { key: 'fieldChanges', object: objectName, changes };
-  return { text: composeStoredSummary(message, locale), fields: changes.map((c) => c.field), message };
+  return { text: fitStoredChangeSummary(message, locale, maxLength), fields: changes.map((c) => c.field), message };
+}
+
+/**
+ * [#36290] Whether a changed field's old → new VALUES are rendered: the
+ * predicate {@link changeValuesShownFor} builds for one object.
+ */
+type ChangeValuesShown = (key: string, field: any) => boolean;
+
+/**
+ * [#36290] The field types whose value has no one-line text — media, embedded
+ * structured values, vectors, a signature. Their change is named by label
+ * only, unless the field itself declares `trackHistory: true`, which keeps the
+ * opt-in it always was.
+ */
+const NO_LINE_VALUE_TYPES: ReadonlySet<string> = new Set([
+  'image', 'file', 'avatar', 'video', 'audio', 'signature',
+  'composite', 'repeater', 'record', 'location', 'address', 'code', 'json', 'vector',
+]);
+
+/**
+ * [#36290, ruling 7076513167] ADR-0052 §5b.1 with its default reversed: a
+ * changed field's old → new values render on the record's activity stream
+ * unless the object turns it off (`enable.trackHistory: false`) or the field
+ * does (`trackHistory: false`). An absent flag is on. Two classes never render
+ * values, whatever the flags say:
+ *
+ *  - a credential field (`collectMaskedReadFields`): both sides are the same
+ *    mask, so the change is named by label only, never `•••• → ••••`;
+ *  - a type in {@link NO_LINE_VALUE_TYPES}, unless the field declares
+ *    `trackHistory: true` itself.
+ *
+ * Who may READ the values is not decided here: the row is redacted per reader,
+ * field by field (`activity-field-redaction.ts`).
+ */
+function changeValuesShownFor(objectDef: any): ChangeValuesShown {
+  if (objectDef?.enable?.trackHistory === false) return () => false;
+  const credentials = new Set(collectMaskedReadFields(objectDef));
+  return (key, field) => {
+    if (!field || field.trackHistory === false || credentials.has(key)) return false;
+    if (field.trackHistory === true) return true;
+    return !(typeof field.type === 'string' && NO_LINE_VALUE_TYPES.has(field.type));
+  };
+}
+
+/**
+ * [#36290] The longest text one side of a field change keeps in the stored
+ * code. The code is what a reader's record page draws each change from, so a
+ * long text keeps enough to read; bounded so one edit of a long text field
+ * cannot grow the row without limit.
+ */
+const MAX_CHANGE_VALUE_TEXT = 1000;
+
+/**
+ * [#36290] How long one side of a change may be inside the STORED one-line
+ * summary when the full sentence does not fit `sys_activity.summary`'s
+ * `maxLength`.
+ */
+const FITTED_CHANGE_VALUE_TEXT = 60;
+
+/** `value` with its text cut to `max` characters (an ellipsis marks the cut). */
+function boundedChangeValue(value: ActivitySummaryValue, max: number): ActivitySummaryValue {
+  if (value.text.length <= max) return value;
+  return { ...value, text: `${value.text.slice(0, Math.max(0, max - 1))}…` };
+}
+
+/**
+ * [#36290] The stored sentence for a field-change code, fitted to
+ * `sys_activity.summary`'s `maxLength` (the SQL driver sizes the column
+ * `varchar(n)` from it, so an over-long text fails the whole activity insert).
+ * With values on by default one save can change many fields, or one long
+ * text, so the tracked branch is fitted as the changed-fields branch is: first
+ * each side is cut to {@link FITTED_CHANGE_VALUE_TEXT} characters, then
+ * trailing changes are left out, then the sentence itself is cut. The code
+ * keeps every change, so a reader's language re-composes the whole of it.
+ */
+function fitStoredChangeSummary(
+  message: Extract<ActivitySummaryMessage, { key: 'fieldChanges' }>,
+  locale: ActivitySummaryLocale,
+  maxLength: number | undefined,
+): string {
+  const full = composeStoredSummary(message, locale);
+  if (maxLength === undefined || full.length <= maxLength) return full;
+  const cut = message.changes.map((c) => ({
+    field: c.field,
+    from: boundedChangeValue(c.from, FITTED_CHANGE_VALUE_TEXT),
+    to: boundedChangeValue(c.to, FITTED_CHANGE_VALUE_TEXT),
+  }));
+  for (let shown = cut.length; shown >= 1; shown -= 1) {
+    const text = composeStoredSummary({ ...message, changes: cut.slice(0, shown) }, locale);
+    const tail = shown < cut.length ? '; …' : '';
+    if (text.length + tail.length <= maxLength) return `${text}${tail}`;
+  }
+  const one = composeStoredSummary({ ...message, changes: cut.slice(0, 1) }, locale);
+  return `${one.slice(0, Math.max(0, maxLength - 1))}…`;
 }
 
 /**
@@ -1103,8 +1202,9 @@ const MAX_NAMED_CHANGED_FIELDS = 5;
  * changed: before this, the row said only `Updated <object> "<label>"`, so a
  * record a rollup or flow bumps repeatedly showed a wall of identical entries
  * nobody could read. `trackHistory` still governs what it always did — whether
- * a field's old → new VALUES are rendered (ADR-0052 §5b.1); an untracked
- * field's value never reaches the text, only its label does.
+ * a field's old → new VALUES are rendered (ADR-0052 §5b.1, on unless turned off
+ * since #36290); a field whose values are off never reaches the text with its
+ * value, only its label does.
  *
  * Names fields in declaration order (keys the definition does not carry come
  * after, by key), at most {@link MAX_NAMED_CHANGED_FIELDS}, then counts the
@@ -2602,9 +2702,11 @@ export function installAuditWriters(
         // that changes no tracked reference field issues no read at all. The
         // titles are read as the WRITER (see `resolveLookupTitles`): each side
         // of a change names a title the writer may read, else the stored id.
+        // [#36290] Values render unless the object or the field turns them off.
+        const showsValues = changeValuesShownFor(getObjectDef(ctx.object));
         const lookupTitles = await resolveLookupTitles(
           api,
-          planTrackedLookupReads(summaryFields, oldValue, newValue),
+          planTrackedLookupReads(summaryFields, oldValue, newValue, showsValues),
         );
         const tracked = renderTrackedChangeSummary(
           ctx.object,
@@ -2612,7 +2714,9 @@ export function installAuditWriters(
           oldValue,
           newValue,
           writeLocale,
+          showsValues,
           lookupTitles,
+          activitySummaryMaxLength(),
         );
         if (tracked) {
           summary = tracked.text;

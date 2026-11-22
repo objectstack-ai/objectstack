@@ -20,7 +20,11 @@ describe('ObjectCapabilities', () => {
   it('should apply default values correctly', () => {
     const result = ObjectCapabilities.parse({});
     
-    expect(result.trackHistory).toBe(false);
+    // [#36290] No default: absent (values on in the activity stream) and
+    // `true` (also the ledger view and the `history` verb) read differently,
+    // and an explicit `false` turns the object off.
+    expect(result.trackHistory).toBeUndefined();
+    expect('trackHistory' in result).toBe(false);
     expect(result.searchable).toBe(true);
     expect(result.apiEnabled).toBe(true);
     expect(result.files).toBe(false);
