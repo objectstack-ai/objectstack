@@ -7,6 +7,10 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Paid during collection, not inside a case's clock: Studio's dashboard panels
+// reach both through dynamic imports (check:test-source-alias).
+import '@objectstack/lint';
+import '@objectstack/formula';
 import {
   filtersSectionLabel,
   openDashboardForEdit,

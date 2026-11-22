@@ -34,6 +34,9 @@ import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import { MetadataCtx } from '@object-ui/react';
+// Paid during collection, not inside a case's clock: Studio's card panel
+// reaches `@objectstack/lint` through a dynamic import (check:test-source-alias).
+import '@objectstack/lint';
 
 const meta = vi.hoisted(() => ({ value: null as unknown }));
 const gate = vi.hoisted(() => ({ entry: null as null | { path: string; posture: 'edit' | 'view' } }));
