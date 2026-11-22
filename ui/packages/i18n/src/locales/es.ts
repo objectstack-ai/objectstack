@@ -2738,7 +2738,9 @@ const es = {
     changeOwner: {
       title: 'Cambiar propietario',
       descriptionRecord: 'Entregar este registro a un nuevo propietario.',
-      descriptionBulk: 'Entregar {{count}} registros a un nuevo propietario.',
+      descriptionBulk_one: 'Entregar {{count}} registro a un nuevo propietario.',
+      descriptionBulk_many: 'Entregar {{count}} de registros a un nuevo propietario.',
+      descriptionBulk_other: 'Entregar {{count}} registros a un nuevo propietario.',
       ownerFallback: 'Propietario',
       targetPerson: 'Una persona',
       targetQueue: 'Una cola',
@@ -2757,7 +2759,9 @@ const es = {
       changed: 'Propietario cambiado.',
       report: 'Transferidos {{moved}}, {{unchanged}} ya tenían este propietario, {{failed}} no se pudieron transferir.',
       failure: '{{id}}: {{message}}',
-      skipped: '{{count}} registros seleccionados no ofrecen Cambiar propietario y se omiten.',
+      skipped_one: '{{count}} registro seleccionado no ofrece Cambiar propietario y se omite.',
+      skipped_many: '{{count}} de registros seleccionados no ofrecen Cambiar propietario y se omiten.',
+      skipped_other: '{{count}} registros seleccionados no ofrecen Cambiar propietario y se omiten.',
       noClient: 'El propietario no se puede cambiar aquí.',
     },
     objectView: {

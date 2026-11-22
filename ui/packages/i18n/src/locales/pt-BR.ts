@@ -2733,7 +2733,9 @@ const pt = {
     changeOwner: {
       title: 'Alterar proprietário',
       descriptionRecord: 'Entregar este registro a um novo proprietário.',
-      descriptionBulk: 'Entregar {{count}} registros a um novo proprietário.',
+      descriptionBulk_one: 'Entregar {{count}} registro a um novo proprietário.',
+      descriptionBulk_many: 'Entregar {{count}} de registros a um novo proprietário.',
+      descriptionBulk_other: 'Entregar {{count}} registros a um novo proprietário.',
       ownerFallback: 'Proprietário',
       targetPerson: 'Uma pessoa',
       targetQueue: 'Uma fila',
@@ -2752,7 +2754,9 @@ const pt = {
       changed: 'Proprietário alterado.',
       report: '{{moved}} transferidos, {{unchanged}} já tinham este proprietário, {{failed}} não puderam ser transferidos.',
       failure: '{{id}}: {{message}}',
-      skipped: '{{count}} registros selecionados não oferecem Alterar proprietário e foram deixados de fora.',
+      skipped_one: '{{count}} registro selecionado não oferece Alterar proprietário e foi deixado de fora.',
+      skipped_many: '{{count}} de registros selecionados não oferecem Alterar proprietário e foram deixados de fora.',
+      skipped_other: '{{count}} registros selecionados não oferecem Alterar proprietário e foram deixados de fora.',
       noClient: 'O proprietário não pode ser alterado aqui.',
     },
     objectView: {

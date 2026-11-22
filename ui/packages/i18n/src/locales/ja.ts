@@ -2666,7 +2666,8 @@ const ja = {
     changeOwner: {
       title: '所有者の変更',
       descriptionRecord: 'このレコードを新しい所有者に引き渡します。',
-      descriptionBulk: '{{count}} 件のレコードを新しい所有者に引き渡します。',
+      descriptionBulk_one: '{{count}} 件のレコードを新しい所有者に引き渡します。',
+      descriptionBulk_other: '{{count}} 件のレコードを新しい所有者に引き渡します。',
       ownerFallback: '所有者',
       targetPerson: 'ユーザー',
       targetQueue: 'キュー',
@@ -2685,7 +2686,8 @@ const ja = {
       changed: '所有者を変更しました。',
       report: '{{moved}} 件を移動、{{unchanged}} 件はすでにこの所有者、{{failed}} 件は移動できませんでした。',
       failure: '{{id}}: {{message}}',
-      skipped: '選択したレコードのうち {{count}} 件は所有者の変更に対応していないため除外されます。',
+      skipped_one: '選択したレコードのうち {{count}} 件は所有者の変更に対応していないため除外されます。',
+      skipped_other: '選択したレコードのうち {{count}} 件は所有者の変更に対応していないため除外されます。',
       noClient: 'ここでは所有者を変更できません。',
     },
     objectView: {

@@ -2734,7 +2734,9 @@ const fr = {
     changeOwner: {
       title: 'Changer de propriétaire',
       descriptionRecord: 'Confier cet enregistrement à un nouveau propriétaire.',
-      descriptionBulk: 'Confier {{count}} enregistrements à un nouveau propriétaire.',
+      descriptionBulk_one: 'Confier {{count}} enregistrement à un nouveau propriétaire.',
+      descriptionBulk_many: 'Confier {{count}} d\'enregistrements à un nouveau propriétaire.',
+      descriptionBulk_other: 'Confier {{count}} enregistrements à un nouveau propriétaire.',
       ownerFallback: 'Propriétaire',
       targetPerson: 'Une personne',
       targetQueue: 'Une file d’attente',
@@ -2753,7 +2755,9 @@ const fr = {
       changed: 'Propriétaire modifié.',
       report: '{{moved}} transférés, {{unchanged}} avaient déjà ce propriétaire, {{failed}} n’ont pas pu être transférés.',
       failure: '{{id}} : {{message}}',
-      skipped: '{{count}} enregistrements sélectionnés ne proposent pas « Changer de propriétaire » et sont ignorés.',
+      skipped_one: '{{count}} enregistrement sélectionné ne propose pas « Changer de propriétaire » et est ignoré.',
+      skipped_many: '{{count}} d\'enregistrements sélectionnés ne proposent pas « Changer de propriétaire » et sont ignorés.',
+      skipped_other: '{{count}} enregistrements sélectionnés ne proposent pas « Changer de propriétaire » et sont ignorés.',
       noClient: 'Le propriétaire ne peut pas être modifié ici.',
     },
     objectView: {
