@@ -5,14 +5,13 @@
  * runtime dispatcher asks (`judgeEnvironmentMembership`, `@objectstack/core`),
  * driven here through the UNSTUBBED identity resolution of `RestServer`.
  *
- * ## The host this file builds
+ * ## The fixture
  *
- * Two environments whose kernels each carry an `auth` service that accepts
- * the SAME platform session, so the credential is anchored in whichever
- * environment the request resolved to; the environment kernel's engine
- * registers `sys_environment_member` and holds one member. Every request is
- * aimed at that environment, on the scoped mount and on the unscoped one
- * (named by `X-Environment-Id`).
+ * Two environments; the caller's credential is anchored in the environment
+ * the request resolves to, and that environment's engine registers
+ * `sys_environment_member` with one member. Every request is aimed at that
+ * environment, on the scoped mount and on the unscoped one (named by
+ * `X-Environment-Id`).
  *
  * ## What is pinned
  *
@@ -118,8 +117,8 @@ function wiring(userId: string, spec: EngineSpec, opts: WiringOpts = {}) {
         async getOrCreate(environmentId: string) {
             return {
                 async getServiceAsync<T>(name: string): Promise<T> {
-                    // The SHARED auth: every environment's kernel accepts the
-                    // same platform session.
+                    // Each environment's kernel validates the caller, so the
+                    // credential is anchored where the request resolved.
                     if (name === 'auth') {
                         if (opts.noAuthIn?.includes(environmentId)) throw new Error(`no auth service in ${environmentId}`);
                         return {

@@ -2204,9 +2204,10 @@ export class RestServer {
          * environment-membership switch, resolved by the composition root
          * (`rest-api-plugin`) through `resolveEnvironmentMembershipEnforcement`
          * — the reading the runtime dispatcher's plugin makes of the same
-         * `api.enforceProjectMembership` / environment-scoping pair. Absent ⇒
-         * off: the switch is the composition's to state, never this class's to
-         * guess.
+         * `api.enforceProjectMembership` / environment-scoping pair. The
+         * plugin is the one composition, and it always hands in that resolved
+         * value, so every data door of the host judges environment membership
+         * by the host's own switch.
          */
         environmentMembership?: { enforced: boolean },
     ) {
