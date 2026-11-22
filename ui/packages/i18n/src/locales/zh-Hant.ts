@@ -549,6 +549,7 @@ const zhHant = {
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: '儲存中…',
     cellSaved: '已儲存',
+    cellSavedAnnouncement: '已儲存：{{fields}}',
     openRecordToFinish: '開啟記錄完成修改',
   },
   grid: {
@@ -1606,6 +1607,7 @@ const zhHant = {
     updatedTime: '修改時間',
     recordNumber: '記錄編號',
     clickToEdit: '點選編輯',
+    setField: '設定{{field}}',
     // Attachments
     dropFilesToUpload: '拖拽檔案到此處或點選上傳',
     attachmentCount: '{{count}} 個附件',
@@ -2357,6 +2359,14 @@ const zhHant = {
       systemTheme: '系統主題',
       actions: '操作',
       openFullSearch: '開啟完整搜尋頁面',
+      create: '新建',
+      createAs: '新建「{{query}}」為{{object}}',
+      previewEmpty: '選中一條記錄即可檢視詳情。',
+      enterOpenRecord: '開啟記錄',
+      enterCreate: '新建',
+      enterSwitchApp: '切換應用',
+      enterApplyTheme: '應用主題',
+      enterOpen: '開啟',
     },
     ai: {
       pendingDrafts: {
@@ -3519,6 +3529,11 @@ const zhHant = {
     allReports: '全部報表',
     collapse: '收起側邊欄',
     expand: '展開側邊欄',
+  },
+  designMode: {
+    title: '設計模式',
+    leaveUnsaved: '離開設計模式？未儲存的改動將會丟失。',
+    saveFailed: '部分改動沒有儲存：{{reason}}',
   },
   topbar: {
     aiAssistant: 'AI 助手',

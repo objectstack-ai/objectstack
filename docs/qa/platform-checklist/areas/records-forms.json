@@ -3128,6 +3128,121 @@
       ]
     },
     {
+      "id": "records-forms.list-header-menu-and-sort-levels",
+      "title": "A list page's column header opens a menu (Sort ascending, Sort descending, Hide column) instead of sorting, a pick keeps every level of a multi-level sort, and the sort chip's panel reorders the levels by drag or arrow keys",
+      "since": "v18.7",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), signed in through the form"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_task's All Tasks list (examples/app-showcase/src/ui/views/task.view.ts#TaskViews): columns Title, Project, Assignee, Status, Priority, Due Date, Progress, and no declared sort, so the list opens with no sort level",
+          "the 10 seeded tasks (examples/app-showcase/src/data/seed/index.ts), which give every sort below at least two rows to order",
+          "the Project column is a master_detail field (examples/app-showcase/src/data/objects/task.object.ts), which the list does not sort (a relational column is sortable: false in ui/packages/plugin-grid/src/ObjectGrid.tsx#withSortability): it is the non-sortable header",
+          "the English console, so the menu reads Sort ascending / Sort descending / Hide column and the sort panel Sort by / Then by / Add sort"
+        ]
+      },
+      "steps": [
+        "sign in as admin; open showcase_task's All Tasks list at 1440x900; the condition row's Sort is the dashed 「Sort」 button (data-testid condition-sort, data-levels 0); keep the network panel open from here on",
+        "click the Due Date column header's text; read what opens (data-testid column-context-menu, its entries role=menuitem) and whether a data request with a changed `sort` went out; click the same header again",
+        "open the Due Date header's menu again and choose 「Sort descending」; capture the data request and read the header's arrow and the sort chip",
+        "click the sort chip once: it opens every level in one panel (data-testid sort-chip-panel) and changes nothing by itself; choose 「Add sort」, set the new level's field (data-testid sort-builder-field) to Priority and leave its direction A → Z; press Esc and capture the data request; the headers now carry the numbered marks 1 and 2",
+        "with those two levels, open the Title header's menu and choose 「Sort ascending」; capture the request. Then open the Priority header's menu and choose 「Sort descending」; capture the request",
+        "keyboard: Tab to the Status header (a header that opens the menu is a tab stop) and press Enter; read where focus lands; press ArrowDown, then Esc; read the sort and where focus is. Repeat the open with Space and with ArrowDown on the header, and once choose an entry with Enter",
+        "click the Project header: read the menu's entries; choose 「Hide column」 and read the grid and the request's `sort`",
+        "click the sort chip (now 「Sorted by Priority」 with 「+2」) to open the panel; focus the second level's handle (aria-label 「Drag to reorder」, data-testid sort-builder-handle) and press ArrowUp; read the level order, the 「Sort by」 / 「Then by」 labels and which handle has focus; press ArrowUp again on the now-first handle; then drag the third level's handle onto the first row; press Esc and capture the data request after each move",
+        "remove levels with 「Remove sort」 until one is left, and read its handle"
+      ],
+      "acceptance": [
+        {
+          "clause": "a click on a column header opens the column menu below it and changes no sort; a second click on the same header shuts it (objectstack#35876)",
+          "oracle": "network",
+          "verify": "after steps[1]'s first click data-testid column-context-menu is visible with the entries Sort ascending, Sort descending and Hide column, the header carries aria-expanded=true, and no data request carries a `sort` different from the one before the click; after the second click the menu is gone",
+          "evidence": "the menu screenshot and the network log around the click"
+        },
+        {
+          "clause": "the entry chosen in the menu is the sort, ordered by the server: the request carries it and the chip names it",
+          "oracle": "network",
+          "verify": "after steps[2] the data request carries sort=-due_date (the console's `field,-other_field` shorthand, not $orderby) and the rows come back ordered by Due Date, newest first, over at least two rows; the chip reads 「Sorted by Due Date」 (data-levels 1)",
+          "evidence": "the request URL and the row order"
+        },
+        {
+          "clause": "a header pick over a sort of two levels or more keeps every level: the picked column becomes the first level, the others keep their order after it, and a column already in the sort moves up with the picked direction; over no sort or one level the pick replaces the sort",
+          "oracle": "network",
+          "verify": "steps[3] sends sort=-due_date,priority; steps[4]'s Title pick sends sort=title,-due_date,priority (three levels, title first) and its Priority pick sends sort=-priority,title,-due_date (still three levels); steps[2] over no sort sent the one level alone; the headers' numbered marks follow the request's order",
+          "evidence": "the three request URLs and a screenshot of the header marks"
+        },
+        {
+          "clause": "the menu is reachable from the keyboard: Enter, Space or ArrowDown on the focused header opens it with focus on its first entry, the arrows move through it, Enter chooses, and Esc shuts it without touching the sort and gives focus back to the header",
+          "oracle": "dom",
+          "verify": "in steps[5] document.activeElement is the menu's first role=menuitem after each open, the next entry after ArrowDown, and the Status header (th) after Esc; the request's `sort` is unchanged by the Esc",
+          "evidence": "the activeElement read after each key"
+        },
+        {
+          "clause": "a header that does not sort opens a menu with Hide column alone, and Hide column takes the column off the grid without changing the sort",
+          "oracle": "dom",
+          "verify": "in steps[6] the Project menu holds one role=menuitem, Hide column, and no Sort ascending or Sort descending; after it the grid has no th[data-column-key=project] and any request still carries the sort steps[4] left",
+          "evidence": "the menu screenshot and the header row after the hide"
+        },
+        {
+          "clause": "a click on the sort chip opens every level in one panel and never flips a direction",
+          "oracle": "network",
+          "verify": "after the chip click in steps[3] and steps[7] data-testid sort-chip-panel is visible with one data-testid sort-builder-row per level, and no data request with a changed `sort` went out on the click",
+          "evidence": "the panel screenshot and the network log around the click"
+        },
+        {
+          "clause": "the sort panel reorders the levels: ArrowUp / ArrowDown on a focused handle moves its level one place and the handle keeps focus, a drag of a handle onto another row moves the level there, an arrow past either end changes nothing, and the request's sort follows the new order",
+          "oracle": "network",
+          "verify": "in steps[7] ArrowUp on the second handle makes that level the first row (labelled 「Sort by」) and the same handle is document.activeElement; ArrowUp on the first handle leaves the order as it was; the drag puts the third level first; each move's data request lists the levels in the panel's order; in steps[8] the one remaining handle carries aria-disabled=true and tabindex=-1",
+          "evidence": "the panel order and the request URL after each move"
+        },
+        {
+          "clause": "the pins pass at the run subject sha",
+          "oracle": "test",
+          "verify": "from ui/ run with vitest ui/packages/components/src/renderers/complex/__tests__/data-table-header-menu-35876.test.tsx, ui/packages/plugin-list/src/__tests__/ListView.headerMenuSort-35876.test.tsx and ui/packages/components/src/__tests__/sort-builder-reorder-35876.test.tsx, and ui/e2e/list-condition-row-35549.spec.ts with Playwright (Chromium); each reports at least one test and 0 failed",
+          "evidence": "the vitest and Playwright summary lines, with the subject sha"
+        }
+      ],
+      "negative": [
+        "a header click on the list page that sorts, or that sends a request with a changed `sort`, is a FAIL: the header opens the menu and the sort is the entry chosen there",
+        "a header pick that drops a level of a sort of two levels or more is a FAIL",
+        "Sort ascending or Sort descending in the menu of a header that does not sort (Project) is a FAIL",
+        "a sort chip click that reverses a direction is a FAIL: the chip opens the panel",
+        "a reorder that moves the panel's rows but leaves the request's `sort` in the old order is a FAIL"
+      ],
+      "traps": [
+        "hydration-race",
+        "stale-console-bundle"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "ui/packages/components/src/renderers/complex/__tests__/data-table-header-menu-35876.test.tsx (the header opens the menu, the keyboard, a non-sortable header, Hide column, and click-to-sort outside the provider), ui/packages/plugin-list/src/__tests__/ListView.headerMenuSort-35876.test.tsx (the pick over zero, one and two levels, the chip, a handle's ArrowUp and a mouse drag), ui/packages/components/src/__tests__/sort-builder-reorder-35876.test.tsx (the handle, both ends, a drag, a single level), ui/e2e/list-condition-row-35549.spec.ts (a real handle drag in the chip's panel and a header menu pick in Chromium, on a mounted ListView with an in-memory data source, not a live stack); no pin reads the console's data request against a running server"
+      },
+      "source": [
+        "ui/packages/components/src/context/gridHeaderMenu.tsx#GridHeaderMenuProvider",
+        "ui/packages/components/src/renderers/complex/data-table.tsx#openHeaderMenu",
+        "ui/packages/core/src/utils/column-sortability.ts#withHeaderSortPick",
+        "ui/packages/plugin-list/src/ListView.tsx#handleHeaderSort",
+        "ui/packages/components/src/custom/sort-builder.tsx#moveItem",
+        "ui/packages/plugin-list/src/conditions/ListConditionControls.tsx",
+        "#35876",
+        "cross-ref: records-forms.adhoc-filter-sort-builder (building a filter and a sort, the view-filter merge and the draft)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-22",
+          "change": "initial — the column-header menu and the sort-level reorder that #35876 added (PR #35909), read from source at base 4e55e4eb; no live run made",
+          "ref": "#35922"
+        }
+      ]
+    },
+    {
       "id": "records-forms.calendar-interactions",
       "title": "Calendar is interactive: drag reschedules via PATCH, a failing PATCH reverts with an error, mode switches re-render, empty-day click quick-creates",
       "since": "v16",

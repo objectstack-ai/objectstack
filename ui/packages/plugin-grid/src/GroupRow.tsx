@@ -14,7 +14,10 @@ import type { AggregationResult } from './useGroupedData';
 export interface GroupRowProps {
   /** Unique key identifying this group */
   groupKey: string;
-  /** Display label for the group (field value or "(empty)") */
+  /**
+   * Display label for the group: the field value, or for an empty key the
+   * grid's empty-value string `grid.empty` ("Empty" in English).
+   */
   label: string;
   /**
    * The group's size. On a server-grouped grid this is the header query's

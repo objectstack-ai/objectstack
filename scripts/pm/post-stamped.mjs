@@ -483,6 +483,15 @@
  * analysis that check could never find is not written. `decisionFacetRefusals`' banner carries the predicate, the
  * measurement it was chosen on, and what it cannot see. `--comment` only.
  *
+ * ## A claim goes out with its labels, never alone
+ *
+ * A comment whose first keyed line (after the signature) is `Claim:` is `EXIT_REFUSED` with zero writes, and the
+ * refusal prints the `label-write.mjs --comment-file … --add pm:dispatched --remove pm:queue --assign LOGIN` stroke
+ * that folds the same comment — judged by `judgeBody`, unchanged — with the labels and assignee. Measured: claims
+ * posted here as lone comments left their cards `pm:queue` and unassigned until triage knocked. Judged after the route
+ * is resolved, on one arm: on a route resolved `direct` the fold does not exist (it is relay-only) and the claim stays
+ * this tool's write, said on stderr. `claimStrokeRefusal` carries why it is not in `judgeBody`. `--comment` only.
+ *
  * ## ⚖️ Why this ACTS by default, where `sweep-closed-cards.mjs` dry-runs
  *
  * Its sibling next door defaults to a dry run and needs `--write`, because it
@@ -2055,6 +2064,61 @@ export function keyedLineRefusalText(rows) {
     '  `containerModelRefusal` (`dispatch-gates.mjs`) are imported HERE, so this IS the row they would file — hours earlier,\n' +
     '  and on your own claim rather than on someone else\'s post. ⛔ No flag turns it off: a line those readers cannot read\n' +
     '  is a half-state, not a formatting preference.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// A claim is ONE stroke with its labels and assignee — a lone `Claim:` comment is refused before the write
+// ---------------------------------------------------------------------------
+
+/**
+ * The claim this comment OPENS with — its first keyed line, read after one leading signature line
+ * (`stripSignatureLine`) through the patrol's own marker (`CLAIM_COMMENT_MARKER` by `markerMatches`, so a decorated
+ * `> Claim:` is a claim here exactly as it is to H2) — or null. Only the opening line: a round report or a seat post
+ * that quotes a `Claim:` further down is not a claim being made, and stays this tool's write. Pure.
+ */
+export function openingClaimLine(body) {
+  const first = stripSignatureLine(body)
+    .split(/\r?\n/)
+    .find((line) => line.trim() !== '');
+  return first !== undefined && markerMatches(CLAIM_COMMENT_MARKER, first) ? first.trim() : null;
+}
+
+/**
+ * Why this comment must not go out alone, or null. A claim sent here lands while the card's labels and assignee do
+ * not move: the card stays `pm:queue`, unassigned, readable as free, until a sweep or a triage knock notices — the
+ * half-state the one-stroke rule exists to prevent. `label-write.mjs --comment-file` folds the same comment, judged by
+ * this file's own `judgeBody`, into the stroke that moves the labels, comment first.
+ *
+ * ⛔ Deliberately NOT in `judgeBody`: that is the path `label-write` folds through, and the fold is the remedy. And
+ * route-aware, on one arm only: the fold is RELAY-ONLY (`label-write.mjs` header), so on a route resolved `direct`
+ * — the one place it does not exist — the claim stays this tool's write and `main` says so. Any other route, an
+ * undecidable one included (it cannot prove the fold absent), is refused. `--comment` only. Pure.
+ *
+ * @param {string} body — the rendered bytes this act would send.
+ * @param {{ mode: string, route: { transport?: string|null, error?: string|null } | null }} ctx
+ * @returns {{ line: string, transport: string|null } | null}
+ */
+export function claimStrokeRefusal(body, { mode, route } = {}) {
+  if (mode !== 'comment') return null;
+  const line = openingClaimLine(body);
+  if (line === null) return null;
+  if (route && !route.error && route.transport === 'direct') return null;
+  return { line, transport: route && !route.error ? route.transport ?? null : null };
+}
+
+/** The refusal a caller reads, naming the stroke that carries the same comment. */
+export function claimStrokeRefusalText(refusal, { number = 'N', file = null } = {}) {
+  const transport = refusal.transport ? `the route resolved \`${refusal.transport}\`` : 'the route could not be decided, so the fold cannot be ruled out';
+  return (
+    'post-stamped: REFUSED — this comment opens with a `Claim:` line, and a claim is ONE stroke with its labels and ' +
+    'assignee. Nothing was written.\n' +
+    `  line:  ${offendingSpan(refusal.line, 160)}\n` +
+    '  Sent alone, the claim lands and the card stays `pm:queue` with no assignee — readable as free — until someone\n' +
+    '  notices. Fold it into the label write, comment first, in one relay stroke:\n' +
+    `    node scripts/pm/label-write.mjs --issue ${number} --comment-file ${file ?? 'PATH'} --add pm:dispatched --remove pm:queue --assign LOGIN\n` +
+    '  The comment is judged there by this file\'s own `judgeBody`, so nothing about the body changes.\n' +
+    `  (${transport}; \`--comment-file\` is relay-only, and only on a route resolved \`direct\` does this tool post a claim.)`
   );
 }
 
@@ -3976,6 +4040,10 @@ const USAGE = [
   '  A mailbox comment whose `To:` is a triage seat and whose key is `Request: contract-review` is REFUSED, whether',
   '  or not the key line spells its template: a lane without the review tier knocks an L2 seat, then a sibling',
   '  seat with the tier — never triage.',
+  '  A comment whose first line after the signature opens `Claim:` is REFUSED: a claim is ONE stroke with its',
+  '  labels and assignee — `label-write.mjs --issue N --comment-file PATH --add pm:dispatched --remove pm:queue',
+  '  --assign LOGIN` folds the same comment. Only on a route resolved `direct`, where that fold does not exist, is',
+  '  the claim written here, with a note on stderr.',
   '  The attribution footer is the caller\'s: its form differs by channel and act, so this tool adds none.',
   '',
   `  Exit: 0 written and stored · ${EXIT_USAGE} usage · ${EXIT_REFUSED} refused, nothing written ·`,
@@ -4035,6 +4103,17 @@ async function main(argv) {
     return EXIT_PREREQUISITE_NOT_MET;
   }
   console.error(route.error ? `post-stamped: transport undecidable on a live run — ${route.error}` : `post-stamped: transport ${route.transport} — ${route.reason}`);
+
+  // A claim is one stroke with its labels (`claimStrokeRefusal`): judged HERE, after the route, ⛔ never in `judgeBody`,
+  // which is the path the remedy — `label-write.mjs --comment-file` — folds the same comment through.
+  const loneClaim = claimStrokeRefusal(rendered.body, { mode: options.mode, route });
+  if (loneClaim !== null) {
+    console.error(claimStrokeRefusalText(loneClaim, { number: options.number, file: options.file }));
+    return EXIT_REFUSED;
+  }
+  if (options.mode === 'comment' && openingClaimLine(rendered.body) !== null) {
+    console.error('post-stamped: a `Claim:` comment on a route resolved `direct` — `label-write.mjs --comment-file` is relay-only, so this write is the claim alone; move the labels and assignee with `label-write.mjs` right after it.');
+  }
 
   if (options.dryRun) {
     console.error(
@@ -4219,8 +4298,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the one judge: every body refusal on ONE path — `main` and `label-write.mjs --comment-file` call `judgeBody`, never a copy': 8,
   'the review route: a `Request: contract-review` knock addressed to triage is refused; to a review or sibling seat, and every other key to triage, it passes': 10,
   'the record tier: a record naming `CONTRACT_REVIEW_TIER` is written only on a transcript `verify-review-tier.mjs` passes; another tier and a non-record comment are untouched': 16,
+  'the claim stroke: a comment opening `Claim:` is refused on every route but `direct`, pointing at the `label-write` fold; the same body through that fold passes': 15,
 });
-const SELF_TEST_BATTERY_FLOOR = 29;
+const SELF_TEST_BATTERY_FLOOR = 30;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 let selfTestReachedVerdict = false;
@@ -5756,6 +5836,48 @@ export function selfTest() {
     let lw = '';
     try { lw = readFileSync(new URL('./label-write.mjs', import.meta.url), 'utf8'); } catch { lw = ''; }
     t('↔ structural: label-write imports judgeBody and judges its folded comment with it, ⛔ no reader of its own', /\bjudgeBody\b[^;]*from '\.\/post-stamped\.mjs'/u.test(lw) && /judgeBody\(text, \{ mode: 'comment', tierEvidence: options\.tierEvidence \}/u.test(lw) && !/function\s+(signatureRefusal|claimKeyedLineRefusals|decisionFacetRefusals)\b/u.test(lw));
+  }
+
+  // ── the claim stroke: a claim goes out with its labels, never alone ──────────
+  battery('the claim stroke: a comment opening `Claim:` is refused on every route but `direct`, pointing at the `label-write` fold; the same body through that fold passes');
+  {
+    const SIG = 'domain:skills#2 · os-justin · session_01QSeKYmhU5KEj1nukYhp1Tg';
+    const CLAIM = `${SIG}\nClaim: PM loop round 1 · {{NOW}}\nSession: \`session_x\`\nBranch: \`claude/issue-7-fold\`\nSeat: \`domain:skills#2\`\n`;
+    const RELAY = { transport: 'dispatch', error: null };
+    const DIRECT = { transport: 'direct', error: null };
+    const UNDECIDED = { transport: null, error: 'no session' };
+    t('the opening claim is read under one signature line, and without one', openingClaimLine(CLAIM)?.startsWith('Claim: PM loop round 1') === true && openingClaimLine('Claim: x') === 'Claim: x');
+    t('…a decorated `> Claim:` is a claim here exactly as the patrol reads it', openingClaimLine(`${SIG}\n> Claim: x`) === '> Claim: x');
+    t('⛔ control: a `Claim:` QUOTED further down a round report is not a claim being made', openingClaimLine(`${SIG}\nRound report\n\nClaim: x. Seat: domain:skills#2 taken.`) === null && openingClaimLine(`${SIG}\nRelease: x`) === null);
+    t('⭐ a claim on the relay route is refused, naming its line and the route', claimStrokeRefusal(CLAIM, { mode: 'comment', route: RELAY })?.transport === 'dispatch' && claimStrokeRefusal(CLAIM, { mode: 'comment', route: RELAY }).line.startsWith('Claim:'));
+    t('…and on an UNDECIDABLE route too — it cannot prove the fold absent', claimStrokeRefusal(CLAIM, { mode: 'comment', route: UNDECIDED })?.transport === null && claimStrokeRefusal(CLAIM, { mode: 'comment', route: null }) !== null);
+    t('⛔ control: on a route resolved `direct` — where the relay-only fold does not exist — the claim stays this tool\'s write', claimStrokeRefusal(CLAIM, { mode: 'comment', route: DIRECT }) === null);
+    t('⛔ control: a card BODY opening `Claim:` and a comment that is no claim pass on the relay route', claimStrokeRefusal(CLAIM, { mode: 'body', route: RELAY }) === null && claimStrokeRefusal(`${SIG}\nRound report {{NOW}}`, { mode: 'comment', route: RELAY }) === null);
+    const text = claimStrokeRefusalText(claimStrokeRefusal(CLAIM, { mode: 'comment', route: RELAY }), { number: 36203, file: 'claim.md' });
+    t('⭐ the refusal prints the ONE stroke that folds it — the card, the file, the labels and the assignee — and says nothing was written', ['label-write.mjs --issue 36203 --comment-file claim.md --add pm:dispatched --remove pm:queue --assign LOGIN', 'Nothing was written', 'ONE stroke with its labels'].every((x) => text.includes(x)));
+    t('…and placeholders where the caller gave none', claimStrokeRefusalText({ line: 'Claim: x', transport: null }).includes('--issue N --comment-file PATH'));
+    const folded = judgeBody(CLAIM, { mode: 'comment' }, NOW_MS, 'label-write');
+    t('⭐ control: the SAME claim through `judgeBody` — the path `label-write --comment-file` folds it through — passes, rendered', folded.ok && folded.rendered.body.includes('Claim: PM loop round 1 · 2026-09-10T06:37Z'));
+    const dir = mkdtempSync(join(tmpdir(), 'post-stamped-claim-'));
+    try {
+      const run = (transport, body) => {
+        writeFileSync(join(dir, 'b.md'), body, 'utf8');
+        return spawnSync(process.execPath, [SELF_PATH, '--dry-run', '--comment=7', '--repo=o/r', `--file=${join(dir, 'b.md')}`], { encoding: 'utf8', env: { ...process.env, HTTPS_PROXY: '', https_proxy: '', GITHUB_TOKEN: '', GH_TOKEN: '', OS_FLEET_TRANSPORT: transport, OS_FLEET_SESSION: '', CLAUDE_CODE_REMOTE_SESSION_ID: '' } });
+      };
+      const refused = run('dispatch', CLAIM);
+      t('⭐ the CLI refuses the claim on a dry run off the direct route: exit 2, the stroke on stderr, nothing on stdout', refused.status === EXIT_REFUSED && refused.stderr.includes('--comment-file') && refused.stderr.includes('--issue 7') && refused.stdout === '');
+      const direct = run('direct', CLAIM);
+      t('⛔ control: the same claim on the direct route renders (exit 0) and says the labels follow as a second write', direct.status === EXIT_OK && direct.stdout.includes('Claim: PM loop round 1') && direct.stderr.includes('relay-only'));
+      const other = run('dispatch', `${SIG}\nRound report {{NOW}}\n`);
+      t('⛔ control: a signed comment that is no claim, on the same undecidable route, renders (exit 0) — the refusal keys on the claim', other.status === EXIT_OK && !other.stderr.includes('--comment-file'));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+    const own = readFileSync(SELF_PATH, 'utf8');
+    const mainOnly = own.slice(own.indexOf('async function main(argv)'), own.indexOf('// --self-test — offline'));
+    const judgeOnly = own.slice(own.indexOf('export function judgeBody('), own.indexOf('const USAGE = ['));
+    t('structural: main judges the claim after the route is resolved and before the dry-run exit; `judgeBody` never does', mainOnly.indexOf('claimStrokeRefusal(rendered.body') > mainOnly.indexOf('await resolveRoute(') && mainOnly.indexOf('claimStrokeRefusal(rendered.body') < mainOnly.indexOf('if (options.dryRun)') && !judgeOnly.includes('claimStrokeRefusal'));
+    t('the usage says it, with the stroke', USAGE.includes('opens `Claim:` is REFUSED') && USAGE.includes('--comment-file PATH --add pm:dispatched --remove pm:queue'));
   }
 
   battery('the review route: a `Request: contract-review` knock addressed to triage is refused; to a review or sibling seat, and every other key to triage, it passes');

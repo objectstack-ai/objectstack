@@ -89,6 +89,8 @@ let lockStatus = 200;
 let lockReads: string[][] = [];
 /** How long the lock read and the explain read take, in ms; 0 answers at once. */
 let lockDelay = 0;
+/** While set, a lock read answers only once it settles (objectstack#35689). */
+let lockGate: Promise<void> | null = null;
 let explainDelay = 0;
 let explainReads = 0;
 /** The rows the explain engine refuses `update` on. */
@@ -105,6 +107,7 @@ beforeEach(() => {
   lockStatus = 200;
   lockReads = [];
   lockDelay = 0;
+  lockGate = null;
   explainDelay = 0;
   explainReads = 0;
   refusedIds = new Set();
@@ -115,6 +118,7 @@ beforeEach(() => {
     const ids: string[] = Array.isArray(body.recordIds) ? body.recordIds : [];
     if (href.endsWith(LOCKS_URL)) {
       lockReads.push(ids);
+      if (lockGate) await lockGate;
       return after(lockDelay, {
         ok: lockStatus < 300,
         status: lockStatus,
@@ -228,6 +232,41 @@ describe('ObjectGrid cellSelection — why a cell opens no editor', () => {
     fireEvent.doubleClick(g.cell(1, 0));
     await waitFor(() => expect(g.container.querySelector('td[data-editing-cell]')).not.toBeNull());
     expect(lockReads).toEqual([['3', '1', '2']]);
+  });
+});
+
+describe('ObjectGrid cellSelection — the selected cell says a lock that answers after it was selected (objectstack#35689)', () => {
+  const catcher = (g: { container: HTMLElement }) => g.container.querySelector('[data-slot="cell-type-catcher"]');
+  function holdLockRead(): () => void {
+    let answer!: () => void;
+    lockGate = new Promise<void>((resolve) => { answer = resolve; });
+    return answer;
+  }
+
+  it('a row the service says is locked turns aria-readonly on where the selection is', async () => {
+    lockedIds = new Set(['3']);
+    const answer = holdLockRead();
+    const g = await renderGrid();
+    // Gamma has no approval_status: editable until the service answers.
+    fireEvent.click(g.cell(2, 0));
+    await waitFor(() => expect(lockReads).toEqual([['3', '1', '2']]));
+    expect(g.cell(2, 0)).not.toHaveAttribute('aria-readonly');
+    answer();
+    await waitFor(() => expect(g.cell(2, 0)).toHaveAttribute('aria-readonly', 'true'));
+    expect(catcher(g)).toHaveAttribute('aria-readonly', 'true');
+    expect(g.cell(2, 0)).toHaveAttribute('data-selected-cell');
+  });
+
+  it("a row whose approval_status stands in as locked turns it off when the service says it is not", async () => {
+    const answer = holdLockRead();
+    const g = await renderGrid();
+    fireEvent.click(g.cell(1, 0));
+    await waitFor(() => expect(lockReads).toEqual([['2', '1', '3']]));
+    expect(g.cell(1, 0)).toHaveAttribute('aria-readonly', 'true');
+    answer();
+    await waitFor(() => expect(g.cell(1, 0)).not.toHaveAttribute('aria-readonly'));
+    expect(catcher(g)).not.toHaveAttribute('aria-readonly');
+    expect(g.cell(1, 0)).toHaveAttribute('data-selected-cell');
   });
 });
 

@@ -548,6 +548,7 @@ const es = {
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "Guardando…",
     cellSaved: "Guardado",
+    cellSavedAnnouncement: "Guardado: {{fields}}",
     openRecordToFinish: "Abre el registro para completar el cambio",
   },
   grid: {
@@ -1713,6 +1714,7 @@ const es = {
     updatedTime: "Fecha de modificación",
     recordNumber: "ID del registro",
     clickToEdit: "Haga clic para editar",
+    setField: "Establecer {{field}}",
     // objectui#3863 — base key, answering only a call made without a count. es's
     // `many` (exact millions) has its own slot since objectui#11432; it repeats
     // `_other` here because the count governs no noun complement.
@@ -2688,6 +2690,14 @@ const es = {
       systemTheme: "Tema del sistema",
       actions: "Acciones",
       openFullSearch: "Abrir página de búsqueda completa",
+      create: "Crear",
+      createAs: "Crear «{{query}}» como {{object}}",
+      previewEmpty: "Selecciona un registro para ver sus detalles.",
+      enterOpenRecord: "Abrir registro",
+      enterCreate: "Crear",
+      enterSwitchApp: "Cambiar aplicación",
+      enterApplyTheme: "Aplicar tema",
+      enterOpen: "Abrir",
       searching: "Buscando…",
       records: "Registros",
       recentRecords: "Visto recientemente",
@@ -3518,6 +3528,11 @@ const es = {
     allReports: "Todos los informes",
     collapse: 'Contraer la barra lateral',
     expand: 'Expandir la barra lateral',
+  },
+  designMode: {
+    title: 'Modo de diseño',
+    leaveUnsaved: '¿Salir del modo de diseño? Se perderán los cambios no guardados.',
+    saveFailed: 'Algunos cambios no se guardaron: {{reason}}',
   },
   topbar: {
     openAssistant: "Abrir el asistente {{name}}",

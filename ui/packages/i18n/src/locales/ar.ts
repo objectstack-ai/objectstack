@@ -570,6 +570,7 @@ const ar = {
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "جارٍ الحفظ…",
     cellSaved: "تم الحفظ",
+    cellSavedAnnouncement: "تم الحفظ: {{fields}}",
     openRecordToFinish: "افتح السجل لإكمال التغيير",
   },
   grid: {
@@ -1441,6 +1442,7 @@ const ar = {
     updatedTime: "تاريخ التعديل",
     recordNumber: "معرّف السجل",
     clickToEdit: "انقر للتحرير",
+    setField: "تعيين {{field}}",
     back: "رجوع",
     edit: "تحرير",
     editInline: "تحرير",
@@ -2902,6 +2904,14 @@ const ar = {
       systemTheme: "مظهر النظام",
       actions: "الإجراءات",
       openFullSearch: "فتح صفحة البحث الكاملة",
+      create: "إنشاء",
+      createAs: "إنشاء «{{query}}» كـ {{object}}",
+      previewEmpty: "اختر سجلاً لعرض تفاصيله.",
+      enterOpenRecord: "فتح السجل",
+      enterCreate: "إنشاء",
+      enterSwitchApp: "تبديل التطبيق",
+      enterApplyTheme: "تطبيق المظهر",
+      enterOpen: "فتح",
       searching: "جارٍ البحث…",
       records: "السجلات",
       recentRecords: "شوهد مؤخراً",
@@ -3753,6 +3763,11 @@ const ar = {
     allReports: "كل التقارير",
     collapse: 'طي الشريط الجانبي',
     expand: 'توسيع الشريط الجانبي',
+  },
+  designMode: {
+    title: 'وضع التصميم',
+    leaveUnsaved: 'هل تريد مغادرة وضع التصميم؟ ستفقد التغييرات غير المحفوظة.',
+    saveFailed: 'لم يتم حفظ بعض التغييرات: {{reason}}',
   },
   topbar: {
     openAssistant: "فتح مساعد {{name}}",

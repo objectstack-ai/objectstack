@@ -71,12 +71,13 @@ export const RecordTimelineTotalContext = React.createContext<number | null>(nul
 export const RecordTimelineCountContext = React.createContext<((count: number | null) => void) | null>(null);
 
 /**
- * Whether the record's comments live in its comment panel (objectstack#36075):
- * the host draws the panel beside the default record page, so the page's 动态
- * stream — its tab and its peek — draws the system entries alone: no comment,
- * no composer, no filter chips, and its count names those entries only.
- * `false` (the phone, an authored page, no host saying): the stream carries
- * the discussion as before.
+ * Whether the record's comments live outside its 动态 stream: in its comment
+ * panel (objectstack#36075), which the host draws beside the default record
+ * page, or on the full page, for a record the host draws in a side preview
+ * (objectstack#36225). The page's 动态 stream — its tab and its peek — then
+ * draws the system entries alone: no comment, no composer, no filter chips,
+ * and its count names those entries only. `false` (an authored page, no host
+ * saying): the stream carries the discussion as before.
  */
 export const RecordCommentsInPanelContext = React.createContext(false);
 
