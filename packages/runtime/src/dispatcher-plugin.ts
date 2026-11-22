@@ -23,6 +23,7 @@ import { resolveSessionData, resolveSessionPrincipalId } from './security/resolv
 import { sessionAdmittedPrincipal } from './security/admitting-credential.js';
 import { buildActorUser } from './security/actor-user.js';
 import { resolveKernelCache } from './security/kernel-cache.js';
+import { readTrustProxy, type ClientAddressTrust } from '@objectstack/plugin-auth/client-address';
 import {
     NoopMetricsRegistry,
     NoopErrorReporter,
@@ -150,8 +151,12 @@ export interface DispatcherPluginConfig {
     rateLimit?: {
         /** The authored `server.security.rateLimit` budget. */
         budget?: InboundRateLimitBudget;
-        /** The authored `server.trustProxy`. */
-        trustProxy?: boolean;
+        /**
+         * The authored `server.trustProxy`, either form, read once by
+         * `readTrustProxy` when the plugin is created: a malformed
+         * trusted-network form fails the boot instead of trusting nobody.
+         */
+        trustProxy?: ClientAddressTrust;
     };
 }
 
@@ -885,6 +890,9 @@ function errorResponseBase(
  * ```
  */
 export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plugin {
+    // One reading of `server.trustProxy` for both limiters below, so the
+    // trusted-network form reaches each of them as authored.
+    const trustProxy = readTrustProxy(config.rateLimit?.trustProxy);
     return {
         name: 'com.objectstack.runtime.dispatcher',
         version: '1.0.0',
@@ -913,7 +921,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             // (see `HonoHttpServer.installMiddlewareSeam`).
             const rateLimitMiddleware = createInboundRateLimitMiddleware({
                 ...(config.rateLimit?.budget ? { budget: config.rateLimit.budget } : {}),
-                trustProxy: config.rateLimit?.trustProxy === true,
+                trustProxy,
                 // The read goes through the request's session-read carrier, with
                 // the engine the auth service reads through: the route's own
                 // identity step is answered by this read, so a request reads
@@ -941,7 +949,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                         // `key: ***REDACTED***` tells an operator nothing about
                         // what the limit is actually keyed on.
                         keyedBy: 'principal, falling back to caller IP',
-                        trustProxy: config.rateLimit?.trustProxy === true,
+                        trustProxy,
                     });
                 } else {
                     // Absence must be loud (route-ownership rule 3): a stack
@@ -2576,7 +2584,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                                 // same declaration the server-level limiter reads.
                                 // A second trust switch is a second answer to
                                 // "may I believe X-Forwarded-For".
-                                trustProxy: config.rateLimit?.trustProxy === true,
+                                trustProxy,
                                 logger: ctx.logger,
                             },
                             execution: {
