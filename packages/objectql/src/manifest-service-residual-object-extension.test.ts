@@ -99,10 +99,10 @@ afterEach(async () => {
   while (kernels.length > 0) await kernels.pop()!.shutdown().catch(() => {});
 });
 
-const composed = (residual: Record<string, unknown>, otherExtra: Record<string, unknown> = {}) =>
+const composed = (residual: Record<string, unknown>, otherExtra: Record<string, unknown> = {}, ownerObject: Record<string, unknown> = account()) =>
   composeStacks(
     [
-      defineStack({ manifest: owner, objects: [account()] }),
+      defineStack({ manifest: owner, objects: [ownerObject as ReturnType<typeof account>] }),
       defineStack({ manifest: other, objects: [otherObj()], ...otherExtra }),
       defineStack(residual),
     ],
@@ -128,6 +128,19 @@ describe('a residual objectExtensions entry registers under the residual\'s id',
     const asResidual = await boot(payload(composed({ objectExtensions: [entry] })));
     const served = (ql: ObjectQL) => strip(ql.registry.getObject('probe_account'));
     expect(fieldsOf(asResidual.ql, 'probe_account'), 'anti-vacuity').toContain('parity_note');
+    expect(served(asResidual.ql)).toEqual(served(asBody.ql));
+  });
+
+  it('carries the entry\'s place as a body\'s entry does (one reading of an entry for both)', async () => {
+    const grouped = { ...account(), fieldGroups: [{ key: 'basic', label: 'Basic' }] };
+    const placed = { ...extension('placed_note'), place: [{ field: 'placed_note', group: 'basic' }] };
+    const strip = (value: unknown): unknown => JSON.parse(JSON.stringify(value), (key, v) => (key.startsWith('_') ? undefined : v));
+    const served = (ql: ObjectQL) => strip(ql.registry.getObject('probe_account'));
+    const asBody = await boot(payload(composed({ pages: [{ name: 'probe_home', label: 'Home', type: 'app', regions: [] }] }, { objectExtensions: [placed] }, grouped)));
+    const asResidual = await boot(payload(composed({ objectExtensions: [placed] }, {}, grouped)));
+    const unplaced = await boot(payload(composed({ objectExtensions: [extension('placed_note')] }, {}, grouped)));
+    expect(fieldsOf(asResidual.ql, 'probe_account'), 'anti-vacuity').toContain('placed_note');
+    expect(served(asResidual.ql), 'anti-vacuity: the placement changes what is served').not.toEqual(served(unplaced.ql));
     expect(served(asResidual.ql)).toEqual(served(asBody.ql));
   });
 
