@@ -53,6 +53,7 @@ import {
   type BranchGuard,
   type ConditionContext,
   type ConditionField,
+  type FlowSubjects,
 } from './flow-branches';
 
 // ---------------------------------------------------------------------------
@@ -403,7 +404,7 @@ const TECHNICAL_NODE_TYPES = new Set([
  * and options from the flow's object as served, amounts in the reader's
  * locale and, for a currency field, its currency.
  */
-function useConditionContext(object: any, subjects: ReturnType<typeof flowSubjects>): ConditionContext {
+function useConditionContext(object: any, subjects: FlowSubjects): ConditionContext {
   const { t } = useObjectTranslation();
   const locale = useDisplayLocale();
   const { currency: tenantCurrency } = useLocalization();
@@ -438,6 +439,23 @@ function useConditionContext(object: any, subjects: ReturnType<typeof flowSubjec
   };
 }
 
+/** The business view's condition reader, provided by {@link FlowConditions}. */
+const ConditionScope = React.createContext<ConditionContext | null>(null);
+
+/**
+ * Reads the object the flow runs on (one request per embed) and provides the
+ * condition reader to the branches below it. Mounted once the flow is known,
+ * so its object request starts in the loading state rather than drawing the
+ * conditions unread for a render.
+ */
+function FlowConditions({ flow, fallback, children }: { flow: unknown; fallback: React.ReactNode; children: React.ReactNode }) {
+  const subjects = flowSubjects(flow);
+  const subject = useMetadataItem('object', subjects.object ?? null);
+  const ctx = useConditionContext(subject.item, subjects);
+  if (subject.loading) return <>{fallback}</>;
+  return <ConditionScope.Provider value={ctx}>{children}</ConditionScope.Provider>;
+}
+
 /** A branch's condition as text, or the neutral marker when it cannot be read; never the raw expression. */
 function ConditionText({ guard, ctx }: { guard: BranchGuard; ctx: ConditionContext }) {
   const { t } = useObjectTranslation();
@@ -465,10 +483,11 @@ function ConditionText({ guard, ctx }: { guard: BranchGuard; ctx: ConditionConte
 }
 
 /** The flow's entry condition, once, above its steps. */
-function EntryCondition({ flow, ctx }: { flow: unknown; ctx: ConditionContext }) {
+function EntryCondition({ flow }: { flow: unknown }) {
   const { t } = useObjectTranslation();
+  const ctx = React.useContext(ConditionScope);
   const guard = entryGuard(flow);
-  if (guard.kind === 'none') return null;
+  if (!ctx || guard.kind === 'none') return null;
   return (
     <div data-flow-entry className="mb-2 text-xs text-muted-foreground">
       {withChips(t('element.metadataViewer.runsWhen', { defaultValue: 'Runs when {{condition}}', condition: CHIP[0] }), [
@@ -479,9 +498,10 @@ function EntryCondition({ flow, ctx }: { flow: unknown; ctx: ConditionContext })
 }
 
 /** A decision's branches: each condition (or the neutral marker) and the step it leads to. */
-function Branches({ flow, node, nodes, ctx }: { flow: unknown; node: any; nodes: any[]; ctx: ConditionContext }) {
+function Branches({ flow, node, nodes }: { flow: unknown; node: any; nodes: any[] }) {
+  const ctx = React.useContext(ConditionScope);
   const branches = decisionBranches(flow, node);
-  if (branches.length === 0) return null;
+  if (!ctx || branches.length === 0) return null;
   return (
     <ul data-flow-branches={node.id} className="w-full space-y-1 pl-7 text-xs">
       {branches.map((b) => {
@@ -502,14 +522,9 @@ function FlowView({ name, detail }: ViewerProps) {
   const { item: flow, loading, error } = useMetadataItem('flow', name ?? null);
   const { t, ...view } = useViewStates();
   const business = (detail ?? 'business') === 'business';
-  // The business view reads its conditions' field labels and currency from
-  // the one object the flow runs on: a second request, made once per embed.
-  const subjects = flowSubjects(flow);
-  const subject = useMetadataItem('object', business ? (subjects.object ?? null) : null);
-  const conditions = useConditionContext(subject.item, subjects);
 
   if (!name) return view.missing('name');
-  if (loading || subject.loading) return view.loading(name);
+  if (loading) return view.loading(name);
   if (error) return view.failed(name, error.message);
   if (!flow) return view.notFound(name);
 
@@ -517,7 +532,7 @@ function FlowView({ name, detail }: ViewerProps) {
   const nodes = business ? allNodes.filter((n) => !TECHNICAL_NODE_TYPES.has(n?.type)) : allNodes;
   const hiddenCount = allNodes.length - nodes.length;
 
-  return (
+  const card = (
     <Shell
       hint={t('element.metadataViewer.flow', { defaultValue: 'Flow' })}
       icon={GitBranch}
@@ -527,7 +542,7 @@ function FlowView({ name, detail }: ViewerProps) {
         t('element.metadataViewer.steps', { defaultValue: 'Steps: {{count}}', count: allNodes.length })
       }
     >
-      {business && <EntryCondition flow={flow} ctx={conditions} />}
+      {business && <EntryCondition flow={flow} />}
       {nodes.length === 0 ? (
         <Placeholder>{t('element.metadataViewer.noSteps', { defaultValue: 'No steps to show.' })}</Placeholder>
       ) : (
@@ -545,7 +560,7 @@ function FlowView({ name, detail }: ViewerProps) {
                   {n.type}
                 </span>
               )}
-              {business && <Branches flow={flow} node={n} nodes={allNodes} ctx={conditions} />}
+              {business && <Branches flow={flow} node={n} nodes={allNodes} />}
             </li>
           ))}
         </ol>
@@ -563,6 +578,13 @@ function FlowView({ name, detail }: ViewerProps) {
         </div>
       )}
     </Shell>
+  );
+  return business ? (
+    <FlowConditions flow={flow} fallback={view.loading(name)}>
+      {card}
+    </FlowConditions>
+  ) : (
+    card
   );
 }
 
