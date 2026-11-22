@@ -69,8 +69,14 @@ describe('a run: no variable key writes outside the run scope object', () => {
         expect(inherited('x')).toBeUndefined();
     });
 
-    it('a record key naming the prototype chain through a constructor segment leaves a fresh object unchanged', async () => {
-        const result = await runWith({ record: { name: 'a', 'constructor.prototype.cskProbeA': true } }, "name == 'a'");
+    it('a key with a constructor or prototype segment stays inside the run scope, a walk into a held value included', async () => {
+        const record = {
+            name: 'a',
+            'constructor.prototype.cskProbeA': true,
+            'record.constructor.prototype.cskProbeA': true,
+            'name_holder.prototype.cskProbeA': true,
+        };
+        const result = await runWith({ record }, "name == 'a'");
         expect(result.success, JSON.stringify(result)).toBe(true);
         expect(inherited('cskProbeA')).toBeUndefined();
     });
@@ -89,17 +95,18 @@ describe('a run: no variable key writes outside the run scope object', () => {
     });
 });
 
-describe('a record field named by a skipped segment', () => {
-    it('is still read through the record it came from', async () => {
+describe('constructor and prototype stay ordinary keys', () => {
+    it('a variable or output key of either name still binds, and a condition reads it', () => {
+        const engine = makeEngine();
+        const variables = new Map<string, unknown>([['prototype', 'p1'], ['step.prototype', 'p2'], ['step.result', 1]]);
+        expect((engine as any).evaluateCondition("vars['prototype'] == 'p1' && step.prototype == 'p2' && step.result == 1", variables)).toBe(true);
+        expect((engine as any).evaluateCondition("constructor == 'c1'", new Map<string, unknown>([['constructor', 'c1']]))).toBe(true);
+    });
+
+    it('a record field named prototype is still read through the record it came from', async () => {
         const result = await runWith({ record: { name: 'a', prototype: 'p1' } }, "record.prototype == 'p1'", 'record.prototype');
         expect(result.success, JSON.stringify(result)).toBe(true);
         expect((result.output as { v?: unknown }).v).toBe('p1');
-    });
-
-    it('a constructor key no longer stops the reads of its siblings', () => {
-        const engine = makeEngine();
-        const variables = new Map<string, unknown>([['constructor', 'c1'], ['name', 'a'], ['step.constructor', 'c1'], ['step.result', 1]]);
-        expect((engine as any).evaluateCondition("vars.name == 'a' && step.result == 1", variables)).toBe(true);
     });
 });
 
@@ -137,16 +144,16 @@ describe('the CEL scope builder', () => {
         expect((engine as any).evaluateCondition("vars['$error'].message == 'm'", variables)).toBe(true);
     });
 
-    it('a reader of a skipped key faults loudly, never reading a value', () => {
+    it('a skipped key leaves its siblings readable', () => {
         const engine = makeEngine();
-        const variables = new Map<string, unknown>([['step.constructor', 1], ['step.result', 5]]);
-        expect(() => (engine as any).evaluateCondition('step.constructor == 1', variables)).toThrow(/condition/);
+        const variables = new Map<string, unknown>([['step.__proto__', { result: 9 }], ['step.result', 5], ['__proto__', { name: 'x' }], ['name', 'a']]);
+        expect((engine as any).evaluateCondition("step.result == 5 && name == 'a' && vars.name == 'a'", variables)).toBe(true);
     });
 });
 
 describe('the text-hole scope builder', () => {
     it('creates every container without a prototype and binds nothing for a key with a skipped segment', () => {
-        const keys = ['__proto__', '__proto__.cskProbeE', 'n1.__proto__', 'n1.__proto__.cskProbeE', 'constructor', 'n1.prototype'];
+        const keys = ['__proto__', '__proto__.cskProbeE', 'n1.__proto__', 'n1.__proto__.cskProbeE'];
         const scope = textTemplateScope(new Map<string, unknown>([['n1.result', 'ok'], ...keys.map((k) => [k, { cskProbeE: true }] as [string, unknown])]));
         expect(Object.getPrototypeOf(scope)).toBeNull();
         expect(Object.keys(scope)).toEqual(['n1']);
