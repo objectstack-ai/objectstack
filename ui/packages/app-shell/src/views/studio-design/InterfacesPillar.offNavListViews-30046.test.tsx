@@ -75,8 +75,16 @@ function seed() {
     [
       listView('crm_lead', 'all', 'All leads', { isDefault: true }),
       listView('crm_lead', 'hot', 'Hot leads'),
-      formView('crm_lead', 'form', undefined, { isDefault: true }),
+      // A default form that is public (`sharing.enabled`): still loaded, so
+      // still listed (objectstack-ai/objectstack#36425 hides only internal ones).
+      {
+        ...formView('crm_lead', 'form', undefined, { isDefault: true }),
+        config: { type: 'simple', sharing: { enabled: true }, sections: [{ label: 'Main', fields: ['name'] }] },
+      },
       formView('crm_lead', 'contact_us', 'Contact us'),
+      // An internal default form (not public): the Console's create and edit
+      // forms no longer load it (#36425), so the rail does not list it.
+      formView('crm_case', 'form', undefined, { isDefault: true }),
       listView('crm_case', 'open', 'Open cases', { isDefault: true }),
       listView('crm_case', 'mine', 'My cases', {}, {
         conditionalFormatting: [{ condition: "record.status == 'urgent'", style: { color: 'red' } }],
@@ -299,6 +307,7 @@ describe('不在导航中 → 视图 lists what the dropdown does not reach (obj
     mountPillar();
     const group = await viewGroup();
     await viewsRead();
+    // The internal default `crm_case.form` is not listed (#36425).
     expect(rowNames(group).sort()).toEqual(
       ['view · crm_case.mine', 'view · crm_case.open', 'view · crm_lead.contact_us', 'view · crm_lead.form'].sort(),
     );
