@@ -1591,6 +1591,12 @@ const zhHant = {
     updatedBy: '更新人',
     created: '創建於',
     updated: '更新於',
+    // Record page field list (objectstack#36147).
+    systemInfo: '系統資訊',
+    createdTime: '建立時間',
+    updatedTime: '修改時間',
+    recordNumber: '記錄編號',
+    clickToEdit: '點擊編輯',
     // Attachments
     dropFilesToUpload: '拖拽檔案到此處或點選上傳',
     attachmentCount: '{{count}} 個附件',

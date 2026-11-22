@@ -1363,6 +1363,12 @@ const ru = {
     unknownUser: "Неизвестно",
     created: "Создано",
     updated: "Обновлено",
+    // Record page field list (objectstack#36147).
+    systemInfo: "Системная информация",
+    createdTime: "Дата создания",
+    updatedTime: "Дата изменения",
+    recordNumber: "ID записи",
+    clickToEdit: "Нажмите, чтобы изменить",
     back: "Назад",
     edit: "Редактировать",
     editInline: "Редактировать",

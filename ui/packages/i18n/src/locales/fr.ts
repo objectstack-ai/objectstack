@@ -1325,6 +1325,12 @@ const fr = {
     unknownUser: "Inconnu",
     created: "Créé",
     updated: "Mis à jour",
+    // Record page field list (objectstack#36147).
+    systemInfo: "Informations système",
+    createdTime: "Créé le",
+    updatedTime: "Modifié le",
+    recordNumber: "ID de l’enregistrement",
+    clickToEdit: "Cliquez pour modifier",
     back: "Retour",
     edit: "Modifier",
     editInline: "Modifier",
