@@ -264,11 +264,12 @@ describe('RecordAttachmentsPanel — write affordances follow the sys_attachment
   });
 });
 
-describe('RecordAttachmentsPanel — Rename is offered to the reader who may delete and edit (objectstack#35724)', () => {
+describe('RecordAttachmentsPanel — Rename follows the rename door\'s two limbs (objectstack#35724)', () => {
   // The server renames by the attachment delete rule (uploader or parent
-  // editor) and writes an editor's rename as the caller, which needs the edit
-  // grant; so the row menu offers Rename where it offers Delete, and only to a
-  // reader who also holds the edit grant.
+  // editor): the uploader's own rename needs no edit grant, and anyone else's
+  // is written as the caller, which needs the edit grant. So the row menu
+  // offers Rename where it offers Delete, on the caller's own rows, and on
+  // every row only to a reader who also holds the edit grant.
   it('a reader who may not delete sees no Rename, on the own row and on another\'s', async () => {
     renderWithGrant({ allowCreate: true, allowEdit: true });
     await rowsLoaded();
@@ -277,11 +278,23 @@ describe('RecordAttachmentsPanel — Rename is offered to the reader who may del
     expect(await rowMenuItems('others.pdf')).not.toContain('Rename');
   });
 
-  it('a reader who may delete but holds no edit grant sees Delete and no Rename, on the own row and on another\'s', async () => {
+  it('the uploader holding delete but not edit sees Rename on their own row and no Rename on another\'s', async () => {
     renderWithGrant({ allowDelete: true });
     await rowsLoaded();
 
-    expect(await rowMenuItems('mine.pdf')).toEqual(['Download', 'Delete attachment']);
+    expect(await rowMenuItems('mine.pdf')).toEqual(['Download', 'Rename', 'Delete attachment']);
+    expect(await rowMenuItems('others.pdf')).toEqual(['Download', 'Delete attachment']);
+  });
+
+  it('the same holds where the read expanded the uploader into a user row', async () => {
+    const find = vi.fn(async () => [
+      { ...OTHERS_ROW, uploaded_by: { id: 'u-someone-else', name: 'Someone Else' } },
+      { ...OWN_ROW, uploaded_by: { id: ME, name: 'Me' } },
+    ]);
+    renderWithGrant({ allowDelete: true }, makeDataSource({ find }));
+    await rowsLoaded();
+
+    expect(await rowMenuItems('mine.pdf')).toEqual(['Download', 'Rename', 'Delete attachment']);
     expect(await rowMenuItems('others.pdf')).toEqual(['Download', 'Delete attachment']);
   });
 

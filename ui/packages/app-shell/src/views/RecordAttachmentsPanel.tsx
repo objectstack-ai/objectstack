@@ -102,7 +102,10 @@ export interface RecordAttachmentsPanelProps {
   recordId: string;
   /** ObjectUI DataSource (the list read and the delete go through the generic data path; the attach does not). */
   dataSource: any;
-  /** Current user id. The server stamps `uploaded_by` from the session; the panel no longer sends it. */
+  /**
+   * Current user id. The server stamps `uploaded_by` from the session; the panel no longer sends it.
+   * It names the caller's own rows for Rename when no auth provider supplies the user.
+   */
   currentUserId?: string | null;
   className?: string;
 }
@@ -224,6 +227,7 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
   objectName,
   recordId,
   dataSource,
+  currentUserId,
   className,
 }) => {
   const { t } = useObjectTranslation();
@@ -295,13 +299,24 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
   const canUpload = resolveAffordance('attachmentUpload', { objectName: 'sys_attachment', perms }).allowed;
   const canDelete = resolveAffordance('attachmentDelete', { objectName: 'sys_attachment', perms }).allowed;
   /**
-   * Rename asks the delete grant AND the edit grant. The rename door writes a
-   * non-uploader's rename through the engine as the caller, so the object's
-   * edit grant is required there before the delete rule is consulted; offering
-   * Rename to a delete-only reader would offer a door the server refuses. With
-   * no provider mounted `can` answers `true`, and the server remains the gate.
+   * Rename follows the rename door's two limbs, behind the delete grant. The
+   * door renames the caller's OWN upload with no edit grant (written on their
+   * behalf, as the removal door removes), and writes anyone else's rename
+   * through the engine as the caller, which needs the edit grant on
+   * `sys_attachment`. So a row offers Rename to a reader who may delete and
+   * either uploaded it or holds the edit grant; offering it elsewhere would
+   * offer a door the server refuses. With no provider mounted `can` answers
+   * `true`, and the server remains the gate.
    */
-  const canRename = canDelete && perms.can('sys_attachment', 'update');
+  const canEditAttachments = perms.can('sys_attachment', 'update');
+  const callerId = user?.id ?? currentUserId ?? null;
+  const canRename = (row: AttachmentRow): boolean => {
+    if (!canDelete) return false;
+    if (canEditAttachments) return true;
+    const by = row.uploaded_by;
+    const uploaderId = by && typeof by === 'object' ? by.id : by;
+    return !!callerId && uploaderId === callerId;
+  };
 
   // Same base-URL convention as RecordDetailView's raw API fetches: the
   // Vite dev console proxies same-origin `/api` unless VITE_SERVER_URL
@@ -531,10 +546,10 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
   );
 
   /**
-   * Rename: offered beside Delete, to a reader who may delete and holds the
-   * edit grant (`canRename`), because the server renames by the attachment
-   * delete rule — the uploader, or an editor of the record — and writes an
-   * editor's rename as the caller. The dialog closes on a stored name and
+   * Rename: offered beside Delete, to a reader who may delete and either
+   * uploaded the row or holds the edit grant (`canRename`), because the server
+   * renames by the attachment delete rule — the uploader, or an editor of the
+   * record — and writes an editor's rename as the caller. The dialog closes on a stored name and
    * stays open on a refusal, which the panel's error line names.
    */
   const [renaming, setRenaming] = React.useState<AttachmentRow | null>(null);
@@ -859,7 +874,7 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
                       <Download className="mr-2 h-4 w-4" />
                       {t('detail.downloadAttachment', { defaultValue: 'Download' })}
                     </DropdownMenuItem>
-                    {canRename && (
+                    {canRename(row) && (
                       <DropdownMenuItem
                         onSelect={() => {
                           setError(null);
