@@ -86,3 +86,77 @@ describe('objectstack#36344 — a markdown heading in a grid cell is drawn at th
     expect(face).not.toHaveClass('leading-[inherit]');
   });
 });
+
+/**
+ * objectstack#36452 — the same face for the `html` and `richtext` cell. Both
+ * types read through `HtmlCellRenderer`, which drew a stored `<h1>` as a
+ * heading element in every caller, so a list row holding one grew to the
+ * heading's line height (45 px against 36 px in Chromium; readings in the
+ * pull request). In a grid column it now draws the sanitized tree with the
+ * markdown cell's face; outside one the heading element stays.
+ */
+const HTML_HEADING_VALUE = '<h1>Heading</h1><p>Body with <strong>bold</strong> text</p><script>alert(1)</script>';
+
+async function renderHtml(type: 'html' | 'richtext', value: string, props: { inGridColumn?: boolean } = {}) {
+  const Renderer = getCellRenderer(resolveCellRendererType({ type }) || type);
+  const utils = render(<Renderer value={value} field={{ type } as any} {...props} />);
+  const face = await waitFor(() => {
+    const el = utils.container.querySelector<HTMLElement>('[data-html-face]');
+    if (!el) throw new Error('html body not rendered yet');
+    return el;
+  });
+  return { ...utils, face };
+}
+
+describe('objectstack#36452 — an html or richtext heading in a grid cell is drawn at the cell size', () => {
+  for (const type of ['html', 'richtext'] as const) {
+    it(`${type} in a grid column: no heading element, the heading is a bold line, the body inherits the cell size`, async () => {
+      const { face } = await renderHtml(type, HTML_HEADING_VALUE, { inGridColumn: true });
+
+      expect(face).toHaveAttribute('data-html-face', 'cell');
+      expect(face.querySelector(HEADINGS)).toBeNull();
+
+      const heading = face.querySelector<HTMLElement>('[data-html-heading]');
+      expect(heading?.tagName).toBe('P');
+      expect(heading).toHaveTextContent('Heading');
+      expect(heading).toHaveClass('font-semibold');
+      expect(face).toHaveClass('prose', 'prose-sm', 'text-[length:inherit]', 'leading-[inherit]');
+
+      // Sanitisation is the same in this face: the script is gone, the rest formatted.
+      expect(face.querySelector('script')).toBeNull();
+      expect(face.textContent).not.toContain('alert');
+      expect(face.querySelector('strong')).toHaveTextContent('bold');
+    });
+  }
+
+  it('html in a grid column: every heading level is drawn the same way', async () => {
+    const value = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].map((tag) => `<${tag}>${tag}</${tag}>`).join('');
+    const { face } = await renderHtml('html', value, { inGridColumn: true });
+    expect(face.querySelector(HEADINGS)).toBeNull();
+    expect(face.querySelectorAll('[data-html-heading]')).toHaveLength(6);
+  });
+
+  it('the markdown and html cells draw a heading with the same element and classes', async () => {
+    const md = await renderMarkdown('# Heading', { inGridColumn: true });
+    const mdHeading = md.face.querySelector<HTMLElement>('[data-markdown-heading]');
+    const html = await renderHtml('html', '<h1>Heading</h1>', { inGridColumn: true });
+    const htmlHeading = html.face.querySelector<HTMLElement>('[data-html-heading]');
+    expect(htmlHeading?.tagName).toBe(mdHeading?.tagName);
+    expect(htmlHeading?.className).toBe(mdHeading?.className);
+    expect(html.face.className).toBe(md.face.className);
+  });
+
+  for (const type of ['html', 'richtext'] as const) {
+    it(`CONTROL — ${type} outside a grid column (the record page, a readonly form) keeps the heading element`, async () => {
+      const { face } = await renderHtml(type, HTML_HEADING_VALUE);
+
+      expect(face).toHaveAttribute('data-html-face', 'document');
+      expect(face.querySelector('h1')).toHaveTextContent('Heading');
+      expect(face.querySelector('[data-html-heading]')).toBeNull();
+      expect(face).toHaveClass('prose', 'prose-sm');
+      expect(face).not.toHaveClass('text-[length:inherit]');
+      expect(face).not.toHaveClass('leading-[inherit]');
+      expect(face.querySelector('script')).toBeNull();
+    });
+  }
+});
