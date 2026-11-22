@@ -2746,6 +2746,13 @@ const de = {
       skipped_one: '{{count}} ausgewählter Datensatz bietet Besitzer ändern nicht an und wird ausgelassen.',
       skipped_other: '{{count}} ausgewählte Datensätze bieten Besitzer ändern nicht an und werden ausgelassen.',
       noClient: 'Der Besitzer kann hier nicht geändert werden.',
+      cascadeHeading: 'Zugehörige Datensätze mit übertragen',
+      cascadeHelp: 'Zugehörige Datensätze, die auf diesen verweisen und dem bisherigen Inhaber gehören, gehen ebenfalls an den neuen Inhaber.',
+      cascadeOption: '{{object}} ({{field}})',
+      cascadesFailed: 'Die zugehörigen Datensätze, die mit übertragen werden können, konnten nicht gelesen werden: {{message}}',
+      cascadeReport: '{{object}} ({{field}}): {{moved}} übertragen, {{failed}} konnten nicht übertragen werden.',
+      cascadeRemaining: 'Beim bisherigen Inhaber geblieben, über der Grenze von 500 Datensätzen je Änderung: {{count}}.',
+      cascadeReadFailure: '{{object}} ({{field}}): Die zugehörigen Datensätze konnten nicht gelesen werden: {{message}}',
     },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.

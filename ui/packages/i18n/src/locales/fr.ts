@@ -2818,6 +2818,13 @@ const fr = {
       skipped_many: '{{count}} d\'enregistrements sélectionnés ne proposent pas « Changer de propriétaire » et sont ignorés.',
       skipped_other: '{{count}} enregistrements sélectionnés ne proposent pas « Changer de propriétaire » et sont ignorés.',
       noClient: 'Le propriétaire ne peut pas être modifié ici.',
+      cascadeHeading: 'Transférer aussi les enregistrements liés',
+      cascadeHelp: 'Les enregistrements liés qui pointent vers celui-ci et appartiennent à l\'ancien propriétaire passent aussi au nouveau propriétaire.',
+      cascadeOption: '{{object}} ({{field}})',
+      cascadesFailed: 'Impossible de lire les enregistrements liés transférables : {{message}}',
+      cascadeReport: '{{object}} ({{field}}) : {{moved}} transférés, {{failed}} n\'ont pas pu l\'être.',
+      cascadeRemaining: 'Restés à l\'ancien propriétaire, au-delà de la limite de 500 enregistrements par changement : {{count}}.',
+      cascadeReadFailure: '{{object}} ({{field}}) : impossible de lire les enregistrements liés : {{message}}',
     },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.

@@ -2746,6 +2746,13 @@ const ko = {
       skipped_one: '선택한 레코드 중 {{count}}개는 소유자 변경을 제공하지 않아 제외됩니다.',
       skipped_other: '선택한 레코드 중 {{count}}개는 소유자 변경을 제공하지 않아 제외됩니다.',
       noClient: '여기서는 소유자를 변경할 수 없습니다.',
+      cascadeHeading: '관련 레코드도 함께 이전',
+      cascadeHelp: '이 레코드를 가리키며 이전 소유자가 소유한 관련 레코드도 새 소유자에게 넘어갑니다.',
+      cascadeOption: '{{object}} ({{field}})',
+      cascadesFailed: '함께 이전할 수 있는 관련 레코드를 읽을 수 없습니다: {{message}}',
+      cascadeReport: '{{object}} ({{field}}): {{moved}}건 이전, {{failed}}건은 이전할 수 없습니다.',
+      cascadeRemaining: '한 번 변경의 500건 한도를 넘어 이전 소유자에게 남은 레코드: {{count}}건.',
+      cascadeReadFailure: '{{object}} ({{field}}): 관련 레코드를 읽을 수 없습니다: {{message}}',
     },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.

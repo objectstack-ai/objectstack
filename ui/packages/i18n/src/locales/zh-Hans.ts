@@ -2849,6 +2849,13 @@ const zh = {
       skipped_one: '所选记录中有 {{count}} 条不提供更改负责人，已排除。',
       skipped_other: '所选记录中有 {{count}} 条不提供更改负责人，已排除。',
       noClient: '此处无法更改负责人。',
+      cascadeHeading: '同时转移相关记录',
+      cascadeHelp: '指向此记录且属于原负责人的相关记录，也会转给新负责人。',
+      cascadeOption: '{{object}}（{{field}}）',
+      cascadesFailed: '无法读取可一并转移的相关记录：{{message}}',
+      cascadeReport: '{{object}}（{{field}}）：已转移 {{moved}} 条，{{failed}} 条无法转移。',
+      cascadeRemaining: '超出单次更改 500 条上限、仍归原负责人的记录：{{count}} 条。',
+      cascadeReadFailure: '{{object}}（{{field}}）：无法读取相关记录：{{message}}',
     },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.

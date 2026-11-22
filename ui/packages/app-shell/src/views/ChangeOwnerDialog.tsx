@@ -8,7 +8,13 @@
  * The new owner, under the object's OWN label for its owner field ("Assigned
  * To", "Person", …): a person, or — where the object carries the ownership
  * queue column (ADR-0142 D3) — a queue. Optionally, that the new person is
- * notified. Cascade to related records is a later phase and is not offered.
+ * notified. And, for a person target, which related records move along
+ * (objectstack#35315 phase 2): one tick per declared cascade
+ * (`transferBehavior: 'cascade'` on a child's reference field) whose child
+ * offers Change Owner and on which the explain engine allows the caller the
+ * `transfer` operation (`useChangeOwnerCascadeCandidates`). A ticked cascade
+ * moves the child records owned by the previous owner; the server reports
+ * every one it did not move, and the dialog draws that report.
  *
  * ## What it calls, and as whom
  *
@@ -56,7 +62,10 @@ import type { ObjectStackAdapter } from '@object-ui/data-objectstack';
 import { toast } from 'sonner';
 import {
   CHANGE_OWNER_FIELD,
+  cascadeKey,
   declaredOwnerLabel,
+  useChangeOwnerCascadeCandidates,
+  type ChangeOwnerCascadeCandidate,
   offersQueueTarget,
   ownerIdOf,
   readChangeOwnerReport,
@@ -70,6 +79,8 @@ const UserWidget = getLazyFieldWidget('user');
 type ClientData = ReturnType<ObjectStackAdapter['getClient']>['data'];
 /** `data.changeOwnerMany`'s answer (`ChangeOwnerReport` of `@objectstack/client`). */
 export type ChangeOwnerBulkReport = Awaited<ReturnType<ClientData['changeOwnerMany']>>;
+/** One cascaded relationship's outcome (`ChangeOwnerCascadeOutcome` of `@objectstack/client`). */
+export type ChangeOwnerCascadeOutcomeView = NonNullable<ChangeOwnerBulkReport['cascade']>[number];
 
 /** A refused call's words: the client throws an `Error` carrying the server's message. */
 function failureText(err: unknown): string {
@@ -81,7 +92,7 @@ type RunState =
   | { phase: 'idle' }
   | { phase: 'running' }
   | { phase: 'refused'; message: string }
-  | { phase: 'done'; report: ChangeOwnerBulkReport; moved: number; unchanged: number };
+  | { phase: 'done'; report?: ChangeOwnerBulkReport; moved: number; unchanged: number; cascade?: ChangeOwnerCascadeOutcomeView[] };
 
 type QueueState =
   | { phase: 'loading' }
@@ -105,7 +116,7 @@ export interface ChangeOwnerDialogProps {
 
 export function ChangeOwnerDialog({ open, onOpenChange, objectDef, records, skipped = 0 }: ChangeOwnerDialogProps) {
   const { t } = useObjectTranslation();
-  const { fieldLabel } = useObjectLabel();
+  const { fieldLabel, objectLabel } = useObjectLabel();
   const adapter = useAdapter() as ObjectStackAdapter | null;
   const objectName = String(objectDef?.name ?? '');
   const bulk = records.length !== 1;
@@ -120,7 +131,14 @@ export function ChangeOwnerDialog({ open, onOpenChange, objectDef, records, skip
   const [notify, setNotify] = useState(false);
   const [run, setRun] = useState<RunState>({ phase: 'idle' });
   const [queues, setQueues] = useState<QueueState>({ phase: 'loading' });
+  const [ticks, setTicks] = useState<ReadonlySet<string>>(() => new Set());
   const formId = useId();
+  const cascades = useChangeOwnerCascadeCandidates(
+    objectName,
+    open && kind === 'person',
+    adapter ? (object) => adapter.getClient().data.changeOwnerCascades(object) : undefined,
+  );
+  const cascadeCandidates = cascades.phase === 'ready' ? cascades.candidates : [];
 
   // Each opening starts from nothing picked and nothing reported.
   useEffect(() => {
@@ -129,6 +147,7 @@ export function ChangeOwnerDialog({ open, onOpenChange, objectDef, records, skip
     setPerson(null);
     setQueue('');
     setNotify(false);
+    setTicks(new Set());
     setRun({ phase: 'idle' });
   }, [open]);
 
@@ -173,23 +192,33 @@ export function ChangeOwnerDialog({ open, onOpenChange, objectDef, records, skip
 
   const submit = async () => {
     if (!adapter || !target || ids.length === 0) return;
+    const cascade = cascadeCandidates
+      .filter((c) => ticks.has(cascadeKey(c)))
+      .map((c) => ({ object: c.object, field: c.field }));
     const request = target.queue !== undefined
       ? { queue: target.queue }
-      : { ownerId: target.ownerId!, ...(notify ? { notify: true } : {}) };
+      : { ownerId: target.ownerId!, ...(notify ? { notify: true } : {}), ...(cascade.length > 0 ? { cascade } : {}) };
     setRun({ phase: 'running' });
     try {
       const data = adapter.getClient().data;
       if (!bulk) {
-        await data.changeOwner(objectName, ids[0]!, request);
+        const result = await data.changeOwner(objectName, ids[0]!, request);
         notifyDataChanged({ objectName, recordId: ids[0]! });
+        for (const c of result.cascade ?? []) notifyDataChanged({ objectName: c.object });
+        // A cascade that left anything behind is drawn, never toasted away.
+        if (result.cascade?.some((c) => c.failed > 0 || c.remaining > 0 || c.readFailure)) {
+          setRun({ phase: 'done', moved: 1, unchanged: 0, cascade: result.cascade });
+          return;
+        }
         toast.success(t('console.changeOwner.changed'));
         onOpenChange(false);
         return;
       }
       const report = await data.changeOwnerMany(objectName, ids, request);
       notifyDataChanged({ objectName });
+      for (const c of report.cascade ?? []) notifyDataChanged({ objectName: c.object });
       const read = readChangeOwnerReport(report, records, target);
-      setRun({ phase: 'done', report, moved: read.moved, unchanged: read.unchanged });
+      setRun({ phase: 'done', report, moved: read.moved, unchanged: read.unchanged, cascade: report.cascade });
     } catch (err) {
       setRun({ phase: 'refused', message: failureText(err) });
     }
@@ -263,6 +292,40 @@ export function ChangeOwnerDialog({ open, onOpenChange, objectDef, records, skip
                 />
                 {t('console.changeOwner.notify')}
               </label>
+              {cascades.phase === 'failed' && (
+                <p role="alert" className="text-xs text-destructive" data-testid="change-owner-cascades-failed">
+                  {t('console.changeOwner.cascadesFailed', { message: cascades.message })}
+                </p>
+              )}
+              {cascadeCandidates.length > 0 && (
+                <fieldset className="grid gap-1.5" data-testid="change-owner-cascades">
+                  <legend className="text-sm font-medium">{t('console.changeOwner.cascadeHeading')}</legend>
+                  <p className="text-xs text-muted-foreground">{t('console.changeOwner.cascadeHelp')}</p>
+                  {cascadeCandidates.map((c) => {
+                    const key = cascadeKey(c);
+                    return (
+                      <label key={key} className="flex items-center gap-2 text-sm">
+                        <Checkbox
+                          checked={ticks.has(key)}
+                          onCheckedChange={(v) => {
+                            setTicks((prev) => {
+                              const next = new Set(prev);
+                              if (v === true) next.add(key); else next.delete(key);
+                              return next;
+                            });
+                          }}
+                          disabled={done}
+                          data-testid={`change-owner-cascade-${key}`}
+                        />
+                        {t('console.changeOwner.cascadeOption', {
+                          object: objectLabel({ name: c.object, label: c.label }),
+                          field: fieldLabel(c.object, c.field, c.fieldLabel),
+                        })}
+                      </label>
+                    );
+                  })}
+                </fieldset>
+              )}
             </div>
           ) : (
             <div className="grid gap-2">
@@ -304,8 +367,11 @@ export function ChangeOwnerDialog({ open, onOpenChange, objectDef, records, skip
             </p>
           )}
 
-          {run.phase === 'done' && (
+          {run.phase === 'done' && run.report && (
             <ChangeOwnerReportView report={run.report} moved={run.moved} unchanged={run.unchanged} />
+          )}
+          {run.phase === 'done' && run.cascade && run.cascade.length > 0 && (
+            <ChangeOwnerCascadeReportView outcomes={run.cascade} candidates={cascadeCandidates} />
           )}
         </form>
 
@@ -364,6 +430,57 @@ export function ChangeOwnerReportView({
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+/**
+ * [objectstack#35315 phase 2] A cascade's answer, one paragraph per ticked
+ * relationship: how many related records moved, every one the server did not
+ * move with its own sentence, how many the row cap left with the previous
+ * owner, and a relationship whose records could not be read at all.
+ */
+export function ChangeOwnerCascadeReportView({
+  outcomes,
+  candidates = [],
+}: {
+  outcomes: ReadonlyArray<ChangeOwnerCascadeOutcomeView>;
+  /** The offered relationships, for the labels the child serves. */
+  candidates?: ReadonlyArray<ChangeOwnerCascadeCandidate>;
+}) {
+  const { t } = useObjectTranslation();
+  const { fieldLabel, objectLabel } = useObjectLabel();
+  return (
+    <div className="grid gap-2 text-sm" role="status" data-testid="change-owner-cascade-report">
+      {outcomes.map((o) => {
+        const offered = candidates.find((c) => c.object === o.object && c.field === o.field);
+        const names = {
+          object: objectLabel({ name: o.object, label: offered?.label ?? o.object }),
+          field: fieldLabel(o.object, o.field, offered?.fieldLabel ?? o.field),
+        };
+        return (
+          <div key={`${o.object}.${o.field}`} className="grid gap-0.5" data-testid={`change-owner-cascade-outcome-${o.object}.${o.field}`}>
+            <p>{t('console.changeOwner.cascadeReport', { ...names, moved: o.updated, failed: o.failed })}</p>
+            {o.readFailure && (
+              <p className="text-xs text-destructive">
+                {t('console.changeOwner.cascadeReadFailure', { ...names, message: o.readFailure.message })}
+              </p>
+            )}
+            {o.remaining > 0 && (
+              <p className="text-xs text-muted-foreground">{t('console.changeOwner.cascadeRemaining', { count: o.remaining })}</p>
+            )}
+            {o.failures.length > 0 && (
+              <ul className="grid max-h-32 gap-0.5 overflow-y-auto text-xs text-destructive">
+                {o.failures.map((f) => (
+                  <li key={f.id} data-testid="change-owner-cascade-failure">
+                    {t('console.changeOwner.failure', { id: f.id, message: f.message })}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

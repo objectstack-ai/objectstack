@@ -2900,6 +2900,13 @@ const ru = {
       skipped_many: '{{count}} выбранных записей не поддерживают смену владельца и пропущены.',
       skipped_other: 'Выбранные записи ({{count}}) не поддерживают смену владельца и пропущены.',
       noClient: 'Здесь нельзя сменить владельца.',
+      cascadeHeading: 'Также передать связанные записи',
+      cascadeHelp: 'Связанные записи, которые ссылаются на эту и принадлежат прежнему владельцу, тоже перейдут новому владельцу.',
+      cascadeOption: '{{object}} ({{field}})',
+      cascadesFailed: 'Не удалось прочитать связанные записи, которые можно передать: {{message}}',
+      cascadeReport: '{{object}} ({{field}}): передано {{moved}}, не удалось передать {{failed}}.',
+      cascadeRemaining: 'Остались у прежнего владельца сверх предела в 500 записей за одну смену: {{count}}.',
+      cascadeReadFailure: '{{object}} ({{field}}): не удалось прочитать связанные записи: {{message}}',
     },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.

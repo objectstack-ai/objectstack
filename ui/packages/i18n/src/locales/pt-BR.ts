@@ -2817,6 +2817,13 @@ const pt = {
       skipped_many: '{{count}} de registros selecionados não oferecem Alterar proprietário e foram deixados de fora.',
       skipped_other: '{{count}} registros selecionados não oferecem Alterar proprietário e foram deixados de fora.',
       noClient: 'O proprietário não pode ser alterado aqui.',
+      cascadeHeading: 'Transferir também os registros relacionados',
+      cascadeHelp: 'Os registros relacionados que apontam para este e pertencem ao proprietário anterior também passam para o novo proprietário.',
+      cascadeOption: '{{object}} ({{field}})',
+      cascadesFailed: 'Não foi possível ler os registros relacionados que podem ser transferidos: {{message}}',
+      cascadeReport: '{{object}} ({{field}}): {{moved}} transferidos, {{failed}} não puderam ser transferidos.',
+      cascadeRemaining: 'Ficaram com o proprietário anterior, acima do limite de 500 registros por alteração: {{count}}.',
+      cascadeReadFailure: '{{object}} ({{field}}): não foi possível ler os registros relacionados: {{message}}',
     },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.

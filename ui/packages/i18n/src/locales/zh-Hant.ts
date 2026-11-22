@@ -2849,6 +2849,13 @@ const zhHant = {
       skipped_one: '所選記錄中有 {{count}} 條不提供更改負責人，已排除。',
       skipped_other: '所選記錄中有 {{count}} 條不提供更改負責人，已排除。',
       noClient: '此處無法更改負責人。',
+      cascadeHeading: '同時轉移相關記錄',
+      cascadeHelp: '指向此記錄且屬於原負責人的相關記錄，也會轉給新負責人。',
+      cascadeOption: '{{object}}（{{field}}）',
+      cascadesFailed: '無法讀取可一併轉移的相關記錄：{{message}}',
+      cascadeReport: '{{object}}（{{field}}）：已轉移 {{moved}} 筆，{{failed}} 筆無法轉移。',
+      cascadeRemaining: '超出單次變更 500 筆上限、仍歸原負責人的記錄：{{count}} 筆。',
+      cascadeReadFailure: '{{object}}（{{field}}）：無法讀取相關記錄：{{message}}',
     },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.

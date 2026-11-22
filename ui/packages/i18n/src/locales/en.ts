@@ -3355,6 +3355,13 @@ const en = {
       skipped_one: '{{count}} selected record does not offer Change Owner and is left out.',
       skipped_other: '{{count}} selected records do not offer Change Owner and are left out.',
       noClient: 'The owner cannot be changed here.',
+      cascadeHeading: 'Also move related records',
+      cascadeHelp: 'Related records that point at this one and belong to its previous owner go to the new owner too.',
+      cascadeOption: '{{object}} ({{field}})',
+      cascadesFailed: 'The related records that can move along could not be read: {{message}}',
+      cascadeReport: '{{object}} ({{field}}): moved {{moved}}, {{failed}} could not be moved.',
+      cascadeRemaining: 'Left with the previous owner, past the 500-record limit of one change: {{count}}.',
+      cascadeReadFailure: '{{object}} ({{field}}): the related records could not be read: {{message}}',
     },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.
