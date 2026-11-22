@@ -2578,10 +2578,14 @@ export function translateDashboard<T extends DashboardLike>(
         if (!w || typeof w !== 'object' || typeof w.id !== 'string') return w;
         const next: WidgetLike = { ...w };
         const packagedWidget = packagedPart(base, 'widgets', (candidate) => candidate.id === w.id);
-        const title = lookupWidgetAttr(
-          catalogFor(catalogs, valueOverridesPackagedBase(packagedWidget, 'title', w.title)),
-          name, w.id, 'title', opts,
-        );
+        // A widget title's inline entry for the requested locale, where it is
+        // the customer's text, beats the catalog (`translateReport`'s rule).
+        const title = inlineEntryOverridesPackagedBase(packagedWidget, 'title', w.title, opts?.locale)
+          ? undefined
+          : lookupWidgetAttr(
+            catalogFor(catalogs, valueOverridesPackagedBase(packagedWidget, 'title', w.title)),
+            name, w.id, 'title', opts,
+          );
         if (title) next.title = title;
         const desc = lookupWidgetAttr(
           catalogFor(catalogs, valueOverridesPackagedBase(packagedWidget, 'description', w.description)),
@@ -3178,12 +3182,19 @@ export function translateReport<T extends ReportLike>(
   if (typeof name !== 'string' || name.length === 0 || !catalogs.unchanged) return doc;
 
   const base = asRecord(opts?.packagedBase);
-  const label = lookupReportAttr(
-    catalogFor(catalogs, valueOverridesPackagedBase(base, 'label', doc.label)), name, 'label', opts,
-  );
-  const description = lookupReportAttr(
-    catalogFor(catalogs, valueOverridesPackagedBase(base, 'description', doc.description)), name, 'description', opts,
-  );
+  // An inline map's own entry for the requested locale, where it is the
+  // customer's text, beats the catalog: the slot is served as authored and the
+  // reader picks that entry ({@link inlineEntryOverridesPackagedBase}).
+  const label = inlineEntryOverridesPackagedBase(base, 'label', doc.label, opts?.locale)
+    ? undefined
+    : lookupReportAttr(
+      catalogFor(catalogs, valueOverridesPackagedBase(base, 'label', doc.label)), name, 'label', opts,
+    );
+  const description = inlineEntryOverridesPackagedBase(base, 'description', doc.description, opts?.locale)
+    ? undefined
+    : lookupReportAttr(
+      catalogFor(catalogs, valueOverridesPackagedBase(base, 'description', doc.description)), name, 'description', opts,
+    );
   const blocks = translateReportBlocks(doc.blocks, catalogs, name, base, opts);
   if (label === undefined && description === undefined && blocks === undefined) return doc;
   return {
@@ -4946,6 +4957,55 @@ function valueOverridesPackagedBase(base: unknown, key: string, value: unknown):
   if (!base || typeof base !== 'object') return false;
   if (typeof value !== 'string' || value.length === 0) return false;
   return (base as Record<string, unknown>)[key] !== value;
+}
+
+/**
+ * An inline locale map's entry for the REQUESTED locale — the exact tag, then
+ * the base language's tag (`zh` for `zh-CN`). ⛔ Never `default` and never a
+ * sibling region: those are display fallbacks for a locale the map has no
+ * entry for, and are no statement about the requested locale.
+ */
+function inlineEntryFor(value: unknown, locale: string | undefined): string | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !locale) return undefined;
+  const map = value as Record<string, unknown>;
+  const read = (key: string): string | undefined => {
+    if (!Object.prototype.hasOwnProperty.call(map, key)) return undefined;
+    const entry = map[key];
+    return typeof entry === 'string' && entry.length > 0 ? entry : undefined;
+  };
+  const baseTag = locale.split('-')[0];
+  return read(locale) ?? (baseTag !== locale ? read(baseTag) : undefined);
+}
+
+/**
+ * Whether an inline locale map's entry for the requested locale is a
+ * customer's own text that beats the catalog's translation for that locale —
+ * the map-valued twin of {@link valueOverridesPackagedBase}, which answers the
+ * same question for a plain string (`false` for any map) and exists so that a
+ * customer's value beats the package's translation.
+ *
+ * `true` only when the map carries an entry for the requested locale
+ * ({@link inlineEntryFor}) AND that entry differs from the packaged base's own
+ * entry for the locale: a map equal to the package's own map changes nothing,
+ * so a package that ships inline maps keeps reading its bundle exactly as
+ * before. No packaged base supplied: `false`, as the string rule answers. A
+ * locale the map has no entry for keeps reading the catalog, so a third
+ * language still reads its bundle translation, never another locale's entry.
+ *
+ * Read by {@link translateReport} (name, description) and
+ * {@link translateDashboard} (a widget's title), the label slots the
+ * console's report and dashboard panels edit in the current language.
+ */
+function inlineEntryOverridesPackagedBase(
+  base: unknown,
+  key: string,
+  value: unknown,
+  locale: string | undefined,
+): boolean {
+  if (!base || typeof base !== 'object') return false;
+  const entry = inlineEntryFor(value, locale);
+  if (entry === undefined) return false;
+  return inlineEntryFor((base as Record<string, unknown>)[key], locale) !== entry;
 }
 
 /**

@@ -19,6 +19,8 @@ import {
 import {
   translateMetadataDocument,
   translateReport,
+  translateDashboard,
+  translateDataset,
   TRANSLATABLE_METADATA_TYPES,
 } from './i18n-resolver';
 // The fixture is PARSED by the authoring schema rather than hand-shaped, so a
@@ -176,5 +178,93 @@ describe('translateReport', () => {
       const edited = { ...report(), label: 'Pipeline by stage (ours)' };
       expect((translateReport(edited, bundle, { locale: 'zh-CN' }) as any).label).toBe('各阶段商机');
     });
+  });
+});
+
+/**
+ * objectstack#36373 — the console's report and dashboard panels edit a name or
+ * a widget title in the CURRENT language: an edit made while the box showed a
+ * bundle translation of a plain-string source stores the inline locale map
+ * `{ default: SOURCE, LANG: EDIT }`. These pins hold the precedence that makes
+ * that edit visible without moving any other locale.
+ */
+describe('an inline locale map entry for the requested locale beats the catalog (objectstack#36373)', () => {
+  const multi: TranslationBundle = {
+    'zh-CN': { reports: { opps_by_stage: { label: '各阶段商机', description: '按阶段汇总的商机' } } },
+    'ja-JP': { reports: { opps_by_stage: { label: 'ステージ別商談' } } },
+  };
+  const packagedBase = () => report();
+  // The shape the panel writes for a zh-CN edit of the plain-string source.
+  const editedInZh = () => ({
+    ...report(),
+    label: { default: 'Opportunities by Stage', 'zh-CN': '各阶段商机（本公司）' },
+  });
+
+  it('serves the zh-CN entry to a zh-CN reader, not the bundle translation', () => {
+    const out = translateReport(editedInZh(), multi, { locale: 'zh-CN', packagedBase: packagedBase() }) as any;
+    expect(out.label).toEqual({ default: 'Opportunities by Stage', 'zh-CN': '各阶段商机（本公司）' });
+    // The description, untouched by the edit, still reads its translation.
+    expect(out.description).toBe('按阶段汇总的商机');
+  });
+
+  it('keeps the English source byte-identical for a reader in the source language', () => {
+    const out = translateReport(editedInZh(), multi, { locale: 'en', packagedBase: packagedBase() }) as any;
+    expect(out.label.default).toBe(packagedBase().label);
+  });
+
+  it('a third locale still reads its own bundle translation, never the zh-CN entry or `default`', () => {
+    const out = translateReport(editedInZh(), multi, { locale: 'ja-JP', packagedBase: packagedBase() }) as any;
+    expect(out.label).toBe('ステージ別商談');
+  });
+
+  it('a base-language entry answers a regional request (`zh` for `zh-CN`)', () => {
+    const edited = { ...report(), label: { default: 'Opportunities by Stage', zh: '各阶段（本公司）' } };
+    const out = translateReport(edited, multi, { locale: 'zh-CN', packagedBase: packagedBase() }) as any;
+    expect(out.label).toEqual(edited.label);
+  });
+
+  it('control: a map equal to the package\'s own map changes nothing — the bundle still answers', () => {
+    const shipped = { default: 'Opportunities by Stage', 'zh-CN': '旧的内联译文' };
+    const base = { ...report(), label: shipped };
+    const served = { ...report(), label: { ...shipped } };
+    const out = translateReport(served, multi, { locale: 'zh-CN', packagedBase: base }) as any;
+    expect(out.label).toBe('各阶段商机');
+  });
+
+  it('control: with no packaged base the catalog answers, as the string rule does', () => {
+    const out = translateReport(editedInZh(), multi, { locale: 'zh-CN' }) as any;
+    expect(out.label).toBe('各阶段商机');
+  });
+
+  it('a dashboard widget title follows the same rule', () => {
+    const bundle: TranslationBundle = {
+      'zh-CN': { dashboards: { exec: { widgets: { rev: { title: '按行业收入' } } } } },
+      'ja-JP': { dashboards: { exec: { widgets: { rev: { title: '業種別売上' } } } } },
+    };
+    const base = { name: 'exec', label: 'Executive', widgets: [{ id: 'rev', title: 'Revenue by Industry' }] };
+    const edited = {
+      ...base,
+      widgets: [{ id: 'rev', title: { default: 'Revenue by Industry', 'zh-CN': '各行业收入（本公司）' } }],
+    };
+    const zh = translateDashboard(edited as any, bundle, { locale: 'zh-CN', packagedBase: base }) as any;
+    expect(zh.widgets[0].title).toEqual(edited.widgets[0].title);
+    const ja = translateDashboard(edited as any, bundle, { locale: 'ja-JP', packagedBase: base }) as any;
+    expect(ja.widgets[0].title).toBe('業種別売上');
+    // Unedited: the bundle answers, as before.
+    const plain = translateDashboard(base as any, bundle, { locale: 'zh-CN', packagedBase: base }) as any;
+    expect(plain.widgets[0].title).toBe('按行业收入');
+  });
+
+  it('scope control: a dataset member\'s inline map still loses to the bundle (ADR-0149)', () => {
+    const bundle: TranslationBundle = {
+      'zh-CN': { datasets: { pipeline: { dimensions: { stage: { label: '阶段' } } } } },
+    };
+    const base = { name: 'pipeline', object: 'opp', dimensions: [{ name: 'stage', label: 'Stage' }], measures: [] };
+    const edited = {
+      ...base,
+      dimensions: [{ name: 'stage', label: { default: 'Stage', 'zh-CN': '销售阶段（本公司）' } }],
+    };
+    const out = translateDataset(edited as any, bundle, { locale: 'zh-CN', packagedBase: base }) as any;
+    expect(out.dimensions[0].label).toBe('阶段');
   });
 });

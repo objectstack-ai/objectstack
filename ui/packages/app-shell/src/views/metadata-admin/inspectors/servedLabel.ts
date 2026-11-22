@@ -103,7 +103,7 @@ export function writtenLabel(
   const translated = servedTranslation(current, pair, language) !== undefined;
   if (next === '') {
     if (translated) return asLabel(current);
-    return clearLocalized(current, language) ?? emptyAs;
+    return (clearLocalized(current, language) as I18nLabel | undefined) ?? emptyAs;
   }
   if (translated && typeof current === 'string') {
     return setLocalized({ default: current }, language, next) as I18nLabel;
