@@ -125,8 +125,41 @@ function logSameTargetObjectExtensions(
   }
 }
 
+/**
+ * The partial object definition one `objectExtensions` entry registers as an
+ * `extend` contribution to its target, and the priority it registers at — the
+ * one reading of an entry, for a package body (`registerApp` step 2b) and for a
+ * multi-package stack's residual (`ObjectQLPlugin`, ADR-0130 D4), so the two
+ * cannot register one entry differently.
+ */
+export function objectExtensionContribution(ext: any): {
+  definition: {
+    name: string; fields: unknown; fieldPatches: unknown; label: unknown; pluralLabel: unknown;
+    description: unknown; validations: unknown; indexes: unknown;
+  };
+  priority: number;
+} {
+  return {
+    definition: {
+      name: ext.extend, // Use the target FQN as name
+      fields: ext.fields,
+      // [ADR-0146 D10, second rule] The per-field display patches,
+      // the slot as `ObjectExtensionSchema.fieldPatches` declares
+      // it — applied by the registry's `mergeObjectDefinitions`,
+      // whose fold every object read shares.
+      fieldPatches: ext.fieldPatches,
+      label: ext.label,
+      pluralLabel: ext.pluralLabel,
+      description: ext.description,
+      validations: ext.validations,
+      indexes: ext.indexes,
+    },
+    priority: ext.priority ?? 200,
+  };
+}
+
 /** Structural equality of two JSON-shaped values: same primitives, same arrays in order, same keys with equal values. */
-function equalByValue(a: unknown, b: unknown): boolean {
+export function equalByValue(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
   if (Array.isArray(a) !== Array.isArray(b)) return false;
@@ -395,26 +428,10 @@ export class RegistrationFacet {
           // outcome is unchanged.
           logSameTargetObjectExtensions(this.logger, id, manifest.objectExtensions);
           for (const ext of manifest.objectExtensions) {
-              const targetFqn = ext.extend;
-              const priority = ext.priority ?? 200;
-              // Create a partial object definition for the extension
-              const extDef = {
-                  name: targetFqn, // Use the target FQN as name
-                  fields: ext.fields,
-                  // [ADR-0146 D10, second rule] The per-field display patches,
-                  // the slot as `ObjectExtensionSchema.fieldPatches` declares
-                  // it — applied by the registry's `mergeObjectDefinitions`,
-                  // whose fold every object read shares.
-                  fieldPatches: ext.fieldPatches,
-                  label: ext.label,
-                  pluralLabel: ext.pluralLabel,
-                  description: ext.description,
-                  validations: ext.validations,
-                  indexes: ext.indexes,
-              };
+              const { definition: extDef, priority } = objectExtensionContribution(ext);
               // Register as extension (namespace is undefined since we're targeting by FQN)
               this._registry.registerObject(stampPackage(extDef, id, version), id, undefined, 'extend', priority);
-              this.logger.debug('Registered Object Extension', { target: targetFqn, priority, from: id });
+              this.logger.debug('Registered Object Extension', { target: extDef.name, priority, from: id });
           }
       }
 
