@@ -90,13 +90,19 @@ function richTextSource(value: unknown): string | undefined {
  * What the cell holds is decided by {@link richTextSource} (objectui#8580):
  * `[]` is the No-value affordance, never a childless container, and an
  * object is the text the string class prints for it, never `[object Object]`.
+ *
+ * In a grid column (`inGridColumn`) the value is drawn in the `cell` face
+ * (objectstack#36344): a heading is a bold line at the cell's own text size,
+ * so a value that starts with `# Heading` does not grow its row. Every other
+ * caller — the record page, a readonly form field — keeps the `document`
+ * face and its heading sizes.
  */
-export function MarkdownCellRenderer({ value }: CellRendererProps): React.ReactElement {
+export function MarkdownCellRenderer({ value, inGridColumn }: CellRendererProps): React.ReactElement {
   const text = richTextSource(value);
   if (text === undefined) return <EmptyValue />;
   return (
     <React.Suspense fallback={<span className="text-sm text-muted-foreground">{text.slice(0, 80)}</span>}>
-      <LazyMarkdownContent value={text} />
+      <LazyMarkdownContent value={text} face={inGridColumn ? 'cell' : 'document'} />
     </React.Suspense>
   );
 }

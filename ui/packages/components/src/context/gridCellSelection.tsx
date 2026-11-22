@@ -109,7 +109,15 @@ export interface GridReferenceCells {
 }
 
 export interface GridCellSelection {
-  /** The host's facts for one cell; asked when the reader acts on it, never per render. */
+  /**
+   * The host's facts for one cell. The table asks for them when the reader
+   * acts on a cell (an edit, a key, a paste), and for the selected cell's
+   * `aria-readonly` (objectstack#35689): once as the cell becomes selected,
+   * and again when its row is re-read or the provider's value is a new
+   * object. The value's identity is part of this contract: keep it stable
+   * across renders (memoise it) and hand a new one only when an answer may
+   * have changed, or the selected cell is asked on every render.
+   */
   describeCell?: (row: any, columnKey: string) => GridCellFacts | null | undefined;
   /** Called when a cell becomes the selected one (a host may prefetch what an edit will need). */
   onCellSelect?: (row: any, columnKey: string) => void;
