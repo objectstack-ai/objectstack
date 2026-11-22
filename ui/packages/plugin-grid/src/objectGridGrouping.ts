@@ -86,7 +86,7 @@ export function useObjectGridGrouping({
   schema, dataSource, objectName, objectFields, objectTypesPending, data, setData, setTotalMatching,
   t, translateOptions, groupedPage, setGroupedPage, groupedPageSize, refreshKey, serverPageSize,
   groupRowQuery, groupingKeyReadable, groupingRefusesNothing, unmaskedGroupingFields,
-  serverGroupedFetch, invalidationNonce,
+  serverGroupedFetch, invalidationNonce, savedFigureNonce, regroupNonce,
 }: {
   schema: ObjectGridSchema;
   dataSource: DataSource | undefined;
@@ -109,6 +109,17 @@ export function useObjectGridGrouping({
   unmaskedGroupingFields: GroupingDecisions['unmaskedGroupingFields'];
   serverGroupedFetch: GroupingDecisions['serverGroupedFetch'];
   invalidationNonce: RowLoad['invalidationNonce'];
+  /**
+   * objectstack#35689 — bumped when a select-first save changed a figure but
+   * no group: the server's headers are asked again, the rows on screen stay.
+   */
+  savedFigureNonce: number;
+  /**
+   * objectstack#35689 — bumped when the reader left a row whose save moved it
+   * to another group: the server's headers and the open groups' rows are
+   * asked again.
+   */
+  regroupNonce: number;
 }) {
   // --- Grouping support ---
   // Build a per-field value formatter so group headers display the human
@@ -290,7 +301,8 @@ export function useObjectGridGrouping({
       return { error: err instanceof Error ? err : new Error(String(err)) };
     }
   }, [groupRowQueryKey]);
-  const groupReloadKey = `${refreshKey}:${invalidationNonce}`;
+  const groupReloadKey = `${refreshKey}:${invalidationNonce}:${regroupNonce}`;
+  const groupHeaderReloadKey = `${groupReloadKey}:${savedFigureNonce}`;
   // [ADR-0144 D6, ADR-0158 U7 R1] A measure aggregate over a `record`-mode
   // amount or quantity stands only in groups bucketed by its code or unit
   // field; elsewhere it would add amounts in different currencies or
@@ -335,7 +347,7 @@ export function useObjectGridGrouping({
     ...groupSearchOf(groupRowQuery),
     aggregations: groupAggregations,
     objectFields,
-    reloadKey: groupReloadKey,
+    reloadKey: groupHeaderReloadKey,
   });
   // Keyed on the hook's STATE values (a stable identity React promises), so
   // the group tree is rebuilt when the server answers, not on every render.
