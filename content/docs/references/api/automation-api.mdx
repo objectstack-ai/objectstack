@@ -1046,7 +1046,7 @@ const result = AutomationApiErrorCode.parse(data);
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Machine name of the record's object. |
 | **recordId** | `string` | ✅ | Id of the record the update would write. |
-| **changes** | `Record<string, any>` | ✅ | The proposed update: each field it sets and its new value. The record's other fields are read as stored. |
+| **changes** | `Record<string, any>` | ✅ | The proposed update: each field it sets and its new value, keyed by the field's machine name. Every key must be a declared field of `object`; the door refuses any other key `400 VALIDATION_FAILED` before the engine is asked. The record's other fields are read as stored. |
 
 
 ---

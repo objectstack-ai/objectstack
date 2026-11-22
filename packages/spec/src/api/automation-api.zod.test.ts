@@ -1039,6 +1039,19 @@ describe('RecordUpdateStarts schemas (#35928)', () => {
     expect(bare.success).toBe(false);
   });
 
+  it('holds each change key to the field-name grammar', () => {
+    for (const key of ['a.b', 'Status', '1st', 'has space', '']) {
+      const parsed = AutomationApiModule.RecordUpdateStartsRequestSchema.safeParse({
+        object: 'showcase_project', recordId: 'p_1', changes: { [key]: 1 },
+      });
+      expect(parsed.success, key).toBe(false);
+    }
+    const ok = AutomationApiModule.RecordUpdateStartsRequestSchema.safeParse({
+      object: 'showcase_project', recordId: 'p_1', changes: { status: 'completed', _internal_note: 'x' },
+    });
+    expect(ok.success).toBe(true);
+  });
+
   it('answers flows by name, label and approval mark only', () => {
     const answer = {
       success: true,

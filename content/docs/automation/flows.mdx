@@ -2606,8 +2606,9 @@ stage confirm name those flows under their sentence (objectstack#35928).
   record is read as the caller, through the `/data` door's own `get`, so a
   record they cannot read answers `404 RECORD_NOT_FOUND` exactly as one that
   does not exist. An anonymous call is refused `401`, a malformed body `400
-  VALIDATION_FAILED`, any query parameter `400 VALIDATION_ERROR`, and an engine
-  without the read `501`.
+  VALIDATION_FAILED`, a `changes` key that is not a declared field of the
+  object `400 VALIDATION_FAILED`, any query parameter `400 VALIDATION_ERROR`,
+  and an engine without the read `501`.
 - **Which flows:** enabled `record_change` flows of that object, armed on their
   trigger, whose `triggerType` binds an update (`record-…-update` or
   `record-…-write`), and whose start `condition` holds for the record with
@@ -2622,7 +2623,10 @@ stage confirm name those flows under their sentence (objectstack#35928).
 
 The answer is a preview, not a promise: the write itself is judged when it
 happens, and a condition that reads a field the caller cannot see is judged
-here on what the caller sees.
+here on what the caller sees. Of the caller, the preview binds the user id and
+the tenant only. A live save also binds the writer's positions, the request's
+params and its expand, so a condition that reads those is judged here without
+them and the preview can list fewer flows than the save starts.
 
 ## Expressions in flows
 

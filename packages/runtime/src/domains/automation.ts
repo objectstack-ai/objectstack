@@ -59,6 +59,7 @@ import {
 import { ExecutionStatus, collectFlowGraphs, type FlowNodeParsed } from '@objectstack/spec/automation';
 import { nearestName } from '@objectstack/formula';
 import { ListRunsRequestSchema, RecordUpdateStartsRequestSchema, standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
+import { recordNotFoundError } from '@objectstack/metadata-protocol';
 import type { ResumeFailureDetails } from '@objectstack/spec/api';
 import { parseEnumParam, parseIntegerParam, parseStringParam } from '../query-param.js';
 import { capabilityUnavailable } from './unavailable.js';
@@ -3736,11 +3737,39 @@ const RECORD_UPDATE_STARTS_QUERY_PARAMS: readonly string[] = [];
  * THE CALLER through the `/data` door's own read (`callData` `get`): an object
  * the caller may not address, or a record they cannot read, answers that
  * read's refusal (`404 RECORD_NOT_FOUND` for an unreadable or absent record),
- * so this door tells a caller nothing the record read would not. Only then the
- * engine, handed the record as read (`previous`) and with the proposed fields
- * applied (`record`), and the caller as the writer. An engine without the
- * optional member answers 501, never a guess.
+ * so this door tells a caller nothing the record read would not. A read that
+ * answers no record is refused the same `404`, never previewed over an empty
+ * row. Then every `changes` key must be a declared field of `object` (its own
+ * key in the registry's `fields`); any other key is refused
+ * `400 VALIDATION_FAILED`, located on the key, and the engine is not asked.
+ * Only then the engine, handed the record as read (`previous`) and with the
+ * proposed fields applied (`record`), and the caller as the writer. An engine
+ * without the optional member answers 501, never a guess.
  */
+/**
+ * [#35928] The `changes` keys of a record-update preview that are not declared
+ * fields of `object`: an own key of the registry object's `fields` map is
+ * declared, anything else is not. With no registry, or no object under the
+ * name, nothing is declared and every key is answered back, so the door
+ * refuses rather than previews.
+ */
+async function undeclaredChangeKeys(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    object: string,
+    changes: Record<string, unknown>,
+): Promise<string[]> {
+    let fields: unknown;
+    try {
+        const ql: any = typeof deps.getObjectQL === 'function' ? await deps.getObjectQL(context) : undefined;
+        fields = ql?.registry?.getObject?.(object)?.fields;
+    } catch {
+        fields = undefined;
+    }
+    const declared = fields && typeof fields === 'object' && !Array.isArray(fields) ? fields : undefined;
+    return Object.keys(changes).filter((key) => !(declared && Object.prototype.hasOwnProperty.call(declared, key)));
+}
+
 async function respondToRecordUpdateStarts(
     deps: DomainHandlerDeps,
     automationService: unknown,
@@ -3768,9 +3797,22 @@ async function respondToRecordUpdateStarts(
             context?.dataDriver, context?.environmentId, context?.executionContext,
         );
         const row = (read as { record?: unknown } | null | undefined)?.record;
-        stored = row && typeof row === 'object' ? (row as Record<string, unknown>) : {};
+        if (!row || typeof row !== 'object' || Array.isArray(row)) {
+            return { handled: true, response: deps.errorFromThrown(recordNotFoundError(object, recordId), 404) };
+        }
+        stored = row as Record<string, unknown>;
     } catch (err) {
         return { handled: true, response: deps.errorFromThrown(err, 500) };
+    }
+    const undeclared = await undeclaredChangeKeys(deps, context, object, changes);
+    if (undeclared.length > 0) {
+        const fields = undeclared.map((key) => ({
+            field: `changes.${key}`,
+            code: 'unknown_field',
+            message: `not a field of \`${object}\``,
+        }));
+        const message = `Invalid record-update preview request: ${undeclared.map((key) => `\`${key}\``).join(', ')} ${undeclared.length > 1 ? 'are not fields' : 'is not a field'} of \`${object}\``;
+        return { handled: true, response: deps.errorFromThrown(validationFailure(message, fields), VALIDATION_FAILED_STATUS) };
     }
     const ec: any = (context as any)?.executionContext;
     const flows = svc.listRecordUpdateStarts({

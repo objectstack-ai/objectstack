@@ -953,6 +953,11 @@ export interface ResumeSignal {
  * record of `object` as it stands (`previous`) and as the proposed update
  * would leave it (`record`, the stored fields with the update's fields
  * applied). The caller reads the record; the engine reads nothing.
+ *
+ * Of the writer it carries the user id and tenant only. A live save also
+ * binds the writer's positions, request params and expand into the run, so a
+ * start condition reading those is judged here without them and the preview
+ * can under-list.
  */
 export interface RecordUpdateStartsInput {
     /** Machine name of the record's object. */

@@ -901,7 +901,14 @@ export type GetRunResponseParsed = z.infer<typeof GetRunResponseSchema>;
  *
  * Answered to a caller who can read the record: the record is read AS THE
  * CALLER, and one the caller cannot read answers `404 RECORD_NOT_FOUND`, the
- * same answer as a record id that does not exist.
+ * same answer as a record id that does not exist. Every `changes` key must be
+ * a declared field of `object`; any other key is refused
+ * `400 VALIDATION_FAILED` and the engine is not asked.
+ *
+ * What the preview binds of the caller: their user id and tenant only. A live
+ * run also binds the writer's positions, request params and expand, so a
+ * start condition that reads those is judged without them here and the
+ * preview can under-list (it never runs a flow).
  *
  * @example POST /api/v1/automation/_record-starts
  * { object: 'showcase_project', recordId: 'p_1', changes: { status: 'completed' } }
@@ -909,8 +916,13 @@ export type GetRunResponseParsed = z.infer<typeof GetRunResponseSchema>;
 export const RecordUpdateStartsRequestSchema = lazySchema(() => z.object({
   object: z.string().min(1).describe('Machine name of the record\'s object.'),
   recordId: z.string().min(1).describe('Id of the record the update would write.'),
-  changes: z.record(z.string(), z.unknown()).describe(
-    'The proposed update: each field it sets and its new value. The record\'s other fields are read as stored.',
+  changes: z.record(
+    z.string().regex(/^[a-z_][a-z0-9_]*$/, {
+      message: 'A change key is a field machine name (snake_case, the field-name grammar of `data/field.zod.ts`).',
+    }),
+    z.unknown(),
+  ).describe(
+    'The proposed update: each field it sets and its new value, keyed by the field\'s machine name. Every key must be a declared field of `object`; the door refuses any other key `400 VALIDATION_FAILED` before the engine is asked. The record\'s other fields are read as stored.',
   ),
 }).strict());
 export type RecordUpdateStartsRequest = z.input<typeof RecordUpdateStartsRequestSchema>;
