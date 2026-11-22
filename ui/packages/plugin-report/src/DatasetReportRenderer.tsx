@@ -964,7 +964,7 @@ function emitBucketDrill({
   const fields = Array.from(new Set([
     // A relationship path shows its lookup field: the list draws no dotted column.
     ...drillDims.map((d) => state.dimensionFields?.[d]).filter((f): f is string => !!f).map((f) => f.split('.')[0]),
-    ...Object.values(rowRanges ?? {}).map((range) => range.field),
+    ...Object.values(rowRanges ?? {}).map((range) => range.field.split('.')[0]),
     ...measuredFieldsOf(scope),
   ]));
   if (state.object && datasetDrillHasRelationshipPath(drillDims, state.dimensionFields)) {

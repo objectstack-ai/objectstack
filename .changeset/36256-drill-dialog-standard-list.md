@@ -14,4 +14,4 @@ Clicking a number on a dashboard (a chart mark, a metric tile, a table cell) or 
 
 A dataset report's chart marks now drill too: a bar opens the same records as the summary line it stands for.
 
-Additive members: `DrillNavigationValue.openRecord` and the `DrillRecordOrigin` type (`@object-ui/react`), `DrillDownDrawerProps.defaultColumns` (`@object-ui/plugin-dashboard`), `DatasetDrillArgs.fields` (`@object-ui/plugin-report`). A renderer without `@object-ui/plugin-list` registered lists the drilled records in the dashboard's data table, whose rows no longer open a record panel.
+Additive members: `DrillNavigationValue.openRecord` and the `DrillRecordOrigin` type (`@object-ui/react`), `DrillDownDrawerProps.defaultColumns` (`@object-ui/plugin-dashboard`), `DatasetDrillArgs.fields` (`@object-ui/plugin-report`). A renderer without `@object-ui/plugin-list` registered lists the drilled records in the dashboard's data table. A host that gives no `openRecord` (a page block's metric or pivot) opens the drilled record in a dialog, from either body.

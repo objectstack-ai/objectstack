@@ -23,7 +23,9 @@
  * (`DrillNavigationContext.openRecord`, item 6), with the rows the list shows
  * as the page's ↑ ↓ set and the count it matched; no record panel is stacked
  * over the drill. A host with no record page (a page block's metric or pivot
- * mounts no navigation) opens the record in a dialog, as it did before.
+ * mounts no navigation) opens the record in a dialog showing the fields the
+ * list lists: the list reads only those (`$select`), so a field it did not
+ * read is not drawn as empty.
  */
 
 import React from 'react';
@@ -127,7 +129,8 @@ export const DrillRecordList: React.FC<DrillRecordListProps> = ({
     );
   }
 
-  const listColumns = [...baseColumns, ...added.filter((f) => !baseColumns.includes(f))].map((field) =>
+  const listedFields = [...baseColumns, ...added.filter((f) => !baseColumns.includes(f))];
+  const listColumns = listedFields.map((field) =>
     summaries[field] ? { field, summary: summaries[field] } : field,
   );
   const schema = {
@@ -178,6 +181,11 @@ export const DrillRecordList: React.FC<DrillRecordListProps> = ({
         record={opened}
         objectName={objectName}
         objectSchema={definition ?? undefined}
+        // The fields the list read; with none listed, the list picks its own
+        // and reads the whole record.
+        fields={listedFields.length > 0 ? listedFields : undefined}
+        // Values stay masked while the field types are unknown (objectui#10657).
+        objectTypesPending={typeof dataSource?.getObjectSchema === 'function' && !(definition as { fields?: unknown } | null | undefined)?.fields}
         target="dialog"
         onClose={() => setOpened(null)}
       />

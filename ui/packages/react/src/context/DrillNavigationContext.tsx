@@ -69,7 +69,7 @@ export interface DrillNavigationValue {
    * page came from: the ids of the rows it shows, in order, which the page
    * steps through with ↑ ↓ under its 「N of M」 counter, and the count it
    * matched. The host makes the page it opened from (the dashboard, the
-   * report) the page's way back. Absent ⇒ the drill list opens no record.
+   * report) the page's way back. Absent ⇒ the drill opens the record in a dialog.
    */
   openRecord?: (objectName: string, recordId: string, origin?: DrillRecordOrigin) => void;
 }

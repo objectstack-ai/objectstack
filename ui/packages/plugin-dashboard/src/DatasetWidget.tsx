@@ -1503,7 +1503,7 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
     // list draws no dotted column.
     const columns = Array.from(new Set([
       ...drillDims.map((d) => dimensionFields?.[d]).filter((f): f is string => !!f).map((f) => f.split('.')[0]),
-      ...Object.values(drillRanges?.[index] ?? {}).map((range) => range.field),
+      ...Object.values(drillRanges?.[index] ?? {}).map((range) => range.field.split('.')[0]),
       ...measuredFieldsOf(scope),
     ]));
     const request = ++drillRequest.current;
