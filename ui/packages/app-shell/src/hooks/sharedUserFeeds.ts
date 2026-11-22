@@ -106,7 +106,7 @@ import { usePermissions } from '@object-ui/permissions';
 import { errorCodeIs } from '@object-ui/types';
 // The refused-read verdict the record activity panel reads (objectui#11195),
 // so a refused `sys_activity` read means the same thing on Home (objectui#12843).
-import { isRefusedFeedRead } from '@object-ui/plugin-detail';
+import { isRefusedFeedRead } from '@object-ui/plugin-detail/core';
 // Re-exported from `@object-ui/react` — import it through the provider module
 // so a consumer that stubs the provider stubs this too.
 import { useAdapter } from '../providers/AdapterProvider.js';

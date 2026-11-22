@@ -22,7 +22,7 @@
  * Pinned by `recordDetailSections.agreement-12442.test.ts` beside this file.
  */
 
-import { deriveFieldGroupDetailSections, resolveDetailSections } from '@object-ui/plugin-detail';
+import { deriveFieldGroupDetailSections, resolveDetailSections } from '@object-ui/plugin-detail/core';
 import { BUILT_IN_LANGUAGE_CODES, loadBuiltInLocale } from '@object-ui/i18n';
 import { AUDIT_FIELD_NAMES, HIDDEN_SYSTEM_FIELD_NAMES } from './record-detail-system-fields.js';
 
