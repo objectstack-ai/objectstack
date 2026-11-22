@@ -108,12 +108,25 @@ const RESULT_COPY: Record<string, { cls: string; title: string; body: string }> 
   not_approver: { cls: 'warn', title: 'No longer your approval · 已不在你名下', body: 'This approval was handed to someone else. · 该审批已转由他人处理。' },
 };
 
-/** Terminal page for every redemption outcome (and stale GETs). */
-export function renderResultPage(kind: keyof typeof RESULT_COPY, request?: ApprovalRequestRow): string {
+/** The Console's approvals inbox route, relative to the Console's mount. */
+export const APPROVALS_INBOX_PATH = '/system/approvals';
+
+/**
+ * Terminal page for every redemption outcome (and stale GETs).
+ *
+ * [#34862] `inboxHref` is the Console's inbox as the caller links it: under
+ * the Console's mount (`consolePageLink`), which this page cannot know. It
+ * defaults to the bare route.
+ */
+export function renderResultPage(
+  kind: keyof typeof RESULT_COPY,
+  request?: ApprovalRequestRow,
+  inboxHref: string = APPROVALS_INBOX_PATH,
+): string {
   const copy = RESULT_COPY[kind] ?? RESULT_COPY.invalid;
   return shell(copy.title, `
     <span class="badge ${copy.cls}">${esc(copy.title)}</span>
     ${request ? summaryRows(request) : ''}
     <p>${esc(copy.body)}</p>
-    <p class="foot"><a href="/system/approvals">Open the Approvals Inbox · 打开审批中心</a></p>`);
+    <p class="foot"><a href="${esc(inboxHref)}">Open the Approvals Inbox · 打开审批中心</a></p>`);
 }

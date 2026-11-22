@@ -37,7 +37,7 @@ import {
 } from 'lucide-react';
 import { DetailSection } from './DetailSection';
 import { EmptySectionsFold, EmptySectionsLine } from './EmptySectionsFold';
-import { ApprovalBandContext, EmptySectionsLineContext, useApprovalBandOnce, useDefaultRecordPage } from './defaultRecordPage';
+import { EmptySectionsLineContext, useApprovalBandOnce, useDefaultRecordPage } from './defaultRecordPage';
 import { DetailTabs } from './DetailTabs';
 import { SectionGroup } from './SectionGroup';
 import { HeaderHighlight } from './HeaderHighlight';
@@ -45,6 +45,7 @@ import { RecordComments } from './RecordComments';
 import { ActivityTimeline } from './ActivityTimeline';
 import { HistoryTimeline } from './HistoryTimeline';
 import { RecordMetaFooter } from './RecordMetaFooter';
+import { useRecordFieldList } from './recordFieldList';
 import { RecordPageProvenanceContext } from './recordPageProvenance';
 import { SchemaRenderer, SchemaErrorBoundary, toRenderableSchema, useSafeFieldLabel, useDataInvalidation, useInlineEdit, useRowPredicate, resolveApprovalLock, usePrintPage, useRecordContext, usePredicateScope } from '@object-ui/react';
 import { buildExpandFields, declaredNameField, getRecordDisplayName, formatTitleTemplate, recordDelete, recordDisplayValueAt, resolveAffordance, toDisplayDate, userActionPredicates, withoutDeniedFields } from '@object-ui/core';
@@ -327,11 +328,9 @@ export const DetailView: React.FC<DetailViewProps> = ({
   // approval band below is live, per-viewer workflow state, not document
   // content, so it does not print.
   const isPrintPage = usePrintPage() !== null;
-  // objectstack#35253 — `false` on every details part of a split default page
-  // but the first: the approval band is the record's, drawn once per page.
-  // objectstack#35483 / objectstack#35484 — and on a page drawn as written,
-  // the first body to reach the band's place draws it (`ApprovalBandOnceScope`).
-  const drawsApprovalBand = React.useContext(ApprovalBandContext);
+  // objectstack#35253, objectstack#35483, objectstack#35484 — the approval
+  // band is the record's, drawn once per page: under a page's
+  // `ApprovalBandOnceScope` the first body to reach the band's place draws it.
   const approvalBandOnce = useApprovalBandOnce();
   // objectstack#27055, objectstack#35019 — a record page's details body folds
   // its entirely empty sections into one line (`EmptySectionsLine`): every
@@ -340,7 +339,12 @@ export const DetailView: React.FC<DetailViewProps> = ({
   // whole-body fold (`EmptySectionsFold`).
   const inRecordDetailsBody = React.useContext(EmptySectionsLineContext);
   const onDefaultRecordPage = useDefaultRecordPage();
-  const emptySectionsAsLine = inRecordDetailsBody || onDefaultRecordPage;
+  // objectstack#36147 — in the laid-out record page's field list every
+  // section folds its own empty rows into the list's one last row, so this
+  // body draws its sections as they are, with neither fold.
+  const fieldList = useRecordFieldList();
+  const foldsIntoFieldList = fieldList !== null && onDefaultRecordPage && !isPrintPage;
+  const emptySectionsAsLine = (inRecordDetailsBody || onDefaultRecordPage) && !foldsIntoFieldList;
   const isInlineEditing = inline?.editing ?? false;
   const editedValues = inline?.draft ?? EMPTY_DRAFT;
   const autoFocusField = inline?.autoFocusField ?? null;
@@ -1206,7 +1210,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
   // for the whole body (`EmptySectionsFold`). Only when the sections ARE the
   // body: section groups draw fields of their own beside them.
   const foldEmptySections = (rendered: React.ReactNode) =>
-    drawn.sectionGroups?.length ? rendered : (
+    drawn.sectionGroups?.length || foldsIntoFieldList ? rendered : (
       <EmptySectionsFold
         sections={drawn.sections ?? []}
         data={{ ...data, ...editedValues }}
@@ -1451,8 +1455,17 @@ export const DetailView: React.FC<DetailViewProps> = ({
                         // `50%`. Text and bar take the one answer.
                         const percentScale = percentCellScale({ type: armType, max: percentField.max });
                         display = formatPercent(num, percentScale, scale, displayLocale);
-                        const points = summaryChipPercentPoints(num, percentScale);
-                        percentValue = Math.max(0, Math.min(100, points));
+                        // The field's read-only face, `percentDisplay` in
+                        // `@objectstack/spec`: `plain` is a rate or a
+                        // probability, not progress, so the chip states the
+                        // percentage alone and draws no bar; absent or `bar`
+                        // keeps it. The same literal test `PercentCellRenderer`
+                        // applies, read off the same merged bag (view over
+                        // object), so a percent formula's own key counts too.
+                        if (percentField.percentDisplay !== 'plain') {
+                          const points = summaryChipPercentPoints(num, percentScale);
+                          percentValue = Math.max(0, Math.min(100, points));
+                        }
                       }
                     } else if (ftype === 'select' || ftype === 'status' || ftype === 'multiselect') {
                       // Resolve raw option label from field metadata as
@@ -1757,12 +1770,11 @@ export const DetailView: React.FC<DetailViewProps> = ({
           status field through `record:details`, the way `record:path` leaves
           the current stage to it.
 
-          objectstack#35253 — and once per page: a default page split around a
-          body table draws it on its first details part only
-          (`ApprovalBandContext`), and on a page drawn as written by its
-          first details body (`ApprovalBandOnceScope`). */}
-      {inlineEdit && schema.showHeader === false && !isPrintPage && drawsApprovalBand && approvalBandOnce.mark}
-      {inlineEdit && schema.showHeader === false && !isPrintPage && drawsApprovalBand && approvalBandOnce.draws && (() => {
+          objectstack#35253 — and once per page: under the page's
+          `ApprovalBandOnceScope`, by the first details body that reaches
+          this place (objectstack#35483, objectstack#35484). */}
+      {inlineEdit && schema.showHeader === false && !isPrintPage && approvalBandOnce.mark}
+      {inlineEdit && schema.showHeader === false && !isPrintPage && approvalBandOnce.draws && (() => {
         // Two independent facts, not one (objectui#2902):
         //
         //   isPending — an approval is running on this record.

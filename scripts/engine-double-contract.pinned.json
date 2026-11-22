@@ -3772,6 +3772,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-audit/src/comment-routes.test.ts",
+      "verb": "findOne",
+      "pinned": 2
+    },
+    {
       "file": "packages/plugins/plugin-audit/src/stored-metadata-body-migration.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -4079,6 +4084,11 @@
     {
       "file": "packages/plugins/plugin-auth/src/org-create-posture-gate.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/org-create-posture-gate.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {

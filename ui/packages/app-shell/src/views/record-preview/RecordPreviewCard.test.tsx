@@ -33,6 +33,10 @@ import { PermissionProvider } from '@object-ui/permissions';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
 import { MetadataProvider } from '../../providers/MetadataProvider';
 import { RecordPreviewCard, type RecordPreviewSource } from './RecordPreviewCard';
+// The key fields draw through `lazy()` (`lazyDetailSurfaces.tsx`): load the
+// detail entry at module scope, so its cost is paid at import and never inside
+// a test's waits (ui/AGENTS.md, lazy boundaries in tests).
+import '@object-ui/plugin-detail';
 
 const OBJECT = 'invoice_12029';
 
@@ -136,7 +140,8 @@ describe('RecordPreviewCard — loading and readable (objectui#12029)', () => {
     expect(screen.getByTitle('Laptop refresh')).toHaveTextContent('Laptop refresh');
     expect(screen.queryByText('INV-0001')).toBeNull();
     expect(screen.getByText('Invoice')).toBeInTheDocument();
-    expect(screen.getByText('Note')).toBeInTheDocument();
+    // The key-field strip sits behind the detail entry's lazy boundary.
+    expect(await screen.findByText('Note')).toBeInTheDocument();
     expect(screen.getByText('Quarterly batch')).toBeInTheDocument();
 
     // One read, the record page's request shape: no reference field is shown,

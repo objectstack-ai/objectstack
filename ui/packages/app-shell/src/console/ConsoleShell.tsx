@@ -41,27 +41,23 @@ import { FlowPaletteRecentsProvider } from '../context/FlowPaletteRecentsProvide
 import { LastAppProvider, LAST_APP_PREFERENCE_KEY } from '../context/LastAppProvider.js';
 import {
   UserStateAdaptersProvider,
-  useAttachListStateFamily,
   useAttachRecordStateFamily,
   useAttachUserStateAdapters,
 } from '../context/UserStateAdapters.js';
-import {
-  LIST_PREFERENCE_PREFIX,
-  ListPreferencesProvider,
-} from '../context/ListPreferencesProvider.js';
 import {
   RECORD_PREFERENCE_PREFIX,
   RecordPreferencesProvider,
 } from '../context/RecordPreferencesProvider.js';
 import { ThemeProvider } from '../chrome/ThemeProvider.js';
-import { LoadingScreen } from '../chrome/LoadingScreen.js';
 import { RedirectWithSplash } from '../chrome/RedirectWithSplash.js';
+import { ConsoleBootFallback } from './ConsoleBootShell.js';
 import { RemediationOverlay } from './RemediationOverlay.js';
 import { HostNavigationBridge } from './HostNavigationBridge.js';
 import { ConsoleElementApiOpen } from './ConsoleElementApiOpen.js';
 import { ImpersonationBanner } from '../layout/ImpersonationBanner.js';
 import { ReadRateBanner } from '../layout/ReadRateBanner.js';
 import { StorageUsageBanner } from '../layout/StorageUsageBanner.js';
+import { ChromeBannerSlot } from '../layout/chromeBannerHost.js';
 import { getRuntimeConfig } from '../runtime-config.js';
 
 // The console's every pre-React / pre-auth gate (Suspense fallback, adapter
@@ -70,8 +66,13 @@ import { getRuntimeConfig } from '../runtime-config.js';
 // /_console load (framework#2615 P3). Delegate to the branded, boot-safe
 // splash (logo + product name + step list) that the rest of the shell already
 // uses, so the cold load looks like the product from the first frame.
+//
+// objectstack#35981 — on an app route, once the session has answered with a
+// user, the console chrome's empty frame instead (`ConsoleBootShell`): the
+// gates after the session read (the adapter, the organization list, the
+// permission answer) decide nothing the frame shows.
 export function LoadingFallback() {
-  return <LoadingScreen />;
+  return <ConsoleBootFallback />;
 }
 
 /**
@@ -202,40 +203,43 @@ function ConsoleShellProviders({ children }: { children: ReactNode }) {
               <RecentItemsProvider>
                 <FlowPaletteRecentsProvider>
                   <LastAppProvider>
-                  <ListPreferencesProvider>
                     <RecordPreferencesProvider>
-                      {/* objectui#4467 — the impersonation indicator. Above the
-                          routes, so it is chrome for EVERY console page (home has
-                          its own layout and would otherwise carry no indicator),
-                          and in flow rather than overlaid, so it never covers the
-                          header it warns about. Renders null on every ordinary
-                          session. */}
-                      <ImpersonationBanner />
-                      {/* objectui#9954 — the environment admin's read-rate report.
-                          Beside the impersonation indicator for the same reason it
-                          is here: chrome for EVERY console page, including `/home`,
-                          which has its own layout and would otherwise carry no
-                          report. Renders null unless the control plane's verdict is
-                          `anomalous`, so an ordinary session and an unmeasured
-                          environment both see nothing — and a non-admin session
-                          never even issues the request, nor does any session on a
-                          runtime whose config does not serve `storageUsage`
-                          (objectui#11002). */}
-                      <ReadRateBanner />
-                      {/* objectui#10439 — the environment admin's storage-capacity
-                          banner, beside the read-rate report and behind the same
-                          two gates (the admin, and the runtime serving
-                          `storageUsage`); the two read one `/usage/storage` response.
-                          Renders null unless the runtime's own verdict says `warn`
-                          (80% and up) or `blocked` (uploads and imports refused). */}
-                      <StorageUsageBanner />
+                      {/* objectstack#36112 — inside an app from 768 px up the three
+                          are drawn at the top of the content area instead
+                          (`ChromeBannerSlot`); everywhere else, here. */}
+                      <ChromeBannerSlot>
+                        {/* objectui#4467 — the impersonation indicator. Above the
+                            routes, so it is chrome for EVERY console page (home has
+                            its own layout and would otherwise carry no indicator),
+                            and in flow rather than overlaid, so it never covers the
+                            header it warns about. Renders null on every ordinary
+                            session. */}
+                        <ImpersonationBanner />
+                        {/* objectui#9954 — the environment admin's read-rate report.
+                            Beside the impersonation indicator for the same reason it
+                            is here: chrome for EVERY console page, including `/home`,
+                            which has its own layout and would otherwise carry no
+                            report. Renders null unless the control plane's verdict is
+                            `anomalous`, so an ordinary session and an unmeasured
+                            environment both see nothing — and a non-admin session
+                            never even issues the request, nor does any session on a
+                            runtime whose config does not serve `storageUsage`
+                            (objectui#11002). */}
+                        <ReadRateBanner />
+                        {/* objectui#10439 — the environment admin's storage-capacity
+                            banner, beside the read-rate report and behind the same
+                            two gates (the admin, and the runtime serving
+                            `storageUsage`); the two read one `/usage/storage` response.
+                            Renders null unless the runtime's own verdict says `warn`
+                            (80% and up) or `blocked` (uploads and imports refused). */}
+                        <StorageUsageBanner />
+                      </ChromeBannerSlot>
                       <Suspense fallback={<LoadingFallback />}>{children}</Suspense>
                       {/* ADR-0069 — full-screen gate (expired password / required MFA) above all routes */}
                       <RemediationOverlay />
                       <NotificationSnackbar />
                       <NotificationAlerts />
                     </RecordPreferencesProvider>
-                  </ListPreferencesProvider>
                   </LastAppProvider>
                 </FlowPaletteRecentsProvider>
               </RecentItemsProvider>
@@ -382,7 +386,6 @@ function UserStateBridge() {
   const { user } = useAuth();
   const dataSource = useAdapter();
   const attach = useAttachUserStateAdapters();
-  const attachListState = useAttachListStateFamily();
   const attachRecordState = useAttachRecordStateFamily();
 
   useEffect(() => {
@@ -391,7 +394,6 @@ function UserStateBridge() {
       attach('recent', null);
       attach('flowPaletteRecents', null);
       attach('lastApp', null);
-      attachListState(null);
       attachRecordState(null);
       return;
     }
@@ -416,35 +418,27 @@ function UserStateBridge() {
       userId: user.id,
       key: LAST_APP_PREFERENCE_KEY,
     });
-    // objectui#12418 — every object's list state, `ui.list.<object>`: a key
-    // family, loaded by prefix in the same one read as the three slots above.
-    const listState = createObjectStackUserPreferenceFamily({
-      dataSource,
-      userId: user.id,
-      prefix: LIST_PREFERENCE_PREFIX,
-    });
     attach('favorites', favorites);
     attach('recent', recent);
     attach('flowPaletteRecents', flowPaletteRecents);
     attach('lastApp', lastApp);
     // objectstack#25883 — every object's record-page state, `ui.record.<object>`
-    // ("show empty fields"): a second key family in the same one read.
+    // ("show empty fields"): a key family loaded by prefix in the same one
+    // read as the slots above.
     const recordState = createObjectStackUserPreferenceFamily({
       dataSource,
       userId: user.id,
       prefix: RECORD_PREFERENCE_PREFIX,
     });
-    attachListState(listState);
     attachRecordState(recordState);
     return () => {
       attach('favorites', null);
       attach('recent', null);
       attach('flowPaletteRecents', null);
       attach('lastApp', null);
-      attachListState(null);
       attachRecordState(null);
     };
-  }, [user?.id, dataSource, attach, attachListState, attachRecordState]);
+  }, [user?.id, dataSource, attach, attachRecordState]);
 
   return null;
 }
@@ -486,7 +480,7 @@ export function RequireOrganization({ children }: { children: ReactNode }) {
   // looking at is dropped and nothing replaces it until `/organizations`
   // renders at transition priority. Measured on the three sibling gates #6506
   // fixed: 41-147 ms of empty `#root`, a white flash on 67/87 boots. The
-  // replacement paints the SAME `LoadingScreen` this gate was already showing,
+  // replacement paints the SAME fallback this gate was already showing,
   // so the handoff changes no pixels.
   if (orgFeatureEnabled && !activeOrganization)
     return <RedirectWithSplash to="/organizations" replace />;

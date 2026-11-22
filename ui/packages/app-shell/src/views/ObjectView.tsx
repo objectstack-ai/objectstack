@@ -9,13 +9,10 @@
  * - ListView delegation for non-grid view types (kanban, calendar, chart, etc.)
  */
 
-import type { ColumnSummary } from '@objectstack/spec/ui';
-import type { ListColumn } from '@object-ui/types';
-import { columnsWithSummary, declaredColumnFields } from './columnSummaryWrite.js';
 import { useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense, type ReactNode } from 'react';
 import { useParams, useSearchParams, useNavigate, useLocation, useHref, createSearchParams } from 'react-router-dom';
 import { resolveAffordance, type FilterTokenScope, type SchemaLike } from '@object-ui/core';
-import { useObjectListPreferences } from '../context/ListPreferencesProvider.js';
+import { useObjectListLayout } from './listLayoutStore.js';
 const ImportWizard = lazy(() =>
   import('@object-ui/plugin-grid').then((m) => ({ default: m.ImportWizard })),
 );
@@ -60,10 +57,10 @@ import { ManagedUsersInviteLine } from './managedEnvironmentUsers.js';
 import { importTargetFields } from './importTargetFields.js';
 import { resolveViewId } from '../utils/resolveViewId.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
-import { usePackageRefusesSaves } from '../hooks/useStudioDesignGate.js';
 import { studioPackageId } from '../utils/appRoute.js';
 import { LIST_PINNED_VIEW_PREFERENCE, objectPreferenceScope, useWorkspacePreference } from '../utils/workspacePreference.js';
 import { defaultListViewId, isSavedViewId, viewRowId } from '../utils/viewIdentity.js';
+import { usePackageSaveRead } from '../hooks/useStudioDesignGate.js';
 import { useObjectActions } from '../hooks/useObjectActions.js';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
@@ -101,12 +98,14 @@ import {
 import { ObjectViewRecordOverlay } from './objectViewRecordOverlay.js';
 import { useObjectViewListRenderer } from './objectViewListRenderer.js';
 import { ListDraftActions } from './ListDraftActions.js';
+import { viewSaveRefusalText } from './viewSaveRefusal.js';
 import { listDraftPreference, listDraftScope, useListDraft } from './listDraftStore.js';
 import { useObjectViewViewCrud } from './objectViewViewCrud.js';
 import {
     PERSONAL_VIEW_OBJECT,
     buildInPlaceViewConfig,
     buildPersonalViewConfig,
+    layListStateOverView,
     personalViewEntry,
     personalViewPanelFilters,
     usePersonalViews,
@@ -457,16 +456,14 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         [personalViews.views],
     );
 
-    // objectui#12418 — the signed-in user's OWN list state for this object:
-    // the tab order, and per view the sort, the Filter panel's conditions and
-    // the column layout. A toolbar change writes here (`sys_user_preference`
-    // `ui.list.<object>`, localStorage as the cache), never into the shared
-    // view: the view's authored values stay the default for every user with
-    // no preference. See `ListPreferencesProvider`.
-    const listPrefs = useObjectListPreferences(objectName);
+    // objectstack#35955 — the reader's list LAYOUT for this object, in this
+    // browser only (`./listLayoutStore.ts`): the tab order, and per view the
+    // column widths and the row height. Never written to the server or into
+    // the shared view: the view's authored values stay every other reader's.
+    const listLayout = useObjectListLayout(objectName);
     // Content keys, not identities (AGENTS.md #10): the views memo and the list
-    // relay re-run when what the user stored changes, and on nothing else.
-    const prefViewOrderKey = JSON.stringify(listPrefs.preference.viewOrder ?? []);
+    // relay re-run when the reader's tab order changes, and on nothing else.
+    const prefViewOrderKey = JSON.stringify(listLayout.layout.viewOrder ?? []);
     useEffect(() => {
         let cancelled = false;
         if (!objectName) {
@@ -609,7 +606,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         }
 
         // Stable sort: respect the user's own view-order preference (for both
-        // metadata and saved views; objectui#12418, `listPrefs`). Falls back
+        // metadata and saved views; `listLayout`). Falls back
         // to: metadata views first in declared order, then saved views by
         // `sortOrder` / created_at — the authored order, every user's default.
         const indexOf = new Map(viewList.map((v, i) => [v.id, i]));
@@ -736,7 +733,12 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     const listDraft = useListDraft(listDraftScope(user?.id, objectName ?? '', activeView?.id ? String(activeView.id) : ''));
     /** The list on screen in the reader-state shape the view builders read (draft + kept widths and row height). */
     const draftPreferenceOf = (id: string | undefined) =>
-        id ? listDraftPreference(listDraft.draft, listPrefs.preference.perView?.[id]) : undefined;
+        id ? listDraftPreference(listDraft.draft, listLayout.layout.perView?.[id]) : undefined;
+    /** The Display panel's layout and row colour the draft holds, for the view builders. */
+    const draftDisplay = {
+        ...(listDraft.draft.viewType ? { viewType: listDraft.draft.viewType } : {}),
+        ...(listDraft.draft.rowColor !== undefined ? { rowColor: listDraft.draft.rowColor } : {}),
+    };
     // objectstack#25992 slice 8: the list's toolbar state in the URL (seed, write-back,
     // "Reset view") moved to `./objectViewListUrlState.ts`.
     const {
@@ -755,7 +757,6 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         objectDef,
         activeView,
         viewResolving: awaitingPersonalViews,
-        listPrefs,
         listDraft: listDraft.draft,
         perms,
         user,
@@ -783,6 +784,8 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
             url: { ...parseListStateParams(searchParams, acceptListField), filters: readPanelFilters() },
             preference: draftPreferenceOf(activeView.id),
             panelFilters: viewPanelFilters,
+            summaries: listDraft.draft.summaries,
+            display: draftDisplay,
         });
         if (!built.ok) {
             toast.error(t('form.saveError'), { description: t(FILTER_FOLD_REFUSAL_KEYS[built.reason]) });
@@ -798,28 +801,16 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         } catch (err) {
             console.error('[ObjectView] Failed to save a personal view:', err);
             toast.error(t('form.saveError'), {
-                description: err instanceof Error ? err.message : String(err),
+                description: viewSaveRefusalText(err, t),
                 classNames: { description: 'whitespace-pre-line' },
             });
         }
     };
-    // objectstack#35955 — Discard and Save while the list holds a draft, at
-    // the end of the condition row (the phone draws the same slot). 「Save to
-    // this view」 writes one of the reader's own views here; a shared view's
-    // save is not offered on the list yet. 「Save as my view」 asks a name.
     // objectstack#29635 — the one test for creating one of the reader's own
     // views, shared by Save as my view here and the view switcher's create
     // card: a reader who cannot read the list's own object has no list to keep.
     const listReadable = !perms.isLoaded || perms.can(objectDef.name, 'read');
     const canCreatePersonalView = personalViewsReady && personalGrant('create') && listReadable && !!activeView && !viewAccess.refusal;
-    const draftActions = !isEnvironmentList && listDraftParts.length > 0 ? (
-        <ListDraftActions
-            parts={listDraftParts}
-            onDiscard={handleResetView}
-            onSaveToView={canUpdatePersonalView ? () => { void handleSaveToPersonalView(); } : undefined}
-            onSaveAsMyView={canCreatePersonalView ? () => setPersonalViewDialog({ mode: 'saveAs' }) : undefined}
-        />
-    ) : null;
 
     // objectstack#25992 slice 11b: the view-config save and create handlers, view switching
     // and the view-tab CRUD callbacks moved to `./objectViewViewCrud.tsx` (the mobile view
@@ -827,6 +818,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     const {
         handleViewConfigSave,
         handleDraftBarChange,
+        handleViewSaveAndPublish,
         handleViewCreate,
         handleViewUpdate,
         handleViewChange,
@@ -855,49 +847,88 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         setRefreshKey,
         confirmHandler,
         savedViews,
-        listPrefs,
+        listLayout,
         views,
         activeViewId,
         baseView,
     });
-    // objectstack#35702 — a footer pick saves the column's calculation and
-    // nothing else (L1 7048239634): the stored view's own columns are the
-    // base, so the reader's unsaved hides, order or added columns never ride
-    // along, and a column the view does not declare is not offered. Each
-    // resolves whether the pick was saved; on `false` the grid takes it back.
-    const personalViewRow = activeView ? personalViews.views.find((v) => v.id === activeView.id) : undefined;
-    // objectstack#35933 — the open saved shared view's own package (its row's
-    // served `_packageId`), and whether the server refuses saves into it: a
-    // view a read-only package ships is offered no save of its own. Read for
-    // an admin only, the one reader offered such a save; unknown offers it.
-    const activeSavedViewRow = activeView && isAdmin
+
+    // objectstack#35955 — 「Save to this view」 on a shared view: offered to
+    // the reader who may edit it (an admin, on a view the metadata door
+    // stores, whose package takes saves). One confirm
+    // (everyone using the view sees it), then the list on screen is saved and
+    // published at once (ruling record 7058616478). A view with a pending
+    // draft is not saved: that draft is never published on its saver's
+    // behalf, and the reader is sent to the view settings. The reader's row
+    // height is theirs, never the view's: the view keeps its own.
+    //
+    // objectstack#36195 — whether the view's package takes saves is read
+    // before the save is offered: the open saved view's own package (its
+    // row's served `_packageId`, read for an admin only), and the save is not
+    // offered while that package list is unread (on a slow boot the list
+    // draws seconds before it lands) nor when it carries the package
+    // read-only. A failed read and a package the list leaves out still offer
+    // it, as before: the server's write gate refuses what it refuses, and
+    // the refusal is said in the reader's words (`viewSaveRefusalText`).
+    const activeSavedViewRow = activeView && isAdmin && !activeIsPersonal
         ? savedViews.find((sv: any) => viewRowId(sv) === activeView.id)
         : undefined;
-    const activeViewPackageRefusesSaves = usePackageRefusesSaves(studioPackageId(activeSavedViewRow));
-    const handlePickPersonalViewSummary = async (field: string, summary: ColumnSummary | null): Promise<boolean> => {
-        if (!personalViewRow) return false;
-        const columns = columnsWithSummary(personalViewRow.config.columns as ListColumn[] | string[] | undefined, field, summary);
-        if (!columns) return false;
-        try {
-            await personalViews.update(personalViewRow.id, { ...personalViewRow.config, columns });
-            return true;
-        } catch (err) {
-            console.error('[ObjectView] Failed to save a footer calculation:', err);
-            toast.error(t('form.saveError'), { description: err instanceof Error ? err.message : String(err) });
-            return false;
+    const activeViewPackageSaveRead = usePackageSaveRead(studioPackageId(activeSavedViewRow));
+    const canSaveToSharedView = !isEnvironmentList && !activeIsPersonal && !!activeView && isAdmin
+        && activeViewPackageSaveRead === 'takes' && isSavedViewId(savedViews, String(activeView.id));
+    const handleSaveToSharedView = async () => {
+        if (!activeView || !canSaveToSharedView) return;
+        const confirmed = await confirmHandler(
+            // The view's name as its tab draws it (objectstack#35955 L1-b S1): a
+            // label is an I18nLabel with no default, so never the raw value.
+            t('console.objectView.draft.saveToViewConfirm', { name: listLabel }),
+            {
+                title: t('console.objectView.draft.saveToViewConfirmTitle'),
+                confirmText: t('console.objectView.draft.saveToViewConfirmButton'),
+                cancelText: t('console.objectView.cancel'),
+            },
+        );
+        if (!confirmed) return;
+        const pref = draftPreferenceOf(activeView.id);
+        const laid = layListStateOverView(activeView, {
+            url: { ...parseListStateParams(searchParams, acceptListField), filters: readPanelFilters() },
+            preference: pref ? { ...pref, rowHeight: undefined } : undefined,
+            panelFilters: viewPanelFilters,
+            summaries: listDraft.draft.summaries,
+            display: draftDisplay,
+        });
+        if (!laid.ok) {
+            toast.error(t('form.saveError'), { description: t(FILTER_FOLD_REFUSAL_KEYS[laid.reason]) });
+            return;
         }
+        const outcome = await handleViewSaveAndPublish(laid.view);
+        if (outcome === 'pending-draft') {
+            toast.error(t('console.objectView.draft.pendingDraft'));
+            return;
+        }
+        if (outcome !== 'published') return;
+        // The draft is the view now, for everyone: Discard and Save go, and
+        // the list opens again on the saved view (its chips stay).
+        handleResetView();
+        toast.success(t('console.objectView.draft.savedForEveryone'));
     };
-    const handlePickSharedViewSummary = async (field: string, summary: ColumnSummary | null): Promise<boolean> => {
-        if (!activeView) return false;
-        const columns = columnsWithSummary(activeView.columns as ListColumn[] | string[] | undefined, field, summary);
-        if (!columns) return false;
-        const priorDraft = viewDraft;
-        const saved = await handleViewConfigSave({ ...activeView, columns });
-        // The panel's save keeps a refused draft on screen (the panel stays
-        // dirty); a refused pick is taken back instead.
-        if (!saved) setViewDraft(priorDraft);
-        return saved;
-    };
+    // objectstack#35955 — Discard and Save while the list holds a draft, at
+    // the end of the condition row (the phone draws the same slot). 「Save to
+    // this view」 writes one of the reader's own views, or the shared view
+    // for a reader who may edit it; 「Save as my view」 asks a name.
+    const saveToThisView = canUpdatePersonalView
+        ? () => { void handleSaveToPersonalView(); }
+        : canSaveToSharedView
+            ? () => { void handleSaveToSharedView(); }
+            : undefined;
+    const draftActions = !isEnvironmentList && listDraftParts.length > 0 ? (
+        <ListDraftActions
+            parts={listDraftParts}
+            onDiscard={handleResetView}
+            onSaveToView={saveToThisView}
+            onSaveAsMyView={canCreatePersonalView ? () => setPersonalViewDialog({ mode: 'saveAs' }) : undefined}
+        />
+    ) : null;
 
     // objectstack#29635 — creating one of the reader's own views, and Rename
     // and Delete on them. Creating is offered to any reader the server lets
@@ -963,14 +994,19 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
      */
     const handleSaveAsMyView = async (label: string): Promise<boolean> => {
         if (!activeView) return false;
+        // objectstack#35955 — the draft's layout is the new view's type (so
+        // the type's own field list is filled as the create card fills it),
+        // and its row colour is laid over the body.
         const built = buildInPlaceViewConfig(
             objectDef.name,
             activeView,
-            { type: String((activeView as any).type ?? 'grid') },
+            { type: listDraft.draft.viewType ?? String((activeView as any).type ?? 'grid') },
             {
                 url: { ...parseListStateParams(searchParams, acceptListField), filters: readPanelFilters() },
                 preference: draftPreferenceOf(activeView.id),
                 panelFilters: viewPanelFilters,
+                summaries: listDraft.draft.summaries,
+                ...(listDraft.draft.rowColor !== undefined ? { display: { rowColor: listDraft.draft.rowColor } } : {}),
             },
         );
         if (!built.ok) {
@@ -986,7 +1022,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         } catch (err) {
             console.error('[ObjectView] Failed to save a personal view:', err);
             toast.error(t('form.saveError'), {
-                description: err instanceof Error ? err.message : String(err),
+                description: viewSaveRefusalText(err, t),
                 classNames: { description: 'whitespace-pre-line' },
             });
             return false;
@@ -1047,7 +1083,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // objectstack#27058 — on a phone the record is always a page: a row tap
     // navigates to it, and no pane is mounted beside or over the list.
     const phone = usePhoneViewport();
-    const { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowInPanel, drawerRoot, drawerRestore, handleListRowsChange, handleListTotalChange, handleRootStep, listLabel } = useObjectViewRecordNavigation({
+    const { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowInPanel, handleOpenReferencedRecord, drawerRoot, drawerRestore, handleListRowsChange, handleListTotalChange, handleRootStep, listLabel } = useObjectViewRecordNavigation({
         activeView,
         objectDef,
         objects,
@@ -1073,6 +1109,9 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
             : null),
         [navOverlay.mode, phone, openInPanelLabel, handleOpenRowInPanel],
     );
+    // objectstack#36015 — a lookup chip in the grid opens its record in the
+    // same side drawer, where this list has one.
+    const openReferencedRecord = navOverlay.mode === 'drawer' && !phone ? handleOpenReferencedRecord : undefined;
 
     // objectstack#25992 slice 8: the `filter[...]` URL equality filters and the `uf_*`
     // user-filter selections moved to `./objectViewListUrlState.ts`.
@@ -1112,6 +1151,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 url: { ...parseListStateParams(searchParams, acceptListField), filters: readPanelFilters() },
                 preference: draftPreferenceOf(activeView?.id),
                 panelFilters: viewPanelFilters,
+                summaries: listDraft.draft.summaries,
             }),
             savePersonal: personalViews.save,
             openPersonal: openPersonalView,
@@ -1173,7 +1213,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         managedUsers,
         managedUserMarker,
         savedViews,
-        listPrefs,
+        listLayout,
         listDraft,
         derivedColumnViewIds,
         baseView,
@@ -1188,6 +1228,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         handleListRowsChange,
         handleListTotalChange,
         openInPanel,
+        openReferencedRecord,
         // objectstack#33317 — the resolved mode: `none` for an authored
         // `none` and for a list-only object (`servesRecordRead`).
         rowOpensRecord: navOverlay.mode !== 'none',
@@ -1227,33 +1268,14 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 : activeView && isAdmin && savedViews.some((sv: any) => viewRowId(sv) === activeView.id)
                     ? async (label: string) => { await handleRenameView(String(activeView.id), label); return true; }
                     : undefined,
-            save: !isEnvironmentList && canUpdatePersonalView && listDraftParts.length > 0 ? () => { void handleSaveToPersonalView(); } : undefined,
+            save: !isEnvironmentList && listDraftParts.length > 0 ? saveToThisView : undefined,
             reset: !isEnvironmentList && listDraftParts.length > 0 ? handleResetView : undefined,
-            // objectstack#35702 — the footer's calculation, saved on the open
-            // view (ruling 7045525672): a personal view at once; a shared one,
-            // by a reader who may edit it, as a draft through the view panel's
-            // save, which others see once published.
-            pickSummary: isEnvironmentList || !activeView
-                ? undefined
-                : activeIsPersonal
-                    ? (canUpdatePersonalView && personalViewRow ? handlePickPersonalViewSummary : undefined)
-                    // Only a view the metadata door stores (one the overlay
-                    // read lists), never the fallback tab an object with no
-                    // views is drawn with. Every stored view has a qualified,
-                    // dotted name, the console's own saved views included
-                    // (`object.key` in the custom package), so the name cannot
-                    // tell a view a read-only package ships: its row's package
-                    // does (objectstack#35933), and such a view is offered no
-                    // menu. While that is unknown the menu stays; the door
-                    // refuses that save by design (it goes to the custom
-                    // package) and the refused pick is taken back, as the
-                    // panel's save is.
-                    : isAdmin && !activeViewPackageRefusesSaves && isSavedViewId(savedViews, String(activeView.id))
-                        ? handlePickSharedViewSummary
-                        : undefined,
-            summaryPickFields: declaredColumnFields(
-                (activeIsPersonal ? personalViewRow?.config.columns : activeView?.columns) as ListColumn[] | string[] | undefined,
-            ),
+            // objectstack#36194 — the footer's calculation is a draft part on
+            // every list that holds a draft: it applies at once, writes
+            // nothing, and Save keeps it where the reader may save (the Save
+            // menu's own test; a view the reader cannot change in place offers
+            // 「Save as my view」 alone).
+            draftsSummaries: !isEnvironmentList && !!activeView,
         },
     });
 
@@ -1595,7 +1617,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                         ? t('console.objectView.draft.saveAsMyView')
                         : t('view.rename', { defaultValue: 'Rename' })}
                     initialName={personalViewDialog?.mode === 'saveAs'
-                        ? t('console.objectView.draft.copyName', { name: activeView?.label ?? '' })
+                        ? t('console.objectView.draft.copyName', { name: listLabel })
                         : renamingPersonalView?.label ?? ''}
                     onSubmit={(name) => (personalViewDialog?.mode === 'rename'
                         ? handleRenamePersonalView(personalViewDialog.viewId, name)

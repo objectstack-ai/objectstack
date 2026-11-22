@@ -34,11 +34,12 @@ import { createAuthenticatedFetch } from '@object-ui/auth';
 import type { FilterBuilderRowGroup } from '@object-ui/components';
 import { builderRulesOfSpecFilter } from '@object-ui/core';
 import type { usePermissions } from '@object-ui/permissions';
-import type { DataSource } from '@object-ui/types';
+import type { DataSource, ListColumn } from '@object-ui/types';
 import { foldFilterGroupToSpecRules, type FilterFoldRefusal } from './viewFilterFold.js';
 import { buildViewConfigSaveBody } from './objectViewTabs.js';
+import { columnsWithSummaries, type DraftColumnSummaries } from './columnSummaryWrite.js';
 import type { ListSortRule, ListUrlState } from './userFilterUrlState.js';
-import type { ListViewPreference } from '../context/ListPreferencesProvider.js';
+import type { ListViewPreference } from './listDraftStore.js';
 
 /** The object a personal view is a row of. */
 export const PERSONAL_VIEW_OBJECT = 'sys_personal_view';
@@ -163,7 +164,7 @@ export function personalViewPanelFilters(
 export interface PersonalViewListState {
   /** The toolbar state the address carries (`uf_*`); an absent part is the view's own. */
   url: Pick<ListUrlState, 'filters' | 'sort' | 'grouping'>;
-  /** The reader's stored state for the view (`ui.list.<object>`), if any. */
+  /** The list's draft with the reader's layout (`listDraftPreference`), if any. */
   preference?: ListViewPreference;
   /**
    * The open view's own conditions when the Filter panel holds them as rows
@@ -171,6 +172,18 @@ export interface PersonalViewListState {
    * the view's conditions included, and is not laid over them a second time.
    */
   panelFilters?: FilterBuilderRowGroup;
+  /**
+   * objectstack#36194 — the footer calculations the list's draft holds, laid
+   * over the saved columns ({@link columnsWithSummaries}).
+   */
+  summaries?: DraftColumnSummaries;
+  /**
+   * objectstack#35955 — the Display panel's layout and row colour the list's
+   * draft holds (`ListDraft.viewType` / `rowColor`). `viewType` retypes the
+   * body; `rowColor: null` is "none" over a view that colours its rows. An
+   * absent part is the view's own.
+   */
+  display?: { viewType?: string; rowColor?: { field: string; colors?: Record<string, string> } | null };
 }
 
 /** The column a `columns` entry names: a bare name, or an entry's `field`. */
@@ -194,7 +207,8 @@ function columnName(column: unknown): string | undefined {
  *   the view's own.
  * - **columns**: the view's and the ones the reader added, in the reader's
  *   dragged order, without the columns they hid (so `hiddenFields` and
- *   `fieldOrder` are applied, not carried). **rowHeight**: the reader's density, else the view's.
+ *   `fieldOrder` are applied, not carried), with the footer calculations the
+ *   draft holds (objectstack#36194). **rowHeight**: the reader's density, else the view's.
  *
  * The body is narrowed to the keys spec's closed `ListViewSchema` declares and
  * bound to this object (`config.data.object`) by `buildViewConfigSaveBody`,
@@ -206,6 +220,25 @@ export function buildPersonalViewConfig(
   view: Record<string, any>,
   state: PersonalViewListState,
 ): { ok: true; config: Record<string, unknown> } | { ok: false; reason: FilterFoldRefusal } {
+  const laid = layListStateOverView(view, state);
+  if (!laid.ok) return laid;
+  return { ok: true, config: buildViewConfigSaveBody(objectName, laid.view).config };
+}
+
+/**
+ * The open view's own entry (the view tab's shape, the one the view config
+ * panel saves) with the list on screen laid over it, as
+ * {@link buildPersonalViewConfig} lays it: what 「Save to this view」 writes
+ * into a shared view (objectstack#35955), and the body a personal view's
+ * config is narrowed from. The layout and row colour of `state.display`
+ * apply too; a retype to a type whose block lists fields of its own fills
+ * that list from the columns when the block holds none, as
+ * {@link buildInPlaceViewConfig} does.
+ */
+export function layListStateOverView(
+  view: Record<string, any>,
+  state: PersonalViewListState,
+): { ok: true; view: Record<string, unknown> } | { ok: false; reason: FilterFoldRefusal } {
   const own: unknown[] = Array.isArray(view.filter) ? view.filter : [];
   let filter: unknown[];
   if (state.panelFilters && state.url.filters === undefined) {
@@ -241,6 +274,9 @@ export function buildPersonalViewConfig(
         .map(({ c }) => c);
     }
     columns = columns.filter((c) => !hidden.has(columnName(c) ?? ''));
+    // objectstack#36194 — and the footer calculations the reader picked, on
+    // the columns the body keeps.
+    columns = columnsWithSummaries(columns as Array<string | ListColumn>, state.summaries);
   }
 
   const sort: ListSortRule[] | undefined = state.url.sort ?? view.sort;
@@ -255,7 +291,18 @@ export function buildPersonalViewConfig(
     fieldOrder: undefined,
     rowHeight: pref?.rowHeight ?? view.rowHeight,
   };
-  return { ok: true, config: buildViewConfigSaveBody(objectName, draft).config };
+  const display = state.display;
+  if (display && 'rowColor' in display) draft.rowColor = display.rowColor ?? undefined;
+  if (display?.viewType && display.viewType !== view.type) {
+    draft.type = display.viewType;
+    const mirrorKey = IN_PLACE_COLUMN_MIRRORS[display.viewType];
+    const block = isRecord(view[display.viewType]) ? (view[display.viewType] as Record<string, unknown>) : undefined;
+    if (mirrorKey && block && !(Array.isArray(block[mirrorKey]) && (block[mirrorKey] as unknown[]).length > 0)) {
+      const names = (columns ?? []).map(columnName).filter((n): n is string => !!n);
+      if (names.length > 0) draft[display.viewType] = { ...block, [mirrorKey]: names };
+    }
+  }
+  return { ok: true, view: draft };
 }
 
 /** The read's state: `off` (nothing read), `loading`, `ready`, or `refused`. */

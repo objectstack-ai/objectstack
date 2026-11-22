@@ -67,7 +67,7 @@ import { overlayWidthFor } from '@object-ui/plugin-view/core';
 import type { FieldContainerLike } from '@object-ui/core';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
-import { prefetchRelatedCounts, relatedCountTargetsIn } from '@object-ui/plugin-detail';
+import { prefetchRelatedCounts, relatedCountTargetsIn } from '@object-ui/plugin-detail/core';
 import { useFilterScope } from '@object-ui/react';
 import {
   RECORD_DETAIL_TAB_PARAM,
@@ -476,6 +476,7 @@ export function RecordStackDrawer({
   storageKey,
   objects,
   mainContent,
+  listObjectName,
   stepScope,
   onClose,
   onOpenAsPage,
@@ -489,6 +490,12 @@ export function RecordStackDrawer({
   objects: ReadonlyArray<unknown>;
   /** The list the pane opens from (`NavigationOverlay.mainContent`). */
   mainContent?: ReactNode;
+  /**
+   * The object of the list's rows (objectstack#36015): the root marks its row
+   * in the list only when it is a record of that object, not a record a lookup
+   * chip opened. Absent ⇒ the root is always the list's row.
+   */
+  listObjectName?: string;
   /**
    * The root level's set by name — the list view it came from — for the
    * counter's tooltip, unless the level names its own set (its group).
@@ -616,7 +623,7 @@ export function RecordStackDrawer({
         if (!next) onClose();
       }}
       mainContent={mainContent}
-      activeListRecordId={path[0]?.recordId ?? null}
+      activeListRecordId={path[0] && (listObjectName === undefined || path[0].objectName === listObjectName) ? path[0].recordId : null}
       storageKey={storageKey}
       onBack={depth > 0 ? () => popTo(depth - 1) : undefined}
       trail={trail}

@@ -15,7 +15,7 @@ import { DisabledReasonMenuLabel, menuItemReasonAria, useDisabledReason } from '
 import { useGridFieldAuthoring } from '../../context/gridFieldAuthoring';
 import { useGridCellSelection } from '../../context/gridCellSelection';
 import { useGridHeaderMenu } from '../../context/gridHeaderMenu';
-import { caretToEnd, cellOpenerAt, defaultTyping, defaultValueFromText, firstCellOpener, firstEditorControl, isCellWidgetTarget, isCommandLetter, isImeKey, isPrintableKey } from './dataTableCellSelection';
+import { caretToEnd, cellOpenerAt, defaultTyping, defaultValueFromText, firstCellOpener, firstEditorControl, firstRecordChip, isCellWidgetTarget, isCommandLetter, isImeKey, isPrintableKey, recordChipAt } from './dataTableCellSelection';
 import { useHorizontalOverflow, HOVER_SCROLLBAR_CLASSES } from '../../custom/use-horizontal-overflow';
 import { ActiveListRow, listRecordIdOf } from '../../custom/record-list-face';
 import { describeIgnoredBind, describeNonArrayData } from './dataTableBindDiagnostic';
@@ -1462,6 +1462,63 @@ function CellOpenButton({ label, onOpen }: { label: string; onOpen: (cell: HTMLE
       }}
     >
       <SquareArrowOutUpRight className="size-3" aria-hidden="true" />
+    </button>
+  );
+}
+
+/**
+ * objectstack#36015 — a reference cell's edit button: drawn while the pointer
+ * is over the cell, and while the cell is selected, when the cell opens an
+ * editor. `editable` is asked when the pointer enters the cell or the cell is
+ * selected, never per render. It takes no focus, so typing carries on in the
+ * cell; the keyboard's ways in are Enter, F2 and typing.
+ */
+function CellEditButton({
+  label,
+  selected,
+  editable,
+  onEdit,
+}: {
+  label: string;
+  selected: boolean;
+  editable: () => boolean;
+  onEdit: () => void;
+}) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const editableRef = useRef(editable);
+  editableRef.current = editable;
+  const [allowed, setAllowed] = useState(false);
+  useLayoutEffect(() => {
+    if (selected) setAllowed(editableRef.current());
+  }, [selected]);
+  useEffect(() => {
+    const host = ref.current?.closest<HTMLElement>('td');
+    if (!host) return undefined;
+    const measure = () => setAllowed(editableRef.current());
+    host.addEventListener('pointerenter', measure);
+    return () => host.removeEventListener('pointerenter', measure);
+  }, []);
+  return (
+    <button
+      ref={ref}
+      type="button"
+      tabIndex={-1}
+      aria-label={label}
+      title={label}
+      data-testid="cell-edit-button"
+      className={cn(
+        'absolute right-1 top-1/2 z-20 size-5 -translate-y-1/2 items-center justify-center rounded border bg-background text-muted-foreground shadow-sm transition-opacity hover:text-foreground',
+        allowed ? 'flex' : 'hidden',
+        selected ? 'opacity-100' : 'opacity-0 group-hover/cell:opacity-100',
+      )}
+      onMouseDown={(e) => e.preventDefault()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation();
+        onEdit();
+      }}
+    >
+      <Pencil className="size-3" aria-hidden="true" />
     </button>
   );
 }
@@ -3663,11 +3720,42 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   // Why the cell an edit was asked of opens no editor, drawn on that cell.
   const [cellNotice, setCellNotice] = useState<{ rowIndex: number; colIndex: number; text: string } | null>(null);
 
+  // objectstack#35795 — an edit or a write asked while the host still reads
+  // what decides it (`GridCellFacts.checking`), asked again when that read
+  // settles. One at a time: a newer ask, another selected cell or an open
+  // editor drops it.
+  type WaitingAct = { rowKey: PendingRowKey; columnKey: string; run: (rowIndex: number, colIndex: number) => void };
+  const waitingEditRef = useRef<WaitingAct | null>(null);
+  const retryWaitingEditRef = useRef<(waiting: WaitingAct) => void>(() => {});
+  /** Say on the cell that it is being checked, and ask `run` again once `settled` settles. */
+  const waitForChecking = (
+    rowIndex: number,
+    colIndex: number,
+    row: any,
+    col: TableColumn,
+    checking: { text: string; settled: Promise<unknown> },
+    run: WaitingAct['run'],
+  ) => {
+    setCellNotice({ rowIndex, colIndex, text: checking.text });
+    const waiting: WaitingAct = { rowKey: pendingRowKeyOf(row), columnKey: col.accessorKey, run };
+    waitingEditRef.current = waiting;
+    const retry = () => {
+      if (waitingEditRef.current !== waiting) return;
+      waitingEditRef.current = null;
+      retryWaitingEditRef.current(waiting);
+    };
+    checking.settled.then(retry, retry);
+  };
+
   const selectCell = (rowIndex: number, colIndex: number) => {
     const row = paginatedData[rowIndex];
     const col = columns[colIndex];
     if (row === undefined || col === undefined) return;
     setCellNotice(null);
+    const waiting = waitingEditRef.current;
+    if (waiting && (waiting.rowKey !== pendingRowKeyOf(row) || waiting.columnKey !== col.accessorKey)) {
+      waitingEditRef.current = null;
+    }
     // objectstack#35685 — a selected cell whose edit a refusal kept says why.
     const rowKey = pendingRowKeyOf(row);
     setFailureNotice(cellErrors.get(rowKey)?.[col.accessorKey] !== undefined ? { rowKey, columnKey: col.accessorKey } : null);
@@ -3685,6 +3773,11 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   };
 
   const factsOf = (row: any, col: TableColumn) => cellSelection?.describeCell?.(row, col.accessorKey) ?? null;
+
+  // objectstack#36015 — the host's reference cells: a chip in one opens its
+  // record in place on a single click, and the cell draws an edit button.
+  const referenceCells = cellSelection?.referenceCells ?? null;
+  const isReferenceColumn = (col: TableColumn) => !!referenceCells?.isReferenceColumn(col.accessorKey);
 
   // objectstack#36015 — while set, a click on a cell's opener follows it: the
   // open button or Ctrl/Cmd+Enter is clicking it on the reader's behalf.
@@ -3744,6 +3837,13 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       setCellNotice({ rowIndex, colIndex, text: reason });
       return;
     }
+    // Asked again when what decides it has been read; it says so meanwhile.
+    const checking = factsOf(row, col)?.checking;
+    if (checking) {
+      waitForChecking(rowIndex, colIndex, row, col, checking, (r, c) => attemptEdit(r, c, seed));
+      return;
+    }
+    waitingEditRef.current = null;
     // A rating is set in place (digits, a click on a star); it opens no editor.
     if (starsOf(row, col) !== null) return;
     setCellNotice(null);
@@ -3757,6 +3857,16 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     setEditorBelow(below);
     setSelectedCell({ rowIndex, colIndex });
     startEdit(row, col.accessorKey, seed);
+  };
+  // Read at settle time, so the retry sees the rows, the selection and the
+  // editor as they are then, not as they were when the edit was asked.
+  retryWaitingEditRef.current = (waiting) => {
+    if (editingCellRef.current) return;
+    if (!selectedCell || selectedCell.rowKey !== waiting.rowKey || selectedCell.columnKey !== waiting.columnKey) return;
+    const rowIndex = paginatedData.findIndex((r) => pendingRowKeyOf(r) === waiting.rowKey);
+    const colIndex = columns.findIndex((c) => c.accessorKey === waiting.columnKey);
+    if (rowIndex < 0 || colIndex < 0) return;
+    waiting.run(rowIndex, colIndex);
   };
 
   /** Write a value into a cell without an editor: the commit `saveEdit` makes. */
@@ -3787,7 +3897,16 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       return;
     }
     const value = valueOf(row, col);
-    if (value !== undefined) commitCellValue(row, col.accessorKey, value);
+    if (value === undefined) return;
+    // Written once what decides the write has been read, the value worked out
+    // again then; it says so meanwhile.
+    const checking = factsOf(row, col)?.checking;
+    if (checking) {
+      waitForChecking(rowIndex, colIndex, row, col, checking, (r, c) => writeCell(r, c, valueOf));
+      return;
+    }
+    waitingEditRef.current = null;
+    commitCellValue(row, col.accessorKey, value);
   };
 
   const togglesCell = (row: any, col: TableColumn) => factsOf(row, col)?.toggles ?? col.type === 'boolean';
@@ -3882,8 +4001,15 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     }
     setCellNotice(null);
     if (onCatcher && e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
-      // objectstack#36015 — Ctrl/Cmd+Enter opens what the selected cell draws.
-      if (openCellOpener(e.currentTarget)) e.preventDefault();
+      // objectstack#36015 — Ctrl/Cmd+Enter opens what the selected cell draws;
+      // in a reference cell, its first chip's record, in place.
+      const chip = isReferenceColumn(col) ? firstRecordChip(e.currentTarget) : null;
+      if (chip && referenceCells) {
+        e.preventDefault();
+        referenceCells.openRecord(chip.objectName, chip.recordId);
+      } else if (openCellOpener(e.currentTarget)) {
+        e.preventDefault();
+      }
       return;
     }
     const next = navigationTarget(e, rowIndex, colIndex);
@@ -5148,6 +5274,11 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                               e.preventDefault();
                               e.stopPropagation();
                               selectCell(rowIndex, colIndex);
+                              // A reference cell's chip opens its record in place: the
+                              // list's side drawer, with the list and its selection kept.
+                              // A double-click's second click opens it no second time.
+                              const chip = isReferenceColumn(col) && e.detail <= 1 ? recordChipAt(e.target, e.currentTarget) : null;
+                              if (chip && referenceCells) referenceCells.openRecord(chip.objectName, chip.recordId);
                             } : undefined}
                             onMouseDown={selectFirst ? (e) => {
                               // The double-click is the edit gesture here, so its second
@@ -5161,6 +5292,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                 // the second click. A touch never edits in place. A word the
                                 // browser selected on the way is not a text selection.
                                 if (isEditing || isTouchPress(e) || isCellWidgetTarget(e.target, e.currentTarget)) return;
+                                // objectstack#36015 — the first click on a reference chip opened
+                                // its record; the second does not also edit the cell.
+                                if (isReferenceColumn(col) && recordChipAt(e.target, e.currentTarget) !== null) return;
                                 window.getSelection?.()?.removeAllRanges();
                                 e.stopPropagation();
                                 if (!togglesCell(row, col)) attemptEdit(rowIndex, colIndex);
@@ -5278,8 +5412,18 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                 }}
                               />
                             )}
-                            {isSelectedCell && !isEditing && (
+                            {isSelectedCell && !isEditing && !isReferenceColumn(col) && (
                               <CellOpenButton label={t('table.open')} onOpen={openCellOpener} />
+                            )}
+                            {selectFirst && !isEditing && isReferenceColumn(col) && (
+                              // objectstack#36015 — a reference cell's chip opens its record,
+                              // so the open button's place holds the edit button.
+                              <CellEditButton
+                                label={t('table.edit')}
+                                selected={isSelectedCell}
+                                editable={() => readOnlyReasonOf(row, col) === null}
+                                onEdit={() => attemptEdit(rowIndex, colIndex)}
+                              />
                             )}
                             {cellNotice?.rowIndex === rowIndex && cellNotice.colIndex === colIndex && (
                               <CellNotice text={cellNotice.text} onDismiss={() => setCellNotice(null)} />

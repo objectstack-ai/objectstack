@@ -178,6 +178,13 @@ vi.mock('../../providers/AdapterProvider', () => ({
 
 import { AppHeader } from '../AppHeader';
 import { registerUnsavedEdits } from '../../chrome/unsavedEdits';
+import { useGoHomeShortcut } from '../../chrome/goHomeShortcut';
+
+/** The home chord, installed as the app layout installs it (objectstack#36112). */
+function GoHomeShortcut() {
+  useGoHomeShortcut(true, '/home');
+  return null;
+}
 
 const QUESTION = 'You have unsaved changes. Are you sure you want to leave?';
 const PAGE = '/apps/crm/system/settings/localization';
@@ -203,6 +210,7 @@ function holdUnsavedEdit() {
 async function renderHeader() {
   render(
     <MemoryRouter initialEntries={[PAGE]}>
+      <GoHomeShortcut />
       <AppHeader variant="app" appName="CRM" activeAppName="crm" onAppChange={onAppChange} objects={[]} />
     </MemoryRouter>,
   );

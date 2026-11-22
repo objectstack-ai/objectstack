@@ -12,7 +12,7 @@ import {
   relatedArrangementFromRecord,
   relatedArrangementToRecord,
   type RelatedArrangement,
-} from '@object-ui/plugin-detail';
+} from '@object-ui/plugin-detail/core';
 
 /**
  * The console's per-reader workspace preferences — how a reader likes the
@@ -127,7 +127,7 @@ export function versionedPreferenceCodec<T>(options: {
 }
 
 /**
- * An on | off preference — the record page's right column shown or not. Stored as
+ * An on | off preference — the approvals queue's 「处理后打开下一条」. Stored as
  * `{"value":"on"|"off","v":1}`.
  */
 export type PreferenceSwitch = 'on' | 'off';
@@ -139,16 +139,20 @@ const switchCodec = versionedPreferenceCodec<PreferenceSwitch>({
 });
 
 /**
- * Whether the record page shows its right column — the 动态 panel and the
- * related panels, the reader's ⊟ (objectstack#27524, Target 4) — per object
- * (scope `object:OBJECT_NAME`). With no choice: shown. The name keeps its
- * stored spelling, so a reader's earlier choice for the related column
- * holds. (The timeline column's switch, `record.columns.timeline`, retired
- * with the column.)
+ * The width, in CSS px, the reader dragged the record page's pinned left
+ * column to — the details beside the other tabs on a wide full page
+ * (objectstack#35890) — per object (scope `object:OBJECT_NAME`). Stored as
+ * `{"width":N,"v":1}`. With no choice: the page's default, 400. (The right
+ * column's ⊟ switch, `record.columns.related`, retired with the right rail.)
  */
-export const RECORD_RELATED_COLUMN_PREFERENCE = defineWorkspacePreference<PreferenceSwitch>({
-  name: 'record.columns.related',
-  codec: switchCodec,
+export const RECORD_DETAILS_WIDTH_PREFERENCE = defineWorkspacePreference<number>({
+  name: 'record.columns.details-width',
+  codec: versionedPreferenceCodec<number>({
+    version: 1,
+    toRecord: (width) => ({ width }),
+    fromRecord: (record) =>
+      typeof record.width === 'number' && Number.isFinite(record.width) && record.width > 0 ? record.width : undefined,
+  }),
 });
 
 /**

@@ -52,6 +52,7 @@ export interface RecordCommentThreadProps {
     | 'onResolveComment'
     | 'moderates'
     | 'updatesOthers'
+    | 'ownDeletesOnly'
     | 'mentionSuggestions'
     | 'onMentionSuggestionsWanted'
   >;
@@ -59,12 +60,31 @@ export interface RecordCommentThreadProps {
    * `expand`: the replies open in place, under the comment, with the reply
    * box after them (the desktop panel). `summary`: the thread stays one
    * comment and 「N 条回复」, and a press on it calls `onOpen` (the phone's
-   * list, which opens the thread on its own page).
+   * list, which opens the thread on its own page). `page`: the thread is the
+   * page, its comment first and every reply after it, oldest first; the page
+   * docks its own reply box, so the thread draws none (the phone's thread).
    */
-  mode?: 'expand' | 'summary';
+  mode?: 'expand' | 'summary' | 'page';
+  /**
+   * `summary`: opens the thread. `page`: 「回复」 was pressed; the host puts
+   * the caret in its reply box.
+   */
   onOpen?: () => void;
   /** Draws a comment's actions; absent, a comment has none on screen. */
   renderActions?: (actions: CommentItemActions) => React.ReactNode;
+  /**
+   * What a comment answers to besides its own controls: the phone's long
+   * press and tap (`useCommentPress`). Spread on each comment's box.
+   */
+  itemInteraction?: (actions: CommentItemActions) => React.HTMLAttributes<HTMLDivElement>;
+  /**
+   * The comment whose actions the surface holds open, by id (the phone's long
+   * press sheet). While it is one of this thread's, its current actions go to
+   * `onHeldActions` each time what they offer changes, so a gate that opens
+   * while the sheet is up (the host's answer to `updatesOthers`) adds its row.
+   */
+  heldId?: string | null;
+  onHeldActions?: (actions: CommentItemActions) => void;
   className?: string;
 }
 
@@ -83,8 +103,19 @@ function editableComment(item: FeedItem, moderates: boolean | undefined, updates
   return ownComment(item) || (item.type === 'comment' && moderates === true && updatesOthers === true);
 }
 
-/** Whether the viewer may delete this comment: their own, or anyone's where they moderate. */
-function deletableComment(item: FeedItem, moderates: boolean | undefined): boolean {
+/**
+ * Whether the viewer may delete this comment: their own, or anyone's where
+ * they moderate. Where the host's Delete is the own-comment delete door
+ * (`ownDeletesOnly`, objectstack#36191), only their own, and only one with no
+ * reply under it: the door keeps a comment that has replies.
+ */
+function deletableComment(
+  item: FeedItem,
+  moderates: boolean | undefined,
+  ownDeletesOnly: boolean | undefined,
+  hasReplies: boolean,
+): boolean {
+  if (ownDeletesOnly === true) return ownComment(item) && !hasReplies;
   return ownComment(item) || (item.type === 'comment' && moderates === true);
 }
 
@@ -114,6 +145,9 @@ export const CommentThread: React.FC<RecordCommentThreadProps> = ({
   mode = 'expand',
   onOpen,
   renderActions,
+  itemInteraction,
+  heldId,
+  onHeldActions,
   className,
 }) => {
   const { t } = useDetailTranslation();
@@ -123,8 +157,16 @@ export const CommentThread: React.FC<RecordCommentThreadProps> = ({
   // on an open thread still lands it there.
   const [replyFocus, setReplyFocus] = React.useState(0);
   const [editingId, setEditingId] = React.useState<string | number | null>(null);
-  const { onAddReply, onToggleReaction, onEditComment, onDeleteComment, onResolveComment, moderates, updatesOthers } =
-    comments;
+  const {
+    onAddReply,
+    onToggleReaction,
+    onEditComment,
+    onDeleteComment,
+    onResolveComment,
+    moderates,
+    updatesOthers,
+    ownDeletesOnly,
+  } = comments;
   const resolvable = threadResolvable(thread);
   const resolved = threadResolved(thread);
   // The host names the resolver (a by-id read of the ids it could not name);
@@ -132,7 +174,7 @@ export const CommentThread: React.FC<RecordCommentThreadProps> = ({
   const resolvedBy = resolved ? resolverName(root, comments.mentionSuggestions) : undefined;
 
   const openReply = React.useCallback(() => {
-    if (mode === 'summary') {
+    if (mode !== 'expand') {
       onOpen?.();
       return;
     }
@@ -145,10 +187,11 @@ export const CommentThread: React.FC<RecordCommentThreadProps> = ({
     isRoot,
     onReply: onAddReply ? openReply : undefined,
     onReact: onToggleReaction ? (emoji: string) => void onToggleReaction(item.id, emoji) : undefined,
-    // ✓ writes the top-level row: on a thread the viewer started, or anyone's
-    // where the server admits their update of a row they did not write.
+    // ✓ resolves the thread by its top-level row, anyone's: the host hands
+    // the handler over only where its write admits every thread the viewer
+    // can read (the resolution door, objectstack#36186).
     onResolve:
-      isRoot && resolvable && onResolveComment && (ownComment(item) || updatesOthers === true)
+      isRoot && resolvable && onResolveComment
         ? () => {
             // A refused write changed nothing, and the host has said so.
             void Promise.resolve(onResolveComment(item.id, !resolved)).catch(() => undefined);
@@ -156,15 +199,45 @@ export const CommentThread: React.FC<RecordCommentThreadProps> = ({
         : undefined,
     resolved: isRoot && resolved,
     onEdit: onEditComment && editableComment(item, moderates, updatesOthers) ? () => setEditingId(item.id) : undefined,
-    onDelete: onDeleteComment && deletableComment(item, moderates) ? () => void onDeleteComment(item.id) : undefined,
+    onDelete:
+      onDeleteComment &&
+      deletableComment(
+        item,
+        moderates,
+        ownDeletesOnly,
+        (item.replyCount ?? 0) > 0 || replies.some((reply) => reply.parentId != null && String(reply.parentId) === String(item.id)),
+      )
+        ? () => {
+            // A refused delete kept the row, and the host has said so.
+            void Promise.resolve(onDeleteComment(item.id)).catch(() => undefined);
+          }
+        : undefined,
   });
 
-  const itemOf = (item: FeedItem, isRoot: boolean, footer?: React.ReactNode, itemClassName?: string) => (
+  // The held comment's actions, reported again whenever what they offer changes.
+  const heldItem = heldId == null ? undefined : [root, ...replies].find((item) => String(item.id) === heldId);
+  const held = heldItem ? actionsOf(heldItem, heldItem === root) : undefined;
+  const heldOffer = held
+    ? [!!held.onReact, !!held.onResolve, !!held.resolved, !!held.onEdit, !!held.onDelete].join()
+    : null;
+  const heldReport = React.useRef({ held, onHeldActions });
+  React.useLayoutEffect(() => {
+    heldReport.current = { held, onHeldActions };
+  });
+  React.useLayoutEffect(() => {
+    const { held: current, onHeldActions: report } = heldReport.current;
+    if (current) report?.(current);
+  }, [heldItem, heldOffer]);
+
+  const itemOf = (item: FeedItem, isRoot: boolean, footer?: React.ReactNode, itemClassName?: string) => {
+    const actions = renderActions || itemInteraction ? actionsOf(item, isRoot) : undefined;
+    return (
     <CommentItem
       key={String(item.id)}
       item={item}
       className={itemClassName}
-      actions={renderActions?.(actionsOf(item, isRoot))}
+      actions={actions && renderActions?.(actions)}
+      interactionProps={actions && itemInteraction?.(actions)}
       editing={editingId === item.id}
       onSaveEdit={
         onEditComment
@@ -178,7 +251,27 @@ export const CommentThread: React.FC<RecordCommentThreadProps> = ({
       onToggleReaction={onToggleReaction ? (emoji) => void onToggleReaction(item.id, emoji) : undefined}
       footer={footer}
     />
-  );
+    );
+  };
+
+  if (mode === 'page') {
+    return (
+      <div className={cn('py-3', className)} data-comment-thread="" data-comment-thread-page="">
+        {resolved && (
+          <p className="mb-1.5 flex items-center gap-1 text-xs text-muted-foreground" data-comment-resolved-mark="">
+            <Check className="h-3.5 w-3.5" aria-hidden="true" />
+            {resolvedBy ? t('detail.threadResolvedBy', { name: resolvedBy }) : t('detail.threadResolved')}
+          </p>
+        )}
+        {itemOf(root, true)}
+        {replies.length > 0 && (
+          <div className="mt-4 space-y-4 border-t border-border/60 pt-4" data-comment-replies="">
+            {replies.map((reply) => itemOf(reply, false))}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const open = mode === 'expand' && expanded;
   const summary = replies.length > 0 && !open && (

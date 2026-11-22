@@ -77,8 +77,8 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Noms des champs de cet objet, du plus important au moins important — la première entrée l’emporte là où une seule peut figurer (ADR-0085). Détermine les colonnes par défaut des listes et des listes associées, les cartes, les aperçus d’enregistrements enfants, la carte de survol de l’enregistrement et le sélecteur d’enregistrements. Un nom qui n’est pas un champ de cet objet est refusé à la publication."
       },
       relatedLists: {
-        label: "Listes associées",
-        helpText: "Ordre métier des listes associées de cet objet sur sa page d’enregistrement, de la plus importante à la moins importante. Chaque entrée est un nom d’objet enfant (par ex. task), ou object.field lorsque cet enfant a plusieurs relations avec cet objet. Les listes indiquées viennent en premier ; les autres suivent dans l’ordre dérivé. Un nom qui ne correspond à aucune relation pointant vers cet objet ne place rien : l’enregistrement ou la validation de l’objet le refuse donc."
+        label: "Onglets de la page d’enregistrement",
+        helpText: "Les onglets de la page d’enregistrement après la vue d’ensemble, dans l’ordre. Chaque entrée est un nom d’objet enfant (par ex. task), object.field lorsque cet enfant a plus d’une relation avec cet objet, un onglet intégré (sys_attachment, sys_approval_request, sys_activity) ou une entrée avec son propre titre et ses propres colonnes, définie dans les paramètres de l’objet de Studio. Dès qu’un élément est listé, une liste associée qu’aucune entrée ne nomme n’affiche aucun onglet, y compris une liste ajoutée par un autre paquet, jusqu’à ce que cet objet la nomme ; les pièces jointes ne s’affichent que si elles sont listées. Vide : toutes les listes s’affichent dans l’ordre par défaut. Un nom qui ne correspond à aucune relation pointant vers cet objet est refusé à l’enregistrement de l’objet."
       },
       searchableFields: {
         label: "Champs de recherche",

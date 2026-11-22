@@ -269,17 +269,17 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    */
   summaryRowLead?: (count: number) => React.ReactNode;
   /**
-   * [objectstack#35702] Wired only for a reader who may change the view: each
-   * footer cell becomes the menu that picks the column's calculation (`null` =
-   * None). The grid draws the pick at once; the host saves it on the view and
-   * hands it back as the column's `summary`. A host that answers `false`
+   * [objectstack#35702] Each footer cell becomes the menu that picks the
+   * column's calculation (`null` = None). The grid draws the pick at once; the
+   * host keeps it (on the view, or in a draft, objectstack#36194) and hands it
+   * back as the column's `summary`. A host that answers `false`
    * (or a promise of it, or one that rejects) did not save it, and the grid
    * takes the pick back.
    */
   onColumnSummaryPick?: (field: string, summary: ColumnSummaryType | null) => void | boolean | Promise<void | boolean>;
   /**
    * [objectstack#35702] The fields whose calculation `onColumnSummaryPick` can
-   * save (the columns the view itself declares); every other footer cell draws
+   * keep (the columns a saved view would carry); every other footer cell draws
    * its figure with no menu. Absent ⇒ every field column is offered.
    */
   summaryPickFields?: readonly string[];
@@ -406,6 +406,19 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    * key reaches it.
    */
   headerMenu?: boolean;
+  /**
+   * [objectstack#36015] Opens a record that a lookup cell's chip names, in
+   * place, as the HOST that owns the page does it (the list page opens it in
+   * its side drawer). With {@link cellSelection}, a single click on such a
+   * chip opens its record here and selects the cell, and the cell draws an
+   * edit button on hover and while selected. A chip naming a person
+   * (`sys_user`) is not one: it only selects. Absent ⇒ a chip only selects
+   * its cell, as before this prop existed.
+   *
+   * A RUNTIME prop, never authored metadata: the host decides it, and no node
+   * key reaches it.
+   */
+  openReferencedRecord?: (objectName: string, recordId: string) => void;
   /**
    * TWO parameters since objectui#9357, and the second is not decoration: this
    * prop reaches `useNavigationOverlay` as its `onRowClick`, and `handleClick`
@@ -774,6 +787,18 @@ function ratingScaleOf(fieldDef: unknown): number {
 }
 
 /**
+ * objectstack#36015 — whether a column's cells are reference cells whose chips
+ * open their record in place: a lookup, master-detail or tree field naming a
+ * record of any object but the person object. A chip naming a person only
+ * selects its cell.
+ */
+function opensReferenceInPlace(fieldDef: { type?: unknown; reference?: unknown } | undefined): boolean {
+  const type = fieldDef?.type;
+  if (type !== 'lookup' && type !== 'master_detail' && type !== 'tree') return false;
+  return fieldDef?.reference !== 'sys_user';
+}
+
+/**
  * objectstack#35688 — how wide a field type's editor layer starts. The layer
  * is never narrower than its cell and grows to fit this; the editor fills it.
  */
@@ -826,6 +851,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   rowOpensRecord,
   cellSelection: hostCellSelection,
   headerMenu: hostHeaderMenu,
+  openReferencedRecord,
   onBulkDelete,
   onRowSelect,
   onRowClick,
@@ -1350,6 +1376,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         describeCell: (row, columnKey) => {
           const fieldDef = objectFields?.[columnKey];
           const recordId = rowRecordId(row);
+          // objectstack#35795 — read at call time, not from this render: an
+          // edit that waited for the verdict is re-asked before the render
+          // that publishes it.
+          const recordUpdate = recordVerdict.current(recordId, 'update');
           const kind = cellReadOnlyKind({
             fieldDef,
             fieldWritable: !objectName || resolveFieldAffordance('listInlineEdit', perms, objectName, columnKey),
@@ -1357,12 +1387,20 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
             objectEditable: objectInlineEditable,
             canUpdate: resolveAffordanceGrant('listInlineEdit', affordanceSource),
             approvalLocked: approvalLocks.isLocked(recordId, row),
-            recordUpdate: recordVerdict(recordId, 'update'),
+            recordUpdate,
           });
+          // objectstack#35795 — while the row's lock or `update` verdict is on
+          // its way, an edit waits for it rather than opening an editor the
+          // answer may refuse.
+          const reads = kind ? [] : [
+            approvalLocks.settling(recordId),
+            recordUpdate === undefined ? recordVerdict.settling() : null,
+          ].filter((read): read is Promise<void> => read !== null);
           const fromText = choiceFromText(fieldDef);
           const type = fieldDef?.type;
           return {
             readOnlyReason: kind ? readOnlyReasonText(kind, t) : null,
+            ...(reads.length > 0 ? { checking: { text: t('grid.readOnlyReason.checking'), settled: Promise.all(reads) } } : {}),
             typing: inlineTyping(type),
             ...(type === 'boolean' || type === 'toggle' ? { toggles: true } : {}),
             // objectstack#36023 — a rating is set in place: digits, or a click on a star.
@@ -1377,7 +1415,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         },
         onCellSelect: (row) => {
           recordVerdict.requestVerdicts();
-          approvalLocks.probe(rowRecordId(row));
+          // objectstack#35795 — one lock read for the page, not one per row selected.
+          approvalLocks.probe([rowRecordId(row), ...pageRecordIds]);
         },
         // objectstack#35685 — a move of a state-machine field is confirmed
         // before anything is written (`./objectGridStateConfirm`). A move that
@@ -1385,6 +1424,15 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         // confirmation, so a state-machine move does not ask twice.
         confirmCommit: (row, columnKey, value) =>
           requiredPrompt.ask(row, columnKey, value, () => askStateMove(row, columnKey, value)),
+        // objectstack#36015 — a lookup cell's chip opens its record in place.
+        ...(openReferencedRecord
+          ? {
+              referenceCells: {
+                isReferenceColumn: (columnKey: string) => opensReferenceInPlace(objectFields?.[columnKey]),
+                openRecord: openReferencedRecord,
+              },
+            }
+          : {}),
       }
     : null;
   // objectstack#35685 — the state-machine confirm, the grid's next question
@@ -4178,6 +4226,32 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
             (rowOpensRecord !== false || cardSelecting) && 'cursor-pointer hover:bg-accent/50',
             cardSelected && 'border-primary bg-primary/5',
           )}
+          // objectstack#36044 — while a selection is open the card owns every tap
+          // inside it: a tap on a link, a referenced record's chip, an image or
+          // a button the card draws ticks or unticks the card and opens nothing,
+          // as phone apps do in selection mode. The cells stop their own clicks
+          // from reaching the card, so the card takes them first, in the capture
+          // phase. The row's 「⋮」 opens on pointer-down, which the card cancels
+          // first. The click that ends the long press that started the selection
+          // is swallowed here too, whatever it landed on. A node a portal draws
+          // (an open menu) is not the card's.
+          onPointerDownCapture={(event) => {
+            if (!cardSelecting || event.target === event.currentTarget) return;
+            if (!event.currentTarget.contains(event.target as Node)) return;
+            event.preventDefault();
+          }}
+          onClickCapture={(event) => {
+            const press = longPress.current;
+            if (!cardSelecting && !press.fired) return;
+            if (!event.currentTarget.contains(event.target as Node)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            if (press.fired) {
+              press.fired = false;
+              return;
+            }
+            toggleCardRow(row);
+          }}
           onPointerDown={(event) => {
             const press = longPress.current;
             // A fresh press never inherits the last one's flag: a long press
