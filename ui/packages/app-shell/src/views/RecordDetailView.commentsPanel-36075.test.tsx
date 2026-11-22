@@ -308,6 +308,7 @@ describe('the record comment panel (objectstack#36075)', () => {
       expect(dataSource.create).toHaveBeenCalledWith(
         'sys_comment',
         expect.objectContaining({ thread_id: THREAD, body: 'Ada: written on the full page' }),
+        expect.anything(),
       ),
     );
     expect(await within(panel(container)!).findByText('Ada: written on the full page')).toBeInTheDocument();
