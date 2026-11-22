@@ -47,6 +47,14 @@ export default defineConfig({
         find: /^@objectstack\/service-messaging$/,
         replacement: path.resolve(__dirname, '../../services/service-messaging/src/index.ts'),
       },
+      // `hono-comment-doors.conformance.test.ts` boots the REAL AuditPlugin on
+      // both of its doors — the self-hosted mount on `http.server` and the
+      // `handleCommentDoor` member behind the dispatcher's `/comments` domain —
+      // so its verdict about either is about this checkout's plugin source.
+      {
+        find: /^@objectstack\/plugin-audit$/,
+        replacement: path.resolve(__dirname, '../../plugins/plugin-audit/src/index.ts'),
+      },
       // `cors-doors.conformance.test.ts` reads `AuthManager`'s trusted-origin
       // merge off a REAL better-auth instance — one of the CORS doors it holds
       // to one answer — so that verdict is about this checkout's auth source.

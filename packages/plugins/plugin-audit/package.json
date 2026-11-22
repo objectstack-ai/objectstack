@@ -30,6 +30,7 @@
     "@objectstack/metadata-core": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
+    "@objectstack/plugin-hono-server": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*"
   },

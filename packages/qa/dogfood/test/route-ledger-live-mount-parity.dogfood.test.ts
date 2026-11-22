@@ -177,6 +177,16 @@ const UNEXERCISED_BY_THIS_BOOT: Record<string, string> = {
   // `rawApp.post()` on the Hono app — never through the port.
   'POST /api/v1/webhooks/redeliver':
     'self-hosted, plugin-webhooks mounts the redeliver door with rawApp.post() directly on Hono, so it never passes through the IHttpServer port; the dispatcher domain this row ledgers serves only a kernel with no raw app. Both doors are driven, on the real plugin, by packages/qa/http-conformance/src/hono-webhooks-redeliver.conformance.test.ts',
+  // [#36469] Two doors, one path, for the three comment doors. These rows
+  // ledger the DISPATCHER's `/comments` domain, the door for a kernel with NO
+  // `http.server`. Self-hosted, plugin-audit mounts the same paths on the
+  // port — but this boot composes no AuditPlugin, so nothing answers them here.
+  'DELETE /api/v1/comments/reactions/:id':
+    'self-hosted, plugin-audit mounts the comment doors on the kernel\'s http.server, and this boot composes no AuditPlugin, so nothing mounts the path; the dispatcher domain this row ledgers serves only a kernel with no http.server and mounts no route here. Both doors are driven, on the real plugin, by packages/qa/http-conformance/src/hono-comment-doors.conformance.test.ts',
+  'PUT /api/v1/comments/:id/resolution':
+    'self-hosted, plugin-audit mounts the comment doors on the kernel\'s http.server, and this boot composes no AuditPlugin, so nothing mounts the path; the dispatcher domain this row ledgers serves only a kernel with no http.server and mounts no route here. Both doors are driven, on the real plugin, by packages/qa/http-conformance/src/hono-comment-doors.conformance.test.ts',
+  'DELETE /api/v1/comments/:id':
+    'self-hosted, plugin-audit mounts the comment doors on the kernel\'s http.server, and this boot composes no AuditPlugin, so nothing mounts the path; the dispatcher domain this row ledgers serves only a kernel with no http.server and mounts no route here. Both doors are driven, on the real plugin, by packages/qa/http-conformance/src/hono-comment-doors.conformance.test.ts',
   // [#22773] Two doors, one path, a third time. This row ledgers the inbound
   // hook as the DISPATCHER's `/automation` domain serves it, the door for a
   // kernel with NO raw app. Self-hosted, `@objectstack/trigger-api`'s
