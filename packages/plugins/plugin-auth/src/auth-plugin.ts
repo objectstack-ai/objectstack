@@ -128,6 +128,7 @@ import { resolveKernelCache } from './kernel-cache.js';
 import { authIdentityManifest } from './manifest.js';
 import { scheduleLegacySsoSecretMigration } from './sso-client-secret.js';
 import { reportSsoProvidersWithNonBareDomainEntries } from './sso-stored-domain-entries.js';
+import { retireDevSeedCredentials, type DevSeedRetirementEngine } from './dev-seed-credential-retirement.js';
 import {
   directSignInNetworkRefusal,
   isDirectSignInDoorNavigation,
@@ -1793,6 +1794,23 @@ export class AuthPlugin implements Plugin {
         }
         await reportIfNoSignInMethodAtBoot(this.signInMethodFloorDeps(ctx, this.authManager), ctx.logger);
       }
+    });
+
+    // Outside development mode: retire what the development seed issued to
+    // every stamped account still on its seed password, on `kernel:ready`, so
+    // it has settled before `kernel:listening` opens the socket. Registered
+    // independently of `registerRoutes`: a retired session or key must not act
+    // through any door. A retirement that does not complete THROWS and fails
+    // the boot (`dev-seed-credential-retirement.ts`).
+    ctx.hook('kernel:ready', async () => {
+      let ql: DevSeedRetirementEngine | undefined;
+      try { ql = ctx.getService<DevSeedRetirementEngine>('objectql'); } catch { ql = undefined; }
+      const authManager = this.authManager;
+      await retireDevSeedCredentials({
+        engine: ql,
+        authContext: async () => (authManager ? await authManager.getAuthContext() : undefined),
+        logger: ctx.logger,
+      });
     });
 
     // Dev-only: provision a known, loginable platform admin on an empty DB.
