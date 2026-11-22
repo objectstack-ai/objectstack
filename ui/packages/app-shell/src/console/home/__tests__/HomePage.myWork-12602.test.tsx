@@ -225,7 +225,12 @@ describe('the approvals column (objectui#12602)', () => {
     render(<HomePage />);
 
     await userEvent.setup().click(screen.getAllByTestId('home-my-work-approval-row')[1]);
-    expect(navigateMock).toHaveBeenCalledWith('/apps/crm/system/approvals?request=apr_2');
+    // objectstack#35505 — the open also hands the request page Home's pending
+    // queue (`approvalQueueState`), so the call carries history state.
+    expect(navigateMock).toHaveBeenCalledWith(
+      '/apps/crm/system/approvals?request=apr_2',
+      expect.objectContaining({ state: expect.objectContaining({ approvalQueue: true }) }),
+    );
   });
 
   it('says nothing is waiting at zero — on the approvals column only', () => {
