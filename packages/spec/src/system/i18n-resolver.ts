@@ -5060,8 +5060,9 @@ function inlineEntryOverridesPackagedBase(
  *    locale, so any translation of it is a better answer;
  *  - an inline map whose entry for the requested locale is the customer's own
  *    ({@link inlineEntryOverridesPackagedBase}): the pair's translation for
- *    the REQUESTED locale only (the same tag, case aside), with no fallback
- *    chain and no regional variant. The map states its text for that locale,
+ *    the REQUESTED language only (the same tag, case aside, or another
+ *    spelling of the same platform-table tag), with no fallback chain and no
+ *    regional variant of another script. The map states its text for that locale,
  *    so a pair translation for another one (`en` down the chain, `zh-TW` for
  *    a `zh-CN` request) is no better answer than it. Rank 1 of ruling record
  *    6631250894 is kept for the locale it speaks about; the base's
@@ -5077,15 +5078,29 @@ function slotRead(
 ): { bundle: TranslationBundle | undefined; opts: TranslateDocumentOptions | undefined } {
   if (valueOverridesPackagedBase(base, key, value)) return { bundle: catalogs.changed, opts };
   if (!inlineEntryOverridesPackagedBase(base, key, value, opts?.locale)) return { bundle: catalogs.unchanged, opts };
-  const locale = opts?.locale;
+  const locale = (opts?.locale ?? '').trim();
   const pair = catalogs.changed;
-  const own = pair && locale
-    ? Object.keys(pair).find((code) => code.toLowerCase() === locale.toLowerCase())
-    : undefined;
+  const own = pair && locale ? samelanguagePairKey(Object.keys(pair), locale) : undefined;
   return {
-    bundle: own === undefined ? undefined : ({ [locale as string]: pair![own] } as TranslationBundle),
-    opts: { ...opts, fallbackChain: [] },
+    bundle: own === undefined ? undefined : ({ [locale]: pair![own] } as TranslationBundle),
+    opts: { ...opts, locale, fallbackChain: [] },
   };
+}
+
+/**
+ * The key of a pair bundle that holds the REQUESTED language, for
+ * {@link slotRead}: the same tag (case aside), else a key that names the same
+ * platform-table tag ({@link platformLocaleTagOf}: a `zh-CN` request reads a
+ * row stored under `zh-Hans`, `ja-JP` one under `ja`). It stops there, before
+ * the base-language and regional-variant steps of `pickData`, so a `zh-TW`
+ * key never answers a `zh-CN` request.
+ */
+function samelanguagePairKey(keys: readonly string[], locale: string): string | undefined {
+  const folded = locale.toLowerCase();
+  const exact = keys.find((code) => code.toLowerCase() === folded);
+  if (exact !== undefined) return exact;
+  const tag = platformLocaleTagOf(locale);
+  return tag === undefined ? undefined : keys.find((code) => platformLocaleTagOf(code) === tag);
 }
 
 /**

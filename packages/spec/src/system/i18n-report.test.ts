@@ -298,6 +298,22 @@ describe('an inline locale map entry for the requested locale beats the catalog 
     expect(out.label).toEqual(editedInZh().label);
   });
 
+  it('L2 7080413623 S4: a pair row stored under another spelling of the same language (zh-Hans) still answers a zh-CN request first', () => {
+    const pairBundle: TranslationBundle = { 'zh-Hans': { reports: { opps_by_stage: { label: '成对包的译文（zh-Hans）' } } } };
+    const out = translateReport(editedInZh(), multi, { locale: 'zh-CN', packagedBase: packagedBase(), pairBundle }) as any;
+    expect(out.label).toBe('成对包的译文（zh-Hans）');
+    // The mirror: a zh-Hans request over a row stored under zh-CN.
+    const edited = { ...report(), label: { default: 'Opportunities by Stage', 'zh-Hans': '各阶段商机（本公司）' } };
+    const mirror: TranslationBundle = { 'zh-CN': { reports: { opps_by_stage: { label: '成对包的译文（zh-CN）' } } } };
+    const back = translateReport(edited, multi, { locale: 'zh-Hans', packagedBase: packagedBase(), pairBundle: mirror }) as any;
+    expect(back.label).toBe('成对包的译文（zh-CN）');
+    // A ja-JP request over a row stored under the table tag `ja`.
+    const editedJa = { ...report(), label: { default: 'Opportunities by Stage', 'ja-JP': 'ステージ別（当社）' } };
+    const ja: TranslationBundle = { ja: { reports: { opps_by_stage: { label: 'ステージ別（ペア）' } } } };
+    const jaOut = translateReport(editedJa, multi, { locale: 'ja-JP', packagedBase: packagedBase(), pairBundle: ja }) as any;
+    expect(jaOut.label).toBe('ステージ別（ペア）');
+  });
+
   it('a widget title: a fallback-locale pair translation leaves the zh-CN entry', () => {
     const bundle: TranslationBundle = { 'zh-CN': { dashboards: { exec: { widgets: { rev: { title: '按行业收入' } } } } } };
     const base = { name: 'exec', label: 'Executive', widgets: [{ id: 'rev', title: 'Revenue by Industry' }] };
