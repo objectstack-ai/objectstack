@@ -23,11 +23,11 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-21T10:35:08Z",
-  "updated_at": "2026-11-22T07:43:09Z",
+  "updated_at": "2026-11-22T18:11:11Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36043",
   "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFollow-up from #36023 S5 (PR #36039, the form line-item table `GridField`). Under epic #35547.\n\n## What happens today\n\nThe line-item table's column types are locked to nine by the public spec (`InlineGridColumnSchema.type` in `packages/spec/src/data/field.zod.ts`: text, number, currency, date, datetime, time, select, lookup, file). A child field of any other type is folded by `fieldTypeToColumnType` (`ui/packages/plugin-form/src/deriveMasterDetail.ts`) into a plain text box. Measured in the browser by the S5 thread:\n- A people column takes only a raw user id typed by hand; no name, no picker. A wrong id is refused by the server (`reference_not_found`) and nothing is saved.\n- A multi-select column holds one option only; \"red, green\" is refused (`invalid_option`).\n- Check and rating fold the same way; boolean folds to a yes/no select, which is fine.\n\nNo bad value reaches the database; the cost is usability.\n\n## To do\n\n1. Add the missing column types to the spec's line-item column enum (people, multi-select, tags, check, rating), with the same cell editors the main list uses (S1/S2 in-cell faces). This is a spec change and takes its own contract review.\n2. Until then, consider making those columns read-only in the line-item table with a hint to edit on the record page, so nobody types raw ids.\n3. Pin each new column type in the line-item table's tests.\n\n## Acceptance\n\n- In a master-detail form, a people cell offers a searchable list of names, a multi-select cell holds several options, and check and rating cells behave as in the main list.\n\nBlocked-by: #36039"

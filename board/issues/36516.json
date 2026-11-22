@@ -1,0 +1,32 @@
+{
+  "number": 36516,
+  "kind": "issue",
+  "title": "objectstack-formula skill: \"Surfaces\" says an unevaluable SharingRule condition aborts the write; lint and runtime skip the rule instead",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:skills",
+    "finding",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T16:21:32Z",
+  "updated_at": "2026-11-22T16:56:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36516",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY\n\nFiled as a `finding` by seat `repo:objectstack#2` from the l2-review#4 record 7081992501 on PR #36354 (escalated out of scope; pre-existing). Not triaged; not claimed.\n\n## What\n\n`skills/objectstack-formula/SKILL.md`, \"Surfaces\" paragraph (line ~450 at 5dfda7151), says an unevaluable `SharingRule` `condition` \"aborts the write\".\n\n`packages/lint/src/validate-sharing-rule-enforceability.ts` says otherwise: a condition that does not lower to a filter is a build error, and at runtime the rule is skipped and grants nothing, with one WARN line. Eval case 14 in the same skill (added by #36354) already teaches the skip.\n\nSo the published skill tells an author the wrong failure mode for a sharing rule.\n\n## Not measured\n\nThis is a static read of the lint header and the skill text. The runtime skip was not reproduced here.\n\n## Suggested shape\n\nA one-sentence correction in the skill's \"Surfaces\" paragraph: the build refuses the condition, and at runtime the rule grants nothing. This is a `skills/**` change (Tier H, governed).\n\nSuggested-grade: p2, domain:skills."
+}

@@ -2,8 +2,8 @@
   "number": 36403,
   "kind": "issue",
   "title": "Retire the server-side column state key (columnState) from view metadata",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-22T09:59:52Z",
-  "updated_at": "2026-11-22T13:37:55Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T14:23:15Z",
+  "closed_at": "2026-11-22T14:23:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 6,
   "locked": false,

@@ -1,0 +1,32 @@
+{
+  "number": 36502,
+  "kind": "issue",
+  "title": "Studio「界面」整栏作废：顶部导航去掉「界面」，原来在里面改的东西各有去处；前置的运行界面入口全部落地后再摘",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:ui",
+    "enhancement",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-22T15:04:02Z",
+  "updated_at": "2026-11-22T15:50:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36502",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#36359（运行界面的设计模式专题）。⛔ 不是认领。优先级 p2（协调席定的，维护者未指定）。维护者 2026-11-22：「通知 2 号」，本卡通知席位 `repo:objectstack#2`。\n\n## 维护者说过的（2026-11-22）\n\n- 「设计模式中顶部的字是不是太多了，而且不需要 studio 打开了，这个做完，是不是 studio 的界面设计就可以作废了。」\n- 「Studio「界面」整栏作废，自定义页面等我想想再说。」\n- 「之前studio 元数据设计那一波立卡了嘛」；协调席答复没立并建议补立后：「两张都立」。\n- 「右侧 studio的界面，顶部导航也需要重新规划」\n\n## 现状（主干 `6a35635a33`）\n\n- Studio 顶部中间是五个分区：数据、自动化、界面、权限、全部元数据（`ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx`）。\n- 「界面」一栏里现在能改的东西，和各自的新去处：\n\n| 原来在「界面」里改的 | 新去处 | 卡 |\n|---|---|---|\n| 左侧菜单 | 运行界面的设计模式 | objectstack-ai/objectstack#36363 |\n| 页头动作 | 设计模式 | objectstack-ai/objectstack#36366 |\n| 新建仪表盘、报表并挂到菜单 | 设计模式「添加菜单项」 | objectstack-ai/objectstack#36364 |\n| 列表视图、看板 | 页面上的「视图设置」 | objectstack-ai/objectstack#36370 |\n| 仪表盘 | 页面上的「编辑」 | objectstack-ai/objectstack#36372 |\n| 报表 | 页面上的「编辑」 | objectstack-ai/objectstack#36374 |\n| 内部的新建/编辑表单 | 作废 | objectstack-ai/objectstack#36425 |\n| 对外表单 | 设置 › 对外表单 | objectstack-ai/objectstack#36444 |\n| 记录页的分组和页签 | 记录「…」里的「配置页面」 | objectstack-ai/objectstack#36498、objectstack-ai/objectstack#36499 |\n| 自定义页面、打印模板（带 `print` 声明的记录页） | 不提供可视化编辑；元数据照常可写 | 本卡 |\n\n- 运行界面里跳到 Studio「界面」的旧入口：页头的「编辑应用」「在 Studio 中查看」（objectstack-ai/objectstack#36485 去掉）、侧栏菜单项「…」里的「设计」（objectstack-ai/objectstack#36487 处理）。\n\n## 要做的\n\n1. **前置**：上表里除「自定义页面、打印模板」以外的每一行，对应的卡都已合并，并且在安装来的应用（HotCRM）上各走通一次。没满足前不动手。\n2. Studio 顶部导航去掉「界面」，剩「数据、自动化、权限、全部元数据」。\n3. 直接输入 `/studio/<包>/interfaces` 的旧地址：转到这个包的 Studio 首屏，并提示一句「界面的修改已经搬到应用里」，带一个回到应用的链接。带 `?surface=` 的旧深链接同样处理。\n4. 「全部元数据」里视图、仪表盘、报表、页面这些类型**保留**，作为查看和兜底修改的地方。\n5. 删掉只为「界面」一栏服务的代码和测试；别处还在用的部件不删，在 PR 里列出删了什么、留了什么。\n6. 文档和技能里提到「在 Studio 界面里改」的地方改成新去处。\n\n## 自定义页面、打印模板（维护者 2026-11-22 已定）\n\n维护者：「自定义页面 暂时不提供可视化编辑没关系，元数据还是可以写，但是 hotcrm 中相关的页面都要清理。」\n\n- 「界面」一栏摘掉后，自定义页面**不提供可视化编辑**；页面这类元数据照常加载和显示，可以用代码、AI 或「全部元数据」写。\n- 打印模板不是单独的类型：它就是带 `print` 声明的记录页（objectstack#8346 的裁决），所以同样处理。\n- HotCRM 里的页面清理在 hotcrm 仓库另行处理，不在本卡。\n\n## 顶部导航的重新规划\n\n维护者说顶部导航「也需要重新规划」。本卡只做「去掉界面」这一步；剩下四项怎么排、要不要改名或合并，协调席另和维护者讨论，定了再立卡或并进本卡。左上角改成「‹ 返回应用」是另一张卡（外壳专题 objectstack-ai/objectstack#36107 第 12 项）。\n\n## 不做的\n\n- 不动数据、自动化、权限三个分区的内容。\n- 不删视图、仪表盘、报表、页面这些元数据类型本身。\n- 不处理 HotCRM 的表单和页面（objectstack-ai/hotcrm 另有卡）。\n\n## 验收\n\n- Studio 顶部只有四个分区，没有「界面」。\n- 打开旧地址 `/studio/<包>/interfaces`：不报错，看到提示和回到应用的链接。\n- HotCRM 上：改菜单、改一个列表视图、改一个仪表盘、调一次记录页分组，全部在应用里完成，不需要进 Studio。\n- 「全部元数据」里能找到并打开一个视图、一个仪表盘、一个页面。\n- 运行界面里没有任何入口再跳到 Studio「界面」。\n- 一个自定义页面和一个打印页（HotCRM 的合同打印）在摘栏后照常能打开。\n- PR 正文列出前置卡的合并情况。\n\n## 协调席自己加的\n\n- 「要做的」第 3 条（旧地址的处理）、第 4 条（全部元数据保留）、第 5、6 条。\n- 前置里「在 HotCRM 上各走通一次」。\n- 上表的对应关系是协调席按今天各张卡整理的；「界面」一栏里实际有哪些编辑功能，协调席没有逐项点过，动手前请对着代码再列一遍，有表里没有的要先报。\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 36508,
+  "kind": "pull_request",
+  "title": "fix(plugin-detail): truncate a long record name in the phone comment page top bar",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T16:00:17Z",
+  "updated_at": "2026-11-22T16:55:19Z",
+  "closed_at": "2026-11-22T16:55:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T16:55:17Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36508",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9JpRoUZGqtwqMU5k7b4C58D)_\nFixes #36470\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 手机上打开评论整页时，记录名很长也只在左边显示一截并以省略号收尾，中间的「评论」两个字始终完整；名字短的记录看起来和以前一样。\n- 属于评论专题（手机端评论体验）的验收缺陷，替手机用户解决标题叠字看不清的问题。\n- 出错时最坏是左边记录名截得比必要的多一点，不影响任何操作，可直接撤回这次改动。\n- 无\n\n## What changes\n\nThe phone full-page comment view (`CommentsPage` in `@object-ui/plugin-detail`) draws one top bar for both the list and a thread: a three-column grid, `minmax(0,1fr) auto minmax(0,1fr)`, with the back button (arrow + label) start-aligned in the left column and the title centred. The left column was already bounded; the button inside it was not. A start-aligned grid item sizes to fit-content, whose floor is its min-content width, and the label is a single unbreakable `truncate` line, so the button grew to the full record name and ran under the centred title. The thread sub-page uses the very same markup; it only looked fine because its label (「评论」) is short.\n\nThe fix is one class: `max-w-full` on the back button, capping it at its column. The label span already carries `truncate`, and as an overflow-hidden flex item it can shrink, so it now ellipsizes. Nothing else in the page moves; a short name lays out byte-identically.\n\nWhy keep the name rather than drop it for the arrow alone: the label tells the reader where Back returns to (the record), and with the cap the name costs nothing to the title; dropping it would change the page's layout, which the card rules out.\n\n## Tests\n\n- New `CommentsPage — the top bar` describe in the existing `CommentsPage.test.tsx` harness pins the structure that keeps the name off the title (jsdom lays nothing out): equal side columns on the header, `max-w-full` + `justify-self-start` on the back button, `truncate` on its label, on both the list and a thread.\n- Local run of that file: NOT MEASURED, reason: the dependency closure build (`@object-ui/plugin-detail` upstream, incl. `@objectstack/spec` dist) never got the shared verify lock in four 9-minute waits (holder: a `@objectstack/dogfood` run held over 70 minutes); without the built spec the file fails at import resolution, not at an assertion. Declared narrowing: CI `Test UI` runs it.\n\n## Verification\n\nReal-browser layout measurement at 375 px wide (Chromium, Tailwind v4 compiled from the component source, header markup and class strings read out of `CommentsPage.tsx` itself), record name 青岛海辰食品集团有限公司 (12 CJK characters) and 海辰食品 (4):\n\n<details><summary>Measured boxes (px)</summary>\n\n| case | back button right edge | title left edge | overlap | label truncated |\n|---|---|---|---|---|\n| before, long name | 202 | 172 | yes | no |\n| after, long name | 164 | 172 | no | yes (ellipsis) |\n| before, short name | 90 | 172 | no | no |\n| after, short name | 90 | 172 | no | no |\n\n</details>\n\nScreenshots: rendered in the container (long name before shows 「评论」 drawn over 「公司」; after shows 青岛海辰食品集团… then a clear gap then 「评论」; short name identical before and after). They could not be attached to this body from the container (no image upload path through the write relay), so the table above is the evidence; a reviewer can reproduce in two minutes below.\n\nTwo-minute check: on a phone-width window (375), open a record whose name is 12+ CJK characters, tap the comment icon at the top right — the name ends in an ellipsis and 「评论」 is fully readable; a 4-character name shows in full as before.\n\n<details><summary>Gates</summary>\n\n`node scripts/pm/dispatch-gates.mjs --ran`: 38 derived families accounted for, 37 run, 1 NOT-MEASURED. Exit 0 on every gate except:\n- `pnpm check:type-check-debt` exit 3 PREREQUISITE NOT MET (its re-measure build never got the verify lock) — NOT MEASURED.\n- `pnpm --dir ui exec vitest run scripts/` exit 1 at import resolution (`Cannot find package '@objectstack/spec/ui'`, spec dist not built in this worktree for the same lock reason) — NOT MEASURED, not a red.\nAlso ran `pnpm check:changeset-fixed` (exit 0).\n\n</details>\n\n## Acceptance notes\n\n- None beyond the above.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmRY38EZf38Yy3zthbY\n\n<!-- signed: repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY -->\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 36544,
+  "kind": "issue",
+  "title": "Ledger: form view `modalSize` keeps `live` after #36425 deleted its only named reader — re-audit (enforce-or-remove)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:spec",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-22T19:30:02Z",
+  "updated_at": "2026-11-22T19:32:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36544",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY\n\nFiled as a `finding` by seat `repo:objectstack#2` from the #36425 dev's report (`open_questions[0]` and `out_of_scope_findings[0]`, PR #36543). Not triaged; not claimed.\n\n## What\n\n`packages/spec/liveness/view.json` → `form.modalSize` is `status: live`, verified 2026-10-28. Its note names one Console reader: the New / Edit record dialog, which copied `modalSize` from the object's internal form view.\n\nPR #36543 (#36425) retires that read. Record create and edit no longer load an internal form view, and the dialog derives its own size. A named or public form opens on a full page (`FormPage`, `/forms/NAME`), not in a dialog. So after #36543 merges, no reader of `modalSize` **on a form view** is named. `ModalForm.tsx` still has a `modalSize` prop, but that is the block's own prop, not a form-view key.\n\nPR #36543 rewrites the note to say \"RE-AUDIT OWED\" and deliberately leaves the status alone. Flipping a ledger verdict is the ledger owner's call, not that card's.\n\n## Why it matters\n\nA key the ledger calls `live` but that nothing reads is the declared-but-not-enforced shape ADR-0049 forbids. An author, or an AI writing metadata, sets `modalSize` on a form view and nothing happens.\n\n## Ask\n\nRe-audit `form.modalSize`. Also check any sibling key that only a dialog ever read. Then either name a live reader or retire the key through the enforce-or-remove route (`spec-property-retirement` playbook). The dev recommends the re-audit (option A) because the only cited reader is gone.\n\n## Likely lane\n\n`domain:spec` (ledger, schema, retirement). It might have a ui half if a dialog reader is found.\n\n## Re-check\n\n`grep -n \"RE-AUDIT OWED\" packages/spec/liveness/view.json`: a hit on `main` means #36543 has merged and the re-audit is still owed. Until then, this card waits on #36543."
+}

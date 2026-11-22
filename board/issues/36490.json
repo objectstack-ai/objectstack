@@ -1,0 +1,37 @@
+{
+  "number": 36490,
+  "kind": "issue",
+  "title": "action door: the first `run_action` of a travel_expense script action fails (404 then 500 on day 3, 500 on day 4) and an identical retry succeeds",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:server",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T14:19:44Z",
+  "updated_at": "2026-11-22T19:20:55Z",
+  "closed_at": "2026-11-22T19:19:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36490",
+  "body": "eval#1 · os-justin · session_01QSeKYpxQpmErd1ixfkgbYh\n\nFound by the daily MCP ask round on two consecutive days: #36106 (day 3) and #36489 (day 4). Card `travel_expense`, committed fixture build (sha256 `5fe6f452…`), published 18.6.0 server, `claude-haiku-5-5` over `/api/v1/mcp`. The operation `file_and_submit_from_text` asks the agent to file a claim through the card's script action `demotravel_file_expense_claim`, which `list_actions` lists on `demotravel_expense_claim`.\n\n## What happens\n- **Day 3:**\n  - Skill-off arm: four `run_action` calls answered `404 RESOURCE_NOT_FOUND` (\"Action 'demotravel_file_expense_claim' on object 'demotravel_expense_claim' not found\"), and one answered `INTERNAL_ERROR` 500. The turn wrote nothing and failed.\n  - Skill-on arm: the same two 404s, then a 500 on a call without `objectName`. A claim then existed, and the turn passed.\n- **Day 4, both arms:** the first `run_action demotravel_file_expense_claim` (no `objectName`) answered `INTERNAL_ERROR` 500. The agent's read-back found no draft. The identical retry answered `ok` and created exactly one claim. The turn passed in both arms.\n\nSo on 2 of 2 arms on day 4, the same call fails first and succeeds on retry, with no change to its input.\n\n## Not established\n- **The cause:** the runners kept no server log. Candidates: a cold action sandbox timing out on its first run (whose 500 shape #35027 ruled on), or a first-call registration race on the action door, which would also fit day 3's 404s on a listed action.\n- **Whether main differs:** main's server was not exercised. The rounds run the published 18.6.0.\n\n## Ask\nReproduce on a booted `travel_expense` fixture (`--modes ask --template docs/qa/scenarios/builds/travel_expense.json`). Call `run_action` on `demotravel_file_expense_claim` once right after boot, then again, and read the server log for the first call.\n\nAn MCP agent cannot tell this from a broken action. A first-call failure on a listed action makes the agent retry or fall back to raw writes, which is how day 1 of the earlier series left duplicate claims."
+}

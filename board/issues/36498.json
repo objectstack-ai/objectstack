@@ -1,0 +1,34 @@
+{
+  "number": 36498,
+  "kind": "issue",
+  "title": "记录页排布的第三层：配对的 .custom 包可以给安装来的对象声明完整的分组和页签排布（原始包完整声明、继承包只能声明插入位置，这两层不变）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-22T14:46:55Z",
+  "updated_at": "2026-11-22T19:01:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36498",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#36359（运行界面的设计模式专题）。⛔ 不是认领。优先级 p1（维护者 2026-11-22：「都是p1」）。维护者 2026-11-22：「不要通知7号座位」「立卡之后通知2号座位」，本卡通知席位 `repo:objectstack#2`。\n\n## 维护者说过的（2026-11-22）\n\n- 「attio 是列表页可以设置对象，详情页下拉显示的是自定义布局。」协调席实测 Attio 记录页菜单第一项 Configure page 原地进入记录页布局编辑后，建议记录的「…」加「配置页面」；维护者：「立卡」。\n- 「页签也做」「还有页签，先把元数据格式确定了」「分组具体保存在哪里？」\n- 「软件包字段、子表自定义分三种，原始软件包，继承软件包和环境管理员覆盖，继承软件包 我记得已经有一套标准，只能申明插入位置，原始软件包、环境管理员 应该可以申明完整的配置，具体综合评估一下。」\n- 协调席评估后建议：只对配对的 `.custom` 包放开完整配置，形状和原始包一样；环境层的页签没列出的默认显示在最后，隐藏要明确写。维护者：「同意，立卡」。\n- 「左侧菜单的定制 应该也是要保存在 .custom」（现状已是这样：objectstack#30059，`<base>.custom` 里带 `overrides` 声明的 `app` 项。）\n\n## 现状（主干 `6a35635a33`，读规格和决策记录）\n\n| 层 | 能做什么 | 在哪里 |\n|---|---|---|\n| 原始软件包 | 完整声明：`ObjectSchema.fieldGroups`（分组、每组的字段和顺序、是否折叠、组里放子表）、`ObjectSchema.relatedLists`（页签及顺序，可带标题和列） | `packages/spec/src/data/object.zod.ts` |\n| 继承软件包 | 只放自己带来的：`ObjectExtensionSchema.place`，每项写 `after` 或 `before`（字段进某个组、自己的组、自己的子表页签） | 同上；规则是 ADR-0146 D10 的 2026-11-22 附注（#35901） |\n| 环境管理员 | 和继承包一样。那条附注对所有扩展一视同仁：「the base's arrangement stays the base's」 | 环境的定制存在配对的 `<base>.custom` 包（ADR-0146 D2） |\n\n- 所以在安装来的对象（如 HotCRM 的线索）上，环境管理员想调分组顺序、把原有字段挪到别的组、隐藏或重排页签，现在没有地方写。\n- 自建应用的对象在可写的包里，直接改对象上的两个键即可，没有这个问题。\n- 字段显示补丁（`fieldPatches`）允许改的属性是 `BASE_FIELD_DISPLAY_WHITELIST`（`packages/spec/src/data/field-customization.ts`）：`label`、`description`、`inlineHelpText`、`placeholder`。**没有 `hidden`。**\n- 分组这份排布由记录页、新建表单、编辑表单、右侧预览共用（`deriveFieldGroupLayout`，ADR-0085 §5）。\n\n## 要做的\n\n1. **只对配对的 `.custom` 包放开**：它的对象扩展可以写两个键，形状和 `ObjectSchema` 上的相同：\n   - `fieldGroups`：完整的分组排布。可以列任何来源的字段（原始包的、继承包的、`.custom` 自己的 `__c` 字段），可以用组里的 `relatedList` 摆任何来源的子表。\n   - `relatedLists`：完整的页签排布。可以列任何来源的页签和三个内置页签。\n2. 其他包（厂商、伙伴的扩展包）写这两个键：在发布、`os validate`、安装三处拒绝，提示它只能用 `place`。做法照 `__c` 后缀的先例。\n3. 合并顺序：原始包的排布 → 各继承包按 `place` 插入 → `.custom` 写了哪个键，就用它**整个替换**前两步在那个键上的结果；没写的键保持前两步的结果。不做逐项合并。\n4. 没列出的东西（升级新增的、后来安装的包带来的）：\n   - 字段：照现有规则排在最后，不丢。\n   - 页签：**显示在最后**（和原始包「不列就隐藏」相反）。要隐藏的明确写：`{ list: 'task', hidden: true }`。`hidden` 这个键只在 `.custom` 的排布里接受。\n5. 隐藏字段：环境层要能把一个原有字段在界面上隐藏。请按白名单的准入条件（不改表结构、不改存的值、不改校验结论、不改权限）评估把 `hidden` 加进 `BASE_FIELD_DISPLAY_WHITELIST.field`；如果它过不了这个条件（比如会影响必填校验），在 PR 里说明并改用排布里的明确写法，不要悄悄放宽白名单的条件。\n6. 更新 ADR-0146 D10 的那条附注：「只放自己带来的」对配对的 `.custom` 除外，引用本卡和维护者的话。\n7. 记录页、表单、预览、Studio 读到的仍是同一份合并结果；卸载或停用 `.custom` 后回到前两步的结果。\n\n## 不做的\n\n- 不放开对象整体覆盖（字段类型、校验、权限等照 ADR-0146 D10 不变）。\n- 不改原始包和继承包两层的格式和规则。\n- 不做界面（另一张卡）。\n- 不做升级时的自动合并或改写。\n\n## 验收\n\n- `hotcrm.custom` 里给 `crm_lead` 写一份 `fieldGroups`，把原始包的一个字段挪到另一个组、把两个组换顺序：记录页、新建表单、预览都按新排布显示。\n- 同一个扩展再写 `relatedLists`，调换两个页签、把一个写成 `hidden: true`：页签顺序变了，那一个不显示。\n- 排布里没列出的一个原有页签：显示在最后。排布里没列出的一个原有字段：排在最后一个组之后。\n- 一个不是 `.custom` 的扩展包写 `fieldGroups`：发布、`os validate`、安装各被拒绝一次，提示用 `place`。\n- 只写 `relatedLists` 不写 `fieldGroups`：分组保持原始包加继承包的结果。\n- 删除 `.custom` 里的这两个键：回到原样。\n- 安装一个带 `place` 的继承包后：它带来的字段不在 `.custom` 的排布里，仍然显示（排在最后）。\n- PR 正文写明 `hidden` 进没进白名单及理由，并列出改到的规格键（这是规格变更）。\n\n## 协调席自己加的\n\n- 「要做的」第 2 条的三处拒绝、第 7 条。\n- 第 4 条里「`hidden` 只在 `.custom` 的排布里接受」和具体写法 `{ list, hidden: true }`：维护者同意的是「没列出的显示在最后、隐藏要明确写」，键名是协调席起的。\n- 第 5 条的两条路（进白名单 / 排布里明确写）：维护者没有选，交给实现时按准入条件判断。\n- 验收最后一条里继承包的情形。\n- 没有核实的：每个用户自己拖动的页签顺序（存在控制台的工作区偏好里，见 `ui/packages/plugin-detail/src/synth/relatedArrangement.ts`）和环境层排布谁优先。协调席的看法是用户自己的顺序叠在环境层之上，请实现时确认并写进 PR。\n"
+}

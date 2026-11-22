@@ -1,0 +1,32 @@
+{
+  "number": 36530,
+  "kind": "issue",
+  "title": "flow step names: a titled screen whose heading holds a {{ }} hole keeps its untranslated label in the docs embed",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T17:52:34Z",
+  "updated_at": "2026-11-22T19:31:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36530",
+  "body": "repo:objectstack#7 · zhuangjianguo · session_01QsR2jTeURPvEm465RcoYEC\n\nFound by the contract review 7083158017 on PR #36383 (card #35979 item 2) on 2026-11-22, and declared by that PR as a deviation. Filed by the seat, not claimed. Parent: #35979.\n\n## What happens\n\nThe docs flow embed names a titled screen by its translated heading (`screens.NODE_ID.title`). When that heading holds a `{{ }}` template hole, the embed falls back to the screen's authored `label`. A titled screen's label has no translation key: `flows.FLOW.nodes.NODE_ID.label` refuses screen ids and redirects them to `screens`. So such a step stays in the authoring language in every locale, and #35979's done-when, no step name left untranslated, is not met for it.\n\nA related display gap: an untitled screen's translated `screens.NODE_ID.title` is drawn by `stepLabel` without the `{{` test that `flowStepName` applies to a titled heading. A translation that adds a hole is therefore drawn raw (review N2).\n\n## To do\n\n1. Give a titled screen's canvas label a key. Either accept `nodes.NODE_ID.label` over a screen id, which is a widening, or add a `screens.NODE_ID.label` member, and read it in `flowStepName` when the heading holds a hole.\n2. Apply the same `{{` test to an untitled screen's translated title in `stepLabel`.\n3. Pin both cases through the docs embed and the Studio canvas. The lint walk should ask for the new key exactly where the viewer draws it.\n\nBlocked-by: #36383\n\n## Grade\np3 · area:ux · domain:ui (narrow: a screen whose heading is templated).\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 36492,
+  "kind": "issue",
+  "title": "ui scripts vitest: date-only-zone-pins-10183 fails after a test that writes process.env.TZ without restoring it (isolate false order dependence)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "bug",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T14:20:54Z",
+  "updated_at": "2026-11-22T14:55:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36492",
+  "body": "repo:objectstack#7 · zhuangjianguo · session_01QsR2jTeURPvEm465RcoYEC\n\nFound by the #36363 thread (PR #36437) in its local gate run on 2026-11-22. Filed by the seat.\n\n## What happens\n\nThe ui `scripts/` vitest project runs with `isolate: false`. `ui/scripts/__tests__/date-only-zone-pins-10183.test.ts` fails 2 cases when it runs after a test file that writes `process.env.TZ` and does not restore it (the thread names `vitest-timezone-pin-8366.test.ts` as the likely writer). Run alone, the same file passes 39 of 39. So the result depends on file order, and a dev's local gate sweep can go red on a PR that touches no date code.\n\n## What should happen\n\nEvery test in that project that writes `process.env.TZ` restores it afterwards (or the project isolates those files), and `date-only-zone-pins-10183` passes in any order.\n\n## Done when\n\n- The `scripts/` project passes twice in a row with a shuffled file order (`--sequence.shuffle`).\n- A pin or lint rule stops a new unrestored `process.env.TZ` write in that project.\n"
+}

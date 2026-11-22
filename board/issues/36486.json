@@ -2,9 +2,9 @@
   "number": 36486,
   "kind": "pull_request",
   "title": "fix(fields): the line grid's column-header help no longer joins every cell's announced column name",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -21,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-22T14:02:18Z",
-  "updated_at": "2026-11-22T14:03:26Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 0,
+  "updated_at": "2026-11-22T15:30:57Z",
+  "closed_at": "2026-11-22T15:30:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T15:30:55Z",
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/36486",
   "body": "Fixes #36004\n\nClause-②: yes (widening)\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:明细行表格里,读屏用户在表格中移动时,每个单元格只播报列名(外加一个\"帮助\"字样),不再把整句字段说明跟着每个格子念一遍;视觉上不变。\n- 为什么做:这是上一张\"明细表头显示字段帮助\"卡的后续无障碍修正,替读屏用户解决播报冗长的问题。\n- 出错会怎样:最坏是读屏用户在按钮上听不到说明,但悬停与键盘聚焦时的提示框照常显示;改动可直接撤回。\n- 要你做什么:无\n\n## What changes\n\n- `ColumnHeaderHelp` (the info button in a line grid's column header; now in `ui/packages/fields/src/widgets/grid-field/GridFieldWidget.tsx` after the lazy-body split landed on main): the button is named by a short Help word from the pack, `fields.grid.columnHelp`, and the help is its description through `aria-describedby` on a `hidden` copy beside the button. A hidden node does not enter the header's name from content; a description reads a node it references even when hidden. The tooltip on hover and focus is unchanged.\n- `@object-ui/i18n`: new key `fields.grid.columnHelp` in all eleven locale packs (the Clause-② widening: the packs are published through `./locales`). No existing key had the value \"Help\": the catalogue has `sidebar.helpTooltip` (\"Help & Documentation\") and the `help.*` docs namespace, neither a one-word label.\n- `ui/packages/plugin-form/src/MasterDetailForm.test.tsx`: its 35804 test found the button by the help as its name; it now finds it by name Help and description = the help. This change made that assertion false, so it is updated here (file outside the claim's surface, named in the report).\n- Changeset `.changeset/36004-grid-header-help-name.md` (`@object-ui/fields`, `@object-ui/i18n`: patch).\n\n## Tests\n\n- New top-level describe in `GridField.test.tsx`, `column header help stays out of the column name (objectstack#36004)`: on the editable grid and the read-only table, the header's accessible name, every `aria-label` inside the header (only the Help word), the button's name (Help word) and its description (the help); plus the zh pack under zh. The existing 35804 tests now find the button by name Help and description = the help.\n- How the accname helper reads it: jest-dom's `toHaveAccessibleName` (dom-accessibility-api) treats a button nested in the header as an embedded control and drops its `aria-label`. So it reads the header as `Amount` on origin/main and on this branch alike, and the header-name assertion alone cannot tell them apart. The pin therefore also holds the `aria-label`s inside the header, which is the text a spec-following browser adds.\n- Chromium (CDP `Accessibility.getFullAXTree`, static markup of both shapes): origin/main shape, column header `Amount Enter the tax-inclusive amount.`; this branch's shape, column header `Amount Help`, button name `Help`, description `Enter the tax-inclusive amount.`.\n\n<details><summary>Ablation (head 7daa1e4b74): origin/main's component under this branch's tests and packs</summary>\n\n- Mutation: `git restore --source=c13af73039 -- ui/packages/fields/src/widgets/grid-field/GridFieldWidget.tsx` (tree only). On disk: `fields.grid.columnHelp` count 0, `aria-label={help}` count 1.\n- Run: `vitest run packages/fields/src/widgets/GridField.test.tsx -t 'objectstack#36004|objectstack#35804'` gives `Tests 6 failed | 2 passed | 87 skipped`. For example, `Expected element to have accessible name: 帮助 / Received: Enter the tax-inclusive amount.`\n- Restore: `git checkout HEAD -- <abs path>`, hash `baa9863a23` == HEAD blob, `git diff HEAD` empty. Re-run gives `Tests 8 passed | 87 skipped`.\n- The subject is imported relatively from `src`, so no `dist/` leg applies.\n</details>\n\n<details><summary>Suites and type-check (head 7daa1e4b74)</summary>\n\n- `pnpm --dir ui exec vitest run packages/fields/src/widgets/GridField.test.tsx packages/plugin-form/src/MasterDetailForm.test.tsx packages/i18n/src/__tests__/all-locales-key-parity.test.ts packages/i18n/src/__tests__/en-zh-key-parity.test.ts`: `Test Files 4 passed (4) · Tests 166 passed (166)`\n- `pnpm --dir ui exec vitest run packages/fields/ packages/i18n/`: `Test Files 428 passed | 1 skipped (429) · Tests 6829 passed | 20 skipped (6849)`\n- `turbo run build --filter='@object-ui/plugin-form^...' --filter='@object-ui/i18n^...'` exit 0, then `type-check` for `@object-ui/fields`, `@object-ui/i18n` and `@object-ui/plugin-form`: exit 0 each.\n</details>\n\n## Acceptance notes\n\n- The card's pin wording says \"label only\". The header names the label plus the one Help word, which done-when bullet 1 allows (\"plus at most a short Help word\"). The helper reads `Amount` and Chromium reads `Amount Help`; both are pinned as described above.\n- The editable header keeps its required ` *` mark in the header text, as before.\n\n## Verification\n\nRisk-ranked first reads:\n1. `ui/packages/fields/src/widgets/grid-field/GridFieldWidget.tsx`, `ColumnHeaderHelp`: the `aria-describedby` target is the `hidden` span, and the hooks run before the early return.\n2. `ui/packages/fields/src/widgets/GridField.test.tsx`, the `objectstack#36004` describe.\n3. `ui/packages/i18n/src/locales/en.ts`, `fields.grid.columnHelp`.\n\nTwo-minute check: `pnpm --dir ui exec vitest run packages/fields/src/widgets/GridField.test.tsx -t 'objectstack#36004'` should show 3 passed.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jUc3qp6bHKSWijbjds)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QsR2jUc3qp6bHKSWijbjds\n"

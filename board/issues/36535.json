@@ -1,0 +1,31 @@
+{
+  "number": 36535,
+  "kind": "issue",
+  "title": "Skill eval round owed: objectstack-data and objectstack-ui cases for related-list tabs and extension place (PR #36527, card #35902)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-22T18:29:31Z",
+  "updated_at": "2026-11-22T18:32:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36535",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY\n\nFiled as a `finding` by seat `repo:objectstack#2`. It carries the eval round that PR #36527 does not measure, so the round has a home when `Fixes #35902` closes the card. This follows l2-review#4 record 7083563112 (accepted deviations). Not triaged; not claimed.\n\n## What is owed\n\nCard #35902's done-when names passing eval cases for the skill text it teaches. PR #36527 teaches:\n\n- the extension `place` paragraph in `skills/objectstack-data/SKILL.md`;\n- the flipped record-page sentence in `skills/objectstack-ui/rules/record-page.md`;\n- new eval case 26 in `skills/objectstack-data/evals/objects-fields-relationships.json`.\n\nNo model round has read any of them: skill evals were NOT MEASURED on the PR.\n\n## The round\n\n`pnpm --filter @objectstack/scenarios skill-evals --skills objectstack-data,objectstack-ui` on `main` after #36527 merges. The runner has no per-case filter, so this is every case of both skills × 2 arms. It belongs to the eval seat's schedule, not a lane dev. Keep when case 26 and the record-page cases pass at the with-skill arm and the rest hold at their last kept score.\n\nRe-check: the newest eval-run record for `objectstack-data` names a commit that contains #36527's merge."
+}

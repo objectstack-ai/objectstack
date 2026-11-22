@@ -23,11 +23,11 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-22T03:27:46Z",
-  "updated_at": "2026-11-22T12:30:33Z",
+  "updated_at": "2026-11-22T19:14:27Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 10,
+  "comments": 12,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36249",
   "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFiling gate: ① product defects found by the #36005 card thread (PR #36233, \"Follow-ups (not in this PR)\"), raised as N1 by L1-d (7073534398). Two items share the fixture (the showcase EUR invoice INV-1010) and the reader.\n\n## What a user sees\n\n1. **Price copied across currencies.** On a EUR invoice, picking a product copies the product's `unit_price`, which is a home-currency amount, into the line as if it were euros. A $100 product becomes a €100 line. Money is silently wrong. This is a price-list currency question: convert, refuse, or require a per-currency price.\n2. **Subtotal without a symbol.** The edit form draws the `total` subtotal as a bare `230.00`, both before and after #36233, while the record page draws `€230.00`.\n\n## Done when\n\n1. Picking a product on a line whose currency differs from the product price's currency does not copy the number silently. Decide the rule (convert at a stated rate, refuse with a reason, or a per-currency price) and pin it. A rule that changes shipped behaviour goes to the maintainer.\n2. The edit form's subtotal uses the record's currency format, the same as the record page and the form's total including tax.\n\n## Notes\n\n- After #36233 the lines and subtotal declare that they follow `invoice.currency_code` (ADR-0144 D2/D6 as amended).\n- Related: #36005 (closed by #36233), #31910–#31912.\n\nReader: `domain:ui` for item 2; item 1 touches the lookup-fill path and may need `domain:data`.\n\nDedupe: `product price currency copy invoice line`, `小计 货币符号 表单` (objectstack issues, open) → none."

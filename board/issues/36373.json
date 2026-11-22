@@ -2,8 +2,8 @@
   "number": 36373,
   "kind": "issue",
   "title": "仪表盘和报表的编辑面板换成业务用词：字段显示标签不显示内部名，「维度」「度量」改成「分组」「指标」，图表类型用中文，标题不变成英文",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-22T08:16:30Z",
-  "updated_at": "2026-11-22T11:58:40Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T15:34:47Z",
+  "closed_at": "2026-11-22T15:34:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 5,
   "locked": false,

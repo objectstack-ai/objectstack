@@ -1,0 +1,37 @@
+{
+  "number": 36523,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): title a record-share search hit by its recipient, not the raw recipient id",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T17:31:11Z",
+  "updated_at": "2026-11-22T18:37:10Z",
+  "closed_at": "2026-11-22T18:37:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T18:37:08Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36523",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi92ncfFpPUpTD8314otX5oaG)_\nFixes #35307\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户在 ⌘K 面板和全局搜索里搜到一条记录共享时，标题从一串用户编号变成被共享人的名字；看不到该用户的人仍看到编号。\n- 跟进全局搜索把关联字段标题显示成目标记录名的那次修复，替搜索用户解决共享记录标题看不懂的问题。\n- 出错时最多是搜索标题又显示回编号，或目录读取故障时整次搜索报错（与关联字段一致）；直接回退本次改动即可撤回。\n- 无。\n\n## What changes\n\n`sys_record_share` is titled by `recipient_id`, a text column whose principal kind `recipient_type` names. `searchAll` followed only a reference-typed title pointer (`referenceTargetOf`), so every record-share hit in the palette read as a raw user id.\n\n`searchAll` now recognises a title pointer that is a recipient id by the declaration the console's recipient face already reads: a `text` field with `widget: 'recipient-picker'` and `recipient_type` in its `dependsOn` (no object-name special case; another object carrying the declaration is titled the same way). The hit is titled by the directory record its row's kind names, mirroring the console's `RECIPIENT_RECORD_KINDS` table:\n\n| `recipient_type` | directory read | title |\n|:---|:---|:---|\n| `user` | `sys_user` by id | its ADR-0079 title (`name`) |\n| `unit_and_subordinates` (and `business_unit`) | `sys_business_unit` by id | `name` |\n| `team` (not offered on `sys_record_share`) | `sys_team` by id | `name` |\n| `group` | none: no directory object exists anywhere | stored id kept (the console keeps it too) |\n| `position` | none: a registry kind, read by the console through the metadata store, not as the searcher | stored value kept |\n\nEach directory is read once per swept object (`id $in`), through the existing `readReferenceTitles`, so the read is the searcher's and every gate and disposition of the #34175 reference follow applies unchanged: exposure must serve `get`, disabled-package targets are not read, `canReadObject` is asked first, a typed `PERMISSION_DENIED` / row scope / field-level security leaves the bare id, an unprovisioned table titles nothing, and any other read failure propagates (the 2026-08-29 search ruling: a read that could not run is never answered as no match). The hit wire shape does not move; `record` still carries the stored id.\n\nFiles: `packages/metadata-protocol/src/protocol-record-reads.ts`, new `packages/metadata-protocol/src/protocol.search-title-recipient-35307.test.ts`, `.changeset/35307-search-recipient-title.md`. No existing test was changed.\n\nRead first: `protocol-record-reads.ts` `recipientKindFieldOf` (the declaration gate) and `readRecipientTitles` (grouping ids by directory), then the `renderTitle` call in the sweep loop.\n\n## Tests\n\nNew file `protocol.search-title-recipient-35307.test.ts` (12 cases): user and business-unit recipients titled by name while group and position keep the stored value; one read per directory as the searcher (`id`+`name` only); wire shape unchanged; object-level refusal (never read), refusal thrown by the read, row scope and FLS each keep the bare id; `recipient_type` hidden from the searcher pays no read; unprovisioned table keeps the hit; a failing directory read fails the search with its own `code`/`status`; another object with the declaration is titled the same; without the widget or without `dependsOn` nothing changes; a reference-typed `nameField` still follows its target.\n\n## Acceptance notes\n\n- The kind-to-directory table is a second copy of the console's `RECIPIENT_RECORD_KINDS` (objectui `@object-ui/fields`); the server cannot import the UI package. Lifting it into a spec contract both sides read is a spec change outside this card.\n- A failing (non-refusal) directory read fails the whole search, as a failing reference title read already does; it is not turned into a bare-id title, which the read-invention gate and the search ruling both forbid.\n\n## Verification\n\nTwo-minute check: `pnpm --filter @objectstack/metadata-protocol exec vitest run src/protocol.search-title-recipient-35307.test.ts`, expected 12 passed.\n\nReadings at head e8b22f7f (merge base 316f7571, origin/main unchanged at PR open):\n\n<details><summary>Package typecheck and tests</summary>\n\n- `pnpm --filter @objectstack/metadata-protocol typecheck` exit 0; `vitest run`: 363 files passed, 9 skipped; 23336 tests passed, 45 skipped (lock VERDICT command-exit 0).\n- New file plus the two sibling title suites (`search-title-lookup`, `search-title-namefield`): 3 files, 32 tests passed.\n- `test:repo` not run locally (declared to CI `Test Core`).\n</details>\n\n<details><summary>Ablation (one-shot, not kept)</summary>\n\nThe fix's call site (`renderTitle(row, referenceTitles ?? ...recipientTitles...)` back to `renderTitle(row, referenceTitles)`) mutated on disk by `scripts/ablation-replace.mjs` (anchor 1 to 0, blob 34aaaee9 to 20eb4f9f); the new file went 5 failed / 7 passed (the pin, the business-unit and refusal legs, the unprovisioned-table leg, the other-object leg); restored blob equals HEAD and `git diff HEAD` empty. The suite imports `./protocol.js` from source, so no dist rebuild applies.\n</details>\n\n<details><summary>Derived gate families</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 67 families, each run with stdin closed, exit captured before any pipe: 67 exit 0. Three first answered exit 3 (prerequisite): the teardown-shape self-test (shallow clone, unshallowed) and `check:dual-build-cjs-loads` / `check:lean-entry-closure` (dists absent, full build at concurrency 2); each re-run exit 0. `--ran`: 67 derived, 67 run, 0 NOT-MEASURED, 0 UNRUN.\n</details>\n\nhttps://claude.ai/code/session_01ADHkmRB34k9WUWeGpRnVNm\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n<!-- signed: repo:objectstack#2 · os-steve · session_01ADHkmRB34k9WUWeGpRnVNm -->\n"
+}

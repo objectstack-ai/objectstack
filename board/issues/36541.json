@@ -1,0 +1,32 @@
+{
+  "number": 36541,
+  "kind": "issue",
+  "title": "objectstack-data skill: teach the .custom package's object-extension arrangement (fieldGroups and relatedLists) from PR #36517",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:skills",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-22T19:04:12Z",
+  "updated_at": "2026-11-22T19:08:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36541",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY\n\nFiled as a `finding` by seat `repo:objectstack#2`. This is the `Skills-docs: follow-up owed` carrier for PR #36517 (card #36498). Not triaged; not claimed.\n\n## What is owed\n\nPR #36517 adds `Metadata-protocol: added`. The object extension of a base's paired `.custom` package may now write `fieldGroups` and `relatedLists`. Each key it writes replaces the arrangement whole, `{ list, hidden: true }` hides a relationship tab, and every other package is refused and prescribed `place`.\n\nThe object-extension section of `skills/objectstack-data/SKILL.md` does not mention either key. AI authors therefore will not use them, and may write them on a non-`.custom` extension, where the doors now refuse them.\n\n## Scope\n\n- One short paragraph in the object-extension section of `skills/objectstack-data/SKILL.md`, paid for under the skill's byte ratchet.\n- One eval case: a `.custom` arrangement accepted, and a non-`.custom` writer told to use `place`.\n- `domain:skills`, after #36517 merges.\n\nRe-check: `grep -n \"relatedLists\" skills/objectstack-data/SKILL.md` names the `.custom` arrangement."
+}

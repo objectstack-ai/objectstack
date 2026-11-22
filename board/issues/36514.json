@@ -1,0 +1,35 @@
+{
+  "number": 36514,
+  "kind": "pull_request",
+  "title": "test(plugin-form): wait for the captured grid before reading it in the master-detail members pin",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T16:12:32Z",
+  "updated_at": "2026-11-22T16:55:36Z",
+  "closed_at": "2026-11-22T16:55:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T16:55:34Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36514",
+  "body": "Fixes #36500\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感:CI 不再因为这个测试偶发失败。\n- 为什么做:主从表单的一个测试在明细网格还没就绪时就去读它,三个不相关的改动因此被误判失败。\n- 出错会怎样:只改了一个测试文件,不影响产品行为,有问题可以直接撤回。\n- 要你做什么:无。\n\n## What changes\n\nTest-only. One file: `ui/packages/plugin-form/src/__tests__/masterDetailDetailsMembers-8071.test.tsx`. No product code, no published file moves (`@object-ui/plugin-form` ships `dist`, README, CHANGELOG and LICENSE only), so the PR carries `skip-changeset`.\n\nCause: `MasterDetailForm` draws a section's heading before its columns load, so the heading can exist while the grid is still on \"Loading columns...\". Case 1 waited for the headings, then read the captured grid props right away, and the old `gridOf` (`gridProps.slice(-sections)[index]`) gave back `undefined` until every section's grid had been captured.\n\n- **`gridOf` is keyed by section, not by slice index.** The capturing `LineItemsField` mock now gives each mounted grid a per-instance id (`useId`), keeps that grid's latest props in a map under the id, and draws a hidden sentinel span carrying the id beside the real grid. `gridOf(heading)` finds the section by its heading, reads the one sentinel inside it, and returns that grid's latest props. It throws (rather than returning `undefined` or another section's props) when the section has no captured grid yet, so a caller inside `waitFor` retries. A render pass that re-renders only some grids can no longer misalign it. The flat `gridProps` list stays, because case 7 asserts it is empty.\n- **Every read after a heading wait now waits for the grid capture itself:**\n  - case 1: both column-order assertions are inside one `waitFor`\n  - case 2c: the `Steps, configured` read waits for that grid's `field`\n  - case 3: `Wider form` and `Cells only` wait for their grids, the same way `As a list` already did\n  - case 6: the `Notes` value assertion is inside `waitFor`, the same way `Lines` already was\n- No assertion is removed or weakened. Every expectation and message keeps its meaning. A read that used to hit `undefined` now gets a named error from `gridOf`, retried by `waitFor` until it times out, so a wrong value still fails.\n\nSibling `*Members-8071` files: per the scope note on the card, none defines or uses `gridOf`/`gridProps`, so they are not affected.\n\nRead first (by risk): the `vi.mock('@object-ui/fields', ...)` factory (the sentinel and the per-instance map), then `gridOf`, then case 1.\n\n## Tests\n\n- **Before the fix**, at `9abc732132a` (origin/main), the file was looped 10 times from `ui/`. **6 of 10 runs failed**, every one in case 1 with `TypeError: Cannot read properties of undefined (reading 'field')` at the `gridOf('Lines').field` read. The other 4 runs passed 9/9.\n- **After the fix**, at `28dd844ac5b`, the same file passed **20 runs in a row, 0 failures**, `Tests 9 passed (9)` on every run.\n- **Package suite**, once: `cd ui && pnpm exec vitest run packages/plugin-form/` gave `Test Files 244 passed (244)`, `Tests 2750 passed | 1 skipped (2751)`.\n- **Type-check:** `pnpm --filter @object-ui/plugin-form run type-check` (`tsc --noEmit && tsc -p tsconfig.test.json`; the test project includes `src/**/*.test.tsx`) exited 0.\n\n## Acceptance notes\n\n- The sentinel is a hidden, empty span in the test mock only. It has no role or label, and no query in the file counts section children, so it does not change what the other cases see.\n- No ablation was run: the diff changes no product behaviour, so there is nothing for one to prove.\n\n## Verification\n\nTwo-minute check: `cd ui && pnpm exec vitest run packages/plugin-form/src/__tests__/masterDetailDetailsMembers-8071.test.tsx` should print `Tests 9 passed (9)`, and keep printing it when looped.\n\n<details><summary>Run counts and gate readings (objectstack-ai/objectstack, head 28dd844ac5b, merge base 9abc732132a)</summary>\n\n- Before the fix, 10 runs: 6 failed, 4 passed. Each failure was `× 1. each member is its own section, in AUTHORED order ...`, with `Tests 1 failed | 8 passed (9)`.\n- After the fix, 20 runs: 0 failed. `fails=0` in the loop, and `Tests 9 passed (9)` on all 20.\n- `node scripts/pm/dispatch-gates.mjs --commands` derived 27 families for this one path. All 27 were run locally, every one exiting 0, and `pnpm --dir ui exec vitest run scripts/` gave 172 files passed, 2 skipped.\n- `--ran` reconciliation: `27 derived, 27 run, 0 NOT-MEASURED, 0 UNRUN`, a derived zero with every exit code recorded.\n- Also run: `pnpm --dir ui run check:vi-mock-specifiers` and `check:vi-mock-inherit` both OK, and `check:new-line-citations` found 0 new citations.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QsR2jTeURPvEm465RcoYEC\n"
+}

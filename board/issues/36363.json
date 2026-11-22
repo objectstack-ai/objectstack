@@ -23,11 +23,11 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-22T08:11:58Z",
-  "updated_at": "2026-11-22T14:04:29Z",
+  "updated_at": "2026-11-22T17:37:12Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36363",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#36359（专题：运行界面的设计模式，维护者直派）。⛔ 不是认领。优先级 p1（维护者 2026-11-22：「这几张卡都 p1」）。\n\n本卡属于「运行界面的设计模式」这套方案，总说明和全部效果图在 objectstack-ai/objectstack#36359。\n\n## 维护者说过的（2026-11-22）\n\n- 「现在左侧菜单是每个应用自己定义的，我们的报表和仪表盘如果设计通过列表入口也很奇怪」\n- 看过 Twenty 的 Layout customization 后：「按这个改，重画」\n\n## 效果图（设计板图 49 的图四）\n\n![设计模式里的菜单：每组底部「添加菜单项」，每项右边的菜单](https://github.com/objectstack-ai/objectstack/blob/b3583aa509be265d5bb8af55ae8bd0c152fb6df5/runtime-edit/2026-11-22-board49-fig4.jpg?raw=true)\n\n## 现状（主干 `6c7c6db250`，本机环境 HotCRM 6.5.0）\n\n- 运行界面的菜单不能改。菜单的每一项是应用作者逐条写的（`src/sales/apps/crm.app.ts`）。\n- Studio「界面」一栏里可以改菜单（`StudioDesignSurface.tsx` 里「nav editing」一段），保存的是应用的定制层，安装来的只读应用也能存（objectstack#30059）。\n\n## 要做的（都只在设计模式里出现）\n\n1. 每个分组的底部出现一行「＋ 添加菜单项」。\n2. 点了以后先在菜单里那个位置占一行（虚线框「选择一个菜单项…」），再弹出选择面板：顶上搜索框，下面按类型列：对象、视图、仪表盘、报表、页面、链接。点一类进去，列出**已经存在、还不在菜单里**的；选一个，占位那一行换成它。\n3. 每个菜单项鼠标移上去右边出现「⋮」，菜单里是：上移、下移、移到分组（子菜单列出各分组）、在前面加一项、在后面加一项、改名和图标、从菜单移除。\n4. 也可以直接拖动菜单项调顺序、拖到别的分组。\n5. 「从菜单移除」只是不在菜单里显示，东西不删；可以再从「添加菜单项」加回来。\n6. 改动先都是待保存的，由设计模式统一「保存」「取消」（同专题的「模式本身」那张卡）。保存写的是应用的定制层，和 Studio 现在改菜单存的是同一份。\n7. 安装来的应用（比如 HotCRM）同样能改，算本环境的定制。\n\n## 不做的\n\n- 不做新建仪表盘、新建报表（同专题的下一张卡，在本卡的选择面板上加）。\n- 不做「添加分组」「删除分组」「分组改名」（专题里列为等维护者定）。\n- 不改菜单项的可见条件（谁能看到哪一项），仍然在 Studio。\n- 不改个人的「收藏」和固定。\n\n## 验收\n\n- 设计模式里，「数据洞察」分组底部点「添加菜单项」→ 选「对象」→ 选一个不在菜单里的对象 → 保存：菜单里出现这一项，换一个普通成员账号也看得到。\n- 对「商机」点「⋮ → 上移」并保存：顺序变了；刷新后还在。\n- 把一项拖到另一个分组并保存：生效。\n- 对一项点「从菜单移除」并保存：菜单里没有了；再点「添加菜单项」，它出现在对应类型的清单里。\n- 做了三处改动后点「取消」：菜单和进来之前一样。\n- 「改名和图标」：改完保存，菜单上是新名字；对象本身的名称没有变。\n- HotCRM（安装来的应用）上做一次添加和一次移动：能保存。\n- 平时（不在设计模式里）：菜单上没有「添加菜单项」，菜单项上没有这个「⋮」。\n- PR 正文附选择面板和菜单项菜单的截图。\n\n## 协调席自己加的（不是维护者原话）\n\n- 类型清单（对象、视图、仪表盘、报表、页面、链接）。Twenty 的是对象、视图、记录、自动化、文件夹。\n- 第 4 项拖动、第 5 项「移除不是删除」。\n- 「不做的」四条。\n\n## 没有核对的\n\n- 运行界面现在能不能直接调用 Studio 改菜单用的那个保存接口，还是要补一层。\n- 安装来的应用的菜单定制，升级应用包时是不是保留，是按 Studio 首页「本环境的定制」的说法推断的，没有实测。\n- 「视图」作为菜单项和已有的「把视图加到收藏」是不是同一种东西，没有理清。\n\nReader: `domain:ui` 车道。菜单在 `ui/packages/app-shell/src/layout/UnifiedSidebar.tsx`；Studio 里现成的菜单编辑在 `ui/packages/app-shell/src/views/studio-design/`（`InterfacesNavRail.tsx`、`StudioNavItemInspector.tsx`）。参照 Twenty 的 Layout customization（本机源码跑的，AGPL，⛔ 只看界面行为，不读不抄它的代码）。\n\nDedupe: `设计模式 菜单`、`运行界面 编辑菜单`（objectstack，open）→ 都是 0。\n"

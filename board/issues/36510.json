@@ -1,0 +1,31 @@
+{
+  "number": 36510,
+  "kind": "issue",
+  "title": "专题：Studio 的保存方式和用词（人工修改保存即生效，草稿加整包发布只留给 AI；设置页说业务话；页签和顶部导航重排）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:ui",
+    "pm:epic",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T16:03:39Z",
+  "updated_at": "2026-11-22T16:45:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36510",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点（父单），由维护者直派。独立专题，不挂在别的专题下（维护者：「你的专题不一定要挂在另外一个专题下」；它和 objectstack-ai/objectstack#34571 相关）。⛔ 不是认领。优先级 p2（协调席定的，维护者未指定）。维护者 2026-11-22：「立卡完成通知objectstack 2号座位」，本卡通知席位 `repo:objectstack#2`。\n\n## 维护者速读\n\n- **Studio 给两类人用**：应用开发人员（主要）和管理员（从应用里点「对象设置」进来加字段、调字段布局）。所以技术功能一个都不隐藏，改的是保存方式、用词和摆法。\n- **保存方式**：人改一项、点保存、立刻生效。草稿加整包发布只留给 AI 的批量改动。\n- **不做的**：不给 AI 的改动单独做一份清单（维护者：先不考虑）；不为「在正式环境分批上线」设计草稿机制。\n- **三张子卡**见下。\n\n## 维护者说过的（2026-11-22）\n\n- 「studio目前的设计是不是太技术，通常每个元数据修改完直接点保存不就行了吗？除了AI会批量改，人类通常是改一个确认一个，是否建议调整」\n- 「包括界面上很多技术元素感觉实际没必要，而且容易让管理员看不懂」\n- 「Studio 不只是管理员用，应用开发人员也要用。」\n- 对「开发人员直接在有人使用的正式环境里攒几项草稿一起发布」：「虽然合理，但是把问题搞的复杂很多，先不考虑这种场景。通常正式的生产环境只会运行代码包安装的元数据应用。叠加小的个性化定制，不会大规模的批量修改」\n- 「AI 的改动单独一份清单。先不考虑」\n- 协调席给出三张卡的写法后：「立专题和卡」\n\n## 现状（主干 `6a35635a33`，cloud `e9da58ce77`；读代码清点，关键处协调席逐条核对过）\n\n- Studio 里人工改动没有「保存」按钮：停手 1.5 秒自动存成草稿（`ui/packages/app-shell/src/views/studio-design/useDraftAutoSave.ts`；对象编辑、钩子、动作、权限、软件包项编辑都用它）。注释写明自动保存取代了原先的「保存草稿」按钮（`StudioDesignSurface.tsx`，objectui#5813）。\n- 草稿只能整包发布：`POST /api/v1/packages/:id/publish-drafts`，一个事务，全有或全无，不能挑其中几项（`packages/metadata-protocol/src/protocol-history-and-publish.ts`）。Studio 的注释写明「There is no per-item publish」。\n- 流程的启用开关在自建应用里也只是存草稿，整包发布后才启用；安装来的应用的流程开关走另一个接口，立即生效。\n- 「变更」面板里没有逐项发布、逐项丢弃。只有权限页有单独的「丢弃草稿」。\n- 单项发布的接口已经有：`POST /api/v1/meta/:type/:name/publish`，没有「属于某个包的项不许单发」的限制；它拿这一项和已生效的内容对照检查，不看别的草稿。「全部元数据」的单项编辑页在用它。\n- 「保存并立即生效」的现成做法也有：`saveAndPublishRuntimeMetadata`（`views/runtime-metadata-persistence.ts`），现在只有应用里保存列表视图在用。\n- AI 的修改工具只写草稿（cloud `packages/service-ai-studio/src/tools/metadata-tools.ts` 的 `stageDraft`），生效是单独一步整包发布；AI 新搭建的应用默认自动发布，应用已上线并有数据时停在草稿。AI 和人共用同一项的同一份草稿，后写的覆盖先写的；每个被改的属性上记着是谁改的。\n- 实测：协调席进自建应用时已有 2 项隔了一两天没发布的草稿；想只撤销自己的一项，界面上做不到。\n\n## 子卡\n\n1. 人工修改保存即生效（见子卡）。\n2. 对象「设置」页签的用词和摆法（见子卡）。\n3. 对象页页签顺序和顶部导航（见子卡；顶部导航部分要先出图给维护者看）。\n\n相关的已立卡（各在原来的专题下，不改挂）：\n\n- objectstack-ai/objectstack#36501：Studio 左上角改成「‹ 返回应用」。\n- objectstack-ai/objectstack#36502：Studio「界面」整栏作废。\n- objectstack-ai/objectstack#36505：「表单」页签改成「字段布局」，只存对象的字段分组。\n\n## 不在本专题\n\n- AI 的改动单独一份清单、逐项应用或放弃。\n- 「变更」面板加逐项丢弃。\n- 在正式环境攒多项草稿一起上线的做法。\n- 隐藏技术功能或加「开发者模式」开关。\n\n## 协调席自己加的\n\n- 专题的名字和三张卡的分法。\n- 「不在本专题」里的第二条（逐项丢弃）：维护者没提，协调席实测时碰到；因为人工不再留草稿，它的必要性降低，所以没放进来。\n"
+}

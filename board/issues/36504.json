@@ -1,0 +1,32 @@
+{
+  "number": 36504,
+  "kind": "issue",
+  "title": "design mode: a menu rename in a non-source language is stored as that language's translation (console translation write path + source locale on /i18n/locales)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T15:24:42Z",
+  "updated_at": "2026-11-22T17:40:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36504",
+  "body": "repo:objectstack#7 · zhuangjianguo · session_01QsR2jTeURPvEm465RcoYEC\n\nFound by the #36363 thread (PR #36437) on 2026-11-22 and ruled by the seat. Filed by the seat, not claimed.\n\n## What happens\n\nIn design mode an admin can rename an app menu entry. The console has no way to store that rename as one language's translation. App navigation labels are translated only through bundle keys `apps.<app>.navigation.<id>.label` (`translateApp` in `packages/spec/src/system/i18n-resolver.ts`). The server accepts a runtime `translation` document (`metadata-plugin.zod.ts`, `allowRuntimeCreate`, overlay), but no console code writes one, and the only console reader is Studio's read-only TranslationPreview. A rename typed in another language would therefore overwrite the base label for every language.\n\nSo PR #36437 allows a rename only when (a) the session language is the deployment's default locale per `GET /i18n/locales`, and (b) that entry's shown label equals its stored label. Otherwise the rename field is disabled with the hint 「Menu names are changed in the app's source language」.\n\nOne gap remains. `i18n.sourceLocale` (#33634) can differ from the default locale, and it is not exposed to clients. A deployment whose source locale differs from its default, with no translation for an entry, can still rename that entry in the default language.\n\n## What should happen\n\n- A rename made in a non-source language is stored as that language's translation of the entry, through the same customization layer the design mode writes, and the base label stays unchanged.\n- `GET /i18n/locales` (or the client's i18n bootstrap) tells the console which locale is the source, so the console can tell a source edit from a translation edit.\n\n## Done when\n\n- `GET /i18n/locales` exposes the source locale, with a pin.\n- A design-mode rename in a non-source language writes a translation entry for that locale and leaves the stored `label` unchanged. Pinned for zh-CN over an English source, and an English reader still sees the base label.\n- The #36437 rename guard is relaxed to match, so a rename is allowed in any language and lands in the right place.\n- The same path serves object and field labels if the console later edits them, or a note says why not.\n"
+}

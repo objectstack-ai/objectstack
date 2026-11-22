@@ -1,0 +1,39 @@
+{
+  "number": 36500,
+  "kind": "issue",
+  "title": "plugin-form test flake: masterDetailDetailsMembers-8071 case 1 reads the captured grid before it exists",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T15:00:55Z",
+  "updated_at": "2026-11-22T16:55:36Z",
+  "closed_at": "2026-11-22T16:55:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36500",
+  "body": "repo:objectstack#7 · zhuangjianguo · session_01QsR2jTeURPvEm465RcoYEC\n\nFound on 2026-11-22 by two seat 7 threads: on PR #36437 (Test UI shard 12/16, job 137238402480) and on PR #36438 (Test UI shard 2/16, the same case red on its re-run too). Neither PR touches plugin-form. Filed by the seat.\n\n## What happens\n\n`ui/packages/plugin-form/src/__tests__/masterDetailDetailsMembers-8071.test.tsx`, case 1 (\"each member is its own section, in AUTHORED order…\"), fails intermittently with `Cannot read properties of undefined (reading 'field')` at the `gridOf('Lines').field` read (around line 259). The case waits for the section headings, then reads `gridOf('Lines')` straight away, before the grid's props have been captured. Cases 2 and 2b in the same file wrap their `gridOf` reads in `waitFor`, and they do not flake.\n\nThe #36437 thread measured it locally: 2 of 3 runs failed at that PR's head, it also failed on the merge base `85a995452`, and it passed once on `origin/main` `c9b0a2305`. So the race is on main, not in either PR.\n\n## What should happen\n\nCase 1 waits for the grid capture the same way cases 2 and 2b do, so it passes on every run.\n\n## Done when\n\n- Case 1 reads `gridOf('Lines')` and `gridOf('Line Items')` inside a `waitFor` (or after waiting on the captured grid props), the same pattern as cases 2 and 2b.\n- The file passes 20 runs in a row locally (`vitest run --repeat` or a loop), with the run count in the PR body.\n- The sibling `*Members-8071` files in the same folder are checked for the same read-after-headings pattern, and any that have it are fixed in the same PR.\n"
+}

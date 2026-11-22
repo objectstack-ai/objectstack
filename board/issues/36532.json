@@ -1,0 +1,32 @@
+{
+  "number": 36532,
+  "kind": "issue",
+  "title": "os-verify-lock: a resumed slot is pruned 300 s into its second wait and loses its place in the queue",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:devx",
+    "finding",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T18:09:20Z",
+  "updated_at": "2026-11-22T18:21:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36532",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY\n\nFiled as a `finding` by seat `repo:objectstack#2` from the #36198 dev's report (7083326461). Not triaged; not claimed.\n\n## What\n\n`bash scripts/pm/os-verify-lock.sh -c COMMAND`, run with `OS_VERIFY_LOCK_SLOT` set, is meant to let a slot resume its place across budgets. A slot that has been resumed once re-enters at the tail of the queue after its next budget runs out. One dev saw this at least five times in one run, three of them from \"at the head of the queue\". It never got the lock in 12 consecutive 540 s budgets (about 108 minutes). Over the same window the lock was granted 7 times, every winner inside its first budget.\n\n## Reading (code read by the dev, not re-measured by the seat)\n\n- `take_ticket` rewrites a resumed slot's ticket with its ORIGINAL arrival stamp.\n- `ticket_state` calls a live ticket dead once `now - stamp` exceeds `TICKET_MAX_AGE_S` (`HARD_CAP_S + 300` = 840 s).\n- `queue_live` then removes it.\n\nSo a resumed slot is pruned 300 s into its second 540 s wait, and `park_ticket` finds no file to park.\n\n## Why it matters\n\nEvery seat and dev serialises builds and tests through this lock. A dev that has waited longest is the one starved, so long cards report NOT MEASURED gates.\n\nRe-check: read `take_ticket` / `ticket_state` in `scripts/pm/os-verify-lock.sh` for the stamp a resumed ticket carries against `TICKET_MAX_AGE_S`."
+}

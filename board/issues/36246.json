@@ -2,8 +2,8 @@
   "number": 36246,
   "kind": "issue",
   "title": "记录页的收藏星标露在记录名旁边：现在收在「更多」菜单里（以 Attio 为准）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-22T03:21:28Z",
-  "updated_at": "2026-11-22T13:31:59Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T15:41:57Z",
+  "closed_at": "2026-11-22T15:41:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36246",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35590（记录页专题，维护者直派）。⛔ 不是认领。优先级 p2（协调席定的，维护者未指定）。\n\n## 维护者说过的（2026-11-22）\n\n- 协调席对照后汇报：收藏我们已经有，和 Attio 唯一的差别是星标的位置。维护者：「Attio 的星标直接露在记录名旁边，我们收在「更多」里。以 attio 为准」\n\n## 现状（主干 `6c7c6db250`，本机环境浏览器实测，1440 宽，自建应用「客户」记录整页）\n\n![我们的记录整页头部：记录名、复制编号图标，右边是评论、编辑、更多](https://github.com/objectstack-ai/objectstack/blob/5ef1288a78bc42aaba1ce459e85b9b23ad1cb13d/widths/2026-11-22-ours-record-page-1440.jpg?raw=true)\n\n- 记录页头部没有星标。「更多」菜单里有四项：刷新、添加到收藏、分享、删除。\n- 收藏本身是通的：加了以后进左侧栏的「收藏」一组。\n\nAttio（同日浏览器实测）：\n\n![Attio 记录页头部：记录名右边是编辑图标和星标，已收藏时星标是实心黄色](https://github.com/objectstack-ai/objectstack/blob/4dedd5452650654b2a86ad4b3ff7a4e590cf74ba/widths/2026-11-22-attio-record-star.jpg?raw=true)\n\n- 星标紧挨在记录名右边，一直可见。没收藏是空心，收藏了是实心黄色。点一下切换。\n- 收藏后记录进左侧栏「Favorites」一组，名称后面带对象名（「Disney Company」）。\n\n## 要做的\n\n1. 记录页头部，记录名右边加星标按钮，一直可见。没收藏是空心，已收藏是实心。点一下切换，不弹确认。\n2. 「更多」菜单里的「添加到收藏」拿掉，不留两个入口。\n3. 记录整页和右侧预览的头部都加；手机记录页同样加在记录名旁。\n4. 收藏的数据和左侧栏「收藏」一组不变。\n\n## 不做的\n\n- 不改视图的收藏入口（视图切换下拉里每行的「添加到收藏」）。\n- 不改左侧栏「收藏」一组的排法和上限。\n- 不在列表行上加星标。\n\n## 验收\n\n- 自建应用「客户」记录整页：记录名右边有星标；点一下变实心，左侧栏「收藏」里出现这条记录；再点一下变空心，左侧栏里消失。\n- 「更多」菜单里没有「添加到收藏」。\n- 右侧预览头部同样有星标，状态和整页一致。\n- HotCRM「线索」（头部按钮多）：星标不被挤掉，记录名的显示不比现在更短。\n- 刷新页面后星标状态还在。\n- PR 正文附收藏前后的截图。\n\n## 协调席自己加的（不是维护者原话）\n\n- 「更多」里的入口拿掉（第 2 项）。\n- 预览和手机也加（第 3 项）。\n- 「不做的」三条。\n\n## 没有核对的\n\n- 右侧预览和手机记录页的「更多」里现在有没有「添加到收藏」，没有点开看。\n- 星标和 objectstack-ai/objectstack#36201（预览头部记录名优先、只留一个主要动作）一起做时的先后顺序，没有排；星标是图标按钮，不占带文字按钮的名额。\n\nReader: `domain:ui` 车道。头部在 `ui/packages/app-shell/src/views/RecordDetailView.tsx`；收藏在 `ui/packages/app-shell/src/context/FavoritesProvider.tsx`。\n\nDedupe: `记录 星标 收藏`、`收藏 记录名`（objectstack，open）→ 都是 0。相关：#36201、#36149。"

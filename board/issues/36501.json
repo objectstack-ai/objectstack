@@ -1,0 +1,34 @@
+{
+  "number": 36501,
+  "kind": "issue",
+  "title": "Studio 左上角改成「‹ 返回应用」加应用名；去掉首页图标、应用切换和右上角的「打开应用」（外壳专题第 12 项，设计板图 47）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-22T15:03:18Z",
+  "updated_at": "2026-11-22T17:11:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36501",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#36107（去掉顶栏和平台首页专题，第三阶段第 12 项）。⛔ 不是认领。优先级 p2（协调席定的，维护者未指定）。维护者 2026-11-22：「通知 2 号」，本卡通知席位 `repo:objectstack#2`。\n\n## 维护者说过的\n\n- 2026-11-21：「是否建议 studio 左上角不需要切换应用，而是返回应用，这样右上角的打开应用也不需要了。」协调席画了设计板图 47，维护者看过后：「可以，拆第一阶段」。专题里写明第 12 项里 Studio 的三处小改和别的互不依赖，可以最先做。\n- 2026-11-22：「右侧 studio的界面，顶部导航也需要重新规划，左上角应该改成返回应用的立卡了嘛」。协调席核对：这一项在专题清单里，但只拆了第一阶段的三张子卡，这一项没有单独的卡。本卡补上。\n\n## 现状（主干 `6a35635a33`）\n\n![Studio：上面是改后，下面是现在，虚线框是会动的地方](https://github.com/objectstack-ai/objectstack/blob/d9b2dc5da9eb0106679fce6d82cd7bdb7dc2f0af/shell/studio-keep-1.png?raw=true)\n\n- Studio 是独立的外壳（`ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx`），自己的顶栏从左到右：首页图标、应用切换、中间的分区、右边的「打开应用」「变更」「发布」等。\n- 平台首页那一层已经去掉（外壳专题第一阶段已合并），首页图标点了没有对应的去处。\n- 从应用进 Studio 的入口正在收拢成「对象设置」（objectstack-ai/objectstack#36487）；回到应用现在靠右上角的「打开应用」。\n\n## 要做的\n\n1. 左上角改成「‹ 返回应用」，后面是应用名和「Studio」字样。点了回到应用里进来之前的那一页；不是从应用进来的（直接打开地址），回到这个应用的首屏。\n2. 去掉首页图标。\n3. 去掉应用切换。要换一个应用来设计：先返回应用，在应用里换，再进 Studio。\n4. 去掉右上角的「打开应用」。\n5. 其余不动：中间的分区、左边的清单、右边的 AI 面板、「变更」「发布」。\n\n## 不做的\n\n- 不做图 47 里的另外三项小改进（对象页页签摆平、对象头部、流程空状态）；它们在专题里列为「适当优化」，另拆。其中「对象页页签摆平」里的「表单」页签受 objectstack-ai/objectstack#36425 影响，拆的时候要重看。\n- 不动 Studio 的分区（「界面」一栏的去留见 objectstack-ai/objectstack#36359 下的作废卡）。\n- 不把 Studio 接入应用那套左侧菜单。\n\n## 验收\n\n- 从 HotCRM「客户」列表点「对象设置」进 Studio（#36487 未合并时用现有入口）：左上角是「‹ 返回应用 · 销售 · Studio」；点了回到「客户」列表。\n- 直接打开一个 Studio 地址：点「‹ 返回应用」到这个应用的首屏。\n- 顶栏里没有首页图标、没有应用切换、没有「打开应用」。\n- 有未发布的改动时点返回：照现有的未保存提示走，不丢改动。\n- 1280 和 1440 宽各看一次，顶栏不换行。\n- PR 正文附改动前后的顶栏截图。\n\n## 协调席自己加的\n\n- 「要做的」第 1 条里「不是从应用进来的回到首屏」、第 3 条里换应用的走法。\n- 验收里的未保存提示和两个宽度。\n- 没有单独给 Studio 里没有对应应用的包（只有对象没有应用的包）定返回去哪；请实现时提出来。\n"
+}

@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repo": "objectstack-ai/objectstack",
-  "generated_at": "2026-11-22T14:16:57.840Z",
+  "generated_at": "2026-11-22T20:17:25.226Z",
   "walk_phase": "incremental",
   "walk": {
     "open_set": {
@@ -11,8 +11,8 @@
     },
     "delta": {
       "complete": true,
-      "cursor": "2026-11-22T14:01:14.769Z",
-      "since": "2026-11-22T08:06:12.308Z",
+      "cursor": "2026-11-22T20:01:44.254Z",
+      "since": "2026-11-22T14:01:14.769Z",
       "slice": 300
     },
     "history": {
@@ -20,28 +20,28 @@
       "cursor": "2026-09-23T20:24:00Z"
     }
   },
-  "since": "2026-11-22T08:06:12.308Z",
-  "since_reason": "incremental from the previous run's next_since (2026-11-22T08:06:12.308Z)",
-  "next_since": "2026-11-22T14:01:14.769Z",
+  "since": "2026-11-22T14:01:14.769Z",
+  "since_reason": "incremental from the previous run's next_since (2026-11-22T14:01:14.769Z)",
+  "next_since": "2026-11-22T20:01:44.254Z",
   "resume": null,
   "counts": {
-    "issues_open": 543,
-    "issues_closed": 16127,
+    "issues_open": 554,
+    "issues_closed": 16154,
     "issues_transferred": 11,
-    "pulls_open": 59,
-    "pulls_closed": 17633,
-    "records": 34373
+    "pulls_open": 48,
+    "pulls_closed": 17665,
+    "records": 34432
   },
   "board": {
     "open_issues_count": 535,
-    "open_pull_requests": 54,
-    "read_at": "2026-11-22T14:16:50.224Z"
+    "open_pull_requests": 43,
+    "read_at": "2026-11-22T20:17:16.948Z"
   },
   "count_check": {
     "verdict": "ok",
     "reason": null,
-    "expected": 481,
-    "archived": 543,
+    "expected": 492,
+    "archived": 554,
     "shortfall": 0,
     "surplus": 0,
     "gone_ledger": 62,
@@ -52,10 +52,10 @@
     "pending_since": null,
     "reason": null
   },
-  "requests": 489,
+  "requests": 305,
   "run": {
-    "numbers_read": 264,
-    "files_written": 492,
+    "numbers_read": 151,
+    "files_written": 286,
     "walk_complete": true,
     "open_set_completed_here": false,
     "delta_ran": false,
@@ -65,8 +65,8 @@
     "reconcile": {
       "first": {
         "verdict": "ok",
-        "expected": 481,
-        "archived": 543,
+        "expected": 492,
+        "archived": 554,
         "shortfall": 0,
         "surplus": 0
       },

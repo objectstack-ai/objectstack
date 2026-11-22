@@ -1,0 +1,37 @@
+{
+  "number": 36524,
+  "kind": "pull_request",
+  "title": "fix(cloud-connection): an installed package answers its declared hook and action refusals in the caller's language",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T17:35:35Z",
+  "updated_at": "2026-11-22T19:10:26Z",
+  "closed_at": "2026-11-22T19:10:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T19:10:24Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36524",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9JpRoUZGqtwqMU5k7b4C58D)_\n\nFixes #36473\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 用户能看到什么变化：装进环境的应用包（包括托管环境里的应用和模块包），在中文用户保存、批量保存或点操作按钮被拦下时，拦截提示改为显示包里自带的中文译文，不再一律显示英文原句；本地直接启动的应用本来就正常，不受影响。\n- 为什么做：属于界面体验与多语言专题，替托管环境上的中文业务用户解决「拦截提示全是英文」的问题。\n- 出错会怎样：最坏情况是提示仍显示英文原句，拦截本身照常生效、数据不受影响；改动可直接撤回。\n- 要你做什么：无。\n\n## What changes\n\n**Where the cause was: this repository (objectstack), the package-install composition layer — `packages/cloud-connection` (`MarketplaceInstallLocalPlugin.bindArtifactHandlers`).** Not a `main` regression and not the hook refusal catalogue itself.\n\nA hook or action refusal catalogue is translated by `pickTranslatedSentence` (`packages/runtime/src/sandbox/hook-refusal-catalogue.ts`) through the `i18n` reader the binder hands the body runner. `bindAppArtifactHandlers` has two callers:\n\n- `AppPlugin.start` (an app booted with `objectstack dev` / `objectstack start`) passes `i18n: hookRefusalI18nReader(ctx)` and `getService`;\n- the install door (`POST /api/v1/marketplace/install-local`, and the `kernel:ready` rehydrate of every installed package) passed **neither**.\n\nSo for every package installed into an environment, `pickTranslatedSentence` met `i18n === undefined` and returned the declared sentence, on every door that runs the hook (`POST /api/v1/batch`, a record update, an action that writes) and for action refusals too. The package's zh-CN pack was loaded into the same `i18n` service by the same plugin (`applySideEffects`), which is why its labels and confirm texts were Chinese on the same pages. The install door's call is byte-identical on the 18.6.0 tag (`@objectstack/runtime@18.6.0`, commit 958ee0359), so the reporter's local 18.6.0 boots translated because they went through `AppPlugin`, not because 18.6.0 differed. The two leads named on the card (the `sourceLocale` label change and the `/batch` `failedOperation` change) do not touch this path.\n\nThe fix:\n\n- `packages/cloud-connection/src/marketplace-install-local-plugin.ts`: the install-door bind now passes the same `i18n` reader and `getService` that `AppPlugin.start` passes, and says once at `warn` if the runtime it resolves has no reader.\n- `packages/runtime/src/index.ts`: exports `hookRefusalI18nReader`, so both doors use the one reader.\n\nSame seam, also fixed by the `getService` half (named here as the bounded in-place fix): an installed package's `ctx.text` now reads the organization's language, and an installed action body's `ctx.email.send` / `ctx.activity.append` reach their services, as a booted app's do.\n\nThe refusal body shape, code and status are unchanged. `zh-Hans` reaches a `zh-CN` pack through the existing negotiation (`negotiatedLocale` over `getLocales()`, `resolveLocaleAmong` step 3).\n\nWhat this PR cannot show: whether the hosted environment installs packages through this install door. That is the in-repo door for \"a package installed into an environment\", and it reproduces the reported symptom exactly; if the hosted host binds installed packages through a path of its own, that path needs the same two options.\n\n## Tests\n\nNew top-level describe in `packages/cloud-connection/src/marketplace-install-local-artifact-handlers.test.ts` (the existing install-local binder harness): a package with a hook refusal catalogue (`reasons` + `params`), a script action with a refusal catalogue, and a zh-CN pack is installed through the real install route and the real `bindAppArtifactHandlers`; the bound hook body and action handler are run with a `zh-Hans` caller and read through `mapDataError`:\n\n- install, hook: status 400, `code` VALIDATION_ERROR, `declaredCode` ORDER_NOT_READY, `userMessage` is the zh-CN reason sentence with its param filled; an `en` caller gets the declared sentence (control);\n- install, action: status 409, `declaredCode` NOT_DRAFT, zh-CN sentence; `en` control;\n- rehydrate at `kernel:ready`: the same two answers.\n\nThe i18n double answers as `FileI18nAdapter` does (exact-locale `t()`, key echoed on a miss), so the `zh-Hans` to `zh-CN` step is the catalogue's own negotiation.\n\nLocal readings, ablation (removing the `i18n` option from the install-door bind) and gate results are in the `os-dev-report` comment on #36473; any that the shared verify queue did not reach are marked NOT MEASURED there and are covered by this PR's `Test Core` / `TypeScript Type Check` runs.\n\n## Acceptance notes\n\n- The install door previously also omitted `getService`, so installed bodies never reached email, audit or the organization's language; covered by the same one-line binding fix above.\n\n## Verification\n\nRead first (risk order):\n1. `packages/cloud-connection/src/marketplace-install-local-plugin.ts`, the `bind(ql, manifest, …)` call: the two options added.\n2. `packages/runtime/src/index.ts`: the one new export.\n3. The new describe in `marketplace-install-local-artifact-handlers.test.ts`.\n\nTwo-minute check: `pnpm --filter @objectstack/cloud-connection exec vitest run src/marketplace-install-local-artifact-handlers.test.ts` (after building the package's dependency closure) shows the three new cases green; delete the `i18n:` line in the install-door bind and the hook and action cases fail with the English sentence.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmRY38EZf38Yy3zthbY\n\n<!-- signed: repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY -->\n"
+}

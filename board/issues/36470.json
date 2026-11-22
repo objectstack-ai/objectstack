@@ -2,8 +2,8 @@
   "number": 36470,
   "kind": "issue",
   "title": "手机评论页：记录名长的时候和中间的「评论」标题叠在一起",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-22T13:04:14Z",
-  "updated_at": "2026-11-22T13:52:36Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T18:00:20Z",
+  "closed_at": "2026-11-22T16:55:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36470",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#36062（评论专题）。⛔ 不是认领。优先级 p2（协调席定的，维护者未指定：只影响观感，不挡操作）。\n\n## 维护者说过的（2026-11-22）\n\n- 「现在更新最新的代码，验收开发成果」\n- 协调席汇报验收发现的缺陷后，维护者：「bug立卡」。\n\n## 现状（主干 `6a35635a33`（cloud `e9da58ce77`），本机托管环境，浏览器实测，账号是系统管理员，手机宽度 375）\n\n![标题重叠](https://github.com/objectstack-ai/objectstack/blob/5fde13efd06417a8f69bd2d510caad999df9cf44/accept-1122/acc3-17-phone-comment-title-overlap.png?raw=true)\n\n- 打开客户「青岛海辰食品集团有限公司」的记录页，点右上角评论图标进评论整页。\n- 顶部左边是返回箭头加记录名，中间是「评论」两个字。记录名有 12 个字，一直写到中间，和「评论」叠在一起，两边都读不清。\n- 点进一串回复后的那一页（左边「评论」、中间「评论串」）没有这个问题。\n\n## 要做的\n\n1. 左边的记录名放不下时截断加省略号，不能压到中间的标题上。\n\n## 不做的\n\n- 不改这一页的其他布局。\n\n## 验收\n\n- 375 宽下，记录名 12 个汉字以上的记录：评论整页顶部记录名被截断，「评论」两个字完整可读，两者不重叠。\n- 记录名很短时（如 4 个字）：显示完整，和改动前一样。\n- PR 正文附长名和短名各一张截图。\n\n## 协调席自己加的\n\n- 「截断加省略号」这个做法是协调席提的；如果实现上更合适的是只留返回箭头不写记录名，请在 PR 里说明。"

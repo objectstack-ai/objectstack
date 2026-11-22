@@ -2,9 +2,9 @@
   "number": 36389,
   "kind": "pull_request",
   "title": "docs(skills): the data skill teaches that a predicate update or delete of a controlled_by_parent detail writes the rows its by-id writes do",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,7 +12,7 @@
   },
   "labels": [
     "documentation",
-    "needs:contract-review",
+    "security",
     "size/s",
     "tooling"
   ],
@@ -22,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-22T09:16:56Z",
-  "updated_at": "2026-11-22T09:35:14Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 1,
+  "updated_at": "2026-11-22T16:37:26Z",
+  "closed_at": "2026-11-22T16:37:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-22T16:37:24Z",
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/36389",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9JpRoUZGqtwqMU5k7b4C58D)_\n\nFixes #36285\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:用 AI 搭应用的人问到「看得到主记录的人按条件批量改、删明细」时,技能包不再教「只能动到本人录入的行」,改为教「批量与逐条改到的行一致,要么全部生效要么一行不动」。平台行为本身没有变。\n- 为什么做:属于权限与共享这条线;你裁定的「批量与逐条一致」已经随上一个改动落地,对外发布的技能包还在教旧规则,这是它欠下的文档跟进。\n- 出错会怎样:这次只改两处说明文字,不动运行代码;写错的后果是 AI 照着错误说法搭应用,合并后发现不对可以直接撤回。\n- 要你做什么:技能包属于需你本人批准的内容,请审阅这两处文字后批准并合并。\n\n## What changes\n\nThe rule taught is the maintainer's ruling 「A 批量与逐条一致」 as the runtime now implements it (the predicate-write change for `controlled_by_parent` details, already on `main`).\n\n- `skills/objectstack-data/rules/relationships.md`, the `writeRequiresMasterRead: true` bullet under \"Writes under `controlled_by_parent`\". Before: \"The ownership floor (rows you created) still binds predicate and, for both users, on-behalf-of updates and deletes.\" After: \"A predicate (`multi: true`) update or delete writes the rows a by-id write of each would, all matched rows or none. The ownership floor (rows you created) still binds, for both users, on-behalf-of updates and deletes.\" Only the predicate half moved; the on-behalf-of half is kept word for word (ADR-0090 D10).\n- `skills/objectstack-data/evals/objects-fields-relationships.json`, eval 17: the last sentence of `expected_output` states the same rule. Its `assertions` are unchanged: none of the four `must_contain` strings and none of the four `must_not_contain` strings involved the old wording.\n- `.changeset/36285-relationships-predicate-floor.md`: `@objectstack/skills` patch.\n\nRead first, by risk:\n\n1. `skills/objectstack-data/rules/relationships.md`, the one hunk at lines 86 to 92: the sentence an agent will author from.\n2. `skills/objectstack-data/evals/objects-fields-relationships.json`, eval 17.\n\n### Skill size readings\n\n| What | Before | After |\n|:---|---:|---:|\n| `rules/relationships.md`, lines | 399 | 400 |\n| `rules/relationships.md`, tokens (ceiling 4203) | 4162 | 4188 |\n| `evals/objects-fields-relationships.json`, lines | 451 | 451 |\n| `evals/objects-fields-relationships.json`, tokens (not ratcheted) | 7488 | 7517 |\n| Bundle, every `SKILL.md` summed, lines | 4950 | 4950 |\n| Bundle, whole shipped tree, lines | 22900 | 22901 |\n| Bundle, ratcheted authored tokens (ceiling 202541) | 197497 | 197523 |\n| Bundle, whole shipped tree, tokens | 290191 | 290246 |\n\nNo ceiling is raised. Before readings at `ed33f8aed`, after readings at `eb547b8f3`.\n\n## Tests\n\nHead `eb547b8f3`. No runtime code moves, so no package test suite is owed and no ablation applies (documentation only).\n\n<details><summary>Eval 17 against its own assertions, and the shipped catalog</summary>\n\n- Eval 17 `expected_output` checked against its `assertions`: `must_contain` missing 0 of 4, `must_not_contain` present 0 of 4. The fixture parses as JSON, 25 evals. The repository has no runner that executes eval fixtures; this is the structural check available.\n- `pnpm --filter @objectstack/skills build`, exit 0: \"sync-catalog self-test: 9 cases pass\", \"114 file(s) across 14 skill(s) copied from skills/** into dist/skills and read back byte-identical\". In `packages/skills/dist/skills/objectstack-data/`, the new sentence is found once in each of the two files and the old wording \"still binds predicate\" zero times in `rules/relationships.md` (positive control: `writeRequiresMasterRead` is found there).\n\n</details>\n\n<details><summary>Derived gates, local subset</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands` derived 48 families from the 3 changed paths. All 48 were run at `eb547b8f3` with each exit code captured before any pipe; `--ran` answers \"48 derived, 48 run, 0 UNRUN\".\n\n- 43 exit 0, among them `check-skills-token-ratchet` (\"60 authored bundle file(s) within their ceilings\"; `relationships.md` 4188 tokens, ceiling 4203, headroom 15), `check:skill-served-sections`, `check:skill-links`, `check:skill-identifier-liveness`, `check:skill-compatibility`, `check:skill-frame-sync`, `check:doc-authoring`, `check:pm-skill-id-lint`, `check:nul-bytes`, `check:published-files`, `check-empty-changeset`, `check-changeset-no-major`, `check-adr-0087-registration`.\n- 5 exit 3, NOT MEASURED, reason: each needs a full workspace build this documentation diff does not owe locally, and each printed its own prerequisite refusal: `check:doc-formula-expressions` (the formula package is not built), `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`, `check:sourcemap-no-sources-content`. They are left to CI.\n\n</details>\n\n## Acceptance notes\n\n- Search for other sentences teaching the old rule, at `ed33f8aed`: `git grep -iE 'rows you created|ownership floor' -- skills/` answers the two sites corrected here and no other; `git grep -i predicate -- skills/objectstack-data/` has no other hit about a `controlled_by_parent` write. No generated mirror carries the sentence: `rules/relationships.md` is hand-authored, and `check:skill-served-sections` is green.\n- The predicate rule holds for every `controlled_by_parent` detail, not only one that declares `writeRequiresMasterRead`. The sentence stays in the bullet where the old one stood, as the card asks for a rewrite in place with no restructuring.\n- The region after line 406 of `relationships.md` (another open draft's) is not touched; the file is 400 lines on this branch.\n- `relationships.md` grows by 1 line and 26 tokens, inside its ceiling. Nothing was deleted to pay for it.\n- Governed surface (`skills/**`, Tier H): this pull stays draft and requests no reviewer.\n\n## Verification\n\nTwo-minute check: `git diff origin/main...HEAD -- skills/` shows exactly two hunks, one sentence each. Then `node scripts/check-skills-token-ratchet.mjs`; expect a last line starting \"✓ check-skills-token-ratchet: 60 authored bundle file(s) within their ceilings\".\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmRY38EZf38Yy3zthbY\n\n<!-- signed: repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY -->"

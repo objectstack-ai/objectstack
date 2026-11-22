@@ -1,0 +1,37 @@
+{
+  "number": 36507,
+  "kind": "issue",
+  "title": "drill dialog: a relationship-path condition shows as a locked chip reading \"= [object Object]\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T15:40:36Z",
+  "updated_at": "2026-11-22T18:52:16Z",
+  "closed_at": "2026-11-22T18:51:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36507",
+  "body": "repo:objectstack#7 · zhuangjianguo · session_01QsR2jTeURPvEm465RcoYEC\n\nFound by the #36256 thread (PR #36461) on 2026-11-22 and measured by its dev. Filed by the seat, not claimed. It is the remainder of #36256, whose PR becomes `Part of #36256`.\n\n## What happens\n\nA dashboard or report drill whose dimension is a relationship path opens the drill dialog over the standard list with the right records, but the drilled condition shows as a locked chip whose value reads `[object Object]`. Measured live on HotCRM's industry donut (dimension `crm_account.industry`), 科技 slice, on the PR #36461 branch: the chip reads 「所属客户：= [object Object]」 with `data-field=crm_account`, and the list itself is right (3 rows, the 所属客户 column pinned). `readViewConditions` takes the nested object form in as a plain field triple, so the related field and its value are lost. (Corrected 2026-11-22: an earlier static reading said the chip reads \"View filter\".)\n\nMeasured causes:\n- List rows lower to dotted AST fields, and objectql `assertFilterIsMaterializable` refuses a dotted relation path. Only the nested form `{ crm_account: { industry: V } }` executes, so an editable chip on that path is not possible today.\n- `ui/packages/plugin-list` `conditionModel.ts` `readViewConditions` reads the nested-relation form as a field triple on the lookup (`crm_account`) whose value is the nested object, so `viewChipText` prints the lookup label and `[object Object]`.\n- Neither plugin-grid nor plugin-list supports a dotted column, so the related value cannot be shown as a column either. PR #36461 adds the lookup field itself (`crm_account`, showing the account name) to the drill's default columns.\n\n## What should happen\n\nThe drilled condition reads as a locked, labelled chip, for example \"Account Industry: Technology\". The label is built from the related object's field label and the option's label, in the reader's language.\n\n## Done when\n\n- `readViewConditions` reads the nested-relation form `{ <lookup>: { <field>: V } }` into a locked chip for `<lookup>.<field>`.\n- `viewChipText` labels it from the lookup field's label plus the related object's field and option labels, translated, and falls back to the raw names when a label is missing.\n- A pin covers the HotCRM `crm_account.industry` drill under en and zh-CN, plus one control showing a same-object condition is unchanged.\n- No new public ListView prop. If one turns out to be needed, the claim says `Clause-②: yes (widening)` and names it.\n\nDedupe words: [object Object] chip, View filter chip, nested relation filter, crm_account.industry, readViewConditions.\n\n"
+}

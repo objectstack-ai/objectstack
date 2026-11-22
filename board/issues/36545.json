@@ -1,0 +1,32 @@
+{
+  "number": 36545,
+  "kind": "issue",
+  "title": "After #36425: a default / OBJECT.create form opened by name from a form-type action is flagged \"internal\" (lint + Studio rail), and stale resolveFormViewLayout comments remain",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:spec",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T19:47:20Z",
+  "updated_at": "2026-11-22T19:49:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36545",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY\n\nFiled as a `finding` by seat `repo:objectstack#2` from the l2-review#4 record on PR #36543 (comment 7084658554, nits N2 and N3). Not triaged; not claimed. Waits on #36543.\n\n## N2: a default form that an action opens by name is called \"internal\"\n\nPR #36543 (#36425) adds the advisory lint rule `form-view-internal-not-loaded` and a Studio Interfaces-rail filter. Both treat an object's default form (`form`, `formViews.default`, an `isDefault` form item) and its `OBJECT.create` form as internal whenever `sharing.enabled !== true`.\n\nA `form`-type action can still open one of those forms by its name, and apps/console `FormPage` still loads it in that case. So for that form:\n- the lint message \"no longer loaded\" overstates what happens, and\n- Studio stops listing a form that users can still reach.\n\nThe rule is advisory, so nothing is refused.\n\n**Ask:** when an action in the stack opens the form by name, exempt it from both the rule and the rail filter, or reword the message. Pin the exemption with a test.\n\n## N3: stale comments name a deleted function\n\nThese comments still name `resolveFormViewLayout`, which #36543 deletes:\n- `ui/apps/console/src/components/FormPage.tsx:60`\n- `FormPage.visibleWhen.test.tsx:12`\n- plugin-form tests `sectionVisibleWhen-6111`, `sectionStyleKeysRetired-13626` and `modalFormSectionGroupReference-11542`\n\n`docs/qa/platform-checklist/areas/records-forms.json` and `studio-authoring.json` also describe the retired default-form overlay recipe, and need a checklist re-audit.\n\n## Likely lane\n\n- N2: `domain:spec` for the lint rule (`packages/lint`), plus a ui half for the rail.\n- N3: `domain:ui`, plus devx for the checklist.\n\n## Re-check\n\n`git grep -n resolveFormViewLayout -- ui docs/qa`: any hit after #36543 merges means N3 still applies."
+}

@@ -14,18 +14,20 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-22T13:03:18Z",
-  "updated_at": "2026-11-22T13:52:33Z",
+  "updated_at": "2026-11-22T19:11:16Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36469",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#36062（评论专题）。⛔ 不是认领。优先级 p1（协调席定的，维护者未指定：已上线功能点了就报错）。\n\n## 维护者说过的（2026-11-22）\n\n- 「现在更新最新的代码，验收开发成果」\n- 协调席汇报验收发现的缺陷后，维护者：「bug立卡」。\n\n## 现状（主干 `6a35635a33`（cloud `e9da58ce77`），本机托管环境，浏览器实测，账号是系统管理员）\n\n![取消表情时的报错](https://github.com/objectstack-ai/objectstack/blob/5fde13efd06417a8f69bd2d510caad999df9cf44/accept-1122/acc3-19-reaction-remove-fails.jpg?raw=true)\n\n- 在自建应用「CRM客户管理」的一条客户记录上发一条评论，给它点 👍：成功，显示「👍 1」。\n- 再点一次这个「👍 1」想取消：顶部提示「表情回应未保存，请重试。」，数字仍是 1。\n- 连续试了 2 次（手机宽度的评论串里一次，重新打开页面后一次），2 次都失败。\n- 界面发出的请求是 `DELETE /api/v1/comments/reactions/<id>`，返回 `404`，`{\"code\":\"ENDPOINT_NOT_FOUND\",\"message\":\"Not found\"}`。\n- 这条接口的代码在主干上有（`packages/plugins/plugin-audit/src/comment-reaction-routes.ts`，由 `audit-plugin.ts` 在拿到 HTTP 服务后挂上，挂上时会打一行日志 `AuditPlugin: comment doors mounted at …`，拿不到时打一行警告）。本机托管环境这次启动的日志里 `AuditPlugin` 的其他行都在，**这两行都没有**。\n- 同一段代码还挂了「标记已解决」（`PUT`）和「删除自己的评论」（`DELETE`）两条接口，所以它们在托管环境里很可能同样不通。这两条协调席没有点。\n\n## 要做的\n\n1. 找出托管环境里这组评论接口为什么没有挂上，让它挂上。单机运行（`os serve`）是否正常，一并确认。\n2. 修好后：取消表情回应成功，数字减一；「标记已解决」和成员删除自己的评论在托管环境里各走通一次。\n3. 加一条能在托管形态下拦住这类问题的检查（这组接口没挂上时要有失败的测试或启动告警，而不是静默）。\n\n## 不做的\n\n- 不改表情回应的界面。\n\n## 验收\n\n- 托管环境（本机 cloud rig 或 staging）里：给评论点 👍 再点一次，👍 消失，请求返回成功。\n- 同一环境里：把一条评论标记已解决再取消；一个没有删除权限的普通成员删除自己的评论成功。\n- 环境启动日志里有 `comment doors mounted` 一行。\n- PR 正文写明原因在哪个仓库、哪一层。\n\n## 协调席自己加的\n\n- 「要做的」第 3 条（加检查）。\n- 原因的推断（日志里缺两行）是协调席读日志和代码得出的，没有调试确认。线上 staging 没有验。\n- 如果原因在 cloud 仓库的托管内核装配里，请席位把修复放到 cloud，本卡留作记录。"

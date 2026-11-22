@@ -1,0 +1,31 @@
+{
+  "number": 36491,
+  "kind": "issue",
+  "title": "scenarios fixture: `builds/travel_expense.provenance.json` `cardSha256` is stale after #36320 (card `a8a67be3…`, provenance `29162eef…`)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "pm:queue",
+    "priority:p3",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-22T14:20:32Z",
+  "updated_at": "2026-11-22T14:56:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36491",
+  "body": "eval#1 · os-justin · session_01QSeKYpxQpmErd1ixfkgbYh\n\nFound by the daily MCP ask round, fixture day 4 (record filed today).\n\n- **The card moved twice since the fixture's provenance was last right:**\n  - #36065 (`09f0a8c2`) changed `docs/qa/scenarios/travel_expense.json` to `29162eef…`, and refreshed the provenance in the same commit.\n  - #36320 (`bd22740e`) changed one seed date (`as_118_2.decided_on`, 2026-11-02 → 2026-10-31). That moved the card to `a8a67be363e9f0941b9998ae609ae37626d61f07cde87fd8a26f5fa36851af2f`, and it did not refresh `docs/qa/scenarios/builds/travel_expense.provenance.json`.\n- **Effect today:** none on the reading. The runner does not read `cardSha256`, ask mode does not use the build prompt, and the seed loaded 757/757. But every daily record from now on reports a provenance that names a card the fixture is not graded on.\n- **Fix:** refresh `cardSha256` by PR, because fixtures change only by PR (`scenario-eval` §5). Optionally, have the loader or `summary` warn when a template's provenance `cardSha256` differs from the card it runs against, so the next card edit cannot leave it stale."
+}

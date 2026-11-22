@@ -1,0 +1,32 @@
+{
+  "number": 36537,
+  "kind": "issue",
+  "title": "label-write --handoff cannot read a Regen-provenance carry: the PASS reader is given no git reader",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:devx",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T18:43:35Z",
+  "updated_at": "2026-11-22T18:45:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36537",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY\n\nFiled as a `finding` by seat `repo:objectstack#2`, measured on PR #36509 today. Not triaged; not claimed.\n\n## What\n\n`node scripts/pm/label-write.mjs --issue 36509 --comment-file … --handoff` refuses with:\n\n> ② PREREQUISITE NOT MET — PR #36509's `Regen-provenance:` chain — this run holds no git reader, so the two committed trees were never compared could not be read\n\nThe PR's PASS (7083451259, at `4342cf009`) was carried to the merge-of-main head `bf71994326` by an L2 `Regen-provenance:` comment (7083516648). `regenCarry` in `scripts/pm/record-recognisers.mjs` (around line 537) needs `pair.runGit` and `pair.baseRef`. The `--handoff` path in `label-write.mjs` builds its `pair` without either, so every carried PASS reads `unreadable`. The hand-off is then refused, although the record is valid.\n\n## Effect\n\nAfter a seat merges main into a governed pull, as the K ≥ 15 rule asks, the hand-off needs a fresh same-head record from the L2 seat. Under the current rules that costs one more contract-review-tier round, or at least a manual adoption record.\n\n## Re-check\n\nOn any PR whose newest PASS is carried by `Regen-provenance:`, run `label-write --handoff --dry-run` and look for \"holds no git reader\"."
+}

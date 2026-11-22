@@ -1,0 +1,32 @@
+{
+  "number": 36506,
+  "kind": "issue",
+  "title": "Hosted tenant kernels: personal-view delete and attachment remove/rename doors answer 404 (same class as #36469)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:cloud",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T15:33:07Z",
+  "updated_at": "2026-11-22T15:35:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36506",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY\n\nFiled as a `finding` by seat `repo:objectstack#2` from the #36469 dev's report (7081359453). Not triaged; not claimed.\n\n## What\n\nThese two producers register doors only on the kernel's own `http.server` through `IHttpServer` verbs. A hosted tenant kernel has no `http.server`, and the runtime `HttpDispatcher` has no domain for their paths. So by reading, on a hosted environment, these requests fall through to the host's unmatched 404 (`ENDPOINT_NOT_FOUND`). This is the same class as #36469 (comment doors) and ruling 6079645593 on #22438.\n\n1. **plugin-auth personal-view delete**: `DELETE /api/v1/personal-views/:id`. Mounted only inside the `registerRoutes` branch on `http.server` (`packages/plugins/plugin-auth/src/auth-plugin.ts` ~1700-1707). A hosted tenant kernel runs `registerRoutes: false`.\n2. **service-storage attachment removal and rename**: `DELETE` and `PATCH /api/v1/attachments/:id`. Mounted only when the kernel has an http server (`storage-service-plugin.ts` ~812). The host door `mountStorageRoutes` calls `composeStorageRoutes` only, never `mountAttachmentRemovalDoor`.\n\n`git grep` over `packages/runtime/src` and `packages/adapters/hono/src` (non-test) on origin/main c9b0a2305 gives 0 hits for `/personal-views` and 0 for `/attachments`.\n\n## Not measured\n\nNeither route was measured on a live hosted rig. The reading above is static.\n\n## Why the #22564 sweep missed them\n\nThe A-2 sweep under ruling 6079645593 classified only `getRawApp()` mount sites. Doors registered through `IHttpServer` verbs were outside its census. #36469 brings the comment doors under ruling A (scope update 7081381198). These two are the remaining known members.\n\n## Suggested shape\n\nRuling 6079645593 A, applied per member: an optional transport-neutral member on the producer's service contract, an exact dispatcher domain with a typed 501 on an absent slot, and the self-hosted mount byte-unchanged. Measure each on a dispatcher-only kernel first."
+}

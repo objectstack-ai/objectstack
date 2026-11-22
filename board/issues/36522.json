@@ -1,0 +1,36 @@
+{
+  "number": 36522,
+  "kind": "pull_request",
+  "title": "fix(fields): a click in the record form date box opens the calendar",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T17:00:40Z",
+  "updated_at": "2026-11-22T17:55:28Z",
+  "closed_at": "2026-11-22T17:55:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T17:55:26Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36522",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9JpRoUZGqtwqMU5k7b4C58D)_\n\nFixes #36457\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 业务用户在记录新建、编辑表单及复用同一控件的对话框里，点日期输入框本身就会弹出日历；以前只有点右侧小图标才弹，点框只出光标。\n- 解决外部试用中用户把日期框当成坏了的体验问题（界面体验专题），替前线业务用户解决。\n- 若出错，最坏是日期框点击后日历不弹或焦点位置不对，手输日期与日历图标仍照旧可用；可直接撤回此改动。\n- 无\n\n## What changes\n\n`TemporalPicker` in `ui/packages/fields/src/widgets/date-picker/DatePickerField.tsx` (both the `date` and the `datetime` face, which share it):\n\n- Outside a grid cell, a click in the text box opens the calendar popover the calendar button opens.\n- The box keeps the focus when the popover opens from it (the popover's open auto-focus and the calendar's own `autoFocus` are skipped), so typing still edits the text; the text is still read on Enter or blur, as before.\n- A click or focus in the box is not treated as a click outside, so it does not close the popover. Enter commits the text and, when it names a date, closes the popover. Escape closes it and the focus stays in the box (Radix would otherwise move it to the calendar button). On close, the focus returns to the box only when nothing else took it.\n- Only a click opens it: focus arriving by Tab opens nothing, so tabbing through a form does not pop a calendar at every date field, and Tab moves on without entering the popover.\n- A11y: the box carries the popover relationship Radix gives the button: `aria-haspopup=\"dialog\"`, `aria-expanded`, and `aria-controls` naming the popover while open. The button keeps its label; its `aria-controls` now names the same popover id.\n- The calendar button is unchanged. The grid's in-cell face (`inCell`, settled by #36023) is not touched: it draws no popover and its box gets none of the above.\n- Placeholder: `parseLocaleDateText` reads digit groups split by any non-digit, so `/`, `-`, `.` and spaces are all accepted. Left as it is, per the dispatch.\n\n## Tests\n\nNew top-level describe in the existing harness `DatePickerField-12622.test.tsx` (10 cases): a click in the box opens the popover, keeps focus in the box and wires `aria-haspopup` / `aria-expanded` / `aria-controls`; typing keeps it open and a typed date still writes, Enter commits and closes; a second click keeps it open; Escape closes and focus stays in the box; a calendar pick after a box click writes and closes; focus without a click opens nothing; a disabled box opens nothing; the button still opens it and moves focus into the calendar; the datetime face opens the same way with its time row; CONTROL: the in-cell face has no popover relationship and a click opens nothing.\n\n<details><summary>Local run (head 53e09525a, under the shared verify lock)</summary>\n\n```\npnpm --dir ui exec vitest run --maxWorkers=2 packages/fields/src/widgets/date-picker/ packages/fields/src/widgets/imeComposition-35996.test.tsx packages/fields/src/widgets/touchTarget.formControls-29072.test.tsx packages/fields/src/__tests__/inCellFaces-35688.test.tsx packages/fields/src/__tests__/inline-widget-aria-invalid-7126.test.tsx packages/fields/src/__tests__/date-picker-invalid-text-blocks-submit-27483.test.tsx packages/plugin-detail/src/__tests__/InlineFieldInput.datetimePicker-12759.test.tsx packages/app-shell/src/views/ScreenView.platformControls-26579.test.tsx\n Test Files  9 passed (9)\n      Tests  141 passed | 4 skipped (145)\nos-verify-lock: VERDICT command-exit 0\n```\n\nThe extra files are every other suite that drives this widget (IME Enter, touch targets, in-cell faces, aria-invalid, invalid-text submit, record-page inline editing, screen view controls).\n</details>\n\nNOT MEASURED: `pnpm --filter @object-ui/fields type-check` locally, reason: it needs the `@object-ui/fields^...` dist closure (about fifty packages) built, under a verify lock that was contended for over an hour; `Type Check UI` in CI measures it.\nNOT MEASURED: ablation of the box click, reason: the first attempt was refused by `scripts/ablation-replace.mjs` before any test ran (the replacement text was not distinct, a no-op the tool caught and restored), and the corrected re-run did not reach the lock before this PR opened. The report on the card carries the reading if it lands.\n\n## Acceptance notes\n\n- On a phone, the box's `inputMode=\"numeric\"` still raises the soft keyboard on tap, now together with the calendar. Not changed here: switching keyboard off would cost keyboard entry, which the dispatch keeps.\n- Other non-grid hosts of this widget get the same behaviour: the record page's inline details editing (`InlineFieldInput`, via `FieldEditWidget`), the kanban required-fields dialog, the filter builder and screen view controls. All are form-like faces, not list cells.\n- Arrow-key entry from the box into the open calendar is not added; the calendar button remains the keyboard route into the calendar.\n\n## Verification\n\nRead first:\n1. `ui/packages/fields/src/widgets/date-picker/DatePickerField.tsx`, the `PopoverContent` handlers (`onOpenAutoFocus`, `onInteractOutside`, `onCloseAutoFocus`): the focus and dismissal logic is where a regression would hide.\n2. The same file, the text box `onClick` and the `opensPopover` argument: confirms the in-cell face is untouched.\n3. The new describe in `DatePickerField-12622.test.tsx`.\n\nTwo-minute check: in the showcase console, open any object's New dialog with a date field and click inside the date box. Expect the calendar to open under the box with the cursor still in the box; type `2026-10-20` and press Enter; expect the value set and the calendar closed.\n\nLocal gates: the 38 commands `node scripts/pm/dispatch-gates.mjs --commands` derived for this diff, plus `pnpm check:changeset-fixed`, all exit 0 except `pnpm check:type-check-debt` (NOT MEASURED: its closure build waits on the same contended lock; CI runs it) and `pnpm --dir ui exec vitest run scripts/` (left to CI's Test UI).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmRY38EZf38Yy3zthbY\n\n<!-- signed: repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY -->\n"
+}

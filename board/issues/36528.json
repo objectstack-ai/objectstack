@@ -1,0 +1,32 @@
+{
+  "number": 36528,
+  "kind": "issue",
+  "title": "Related list entry label (relatedLists[].label) has no translation key: a declared tab title cannot be localised",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:spec",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T17:45:35Z",
+  "updated_at": "2026-11-22T17:48:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36528",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY\n\nFiled as a `finding` by seat `repo:objectstack#2` from PR #36527's Acceptance note 3 (card #35902 thread), read by the seat on `main`. Not triaged; not claimed.\n\n## What\n\n#35902 added an object-level tab list, `relatedLists`, whose entries may carry `{ list, label, columns }`. The entry's `label` wins over the child field's `relatedListTitle`.\n\n`packages/spec/src/system/translation.zod.ts` has a translation key for the field-level title only (`objects.<child>.fields.<field>.relatedListTitle`, line 263 on `main`). It has none for a `relatedLists[]` entry's `label`. A declared tab title therefore shows its authored text in every locale. The field-level title it overrides could be translated.\n\n## Reading\n\nMeasured by schema read only (`grep -n -i relatedList packages/spec/src/system/translation.zod.ts`: only the `relatedListTitle` lines). It is not reproduced in a running app.\n\n## Where the fix likely lands\n\n`domain:spec` (a translation key for the entry label), plus its ui reader that overlays it. Re-check: the grep above gaining a `relatedLists` entry-label key."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 36538,
+  "kind": "issue",
+  "title": "design mode menu save: id-less twins, a 404 stored read, moves into a contributed group, and no version pin",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T18:44:00Z",
+  "updated_at": "2026-11-22T19:53:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36538",
+  "body": "repo:objectstack#7 · zhuangjianguo · session_01QsR2jTeURPvEm465RcoYEC\n\nFollow-up from #36363 (PR #36437, design mode's in-place menu editing). These were found by the delta contract review on head 52791229 and graded below a blocker. Filed by the seat, not claimed. Parent: #36363.\n\n## What happens\n\n1. **Id-less twins (review N7).** Two id-less entries in one group can share a type and target, or both have no target, which the spec allows for separators. If the earlier one is hidden from the editor, removing the shown one removes the hidden one instead. The match is by group and target.\n2. **A 404 on the stored read (N8).** `MetadataClient.layered` answers a 404 as an empty success, so the save sends `{ name, navigation: additions only }` instead of refusing. Nothing served is written. The server should refuse it, because `AppSchema` requires `label`, but that refusal is not measured.\n3. **Moving into a contributed group (N9).** An own entry moved or added into a group that another package contributes lands at the end of the stored top level, while the bar reports a save. 「Move to group」 still lists contributed groups.\n4. **No version pin (N6).** Nothing pins the stored version between the layered read and the draft write, so a publish landing in that window is overwritten.\n\n## To do\n\n1. Match id-less entries by position among equal twins, or mint ids for them on the first design-mode save.\n2. Refuse the save when the stored read answers 404, and say so in the bar.\n3. Leave contributed groups out of 「Move to group」 and the drop targets, or refuse the move with a hint.\n4. Send the read version with the draft write, and refuse on a mismatch.\n5. Pin each case with a control.\n\nBlocked-by: #36437\n\n## Grade\np3 · area:ux · domain:ui.\n"
+}

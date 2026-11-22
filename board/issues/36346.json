@@ -2,8 +2,8 @@
   "number": 36346,
   "kind": "issue",
   "title": "Initials: four more copies outside the people cell still draw punctuation for names like \"Alice (Sales)\" (kanban owner, history timeline, user menu, presence stack)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-22T06:31:13Z",
-  "updated_at": "2026-11-22T14:00:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T15:30:59Z",
+  "closed_at": "2026-11-22T15:30:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,
