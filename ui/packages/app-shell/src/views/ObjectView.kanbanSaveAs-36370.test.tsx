@@ -92,7 +92,7 @@ vi.mock('./studio-design/packages-io', async (importOriginal) => ({
 
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
-import { listDraftScope, readListDraft, resetListDraftStoreForTests } from './listDraftStore';
+import { resetListDraftStoreForTests } from './listDraftStore';
 
 const OBJECT = 'showcase_task';
 const SHIPPED_PACKAGE = 'com.example.showcase';
