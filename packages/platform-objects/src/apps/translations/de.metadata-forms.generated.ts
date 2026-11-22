@@ -1355,11 +1355,11 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       navigation: {
         label: "Navigation",
-        helpText: "Konfiguration der Navigation beim Klick auf ein Element (standardmäßig Seitenleiste, page, new_window oder none)"
+        helpText: "Konfiguration der Navigation beim Klick auf ein Element: die Größe der Seitenleiste und `preventNavigation` für eine Liste, deren Zeilen nichts öffnen (`mode` ist veraltet – der Datensatzname öffnet die Seite, das Hover-Symbol die Seitenleiste)"
       },
       "navigation.mode": {
         label: "Modus",
-        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
+        helpText: "[VERALTET] Bestimmt bei der Liste eines Objekts (einer Listenansicht, den `listViews` eines Objekts) nicht mehr, wie ein Datensatz geöffnet wird: In der Konsole öffnet der Datensatzname für jeden Leser die vollständige Seite und das Hover-Symbol daneben die Seitenleiste. Dort werden `drawer`, `page` und `new_window` weiterhin geparst und ändern nichts, lassen Sie den Schlüssel also weg; `none` bedeutet weiterhin, dass Zeilen nichts öffnen – verwenden Sie besser `preventNavigation: true`. Ein Seitenblock mit `navigation` (ein Listenblock, die Zeitleiste, eine eingebettete Ansicht) berücksichtigt weiterhin jeden Wert."
       },
       "navigation.preventNavigation": {
         label: "Navigation verhindern",

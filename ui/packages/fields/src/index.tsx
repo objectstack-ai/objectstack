@@ -36,6 +36,7 @@ import { deriveHexBadgePalette } from './hexBadgePalette.js';
 import { formatNumberFieldValue, formatCurrency, formatPercentPoints, percentCellScale } from './widgets/number-format.js';
 import { useFieldTranslation } from './widgets/useFieldTranslation.js';
 import { useBooleanValueLabel } from './widgets/booleanValueLabel.js';
+import { loadGridFieldWidget } from './widgets/GridField.js';
 import { RecordHoverCard, type RecordHoverCardObjectDef } from './RecordHoverCard.js';
 
 // Module-level cache so multiple renderers fetching the same lookup ID
@@ -440,7 +441,14 @@ export interface CellRendererProps {
   alwaysShowYear?: boolean;
   /**
    * The cell is one of a grid COLUMN's cells, read against the cells above
-   * and below it (objectstack#25884). Read by the `date` cell only.
+   * and below it (objectstack#25884). Read by the `date` cell and the
+   * `markdown` cell.
+   *
+   * The `markdown` cell then draws its value in the cell face
+   * (objectstack#36344): a heading is a bold line at the cell's own text size
+   * instead of a heading element, so a value that starts with `# Heading`
+   * keeps the row's height. The record page does not pass it and keeps the
+   * heading sizes.
    *
    * A `date` field that declares no `format` then paints `formatDate`'s
    * absolute default face instead of `'relative'`, and the relative phrase
@@ -4824,7 +4832,9 @@ const fieldWidgetMap = {
   // Complex data types
   'object': () => import('./widgets/ObjectField.js').then(m => ({ default: m.ObjectField })),
   'vector': () => import('./widgets/VectorField.js').then(m => ({ default: m.VectorField })),
-  'grid': () => import('./widgets/GridField.js').then(m => ({ default: m.GridField })),
+  // The grid's body, through its public face's one loader so a lazy `GridField`
+  // mounted after this resolved renders without a boundary (objectstack#36102).
+  'grid': () => loadGridFieldWidget().then(m => ({ default: m.GridFieldWidget })),
   
   // Additional field types from @objectstack/spec
   'color': () => import('./widgets/ColorField.js').then(m => ({ default: m.ColorField })),
@@ -5503,7 +5513,10 @@ export * from './widgets/AutoNumberField.js';
 export * from './widgets/UserField.js';
 export * from './widgets/ObjectField.js';
 export * from './widgets/VectorField.js';
-export { evalArith, lookupAutofillPatch, computeRow, GridField, LineItemsField, UNTOUCHED_NEW_ROW, isUntouchedNewRow, columnHelpByField } from './widgets/GridField.js';
+// `GridField` / `LineItemsField` are the grid's lazy face: the body loads on
+// first use, or earlier through `preloadGridField` (objectstack#36102). The
+// pure helpers beside them are eager. See `widgets/GridField.ts`.
+export { evalArith, lookupAutofillPatch, computeRow, GridField, LineItemsField, preloadGridField, UNTOUCHED_NEW_ROW, isUntouchedNewRow, columnHelpByField } from './widgets/GridField.js';
 export type { ColumnCurrencies, ColumnHelp } from './widgets/GridField.js';
 export type { GridColumn } from './widgets/GridField.js';
 export * from './widgets/lookupAutofill.js';

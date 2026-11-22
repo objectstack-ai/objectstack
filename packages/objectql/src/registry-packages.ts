@@ -82,6 +82,7 @@ export interface PackagesHost {
   noteItem: SchemaRegistry['noteItem'];
   noteItemType: SchemaRegistry['noteItemType'];
   readonly objectContributors: SchemaRegistry['objectContributors'];
+  readonly packageBodyExtensions: SchemaRegistry['packageBodyExtensions'];
   readonly packageBodyItems: SchemaRegistry['packageBodyItems'];
   recordBareNameClaims: SchemaRegistry['recordBareNameClaims'];
   recordDefaultRecordPageClaims: SchemaRegistry['recordDefaultRecordPageClaims'];
@@ -560,7 +561,7 @@ export class PackagesFacet {
   }
 
   /** The body of `SchemaRegistry#uninstallPackage`; the method's docblock there is its contract. */
-  static uninstallPackage(this: Pick<PackagesHost, 'announcePackageUninstalled' | 'forgetBareNameClaims' | 'forgetDefaultRecordPageClaims' | 'forgetSecurityCatalogClaims' | 'getPackage' | 'initialDisabledPackageIds' | 'invalidateAll' | 'isPackageDisabled' | 'log' | 'metadata' | 'packageBodyItems' | 'residualNamespaceHolders' | 'setPackageNavContributions' | 'unregisterItemsByPackage' | 'unregisterNamespace' | 'unregisterObjectsByPackage'>, id: string, options?: { keepBootSeed?: boolean }): boolean {
+  static uninstallPackage(this: Pick<PackagesHost, 'announcePackageUninstalled' | 'forgetBareNameClaims' | 'forgetDefaultRecordPageClaims' | 'forgetSecurityCatalogClaims' | 'getPackage' | 'initialDisabledPackageIds' | 'invalidateAll' | 'isPackageDisabled' | 'log' | 'metadata' | 'packageBodyExtensions' | 'packageBodyItems' | 'residualNamespaceHolders' | 'setPackageNavContributions' | 'unregisterItemsByPackage' | 'unregisterNamespace' | 'unregisterObjectsByPackage'>, id: string, options?: { keepBootSeed?: boolean }): boolean {
     const pkg = this.getPackage(id);
     if (!pkg) {
       console.warn(`[Registry] Package not found for uninstall: ${id}`);
@@ -602,6 +603,9 @@ export class PackagesFacet {
     // [#33050] …and the record of what its body shipped: a later install of
     // the id is a first registration, with nothing of its own to withdraw.
     this.packageBodyItems.delete(id);
+    // [#35609] …and of the extension layers it wrote: the object verb above
+    // has withdrawn them.
+    this.packageBodyExtensions.delete(id);
     // [#31720] …and the namespace names a stack's residual holds under this
     // id: the residual's items are registered under their owner id, so
     // `unregisterItemsByPackage(id)` above has just withdrawn them (the
