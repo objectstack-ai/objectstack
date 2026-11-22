@@ -543,6 +543,7 @@ const fr = {
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "Enregistrement…",
     cellSaved: "Enregistré",
+    cellSavedAnnouncement: "Enregistré : {{fields}}",
     openRecordToFinish: "Ouvrir la fiche pour terminer la modification",
   },
   grid: {
@@ -1336,6 +1337,7 @@ const fr = {
     updatedTime: "Modifié le",
     recordNumber: "ID de l’enregistrement",
     clickToEdit: "Cliquez pour modifier",
+    setField: "Définir {{field}}",
     back: "Retour",
     edit: "Modifier",
     editInline: "Modifier",
@@ -2684,6 +2686,14 @@ const fr = {
       systemTheme: "Thème système",
       actions: "Actions",
       openFullSearch: "Ouvrir la page de recherche complète",
+      create: "Créer",
+      createAs: "Créer « {{query}} » comme {{object}}",
+      previewEmpty: "Sélectionnez un enregistrement pour voir ses détails.",
+      enterOpenRecord: "Ouvrir l'enregistrement",
+      enterCreate: "Créer",
+      enterSwitchApp: "Changer d'application",
+      enterApplyTheme: "Appliquer le thème",
+      enterOpen: "Ouvrir",
       searching: "Recherche…",
       records: "Enregistrements",
       recentRecords: "Récemment consultés",
@@ -3514,6 +3524,11 @@ const fr = {
     allReports: "Tous les rapports",
     collapse: 'Réduire la barre latérale',
     expand: 'Développer la barre latérale',
+  },
+  designMode: {
+    title: 'Mode conception',
+    leaveUnsaved: 'Quitter le mode conception ? Les modifications non enregistrées seront perdues.',
+    saveFailed: 'Certaines modifications n’ont pas été enregistrées : {{reason}}',
   },
   topbar: {
     openAssistant: "Ouvrir l'assistant {{name}}",

@@ -468,7 +468,7 @@ import { SCANNED_ROOTS as RUNNER_ENV_SCANNED_ROOTS, findRunnerEnvReads, isProduc
 import { findViolations as findErrorCodeCasingViolations } from '../check-error-code-casing.mjs';
 // The workspace parse the README claim net (#31292) reads its population through, the one the gate itself imports.
 // Dependency-free, and it declares no path population of its own.
-import { WORKSPACE_FILE, parseWorkspaceGlobs, workspacePackageDirs } from '../workspace-enumerator.mjs';
+import { WORKSPACE_FILE, parseWorkspaceGlobs, workspacePackageDirs, workspacePackages } from '../workspace-enumerator.mjs';
 // The hand-written tables — ledgers, marker grammars, the change-kind roster, the tier globs — are
 // DATA, and live beside this file; this engine loads them, matches paths against them and derives.
 // Every table is re-exported under the name it always had, so no consumer moved.
@@ -8713,13 +8713,24 @@ export function trackedPrefixes(files) {
 // absolute literal — is outside the tree by construction. So the classifier has
 // THREE answers, and the third carries the honesty: a site whose base it cannot
 // resolve is UNRESOLVED, never "probably fine". For `mkdtempSync` — the shape
-// every in-tree fixture in this tree is built from — an unresolved site is a
-// FAILURE. A detector that silently skipped what it could not read would be
-// this card's own defect one level up: green over the sites nobody measured.
+// every in-tree fixture in this tree is built from — an unresolved site in a
+// test file or in repo tooling is a FAILURE. A detector that silently skipped
+// what it could not read would be this card's own defect one level up: green
+// over the sites nobody measured.
 //
-// Measured on the tree at the time of writing: 359 `mkdtempSync` sites — 4 in
-// the tree (the four `packages/cli` fixtures the convention names), the rest in
-// the system temp directory, 0 unresolved.
+// The boundary of that rule is the FILE POPULATION: an unresolved site in
+// shipped package source (a non-test file under the own `src/` of a workspace
+// member whose manifest is not `private: true`, `isShippedPackageSource`) is
+// REPORTED and not failed, because its base is chosen at run time by whoever
+// runs the published code (ruling record 7075362923).
+//
+// Measured on 2026-11-22 on the tree of d8599c2c through
+// `scratchDirSitesInSource` and `isShippedPackageSource`: 1823 `mkdtempSync`
+// sites — 1465 in `isTestFilePath` test files (47 in the tree), 344 in every
+// other source outside shipped package source (repo tooling, package scripts,
+// test helpers and tests by directory; 0 in the tree; 0 of them under a private
+// member's `src/`), 14 in shipped package source (all in the system temp
+// directory); 0 unresolved in any population.
 //
 // `mkdirSync` is swept too and deliberately NOT held to completeness: of its
 // sites, ~124 take a base this resolver cannot see (a function parameter, a
@@ -9990,6 +10001,56 @@ export function exposedScratchDirs({ cwd = ROOT, files = null } = {}) {
     });
   }
   return { ...sweep, exposed, covered };
+}
+
+/**
+ * ── Which UNRESOLVED `mkdtempSync` site fails completeness: the FILE ──────────
+ *
+ * In a test file or a repo script the base of a scratch directory is something
+ * this tree chose, so a base the scan cannot read is a gap in the reading and
+ * fails. Shipped package source is the population where that stops holding: a
+ * published command stages beside a directory its USER names at run time (a
+ * cwd-relative argument), and no reading of this tree can say whether that
+ * lands inside a checkout. Failing it forces a spelling that only hides the
+ * base, never a safer directory. So that population is reported and not
+ * failed (ruling record 7075362923, 「扫描只管仓内运行的代码」).
+ *
+ * The boundary is the site's FILE, never its resolution: "in the tree" is
+ * exactly what an unresolved site does not know. ⛔ Nor is it "not a test
+ * file" alone — repo tooling is code this checkout runs, and it stays held.
+ *
+ * Shipped package source = a non-test source under the own `src/` of a
+ * published workspace member. "Non-test" is the runner-env gate's
+ * `isProductSource` (a test by name or by directory, `.d.ts` excluded), the
+ * stricter of the tree's test predicates, so a helper under `src/__tests__/`
+ * stays held. "Published member" is a workspace member whose manifest is not
+ * `private: true`, as the enumerator's `workspacePackages` pairs them: a
+ * private member (an example app, a QA harness, the docs app) is not published
+ * code and has no such user, so its `src/` is code this checkout runs and stays
+ * held, as does a member whose manifest does not parse. Neither half is a list
+ * kept here.
+ *
+ * `members` is `workspacePackages(root)`'s shape: `{ dir, manifest }` pairs.
+ */
+export function isShippedPackageSource(rel, members) {
+  return isRunnerEnvProductSource(rel)
+    && members.some(({ dir, manifest }) => manifest?.private !== true && rel.startsWith(`${dir}/src/`));
+}
+
+/**
+ * The completeness rule's verdict over a sweep's `unresolved` sites: `failing`
+ * is what reds the live case, `reported` the shipped-source remainder it names
+ * and does not fail. A `mkdirSync` site is in neither — that half was never
+ * held to completeness (the header above).
+ */
+export function mkdtempCompleteness(unresolved, { members = workspacePackages(ROOT) } = {}) {
+  const failing = [];
+  const reported = [];
+  for (const site of unresolved) {
+    if (site.call !== 'mkdtempSync') continue;
+    (isShippedPackageSource(site.file, members) ? reported : failing).push(site);
+  }
+  return { failing, reported };
 }
 
 /** An ignore file every clone has, as opposed to one local to whoever ran this. */
@@ -13270,7 +13331,7 @@ export function tierLines(result) {
   if (!mandatory) {
     return [
       `Model tier — no path-derived mandate: the surface hits none of the ${declared} declared glob(s), derived here, not recalled.`,
-      `  The tier stays the PM's per-card judgment call (floor ${TIER_FLOOR} · default ${TIER_DEFAULT} · ceiling ${TIER_CEILING}).`,
+      `  The tier stays below the ceiling: with no mandate the PM picks floor or default per card, and a ceiling build takes a path-derived mandate or the maintainer's explicit order (floor ${TIER_FLOOR} · default ${TIER_DEFAULT} · ceiling ${TIER_CEILING}).`,
       clause2,
       ...suspicion,
     ];

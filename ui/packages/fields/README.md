@@ -142,8 +142,11 @@ they stay in `INLINE_EXCLUDED_FIELD_TYPES` and `hasFieldEditWidget` answers
 `false` for them, so every other host keeps them out, while
 `hasInCellPanelEditWidget(type)` answers `true` and `FieldEditWidget` draws the
 form's rich-text box for them (loaded lazily) when the host asks for the cell
-face. The list grid opens it in a panel under the cell, where Enter is a new
-line.
+face. A select-first list grid (`cellSelection`) opens it in a panel under the
+cell, where Enter is a new line, Ctrl/Cmd+Enter saves, Esc discards and a click
+outside saves; a grid without `cellSelection` opens it over the cell, where
+Ctrl/Cmd+Enter does nothing and a click outside keeps the text as a pending
+change for the grid's save buttons.
 
 ### Resolving declared action params
 

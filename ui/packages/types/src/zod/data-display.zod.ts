@@ -496,6 +496,11 @@ export const DataTableSchema = BaseSchema.extend({
   }).optional().describe('Per-record CEL predicates for the built-in row Delete item (objectui#2614)'),
   onSelectionChange: handlerKeyRefusal('onSelectionChange', 'runtime-slot', 'Selection change handler'),
   onColumnsReorder: handlerKeyRefusal('onColumnsReorder', 'runtime-slot', 'Column reorder handler'),
+  // RUNTIME SLOT (objectstack#35955): `data-table` calls `schema.onColumnHide`
+  // with the column's key when the column menu's "Hide column" is picked; its
+  // supplier is `ObjectGrid` (`@object-ui/plugin-grid`). A function is not
+  // JSON, so authored data is refused by name.
+  onColumnHide: handlerKeyRefusal('onColumnHide', 'runtime-slot', 'Column hide handler'),
   // ⭐ `75fca9669` — seven keys the REGISTERED `data-table` renderer reads off
   // the authored document while this arm declared none of them. `BaseSchema` is
   // `.passthrough()`, so an undeclared key is NOT refused: it stops being judged

@@ -44,8 +44,8 @@ import { RecordEditStateController, bodyTablesSaveTogether, isMasterDetailChild,
 import { isRecordPagePushed, useRecordPageScrollMemory } from './recordPagePush.js';
 import { phoneRecordHeader } from './recordPhoneHeader.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
-import { PrefetchUpcomingRelatedCounts, RecordDrawerUpcomingContext, RecordPageDrawerHost, RecordPaneBarComments, RecordPaneBarToggles, useRecordPane, useRecordPaneBar, useRecordPageReturn } from './recordDrawerStack.js';
-import { COMMENTS_PANEL_WIDTH, RecordCommentsAside, commentsPanelPlacement, useCommentsPanelOpen, useElementWidth, useWindowWidth } from './recordCommentsPanel.js';
+import { PrefetchUpcomingRelatedCounts, RecordDrawerUpcomingContext, RecordPageDrawerHost, RecordPaneBarToggles, useRecordPane, useRecordPaneBar, useRecordPageReturn } from './recordDrawerStack.js';
+import { COMMENTS_PANEL_WIDTH, RecordCommentsAside, commentsPanelPlacement, useCommentsPanelOpen, useWindowWidth } from './recordCommentsPanel.js';
 import {
   RECORD_PAGE_ACTIVITY_ROWS,
   RECORD_PAGE_ATTACHMENT_ROWS,
@@ -1171,6 +1171,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // keeps ⟳ off those surfaces for now. `undefined` is the opt-out
   // `page:header` reads, so nothing renders there.
   const headerRefresh = embedded ? undefined : handleManualRefresh;
+  // objectstack#36309 — the header's re-read (`RecordContext.reread`) is not
+  // the ⟳: the stage menu draws in a drawer too, and its 409 answer must read
+  // the record again there, so every host provides it. Same `'*'` scope as the
+  // ⟳: a 409 is exactly a write this client never saw.
+  const headerReread = handleManualRefresh;
 
   // Record-scoped presence ("who else is viewing this record"). The default
   // PresenceProvider source is a no-op, so this resolves to `[]` until a
@@ -1301,25 +1306,33 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const [pageRootEl, setPageRootEl] = useState<HTMLDivElement | null>(null);
   const pageColumnsEligible = !assignedPage && !namedPageBlocked;
   // ─── The record's comment panel (objectstack#36075) ──────────────────
-  // Offered on the desktop, page and drawer, wherever the page draws the
-  // platform's own 动态 stream: the default page and a slotted one. That is
-  // where the stream gives its comments up to the panel; a page whose author
-  // composed it keeps its discussion where the author put it (a page is what
-  // its author composes), and an object with feeds off has none. The phone's
-  // comment page is its own surface. Open or closed is the reader's, kept per
-  // page and per drawer; beside the record it takes 380 px from the page,
-  // whose tier is judged on what is left.
+  // Offered on the desktop full page, wherever the page draws the platform's
+  // own 动态 stream: the default page and a slotted one. That is where the
+  // stream gives its comments up to the panel; a page whose author composed
+  // it keeps its discussion where the author put it (a page is what its
+  // author composes), and an object with feeds off has none. The phone's
+  // comment page is its own surface. Open or closed is the reader's, kept in
+  // this browser; beside the record it takes 380 px from the page, whose tier
+  // is judged on what is left.
+  //
+  // objectstack#36225 — a record drawn embedded (the side preview, and any
+  // drawer a list or a record page opens) has no comment panel and no
+  // comments icon: the comments are the full page's, one 「Open as full page」
+  // away. Its 动态 stream gives them up all the same, so the preview shows
+  // no comment and no composer anywhere.
   const commentsPhone = usePhoneViewport();
-  const commentsPanelOffered =
-    !!objectDef && objectDef.enable?.feeds !== false && pageColumnsEligible && !commentsPhone && !!pureRecordId;
+  const commentsEligible = !!objectDef && objectDef.enable?.feeds !== false && pageColumnsEligible && !!pureRecordId;
+  const commentsPanelOffered = commentsEligible && !commentsPhone && !embedded;
+  const commentsLeftToFullPage = commentsEligible && !!embedded;
   // objectstack#36076 — the phone's comment page, on the same pages: a page
   // over the record page, addressed by `?comments=` (empty: the threads; a
   // top-level comment's id: that thread). A phone draws no drawer or pane.
-  const commentsPageOffered =
-    !!objectDef && objectDef.enable?.feeds !== false && pageColumnsEligible && commentsPhone && !embedded && !!pureRecordId;
+  const commentsPageOffered = commentsEligible && commentsPhone && !embedded;
   // Either surface holds the record's comments, so the 动态 stream gives
-  // them up and names its system entries alone.
+  // them up and names its system entries alone — as it does in a preview,
+  // whose comments are the full page's.
   const commentsSurfaceOffered = commentsPanelOffered || commentsPageOffered;
+  const streamGivesUpComments = commentsSurfaceOffered || commentsLeftToFullPage;
   const commentsParam = commentsPageOffered ? tabSearchParams.get(RECORD_COMMENTS_PARAM) : null;
   const commentsPageOpen = commentsParam !== null;
   const commentsPageThread = commentsParam ? commentsParam : null;
@@ -1351,15 +1364,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     }
     commentsPageWasOpen.current = commentsPageOpen;
   }, [commentsPageOpen]);
-  const [commentsOpenChosen, setCommentsOpen] = useCommentsPanelOpen(embedded ? 'drawer' : 'page');
+  const [commentsOpenChosen, setCommentsOpen] = useCommentsPanelOpen();
   const commentsOpen = commentsPanelOffered && commentsOpenChosen;
-  const commentsWindowWidth = useWindowWidth();
-  const commentsHostWidth = useElementWidth(embedded ? pageRootEl : null);
-  const commentsPlacement = commentsPanelPlacement({
-    embedded: !!embedded,
-    windowWidth: commentsWindowWidth,
-    hostWidth: commentsHostWidth,
-  });
+  const commentsPlacement = commentsPanelPlacement(useWindowWidth());
   const recordPageTier = useRecordPageTier(pageRootEl, {
     enabled: pageColumnsEligible,
     reservedWidth: commentsOpen && commentsPlacement === 'beside' ? COMMENTS_PANEL_WIDTH : 0,
@@ -3896,10 +3903,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const timelineServed = feedRecordKey ? timelineCountByRecord[feedRecordKey] ?? null : null;
   const heldCommentCount = useMemo(() => feedItems.filter((item) => item.type === 'comment').length, [feedItems]);
   // objectstack#36075, objectstack#36076 — where the comment panel or the
-  // phone's comment page holds the comments, the 动态 stream names its system
+  // phone's comment page holds the comments (and in a preview, whose comments
+  // are the full page's, objectstack#36225), the 动态 stream names its system
   // entries alone.
   const timelineTotal = timelineServed
-    ? Math.max(0, timelineServed.total - timelineServed.comments + (commentsSurfaceOffered ? 0 : heldCommentCount))
+    ? Math.max(0, timelineServed.total - timelineServed.comments + (streamGivesUpComments ? 0 : heldCommentCount))
     : null;
   // The comments icon's number: the record's unresolved threads (#36075 item
   // 8; every thread where the deployment stores no resolution), unknown while
@@ -5933,7 +5941,6 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       {pageBar}
       {/* In a pane, the record's ⊟ goes into the pane's own top bar. */}
       {embedded && paneBar && <RecordPaneBarToggles>{panelToggles}</RecordPaneBarToggles>}
-      {embedded && paneBar && <RecordPaneBarComments>{commentsButton}</RecordPaneBarComments>}
       {/* On a print page the shared chrome joins the print chrome row below,
           so the row's buttons are not drawn under it. On the page it sits
           under the top bar, where it sat before the bar. */}
@@ -5958,6 +5965,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         dataSource={dataSource}
         embedded={embedded}
         refresh={headerRefresh}
+        reread={headerReread}
         headerSystemActions={synthSystemActions}
         objectLabelNote={inSetupApp ? managedByNote ?? undefined : undefined}
       >
@@ -6091,7 +6099,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         {/* objectstack#27055 — the field changes of the timeline stream,
             for the synthesized page's `record:activity`; on an assigned page,
             for its feed blocks (objectstack#33996). */}
-        <RecordCommentsInPanelContext.Provider value={commentsSurfaceOffered}>
+        <RecordCommentsInPanelContext.Provider value={streamGivesUpComments}>
         <RecordFieldChangesContext.Provider value={timelineFieldChanges}>
         {/* objectstack#30074 — whether this record shows its field history
             (objectstack#30344: to this reader, whose audit read answered):
@@ -6239,7 +6247,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   // overlay, not the console's pane) keeps its ⊟ at the end of
                   // the header's action row.
                   <PageHeaderTrailingContext.Provider
-                    value={embedded && !paneBar && (commentsButton || panelToggles) ? <>{commentsButton}{panelToggles}</> : null}
+                    value={embedded && !paneBar && panelToggles ? panelToggles : null}
                   >
                   <RecordPageColumns
                     tier={recordPageTier}
