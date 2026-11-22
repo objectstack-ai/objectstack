@@ -8724,11 +8724,12 @@ export function trackedPrefixes(files) {
 // chosen at run time by whoever runs the published code (ruling record
 // 7075362923).
 //
-// Measured on 2026-11-22 at 3f7fdd00 through `scratchDirSitesInSource` and
-// `isShippedPackageSource`: 1821 `mkdtempSync` sites — 1463 in `isTestFilePath`
-// test files (47 in the tree), 344 in repo tooling and the other non-package
-// sources (0 in the tree), 14 in shipped package source (all in the system
-// temp directory); 0 unresolved in any population.
+// Measured on 2026-11-22 at 80421551 (the same at its base 3f7fdd00) through
+// `scratchDirSitesInSource` and `isShippedPackageSource`: 1821 `mkdtempSync`
+// sites — 1463 in `isTestFilePath` test files (47 in the tree), 344 in repo
+// tooling and the other non-package sources (0 in the tree), 14 in shipped
+// package source (all in the system temp directory); 0 unresolved in any
+// population.
 //
 // `mkdirSync` is swept too and deliberately NOT held to completeness: of its
 // sites, ~124 take a base this resolver cannot see (a function parameter, a
