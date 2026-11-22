@@ -181,7 +181,7 @@ describe('the local raw byte route answers stored bytes by the allow-list rule',
 
 describe('the S3 signed download URL bakes in the same type and disposition', () => {
   const baked = async (contentType: string | undefined, filename: string | undefined) => {
-    const s3 = new S3StorageAdapter({ bucket: 'served-bytes', region: 'us-east-1' });
+    const s3 = new S3StorageAdapter({ bucket: 'served-bytes', region: 'us-east-1', keyPrefix: 'served-bytes' });
     const { downloadUrl } = await s3.getPresignedDownload('k/file', 60, { contentType, filename });
     return JSON.parse(new URL(downloadUrl).searchParams.get('input')!) as Record<string, string>;
   };
