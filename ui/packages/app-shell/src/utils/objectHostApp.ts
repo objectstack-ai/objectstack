@@ -28,6 +28,12 @@
  *     open Setup, so every app they can reach is equally unrelated. The caller
  *     keeps its own app, the one place it knows the user can reach.
  *
+ * Step 3 is for a link to the RECORD. An approval request opened with no
+ * source app passes `{ orSetup: false }` and stops after step 2: when no app
+ * lists the record's object it stays in the app it was opened in, which is the
+ * current, last used or first app (`resolveApprovalsHostSegment`), never Setup
+ * by default (objectstack#35505).
+ *
  * An app lists an object through a `type: 'object'` entry naming it, at any
  * depth of its `navigation` or of any `areas[].navigation`: the entries the
  * sidebar draws for it. The trees are read as authored; the member gates the
@@ -66,12 +72,13 @@ export function appListsObject(app: ObjectHostApp | null | undefined, objectName
 /**
  * The `/apps/<segment>` a record of `objectName` opens under, asked from the
  * app `currentSegment` names; `undefined` when no app can be named (see the
- * module docblock for the order).
+ * module docblock for the order). `orSetup: false` leaves out the Setup step.
  */
 export function objectHostAppSegment(
   apps: readonly ObjectHostApp[] | null | undefined,
   objectName: string | null | undefined,
   currentSegment: string | null | undefined,
+  options: { orSetup?: boolean } = {},
 ): string | undefined {
   if (!objectName) return undefined;
   const active = filterActiveApps(apps);
@@ -79,6 +86,7 @@ export function objectHostAppSegment(
   if (current && currentSegment && appListsObject(current, objectName)) return currentSegment;
   const owner = active.find((app) => appListsObject(app, objectName));
   if (owner) return appAddressSegment(apps, owner);
+  if (options.orSetup === false) return undefined;
   const setup = matchAppBySegment(active, SETUP_APP_PACKAGE_ID) ?? matchAppBySegment(active, SETUP_APP_NAME);
   return setup ? appAddressSegment(apps, setup) : undefined;
 }

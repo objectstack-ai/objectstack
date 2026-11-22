@@ -20,6 +20,7 @@
     "@objectstack/mcp": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/plugin-approvals": "workspace:*",
+    "@objectstack/plugin-audit": "workspace:*",
     "@objectstack/plugin-auth": "workspace:*",
     "@objectstack/plugin-hono-server": "workspace:*",
     "@objectstack/plugin-webhooks": "workspace:*",

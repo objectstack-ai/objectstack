@@ -69,6 +69,7 @@ import {
   navEntriesShownOncePendingReadsShow,
 } from '../hooks/useNavMemberGates.js';
 import { resolveSetupAppPath } from './ConsoleShell.js';
+import { useSetupAliasApprovalsTarget } from './setupAliasApprovals.js';
 import { APP_ROUTE_METADATA_READS, collectRoutePaths, metadataReadsForAppRoute } from './appRouteMetadataReads.js';
 import { enterAppBundle, objectViewRouteObject, prefetchObjectViewRows, readAppObjectScope } from './appObjectScope.js';
 import { preferLocal } from '../utils/preferLocal.js';
@@ -469,13 +470,17 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // so Back never returns to the alias. An effect rather than a `<Navigate>`
   // return, so a layout already on screen is not unmounted for the swap.
   const canonicalPathname = canonicalAppPathname(apps, appName, location.pathname);
+  // objectstack#35505 — the inbox under the `setup` alias names no source app:
+  // it moves to the reader's approvals host below instead of onto Setup's
+  // address (`setupAliasApprovals.ts`).
+  const setupAliasApprovalsTarget = useSetupAliasApprovalsTarget();
   useEffect(() => {
-    if (!canonicalPathname) return;
+    if (!canonicalPathname || setupAliasApprovalsTarget !== undefined) return;
     navigate(`${canonicalPathname}${location.search}${location.hash}`, {
       replace: true,
       state: location.state,
     });
-  }, [canonicalPathname, location.search, location.hash, location.state, navigate]);
+  }, [canonicalPathname, setupAliasApprovalsTarget, location.search, location.hash, location.state, navigate]);
 
   // objectui#12809 — the lazy metadata buckets the CURRENT route reads at
   // render (`appRouteMetadataReads.ts` declares them per route). This used to
@@ -654,11 +659,11 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // probe change nothing.
   //
   // ⛔ Not the rest of the Setup subtree. `/system/*` links forward onto
-  // `/apps/setup/system/*` (`SystemRedirect`, `ConsoleShell.tsx`), the server's
-  // approval links (`/system/approvals?request=`) among them, and that inbox
-  // opens records at `/apps/setup/OBJECT/record/ID` (`ApprovalsInboxPage`'s
-  // `recordHref`). A member reaches both under the Setup segment, so whether
-  // they wait on Setup's verdict is a product decision, left open on
+  // `/apps/setup/system/*` (`SystemRedirect`, `ConsoleShell.tsx`). The server's
+  // approval links (`/system/approvals?request=`) among them move on from there
+  // to the reader's own app (`setupAliasApprovals.ts`, objectstack#35505), but
+  // an older record link may still name `/apps/setup/OBJECT/record/ID`, so
+  // whether those wait on Setup's verdict is a product decision, left open on
   // objectui#12706.
   //
   // objectstack#27507 — two more wait on it: the settings pages
@@ -1245,6 +1250,10 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // objectstack#35981 — and the deployment flags (`featuresSettled`, above):
   // the chrome's navigation gates read them.
   if (!dataSource || metadataLoading || !isWorkspaceAdminResolved || !featuresSettled) return <ConsoleBootShell />;
+  // objectstack#35505 — before any app's chrome mounts (which would record
+  // Setup as the reader's last app), the alias inbox moves to its host.
+  if (setupAliasApprovalsTarget === 'waiting') return <ConsoleBootShell />;
+  if (setupAliasApprovalsTarget) return <Navigate to={setupAliasApprovalsTarget} replace state={location.state} />;
   if (routeReadsSettled) firstRouteDrawn.current = true;
 
   // ADR-0037 — preview mode renders its OWN empty/error states and never
