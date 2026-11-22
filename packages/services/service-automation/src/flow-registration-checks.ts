@@ -794,6 +794,14 @@ export function validateFlowExpressions(
     const objectName = bound?.triggerType === 'time_relative'
         ? bound.binding.object
         : ((startNode?.config ?? {}) as Record<string, unknown>).objectName;
+    const startCfg = (startNode?.config ?? {}) as Record<string, unknown>;
+    const sweep = (startCfg.timeRelative ?? {}) as Record<string, unknown>;
+    const runBindsTypedRow = bound?.triggerType === 'record_change'
+        // The array form routes here only to be refused at bind: it never fires.
+        ? typeof startCfg.triggerType === 'string'
+        : bound?.triggerType === 'time_relative'
+            && typeof sweep.object === 'string'
+            && (typeof startCfg.objectName !== 'string' || startCfg.objectName === sweep.object);
     const schemaHint = typeof objectName === 'string'
         ? (() => {
             const s = this.objectSchemaResolver?.(objectName);
@@ -804,6 +812,11 @@ export function validateFlowExpressions(
                     fieldTypes: s.fieldTypes,
                     // [#36167] A list compared with a scalar is reported (`list-equality`).
                     ...(s.multiValueFields ? { multiValueFields: s.multiValueFields } : {}),
+                    // [#36167] The run binds a row of the typed object (the flows
+                    // `@objectstack/lint` declares `run-fails` on), so a flattened
+                    // list read is proven to be the field: the one signal the
+                    // list-equality verdict reads at a flattened site.
+                    ...(runBindsTypedRow ? { faultOutcome: 'run-fails' as const } : {}),
                     scope: 'flattened' as const,
                 }
                 : undefined;
@@ -825,14 +838,6 @@ export function validateFlowExpressions(
     // every run it starts — and its refusal names the rewrite
     // ({@link SHARED_STEPS_REWRITE}; ruling 7023700548). `objectstack
     // validate` judges the same set.
-    const startCfg = (startNode?.config ?? {}) as Record<string, unknown>;
-    const sweep = (startCfg.timeRelative ?? {}) as Record<string, unknown>;
-    const runBindsTypedRow = bound?.triggerType === 'record_change'
-        // The array form routes here only to be refused at bind: it never fires.
-        ? typeof startCfg.triggerType === 'string'
-        : bound?.triggerType === 'time_relative'
-            && typeof sweep.object === 'string'
-            && (typeof startCfg.objectName !== 'string' || startCfg.objectName === sweep.object);
     const valueEnvelopeFieldTypes = runBindsTypedRow && !flowRebindsRunRowRoots(flow)
         ? schemaHint?.fieldTypes
         : undefined;
