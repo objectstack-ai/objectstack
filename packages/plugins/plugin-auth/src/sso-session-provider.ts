@@ -3,9 +3,9 @@
 /**
  * Which identity provider a session was signed in through.
  *
- * Deleting an SSO provider ends the access it vouched for
- * (`sso-provider-lifecycle.ts`, "Deleting a provider"): the live sessions
- * obtained by signing in through that provider are revoked with it. A session
+ * Deleting an SSO provider ends the sessions a sign-in through it opened, and
+ * removes its projected grants (`sso-provider-lifecycle.ts`, "Deleting a
+ * provider"): the live sessions those sign-ins opened are revoked with it. A session
  * row does not say how it was obtained, so each session an SSO sign-in mints
  * records its provider in `sys_session.sso_provider_id`
  * ({@link SESSION_SSO_PROVIDER_FIELD}), and the delete revokes the live rows

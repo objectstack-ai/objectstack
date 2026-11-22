@@ -25,7 +25,7 @@
  *     refuses the delete `503`: the answer names what was unlinked, and an
  *     unlink cannot be taken back;
  *   - **after** a delete the vendor answered `success`, the after-hook ends
- *     the access the provider vouched for and removes what it left behind
+ *     the sessions its sign-ins opened and removes what it left behind
  *     ({@link removeSsoProviderDependents}): the live sessions signed in
  *     through it are revoked (`sys_session.sso_provider_id`, recorded at
  *     sign-in by `sso-session-provider.ts`; `revoke_reason`
@@ -496,6 +496,45 @@ export interface SsoProviderDependentsRemoved {
  */
 const countOf = (result: unknown, fallback: number): number => (typeof result === 'number' ? result : fallback);
 
+/**
+ * Most rows one read pages in and one write touches. Below the engine's ceiling on
+ * rows a single predicate write may run per-row hooks over (`MAX_BULK_PER_ROW_HOOK_ROWS`,
+ * 10,000; a served deployment binds per-row hooks on every object), which refuses the
+ * whole write above it, and below SQLite's legacy 999-parameter bind limit for the id
+ * set. Any count is ended by paging, never by one write.
+ */
+export const SSO_PROVIDER_WRITE_BATCH = 500;
+
+/**
+ * Read `object` in pages of {@link SSO_PROVIDER_WRITE_BATCH} rows matching `where`,
+ * ordered by id and resumed after the last id read, handing each page to `each`
+ * before reading the next. A row the page's own write removed or revoked does not
+ * stall the walk: the cursor, not the filter, moves it on.
+ */
+async function eachPage(
+  reader: IDataEngine,
+  object: string,
+  where: Record<string, unknown>,
+  fields: string[],
+  each: (page: Record<string, unknown>[]) => Promise<void>,
+): Promise<void> {
+  let after: string | undefined;
+  for (;;) {
+    const page = rowsOf(
+      await reader.find(object, {
+        where: after === undefined ? where : { ...where, id: { $gt: after } },
+        fields,
+        orderBy: [{ field: 'id', order: 'asc' }],
+        limit: SSO_PROVIDER_WRITE_BATCH,
+      } as never),
+    );
+    if (page.length === 0) return;
+    await each(page);
+    if (page.length < SSO_PROVIDER_WRITE_BATCH) return;
+    after = text(page[page.length - 1]!.id);
+  }
+}
+
 /** A session row a request could still authenticate with: not revoked, not past its expiry. */
 function isLiveSession(row: Record<string, unknown>, now: number): boolean {
   if (row.revoked_at) return false;
@@ -555,7 +594,7 @@ async function deleteGrants(engine: IDataEngine, grants: Record<string, unknown>
 }
 
 /**
- * End what a deleted provider vouched for and remove what it leaves behind:
+ * End the sessions a deleted provider's sign-ins opened and remove what it leaves behind:
  * first the live sessions signed in through it are revoked, then its group
  * mapping rows and the grants whose `reason` is exactly its projection marker
  * are deleted. Throws on the first failed write.
@@ -569,17 +608,15 @@ export async function removeSsoProviderDependents(
   const writer: IDataEngine = withSystemContext(engine);
   let revokedSessions = 0;
   if (registered(engine, SESSION_OBJECT)) {
-    const sessions = rowsOf(
-      await reader.find(SESSION_OBJECT, { where: { [SESSION_SSO_PROVIDER_FIELD]: providerId }, fields: SESSION_ROW_FIELDS } as never),
-    );
-    revokedSessions = await revokeSessions(engine, sessions, now);
+    await eachPage(reader, SESSION_OBJECT, { [SESSION_SSO_PROVIDER_FIELD]: providerId, revoked_at: null }, SESSION_ROW_FIELDS, async (page) => {
+      revokedSessions += await revokeSessions(engine, page, now);
+    });
   }
   let removedGrants = 0;
   if (registered(engine, GRANT_OBJECT)) {
-    const grants = rowsOf(
-      await reader.find(GRANT_OBJECT, { where: { reason: ssoGroupProjectionReason(providerId) }, fields: ['id', 'organization_id'] } as never),
-    );
-    removedGrants = await deleteGrants(engine, grants);
+    await eachPage(reader, GRANT_OBJECT, { reason: ssoGroupProjectionReason(providerId) }, ['id', 'organization_id'], async (page) => {
+      removedGrants += await deleteGrants(engine, page);
+    });
   }
   let removedGroupMappings = 0;
   if (registered(engine, IDP_GROUP_MAPPING_OBJECT)) {
@@ -712,14 +749,16 @@ async function storedProviderIds(reader: IDataEngine): Promise<Set<string>> {
  * grants whose `reason` is its projection marker, and the live sessions
  * signed in through it. Run once per boot ({@link reportSsoProviderAccessSweep}).
  *
- * A boot sweep and not a one-shot backfill: a provider row can still go while
- * its dependents stay after this release too (a delete whose cleanup failed
- * once the vendor had deleted the provider, a row removed beneath the
- * engine), and a sweep run once would leave those for good.
+ * A boot sweep and not a one-shot backfill: a provider row can go while its
+ * dependents stay (a delete whose cleanup failed once the vendor had deleted
+ * the provider, a row removed beneath the engine), and a sweep run once would
+ * leave those for good.
  *
- * The provider rows are read before the candidates and again after them; a
- * candidate is removed only when neither read holds its provider, so a
- * provider registered while the sweep runs keeps what its sign-ins write.
+ * Candidates are read and written in pages ({@link SSO_PROVIDER_WRITE_BATCH}),
+ * so any count is settled. The provider rows are read before the candidates
+ * and again for each page; a candidate is removed only when neither read holds
+ * its provider, so a provider registered while the sweep runs keeps what its
+ * sign-ins write.
  * Answers `undefined`, removing nothing, when the provider object is not
  * registered: with nothing to read, no provider can be judged gone. Throws on
  * a failed read or write.
@@ -731,35 +770,32 @@ export async function sweepDeletedSsoProviderAccess(
   if (!registered(engine, SSO_PROVIDER_OBJECT)) return undefined;
   const reader: IDataEngine = withSystemContext(engine);
   const before = await storedProviderIds(reader);
+  // Re-read once per page: a provider registered while the sweep runs keeps its own.
+  const goneNow = async () => {
+    const after = await storedProviderIds(reader);
+    return (providerId: string | undefined) => !!providerId && !before.has(providerId) && !after.has(providerId);
+  };
 
-  let grants: Record<string, unknown>[] = [];
+  let removedGrants = 0;
   if (registered(engine, GRANT_OBJECT)) {
     const markers = [...before].map(ssoGroupProjectionReason);
-    grants = rowsOf(
-      await reader.find(GRANT_OBJECT, {
-        where: { reason: { $startsWith: SSO_GRANT_REASON_HEAD, ...(markers.length > 0 ? { $nin: markers } : {}) } },
-        fields: ['id', 'organization_id', 'reason'],
-      } as never),
-    );
+    const where = { reason: { $startsWith: SSO_GRANT_REASON_HEAD, ...(markers.length > 0 ? { $nin: markers } : {}) } };
+    await eachPage(reader, GRANT_OBJECT, where, ['id', 'organization_id', 'reason'], async (page) => {
+      const gone = await goneNow();
+      removedGrants += await deleteGrants(engine, page.filter((row) => gone(markerProvider(row.reason))));
+    });
   }
-  let sessions: Record<string, unknown>[] = [];
+  let revokedSessions = 0;
   if (registered(engine, SESSION_OBJECT)) {
-    sessions = rowsOf(
-      await reader.find(SESSION_OBJECT, {
-        where: {
-          [SESSION_SSO_PROVIDER_FIELD]: { $null: false, ...(before.size > 0 ? { $nin: [...before] } : {}) },
-          revoked_at: { $null: true },
-        },
-        fields: SESSION_ROW_FIELDS,
-      } as never),
-    );
+    const where = {
+      [SESSION_SSO_PROVIDER_FIELD]: { $null: false, ...(before.size > 0 ? { $nin: [...before] } : {}) },
+      revoked_at: { $null: true },
+    };
+    await eachPage(reader, SESSION_OBJECT, where, SESSION_ROW_FIELDS, async (page) => {
+      const gone = await goneNow();
+      revokedSessions += await revokeSessions(engine, page.filter((row) => gone(text(row[SESSION_SSO_PROVIDER_FIELD]))), now);
+    });
   }
-  if (grants.length === 0 && sessions.length === 0) return { removedGrants: 0, revokedSessions: 0 };
-
-  const after = await storedProviderIds(reader);
-  const gone = (providerId: string | undefined) => !!providerId && !before.has(providerId) && !after.has(providerId);
-  const revokedSessions = await revokeSessions(engine, sessions.filter((row) => gone(text(row[SESSION_SSO_PROVIDER_FIELD]))), now);
-  const removedGrants = await deleteGrants(engine, grants.filter((row) => gone(markerProvider(row.reason))));
   return { removedGrants, revokedSessions };
 }
 

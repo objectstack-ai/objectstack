@@ -1327,7 +1327,7 @@ export class AuthPlugin implements Plugin {
       await reportSsoProvidersWithNonBareDomainEntries(ql, ctx.logger);
     });
 
-    // Deleting an SSO provider ends the access it vouched for: what a provider
+    // Deleting an SSO provider ends the sessions its sign-ins opened and its projected grants: what a provider
     // that no longer exists left behind (the grants its sign-ins projected,
     // the live sessions signed in through it) is removed once per boot
     // (`sso-provider-lifecycle.ts` `sweepDeletedSsoProviderAccess`). Registered

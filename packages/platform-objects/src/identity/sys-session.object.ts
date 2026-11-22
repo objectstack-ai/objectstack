@@ -252,8 +252,8 @@ export const SysSession = ObjectSchema.create({
       // session read through a door (`enforceSessionControls`,
       // `plugin-auth/auth-manager-password-session-policy.ts`).
       // `sso_provider_deleted`: the SSO provider the session was signed in
-      // through (`sso_provider_id`) was deleted, which ends the access it
-      // vouched for (`plugin-auth/sso-provider-lifecycle.ts`).
+      // through (`sso_provider_id`) was deleted, which ends the sessions a
+      // sign-in through it opened (`plugin-auth/sso-provider-lifecycle.ts`).
       description:
         'Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, ip_not_allowed, user_revoked, '
         + 'admin, organization_membership_ended, admin_password_reset, password_reset, sso_provider_deleted, …).',

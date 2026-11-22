@@ -1514,7 +1514,7 @@ describe('sign out of the company sign-in too: SAML single logout', () => {
   });
 });
 
-// ── Deleting an identity provider ends the access it vouched for ────────────
+// ── Deleting an identity provider ends the sessions a sign-in through it opened ──
 // `sso-provider-lifecycle.ts` ("Deleting a provider"): a real sign-in through
 // each provider, a real delete through the vendor's own door, then each first
 // session cookie presented again.
