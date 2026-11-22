@@ -996,10 +996,14 @@ the host's data source (`dataSource.update`) with no callback to wire.
   (formula, autonumber, file, …), never open an editor
   (`isFieldInlineEditable` in `src/inline-edit-options.ts`). There is no
   `editable` key on `ListColumn`.
-- **Rich text edits in a panel**: a `markdown`, `html` or `richtext` cell opens
-  the record form's text box in a panel under the cell (Enter is a new line,
-  Ctrl/Cmd+Enter saves, Escape discards, a click outside saves); the cell keeps
-  showing its value and the row its height.
+- **Rich text edits in a panel**: on a select-first grid (`cellSelection`), a
+  `markdown`, `html` or `richtext` cell opens the record form's text box in a
+  panel under the cell (Enter is a new line, Ctrl/Cmd+Enter saves, Escape
+  discards, a click outside saves); the cell keeps showing its value and the row
+  its height. A grid without `cellSelection` opens the text box over the cell on
+  one click, where Enter is a new line, Ctrl/Cmd+Enter does nothing, Escape
+  discards and a click outside keeps the text as a pending change for the save
+  buttons.
 - **Visual feedback**: editable cells show a hover state
 - **Automatic focus**: the input is focused and selected when editing begins
 
