@@ -2499,8 +2499,8 @@ export const PER_CHUNK_GZIP_CEILINGS = Object.freeze({
   // turbo run build --filter=@object-ui/console...`, reading
   // `apps/console/dist/eager-closure.json`, twice on one tree: `main` at
   // `b3bcfefc` alone, then the same `main` with this change (`3c422050`, a
-  // branch commit on that base; the branch's later commits change no emitted
-  // byte of the eager closure). Gzipped bytes:
+  // branch commit on that base; re-read on the branch's final head, this
+  // chunk is still 346,403 and the aggregate is within 3 bytes). Gzipped bytes:
   //
   //   | chunk                 | `b3bcfefc` | `3c422050` |  delta |
   //   |-----------------------|-----------:|-----------:|-------:|
