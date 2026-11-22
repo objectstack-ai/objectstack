@@ -195,7 +195,7 @@ async function bootDoorStack(): Promise<DoorStack> {
   );
   await engine.syncSchemas();
   for (const [userId, name] of [[ALICE, 'Alice Uploader'], [BOB, 'Bob Editor'], [CAROL, 'Carol Outsider'], [DAVE, 'Dave Reader']]) {
-    await engine.getDriverForObject('sys_user')!.create('sys_user', { id: userId, name, email: `${userId}@door.test` });
+    await engine.getDriverForObject('sys_user')!.create('sys_user', { id: userId, name, email: `${userId}@door.test`, organization_id: ORG });
   }
 
   // Record visibility, as the fixture stands it in: the outsider reads no case.
@@ -386,6 +386,19 @@ describe('the rename door renames an attachment by the delete rule: its uploader
     expect(answer.body).toEqual({ success: true, data: { id, file_name: 'Q3 report.txt' } });
     expect(await attachmentRow(id)).toMatchObject({ id, file_name: 'Q3 report.txt', uploaded_by: ALICE });
     expect((await fileRow('f_alice_rename'))?.name, 'the stored file keeps its own name').toBe('f_alice_rename.txt');
+  });
+
+  it('the uploader renames their own attachment on a record they read but cannot edit: the uploader limb needs no edit', async () => {
+    // A row DAVE uploaded, as one attached while he could still edit the case.
+    await seedFile('f_dave_own', DAVE);
+    const id = String((await stack.engine.insert('sys_attachment', {
+      parent_object: CASE, parent_id: stack.caseId, file_id: 'f_dave_own', file_name: 'f_dave_own.txt',
+      uploaded_by: DAVE, organization_id: ORG,
+    }, { context: SYS })).id);
+
+    const answer = await rename(id, DAVE, { file_name: 'daves notes.txt' });
+    expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+    expect(await attachmentRow(id)).toMatchObject({ id, file_name: 'daves notes.txt', uploaded_by: DAVE });
   });
 
   it('a member who can edit the record renames another member\'s attachment, through the update gate', async () => {
