@@ -345,37 +345,34 @@ InvoiceLine = {
 ### Detail-page related lists (the read-side mirror)
 
 You usually don't declare the **related list** on the parent's record detail page: every child relationship
-is shown **by default** — a `master_detail` child as a body table, a `lookup`
-child as a panel. `inlineEdit` plays no part: it governs entry in the parent's
-form only. The relationship flags *refine* that:
+is shown **by default** as a tab with its count, a `master_detail` child too. The
+relationship flags *refine* that:
 
 ```typescript
 project: {
   type: 'master_detail',
-  reference: 'project',             // no relatedList: a body table
+  reference: 'project',
   relatedListTitle: 'Tasks',
   relatedListColumns: ['title', 'status', 'priority', 'due_date'],
 },
-
-// Suppress a noisy association from the detail page entirely:
 audit_ref: { type: 'master_detail', reference: 'invoice', relatedList: false },
 ```
 
-`relatedList` is tri-state — placement:
-
-- `'primary'` — a full-width table in the record's detail body. Default for a `master_detail` FK.
-- `false` — the child object is not shown on the parent record page.
-- `true` — an auxiliary panel on the record page. Default for a `lookup` FK.
-- Order is the parent's: `relatedLists: ['task', 'event.related_to']` (child, or
-  `object.field`) lists those first. A child in the stack with no inbound FK is
-  refused everywhere; one that exists nowhere is refused by `os validate` /
+- `relatedList: false` — the child object is not shown on the parent record page.
+- `'primary'` — a full-width table in the record's details; so is a `master_detail`
+  child that a parent field group names (`relatedList: 'quote_line'`), written only when asked.
+- The parent's `relatedLists` is the tab list (objectstack-ui Record Page): absent,
+  nothing changes; declared, only the named lists show, in order, built-ins by name
+  (`sys_attachment`, `sys_approval_request`, `sys_activity`). An entry is the child,
+  `object.field` or `{ list, label, columns }`. A child in the stack with no inbound FK
+  is refused everywhere; one that exists nowhere is refused by `os validate` /
   `os build` (which leave a `sys_` / `cloud_` / `ai_` or sibling-artifact name
   to the runtime) and by a metadata write naming no package — a write into a
   package stores it, and the page places nothing.
 
-`relatedListTitle` / `relatedListColumns` override the derived title / columns;
-otherwise columns auto-derive from the child object's
-`highlightFields`. Audit FKs
+`relatedListTitle` / `relatedListColumns` override the derived title / columns
+(an entry's `label` / `columns` win over both); otherwise columns auto-derive from
+the child object's `highlightFields`. Audit FKs
 (`created_by`/`updated_by`/`owner_id`) never become related lists. A child that
 references the parent through several FKs (e.g. `primary_account` +
 `partner_account`) yields **one related list per FK**; a self-referential FK
