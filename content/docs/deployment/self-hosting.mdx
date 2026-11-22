@@ -625,14 +625,27 @@ serve a database `os dev` wrote, set each seeded account's password on the
 server with [`os user set-password`](/docs/deployment/cli#os-user-set-password)
 first; the refusal names that command.
 
-What this release refuses is the seed password and every new session for a
-seeded account still on it. Sessions and API keys a seeded account was issued
-before the server left development mode are ended by `os user set-password`
-(with any sign-in account linked to it and any app authorized to it; the
-OAuth applications it registered are disabled and the SCIM credentials it
-minted are revoked), so
-run it on each seeded account before serving the database; ending them at boot
-is follow-up #35184.
+Nothing the development seed issued keeps acting once the deployment leaves
+development mode. At every boot outside development mode, before the server
+serves a request, it retires what each seeded account still on its seed
+password was issued: its sessions, its API keys, the apps authorized to it and
+its device sign-ins, its outstanding password-reset links, any sign-in account
+linked to it, the OAuth applications it registered (disabled) and the SCIM
+credentials it minted (revoked). A retired session or key answers exactly as a
+revoked one does, and the log names each account and what was retired. When
+the host supplies a `secondaryStorage` that holds the sessions, the server ends
+them there too, which `os user set-password` cannot reach. An
+account whose password was set since the seed (by `os user set-password`, by
+an administrator, or by its own reset) holds a credential the seed did not
+issue and is untouched, as is every account the seed did not create. A boot in
+development mode retires nothing. There is no switch.
+
+If the retirement cannot complete (the database refuses a read or a write),
+the server does not start, and the error names the accounts; fix the database
+access, or run `os user set-password` on each of them, and start it again.
+`os user set-password` itself ends the same credentials when it sets the
+password, so running it on each seeded account before serving the database
+leaves nothing for the boot to retire.
 
 ### A seeded directory opens no bootstrap window
 
