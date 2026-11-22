@@ -63,6 +63,7 @@ import { MetadataCtx } from '@object-ui/react';
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { toast } from 'sonner';
 import { RecordDetailView } from './RecordDetailView';
+import { COMMENTS_PANEL_OPEN_KEY } from './recordCommentsPanel';
 import { __clearRecordEditableCache } from '../../../plugin-detail/src/useRecordEditable';
 
 const OBJECT_NAME = 'crm_case';
@@ -351,6 +352,8 @@ describe('the side preview has no comments (objectstack#36225)', () => {
   });
 
   it('a hand-written page’s object: the preview draws the standard page, with no icon (objectstack#36150)', async () => {
+    // The reader left the full page's panel open.
+    window.localStorage.setItem(COMMENTS_PANEL_OPEN_KEY, 'open');
     const { container } = await mount({ pages: [AUTHORED_PAGE], embedded: true });
     // The standard page is laid out (its tab row is drawn) before anything is asked of it.
     await within(container).findByRole('tab', { name: /^Activity/ });
