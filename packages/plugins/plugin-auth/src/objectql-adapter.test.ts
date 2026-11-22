@@ -915,6 +915,7 @@ describe('a guarded increment is one atomic conditional write, even across proce
   type Where = { field: string; value: unknown; operator?: string; connector?: string };
   type Adapter = {
     create(a: { model: string; data: Record<string, unknown> }): Promise<Record<string, unknown>>;
+    findOne(a: { model: string; where: Where[] }): Promise<Record<string, unknown> | null>;
     incrementOne(a: {
       model: string; where: Where[]; increment: Record<string, number>; set?: Record<string, unknown>;
     }): Promise<Record<string, unknown> | null>;
@@ -1069,16 +1070,24 @@ describe('a guarded increment is one atomic conditional write, even across proce
     expect(await incrementUnguarded(adapter, 'no-such-row'), 'a row that does not exist').toBeNull();
   });
 
-  it('the row a guarded increment answers keeps the internal columns every other read re-attaches', async () => {
+  it('the row a guarded increment answers carries the fields a read of that row carries, internal columns included', async () => {
     const { adapter } = await oneReplica();
     const row = await twoFactorRow(adapter);
+    const team = await teamRow(adapter);
+    const fieldsOf = (r: Record<string, unknown> | null) => Object.keys(r ?? {}).sort();
+    const read = (model: string, id: unknown) => adapter.findOne({ model, where: [eq('id', id)] });
 
-    expect(await incrementUnguarded(adapter, row.id)).toMatchObject({
-      id: row.id, secret: 'totp-secret', backupCodes: 'codes-v1', failedVerificationCount: 1,
-    });
-    expect(await swapGuardedValue(adapter, row.id, 'codes-v1', 'codes-v2')).toMatchObject({
-      id: row.id, secret: 'totp-secret', backupCodes: 'codes-v2',
-    });
+    const counted = await incrementUnguarded(adapter, row.id);
+    expect(counted).toMatchObject({ id: row.id, secret: 'totp-secret', backupCodes: 'codes-v1', failedVerificationCount: 1 });
+    expect(fieldsOf(counted)).toEqual(fieldsOf(await read('twoFactor', row.id)));
+
+    const swapped = await swapGuardedValue(adapter, row.id, 'codes-v1', 'codes-v2');
+    expect(swapped).toMatchObject({ id: row.id, secret: 'totp-secret', backupCodes: 'codes-v2' });
+    expect(fieldsOf(swapped)).toEqual(fieldsOf(await read('twoFactor', row.id)));
+
+    const reserved = await incrementBelowBound(adapter, team.id, 5);
+    expect(reserved).toMatchObject({ id: team.id, memberCount: 1 });
+    expect(fieldsOf(reserved)).toEqual(fieldsOf(await read('team', team.id)));
   });
 
   it('a counter stored as null counts from zero', async () => {
