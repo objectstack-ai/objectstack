@@ -40,13 +40,18 @@ describe('registerFlow — a list compared with a scalar is reported (advisory)'
     }
 
     /** A record-triggered flow by default; `entrance` swaps in a flow no record write fires. */
-    function makeFlow(condition: string, entrance: { type: string; triggerType?: string } = { type: 'record_change', triggerType: 'record-after-update' }) {
+    type Entrance = { type: string; triggerType?: string; secretRef?: string };
+    function makeFlow(condition: string, entrance: Entrance = { type: 'record_change', triggerType: 'record-after-update' }) {
         return {
             name: 'ticket_flow', label: 'Ticket Flow', type: entrance.type,
             nodes: [
                 {
                     id: 'start', type: 'start', label: 'Start',
-                    config: { objectName: 'ticket', ...(entrance.triggerType ? { triggerType: entrance.triggerType } : {}) },
+                    config: {
+                        objectName: 'ticket',
+                        ...(entrance.triggerType ? { triggerType: entrance.triggerType } : {}),
+                        ...(entrance.secretRef ? { secretRef: entrance.secretRef } : {}),
+                    },
                 },
                 { id: 'check', type: 'decision', label: 'Check', config: { condition } },
                 { id: 'end', type: 'end', label: 'End' },
@@ -58,7 +63,7 @@ describe('registerFlow — a list compared with a scalar is reported (advisory)'
         };
     }
 
-    function warningsFor(condition: string, entrance?: { type: string; triggerType?: string }): string[] {
+    function warningsFor(condition: string, entrance?: Entrance): string[] {
         const warns: string[] = [];
         const engine = new AutomationEngine(loggerCapturing(warns));
         engine.setObjectSchemaResolver((name) => (name === 'ticket' ? parseObjectFieldSchema(TICKET_FIELDS) : undefined));
@@ -96,7 +101,8 @@ describe('registerFlow — a list compared with a scalar is reported (advisory)'
     // A flow no record write fires runs on what its entrance handed it: the
     // names are not proven to be the ticket's fields, so no verdict.
     it.each([
-        ['an API flow', { type: 'api', triggerType: 'api' }],
+        // An inbound api flow registers only with a hook secret (ADR-0041).
+        ['an API flow', { type: 'api', triggerType: 'api', secretRef: 'TICKET_HOOK_SECRET' }],
         ['a scheduled flow', { type: 'schedule', triggerType: 'schedule' }],
         ['a trigger-less autolaunched flow', { type: 'autolaunched' }],
     ])('CONTROL — %s: neither the bare nor the record. read is reported', (_label, entrance) => {

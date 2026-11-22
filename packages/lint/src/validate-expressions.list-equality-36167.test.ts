@@ -205,7 +205,7 @@ describe('publish lint — list-equality at a sharing rule condition', () => {
     specValid({
       objects: [ticket],
       sharingRules: [
-        { name: 'sr', object: 'ticket_probe', condition, sharedWith: { type: 'role', value: 'r' }, accessLevel: 'read' },
+        { name: 'sr', type: 'criteria', object: 'ticket_probe', condition, sharedWith: { type: 'team', value: 't' }, accessLevel: 'read' },
       ],
     });
   /** The expression lint's findings and the enforceability pass's (which lowers the condition) together. */
