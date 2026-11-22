@@ -654,45 +654,6 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
           );
         })}
 
-        {/* objectstack#36286 — create a record: "Create 'words' as OBJECT"
-            below the results, then the "New OBJECT" entries the query finds. */}
-        {(createAsRows.length > 0 || newRecordRows.length > 0) && (
-          <CommandGroup heading={t('console.commandPalette.create', { defaultValue: 'Create' })}>
-            {createAsRows.map(({ target, objectText }) => (
-              <CommandItem
-                key={`create-as:${target.objectName}`}
-                value={`create as ${target.objectName}`}
-                onSelect={() =>
-                  leaveTo(paletteCreateHref(baseUrl, target.objectName, { field: target.prefillField!, value: query }))
-                }
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                <span className="truncate">
-                  {t('console.commandPalette.createAs', {
-                    query,
-                    object: objectText,
-                    defaultValue: 'Create "{{query}}" as {{object}}',
-                  })}
-                </span>
-              </CommandItem>
-            ))}
-            {newRecordRows.map(({ target, label }) => (
-              <CommandItem
-                key={`create-new:${target.objectName}`}
-                value={`create new ${target.objectName}`}
-                onSelect={() => leaveTo(paletteCreateHref(baseUrl, target.objectName))}
-              >
-                <ObjectIconTile
-                  glyph={getIcon(typeof target.def.icon === 'string' ? target.def.icon : undefined)}
-                  color={typeof target.def.color === 'string' ? target.def.color : undefined}
-                  className="mr-2"
-                />
-                <span className="truncate">{label}</span>
-              </CommandItem>
-            ))}
-          </CommandGroup>
-        )}
-
         {/* Object Navigation */}
         {objectItems.length > 0 && (
           <CommandGroup heading={t('console.commandPalette.objects')}>
@@ -851,6 +812,49 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
                 <CommandItem key={value} value={value} onSelect={() => runCommand(() => setTheme(theme))}>
                   <Icon className="mr-2 h-4 w-4" />
                   <span>{themeLabel[theme]}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </>
+        )}
+
+        {/* objectstack#36286 — create a record, below every result: the
+            "New OBJECT" entries the query finds, then "Create 'words' as
+            OBJECT". Last, so Enter on a query that finds something opens it. */}
+        {(newRecordRows.length > 0 || createAsRows.length > 0) && (
+          <>
+            <CommandSeparator />
+            <CommandGroup heading={t('console.commandPalette.create', { defaultValue: 'Create' })}>
+              {newRecordRows.map(({ target, label }) => (
+                <CommandItem
+                  key={`create-new:${target.objectName}`}
+                  value={`create new ${target.objectName}`}
+                  onSelect={() => leaveTo(paletteCreateHref(baseUrl, target.objectName))}
+                >
+                  <ObjectIconTile
+                    glyph={getIcon(typeof target.def.icon === 'string' ? target.def.icon : undefined)}
+                    color={typeof target.def.color === 'string' ? target.def.color : undefined}
+                    className="mr-2"
+                  />
+                  <span className="truncate">{label}</span>
+                </CommandItem>
+              ))}
+              {createAsRows.map(({ target, objectText }) => (
+                <CommandItem
+                  key={`create-as:${target.objectName}`}
+                  value={`create as ${target.objectName}`}
+                  onSelect={() =>
+                    leaveTo(paletteCreateHref(baseUrl, target.objectName, { field: target.prefillField!, value: query }))
+                  }
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  <span className="truncate">
+                    {t('console.commandPalette.createAs', {
+                      query,
+                      object: objectText,
+                      defaultValue: 'Create "{{query}}" as {{object}}',
+                    })}
+                  </span>
                 </CommandItem>
               ))}
             </CommandGroup>
