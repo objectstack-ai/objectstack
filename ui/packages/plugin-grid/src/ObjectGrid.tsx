@@ -1883,7 +1883,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // objectstack#35554 — a host that loads its rows window by window
   // (`onLoadMore`) is asked for the next window as the table's scroll box
   // nears its end, and the box's position is kept across a return to the list
-  // (`./objectGridInfiniteLoad`).
+  // (`./objectGridInfiniteLoad`). On a phone the box is the record cards'
+  // scroller (objectstack#36407).
   useInfiniteRowLoad({
     root: gridRoot,
     enabled: !!onLoadMore,
@@ -4376,7 +4377,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // the match set, so without it a card list never reached past its first
     // page. It turns the same page the table's pager turns, with the table's
     // words, at a touch size, and returns the reader to the top of the list.
-    const cardPageCount = manualPaginationOn && typeof resolvedTotalMatching === 'number' && manualPageSize > 0
+    // objectstack#36407 — a host that loads as the list scrolls
+    // (`onLoadMore`) pages nothing, so the cards draw no pager, as the table
+    // draws none: the next window comes as the card scroller nears its end.
+    const cardPageCount = manualPaginationOn && !onLoadMore && typeof resolvedTotalMatching === 'number' && manualPageSize > 0
       ? Math.ceil(resolvedTotalMatching / manualPageSize)
       : 1;
     const cardPage = Math.min(Math.max(1, manualPage ?? 1), cardPageCount);
