@@ -39,6 +39,7 @@
  * stays on the class, the contract, and its function keeps the placeholder.
  */
 
+import { markRunCaller, runCallerOf } from '@objectstack/core';
 import type { HookContext } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 
@@ -110,6 +111,12 @@ export function buildSession(execCtx?: ExecutionContext): HookContext['session']
   // presence test for the reason `locale` is: what sort of caller is not who.
   const principalKind = execCtx.principalKind;
   if (principalKind !== undefined) session!.principalKind = principalKind;
+  // [ADR-0095 D1] A write of a decided flow segment whose run began for no
+  // caller: its `userId` is the decider, the segment's attribution user, and
+  // the run-caller mark (`@objectstack/core`) says the run has no caller. The
+  // mark rides the session so a run this write starts (the record-change
+  // trigger) begins for no caller too; nothing else reads it here.
+  if (runCallerOf(execCtx) === null) return markRunCaller(session as object, null) as HookContext['session'];
   return session;
 }
 

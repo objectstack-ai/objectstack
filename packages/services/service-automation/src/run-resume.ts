@@ -244,6 +244,42 @@ export async function seedRunGrants(
         if (runContext.runAs !== 'system') delete (runContext as SeededRunContext).principalKind;
         delete (runContext as SeededRunContext).permissionSetAddresses;
     }
+    // [ADR-0095 D1 · ADR-0093 D8.1, as amended] A `runAs:'system'` run that
+    // names a user reads no grants — elevation lifts them — but the
+    // organization wall it meets is that user's (plugin-security's app
+    // automation wall), and the engine projects that wall from the run's own
+    // facts. So the trigger user's membership set and posture rung are seeded
+    // once here, as for a user-mode run, and every data operation of the run
+    // is judged on them with no resolution of its own: under `group` its reads
+    // span the union of the user's memberships, as the user's request does.
+    // A run that names no user gains nothing; a decided segment keeps the
+    // facts of the run it belongs to (the wall judges it by that run's caller).
+    if (runContext.runAs === 'system' && whose === 'triggering' && runContext.userId && this.userGrantsResolver) {
+        const needsRung = (runContext as SeededRunContext).posture === undefined;
+        if (needsMembership || needsRung) {
+            try {
+                const grants = await this.userGrantsResolver(runContext.userId, runContext.tenantId);
+                if (needsMembership) {
+                    (runContext as SeededRunContext).accessible_org_ids = Array.isArray(grants?.accessible_org_ids)
+                        ? grants.accessible_org_ids
+                        : [];
+                }
+                if (needsRung && grants?.posture) (runContext as SeededRunContext).posture = grants.posture;
+            } catch (err) {
+                // Narrower, never wider: a membership run setup could not read
+                // is not a current membership, so the wall judges the run as it
+                // judges a person who holds none.
+                if (needsMembership) (runContext as SeededRunContext).accessible_org_ids = [];
+                this.logger.warn(
+                    `[runAs] flow '${flowName}' could not resolve the memberships of the user '${runContext.userId}' ` +
+                    `its system run runs for — the organization wall judges its data ops as for a person who ` +
+                    `holds none. The resolver's failure is in this record's meta.`,
+                    describeThrownForLog(err),
+                );
+            }
+        }
+        return;
+    }
     if (
         runContext.runAs !== 'system' &&
         runContext.userId &&

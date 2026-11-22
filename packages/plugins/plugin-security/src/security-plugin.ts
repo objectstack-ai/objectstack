@@ -137,6 +137,7 @@ import {
 // body the members it reads (`RlsFilterHost`).
 import {
   computeLayeredRlsFilter,
+  computeTenantLayer0Only,
   computeWriteCheckFilter,
   isVerifiedPlatformOwnerSession,
   stageRlsMembership,
@@ -2391,7 +2392,7 @@ export class SecurityPlugin implements Plugin {
       const readLogger = () => this.logger;
       const readPermissionEvaluator = () => this.permissionEvaluator;
       const readQl = () => this.ql;
-      const host: Pick<AuthzMiddlewareHost, 'addressedByIdWriteId' | 'addressedPredicateWrite' | 'assertControlledByParentWrite' | 'callerCannotReadAddressedRow' | 'collectRLSPolicies' | 'composeWriteTenantWall' | 'computeControlledByParentFilter' | 'computeForbiddenFieldWrites' | 'computeLayeredRlsFilter' | 'computePartialMaskRules' | 'computeQueryGuardFieldPerms' | 'computeRlsFilter' | 'computeWriteCheckFilter' | 'delegatedAdminGate' | 'delegatorOwnWriteFloorOptions' | 'engineOperationScope' | 'epoch' | 'extractSingleId' | 'fieldMasker' | 'getCallerPreImage' | 'getObjectFieldNames' | 'logger' | 'maskOperationResult' | 'ownershipQueues' | 'permissionEvaluator' | 'ql' | 'raiseWriteWallRefusal' | 'readableRowsScopeForPredicateWrite' | 'resolveCallerPosture' | 'resolveHopWithheldFields' | 'resolveOperationPrincipals' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingWriteVerdict' | 'writeCheckFieldOptions'> = {
+      const host: Pick<AuthzMiddlewareHost, 'addressedByIdWriteId' | 'addressedPredicateWrite' | 'assertControlledByParentWrite' | 'callerCannotReadAddressedRow' | 'collectRLSPolicies' | 'composeWriteTenantWall' | 'computeControlledByParentFilter' | 'computeForbiddenFieldWrites' | 'computeLayeredRlsFilter' | 'computePartialMaskRules' | 'computeQueryGuardFieldPerms' | 'computeRlsFilter' | 'computeTenantLayer0Only' | 'computeWriteCheckFilter' | 'delegatedAdminGate' | 'delegatorOwnWriteFloorOptions' | 'engineOperationScope' | 'epoch' | 'extractSingleId' | 'fieldMasker' | 'getCallerPreImage' | 'getObjectFieldNames' | 'logger' | 'maskOperationResult' | 'ownershipQueues' | 'permissionEvaluator' | 'ql' | 'raiseWriteWallRefusal' | 'readableRowsScopeForPredicateWrite' | 'resolveCallerPosture' | 'resolveHopWithheldFields' | 'resolveOperationPrincipals' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingWriteVerdict' | 'writeCheckFieldOptions'> = {
         addressedByIdWriteId: (...a) => this.addressedByIdWriteId(...a),
         addressedPredicateWrite: (...a) => this.addressedPredicateWrite(...a),
         assertControlledByParentWrite: (...a) => this.assertControlledByParentWrite(...a),
@@ -2401,6 +2402,7 @@ export class SecurityPlugin implements Plugin {
         computeControlledByParentFilter: (...a) => this.computeControlledByParentFilter(...a),
         computeForbiddenFieldWrites: (...a) => this.computeForbiddenFieldWrites(...a),
         computeLayeredRlsFilter: (...a) => this.computeLayeredRlsFilter(...a),
+        computeTenantLayer0Only: (...a) => this.computeTenantLayer0Only(...a),
         computePartialMaskRules: (...a) => this.computePartialMaskRules(...a),
         computeQueryGuardFieldPerms: (...a) => this.computeQueryGuardFieldPerms(...a),
         computeRlsFilter: (...a) => this.computeRlsFilter(...a),
@@ -4641,6 +4643,39 @@ export class SecurityPlugin implements Plugin {
       get tenancyPosture() { return readTenancyPosture(); },
     };
     return computeLayeredRlsFilter.call(host, permissionSets, object, operation, context, opts);
+  }
+
+  /**
+   * The caller's Layer 0 alone — {@link computeLayeredRlsFilter}'s Layer 0
+   * half, with the permission sets loaded only where they decide an
+   * operator's crossing. Read by the organization wall an app-authored
+   * elevation meets (`app-automation-organization-wall.ts`).
+   */
+  private computeTenantLayer0Only(
+    loadPermissionSets: () => Promise<PermissionSet[]>,
+    object: string,
+    operation: string,
+    context: any,
+  ): ReturnType<typeof computeTenantLayer0Only> {
+    // The body lives in `security-plugin-rls-filter.ts` (see `RlsFilterHost`).
+    const readLogger = () => this.logger;
+    const readMetadata = () => this.metadata;
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const readQl = () => this.ql;
+    const readTenancyPosture = () => this.tenancyPosture;
+    const host: Pick<RlsFilterHost, 'getObjectFieldNames' | 'getObjectSecurityMeta' | 'hasPlatformAdminPosture' | 'isVerifiedPlatformOwnerSession' | 'logger' | 'metadata' | 'permissionEvaluator' | 'ql' | 'tenancyDisabledCache' | 'tenancyPosture'> = {
+      getObjectFieldNames: (...a) => this.getObjectFieldNames(...a),
+      getObjectSecurityMeta: (...a) => this.getObjectSecurityMeta(...a),
+      hasPlatformAdminPosture: (...a) => this.hasPlatformAdminPosture(...a),
+      isVerifiedPlatformOwnerSession: (...a) => this.isVerifiedPlatformOwnerSession(...a),
+      get logger() { return readLogger(); },
+      get metadata() { return readMetadata(); },
+      get permissionEvaluator() { return readPermissionEvaluator(); },
+      get ql() { return readQl(); },
+      tenancyDisabledCache: this.tenancyDisabledCache,
+      get tenancyPosture() { return readTenancyPosture(); },
+    };
+    return computeTenantLayer0Only.call(host, loadPermissionSets, object, operation, context);
   }
 
   /**

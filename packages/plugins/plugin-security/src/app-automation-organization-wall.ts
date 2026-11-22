@@ -83,9 +83,10 @@
  */
 
 import { isOutsideEveryOrganization, rlsOperationForVerb, runCallerOf } from '@objectstack/core';
-import type { TenantLayer0Verdict } from '@objectstack/spec/security';
+import type { TenancyPosture, TenantLayer0Verdict } from '@objectstack/spec/security';
 
 import { PermissionDeniedError } from './errors.js';
+import { undeclaredExternalScopeWriteRefusal } from './external-organization-scope.js';
 import { RLS_DENY_FILTER } from './rls-compiler.js';
 import { ELEVATION, SUBJECT, elevationSource, type ElevationSource } from './flow-system-identity-write-refusal.js';
 import { extractSingleId } from './security-plugin-addressed-writes.js';
@@ -96,6 +97,9 @@ const WRITE_CLASS: ReadonlySet<string> = new Set(['insert', 'update', 'delete'])
 /** The removal class (`delete`, and `purge` mapped onto it): answered by the read rule when the wall denies. */
 const REMOVAL = 'delete';
 
+/** The recycle bin's verbs, which its doors dispatch with neither a predicate nor a row id. */
+const BIN_VERBS: ReadonlySet<string> = new Set(['purge', 'restore']);
+
 /** The organization column the wall's filters and a payload name. */
 const ORGANIZATION_FIELD = 'organization_id';
 
@@ -104,6 +108,12 @@ export interface AppAutomationWallCaller {
   source: ElevationSource;
   /** The elevated context as the caller's plain door reads it: `isSystem` off, everything else kept. */
   callerContext: Record<string, unknown>;
+  /**
+   * A decided flow segment judged by the user its run began for: the
+   * segment's own facts are its decider's, so the engine's projection of them
+   * is not the caller's wall, and the wall is always asked.
+   */
+  decided?: true;
 }
 
 /**
@@ -125,7 +135,7 @@ export function appAutomationWallCaller(context: unknown): AppAutomationWallCall
   if (runCaller !== undefined && runCaller !== (context as { userId?: unknown }).userId) {
     const { positions: _p, permissions: _s, permissionSetAddresses: _a, accessible_org_ids: _o, posture: _r, principalKind: _k, ...rest } =
       context as Record<string, unknown>;
-    return { source, callerContext: { ...rest, userId: runCaller, isSystem: false } };
+    return { source, callerContext: { ...rest, userId: runCaller, isSystem: false }, decided: true };
   }
   const c = context as { userId?: unknown; principalKind?: unknown };
   const hasCaller = isPrincipal(c.userId) || c.principalKind === 'guest';
@@ -158,9 +168,17 @@ export function callerMayLackOrganization(callerContext: Record<string, unknown>
   return callerContext.posture === 'PLATFORM_ADMIN';
 }
 
-/** Does the context carry the facts the caller's door is judged on? */
+/**
+ * Does the context carry the facts the caller's Layer 0 is judged on? The
+ * membership set always; and either the permission sets, or a carried posture
+ * rung below the platform operator's — the only rung whose crossing the
+ * permission sets decide (ADR-0099 D1). A run that carries its caller's set and
+ * rung (run setup seeds both) is judged on them with no resolution.
+ */
 export function carriesDoorFacts(callerContext: Record<string, unknown>): boolean {
-  return Array.isArray(callerContext.permissions) && Array.isArray(callerContext.accessible_org_ids);
+  if (!Array.isArray(callerContext.accessible_org_ids)) return false;
+  if (Array.isArray(callerContext.permissions)) return true;
+  return typeof callerContext.posture === 'string' && callerContext.posture !== '' && callerContext.posture !== 'PLATFORM_ADMIN';
 }
 
 /** The refusal: the standard catalog's `PERMISSION_DENIED`, naming what is missing. */
@@ -200,7 +218,7 @@ export function appAutomationOrganizationWallRefusal(
   );
 }
 
-/** The refusal of an insert naming an organization the caller's wall does not admit. */
+/** The refusal of a write naming an organization the caller's wall does not admit. */
 function landingRefusal(source: ElevationSource, object: string, operation: string): PermissionDeniedError {
   return new PermissionDeniedError(
     `[Security] Access denied: this ${operation} names an organization for a '${object}' record that the user ` +
@@ -209,12 +227,40 @@ function landingRefusal(source: ElevationSource, object: string, operation: stri
   );
 }
 
+/** The refusal of an update that would leave a row in no organization. */
+function removalRefusal(source: ElevationSource, object: string, operation: string): PermissionDeniedError {
+  return new PermissionDeniedError(
+    `[Security] Access denied: this ${operation} would leave a '${object}' record in no organization, which the ` +
+      `user ${SUBJECT[source]} runs for may not do, and ${ELEVATION[source]} does not lift the organization wall.`,
+    { operation, object, field: ORGANIZATION_FIELD },
+  );
+}
+
+/** A payload row that NAMES an organization (an absent or empty value is the stamp's to fill). */
+function namesOrganization(row: Record<string, unknown>): boolean {
+  const value = row[ORGANIZATION_FIELD];
+  return value !== undefined && value !== null && value !== '';
+}
+
+/** A payload row of an update that SETS the organization column empty. */
+function emptiesOrganization(row: Record<string, unknown>): boolean {
+  if (!Object.prototype.hasOwnProperty.call(row, ORGANIZATION_FIELD)) return false;
+  const value = row[ORGANIZATION_FIELD];
+  return value === null || value === '';
+}
+
 /** The caller's own Layer 0 for one operation, as the plain door computes it. */
 export interface CallerLayer0Answer {
   layer0: Record<string, unknown> | null;
   tenantLayer0Verdict: TenantLayer0Verdict;
   /** A platform operator's crossing, and nothing else, made the verdict `none` (ADR-0095 D3). */
   crossedByPlatformAdmin?: boolean;
+  /**
+   * The verdict is `deny` because the external object states no organization
+   * scope (ADR-0015 §10), under this posture — not because the caller lacks
+   * an organization; the refusal names the undeclared scope.
+   */
+  undeclaredExternalScopePosture?: TenancyPosture;
 }
 
 /** What {@link applyAppAutomationOrganizationWall} reads, supplied by the security plugin. */
@@ -225,10 +271,51 @@ export interface AppAutomationWallDeps {
   completeCaller(callerContext: Record<string, unknown>): Promise<Record<string, unknown>>;
   /** The caller's own Layer 0 for the operation. */
   callerLayer0(callerContext: Record<string, unknown>, object: string, operation: string): Promise<CallerLayer0Answer>;
-  /** Does the row the write names lie inside `layer0`? Read as the platform, by the wall's predicate alone. */
-  rowInScope(object: string, id: string | number | bigint, layer0: Record<string, unknown>): Promise<boolean>;
+  /**
+   * Does the row the write names lie inside `layer0`? Read as the platform, by
+   * the wall's predicate alone, inside the transaction the write itself
+   * carries on `context` — a row the write's own transaction wrote is there.
+   */
+  rowInScope(object: string, id: string | number | bigint, layer0: Record<string, unknown>, context: unknown): Promise<boolean>;
   /** The answer for a by-id write of a row the caller's wall does not admit: the door's not-found. */
   notFound(object: string, id: string | number | bigint, context: unknown): Error;
+}
+
+/**
+ * The caller facts the wall resolves, memoised for one flow run: a run's
+ * operations share their caller, so its membership set and grants are
+ * resolved once per run, not once per operation. Keyed by the run, the user
+ * and the active organization; never across runs, and never for an operation
+ * that belongs to no run. Bounded and short-lived, and a failed resolution is
+ * not kept, so the next operation asks again.
+ */
+export class RunCallerFactsMemo<T> {
+  private readonly entries = new Map<string, { at: number; value: Promise<T> }>();
+
+  constructor(
+    private readonly maxEntries = 256,
+    private readonly ttlMs = 60_000,
+    private readonly now: () => number = () => Date.now(),
+  ) {}
+
+  resolve(flowRunId: unknown, userId: string, tenantId: string | undefined, load: () => Promise<T>): Promise<T> {
+    if (typeof flowRunId !== 'string' || flowRunId === '') return load();
+    const key = `${flowRunId}\u0000${userId}\u0000${tenantId ?? ''}`;
+    const at = this.now();
+    const hit = this.entries.get(key);
+    if (hit && at - hit.at < this.ttlMs) return hit.value;
+    const value = load();
+    this.entries.set(key, { at, value });
+    value.catch(() => {
+      if (this.entries.get(key)?.value === value) this.entries.delete(key);
+    });
+    while (this.entries.size > this.maxEntries) {
+      const oldest = this.entries.keys().next().value;
+      if (oldest === undefined) break;
+      this.entries.delete(oldest);
+    }
+    return value;
+  }
 }
 
 /** The organizations a verdict admits a new row into, or `undefined` for every organization. */
@@ -272,8 +359,20 @@ export async function applyAppAutomationOrganizationWall(
   const object = typeof opCtx.object === 'string' ? opCtx.object : '';
   const operation = typeof opCtx.operation === 'string' ? opCtx.operation : '';
   if (!object || !operation) return;
-  const federated = deps.isFederated(object);
-  if (!federated && !callerMayLackOrganization(caller.callerContext)) return;
+  const verb = rlsOperationForVerb(operation);
+  const isWrite = WRITE_CLASS.has(verb);
+  const rows = isWrite && verb !== REMOVAL ? payloadRows(opCtx.data) : [];
+  // [ADR-0095 D1] A write whose payload names an organization, or an update
+  // that empties the column, is judged for EVERY caller, as the plain door
+  // judges it: the engine keeps an elevated payload's organization as sent,
+  // so no projection of the wall reaches it. The common elevation, which
+  // names none, pays nothing for this.
+  const touchesOrganization = rows.some((row) => namesOrganization(row) || (verb === 'update' && emptiesOrganization(row)));
+  // Always asked: a federated object (the engine projects no driver scope
+  // there), a decided segment (its own facts are the decider's), and a write
+  // that names or empties the organization.
+  const alwaysAsked = deps.isFederated(object) || caller.decided === true || touchesOrganization;
+  if (!alwaysAsked && !callerMayLackOrganization(caller.callerContext)) return;
 
   // The door's facts, resolved for the caller where the context does not
   // carry them (a flow run's envelope carries no permission sets), and the
@@ -281,20 +380,25 @@ export async function applyAppAutomationOrganizationWall(
   const callerContext = carriesDoorFacts(caller.callerContext)
     ? caller.callerContext
     : await deps.completeCaller(caller.callerContext);
-  if (!federated && !callerMayLackOrganization(callerContext)) return;
+  if (!alwaysAsked && !callerMayLackOrganization(callerContext)) return;
 
   const answer = await deps.callerLayer0(callerContext, object, operation);
   const { tenantLayer0Verdict, crossedByPlatformAdmin } = answer;
   // A deny verdict's projection is the deny sentinel, never "no wall".
   const layer0 = tenantLayer0Verdict.kind === 'deny' ? (answer.layer0 ?? RLS_DENY_FILTER) : answer.layer0;
-  const verb = rlsOperationForVerb(operation);
-  const isWrite = WRITE_CLASS.has(verb);
   const denied = tenantLayer0Verdict.kind === 'deny';
   // [ADR-0123 D2] A denied caller's delete and purge are answered by the read
   // rule, as its plain door answers them: the wall's deny filter goes onto a
   // predicate delete (it matches nothing), and a by-id delete answers as a
   // row that is not there. Every other write is refused, naming what is missing.
   if (denied && isWrite && verb !== REMOVAL) {
+    // [ADR-0015 §10] An external object that states no organization scope is
+    // denied for every caller; the sentence names the undeclared scope, not an
+    // active organization the caller may well have.
+    if (answer.undeclaredExternalScopePosture) {
+      const refusal = undeclaredExternalScopeWriteRefusal(object, operation, answer.undeclaredExternalScopePosture);
+      throw new PermissionDeniedError(refusal.message, { operation, object }, refusal.developerMessage);
+    }
     throw appAutomationOrganizationWallRefusal(caller.source, object, operation, callerContext);
   }
 
@@ -308,9 +412,8 @@ export async function applyAppAutomationOrganizationWall(
     // A row that names its organization names one the caller's wall admits.
     const admitted = admittedOrganizations(tenantLayer0Verdict);
     if (admitted) {
-      for (const row of payloadRows(opCtx.data)) {
-        const named = row[ORGANIZATION_FIELD];
-        if (named !== undefined && named !== null && named !== '' && !admitted.has(String(named))) {
+      for (const row of rows) {
+        if (namesOrganization(row) && !admitted.has(String(row[ORGANIZATION_FIELD]))) {
           throw landingRefusal(caller.source, object, operation);
         }
       }
@@ -324,23 +427,36 @@ export async function applyAppAutomationOrganizationWall(
   }
 
   if (isWrite) {
-    // A write never moves a row into an organization the wall does not admit.
+    // A write never moves a row into an organization the wall does not admit,
+    // and an update never leaves one in none.
     const admitted = admittedOrganizations(tenantLayer0Verdict);
     if (admitted) {
-      for (const row of payloadRows(opCtx.data)) {
-        if (!Object.prototype.hasOwnProperty.call(row, ORGANIZATION_FIELD)) continue;
-        const named = row[ORGANIZATION_FIELD];
-        if (named === undefined || named === null || named === '' || !admitted.has(String(named))) {
+      for (const row of rows) {
+        if (namesOrganization(row) && !admitted.has(String(row[ORGANIZATION_FIELD]))) {
           throw landingRefusal(caller.source, object, operation);
         }
+        if (verb === 'update' && emptiesOrganization(row)) throw removalRefusal(caller.source, object, operation);
       }
     }
     if (!opCtx.ast) {
       // A by-id write: the row it names is the caller's to write only if the
       // caller's wall admits it; a row it does not admit answers as absent.
+      // Read where the write runs: inside the transaction it carries.
       const id = extractSingleId(opCtx);
-      if (id === null) throw appAutomationOrganizationWallRefusal(caller.source, object, operation, callerContext);
-      if (denied || !(await deps.rowInScope(object, id, layer0))) throw deps.notFound(object, id, opCtx.context);
+      if (id === null) {
+        // The recycle bin's own verbs (`purge(entryId)`, `empty(object)`,
+        // `restore(entryId)`) name an entry, not a row, and carry no predicate:
+        // the bin scopes them by the verdict recorded on the dispatch, as it
+        // scopes the plain door's (a denied caller sees no entry: `purge`
+        // answers `false`, `empty` `0`). Every other write that names neither
+        // is refused rather than run past the wall.
+        if (BIN_VERBS.has(operation)) {
+          opCtx.tenantLayer0Verdict = tenantLayer0Verdict;
+          return;
+        }
+        throw appAutomationOrganizationWallRefusal(caller.source, object, operation, callerContext);
+      }
+      if (denied || !(await deps.rowInScope(object, id, layer0, opCtx.context))) throw deps.notFound(object, id, opCtx.context);
       return;
     }
   } else if (!opCtx.ast) {

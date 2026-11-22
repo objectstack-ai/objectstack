@@ -120,7 +120,7 @@ import {
   assertFlowSystemIdentityWriteAllowed,
   warnAppAutomationAppendOnlyInsert,
 } from './flow-system-identity-write-refusal.js';
-import { applyAppAutomationOrganizationWall } from './app-automation-organization-wall.js';
+import { applyAppAutomationOrganizationWall, RunCallerFactsMemo } from './app-automation-organization-wall.js';
 import { delegatedUnitReadScope, isUnreadableAddressedRowRefusal } from './delegated-admin-gate.js';
 import { isRowWriteProbe, logGateRefusal, type AuthzMiddlewareFn } from './record-row-write-probe.js';
 import {
@@ -598,6 +598,7 @@ export interface AuthzMiddlewareHost {
   computeControlledByParentFilter: SecurityPlugin['computeControlledByParentFilter'];
   computeForbiddenFieldWrites: SecurityPlugin['computeForbiddenFieldWrites'];
   computeLayeredRlsFilter: SecurityPlugin['computeLayeredRlsFilter'];
+  computeTenantLayer0Only: SecurityPlugin['computeTenantLayer0Only'];
   computePartialMaskRules: SecurityPlugin['computePartialMaskRules'];
   computeQueryGuardFieldPerms: SecurityPlugin['computeQueryGuardFieldPerms'];
   computeRlsFilter: SecurityPlugin['computeRlsFilter'];
@@ -621,7 +622,7 @@ export interface AuthzMiddlewareHost {
 
 /** The authorization middleware registration `SecurityPlugin#start` runs; the comment above its call there is its contract. */
 export function registerAuthzMiddleware(
-  this: Pick<AuthzMiddlewareHost, 'addressedByIdWriteId' | 'addressedPredicateWrite' | 'assertControlledByParentWrite' | 'callerCannotReadAddressedRow' | 'collectRLSPolicies' | 'composeWriteTenantWall' | 'computeControlledByParentFilter' | 'computeForbiddenFieldWrites' | 'computeLayeredRlsFilter' | 'computePartialMaskRules' | 'computeQueryGuardFieldPerms' | 'computeRlsFilter' | 'computeWriteCheckFilter' | 'delegatedAdminGate' | 'delegatorOwnWriteFloorOptions' | 'engineOperationScope' | 'epoch' | 'extractSingleId' | 'fieldMasker' | 'getCallerPreImage' | 'getObjectFieldNames' | 'logger' | 'maskOperationResult' | 'ownershipQueues' | 'permissionEvaluator' | 'ql' | 'raiseWriteWallRefusal' | 'readableRowsScopeForPredicateWrite' | 'resolveCallerPosture' | 'resolveOperationPrincipals' | 'resolveHopWithheldFields' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingWriteVerdict' | 'writeCheckFieldOptions'>,
+  this: Pick<AuthzMiddlewareHost, 'addressedByIdWriteId' | 'addressedPredicateWrite' | 'assertControlledByParentWrite' | 'callerCannotReadAddressedRow' | 'collectRLSPolicies' | 'composeWriteTenantWall' | 'computeControlledByParentFilter' | 'computeForbiddenFieldWrites' | 'computeLayeredRlsFilter' | 'computePartialMaskRules' | 'computeQueryGuardFieldPerms' | 'computeRlsFilter' | 'computeTenantLayer0Only' | 'computeWriteCheckFilter' | 'delegatedAdminGate' | 'delegatorOwnWriteFloorOptions' | 'engineOperationScope' | 'epoch' | 'extractSingleId' | 'fieldMasker' | 'getCallerPreImage' | 'getObjectFieldNames' | 'logger' | 'maskOperationResult' | 'ownershipQueues' | 'permissionEvaluator' | 'ql' | 'raiseWriteWallRefusal' | 'readableRowsScopeForPredicateWrite' | 'resolveCallerPosture' | 'resolveOperationPrincipals' | 'resolveHopWithheldFields' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingWriteVerdict' | 'writeCheckFieldOptions'>,
   ctx: PluginContext,
   ql: IObjectQLEngine,
   metadata: IMetadataService,
@@ -629,6 +630,8 @@ export function registerAuthzMiddleware(
   // [#27175] The handler is kept as well as registered: the record
   // field-access answer's `writable` runs THIS function over a synthetic by-id
   // update (`record-row-write-probe.ts`), so the verdict is the gate's own.
+  // The organization wall's per-run memo of its callers' resolved facts.
+  const wallCallerGrants = new RunCallerFactsMemo<Awaited<ReturnType<typeof resolveUserAuthzGrants>>>();
   const authzMiddleware: AuthzMiddlewareFn = async (opCtx: any, chainNext: () => Promise<void>) => {
     // [#21771] Whether THIS operation was issued from inside another engine
     // operation's pipeline (a cascade, a hook's `ctx.api` write), read before
@@ -726,11 +729,13 @@ export function registerAuthzMiddleware(
     // rules, never the wall. A caller the wall denies (no active organization)
     // reads nothing of a tenant-scoped object, its delete and purge there match
     // nothing (the read rule), and every other write there is refused naming
-    // the missing organization. The wall is the caller's own
-    // Layer 0, over the caller's own context and permission sets, so its
-    // exemptions are the plain door's. A caller with an active organization,
-    // an elevation with no caller, and every platform system context pass on
-    // to the bypass unchanged. See `app-automation-organization-wall.ts`.
+    // the missing organization; a write that names or empties the organization
+    // is judged for every caller. The wall is the caller's own Layer 0, over
+    // the caller's own context, so its exemptions are the plain door's. Where
+    // the engine's projection of the same verdict already is that wall, the
+    // operation passes on to the bypass unasked; an elevation with no caller,
+    // and every platform system context, pass on unchanged. See
+    // `app-automation-organization-wall.ts`.
     await applyAppAutomationOrganizationWall(opCtx, {
       isFederated: (object) => isFederatedObject(typeof ql?.getSchema === 'function' ? ql.getSchema(object) : undefined),
       // The door's facts for a caller whose context does not carry them (a
@@ -744,7 +749,12 @@ export function registerAuthzMiddleware(
         }
         try {
           const tenantId = typeof callerContext.tenantId === 'string' && callerContext.tenantId !== '' ? callerContext.tenantId : undefined;
-          const grants = await resolveUserAuthzGrants(ql, userId, tenantId ? { tenantId } : {});
+          // Once per run: a flow run's operations share their caller's facts,
+          // so the resolution is memoised under the run (never across runs,
+          // and never for an operation that belongs to none).
+          const grants = await wallCallerGrants.resolve(callerContext.flowRunId, userId, tenantId, () =>
+            resolveUserAuthzGrants(ql, userId, tenantId ? { tenantId } : {}),
+          );
           return {
             ...callerContext,
             positions: grants.positions,
@@ -765,27 +775,34 @@ export function registerAuthzMiddleware(
           return { ...callerContext, permissions: [], accessible_org_ids: [] };
         }
       },
+      // Layer 0 alone: the permission sets are loaded only where they decide
+      // a platform operator's crossing.
       callerLayer0: async (callerContext, object, operation) => {
-        let callerSets: PermissionSet[] = [];
-        try {
-          callerSets = await this.resolvePermissionSetsForContext(callerContext);
-        } catch (err) {
-          // [N1] Unresolvable sets grant no exemption: the wall's verdict stands.
-          ctx.logger.warn(
-            `[security] The organization wall could not resolve the permission sets of the user an elevated ` +
-              `${operation} on '${object}' runs for; it judges the operation with none, which grants no exemption.`,
-            { object, operation, error: err instanceof Error ? err.message : String(err) },
-          );
-          callerSets = [];
-        }
-        return this.computeLayeredRlsFilter(callerSets, object, operation, callerContext);
+        const loadSets = async (): Promise<PermissionSet[]> => {
+          try {
+            return await this.resolvePermissionSetsForContext(callerContext);
+          } catch (err) {
+            // [N1] Unresolvable sets grant no exemption: the wall's verdict stands.
+            ctx.logger.warn(
+              `[security] The organization wall could not resolve the permission sets of the user an elevated ` +
+                `${operation} on '${object}' runs for; it judges the operation with none, which grants no exemption.`,
+              { object, operation, error: err instanceof Error ? err.message : String(err) },
+            );
+            return [];
+          }
+        };
+        return this.computeTenantLayer0Only(loadSets, object, operation, callerContext);
       },
-      rowInScope: async (object, id, layer0) => {
+      rowInScope: async (object, id, layer0, context) => {
         // Read as the platform, by the wall's predicate alone, as step 2.7
-        // reads the addressed row by the caller's.
+        // reads the addressed row by the caller's — and where the write runs:
+        // inside the transaction it carries, so a row the write's own
+        // transaction wrote is there, and a single-connection store is not
+        // asked for a second connection.
+        const transaction = (context as { transaction?: unknown } | null | undefined)?.transaction;
         const row = await this.ql.findOne(object, {
           where: { $and: [{ id: typeof id === 'bigint' ? String(id) : id }, layer0] },
-          context: { isSystem: true },
+          context: { isSystem: true, ...(transaction !== undefined ? { transaction } : {}) },
         });
         return !!row;
       },

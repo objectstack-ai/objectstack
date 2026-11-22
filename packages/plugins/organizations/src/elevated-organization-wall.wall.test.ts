@@ -44,6 +44,7 @@ const WALLED_BOOT_ENV = [
 
 const TASK = 'eow_task';
 const NOTE = 'eow_note';
+const PING = 'eow_ping';
 
 const BODY_READ =
   "const rows = await ctx.api.object('eow_task').find({});" +
@@ -186,6 +187,15 @@ const APP = {
       },
     },
     {
+      // Outside tenancy, so a decided segment's write lands whatever the
+      // decider's organization.
+      name: PING,
+      label: 'Ping',
+      sharingModel: 'public_read_write',
+      tenancy: { enabled: false },
+      fields: { name: { type: 'text', label: 'Name' } },
+    },
+    {
       // Outside tenancy, so the hook route and the flow's read report land
       // whatever the caller's organization.
       name: NOTE,
@@ -260,6 +270,50 @@ const APP = {
           type: 'create_record',
           label: 'Report',
           config: { objectName: NOTE, fields: { name: 'seen-remote-flow', seen: { dialect: 'cel', source: 'string(size(found))' } } },
+        },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'read' },
+        { id: 'e2', source: 'read', target: 'report' },
+        { id: 'e3', source: 'report', target: 'end' },
+      ],
+    },
+    {
+      // A run that begins for no caller and, after a human decision, writes a
+      // record whose change starts another system run.
+      name: 'eow_sys_sweep_ping',
+      label: 'System sweep ping',
+      type: 'autolaunched',
+      status: 'active',
+      runAs: 'system',
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'hold', type: 'wait', label: 'Hold', waitEventConfig: { eventType: 'signal', signalName: 'eow.decided.ping' } },
+        { id: 'ping', type: 'create_record', label: 'Ping', config: { objectName: PING, fields: { name: 'from-decided' } } },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'hold' },
+        { id: 'e2', source: 'hold', target: 'ping' },
+        { id: 'e3', source: 'ping', target: 'end' },
+      ],
+    },
+    {
+      name: 'eow_rc_ping',
+      label: 'Record-change read',
+      type: 'record_change',
+      status: 'active',
+      runAs: 'system',
+      variables: [{ name: 'found', type: 'record_collection', isInput: false, isOutput: false }],
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start', config: { objectName: PING, triggerType: 'record-after-create' } },
+        { id: 'read', type: 'get_record', label: 'Read', config: { objectName: TASK, limit: 100, outputVariable: 'found' } },
+        {
+          id: 'report',
+          type: 'create_record',
+          label: 'Report',
+          config: { objectName: NOTE, fields: { name: 'seen-rc', seen: { dialect: 'cel', source: 'string(size(found))' } } },
         },
         { id: 'end', type: 'end', label: 'End' },
       ],
@@ -696,6 +750,23 @@ describe('an app-authored elevation sees through the organization wall what its 
       expect(resumed.success, JSON.stringify(resumed)).toBe(true);
       expect(await noteSeen('seen-sweep')).toBe('4');
       expect((await touched()).B1).toBe('sweep');
+    });
+
+    it('a run a caller-less run’s decided segment starts by its write begins for no caller, and is unjudged', async () => {
+      await reseed();
+      await activate(null);
+      const automation: any = await stack.kernel.getServiceAsync('automation');
+      const decider = await ql.findOne('sys_user', { where: { email: 'eow-alice@verify.test' }, ...SYS });
+      const paused = await automation.execute('eow_sys_sweep_ping', {});
+      expect(paused.status, JSON.stringify(paused)).toBe('paused');
+      const resumed = await automation.resume(paused.runId, { [RESUME_AUTHORITY_SERVICE]: true, resumedBy: decider.id });
+      expect(resumed.success, JSON.stringify(resumed)).toBe(true);
+      let seen: unknown;
+      for (let i = 0; i < 50 && seen === undefined; i++) {
+        seen = await noteSeen('seen-rc');
+        if (seen === undefined) await new Promise((done) => setTimeout(done, 100));
+      }
+      expect(seen).toBe('4');
     });
 
     it('a platform system context and a caller-less run read every organization’s rows', async () => {

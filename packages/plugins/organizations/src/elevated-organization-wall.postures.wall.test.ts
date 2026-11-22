@@ -31,6 +31,7 @@ import { OrganizationsPlugin } from './organizations-plugin.js';
 
 const TASK = 'eop_task';
 const NOTE = 'eop_note';
+const PING = 'eop_ping';
 
 const APP = {
   manifest: { id: 'com.example.eop', namespace: 'eop', version: '0.0.1', type: 'app', name: 'Elevated Org Wall Postures Fixture' },
@@ -41,6 +42,12 @@ const APP = {
       label: 'Task',
       sharingModel: 'public_read_write',
       fields: { name: { type: 'text', label: 'Name' }, touched: { type: 'text', label: 'Touched' } },
+    },
+    {
+      name: PING,
+      label: 'Ping',
+      sharingModel: 'public_read_write',
+      fields: { name: { type: 'text', label: 'Name' } },
     },
     {
       name: NOTE,
@@ -106,6 +113,31 @@ const APP = {
         { id: 'e2', source: 'hold', target: 'read' },
         { id: 'e3', source: 'read', target: 'report' },
         { id: 'e4', source: 'report', target: 'end' },
+      ],
+    },
+    {
+      // A system run a member's own write starts: a record change.
+      name: 'eop_rc_read',
+      label: 'Record-change read',
+      type: 'record_change',
+      status: 'active',
+      runAs: 'system',
+      variables: [{ name: 'found', type: 'record_collection', isInput: false, isOutput: false }],
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start', config: { objectName: PING, triggerType: 'record-after-create' } },
+        { id: 'read', type: 'get_record', label: 'Read', config: { objectName: TASK, limit: 100, outputVariable: 'found' } },
+        {
+          id: 'report',
+          type: 'create_record',
+          label: 'Report',
+          config: { objectName: NOTE, fields: { name: 'seen-rc', seen: { dialect: 'cel', source: 'string(size(found))' } } },
+        },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'read' },
+        { id: 'e2', source: 'read', target: 'report' },
+        { id: 'e3', source: 'report', target: 'end' },
       ],
     },
     {
@@ -286,6 +318,19 @@ describe('group: a system flow run for a member of two organizations reads exact
       expect(await noteSeen('seen-flow')).toBe('2');
     });
   }
+
+  it('a system run the member’s own write starts reads the union of the member’s organizations', async () => {
+    await clearNotes(orgA);
+    expect((await stack.apiAs(alice, 'POST', '/auth/organization/set-active', { organizationId: orgA })).status).toBe(200);
+    const r = await answer(await stack.apiAs(alice, 'POST', `/data/${PING}`, { name: 'ping' }));
+    expect(r.status, JSON.stringify(r.body)).toBeLessThan(300);
+    let seen: unknown;
+    for (let i = 0; i < 50 && seen === undefined; i++) {
+      seen = await noteSeen('seen-rc');
+      if (seen === undefined) await new Promise((done) => setTimeout(done, 100));
+    }
+    expect(seen).toBe('2');
+  });
 
   it('after a decision by another user, the run is still judged by the member it began for', async () => {
     await clearNotes(orgA);

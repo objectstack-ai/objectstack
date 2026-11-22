@@ -601,6 +601,100 @@ export async function computeLayeredRlsFilter(
   return { layer0, layer1, tenantLayer0Verdict, crossedByPlatformAdmin };
 }
 
+/**
+ * The caller's Layer 0 ALONE, as {@link computeLayeredRlsFilter} computes it:
+ * the same verdict, filter, operator crossing and verified-owner read
+ * crossing, without compiling Layer 1. The organization wall an app-authored
+ * elevation meets reads nothing else (`app-automation-organization-wall.ts`).
+ *
+ * The permission sets decide one fact only — whether a true platform operator
+ * crosses on a posture-permitting object (the superuser bit beside the
+ * `PLATFORM_ADMIN` evidence) — so they are loaded only where that fact is
+ * open: a posture-permitting object, and a context whose carried rung is the
+ * operator's, or that carries none. Everywhere else the crossing is `false`
+ * without them, exactly as the layered computation answers it.
+ */
+export async function computeTenantLayer0Only(
+  this: Pick<RlsFilterHost, 'getObjectFieldNames' | 'getObjectSecurityMeta' | 'hasPlatformAdminPosture' | 'isVerifiedPlatformOwnerSession' | 'logger' | 'metadata' | 'permissionEvaluator' | 'ql' | 'tenancyDisabledCache' | 'tenancyPosture'>,
+  loadPermissionSets: () => Promise<PermissionSet[]>,
+  object: string,
+  operation: string,
+  context: any,
+): Promise<{
+  layer0: Record<string, unknown> | null;
+  tenantLayer0Verdict: TenantLayer0Verdict;
+  crossedByPlatformAdmin: boolean;
+  /** Set when the `deny` is an external object's undeclared organization scope (ADR-0015 §10): the posture it is denied under. */
+  undeclaredExternalScopePosture?: RlsFilterHost['tenancyPosture'];
+}> {
+  const meta = await this.getObjectSecurityMeta(object);
+  const rlsOperation = rlsOperationForVerb(operation);
+  const isWrite = rlsOperation === 'insert' || rlsOperation === 'update' || rlsOperation === 'delete';
+  const posturePermits = meta.isPrivate || meta.tenancyDisabled || meta.isBetterAuthManaged;
+  const carriedPosture = context?.posture;
+  const carried = isCarriedPosture(carriedPosture);
+  let isPlatformAdmin = false;
+  if (posturePermits && (!carried || carriedPosture === 'PLATFORM_ADMIN')) {
+    const permissionSets = await loadPermissionSets();
+    const superuserBypass = isWrite
+      ? this.permissionEvaluator.hasSuperuserWriteBypass(object, permissionSets, { isPrivate: meta.isPrivate })
+      : this.permissionEvaluator.hasSuperuserReadBypass(object, permissionSets, { isPrivate: meta.isPrivate });
+    const probePlatformAdmin = this.hasPlatformAdminPosture(permissionSets);
+    const platformPosture = carried ? carriedPosture === 'PLATFORM_ADMIN' : probePlatformAdmin;
+    if (carried && platformPosture !== probePlatformAdmin) {
+      this.logger.warn?.(
+        '[authz/ADR-0099] Layer 0 exemption: carried posture rung and capability probe disagree; ' +
+          'enforcing the (narrower) carried rung',
+        { object, operation, carriedPosture, probePlatformAdmin, userId: context?.userId },
+      );
+    }
+    isPlatformAdmin = superuserBypass && platformPosture;
+  }
+  const objectFields = await this.getObjectFieldNames(this.metadata, object, this.ql);
+  const tenancyDisabled = this.tenancyDisabledCache.get(object) === true || meta.tenancyDisabled;
+  const tenantLayer0Input: TenantLayer0Input = tenantLayer0InputOf({
+    tenancyPosture: this.tenancyPosture,
+    context,
+    meta,
+    objectFields,
+    tenancyDisabled,
+    isPlatformAdmin,
+  });
+  const tenantLayer0Verdict = computeTenantLayer0Verdict(tenantLayer0Input);
+  const layer0 = tenantLayer0FilterOf(tenantLayer0Verdict);
+  const crossedByPlatformAdmin =
+    tenantLayer0Verdict.kind === 'none' &&
+    isPlatformAdmin &&
+    computeTenantLayer0Verdict({ ...tenantLayer0Input, isPlatformAdmin: false }).kind !== 'none';
+  const undeclaredExternalScope =
+    tenantLayer0Verdict.kind === 'deny' && tenantLayer0Input.externalOrganizationScopeUndeclared === true;
+  // [#12974] The verified platform owner's READ crosses, as in the layered
+  // computation (its audit line included).
+  if (!isWrite && layer0 !== null && !undeclaredExternalScope && (await this.isVerifiedPlatformOwnerSession(context))) {
+    this.logger.warn?.(
+      `[security] ${PLATFORM_OWNER_WALL_BYPASS_EVENT}: verified platform owner crossed ` +
+        'the Layer 0 organization wall on a read — the org filter below was NOT appended (only the ' +
+        "declared platform owner's reads cross it; writes stay walled for everyone)",
+      {
+        event: PLATFORM_OWNER_WALL_BYPASS_EVENT,
+        object,
+        operation,
+        userId: context?.userId,
+        organizationId: context?.tenantId ?? null,
+        tenancyPosture: this.tenancyPosture,
+        suppressedFilter: layer0,
+      },
+    );
+    return { layer0: null, tenantLayer0Verdict: { kind: 'none' }, crossedByPlatformAdmin };
+  }
+  return {
+    layer0,
+    tenantLayer0Verdict,
+    crossedByPlatformAdmin,
+    ...(undeclaredExternalScope ? { undeclaredExternalScopePosture: this.tenancyPosture } : {}),
+  };
+}
+
 /** The body of `SecurityPlugin#isVerifiedPlatformOwnerSession`; the method's docblock there is its contract. */
 export async function isVerifiedPlatformOwnerSession(
   this: Pick<RlsFilterHost, 'ql'>,

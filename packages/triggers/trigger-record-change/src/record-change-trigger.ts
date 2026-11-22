@@ -3,7 +3,7 @@
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { HookContext } from '@objectstack/spec/data';
 import { recordChangeTriggerHookEvents } from '@objectstack/spec/automation';
-import { omitInternalFieldsFromWriteResponse } from '@objectstack/core';
+import { omitInternalFieldsFromWriteResponse, runCallerOf } from '@objectstack/core';
 
 import { decoupleFromEngineState } from './decouple-flow-record.js';
 
@@ -589,6 +589,13 @@ export class RecordChangeTrigger implements FlowTrigger {
             // alias was removed in v16, #3290); it feeds the automation context's
             // driver-layer `tenantId` field unchanged.
             ...(session.organizationId ? { tenantId: session.organizationId } : {}),
+            // [ADR-0095 D1] A write of a decided segment of a run that began for
+            // no caller starts this run for no caller too: the writer (the
+            // decider) is its attribution user, as it is the segment's, and the
+            // run records that it has no trigger user (`triggerUserId: null`,
+            // the decision switch's own spelling), so a system run is not judged
+            // by the decider's organization wall.
+            ...(runCallerOf(ctx.session) === null ? { triggerUserId: null } : {}),
             // The administrator at the keyboard when the triggering write came
             // from an impersonation session, read off the write's PROVENANCE
             // (never its session: the session is the impersonated user's), so
