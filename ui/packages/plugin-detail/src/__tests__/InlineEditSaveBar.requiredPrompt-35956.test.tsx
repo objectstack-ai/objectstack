@@ -19,8 +19,15 @@
  *      conflict dialog over it, as a plain Save's 409 does (L1 7057894230
  *      S1): its Overwrite sends the draft AND the typed values at the version
  *      the server reported, its Cancel comes back to the typed values.
- *   5. Control: a draft that makes nothing required saves at once, as before;
- *      and the drawer's per-field callback mode never asks.
+ *   5. Control: a draft that makes nothing required saves at once, as before.
+ *
+ * objectstack#35995 — the drawer's per-field callback mode asks too, when its
+ * host hands the bar the record and the data source (`RecordDetailPanel`
+ * does): Save writes the change and the typed values in ONE guarded update at
+ * the version the edit began on, never through the per-field callback; Cancel
+ * writes nothing; a change that makes nothing required still goes through the
+ * callback at once; a 409 keeps the fill-in dialog open under the conflict
+ * dialog.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react';
@@ -29,6 +36,7 @@ import React from 'react';
 import { InlineEditProvider, RecordContextProvider, useInlineEdit } from '@object-ui/react';
 import { registerAllFields } from '@object-ui/fields';
 import { InlineEditSaveBar } from '../InlineEditSaveBar';
+import { RecordDetailPanel } from '../RecordDetailPanel';
 
 registerAllFields();
 afterEach(() => cleanup());
@@ -59,22 +67,23 @@ function Harness() {
 
 function renderBar(update: ReturnType<typeof vi.fn>, extra: Partial<React.ComponentProps<typeof InlineEditSaveBar>> = {}) {
   const refresh = vi.fn().mockResolvedValue(undefined);
-  render(
-    <RecordContextProvider objectName="deal" recordId="d1" data={DATA} objectSchema={OBJECT_SCHEMA} dataSource={{ update } as never}>
+  const tree = (data: typeof DATA) => (
+    <RecordContextProvider objectName="deal" recordId="d1" data={data} objectSchema={OBJECT_SCHEMA} dataSource={{ update } as never}>
       <InlineEditProvider canEdit>
         <Harness />
         <InlineEditSaveBar
           dataSource={{ update }}
           objectName="deal"
           recordId="d1"
-          data={DATA}
+          data={data}
           refresh={refresh}
           {...extra}
         />
       </InlineEditProvider>
-    </RecordContextProvider>,
+    </RecordContextProvider>
   );
-  return { refresh };
+  const { rerender } = render(tree(DATA));
+  return { refresh, rereadAs: (data: typeof DATA) => rerender(tree(data)) };
 }
 
 const winReasonInput = (dialog: HTMLElement) =>
@@ -147,13 +156,15 @@ describe('InlineEditSaveBar asks for the fields a draft makes required (objectst
     expect(screen.queryByTestId('required-fields-dialog')).toBeNull();
   });
 
-  it('control: the per-field callback mode (drawer) never asks', async () => {
+  it('the per-field callback mode (drawer) asks too, and writes nothing yet (objectstack#35995)', async () => {
     const update = vi.fn().mockResolvedValue({});
     const onFieldSave = vi.fn().mockResolvedValue(undefined);
     renderBar(update, { onFieldSave });
     stageWon();
-    await waitFor(() => expect(onFieldSave).toHaveBeenCalledWith('stage', 'won'));
-    expect(screen.queryByTestId('required-fields-dialog')).toBeNull();
+    const dialog = await screen.findByTestId('required-fields-dialog');
+    expect(winReasonInput(dialog)).toBeTruthy();
+    expect(onFieldSave).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
   });
 
   describe('a 409 of the combined write opens the conflict dialog, as a plain Save does', () => {
@@ -195,5 +206,135 @@ describe('InlineEditSaveBar asks for the fields a draft makes required (objectst
       expect(update).toHaveBeenCalledTimes(1);
       expect(screen.getByTestId('editing')).toHaveTextContent('editing');
     });
+  });
+});
+
+describe('the drawer\'s per-field callback mode asks for the fields a change makes required (objectstack#35995)', () => {
+  it('Save writes the change and the typed value in ONE guarded update, never through the callback', async () => {
+    const update = vi.fn().mockResolvedValue({});
+    const onFieldSave = vi.fn().mockResolvedValue(undefined);
+    renderBar(update, { onFieldSave });
+    stageWon();
+    const dialog = await screen.findByTestId('required-fields-dialog');
+    fireEvent.change(winReasonInput(dialog), { target: { value: 'Better price' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(screen.getByTestId('editing')).toHaveTextContent('idle'));
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenCalledWith('deal', 'd1', { stage: 'won', win_reason: 'Better price' }, { ifMatch: 'v1' });
+    expect(onFieldSave).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('required-fields-dialog')).toBeNull();
+  });
+
+  it('the guard is the version the edit began on, not one read again meanwhile', async () => {
+    const update = vi.fn().mockResolvedValue({});
+    const onFieldSave = vi.fn().mockResolvedValue(undefined);
+    const { rereadAs } = renderBar(update, { onFieldSave });
+    fireEvent.click(screen.getByText('edit-enter'));
+    fireEvent.click(screen.getByText('edit-stage-won'));
+    // The host reads the record again mid-edit (a write elsewhere).
+    rereadAs({ ...DATA, priority: 'high', updated_at: 'v2' });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    const dialog = await screen.findByTestId('required-fields-dialog');
+    fireEvent.change(winReasonInput(dialog), { target: { value: 'Better price' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+    expect(update).toHaveBeenCalledWith('deal', 'd1', { stage: 'won', win_reason: 'Better price' }, { ifMatch: 'v1' });
+  });
+
+  it('Cancel writes nothing and keeps the field\'s edit', async () => {
+    const update = vi.fn().mockResolvedValue({});
+    const onFieldSave = vi.fn().mockResolvedValue(undefined);
+    renderBar(update, { onFieldSave });
+    stageWon();
+    const dialog = await screen.findByTestId('required-fields-dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByTestId('required-fields-dialog')).toBeNull());
+    expect(update).not.toHaveBeenCalled();
+    expect(onFieldSave).not.toHaveBeenCalled();
+    expect(screen.getByTestId('editing')).toHaveTextContent('editing');
+    expect(screen.getByTestId('draft')).toHaveTextContent('"stage":"won"');
+  });
+
+  it('control: a change that makes nothing required saves at once through the callback, as before', async () => {
+    const update = vi.fn().mockResolvedValue({});
+    const onFieldSave = vi.fn().mockResolvedValue(undefined);
+    renderBar(update, { onFieldSave });
+    fireEvent.click(screen.getByText('edit-enter'));
+    fireEvent.click(screen.getByText('edit-priority'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(onFieldSave).toHaveBeenCalledWith('priority', 'high'));
+    expect(onFieldSave).toHaveBeenCalledTimes(1);
+    expect(update).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('required-fields-dialog')).toBeNull();
+  });
+
+  it('a 409 keeps the fill-in dialog open under the conflict dialog, with the value still typed', async () => {
+    const conflict = {
+      code: 'CONCURRENT_UPDATE',
+      currentVersion: 'v2',
+      currentRecord: { ...DATA, priority: 'high', updated_at: 'v2' },
+    };
+    const update = vi.fn().mockRejectedValueOnce(conflict).mockResolvedValueOnce({});
+    const onFieldSave = vi.fn().mockResolvedValue(undefined);
+    renderBar(update, { onFieldSave });
+    stageWon();
+    const dialog = await screen.findByTestId('required-fields-dialog');
+    fireEvent.change(winReasonInput(dialog), { target: { value: 'Better price' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(screen.getByRole('alertdialog')).toBeInTheDocument());
+    expect(winReasonInput(screen.getByTestId('required-fields-dialog')).value).toBe('Better price');
+    fireEvent.click(screen.getByRole('button', { name: /overwrite/i }));
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
+    expect(update).toHaveBeenLastCalledWith('deal', 'd1', { stage: 'won', win_reason: 'Better price' }, { ifMatch: 'v2' });
+    expect(onFieldSave).not.toHaveBeenCalled();
+  });
+
+  it('control: with no data source handed over there is no one write to make, so it never asks', async () => {
+    const update = vi.fn().mockResolvedValue({});
+    const onFieldSave = vi.fn().mockResolvedValue(undefined);
+    renderBar(update, { onFieldSave, dataSource: undefined });
+    stageWon();
+    await waitFor(() => expect(onFieldSave).toHaveBeenCalledWith('stage', 'won'));
+    expect(screen.queryByTestId('required-fields-dialog')).toBeNull();
+  });
+
+  it('RecordDetailPanel hands the bar what it needs: the drawer asks before its per-field save', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ record: { visible: true } }) })));
+    try {
+      const schema = {
+        name: 'task',
+        fields: {
+          subject: { type: 'text', label: 'Subject' },
+          status: { type: 'text', label: 'Status' },
+          outcome: { type: 'text', label: 'Outcome', requiredWhen: 'record.status == "done"' },
+        },
+      };
+      const record = { id: 't1', subject: 'Call Acme', status: 'open', outcome: null, updated_at: 'v1' };
+      const update = vi.fn().mockResolvedValue({});
+      const onFieldSave = vi.fn().mockResolvedValue(undefined);
+      render(
+        <RecordDetailPanel
+          record={record}
+          objectName="task"
+          recordId="t1"
+          dataSource={{ update } as never}
+          objectSchema={schema as never}
+          onFieldSave={onFieldSave}
+        />,
+      );
+      fireEvent.doubleClick(screen.getByText('open'));
+      fireEvent.change(screen.getByDisplayValue('open'), { target: { value: 'done' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      const dialog = await screen.findByTestId('required-fields-dialog');
+      const outcome = dialog.querySelector<HTMLInputElement>('[data-required-fields-field="outcome"] input')!;
+      fireEvent.change(outcome, { target: { value: 'Signed' } });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+      expect(update).toHaveBeenCalledWith('task', 't1', { status: 'done', outcome: 'Signed' }, { ifMatch: 'v1' });
+      expect(onFieldSave).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
