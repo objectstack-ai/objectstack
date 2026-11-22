@@ -329,14 +329,15 @@ function resolveWidth(width: string | number | undefined): string | undefined {
   return width;
 }
 
-/** Hard floor for drag-resize — narrower than this and the body becomes unusable. */
-const DRAWER_MIN_PX = 360;
 /**
- * The widest a reader can drag the pane, as a share of the viewport
- * (objectstack#27545: wider than that is what the full page is for). A
- * remembered width beyond it draws at this bound.
+ * The drag range of the pane (objectstack#36149): 380 px to 900 px. Narrower
+ * and the body becomes unusable; wider is what the full page is for. A
+ * remembered width below it is not used, one above it draws at 900, and the
+ * pane never draws wider than the viewport leaves it
+ * (`sm:w-[calc(100%-1rem)]`).
  */
-const DRAWER_MAX_VW = 60;
+const DRAWER_MIN_PX = 380;
+const DRAWER_MAX_PX = 900;
 
 /**
  * Whether an `Esc` belongs to the element it was pressed in rather than to the
@@ -416,7 +417,7 @@ function useDrawerResize(
     e.preventDefault();
     draggingRef.current = true;
 
-    const maxPx = Math.floor((window.innerWidth * DRAWER_MAX_VW) / 100);
+    const maxPx = DRAWER_MAX_PX;
     // The drawer is right-anchored, at the viewport's edge.
     const paneRight = e.currentTarget.parentElement?.getBoundingClientRect().right || window.innerWidth;
     document.body.style.cursor = 'col-resize';
@@ -563,7 +564,7 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   // even when it was remembered at a wider viewport; otherwise the host's
   // width as given.
   const paneWidthCss = resize.width != null
-    ? `min(${resize.width}px, ${DRAWER_MAX_VW}vw)`
+    ? `${Math.min(resize.width, DRAWER_MAX_PX)}px`
     : resolveWidth(width) ?? '42rem';
   const widthStyle: React.CSSProperties = {
     ['--ov-w' as any]: paneWidthCss,

@@ -55,6 +55,7 @@ import { RECORD_FORM_CREATE_VALUES_STATE } from '../utils/recordFormNavigation.j
 import { viewTabLabel } from './viewTabLabel.js';
 import { listRecordDetailUrl, listRecordActionsValue } from './objectViewRecordLinks.js';
 import { RECORD_PAGE_PUSHED_STATE } from './recordPagePush.js';
+import { RECORD_PREVIEW_DEFAULT_WIDTH } from './recordDrawerContext.js';
 import { servesRecordRead } from '../utils/recordReadServed.js';
 import {
     expandedRecordPath,
@@ -188,12 +189,12 @@ function splitRecordFormSearch(search: string): { form: string; origin: URLSearc
 type OverlaySizeBucket = 'sm' | 'md' | 'lg' | 'xl' | 'full';
 
 /**
- * The record pane's size bucket (objectstack#27545): `auto` — or no size —
- * is `md` (720 px) whatever the object's field count; an authored bucket
- * stands as authored.
+ * The record pane's width before any drag (objectstack#36149): an authored
+ * size bucket stands as authored; `auto` — or no size — is the side
+ * preview's 460, whatever the object's field count.
  */
-function recordPaneSize(size: 'auto' | OverlaySizeBucket | undefined): OverlaySizeBucket {
-    return !size || size === 'auto' ? 'md' : size;
+function recordPaneWidth(size: 'auto' | OverlaySizeBucket | undefined, objectDef: unknown): string {
+    return !size || size === 'auto' ? RECORD_PREVIEW_DEFAULT_WIDTH : overlayWidthFor(size, objectDef);
 }
 
 export function useObjectViewRecordNavigation({
@@ -261,13 +262,13 @@ export function useObjectViewRecordNavigation({
             // view that declares one behaves as one that declares nothing.
             // The drawer's width still reads the authored `size` bucket (or the
             // deprecated pixel `width`, objectstack-ai/objectstack#2578): `auto`
-            // is the pane's 720 (objectstack#27545), clamped to the viewport.
+            // is the side preview's 460 (objectstack#36149), clamped to the viewport.
             // `openNewTab: true` stays live: the name opens the page in a new tab.
             return {
                 mode: 'drawer',
                 openNewTab: authored?.openNewTab,
-                width: authored?.width ?? overlayWidthFor(
-                    recordPaneSize((authored as { size?: 'auto' | OverlaySizeBucket } | undefined)?.size),
+                width: authored?.width ?? recordPaneWidth(
+                    (authored as { size?: 'auto' | OverlaySizeBucket } | undefined)?.size,
                     objectDef,
                 ),
             };

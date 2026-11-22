@@ -63,7 +63,6 @@ import {
   type RecordHeaderBar,
   ObjectIconTile,
 } from '@object-ui/components';
-import { overlayWidthFor } from '@object-ui/plugin-view/core';
 import type { FieldContainerLike } from '@object-ui/core';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
@@ -80,6 +79,8 @@ import {
 } from '../urlParams.js';
 import { appRecordPath, routableObjectNames } from './RelatedRecordActionsBridge.js';
 import {
+  RECORD_PREVIEW_DEFAULT_WIDTH,
+  RECORD_PREVIEW_WIDTH_KEY,
   RecordDrawerContext,
   RecordPaneBarContext,
   RecordPaneContext,
@@ -955,9 +956,10 @@ export function RecordPageDrawerHost({
   );
 
   const rootDef = root ? objects.find((o) => (o as { name?: unknown } | null)?.name === root.objectName) : undefined;
-  // The pane's own width (objectstack#27545): an authored one, else `md`.
+  // The pane's own width (objectstack#27545): an authored one, else the side
+  // preview's 460 (objectstack#36149).
   const rootWidth = (rootDef as { navigation?: { width?: string | number } } | undefined)?.navigation?.width
-    ?? overlayWidthFor('md', rootDef);
+    ?? RECORD_PREVIEW_DEFAULT_WIDTH;
 
   return (
     <RecordDrawerContext.Provider value={api}>
@@ -966,7 +968,7 @@ export function RecordPageDrawerHost({
         stack={stack}
         open={!!root}
         width={rootWidth}
-        storageKey={root ? `drawer-width:${root.objectName}` : undefined}
+        storageKey={root ? RECORD_PREVIEW_WIDTH_KEY : undefined}
         objects={objects}
         onClose={close}
         onOpenAsPage={openAsPage}

@@ -90,3 +90,20 @@ export function opensInRecordDrawer(objectDef: unknown): boolean {
   const mode = (objectDef as { navigation?: { mode?: unknown } } | null | undefined)?.navigation?.mode;
   return mode == null || mode === 'drawer';
 }
+
+/**
+ * The side preview's width until the reader drags it (objectstack#36149):
+ * 460 px — the list beside it keeps its first three columns on a 1440 px
+ * window — never wider than the viewport allows.
+ */
+export const RECORD_PREVIEW_DEFAULT_WIDTH = 'min(92vw, 460px)';
+
+/**
+ * The one remembered width of the side preview, every object's
+ * (objectstack#36149): a width the reader dragged is kept for the next
+ * record, whatever its object, so the preview never changes width from one
+ * record to the next. `NavigationOverlay` stores it as `ov:` + this key; the
+ * hyphen keeps it apart from every per-object key (`drawer-width:` + an
+ * object's snake_case name).
+ */
+export const RECORD_PREVIEW_WIDTH_KEY = 'drawer-width:record-preview';

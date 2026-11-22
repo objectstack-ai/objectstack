@@ -21,6 +21,7 @@ import { lazy, Suspense, type ReactNode } from 'react';
 import type { NavigationOverlayMode } from '@object-ui/components';
 import { SkeletonDetail } from '../skeletons/index.js';
 import { RecordStackDrawer, useRecordDrawerStack } from './recordDrawerStack.js';
+import { RECORD_PREVIEW_WIDTH_KEY } from './recordDrawerContext.js';
 import type { useObjectViewRecordNavigation } from './objectViewRecordNavigation.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
 
@@ -75,7 +76,8 @@ export function ObjectViewRecordOverlay({
                  onClose={handleDrawerClose}
                  onOpenAsPage={handleOpenAsPage}
                  stepScope={stepScope}
-                 storageKey={`drawer-width:${objectDef.name}`}
+                 // objectstack#36149 — one remembered width for every object.
+                 storageKey={RECORD_PREVIEW_WIDTH_KEY}
                  objects={objects}
                  renderRecord={(level) => (
                      <Suspense fallback={<SkeletonDetail />}>
