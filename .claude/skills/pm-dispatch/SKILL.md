@@ -201,7 +201,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 - 终稿 = 席位照自己读的 diff 校正 dev 草稿、加席位意见行,置顶席位记录;维护者只读评论。
 - `pm:awaiting-merge` 只挂 PR、不入六态,与请审同为等人批清单,随获批或撤回判决离开。
 - 批准后再推亦不过期;席位落地 = 过落地前检、清标、ready、auto-merge,踢出/变基同法。
-- ③ 请审 = 席位交棒:ACCEPT 与现 head 同形 PASS 俱在案,同轮中继 `pr_request_reviewers` 请审批人。
+- ③ 请审 = 交棒:ACCEPT 与现 head 同形 PASS 俱在案,同轮一笔 `label-write.mjs --handoff` 交②③。
 - 作者是审批人 ⇒ `assign` 它、请其余(请它必 422);⛔ 永不请席位自身账号;Tier S 不交人。
 - `pr_create` 派不请;`pr_ready` 只补交棒漏;非例外 head 移 ⇒ 撤挂回等;脱中继 PR 自读请/派。
 - 速读「要你做什么」求批点名 PASS 评论 id+`Head-sha`;无 PASS ⇒ 写 contract review owed 不求批。

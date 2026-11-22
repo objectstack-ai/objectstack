@@ -14,7 +14,7 @@
 - 工作项面:卡片、裁决与分诊评论列的工作项逐条对树核验是否仍未完成,⛔ 不对卡核验。
 - 软顶:本席已验收等人批的 Tier H PR 逾 5 ⇒ 停派 Tier H,S/非受管照常,轮报列积压;两周复测。
 - 每轮按现 head 核本席终局四件套 PR:席位记录/`pm:awaiting-merge`/请审/终版速读,缺件同轮补。
-- 四件读数器:本地 `node scripts/pm/check-half-states.mjs` H43/H48 只读受管 H;超行无受管 PR 自读。
+- 四件读数器:每 PR 跑 `label-write.mjs --issue PR --handoff --dry-run`,含超行与收窄;7 即缺件。
 - single-writer 路径 = `SINGLE_CLAIM_PATHS` 所枚举;共享其它路径是普通并发,后落地方解冲突。
 - 第 N 单派发前跑 `scripts/pm/os-verify-lock.sh --depth`:≥ `LOCK_DEPTH_HOLD`(= 2)即等(exit 1)。
 - 同批独立按文件面不相交判,⛔ 不按包/check 名;有效上限随锁宽,⛔ 不是第二个 `batch`。

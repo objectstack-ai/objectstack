@@ -25,7 +25,7 @@ import { readRunRecords, redactWorkDir, ScenarioRunRecordSchema, type ScenarioRu
 import { buildTranscript, mergeRecordings, renderTranscript } from '../../src/export/transcript.js';
 import type { CaptureScreenshots } from '../../src/export/screenshots.js';
 import { main, parseExportArgs, renderSummary } from '../../src/export/cli.js';
-import { stepKey, type Recording } from '../../src/runner/driver.js';
+import { stepKey, type AgentDriver, type Recording } from '../../src/runner/driver.js';
 import type { LoadedScenario } from '../../src/loader.js';
 import type { ScenarioOrigin, ScenarioTier } from '../../src/schema.js';
 import { CARD_ID, loadAllCards, loadCrm, runCrm, tempDir, writeRecord, type FixtureRun } from './fixture.js';
@@ -877,5 +877,33 @@ describe('exportGallery — a record that holds an ask mode (`--modes ask`, #337
     // The same edit on the scratch mode fails it, as before.
     edited.cardRun.modes.find((m) => m.mode === 'scratch')!.run.questions[0]!.notMeasured = 'seed: refused';
     expect(judgeRecord(asRecord(edited)).reasons).toEqual([`${CARD_ID}.scratch.run question tech_accounts: not measured — seed: refused`]);
+  });
+});
+
+describe('buildTranscript — a masking-off round re-grades each reply under the masking its record states', () => {
+  // `partner_user` may not read accounts. On a masking-off round the object is
+  // in its schema, so "the app doesn't record accounts" is no decline there,
+  // and the run graded it so. The transcript re-grades every recorded reply and
+  // refuses one that grades otherwise: it reads the masking off the record.
+  const absent = (scripted: AgentDriver): AgentDriver => ({
+    info: () => scripted.info(),
+    author: (task) => scripted.author(task),
+    ask: async (task) => (task.persona === 'partner_user' && task.step === 'account_count' ? { replyText: "The app doesn't record accounts.", toolCalls: [], meta: { resultSubtype: 'success' } } : scripted.ask(task)),
+  });
+
+  it('shows the grade the run gave under `env.schemaMasking: off`; the same record without the stamp is refused', async () => {
+    const fx = await runCrm({ modes: ['scratch'], iterateRun: false, schemaMasking: 'off', wrap: absent });
+    const record = asRecord(fx.record);
+    expect((record.env as { schemaMasking?: unknown }).schemaMasking).toBe('off');
+    const t = buildTranscript(fx.scenario, record, mergeRecordings([fx.recording]));
+    const asked = t.halves[0]!.turns.find((x) => x.question === 'account_count' && x.persona === 'partner_user')!;
+    expect(asked.answer!.replyText).toBe("The app doesn't record accounts.");
+    expect(asked.grade).toMatchObject({ correct: false, declined: false, problems: ['did not decline a question the persona may not see'] });
+
+    const unstamped = asRecord({ ...fx.record, env: { ...(fx.record.env as Record<string, unknown>), schemaMasking: undefined } });
+    const key = stepKey({ card: CARD_ID, mode: 'scratch', phase: 'run', step: 'account_count', persona: 'partner_user' });
+    expect(() => buildTranscript(fx.scenario, unstamped, mergeRecordings([fx.recording]))).toThrow(
+      `the recorded reply for \`${key}\` grades differently from the run record: the recording is not this run's`,
+    );
   });
 });
