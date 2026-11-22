@@ -48,7 +48,9 @@ const SCHEMA = {
 };
 const RECORD = { id: 'd1', subject: 'Acme deal', deal_stage: 'open', loss_reason: null, memo: 'first call', updated_at: 'v1' };
 
-function renderPanel(opts: { update?: ReturnType<typeof vi.fn>; onFieldSave: ReturnType<typeof vi.fn> }) {
+type FieldSave = (field: string, value: unknown) => Promise<void>;
+
+function renderPanel(opts: { update?: ReturnType<typeof vi.fn>; onFieldSave: FieldSave }) {
   return render(
     <RecordDetailPanel
       record={RECORD}
@@ -76,7 +78,7 @@ const summaryLine = (field: string) =>
 
 describe('the record overlay names a field by its label (objectstack#36310)', () => {
   it('a refused save names the field by its label', async () => {
-    const onFieldSave = vi.fn().mockRejectedValue(new Error('Refused by rule'));
+    const onFieldSave = vi.fn<FieldSave>().mockRejectedValue(new Error('Refused by rule'));
     renderPanel({ onFieldSave });
     editAndSave('open', 'pending');
     await waitFor(() => expect(onFieldSave).toHaveBeenCalledWith('deal_stage', 'pending'));
@@ -85,7 +87,7 @@ describe('the record overlay names a field by its label (objectstack#36310)', ()
   });
 
   it('a refusal naming a declared field the record does not carry is that field\'s, by its label', async () => {
-    const onFieldSave = vi.fn().mockRejectedValue({
+    const onFieldSave = vi.fn<FieldSave>().mockRejectedValue({
       code: 'VALIDATION_FAILED',
       message: 'Validation failed',
       details: { fields: [{ field: 'region_code', message: 'Pick a region first' }] },
@@ -103,7 +105,7 @@ describe('the record overlay names a field by its label (objectstack#36310)', ()
       currentVersion: 'v2',
       currentRecord: { ...RECORD, deal_stage: 'won', updated_at: 'v2' },
     });
-    const onFieldSave = vi.fn().mockResolvedValue(undefined);
+    const onFieldSave = vi.fn<FieldSave>().mockResolvedValue(undefined);
     renderPanel({ update, onFieldSave });
     editAndSave('open', 'lost');
     const ask = await screen.findByTestId('required-fields-dialog');
@@ -120,7 +122,7 @@ describe('the record overlay names a field by its label (objectstack#36310)', ()
   });
 
   it('control: a field that declares no label still reads by its name', async () => {
-    const onFieldSave = vi.fn().mockRejectedValue(new Error('Too short'));
+    const onFieldSave = vi.fn<FieldSave>().mockRejectedValue(new Error('Too short'));
     renderPanel({ onFieldSave });
     editAndSave('first call', 'x');
     await waitFor(() => expect(onFieldSave).toHaveBeenCalledWith('memo', 'x'));
