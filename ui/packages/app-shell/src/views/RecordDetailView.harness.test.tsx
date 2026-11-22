@@ -1649,7 +1649,7 @@ describe('RecordDetailView.feedRefusal-11195', () => {
     } as any;
   }
 
-  function renderDetail(dataSource: any) {
+  function renderDetail(dataSource: any, { embedded = true }: { embedded?: boolean } = {}) {
     return render(
       <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}?related=timeline`]}>
         <MetadataCtx.Provider value={makeMetadata()}>
@@ -1659,7 +1659,7 @@ describe('RecordDetailView.feedRefusal-11195', () => {
             onEdit={() => {}}
             objectNameOverride={OBJECT_NAME}
             recordIdOverride={RECORD_ID}
-            embedded
+            embedded={embedded}
           />
         </MetadataCtx.Provider>
       </MemoryRouter>,
@@ -1811,7 +1811,8 @@ describe('RecordDetailView.feedRefusal-11195', () => {
       });
 
       window.localStorage.clear();
-      renderDetail(dataSource);
+      // objectstack#36225 — the comment panel is the full page's: a preview has none.
+      renderDetail(dataSource, { embedded: false });
 
       expect(await screen.findByText('Stage moved to qualified')).toBeTruthy();
       // The 动态 stream holds no comments, so their refusal is not its to say.
