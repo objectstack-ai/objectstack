@@ -23,6 +23,7 @@
  * is pinned in `ObjectView.viewConfigSaveWiring-10210.test.tsx`.
  */
 
+import { useState } from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, act, waitFor, cleanup } from '@testing-library/react';
 import { MetadataClient } from '@object-ui/data-objectstack';
@@ -92,6 +93,10 @@ function viewDoor(start: { draft?: Record<string, unknown> } = {}) {
   const publishes: Array<Record<string, unknown>> = [];
   let parked: { release: () => void } | null = null;
   let parkNext = false;
+  let parkedPut: { release: () => void } | null = null;
+  let parkNextPut = false;
+  let putArrived: () => void = () => {};
+  const putArrival = new Promise<void>((resolve) => { putArrived = resolve; });
   let publishArrived: () => void = () => {};
   const arrived = new Promise<void>((resolve) => { publishArrived = resolve; });
 
@@ -138,6 +143,11 @@ function viewDoor(start: { draft?: Record<string, unknown> } = {}) {
       return json(200, { success: true });
     }
     if (method !== 'PUT' || url.searchParams.get('mode') !== 'draft') return json(404, { error: 'not modelled' });
+    if (parkNextPut) {
+      parkNextPut = false;
+      putArrived();
+      await new Promise<void>((resolve) => { parkedPut = { release: resolve }; });
+    }
     const headers = new Headers(init?.headers);
     const ifMatch = headers.get('If-Match');
     const ifNoneMatch = headers.get('If-None-Match');
@@ -173,12 +183,23 @@ function viewDoor(start: { draft?: Record<string, unknown> } = {}) {
     releasePublish(): void {
       parked?.release();
     },
+    /** Park the next draft save once it arrives, before the door judges it; resolves when it has. */
+    holdNextPut(): Promise<void> {
+      parkNextPut = true;
+      return putArrival;
+    },
+    releasePut(): void {
+      parkedPut?.release();
+    },
   };
 }
 
 type Door = ReturnType<typeof viewDoor>;
 
-/** The panel, hosted the way `handleViewConfigSave` hosts it. */
+/**
+ * The panel, hosted the way `handleViewConfigSave` hosts it, by a host that
+ * closes it on Discard the way `ObjectView` does.
+ */
 function mountPanel(door: Door) {
   const outcomes: string[] = [];
   const onSave = vi.fn(async (draft: Record<string, any>, saveDraft?: DraftVersionGuard['save']) => {
@@ -197,19 +218,25 @@ function mountPanel(door: Door) {
       return false;
     }
   });
-  render(
-    <ViewConfigPanel
-      open
-      mode="edit"
-      onClose={vi.fn()}
-      activeView={{ id: VIEW_ID, label: 'Everything', type: 'grid', columns: ['name'], filter: [], sort: [] }}
-      objectDef={{ name: OBJECT, fields: { name: { label: 'Name', type: 'text' } } }}
-      onViewUpdate={vi.fn()}
-      onSave={onSave}
-      metadataClient={door.client}
-    />,
-  );
-  return { onSave, outcomes };
+  const host: { reopen: () => void } = { reopen: () => {} };
+  function Host() {
+    const [open, setOpen] = useState(true);
+    host.reopen = () => setOpen(true);
+    return (
+      <ViewConfigPanel
+        open={open}
+        mode="edit"
+        onClose={() => setOpen(false)}
+        activeView={{ id: VIEW_ID, label: 'Everything', type: 'grid', columns: ['name'], filter: [], sort: [] }}
+        objectDef={{ name: OBJECT, fields: { name: { label: 'Name', type: 'text' } } }}
+        onViewUpdate={vi.fn()}
+        onSave={onSave}
+        metadataClient={door.client}
+      />
+    );
+  }
+  render(<Host />);
+  return { onSave, outcomes, reopen: () => act(() => host.reopen()) };
 }
 
 const saveButton = () => screen.getByTestId('view-config-save') as HTMLButtonElement;
@@ -290,6 +317,48 @@ describe('a view settings save between 「Save to this view」\'s draft write an
     });
     await waitFor(() => expect(outcomes).toEqual(['reloaded', 'saved']));
     expect(door.puts[door.puts.length - 1]).toMatchObject({ ifNoneMatch: '*', status: 200 });
+    cleanup();
+  });
+
+  it('refused after the panel closed, still asks, and Save is live again once answered', async () => {
+    const door = viewDoor();
+    const { outcomes, reopen } = mountPanel(door);
+    await loadedAndEdited();
+    const parked = door.holdNextPublish();
+    const saveToView = saveAndPublishRuntimeMetadata('view', VIEW_ID, SAVE_TO_VIEW_BODY, { metadataClient: door.client });
+    await parked;
+
+    // The settings save is sent, and the panel closes (Discard) before the door answers it.
+    const putParked = door.holdNextPut();
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    await putParked;
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('view-config-discard'));
+    });
+    expect(screen.queryByTestId('view-config-save')).toBeNull();
+
+    // The refusal lands on the closed panel: the dialog is still shown.
+    await act(async () => {
+      door.releasePut();
+    });
+    await waitFor(() => expect(screen.getByTestId('draft-conflict-dialog')).toBeTruthy());
+    expect(door.puts[door.puts.length - 1]).toMatchObject({ ifNoneMatch: '*', label: 'Settings edit', status: 409 });
+    door.releasePublish();
+    await expect(saveToView).resolves.toBe('published');
+    expect(door.publishes).toEqual([SAVE_TO_VIEW_BODY]);
+
+    // Keep editing: the host hears the refusal, and the save is no longer in flight.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('draft-conflict-cancel'));
+    });
+    await waitFor(() => expect(outcomes).toHaveLength(1));
+    expect(outcomes[0]).toMatch(/^refused: /);
+    await reopen();
+    await waitFor(() => expect(screen.getByTestId('mock-inspector-shown-label').textContent).toBe('Everything'));
+    fireEvent.click(screen.getByTestId('mock-inspector-label'));
+    expect(saveButton().disabled).toBe(false);
     cleanup();
   });
 });

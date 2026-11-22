@@ -433,7 +433,17 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
     if (!open) {
         // Keep the slide container (owned by ObjectView) able to collapse to
         // zero width without rendering inspector internals while hidden.
-        return <div ref={panelRef} tabIndex={-1} data-testid="view-config-panel" aria-hidden />;
+        //
+        // objectstack#36137 — the conflict dialog is rendered here too: a
+        // save still in flight when the panel closes (Discard, another view
+        // tab) can be refused after it closed, and the guard then waits on
+        // the author's choice. Without the dialog nothing would answer it,
+        // and Save would stay disabled. It portals out of this hidden div.
+        return (
+            <div ref={panelRef} tabIndex={-1} data-testid="view-config-panel" aria-hidden>
+                {draftConflictDialog}
+            </div>
+        );
     }
 
     return (
