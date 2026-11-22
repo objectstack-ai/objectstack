@@ -252,8 +252,10 @@ describe('the route element chunk loads beside the route reads (objectui#12980)'
     await waitFor(() => expect(chunks.page.requested).toBe(true));
     expect(chunks.page.splashUpWhenRequested).toBe(true);
     expect(splashUp()).toBe(true);
-    // objectstack#35981 — the chrome is up; the route's skeleton is the boot wait.
-    expect(screen.getByTestId('console-layout')).toBeInTheDocument();
+    // objectstack#35981 — the chrome comes up (once the deployment flags have
+    // answered, a promise apart from the chunk's); the route's skeleton is the
+    // boot wait.
+    await waitFor(() => expect(screen.getByTestId('console-layout')).toBeInTheDocument());
     expect(screen.getByTestId('route-metadata-skeleton')).toHaveAttribute('data-boot-splash');
     expect(meta.status.page).toBe('loading');
 
