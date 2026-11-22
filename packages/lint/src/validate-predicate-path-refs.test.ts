@@ -902,7 +902,7 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     ).toBe(19);
 
     const findings = validatePredicatePathRefs({ views: [objectForm] });
-    expect(findings).toHaveLength(18);
+    expect(findings).toHaveLength(19);
     expect(new Set(findings.map((f) => f.rule))).toEqual(new Set([PREDICATE_PATH_UNROOTED]));
     expect(findings[0].message).toContain('`type`');
   });

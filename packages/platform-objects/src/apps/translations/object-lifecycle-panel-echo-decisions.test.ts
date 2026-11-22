@@ -1307,7 +1307,10 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // 759 since #36290's field off switch: the object form's `fields`
       // repeater and the field form each offer a `fieldHistory` row — two
       // row labels, authored in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(759);
+      // 761 since #35315: the object form's `fields` repeater and the field
+      // form each offer a `transferBehavior` row — two row labels, authored in
+      // all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(761);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

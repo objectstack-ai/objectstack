@@ -1005,7 +1005,10 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     // 130 since #36290 gave the `fields` repeater its `fieldHistory` sub-row
     // (a field's off switch for old → new values) — label and help text,
     // authored in every translated locale, so `openEchoes` stays at zero.
-    expect(OPEN_LEAVES.length).toBe(130);
+    // 132 since #35315 gave the `fields` repeater its `transferBehavior`
+    // sub-row (the Change Owner cascade) — label and help text, authored in
+    // every translated locale, so `openEchoes` stays at zero.
+    expect(OPEN_LEAVES.length).toBe(132);
     expect(PANEL_LEAVES.some((l) => l.path === 'fields.placeholder')).toBe(false);
     expect(OPEN_LEAVES.some((l) => l.path === 'fields.placeholder')).toBe(true);
     for (const path of ['name', 'label', 'fields', 'fields.valueDomain', 'fields.deleteBehavior', 'fields.expression']) {
