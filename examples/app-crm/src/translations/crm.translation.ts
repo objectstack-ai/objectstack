@@ -128,6 +128,11 @@ export const CrmTranslationBundle = defineTranslationBundle({
           website: { label: '官网' },
           owner_id: { label: '负责人' },
         },
+        // The account's field groups, keyed by `fieldGroups[].key`.
+        _sections: {
+          basic: { label: '基本信息' },
+          financials: { label: '财务信息' },
+        },
       },
       crm_contact: {
         label: '联系人',

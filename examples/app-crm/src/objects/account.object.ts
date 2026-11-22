@@ -46,4 +46,24 @@ export const Account = ObjectSchema.create({
       label: 'Website',
     }),
   },
+
+  // The Details sections of the record page and the form. Each group lists its
+  // own fields, in order, so no field carries a `group` key.
+  fieldGroups: [
+    { key: 'basic', label: 'Basic', fields: ['name', 'industry', 'website'] },
+    { key: 'financials', label: 'Financials', fields: ['annual_revenue'] },
+  ],
+
+  // The record page's tabs, declared in one place: only the lists named here
+  // show, in this order. An entry may carry its own columns (fields of the
+  // child); the built-in tabs are named by object. Leaving a list out hides its
+  // tab. Without this key every related list is a tab, in the automatic order.
+  relatedLists: [
+    { list: 'crm_contact', columns: ['full_name', 'email'] },
+    'crm_opportunity',
+    'crm_activity',
+    'crm_lead',
+    'sys_approval_request',
+    'sys_activity',
+  ],
 });

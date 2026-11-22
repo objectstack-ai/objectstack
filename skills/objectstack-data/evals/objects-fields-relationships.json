@@ -446,6 +446,25 @@
           "definePage"
         ]
       }
+    },
+    {
+      "id": 26,
+      "prompt": "Our add-on package `acme_contracts` depends on HotCRM (`hotcrm`, namespace `crm`). Its extension of `crm_account` adds a `tax_id` text field, and the package ships an `acme_contract` object whose `account` lookup points at `crm_account`. On the account record page, show Tax ID right after Industry in the Basic section, and the Contracts tab right after Opportunities. `crm_account` declares `fieldGroups: [{ key: 'basic', label: 'Basic', fields: ['name', 'industry', 'website'] }]` and `relatedLists: ['crm_contact', 'crm_opportunity', 'sys_activity']`. We cannot edit HotCRM.",
+      "expected_output": "Two `place` entries on the package's own object extension, registered in its stack's `objectExtensions`: `defineObjectExtension({ extend: 'crm_account', fields: { tax_id: Field.text({ label: 'Tax ID' }) }, place: [{ field: 'tax_id', group: 'basic', after: 'industry' }, { list: 'acme_contract', after: 'crm_opportunity' }] })`. `place` arranges only what the extension brings (its own field, its package's child list), each right after (or `before`) an item the account already has, and it applies here because the account declares `fieldGroups` and `relatedLists`. Without it the field arrives after the account's own and the Contracts tab after the listed tabs. The extension does not carry `fieldGroups` or `relatedLists` of its own (an extension has neither key), does not redeclare the account, and nothing in HotCRM is edited.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "defineObjectExtension",
+          "extend: 'crm_account'",
+          "place:",
+          "after: 'industry'",
+          "after: 'crm_opportunity'"
+        ],
+        "must_not_contain": [
+          "name: 'crm_account'",
+          "overrides:"
+        ]
+      }
     }
   ]
 }
