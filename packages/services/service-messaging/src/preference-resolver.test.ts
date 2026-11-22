@@ -351,6 +351,31 @@ describe('PreferenceResolver — a member’s explicit off beats the organizatio
         expect((await run(rows, { topic: 'other.topic' })).digest).toEqual({ window: '2026-01-01' });
     });
 
+    describe("after a member's explicit no-quiet-hours, the digest keeps the organization window's time zone", () => {
+        // 2026-01-01 23:30 UTC is 2026-01-02 00:30 in Berlin (CET), inside its 22:00–07:00 window.
+        const late = Date.UTC(2026, 0, 1, 23, 30);
+        const BERLIN = { tz: 'Europe/Berlin', start: '22:00', end: '07:00' };
+        const member = row({ user_id: 'u1', quiet_hours: { off: true } });
+        const at = async (rows: any[]) =>
+            (await resolver(() => fakeData(rows).engine).filter(['u1'], ['inbox'], { topic: 'task.assigned', organizationId: 'org_a', now: late }))[0];
+
+        it('quiet hours stay off for the member, and the daily digest flushes at Berlin midnight', async () => {
+            // Quiet hours alone: the member's off decides, nothing is deferred (CONTROL: without it, 07:00 Berlin).
+            expect((await at([row({ quiet_hours: BERLIN })])).notBefore).toBe(Date.UTC(2026, 0, 2, 6, 0));
+            expect(await at([row({ quiet_hours: BERLIN }), member])).toEqual({ recipient: 'u1', channels: ['inbox'] });
+            // Digest: the next row holding a window (the organization's) gives the zone.
+            const out = await at([row({ digest: 'daily', quiet_hours: BERLIN }), member]);
+            expect(out.digest).toEqual({ window: '2026-01-02' });
+            expect(out.notBefore).toBe(Date.UTC(2026, 0, 2, 23, 0)); // 2026-01-03 00:00 Berlin, not 00:00 UTC
+        });
+
+        it('CONTROL: with no window on any row, the digest stays on UTC', async () => {
+            const out = await at([row({ digest: 'daily' }), member]);
+            expect(out.digest).toEqual({ window: '2026-01-01' });
+            expect(out.notBefore).toBe(Date.UTC(2026, 0, 2, 0, 0));
+        });
+    });
+
     it('an organization default row that is explicitly off is no default', async () => {
         expect(await run([row({ digest: 'none', quiet_hours: { off: true } }), row({ user_id: 'u1' })])).toEqual({ recipient: 'u1', channels: ['inbox'] });
     });

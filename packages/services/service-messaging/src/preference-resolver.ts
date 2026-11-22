@@ -224,7 +224,7 @@ export class PreferenceResolver {
                 const cadence = this.resolveDigest(index, recipient, ctx.topic)?.digest;
                 const qh = windowOf(this.resolveQuietHours(index, recipient, ctx.topic));
                 if (cadence === 'daily' || cadence === 'weekly') {
-                    const d = digestDeferral(cadence, nowMs, qh?.tz);
+                    const d = digestDeferral(cadence, nowMs, this.resolveDigestZoneWindow(index, recipient, ctx.topic)?.tz);
                     notBefore = d.notBefore;
                     digest = { window: d.window };
                 } else {
@@ -282,6 +282,25 @@ export class PreferenceResolver {
                 // A row that leaves the field unset decides nothing for it
                 // (ruling 7073270426): only a window or the explicit off stops.
                 if (hit?.quietHours !== undefined) return hit;
+            }
+        }
+        return undefined;
+    }
+
+    /**
+     * The window whose `tz` a digest is batched in (ADR-0030: digest windows
+     * use `quiet_hours.tz`, else UTC). The same walk as
+     * {@link resolveQuietHours}, except that it stops only at a row that holds
+     * a WINDOW: it walks past the explicit off as well as unset. So a member's
+     * own "no quiet hours" turns quiet hours off for them and leaves their
+     * digest at midnight in the time zone of the organization's window; with
+     * no window on any row, the digest stays on UTC.
+     */
+    private resolveDigestZoneWindow(index: Map<string, PrefRowLite>, user: string, topic: string): QuietHours | undefined {
+        for (const u of [user, GLOBAL_USER]) {
+            for (const t of [topic, WILDCARD]) {
+                const window = windowOf(index.get(`${u}|${t}|${WILDCARD}`));
+                if (window) return window;
             }
         }
         return undefined;
