@@ -120,6 +120,16 @@
         "must_contain": ["isoDate(addDays(record.borrow_date, 7))", "F`"],
         "must_not_contain": ["timestamp(record.borrow_date)", "{record."]
       }
+    },
+    {
+      "id": 13,
+      "prompt": "On `ticket`, `labels` is a `tags` field. Write the hook `condition` that is true when the ticket carries the `urgent` label.",
+      "expected_output": "`P`record.labels != null && 'urgent' in record.labels``. `labels` holds a list, so `record.labels == 'urgent'` compares the whole list with a scalar and is refused (`list-equality`): it answers `false` on every row. Test membership with `in`, behind a `!= null` guard, because `in` faults on a `null` list.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["record.labels != null", "in record.labels", "P`"],
+        "must_not_contain": ["record.labels == 'urgent'", "{record."]
+      }
     }
   ]
 }
