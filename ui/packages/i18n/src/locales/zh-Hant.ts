@@ -3520,6 +3520,11 @@ const zhHant = {
     collapse: '收起側邊欄',
     expand: '展開側邊欄',
   },
+  designMode: {
+    title: '設計模式',
+    leaveUnsaved: '離開設計模式？未儲存的改動將會丟失。',
+    saveFailed: '部分改動沒有儲存：{{reason}}',
+  },
   topbar: {
     aiAssistant: 'AI 助手',
     designInStudio: '在 Studio 中設計',

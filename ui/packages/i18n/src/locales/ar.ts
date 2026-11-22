@@ -3754,6 +3754,11 @@ const ar = {
     collapse: 'طي الشريط الجانبي',
     expand: 'توسيع الشريط الجانبي',
   },
+  designMode: {
+    title: 'وضع التصميم',
+    leaveUnsaved: 'هل تريد مغادرة وضع التصميم؟ ستفقد التغييرات غير المحفوظة.',
+    saveFailed: 'لم يتم حفظ بعض التغييرات: {{reason}}',
+  },
   topbar: {
     openAssistant: "فتح مساعد {{name}}",
     offline: "غير متصل",

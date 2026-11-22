@@ -3439,6 +3439,11 @@ const ko = {
     collapse: '사이드바 접기',
     expand: '사이드바 펼치기',
   },
+  designMode: {
+    title: '디자인 모드',
+    leaveUnsaved: '디자인 모드를 종료할까요? 저장하지 않은 변경 사항은 사라집니다.',
+    saveFailed: '일부 변경 사항이 저장되지 않았습니다: {{reason}}',
+  },
   topbar: {
     openAssistant: "{{name}} 어시스턴트 열기",
     offline: "오프라인",

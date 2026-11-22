@@ -3514,6 +3514,11 @@ const pt = {
     collapse: 'Recolher a barra lateral',
     expand: 'Expandir a barra lateral',
   },
+  designMode: {
+    title: 'Modo de design',
+    leaveUnsaved: 'Sair do modo de design? As alterações não salvas serão perdidas.',
+    saveFailed: 'Algumas alterações não foram salvas: {{reason}}',
+  },
   topbar: {
     openAssistant: "Abrir o assistente {{name}}",
     offline: "Off-line",

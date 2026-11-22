@@ -3441,6 +3441,11 @@ const ja = {
     collapse: 'サイドバーを折りたたむ',
     expand: 'サイドバーを展開',
   },
+  designMode: {
+    title: 'デザインモード',
+    leaveUnsaved: 'デザインモードを終了しますか？保存されていない変更は失われます。',
+    saveFailed: '一部の変更が保存されませんでした：{{reason}}',
+  },
   topbar: {
     openAssistant: "{{name}} アシスタントを開く",
     offline: "オフライン",

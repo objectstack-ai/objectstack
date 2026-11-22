@@ -3520,6 +3520,11 @@ const zh = {
     collapse: '收起侧边栏',
     expand: '展开侧边栏',
   },
+  designMode: {
+    title: '设计模式',
+    leaveUnsaved: '离开设计模式？未保存的改动将会丢失。',
+    saveFailed: '部分改动没有保存：{{reason}}',
+  },
   topbar: {
     aiAssistant: 'AI 助手',
     designInStudio: '在 Studio 中设计',
