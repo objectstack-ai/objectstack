@@ -517,7 +517,7 @@
         },
         "max": {
           "status": "live",
-          "note": "objectui GridField.tsx — the star count of a rating cell (RatingField's `max`, default 5); hydrateColumns copies the child rating field's `max` when the column declares no type."
+          "note": "objectui grid-field/GridFieldWidget.tsx — the star count of a rating cell (RatingField's `max`, default 5); hydrateColumns copies the child rating field's `max` when the column declares no type."
         },
         "accept": {
           "status": "live",
