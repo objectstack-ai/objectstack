@@ -13,6 +13,7 @@ import { ComponentRegistry } from '@object-ui/core';
 import { MetadataCtx } from '@object-ui/react';
 import { createI18n, I18nProvider, LocalizationProvider, transformSpecTranslations } from '@object-ui/i18n';
 import type { TranslationData } from '@objectstack/spec/system';
+import { FLOW_TECHNICAL_NODE_TYPES } from '@objectstack/spec/automation';
 import '../renderers/basic/metadata-viewer';
 
 function metaCtx(getItem: (type: string, name: string) => Promise<any>) {
@@ -203,9 +204,9 @@ describe('element:metadata_viewer', () => {
  * A `type: flow` embed names the flow and each step the spec lets a package
  * translate in the reader's language: `flows.<flow>.label` and an `approval`
  * node's `flows.<flow>.approvals.<node_id>.label`, read from the package bundle
- * the host loaded, through the resolution the Studio flow designer uses. A step
- * with no key (start, decision, notify, end) and a key the bundle does not
- * carry fall back to the authored text.
+ * the host loaded, through the resolution the Studio flow designer uses. A key
+ * the bundle does not carry falls back to the authored text. (Every other
+ * drawn step's `nodes.<node_id>.label` is pinned in the describe after this.)
  */
 describe('element:metadata_viewer flow embed: package label translations (flows.FLOW.label, approvals.STEP.label)', () => {
   const OPPORTUNITY_APPROVAL = {
@@ -252,7 +253,7 @@ describe('element:metadata_viewer flow embed: package label translations (flows.
     expect(screen.getByText('销售总监签批')).toBeTruthy();
     expect(screen.queryByText('Sales Manager Review')).toBeNull();
     expect(screen.queryByText('Sales Director Sign-off')).toBeNull();
-    // start, decision, notify and end have no key in the spec's flows group.
+    // The bundle carries no `nodes` key for start, decision, notify or end, so they keep their authored labels.
     for (const authored of ['Start', 'High Value (> $500K)?', 'Email Owner — Approved', 'End']) {
       expect(screen.getByText(authored)).toBeTruthy();
     }
@@ -309,6 +310,118 @@ describe('element:metadata_viewer flow embed: package label translations (flows.
     const target = container.querySelector('[data-flow-branches="check_high_value"] [data-branch-target="director_signoff"]')!;
     expect(target.textContent).toContain('销售总监签批');
     expect(container.textContent).not.toContain('Sales Director Sign-off');
+  });
+});
+
+/**
+ * Ruling 7076440876 (objectstack#35979, option A): every step the business
+ * view draws has a key. A start, decision, notify or end step is named by
+ * `flows.<flow>.nodes.<node_id>.label`; an untitled screen by
+ * `screens.<node_id>.title`; a titled screen by its heading, translated under
+ * that same key, unless the heading holds a `{{ }}` hole a drawing cannot fill.
+ * The steps folded away are the spec's `FLOW_TECHNICAL_NODE_TYPES`, the table
+ * the i18n coverage check reads to ask for exactly these translations.
+ */
+describe('element:metadata_viewer flow embed: every drawn step by its key (flows.FLOW.nodes.NODE.label)', () => {
+  function zhCN(data: TranslationData) {
+    const instance = createI18n({ defaultLanguage: 'zh-CN', detectBrowserLanguage: false });
+    instance.addResourceBundle('zh-CN', 'translation', transformSpecTranslations(data as Record<string, unknown>), true, true);
+    return instance;
+  }
+  // Each render gets its own instance, so "no bundle" (`{}`) never sees an earlier test's resources.
+  function renderIn(data: TranslationData, flow: any, getObject?: () => Promise<any>) {
+    const getItem = vi.fn(async (type: string) => (type === 'object' && getObject ? getObject() : flow));
+    return render(
+      <I18nProvider instance={zhCN(data)} persistLanguage={false}>
+        <Viewer getItem={getItem} properties={{ type: 'flow', name: flow.name }} />
+      </I18nProvider>,
+    );
+  }
+
+  const ONBOARDING = {
+    name: 'onboarding',
+    label: 'Onboarding',
+    nodes: [
+      { id: 'start', type: 'start', label: 'On Hire' },
+      { id: 'pick_path', type: 'decision', label: 'Remote?' },
+      { id: 'tell_it', type: 'notify', label: 'Tell IT' },
+      { id: 'save', type: 'update_record', label: 'Save Hire' },
+      { id: 'confirm', type: 'screen', label: 'Confirm' },
+      { id: 'welcome', type: 'screen', label: 'Welcome screen', config: { title: 'Welcome aboard' } },
+      { id: 'greet', type: 'screen', label: 'Greeting screen', config: { title: 'Hello {{vars.name}}' } },
+      { id: 'end', type: 'end', label: 'Onboarded' },
+    ],
+  };
+  const ZH: TranslationData = {
+    flows: {
+      onboarding: {
+        nodes: { start: { label: '入职时' }, pick_path: { label: '远程？' }, tell_it: { label: '通知 IT' }, end: { label: '已入职' } },
+        screens: { confirm: { title: '确认' }, welcome: { title: '欢迎加入' }, greet: { title: '你好 {{vars.name}}' } },
+      },
+    },
+  };
+
+  it('names start, decision, notify and end steps by their nodes key, and an untitled screen by its screens title', async () => {
+    renderIn(ZH, ONBOARDING);
+    await waitFor(() => expect(screen.getByText('入职时')).toBeTruthy());
+    for (const zh of ['远程？', '通知 IT', '已入职', '确认']) expect(screen.getByText(zh)).toBeTruthy();
+    for (const en of ['On Hire', 'Remote?', 'Tell IT', 'Onboarded', 'Confirm']) expect(screen.queryByText(en)).toBeNull();
+    // The technical record write stays folded away, translated or not.
+    expect(screen.queryByText('Save Hire')).toBeNull();
+  });
+
+  it('names a titled screen by its heading, translated where the bundle carries it, and keeps the label for a heading with a hole', async () => {
+    renderIn(ZH, ONBOARDING);
+    await waitFor(() => expect(screen.getByText('欢迎加入')).toBeTruthy());
+    expect(screen.queryByText('Welcome screen')).toBeNull();
+    // `Hello {{vars.name}}` cannot be filled in a drawing: the authored label, which has no key, stands.
+    expect(screen.getByText('Greeting screen')).toBeTruthy();
+    expect(screen.queryByText(/你好/)).toBeNull();
+    cleanup();
+
+    // No bundle: the heading itself, untranslated.
+    renderIn({}, ONBOARDING);
+    await waitFor(() => expect(screen.getByText('Welcome aboard')).toBeTruthy());
+    expect(screen.getByText('On Hire')).toBeTruthy();
+    expect(screen.getByText('Greeting screen')).toBeTruthy();
+  });
+
+  it('names the step a decision branch leads to by its nodes key too', async () => {
+    const flow = {
+      name: 'onboarding',
+      label: 'Onboarding',
+      nodes: [
+        { id: 'start', type: 'start', label: 'On Hire', config: { objectName: 'hr_hire' } },
+        { id: 'pick_path', type: 'decision', label: 'Remote?' },
+        { id: 'tell_it', type: 'notify', label: 'Tell IT' },
+        { id: 'end', type: 'end', label: 'Onboarded' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'pick_path' },
+        { id: 'e2', source: 'pick_path', target: 'tell_it', type: 'conditional', condition: { dialect: 'cel', source: 'record.remote == true' } },
+        { id: 'e3', source: 'pick_path', target: 'end', isDefault: true },
+      ],
+    };
+    const hire = { name: 'hr_hire', fields: { remote: { type: 'boolean', label: 'Remote' } } };
+    const { container } = renderIn(ZH, flow, async () => hire);
+    await waitFor(() => expect(container.querySelector('[data-flow-branches="pick_path"] [data-branch-target="end"]')).toBeTruthy());
+    expect(container.querySelector('[data-flow-branches="pick_path"] [data-branch-target="tell_it"]')!.textContent).toContain('通知 IT');
+    expect(container.querySelector('[data-flow-branches="pick_path"] [data-branch-target="end"]')!.textContent).toContain('已入职');
+  });
+
+  it('folds away exactly the spec table at business altitude', async () => {
+    const flow = {
+      name: 'plumbing',
+      label: 'Plumbing',
+      nodes: [
+        { id: 'start', type: 'start', label: 'Begin' },
+        ...FLOW_TECHNICAL_NODE_TYPES.map((type) => ({ id: `n_${type}`, type, label: `step ${type}` })),
+      ],
+    };
+    const { container } = renderIn({}, flow);
+    await waitFor(() => expect(screen.getByText('Begin')).toBeTruthy());
+    for (const type of FLOW_TECHNICAL_NODE_TYPES) expect(screen.queryByText(`step ${type}`)).toBeNull();
+    expect(container.querySelectorAll('ol > li')).toHaveLength(1);
   });
 });
 

@@ -2,8 +2,10 @@
 
 /**
  * The flow designer's reading of a package's `flows` translations: the flow's
- * own label (`flows.<flow>.label`) and an `approval` node's step label
- * (`flows.<flow>.approvals.<node_id>.label`), in the viewer's language.
+ * own label (`flows.<flow>.label`) and each step's label by the one key its
+ * node type has (`approvals.<node_id>.label`, an untitled screen's
+ * `screens.<node_id>.title`, any other node's `nodes.<node_id>.label`), in the
+ * viewer's language.
  *
  * The resolution itself is `@object-ui/i18n`'s (`flowLabelTranslations` over
  * `activeFlowsBundle`), the one the runner and the docs viewer's flow embed
