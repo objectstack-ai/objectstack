@@ -182,6 +182,7 @@ export function drillListConditions(
  */
 export function measuredFieldsOf(scope: unknown): string[] {
   return andParts(scope)
+    .filter(isPlainObject)
     .map((part) => Object.entries(part)[0])
     .filter(([field, c]) => !field.startsWith('$') && isPlainObject(c) && c.$null === false && Object.keys(c).length === 1)
     .map(([field]) => field);
