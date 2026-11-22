@@ -138,6 +138,7 @@
  *   flows.<flow>.notices.<node_id>.message                     (#28251)
  *   flows.<flow>.records.<node_id>.fields.<field>              (ruling 6913660232)
  *   flows.<flow>.approvals.<node_id>.label                     (#24916)
+ *   flows.<flow>.nodes.<node_id>.label                         (ruling 7076440876)
  *     ^ walked because the ledger's `flows` row is `live` and warns no
  *       author; a group the ledger does warn on is left out of the walk
  *       (see `authorWarnedTranslationGroups`)
@@ -185,7 +186,7 @@ import {
 import { FLOW_REGION_SLOTS_BY_TYPE, flowScreenFieldOptionKey, isFlowTextEnvelopeShaped, templateSlotSource } from '@objectstack/spec/automation';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { deriveFieldGroupLayout } from '@objectstack/spec/data';
-import { APPROVAL_NODE_TYPE } from '@objectstack/spec/automation';
+import { APPROVAL_NODE_TYPE, isFlowTechnicalNodeType } from '@objectstack/spec/automation';
 import { expandViewContainer, InlineLocaleMapSchema } from '@objectstack/spec/ui';
 import { authorWarnedProperties } from './lint-liveness-properties.js';
 import { walkPageComponents } from './page-walk.js';
@@ -2531,6 +2532,27 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
       // No id, no key: the request's `current_step` could not name the node.
       if (!nodeId) continue;
       pushOptional(out, ['flows', flowName, 'approvals', nodeId, 'label'], node.label, 'flow', scope);
+    }
+
+    // [ruling 7076440876] `flows.<flow>.nodes.<node_id>.label` — the label of
+    // every step the docs viewer's `type: flow` embed draws at its default
+    // altitude (`detail: business`): a top-level node whose type
+    // `isFlowTechnicalNodeType` does not fold away, the one table that viewer
+    // reads. A `screen` and an `approval` are drawn too, but their label is
+    // keyed already (`screens.<node_id>.title`, `approvals.<node_id>.label`),
+    // so they are not asked twice. Start and end nodes are asked like any
+    // other step: the viewer draws the author's words for them, not its own.
+    // A region's nested nodes (ADR-0031) are not drawn by that embed, so they
+    // are accepted by `os validate` but not demanded here.
+    const topLevel: any[] = Array.isArray(flow.nodes) ? flow.nodes : [];
+    for (const node of topLevel) {
+      if (!node || typeof node !== 'object') continue;
+      if (node.type === SCREEN_NODE_TYPE || node.type === APPROVAL_NODE_TYPE) continue;
+      if (isFlowTechnicalNodeType(node.type)) continue;
+      const nodeId = typeof node.id === 'string' && node.id.length > 0 ? node.id : undefined;
+      // No id, no key: nothing could address the step.
+      if (!nodeId) continue;
+      pushOptional(out, ['flows', flowName, 'nodes', nodeId, 'label'], node.label, 'flow', scope);
     }
   }
 }
