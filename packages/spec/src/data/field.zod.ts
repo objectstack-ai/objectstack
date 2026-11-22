@@ -1364,7 +1364,10 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
 }, {
   name: z.string().min(1).describe('Child field this column shows — the key the grid reads and writes on each row object (objectui GridColumn.name). The retired `field` spelling is refused.').meta({ title: 'Name' }),
   label: z.string().optional().describe("Column header; defaults to the child field's label via hydration.").meta({ title: 'Label' }),
-  type: z.enum(['text', 'number', 'currency', 'date', 'datetime', 'time', 'select', 'lookup', 'file']).optional().describe("Cell control, derived from the child field's type when omitted. Declaring it opts the column out of schema hydration — supply the extras (options / reference / …) yourself.").meta({ title: 'Type' }),
+  // #36043 — `user` (people), `multiselect`, `tags`, `boolean` (check) and
+  // `rating` joined the nine. Each member is spelled as its namesake field
+  // type, which the renderer's derivation maps to that same column type.
+  type: z.enum(['text', 'number', 'currency', 'date', 'datetime', 'time', 'select', 'lookup', 'file', 'user', 'multiselect', 'tags', 'boolean', 'rating']).optional().describe("Cell control, derived from the child field's type when omitted: `user` is a person picker, `multiselect` a list holding several of the column's options, `tags` a list of free-form tags, `boolean` a checkbox and `rating` a row of stars. Declaring it opts the column out of schema hydration — supply the extras (options / reference / …) yourself.").meta({ title: 'Type' }),
   width: z.number().positive().optional().describe('Fixed column width in px; omitted columns use type-based role sizing (text flexes, numeric/date/select stay fixed).').meta({ title: 'Width' }),
   required: z.boolean().optional().describe('Cell is flagged inline-invalid while empty. Computed columns are never required.').meta({ title: 'Required' }),
   options: z.array(strictObject({
@@ -1374,7 +1377,7 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
   }, {
     label: z.string().describe('Option label shown in the select cell.'),
     value: z.string().min(1).describe("Stored option value; must match the child select field's option values."),
-  })).optional().describe("Select-cell options for `type: 'select'`; derived from the child field's options when the column declares no `type`.").meta({ title: 'Options' }),
+  })).optional().describe("Options of a `select` or `multiselect` cell, and the words a `boolean` cell reads as (values `true` / `false`); derived from the child field's options when the column declares no `type`. A `tags` cell reads none: it holds free-form tags.").meta({ title: 'Options' }),
   // #20045 — no default symbol: the grid shows the resolved currency's own
   // symbol when this is omitted (objectui GridField `currencyAdornment`,
   // objectui#10355), so the former 「(default '¥')」 described a fallback the
@@ -1384,7 +1387,8 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
   reference: z.string().optional().describe("Referenced object for `type: 'lookup'` cells; derived from the child lookup field when the column declares no `type`.").meta({ title: 'Reference' }),
   displayField: z.string().optional().describe('Label field shown for a picked lookup record.').meta({ title: 'Display Field' }),
   idField: z.string().optional().describe('Id field stored for a picked lookup record.').meta({ title: 'ID Field' }),
-  multiple: z.boolean().optional().describe('Multi-value column: multi-record lookup, or multi-file upload cell.').meta({ title: 'Multiple' }),
+  multiple: z.boolean().optional().describe('Multi-value column: multi-record lookup, several people in a `user` cell, or multi-file upload cell.').meta({ title: 'Multiple' }),
+  max: z.number().int().positive().optional().describe("Star count of a `rating` cell (default 5); derived from the child field's `max` when the column declares no `type`.").meta({ title: 'Max' }),
   accept: z.array(z.string()).optional().describe("Accepted MIME types / extensions for a `file` cell's picker (e.g. ['image/*', '.pdf']); omit to accept anything.").meta({ title: 'Accept' }),
   defaultHidden: z.boolean().optional().describe("Collapsed into the grid's column chooser by default (not dropped); required columns are never default-hidden.").meta({ title: 'Default Hidden' }),
   computed: z.boolean().optional().describe('Read-only computed column, recomputed live from sibling cells via `expr` and written back into the row.').meta({ title: 'Computed' }),
