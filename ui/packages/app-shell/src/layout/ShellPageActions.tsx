@@ -56,6 +56,8 @@ import { LocalizedSidebarTrigger } from './LocalizedSidebarTrigger.js';
 import { AssistantTopBarButton } from './AssistantTopBarButton.js';
 import { HelpMenu } from './HelpMenu.js';
 import { useDesignMode, type DesignModeValue } from './designMode.js';
+import { useAuth } from '@object-ui/auth';
+import { postureHasOrgWall, useTenancyPosture } from '../hooks/useTenancyPosture.js';
 
 /**
  * Counts the headers under a scope that place the expand button, so the
@@ -210,7 +212,9 @@ export function useAppStudioEntry(enabled: boolean, activeAppName?: string): {
  * and 「Open {app} in Studio」 (ADR-0146 D5) at the same place.
  *
  * objectstack#36362 — under a shell that holds the design mode, 「Edit app」
- * turns the mode on, in place, and opens no Studio.
+ * turns the mode on, in place, and opens no Studio. objectstack#36363 — so
+ * does a read-only package's app, where the customization door takes this
+ * caller: its changes are saved as this environment's customization.
  */
 function EditAppButton({
   entry,
@@ -222,7 +226,14 @@ function EditAppButton({
   designMode: DesignModeValue | null;
 }) {
   const { t } = useObjectTranslation();
-  if (entry.posture === 'view') {
+  // objectstack#36363 — a read-only package's app (an installed one) enters
+  // the mode too: what the mode saves goes to the package's customization,
+  // as Studio's menu editing does. Not where the customization door is walled
+  // off for this caller (only the platform operator may call it there).
+  const posture = useTenancyPosture();
+  const { user } = useAuth();
+  const customizable = !postureHasOrgWall(posture) || user?.isPlatformAdmin === true;
+  if (entry.posture === 'view' && !(designMode && customizable)) {
     const viewText = t('topbar.openAppInStudio', { defaultValue: 'Open {{app}} in Studio', app: appText });
     return (
       <Button
