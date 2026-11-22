@@ -11464,9 +11464,9 @@ export function selfTest({ tier = 'full' } = {}) {
   // beside a caller's directory. Each arm has a control one step away.
   const callerDirSource = 'const staging = mkdtempSync(join(dir, SKILLS_STAGING_PREFIX));';
   const tmpdirSource = 'const staging = mkdtempSync(join(tmpdir(), SKILLS_STAGING_PREFIX));';
-  const completenessPackages = ['packages/cli'];
-  const completenessOf = (rel, source = callerDirSource, packageDirs = completenessPackages) =>
-    mkdtempCompleteness(scratchDirSitesInSource(rel, source).unresolved, { packageDirs });
+  const completenessPackages = [{ dir: 'packages/cli', manifest: { name: '@objectstack/cli' } }];
+  const completenessOf = (rel, source = callerDirSource, members = completenessPackages) =>
+    mkdtempCompleteness(scratchDirSitesInSource(rel, source).unresolved, { members });
   const verdictIs = (v, failing, reported) => v.failing.length === failing && v.reported.length === reported;
   const shippedVerdict = completenessOf('packages/cli/src/utils/skills-install-state.ts');
   t(
@@ -11476,11 +11476,36 @@ export function selfTest({ tier = 'full' } = {}) {
   );
   t(
     'CONTROL: the same file in a directory that holds no workspace package still FAILS',
-    verdictIs(completenessOf('packages/cli/src/utils/skills-install-state.ts', callerDirSource, ['packages/core']), 1, 0),
+    verdictIs(
+      completenessOf('packages/cli/src/utils/skills-install-state.ts', callerDirSource, [{ dir: 'packages/core', manifest: {} }]),
+      1,
+      0,
+    ),
   );
   t(
     "CONTROL: and in the package but outside its own src/ (one directory up), it still FAILS",
     verdictIs(completenessOf('packages/cli/utils/skills-install-state.ts'), 1, 0),
+  );
+  // A src/ segment of the member's that is NOT its own src/: product source by
+  // name (so `isProductSource` alone would pass it), under the member, and red
+  // the day the member prefix is loosened from MEMBER/src/ to MEMBER/.
+  t(
+    "CONTROL: under the member but in a src/ that is not the member's own (packages/cli/scripts/src/), it still FAILS",
+    verdictIs(completenessOf('packages/cli/scripts/src/staging.ts'), 1, 0)
+      && runnerEnvIsProductSource('packages/cli/scripts/src/staging.ts'),
+  );
+  // A private member is not published code: its src/ is code this checkout
+  // runs (an example app, a QA harness), so the same site there FAILS. The
+  // control is the published arm above, the same path with the flag absent.
+  t(
+    "a private: true member's src/ is not shipped source — the same site there FAILS",
+    verdictIs(
+      completenessOf('packages/cli/src/utils/skills-install-state.ts', callerDirSource, [
+        { dir: 'packages/cli', manifest: { name: '@objectstack/cli', private: true } },
+      ]),
+      1,
+      0,
+    ),
   );
   t(
     'the same site in a test file FAILS — beside the shipped file, by name',
@@ -11507,13 +11532,16 @@ export function selfTest({ tier = 'full' } = {}) {
     verdictIs(completenessOf('scripts/pm/stage-skills.mjs', 'mkdirSync(join(dir, SKILLS_STAGING_PREFIX));'), 0, 0)
       && scratchDirSitesInSource('scripts/pm/stage-skills.mjs', 'mkdirSync(join(dir, SKILLS_STAGING_PREFIX));').unresolved.length === 1,
   );
-  // The default package list is THIS tree's workspace, read from its manifest
-  // globs: the arms above hold on it too, not only on a hand-built list.
+  // The default member list is THIS tree's workspace, read from its manifest
+  // globs and manifests: the arms above hold on it too, not only on a
+  // hand-built list — packages/qa/dogfood is a private member of this tree.
   const liveDefault = (rel) => mkdtempCompleteness(scratchDirSitesInSource(rel, callerDirSource).unresolved);
   t(
-    "on this tree's own workspace, the shipped arm is REPORTED and the tooling arm FAILS",
+    "on this tree's own workspace, the shipped arm is REPORTED, the tooling and private-member arms FAIL",
     verdictIs(liveDefault('packages/cli/src/utils/skills-install-state.ts'), 0, 1)
       && verdictIs(liveDefault('scripts/pm/stage-skills.mjs'), 1, 0)
+      && verdictIs(liveDefault('packages/qa/dogfood/src/staging.ts'), 1, 0)
+      && JSON.parse(readFileSync(nodePath.join(ROOT, 'packages/qa/dogfood/package.json'), 'utf8')).private === true
       && isShippedPackageSource('packages/cli/src/utils/skills-install-state.ts', completenessPackages),
   );
 

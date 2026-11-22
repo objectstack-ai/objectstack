@@ -468,7 +468,7 @@ import { SCANNED_ROOTS as RUNNER_ENV_SCANNED_ROOTS, findRunnerEnvReads, isProduc
 import { findViolations as findErrorCodeCasingViolations } from '../check-error-code-casing.mjs';
 // The workspace parse the README claim net (#31292) reads its population through, the one the gate itself imports.
 // Dependency-free, and it declares no path population of its own.
-import { WORKSPACE_FILE, parseWorkspaceGlobs, workspacePackageDirs } from '../workspace-enumerator.mjs';
+import { WORKSPACE_FILE, parseWorkspaceGlobs, workspacePackageDirs, workspacePackages } from '../workspace-enumerator.mjs';
 // The hand-written tables — ledgers, marker grammars, the change-kind roster, the tier globs — are
 // DATA, and live beside this file; this engine loads them, matches paths against them and derives.
 // Every table is re-exported under the name it always had, so no consumer moved.
@@ -8719,17 +8719,18 @@ export function trackedPrefixes(files) {
 // over the sites nobody measured.
 //
 // The boundary of that rule is the FILE POPULATION: an unresolved site in
-// shipped package source (a non-test file under a workspace package's `src/`,
-// `isShippedPackageSource`) is REPORTED and not failed, because its base is
-// chosen at run time by whoever runs the published code (ruling record
-// 7075362923).
+// shipped package source (a non-test file under the own `src/` of a workspace
+// member whose manifest is not `private: true`, `isShippedPackageSource`) is
+// REPORTED and not failed, because its base is chosen at run time by whoever
+// runs the published code (ruling record 7075362923).
 //
-// Measured on 2026-11-22 at 80421551 (the same at its base 3f7fdd00) through
-// `scratchDirSitesInSource` and `isShippedPackageSource`: 1821 `mkdtempSync`
-// sites — 1463 in `isTestFilePath` test files (47 in the tree), 344 in repo
-// tooling and the other non-package sources (0 in the tree), 14 in shipped
-// package source (all in the system temp directory); 0 unresolved in any
-// population.
+// Measured on 2026-11-22 on the tree of d8599c2c through
+// `scratchDirSitesInSource` and `isShippedPackageSource`: 1823 `mkdtempSync`
+// sites — 1465 in `isTestFilePath` test files (47 in the tree), 344 in every
+// other source outside shipped package source (repo tooling, package scripts,
+// test helpers and tests by directory; 0 in the tree; 0 of them under a private
+// member's `src/`), 14 in shipped package source (all in the system temp
+// directory); 0 unresolved in any population.
 //
 // `mkdirSync` is swept too and deliberately NOT held to completeness: of its
 // sites, ~124 take a base this resolver cannot see (a function parameter, a
@@ -10018,15 +10019,22 @@ export function exposedScratchDirs({ cwd = ROOT, files = null } = {}) {
  * exactly what an unresolved site does not know. ⛔ Nor is it "not a test
  * file" alone — repo tooling is code this checkout runs, and it stays held.
  *
- * Shipped package source = a non-test source under a workspace package's own
- * `src/`. "Non-test" is the runner-env gate's `isProductSource` (a test by name
- * or by directory, `.d.ts` excluded), the stricter of the tree's test
- * predicates, so a helper under `src/__tests__/` stays held; "workspace
- * package" is a workspace member holding a manifest, from the enumerator.
- * Neither half is a list kept here.
+ * Shipped package source = a non-test source under the own `src/` of a
+ * published workspace member. "Non-test" is the runner-env gate's
+ * `isProductSource` (a test by name or by directory, `.d.ts` excluded), the
+ * stricter of the tree's test predicates, so a helper under `src/__tests__/`
+ * stays held. "Published member" is a workspace member whose manifest is not
+ * `private: true`, as the enumerator's `workspacePackages` pairs them: a
+ * private member (an example app, a QA harness, the docs app) is not published
+ * code and has no such user, so its `src/` is code this checkout runs and stays
+ * held, as does a member whose manifest does not parse. Neither half is a list
+ * kept here.
+ *
+ * `members` is `workspacePackages(root)`'s shape: `{ dir, manifest }` pairs.
  */
-export function isShippedPackageSource(rel, packageDirs) {
-  return isRunnerEnvProductSource(rel) && packageDirs.some((dir) => rel.startsWith(`${dir}/src/`));
+export function isShippedPackageSource(rel, members) {
+  return isRunnerEnvProductSource(rel)
+    && members.some(({ dir, manifest }) => manifest?.private !== true && rel.startsWith(`${dir}/src/`));
 }
 
 /**
@@ -10035,12 +10043,12 @@ export function isShippedPackageSource(rel, packageDirs) {
  * and does not fail. A `mkdirSync` site is in neither — that half was never
  * held to completeness (the header above).
  */
-export function mkdtempCompleteness(unresolved, { packageDirs = workspacePackageDirs(ROOT) } = {}) {
+export function mkdtempCompleteness(unresolved, { members = workspacePackages(ROOT) } = {}) {
   const failing = [];
   const reported = [];
   for (const site of unresolved) {
     if (site.call !== 'mkdtempSync') continue;
-    (isShippedPackageSource(site.file, packageDirs) ? reported : failing).push(site);
+    (isShippedPackageSource(site.file, members) ? reported : failing).push(site);
   }
   return { failing, reported };
 }
