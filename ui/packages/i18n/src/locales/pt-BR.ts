@@ -1530,6 +1530,7 @@ const pt = {
     approvalPendingEditable: "Em aprovação · editável",
     approvalPendingTooltip: "Este registro tem uma solicitação de aprovação pendente; esta etapa ainda permite a edição",
     approvalPending: "Em aprovação",
+    approvalPendingStep: "Em aprovação · {{step}}",
     approvalPendingNotEditableTooltip: "Este registro tem uma solicitação de aprovação pendente",
     approvalProgress: "Aprovações — {{got}} de {{need}}",
     approvalProgressGroups: "Assinaturas — {{got}} de {{need}} grupos",
@@ -1636,7 +1637,8 @@ const pt = {
     relatedHiddenCount_other: "{{count}} ocultas",
     relatedShowHidden: "Mostrar",
     recordTabs: "Abas do registro",
-    recordTabOverview: "Visão geral",
+    recordTabOverview: "Detalhes",
+    detailsColumnResize: "Redimensionar a coluna de detalhes",
     recordTabMoveBefore: "Mover para a esquerda",
     recordTabMoveAfter: "Mover para a direita",
     recordTabsMore: "{{count}} abas a mais",
@@ -1648,7 +1650,9 @@ const pt = {
     recordTabsMoreTrigger_one: "Mais {{count}}",
     recordTabsMoreTrigger_many: "Mais {{count}}",
     recordTabsMoreTrigger_other: "Mais {{count}}",
-    // objectstack#35596 — the 概览 tab's summary rail.
+    // objectstack#35596 — the 概览 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
     summaryApprovalDone: "Aprovado",
     summaryApprovalMine: "Aguardando você",
     summaryApprovalWaitingOn: "Aguardando {{name}}",
@@ -2766,6 +2770,11 @@ const pt = {
         saveAsMyView: "Salvar como minha exibição",
         copyName: "{{name}} (cópia)",
         saved: "Salvo",
+        saveToViewConfirmTitle: "Salvar nesta exibição?",
+        saveToViewConfirm: "Todos que usam “{{name}}” verão estas alterações.",
+        saveToViewConfirmButton: "Salvar para todos",
+        savedForEveryone: "Salvo, visível para todos",
+        pendingDraft: "Esta exibição tem alterações não publicadas. Publique ou descarte-as primeiro nas configurações da exibição.",
       },
       linkFilterRefused: 'O filtro deste link não foi aplicado. Ele cita um campo pelo qual você não pode filtrar aqui, então a lista mostra a visualização sem ele.',
       personalizedParts: {
@@ -2775,10 +2784,14 @@ const pt = {
         grouping: "Agrupamento",
         columns: "Disposição das colunas",
         hiddenFields: "Campos ocultos",
+        summaries: "Cálculos",
         density: "Densidade",
         layout: "Layout",
         rowColor: "Cor da linha",
         inlineEdit: "Edição em linha",
+      },
+      saveRefused: {
+        packaged: "Esta visualização vem de um pacote de aplicativo e não pode ser alterada diretamente. Você pode salvá-la como sua própria visualização.",
       },
       cannotDeleteMetaView: "Esta exibição é integrada e definida no código — não é possível excluí-la.",
       expandToPage: "Abrir como página inteira",
@@ -3478,6 +3491,8 @@ const pt = {
     removeFromFavorites: "Remover {{name}} dos favoritos",
     allReports: "Todos os relatórios",
     keepOpen: "Manter a barra lateral aberta",
+    collapse: 'Recolher a barra lateral',
+    expand: 'Expandir a barra lateral',
   },
   topbar: {
     openAssistant: "Abrir o assistente {{name}}",
@@ -3647,6 +3662,7 @@ const pt = {
       backToHome: "Voltar ao início",
       settings: "Configurações",
       productHome: "Início do {{product}}",
+      addApp: 'Adicionar aplicativo',
     },
     activityFeed: {
       title: "Atividade recente",

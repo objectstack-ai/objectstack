@@ -1613,6 +1613,7 @@ const en = {
     approvalPendingEditable: 'In approval · editable',
     approvalPendingTooltip: 'This record has a pending approval request; this step still allows editing',
     approvalPending: 'In approval',
+    approvalPendingStep: 'In approval · {{step}}',
     approvalPendingNotEditableTooltip: 'This record has a pending approval request',
     approvalProgress: 'Approvals — {{got}} of {{need}}',
     approvalProgressGroups: 'Sign-off — {{got}} of {{need}} groups',
@@ -1794,7 +1795,8 @@ const en = {
     relatedHiddenCount_other: '{{count}} hidden',
     relatedShowHidden: 'Show',
     recordTabs: 'Record tabs',
-    recordTabOverview: 'Overview',
+    recordTabOverview: 'Details',
+    detailsColumnResize: 'Resize details column',
     // objectstack#35783 — a related tab's menu: one place before / after it in the row.
     recordTabMoveBefore: 'Move left',
     recordTabMoveAfter: 'Move right',
@@ -1805,7 +1807,9 @@ const en = {
     recordTabsMoreTrigger: 'More {{count}}',
     recordTabsMoreTrigger_one: 'More {{count}}',
     recordTabsMoreTrigger_other: 'More {{count}}',
-    // objectstack#35596 — the 概览 tab's summary rail.
+    // objectstack#35596 — the 概览 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
     summaryApprovalDone: 'Approved',
     summaryApprovalMine: 'Awaiting you',
     summaryApprovalWaitingOn: 'Waiting on {{name}}',
@@ -3294,6 +3298,11 @@ const en = {
         saveAsMyView: 'Save as my view',
         copyName: '{{name}} copy',
         saved: 'Saved',
+        saveToViewConfirmTitle: 'Save to this view?',
+        saveToViewConfirm: 'Everyone who uses “{{name}}” will see these changes.',
+        saveToViewConfirmButton: 'Save for everyone',
+        savedForEveryone: 'Saved, visible to everyone',
+        pendingDraft: 'This view has unpublished changes. Publish or discard them in the view settings first.',
       },
       linkFilterRefused: 'This link’s filter was not applied. It names a field you can’t filter on here, so the list shows the view without it.',
       personalizedParts: {
@@ -3303,10 +3312,14 @@ const en = {
         grouping: 'Grouping',
         columns: 'Column layout',
         hiddenFields: 'Hidden fields',
+        summaries: 'Calculations',
         density: 'Density',
         layout: 'Layout',
         rowColor: 'Row color',
         inlineEdit: 'Inline editing',
+      },
+      saveRefused: {
+        packaged: 'This view comes with an app package and can’t be changed directly. You can save it as your own view.',
       },
       cannotDeleteMetaView: 'This view is built in and defined in code — it cannot be deleted.',
       expandToPage: 'Open as full page',
@@ -4077,6 +4090,8 @@ const en = {
     removeFromFavorites: 'Remove {{name}} from favorites',
     allReports: 'All reports',
     keepOpen: 'Keep sidebar open',
+    collapse: 'Collapse sidebar',
+    expand: 'Expand sidebar',
   },
   topbar: {
     aiAssistant: 'AI Assistant',
@@ -4249,6 +4264,7 @@ const en = {
       backToHome: 'Back to home',
       settings: 'Settings',
       productHome: '{{product}} home',
+      addApp: 'Add app',
     },
     systemNav: {
       systemSettings: 'System Settings',

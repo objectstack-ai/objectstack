@@ -52,6 +52,9 @@
  *     column name.
  */
 
+// The source under test reaches these through dynamic imports: their first load is paid at collection.
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { describe, it, expect, afterEach } from 'vitest';
 import { render, cleanup, fireEvent, screen } from '@testing-library/react';
 import { SchemaForm } from './SchemaForm';
@@ -104,6 +107,7 @@ const CONTROL_CASES: WidgetCase[] = [
   { widget: 'icon', control: (c) => c.querySelector('[aria-haspopup="dialog"]'), faceName: 'the icon picker trigger' },
   { widget: 'color-input', control: (c) => c.querySelector('input[type="color"]'), faceName: 'the native colour input' },
   { widget: 'string-tags', control: (c) => c.querySelector('input[type="text"]'), faceName: 'the tag entry box' },
+  { widget: 'related-list-entries', control: (c) => c.querySelector('input[type="text"]'), faceName: 'the related-list entry box' },
   { widget: 'secret', control: (c) => c.querySelector('input[type="password"]'), faceName: 'the masked credential box' },
 ];
 

@@ -12,12 +12,13 @@ import type { ColumnSummary } from '@objectstack/spec/ui';
 import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore, lazy, Suspense, type ReactNode } from 'react';
 import { DENSITY_MODE_TO_ROW_HEIGHT, columnIdentity, normalizeListViewSchema, servedPackageId, type FilterTokenScope } from '@object-ui/core';
 import { listDraftPreference, type useListDraft } from './listDraftStore.js';
+import { columnSummaryOf, columnsWithSummaries, declaredColumnFields } from './columnSummaryWrite.js';
 import type { useObjectListPreferences, ListViewPreference, ListViewPreferencePatch } from '../context/ListPreferencesProvider.js';
 const ObjectChart = lazy(() =>
   import('@object-ui/plugin-charts').then((m) => ({ default: m.ObjectChart })),
 );
 import { ListView, type ListToolbarTrailingState } from '@object-ui/plugin-list';
-import type { ListViewSchema, TreeViewConfig } from '@object-ui/types';
+import type { ListColumn, ListViewSchema, TreeViewConfig } from '@object-ui/types';
 import type { FilterBuilderRowGroup } from '@object-ui/components';
 import type { useAuth } from '@object-ui/auth';
 import type { useActionTextLocalizer } from '@object-ui/react';
@@ -101,6 +102,7 @@ export function useObjectViewListRenderer({
     handleListRowsChange,
     handleListTotalChange,
     openInPanel,
+    openReferencedRecord,
     rowOpensRecord,
     phoneTitle,
     viewBarTrailing,
@@ -145,6 +147,8 @@ export function useObjectViewListRenderer({
     handleListTotalChange: ReturnType<typeof useObjectViewRecordNavigation>['handleListTotalChange'];
     /** objectstack#35854 — the name cell's 「在侧边打开」 (`./objectViewOpenAsPage.tsx`), or `null` for none. */
     openInPanel: { label: string; open: (recordId: string | number) => void } | null;
+    /** objectstack#36015 — a lookup chip's record in the side drawer, or `undefined` where the list has none. */
+    openReferencedRecord: ((objectName: string, recordId: string) => void) | undefined;
     /** objectstack#33317 — whether a row click opens the record: `false` for the `none` mode. */
     rowOpensRecord: boolean;
     /**
@@ -186,12 +190,11 @@ export function useObjectViewListRenderer({
         save?: () => void;
         reset?: () => void;
         /**
-         * objectstack#35702 — save a footer calculation on the open view (wired
-         * only for a reader who may change it); resolves whether it was saved.
+         * objectstack#36194 — the footer's calculation picks go into the list's
+         * draft (`summaries`), on every column the saved body would carry:
+         * set where the list holds a draft. Nothing a pick does writes.
          */
-        pickSummary?: (field: string, summary: ColumnSummary | null) => boolean | Promise<boolean>;
-        /** objectstack#35702 — the columns the view declares: the only ones a pick may change. */
-        summaryPickFields?: readonly string[];
+        draftsSummaries?: boolean;
     };
 }) {
     // objectstack#35551 — the host hands fresh closures every render; the list
@@ -201,9 +204,7 @@ export function useObjectViewListRenderer({
     const offersRename = !!listViewActions?.rename;
     const offersSave = !!listViewActions?.save;
     const offersReset = !!listViewActions?.reset;
-    const offersSummaryPick = !!listViewActions?.pickSummary;
-    // Keyed on content, never the array's identity (a fresh one every render).
-    const summaryPickKey = (listViewActions?.summaryPickFields ?? []).join('\n');
+    const offersSummaryPick = !!listViewActions?.draftsSummaries;
     // objectstack#27058 — below `sm` the title switcher is the phone's one
     // view control, so the list offers no layout switcher of its own there.
     const wideViewport = useViewTabsFit();
@@ -331,6 +332,7 @@ export function useObjectViewListRenderer({
         // its columns and their order here. The column widths and the row
         // height are the reader's own (`listPrefs`), never a draft: they are
         // laid in from what the reader stored, and nothing else stored is.
+        const viewOwnRowColor = viewDef.rowColor ?? listSchema.rowColor;
         const viewPref: ListViewPreference | undefined = listDraftPreference(
             listDraft.draft,
             listPrefs.preference.perView?.[viewDef.id],
@@ -553,6 +555,25 @@ export function useObjectViewListRenderer({
             listSchema.columns,
             addedFieldsStored ? viewPref?.addedFields : undefined,
         );
+        /**
+         * objectstack#36194 — the footer's calculations are part of the draft
+         * too: a pick applies at once (the columns the list draws carry it)
+         * and is written nowhere; Discard drops it, Save keeps it. The menu is
+         * offered on the columns a saved body carries (the columns the list
+         * draws, the reader's added ones included), the only columns the draft
+         * can carry a calculation on. A pick of the view's own calculation
+         * drops the column from the draft.
+         */
+        const summaryColumns = columnsWithSummaries(listColumns.columns as ListColumn[] | string[] | undefined, listDraft.draft.summaries) as ListViewSchema['columns'];
+        const summaryPickFields = offersSummaryPick
+            ? declaredColumnFields(listColumns.columns as ListColumn[] | string[] | undefined)
+            : undefined;
+        const pickDraftSummary = (field: string, summary: ColumnSummary | null): boolean => {
+            const own = columnSummaryOf(listColumns.columns as ListColumn[] | string[] | undefined, field);
+            const { [field]: _replaced, ...rest } = listDraft.draft.summaries ?? {};
+            listDraft.patch({ summaries: (summary ?? null) === own ? rest : { ...rest, [field]: summary ?? null } });
+            return true;
+        };
         const persistAddedFields = (added: string[]) => {
             listDraft.patch({ addedFields: added.length > 0 ? added : undefined });
         };
@@ -638,7 +659,9 @@ export function useObjectViewListRenderer({
             // new object documents of equal content: hold it like the blocks.
             // objectstack#30077 — plus the fields this user added (see
             // `withAddedListColumns`).
-            columns: holdBlock('columns', listColumns.columns),
+            // objectstack#36194 — and the footer calculations the draft holds,
+            // drawn at once (`summaryColumns`).
+            columns: holdBlock('columns', summaryColumns),
             // objectui#10035 — the refresh signal, in place of the remount the
             // key used to force. The spread above carries only the plugin
             // ObjectView's counter; this page's own counter (actions, import,
@@ -857,7 +880,14 @@ export function useObjectViewListRenderer({
              * a different nesting level ('may the user open the colour panel'
              * versus 'what the colours are').
              */
-            rowColor: viewDef.rowColor ?? listSchema.rowColor,
+            // objectstack#35955 — the reader's unsaved row colour (the list's
+            // draft, `null` for "none") over the view's own; the view's own
+            // goes to `viewDefaults` below, for Discard and Save.
+            rowColor: listDraft.draft.rowColor !== undefined
+                ? (listDraft.draft.rowColor ?? undefined)
+                : viewOwnRowColor,
+            // objectstack#35955 — and the reader's unsaved layout.
+            viewType: listDraft.draft.viewType ?? listSchema.viewType,
             // objectui#11013 — the seven renderer flags this relay used to read
             // off the active view (`wrapHeaders`, `clickIntoRecordDetails`,
             // `addRecordViaForm`, `addDeleteRecordsInline`,
@@ -1081,21 +1111,28 @@ export function useObjectViewListRenderer({
                 // objectstack#28950 — and the view's own grouping, under a
                 // grouping the URL carries (the `grouping` rung above), so the
                 // list can tell the reader's from the view's.
-                viewDefaults={{ hiddenFields: viewHiddenFields, rowHeight: viewRowHeight, sort: viewSort, grouping: listSchema.grouping, filters: viewPanelFilters }}
+                // objectstack#35955 — and the view's own layout and row colour,
+                // under the draft's (`viewType` / `rowColor` above).
+                viewDefaults={{ hiddenFields: viewHiddenFields, rowHeight: viewRowHeight, sort: viewSort, grouping: listSchema.grouping, filters: viewPanelFilters, viewType: listSchema.viewType, rowColor: viewOwnRowColor }}
                 // objectstack#28948 — those resets clear the user's state.
                 onRestoreViewDefaults={restoreViewDefaults}
                 // objectstack#28950 — what of the list differs from the view,
                 // for Discard and Save (objectstack#35955), which then own the
                 // one reset (the Display control draws none of its own).
                 onPersonalizationChange={(parts) => handleListPersonalizationChange(identityKey, parts)}
+                // objectstack#35955 — the layout and the row colour the reader
+                // picks are the list's draft; picking the view's own again
+                // drops that part.
+                onViewChange={(view: string) => listDraft.patch({ viewType: view === listSchema.viewType ? undefined : view })}
+                onRowColorChange={(rowColor: { field: string; colors?: Record<string, string> } | null) => listDraft.patch({
+                    rowColor: (rowColor?.field ?? '') === (viewOwnRowColor?.field ?? '') ? undefined : rowColor,
+                })}
                 // objectstack#35551 — the view's rename, 保存 and full reset in the options menu.
                 onRenameView={offersRename ? (label: string) => listViewActionsRef.current?.rename?.(label) ?? false : undefined}
                 onSaveView={offersSave ? () => listViewActionsRef.current?.save?.() : undefined}
                 onResetView={offersReset ? () => listViewActionsRef.current?.reset?.() : undefined}
-                onColumnSummaryPick={offersSummaryPick
-                    ? (field: string, summary: ColumnSummary | null) => listViewActionsRef.current?.pickSummary?.(field, summary) ?? false
-                    : undefined}
-                columnSummaryPickFields={offersSummaryPick ? summaryPickKey.split('\n').filter(Boolean) : undefined}
+                onColumnSummaryPick={summaryPickFields && summaryPickFields.length > 0 ? pickDraftSummary : undefined}
+                columnSummaryPickFields={summaryPickFields}
                 className={className}
                 onEdit={editHandler}
                 // objectui#13089 — the view's Add button is the header New:
@@ -1183,6 +1220,9 @@ export function useObjectViewListRenderer({
                             : null;
                     }
                     : undefined}
+                // objectstack#36015 — a lookup chip in the grid opens the record it
+                // names in the same side drawer.
+                openReferencedRecord={openReferencedRecord}
                 // objectstack#33317 — a row that opens nothing (the view
                 // authored `navigation.mode: 'none'`, or a list-only object)
                 // draws no record link and no Open in its context menu.
@@ -1203,7 +1243,7 @@ export function useObjectViewListRenderer({
                 dataSource={ds}
             />
         );
-    }, [hasViewBarTrailing, trailStore, rowEndStore, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, listDraft.draft, listDraft.patch, managedUsers, managedUserMarker, openInPanel, rowOpensRecord, handleListRowsChange, handleListTotalChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, offersRename, offersSave, offersReset, offersSummaryPick, summaryPickKey, previewDrafts, previewDataSource, unpublishedObjects]);
+    }, [hasViewBarTrailing, trailStore, rowEndStore, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, listDraft.draft, listDraft.patch, managedUsers, managedUserMarker, openInPanel, openReferencedRecord, rowOpensRecord, handleListRowsChange, handleListTotalChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, offersRename, offersSave, offersReset, offersSummaryPick, previewDrafts, previewDataSource, unpublishedObjects]);
 
     return { renderListView };
 }

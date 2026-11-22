@@ -1487,6 +1487,7 @@ const de = {
     approvalPendingEditable: "In Genehmigung · bearbeitbar",
     approvalPendingTooltip: "Dieser Datensatz hat eine ausstehende Genehmigungsanfrage; dieser Schritt erlaubt weiterhin die Bearbeitung",
     approvalPending: "In Genehmigung",
+    approvalPendingStep: "In Genehmigung · {{step}}",
     approvalPendingNotEditableTooltip: "Dieser Datensatz hat eine ausstehende Genehmigungsanfrage",
     approvalProgress: "Genehmigungen — {{got}} von {{need}}",
     approvalProgressGroups: "Freigabe — {{got}} von {{need}} Gruppen",
@@ -1589,7 +1590,8 @@ const de = {
     relatedHiddenCount_other: "{{count}} ausgeblendet",
     relatedShowHidden: "Anzeigen",
     recordTabs: "Datensatz-Tabs",
-    recordTabOverview: "Übersicht",
+    recordTabOverview: "Details",
+    detailsColumnResize: "Breite der Detailspalte ändern",
     recordTabMoveBefore: "Nach links verschieben",
     recordTabMoveAfter: "Nach rechts verschieben",
     recordTabsMore: "{{count}} weitere Tabs",
@@ -1599,7 +1601,9 @@ const de = {
     recordTabsMoreTrigger: "Mehr {{count}}",
     recordTabsMoreTrigger_one: "Mehr {{count}}",
     recordTabsMoreTrigger_other: "Mehr {{count}}",
-    // objectstack#35596 — the 概览 tab's summary rail.
+    // objectstack#35596 — the 概览 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
     summaryApprovalDone: "Genehmigt",
     summaryApprovalMine: "Wartet auf Sie",
     summaryApprovalWaitingOn: "Wartet auf {{name}}",
@@ -2697,6 +2701,11 @@ const de = {
         saveAsMyView: "Als meine Ansicht speichern",
         copyName: "{{name}} (Kopie)",
         saved: "Gespeichert",
+        saveToViewConfirmTitle: "In dieser Ansicht speichern?",
+        saveToViewConfirm: "Alle, die „{{name}}“ verwenden, sehen diese Änderungen.",
+        saveToViewConfirmButton: "Für alle speichern",
+        savedForEveryone: "Gespeichert, für alle sichtbar",
+        pendingDraft: "Diese Ansicht hat unveröffentlichte Änderungen. Veröffentliche oder verwirf sie zuerst in den Ansichtseinstellungen.",
       },
       linkFilterRefused: 'Der Filter dieses Links wurde nicht angewendet. Er nennt ein Feld, nach dem Sie hier nicht filtern können, daher zeigt die Liste die Ansicht ohne ihn.',
       personalizedParts: {
@@ -2706,10 +2715,14 @@ const de = {
         grouping: "Gruppierung",
         columns: "Spaltenanordnung",
         hiddenFields: "Ausgeblendete Felder",
+        summaries: "Berechnungen",
         density: "Dichte",
         layout: "Layout",
         rowColor: "Zeilenfarbe",
         inlineEdit: "Inline-Bearbeitung",
+      },
+      saveRefused: {
+        packaged: "Diese Ansicht gehört zu einem App-Paket und kann nicht direkt geändert werden. Sie können sie als eigene Ansicht speichern.",
       },
       cannotDeleteMetaView: "Diese Ansicht ist integriert und im Code definiert – sie kann nicht gelöscht werden.",
       expandToPage: "Als ganze Seite öffnen",
@@ -3403,6 +3416,8 @@ const de = {
     removeFromFavorites: "{{name}} aus Favoriten entfernen",
     allReports: "Alle Berichte",
     keepOpen: "Seitenleiste geöffnet lassen",
+    collapse: 'Seitenleiste einklappen',
+    expand: 'Seitenleiste ausklappen',
   },
   topbar: {
     openAssistant: "Assistent {{name}} öffnen",
@@ -3570,6 +3585,7 @@ const de = {
       backToHome: "Zurück zur Startseite",
       settings: "Einstellungen",
       productHome: "{{product}} Startseite",
+      addApp: 'App hinzufügen',
     },
     activityFeed: {
       title: "Letzte Aktivitäten",

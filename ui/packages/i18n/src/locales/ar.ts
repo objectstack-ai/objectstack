@@ -1665,6 +1665,7 @@ const ar = {
     approvalPendingEditable: "قيد الموافقة · قابل للتعديل",
     approvalPendingTooltip: "يحتوي هذا السجل على طلب موافقة معلق، لكن هذه الخطوة لا تزال تسمح بالتعديل",
     approvalPending: "قيد الموافقة",
+    approvalPendingStep: "قيد الموافقة · {{step}}",
     approvalPendingNotEditableTooltip: "يحتوي هذا السجل على طلب موافقة معلق",
     approvalProgress: "الموافقات — {{got}} من {{need}}",
     approvalProgressGroups: "التوقيعات — {{got}} من {{need}} مجموعات",
@@ -1783,7 +1784,8 @@ const ar = {
     relatedHiddenCount_other: "المخفية: {{count}}",
     relatedShowHidden: "إظهار",
     recordTabs: "علامات تبويب السجل",
-    recordTabOverview: "نظرة عامة",
+    recordTabOverview: "التفاصيل",
+    detailsColumnResize: "تغيير عرض عمود التفاصيل",
     // objectstack#35783 — before / after in the row; an RTL row runs right to left, so before is to the right.
     recordTabMoveBefore: "نقل إلى اليمين",
     recordTabMoveAfter: "نقل إلى اليسار",
@@ -1802,7 +1804,9 @@ const ar = {
     recordTabsMoreTrigger_few: "المزيد {{count}}",
     recordTabsMoreTrigger_many: "المزيد {{count}}",
     recordTabsMoreTrigger_other: "المزيد {{count}}",
-    // objectstack#35596 — the 概览 tab's summary rail.
+    // objectstack#35596 — the 概览 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
     summaryApprovalDone: "تمت الموافقة",
     summaryApprovalMine: "بانتظارك",
     summaryApprovalWaitingOn: "بانتظار {{name}}",
@@ -2985,6 +2989,11 @@ const ar = {
         saveAsMyView: "حفظ كعرض خاص بي",
         copyName: "نسخة من {{name}}",
         saved: "تم الحفظ",
+        saveToViewConfirmTitle: "حفظ في هذا العرض؟",
+        saveToViewConfirm: "سيرى كل من يستخدم \"{{name}}\" هذه التغييرات.",
+        saveToViewConfirmButton: "حفظ للجميع",
+        savedForEveryone: "تم الحفظ، مرئي للجميع",
+        pendingDraft: "يحتوي هذا العرض على تغييرات غير منشورة. انشرها أو تجاهلها أولاً في إعدادات العرض.",
       },
       linkFilterRefused: 'لم يُطبَّق عامل التصفية في هذا الرابط، لأنه يذكر حقلًا لا يمكنك التصفية حسبه هنا، لذا تعرض القائمة طريقة العرض دونه.',
       personalizedParts: {
@@ -2994,10 +3003,14 @@ const ar = {
         grouping: "التجميع",
         columns: "ترتيب الأعمدة",
         hiddenFields: "الحقول المخفية",
+        summaries: "العمليات الحسابية",
         density: "الكثافة",
         layout: "التخطيط",
         rowColor: "لون الصف",
         inlineEdit: "التحرير المضمّن",
+      },
+      saveRefused: {
+        packaged: "هذا العرض يأتي مع حزمة تطبيق ولا يمكن تغييره مباشرة. يمكنك حفظه كعرض خاص بك.",
       },
       cannotDeleteMetaView: "هذا عرض مدمج معرَّف في الكود — لا يمكن حذفه.",
       expandToPage: "فتح كصفحة كاملة",
@@ -3718,6 +3731,8 @@ const ar = {
     removeFromFavorites: "إزالة {{name}} من المفضلة",
     allReports: "كل التقارير",
     keepOpen: "إبقاء الشريط الجانبي مفتوحًا",
+    collapse: 'طي الشريط الجانبي',
+    expand: 'توسيع الشريط الجانبي',
   },
   topbar: {
     openAssistant: "فتح مساعد {{name}}",
@@ -3893,6 +3908,7 @@ const ar = {
       backToHome: "العودة إلى الرئيسية",
       settings: "الإعدادات",
       productHome: "الصفحة الرئيسية لـ {{product}}",
+      addApp: 'إضافة تطبيق',
     },
     activityFeed: {
       title: "النشاط الأخير",

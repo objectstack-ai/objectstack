@@ -77,8 +77,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "本对象的字段名，按重要性从高到低排列——只能放下一个时取第一项（ADR-0085）。决定默认列表列和相关列表列、卡片、子记录预览、记录悬停卡片和记录选择器。不是本对象字段的名称会在发布时被拒绝。"
       },
       relatedLists: {
-        label: "相关列表顺序",
-        helpText: "本对象记录页上相关列表的业务顺序，按重要性从高到低排列。每一项是子对象名称（例如 task），当该子对象与本对象有多个关系时写 object.field。列出的列表排在前面，其余按派生顺序排在后面。不对应任何指向本对象的关系的名称不起作用，保存或校验对象时会被拒绝。"
+        label: "记录页页签",
+        helpText: "记录页在概览之后显示的页签，按顺序排列。每一项是子对象名称（例如 task）；当该子对象与本对象有多个关系时写 object.field；也可以是内置页签（sys_attachment、sys_approval_request、sys_activity），或带自己标题和列的一项（在 Studio 的对象设置里设置）。一旦列出任何一项，没有列出的相关列表就不显示页签（其他包添加的列表也一样），直到本对象列出它；附件只有列出时才显示。为空时，所有列表按默认顺序显示。不对应任何指向本对象的关系的名称，在保存对象时会被拒绝。"
       },
       searchableFields: {
         label: "可搜索字段",

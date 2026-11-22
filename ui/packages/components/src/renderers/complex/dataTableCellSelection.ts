@@ -50,6 +50,37 @@ export function cellOpenerAt(target: EventTarget | null, cell: Element): HTMLEle
   return opener !== null && opener !== cell && cell.contains(opener) ? opener : null;
 }
 
+const RECORD_CHIP_SELECTOR = 'a[data-record-link][data-record-object][data-record-id]';
+
+/** The record a referenced record's chip names (`ReferencedRecordLink`'s data attributes). */
+export interface RecordChipTarget {
+  objectName: string;
+  recordId: string;
+}
+
+function chipTarget(chip: Element | null): RecordChipTarget | null {
+  const objectName = chip?.getAttribute('data-record-object') ?? '';
+  const recordId = chip?.getAttribute('data-record-id') ?? '';
+  return objectName !== '' && recordId !== '' ? { objectName, recordId } : null;
+}
+
+/**
+ * The record named by the referenced record's chip at or around `target`
+ * inside `cell`, or `null` when the press is not on one. In a reference cell
+ * of a select-first grid a plain click on a chip opens that record in place
+ * (objectstack#36015).
+ */
+export function recordChipAt(target: EventTarget | null, cell: Element): RecordChipTarget | null {
+  if (!(target instanceof Element) || !cell.contains(target)) return null;
+  const chip = target.closest(RECORD_CHIP_SELECTOR);
+  return chip !== null && cell.contains(chip) ? chipTarget(chip) : null;
+}
+
+/** The record the first chip a cell draws names, or `null` (Ctrl/Cmd+Enter in a reference cell). */
+export function firstRecordChip(cell: Element): RecordChipTarget | null {
+  return chipTarget(cell.querySelector(RECORD_CHIP_SELECTOR));
+}
+
 /** The first opener a cell draws (a cell of several chips opens the first), or `null`. */
 export function firstCellOpener(cell: Element): HTMLElement | null {
   return cell.querySelector<HTMLElement>(CELL_OPENER_SELECTOR);

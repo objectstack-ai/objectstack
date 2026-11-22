@@ -1480,7 +1480,8 @@ const ru = {
     relatedHiddenCount_other: "Скрыто: {{count}}",
     relatedShowHidden: "Показать",
     recordTabs: "Вкладки записи",
-    recordTabOverview: "Обзор",
+    recordTabOverview: "Детали",
+    detailsColumnResize: "Изменить ширину столбца сведений",
     recordTabMoveBefore: "Переместить влево",
     recordTabMoveAfter: "Переместить вправо",
     recordTabsMore: "Ещё вкладок: {{count}}",
@@ -1494,7 +1495,9 @@ const ru = {
     recordTabsMoreTrigger_few: "Ещё {{count}}",
     recordTabsMoreTrigger_many: "Ещё {{count}}",
     recordTabsMoreTrigger_other: "Ещё {{count}}",
-    // objectstack#35596 — the 概览 tab's summary rail.
+    // objectstack#35596 — the 概览 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
     summaryApprovalDone: "Одобрено",
     summaryApprovalMine: "Ожидает вас",
     summaryApprovalWaitingOn: "Ожидает: {{name}}",
@@ -1675,6 +1678,7 @@ const ru = {
     approvalPendingEditable: "На согласовании · редактирование доступно",
     approvalPendingTooltip: "У этой записи есть ожидающий запрос на согласование, но этот шаг всё ещё разрешает редактирование",
     approvalPending: "На согласовании",
+    approvalPendingStep: "На согласовании · {{step}}",
     approvalPendingNotEditableTooltip: "У этой записи есть ожидающий запрос на согласование",
     approvalProgress: "Согласования — {{got}} из {{need}}",
     approvalProgressGroups: "Подписи — {{got}} из {{need}} групп",
@@ -2847,6 +2851,11 @@ const ru = {
         saveAsMyView: "Сохранить как моё представление",
         copyName: "{{name}} (копия)",
         saved: "Сохранено",
+        saveToViewConfirmTitle: "Сохранить в это представление?",
+        saveToViewConfirm: "Все, кто пользуется «{{name}}», увидят эти изменения.",
+        saveToViewConfirmButton: "Сохранить для всех",
+        savedForEveryone: "Сохранено, видно всем",
+        pendingDraft: "В этом представлении есть неопубликованные изменения. Сначала опубликуйте или отмените их в настройках представления.",
       },
       linkFilterRefused: 'Фильтр из этой ссылки не применён: в нём есть поле, по которому здесь нельзя фильтровать, поэтому список показан по представлению без него.',
       personalizedParts: {
@@ -2856,10 +2865,14 @@ const ru = {
         grouping: "Группировка",
         columns: "Расположение столбцов",
         hiddenFields: "Скрытые поля",
+        summaries: "Вычисления",
         density: "Плотность",
         layout: "Макет",
         rowColor: "Цвет строк",
         inlineEdit: "Встроенное редактирование",
+      },
+      saveRefused: {
+        packaged: "Это представление входит в пакет приложения, и его нельзя изменить напрямую. Его можно сохранить как своё представление.",
       },
       cannotDeleteMetaView: "Это встроенное представление, определённое в коде, — удалить его нельзя.",
       expandToPage: "Открыть на всю страницу",
@@ -3568,6 +3581,8 @@ const ru = {
     removeFromFavorites: "Убрать {{name}} из избранного",
     allReports: "Все отчёты",
     keepOpen: "Не сворачивать боковую панель",
+    collapse: 'Свернуть боковую панель',
+    expand: 'Развернуть боковую панель',
   },
   topbar: {
     openAssistant: "Открыть ассистента {{name}}",
@@ -3740,6 +3755,7 @@ const ru = {
       backToHome: "Вернуться на главную",
       settings: "Настройки",
       productHome: "Главная {{product}}",
+      addApp: 'Добавить приложение',
     },
     activityFeed: {
       title: "Последние действия",

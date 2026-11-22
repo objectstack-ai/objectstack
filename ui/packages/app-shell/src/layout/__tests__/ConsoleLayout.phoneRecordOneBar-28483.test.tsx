@@ -6,7 +6,7 @@
  * is the page's one bar, and the record's name shows once, as the header
  * title under it. The four doors (app menu, search, notifications, account)
  * stay on every other route, the object's list among them, one 「‹」 away.
- * From 768 px up every route keeps the app bar.
+ * From 768 px up no route draws the app bar (objectstack#36112).
  *
  * Harness: the real `ConsoleLayout` with its real `@object-ui/layout`
  * `AppShell` (`ConsoleLayout.oneMainLandmark-13334`'s). `AppHeader` is a stub
@@ -131,12 +131,11 @@ describe('a phone record page draws one bar (objectstack#28483)', () => {
     expect(screen.getByTestId('app-bar')).toBeInTheDocument();
   });
 
-  it('control: at 768 px and 1440 px a record route keeps the app bar, as before', () => {
+  it('from 768 px up no route draws the app bar at all (objectstack#36112)', () => {
     for (const width of [768, 1440]) {
       mountAt(RECORD, width);
-      const headers = document.querySelectorAll('header');
-      expect(headers, `${width} px`).toHaveLength(1);
-      expect(headers[0]).toContainElement(screen.getByTestId('app-bar'));
+      expect(document.querySelectorAll('header'), `${width} px`).toHaveLength(0);
+      expect(screen.queryByTestId('app-bar'), `${width} px`).toBeNull();
       cleanup();
     }
   });
@@ -228,7 +227,7 @@ describe('the phone bottom bar is drawn on its three pages only (objectstack#358
 describe('an app\'s docs pages draw no app menu (objectstack#35424)', () => {
   const appMenu = () => screen.queryByTestId('sidebar-stub');
 
-  it('at 1440 px a docs index, a book and an article draw no app menu, and keep the app bar', () => {
+  it('at 1440 px a docs index, a book and an article draw no app menu, and keep the app bar (the one bar a desktop app still draws, objectstack#36112)', () => {
     for (const path of ['/apps/crm/docs', '/apps/crm/docs/crm_manual', '/apps/crm/docs/crm_manual/crm_quotes']) {
       mountAt(path, 1440);
       expect(appMenu(), path).toBeNull();

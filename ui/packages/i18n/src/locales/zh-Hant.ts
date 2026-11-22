@@ -1339,6 +1339,7 @@ const zhHant = {
     approvalPendingEditable: '審批中 · 可編輯',
     approvalPendingTooltip: '該記錄有待審批的請求，但當前審批節點仍允許編輯',
     approvalPending: '審批中',
+    approvalPendingStep: '審批中 · {{step}}',
     approvalPendingNotEditableTooltip: '該記錄有待審批的請求',
     approvalProgress: '審批 — 已通過 {{got}} / 共需 {{need}}',
     approvalProgressGroups: '會籤 — 已完成 {{got}} / 共 {{need}} 個組',
@@ -1495,7 +1496,8 @@ const zhHant = {
     relatedHiddenCount_other: '已隱藏 {{count}} 張',
     relatedShowHidden: '顯示',
     recordTabs: '記錄頁籤',
-    recordTabOverview: '概覽',
+    recordTabOverview: '詳情',
+    detailsColumnResize: '調整詳情欄寬度',
     recordTabMoveBefore: '左移',
     recordTabMoveAfter: '右移',
     recordTabsMore: '另外 {{count}} 個頁籤',
@@ -1505,7 +1507,9 @@ const zhHant = {
     recordTabsMoreTrigger: '更多 {{count}}',
     recordTabsMoreTrigger_one: '更多 {{count}}',
     recordTabsMoreTrigger_other: '更多 {{count}}',
-    // objectstack#35596 — the 概覽 tab's summary rail.
+    // objectstack#35596 — the 概覽 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
     summaryApprovalDone: '已通過',
     summaryApprovalMine: '待你審批',
     summaryApprovalWaitingOn: '等待 {{name}}',
@@ -2784,6 +2788,11 @@ const zhHant = {
         saveAsMyView: '另存為我的檢視',
         copyName: '{{name}} 副本',
         saved: '已儲存',
+        saveToViewConfirmTitle: '儲存到這個檢視？',
+        saveToViewConfirm: '所有用「{{name}}」的人都會看到這些改動。',
+        saveToViewConfirmButton: '儲存，所有人可見',
+        savedForEveryone: '已儲存，所有人可見',
+        pendingDraft: '這個檢視有未釋出的修改，請先在檢視設定裡釋出或放棄。',
       },
       linkFilterRefused: '此連結的篩選條件未應用：其中包含你在此處無法篩選的欄位，因此列表按檢視本身顯示。',
       personalizedParts: {
@@ -2793,10 +2802,14 @@ const zhHant = {
         grouping: '分組',
         columns: '列布局',
         hiddenFields: '隱藏欄位',
+        summaries: '統計',
         density: '密度',
         layout: '佈局',
         rowColor: '行顏色',
         inlineEdit: '行內編輯',
+      },
+      saveRefused: {
+        packaged: '這個檢視來自應用包，不能直接修改，可以另存為我的檢視。',
       },
       cannotDeleteMetaView: '該檢視為內建檢視，由程式碼定義，無法刪除。',
       expandToPage: '整頁開啟',
@@ -3484,6 +3497,8 @@ const zhHant = {
     removeFromFavorites: '從收藏中移除 {{name}}',
     allReports: '全部報表',
     keepOpen: '保持側邊欄展開',
+    collapse: '收起側邊欄',
+    expand: '展開側邊欄',
   },
   topbar: {
     aiAssistant: 'AI 助手',
@@ -3639,6 +3654,7 @@ const zhHant = {
       backToHome: '返回首頁',
       settings: '系統設定',
       productHome: '{{product}} 首頁',
+      addApp: '新增應用',
     },
     systemNav: {
       systemSettings: '系統設定',

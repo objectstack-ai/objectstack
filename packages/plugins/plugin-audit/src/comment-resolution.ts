@@ -21,7 +21,11 @@
  *    server clock; turning `false` clears both.
  *  - **Who may resolve** ({@link isResolutionOnlyUpdate}; maintainer ruling
  *    record 7063285032, option A): whoever may comment on the record may
- *    resolve and reopen its threads. An update that changes nothing but
+ *    resolve and reopen its threads. On the data door the platform's row floor
+ *    (`owner_only_writes`) runs first and admits a rank-and-file member's
+ *    update of their own rows alone, so a member resolves a colleague's thread
+ *    through the resolution door (`comment-routes.ts`), which writes this one
+ *    column for any reader of the thread. An update that changes nothing but
  *    `is_resolved` is authorized by the rule that admits a new comment — the
  *    caller can read the record the thread is on — instead of the
  *    author-or-parent-editor rule every other update meets. It is a narrow,
@@ -130,9 +134,10 @@ export function refuseResolutionOnReply(rows: ReadonlyArray<Record<string, unkno
  * caller — the stamp records what happened, not who was allowed to do it; the
  * authorization handler is separate and exempts system callers).
  *
- * - `is_resolved` turning `true`: `resolved_by` = the session's user (`null`
- *   for a write with no user, such as a system one), `resolved_at` = the
- *   server clock.
+ * - `is_resolved` turning `true`: `resolved_by` = the session's user; with
+ *   none (a system write), the user it is attributed to
+ *   (`provenance.attributedUserId`, the resolution door's caller), else
+ *   `null`; `resolved_at` = the server clock.
  * - turning `false`: both cleared.
  * - unchanged (the stored row already carries that value): nothing stamped,
  *   so resolving an already-resolved thread keeps its first resolver.
@@ -160,7 +165,12 @@ export async function stampCommentResolution(ctx: any): Promise<void> {
     data[key] = value;
   };
   if (next) {
-    const userId: unknown = ctx?.session?.userId;
+    // A system write a door performs for a caller (the resolution door,
+    // `comment-routes.ts`) carries that caller as its attribution, never in
+    // `session`, where every gating hook would read them as the caller. The
+    // precedence is the audit writer's own (#4586): the session subject wins
+    // when present, and the attribution names the resolver otherwise.
+    const userId: unknown = ctx?.session?.userId ?? ctx?.provenance?.attributedUserId;
     assign(
       COMMENT_RESOLVED_BY_FIELD,
       (typeof userId === 'string' || typeof userId === 'number') && String(userId) !== '' ? String(userId) : null,

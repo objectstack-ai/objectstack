@@ -1339,6 +1339,7 @@ const zh = {
     approvalPendingEditable: '审批中 · 可编辑',
     approvalPendingTooltip: '该记录有待审批的请求，但当前审批节点仍允许编辑',
     approvalPending: '审批中',
+    approvalPendingStep: '审批中 · {{step}}',
     approvalPendingNotEditableTooltip: '该记录有待审批的请求',
     approvalProgress: '审批 — 已通过 {{got}} / 共需 {{need}}',
     approvalProgressGroups: '会签 — 已完成 {{got}} / 共 {{need}} 个组',
@@ -1495,7 +1496,8 @@ const zh = {
     relatedHiddenCount_other: '已隐藏 {{count}} 张',
     relatedShowHidden: '显示',
     recordTabs: '记录页签',
-    recordTabOverview: '概览',
+    recordTabOverview: '详情',
+    detailsColumnResize: '调整详情栏宽度',
     recordTabMoveBefore: '左移',
     recordTabMoveAfter: '右移',
     recordTabsMore: '另外 {{count}} 个页签',
@@ -1505,7 +1507,9 @@ const zh = {
     recordTabsMoreTrigger: '更多 {{count}}',
     recordTabsMoreTrigger_one: '更多 {{count}}',
     recordTabsMoreTrigger_other: '更多 {{count}}',
-    // objectstack#35596 — the 概览 tab's summary rail.
+    // objectstack#35596 — the 概览 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
     summaryApprovalDone: '已通过',
     summaryApprovalMine: '待你审批',
     summaryApprovalWaitingOn: '等待 {{name}}',
@@ -2784,6 +2788,11 @@ const zh = {
         saveAsMyView: '另存为我的视图',
         copyName: '{{name}} 副本',
         saved: '已保存',
+        saveToViewConfirmTitle: '保存到这个视图？',
+        saveToViewConfirm: '所有用「{{name}}」的人都会看到这些改动。',
+        saveToViewConfirmButton: '保存，所有人可见',
+        savedForEveryone: '已保存，所有人可见',
+        pendingDraft: '这个视图有未发布的修改，请先在视图设置里发布或放弃。',
       },
       linkFilterRefused: '此链接的筛选条件未应用：其中包含你在此处无法筛选的字段，因此列表按视图本身显示。',
       personalizedParts: {
@@ -2793,10 +2802,14 @@ const zh = {
         grouping: '分组',
         columns: '列布局',
         hiddenFields: '隐藏字段',
+        summaries: '统计',
         density: '密度',
         layout: '布局',
         rowColor: '行颜色',
         inlineEdit: '行内编辑',
+      },
+      saveRefused: {
+        packaged: '这个视图来自应用包，不能直接修改，可以另存为我的视图。',
       },
       cannotDeleteMetaView: '该视图为内置视图，由代码定义，无法删除。',
       expandToPage: '整页打开',
@@ -3484,6 +3497,8 @@ const zh = {
     removeFromFavorites: '从收藏中移除 {{name}}',
     allReports: '全部报表',
     keepOpen: '保持侧边栏展开',
+    collapse: '收起侧边栏',
+    expand: '展开侧边栏',
   },
   topbar: {
     aiAssistant: 'AI 助手',
@@ -3639,6 +3654,7 @@ const zh = {
       backToHome: '返回首页',
       settings: '系统设置',
       productHome: '{{product}} 首页',
+      addApp: '添加应用',
     },
     systemNav: {
       systemSettings: '系统设置',

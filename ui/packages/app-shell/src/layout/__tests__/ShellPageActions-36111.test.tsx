@@ -4,9 +4,9 @@
  * The page's top-right button group (objectstack#36111): comments slot,
  * 「Edit app」, AI, help, placed by the shell.
  *
- * - The shell decides: off by default while the top bar stands
- *   (`SHELL_PAGE_ACTIONS_DEFAULT`), on through the browser switch
- *   (`os:shell:page-actions` = `on`), never outside a scope or on a phone.
+ * - The shell decides: on in a scope unless the scope turns it off
+ *   (objectstack#36112: no top bar carries the buttons any more), never
+ *   outside a scope or on a phone.
  * - The console `PageHeader` draws it after the page's own actions, behind a
  *   hairline; turned off, the header is exactly what it was.
  * - 「Edit app」 reads the top bar pencil's gate and opens its target
@@ -49,9 +49,6 @@ vi.mock('../../providers/MetadataProvider', () => ({
 import {
   ShellPageActions,
   ShellPageActionsScope,
-  SHELL_PAGE_ACTIONS_DEFAULT,
-  SHELL_PAGE_ACTIONS_SWITCH_KEY,
-  readShellPageActionsSwitch,
 } from '../ShellPageActions';
 import { PageHeader } from '../PageHeader';
 import { appStudioRoutePath } from '../../utils/appRoute';
@@ -114,32 +111,18 @@ afterEach(() => {
 });
 
 describe('the shell decides whether the group is drawn (objectstack#36111)', () => {
-  it('off by default while the top bar stands; the browser switch turns it on; a blocked storage reads off', () => {
-    expect(SHELL_PAGE_ACTIONS_DEFAULT).toBe(false);
-    expect(readShellPageActionsSwitch()).toBe(false);
-    window.localStorage.setItem(SHELL_PAGE_ACTIONS_SWITCH_KEY, 'on');
-    expect(readShellPageActionsSwitch()).toBe(true);
-    window.localStorage.setItem(SHELL_PAGE_ACTIONS_SWITCH_KEY, 'yes');
-    expect(readShellPageActionsSwitch()).toBe(false);
-    const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
-      throw new Error('blocked');
-    });
-    expect(readShellPageActionsSwitch()).toBe(false);
-    spy.mockRestore();
-  });
-
-  it('drawn only inside a scope that turned it on, and not on a phone', async () => {
+  it('drawn inside a scope unless it is turned off, never outside one or on a phone', async () => {
     await mount(<ShellPageActions />);
     expect(screen.queryByTestId('shell-page-actions')).not.toBeInTheDocument();
     cleanup();
 
-    await mount(<ShellPageActionsScope><ShellPageActions /></ShellPageActionsScope>);
-    expect(screen.queryByTestId('shell-page-actions')).not.toBeInTheDocument();
-    cleanup();
-
-    window.localStorage.setItem(SHELL_PAGE_ACTIONS_SWITCH_KEY, 'on');
+    // objectstack#36112 — on by default.
     await mount(<ShellPageActionsScope><ShellPageActions /></ShellPageActionsScope>);
     expect(screen.getByTestId('shell-page-actions')).toBeInTheDocument();
+    cleanup();
+
+    await mount(<ShellPageActionsScope on={false}><ShellPageActions /></ShellPageActionsScope>);
+    expect(screen.queryByTestId('shell-page-actions')).not.toBeInTheDocument();
     cleanup();
 
     setWidth(375);

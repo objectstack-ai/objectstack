@@ -10,8 +10,11 @@ import { describe, expect, it } from 'vitest';
 import { defineStack } from '@objectstack/spec';
 
 import {
+  RELATED_LIST_ATTACHMENTS_OFF,
+  RELATED_LIST_COLUMN_UNKNOWN,
   RELATED_LIST_GROUP_NOT_BODY,
   RELATED_LIST_REF_UNKNOWN,
+  RELATED_LIST_STREAM_PART,
   validateRelatedListRefs,
 } from './validate-related-list-refs.js';
 
@@ -131,5 +134,75 @@ describe('validateRelatedListRefs', () => {
     const messages = validateRelatedListRefs(stack).map((f) => f.message);
     expect(messages).toHaveLength(4);
     expect(issues).toEqual(messages);
+  });
+});
+
+/**
+ * [#35897 · #35899] The built-in tab names and an object entry's own columns.
+ * Each finding row's control differs from it by one key or one entry.
+ */
+describe('validateRelatedListRefs — built-in tabs and an entry\'s columns', () => {
+  const findings = (stack: Record<string, unknown>, wholeCollection?: boolean) =>
+    validateRelatedListRefs(stack, wholeCollection ? { wholeCollection } : undefined).map((f) => [f.severity, f.rule, f.path]);
+  // The platform objects as the runtime door's whole collection holds them: none points at the parent.
+  const platform = [
+    { name: 'sys_attachment', label: 'Attachment', fields: { file_name: { type: 'text', label: 'File' } } },
+    { name: 'sys_comment', label: 'Comment', fields: { body: { type: 'text', label: 'Body' } } },
+    { name: 'sys_activity', label: 'Activity', fields: { subject: { type: 'text', label: 'Subject' } } },
+  ];
+  const withPlatform = (parent: Record<string, unknown>) => ({ objects: [parent, task, event, note, ...platform] });
+
+  it('never judges the three built-in tab names as children, even on the whole collection (control)', () => {
+    const parent = lead({ enable: { files: true }, relatedLists: ['sys_attachment', 'sys_approval_request', 'sys_activity', 'rlo_task'] });
+    expect(findings(withPlatform(parent), true)).toEqual([]);
+    expect(findings(stackOf(parent))).toEqual([]);
+  });
+
+  it("warns on 'sys_attachment' when the object does not enable files; enabling them is the control", () => {
+    expect(findings(stackOf(lead({ relatedLists: ['rlo_task', 'sys_attachment'] })))).toEqual([
+      ['warning', RELATED_LIST_ATTACHMENTS_OFF, 'objects[0].relatedLists[1]'],
+    ]);
+    expect(findings(stackOf(lead({ enable: { files: true }, relatedLists: ['rlo_task', 'sys_attachment'] })))).toEqual([]);
+  });
+
+  it("warns on a part of the activity stream and prescribes 'sys_activity', in place of the unknown-name error", () => {
+    const stack = withPlatform(lead({ relatedLists: ['sys_comment', 'sys_audit_log'] }));
+    expect(findings(stack, true)).toEqual([
+      ['warning', RELATED_LIST_STREAM_PART, 'objects[0].relatedLists[0]'],
+      ['warning', RELATED_LIST_STREAM_PART, 'objects[0].relatedLists[1]'],
+    ]);
+    const [first] = validateRelatedListRefs(stack, { wholeCollection: true });
+    expect(first.hint).toContain("'sys_activity'");
+  });
+
+  it('judges an object entry by its list, as a bare entry is', () => {
+    expect(findings(stackOf(lead({ relatedLists: [{ list: 'rlo_note', label: 'Notes' }] })))).toEqual([
+      ['error', RELATED_LIST_REF_UNKNOWN, 'objects[0].relatedLists[0]'],
+    ]);
+    expect(findings(stackOf(lead({ relatedLists: [{ list: 'rlo_task', label: 'Tasks' }] })))).toEqual([]);
+  });
+
+  it("refuses an entry column that is no field of the child, naming the column; a child field and an injected column are the control", () => {
+    expect(findings(stackOf(lead({ relatedLists: [{ list: 'rlo_task', columns: ['lead_id', 'nope', 'created_at'] }] })))).toEqual([
+      ['error', RELATED_LIST_COLUMN_UNKNOWN, 'objects[0].relatedLists[0].columns[1]'],
+    ]);
+    const [finding] = validateRelatedListRefs(stackOf(lead({ relatedLists: [{ list: 'rlo_task', columns: ['nope'] }] })));
+    expect(finding.message).toContain("'nope' is not a field of 'rlo_task'");
+  });
+
+  it("walks a dotted column as a relationship path, as the FK's relatedListColumns is walked (#35923 review S1)", () => {
+    // `lead_id.name` resolves through the task's lookup to the lead; the same spelling on the FK passes too.
+    expect(findings(stackOf(lead({ relatedLists: [{ list: 'rlo_task', columns: ['lead_id.name'] }] })))).toEqual([]);
+    expect(findings(stackOf(lead({ relatedLists: [{ list: 'rlo_task', columns: ['lead_id.nope', 'nope_id.name'] }] })))).toEqual([
+      ['error', RELATED_LIST_COLUMN_UNKNOWN, 'objects[0].relatedLists[0].columns[0]'],
+      ['error', RELATED_LIST_COLUMN_UNKNOWN, 'objects[0].relatedLists[0].columns[1]'],
+    ]);
+    const [leaf] = validateRelatedListRefs(stackOf(lead({ relatedLists: [{ list: 'rlo_task', columns: ['lead_id.nope'] }] })));
+    expect(leaf.message).toContain('"lead_id.nope" is not a field on object "rlo_lead"');
+  });
+
+  it('judges the columns against every child a bare child name names, and leaves a child outside the stack unjudged', () => {
+    expect(findings(stackOf(lead({ relatedLists: [{ list: 'rlo_event', columns: ['who_id'] }] })))).toEqual([]);
+    expect(findings(stackOf(lead({ relatedLists: [{ list: 'rlo_elsewhere', columns: ['nope'] }] })))).toEqual([]);
   });
 });

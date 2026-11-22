@@ -1530,6 +1530,7 @@ const fr = {
     approvalPendingEditable: "En approbation · modifiable",
     approvalPendingTooltip: "Cet enregistrement a une demande d'approbation en attente ; cette étape autorise encore la modification",
     approvalPending: "En approbation",
+    approvalPendingStep: "En approbation · {{step}}",
     approvalPendingNotEditableTooltip: "Cet enregistrement a une demande d'approbation en attente",
     approvalProgress: "Approbations — {{got}} sur {{need}}",
     approvalProgressGroups: "Validation — {{got}} sur {{need}} groupes",
@@ -1636,7 +1637,8 @@ const fr = {
     relatedHiddenCount_other: "{{count}} masquées",
     relatedShowHidden: "Afficher",
     recordTabs: "Onglets de l'enregistrement",
-    recordTabOverview: "Aperçu",
+    recordTabOverview: "Détails",
+    detailsColumnResize: "Redimensionner la colonne des détails",
     recordTabMoveBefore: "Déplacer à gauche",
     recordTabMoveAfter: "Déplacer à droite",
     recordTabsMore: "{{count}} onglets de plus",
@@ -1648,7 +1650,9 @@ const fr = {
     recordTabsMoreTrigger_one: "Plus {{count}}",
     recordTabsMoreTrigger_many: "Plus {{count}}",
     recordTabsMoreTrigger_other: "Plus {{count}}",
-    // objectstack#35596 — the 概览 tab's summary rail.
+    // objectstack#35596 — the 概览 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
     summaryApprovalDone: "Approuvé",
     summaryApprovalMine: "En attente de vous",
     summaryApprovalWaitingOn: "En attente de {{name}}",
@@ -2767,6 +2771,11 @@ const fr = {
         saveAsMyView: "Enregistrer comme ma vue",
         copyName: "{{name}} (copie)",
         saved: "Enregistré",
+        saveToViewConfirmTitle: "Enregistrer dans cette vue ?",
+        saveToViewConfirm: "Toutes les personnes qui utilisent « {{name}} » verront ces modifications.",
+        saveToViewConfirmButton: "Enregistrer pour tous",
+        savedForEveryone: "Enregistré, visible par tous",
+        pendingDraft: "Cette vue contient des modifications non publiées. Publiez-les ou abandonnez-les d’abord dans les paramètres de la vue.",
       },
       linkFilterRefused: 'Le filtre de ce lien n’a pas été appliqué. Il cite un champ sur lequel vous ne pouvez pas filtrer ici, la liste affiche donc la vue sans ce filtre.',
       personalizedParts: {
@@ -2776,10 +2785,14 @@ const fr = {
         grouping: "Regroupement",
         columns: "Disposition des colonnes",
         hiddenFields: "Champs masqués",
+        summaries: "Calculs",
         density: "Densité",
         layout: "Disposition",
         rowColor: "Couleur de ligne",
         inlineEdit: "Édition en ligne",
+      },
+      saveRefused: {
+        packaged: "Cette vue est fournie par un package d’application et ne peut pas être modifiée directement. Vous pouvez l’enregistrer comme votre propre vue.",
       },
       cannotDeleteMetaView: "Cette vue est intégrée et définie dans le code — elle ne peut pas être supprimée.",
       expandToPage: "Ouvrir en pleine page",
@@ -3479,6 +3492,8 @@ const fr = {
     removeFromFavorites: "Retirer {{name}} des favoris",
     allReports: "Tous les rapports",
     keepOpen: "Garder la barre latérale ouverte",
+    collapse: 'Réduire la barre latérale',
+    expand: 'Développer la barre latérale',
   },
   topbar: {
     openAssistant: "Ouvrir l'assistant {{name}}",
@@ -3648,6 +3663,7 @@ const fr = {
       backToHome: "Retour à l'accueil",
       settings: "Paramètres",
       productHome: "Accueil {{product}}",
+      addApp: 'Ajouter une application',
     },
     activityFeed: {
       title: "Activité récente",

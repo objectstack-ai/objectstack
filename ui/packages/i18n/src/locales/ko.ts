@@ -1487,6 +1487,7 @@ const ko = {
     approvalPendingEditable: "승인 진행 중 · 편집 가능",
     approvalPendingTooltip: "이 레코드에 대기 중인 승인 요청이 있지만 이 단계에서는 편집할 수 있습니다",
     approvalPending: "승인 진행 중",
+    approvalPendingStep: "승인 진행 중 · {{step}}",
     approvalPendingNotEditableTooltip: "이 레코드에 대기 중인 승인 요청이 있습니다",
     approvalProgress: "승인 — {{need}}건 중 {{got}}건",
     approvalProgressGroups: "합의 — {{need}}개 그룹 중 {{got}}개",
@@ -1589,7 +1590,8 @@ const ko = {
     relatedHiddenCount_other: "{{count}}개 숨김",
     relatedShowHidden: "표시",
     recordTabs: "레코드 탭",
-    recordTabOverview: "개요",
+    recordTabOverview: "상세정보",
+    detailsColumnResize: "세부 정보 열 너비 조정",
     recordTabMoveBefore: "왼쪽으로 이동",
     recordTabMoveAfter: "오른쪽으로 이동",
     recordTabsMore: "탭 {{count}}개 더",
@@ -1599,7 +1601,9 @@ const ko = {
     recordTabsMoreTrigger: "더보기 {{count}}",
     recordTabsMoreTrigger_one: "더보기 {{count}}",
     recordTabsMoreTrigger_other: "더보기 {{count}}",
-    // objectstack#35596 — the 概览 tab's summary rail.
+    // objectstack#35596 — the 概览 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
     summaryApprovalDone: "승인됨",
     summaryApprovalMine: "내 승인 대기",
     summaryApprovalWaitingOn: "{{name}} 승인 대기",
@@ -2697,6 +2701,11 @@ const ko = {
         saveAsMyView: "내 보기로 저장",
         copyName: "{{name}} 사본",
         saved: "저장했습니다",
+        saveToViewConfirmTitle: "이 보기에 저장할까요?",
+        saveToViewConfirm: "“{{name}}” 보기를 사용하는 모든 사람에게 이 변경 사항이 표시됩니다.",
+        saveToViewConfirmButton: "모두에게 저장",
+        savedForEveryone: "저장했습니다. 모두에게 표시됩니다",
+        pendingDraft: "이 보기에 게시되지 않은 변경 사항이 있습니다. 먼저 보기 설정에서 게시하거나 취소하세요.",
       },
       linkFilterRefused: '이 링크의 필터가 적용되지 않았습니다. 여기서 필터링할 수 없는 필드가 포함되어 있어 뷰를 그대로 표시합니다.',
       personalizedParts: {
@@ -2706,10 +2715,14 @@ const ko = {
         grouping: "그룹",
         columns: "열 배치",
         hiddenFields: "숨긴 필드",
+        summaries: "계산",
         density: "밀도",
         layout: "레이아웃",
         rowColor: "행 색상",
         inlineEdit: "인라인 편집",
+      },
+      saveRefused: {
+        packaged: "이 보기는 앱 패키지에 포함되어 있어 직접 변경할 수 없습니다. 내 보기로 저장할 수 있습니다.",
       },
       cannotDeleteMetaView: "이 보기는 코드에 정의된 기본 제공 보기이므로 삭제할 수 없습니다.",
       expandToPage: "전체 페이지로 열기",
@@ -3403,6 +3416,8 @@ const ko = {
     removeFromFavorites: "즐겨찾기에서 {{name}} 제거",
     allReports: "모든 보고서",
     keepOpen: "사이드바를 열어 두기",
+    collapse: '사이드바 접기',
+    expand: '사이드바 펼치기',
   },
   topbar: {
     openAssistant: "{{name}} 어시스턴트 열기",
@@ -3569,6 +3584,7 @@ const ko = {
       backToHome: "홈으로 돌아가기",
       settings: "시스템 설정",
       productHome: "{{product}} 홈",
+      addApp: '앱 추가',
     },
     activityFeed: {
       title: "최근 활동",

@@ -1393,7 +1393,8 @@ const ja = {
     relatedHiddenCount_other: "{{count}} 件非表示",
     relatedShowHidden: "表示",
     recordTabs: "レコードのタブ",
-    recordTabOverview: "概要",
+    recordTabOverview: "詳細",
+    detailsColumnResize: "詳細列の幅を調整",
     recordTabMoveBefore: "左へ移動",
     recordTabMoveAfter: "右へ移動",
     recordTabsMore: "他 {{count}} 個のタブ",
@@ -1403,7 +1404,9 @@ const ja = {
     recordTabsMoreTrigger: "さらに {{count}}",
     recordTabsMoreTrigger_one: "さらに {{count}}",
     recordTabsMoreTrigger_other: "さらに {{count}}",
-    // objectstack#35596 — the 概览 tab's summary rail.
+    // objectstack#35596 — the 概览 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
     summaryApprovalDone: "承認済み",
     summaryApprovalMine: "あなたの承認待ち",
     summaryApprovalWaitingOn: "{{name}} の承認待ち",
@@ -1568,6 +1571,7 @@ const ja = {
     approvalPendingEditable: "承認中 · 編集可能",
     approvalPendingTooltip: "このレコードには承認待ちのリクエストがありますが、このステップでは編集できます",
     approvalPending: "承認中",
+    approvalPendingStep: "承認中 · {{step}}",
     approvalPendingNotEditableTooltip: "このレコードには承認待ちのリクエストがあります",
     approvalProgress: "承認 — {{need}} 件中 {{got}} 件",
     approvalProgressGroups: "合議 — {{need}} グループ中 {{got}} グループ",
@@ -2699,6 +2703,11 @@ const ja = {
         saveAsMyView: "マイビューとして保存",
         copyName: "{{name}} のコピー",
         saved: "保存しました",
+        saveToViewConfirmTitle: "このビューに保存しますか？",
+        saveToViewConfirm: "「{{name}}」を使うすべての人にこの変更が表示されます。",
+        saveToViewConfirmButton: "全員に保存",
+        savedForEveryone: "保存しました。全員に表示されます",
+        pendingDraft: "このビューには未公開の変更があります。先にビューの設定で公開するか破棄してください。",
       },
       linkFilterRefused: 'このリンクのフィルターは適用されませんでした。ここでは絞り込めないフィールドが含まれているため、ビュー本来の内容を表示しています。',
       personalizedParts: {
@@ -2708,10 +2717,14 @@ const ja = {
         grouping: "グループ",
         columns: "列の配置",
         hiddenFields: "非表示フィールド",
+        summaries: "集計",
         density: "密度",
         layout: "レイアウト",
         rowColor: "行の色",
         inlineEdit: "インライン編集",
+      },
+      saveRefused: {
+        packaged: "このビューはアプリパッケージに含まれているため、直接変更できません。自分のビューとして保存できます。",
       },
       cannotDeleteMetaView: "このビューはコードで定義された組み込みビューのため、削除できません。",
       expandToPage: "フルページで開く",
@@ -3405,6 +3418,8 @@ const ja = {
     removeFromFavorites: "お気に入りから {{name}} を削除",
     allReports: "すべてのレポート",
     keepOpen: "サイドバーを開いたままにする",
+    collapse: 'サイドバーを折りたたむ',
+    expand: 'サイドバーを展開',
   },
   topbar: {
     openAssistant: "{{name}} アシスタントを開く",
@@ -3572,6 +3587,7 @@ const ja = {
       backToHome: "ホームに戻る",
       settings: "システム設定",
       productHome: "{{product}} ホーム",
+      addApp: 'アプリを追加',
     },
     activityFeed: {
       title: "最近の活動",
