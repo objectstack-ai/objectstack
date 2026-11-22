@@ -11,8 +11,9 @@
 //  - `activity` is `GET /data/sys_activity` for the record, newest first, with
 //    `$top`, `$count` and the actor expanded;
 //  - `attachments` is `GET /data/sys_attachment` for the record, newest first,
-//    with `$top` and `$count` — the count inherits the parent's row-level
-//    security, so another record's attachments are neither counted nor listed;
+//    with `$top`, `$count` and the uploader expanded — the count inherits the
+//    parent's row-level security, so another record's attachments are neither
+//    counted nor listed;
 //  - a related list's `expand` is its read's own `$expand`.
 //
 // The stream comparisons are byte-for-byte against the member's own reads, so
@@ -155,6 +156,7 @@ describe('[#28470] the record page attachments part, as a non-admin member', () 
   let adminTok = '';
   let memberTok = '';
   let caseId = '';
+  let adminId = '';
 
   const attach = async (parentObject: string, parentId: string) => {
     const fileId = await uploadFile(stack, adminTok);
@@ -175,7 +177,7 @@ describe('[#28470] the record page attachments part, as a non-admin member', () 
     adminTok = await stack.signIn();
     memberTok = await stack.signUp('rp-attachments-member@verify.test');
     ql = await stack.kernel.getServiceAsync('objectql');
-    const adminId = String((await ql.findOne('sys_user', { where: { email: 'admin@objectos.ai' }, context: SYS }))?.id);
+    adminId = String((await ql.findOne('sys_user', { where: { email: 'admin@objectos.ai' }, context: SYS }))?.id);
 
     const caseRes = await stack.apiAs(adminTok, 'POST', '/data/att_case', { name: 'page case' });
     expect(caseRes.status).toBeLessThan(300);
@@ -198,7 +200,7 @@ describe('[#28470] the record page attachments part, as a non-admin member', () 
     const list = await stack.apiAs(
       memberTok,
       'GET',
-      `/data/sys_attachment?$filter=${q({ parent_object: 'att_case', parent_id: caseId })}&sort=-created_at&$top=2&$count=true`,
+      `/data/sys_attachment?$filter=${q({ parent_object: 'att_case', parent_id: caseId })}&sort=-created_at&$top=2&$count=true&$expand=uploaded_by`,
     );
     expect(list.status).toBe(200);
     const listBody: any = await list.json();
@@ -206,5 +208,16 @@ describe('[#28470] the record page attachments part, as a non-admin member', () 
     // The case's three, never the secret's two; two rows on the page.
     expect(totalOf(listBody)).toBe(3);
     expect(rowsOf(listBody)).toHaveLength(2);
+    // [#35724] Each row was uploaded by the admin, another user: the member,
+    // an org peer who may read that user, is served the uploader's row with
+    // its name, as the member's own read of that user answers it.
+    const uploader = await stack.apiAs(memberTok, 'GET', `/data/sys_user/${adminId}`);
+    expect(uploader.status).toBe(200);
+    const uploaderBody: any = await uploader.json();
+    const uploaderName = uploaderBody?.data?.name ?? uploaderBody?.record?.name ?? uploaderBody?.name;
+    expect(typeof uploaderName === 'string' && uploaderName.length > 0, JSON.stringify(uploaderBody)).toBe(true);
+    for (const row of (data.attachments as { records: any[] }).records) {
+      expect(row.uploaded_by).toMatchObject({ id: adminId, name: uploaderName });
+    }
   }, 60_000);
 });

@@ -374,6 +374,11 @@ const TABLE_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // rule the list cannot complete.
   'table.cellSaving': 'Saving…',
   'table.cellSaved': 'Saved',
+  // objectstack#35689 — what the table's live region says when cells saved.
+  'table.cellSavedAnnouncement': 'Saved: {{fields}}',
+  // The pack's list punctuation the announcement joins column names with
+  // (`、` in ja and zh), the key the form's field lists use.
+  'validation.formInvalidJoiner': ', ',
   'table.openRecordToFinish': 'Open the record to finish this change',
   'common.actions': 'Actions',
   // objectui#10625 — the inline date editors' notice for a stored value
@@ -1487,6 +1492,13 @@ function CellEditButton({
   const ref = useRef<HTMLButtonElement>(null);
   const editableRef = useRef(editable);
   editableRef.current = editable;
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  // objectstack#35689 — the pointer that pressed the button for the click that
+  // follows, cleared by that click. A touch never selects the cell, so on a
+  // cell not selected the button is never drawn for it, and one it lands on
+  // anyway (drawn for a mouse before) edits nothing.
+  const pressedByRef = useRef('');
   const [allowed, setAllowed] = useState(false);
   useLayoutEffect(() => {
     if (selected) setAllowed(editableRef.current());
@@ -1494,7 +1506,8 @@ function CellEditButton({
   useEffect(() => {
     const host = ref.current?.closest<HTMLElement>('td');
     if (!host) return undefined;
-    const measure = () => setAllowed(editableRef.current());
+    const measure = (e: PointerEvent) =>
+      setAllowed(e.pointerType === 'touch' && !selectedRef.current ? false : editableRef.current());
     host.addEventListener('pointerenter', measure);
     return () => host.removeEventListener('pointerenter', measure);
   }, []);
@@ -1511,9 +1524,19 @@ function CellEditButton({
         allowed ? 'flex' : 'hidden',
         selected ? 'opacity-100' : 'opacity-0 group-hover/cell:opacity-100',
       )}
+      onPointerDown={(e) => { pressedByRef.current = e.pointerType; }}
       onMouseDown={(e) => e.preventDefault()}
       onDoubleClick={(e) => e.stopPropagation()}
       onClick={(e) => {
+        // objectstack#35689 — a tap on an unselected cell edits nothing in
+        // place. On the button it does nothing at all: the row's click ignores
+        // a click on a button, so the tap opens no record either (a tap beside
+        // the button opens it). The press is read once: a later click with no
+        // pointer of its own (assistive tech) is not taken for this touch.
+        const pressedBy = pressedByRef.current;
+        pressedByRef.current = '';
+        const pointer = (e.nativeEvent as PointerEvent).pointerType || pressedBy;
+        if (!selected && pointer === 'touch') return;
         e.stopPropagation();
         onEdit();
       }}
@@ -2169,6 +2192,10 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   const [rowRefusals, setRowRefusals] = useState<Map<PendingRowKey, { lines: string[]; needsRecord: boolean }>>(new Map());
   // Each cell's save state while it shows: in flight, or just saved.
   const [cellSaveStates, setCellSaveStates] = useState<Map<PendingRowKey, Record<string, 'saving' | 'saved'>>>(new Map());
+  // objectstack#35689 — what the table's one live region says about the last
+  // cell save. `seq` gives each saying a node of its own, so the same words
+  // twice are said twice.
+  const [saveAnnouncement, setSaveAnnouncement] = useState<{ seq: number; text: string }>({ seq: 0, text: '' });
   // The refused cell whose reason opens on its own as the refusal lands.
   const [failureNotice, setFailureNotice] = useState<{ rowKey: PendingRowKey; columnKey: string } | null>(null);
   // The rows a save updated in place since the rows last loaded, each as it
@@ -3423,6 +3450,16 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       });
       setFailureNotice((prev) => (prev?.rowKey === rowKey ? null : prev));
       flashSaved(rowKey, sentKeys);
+      // Each saved cell by its column's header, in the locale's list
+      // punctuation; a column with no header is never named by its key.
+      const fields = sentKeys.flatMap((key) => {
+        const header = columns.find((c) => c.accessorKey === key)?.header;
+        return typeof header === 'string' && header !== '' ? [header] : [];
+      });
+      const said = fields.length > 0
+        ? t('table.cellSavedAnnouncement', { fields: fields.join(t('validation.formInvalidJoiner')) })
+        : t('table.cellSaved');
+      setSaveAnnouncement((prev) => ({ seq: prev.seq + 1, text: said }));
     } catch (error) {
       // The edits stay pending and the cells keep what was typed. Each cell the
       // refusal names shows its own reason; a cell it does not name shows them
@@ -3446,6 +3483,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
         needsRecord: Object.keys(named).some((field) => !editableHere(field)),
       }));
       setFailureNotice({ rowKey, columnKey: sentKeys[0] });
+      // The refusal is said by the cell's own alert (`CellSaveFailure`), once;
+      // the region drops an earlier "saved" so it is never read after it.
+      setSaveAnnouncement((prev) => (prev.text === '' ? prev : { seq: prev.seq + 1, text: '' }));
     } finally {
       runningSavesRef.current.delete(rowKey);
       if (saveAgainRef.current.delete(rowKey)) requestAutosave(rowKey);
@@ -3692,6 +3732,25 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   const selectedPos = selectedRowIndex >= 0 && selectedColIndex >= 0
     ? { rowIndex: selectedRowIndex, colIndex: selectedColIndex }
     : null;
+  // objectstack#35689 — whether the host holds the selected cell read-only
+  // (`GridCellSelection.describeCell`), for its `aria-readonly`. Asked as a
+  // cell becomes selected, and again only when what the answer reads changes:
+  // the row is re-read, or the host hands the grid a new value (an answer it
+  // was waiting on arrived). Not asked per render (a host keeps its value
+  // stable: `GridCellSelection.describeCell`); every render reads this.
+  const selectedRow = selectedPos ? paginatedData[selectedPos.rowIndex] : undefined;
+  const selectedColumnKey = selectedPos ? columns[selectedPos.colIndex].accessorKey : undefined;
+  const [selectedHostReadOnly, setSelectedHostReadOnly] = useState<{ row: unknown; columnKey: string } | null>(null);
+  useLayoutEffect(() => {
+    const readOnly = selectedRow !== undefined && selectedColumnKey !== undefined
+      && !!cellSelection?.describeCell?.(selectedRow, selectedColumnKey)?.readOnlyReason;
+    setSelectedHostReadOnly((prev) => {
+      if (!readOnly || selectedColumnKey === undefined) return null;
+      return prev !== null && prev.row === selectedRow && prev.columnKey === selectedColumnKey
+        ? prev
+        : { row: selectedRow, columnKey: selectedColumnKey };
+    });
+  }, [selectedRow, selectedColumnKey, cellSelection]);
   const setSelectedCell = (pos: { rowIndex: number; colIndex: number } | null) =>
     setSelectedCellKey(pos ? { rowKey: pendingRowKeyOf(paginatedData[pos.rowIndex]), columnKey: columns[pos.colIndex].accessorKey } : null);
   // objectstack#35688 — a selected cell whose content is cut off shows it in
@@ -4553,6 +4612,15 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
         </div>
       )}
 
+      {/* objectstack#35689 — the one live region a cell save is said in. It is
+          drawn for the table's whole life: a region that appears with its words
+          in it is often not read. */}
+      {autosaves && (
+        <div data-slot="cell-save-announcer" aria-live="polite" aria-atomic="true" className="sr-only">
+          {saveAnnouncement.text !== '' && <span key={saveAnnouncement.seq}>{saveAnnouncement.text}</span>}
+        </div>
+      )}
+
       {/* Table. When `borderless`, drop the rounded frame so the table sits
           flush against its container. The outer box holds the scroll box and
           the right-edge scroll shadow beside it (objectui#12463). */}
@@ -5208,6 +5276,13 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         // objectstack#35684 — the selected cell of the select-first model.
                         const isSelectedCell = selectFirst && selectedPos?.rowIndex === rowIndex && selectedPos.colIndex === colIndex;
                         const showsPreview = isSelectedCell && !isEditing && previewKey === `${rowIndex}:${colIndex}`;
+                        // objectstack#35689 — a read-only cell says so to assistive tech, in the
+                        // grid only, from the table's own facts. The selected cell (the one a
+                        // reader moves to) adds the host's, asked when it became selected
+                        // (`selectedHostReadOnly`: `describeCell` is not asked per render).
+                        const cellReadOnly = keyboardNavigation
+                          && (!isEditable || (isSelectedCell && selectedHostReadOnly !== null
+                            && selectedHostReadOnly.row === row && selectedHostReadOnly.columnKey === col.accessorKey));
                         // What the cell draws; the preview layer draws the same, unclipped.
                         const drawCell = (): React.ReactNode => (typeof col.cell === 'function'
                           ? col.cell(cellValue, row)
@@ -5363,6 +5438,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                             data-editing-cell={isEditing ? '' : undefined}
                             data-selected-cell={isSelectedCell ? '' : undefined}
                             aria-selected={selectFirst ? isSelectedCell : undefined}
+                            aria-readonly={cellReadOnly || undefined}
                             data-cell-error={cellError}
                             title={cellError}
                           >
@@ -5384,6 +5460,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                 autoComplete="off"
                                 spellCheck={false}
                                 aria-label={typeof col.header === 'string' ? col.header : col.accessorKey}
+                                // The focus a reader lands on, so it says read-only too.
+                                aria-readonly={cellReadOnly || undefined}
                                 className={cn(
                                   "absolute inset-0 h-full w-full min-w-0 border-0 bg-transparent px-3 py-0 text-transparent caret-transparent outline-none pointer-events-none",
                                   // An open composition is drawn over the cell, so its
@@ -5449,13 +5527,14 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                               })()}
                             {selectFirst && !isEditing && cellSaveStates.get(rowKey)?.[col.accessorKey] && (() => {
                               // objectstack#35685 — the cell's own save state, drawn over its
-                              // edge so nothing moves.
+                              // edge so nothing moves. The result is said by the table's live
+                              // region (objectstack#35689); the mark is named, never live.
                               const state = cellSaveStates.get(rowKey)?.[col.accessorKey];
                               return (
                                 <span
                                   data-slot="cell-save-state"
                                   data-state={state}
-                                  role="status"
+                                  role="img"
                                   aria-label={t(state === 'saving' ? 'table.cellSaving' : 'table.cellSaved')}
                                   className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground"
                                 >

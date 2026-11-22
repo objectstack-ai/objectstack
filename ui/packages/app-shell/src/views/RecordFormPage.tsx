@@ -39,6 +39,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate, useSearchParams, useLocation, Link } from 'react-router-dom';
 import { ObjectForm } from '@object-ui/plugin-form';
+import { ConsoleFormOwnerLine } from './consoleFormOwnerLine.js';
 import {
   Button,
   Empty,
@@ -447,6 +448,8 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
             )}
             <SuggestedFieldChangesContext.Provider value={aiProposedChanges}>
               <SuggestedFieldsContext.Provider value={aiSuggestedFields}>
+                {/* objectstack#35403 — an edit draws the owner read-only, with Change Owner beside it. */}
+                <ConsoleFormOwnerLine>
                 <ObjectForm
                   key={`${mode}:${objectName}:${recordId ?? 'new'}`}
                   schema={{
@@ -469,6 +472,7 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
                   }}
                   dataSource={formDataSource ?? undefined}
                 />
+                </ConsoleFormOwnerLine>
               </SuggestedFieldsContext.Provider>
             </SuggestedFieldChangesContext.Provider>
           </div>

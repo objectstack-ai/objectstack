@@ -1,7 +1,7 @@
 ---
 title: Attachment access — who can read a file
 navTitle: Attachments Access
-description: "Who can read, upload or delete a record's attachments: the parent-derived access model, authenticated downloads, the enable.files gate and file cleanup."
+description: "Who can read, upload, rename or delete a record's attachments: the parent-derived access model, authenticated downloads, the enable.files gate and file cleanup."
 ---
 
 The generic **Attachments** surface (Salesforce "Notes & Attachments" parity)
@@ -254,6 +254,35 @@ to a member who holds only the baseline, and removing someone else's
 attachment — as a parent editor or an administrator — still goes through the
 data API with an explicit delete grant.
 
+### The rename door
+
+`PATCH /api/v1/attachments/:id` with the body `{ "file_name": "..." }` renames
+one attachment by the delete rule above: **the uploader**, or **a caller who
+may edit the parent record**. The storage service mounts it beside the removal
+door, at the same path.
+
+| Code | Status | When |
+| --- | --- | --- |
+| `UNAUTHENTICATED` | 401 | No session |
+| `VALIDATION_ERROR` | 400 | The request carries query parameters, names no id, or its body is not exactly `{ "file_name" }` with a non-blank string |
+| `RECORD_NOT_FOUND` | 404 | The caller cannot read the attachment (its parent record is out of their sight), or the id names none: the two answer alike |
+| `RECORD_NOT_ACCESSIBLE` | 403 | The caller reads the attachment but is neither its uploader nor able to edit the parent record. The name stays |
+| `PERMISSION_DENIED` | 403 | A caller who is not the uploader holds no edit grant on `sys_attachment`, or is bound by the platform's owner-only edit floor. The name stays |
+
+The door reads the attachment as the caller first, so every read rule above
+applies. **The uploader renames their own attachment with no edit grant**: the
+door writes the new name on their behalf, as the removal door removes. Anyone
+else's rename is an ordinary update made as the caller, so it needs an explicit
+edit grant on `sys_attachment` and then passes the update rule above (uploader
+or parent editor). It answers `{ id, file_name }` (200), with the name trimmed.
+
+Only the name the attachment is listed under changes. The stored `sys_file`,
+its bytes and the file name a download carries stay as they were uploaded.
+
+The console's Attachments tab offers Rename to a reader who holds the delete
+grant on `sys_attachment`: on the rows they uploaded, and on every row when
+they also hold the edit grant.
+
 ## Download — authenticated & parent-scoped
 
 For **`scope: 'attachments'`** files (those created through the Attachments
@@ -340,7 +369,8 @@ Every operation also needs its object grant on `sys_attachment`, refused
 `PERMISSION_DENIED` (403) without it. Read and create come with the member
 baseline (`storage_attachment_member`, where every attachment gate is
 present); edit and delete need an explicit grant, except that the uploader
-withdraws their own attachment through the removal door without one.
+withdraws or renames their own attachment through the storage service's doors
+without one.
 
 | Operation | Requirement | Deny code |
 | --- | --- | --- |
@@ -350,6 +380,7 @@ withdraws their own attachment through the removal door without one.
 | List / read | inherits parent read visibility | *(filtered out)* |
 | Delete | uploader or parent editor (+ an explicit delete grant) | `ATTACHMENT_DELETE_DENIED` (403); `PERMISSION_DENIED` (403) when the parent is not readable or no delete grant is held |
 | Withdraw one's own upload (`DELETE /api/v1/attachments/:id`) | the row's `uploaded_by` is the caller, and the caller reads it; no delete grant | `UNAUTHENTICATED` (401) / `RECORD_NOT_FOUND` (404) / `PERMISSION_DENIED` (403) |
+| Rename (`PATCH /api/v1/attachments/:id`) | the caller reads the attachment, then is its uploader (no edit grant), or holds the edit grant and may edit the parent record | `UNAUTHENTICATED` (401) / `VALIDATION_ERROR` (400) / `RECORD_NOT_FOUND` (404) / `RECORD_NOT_ACCESSIBLE` (403) / `PERMISSION_DENIED` (403) |
 | Download | session + owner-or-parent-read (attachments scope); session only for a file with no parent; none for `acl: 'public_read'` | `AUTH_REQUIRED` (401) / `ATTACHMENT_DOWNLOAD_DENIED` (403) |
 
 ## See also

@@ -1557,6 +1557,9 @@ export function ObjectFieldInspector({
   // The siblings an expression may read: every field but this one (a field
   // computed from itself is circular), named as every other surface names it.
   const siblingFieldNames = view.entries.map((e) => e.name).filter((n) => n !== entry.name);
+  // Each field's type and `multiple`, so every CEL editor below judges a
+  // list-valued field as the object draft check does (`list-equality`).
+  const celFieldDefs = view.entries.map((e) => ({ name: e.name, type: e.def.type, multiple: e.def.multiple }));
   const siblingFieldOptions = view.entries
     .filter((e) => e.name !== entry.name)
     .map((e) => {
@@ -1832,6 +1835,7 @@ export function ObjectFieldInspector({
                 objectName={typeof (draft as any).name === 'string' ? ((draft as any).name as string) : undefined}
                 // A formula may reference every sibling, not itself (circular).
                 fieldNames={siblingFieldNames}
+                fieldDefs={celFieldDefs}
                 fieldOptions={siblingFieldOptions}
                 scope="record"
                 roots={FORMULA_ROOTS}
@@ -1964,6 +1968,7 @@ export function ObjectFieldInspector({
               // The engine computes it as it computes a formula, over the
               // row the write stores: `record` is the one root it binds.
               fieldNames={siblingFieldNames}
+              fieldDefs={celFieldDefs}
               fieldOptions={siblingFieldOptions}
               scope="record"
               roots={FORMULA_ROOTS}
@@ -2030,6 +2035,7 @@ export function ObjectFieldInspector({
               placeholder="record.status != 'draft'"
               objectName={typeof (draft as any).name === 'string' ? ((draft as any).name as string) : undefined}
               fieldNames={view.entries.map((e) => e.name)}
+              fieldDefs={celFieldDefs}
               scope="record"
               roots={FIELD_RULE_ROOTS}
               // The authored key, so the wrong-layer advisory reads the
@@ -2081,6 +2087,7 @@ export function ObjectFieldInspector({
               placeholder="record.status == 'closed'"
               objectName={typeof (draft as any).name === 'string' ? ((draft as any).name as string) : undefined}
               fieldNames={view.entries.map((e) => e.name)}
+              fieldDefs={celFieldDefs}
               scope="record"
               roots={FIELD_RULE_ROOTS}
               // The authored key, so the wrong-layer advisory reads the
@@ -2101,6 +2108,7 @@ export function ObjectFieldInspector({
               placeholder="record.amount > 10000"
               objectName={typeof (draft as any).name === 'string' ? ((draft as any).name as string) : undefined}
               fieldNames={view.entries.map((e) => e.name)}
+              fieldDefs={celFieldDefs}
               scope="record"
               roots={FIELD_RULE_ROOTS}
               // The authored key, so the wrong-layer advisory reads the

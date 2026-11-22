@@ -191,3 +191,13 @@ export {
 // grids and the timeline's week buckets read it from the tag they format with,
 // so the week starts where the locale says and never on a hard-coded day.
 export { firstDayOfWeek, type WeekdayIndex } from './utils/index.js';
+
+// The app's `flows` translation group, read back out of the loaded resource
+// tree: the ONE reader every surface that names a flow goes through — the
+// console's flow runner and designer, and the stage-change confirms that name
+// the flows a move would start (objectstack#35928).
+export {
+  activeFlowsBundle,
+  type FlowsTranslation,
+  type TranslationResourceReader,
+} from './flowsBundle.js';

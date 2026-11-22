@@ -246,6 +246,7 @@ export {
   buildFilterCondition,
   buildWidgetScopedFilter,
   boundMemberFilterNames,
+  dashboardFiltersNotApplied,
   type DashboardFilterJsonColumnOperators,
 } from './utils/dashboard-filters.js';
 export * from './utils/merge-filters.js';

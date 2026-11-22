@@ -22,10 +22,11 @@
  * the slate, the request is reassigned to that member.
  */
 
-import { approvalMessageKey, interpolate } from './approval-notification-text.js';
+import { approvalMessageKey, interpolate, type ApprovalTextParam } from './approval-notification-text.js';
 import { enMessages, type ApprovalMessageId } from './translations/messages.js';
 import { slatePositions, type ApprovalSentenceRender, type PositionLabelOf } from './admin-rescue-note.js';
 import { isPlatformAdminAddress, slateNamesAPerson } from './approver-address.js';
+import { positionLabelKey } from './reader-locale-labels.js';
 
 /** The node-config snapshot key the note rides under. */
 export const NO_APPROVER_NOTE_SNAPSHOT_KEY = '__noApproverNote';
@@ -55,18 +56,66 @@ export function noApproverSlots(slate: readonly string[]): string[] | undefined 
 }
 
 /**
- * What the literals on `slate` ask a member to hold, as `type 'value'`, or
- * `undefined` when it holds none. [#36035] With `positionLabel`, a position's
- * value is the label it answers; with none, or for a position it does not
- * know, the position's name stands, which is the English the row stores.
+ * The catalog word of each approver type a no-approver slot is written under
+ * (`resolveApproverSpec`'s `type:value` fallback). The `en` word IS the type's
+ * machine token, so the English reads as it always did. A slot of any other
+ * type (a stored `role:` or `queue:` slot, a `bu` dialect) is named by its
+ * token, in every language, as the administrators' note names one.
  */
-export function noApproverWho(slate: readonly string[], positionLabel?: PositionLabelOf): string | undefined {
-  const named = (noApproverSlots(slate) ?? []).map((slot) => {
-    const type = slot.slice(0, slot.indexOf(':'));
-    const value = slot.slice(slot.indexOf(':') + 1);
-    return `${type} '${(type === 'position' && positionLabel?.(value)) || value}'`;
-  });
-  return named.length ? named.join(', ') : undefined;
+const APPROVER_TYPE_WORDS: Readonly<Record<string, ApprovalMessageId>> = {
+  position: 'approvalApproverTypePosition',
+  team: 'approvalApproverTypeTeam',
+  department: 'approvalApproverTypeDepartment',
+  org_membership_level: 'approvalApproverTypeOrgMembershipLevel',
+};
+
+/** One literal of a slate, split at its first `:`. */
+interface Slot {
+  readonly type: string;
+  readonly value: string;
+}
+
+function slotsOf(slate: readonly string[]): Slot[] {
+  return (noApproverSlots(slate) ?? []).map((slot) => ({
+    type: slot.slice(0, slot.indexOf(':')),
+    value: slot.slice(slot.indexOf(':') + 1),
+  }));
+}
+
+/** A slot's value as named: a position by the label `positionLabel` knows, else as configured. */
+function slotValue(slot: Slot, positionLabel: PositionLabelOf | undefined): string {
+  return (slot.type === 'position' && positionLabel?.(slot.value)) || slot.value;
+}
+
+/** One slot's clause, `type 'value'`: in English, or in `render`'s language. */
+function slotClause(slot: Slot, value: string, render: ApprovalSentenceRender | undefined): string {
+  const word = APPROVER_TYPE_WORDS[slot.type];
+  const english = interpolate(enMessages.approvalNoApproverSlot, { type: word ? enMessages[word] : slot.type, value });
+  if (!render) return english;
+  const type = word ? render(approvalMessageKey(word), {}) : slot.type;
+  return (type !== undefined ? render(approvalMessageKey('approvalNoApproverSlot'), { type, value }) : undefined)
+    ?? english;
+}
+
+/**
+ * What the literals on `slate` ask a member to hold, one clause per slot
+ * (`position 'legal'`), or `undefined` when it holds none. [#36035] With
+ * `positionLabel`, a position's value is the label it answers; with none, or
+ * for a position it does not know, the position's name stands, which is the
+ * English the row stores. With `render`, each clause and the separator are
+ * the reader's language, the approver type named by its word there; a clause
+ * the pack does not hold falls back to its English.
+ */
+export function noApproverWho(
+  slate: readonly string[],
+  positionLabel?: PositionLabelOf,
+  render?: ApprovalSentenceRender,
+): string | undefined {
+  const clauses = slotsOf(slate).map((slot) => slotClause(slot, slotValue(slot, positionLabel), render));
+  if (!clauses.length) return undefined;
+  const separator = (render && render(approvalMessageKey('approvalNoApproverSlotSeparator'), {}))
+    ?? enMessages.approvalNoApproverSlotSeparator;
+  return clauses.join(separator);
 }
 
 /** [#36035] The position names a note's `slots` hold, each once; none for a note that stored `who`. */
@@ -80,14 +129,37 @@ export function namesNoOneBut(slate: readonly string[], submitter: string): bool
 }
 
 /**
- * The catalog sentence for the note, and its parameters. A note's `slots` are
- * composed here, each position named by `positionLabel` where it knows one; a
+ * The submitter's notice body for the note: its catalog sentence and the
+ * params the messaging service fills per recipient, at delivery
+ * (`EmitInput.keyedText`).
+ *
+ * A hole there takes one text or one hole-free catalog key, so a sentence
+ * composed from clauses cannot ride as a param. A slate of ONE slot is
+ * therefore spelled inline, `approvalNoApproverHoldingSlot`: its `type` is
+ * the approver type's word as a key, and a position's `value` is its
+ * reader-language label as a key (`positions.<name>.label`, the key the
+ * timeline reads) falling back to `declaredLabel`, else the name — the order
+ * the timeline note names it in. A slate of several slots names them in
+ * English inside the reader's sentence, each position by `declaredLabel`; a
  * note that stored `who` keeps it as written.
  */
-export function noApproverSentence(note: Pick<NoApproverNote, 'slots' | 'who'>, positionLabel?: PositionLabelOf): {
-  id: ApprovalMessageId; params: Record<string, string>;
+export function noApproverNotice(note: Pick<NoApproverNote, 'slots' | 'who'>, declaredLabel?: PositionLabelOf): {
+  id: ApprovalMessageId; params: Record<string, ApprovalTextParam>;
 } {
-  const who = note.slots ? noApproverWho(note.slots, positionLabel) : note.who;
+  const slots = note.slots ? slotsOf(note.slots) : [];
+  if (slots.length === 1) {
+    const [slot] = slots;
+    const word = APPROVER_TYPE_WORDS[slot.type];
+    const value = slotValue(slot, declaredLabel);
+    return {
+      id: 'approvalNoApproverHoldingSlot',
+      params: {
+        type: word ? { key: approvalMessageKey(word), fallback: enMessages[word] } : slot.type,
+        value: slot.type === 'position' ? { key: positionLabelKey(slot.value), fallback: value } : value,
+      },
+    };
+  }
+  const who = note.slots ? noApproverWho(note.slots, declaredLabel) : note.who;
   return who
     ? { id: 'approvalNoApproverHolding', params: { who } }
     : { id: 'approvalNoApprover', params: {} };
@@ -99,8 +171,9 @@ export function noApproverSentence(note: Pick<NoApproverNote, 'slots' | 'who'>, 
  * does not hold the sentence (the stored comment then stands).
  *
  * [#36035] With `positionLabel` too, a position the note's `slots` name is
- * named by the label it answers, as `adminRescueNoteText` names one. The
- * stored English keeps the name: it is the audit text.
+ * named by the label it answers, as `adminRescueNoteText` names one, and each
+ * slot's approver type by its word in the reader's pack. The stored English
+ * keeps the name and the type's token: it is the audit text.
  */
 export function noApproverNoteText(note: Pick<NoApproverNote, 'slots' | 'who'>): string;
 export function noApproverNoteText(
@@ -113,8 +186,11 @@ export function noApproverNoteText(
   render?: ApprovalSentenceRender,
   positionLabel?: PositionLabelOf,
 ): string | undefined {
-  const { id, params } = noApproverSentence(note, render ? positionLabel : undefined);
-  return render ? render(approvalMessageKey(id), params) : interpolate(enMessages[id], params);
+  const who = note.slots ? noApproverWho(note.slots, render ? positionLabel : undefined, render) : note.who;
+  if (!who) return render ? render(approvalMessageKey('approvalNoApprover'), {}) : enMessages.approvalNoApprover;
+  return render
+    ? render(approvalMessageKey('approvalNoApproverHolding'), { who })
+    : interpolate(enMessages.approvalNoApproverHolding, { who });
 }
 
 /**

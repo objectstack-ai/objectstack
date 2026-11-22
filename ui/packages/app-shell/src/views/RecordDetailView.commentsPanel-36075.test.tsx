@@ -11,14 +11,17 @@
  * - Whether the panel is open is kept in this browser: a record opened later
  *   opens with the panel as it was left.
  * - Where it is drawn: beside the record from a 1280 window (the record gives
- *   way), over the record's right edge in a narrower one, and over the whole
- *   body of a drawer too narrow to split.
+ *   way), over the record's right edge in a narrower one.
  * - The comments are the panel's: the page's 动态 stream no longer draws them.
  * - No icon where the panel is not offered: an object with feeds off, and a
  *   page authored by hand (option C, seat 13:24Z): that page keeps its own
  *   discussion block as it was. It is drawn on the desktop full page only
- *   (objectstack#36150): the same object's drawer draws the standard page,
- *   which offers the icon.
+ *   (objectstack#36150).
+ * - objectstack#36225 — the side preview (the record drawn embedded, in a
+ *   drawer or pane) has no icon and no panel, whatever the page was left
+ *   with, and its 动态 stream draws no comment and no composer either: the
+ *   comments are the full page's. The CONTROL is the full page, whose icon,
+ *   panel and composer stay.
  */
 
 import * as React from 'react';
@@ -60,6 +63,7 @@ import { MetadataCtx } from '@object-ui/react';
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { toast } from 'sonner';
 import { RecordDetailView } from './RecordDetailView';
+import { COMMENTS_PANEL_OPEN_KEY } from './recordCommentsPanel';
 import { __clearRecordEditableCache } from '../../../plugin-detail/src/useRecordEditable';
 
 const OBJECT_NAME = 'crm_case';
@@ -150,6 +154,7 @@ interface MountOptions {
   embedded?: boolean;
   /** The record route's query, `?comments=…` for the phone's comment page. */
   search?: string;
+  dataSource?: ReturnType<typeof makeDataSource>;
 }
 
 /** The router's location now, for the phone's `?comments=` entries. */
@@ -158,7 +163,7 @@ function LocationProbe() {
   return <span data-testid="location" data-search={location.search} data-pushed={String(!!(location.state as any)?.__commentsPushed)} />;
 }
 
-async function mount({ objectName = OBJECT_NAME, pages = [], embedded = false, search = '' }: MountOptions = {}) {
+async function mount({ objectName = OBJECT_NAME, pages = [], embedded = false, search = '', dataSource = makeDataSource() }: MountOptions = {}) {
   const rendered = render(
     <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }} persistLanguage={false}>
       <MePermissionsProvider initialPermissions={PERMS}>
@@ -166,7 +171,7 @@ async function mount({ objectName = OBJECT_NAME, pages = [], embedded = false, s
           <LocationProbe />
           <MetadataCtx.Provider value={metadataFor(pages)}>
             <RecordDetailView
-              dataSource={makeDataSource()}
+              dataSource={dataSource}
               objects={OBJECTS}
               onEdit={() => {}}
               objectNameOverride={objectName}
@@ -248,19 +253,6 @@ describe('the record comment panel (objectstack#36075)', () => {
     await waitFor(() => expect(panel(second.container)).not.toBeNull());
   });
 
-  it('a drawer too narrow to split gives the panel its whole body, and remembers it apart from the page', async () => {
-    const page = await mount();
-    await waitFor(() => expect(button(page.container)).not.toBeNull());
-    fireEvent.click(button(page.container)!);
-    cleanup();
-    const drawer = await mount({ embedded: true });
-    await waitFor(() => expect(button(drawer.container)).not.toBeNull());
-    // The page was left open; the drawer opens closed.
-    expect(panel(drawer.container)).toBeNull();
-    fireEvent.click(button(drawer.container)!);
-    expect(placement(drawer.container)).toBe('cover');
-  });
-
   it('the 动态 stream no longer draws the comments', async () => {
     const { container } = await mount();
     await waitFor(() => expect(button(container)).not.toBeNull());
@@ -303,12 +295,73 @@ describe('the record comment panel (objectstack#36075)', () => {
     expect(panel(container)).toBeNull();
   });
 
-  it('the drawer of an object with a hand-written page draws the standard page, so it offers the icon (objectstack#36150)', async () => {
-    const { container } = await mount({ pages: [AUTHORED_PAGE], embedded: true });
+  it('a comment written in the panel is posted on the record (objectstack#36225 CONTROL: the full page keeps the panel)', async () => {
+    const dataSource = makeDataSource();
+    const { container } = await mount({ dataSource });
     await waitFor(() => expect(button(container)).not.toBeNull());
-    expect(panel(container)).toBeNull();
     fireEvent.click(button(container)!);
-    expect(await within(panel(container)!).findByText(ADA_BODY)).toBeInTheDocument();
+    const box = within(panel(container)!.querySelector('[data-comments-composer]') as HTMLElement).getByRole('textbox');
+    fireEvent.change(box, { target: { value: 'Ada: written on the full page' } });
+    await act(async () => {
+      fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true });
+    });
+    await waitFor(() =>
+      expect(dataSource.create).toHaveBeenCalledWith(
+        'sys_comment',
+        expect.objectContaining({ thread_id: THREAD, body: 'Ada: written on the full page' }),
+        expect.anything(),
+      ),
+    );
+    expect(await within(panel(container)!).findByText('Ada: written on the full page')).toBeInTheDocument();
+  });
+});
+
+/**
+ * objectstack#36225 — the side preview: a record drawn embedded (the list's
+ * drawer or pane, a record page's drawer) shows no comments at all. To read
+ * or write one, the reader opens the full page.
+ */
+describe('the side preview has no comments (objectstack#36225)', () => {
+  it('no icon and no panel, though the page was left with the panel open', async () => {
+    const page = await mount();
+    await waitFor(() => expect(button(page.container)).not.toBeNull());
+    fireEvent.click(button(page.container)!);
+    expect(panel(page.container)).not.toBeNull();
+    cleanup();
+    const preview = await mount({ embedded: true });
+    await act(async () => {});
+    expect(within(preview.container).getByText(`Case ${RECORD_ID}`)).toBeInTheDocument();
+    expect(button(preview.container)).toBeNull();
+    expect(panel(preview.container)).toBeNull();
+    expect(document.querySelector('[data-comments-button]')).toBeNull();
+    expect(document.querySelector('[data-comments-panel]')).toBeNull();
+  });
+
+  it('its 动态 stream draws no comment and no composer', async () => {
+    const preview = await mount({ embedded: true });
+    const activityTab = await within(preview.container).findByRole('tab', { name: /^Activity/ });
+    fireEvent.mouseDown(activityTab, { button: 0 });
+    fireEvent.click(activityTab);
+    await act(async () => {});
+    expect(activityTab).toHaveAttribute('aria-selected', 'true');
+    expect(within(preview.container).queryByText(ADA_BODY)).toBeNull();
+    expect(within(preview.container).queryByText(GRACE_BODY)).toBeNull();
+    expect(preview.container.querySelector('[data-comments-composer]')).toBeNull();
+    expect(within(preview.container).queryByRole('textbox')).toBeNull();
+    expect(button(preview.container)).toBeNull();
+  });
+
+  it('a hand-written page’s object: the preview draws the standard page, with no icon (objectstack#36150)', async () => {
+    // The reader left the full page's panel open.
+    window.localStorage.setItem(COMMENTS_PANEL_OPEN_KEY, 'open');
+    const { container } = await mount({ pages: [AUTHORED_PAGE], embedded: true });
+    // The standard page is laid out (its tab row is drawn) before anything is asked of it.
+    await within(container).findByRole('tab', { name: /^Activity/ });
+    await act(async () => {});
+    expect(within(container).getByText(`Case ${RECORD_ID}`)).toBeInTheDocument();
+    expect(button(container)).toBeNull();
+    expect(panel(container)).toBeNull();
+    expect(within(container).queryByText(ADA_BODY)).toBeNull();
   });
 });
 
