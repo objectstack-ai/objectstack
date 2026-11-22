@@ -26,7 +26,7 @@
  * entry.
  */
 
-import { lazy, Suspense, type ComponentProps } from 'react';
+import { lazy, Suspense, useState, type ComponentProps } from 'react';
 import type {
   HeaderHighlight as HeaderHighlightComponent,
   RelatedList as RelatedListComponent,
@@ -35,22 +35,37 @@ import type {
 type DetailEntry = typeof import('@object-ui/plugin-detail');
 
 let detailEntry: Promise<DetailEntry> | undefined;
+/** The entry once it has loaded: a surface mounted after that renders it without suspending. */
+let loadedEntry: DetailEntry | undefined;
 
 /** Starts loading the detail entry (once); the lazy components below share it. */
 export function preloadDetailEntry(): Promise<DetailEntry> {
   // A failed load is forgotten, so the next draw asks again.
-  detailEntry ??= import('@object-ui/plugin-detail').catch((error: unknown) => {
-    detailEntry = undefined;
-    throw error;
-  });
+  detailEntry ??= import('@object-ui/plugin-detail').then(
+    (entry) => {
+      loadedEntry = entry;
+      return entry;
+    },
+    (error: unknown) => {
+      detailEntry = undefined;
+      throw error;
+    },
+  );
   return detailEntry;
 }
 
 const HeaderHighlightChunk = lazy(() => preloadDetailEntry().then((m) => ({ default: m.HeaderHighlight })));
 const RelatedListChunk = lazy(() => preloadDetailEntry().then((m) => ({ default: m.RelatedList })));
 
-/** `HeaderHighlight`, loaded on first draw. Nothing shows until the detail chunk is in. */
+/**
+ * `HeaderHighlight`, loaded on first draw. Nothing shows until the detail chunk
+ * is in; once it is, the component draws in the same render.
+ */
 export function LazyHeaderHighlight(props: ComponentProps<typeof HeaderHighlightComponent>) {
+  // Decided once per mount, so a draw never switches between the two element
+  // types (which would remount the component and drop its state).
+  const [entry] = useState(() => loadedEntry);
+  if (entry) return <entry.HeaderHighlight {...props} />;
   return (
     <Suspense fallback={null}>
       <HeaderHighlightChunk {...props} />
@@ -58,8 +73,13 @@ export function LazyHeaderHighlight(props: ComponentProps<typeof HeaderHighlight
   );
 }
 
-/** `RelatedList`, loaded on first draw. Nothing shows until the detail chunk is in. */
+/**
+ * `RelatedList`, loaded on first draw. Nothing shows until the detail chunk is
+ * in; once it is, the component draws in the same render.
+ */
 export function LazyRelatedList(props: ComponentProps<typeof RelatedListComponent>) {
+  const [entry] = useState(() => loadedEntry);
+  if (entry) return <entry.RelatedList {...props} />;
   return (
     <Suspense fallback={null}>
       <RelatedListChunk {...props} />
