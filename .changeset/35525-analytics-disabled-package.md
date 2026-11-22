@@ -1,5 +1,6 @@
 ---
 '@objectstack/service-analytics': patch
+'@objectstack/spec': patch
 ---
 
 fix(service-analytics)!: the analytics doors refuse an object of a disabled package with the data route's `404 OBJECT_PACKAGE_DISABLED`
@@ -16,5 +17,7 @@ Skills-docs: none — no page under `skills/` teaches what analytics answers for
 - TO: every analytics door refuses a query whose read set (the cube's base object, a declared join, or a relationship hop) holds an object of a disabled package with `404 OBJECT_PACKAGE_DISABLED`, naming the object, in the data route's words, for every caller (system included, as on the data route). A declared join counts even when the query does not use it, the same read set the exposure and permission gates already judge. `GET /api/v1/analytics/meta` leaves such a cube out (by name it answers an empty list, as for a hidden cube), and a lookup dimension's label is withheld, so the stored id renders, as the data route's `$expand` withholds the target.
 
 **Not moved.** An enabled object queried on its own is served while another package is disabled. A registry that cannot answer the question hides nothing. Re-enabling the package serves every read again, and nothing is cached.
+
+The error-code ledger records the code under `@objectstack/service-analytics` too (a provenance row: the set of registered codes is unchanged).
 
 The fix for a caller: re-enable the package, or query only objects of enabled packages.

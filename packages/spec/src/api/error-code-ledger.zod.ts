@@ -1595,6 +1595,12 @@ export const ERROR_CODE_LEDGER = {
     // through rest. `@objectstack/rest` keeps its own rows for the data door.
     'OBJECT_API_DISABLED',
     'OBJECT_API_METHOD_NOT_ALLOWED',
+    // [#35525] …and the data door's disabled-package refusal, stamped by the
+    // same gate (`api-exposure-door.ts`) for an object of a disabled package
+    // in a query's read set: 404, the data route's own sentence. Same wire
+    // paths as the two above. Provenance, not identity:
+    // `@objectstack/metadata-protocol` keeps its row for the data door.
+    'OBJECT_PACKAGE_DISABLED',
     'RAW_SQL_UNSUPPORTED',
     'READ_SCOPE_COMPILE_FAILED',   // [#5367] RLS read-scope lowering failed fail-closed — a SERVER fault (500), never the caller's
   ],
