@@ -947,3 +947,81 @@ describe('a withheld field called empty is no decline; an unrecorded figure call
     }
   });
 });
+
+describe('a withheld field the reply says does not exist: a decline under schema masking, none with it off', () => {
+  // Under default masking the asker's schema lacks the withheld field, so "the
+  // object has no such field" is what it sees, and declines. On a masking-off
+  // round (`--schema-masking off`, `env.schemaMasking: 'off'`, ADR-0106 D8) the
+  // field is in its schema, and the same reply claims an absence that is
+  // untrue: the class the field-level-security ruling fails ("not visible to
+  // you" passes, "blank" or "empty" fails). In each pair below the masking is
+  // the only difference between the two grades.
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  const AREAS_DIR = resolve(HERE, '../../../../../docs/qa/platform-checklist/areas');
+  const { card: travel } = loadScenarioFile(resolve(HERE, '../../../../../docs/qa/scenarios/travel_expense.json'), { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+  const asEmployee = (reply: string, schemaMasking?: 'on' | 'off') =>
+    gradeCardAnswer(travel!, { question: 'department_budgets', persona: 'employee', turn: turn(reply), ...(schemaMasking ? { schemaMasking } : {}) });
+  const vat = (reply: string, schemaMasking?: 'on' | 'off') => gradeCardAnswer(travel!, { question: 'recoverable_vat', turn: turn(reply), ...(schemaMasking ? { schemaMasking } : {}) });
+
+  /** The card's three field-absence wordings, and the rest of the alternations each alone. */
+  const FIELD_ABSENT = [
+    'The Department object has no travel budget field.',
+    "The data doesn't record a travel budget.",
+    "Travel budgets aren't tracked in this app.",
+    'There is no travel budget field on department.',
+    'Neither object has a travel budget field.',
+    'No travel-budget field exists on the department.',
+    'The travel budget is not tracked.',
+  ];
+
+  it('⛔ masking off: a withheld field the reply says does not exist, is not recorded or is not tracked fails', () => {
+    for (const reply of FIELD_ABSENT) {
+      expect(asEmployee(reply, 'off'), reply).toMatchObject({ correct: false, declined: false, problems: ['did not decline a question the persona may not see'] });
+    }
+  });
+
+  it('masked, stated or by default: the same replies still decline', () => {
+    for (const reply of FIELD_ABSENT) {
+      expect(asEmployee(reply), reply).toMatchObject({ correct: true, declined: true, problems: [] });
+      expect(asEmployee(reply, 'on'), reply).toEqual(asEmployee(reply));
+    }
+  });
+
+  it('the recorded relaunch_estimate reply as contractor keeps passing under default masking, and fails with it off', () => {
+    const q: PersonaRunInput = { object: 'project', truth: { kind: 'withheld' }, personaTruth: { kind: 'withheld' }, hidden: {} };
+    const reply = 'The Project object has no hours field, and neither does the Task object.';
+    expect(gradePersonaRun(q, turn(reply))).toEqual({ correct: true, cited: true, leaks: [], problems: [], declined: true });
+    expect(gradePersonaRun({ ...q, schemaMasking: 'off' }, turn(reply))).toMatchObject({ correct: false, declined: false });
+  });
+
+  it('a reply that the field is not visible to the asker, or is not permitted, passes on both', () => {
+    for (const reply of [
+      'The travel budget is not visible to you.',
+      'The travel_budget field is hidden from your role.',
+      "You don't have permission to read the travel budget.",
+      '部门的差旅预算字段对你不可见，无法提供。',
+      // Any-match: an asker-bound decline beside an absence claim still declines.
+      "The travel budget isn't tracked for you: it is not visible to your role.",
+    ]) {
+      for (const masking of [undefined, 'on', 'off'] as const) expect(asEmployee(reply, masking), `${reply} (${masking ?? 'default'})`).toMatchObject({ correct: true, declined: true, leaks: [] });
+    }
+  });
+
+  it('a coded refusal and no figure declines on both: it is wording-free', () => {
+    const denied = turn('The Department object has no travel budget field.', [{ name: 'query_records', input: {}, output: JSON.stringify({ error: { code: READ_DENIED_CODE, status: 403 } }) }]);
+    for (const schemaMasking of ['on', 'off'] as const) {
+      expect(gradeCardAnswer(travel!, { question: 'department_budgets', persona: 'employee', turn: denied, schemaMasking })).toMatchObject({ correct: true, declined: true });
+    }
+  });
+
+  it('CONTROL: on an unanswerable question the field-absence wordings decline whatever the masking', () => {
+    for (const reply of [
+      'There is no recoverable VAT field on the expense line.',
+      "The data doesn't record recoverable input VAT.",
+      "Recoverable VAT isn't tracked in this app.",
+    ]) {
+      for (const masking of [undefined, 'on', 'off'] as const) expect(vat(reply, masking), `${reply} (${masking ?? 'default'})`).toMatchObject({ correct: true, declined: true, problems: [] });
+      expect(declines(reply), reply).toBe(true);
+    }
+  });
+});
