@@ -44,7 +44,7 @@ import { checkApiExposure, type ApiExposureDecision, type ObjectApiDef } from '.
 // takes to find its nested-relation conditions and each one's target — the data
 // door's and the MCP stdio bridge's, imported rather than re-walked so this door
 // cannot disagree with them about which conditions a filter holds.
-import { relationConditionSites } from '@objectstack/core';
+import { registryObjectPackageDisabled, relationConditionSites } from '@objectstack/core';
 // [ADR-0090 D10 rule 5] The agent forward credential: minted here, redeemed by
 // the doors that serve forward targets (the dispatcher, the REST face, the
 // identity mount). One module in `@objectstack/rest`, which all three reach.
@@ -92,7 +92,7 @@ import type { FlowFailureDetails } from '@objectstack/spec/api';
 // A pure factory — no service resolution — so importing it costs the fallback
 // nothing on an assembly where the protocol plugin is absent, which is exactly
 // when the fallback runs.
-import { recordNotFoundError, omitInternalFieldsFromWriteResponse } from '@objectstack/metadata-protocol';
+import { objectPackageDisabledError, recordNotFoundError, omitInternalFieldsFromWriteResponse } from '@objectstack/metadata-protocol';
 // [#31697] The environment store's rows are the resync's: a legacy organization's rows left out off the physical column.
 import { isTenantAuthored, readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import { PLATFORM_SYSTEM_API, deriveThroughSeam, serveStoredMetadataRead, serveStoredMetadataReadsThrough } from './stored-metadata-reader-seam.js';
@@ -332,10 +332,26 @@ const RELATION_CONDITION_TARGET_OPERATION = DATA_ACTION_TO_API_OPERATION[RELATIO
  * `callData` must not give two answers depending on whether the deployment
  * registered the protocol slot (the #5138 rule this file already keeps).
  *
+ * [#35526] A target whose owning package is DISABLED is refused first, with
+ * the data plane's own `404 OBJECT_PACKAGE_DISABLED` (the target as `object`,
+ * the condition's position as `param`), whatever it declares: the protocol's
+ * relation-condition check refuses the same condition so (#35427), and the
+ * engine would otherwise read the disabled object to lower it, answering a
+ * count of 1 for a stored value and 0 for any other. The question is the
+ * engine registry's `isObjectPackageDisabled`, the one the data plane asks,
+ * read through {@link registryObjectPackageDisabled}; the refusal is the
+ * protocol's one constructor, `objectPackageDisabledError`. ⛔ Never a second
+ * copy of either. A registry that cannot answer disables nothing, as on the
+ * data route.
+ *
  * `callData` skips it for a system context on the one decision that skips the
  * addressed gate: these flags govern API exposure, not the engine's own reads. A schema
  * that cannot be resolved finds no condition (the filtered object) or serves
- * (a target), the gate's own fail-open.
+ * (a target), the gate's own fail-open. [#35526] OPEN POINT: the package
+ * check rides that same bypass, so a system context is still answered the
+ * count on a disabled package's target. Whether a system context is refused
+ * too is the maintainer's decision (in-process access is ruled served, and a
+ * hook's `ctx.api` is a system context); until it is made, the bypass stays.
  */
 async function refuseUnservedRelationTargets(
     deps: ActionExecutionDeps,
@@ -348,7 +364,11 @@ async function refuseUnservedRelationTargets(
     if (where == null || typeof where !== 'object') return;
     const schema = await resolveWriteResponseSchema(deps, requestContext, engine, object, scopeId);
     const fields = (schema as { fields?: Record<string, any> } | undefined)?.fields;
+    const isObjectPackageDisabled = registryObjectPackageDisabled((engine as { registry?: unknown } | null | undefined)?.registry);
     for (const site of relationConditionSites(fields, where)) {
+        if (isObjectPackageDisabled(site.target)) {
+            throw Object.assign(objectPackageDisabledError(site.target), { param: `where.${site.field}` });
+        }
         const target = await resolveWriteResponseSchema(deps, requestContext, engine, site.target, scopeId);
         const gate = checkApiExposure(target as ObjectApiDef | undefined, RELATION_CONDITION_TARGET_ACTION);
         if (!gate.allowed) throw unservedRelationTargetError(site.target, `where.${site.field}`, gate);
