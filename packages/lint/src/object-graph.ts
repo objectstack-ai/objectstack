@@ -407,11 +407,12 @@ export interface VisibleObjectExtension {
    */
   fieldGroups: AnyRec[];
   /**
-   * The child-list entries the extension brings onto the target's record-page
-   * tabs, as records `{ list, label?, … }` (`[]` when none): each object-form
-   * entry of its `relatedLists` (the `.custom` arrangement, ADR-0146 D10; a
-   * bare name carries no title and is left out) and each list placement of
-   * its `place` (`{ list, after | before, label?, columns? }`). Carried for the
+   * The record entries of its `relatedLists` (the `.custom` arrangement,
+   * ADR-0146 D10; a bare name carries no title and is left out) and of its
+   * `place` (`[]` when none). The ones naming a `list` are the child-list
+   * entries the extension brings onto the target's record-page tabs, each with
+   * its optional `label`; a field or group placement names none and is
+   * skipped by the reader. Carried for the
    * one reader that addresses a tab title by list name
    * (`validate-translation-references.ts`, `_relatedLists.LIST`); like
    * `validations`, carrying them changes nothing about which entries survive.
@@ -508,7 +509,7 @@ export function objectExtensionsByTarget(
         relatedListEntries: [
           ...(Array.isArray(ext.relatedLists) ? ext.relatedLists : []),
           ...(Array.isArray(ext.place) ? ext.place : []),
-        ].filter((entry): entry is AnyRec => isRec(entry) && typeof entry.list === 'string'),
+        ].filter(isRec),
         label: ext.label,
         fieldPatches: isRec(ext.fieldPatches)
           ? Object.fromEntries(
