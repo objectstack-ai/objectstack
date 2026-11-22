@@ -13,8 +13,8 @@ The rule: elevation lifts a caller's business rules, never the organization wall
 
 **BREAKING** for an action body, a system hook or a system flow run for a signed-in caller the organization wall denies: no active organization under `isolated`, an empty membership set under `group`, a person outside every organization under `single`.
 
-- FROM: such an elevation's reads, updates and deletes of a tenant-scoped object were not confined to any organization.
-- TO:
+- FROM: the elevation, not the caller's organization wall, decided what such a context reached of a tenant-scoped object.
+- TO: the caller's own organization wall decides it:
   - its reads of a tenant-scoped object resolve to nothing (zero rows, no error), as the caller's own reads do;
   - its writes of a tenant-scoped object (insert, update, delete, and the recycle bin's purge and restore) are refused with `403 PERMISSION_DENIED`, naming the missing active organization.
 
