@@ -9684,7 +9684,7 @@ function composeBuiltStacks(
     ...collectComposedExternalBindingDatasourceErrors(stacks, objects),
     ...collectComposedDatasourceConnectorErrors(stacks, opts.manifest === 'preserve'),
     ...collectArtifactFlowClaimErrors(stacks),
-    ...collectComposedResidualDuplicateEntryErrors(stacks, composed.packages, composed.manifest?.id, opts.manifest === 'preserve'),
+    ...collectComposedResidualDuplicateEntryErrors(stacks, composed.packages, (composed.manifest as { id?: unknown } | undefined)?.id, opts.manifest === 'preserve'),
     ...collectComposedPackageBodyDuplicateEntryErrors(stacks, opts.manifest === 'preserve'),
   ];
   if (artifactCrossRefErrors.length > 0) {
