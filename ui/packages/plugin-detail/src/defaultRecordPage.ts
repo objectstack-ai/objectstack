@@ -48,36 +48,21 @@ export function useDefaultRecordPage(): boolean {
 export const EmptySectionsLineContext = React.createContext(false);
 
 /**
- * Whether the `DetailView` drawn here draws the record's approval band (the
- * "Locked for approval" / "In approval" status chip, its recall lever and its
- * tally) when its own header is suppressed (objectstack#35253).
- *
- * The band is the RECORD's state, so a record page draws it once. The
- * synthesized default page splits its details around a body table — one
- * `record:details` node per run of sections — and every part used to draw it,
- * so the page read as if two locks applied. The laid-out page
- * (`RecordPageColumns`) sets `false` around every details part after the
- * first, which keeps the band above the body table. Default `true`: a
- * standalone `DetailView` and the drawer keep their band, and an authored
- * page's details bodies draw one between them ({@link ApprovalBandOnceScope}). Whether the band reads locked or editable is untouched — that is
- * `resolveApprovalLock`'s rule (a `lockRecord: false` node is never locked).
- *
- * Module-internal, the way `EmptySectionsLineContext` is: neither a
- * `DetailView` prop nor a `DetailViewSchema` key, and not in the barrel.
- */
-export const ApprovalBandContext = React.createContext(true);
-
-/**
- * One approval band per page drawn as written (objectstack#35483,
- * objectstack#35484). A page the host draws through one `SchemaRenderer` — an
- * authored page, or a synthesized page whose strip cannot be laid out — cannot
- * set {@link ApprovalBandContext} per details node, so each `record:details`
- * body drew its own band. Under {@link ApprovalBandOnceScope} every body that
- * reaches the band's place marks it, and only the FIRST mark in document order
- * draws the band: a first node that draws no body leaves no mark, and a
- * `lockRecord: false` first node draws its own (editable) band, the page's one.
- * The band keeps its recall lever and its tally. Outside a scope every body
- * draws its band as before.
+ * One approval band per record page (objectstack#35253, objectstack#35483,
+ * objectstack#35484): the band (the "Locked for approval" / "In approval"
+ * status chip, its recall lever and its tally, drawn by a `DetailView` whose
+ * own header is suppressed) is the RECORD's state, so a page draws it once,
+ * however many `record:details` bodies it places. Every page host mounts
+ * {@link ApprovalBandOnceScope} around its details: the laid-out page around
+ * its details column (`RecordPageColumns`), and the host around a page drawn
+ * as written (an authored page, or a synthesized page whose strip cannot be
+ * laid out). Under the scope every body that reaches the band's place marks
+ * it, and only the FIRST mark in document order draws the band: a first node
+ * that draws no body leaves no mark, and a `lockRecord: false` first node
+ * draws its own (editable) band, the page's one. The band keeps its recall
+ * lever and its tally. Outside a scope — a standalone `DetailView` (the `detail-view`
+ * node, an overlay panel) — every body draws its band as before. Whether the band reads locked
+ * or editable is untouched: that is `resolveApprovalLock`'s rule.
  */
 export interface ApprovalBandOnce {
   /** Mark a body's band place; returns the unmark. `onChange` re-renders the body when the first mark moves. */
