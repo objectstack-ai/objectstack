@@ -172,6 +172,9 @@ export function attachmentRemovalCallerResolver(
  */
 export const ATTACHMENT_RENAME_ROUTE = ATTACHMENT_REMOVE_ROUTE;
 
+/** The object the rename door writes: the removal door's own. */
+const RENAMED_OBJECT = 'sys_attachment';
+
 /** The rename door's whole body: the one key it reads. */
 export const ATTACHMENT_RENAME_BODY_KEYS: readonly string[] = Object.freeze(['file_name']);
 
@@ -191,10 +194,12 @@ export async function renameAttachment(
   const callerId = context.userId;
   if (!callerId) throw new Error('renameAttachment: the caller context names no user');
 
-  const object = ATTACHMENT_REMOVAL_DOOR.object;
   // The row, read as the caller, so every read gate decides.
-  const row = (await engine.findOne(object, { where: { id }, context })) as Record<string, unknown> | null | undefined;
-  if (!row) throw recordNotFoundError(object, id, context);
+  const row = (await engine.findOne(RENAMED_OBJECT, { where: { id }, context })) as
+    | Record<string, unknown>
+    | null
+    | undefined;
+  if (!row) throw recordNotFoundError(RENAMED_OBJECT, id, context);
 
   const writeContext: ExecutionContext =
     row[ATTACHMENT_REMOVAL_DOOR.ownerField] === callerId
@@ -204,9 +209,9 @@ export async function renameAttachment(
           ...(context.tenantId ? { tenantId: context.tenantId } : {}),
         } as ExecutionContext)
       : context;
-  const updated = await engine.update(object, { file_name: fileName }, { where: { id }, context: writeContext });
+  const updated = await engine.update(RENAMED_OBJECT, { file_name: fileName }, { where: { id }, context: writeContext });
   // The driver's own "nothing matched": the row went between the read and here.
-  if (updated == null || updated === false || updated === 0) throw recordNotFoundError(object, id, context);
+  if (updated == null || updated === false || updated === 0) throw recordNotFoundError(RENAMED_OBJECT, id, context);
 }
 
 /** The body's one name, or the sentence that refuses the body. */
