@@ -86,7 +86,7 @@ import { useNavigationContext, useRecordBreadcrumbTitle } from '../context/Navig
 // Both sets are derived, not restated — see record-detail-system-fields.ts.
 import { deriveRecordDetailSections } from './recordDetailSections.js';
 import type { DataSource, FeedItem, Reaction, RecordPageOperation, RecordPagePayload } from '@object-ui/types';
-import { pinnedHeaderActions, placedHeaderActions } from '@object-ui/types';
+import { arrangedHeaderActions, placedHeaderActions } from '@object-ui/types';
 import type { ActionDef, ActionParamDef, ActionResult, ConfirmationHandler, ParamCollectionHandler } from '@object-ui/core';
 import type { ConsoleActionDispatch } from '../consoleActionDispatch.js';
 import { useRecordApprovals, openApprovalOf, isSubmitterOf } from '../hooks/useRecordApprovals.js';
@@ -1057,8 +1057,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const [heldRecordTitle, setHeldRecordTitle] = useState<{ record: string; title: string } | undefined>();
   const recordTitle = heldRecordTitle?.record === routeRecordKey ? heldRecordTitle.title : undefined;
   const objectDef = objects.find((o: any) => o.name === objectName);
-  // objectstack#36366 — the object's header pins as the header draws them:
-  // staged under the design mode, else as served. Keyed on content for the
+  // objectstack#36366 — the object's action arrangement as the header draws
+  // it: staged under the design mode, else as served. Keyed on content for the
   // synthesized page's memo below.
   const objectPins = useObjectPins(objectDef as any);
   const recordPinsKey = JSON.stringify(objectPins.record ?? null);
@@ -4633,10 +4633,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // (objectstack#29951), so the synthesized header and such a page draw the
     // same actions, an action another package places on the object included.
     const recordHeaderActions = (() => {
-      // objectstack#36366 — the object's record-page pins (`pinnedActions.record`)
-      // choose which of them are buttons, in order; the rest go to ⋯. No pins:
-      // the header's own choice, as before.
-      const base = pinnedHeaderActions<any>(
+      // objectstack#36366 — the object's record scope arrangement
+      // (`actionLayout.record`): `pinned` chooses which of them are buttons, in
+      // order, and `more` orders the rest in ⋯. The same list feeds the side
+      // preview (an embedded mount) and the phone's bottom bar (the header's
+      // `bar` face). No arm: the header's own choice, as before.
+      const base = arrangedHeaderActions<any>(
         placedHeaderActions<any>(objectDef.actions as any[] | undefined),
         objectPins.record,
         'record',
@@ -4786,7 +4788,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // the panel's headline is the pending one. (The decision actions no longer
   // ride this list at all — objectui#3055 moved them to the declared-action
   // bar, which reads the pending row directly.)
-  // `recordPinsKey`: the record-page pins (objectstack#36366), staged under
+  // `recordPinsKey`: the record scope arrangement (objectstack#36366), staged under
   // the design mode without `objects` changing.
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `objectPins` is keyed on content by `recordPinsKey`
   }, [objectDef?.name, childRelations, t, objectPluralLabel, language, objects, approvals.available, approvals.pendingRequest, approvals.requests, user?.id, recordPinsKey]);
@@ -5937,9 +5939,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         </>
       )
       : approvalGroup,
-    // objectstack#36366 — the record-page pins the header draws, staged ones
+    // objectstack#36366 — the record scope arrangement the header draws, a staged one
     // included, for a page that places the object's actions itself.
-    pinnedActions: objectPins.record,
+    actionLayout: objectPins.record,
     // objectstack#35891 — the stage tag is the stage's menu: the default
     // page draws no stage bar, so the header is where the stage moves.
     stage: (parts) => <RecordStageMenu {...parts} />,

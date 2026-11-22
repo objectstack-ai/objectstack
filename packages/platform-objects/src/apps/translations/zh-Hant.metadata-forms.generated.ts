@@ -461,15 +461,15 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "變更負責人",
         helpText: "變更負責人操作（單筆與批次）：開啟即提供，關閉即隱藏。未設定時開啟，但 controlled_by_parent 明細物件預設關閉。僅在記錄有可重新指派負責人的物件上提供（ownership 為 user 或未設定、無 managedBy、不是 sys_ 物件、owner_id 未設為唯讀，外部物件上 owner_id 已宣告或已對應）；在其他物件上開啟會被拒絕。它只控制該操作，不影響直接編輯 owner_id。已儲存的 {enabled, visibleWhen, disabledWhen} 物件逐鍵編輯；在原始碼中寫一個即可按每筆記錄控制該操作。"
       },
-      pinnedActions: {
+      actionLayout: {
         label: "固定按鈕",
         helpText: "每種頁面的頁首按順序顯示為按鈕的動作，每頁最多 3 個；頁首放置的其他動作都進「更多」選單。未設定時，各頁首仍按動作的排序選按鈕。"
       },
-      "pinnedActions.list": {
+      "actionLayout.list": {
         label: "清單頁",
         helpText: "放在清單工具列上的動作名稱，或 $import / $export，按顯示順序排列，最多 3 個。os validate 會拒絕不是本物件動作、或未放在清單工具列上的名稱；這樣的名稱不顯示按鈕。"
       },
-      "pinnedActions.record": {
+      "actionLayout.record": {
         label: "記錄頁",
         helpText: "放在記錄頁首或其「更多」選單中的動作名稱，按顯示順序排列，最多 3 個。os validate 會拒絕不是本物件動作、或未放在記錄頁上的名稱；這樣的名稱不顯示按鈕。"
       },

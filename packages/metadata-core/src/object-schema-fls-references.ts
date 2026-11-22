@@ -766,7 +766,7 @@ const LIST_VIEW_NAME_LISTS: Readonly<Record<string, Scrub>> = {
  */
 export const OBJECT_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     // Identity and posture — no field names.
-    name: keep, label: keep, pluralLabel: keep, description: keep, icon: keep, color: keep, pinnedActions: keep, isSystem: keep,
+    name: keep, label: keep, pluralLabel: keep, description: keep, icon: keep, color: keep, actionLayout: keep, isSystem: keep,
     managedBy: keep, ownership: keep, systemFields: keep, datasource: keep, access: keep,
     requiredPermissions: keep, fileAccessDelegate: keep, schemaReadDelegate: keep, editMode: keep, enable: keep,
     sharingModel: keep, externalSharingModel: keep, protection: keep,

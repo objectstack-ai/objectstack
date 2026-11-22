@@ -2,7 +2,7 @@
 
 /**
  * objectstack#36366 — the list header reads the object's list-page pins
- * (`pinnedActions.list`): the pinned toolbar actions and the page's pinned
+ * (`actionLayout.list`): the pinned toolbar actions and the page's pinned
  * Import (`$import`) and Export (`$export`) are its buttons, in pin order,
  * and every other toolbar action is in the toolbar's own ⋯. No pins: the
  * header draws as before (the control). An environment list never reads them.
@@ -39,8 +39,8 @@ const TOOLBAR = [
 
 const t = ((k: string, o?: { defaultValue?: string }) => o?.defaultValue ?? k) as never;
 
-function mount(pinnedActions?: unknown, extra: Record<string, unknown> = {}) {
-  const objectDef = { name: 'crm_task', label: 'Task', actions: TOOLBAR, ...(pinnedActions ? { pinnedActions } : {}) };
+function mount(actionLayout?: unknown, extra: Record<string, unknown> = {}) {
+  const objectDef = { name: 'crm_task', label: 'Task', actions: TOOLBAR, ...(actionLayout ? { actionLayout } : {}) };
   render(
     <div data-testid="header">
       <ObjectViewPageBarActions
@@ -86,7 +86,7 @@ describe('the list header reads the list-page pins (objectstack#36366)', () => {
   });
 
   it('pins draw in pin order, the built-ins between the actions; the rest go to the toolbar ⋯', () => {
-    mount({ list: ['mass_assign', '$export', 'new_task'] });
+    mount({ list: { pinned: ['mass_assign', '$export', 'new_task'] } });
     expect(drawn()).toEqual([
       'bar(mass_assign)',
       'object-view-export-pinned',
@@ -98,22 +98,22 @@ describe('the list header reads the list-page pins (objectstack#36366)', () => {
   });
 
   it('a pinned Import is a button of its own and leaves the Import / Export menu', () => {
-    mount({ list: ['$import'] });
+    mount({ list: { pinned: ['$import'] } });
     expect(drawn()).toEqual(['object-view-import-pinned', 'bar(⋯new_task ⋯mass_assign ⋯export_csv)']);
   });
 
   it('a pin naming nothing this reader is offered draws nothing', () => {
-    mount({ list: ['ghost', '$import'] }, { importShown: false });
+    mount({ list: { pinned: ['ghost', '$import'] } }, { importShown: false });
     expect(drawn()).toEqual(['bar(⋯new_task ⋯mass_assign ⋯export_csv)']);
   });
 
   it('a record-page arm alone leaves the list header as it was', () => {
-    mount({ record: ['convert'] });
+    mount({ record: { pinned: ['convert'] } });
     expect(drawn()).toEqual(['bar(new_task mass_assign export_csv)']);
   });
 
   it('an environment list never reads the pins', () => {
-    mount({ list: ['mass_assign'] }, { isEnvironmentList: true });
+    mount({ list: { pinned: ['mass_assign'] } }, { isEnvironmentList: true });
     expect(screen.getByTestId('environment-toolbar')).toBeInTheDocument();
     expect(screen.queryByTestId('bar')).toBeNull();
   });

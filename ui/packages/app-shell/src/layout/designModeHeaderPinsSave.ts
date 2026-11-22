@@ -1,9 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The write behind the design mode's 「Save」 for an object's pinned header
- * actions (objectstack#36366): the object's `pinnedActions`, written into its
- * customization layer and published at once, so everyone sees it.
+ * The write behind the design mode's 「Save」 for an object's action
+ * arrangement (objectstack#36366): the object's `actionLayout`, written into
+ * its customization layer and published at once, so everyone sees it. Each
+ * arm the administrator changed is written whole (`{ pinned, more }`); an
+ * object extension's arm replaces the object's arm whole in the fold, and
+ * removing it restores the package's own.
  *
  * Where it is written follows ADR-0146 D10 (objects are extended, never
  * replaced), as Studio's object editing does:
@@ -11,11 +14,11 @@
  * - the object's own package when the server lists it writable: the object as
  *   its author wrote it (`overlay ?? code` of its layered read, never the
  *   served object, which folds other packages' actions and fields in), with
- *   the new `pinnedActions`;
+ *   the new `actionLayout`;
  * - else the base's paired customization package, asked of the ensure door
  *   (which creates it on first use and names it): the pair's
  *   `object_extension` of the object, as published there (or a new one), with
- *   the new `pinnedActions`. The fold carries it onto the object.
+ *   the new `actionLayout`. The fold carries it onto the object.
  *
  * How it is written is the runtime's confirmed-save rule, as the app menu's
  * save (`designModeMenuSave.ts`): the draft is written with the first-write
@@ -25,9 +28,11 @@
  * announces itself (`emitMetadataRefresh`), and the console re-reads the
  * object.
  *
- * Before anything is written, every pinned name is checked against the object
- * as served (every package's actions): a name that is no action of the object,
- * or one not placed on that page, is refused with its reason.
+ * Before anything is written, every name of both parts is checked against the
+ * object as served (every package's actions): a name that is no action of the
+ * object, or one not placed in that arm's scope, is refused with its reason.
+ * (More than three pinned, and a name in both parts, the schema refuses at
+ * the server's door, with its own reason.)
  *
  * @module
  */
@@ -66,7 +71,7 @@ export interface ObjectPinsSaveTexts {
   readonly pendingDraft: string;
   /** `name` is no action of the object. */
   readonly unknown: (name: string) => string;
-  /** `name` is an action of the object not placed on that page. */
+  /** `name` is an action of the object not placed in that arm's scope. */
   readonly notPlaced: (name: string) => string;
 }
 
@@ -78,9 +83,14 @@ function documentOf(read: unknown): Record<string, unknown> {
   return doc;
 }
 
+/** One arm as written: its `pinned`, and its `more` when it has one. */
+function armValue(arm: NonNullable<ObjectPins['list']>): NonNullable<ObjectPins['list']> {
+  return arm.more ? { pinned: [...arm.pinned], more: [...arm.more] } : { pinned: [...arm.pinned] };
+}
+
 /** `pins` as written: an arm the object sets, nothing for an arm it does not. */
-function pinnedActionsValue(pins: ObjectPins): ObjectPins {
-  return { ...(pins.list ? { list: [...pins.list] } : {}), ...(pins.record ? { record: [...pins.record] } : {}) };
+function actionLayoutValue(pins: ObjectPins): ObjectPins {
+  return { ...(pins.list ? { list: armValue(pins.list) } : {}), ...(pins.record ? { record: armValue(pins.record) } : {}) };
 }
 
 /** Whether `err` says the item is not there (`404`). */
@@ -88,7 +98,7 @@ function isNotFound(err: unknown): boolean {
   return (err as { status?: unknown } | null | undefined)?.status === 404;
 }
 
-/** Save `pins` as the pinned header actions of the object `objectName` of the package `packageId`, and publish them. */
+/** Save `pins` as the action layout of the object `objectName` of the package `packageId`, and publish them. */
 export async function saveObjectPins(
   input: { objectName: string; packageId: string; served: unknown; pins: ObjectPins },
   texts: ObjectPinsSaveTexts,
@@ -107,7 +117,7 @@ export async function saveObjectPins(
   if (listed.writable) {
     const layers = (await doors.client.layered('object', objectName, { packageId })) as AuthoredLayers | null;
     if (layers && 'draft' in layers && layers.draft) throw new Error(texts.pendingDraft);
-    body = { ...authoredPublished('object', layers), name: objectName, pinnedActions: pinnedActionsValue(pins) };
+    body = { ...authoredPublished('object', layers), name: objectName, actionLayout: actionLayoutValue(pins) };
   } else {
     const pair = await doors.ensureCustomization(packageId);
     type = OBJECT_EXTENSION_TYPE;
@@ -118,7 +128,7 @@ export async function saveObjectPins(
     } catch (err) {
       if (!isNotFound(err)) throw err;
     }
-    body = { ...documentOf(published), extend: objectName, pinnedActions: pinnedActionsValue(pins) };
+    body = { ...documentOf(published), extend: objectName, actionLayout: actionLayoutValue(pins) };
   }
   try {
     await doors.client.save(type, objectName, body, { mode: 'draft', packageId: target, ifNoneMatch: '*' });
@@ -132,7 +142,7 @@ export async function saveObjectPins(
     try {
       await doors.client.reset(type, objectName, { state: 'draft', packageId: target });
     } catch (discardErr) {
-      console.error('[design-mode] a refused publish left the pinned actions draft pending:', discardErr);
+      console.error('[design-mode] a refused publish left the action layout draft pending:', discardErr);
     }
     emitMetadataRefresh();
     throw err;

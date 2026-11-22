@@ -461,15 +461,15 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Inhaber ändern",
         helpText: "Die Aktion „Inhaber ändern“, einzeln und als Massenaktion: ein bietet sie an, aus blendet sie aus. Nicht gesetzt: ein, außer aus auf einem controlled_by_parent-Detailobjekt. Nur auf einem Objekt angeboten, dessen Datensätze einen neu zuweisbaren Inhaber haben (ownership user oder nicht gesetzt, kein managedBy, kein sys_-Objekt, owner_id nicht schreibgeschützt und auf einem externen Objekt deklariert oder zugeordnet); das Einschalten auf jedem anderen Objekt wird abgelehnt. Es steuert nur die Aktion, nicht eine einfache Bearbeitung von owner_id. Ein gespeichertes Objekt {enabled, visibleWhen, disabledWhen} wird Schlüssel für Schlüssel bearbeitet; schreiben Sie eines im Quelltext, um die Aktion von jedem Datensatz abhängig zu machen."
       },
-      pinnedActions: {
+      actionLayout: {
         label: "Angeheftete Aktionen",
         helpText: "Welche Aktionen jeder Seitenkopf der Reihe nach als Schaltflächen zeigt, höchstens 3 pro Seite; jede andere Aktion des Kopfs kommt ins Menü „Mehr“. Nicht gesetzt: Jeder Kopf wählt seine Schaltflächen wie bisher nach der Reihenfolge der Aktionen."
       },
-      "pinnedActions.list": {
+      "actionLayout.list": {
         label: "Listenseite",
         helpText: "Namen von Aktionen in der Listen-Symbolleiste oder $import / $export, in der Reihenfolge der Anzeige. Höchstens 3. os validate lehnt einen Namen ab, der keine Aktion dieses Objekts ist oder nicht in der Listen-Symbolleiste platziert ist; ein solcher Name zeigt keine Schaltfläche."
       },
-      "pinnedActions.record": {
+      "actionLayout.record": {
         label: "Datensatzseite",
         helpText: "Namen von Aktionen im Datensatzkopf oder in dessen Menü „Mehr“, in der Reihenfolge der Anzeige. Höchstens 3. os validate lehnt einen Namen ab, der keine Aktion dieses Objekts ist oder nicht auf der Datensatzseite platziert ist; ein solcher Name zeigt keine Schaltfläche."
       },

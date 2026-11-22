@@ -956,7 +956,7 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     // switch (ruling 7000907189 point 1) — a label and a help text, two leaves,
     // all translated leaves authored by the same card. `advanced` reads
     // 104 → 106; `capabilities` is untouched.
-    // 123 since #36366 gave `advanced` the `pinnedActions` composite (the
+    // 123 since #36366 gave `advanced` the `actionLayout` composite (the
     // header buttons per page type) and its `list` / `record` rows — a label
     // and a help text each, three rows and six leaves, all translated leaves
     // authored by that card. `advanced` reads 106 → 112.

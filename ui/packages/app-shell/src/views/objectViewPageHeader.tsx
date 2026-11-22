@@ -34,7 +34,7 @@ import { PageHeader } from '../layout/PageHeader.js';
 import { ManagedByBadge } from '../components/ManagedByBadge.js';
 import { EnvironmentListToolbar } from '../environment/EnvironmentListToolbar.js';
 import { ListHeaderActionBar } from './objectViewHeaderLaunchGate.js';
-import { pinnedHeaderActions, type ActionBarSchema } from '@object-ui/types';
+import { arrangedHeaderActions, readActionLayoutArm, type ActionBarSchema, type ActionLayoutArm } from '@object-ui/types';
 import { DesignModeHeaderPins, useObjectPins } from '../layout/DesignModeHeaderPins.js';
 import type { PinCandidate } from '../layout/designModeHeaderPins.js';
 import type { useObjectViewToolbarAffordances } from './objectViewToolbarAffordances.js';
@@ -110,14 +110,15 @@ export function ObjectViewPageBarActions({
     barEnd,
 }: ObjectViewPageBarProps & { barEnd?: ObjectViewBarEnd }) {
     const description = objectDef.description ? objectDesc(objectDef) : undefined;
-    // objectstack#36366 — the object's list-page pins (`pinnedActions.list`):
-    // the header's buttons, in order, the page's Import and Export among them
-    // (`$import`, `$export`). Absent: the header's own choice, as before.
-    // Under the design mode the pins staged there are drawn (`useObjectPins`).
+    // objectstack#36366 — the object's list scope arrangement
+    // (`actionLayout.list`): `pinned` is the header's buttons, in order, the
+    // page's Import and Export among them (`$import`, `$export`), and `more`
+    // orders the toolbar's ⋯. Absent: the header's own choice, as before.
+    // Under the design mode the arrangement staged there is drawn (`useObjectPins`).
     const objectPins = useObjectPins(objectDef);
-    const listPins = isEnvironmentList ? undefined : objectPins.list;
-    const importPinned = !!listPins?.includes('$import') && importShown;
-    const exportPinned = !!listPins?.includes('$export') && !!barEnd?.exportDoor;
+    const listArm = isEnvironmentList ? undefined : readActionLayoutArm(objectPins.list);
+    const importPinned = !!listArm?.pinned.includes('$import') && importShown;
+    const exportPinned = !!listArm?.pinned.includes('$export') && !!barEnd?.exportDoor;
     // A pinned Import or Export is a button of its own, out of the menus.
     const importInMenus = importShown && !importPinned;
     const exportDoor = exportPinned ? undefined : barEnd?.exportDoor;
@@ -141,9 +142,9 @@ export function ObjectViewPageBarActions({
               />
             )}
 
-            {listPins ? (
+            {listArm ? (
               <PinnedListHeaderActions
-                pins={listPins}
+                arm={listArm}
                 toolbarBar={drawsToolbar ? toolbarBar : undefined}
                 importButton={importPinned ? (
                   <Button
@@ -230,24 +231,26 @@ function listPinBuiltins(importShown: boolean, exportShown: boolean, t: ObjectVi
 }
 
 /**
- * objectstack#36366 — the list header's pinned buttons, in pin order: each
- * pinned action of the toolbar (`pinnedHeaderActions`), and the page's pinned
- * Import and Export where they are offered. Every other toolbar action is in
- * the toolbar's own ⋯ menu, drawn after them. A pin naming nothing this
- * reader is offered draws nothing.
+ * objectstack#36366 — the list header's pinned buttons, in `pinned` order:
+ * each pinned action of the toolbar (`arrangedHeaderActions`), and the page's
+ * pinned Import and Export where they are offered. Every other toolbar action
+ * is in the toolbar's own ⋯ menu, drawn after them, the ones `more` names
+ * first, in that order. A `$import` / `$export` named in `more` stays in the
+ * page's Import / Export entries. A name naming nothing this reader is
+ * offered draws nothing.
  */
 function PinnedListHeaderActions({
-    pins,
+    arm,
     toolbarBar,
     importButton,
     exportButton,
 }: {
-    pins: readonly string[];
+    arm: ActionLayoutArm;
     toolbarBar?: ActionBarSchema;
     importButton: ReactNode;
     exportButton: ReactNode;
 }) {
-    const arranged = pinnedHeaderActions<any>((toolbarBar?.actions ?? []) as any[], pins, 'list');
+    const arranged = arrangedHeaderActions<any>((toolbarBar?.actions ?? []) as any[], arm, 'list');
     const byName = new Map<string, any>();
     for (const action of arranged) {
         if (action?.component !== 'action:menu' && typeof action?.name === 'string') byName.set(action.name, action);
@@ -267,7 +270,7 @@ function PinnedListHeaderActions({
         );
         run = [];
     };
-    for (const pin of pins) {
+    for (const pin of arm.pinned) {
         if (pin === '$import' || pin === '$export') {
             flush();
             const button = pin === '$import' ? importButton : exportButton;

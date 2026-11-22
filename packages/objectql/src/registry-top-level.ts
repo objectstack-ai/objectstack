@@ -417,18 +417,24 @@ export function parseFQN(fqn: string): { namespace: string | undefined; shortNam
  * The SCALAR props {@link mergeObjectDefinitions} resolves last-writer-wins
  * — the three string scalars the #8284 ruling and ADR-0029 D9.2a both cover,
  * which {@link scalarOverridesPackagedBase} answers for, and [#36366]
- * `pinnedActions`, the object's header buttons per page type, which
+ * `actionLayout`, the order of the object's actions per scope, which
  * {@link foldScalarOverridesPackagedBase} answers for by its structure.
  */
-const OBJECT_FOLD_SCALAR_KEYS = ['label', 'pluralLabel', 'description', 'pinnedActions'] as const;
+const OBJECT_FOLD_SCALAR_KEYS = ['label', 'pluralLabel', 'description', 'actionLayout'] as const;
 
 type ObjectFoldScalarKey = (typeof OBJECT_FOLD_SCALAR_KEYS)[number];
 
-/** [#36366] A `pinnedActions` value as one comparable string (its two arms, in order), or `null` when it pins nothing. */
-function pinnedActionsKey(value: unknown): string | null {
+/** [#36366] One `actionLayout` arm as a comparable value (`pinned`, then `more`), or `null` when it is no arm. */
+function actionLayoutArmKey(arm: unknown): unknown[] | null {
+  if (!isPlainRecord(arm)) return null;
+  return [Array.isArray(arm.pinned) ? arm.pinned : null, Array.isArray(arm.more) ? arm.more : null];
+}
+
+/** [#36366] An `actionLayout` value as one comparable string (its two arms, in order), or `null` when it arranges nothing. */
+function actionLayoutKey(value: unknown): string | null {
   if (!isPlainRecord(value)) return null;
-  const list = Array.isArray(value.list) ? value.list : null;
-  const record = Array.isArray(value.record) ? value.record : null;
+  const list = actionLayoutArmKey(value.list);
+  const record = actionLayoutArmKey(value.record);
   return list === null && record === null ? null : JSON.stringify([list, record]);
 }
 
@@ -436,17 +442,17 @@ function pinnedActionsKey(value: unknown): string | null {
  * [ADR-0029 D9.2a] Whether the fold's base carries `value` for the scalar
  * `key` authored away from the packaged owner's. The string scalars ask
  * {@link scalarOverridesPackagedBase}, the one comparison both layers share.
- * [#36366] `pinnedActions` is not a string, so that predicate answers `false`
+ * [#36366] `actionLayout` is not a string, so that predicate answers `false`
  * for it whatever the base holds; it asks the same question by structure,
  * with the predicate's three conservative edges: no owner document → `false`,
  * a value that pins nothing → `false`, and equality is exact (both arms, in
  * order).
  */
 function foldScalarOverridesPackagedBase(owner: unknown, key: ObjectFoldScalarKey, value: unknown): boolean {
-  if (key !== 'pinnedActions') return scalarOverridesPackagedBase(owner, key, value);
+  if (key !== 'actionLayout') return scalarOverridesPackagedBase(owner, key, value);
   if (!isPlainRecord(owner)) return false;
-  const authored = pinnedActionsKey(value);
-  return authored !== null && authored !== pinnedActionsKey(owner.pinnedActions);
+  const authored = actionLayoutKey(value);
+  return authored !== null && authored !== actionLayoutKey(owner.actionLayout);
 }
 
 /**

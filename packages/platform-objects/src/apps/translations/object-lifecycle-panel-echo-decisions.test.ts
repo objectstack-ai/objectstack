@@ -1302,7 +1302,7 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // all three locales.
       // 756 since #35985: the object form's `basics` offers a `color` row,
       // whose label zh-CN translates.
-      // 759 since #36366: `advanced` offers the `pinnedActions` composite and
+      // 759 since #36366: `advanced` offers the `actionLayout` composite and
       // its `list` / `record` rows — three row labels, authored in all three
       // locales.
       expect(translated.length, `${locale} positive control`).toBe(759);

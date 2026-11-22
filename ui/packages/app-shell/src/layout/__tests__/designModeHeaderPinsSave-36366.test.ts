@@ -87,14 +87,14 @@ describe('saving the header pins (objectstack#36366)', () => {
   it('a writable package: the object as its author wrote it, with the new pins, saved as a draft and published', async () => {
     const authored = { name: 'crm_lead', label: 'Lead', actions: [{ name: 'convert', locations: ['record_header'] }] };
     const { d, calls } = doors({ writable: true, layers: { code: authored } });
-    await saveObjectPins(input({ record: ['log_call', 'convert'] }), TEXTS, d);
+    await saveObjectPins(input({ record: { pinned: ['log_call', 'convert'] } }), TEXTS, d);
     expect(calls).toEqual([
       ['layered', 'object', 'crm_lead', { packageId: 'com.acme.crm' }],
       [
         'save',
         'object',
         'crm_lead',
-        { ...authored, pinnedActions: { record: ['log_call', 'convert'] } },
+        { ...authored, actionLayout: { record: { pinned: ['log_call', 'convert'] } } },
         { mode: 'draft', packageId: 'com.acme.crm', ifNoneMatch: '*' },
       ],
       ['publish', 'object', 'crm_lead', { packageId: 'com.acme.crm' }],
@@ -104,7 +104,7 @@ describe('saving the header pins (objectstack#36366)', () => {
 
   it("an installed (read-only) package: a new object_extension in its customization package, carrying no `name`", async () => {
     const { d, calls } = doors({ writable: false });
-    await saveObjectPins(input({ list: ['$export', 'mass_assign'] }), TEXTS, d);
+    await saveObjectPins(input({ list: { pinned: ['$export', 'mass_assign'] } }), TEXTS, d);
     expect(calls).toEqual([
       ['ensure', 'com.acme.crm'],
       ['get', 'object_extension', 'crm_lead', { packageId: 'com.acme.crm.custom' }],
@@ -112,7 +112,7 @@ describe('saving the header pins (objectstack#36366)', () => {
         'save',
         'object_extension',
         'crm_lead',
-        { extend: 'crm_lead', pinnedActions: { list: ['$export', 'mass_assign'] } },
+        { extend: 'crm_lead', actionLayout: { list: { pinned: ['$export', 'mass_assign'] } } },
         { mode: 'draft', packageId: 'com.acme.crm.custom', ifNoneMatch: '*' },
       ],
       ['publish', 'object_extension', 'crm_lead', { packageId: 'com.acme.crm.custom' }],
@@ -123,35 +123,35 @@ describe('saving the header pins (objectstack#36366)', () => {
     const extension = {
       extend: 'crm_lead',
       fields: { score__c: { type: 'number' } },
-      pinnedActions: { record: ['convert'] },
+      actionLayout: { record: { pinned: ['convert'] } },
       _packageId: 'com.acme.crm.custom',
     };
     const { d, calls } = doors({ writable: false, extension });
-    await saveObjectPins(input({ record: ['log_call'] }), TEXTS, d);
+    await saveObjectPins(input({ record: { pinned: ['log_call'] } }), TEXTS, d);
     const save = calls.find((c) => c[0] === 'save');
-    expect(save?.[3]).toEqual({ extend: 'crm_lead', fields: { score__c: { type: 'number' } }, pinnedActions: { record: ['log_call'] } });
+    expect(save?.[3]).toEqual({ extend: 'crm_lead', fields: { score__c: { type: 'number' } }, actionLayout: { record: { pinned: ['log_call'] } } });
   });
 
   it('a name the header cannot draw is refused before anything is read or written, with its reason', async () => {
     const { d, calls } = doors({ writable: true });
-    await expect(saveObjectPins(input({ record: ['ghost'] }), TEXTS, d)).rejects.toThrow('unknown ghost');
-    await expect(saveObjectPins(input({ list: ['convert'] }), TEXTS, d)).rejects.toThrow('not placed convert');
+    await expect(saveObjectPins(input({ record: { pinned: ['ghost'] } }), TEXTS, d)).rejects.toThrow('unknown ghost');
+    await expect(saveObjectPins(input({ list: { pinned: ['convert'] } }), TEXTS, d)).rejects.toThrow('not placed convert');
     expect(calls).toEqual([]);
   });
 
   it('a package the server does not list is refused', async () => {
     const { d } = doors({ writable: true });
-    await expect(saveObjectPins({ ...input({ record: ['convert'] }), packageId: 'com.other' }, TEXTS, d)).rejects.toThrow('not listed');
+    await expect(saveObjectPins({ ...input({ record: { pinned: ['convert'] } }), packageId: 'com.other' }, TEXTS, d)).rejects.toThrow('not listed');
   });
 
   it("a draft already pending (the object's, or the extension's) is not overwritten nor published: the save says so", async () => {
     const own = doors({ writable: true, layers: { code: { name: 'crm_lead' }, draft: { name: 'crm_lead' } } });
-    await expect(saveObjectPins(input({ record: ['convert'] }), TEXTS, own.d)).rejects.toThrow('pending draft');
+    await expect(saveObjectPins(input({ record: { pinned: ['convert'] } }), TEXTS, own.d)).rejects.toThrow('pending draft');
     expect(own.calls.map((c) => c[0])).toEqual(['layered']);
 
     const conflict = Object.assign(new Error('conflict'), { status: 409, code: 'METADATA_CONFLICT' });
     const pair = doors({ writable: false, save: () => Promise.reject(conflict) });
-    await expect(saveObjectPins(input({ record: ['convert'] }), TEXTS, pair.d)).rejects.toThrow('pending draft');
+    await expect(saveObjectPins(input({ record: { pinned: ['convert'] } }), TEXTS, pair.d)).rejects.toThrow('pending draft');
     expect(pair.calls.map((c) => c[0])).toEqual(['ensure', 'get', 'save']);
     expect(emitMetadataRefresh).not.toHaveBeenCalled();
   });
@@ -159,7 +159,7 @@ describe('saving the header pins (objectstack#36366)', () => {
   it('a refused publish discards the draft this save wrote, and the refusal is passed on', async () => {
     const refusal = new Error('refused');
     const { d, calls } = doors({ writable: true, layers: { code: { name: 'crm_lead' } }, publish: () => Promise.reject(refusal) });
-    await expect(saveObjectPins(input({ record: ['convert'] }), TEXTS, d)).rejects.toBe(refusal);
+    await expect(saveObjectPins(input({ record: { pinned: ['convert'] } }), TEXTS, d)).rejects.toBe(refusal);
     expect(calls.at(-1)).toEqual(['reset', 'object', 'crm_lead', { state: 'draft', packageId: 'com.acme.crm' }]);
   });
 });
