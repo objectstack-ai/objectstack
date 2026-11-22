@@ -121,6 +121,16 @@ describe('a residual objectExtensions entry registers under the residual\'s id',
     }
   });
 
+  it('serves what the same entry serves from a package body (one reading of an entry for both)', async () => {
+    const entry = { ...extension('parity_note'), label: 'Account (extended)', pluralLabel: 'Accounts (extended)', description: 'Extended' };
+    const strip = (value: unknown): unknown => JSON.parse(JSON.stringify(value), (key, v) => (key.startsWith('_') ? undefined : v));
+    const asBody = await boot(payload(composed({ pages: [{ name: 'probe_home', label: 'Home', type: 'app', regions: [] }] }, { objectExtensions: [entry] })));
+    const asResidual = await boot(payload(composed({ objectExtensions: [entry] })));
+    const served = (ql: ObjectQL) => strip(ql.registry.getObject('probe_account'));
+    expect(fieldsOf(asResidual.ql, 'probe_account'), 'anti-vacuity').toContain('parity_note');
+    expect(served(asResidual.ql)).toEqual(served(asBody.ql));
+  });
+
   it('CONTROL: a package-claimed extension registers as before, nothing logged', async () => {
     const artifact = composed(
       { pages: [{ name: 'probe_home', label: 'Home', type: 'app', regions: [] }] },

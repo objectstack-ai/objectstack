@@ -126,11 +126,17 @@ function logSameTargetObjectExtensions(
 }
 
 /**
- * The partial object definition one `objectExtensions` entry registers as an
- * `extend` contribution to its target, and the priority it registers at — the
- * one reading of an entry, for a package body (`registerApp` step 2b) and for a
- * multi-package stack's residual (`ObjectQLPlugin`, ADR-0130 D4), so the two
- * cannot register one entry differently.
+ * The partial object definition a multi-package stack's RESIDUAL
+ * `objectExtensions` entry registers as an `extend` contribution to its
+ * target, and the priority it registers at (`ObjectQLPlugin`, ADR-0130 D4).
+ *
+ * ⛔ It is the literal `registerApp` step 2b builds for a body's entry, key for
+ * key (below, in {@link RegistrationFacet.registerApp}), and must stay so: a
+ * key added there is added here in the same change, or a residual extension
+ * registers less than the same entry in a package body. The two are not yet
+ * one call only because an in-flight change edits the body's literal; the
+ * pin `manifest-service-residual-object-extension.test.ts` compares the
+ * object both registrations serve.
  */
 export function objectExtensionContribution(ext: any): {
   definition: {
@@ -428,10 +434,26 @@ export class RegistrationFacet {
           // outcome is unchanged.
           logSameTargetObjectExtensions(this.logger, id, manifest.objectExtensions);
           for (const ext of manifest.objectExtensions) {
-              const { definition: extDef, priority } = objectExtensionContribution(ext);
+              const targetFqn = ext.extend;
+              const priority = ext.priority ?? 200;
+              // Create a partial object definition for the extension
+              const extDef = {
+                  name: targetFqn, // Use the target FQN as name
+                  fields: ext.fields,
+                  // [ADR-0146 D10, second rule] The per-field display patches,
+                  // the slot as `ObjectExtensionSchema.fieldPatches` declares
+                  // it — applied by the registry's `mergeObjectDefinitions`,
+                  // whose fold every object read shares.
+                  fieldPatches: ext.fieldPatches,
+                  label: ext.label,
+                  pluralLabel: ext.pluralLabel,
+                  description: ext.description,
+                  validations: ext.validations,
+                  indexes: ext.indexes,
+              };
               // Register as extension (namespace is undefined since we're targeting by FQN)
               this._registry.registerObject(stampPackage(extDef, id, version), id, undefined, 'extend', priority);
-              this.logger.debug('Registered Object Extension', { target: extDef.name, priority, from: id });
+              this.logger.debug('Registered Object Extension', { target: targetFqn, priority, from: id });
           }
       }
 
