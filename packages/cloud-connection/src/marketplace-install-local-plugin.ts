@@ -412,9 +412,11 @@ import { customizationPairManifestRefusal } from '@objectstack/metadata-protocol
 // [ADR-0146 D2, #28410] The override write gate's one rule and its item walk,
 // asked at the managed install exactly as the publish doors ask them.
 import { judgeOverrideWrite, overrideWriteIdentityOf, overrideWriteItemsOf, type OverrideWriteItem, type OverrideWriteRule } from '@objectstack/metadata-protocol';
-// [ADR-0146 D10, #28564] The `__c` extension-field reservation's one judge, step 1c''.
+// [ADR-0146 D10, #28564] The `__c` extension-field reservation's one judge, step 1c'', and
+// the arrangement judge beside it (step 1c-arrangement).
 import {
     judgeExtensionFieldSuffix,
+    judgeExtensionArrangement,
     judgeRedeclaredOwnerFields,
     redeclaredOwnerFieldInstallMessage,
     type ObjectOwnerDeclaration,
@@ -3153,6 +3155,42 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             const refusals = bodies.flatMap(({ id, body }) => judgeExtensionFieldSuffix({
                 packageId: typeof id === 'string' ? id : undefined,
                 objects: body.objects,
+                objectExtensions: body.objectExtensions,
+            }));
+            if (refusals.length > 0) {
+                const n = refusals.length;
+                return c.json({
+                    success: false,
+                    error: {
+                        code: UNRUNNABLE_REFUSAL_CODE,
+                        message: `Package '${manifestId}' cannot be installed: ${refusals[0].message}`
+                            + (n > 1 ? ` (${n - 1} more in \`details.refusals\`.)` : '')
+                            + ' Nothing was installed or written.',
+                        details: { refusals },
+                    },
+                }, UNRUNNABLE_REFUSAL_STATUS);
+            }
+        }
+
+        // 1c-arrangement. [ADR-0146 D10] ⭐ THE WHOLE ARRANGEMENT OF AN EXTENDED
+        //     OBJECT is the paired `.custom` package's, judged where the `__c`
+        //     reservation is and for the same reason: before the manifest
+        //     service sees the artifact, so a refused install registers, writes
+        //     and ledgers nothing. Every package this act delivers is judged by
+        //     the save door's judge (`judgeExtensionArrangement`):
+        //     `fieldGroups` or `relatedLists` on an `objectExtensions` entry of
+        //     a package that is not a `.custom` pair is refused, with the
+        //     prescription naming `place`. The answer is this door's own body
+        //     refusal, `VALIDATION_ERROR` / 422, one row per key in
+        //     `details.refusals`. No code is minted.
+        {
+            const bodies: Array<{ id: unknown; body: Record<string, any> }> = Array.isArray(manifest.packages)
+                ? manifest.packages
+                    .filter((entry: unknown) => isPlainObject(entry) && isPlainObject((entry as any).manifest))
+                    .map((entry: any) => ({ id: manifestIdOf(entry.manifest), body: flattenPackageBody(entry.manifest) }))
+                : [{ id: manifestId, body: flattenPackageBody(manifest) }];
+            const refusals = bodies.flatMap(({ id, body }) => judgeExtensionArrangement({
+                packageId: typeof id === 'string' ? id : undefined,
                 objectExtensions: body.objectExtensions,
             }));
             if (refusals.length > 0) {

@@ -27,10 +27,17 @@ import { act, cleanup, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
-vi.mock('@object-ui/auth', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  useWorkspaceAdminStatus: () => ({ isAdmin: true, isResolved: true }),
-}));
+/** What the session's auth answers beyond the real hook: the deployment's posture, the platform operator flag. */
+const authOverride = vi.hoisted(() => ({ value: {} as Record<string, unknown> }));
+vi.mock('@object-ui/auth', async (importOriginal) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the real module, spread whole
+  const actual = await importOriginal<Record<string, any>>();
+  return {
+    ...actual,
+    useWorkspaceAdminStatus: () => ({ isAdmin: true, isResolved: true }),
+    useAuth: () => ({ ...actual.useAuth(), ...authOverride.value }),
+  };
+});
 
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -270,10 +277,35 @@ describe('「Edit app」 turns the shell\'s design mode on instead of opening St
     expect(screen.queryByTestId('shell-page-actions-edit-app')).not.toBeInTheDocument();
   });
 
-  it('a read-only package keeps the eye into Studio', async () => {
+  it('a read-only package (an installed app) enters the mode too: its changes are this environment\'s customization (objectstack#36363)', async () => {
     writable = false;
     await mount(group);
-    expect(screen.queryByTestId('shell-page-actions-edit-app')).not.toBeInTheDocument();
-    expect(screen.getByTestId('shell-page-actions-view-app')).toHaveAccessibleName('Open Cloud in Studio');
+    expect(screen.queryByTestId('shell-page-actions-view-app')).not.toBeInTheDocument();
+    const button = screen.getByTestId('shell-page-actions-edit-app');
+    expect(button.tagName).toBe('BUTTON');
+    await act(async () => button.click());
+    expect(screen.getByTestId('mode')).toHaveTextContent('on');
+  });
+
+  it('where the customization door is walled off for this caller, a read-only package keeps the eye into Studio', async () => {
+    writable = false;
+    authOverride.value = { getAuthConfig: async () => ({ features: { tenancyPosture: 'isolated' } }), user: { isPlatformAdmin: false } };
+    try {
+      await mount(group);
+      expect(screen.queryByTestId('shell-page-actions-edit-app')).not.toBeInTheDocument();
+      expect(screen.getByTestId('shell-page-actions-view-app')).toHaveAccessibleName('Open Cloud in Studio');
+    } finally {
+      authOverride.value = {};
+    }
+  });
+
+  it('a writable package under the same wall still enters the mode: nothing of it goes through that door', async () => {
+    authOverride.value = { getAuthConfig: async () => ({ features: { tenancyPosture: 'isolated' } }), user: { isPlatformAdmin: false } };
+    try {
+      await mount(group);
+      expect(screen.getByTestId('shell-page-actions-edit-app').tagName).toBe('BUTTON');
+    } finally {
+      authOverride.value = {};
+    }
   });
 });

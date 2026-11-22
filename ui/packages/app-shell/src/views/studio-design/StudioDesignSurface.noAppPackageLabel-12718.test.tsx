@@ -2,8 +2,7 @@
 
 /**
  * objectui#12718 — the Interfaces pillar of a package that has no app yet
- * names the package by its display name, the one the Studio top bar prints,
- * and never by its id.
+ * names the package by its display name, never by its id.
  *
  * `InterfacesPillar` seeded its app label with `packageId`, and the app
  * resolve returned on the no-app branch before it ever set one, so the rail
@@ -20,8 +19,11 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The surface's reach loads `@objectstack/lint` lazily; pay that load during
+// collection, not inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const PACKAGE_ID = 'com.qa.recheck';
@@ -102,12 +104,16 @@ function pillarText(): string {
   return text;
 }
 
-/** Waits for the top bar to have the package list in hand. */
+/**
+ * Waits for the surface to have the package list in hand: the list read was
+ * made, and its answer has had a turn to land. (The package switcher's
+ * `data-pkg-list-state` said this until objectstack#36501 removed it.)
+ */
 async function packageListLoaded() {
-  const header = screen.getByTestId('studio-shell-header');
-  await waitFor(() =>
-    expect(within(header).getByTestId('studio-pkg-chip')).toHaveAttribute('data-pkg-list-state', 'loaded'),
-  );
+  await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith('/api/v1/packages', expect.anything()));
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 50));
+  });
 }
 
 beforeEach(() => {

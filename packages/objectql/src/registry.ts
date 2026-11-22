@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ServiceObject, ObjectOwnership, resolveInjectedSystemColumns, resolveInjectedColumnProvenance as injectedColumnProvenance, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
+import { ServiceObject, ObjectOwnership, type RelatedListsArrangement, resolveInjectedSystemColumns, resolveInjectedColumnProvenance as injectedColumnProvenance, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
 // [#4513] The audit-family governance table, and [#6562] the injected-column
 // DEFINITION tables it governs — see the re-exports below for why both live in a
 // package `objectql` and `metadata-protocol` both depend on.
@@ -232,7 +232,7 @@ export {
  * Declarative authors never reach that silence, though: `ObjectExtensionSchema`
  * (`packages/spec/src/data/object.zod.ts`) is `.strict()` — its shape is
  * exactly `extend` / `fields` / `fieldPatches` / `label` / `pluralLabel` /
- * `description` / `validations` / `indexes` / `place` / `priority`, so an `objectExtensions` entry
+ * `description` / `validations` / `indexes` / `place` / `fieldGroups` / `relatedLists` / `priority`, so an `objectExtensions` entry
  * naming `tenancy`, `permissions`, or any other key outside that list fails
  * LOUDLY at authoring time with a prescription (#4001; the same rule is
  * documented at `content/docs/data-modeling/object-extensions.mdx`). This
@@ -2954,6 +2954,10 @@ export class SchemaRegistry {
    */
   getWithheldExtensionFields(name: string): Record<string, { packageId: string }> {
     return ObjectRegistrationFacet.getWithheldExtensionFields.call(objectRegistrationHost.of(this), name);
+  }
+
+  getRelatedListsArrangement(name: string): RelatedListsArrangement | undefined { // [ADR-0146 D10] contract: `ObjectRegistrationFacet.getRelatedListsArrangement`
+    return ObjectRegistrationFacet.getRelatedListsArrangement.call(objectRegistrationHost.of(this), name);
   }
 
   private withholdDisabledExtensions(contributors: readonly ObjectContributor[], asEnabled?: string): WithheldExtensions | undefined {
@@ -6155,6 +6159,7 @@ export class SchemaRegistry {
       getObject: (...a) => registry.getObject(...a),
       getObjectContributors: (...a) => registry.getObjectContributors(...a),
       getObjectOwner: (...a) => registry.getObjectOwner(...a),
+      getPackage: (...a) => registry.getPackage(...a),
       hasDisabledPackage: (...a) => registry.hasDisabledPackage(...a),
       isActionWithheldByDisabledPackage: (...a) => registry.isActionWithheldByDisabledPackage(...a),
       isPackageDisabled: (...a) => registry.isPackageDisabled(...a),

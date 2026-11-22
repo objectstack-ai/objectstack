@@ -1135,21 +1135,25 @@ function contributedNavItemsByApp(stack: AnyRec): Map<string, unknown[]> {
  *
  * `ObjectExtensionSchema` is a `strictObject`, so the fold surface is EXACTLY
  * its declared keys: `extend`, `priority`, `fields`, `validations`, `indexes`,
- * `label`, `pluralLabel`, `description`. Everything else is refused BY NAME at
- * the extension level with authoring guidance (`actions`, `listViews`,
- * `fieldGroups`, `hooks` carry their own `guidance` text; `views`, `sections`
- * and `tabs` fall to the shared unknown-key refusal). Measured against the
- * schema rather than read off the merge: each of those seven produced an
- * extension-level `unrecognized_keys` issue, while `fields` and `validations`
- * parsed.
+ * `label`, `pluralLabel`, `description`, and the arrangement keys the base's
+ * paired `.custom` package writes, `fieldGroups` and `relatedLists`
+ * (ADR-0146 D10). Everything else is refused BY NAME at the extension level
+ * with authoring guidance (`actions`, `listViews`, `hooks` carry their own
+ * `guidance` text; `views`, `sections` and `tabs` fall to the shared
+ * unknown-key refusal). Measured against the schema rather than read off the
+ * merge: each of those six produced an extension-level `unrecognized_keys`
+ * issue, while `fields`, `validations` and `fieldGroups` parsed.
  *
- * ⇒ Only TWO of this rule's rungs are reachable through an extension:
- * `objects.<obj>.fields.*` and `objects.<obj>._validations.*`. `indexes` is
- * not translatable; `label` / `pluralLabel` / `description` are leaf copy on
- * an object that already resolved, and this rule checks no leaf. ⛔ Do not
- * grow this fold to `_views` / `_sections` / `_tabs` / `_actions` "for
- * symmetry": an extension cannot contribute any of them, so a key there is an
- * orphan exactly as it was, and widening those rungs would silence real ones.
+ * ⇒ THREE of this rule's rungs are reachable through an extension:
+ * `objects.<obj>.fields.*`, `objects.<obj>._validations.*`, and
+ * `objects.<obj>._sections.*` for the groups a `.custom` arrangement brings
+ * (`fieldGroups[].key` is the section anchor, ADR-0085). `indexes` and
+ * `relatedLists` are not translatable here; `label` / `pluralLabel` /
+ * `description` are leaf copy on an object that already resolved, and this
+ * rule checks no leaf. ⛔ Do not grow this fold to `_views` / `_tabs` /
+ * `_actions` "for symmetry": an extension cannot contribute any of them, so a
+ * key there is an orphan exactly as it was, and widening those rungs would
+ * silence real ones.
  *
  * ## Read through the package's one fold (#30471)
  *
@@ -1390,6 +1394,14 @@ function buildUniverse(stack: AnyRec): Universe {
       // the same recursion the declaration loop uses, branches included.
       for (const rule of extension.validations) {
         collectValidationRuleNames(rule, facts.validations);
+      }
+      // [ADR-0146 D10] `_sections.<group>` is keyed by `fieldGroups[].key`
+      // (ADR-0085), and the base's paired `.custom` package declares the
+      // target's whole field arrangement in its extension: a group it brings
+      // is a section anchor of the target, as the target's own groups are.
+      for (const group of extension.fieldGroups) {
+        const key = strName(group.key);
+        if (key) facts.sections.add(key);
       }
     }
   }
