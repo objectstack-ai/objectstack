@@ -305,8 +305,9 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
     label: '报表',
     sections: {
       basics: { label: '基础信息', description: '标识与报表类型' },
-      // ⟨36373⟩
-      dataset_binding: { label: '数据来源', description: '报表从这里取数；分组和指标都从它里面选' },
+      // ⟨36373⟩ The curated fields above the form draw this section's data source,
+      // groups and metrics; what the form shows under it is the order and the drill.
+      dataset_binding: { label: '排序与下钻', description: '汇总结果怎么排，点开一行时看到哪些记录' },
       // ⟨36373⟩
       joined_blocks: { label: '联合报表的分块', description: '叠加进同一张报表的其他分块，各有自己的数据来源（仅联合报表）' },
       filter_and_chart: { label: '筛选与图表', description: '条件与图表展示' },
