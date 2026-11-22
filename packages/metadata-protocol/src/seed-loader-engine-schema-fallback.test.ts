@@ -207,7 +207,7 @@ describe('seed reference graph — engine schema fallback (marketplace objects)'
     expect(result.summary.totalReferencesResolved).toBeGreaterThanOrEqual(4);
   });
 
-  it('prefers the metadata service definition when it exists (the engine is probed only for roll-ups)', async () => {
+  it('falls back to the metadata service definition when the engine has no schema for the object', async () => {
     const { engine, store } = createFaithfulEngine({});
     const metadata = createEmptyMetadata();
     (metadata.getObject as any).mockImplementation(async (name: string) => ENGINE_SCHEMAS[name]);
@@ -222,16 +222,16 @@ describe('seed reference graph — engine schema fallback (marketplace objects)'
     expect(store.crm_contact.find((r) => r.email === 'john.smith@acme.example.com')!.crm_account).toBe(acmeId);
     // The engine here registers no schema at all (`createFaithfulEngine({})`),
     // so the references above resolved from the metadata service's definition.
-    // The engine is still asked once per seeded object, for the roll-up strip
-    // alone (#35655): the metadata copy carries no object extension, so the
-    // strip also reads the engine's merged schema. (The other engine question
-    // is the ADR-0131 D9 registration read for `sys_organization`, which this
+    // [#35254] The engine is asked FIRST for every seeded object: its schema
+    // is the object as served, object extensions folded in, and the metadata
+    // copy is read only when it has none. (The other engine question is the
+    // ADR-0131 D9 registration read for `sys_organization`, which this
     // metadata double does not know: does the composition register an
     // organization object at all? It answers from the same resolver.)
-    const probed = (engine as any).getSchema.mock.calls.map((c: unknown[]) => c[0]);
-    expect(probed.filter((name: string) => name !== 'sys_organization').sort()).toEqual(
-      ['crm_account', 'crm_contact', 'crm_opportunity'],
-    );
+    const probed = new Set<string>((engine as any).getSchema.mock.calls.map((c: unknown[]) => c[0] as string));
+    probed.delete('sys_organization');
+    expect([...probed].sort()).toEqual(['crm_account', 'crm_contact', 'crm_opportunity']);
+    for (const name of probed) expect(metadata.getObject).toHaveBeenCalledWith(name);
   });
 
   it('survives an engine without getSchema (contract-minimal engines keep the old behavior)', async () => {
