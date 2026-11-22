@@ -163,7 +163,7 @@ import {
   type FieldVisibilitySource,
 } from './payload-redaction.js';
 import { APPROVAL_REQUEST_CHILD_OBJECTS, type RequestVisibilitySource } from './request-read-gate.js';
-import { nodeConfigLocksRecord, recordHeldByLockingApproval } from './lifecycle-hooks.js';
+import { detailRowHeldByLockingApproval, nodeConfigLocksRecord, recordHeldByLockingApproval } from './lifecycle-hooks.js';
 import { PendingApproverReadGrantSource, type PendingApproverReadGrants } from './pending-approver-read-grant.js';
 // The ADR-0043 pages — the ONE copy of their text, rendered by the plugin's
 // self-hosted mount and by `handleActionPage` alike.
@@ -11124,7 +11124,11 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * `{ locked }` only: no request id, node, participants or `pending`. Request
    * content stays behind `approvalsVisibleToReaders` (#8652 ruling 5299823744,
    * untouched). The judgement is the record-lock hook's own
-   * ({@link recordHeldByLockingApproval}), never a second copy of it.
+   * ({@link recordHeldByLockingApproval}), never a second copy of it — and,
+   * for a master-detail line, the detail-row lock's
+   * ({@link detailRowHeldByLockingApproval}): a locked record's lines are
+   * locked with it, so the read answers `true` for a line whose write the hook
+   * refuses.
    */
   async getRecordLock(
     object: string,
@@ -11139,7 +11143,9 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       where: { id }, fields: ['id'], limit: 1, context,
     });
     if (!Array.isArray(readable) || readable.length === 0) return null;
-    return { locked: await recordHeldByLockingApproval(this.engine, objectName, id) };
+    const locked = await recordHeldByLockingApproval(this.engine, objectName, id)
+      || await detailRowHeldByLockingApproval(this.engine, objectName, id);
+    return { locked };
   }
 
   private async loadRequest(
