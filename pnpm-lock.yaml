@@ -2520,6 +2520,9 @@ importers:
       '@objectstack/plugin-approvals':
         specifier: workspace:*
         version: link:../../plugins/plugin-approvals
+      '@objectstack/plugin-audit':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-audit
       '@objectstack/plugin-auth':
         specifier: workspace:*
         version: link:../../plugins/plugin-auth
