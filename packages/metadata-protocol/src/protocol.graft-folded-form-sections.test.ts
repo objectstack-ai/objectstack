@@ -40,6 +40,9 @@
  * double for the reason the #20051 door-half block below gives.
  */
 import { describe, expect, it, vi } from 'vitest';
+// `./protocol.js` reaches `import('@objectstack/lint')` (the diagnostics and
+// build probes); pay its first load at collection, never inside a clocked case.
+import '@objectstack/lint';
 import { ViewMetadataSchema, VIEW_CONSOLE_ROUND_TRIP_KEYS } from '@objectstack/spec/ui';
 import { getMetadataTypeSchema, registerMetadataTypeSchema } from '@objectstack/spec/kernel';
 import { z } from 'zod';

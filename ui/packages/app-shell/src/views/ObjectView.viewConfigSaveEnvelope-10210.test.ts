@@ -33,6 +33,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// `./ObjectView` reaches `import('@objectstack/lint')` (the preview lints);
+// pay its first load at collection, never inside a clocked case.
+import '@objectstack/lint';
 import { ViewMetadataSchema } from '@objectstack/spec/ui';
 import { ObjectStackAdapter } from '@object-ui/data-objectstack';
 import { buildViewConfigSaveBody } from './ObjectView';
