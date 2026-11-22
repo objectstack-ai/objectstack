@@ -9,24 +9,21 @@ import {
   useSidebar,
 } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
-import { shortcutKeycaps, type ShortcutChord } from '../chrome/advertisedShortcuts.js';
+import { shortcutKeycaps } from '../chrome/advertisedShortcuts.js';
+import { SIDEBAR_TOGGLE_CHORD } from './consoleSidebarRail.js';
 
 /**
- * The chord `SidebarProvider`'s own listener answers to (⌘B / Ctrl+B). It is
- * the same chord `ConsoleLayout` advertises to the keyboard-shortcuts dialog;
- * the tooltip draws it with the dialog's keycaps so the two never spell it
- * differently.
- */
-const TOGGLE_SIDEBAR_CHORD: ShortcutChord = { key: 'b', mod: true };
-
-/**
- * The shell's one sidebar trigger (objectui#12429). It lives in the app bar's
- * left slot at every width: below the Shadcn mobile breakpoint it opens and
- * closes the drawer, above it it collapses the sidebar and expands it again.
- * In the console a collapsed sidebar is hidden, and the trigger floats its
- * menu over the content instead of expanding it (objectstack#35062,
- * `consoleSidebarRail`). `aria-expanded` follows whichever of the two states
- * the click toggles, and the tooltip names the keyboard shortcut.
+ * The shell's sidebar trigger (objectui#12429): below the Shadcn mobile
+ * breakpoint it opens and closes the drawer, above it it collapses the
+ * sidebar and expands it again. In the console a collapsed sidebar is hidden,
+ * and the trigger docks it beside the content again as the reader's choice
+ * (ruling 7069868269 on objectstack#36112, `consoleSidebarRail`).
+ * `aria-expanded` follows whichever of the two states the click toggles.
+ *
+ * The tooltip names ⌘B / Ctrl+B ({@link SIDEBAR_TOGGLE_CHORD}), drawn with
+ * the keyboard-shortcuts dialog's keycaps so the two never spell it
+ * differently: the chord is a press on this button (ruling 7074574380 on
+ * objectstack#36112).
  */
 export const LocalizedSidebarTrigger = React.forwardRef<
   React.ElementRef<typeof Button>,
@@ -64,7 +61,7 @@ export const LocalizedSidebarTrigger = React.forwardRef<
           data-testid="sidebar-trigger-shortcut"
           className="pointer-events-none inline-flex h-5 select-none items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-xs font-medium text-muted-foreground"
         >
-          {shortcutKeycaps(TOGGLE_SIDEBAR_CHORD).join('')}
+          {shortcutKeycaps(SIDEBAR_TOGGLE_CHORD).join('')}
         </kbd>
       </TooltipContent>
     </Tooltip>

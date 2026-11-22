@@ -26,7 +26,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import * as React from 'react';
 import { render, cleanup } from '@testing-library/react';
-import { GridField } from './GridField';
+import { GridFieldWidget as GridField } from './grid-field/GridFieldWidget';
 
 afterEach(() => cleanup());
 

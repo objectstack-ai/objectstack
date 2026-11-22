@@ -25,7 +25,7 @@
  * The verdict comes from `@object-ui/core`'s {@link resolveFieldRuleState} —
  * the SAME function the record form (`components/renderers/form/form.tsx`),
  * the wizard (`plugin-form/WizardForm.tsx`) and the line-item grid
- * (`fields/widgets/GridField.tsx`) resolve `visibleWhen`/`readonlyWhen`/
+ * (`fields/widgets/grid-field/GridFieldWidget.tsx`) resolve `visibleWhen`/`readonlyWhen`/
  * `requiredWhen` with, which in turn delegates to `@objectstack/formula`'s
  * `ExpressionEngine`. That is deliberate and load-bearing: the prompt and the
  * server's enforcement must reach the identical verdict, and a second

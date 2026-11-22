@@ -323,6 +323,7 @@
     "RealtimeSubscriptionOptions": "src/contracts/realtime-service.ts#RealtimeSubscriptionOptions (interface)",
     "RecordShare": "src/contracts/sharing-service.ts#RecordShare (interface)",
     "RecordShareRecipientType": "src/contracts/sharing-service.ts#RecordShareRecipientType (type)",
+    "RecordUpdateStartsInput": "src/contracts/automation-service.ts#RecordUpdateStartsInput (interface)",
     "RemoteTable": "src/contracts/external-datasource-service.ts#RemoteTable (interface)",
     "RenderTemplateInput": "src/contracts/email-service.ts#RenderTemplateInput (interface)",
     "RenderTemplateResult": "src/contracts/email-service.ts#RenderTemplateResult (interface)",

@@ -962,13 +962,16 @@ describe('AutomationApiErrorCode', () => {
 // ==========================================
 
 describe('AutomationApiContracts', () => {
-  it('should define all 9 contract endpoints', () => {
+  it('should define all 10 contract endpoints', () => {
     // 9 -> 8: `listFlows` (`GET /api/v1/automation`) retired with its route
     // (#19543) — flows are listed through `GET /api/v1/meta/flow`.
     // 8 -> 9: `cloneFlow` (`POST /api/v1/automation/:name/clone`) gained its
     // request/response schemas (#28149, ADR-0146 D4 "new similar").
-    expect(Object.keys(AutomationApiContracts)).toHaveLength(9);
+    // 9 -> 10: `listRecordUpdateStarts` (`POST /api/v1/automation/_record-starts`),
+    // the record-update preview the stage-change confirms read (#35928).
+    expect(Object.keys(AutomationApiContracts)).toHaveLength(10);
     expect(AutomationApiContracts).toHaveProperty('cloneFlow');
+    expect(AutomationApiContracts).toHaveProperty('listRecordUpdateStarts');
   });
 
   it('declares no flow-list entry and no GET at the bare /api/v1/automation path', () => {
@@ -1000,6 +1003,8 @@ describe('AutomationApiContracts', () => {
     expect(AutomationApiContracts.toggleFlow.path).toBe('/api/v1/automation/:name/toggle');
     expect(AutomationApiContracts.listRuns.path).toBe('/api/v1/automation/:name/runs');
     expect(AutomationApiContracts.getRun.path).toBe('/api/v1/automation/:name/runs/:runId');
+    expect(AutomationApiContracts.listRecordUpdateStarts.method).toBe('POST');
+    expect(AutomationApiContracts.listRecordUpdateStarts.path).toBe('/api/v1/automation/_record-starts');
   });
 
   it('should have input and output schemas for all endpoints', () => {
@@ -1007,5 +1012,58 @@ describe('AutomationApiContracts', () => {
       expect(contract.input, `${key} should have input schema`).toBeDefined();
       expect(contract.output, `${key} should have output schema`).toBeDefined();
     }
+  });
+});
+
+// ==========================================
+// Record Update Starts (#35928)
+// ==========================================
+
+describe('RecordUpdateStarts schemas (#35928)', () => {
+  it('accepts the proposed update of one record', () => {
+    const parsed = AutomationApiModule.RecordUpdateStartsRequestSchema.safeParse({
+      object: 'showcase_project',
+      recordId: 'p_1',
+      changes: { status: 'completed' },
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('refuses a key the request does not declare, and a request without changes', () => {
+    const extra = AutomationApiModule.RecordUpdateStartsRequestSchema.safeParse({
+      object: 'showcase_project', recordId: 'p_1', changes: {}, nodes: true,
+    });
+    expect(extra.success).toBe(false);
+    expect(extra.error?.issues.map((i) => i.code)).toContain('unrecognized_keys');
+    const bare = AutomationApiModule.RecordUpdateStartsRequestSchema.safeParse({ object: 'showcase_project', recordId: 'p_1' });
+    expect(bare.success).toBe(false);
+  });
+
+  it('holds each change key to the field-name grammar', () => {
+    for (const key of ['a.b', 'Status', '1st', 'has space', '']) {
+      const parsed = AutomationApiModule.RecordUpdateStartsRequestSchema.safeParse({
+        object: 'showcase_project', recordId: 'p_1', changes: { [key]: 1 },
+      });
+      expect(parsed.success, key).toBe(false);
+    }
+    const ok = AutomationApiModule.RecordUpdateStartsRequestSchema.safeParse({
+      object: 'showcase_project', recordId: 'p_1', changes: { status: 'completed', _internal_note: 'x' },
+    });
+    expect(ok.success).toBe(true);
+  });
+
+  it('answers flows by name, label and approval mark only', () => {
+    const answer = {
+      success: true,
+      data: { flows: [{ name: 'showcase_project_closure', label: 'Project Closure', startsApproval: true }] },
+    };
+    const parsed = AutomationApiModule.RecordUpdateStartsResponseSchema.parse(answer);
+    expect(parsed.data.flows[0]).toEqual({ name: 'showcase_project_closure', label: 'Project Closure', startsApproval: true });
+    // A served condition or node list is not part of the answer: the parse drops it.
+    const leaked = AutomationApiModule.RecordUpdateStartsResponseSchema.parse({
+      success: true,
+      data: { flows: [{ name: 'f', label: 'F', startsApproval: false, condition: 'status == "x"', nodes: [] }] },
+    });
+    expect(Object.keys(leaked.data.flows[0]).sort()).toEqual(['label', 'name', 'startsApproval']);
   });
 });

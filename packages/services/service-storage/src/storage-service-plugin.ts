@@ -93,6 +93,7 @@ import { contributeAttachmentDeleteFloorAlternate } from './attachment-delete-fl
 import { contributeAttachmentMemberGrant } from './attachment-member-grant.js';
 import {
   ATTACHMENT_REMOVE_ROUTE,
+  ATTACHMENT_RENAME_ROUTE,
   attachmentRemovalCallerResolver,
   registerAttachmentRemovalRoutes,
 } from './attachment-removal-routes.js';
@@ -1838,15 +1839,16 @@ async function resolveAdmissionTenancyPosture(
 }
 
 /**
- * Mount the uploader's removal door (`attachment-removal-routes.ts`) on the
- * kernel's HTTP server, over this kernel: the data engine the row is read as
- * the caller and removed through, and the caller resolution every own-row door
- * shares, reading this registry's `auth` service and `tenancy` posture per
- * request, as the storage family's own doors do. No engine leaves the door up
- * and answering `503`; no `auth` service leaves it refusing every request as
- * anonymous (`401`). An HTTP server that registers no DELETE routes mounts
- * nothing, and says so: a member then cannot remove an attachment they
- * uploaded.
+ * Mount the attachment's own doors (`attachment-removal-routes.ts`) — the
+ * uploader's removal door and the rename door — on the kernel's HTTP server,
+ * over this kernel: the data engine the row is read as the caller and written
+ * through, and the caller resolution every own-row door shares, reading this
+ * registry's `auth` service and `tenancy` posture per request, as the storage
+ * family's own doors do. No engine leaves the doors up and answering `503`; no
+ * `auth` service leaves them refusing every request as anonymous (`401`). An
+ * HTTP server that registers no DELETE or no PATCH routes mounts neither, and
+ * says so: a member then cannot remove an attachment they uploaded, and nobody
+ * can rename one from the Attachments panel.
  */
 function mountAttachmentRemovalDoor(
   http: IHttpServer,
@@ -1854,10 +1856,15 @@ function mountAttachmentRemovalDoor(
   engine: IDataEngine | null,
   logger: { info(msg: string): void; warn(msg: string): void },
 ): void {
-  if (typeof (http as Partial<IHttpServer>).delete !== 'function') {
+  const missingVerbs = (['delete', 'patch'] as const).filter(
+    (verb) => typeof (http as Partial<IHttpServer>)[verb] !== 'function',
+  );
+  if (missingVerbs.length > 0) {
     logger.warn(
-      `StorageServicePlugin: the HTTP server registers no DELETE routes, so the attachment removal door ` +
-        `(DELETE ${ATTACHMENT_REMOVE_ROUTE}) is not mounted, and a member cannot remove an attachment they uploaded.`,
+      `StorageServicePlugin: the HTTP server registers no ${missingVerbs.map((v) => v.toUpperCase()).join(' or ')} routes, ` +
+        `so neither the attachment removal door (DELETE ${ATTACHMENT_REMOVE_ROUTE}) nor the rename door ` +
+        `(PATCH ${ATTACHMENT_RENAME_ROUTE}) is mounted: a member cannot remove an attachment they uploaded, ` +
+        `and nobody can rename one from the Attachments panel.`,
     );
     return;
   }
@@ -1870,7 +1877,10 @@ function mountAttachmentRemovalDoor(
       tenancy: tenancyServiceResolver(registry),
     }),
   });
-  logger.info(`StorageServicePlugin: attachment removal door mounted at DELETE ${ATTACHMENT_REMOVE_ROUTE}`);
+  logger.info(
+    `StorageServicePlugin: attachment removal door mounted at DELETE ${ATTACHMENT_REMOVE_ROUTE}, ` +
+      `rename door at PATCH ${ATTACHMENT_RENAME_ROUTE}`,
+  );
 }
 
 /**

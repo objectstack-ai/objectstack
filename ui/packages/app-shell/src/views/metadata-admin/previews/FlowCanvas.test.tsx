@@ -19,7 +19,7 @@ import {
   useFlowLabelTranslations,
   type FlowLabelTranslations,
 } from './flow-label-translations';
-import { activeFlowsBundle } from '../../../utils/flowsBundle';
+import { activeFlowsBundle } from '@object-ui/i18n';
 
 afterEach(cleanup);
 

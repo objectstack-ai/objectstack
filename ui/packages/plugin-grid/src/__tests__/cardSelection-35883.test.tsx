@@ -356,6 +356,39 @@ describe('a tap on a link inside a card while selecting ticks the card (objectst
     expect(onRowSelect).toHaveBeenLastCalledWith([expect.objectContaining({ id: 'a1' })]);
   });
 
+  // objectstack#36315 — a keyboard on the 「⋮」 is a tap too: Enter or Space
+  // ticks the card and opens no menu (nor does ArrowDown); after 「×」 Enter
+  // opens the menu again.
+  it.each(['{Enter}', ' '])('while selecting, %s on the card\'s 「⋮」 ticks the card and opens no menu', async (key) => {
+    const { onRowSelect } = renderLinkedCards();
+    await mailOf('ada@acme.test');
+    await startSelecting();
+    within(await cardOf('Acme')).getByTestId('row-action-trigger').focus();
+    await userEvent.keyboard(key);
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(await cardOf('Acme')).toHaveAttribute('aria-pressed', 'true');
+    expect(onRowSelect).toHaveBeenLastCalledWith([expect.objectContaining({ id: 'a1' })]);
+    await userEvent.keyboard('{ArrowDown}');
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(await cardOf('Acme')).toHaveAttribute('aria-pressed', 'true');
+
+    endSelecting();
+    within(await cardOf('Acme')).getByTestId('row-action-trigger').focus();
+    await userEvent.keyboard(key);
+    await waitFor(() => expect(screen.getByRole('menu')).toBeInTheDocument());
+  });
+
+  it('while selecting, Enter on a link inside the card ticks the card and opens nothing', async () => {
+    const { onRowClick, onRowSelect } = renderLinkedCards();
+    await mailOf('ada@acme.test');
+    await startSelecting();
+    (await mailOf('ada@acme.test')).focus();
+    await userEvent.keyboard('{Enter}');
+    expect(await cardOf('Acme')).toHaveAttribute('aria-pressed', 'true');
+    expect(onRowSelect).toHaveBeenLastCalledWith([expect.objectContaining({ id: 'a1' })]);
+    expect(onRowClick).not.toHaveBeenCalled();
+  });
+
   it('a long press on the email starts the selection with its card ticked, and the click that ends it opens nothing', async () => {
     const { onRowClick, onRowSelect } = renderLinkedCards();
     const mail = await mailOf('ada@acme.test');
