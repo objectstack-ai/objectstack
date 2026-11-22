@@ -69,6 +69,7 @@ check that spelling first.
 | `label` | Replaces the target's label — with one exception, [below](#extensions-and-tenant-customization). A new `label` with no `pluralLabel` beside it also takes the target's plural off, since that plural names the old label: the object is served as one that declares no plural, and lists title it by its label. Set `pluralLabel` too to serve one. A plural the tenant set stays. |
 | `pluralLabel` | Same as `label`. |
 | `description` | Same as `label`. |
+| `place` | **Applied once, after every extension's fields are merged.** Says where the fields, groups and child lists this extension brings go on the target — [below](#placing-what-you-bring). |
 | `priority` | Not merged — it *orders* the merge. `0`–`999`, default `200`. |
 
 Added fields are ordinary fields, so everything on the
@@ -77,7 +78,7 @@ Added fields are ordinary fields, so everything on the
 
 ### What an extension may **not** contribute
 
-The merge carries the eight keys above and nothing else. These four are not
+The merge carries the nine keys above and nothing else. These five are not
 "unsupported yet" — there is no slot for them to arrive through, and the schema rejects
 each one by name with the alternative to use instead:
 
@@ -86,10 +87,64 @@ each one by name with the alternative to use instead:
 | `actions` | A top-level action with `objectName: '<target>'` in the same stack — it stays in the stack's top-level `actions`, and the engine's schema registry attaches it to the target object wherever the object is served, whichever package registers first; a target no loaded package registers fails the boot |
 | `hooks` | A top-level hook in the stack that defines the target object — a hook follows the ownership of its object, and `defineStack()` refuses a top-level hook bound to an object the stack does not define, an extended one included |
 | `listViews` | A top-level `view` in the stack that defines the target object — `defineStack()` refuses a top-level `view` whose `list` or `form` data source is an object the stack does not define, an extended one included |
-| `fieldGroups` | Add the fields here and declare the groups on the owning object, or assign a Page for the layout |
+| `fieldGroups` | A `place` entry: `{ group: { key, label }, after: '<group>' }` adds a group of your own, and `{ field, group, after: '<field>' }` puts a field of yours into one of the target's groups — [below](#placing-what-you-bring) |
+| `relatedLists` | A `place` entry `{ list, after: '<tab>' }` for a child object of your own package that points at the target — [below](#placing-what-you-bring). The target's own tab list stays its owner's |
 
 The same holds for any other key: the extension schema is strict, so an unknown key
 fails at authoring time with a prescription rather than being dropped in silence.
+
+---
+
+## Placing what you bring
+
+Without `place`, the fields you add arrive after the target's own, and a child list of
+yours shows wherever the record page's automatic order puts it. `place` names the item
+each one goes next to:
+
+```ts
+objectExtensions: [{
+  extend: 'crm_account',
+  fields: { tax_id: { type: 'text', label: 'Tax ID' } },
+  place: [
+    { field: 'tax_id', group: 'basic', after: 'industry' },
+    { group: { key: 'tax', label: 'Tax' }, after: 'basic' },
+    { list: 'acme_contract', after: 'crm_opportunity', label: 'Contracts', columns: ['name', 'amount'] },
+  ],
+}],
+```
+
+- **`{ field, group, after | before }`** puts a field of *your* `fields` into a group of the
+  target (or one you add), right after or before a member of that group.
+- **`{ group: { key, label, … }, after | before }`** adds a field group of your own, right
+  after or before one of the target's groups. Its `fields` may name only fields you add.
+- **`{ list, after | before, label?, columns? }`** puts a child list of your own package (a
+  child object of your package with a lookup to the target, or `object.field`) right after
+  or before one of the target's tabs, with that tab's own title and columns.
+
+Write `after` or `before`, not both; neither means the end. An anchor the target does not
+have puts the item at the end of its group, of the groups, or of the tabs (before the
+approvals and activity-stream tabs). Several packages at one anchor follow ascending
+`priority`, then package name. When the target's owner already names your list or lists
+your field, the owner's position wins.
+
+**Placement arranges what the target declares.** A list placement applies when the target
+declares `relatedLists`; a group or field placement when it declares `fieldGroups`. On a
+target that declares neither, its automatic arrangement stays and nothing is dropped: your
+list shows in the automatic tab order (and the entry's `label` / `columns` are not applied
+either, so write `relatedListTitle` / `relatedListColumns` on your child object's lookup
+field to title the list on every parent), and your field shows among the fields, its
+`after` / `before` not applied. The boot log names each placement that did not apply, with
+the object and your package; `os validate` names it too when the target is in the same
+stack.
+
+A child list your package brings is shown even when the target's `relatedLists` does not
+name it: placed, where you put it; unplaced, at the end of the tabs.
+
+**You place only what you bring.** A field of the target or of another package, a group
+key the target already declares, or a list that is not a child object of your package is
+refused at authoring time, and skipped by the merge with a warning naming whose item it
+is. Uninstalling or disabling your package takes its items off and leaves the target's own
+order as it was.
 
 ---
 

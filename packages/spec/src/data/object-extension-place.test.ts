@@ -115,6 +115,21 @@ describe('ObjectExtensionSchema.place — an extension places only what it bring
   });
 });
 
+describe('ObjectExtensionSchema.place — the guide\'s example', () => {
+  it('control: `content/docs/data-modeling/object-extensions.mdx`, "Placing what you bring", parses whole', () => {
+    const parsed = ObjectExtensionSchema.safeParse({
+      extend: 'crm_account',
+      fields: { tax_id: { type: 'text', label: 'Tax ID' } },
+      place: [
+        { field: 'tax_id', group: 'basic', after: 'industry' },
+        { group: { key: 'tax', label: 'Tax' }, after: 'basic' },
+        { list: 'acme_contract', after: 'crm_opportunity', label: 'Contracts', columns: ['name', 'amount'] },
+      ],
+    });
+    expect(parsed.success).toBe(true);
+  });
+});
+
 describe('ObjectExtensionSchema — the owner\'s arrangement keys point to place', () => {
   it.each([
     ['fieldGroups', [{ key: 'tax', label: 'Tax' }]],
