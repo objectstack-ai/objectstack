@@ -3496,7 +3496,6 @@ const zhHant = {
     starred: '已收藏',
     removeFromFavorites: '從收藏中移除 {{name}}',
     allReports: '全部報表',
-    keepOpen: '保持側邊欄展開',
     collapse: '收起側邊欄',
     expand: '展開側邊欄',
   },

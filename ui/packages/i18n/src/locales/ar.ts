@@ -3730,7 +3730,6 @@ const ar = {
     starred: "المميزة",
     removeFromFavorites: "إزالة {{name}} من المفضلة",
     allReports: "كل التقارير",
-    keepOpen: "إبقاء الشريط الجانبي مفتوحًا",
     collapse: 'طي الشريط الجانبي',
     expand: 'توسيع الشريط الجانبي',
   },
