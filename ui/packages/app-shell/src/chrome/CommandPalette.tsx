@@ -35,6 +35,7 @@ import {
   CommandItem,
   CommandList,
   CommandSeparator,
+  DIALOG_VIEWPORT_GUTTER,
   ObjectIconTile,
   cn,
 } from '@object-ui/components';
@@ -947,9 +948,10 @@ function PaletteDialog({
  * The palette's width while a record preview is drawn beside the results
  * (objectstack#36286): room for two halves. The preview pane itself shows only
  * from a 45rem frame on (`PREVIEW_PANE_CLASS`), so a narrower window keeps the
- * results alone.
+ * results alone. The cap (768px) is wider than the narrowest `sm` window can
+ * hold with a margin, so it reads the shared viewport gutter (objectui#12603).
  */
-const PALETTE_WIDE_CLASS = 'sm:max-w-3xl';
+const PALETTE_WIDE_CLASS = `sm:max-w-3xl ${DIALOG_VIEWPORT_GUTTER}`;
 
 /**
  * The cmdk root's classes, as `CommandDialog` draws them, laid out as a grid
