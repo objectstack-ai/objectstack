@@ -1930,6 +1930,27 @@ function recordPictureUrl(value: unknown): string | undefined {
 const PHONE_ACTION_BAR_BUTTONS = 2;
 
 /**
+ * The room a side preview keeps for the record's name before any button
+ * (objectstack#36201): sixteen characters, measured in the name's own `em`.
+ */
+const PREVIEW_NAME_MIN_EM = 16;
+
+/**
+ * Whether the record's name in the bar around `row` is cut short of the
+ * room a side preview keeps for it (objectstack#36201): it does not show in
+ * full, and it shows less than {@link PREVIEW_NAME_MIN_EM} characters' width.
+ */
+function previewNameSqueezed(row: HTMLElement): boolean {
+  const bar = row.closest('[data-record-top-bar]');
+  const name = bar?.querySelector<HTMLElement>('[data-record-header-title] h1');
+  if (!name) return false;
+  const shown = name.clientWidth;
+  if (name.scrollWidth <= shown + 1) return false;
+  const em = Number.parseFloat(getComputedStyle(name).fontSize) || 16;
+  return shown < PREVIEW_NAME_MIN_EM * em;
+}
+
+/**
  * The props of {@link PageHeaderActions}.
  *
  * `actions`, `maxVisible` and `mobileMaxVisible` are `page:header`'s own
@@ -1991,6 +2012,17 @@ export interface PageHeaderActionsProps {
    * action set (objectstack#35997). The host's buttons (Edit) still never fold.
    */
   fitWidth?: boolean;
+  /**
+   * The row is a side preview's (objectstack#36149, objectstack#36201;
+   * `RecordHeaderBar.preview`): on the desktop it draws ONE labelled action,
+   * the page's primary, and every other button folds into the `⋯` in its
+   * band and order — the host's buttons too (Edit), except the buttons of the
+   * host's edit state (Cancel, Save), which are that state's. With
+   * {@link fitWidth} that one action folds as well while the record's name in
+   * the bar is cut below sixteen characters' width. No effect on a phone or
+   * in the bottom bar.
+   */
+  preview?: boolean;
 }
 
 /** The refresh entry of the header's `⋯` menu — see {@link PageHeaderActionsProps.refresh}. */
@@ -2025,6 +2057,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
   face = 'row',
   defaultMaxVisible,
   fitWidth = false,
+  preview = false,
 }) => {
   const ctx = useRecordContext();
   // objectstack#35853 — the width fold ({@link PageHeaderActionsProps.fitWidth}):
@@ -2037,10 +2070,11 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
   React.useLayoutEffect(() => {
     if (!fitWidth || !fitRow) return;
     const items = Array.from(fitRow.children) as HTMLElement[];
-    if (items.length < 2) return;
-    const wrapped = items[items.length - 1].offsetTop > items[0].offsetTop + 1;
+    const wrapped = items.length >= 2 && items[items.length - 1].offsetTop > items[0].offsetTop + 1;
+    // objectstack#36201 — a side preview's buttons give way to the name first.
+    const squeezed = preview && previewNameSqueezed(fitRow);
     const { inline, floor, key } = fitDrawn.current;
-    if (wrapped && inline > floor) setWidthCap({ key, cap: inline - 1 });
+    if ((wrapped || squeezed) && inline > floor) setWidthCap({ key, cap: inline - 1 });
   });
   React.useEffect(() => {
     if (!fitWidth || !fitRow || typeof ResizeObserver === 'undefined') return;
@@ -2730,24 +2764,44 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     // record (objectstack#35997) draws the full budget and the next layout
     // measures again. A string key, so an equal set never re-arms the fold.
     const fitsWidth = fitWidth && !barFace && !isMobile;
+    // objectstack#36201 — a side preview's row: one labelled action, the
+    // page's own primary (never a host button, never a destructive one), and
+    // only the host's edit state keeps its buttons (Cancel, Save) in the row.
+    // Its width fold goes down to none: the name keeps its room first.
+    const previewRow = preview && !barFace && !isMobile;
+    const previewPick: unknown[] = !previewRow || hostPrimary
+      ? []
+      : [
+          primaryCandidates.find((a) => !isHostAction(a) && a?.variant === 'primary')
+            ?? primaryCandidates.find((a) => !isHostAction(a)),
+        ].filter((a) => a !== undefined);
+    const rowButtons = previewRow ? previewPick : authoredButtons;
+    const rowMax = previewRow ? 1 : maxVisible;
     const fitKey = JSON.stringify([ctx?.recordId, authoredButtons.map((a: any) => a?.name || a?.id)]);
     const rowCap = widthCap?.key === fitKey ? widthCap.cap : null;
-    const rowBudget = fitsWidth && rowCap != null ? Math.min(maxVisible, rowCap) : maxVisible;
+    const rowBudget = fitsWidth && rowCap != null ? Math.min(rowMax, rowCap) : rowMax;
     if (fitsWidth) {
-      fitDrawn.current = { inline: Math.min(rowBudget, authoredButtons.length), floor: authoredButtons.length > 0 ? 1 : 0, key: fitKey };
+      fitDrawn.current = {
+        inline: Math.min(rowBudget, rowButtons.length),
+        floor: !previewRow && rowButtons.length > 0 ? 1 : 0,
+        key: fitKey,
+      };
     }
-    const inlineAuthored = new Set<unknown>(authoredButtons.slice(0, rowBudget));
+    const inlineAuthored = new Set<unknown>(rowButtons.slice(0, rowBudget));
+    // The host's buttons that keep the row: all of them on a page; in a side
+    // preview only those of the host's edit state.
+    const hostKeepsRow = (a: unknown): boolean => isHostButton(a) && (!previewRow || !!hostPrimary);
     const inlineActions = barFace
       ? barQueue.slice(0, maxVisible)
-      : ranked.filter((a) => isHostButton(a) || inlineAuthored.has(a));
+      : ranked.filter((a) => hostKeepsRow(a) || inlineAuthored.has(a));
     const foldedButtons = barFace
       ? [
           ...barQueue.slice(maxVisible),
           ...ranked.filter((a) => isHostAction(a) && !isHostButton(a)),
         ]
       : [
-          ...authoredButtons.slice(rowBudget),
-          ...ranked.filter((a) => isHostAction(a) && !isHostButton(a)),
+          ...ranked.filter((a) => !isHostAction(a) && !inlineAuthored.has(a)),
+          ...ranked.filter((a) => isHostAction(a) && !hostKeepsRow(a)),
         ];
     // The overflow reads as one list in three bands (objectui#12529): the
     // authored actions first, then the host's menu chrome (favorites /
@@ -2861,8 +2915,9 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       // target.
       const hostEditPick =
         action === primaryAction && !barFace && isHostAction(action) && action?.variant !== 'primary';
+      // A side preview's one action is its row's primary (objectstack#36201).
       const variant =
-        action === primaryAction && !hostEditPick
+        (action === primaryAction && !hostEditPick) || previewPick.includes(action)
           ? 'default'
           : isDestructiveAction(action) ? 'destructive' : 'outline';
       const size = action.size || 'sm';
@@ -3250,6 +3305,8 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
         // objectstack#35853 — the bar's budget is 3, as anywhere else, and
         // what does not fit the bar's width folds into the `⋯`.
         fitWidth={inBar}
+        // objectstack#36201 — a side preview's bar: one labelled action.
+        preview={inBar && !!headerBar?.preview}
       />
     );
     if (!phoneFace) return row;
@@ -3569,11 +3626,17 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
     // (`text-base`). The navigation row names the object or the list, so the
     // chip does not repeat it. Nothing is drawn until the host's slots exist.
     if (drawsInBar && headerBar) {
+      // objectstack#36149 / objectstack#36201 — a side preview's name: no
+      // copy-id icon after it (the host's `⋯` offers the copy), and its full
+      // text as its tooltip, since the preview's width can cut it.
+      const preview = !!headerBar.preview;
       const title = headerBar.titleSlot ? createPortal(
         <span className="flex min-w-0 items-center gap-2" data-record-header-title="" {...headerAria}>
           <RecordTitleChip
             title={chipTitle}
-            titleNode={chipTitleNode}
+            titleNode={preview
+              ? <span title={chipTitle} data-record-header-name="">{chipTitleNode ?? chipTitle}</span>
+              : chipTitleNode}
             icon={recordPicture}
             // The bar's crumb names the object; a host note on it (how a
             // Setup record's object is managed) keeps its label beside the
@@ -3581,7 +3644,7 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
             objectLabel={ctx?.objectLabelNote ? objectLabel : undefined}
             objectLabelNote={ctx?.objectLabelNote}
             resourceId={data?.id ? String(data.id) : undefined}
-            showCopyId={showCopyId}
+            showCopyId={showCopyId && !preview}
             isFavorite={ctx?.isFavorite}
             onToggleFavorite={
               ctx?.onToggleFavorite

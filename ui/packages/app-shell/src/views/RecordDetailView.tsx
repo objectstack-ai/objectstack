@@ -5361,6 +5361,30 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         onClick: () => recordPane.openAsPage(),
       } as any);
     }
+    // objectstack#36149 — a side preview's header draws no copy-id icon after
+    // the name; the copy is this `⋯` entry instead.
+    if (embedded && paneHeaderBar?.preview && pureRecordId) {
+      items.push({
+        name: 'sys_copy_record_id',
+        label: t('detail.copyRecordId', { defaultValue: 'Copy record ID' }),
+        icon: 'copy',
+        type: 'script',
+        locations: ['record_header'],
+        variant: 'outline',
+        order: 113,
+        component: 'action:menu',
+        onClick: async () => {
+          const label = t('detail.copyRecordId', { defaultValue: 'Copy record ID' });
+          try {
+            await navigator.clipboard.writeText(String(pureRecordId));
+            toast.success(t('detail.copied', { defaultValue: 'Copied!' }));
+          } catch (err: any) {
+            // A clipboard the page may not write (not focused, not https) says so.
+            toast.error(err?.message ? `${label}: ${err.message}` : label);
+          }
+        },
+      } as any);
+    }
     if (affordances.delete) {
       items.push({
         name: 'sys_delete',

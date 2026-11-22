@@ -528,8 +528,10 @@ export function RecordStackDrawer({
   const [headerTitleSlot, setHeaderTitleSlot] = useState<HTMLElement | null>(null);
   const [headerActionSlot, setHeaderActionSlot] = useState<HTMLElement | null>(null);
   const [headerClaimed, setHeaderClaimed] = useState(false);
+  // objectstack#36149 / objectstack#36201 — the pane is the side preview: the
+  // record's name first, one labelled action, Edit and the id's copy in `⋯`.
   const headerBar = useMemo<RecordHeaderBar>(
-    () => ({ titleSlot: headerTitleSlot, actionSlot: headerActionSlot, claim: setHeaderClaimed }),
+    () => ({ titleSlot: headerTitleSlot, actionSlot: headerActionSlot, claim: setHeaderClaimed, preview: true }),
     [headerTitleSlot, headerActionSlot],
   );
   const currentObject = current?.objectName;

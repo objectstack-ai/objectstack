@@ -30,6 +30,18 @@ export interface RecordHeaderBar {
   actionSlot: HTMLElement | null;
   /** The header took the bar (`true`) or gave it back (`false`). */
   claim(claimed: boolean): void;
+  /**
+   * The bar is a side preview's (objectstack#36149, objectstack#36201): the
+   * record's name comes first. The row draws at most ONE labelled action —
+   * the page's primary — and the host's buttons (Edit) go into the `⋯` with
+   * the rest, in their order; that one action folds into the `⋯` too while
+   * the name has less than 16 characters' room and is cut. No copy-id icon
+   * follows the name: a host that offers the copy does so in its `⋯`. The
+   * name's full text is its tooltip. A state's own levers (an approval's
+   * approve / reject) are drawn as the state draws them. Absent: a page's
+   * bar, as before.
+   */
+  preview?: boolean;
 }
 
 export const RecordHeaderBarContext = React.createContext<RecordHeaderBar | null>(null);
