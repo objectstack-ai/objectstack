@@ -165,27 +165,54 @@ async function settle(k: { kernel: ObjectKernel }) {
 }
 
 describe('[#35609] install-local: a version that no longer extends an object serves it without the extension', () => {
-    it('READINGS (measure first)', async () => {
+    it('an upgrade that drops the extension: the plan names the field, the object no longer serves it, the column keeps its value', async () => {
         const k = await bootDoor();
         try {
-            const r1 = await k.post(mod('1.0.0', { extends: true }));
-            console.log('install v1', r1.status, JSON.stringify(r1.payload?.data?.hotLoaded), k.servedFields());
-            await k.ql.insert('crm_line', { id: 'l1', name: 'one', cb_account: 'ACME' }, SYSTEM as any);
-            console.log('column after v1', JSON.stringify(await k.column()));
+            expect((await k.post(mod('1.0.0', { extends: true }))).payload?.data?.hotLoaded).toBe(true);
+            expect(k.servedFields()).toEqual(['cb_account', 'name']);
+            await k.ql.insert('crm_line', { id: 'l1', name: 'one', cb_account: 'ACME', organization_id: 'org_a' }, SYSTEM as any);
+
+            // The dry run already said so (unchanged by this fix): the field is removed, its column holds a row.
             const dry = await k.post({ ...mod('1.0.1', { extends: false }), dryRun: true });
-            console.log('dry run', dry.status, JSON.stringify(dry.payload?.data?.plan?.fields ?? dry.payload, null, 0).slice(0, 2000));
-            console.log('dry env', JSON.stringify(dry.payload?.data?.environment ?? null).slice(0, 1000));
-            const r2 = await k.post(mod('1.0.1', { extends: false }));
-            console.log('upgrade v1.0.1', r2.status, JSON.stringify(r2.payload).slice(0, 1500));
-            console.log('served after upgrade', k.servedFields());
-            console.log('column after upgrade', JSON.stringify(await k.column()));
-            const rows = await k.ql.find('crm_line', { where: {}, ...SYSTEM } as any);
-            console.log('find after upgrade', JSON.stringify(rows));
-            const r3 = await k.post(mod('1.0.1', { extends: true }));
-            console.log('reinstall same version w/ ext', r3.status, k.servedFields());
-            const r4 = await k.post(mod('1.0.1', { extends: false }));
-            console.log('reinstall same version w/o ext', r4.status, JSON.stringify(r4.payload).slice(0, 600), k.servedFields());
-            console.log('warns', JSON.stringify(k.logger.warn.mock.calls.map((c: any[]) => String(c[0]).slice(0, 300))));
+            expect(dry.status).toBe(200);
+            expect(dry.payload.data.plan.fields.removed).toEqual([expect.objectContaining({ object: 'crm_line', field: 'cb_account' })]);
+            expect(dry.payload.data.environment.columns).toEqual([expect.objectContaining({ object: 'crm_line', field: 'cb_account', reasons: ['removed'], rows: 1 })]);
+
+            const upgraded = await k.post(mod('1.0.1', { extends: false }));
+            expect(upgraded.status, JSON.stringify(upgraded.payload)).toBe(200);
+            expect(upgraded.payload.data.hotLoaded).toBe(true);
+
+            expect(k.servedFields()).toEqual(['name']);
+            const [row] = (await k.ql.find('crm_line', { where: {}, ...SYSTEM } as any)) as Array<Record<string, unknown>>;
+            expect(row).toMatchObject({ id: 'l1', name: 'one' });
+            expect(row).not.toHaveProperty('cb_account');
+            // Stored data is untouched: nothing drops the column.
+            expect(await k.column()).toEqual({ hasColumn: true, values: ['ACME'] });
+        } finally {
+            await settle(k);
+        }
+    }, 60_000);
+
+    it('a re-install of the same version without the extension withdraws it too', async () => {
+        const k = await bootDoor();
+        try {
+            await k.post(mod('1.0.0', { extends: true }));
+            expect(k.servedFields()).toEqual(['cb_account', 'name']);
+            const res = await k.post(mod('1.0.0', { extends: false }));
+            expect(res.status, JSON.stringify(res.payload)).toBe(200);
+            expect(k.servedFields()).toEqual(['name']);
+        } finally {
+            await settle(k);
+        }
+    }, 60_000);
+
+    it('CONTROL: an upgrade that keeps the extension keeps its field', async () => {
+        const k = await bootDoor();
+        try {
+            await k.post(mod('1.0.0', { extends: true }));
+            const res = await k.post(mod('1.0.1', { extends: true }));
+            expect(res.status, JSON.stringify(res.payload)).toBe(200);
+            expect(k.servedFields()).toEqual(['cb_account', 'name']);
         } finally {
             await settle(k);
         }
