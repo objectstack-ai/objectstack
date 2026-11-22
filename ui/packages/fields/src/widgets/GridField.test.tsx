@@ -4,7 +4,8 @@ import React from 'react';
 import { UploadProvider } from './UploadProvider';
 import { Dialog, DialogContent, DialogTitle } from '@object-ui/components';
 import { formatDate, formatDateTime } from '@object-ui/core';
-import { GridField, LineItemsField, sumColumn, lookupAutofillPatch, UNTOUCHED_NEW_ROW, isUntouchedNewRow, columnHelpByField } from './GridField';
+import { GridFieldWidget as GridField } from './grid-field/GridFieldWidget';
+import { GridField as GridFieldFace, LineItemsField, sumColumn, lookupAutofillPatch, UNTOUCHED_NEW_ROW, isUntouchedNewRow, columnHelpByField } from './GridField';
 
 const columns = [
   { name: 'description', label: 'Description', type: 'text' as const },
@@ -15,7 +16,7 @@ const field = { columns, totalField: 'amount' } as any;
 
 describe('GridField / LineItemsField — editable line items', () => {
   it('is exported under both names', () => {
-    expect(LineItemsField).toBe(GridField);
+    expect(LineItemsField).toBe(GridFieldFace);
   });
 
   it('renders a column header per config and an empty hint', () => {
@@ -1290,5 +1291,44 @@ describe('cell faces that open under the cell (objectstack#36023)', () => {
       fireEvent.keyDown(outside, { key: 'Escape' });
       expect(onOpenChange).toHaveBeenCalledWith(false);
     });
+  });
+});
+
+/**
+ * objectstack#36102 — `@object-ui/fields` exports a lazy face for the grid
+ * (`./GridField.ts`); the body (`./grid-field/GridFieldWidget.tsx`) loads
+ * through one `import()`. Each case re-imports the face from a fresh module
+ * registry, so "before the body loaded" does not depend on case order.
+ */
+describe('GridField — the lazy face the package exports (objectstack#36102)', () => {
+  const lines = [{ description: 'Widget', amount: 5 }];
+
+  it('a mount before the body loads shows the placeholder, then the grid, and a later render keeps the focused cell', async () => {
+    vi.resetModules();
+    const face = await import('./GridField');
+    const view = render(<face.GridField value={lines} onChange={() => {}} field={field} />);
+    expect(screen.getByTestId('grid-field-loading')).toBeTruthy();
+
+    const grid = await screen.findByTestId('line-items');
+    expect(screen.queryByTestId('grid-field-loading')).toBeNull();
+    const cell = grid.querySelector('input[aria-label="Description"]') as HTMLInputElement;
+    expect(cell.value).toBe('Widget');
+    cell.focus();
+
+    // The body has loaded now. A render of the same mount must not swap the
+    // boundary for a direct render: that remounts the body and drops focus.
+    view.rerender(<face.GridField value={[{ ...lines[0] }]} onChange={() => {}} field={field} />);
+    expect(cell.isConnected).toBe(true);
+    expect(document.activeElement).toBe(cell);
+  });
+
+  it('a mount after preloadGridField renders the grid in the same render, with no placeholder', async () => {
+    vi.resetModules();
+    const face = await import('./GridField');
+    await face.preloadGridField();
+    render(<face.LineItemsField value={lines} onChange={() => {}} field={field} />);
+    expect(screen.queryByTestId('grid-field-loading')).toBeNull();
+    const cell = screen.getByTestId('line-items').querySelector('input[aria-label="Description"]') as HTMLInputElement;
+    expect(cell.value).toBe('Widget');
   });
 });

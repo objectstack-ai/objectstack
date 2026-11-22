@@ -27,7 +27,8 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { render, screen, cleanup, within } from '@testing-library/react';
 import * as React from 'react';
 import { LocalizationProvider } from '@object-ui/i18n';
-import { GridField, type GridColumn } from './GridField';
+import { GridFieldWidget as GridField } from './grid-field/GridFieldWidget';
+import { type GridColumn } from './GridField';
 import { LookupField } from './LookupField';
 
 afterEach(() => cleanup());

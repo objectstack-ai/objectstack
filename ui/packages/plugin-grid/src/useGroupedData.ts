@@ -638,6 +638,11 @@ export function useGroupedData(
  *
  * @param optionRanks - per grouping field, its declared option order
  * @param temporalAggregates - per aggregated field, its date-family cell face
+ * @param aggregationsByDepth - per nesting depth (index 0 = top level), the
+ *   aggregations a group at that depth draws, in place of `aggregations`: a
+ *   measure aggregate over a `record`-mode amount or quantity stands only from
+ *   the depth that groups by its unit or currency field down
+ *   (`honestGroupAggregationsByDepth`, objectstack#36276)
  */
 export function useGroupedDataInOptionOrder(
   config: GroupingConfig | undefined,
@@ -647,6 +652,7 @@ export function useGroupedDataInOptionOrder(
   server: ServerGroupSource | undefined,
   optionRanks: GroupOptionRanks | undefined,
   temporalAggregates?: TemporalAggregateFaces,
+  aggregationsByDepth?: ReadonlyArray<GroupAggregationConfig[] | undefined>,
 ): UseGroupedDataResult {
   // [objectui#7217] The SAME normalized list `ObjectGrid`'s formatter memo
   // reads. Memoized on the raw array rather than on `config`: hosts rebuild
@@ -664,6 +670,8 @@ export function useGroupedDataInOptionOrder(
 
   const groups: GroupEntry[] = useMemo(() => {
     if (!isGrouped) return [];
+    const aggregationsAt = (depth: number): GroupAggregationConfig[] | undefined =>
+      (aggregationsByDepth ? aggregationsByDepth[depth] : aggregations);
 
     if (server) {
       /**
@@ -721,7 +729,7 @@ export function useGroupedDataInOptionOrder(
             count: Number.isFinite(count) ? count : 0,
             keyValues,
             collapsed,
-            aggregations: readServerAggregations(row, aggregations, temporalAggregates),
+            aggregations: readServerAggregations(row, aggregationsAt(depth), temporalAggregates),
             subgroups: isLeaf ? [] : buildServerLevel(depth + 1, compositeKey, keyValues),
           };
         });
@@ -782,8 +790,9 @@ export function useGroupedDataInOptionOrder(
         const collapsedDefault = !!f.collapsed;
         const collapsed =
           compositeKey in toggledKeys ? toggledKeys[compositeKey] : collapsedDefault;
-        const agg = aggregations && aggregations.length > 0
-          ? computeAggregations(entry.rows, aggregations, temporalAggregates)
+        const levelAggregations = aggregationsAt(depth);
+        const agg = levelAggregations && levelAggregations.length > 0
+          ? computeAggregations(entry.rows, levelAggregations, temporalAggregates)
           : [];
         const keyValues = { ...prefix, [f.field]: entry.rows[0]?.[f.field] ?? null };
         const subgroups = depth + 1 < fields.length
@@ -805,7 +814,7 @@ export function useGroupedDataInOptionOrder(
     };
 
     return buildLevel(data, 0, '', {});
-  }, [data, fields, isGrouped, toggledKeys, aggregations, formatValue, server, optionRanks, temporalAggregates, emptyLabel]);
+  }, [data, fields, isGrouped, toggledKeys, aggregations, aggregationsByDepth, formatValue, server, optionRanks, temporalAggregates, emptyLabel]);
 
   const toggleGroup = useCallback((key: string) => {
     setToggledKeys((prev) => {

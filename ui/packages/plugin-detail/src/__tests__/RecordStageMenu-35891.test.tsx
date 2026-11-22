@@ -120,7 +120,7 @@ function mount(opts: MountOptions = {}) {
       data={{ id: 'o1', name: 'Wayne deal', stage, loss_reason: null, updated_at: VERSION }}
       objectSchema={opts.schema ?? OPPORTUNITY}
       dataSource={dataSource as any}
-      refresh={refresh}
+      reread={refresh}
     >
       <InlineEditProvider canEdit={opts.canEdit ?? true}>
         <RecordStageMenu field="stage" label={label} tag={tag} />
@@ -423,7 +423,7 @@ describe('#36036 after a 409 re-read, the stage dialog asks what the re-read rec
   } as unknown as typeof OPPORTUNITY;
 
   /**
-   * The page's refresh as the record page wires it: a notice that returns at
+   * The page's re-read as the record page wires it: a notice that returns at
    * once, the re-read row landing in the record context afterwards.
    */
   function mountReRead(reread: Record<string, unknown>, schema: typeof OPPORTUNITY = OPPORTUNITY) {
@@ -444,7 +444,7 @@ describe('#36036 after a 409 re-read, the stage dialog asks what the re-read rec
           data={row}
           objectSchema={schema}
           dataSource={dataSource as any}
-          refresh={refresh}
+          reread={refresh}
         >
           <InlineEditProvider canEdit>
             <RecordStageMenu field="stage" label="Prospecting" tag={<span>Prospecting</span>} />
@@ -537,6 +537,51 @@ describe('#35891 who sees the plain tag', () => {
     mount();
     expect(screen.queryByTestId('plain-tag')).toBeNull();
     expect(trigger()).toHaveTextContent('Prospecting');
+  });
+});
+
+describe('#36309 a host with only refresh still re-reads; reread wins where both are given', () => {
+  const conflict = () => Object.assign(new Error('CONCURRENT_UPDATE'), { code: 'CONCURRENT_UPDATE', status: 409 });
+
+  function mountWith(members: { refresh?: () => Promise<void>; reread?: () => Promise<void> }) {
+    const dataSource = makeDataSource(async () => { throw conflict(); });
+    render(
+      <RecordContextProvider
+        objectName="crm_opportunity"
+        recordId="o1"
+        data={{ id: 'o1', name: 'Wayne deal', stage: 'prospecting', loss_reason: null, updated_at: VERSION }}
+        objectSchema={OPPORTUNITY}
+        dataSource={dataSource as any}
+        {...members}
+      >
+        <InlineEditProvider canEdit>
+          <RecordStageMenu field="stage" label="Prospecting" tag={<span>Prospecting</span>} />
+        </InlineEditProvider>
+      </RecordContextProvider>,
+    );
+    return { dataSource };
+  }
+
+  it('a provider with only refresh: a 409 on Move calls refresh', async () => {
+    const refresh = vi.fn(async () => {});
+    const { dataSource } = mountWith({ refresh });
+    fireEvent.click(item(openMenu(), 'Negotiation'));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+  });
+
+  it('CONTROL — a provider with both: a 409 on Move calls reread, not refresh', async () => {
+    const refresh = vi.fn(async () => {});
+    const reread = vi.fn(async () => {});
+    const { dataSource } = mountWith({ refresh, reread });
+    fireEvent.click(item(openMenu(), 'Negotiation'));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(reread).toHaveBeenCalledTimes(1));
+    expect(refresh).not.toHaveBeenCalled();
   });
 });
 

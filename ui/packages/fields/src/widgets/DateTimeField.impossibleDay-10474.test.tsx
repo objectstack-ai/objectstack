@@ -38,7 +38,7 @@ import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { DateTimeField } from './DateTimeField';
-import { GridField } from './GridField';
+import { GridFieldWidget as GridField } from './grid-field/GridFieldWidget';
 import {
   fromDateTimeInputValue,
   isImpossibleStoredDay,
