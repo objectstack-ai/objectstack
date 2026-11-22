@@ -153,6 +153,7 @@ import { validateActionBodyCompiles } from './validate-action-body-compiles.js';
 import { validateHookAndJobBodyCompiles } from './validate-hook-body-compiles.js';
 import { validateRuleSchemaFormats } from './validate-rule-schema-formats.js';
 import { validateActionLocations } from './validate-action-locations.js';
+import { validateObjectPinnedActions } from './validate-object-pinned-actions.js';
 import { validateActionObjectBinding } from './validate-action-object-binding.js';
 import { validateFlowNodeExecutors } from './validate-flow-node-executors.js';
 import { validateInertObjectDeclarations } from './validate-inert-object-declarations.js';
@@ -1877,6 +1878,23 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_ONLY,
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateActionLocations(stack),
+  },
+  // [#36366] An object's pinned header actions (`pinnedActions`, and an
+  // object extension's) that name no action of the object, or one not placed
+  // on the page the arm pins: the pin draws no button. Gating, because the
+  // author's pin is lost without a word otherwise. CLI only: the runtime
+  // snapshot carries no stack `actions`, so an action bound by `objectName`
+  // would read as unknown there; the design mode's Save checks the names
+  // against the served object before it writes.
+  {
+    name: 'validateObjectPinnedActions',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-object-pinned-actions.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
+    run: (stack) => validateObjectPinnedActions(stack),
   },
   // A standalone action that declares a location but no `objectName` binds to
   // no object, so the button it declares never renders (every location is an

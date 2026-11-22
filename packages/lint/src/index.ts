@@ -704,6 +704,12 @@ export type { ActionNameRefFinding, ActionNameRefSeverity } from './validate-act
 
 export { validateActionLocations, ACTION_NO_PLACEMENT } from './validate-action-locations.js';
 export type { ActionLocationsFinding, ActionLocationsSeverity } from './validate-action-locations.js';
+export {
+  validateObjectPinnedActions,
+  OBJECT_PINNED_ACTION_UNKNOWN,
+  OBJECT_PINNED_ACTION_NOT_PLACED,
+} from './validate-object-pinned-actions.js';
+export type { ObjectPinnedActionsFinding } from './validate-object-pinned-actions.js';
 export { validateActionObjectBinding, ACTION_NO_OBJECT_BINDING } from './validate-action-object-binding.js';
 export type { ActionObjectBindingFinding } from './validate-action-object-binding.js';
 export { validateFlowNodeExecutors, FLOW_NODE_TYPE_NO_EXECUTOR } from './validate-flow-node-executors.js';
