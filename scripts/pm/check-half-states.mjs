@@ -266,6 +266,18 @@
  *       handler. `unknown`/null readings are SKIPPED and never vouched for —
  *       GitHub computes mergeability asynchronously, so that reading is the
  *       platform saying "ask again later", not a state to name.
+ *   H82 a CLAIMED card's PR that CI cannot see, silent past the threshold:
+ *       a DRAFT in merge conflict, or a head — draft or not — carrying zero
+ *       GitHub Actions check suites. A card PR stays draft until its seat
+ *       lands it, so H12 and H16 (non-draft only) were blind where the
+ *       in-flight work is, and nothing read whether CI started at all: a
+ *       conflicting PR starts no `pull_request` workflow, so no green or red
+ *       event ever wakes the thread waiting for one. "Claimed" is a bound
+ *       card (closing keyword or `Part of`) the sweep holds under
+ *       `pm:dispatched`. Two per-PR reads for candidates only — the PR row
+ *       (shared with H16's) and the head's check suites filtered to the
+ *       Actions app; an unread suite is UNJUDGED, counted in the summary,
+ *       never a zero. A non-draft dirty PR stays H16's row alone.
  *
  * ## H17 — an item here that is NOT an invariant
  *
@@ -4595,6 +4607,131 @@ export function h16StuckMergeConflict(pr, nowMs = Date.now()) {
     'armed while dirty simply never lands). The owning lane PM merges `main` into the branch, ' +
     'resolves it, and re-arms afterwards. Age is the PR\'s `updated_at`, not the conflict\'s: a ' +
     'conflict carries no timestamp of its own, and base advancing does not touch the PR row.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H82 — a claimed card's PR that CI cannot see: a DRAFT in merge conflict, or
+// a head that carries no GitHub Actions check suite at all.
+//
+// H12 and H16 read only non-draft PRs, and in this fleet a card PR stays draft
+// until its seat lands it — so the conflict detector was blind exactly where
+// the in-flight work is. And neither row reads whether CI started at all: a
+// conflicting PR starts no `pull_request` workflow, so its head carries ZERO
+// Actions check suites, no green and no red event ever arrives, and a card
+// thread waiting "until CI is green" waits on nothing while its seat waits on
+// the thread. `dispatch-runbook.md` 〈卡线程〉 states the wake rule this row
+// reads mechanically: zero Actions 30 minutes after the push, or `dirty`.
+// ---------------------------------------------------------------------------
+
+/**
+ * H82 threshold, in MINUTES — the wait the card-thread rule allows before the
+ * seat wakes the thread (the self-test pins the rule's phrase and this number
+ * together, so neither moves alone).
+ *
+ * Aged by the PR's `updated_at`, H16's proxy and for H16's reason: neither a
+ * conflict nor a missing suite carries a timestamp of its own, a push bumps
+ * the PR row, and `main` advancing under it does not. The error direction is
+ * H16's too — a quiet PR whose base just moved flags at once (over-report),
+ * while a comment on the PR defers the row by one threshold (a bounded
+ * under-report, never a silence).
+ */
+export const CLAIMED_PR_BLIND_STALE_MINUTES = 30;
+
+/**
+ * The GitHub Actions app id, the `app_id` filter on the check-suites read.
+ * Unfiltered, the other apps' suites hide the gap: measured on the head this
+ * row is written for, `/commits/SHA/check-suites` answered 5 suites (deploy
+ * previews, the fleet app) and 0 of them Actions', while a head CI ran on
+ * answered 10 Actions suites of 15.
+ */
+export const GITHUB_ACTIONS_APP_ID = 15368;
+
+/**
+ * The claimed cards a PR delivers: the cards its body binds — H16's
+ * extractor, a closing keyword or `Part of`, quoted spellings naming nothing —
+ * that the sweep holds OPEN under `pm:dispatched`.
+ *
+ * `pm:dispatched` is the claim's machine-readable bit: the state model defines
+ * the label as claimed and assigned, and a label without its claim is H1/H2's
+ * row, never a reason for this one to stay silent. Reading the label costs no
+ * request; reading every bound card's thread again would.
+ *
+ * @param {object} pr — a PR row (list or single).
+ * @param {Iterable<number>} dispatched — open `pm:dispatched` card numbers.
+ * @returns {number[]} ascending.
+ */
+export function h82ClaimedCards(pr, dispatched) {
+  const held = new Set([...(dispatched ?? [])].map(Number));
+  return h16HeldCards(pr?.body).filter((n) => held.has(n));
+}
+
+/**
+ * Whether this PR buys the H82 reads — the gathering policy, exported so the
+ * self-test pins that it is never NARROWER than the predicate.
+ *
+ * Open (draft or not: the no-Actions leg reads both), not merged, not the
+ * release bot's `changeset-release/*` head, bound to at least one claimed card,
+ * and either silent past the threshold or carrying an unreadable `updated_at`
+ * — which the predicate flags rather than reads as fresh, so skipping it here
+ * would drop the row the predicate promises.
+ */
+export function h82NeedsDetail(pr, claimed, nowMs = Date.now()) {
+  if (!pr || typeof pr.draft !== 'boolean' || pr.merged_at) return false;
+  if ((pr.head?.ref ?? '').startsWith('changeset-release/')) return false;
+  if ((claimed ?? []).length === 0) return false;
+  const updated = Date.parse(pr.updated_at ?? '');
+  if (!Number.isFinite(updated)) return true;
+  return (nowMs - updated) / 60_000 > CLAIMED_PR_BLIND_STALE_MINUTES;
+}
+
+/**
+ * H82 — null when clean or unjudged, else the finding sentence. Takes the
+ * SINGLE-PR payload (the listing carries no `mergeable_state`) and the
+ * check-suites reading for its head.
+ *
+ * Two legs, one row per PR:
+ *
+ *   dirty      a DRAFT whose `mergeable_state` is literally `dirty`. A
+ *              non-draft dirty PR is H16's row, so it is ⛔ not reported
+ *              twice; `unknown` is the platform saying "ask again later" and
+ *              is skipped, as in H16.
+ *   no Actions any claimed PR, draft or not, not dirty, whose head answered
+ *              `total_count: 0` for the Actions app. A reading of `null` —
+ *              the read failed, or was not made — is UNJUDGED and says
+ *              nothing: the summary clause counts it, the row never invents
+ *              a zero.
+ *
+ * @param {object} pr — the single-PR payload.
+ * @param {number[]} claimed — `h82ClaimedCards` for it.
+ * @param {{ actionsSuites: number|null }} reading
+ */
+export function h82ClaimedPrBlind(pr, claimed, reading, nowMs = Date.now()) {
+  if (!h82NeedsDetail(pr, claimed, nowMs)) return null;
+  const dirty = pr.mergeable_state === 'dirty';
+  if (dirty && pr.draft !== true) return null;
+  const suites = reading?.actionsSuites;
+  if (!dirty && suites !== 0) return null;
+  const updated = Date.parse(pr.updated_at ?? '');
+  const age = Number.isFinite(updated)
+    ? `untouched for ~${Math.round((nowMs - updated) / 60_000)} min (threshold ${CLAIMED_PR_BLIND_STALE_MINUTES} min)`
+    : 'with an unreadable `updated_at` (which must not read as fresh)';
+  const cards = `${claimed.length === 1 ? 'card' : 'cards'} ${claimed.map((n) => `#${n}`).join(', ')}`;
+  const head = String(pr.head?.sha ?? '').slice(0, 10) || 'unread';
+  if (dirty) {
+    return (
+      `a claimed ${cards} (\`pm:dispatched\`) delivered by this DRAFT, which is in MERGE CONFLICT ` +
+      `(\`mergeable_state: dirty\`), ${age} — a conflicting PR starts no \`pull_request\` workflow, so no ` +
+      'green or red event ever arrives and a thread waiting for CI waits on nothing. H16 reads only ' +
+      'non-draft PRs, and a card PR stays draft until its seat lands it. The seat wakes the card thread ' +
+      'this round; the thread merges `origin/main`, resolves, pushes, and confirms Actions started.'
+    );
+  }
+  return (
+    `a claimed ${cards} (\`pm:dispatched\`) delivered by this ${pr.draft ? 'DRAFT' : 'ready'} PR, whose head ` +
+    `\`${head}\` carries ZERO GitHub Actions check suites, ${age} — no CI ever ran on this head, so no ` +
+    'green or red event will arrive. The seat wakes the card thread this round; the thread re-reads ' +
+    '`mergeable_state`, merges `origin/main` and pushes again, and confirms Actions started on the new head.'
   );
 }
 
@@ -19101,6 +19238,13 @@ export const SWEEP_COUNT_KEYS = [
   'conflictProbed',
   'sharedFileCandidates',
   'sharedFileProbed',
+  // H82's coverage quadruple: claimed card PRs past the threshold, how many PR
+  // rows answered, and of the heads not dirty, how many check-suite reads were
+  // owed and how many answered (an unread one is UNJUDGED, never a zero).
+  'claimedPrCandidates',
+  'claimedPrProbed',
+  'claimedPrSuitesOwed',
+  'claimedPrSuitesRead',
   // H43's coverage triple and its fourth state (#14967) — the register that
   // did not load. `governedRegisterReason` is a STRING, not a counter, and it
   // rides the same contract for the same reason: without it the clause would
@@ -19714,6 +19858,10 @@ export function summaryLine(counts, findingCount) {
     `Shared-file holds (H36): changed-file page read on ${counts.sharedFileProbed ?? 0} of ` +
     `${counts.sharedFileCandidates ?? 0} open PR(s) — a pair needs both sides read, so a shortfall ` +
     'can only MISS a hold, never invent one. ' +
+    `Claimed card PRs (H82): PR row read on ${counts.claimedPrProbed ?? 0} of ${counts.claimedPrCandidates ?? 0} ` +
+    `open PR(s) bound to a \`pm:dispatched\` card and silent past ${CLAIMED_PR_BLIND_STALE_MINUTES} min, and the Actions ` +
+    `check suites read on ${counts.claimedPrSuitesRead ?? 0} of ${counts.claimedPrSuitesOwed ?? 0} head(s) not in conflict` +
+    `${(counts.claimedPrSuitesRead ?? 0) < (counts.claimedPrSuitesOwed ?? 0) ? ' — an unread head is UNJUDGED on the no-Actions leg, never clean' : ''}. ` +
     // H43's coverage clause (#14967). It is UNCONDITIONAL, like every other
     // window's: this row can be quiet for three different reasons — no governed
     // PR is short of coverage, no file page was read, or the register itself
@@ -20110,6 +20258,7 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h20Dispatch', 'Dispatch liveness (H20 + H27): '],
   ['h32Seats', 'Seat liveness (H32): '],
   ['h36SharedFiles', 'Shared-file holds (H36): '],
+  ['h82ClaimedPrs', 'Claimed card PRs (H82): '],
   ['h43GovernedReviews', 'Governed review requests (H43): '],
   ['h37Folds', 'Family folds (H37): '],
   ['h40References', 'Dangling references (H40): '],
@@ -20601,6 +20750,8 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   H4: 'stall',
   H12: 'stall',
   H16: 'stall',
+  // H82 is a `stall` for H16's reason: a claimed PR CI cannot see never lands.
+  H82: 'stall',
   H19: 'stall',
   H20: 'stall',
   H26: 'stall',
@@ -22358,6 +22509,12 @@ async function sweep(options = {}) {
     // mode as H16's detail pass, so it owes the same `read X of Y`.
     sharedFileCandidates: 0,
     sharedFileProbed: 0,
+    // H82's coverage quadruple — the PR-row half shares H16's per-row failure
+    // mode; the check-suite half is disclosed rather than rethrown (sweep pass).
+    claimedPrCandidates: 0,
+    claimedPrProbed: 0,
+    claimedPrSuitesOwed: 0,
+    claimedPrSuitesRead: 0,
     // H43's coverage triple (#14967) — the governed slice of the PRs whose
     // file page H36 already read, how many of those the cheap union left
     // short, and how many review pages answered. `governedRegisterReason` is
@@ -24831,6 +24988,8 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // a bounded gap the report states, while "no row readable" is a sweep whose
   // H16 pass silently examined nothing and would otherwise print as quiet.
   let lastDetailError = null;
+  // The PR rows this pass read, kept for H82 below so a PR both rows want costs ONE GET.
+  const prDetails = new Map();
   for (const pr of seenPrs.values()) {
     if (!h16NeedsDetail(pr)) continue;
     stats.conflictCandidates = (stats.conflictCandidates ?? 0) + 1;
@@ -24842,11 +25001,63 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
       continue;
     }
     stats.conflictProbed = (stats.conflictProbed ?? 0) + 1;
+    prDetails.set(pr.number, detail);
     const stuck = h16StuckMergeConflict(detail);
     if (stuck) findings.push([pr, 'H16', stuck]);
   }
   if (h16DetailPassUnreadable(stats.conflictCandidates, stats.conflictProbed)) {
     throw lastDetailError;
+  }
+
+  // H82 — a claimed card's PR that CI cannot see. Candidates only
+  // (`h82NeedsDetail`: bound to an open `pm:dispatched` card the label pages
+  // above already hold, and silent past the threshold), so the cost is bounded
+  // by the in-flight card PRs. Two reads each: the PR row (reused when H16
+  // read it) and, for a head not in conflict, its check suites filtered to the
+  // Actions app.
+  //
+  // The PR-row half takes H16's posture: one failed read drops that PR, an
+  // all-failed pass is the transport and is rethrown. The check-suite half is
+  // DISCLOSED instead of rethrown — it needs a scope the PR row does not
+  // (`checks`), so a token without it must cost the no-Actions leg, stated on
+  // the summary line, never the whole sweep.
+  const dispatchedCards = [...seen.values()].filter((i) => labelNames(i).includes('pm:dispatched')).map((i) => i.number);
+  let lastClaimedError = null;
+  for (const pr of seenPrs.values()) {
+    const claimed = h82ClaimedCards(pr, dispatchedCards);
+    if (!h82NeedsDetail(pr, claimed)) continue;
+    stats.claimedPrCandidates = (stats.claimedPrCandidates ?? 0) + 1;
+    let detail = prDetails.get(pr.number);
+    if (!detail) {
+      try {
+        detail = await rest(`/repos/${OWNER_REPO}/pulls/${pr.number}`);
+      } catch (err) {
+        lastClaimedError = err;
+        continue;
+      }
+    }
+    stats.claimedPrProbed = (stats.claimedPrProbed ?? 0) + 1;
+    let actionsSuites = null;
+    const sha = detail?.head?.sha ?? pr.head?.sha ?? null;
+    if (detail?.mergeable_state !== 'dirty') {
+      stats.claimedPrSuitesOwed = (stats.claimedPrSuitesOwed ?? 0) + 1;
+      if (sha) {
+        try {
+          const page = await rest(`/repos/${OWNER_REPO}/commits/${sha}/check-suites?app_id=${GITHUB_ACTIONS_APP_ID}&per_page=1`);
+          if (Number.isInteger(page?.total_count)) {
+            actionsSuites = page.total_count;
+            stats.claimedPrSuitesRead = (stats.claimedPrSuitesRead ?? 0) + 1;
+          }
+        } catch {
+          actionsSuites = null;
+        }
+      }
+    }
+    const blind = h82ClaimedPrBlind(detail, claimed, { actionsSuites });
+    if (blind) findings.push([pr, 'H82', blind]);
+  }
+  if (h16DetailPassUnreadable(stats.claimedPrCandidates, stats.claimedPrProbed)) {
+    throw lastClaimedError;
   }
 
   // H36 (#12286) — the shared-file pass, H16's transport posture over one
