@@ -63,6 +63,7 @@
  * default every key of `changes`): the change IS their value.
  */
 import { resolveFieldRuleState, isMissingForRequired, collectPredicateFieldRefs } from '@object-ui/core';
+import { parseCelToAst } from '@objectstack/formula';
 import { hasFieldEditWidget } from './FieldEditWidget.js';
 
 /** A field the change makes required, paired with the definition to render it. */
@@ -206,4 +207,96 @@ export function requiredWhenPromptReads(
     )) add(ref);
   }
   return out;
+}
+
+/** The stdlib functions that read the clock (`registerBoundStdLib`, `@objectstack/formula`). */
+const CLOCK_FUNCTIONS: ReadonlySet<string> = new Set(['now', 'today', 'daysFromNow', 'daysAgo']);
+
+/** The roots the engine mounts the acting user (and the session around it) under (ADR-0068). */
+const SESSION_ROOTS: ReadonlySet<string> = new Set(['current_user', 'user', 'ctx', 'os']);
+
+/** The record roots a predicate reads its operands from, `record.x` / `data.x` / `previous.x`. */
+const RECORD_ROOTS: ReadonlySet<string> = new Set(['record', 'data', 'previous']);
+
+/**
+ * Whether a `requiredWhen` predicate reads anything besides the record
+ * fields it names: the clock, the acting user, or the record as a whole
+ * (`record["stage"]`, `size(record)`), whose operands no harvest can list.
+ * A predicate this cannot parse, or one in another dialect, answers `true`:
+ * not knowing what it reads, the caller keeps the read.
+ */
+function readsBeyondNamedFields(pred: unknown): boolean {
+  let source: unknown = pred;
+  if (pred && typeof pred === 'object') {
+    const { dialect, source: src } = pred as { dialect?: unknown; source?: unknown };
+    if (dialect !== undefined && dialect !== 'cel') return true;
+    source = src;
+  }
+  if (typeof source !== 'string') return true;
+  const ast = parseCelToAst(source);
+  if (!ast) return true;
+  // `asMember`: the node is the receiver of a `.x` / `.?x` selection, the one
+  // place a record root names a single field.
+  const walk = (node: unknown, asMember: boolean): boolean => {
+    if (Array.isArray(node)) return node.some((child) => walk(child, false));
+    if (!node || typeof node !== 'object') return false;
+    const { op, args } = node as { op?: unknown; args?: unknown };
+    if (op === 'id' && typeof args === 'string') {
+      if (SESSION_ROOTS.has(args)) return true;
+      return RECORD_ROOTS.has(args) && !asMember;
+    }
+    if ((op === '.' || op === '.?') && Array.isArray(args)) return walk(args[0], true);
+    if (op === 'call' && Array.isArray(args) && typeof args[0] === 'string' && CLOCK_FUNCTIONS.has(args[0])) {
+      return true;
+    }
+    if (op === 'value') return false;
+    return walk(args, false);
+  };
+  return walk(ast, false);
+}
+
+/**
+ * Whether writing the keys `changed` can make
+ * {@link collectRequiredWhenPromptFields} ask for anything, judged on the
+ * metadata alone, before any record is read.
+ *
+ * The collector asks for a field still empty on the stored record only when
+ * its `requiredWhen` holds after the write and did not hold before it (the
+ * transition gate, see `resolveFieldRuleState`). A write that touches none of
+ * the predicate's operands leaves its verdict where it was, so that field
+ * cannot be asked for, whatever the record holds. A surface whose judgment
+ * first READS the record (a list row is a projection, see
+ * {@link requiredWhenPromptReads}) asks this first and skips the read when the
+ * answer is `false`: the read could change nothing.
+ *
+ * `true` (the read stays) for an askable field (the same narrowing as the
+ * collector: a `requiredWhen`, an in-place editor, the host's `fillable`) that
+ * is not itself being written and:
+ *
+ *  - whose `requiredWhen` names one of `changed` (as `record.x`, `data.x` or
+ *    `previous.x`, harvested as {@link requiredWhenPromptReads} harvests it);
+ *  - whose `requiredWhen` reads the clock or the acting user, or reads the
+ *    record as a whole, or cannot be parsed;
+ *  - that is also statically `required: true`: the collector then asks for it
+ *    on any write while it is empty, whatever the predicate says.
+ */
+export function requiredWhenPromptAsksOn(
+  objectFields: Record<string, unknown> | null | undefined,
+  changed: Iterable<string>,
+  options: Pick<RequiredWhenPromptOptions, 'fillable'> = {},
+): boolean {
+  if (!objectFields) return false;
+  const writes = new Set(changed);
+  for (const [name, raw] of Object.entries(objectFields)) {
+    if (writes.has(name)) continue;
+    if (!raw || typeof raw !== 'object') continue;
+    const def = raw as Record<string, unknown>;
+    if (def.requiredWhen == null) continue;
+    if (!hasFieldEditWidget(def.type as string | undefined)) continue;
+    if (options.fillable && !options.fillable(name, def)) continue;
+    if (def.required === true) return true;
+    if (collectPredicateFieldRefs([asRecordScoped(def.requiredWhen)]).some((ref) => writes.has(ref))) return true;
+    if (readsBeyondNamedFields(def.requiredWhen)) return true;
+  }
+  return false;
 }

@@ -23,12 +23,18 @@
  */
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
 import { render, cleanup, fireEvent, waitFor, screen, within, act } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import React from 'react';
 
 import { ObjectGrid } from '../ObjectGrid';
 import { requestListSelection, useListPageSelectable } from '../listPageScope';
-import { ActionProvider, SchemaRendererProvider } from '@object-ui/react';
+import {
+  ActionProvider,
+  RelatedRecordActionsProvider,
+  SchemaRendererProvider,
+  type RelatedRecordActionsValue,
+} from '@object-ui/react';
 import { registerAllFields } from '@object-ui/fields';
 
 beforeAll(() => {
@@ -218,6 +224,162 @@ describe('card list selection on a phone (objectstack#35883)', () => {
       expect(getByTestId('selectable-probe').dataset.selectable, `selection ${selection.type}`).toBe(String(offered));
       cleanup();
     }
+  });
+});
+
+/**
+ * objectstack#36044 — while a selection is open, every tap on a card ticks or
+ * unticks it, a tap on a link the card draws included: the email, the
+ * referenced record's chip and the row's 「⋮」 open nothing. When the selection
+ * ends, the same taps open again.
+ */
+describe('a tap on a link inside a card while selecting ticks the card (objectstack#36044)', () => {
+  const LINKED_ROWS = [
+    { id: 'a1', name: 'Acme', email: 'ada@acme.test', owner: { id: 'u9', name: 'Grace' } },
+    { id: 'a2', name: 'Globex', email: 'hank@globex.test', owner: { id: 'u8', name: 'Linus' } },
+  ];
+  const opened: Array<[string, string | number]> = [];
+  const host: RelatedRecordActionsValue = {
+    resolve: () => ({}),
+    recordHref: (objectName, recordId) => `/apps/demo/${objectName}/record/${encodeURIComponent(String(recordId))}`,
+    openRecord: (objectName, recordId) => { opened.push([objectName, recordId]); },
+  };
+
+  function renderLinkedCards(width = 390) {
+    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: width });
+    opened.length = 0;
+    const onRowClick = vi.fn();
+    const onRowSelect = vi.fn();
+    const dataSource = {
+      find: vi.fn(async () => ({ data: LINKED_ROWS, total: LINKED_ROWS.length, hasMore: false, pageSize: 50 })),
+      getObjectSchema: async (name: string) => ({
+        name,
+        nameField: 'name',
+        fields: {
+          id: { type: 'text' },
+          name: { type: 'text', label: 'Name' },
+          email: { type: 'email', label: 'Email' },
+          owner: { type: 'lookup', label: 'Owner', reference: 'sys_user' },
+        },
+      }),
+    } as never;
+    render(
+      <ActionProvider>
+        <RelatedRecordActionsProvider value={host}>
+          <SchemaRendererProvider dataSource={dataSource}>
+            <div data-testid="page-column">
+              <ObjectGrid
+                schema={{
+                  type: 'object-grid',
+                  objectName: 'account_36044',
+                  columns: [{ field: 'name' }, { field: 'email' }, { field: 'owner' }],
+                  selection: { type: 'multiple' },
+                  pagination: { pageSize: 50 },
+                } as never}
+                dataSource={dataSource}
+                onRowClick={onRowClick}
+                onRowSelect={onRowSelect}
+                // An edit makes the card draw the row's 「⋮」 (objectstack#29150).
+                onEdit={vi.fn()}
+              />
+            </div>
+          </SchemaRendererProvider>
+        </RelatedRecordActionsProvider>
+      </ActionProvider>,
+    );
+    return { onRowClick, onRowSelect };
+  }
+
+  const mailOf = async (address: string) => {
+    await waitFor(() => expect(document.querySelector(`a[href="mailto:${address}"]`)).not.toBeNull());
+    return document.querySelector<HTMLElement>(`a[href="mailto:${address}"]`)!;
+  };
+  const chipOf = async (id: string) => {
+    await waitFor(() => expect(document.querySelector(`a[href="/apps/demo/sys_user/record/${id}"]`)).not.toBeNull());
+    return document.querySelector<HTMLElement>(`a[href="/apps/demo/sys_user/record/${id}"]`)!;
+  };
+  const startSelecting = async () => {
+    act(() => requestListSelection(screen.getByTestId('page-column')));
+    await waitFor(() => expect(screen.getAllByTestId('grid-card-check')).toHaveLength(2));
+  };
+  const endSelecting = () => {
+    fireEvent.click(within(screen.getByTestId('bulk-actions-bar')).getByTestId('bulk-selection-clear'));
+    expect(screen.queryAllByTestId('grid-card-check')).toHaveLength(0);
+  };
+
+  it('a tap on the email ticks the card and opens nothing; after 「×」 the same tap opens the link', async () => {
+    const { onRowClick, onRowSelect } = renderLinkedCards();
+    await mailOf('ada@acme.test');
+    await startSelecting();
+    // `fireEvent` answers false when the click's default (following the
+    // mailto) was cancelled.
+    expect(fireEvent.click(await mailOf('ada@acme.test')), 'the link does not open').toBe(false);
+    expect(await cardOf('Acme')).toHaveAttribute('aria-pressed', 'true');
+    expect(onRowSelect).toHaveBeenLastCalledWith([expect.objectContaining({ id: 'a1' })]);
+    expect(fireEvent.click(await mailOf('hank@globex.test'))).toBe(false);
+    expect(await cardOf('Globex')).toHaveAttribute('aria-pressed', 'true');
+    // A second tap on the same link unticks its card.
+    expect(fireEvent.click(await mailOf('hank@globex.test'))).toBe(false);
+    expect(await cardOf('Globex')).toHaveAttribute('aria-pressed', 'false');
+    expect(onRowClick).not.toHaveBeenCalled();
+
+    endSelecting();
+    const ticks = onRowSelect.mock.calls.length;
+    expect(fireEvent.click(await mailOf('ada@acme.test')), 'the link opens again').toBe(true);
+    expect(onRowSelect).toHaveBeenCalledTimes(ticks);
+    expect(screen.queryAllByTestId('grid-card-check')).toHaveLength(0);
+    expect(onRowClick).not.toHaveBeenCalled();
+  });
+
+  it('a tap on the referenced record\'s chip ticks the card and opens no record; after 「×」 it opens it', async () => {
+    const { onRowClick, onRowSelect } = renderLinkedCards();
+    await chipOf('u9');
+    await startSelecting();
+    expect(fireEvent.click(await chipOf('u9'))).toBe(false);
+    expect(await cardOf('Acme')).toHaveAttribute('aria-pressed', 'true');
+    expect(onRowSelect).toHaveBeenLastCalledWith([expect.objectContaining({ id: 'a1' })]);
+    expect(opened).toEqual([]);
+    expect(onRowClick).not.toHaveBeenCalled();
+
+    endSelecting();
+    fireEvent.click(await chipOf('u9'));
+    expect(opened).toEqual([['sys_user', 'u9']]);
+  });
+
+  it('a tap on the card\'s 「⋮」 ticks the card and opens no menu', async () => {
+    const { onRowSelect } = renderLinkedCards();
+    await mailOf('ada@acme.test');
+    await startSelecting();
+    await userEvent.click(within(await cardOf('Acme')).getByTestId('row-action-trigger'));
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(await cardOf('Acme')).toHaveAttribute('aria-pressed', 'true');
+    expect(onRowSelect).toHaveBeenLastCalledWith([expect.objectContaining({ id: 'a1' })]);
+  });
+
+  it('a long press on the email starts the selection with its card ticked, and the click that ends it opens nothing', async () => {
+    const { onRowClick, onRowSelect } = renderLinkedCards();
+    const mail = await mailOf('ada@acme.test');
+    fireEvent.pointerDown(mail, { clientX: 10, clientY: 10 });
+    await hold(600);
+    fireEvent.pointerUp(mail);
+    expect(fireEvent.click(mail), 'the link does not open').toBe(false);
+    expect(await cardOf('Acme')).toHaveAttribute('aria-pressed', 'true');
+    expect(onRowSelect).toHaveBeenLastCalledWith([expect.objectContaining({ id: 'a1' })]);
+    expect(onRowClick).not.toHaveBeenCalled();
+  });
+
+  it('on a desktop width the table keeps its links while rows are ticked', async () => {
+    const { onRowSelect } = renderLinkedCards(1280);
+    const mail = await mailOf('ada@acme.test');
+    expect(document.querySelector('[data-testid="grid-mobile-card"]'), 'the table, not the cards').toBeNull();
+    const row = mail.closest('tr') as HTMLElement;
+    fireEvent.click(within(row).getByRole('checkbox'));
+    await waitFor(() => expect(onRowSelect).toHaveBeenLastCalledWith([expect.objectContaining({ id: 'a1' })]));
+    const ticks = onRowSelect.mock.calls.length;
+    expect(fireEvent.click(await mailOf('ada@acme.test')), 'the link opens').toBe(true);
+    fireEvent.click(await chipOf('u9'));
+    expect(opened).toEqual([['sys_user', 'u9']]);
+    expect(onRowSelect).toHaveBeenCalledTimes(ticks);
   });
 });
 

@@ -35,6 +35,9 @@ describe('reference-integrity suite — membership', () => {
       // inbound relationships of its children: the door's copy of the verdict
       // `defineStack` gives on the CLI.
       'validateRelatedListRefs',
+      // [#35901] Where an object extension's `place` will not land as written:
+      // warnings on the same objects' tabs and groups.
+      'validateExtensionPlacement',
       'validateActionNameRefs',
       // [#17319] The same action name, one question on: the name-ref member
       // above asks whether the selection bar's name resolves to an action; this
