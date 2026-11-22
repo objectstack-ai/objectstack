@@ -66,7 +66,7 @@ describe('「系统信息」: the provenance as the field list’s last group (o
     const { container } = render(inFieldList(<RecordMetaFooter data={data} objectSchema={contact} />));
     fireEvent.click(screen.getByRole('button', { name: 'System information' }));
     for (const row of Array.from(container.querySelectorAll('[data-detail-field-row]'))) {
-      expect(row.querySelector('[aria-label="Double-click to edit"]')).toBeNull();
+      expect(row.querySelector('[aria-label="Double-click to edit"], [aria-label="Click to edit"]')).toBeNull();
     }
   });
 

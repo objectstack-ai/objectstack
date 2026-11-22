@@ -144,6 +144,22 @@ export function framelessSpanClass(span: number | undefined, columns: 1 | 2 | 3)
  */
 const ignoreReadOnlyChange = (): void => {};
 
+/**
+ * The inline-edit pencil beside a field. A real Tab stop, revealed on keyboard
+ * focus as well as on hover (objectstack#25883); a touch screen has no hover,
+ * so there it is always drawn, and below `sm` it is a 44 px target
+ * (objectstack#29071).
+ */
+const PENCIL_CLASS =
+  'h-6 w-6 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100 transition-opacity shrink-0';
+
+/**
+ * The field list draws no pencil (objectstack#36147): a click or a tap on the
+ * value is the way in, and the button stays only as the keyboard's way in,
+ * drawn while it has focus.
+ */
+const FIELD_LIST_PENCIL_CLASS = 'sr-only h-px w-px focus-visible:not-sr-only focus-visible:h-6 focus-visible:w-6 shrink-0';
+
 /** What a section reports while it draws no row of the page's record. */
 const NO_REPORTED_FIELDS: readonly string[] = [];
 
@@ -836,6 +852,13 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
     // value is copied from its hover / focus button. An editable row's click
     // enters edit instead.
     const copyInteractive = copyOffered && !canInlineEditField && !frameless;
+    // The edit hint names the gesture the face takes: a click on the field
+    // list (objectstack#36147), a double-click elsewhere. The pencil, its
+    // tooltip and the value's title read it, so a screen reader hears the
+    // gesture that works.
+    const editHintLabel = frameless
+      ? t('detail.clickToEdit', { defaultValue: 'Click to edit' })
+      : t('detail.editInlineHint');
     const isCopied = copiedField === field.name;
     const fieldLabelText = fieldLabel(objectName || '', field.name, field.label || field.name);
 
@@ -962,13 +985,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
           } : undefined}
           role={copyInteractive ? "button" : undefined}
           tabIndex={copyInteractive ? 0 : undefined}
-          title={
-            canInlineEditField
-              ? frameless
-                ? t('detail.clickToEdit', { defaultValue: 'Click to edit' })
-                : t('detail.editInlineHint')
-              : undefined
-          }
+          title={canInlineEditField ? editHintLabel : undefined}
         >
           <div
             className={cn(
@@ -985,20 +1002,9 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
                   <Button
                     variant="ghost"
                     size="icon"
-                    // A real Tab stop, so it is revealed on keyboard focus as
-                    // well as on hover — itself, or anything in its field
-                    // (objectstack#25883). The Button's own ring marks it.
-                    // A touch screen has no hover, so there it is always
-                    // drawn, and below `sm` it is a 44 px target
-                    // (objectstack#29071): otherwise a phone has no way into
-                    // inline edit it can see.
-                    // The frameless face draws no pencil (objectstack#36147):
-                    // the value itself is the way in, and this button stays
-                    // only as the keyboard's way in, drawn while it has focus.
-                    className={frameless
-                      ? 'sr-only focus-visible:not-sr-only h-6 w-6 shrink-0'
-                      : 'h-6 w-6 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100 transition-opacity shrink-0'}
-                    aria-label={t('detail.editInlineHint')}
+                    // The Button's own ring marks it on focus.
+                    className={frameless ? FIELD_LIST_PENCIL_CLASS : PENCIL_CLASS}
+                    aria-label={editHintLabel}
                     onClick={(e) => {
                       e.stopPropagation();
                       onEnterInlineEdit?.(field.name);
@@ -1008,7 +1014,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  {t('detail.editInlineHint')}
+                  {editHintLabel}
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
@@ -1021,7 +1027,14 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
                     size="icon"
                     // A real Tab stop, so it is revealed on keyboard focus as
                     // well as on hover, like the pencil above (objectstack#26329).
-                    className="h-6 w-6 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity shrink-0"
+                    // On the field list a touch screen draws no copy icon
+                    // (objectstack#36147, ruling 1): a tap sets `:hover`, which
+                    // would reveal it; the reader long-presses the value instead.
+                    className={cn(
+                      "h-6 w-6 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity shrink-0",
+                      frameless && "pointer-coarse:hidden",
+                    )}
+                    data-detail-copy=""
                     // objectui#12625 — an icon-only button; the tooltip is
                     // closed at rest, so without this it has no name.
                     aria-label={t('detail.copyToClipboard')}

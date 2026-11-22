@@ -164,6 +164,30 @@ describe('no pencil: a click on an editable value edits it (objectstack#36147 it
     expect(pencil).not.toBeNull();
     expect(pencil.className.split(/\s+/)).toContain('sr-only');
     expect(pencil.className).not.toContain('pointer-coarse:opacity-100');
+    // It names the gesture that works here: a click, not a double-click.
+    expect(pencil.getAttribute('aria-label')).toBe('Click to edit');
+  });
+
+  it('a touch screen draws no copy icon on a read-only value (ruling 1): a tap would reveal it through :hover', () => {
+    render(
+      <Page list={makeList()}>
+        <DetailSection section={section} data={data} objectSchema={objectSchema} onEnterInlineEdit={vi.fn()} />
+      </Page>,
+    );
+    const copy = rowOf('Code').querySelector('[data-detail-copy]') as HTMLButtonElement;
+    expect(copy).not.toBeNull();
+    expect(copy.className.split(/\s+/)).toContain('pointer-coarse:hidden');
+  });
+
+  it('control: outside the field list the copy icon and the double-click hint are as before', () => {
+    const { container } = render(
+      <DetailSection section={section} data={data} objectSchema={objectSchema} onEnterInlineEdit={vi.fn()} />,
+    );
+    const copies = Array.from(container.querySelectorAll('[data-detail-copy]'));
+    expect(copies.length).toBeGreaterThan(0);
+    for (const copy of copies) expect(copy.className).not.toContain('pointer-coarse:hidden');
+    expect(container.querySelector('button[aria-label="Double-click to edit"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Click to edit"]')).toBeNull();
   });
 
   it('a click on a link inside an editable value is the link’s, not the row’s', () => {
