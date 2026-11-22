@@ -9,8 +9,9 @@
  * A call that names records by id names rows the caller must be able to read.
  * The per-record door has always held that for `recordId` (the subject load,
  * `404 RECORD_NOT_FOUND` on a miss). A call that carries a selection instead
- * holds it now too: every id in `_selectedIds` is read once, batched, under the
- * caller's own execution context, and one id that read does not deliver
+ * holds it now too: every id in `_selectedIds` is read with the per-record
+ * door's own read, under the caller's own execution context, and one id that
+ * read does not deliver
  * refuses the WHOLE call with the same `404 RECORD_NOT_FOUND` — nothing is
  * dropped, nothing runs, nothing is written.
  *
@@ -394,17 +395,21 @@ describe('the selection read is the per-record door\'s own read', () => {
 });
 
 describe('the selection\'s shape', () => {
-  const shapes: ReadonlyArray<{ title: string; value: unknown }> = [
+  const shapes: ReadonlyArray<{ title: string; value: unknown; caller?: Caller }> = [
     { title: 'one id, not a list', value: row.bobA },
     { title: 'a list carrying a non-id', value: [row.bobA, { id: row.aliceA }] },
     { title: 'more ids than the cap', value: Array.from({ length: 5001 }, (_, i) => `tkt_pin_sel_${i}`) },
+    { title: 'an empty id', value: [''] },
+    { title: 'an empty id (second caller)', value: [''], caller: 'dave' },
+    { title: 'a whitespace-only id', value: ['   '] },
+    { title: 'a readable id beside an empty one', value: [row.bobA, ''] },
   ];
   for (const door of DOORS) {
     for (const s of shapes) {
       it(`${door}: ${s.title} → 400 VALIDATION_FAILED, nothing runs`, async () => {
         await resetRows();
         const before = handed.length;
-        const a = await knock(door, 'bob', { _selectedIds: s.value });
+        const a = await knock(door, s.caller ?? 'bob', { _selectedIds: s.value });
         expect({ status: a.status, code: a.code }, JSON.stringify(a.body).slice(0, 400)).toEqual({ status: 400, code: 'VALIDATION_FAILED' });
         expect(handed.length).toBe(before);
         expect(await statusOf(row.bobA)).toBe('open');

@@ -4743,8 +4743,8 @@ export function actionSelectionIsRead(action: any, ec: any): boolean {
 
 /**
  * The record ids a call's `params._selectedIds` names, or the `400` its shape
- * earns: a list of ids (strings or numbers), at most {@link ACTION_SELECTION_CAP}
- * of them. `undefined` when the call carries none (absent, `null` or `''`, as
+ * earns: a list of non-empty ids (strings or numbers), at most
+ * {@link ACTION_SELECTION_CAP} of them. `undefined` when the call carries none (absent, `null` or `''`, as
  * for `recordId`). A call addressed to no object (an object-less action key)
  * names no object its ids could be read from, and is refused for carrying one.
  */
@@ -4752,6 +4752,10 @@ export function actionSelectionIdsOrRefuse(objectName: string, params: Record<st
     const value = params[ACTION_SELECTION_PARAM];
     if (value === undefined || value === null || value === '') return undefined;
     const ids = recordIdListOrRefuse(ACTION_SELECTION_PARAM, value);
+    if (ids.some((id) => id.trim() === '')) {
+        const message = `The record key \`${ACTION_SELECTION_PARAM}\` must name each record by a non-empty id.`;
+        throw validationFailure(message, [{ field: ACTION_SELECTION_PARAM, code: 'invalid_value', message }]);
+    }
     if (ids.length > ACTION_SELECTION_CAP) {
         const message = `The record key \`${ACTION_SELECTION_PARAM}\` names ${ids.length} records; one call may name at most ${ACTION_SELECTION_CAP}.`;
         throw validationFailure(message, [{ field: ACTION_SELECTION_PARAM, code: 'max_items', message }]);
