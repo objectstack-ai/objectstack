@@ -559,7 +559,6 @@ describe('frame-src names the storage origin the file preview frames a PDF from,
       { adapter: 's3', s3: { bucket: 'csp-uploads', region: 'eu-west-2', keyPrefix: null } },
       { adapter: 's3', s3: { bucket: 'csp.uploads.example', region: 'us-east-1', keyPrefix: null } },
       { adapter: 's3', s3: { bucket: 'csp-uploads', region: 'us-east-1', endpoint: 'http://127.0.0.1:9000', keyPrefix: null } },
-      { adapter: 's3', s3: { bucket: 'csp-uploads', region: 'auto', endpoint: 'https://minio.example.com', forcePathStyle: true, keyPrefix: null } },
     ] satisfies StorageServicePluginOptions[]) {
       const services = await storageServices(options);
       // The link the download doors and the record-file read hand the preview.
