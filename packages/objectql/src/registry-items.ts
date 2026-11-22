@@ -43,6 +43,7 @@ import {
   collectBundle, entriesOfMember, isStoredActionRow, overlaySlotEntriesOf, packageBodySlot, packagelessActionOwnerKey,
   packagelessActionSlotEntriesOf, packagelessActionSlotKey,
 } from './registry-top-level.js';
+import type { ObjectContributor } from './registry-top-level.js';
 import type { SchemaRegistry } from './registry.js';
 
 /**
@@ -58,18 +59,37 @@ export interface ItemsHost {
   invalidateAll: SchemaRegistry['invalidateAll'];
   log: SchemaRegistry['log'];
   readonly metadata: SchemaRegistry['metadata'];
+  readonly objectContributors: SchemaRegistry['objectContributors'];
   noteBareNameClaim: SchemaRegistry['noteBareNameClaim'];
   noteItem: SchemaRegistry['noteItem'];
   noteItemOrder: SchemaRegistry['noteItemOrder'];
   noteSecurityCatalogClaim: SchemaRegistry['noteSecurityCatalogClaim'];
   openPackageBody: SchemaRegistry['openPackageBody'];
   orderedOverlayTier: SchemaRegistry['orderedOverlayTier'];
+  readonly packageBodyExtensions: SchemaRegistry['packageBodyExtensions'];
   readonly packageBodyItems: SchemaRegistry['packageBodyItems'];
   readonly restorePoint: SchemaRegistry['restorePoint'];
   readonly securityCatalogClaims: SchemaRegistry['securityCatalogClaims'];
   unregisterPicklistExtensionsByPackage: SchemaRegistry['unregisterPicklistExtensionsByPackage'];
+  withdrawObjectExtension: SchemaRegistry['withdrawObjectExtension'];
   withdrawPackageBodyItemsNotShipped: SchemaRegistry['withdrawPackageBodyItemsNotShipped'];
   withdrawPackageClaimsNotDeclared: SchemaRegistry['withdrawPackageClaimsNotDeclared'];
+}
+
+/**
+ * [#35609] Each object `packageId` holds an `extend` layer of, by key: the
+ * layer itself, so a caller can tell a layer it saw from one written since.
+ */
+function packageExtensionLayers(
+  objectContributors: ReadonlyMap<string, readonly ObjectContributor[]>,
+  packageId: string,
+): Map<string, ObjectContributor> {
+  const layers = new Map<string, ObjectContributor>();
+  for (const [fqn, contributors] of objectContributors) {
+    const layer = contributors.find((c) => c.ownership === 'extend' && c.packageId === packageId);
+    if (layer) layers.set(fqn, layer);
+  }
+  return layers;
 }
 
 /** The bodies of the "Generic metadata items and package bodies" section of `SchemaRegistry`: a stateless facet, called by the class's stubs. */
@@ -203,10 +223,15 @@ export class ItemsFacet {
   }
 
   /** The body of `SchemaRegistry#replacingPackageBody`; the method's docblock there is its contract. */
-  static replacingPackageBody<T>(this: Pick<ItemsHost, 'openPackageBody' | 'packageBodyItems' | 'restorePoint' | 'withdrawPackageBodyItemsNotShipped' | 'withdrawPackageClaimsNotDeclared'>, packageId: string | undefined, manifest: ObjectStackManifest, register: () => T): T {
+  static replacingPackageBody<T>(this: Pick<ItemsHost, 'log' | 'objectContributors' | 'openPackageBody' | 'packageBodyExtensions' | 'packageBodyItems' | 'restorePoint' | 'withdrawObjectExtension' | 'withdrawPackageBodyItemsNotShipped' | 'withdrawPackageClaimsNotDeclared'>, packageId: string | undefined, manifest: ObjectStackManifest, register: () => T): T {
     if (!packageId) return register();
     const open = this.openPackageBody;
     const body = { packageId, written: new Set<string>() };
+    // [#35609] The package's extension layers before the body registers. The
+    // extend splice replaces a package's layer of a target with a NEW
+    // contributor, so a layer still the same object afterwards is one this
+    // body did not write.
+    const extensionsBefore = packageExtensionLayers(this.objectContributors, packageId);
     this.openPackageBody = body;
     let result: T;
     try {
@@ -214,11 +239,41 @@ export class ItemsFacet {
     } finally {
       this.openPackageBody = open;
     }
+    const extended = new Map<string, ObjectContributor>();
+    for (const [fqn, layer] of packageExtensionLayers(this.objectContributors, packageId)) {
+      if (extensionsBefore.get(fqn) !== layer) extended.set(fqn, layer);
+    }
     const previous = this.packageBodyItems.get(packageId);
     if (previous !== undefined) {
       this.withdrawPackageBodyItemsNotShipped(packageId, previous, body.written);
       this.withdrawPackageClaimsNotDeclared(packageId, manifest);
     }
+    // [#35609] …and the extension layers the previous body wrote of a target
+    // this one does not extend, through the per-target withdrawal the
+    // `object_extension` item delete uses. Only the layer that body wrote:
+    // one another door has since put in the package's slot is not the body's.
+    const previousExtensions = this.packageBodyExtensions.get(packageId);
+    if (previousExtensions !== undefined) {
+      const withdrawn: string[] = [];
+      for (const [fqn, layer] of previousExtensions) {
+        if (extended.has(fqn) || !this.objectContributors.get(fqn)?.includes(layer)) continue;
+        if (this.withdrawObjectExtension(fqn, packageId)) withdrawn.push(fqn);
+      }
+      if (withdrawn.length > 0) {
+        this.log(
+          `[Registry] Withdrew ${withdrawn.length} object extension(s) package ${packageId}'s new body no longer declares: ${withdrawn.join(', ')}`,
+        );
+      }
+    }
+    this.restorePoint?.note(`packageBodyExtensions\u0000${packageId}`, () => {
+      const had = this.packageBodyExtensions.has(packageId);
+      const saved = this.packageBodyExtensions.get(packageId);
+      return () => {
+        if (had && saved !== undefined) this.packageBodyExtensions.set(packageId, saved);
+        else this.packageBodyExtensions.delete(packageId);
+      };
+    });
+    this.packageBodyExtensions.set(packageId, extended);
     this.restorePoint?.note(`packageBody\u0000${packageId}`, () => {
       const had = this.packageBodyItems.has(packageId);
       const saved = this.packageBodyItems.get(packageId);
