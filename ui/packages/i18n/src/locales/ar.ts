@@ -1438,6 +1438,7 @@ const ar = {
     updatedTime: "تاريخ التعديل",
     recordNumber: "معرّف السجل",
     clickToEdit: "انقر للتحرير",
+    setField: "تعيين {{field}}",
     back: "رجوع",
     edit: "تحرير",
     editInline: "تحرير",

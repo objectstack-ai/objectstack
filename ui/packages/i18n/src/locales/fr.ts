@@ -1333,6 +1333,7 @@ const fr = {
     updatedTime: "Modifié le",
     recordNumber: "ID de l’enregistrement",
     clickToEdit: "Cliquez pour modifier",
+    setField: "Définir {{field}}",
     back: "Retour",
     edit: "Modifier",
     editInline: "Modifier",

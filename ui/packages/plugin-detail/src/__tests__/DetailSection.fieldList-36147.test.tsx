@@ -27,6 +27,8 @@ import { DetailSection } from '../DetailSection';
 import { DefaultRecordPageContext, DetailsColumnCapContext } from '../defaultRecordPage';
 import { createEmptyFieldTally, RecordFieldListContext, type RecordFieldList } from '../recordFieldList';
 import { EmptyFieldsRow } from '../EmptySectionsFold';
+import { I18nProvider } from '@object-ui/i18n';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 const objectSchema = {
   fields: {
@@ -292,5 +294,152 @@ describe('empty fields fold into the list’s one last row (objectstack#36147 it
     const toggles = Array.from(container.querySelectorAll('section button')).filter((b) => /2/.test(b.textContent ?? ''));
     expect(toggles).toHaveLength(1);
     expect(container.querySelector('[data-empty-fields-row]')).toBeNull();
+  });
+});
+
+/**
+ * objectstack#36292 — on the field list an empty value the reader can fill in
+ * reads "Set <label>" and its one click opens the editor; a value the reader
+ * cannot edit keeps the shared "No value" placeholder; and an editable value
+ * offers the same hover / focus copy button a read-only one does.
+ */
+describe('an empty editable value reads "Set <label>" and one click edits it (objectstack#36292)', () => {
+  const setOf = (container: HTMLElement) => Array.from(container.querySelectorAll('[data-detail-set-field]'));
+  const noValueIn = (row: HTMLElement) => row.querySelector('[title="No value"]');
+
+  it('an empty editable value reads "Set Note", and a click on it enters edit', () => {
+    const onEnter = vi.fn();
+    const { container } = render(
+      <Page list={makeList(true)}>
+        <DetailSection section={section} data={data} objectSchema={objectSchema} onEnterInlineEdit={onEnter} />
+      </Page>,
+    );
+    expect(setOf(container).map((n) => n.textContent)).toEqual(['Set Note', 'Set Phone']);
+    expect(noValueIn(rowOf('Note'))).toBeNull();
+    fireEvent.click(screen.getByText('Set Note'));
+    expect(onEnter).toHaveBeenCalledWith('note');
+  });
+
+  it('control: a non-empty value reads as before', () => {
+    render(
+      <Page list={makeList(true)}>
+        <DetailSection section={section} data={data} objectSchema={objectSchema} onEnterInlineEdit={vi.fn()} />
+      </Page>,
+    );
+    expect(rowOf('Name').querySelector('[data-detail-set-field]')).toBeNull();
+    expect(rowOf('Name').textContent).toContain('Atlas deal');
+  });
+
+  it('control: a read-only field keeps the "No value" placeholder and takes no click', () => {
+    const onEnter = vi.fn();
+    const readonlySchema = { fields: { ...objectSchema.fields, note: { type: 'text', label: 'Note', readonly: true } } };
+    const { container } = render(
+      <Page list={makeList(true)}>
+        <DetailSection section={section} data={data} objectSchema={readonlySchema} onEnterInlineEdit={onEnter} />
+      </Page>,
+    );
+    expect(noValueIn(rowOf('Note'))).not.toBeNull();
+    expect(setOf(container).map((n) => n.textContent)).toEqual(['Set Phone']);
+    fireEvent.click(noValueIn(rowOf('Note'))!);
+    expect(onEnter).not.toHaveBeenCalled();
+  });
+
+  it('control: a record that is not inline-editable keeps the placeholder on every empty row', () => {
+    const { container } = render(
+      <Page list={makeList(true)}>
+        <DetailSection section={section} data={data} objectSchema={objectSchema} />
+      </Page>,
+    );
+    expect(setOf(container)).toHaveLength(0);
+    expect(noValueIn(rowOf('Note'))).not.toBeNull();
+    expect(noValueIn(rowOf('Phone'))).not.toBeNull();
+  });
+
+  it('control: a field the caller may not write keeps the placeholder', () => {
+    const OBJECT = 'crm_account';
+    const perms: MePermissionsAuthenticatedResponse = {
+      authenticated: true,
+      userId: 'u-rep',
+      tenantId: null,
+      hasAnyQueue: false,
+      objectsUsingQueues: [],
+      positions: [],
+      permissionSets: ['rep'],
+      objects: { [OBJECT]: { allowRead: true, allowCreate: false, allowEdit: true, allowDelete: false, allowTransfer: false } },
+      fields: { [`${OBJECT}.note`]: { readable: true, editable: false } },
+    };
+    const { container } = render(
+      <MePermissionsProvider initialPermissions={perms}>
+        <Page list={makeList(true)}>
+          <DetailSection section={section} data={data} objectSchema={objectSchema} objectName={OBJECT} onEnterInlineEdit={vi.fn()} />
+        </Page>
+      </MePermissionsProvider>,
+    );
+    expect(noValueIn(rowOf('Note'))).not.toBeNull();
+    expect(setOf(container).map((n) => n.textContent)).toEqual(['Set Phone']);
+  });
+
+  it('control: outside the record page’s field face an empty editable value keeps the placeholder', () => {
+    const { container } = render(
+      <DetailSection section={section} data={data} objectSchema={objectSchema} onEnterInlineEdit={vi.fn()} />,
+    );
+    expect(setOf(container)).toHaveLength(0);
+    // CONTROL: the empty row is on screen, so the count above is not vacuous.
+    const noteRow = screen.getByText('Note', { exact: true }).closest('.group') as HTMLElement;
+    expect(noValueIn(noteRow)).not.toBeNull();
+  });
+
+  it('reads in the reader’s language: 设置备注 in Chinese', () => {
+    const { container } = render(
+      <I18nProvider config={{ defaultLanguage: 'zh-CN', detectBrowserLanguage: false }} persistLanguage={false}>
+        <Page list={makeList(true)}>
+          <DetailSection
+            section={{ title: 'Overview', fields: [{ name: 'note', label: '备注' }] } as unknown as DetailViewSection}
+            data={data}
+            objectSchema={objectSchema}
+            onEnterInlineEdit={vi.fn()}
+          />
+        </Page>
+      </I18nProvider>,
+    );
+    expect(setOf(container).map((n) => n.textContent)).toEqual(['设置备注']);
+  });
+});
+
+describe('an editable value offers the hover / focus copy button too (objectstack#36292 item 2)', () => {
+  it('the copy button sits beside an editable value, copies it, and does not enter edit', () => {
+    const onEnter = vi.fn();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    render(
+      <Page list={makeList()}>
+        <DetailSection section={section} data={data} objectSchema={objectSchema} onEnterInlineEdit={onEnter} />
+      </Page>,
+    );
+    const copy = rowOf('Name').querySelector('[data-detail-copy]') as HTMLButtonElement;
+    expect(copy).not.toBeNull();
+    // Hidden at rest, drawn on hover or focus, and never on a touch screen (ruling 1).
+    expect(copy.className.split(/\s+/)).toEqual(expect.arrayContaining(['opacity-0', 'group-hover:opacity-100', 'pointer-coarse:hidden']));
+    fireEvent.click(copy);
+    expect(writeText).toHaveBeenCalledWith('Atlas deal');
+    expect(onEnter).not.toHaveBeenCalled();
+  });
+
+  it('control: an empty editable value offers no copy button', () => {
+    render(
+      <Page list={makeList(true)}>
+        <DetailSection section={section} data={data} objectSchema={objectSchema} onEnterInlineEdit={vi.fn()} />
+      </Page>,
+    );
+    expect(rowOf('Note').querySelector('[data-detail-copy]')).toBeNull();
+  });
+
+  it('control: outside the field face an editable row keeps the pencil alone', () => {
+    const { container } = render(
+      <DetailSection section={section} data={data} objectSchema={objectSchema} onEnterInlineEdit={vi.fn()} />,
+    );
+    const nameRow = screen.getByText('Atlas deal').closest('.group') as HTMLElement;
+    expect(nameRow.querySelector('[data-detail-copy]')).toBeNull();
+    expect(container.querySelector('button[aria-label="Double-click to edit"]')).not.toBeNull();
   });
 });
