@@ -77,8 +77,8 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         helpText: "本物件的欄位名，依重要性從高到低排列——只能放下一個時取第一項（ADR-0085）。決定預設清單欄和相關清單欄、卡片、子記錄預覽、記錄懸停卡片和記錄選擇器。不是本物件欄位的名稱會在發布時被拒絕。"
       },
       relatedLists: {
-        label: "相關清單順序",
-        helpText: "本物件記錄頁上相關清單的業務順序，依重要性從高到低排列。每一項是子物件名稱（例如 task），當該子物件與本物件有多個關係時寫 object.field。列出的清單排在前面，其餘依派生順序排在後面。不對應任何指向本物件的關係的名稱不起作用，儲存或驗證物件時會被拒絕。"
+        label: "記錄頁頁籤",
+        helpText: "記錄頁在概覽之後顯示的頁籤，依順序排列。每一項是子物件名稱（例如 task）；當該子物件與本物件有多個關係時寫 object.field；也可以是內建頁籤（sys_attachment、sys_approval_request、sys_activity），或帶自己標題和欄位的一項（在 Studio 的物件設定裡設定）。一旦列出任何一項，未列出的相關清單就不顯示頁籤（其他套件新增的清單也一樣），直到本物件列出它；附件只有列出時才顯示。為空時，所有清單依預設順序顯示。不對應任何指向本物件之關係的名稱，在儲存物件時會被拒絕。"
       },
       searchableFields: {
         label: "可搜尋欄位",

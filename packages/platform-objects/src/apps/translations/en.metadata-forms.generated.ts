@@ -78,7 +78,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       relatedLists: {
         label: "Related Lists",
-        helpText: "Business order of this object's related lists on its record page, most important first. Each entry is a child object name (e.g. task), or object.field when that child has more than one relationship to this object. Listed lists come first; the rest follow in the derived order. A name that matches no relationship pointing at this object places nothing, so saving or validating the object refuses it."
+        helpText: "The record page tabs after the overview, in order. Each entry is a child object name (e.g. task), object.field when that child has more than one relationship to this object, a built-in tab (sys_attachment, sys_approval_request, sys_activity), or an entry with its own title and columns, set in Studio's object settings. Once anything is listed, a related list no entry names shows no tab, a list another package adds included, until this object names it; attachments show only when listed. Empty: every list shows in the default order. A name that matches no relationship pointing at this object is refused when the object is saved."
       },
       searchableFields: {
         label: "Searchable Fields",

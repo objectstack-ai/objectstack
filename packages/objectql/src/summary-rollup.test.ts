@@ -468,11 +468,13 @@ describe('roll-up summary seeding on the PARENT insert (#5749)', () => {
   });
 
   // [#34672] These two cases kept an ordinary caller's starting value until the
-  // create side of the roll-up lock landed. The seed still never overwrites a
-  // supplied value, but only the system principal (seed loads, package
-  // installs, historical imports) can still supply one; an ordinary caller's
-  // is dropped and the seed fills the column.
-  it('never overwrites a value a system writer supplied on insert (seed data, a historical import)', async () => {
+  // create side of the roll-up lock landed. The insert-time seed still never
+  // overwrites a supplied value, but only the system principal (a historical
+  // import, server code under `isSystem`) can still supply one; an ordinary
+  // caller's is dropped and the insert-time seed fills the column. The seed
+  // LOADER never supplies one (#35655): it drops a seed record's roll-up value
+  // before the write.
+  it('never overwrites a value a system writer supplied on insert (a historical import)', async () => {
     const p = await engine.insert('project', { name: 'Imported', task_count: 7, total_estimate: 42 }, { context: { isSystem: true } } as any);
     expect(row(p.id).task_count).toBe(7);
     expect(row(p.id).total_estimate).toBe(42);

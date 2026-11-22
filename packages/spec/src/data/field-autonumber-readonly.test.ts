@@ -86,7 +86,9 @@ describe('RUNTIME_OWNED_FIELD_TYPES is the protocol vocabulary — the types who
 
   it('does NOT name the other calculated types, nor ordinary ones', () => {
     // `formula` is computed on read (no stored caller value to strip);
-    // `summary` is a stored roll-up a caller MAY legitimately seed (#6014).
+    // `summary` is a stored roll-up with its own write lock (objectql's
+    // `summaryFieldsLockedOnWrite`), which still lets a system writer such as a
+    // historical import supply it (#6014); a seed never does (#35655).
     for (const t of ['formula', 'summary', 'text', 'number']) {
       expect(RUNTIME_OWNED_FIELD_TYPES.has(t)).toBe(false);
     }

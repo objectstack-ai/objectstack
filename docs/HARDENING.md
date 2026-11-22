@@ -77,7 +77,7 @@ export default defineStack({
                 maxRequests: 300,      // requests per caller per window
             },
         },
-        trustProxy: true,              // ONLY behind a proxy you control (see below)
+        trustProxy: { networks: ['10.20.0.0/28'] },  // your proxies' own addresses (see below)
     },
 });
 ```
@@ -118,14 +118,34 @@ no who:
 | --- | --- |
 | Carries a valid session | `principal:<user id>` — one abusive session cannot spend another user's budget, and users behind one NAT do not throttle each other |
 | Anonymous, `server.trustProxy` unset (the default) | `ip:<transport peer address>` — the socket's own address, which a client cannot forge |
+| Anonymous, `server.trustProxy: { networks, header }` | `ip:<address>` — on a connection from inside `networks`, the first `X-Forwarded-For` entry **from the right** that is outside `networks` (every entry inside them is a hop of yours); `X-Real-IP` instead when `header: 'x-real-ip'`; the peer address on a connection from outside `networks`, or when the header is absent |
 | Anonymous, `server.trustProxy: true` | `ip:<address>` — the **leftmost** `X-Forwarded-For` entry, else `X-Real-IP`, else the peer address when neither header is present |
 | Anonymous, no address can be established | one shared `ip:unknown` bucket, with a warning logged once — it over-throttles rather than failing open |
+
+Behind reverse proxies, declare the **trusted-network form**, naming them:
+`server.trustProxy: { networks: ['10.20.0.0/28', '2001:db8::10'] }` (each
+entry an address or a CIDR range, IPv4 or IPv6). **Every address inside
+`networks` is taken for one of your proxies**, so list the proxies' own
+addresses or the narrow range they sit in, never a range your clients
+connect from (a whole `10.0.0.0/8` that also holds office clients makes
+those clients proxy hops). A prefix length of 0 is refused: it would stand
+in for `true`. The header is believed only
+on a connection from one of those proxies, and it is read from the right,
+past them, so it holds behind a proxy that *appends* to `X-Forwarded-For`
+(`$proxy_add_x_forwarded_for`, most load balancers) as well as one that
+overwrites it. `header` (default `'x-forwarded-for'`) names the one header
+your proxies set; `X-Real-IP` is read only when it is `'x-real-ip'`. Several
+`X-Forwarded-For` lines are read as one list. A malformed form fails the
+boot, naming the entry.
 
 Set `server.trustProxy: true` **only** when a reverse proxy you control
 **overwrites** `X-Forwarded-For` on every inbound request (nginx:
 `proxy_set_header X-Forwarded-For $remote_addr;`). A proxy that *appends*
 (`$proxy_add_x_forwarded_for`) leaves the leftmost entry — the one read —
-whatever the client sent. Getting it wrong costs in either direction:
+whatever the client sent. Under `true` the server logs one warning per
+process the first time an `X-Forwarded-For` with more than one entry
+arrives; `true` is refused at boot from the next major. Getting it wrong
+costs in either direction:
 
 - **Behind a proxy, left unset:** every anonymous caller has the proxy's
   address, so all anonymous traffic shares one bucket.

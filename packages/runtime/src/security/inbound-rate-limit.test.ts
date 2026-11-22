@@ -115,6 +115,21 @@ describe('resolveRateLimitKey — Q3=C, principal first, IP only as a fallback',
         }).key).toBe('ip:203.0.113.9');
     });
 
+    it('under the trusted-network form, keys by the first entry from the right outside the declared proxies', () => {
+        const trustProxy = { networks: ['10.0.0.0/8'], header: 'x-forwarded-for' } as const;
+        expect(resolveRateLimitKey({
+            remoteAddress: '10.0.0.5',
+            headers: { 'x-forwarded-for': '198.51.100.1, 203.0.113.9, 10.0.0.7' },
+            trustProxy,
+        }).key).toBe('ip:203.0.113.9');
+        // A peer outside the declared networks keys by itself.
+        expect(resolveRateLimitKey({
+            remoteAddress: '203.0.113.20',
+            headers: { 'x-forwarded-for': '198.51.100.1' },
+            trustProxy,
+        }).key).toBe('ip:203.0.113.20');
+    });
+
     it('accepts X-Real-IP as the fallback forwarded header', () => {
         expect(resolveRateLimitKey({ headers: { 'x-real-ip': '198.51.100.7' }, trustProxy: true }).key)
             .toBe('ip:198.51.100.7');
@@ -375,5 +390,76 @@ describe('degradation is announced once, with consequence and remedy (ADR-0069 D
             .filter((m) => m.includes('cannot identify anonymous callers'));
         expect(unknownWarnings).toHaveLength(1);
         expect(unknownWarnings[0]).toMatch(/trustProxy/);
+    });
+});
+
+describe('createInboundRateLimitMiddleware reads server.trustProxy in either form', () => {
+    const budget = { enabled: true, maxRequests: 10, windowMs: 10_000 };
+    const WARNED = Symbol.for('@objectstack/plugin-auth/client-address:legacy-trust-proxy-warned');
+
+    it('keys by the entry the declared proxy appended under the trusted-network form', async () => {
+        const { store } = memoryStore();
+        const middleware = createInboundRateLimitMiddleware({
+            budget,
+            trustProxy: { networks: ['10.0.0.0/8'], header: 'x-forwarded-for' },
+            resolveCache: async () => store,
+        })!;
+        const exchange = fakeExchange({
+            remoteAddress: '10.0.0.5',
+            headers: { 'x-forwarded-for': '198.51.100.1, 203.0.113.9' },
+        });
+        await middleware(exchange.req, exchange.res, exchange.next);
+        await expect(store.get('ip:203.0.113.9')).resolves.toBeDefined();
+        await expect(store.get('ip:198.51.100.1')).resolves.toBeUndefined();
+    });
+
+    it('takes the authored form with no header, as a door typed for it', async () => {
+        const { store } = memoryStore();
+        const middleware = createInboundRateLimitMiddleware({
+            budget,
+            trustProxy: { networks: ['10.0.0.0/8'] },
+            resolveCache: async () => store,
+        })!;
+        const exchange = fakeExchange({
+            remoteAddress: '10.0.0.5',
+            headers: { 'x-forwarded-for': '198.51.100.1, 203.0.113.9' },
+        });
+        await middleware(exchange.req, exchange.res, exchange.next);
+        await expect(store.get('ip:203.0.113.9')).resolves.toBeDefined();
+        expect(resolveRateLimitKey({
+            remoteAddress: '10.0.0.5',
+            headers: { 'x-forwarded-for': '198.51.100.1, 203.0.113.9' },
+            trustProxy: { networks: ['10.0.0.0/8'] },
+        }).key).toBe('ip:203.0.113.9');
+    });
+
+    it('refuses a malformed trusted-network form when it is built', () => {
+        expect(() => createInboundRateLimitMiddleware({
+            budget,
+            trustProxy: { networks: ['proxy.internal'] },
+            resolveCache: async () => undefined,
+        })).toThrow(/"proxy\.internal"/);
+    });
+
+    it('under `true`, warns once through its logger when a multi-entry X-Forwarded-For arrives', async () => {
+        delete (globalThis as unknown as Record<symbol, unknown>)[WARNED];
+        const { store } = memoryStore();
+        const warn = vi.fn();
+        const middleware = createInboundRateLimitMiddleware({
+            budget,
+            trustProxy: true,
+            resolveCache: async () => store,
+            logger: { warn, info: vi.fn() },
+        })!;
+        for (let i = 0; i < 3; i++) {
+            const exchange = fakeExchange({
+                remoteAddress: '10.0.0.5',
+                headers: { 'x-forwarded-for': '203.0.113.9, 10.0.0.7' },
+            });
+            await middleware(exchange.req, exchange.res, exchange.next);
+        }
+        const legacy = warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('[server.trustProxy]'));
+        expect(legacy).toHaveLength(1);
+        delete (globalThis as unknown as Record<symbol, unknown>)[WARNED];
     });
 });

@@ -52,10 +52,15 @@ export interface RecordCommentsData {
   moderates?: boolean;
   /**
    * The server admits the viewer's update of a comment they did not write
-   * (the host's definite verdict; objectstack#36075). ✓ on another person's
-   * thread and Edit on another person's comment need it.
+   * (the host's definite verdict; objectstack#36075). Edit on another
+   * person's comment needs it.
    */
   updatesOthers?: boolean;
+  /**
+   * The viewer's Delete removes only their own comments that nobody replied
+   * under (the own-comment delete door; objectstack#36191).
+   */
+  ownDeletesOnly?: boolean;
   mentionSuggestions?: DiscussionMentionSuggestion[];
   onMentionSuggestionsWanted?: () => void;
 }
@@ -94,6 +99,7 @@ export function useRecordComments(): RecordCommentsData {
     onResolveComment: discussion?.onResolveComment,
     moderates: discussion?.moderatesComments === true,
     updatesOthers: discussion?.updatesOthersComments === true,
+    ownDeletesOnly: discussion?.ownCommentDeletesOnly === true,
     mentionSuggestions: discussion?.mentionSuggestions,
     onMentionSuggestionsWanted: discussion?.onMentionSuggestionsWanted,
   };

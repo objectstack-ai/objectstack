@@ -252,8 +252,8 @@ describe('[#30892] showcase: an agent reads and attaches a record\'s files over 
     // what is under test); everything after this runs as a caller over HTTP.
     const acc = idOf(await ql.insert('showcase_account', { name: 'Files Co', status: 'prospect' }, SYS));
     const prod = idOf(await ql.insert('showcase_product', { name: 'Gadget' }, SYS));
-    memberInvoice = idOf(await ql.insert('showcase_invoice', { name: 'INV-FILES-MEMBER', account: acc, status: 'draft', created_by: memberId }, SYS));
-    adminInvoice = idOf(await ql.insert('showcase_invoice', { name: 'INV-FILES-ADMIN', account: acc, status: 'draft', created_by: adminId }, SYS));
+    memberInvoice = idOf(await ql.insert('showcase_invoice', { name: 'INV-FILES-MEMBER', account: acc, status: 'draft', currency_code: 'USD', created_by: memberId }, SYS));
+    adminInvoice = idOf(await ql.insert('showcase_invoice', { name: 'INV-FILES-ADMIN', account: acc, status: 'draft', currency_code: 'USD', created_by: adminId }, SYS));
     memberLine = idOf(await ql.insert('showcase_invoice_line', { invoice: memberInvoice, product: prod, quantity: 1, unit_price: 10, description: 'member line' }, SYS));
     adminLine = idOf(await ql.insert('showcase_invoice_line', { invoice: adminInvoice, product: prod, quantity: 1, unit_price: 20, description: 'admin line' }, SYS));
   }, 120_000);

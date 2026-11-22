@@ -130,11 +130,18 @@ export function AccountMenu({ trigger }: AccountMenuProps) {
           </SidebarMenuButton>
         )}
       </DropdownMenuTrigger>
-      {/* 44 px rows below `md`, as the app switcher's menu (objectstack#29075). */}
+      {/*
+       * 44 px rows below `md`, as the app switcher's menu (objectstack#29075).
+       * Below `md` the menu is also no wider than the screen less a 1 rem
+       * gutter each side: it sizes to its longest line, so an unbounded line
+       * (a long label, the desktop notification hint in German or Russian)
+       * would widen it past a phone screen and carry the theme and language
+       * controls off it. Capped, long lines wrap and keep their full text.
+       */}
       <DropdownMenuContent
         align={trigger === 'avatar' ? 'end' : 'start'}
         side={trigger === 'avatar' ? 'bottom' : 'top'}
-        className="min-w-64 rounded-lg max-md:[&_[role=menuitem]]:min-h-11"
+        className="min-w-64 rounded-lg max-md:max-w-[calc(100vw-2rem)] max-md:[&_[role=menuitem]]:min-h-11"
         sideOffset={4}
       >
         {/* User identity */}

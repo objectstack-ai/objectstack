@@ -77,8 +77,8 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Feldnamen dieses Objekts, das wichtigste zuerst – der erste Eintrag gewinnt, wo nur einer Platz hat (ADR-0085). Steuert die Standardspalten von Listen und Bezugslisten, Karten, Vorschauen untergeordneter Datensätze, die Hover-Karte des Datensatzes und die Datensatzauswahl. Ein Name, der kein Feld dieses Objekts ist, wird bei der Veröffentlichung abgelehnt."
       },
       relatedLists: {
-        label: "Verknüpfte Listen",
-        helpText: "Fachliche Reihenfolge der verknüpften Listen dieses Objekts auf seiner Datensatzseite, die wichtigste zuerst. Jeder Eintrag ist ein Name eines untergeordneten Objekts (z. B. task) oder object.field, wenn dieses untergeordnete Objekt mehr als eine Beziehung zu diesem Objekt hat. Aufgeführte Listen kommen zuerst; die übrigen folgen in der abgeleiteten Reihenfolge. Ein Name, der keiner auf dieses Objekt zeigenden Beziehung entspricht, platziert nichts, daher lehnt das Speichern oder Validieren des Objekts ihn ab."
+        label: "Tabs der Datensatzseite",
+        helpText: "Die Tabs der Datensatzseite nach der Übersicht, in Reihenfolge. Jeder Eintrag ist der Name eines untergeordneten Objekts (z. B. task), object.field, wenn dieses Objekt mehr als eine Beziehung zu diesem Objekt hat, ein integrierter Tab (sys_attachment, sys_approval_request, sys_activity) oder ein Eintrag mit eigenem Titel und eigenen Spalten, festgelegt in den Objekteinstellungen von Studio. Sobald etwas aufgeführt ist, zeigt eine verknüpfte Liste, die kein Eintrag nennt, keinen Tab, auch eine Liste, die ein anderes Paket hinzufügt, bis dieses Objekt sie nennt; Anhänge erscheinen nur, wenn sie aufgeführt sind. Leer: Alle Listen erscheinen in der Standardreihenfolge. Ein Name, der keiner auf dieses Objekt zeigenden Beziehung entspricht, wird beim Speichern des Objekts abgelehnt."
       },
       searchableFields: {
         label: "Durchsuchbare Felder",

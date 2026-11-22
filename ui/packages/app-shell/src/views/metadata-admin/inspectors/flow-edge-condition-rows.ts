@@ -40,7 +40,8 @@
  *   list membership, `S != null && V in S`, and `not_contains` its complement,
  *   `S == null || !(V in S)`. CEL has no `contains` method on a list (it
  *   faults with "no matching overload"), and `S == V` compares the whole list
- *   with one value, so it is false for every record.
+ *   with one value, so it is false for every record. The spelling is the one
+ *   `ConditionBuilder` writes too (`cel-list-membership.ts`).
  * - `in` / `not_in` → `S in [A, B]` / `!(S in [A, B])`.
  * - `is_empty` / `is_not_empty` → the spec's ruled 「is empty」 table
  *   (`expandEmptyOperator`), in the clauses `ConditionBuilder` writes:
@@ -68,9 +69,10 @@
  * that writes more than one clause is parenthesised when it is joined.
  */
 
-import { operatorsForField, jsonColumnFilterOperators, isFilterValueComplete } from '@object-ui/components';
+import { operatorsForField, isFilterValueComplete } from '@object-ui/components';
 import { expandEmptyOperator, type EmptyOperatorArm } from '@objectstack/spec/data';
 import { FILTER_DATE_LIKE_TYPES, FILTER_LOOKUP_LIKE_TYPES, FILTER_NUMBER_LIKE_TYPES, FILTER_SELECT_LIKE_TYPES } from '@object-ui/types';
+import { listMembershipCel, listSubjectOperators } from './cel-list-membership.js';
 
 /** One column the rows may name: `value` is its CEL subject (`record.meeting_date`). */
 export interface EdgeConditionField {
@@ -184,12 +186,11 @@ function offered(field: EdgeConditionField, operator: string): boolean {
 
 /**
  * Whether the column holds a list — the columns the shared builder offers
- * membership on (`jsonColumnFilterOperators` answers the multi-value set, whose
- * `contains` is one member). A structured-JSON column gets the empty checks
- * only, so its `contains` never reaches the writer.
+ * membership on (`listSubjectOperators`, objectstack#36167). A structured-JSON
+ * column gets the empty checks only, so its `contains` never reaches the writer.
  */
 function isListColumn(field: EdgeConditionField): boolean {
-  return jsonColumnFilterOperators({ type: field.type, multiple: field.multiple === true })?.includes('contains') === true;
+  return listSubjectOperators(field) !== undefined;
 }
 
 const ORDERING: Readonly<Record<string, string>> = {
@@ -212,9 +213,7 @@ function rowCel(row: EdgeConditionRow, field: EdgeConditionField): { cel: string
     // List membership: one member per row, as the builder's value control picks.
     const v = typeof row.value === 'string' ? literalOf(row.value, kind) : undefined;
     if (v === undefined) return null;
-    return op === 'contains'
-      ? { cel: `${s} != null && ${v} in ${s}`, compound: true }
-      : { cel: `${s} == null || !(${v} in ${s})`, compound: true };
+    return { cel: listMembershipCel(s, v, op === 'contains'), compound: true };
   }
   switch (op) {
     case 'is_empty':
