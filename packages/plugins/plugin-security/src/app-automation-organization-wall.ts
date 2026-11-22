@@ -520,8 +520,9 @@ export async function applyAppAutomationOrganizationWall(
   const denied = tenantLayer0Verdict.kind === 'deny';
   judgedAdmitted = admittedOrganizations(tenantLayer0Verdict);
   // The option bag's tenant keys, judged as the payload is: a write naming an
-  // organization the caller's wall does not admit is refused; a read naming
-  // one matches nothing (the read rule), as the plain door's predicate bounds it.
+  // organization the caller's wall does not admit is refused. A read naming
+  // one matches nothing: the caller's wall is composed onto its predicate
+  // below, so no row of the named organization meets both.
   const bagOutside =
     bagOrganizations !== undefined && judgedAdmitted !== undefined && bagOrganizations.some((id) => !judgedAdmitted!.has(id));
   if (bagOutside && isWrite) throw bagRefusal(caller.source, object, operation);
@@ -611,7 +612,6 @@ export async function applyAppAutomationOrganizationWall(
   // engine recognise it by identity), and the verdict recorded as the door
   // records it, so the engine's driver scope follows the caller's wall.
   const where = opCtx.ast!.where;
-  const wall = bagOutside ? RLS_DENY_FILTER : layer0;
-  opCtx.ast!.where = where ? { $and: [where, wall] } : wall;
+  opCtx.ast!.where = where ? { $and: [where, layer0] } : layer0;
   opCtx.tenantLayer0Verdict = tenantLayer0Verdict;
 }

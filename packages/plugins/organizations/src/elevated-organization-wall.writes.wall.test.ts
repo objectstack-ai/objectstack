@@ -82,6 +82,7 @@ const APP = {
     { name: 'eoww_hooked_land', label: 'Hooked land', objectName: TASK, type: 'script', target: 'eowwHookedLand' },
     { name: 'eoww_hooked_touch', label: 'Hooked touch', objectName: TASK, type: 'script', target: 'eowwHookedTouch' },
     { name: 'eoww_late_bag', label: 'Late bag', objectName: TASK, type: 'script', target: 'eowwLateBag' },
+    { name: 'eoww_late_read', label: 'Late read', objectName: TASK, type: 'script', target: 'eowwLateRead' },
     ...(
       [
         ['eoww_bag_find', BODY_BAG_FIND],
@@ -170,6 +171,25 @@ describe('an app-authored elevation writes through the organization wall what it
       },
       { object: TASK },
     );
+    // A before-hook that writes a tenant key into the option bag of the read
+    // the late-read handler makes, after the wall has run.
+    let lateReadOrg: string | undefined;
+    ql.registerHook(
+      'beforeFind',
+      async (ctx: any) => {
+        if (lateReadOrg !== undefined && ctx.input?.options) ctx.input.options.tenantId = lateReadOrg;
+      },
+      { object: TASK },
+    );
+    ql.registerAction(TASK, 'eowwLateRead', async (ctx: any) => {
+      lateReadOrg = String(ctx.params?.org);
+      try {
+        const rows = await ctx.api.object(TASK).find({ where: {} });
+        return { seen: rows.map((r: any) => r.name).sort() };
+      } finally {
+        lateReadOrg = undefined;
+      }
+    });
     ql.registerAction(TASK, 'eowwHookedLand', async (ctx: any) => {
       await ctx.engine.insert(TASK, { name: ctx.params?.name, hint: ctx.params?.org });
       return { landed: 1 };
@@ -341,6 +361,16 @@ describe('an app-authored elevation writes through the organization wall what it
       expect(r.body.error.code).toBe('PERMISSION_DENIED');
       expect((await rowNamed('B1'))!.touched ?? null).toBeNull();
       expect((await rowNamed('A1'))!.touched ?? null).toBeNull();
+    });
+
+    it('a tenant key a before-hook writes into the bag of a read matches nothing', async () => {
+      await reseed();
+      const r = await run(alice, 'eoww_late_read', { org: orgB });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      expect(r.body.data).toEqual({ seen: [] });
+      const own = await run(alice, 'eoww_late_read', { org: orgA });
+      expect(own.status, JSON.stringify(own.body)).toBe(200);
+      expect(own.body.data).toEqual({ seen: ['A1'] });
     });
 
     it('control: a bag naming the caller’s own organization reads and writes there', async () => {

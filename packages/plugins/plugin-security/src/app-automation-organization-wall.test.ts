@@ -393,10 +393,10 @@ describe('an app-authored elevation sees through the organization wall what its 
   describe('the option bag’s tenant keys', () => {
     const member = () => actionBody({ tenantId: 'org_a' });
 
-    it('a read whose bag names another organization matches nothing; a write is refused 403', async () => {
+    it('a read whose bag names another organization is bounded by the caller’s wall; a write is refused 403', async () => {
       const read: any = { object: 'task', operation: 'find', context: member(), options: { tenantId: 'org_b' }, ast: { object: 'task', where: { a: 1 } } };
       await applyAppAutomationOrganizationWall(read, depsFor(ORG_A));
-      expect(read.ast.where).toEqual({ $and: [{ a: 1 }, RLS_DENY_FILTER] });
+      expect(read.ast.where).toEqual({ $and: [{ a: 1 }, filterOf(ORG_A)] });
       for (const operation of ['update', 'delete']) {
         const e = await refusalOf(() =>
           applyAppAutomationOrganizationWall(
