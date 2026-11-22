@@ -37,6 +37,8 @@ import { ActionConfirmDialog, type ConfirmDialogState } from './ActionConfirmDia
 import { ActionParamDialog, type ParamDialogState } from './ActionParamDialog.js';
 import { resolveParamDialogCompanion } from './actionDialogCompanion.js';
 import { ActionResultDialog, type ResultDialogState } from './ActionResultDialog.js';
+import { ChangeOwnerDialog } from './ChangeOwnerDialog.js';
+import { useRecordChangeOwnerOffer } from './changeOwner.js';
 import { FlowRunner, type ScreenFlowState, type ScreenSpec } from './FlowRunner.js';
 import { FlowRefusalNotice, type FlowRefusalState } from './FlowRefusalNotice.js';
 import { RelatedRecordActionsBridge } from './RelatedRecordActionsBridge.js';
@@ -2676,6 +2678,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const sittingInQueue = recordSitsInQueue(pageRecord);
   const claimOffered = useQueueClaimOffered(objectDef?.name, pureRecordId, sittingInQueue !== null);
 
+  // objectstack#35403 — Change Owner: the object offers it (structural
+  // eligibility and `userActions.transfer`, the spec's one resolution), the
+  // switch's `visibleWhen` admits this record, and the explain engine's
+  // `transfer` verdict for this record is a definite allow. The verdict rides
+  // the record page's one read below (`explain: ['transfer']`).
+  const changeOwnerOffer = useRecordChangeOwnerOffer(objectDef, pureRecordId, pageRecord);
+  const [changeOwnerOpen, setChangeOwnerOpen] = useState(false);
+
   // ─── The record page payload (objectstack#27627) ─────────────────────
   // Everything this page asks of the server when it opens, in ONE read
   // (`DataSource.getRecordPage`): the record with the `$expand` above, each
@@ -2734,8 +2744,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     if (objectDef?.name && !editOffByObject) explain.push('update');
     if (objectDef?.name && !deleteOffByObject) explain.push('delete');
     // Claim asks a transfer verdict only of a record sitting in a queue; the
-    // payload asks it of every record of an object that has the column.
-    if (objectDef?.fields && Object.prototype.hasOwnProperty.call(objectDef.fields, 'queue')) explain.push('transfer');
+    // payload asks it of every record of an object that has the column, and
+    // of every record of an object that offers Change Owner (objectstack#35403).
+    if (
+      changeOwnerOffer.asks
+      || (objectDef?.fields && Object.prototype.hasOwnProperty.call(objectDef.fields, 'queue'))
+    ) explain.push('transfer');
     const relatedExpand = (child: string, field: string): string[] => {
       const childDef = objects.find((o: any) => o?.name === child) as { fields?: Record<string, any> } | undefined;
       const expandable = buildExpandFields(childDef?.fields as any).filter((f) => f !== field);
@@ -2748,7 +2762,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       fieldAccess: typeof dataSource.getRecordFieldAccess === 'function',
       approvals: true,
     });
-  }, [hasPage, objectName, pureRecordId, dataSource, objectDef, editOffByObject, deleteOffByObject, pageRecordExpand, effectivePage, assignedPage, childRelations, objects, perms]);
+  }, [hasPage, objectName, pureRecordId, dataSource, objectDef, editOffByObject, deleteOffByObject, changeOwnerOffer.asks, pageRecordExpand, effectivePage, assignedPage, childRelations, objects, perms]);
   // The stream parts ride whichever payload the plan above asks; they never ask
   // one of their own. So they are read off a ref when the payload goes out, not
   // keyed into the plan: an assigned page landing after a synthesized one (which
@@ -5353,6 +5367,24 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         }
       },
     } as any);
+    // objectstack#35403 — Change Owner, in the `⋯` ahead of Share's pane
+    // entries: offered only where the object offers it and the explain engine
+    // allows this caller to transfer this record (`useRecordChangeOwnerOffer`).
+    // The title is fixed; the dialog names the object's own owner field.
+    if (changeOwnerOffer.offered) {
+      items.push({
+        name: 'sys_change_owner',
+        label: t('console.changeOwner.title', { defaultValue: 'Change Owner' }),
+        icon: 'user-cog',
+        type: 'script',
+        locations: ['record_header'],
+        variant: 'outline',
+        order: 112,
+        component: 'action:menu',
+        ...(changeOwnerOffer.disabled ? { disabled: true, disabledReason: predicateDisabledReason } : {}),
+        onClick: () => setChangeOwnerOpen(true),
+      } as any);
+    }
     // objectstack#27545 — in a record pane, the way to this record's full page,
     // the last of the `⋯`'s host entries (the destructive band stays below it,
     // objectui#12529). The bar's `⤢` maximizes in place; it no longer routes.
@@ -6448,6 +6480,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           if (!open) setParamState(s => ({ ...s, open: false }));
         }}
       />
+
+      {/* objectstack#35403 — the Change Owner dialog the header's action opens. */}
+      {changeOwnerOffer.offered && objectDef && pageRecord && (
+        <ChangeOwnerDialog
+          open={changeOwnerOpen}
+          onOpenChange={setChangeOwnerOpen}
+          objectDef={objectDef as any}
+          records={[{ ...pageRecord, id: pureRecordId }]}
+        />
+      )}
 
       {/* Action Result Reveal Dialog */}
       <ActionResultDialog
