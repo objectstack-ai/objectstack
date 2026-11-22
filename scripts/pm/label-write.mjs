@@ -237,17 +237,24 @@
  * order: the comment, `labels_add`, `assign` (the author), `pr_request_reviewers` (the rest).
  *
  *   tier      `check-governed-merges.mjs --pr OWNER/NAME#N --json`, spawned: the one reading that chains every
- *             split (workflows, the low-risk arm, `Rule-change:`) and the size limb. Tier H, or the size limb
- *             firing (it lands the way Tier H does), proceeds; Tier S (「Tier S 不交人」), an ungoverned pull and a
- *             fork (a proposal, adopted by the owning seat) are refused. A reading that did not answer is exit 3.
+ *             split (workflows, the low-risk arm, `Rule-change:`) and the size limb. Three populations land by the
+ *             maintainer and proceed: Tier H; the size limb firing (it lands the way Tier H does); and a declared
+ *             narrowing — the queue guard's narrowed leg, which the tier tool has no limb for, read with that leg's
+ *             own `narrowedReading` over the body and the committed changesets at the head (`readChangesetTexts`'
+ *             rule: a changeset the head does not hold, deleted or renamed away, answers 404 and declares nothing),
+ *             Tier S included. On Tier H the paths decide and ⛔ no changeset is read. Tier S (「Tier S 不交人」)
+ *             and an ungoverned pull that declare no narrowing, and a fork (a proposal, adopted by the owning
+ *             seat), are refused. A reading that did not answer is exit 3.
  *   records   the ACCEPT on the pull's own thread, by check-half-states' H43 hand-off reading
  *             (`h43HandoffReading`): the NEWEST `## 席位核对` must read ACCEPT and be newer than the head's committer
  *             date (H69's comparison). The PASS the queue guard's way, with its own readers, ⛔ never re-spelled:
  *             `loadRecordRecognisers`, `readRecordThreads` over the pull AND the card it delivers
  *             (`REVIEW_OF_RECORD_LOCATION`), each cut to trusted authors, then `recordVerdict` and
  *             `recordPassVerdict` — the newest same-head record, signed, at the tier its FACE owes (`reviewFace`
- *             over the pull's paths, the `Clause-②:` line read off the body and each committed changeset, so a
- *             code-only size-limb pull is on the declaration face at `TIER_DEFAULT`), one PASS line, no open grade.
+ *             over every path the tier tool read, pre-lift — a path lifted as a pure regeneration included; off the
+ *             tier route the narrowed leg's pair: the body and each changeset text, `narrowingDeclared` when a
+ *             narrowing is declared on either line — so a code-only size-limb pull is on the declaration face at
+ *             `TIER_DEFAULT` and a narrowing one on the narrowing face), one PASS line, no open grade.
  *             A `## 维护者速读` comment must be on the thread or be the request itself — H48's brief half.
  *   plan      the approvers not requested, assigned or holding a submitted review (H43's union); the author among
  *             them is ASSIGNED, never requested (a request naming the author is a 422). A covered approver and a
@@ -257,16 +264,17 @@
  *   read-back besides the fold's labels, assignees and comment lines: `④ reviewers` against the pull's pending
  *             requests, then `④ H43` and `④ H48` — the patrol rows THEMSELVES (`h43GovernedReviewRequestGap`,
  *             `h48GovernedVerdictWithoutBrief`), asked of the pull as read back, on the tier reading's matched
- *             slice — plus one Tier H entry for the size limb when that is what admitted the pull
- *             (`handoffSlice`: otherwise both rows stand down and read ✓ with nobody asked) — and told the hand-off
+ *             slice — plus one Tier H entry for the size limb or the declared narrowing when that is what admitted
+ *             the pull (`handoffSlice`: otherwise both rows stand down and read ✓ with nobody asked) — and told the hand-off
  *             is DUE on the gate's own PASS. Any ✗ is exit 4, never repaired.
- *   once      a pull already whole — the label on, every approver covered — sends nothing and exits 0: ⛔ no second
- *             request comment. A request whose signature names an uncovered approver is refused: a seat never
+ *   once      a pull already whole — the label on, every approver covered, a `## 维护者速读` brief on the thread —
+ *             sends nothing and exits 0: ⛔ no second request comment. Short of the brief, the request is owed. A request whose signature names an uncovered approver is refused: a seat never
  *             requests its own account (「⛔ 永不请席位自身账号」).
  *
  * Every refusal is exit 2 with ZERO writes. `--dry-run` reads all of it, prints `now H43` / `now H48` for the
  * pull as it stands and the stroke it would send, and sends nothing — it may omit `--comment-file`, so it is the
- * per-round reading of a seat's own governed pulls (execution-duties' 每轮 check) without a full patrol run.
+ * per-round reading of a seat's own governed pulls (execution-duties' 四件读数器) without a full patrol run: exit 7
+ * when a `now` row reads ✗ (the hand-off is owed), 0 when both read ✓.
  * `--handoff` owns its plan: `--land`, `--release` and every label or assignee flag are refused beside it.
  *
  * ## The read-back judge is HANDED to `sendFleetWrite`, never loaded by it
@@ -309,6 +317,8 @@
  *   6  UNCONFIRMED — the dispatch was accepted and its run did not appear, or
  *      did not complete, within the ceiling. The run URL is printed. Go READ
  *      the card; ⛔ never re-run blind: a second dispatch is a second write.
+ *
+ *   7  `--handoff --dry-run` only: a `now` row reads ✗ — the hand-off is OWED. Nothing was written.
  *
  *   Under `--land`, 2 is also the dogfood battery gate's judged refusal and 3 a gate read the platform did not
  *   answer (header: that gate), ⛔ ZERO writes on both.
@@ -453,13 +463,13 @@ import {
   readSignatureLine,
   h48GovernedVerdictWithoutBrief,
 } from './check-half-states.mjs';
-import { GOVERNED_TIER_H, GOVERNED_TIER_S, sizeLimbFires } from './check-governed-merges.mjs';
+import { GOVERNED_TIER_H, GOVERNED_TIER_S, LOW_RISK_CHANGESET_PATH, sizeLimbFires } from './check-governed-merges.mjs';
 // The `--land` dogfood gate's readers (header: `--land` on a breaking or narrowing pull), each CALLED from its owner:
 // the one `Clause-②:` reader, the card a pull delivers, the relay's identity and the record leg's author trust.
 import { quoteLine, readClause2Line } from './clause2-line.mjs';
 import { deliveredCardNumber, deliveredCardsAtStrongest } from './record-recognisers.mjs';
 import { RELAY_COMMENT_AUTHOR } from './fleet-write/ops.mjs';
-import { GOVERNED_APPROVERS, RECOGNISER_SOURCES, loadRecordRecognisers, readRecordThreads, recordAuthorTrusted, recordPassVerdict, recordTrustedAuthors, recordVerdict } from './check-governed-queue-guard.mjs';
+import { GOVERNED_APPROVERS, NARROWED_RULING, RECOGNISER_SOURCES, loadRecordRecognisers, narrowedReading, readRecordThreads, recordAuthorTrusted, recordPassVerdict, recordTrustedAuthors, recordVerdict } from './check-governed-queue-guard.mjs';
 // `--handoff`'s record reading loads the guard's recognisers through the guard's OWN loader, handed these two
 // namespaces for the two specifiers it imports (`RECOGNISER_SOURCES`). ⛔ Never a dynamic import from here:
 // `check-handover.mjs` imports post-stamped, which reaches this file through `fleet-write/dispatch.mjs`, so a dynamic
@@ -501,6 +511,8 @@ export const EXIT_OK = 0;
 export const EXIT_USAGE = 2;
 export const EXIT_READ_BACK_MISMATCH = 4;
 export const EXIT_PLATFORM_REFUSAL = 5;
+/** `--handoff --dry-run` only: a `now` row reads ✗ — the hand-off is owed (header: exit codes). */
+export const EXIT_HANDOFF_OWED = 7;
 
 /**
  * Re-exported so a caller reads ONE name rather than remembering that 3 is
@@ -2024,21 +2036,38 @@ export function readGovernedTier({ repo, issue }) {
 }
 
 /**
- * Does the tier reading let the hand-off proceed? Pure. `{ ok, unread, why, matched? }` — `matched` the tool's own
- * post-split slice on a pass, which the patrol rows are asked on: Tier H, or the size limb firing
- * (it lands the way Tier H does, with no Tier S exception), proceeds; a fork, a Tier S pull and an ungoverned one are
- * refused; a reading with no verdict object is `unread` — a PREREQUISITE, never a verdict.
+ * Does the verdict turn on the pull's narrowing declarations? Pure: a readable reading that is neither a fork nor
+ * Tier H — there the paths decide, and ⛔ no changeset text is read at all (header: `--handoff`, tier).
  */
-export function handoffTierVerdict(reading) {
+export function handoffOwesDeclarations(reading) {
+  const v = reading?.json;
+  return Boolean(v && typeof v === 'object' && v.fork?.isFork !== true && !(v.governed === true && v.tier === GOVERNED_TIER_H));
+}
+
+/**
+ * Does the tier reading let the hand-off proceed? Pure. `{ ok, unread, why, route?, matched?, narrowing? }` —
+ * `matched` the tool's own post-split slice on a pass, which the patrol rows are asked on. Three populations land
+ * by the maintainer (SKILL.md 〈路径分叉〉 Tier H and the line after it) and proceed: Tier H (`tier`), the size limb
+ * firing (`size`), and a declared narrowing — the queue guard's narrowed leg, read with its own
+ * `narrowedReading` (`narrowed`), whatever the register says, Tier S included. `declarations` is that reading's
+ * list, owed wherever `handoffOwesDeclarations` says so: null there is `unread`, never a pass. A fork, and a
+ * Tier S or ungoverned pull that declares no narrowing, are refused; a reading with no verdict object is `unread` —
+ * a PREREQUISITE, never a verdict.
+ */
+export function handoffTierVerdict(reading, declarations = null) {
   const v = reading?.json;
   const tool = `\`${HANDOFF_TIER_TOOL} --pr\``;
   if (!v || typeof v !== 'object') return { ok: false, unread: true, why: `${tool} gave no reading (${reading?.detail || 'no answer'}) — NOT MEASURED, so nothing is handed to anyone` };
   if (v.fork?.isFork === true) return { ok: false, unread: false, why: `${tool} reads a FORK pull request (head ${v.fork.headRepo ?? '?'}): a proposal, never a delivery — no seat hands it to an approver; the owning seat adopts the diff onto an internal branch and hands THAT off` };
   const matched = Array.isArray(v.matched) ? v.matched : [];
-  if (v.governed === true && v.tier === GOVERNED_TIER_H) return { ok: true, unread: false, route: 'tier', json: v, matched, why: `${tool} reads Tier H (${(v.matched ?? []).map((s) => `\`${s.glob}\`×${s.files?.length ?? 0}`).join(', ')})` };
-  if (sizeLimbFires(v.size)) return { ok: true, unread: false, route: 'size', json: v, matched, why: `${tool} reads the SIZE limb: ${v.size.changedLines} changed lines over ${v.size.threshold}, which lands the way Tier H does` };
-  if (v.governed === true && v.tier === GOVERNED_TIER_S) return { ok: false, unread: false, why: `${tool} reads Tier S: it lands on the owning seat's review of record and no human is handed it (「Tier S 不交人」, ${HANDOFF_RULE_PATH})` };
-  return { ok: false, unread: false, why: `${tool} reads this pull as NOT governed (tier ${v.tier ?? 'none'}, size limb clear): nobody is owed a hand-off` };
+  if (v.governed === true && v.tier === GOVERNED_TIER_H) return { ok: true, unread: false, route: 'tier', json: v, matched, narrowing: false, why: `${tool} reads Tier H (${matched.map((s) => `\`${s.glob}\`×${s.files?.length ?? 0}`).join(', ')})` };
+  if (!Array.isArray(declarations)) return { ok: false, unread: true, why: 'the narrowing declarations of the body and the committed changesets were not read, so whether the narrowed leg hands this pull to the maintainer is unknown — NOT MEASURED' };
+  const narrowing = declarations.length > 0;
+  const declared = narrowing ? `\`${declarations[0].key}:\` narrowing on ${declarations.map((d) => d.where).join(', ')}` : '';
+  if (sizeLimbFires(v.size)) return { ok: true, unread: false, route: 'size', json: v, matched, narrowing, why: `${tool} reads the SIZE limb: ${v.size.changedLines} changed lines over ${v.size.threshold}, which lands the way Tier H does${narrowing ? `; it also declares a narrowing (${declared})` : ''}` };
+  if (narrowing) return { ok: true, unread: false, route: 'narrowed', json: v, matched, narrowing, why: `the pull declares a narrowing (${declared}): the queue guard's narrowed leg lands it by the maintainer (${NARROWED_RULING}), whatever ${tool} reads (tier ${v.tier ?? 'none'})` };
+  if (v.governed === true && v.tier === GOVERNED_TIER_S) return { ok: false, unread: false, why: `${tool} reads Tier S and no narrowing is declared: it lands on the owning seat's review of record and no human is handed it (「Tier S 不交人」, ${HANDOFF_RULE_PATH})` };
+  return { ok: false, unread: false, why: `${tool} reads this pull as NOT governed (tier ${v.tier ?? 'none'}, size limb clear) and no narrowing is declared on the body or a committed changeset: nobody is owed a hand-off` };
 }
 
 /**
@@ -2073,8 +2102,22 @@ async function readThreadRows(doCall, repo, number) {
   }
 }
 
-/** A committed changeset — the carrier of a `Clause-②:` line the review's face may turn on (record-recognisers' own shape). */
-const isChangesetFile = (path) => /^\.changeset\/[^/]+\.md$/.test(String(path ?? '')) && path !== '.changeset/README.md';
+/**
+ * The committed changesets at the head, the queue guard's way (`readChangesetTexts`): the paths its
+ * `LOW_RISK_CHANGESET_PATH` picks out of the tier tool's list, each read at the head. A path the head does not hold —
+ * a changeset the pull DELETED, a rename's old name — answers 404 and is left out, declaring nothing; any other
+ * failed read is NOT MEASURED. `{ measured, reason, files: [{ path, text }] }`.
+ */
+async function readHeadChangesets(doCall, repo, headSha, paths) {
+  const files = [];
+  for (const path of paths.filter((p) => LOW_RISK_CHANGESET_PATH.test(p))) {
+    const read = await doCall('contents-read', `/repos/${repo}/contents/${path.split('/').map(enc).join('/')}?ref=${headSha}`, {});
+    if (read.status === 404) continue;
+    if (read.verdict !== 'ok' || typeof read.json?.content !== 'string') return { measured: false, reason: `${read.call} -> HTTP ${read.status}: \`${path}\` could not be read at the head`, files: [] };
+    files.push({ path, text: Buffer.from(read.json.content, read.json.encoding === 'base64' ? 'base64' : 'utf8').toString('utf8') });
+  }
+  return { measured: true, reason: null, files };
+}
 
 /**
  * The slice the two patrol rows are asked on (header: `--handoff`, read-back). A Tier H reading hands its own
@@ -2084,6 +2127,7 @@ const isChangesetFile = (path) => /^\.changeset\/[^/]+\.md$/.test(String(path ??
  */
 export function handoffSlice(tier, paths = []) {
   const matched = Array.isArray(tier?.matched) ? tier.matched : [];
+  if (tier?.route === 'narrowed') return [...matched, { id: 'narrowed', glob: 'declared narrowing (the narrowed leg)', tier: GOVERNED_TIER_H, files: [...paths], what: 'a declared narrowing: lands by the maintainer' }];
   if (tier?.route !== 'size') return matched;
   const size = tier.json?.size ?? {};
   return [...matched, { id: 'size-limb', glob: `size limb (${size.changedLines ?? '?'} > ${size.threshold ?? '?'} changed lines)`, tier: GOVERNED_TIER_H, files: [...paths], what: 'the SIZE limb: lands the way Tier H does' }];
@@ -2115,13 +2159,27 @@ async function handoffGate(c) {
   if (c.kind !== KIND_PULL) return refuse(`--handoff hands a PULL REQUEST to its approvers, and ${repo}#${issue} is ${c.kind === null ? 'of no kind step ① could read' : 'an issue'}`);
   if (c.card?.state !== 'open') return refuse(`${repo}#${issue} is ${c.card?.state ?? 'of no readable state'}: the hand-off is over once a pull is closed or merged`);
 
-  const tier = handoffTierVerdict(await (deps.tierReading ?? readGovernedTier)({ repo, issue }));
-  if (!tier.ok) return tier.unread ? unread(tier.why) : refuse(tier.why);
-  record(`[${stamp()}] ② hand-off tier ✓ — ${tier.why}`);
+  const reading = await (deps.tierReading ?? readGovernedTier)({ repo, issue });
+  const owes = handoffOwesDeclarations(reading);
+  let tier = owes ? null : handoffTierVerdict(reading);
+  if (tier && !tier.ok) return tier.unread ? unread(tier.why) : refuse(tier.why);
 
   const pull = await doCall('pull-read', `/repos/${repo}/pulls/${issue}`, {});
   if (pull.verdict !== 'ok' || !pull.json) return unread(`${pull.call} -> HTTP ${pull.status}: the pull's head, author and pending requests are unknown`);
   const headSha = String(pull.json.head?.sha ?? '');
+  // Every changed path the tier tool read, pre-lift (`reviewFace` reads the register before a pure regeneration is
+  // lifted): the post-lift hits, the paths off the register, and each path an exception lifted or tried.
+  const paths = [...new Set([...(reading.json?.hitPaths ?? []), ...(reading.json?.clearPaths ?? []), ...(reading.json?.exceptions ?? []).map((e) => e?.path).filter((p) => typeof p === 'string' && p !== '')])];
+  const body = typeof pull.json.body === 'string' ? pull.json.body : '';
+  let changesets = null;
+  if (owes) {
+    // The narrowed leg's own reading (header: tier): the body and the committed changesets, its readers CALLED.
+    changesets = await readHeadChangesets(doCall, repo, headSha, paths);
+    if (!changesets.measured) return unread(`${changesets.reason} — whether the pull declares a narrowing is unknown`);
+    tier = handoffTierVerdict(reading, narrowedReading({ pr: issue, body, changesets }).declarations);
+    if (!tier.ok) return tier.unread ? unread(tier.why) : refuse(tier.why);
+  }
+  record(`[${stamp()}] ② hand-off tier ✓ — ${tier.why}`);
   const reviews = await doCall('reviews-list', `/repos/${repo}/pulls/${issue}/reviews?per_page=100`, {});
   if (reviews.verdict !== 'ok' || !Array.isArray(reviews.json)) return unread(`${reviews.call} -> HTTP ${reviews.status}: who has already reviewed is unknown`);
   const reviewed = reviews.json.filter((r) => r?.state !== 'PENDING').map((r) => r?.user?.login).filter(Boolean);
@@ -2139,11 +2197,12 @@ async function handoffGate(c) {
   const handoffPr = h43HandoffReading(rows, headSha, authors);
   const labels = labelNamesOf(c.card?.labels);
   const assigned = loginsOf(c.card?.assignees);
-  const paths = [...new Set([...(tier.json?.hitPaths ?? []), ...(tier.json?.clearPaths ?? [])])];
   const slice = handoffSlice(tier, paths);
   // `now H43` / `now H48` (header): the rows as the pull stands, printed on every exit past the reads.
+  let nowClean = false;
   const printNow = (handoff) => {
     const now = handoffRowLines({ pull: handoffPullView(pull.json, labels, assigned), matched: slice, approvers, reviewed, handoff, rows });
+    nowClean = now.clean;
     record(`[${stamp()}] ② now H43 ${now.h43 === null ? '✓' : '✗'} · now H48 ${now.h48 === null ? '✓' : '✗'} — ${repo}#${issue} as it stands, head \`${headSha.slice(0, 12)}\`${now.h43 ? `\n      H43: ${now.h43}` : ''}${now.h48 ? `\n      H48: ${now.h48}` : ''}`);
   };
   const stop = (res) => {
@@ -2159,14 +2218,11 @@ async function handoffGate(c) {
   }
 
   // The PASS, the guard's way (header): the pull's thread AND its card, cut to trusted authors, at the FACE's tier.
-  const declaredOn = [String(pull.json.body ?? '')];
-  for (const path of paths.filter(isChangesetFile)) {
-    const read = await doCall('contents-read', `/repos/${repo}/contents/${path.split('/').map(enc).join('/')}?ref=${headSha}`, {});
-    if (read.verdict !== 'ok' || typeof read.json?.content !== 'string') return stop(unread(`${read.call} -> HTTP ${read.status}: the changeset whose \`Clause-②:\` line decides the review's face could not be read`));
-    declaredOn.push(Buffer.from(read.json.content, read.json.encoding === 'base64' ? 'base64' : 'utf8').toString('utf8'));
-  }
+  // On the tier route the paths decide the face and no declaration is handed (the guard's governed entry); off it,
+  // the narrowed leg's pair: the body and every changeset text, and `narrowingDeclared` when it declares one.
   const card = recognisers.deliveredCard(pull.json);
-  const pair = { pr: issue, card: card.card, headSha, paths, repo: tier.json?.repo, declaredOn };
+  const declared = changesets === null ? {} : { declaredOn: [body, ...changesets.files.map((f) => f.text)], narrowingDeclared: tier.narrowing === true };
+  const pair = { pr: issue, card: card.card, headSha, paths, repo: tier.json?.repo, ...declared };
   const fetchComments = async (n) => {
     if (n === issue) return rows;
     const thread = await readThreadRows(doCall, repo, n);
@@ -2193,8 +2249,11 @@ async function handoffGate(c) {
   const plan = handoffReviewPlan({ approvers, author: pull.json.user?.login ?? null, requested: (pull.json.requested_reviewers ?? []).map((u) => u?.login).filter(Boolean), assigned, reviewed });
   const named = (l) => (l.length ? l.map((x) => `\`${x}\``).join(', ') : 'none');
   record(`[${stamp()}] ② hand-off plan — covered ${named(plan.covered)} · request ${named(plan.toRequest)} · assign the author ${named(plan.toAssign)} · \`${GOVERNED_PR_AWAITING_MERGE_LABEL}\` ${labels.includes(GOVERNED_PR_AWAITING_MERGE_LABEL) ? 'already on' : 'to add'}`);
-  return { ok: true, plan, tier, slice, pull: pull.json, reviewed, rows, handoff, headSha, approvers, hasBrief: latestMarkedComment(rows, MAINTAINER_BRIEF_MARKER) !== null };
+  return { ok: true, plan, tier, slice, pull: pull.json, reviewed, rows, handoff, headSha, approvers, nowClean, hasBrief: latestMarkedComment(rows, MAINTAINER_BRIEF_MARKER) !== null };
 }
+
+/** A dry run's exit: 0, or under `--handoff` `EXIT_HANDOFF_OWED` when a `now` row reads ✗ (header: exit codes). */
+const dryRunExit = (gate) => (gate && gate.nowClean !== true ? EXIT_HANDOFF_OWED : EXIT_OK);
 
 async function foldStroke(c) {
   const { options, repo, issue, base, labels, route, record, stamp, result, doCall } = c;
@@ -2270,9 +2329,10 @@ async function foldStroke(c) {
     if (seat && gate.plan.toRequest.some((a) => a.toLowerCase() === seat.toLowerCase())) {
       return refuse(`the seat's own account \`${seat}\` (the request's signature line) is an uncovered approver, and a seat never requests itself (「⛔ 永不请席位自身账号」) — the hand-off to that account is the maintainer's to arrange`);
     }
-    // Idempotent (header): a pull already whole — label on, every approver covered — is not handed off twice.
-    if (labels.addCalls.length === 0 && assignees.addCalls.length === 0 && gate.plan.toRequest.length === 0) {
-      record(`[${stamp()}] ③ already handed off — \`${GOVERNED_PR_AWAITING_MERGE_LABEL}\` is on and every approver is requested, assigned or has reviewed (the \`now\` line above): no stroke, ⛔ no second request comment.`);
+    // Idempotent (header): a pull already whole — label on, every approver covered, a brief on the thread — is not
+    // handed off twice. With no brief on the thread the request comment is still owed (H48's brief half).
+    if (labels.addCalls.length === 0 && assignees.addCalls.length === 0 && gate.plan.toRequest.length === 0 && gate.hasBrief) {
+      record(`[${stamp()}] ③ already handed off — \`${GOVERNED_PR_AWAITING_MERGE_LABEL}\` is on, every approver is requested, assigned or has reviewed and a \`## 维护者速读\` brief is on the thread (the \`now\` line above): no stroke, ⛔ no second request comment.`);
       return done(EXIT_OK, { alreadyHandedOff: true, plan: gate.plan });
     }
   }
@@ -2296,7 +2356,7 @@ async function foldStroke(c) {
   if (body === null) {
     record(`[${stamp()}] ③ DRY RUN — no comment file, so no stroke is packed; with the request comment first it would send: ${['comment', ...actions.map((a) => a.op)].join(' → ')}${reviewerOp.length ? ` (reviewers ${render(reviewerOp[0].reviewers)})` : ''}`);
     record(`[${stamp()}] ④ read-back SKIPPED — ⛔ a dry run proves the PLAN and never the board.`);
-    return done(EXIT_OK, { dryRun: true, plan: gate?.plan ?? null });
+    return done(dryRunExit(gate), { dryRun: true, plan: gate?.plan ?? null });
   }
   const packed = packRequest({ repo, session: route.session, actions, now: () => c.clock().getTime() });
   if (!packed.ok) {
@@ -2308,7 +2368,7 @@ async function foldStroke(c) {
   if (options.dryRun) {
     record(`[${stamp()}] ③ DRY RUN — nothing sent. Payload: ${JSON.stringify(packed.payload)}`);
     record(`[${stamp()}] ④ read-back SKIPPED — ⛔ a dry run proves the PLAN and never the board.`);
-    return done(EXIT_OK, { dryRun: true, payload: packed.payload });
+    return done(dryRunExit(gate), { dryRun: true, payload: packed.payload });
   }
   const sentAt = c.clock().getTime();
   const sent = await c.send(packed.payload, { token: TOKEN, judge: readBackJudge(), log: (line) => record(`      ${line}`) });
@@ -2820,6 +2880,7 @@ export function fakeBoard(initial = {}) {
     if (op === 'contents-read') {
       const file = decodeURIComponent(path0(path));
       if (!(file in board.files)) return wrap(404, { message: 'Not Found' });
+      if (typeof board.files[file] === 'object') return wrap(board.files[file].status, { message: 'fixture: a read the platform did not answer' });
       return wrap(200, { path: file, encoding: 'base64', content: Buffer.from(board.files[file], 'utf8').toString('base64') });
     }
     if (op === 'reviews-list') {
@@ -3103,7 +3164,7 @@ const KIND_BATTERY = 'the kind rule: no pm state added to a pull request, no `pm
 const LAND_DOGFOOD_BATTERY = "the --land dogfood gate: a `!` title or a `(narrowing)` arm lands only on a trusted newest os-dev-report whose dogfood_battery names the head or a first-parent ancestor reached over merges of the base alone; every NOT MEASURED refuses before any send; an unmarked pull, or one in a repository with no battery, is not judged";
 const STATELESS_BATTERY = 'the stateless write: an OPEN card never loses its last pm state unless the same write adds a state or needs-user-decision or closes it, a parked card never keeps an assignee a state or assignee move left there, a release stays legal — before the transport, zero writes';
 const HAND_SET_BATTERY = "the hand-set grade: a `priority:*` whose newest `labeled` event is not the fleet's (no app, no bot actor), or is the fleet's with its own `Ruling-ref: <that grade>` fold beside it, is never changed — refused at step ② with zero writes unless the folded comment's `Ruling-ref:` names the grade it writes";
-const HANDOFF_BATTERY = "--handoff: the Tier H hand-off — request comment, pm:awaiting-merge, the author-approver assigned and the rest requested — as ONE relay stroke, refused with zero writes off Tier H (or the size limb) or without a seat ACCEPT newer than the head and a same-head trusted PASS on the PR or its card at the tier its face owes, read back with the H43 and H48 rows themselves on a slice that carries the size limb; idempotent, never the seat's own account; --dry-run the per-round reading";
+const HANDOFF_BATTERY = "--handoff: the Tier H hand-off — request comment, pm:awaiting-merge, the author-approver assigned and the rest requested — as ONE relay stroke, refused with zero writes off Tier H, the size limb or a declared narrowing (the narrowed leg), or without a seat ACCEPT newer than the head and a same-head trusted PASS on the PR or its card at the tier its face owes, read back with the H43 and H48 rows themselves on a slice that carries the size limb; idempotent only with the brief on the thread, never the seat's own account; --dry-run the per-round reading, exit 7 while owed";
 const SELF_TEST_BATTERIES = Object.freeze({
   'the re-exec guard: the name this tool sets, and the patrol name that must not silence it': 11,
   'the arithmetic: union, difference, and the two idempotent no-ops': 12,
@@ -3125,7 +3186,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // Raised 65 → 70 with the battery repositories: the pure predicate, the zero-read gate, cloud `(narrowing)` and `!` landing, objectstack still refusing.
   [LAND_DOGFOOD_BATTERY]: 70,
   [HAND_SET_BATTERY]: 42,
-  [HANDOFF_BATTERY]: 43,
+  [HANDOFF_BATTERY]: 59,
 });
 const SELF_TEST_BATTERY_FLOOR = 19;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -4076,7 +4137,7 @@ export async function selfTest() {
     ], [false, false, false, false, true, [GOVERNED_PR_AWAITING_MERGE_LABEL]]);
 
     // The tier reading, pure.
-    const verdictOf = (json) => handoffTierVerdict({ exit: 3, json });
+    const verdictOf = (json, declarations = []) => handoffTierVerdict({ exit: 3, json }, declarations);
     t('the tier: Tier H and the size limb proceed; Tier S, ungoverned and a fork refuse; no verdict object is UNREAD', [
       verdictOf({ governed: true, tier: 'H', matched: H_SLICE }).ok,
       verdictOf({ governed: false, tier: null, size: { exceeds: true, lifted: null, changedLines: 3100, threshold: 3000 } }).ok,
@@ -4161,7 +4222,9 @@ export async function selfTest() {
     // The per-round reading: --dry-run with no comment file, zero sends, the two rows printed.
     const neverSend = async () => { throw new Error('a dry run must not dispatch'); };
     const dry = await hand(board(), { argv: ['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--handoff', '--dry-run'], send: neverSend });
-    t('⭐ --handoff --dry-run with NO comment file reads the pull, prints now H43 / now H48 and the stroke, sends nothing, exit 0', [dry.exit, dry.res.dryRun, dry.text.includes('② now H43 ✗ · now H48 ✗'), dry.text.includes('comment → labels_add → assign → pr_request_reviewers'), writesOf(dry).length], [EXIT_OK, true, true, true, 0], dry.text.slice(-600));
+    t('⭐ --handoff --dry-run with NO comment file reads the pull, prints now H43 / now H48 and the stroke, sends nothing, exit 7 — the hand-off is OWED', [dry.exit, dry.res.dryRun, dry.text.includes('② now H43 ✗ · now H48 ✗'), dry.text.includes('comment → labels_add → assign → pr_request_reviewers'), writesOf(dry).length], [EXIT_HANDOFF_OWED, true, true, true, 0], dry.text.slice(-600));
+    const dryFile = await hand(board(), { argv: [...argv, '--dry-run'], send: neverSend });
+    t('…and a dry run WITH the request file packs the stroke and exits 7 on the same ✗ rows, never 0', [dryFile.exit, dryFile.text.includes('Payload:'), writesOf(dryFile).length], [EXIT_HANDOFF_OWED, true, 0]);
     const dryDone = await hand(ok.fake.board, { argv: ['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--handoff', '--dry-run'], send: neverSend });
     t('…and on the pull AFTER the hand-off it reads ✓ ✓ and plans nothing to request', [dryDone.exit, dryDone.text.includes('② now H43 ✓ · now H48 ✓'), dryDone.res.plan?.toRequest, dryDone.res.plan?.toAssign], [EXIT_OK, true, [], []], dryDone.text.slice(-600));
 
@@ -4182,16 +4245,70 @@ export async function selfTest() {
     t('…control: the same pull with a CONTRACT_REVIEW_TIER PASS is refused — the face\'s tier is EXACT, in either direction', [...zero(sizedAtContract), sizedAtContract.text.includes('the `declaration` face owes `Served-tier: TIER_DEFAULT`')], [EXIT_USAGE, 0, 0, true]);
     const narrowing = await hand(codeBoard({ files: { '.changeset/x.md': '---\n---\n\nClause-②: no (narrowing)\nMetadata-protocol: narrowed\n' } }), { tier: SIZE([...CODE_PATHS, '.changeset/x.md']) });
     t('…and a committed changeset declaring `(narrowing)` moves the face, read off the head: the TIER_DEFAULT PASS no longer stands', [...zero(narrowing), narrowing.text.includes('the `narrowing` face owes')], [EXIT_USAGE, 0, 0, true]);
-    const SIZE_SLICE = handoffSlice(handoffTierVerdict(await SIZE()()), CODE_PATHS);
+    const SIZE_SLICE = handoffSlice(handoffTierVerdict(await SIZE()(), []), CODE_PATHS);
     const sizedDue = { ...handoffOf(codeBoard()), state: 'due', passed: true };
     t('⭐ control for the rows on the size limb: the register\'s own slice is EMPTY there, so both rows stand down and would read ✓ with nobody asked', [rowsOn(fakeBoard(codeBoard()).board, [], sizedDue)], [{ h43: null, h48: null }]);
     t('…the hand-off slice carries the size limb, so the same pull BEFORE the hand-off fires both rows, and the board AFTER reads null on both', [Object.values(rowsOn(fakeBoard(codeBoard()).board, SIZE_SLICE, sizedDue)).map((v) => v !== null), rowsOn(sized.fake.board, SIZE_SLICE, sizedDue)], [[true, true], { h43: null, h48: null }]);
     const sizedDry = await hand(codeBoard(), { tier: SIZE(), argv: ['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--handoff', '--dry-run'], send: neverSend });
-    t('…and the per-round dry run on that pull reads `now H43 ✗ · now H48 ✗`, never a stand-down ✓', [sizedDry.exit, sizedDry.text.includes('② now H43 ✗ · now H48 ✗'), sized.text.includes('④ H43 ✓'), sized.text.includes('④ H48 ✓')], [EXIT_OK, true, true, true]);
+    t('…and the per-round dry run on that pull reads `now H43 ✗ · now H48 ✗` (exit 7), never a stand-down ✓', [sizedDry.exit, sizedDry.text.includes('② now H43 ✗ · now H48 ✗'), sized.text.includes('④ H43 ✓'), sized.text.includes('④ H48 ✓')], [EXIT_HANDOFF_OWED, true, true, true]);
+
+    // M1 — the NARROWED leg: a declared narrowing, no governed path, under the size threshold, lands by the maintainer.
+    const UNGOVERNED = (paths = CODE_PATHS, over = {}) => reading({ repo: 'objectstack', governed: false, tier: null, matched: [], hitPaths: [], clearPaths: paths, size: { exceeds: false, lifted: null, changedLines: 40, threshold: 3000 }, fork: { isFork: false }, ...over });
+    const NARROW_BODY = 'Fixes #35\n\nClause-②: no\nMetadata-protocol: narrowed\n';
+    const DECL = [{ key: 'Metadata-protocol', line: 'Metadata-protocol: narrowed', where: 'the PR body' }];
+    t('the tier, narrowed: a declaration admits an ungoverned or Tier S pull on the `narrowed` route; none refuses; an unread list is UNREAD; Tier H needs none', [
+      verdictOf({ governed: false, tier: null, size: { exceeds: false } }, DECL).route,
+      verdictOf({ governed: true, tier: 'S', size: { exceeds: false } }, DECL).route,
+      verdictOf({ governed: false, tier: null, size: { exceeds: true, changedLines: 3100, threshold: 3000 } }, DECL).narrowing,
+      verdictOf({ governed: false, tier: null, size: { exceeds: false } }, []).ok,
+      handoffTierVerdict({ exit: 0, json: { governed: false, tier: null, size: { exceeds: false } } }).unread,
+      handoffOwesDeclarations({ json: { governed: true, tier: 'H' } }),
+      handoffOwesDeclarations({ json: { governed: true, tier: 'S' } }),
+    ], ['narrowed', 'narrowed', true, false, true, false, true]);
+    const narrowed = await hand(board({ body: NARROW_BODY }), { tier: UNGOVERNED() });
+    t('⭐ a narrowing declared on the `Metadata-protocol:` line beside a bare `Clause-②: no`, no governed path, 40 lines: HANDED OFF — all three written, exit 0', [narrowed.exit, narrowed.sent[0]?.actions.map((a) => a.op), narrowed.text.includes('narrowed leg'), narrowed.text.includes('the `narrowing` face at `Served-tier: CONTRACT_REVIEW_TIER`')], [EXIT_OK, ['comment', 'labels_add', 'assign', 'pr_request_reviewers'], true, true], narrowed.text.slice(-900));
+    t('…and the board after passes H43 and H48 on the narrowed slice, read back on their own lines', [narrowed.text.includes('④ H43 ✓'), narrowed.text.includes('④ H48 ✓'), narrowed.text.includes('② now H43 ✗ · now H48 ✗')], [true, true, true]);
+    const notNarrowed = await hand(board({ body: 'Fixes #35\n\nClause-②: no\nMetadata-protocol: none\n' }), { tier: UNGOVERNED() });
+    t('⭐ control: the same pull declaring `none` is NOT governed and refused, exit 2, zero sends', [...zero(notNarrowed), notNarrowed.text.includes('no narrowing is declared')], [EXIT_USAGE, 0, 0, true]);
+    const narrowedS = await hand(board({ body: NARROW_BODY }), { tier: TIER_S });
+    t('…a Tier S pull that declares a narrowing is handed off too (the narrowed leg owes a human half whatever the register says)', [narrowedS.exit, narrowedS.sent.length], [EXIT_OK, 1], narrowedS.text.slice(-600));
+    const narrowedLow = await hand(board({ body: NARROW_BODY, comments: [row(501, '2026-11-08T14:00:00Z', RECORD()), row(502, '2026-11-08T14:10:00Z', PASS(HEAD, '`TIER_DEFAULT`'))] }), { tier: UNGOVERNED() });
+    t('⭐ S3: the narrowing face is held from the `Metadata-protocol:` line, so a TIER_DEFAULT PASS is refused there — the guard\'s `narrowingDeclared`', [...zero(narrowedLow), narrowedLow.text.includes('the `narrowing` face owes `Served-tier: CONTRACT_REVIEW_TIER`')], [EXIT_USAGE, 0, 0, true]);
+    const CS = '.changeset/narrow.md';
+    const narrowedCs = await hand(board({ body: 'Fixes #35\n\nMetadata-protocol: none\n', files: { [CS]: '---\n---\n\nMetadata-protocol: narrowed\n' } }), { tier: UNGOVERNED([...CODE_PATHS, CS]) });
+    t('…a narrowing declared only in a committed changeset, read at the head, is the same population: exit 0', [narrowedCs.exit, narrowedCs.text.includes(`\`${CS}\``)], [EXIT_OK, true], narrowedCs.text.slice(-600));
+    const NARROW_SLICE = handoffSlice(handoffTierVerdict(await UNGOVERNED()(), DECL), CODE_PATHS);
+    const narrowDue = { ...handoffOf(board()), state: 'due', passed: true };
+    t('⭐ control for the rows on the narrowed leg: the register\'s slice is empty, both rows stand down; the hand-off slice fires both before', [rowsOn(fakeBoard(board()).board, [], narrowDue), Object.values(rowsOn(fakeBoard(board()).board, NARROW_SLICE, narrowDue)).map((v) => v !== null)], [{ h43: null, h48: null }, [true, true]]);
+
+    // S1 — a changeset the head does not hold declares nothing; the tier route reads none.
+    const GONE = '.changeset/gone.md';
+    const deleted = await hand(codeBoard(), { tier: SIZE([...CODE_PATHS, GONE]) });
+    t('⭐ a size-limb pull that DELETES (or renames away) a changeset: the 404 at the head declares nothing, the hand-off proceeds, exit 0', [deleted.exit, deleted.sent.length], [EXIT_OK, 1], deleted.text.slice(-600));
+    const brokenRead = await hand(codeBoard({ files: { [GONE]: { status: 502 } } }), { tier: SIZE([...CODE_PATHS, GONE]) });
+    t('…control: any other failed read of a changeset is NOT MEASURED, exit 3, zero sends', [...zero(brokenRead), brokenRead.text.includes('PREREQUISITE NOT MET')], [EXIT_PREREQUISITE, 0, 0, true]);
+    const tierWithCs = await hand(board(), { tier: reading({ repo: 'objectstack', governed: true, tier: GOVERNED_TIER_H, matched: H_SLICE, hitPaths: H_SLICE[0].files, clearPaths: [GONE], size: { exceeds: false }, fork: { isFork: false } }) });
+    t('…and on the TIER route no changeset is read at all: exit 0, zero contents reads', [tierWithCs.exit, tierWithCs.fake.calls.filter((c) => c.path.includes('/contents/')).length], [EXIT_OK, 0]);
+
+    // S3 — a path lifted as a pure regeneration is still on the face reviewFace reads.
+    const REGEN = 'skills/objectstack-ui/references/react-blocks.md';
+    const liftedRead = reading({ repo: 'objectstack', governed: false, tier: null, matched: [], hitPaths: [], clearPaths: CODE_PATHS, exceptions: [{ path: REGEN, pureRegeneration: true }], size: { exceeds: true, lifted: null, changedLines: 3400, threshold: 3000 }, fork: { isFork: false } });
+    const regenLow = await hand(codeBoard(), { tier: liftedRead });
+    t('⭐ S3: a size-limb pull whose only register hit was LIFTED as a pure regeneration is on the `rules` face, pre-lift, as the guard reads it: TIER_DEFAULT refused', [...zero(regenLow), regenLow.text.includes('the `rules` face owes `Served-tier: CONTRACT_REVIEW_TIER`')], [EXIT_USAGE, 0, 0, true], regenLow.text.slice(-600));
+    const regenAt = await hand(board(), { tier: liftedRead });
+    t('…control: the same pull with a CONTRACT_REVIEW_TIER PASS is handed off, exit 0', [regenAt.exit, regenAt.sent.length], [EXIT_OK, 1]);
+
+    // S2 — "whole" includes the brief on the thread.
+    const coveredNoBrief = { labels: ['domain:skills', GOVERNED_PR_AWAITING_MERGE_LABEL], assignees: ['os-zhuang'], requested: ['os-second'], comments: noBrief };
+    const owed = await hand(board(coveredNoBrief), { request: BRIEF_REQUEST });
+    t('⭐ S2: label on and every approver covered but NO brief on the thread — the request is still owed: ONE dispatch, the comment alone, H48 ✓ after, exit 0', [owed.exit, owed.sent.length, owed.sent[0]?.actions.map((a) => a.op), owed.text.includes('already handed off'), owed.text.includes('④ H48 ✓'), rowsOn(owed.fake.board).h48], [EXIT_OK, 1, ['comment'], false, true, null], owed.text.slice(-700));
+    const owedDry = await hand(board(coveredNoBrief), { argv: ['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--handoff', '--dry-run'], send: neverSend });
+    t('…and the per-round dry run on that pull never says it is whole: `now H48 ✗`, exit 7', [owedDry.exit, owedDry.text.includes('already handed off'), owedDry.text.includes('now H48 ✗')], [EXIT_HANDOFF_OWED, false, true]);
 
     // The rule this mode writes is the skill's, pinned as substrings so a reworded rule reds here.
     const skill = readFileSync(new URL(HANDOFF_RULE_PATH, REPO_ROOT), 'utf8');
-    t('the skill\'s hand-off line points at this ONE command, and the author-assign rule it enforces is still the skill\'s', [skill.includes('label-write.mjs --handoff'), skill.includes('作者是审批人 ⇒ `assign` 它'), skill.includes('Tier S 不交人')], [true, true, true]);
+    const perRound = readFileSync(new URL('.claude/skills/pm-dispatch/references/execution-duties.md', REPO_ROOT), 'utf8');
+    t('the skill\'s hand-off line points at this ONE command, the per-round reader (execution-duties 四件读数器) at its dry run, and the author-assign rule it enforces is still the skill\'s', [skill.includes('label-write.mjs --handoff'), perRound.includes('四件读数器:每 PR 跑 `label-write.mjs --issue PR --handoff --dry-run`'), skill.includes('作者是审批人 ⇒ `assign` 它'), skill.includes('Tier S 不交人')], [true, true, true, true]);
   }
 
   // ── the floor, BEFORE the verdict ────────────────────────────────────────
