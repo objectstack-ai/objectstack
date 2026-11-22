@@ -126,6 +126,7 @@ const LEGITIMATE_IDENTITIES: Record<string, string> = {
   // value is the hole alone — a fit decision held by app-shell's
   // `appTileOpenedLine-12601.test.ts`, not an omission.
   'home.appOpened': 'Tile last-opened line — the bare `{{time}}` hole where no verb fits the tile.',
+  'console.changeOwner.failure': 'Change Owner report row — the row id and the server\'s own sentence joined by a colon, a format string with no word to translate; zh-Hans and fr use their own colon (objectstack#35403).',
 
   // Loanwords these packs have adopted as their OWN vocabulary (checked against
   // their neighbours: zh writes `Logo 链接` / `Logo 已上传…`, ru writes `Email подтверждён`).

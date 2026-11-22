@@ -338,7 +338,15 @@ function startVerdict(
   return answer;
 }
 
-export type RecordOperation = 'update' | 'delete';
+/**
+ * The record-grained operations this hook asks about. `transfer` is the
+ * Change Owner action's permission half (objectstack#35403): the explain
+ * engine's verdict for a change of the record's owner — edit on the record and
+ * the transfer grant (`allowTransfer`, or `modifyAllRecords`). A caller that
+ * offers Change Owner reads it three-state ({@link useRecordVerdict}) and
+ * offers the action only on a definite `true`.
+ */
+export type RecordOperation = 'update' | 'delete' | 'transfer';
 
 /**
  * objectstack#27627 — the record page's ONE read (`DataSource.getRecordPage`)

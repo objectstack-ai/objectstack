@@ -1355,11 +1355,11 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       navigation: {
         label: "Navigation",
-        helpText: "Configuration de la navigation au clic sur un élément (tiroir par défaut, page, new_window ou none)"
+        helpText: "Configuration de la navigation au clic sur un élément : la taille du tiroir, et `preventNavigation` pour une liste dont les lignes n'ouvrent rien (`mode` est obsolète — le nom de l'enregistrement ouvre la page, l'icône au survol le panneau latéral)"
       },
       "navigation.mode": {
         label: "Mode",
-        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
+        helpText: "[OBSOLÈTE] Sur la liste d'un objet (une vue de liste, les `listViews` d'un objet), ne détermine plus la façon dont un enregistrement s'ouvre : dans la console, pour tous les lecteurs, le nom de l'enregistrement ouvre la page complète et l'icône qui apparaît à côté au survol ouvre le panneau latéral. Là, `drawer`, `page` et `new_window` sont toujours analysés et ne changent rien, omettez donc la clé ; `none` signifie toujours que les lignes n'ouvrent rien — préférez `preventNavigation: true`. Un bloc de page qui porte `navigation` (un bloc de liste, la chronologie, une vue intégrée) respecte toujours chaque valeur."
       },
       "navigation.preventNavigation": {
         label: "Empêcher la navigation",
