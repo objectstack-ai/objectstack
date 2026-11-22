@@ -17,7 +17,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { bindDetailRowLockHook, bindRecordDeleteCancelHook } from './lifecycle-hooks.js';
-import type { EngineQueryOptions } from '@objectstack/spec/data';
+import type { EngineDeleteOptions, EngineQueryOptions } from '@objectstack/spec/data';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const opportunity = {
@@ -311,7 +311,7 @@ describe('a locked record\'s lines are locked with it — deleting the record it
 
   it('the held record is deleted with its lines by the caller, and its pending request is cancelled', async () => {
     // The bundle line carries a second cascading relation, so it is not this case's: clear it first.
-    await engine.delete('bundle_line', { where: { opportunity: lockedId }, multi: true, ...SYSTEM } as any);
+    await engine.delete('bundle_line', { where: { opportunity: lockedId }, multi: true, context: { isSystem: true } } satisfies EngineDeleteOptions);
     expect(await refusal(() => engine.delete('opportunity', { where: { id: lockedId }, ...USER }))).toBeNull();
     expect(await engine.findOne('opportunity', { where: { id: lockedId } })).toBeFalsy();
     expect(await linesOf('opportunity_line', lockedId)).toHaveLength(0);
@@ -341,7 +341,7 @@ describe('a locked record\'s lines are locked with it — deleting the record it
   });
 
   it('FAIL-CLOSED — a junction under two cascading masters: the held record\'s own delete is refused, nothing removed', async () => {
-    await engine.delete('bundle_line', { where: { opportunity: lockedId }, multi: true, ...SYSTEM } as any);
+    await engine.delete('bundle_line', { where: { opportunity: lockedId }, multi: true, context: { isSystem: true } } satisfies EngineDeleteOptions);
     const contactId = String((await engine.insert('contact', { name: 'Ada' }, SYSTEM)).id);
     await engine.insert('deal_contact', { opportunity: lockedId, contact: contactId }, SYSTEM);
     await expectHeldDeleteRefusedIntact(await refusal(() => engine.delete('opportunity', { where: { id: lockedId }, ...USER })));
@@ -432,7 +432,7 @@ describe('a locked record\'s lines are locked with it — without a transaction 
   const linesOf = async (opp: string) =>
     engine.find('opportunity_line', { where: { opportunity: opp }, context: { isSystem: true } } satisfies EngineQueryOptions);
   const requestStatus = async () =>
-    (await engine.findOne('sys_approval_request', { where: { record_id: lockedId }, context: { isSystem: true } } as any))?.status;
+    (await engine.findOne('sys_approval_request', { where: { record_id: lockedId }, context: { isSystem: true } } satisfies EngineQueryOptions))?.status;
 
   it('a held record with a later `restrict` row: the delete is refused RECORD_LOCKED; record, lines and pending request all stay', async () => {
     await engine.insert('opportunity_hold', { opportunity: lockedId }, SYSTEM);
