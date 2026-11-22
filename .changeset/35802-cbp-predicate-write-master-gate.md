@@ -24,7 +24,7 @@ What does not change:
 
 - A predicate write reaches only the rows its predicate matches that the caller can read, and a predicate matching more than 10,000 of them is refused before anything is written.
 - It is refused whole, with `PERMISSION_DENIED` / 403 and nothing written, when it reaches a detail row under a master the caller may not edit (or may not read, where the detail declares `writeRequiresMasterRead`).
-- A detail row that names no master (an optional master) is written by its owner or a Modify All holder; a predicate write that reaches such a row of someone else's is refused whole.
+- A detail row that names no master (an optional master) is written by its owner or a Modify All holder; a predicate write that reaches such a row the caller can read and may not write is refused whole.
 - An app-authored row-level policy on the detail binds every row.
 - A write made on another user's behalf keeps the floor for both principals, as its by-id write does.
 - `sharing.controlledByParent.ownerMayEdit` widens a by-id update only: a predicate update still needs edit on the master.
