@@ -2,8 +2,8 @@
   "number": 35897,
   "kind": "issue",
   "title": "relatedLists 管记录页页签的显示和顺序：声明了就只显示列出来的；附件、审批、动态用对象名 sys_attachment、sys_approval_request、sys_activity 列进来",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -11,7 +11,7 @@
     "type": "Bot"
   },
   "labels": [
-    "area:records",
+    "area:build",
     "domain:spec",
     "enhancement",
     "pm:dispatched",
@@ -21,11 +21,15 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-20T17:27:43Z",
-  "updated_at": "2026-11-20T19:11:58Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T02:14:16Z",
+  "closed_at": "2026-11-22T02:14:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35897",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35896（专题：记录页的页签和字段分组改由父对象一处声明，维护者直派）。⛔ 不是认领。完整的元数据例子在父单。\n\n维护者 2026-11-20 至 21 原话：「但是你看右侧，他显示哪些子表都是通过tab配置出来的。删除tab就是不现实。」（意为不显示）「其实除了 overview，我们直接用 relatedLists 是不是就可以。」「三个内置项，是不是可以直接用对应的对象名」「按对象名这版，立专题」。\n\n## 现状（主干 `8c18a362a2`）\n\n- `relatedLists`（`packages/spec/src/data/object.zod.ts:4470`）只管顺序：列出来的排前面，没列的跟在后面照样出现。规范的说明里写着「It orders; it does not show or hide」。合并逻辑在 `ui/packages/app-shell/src/utils/deriveRelatedLists.ts:269`（`resolveRelatedListOrder`）。\n- 想让一张子表不出现，要去**子对象**的关系字段上写 `relatedList: false`。\n- 附件、审批、动态三个页签不在 `relatedLists` 里，顺序写死：全部子表之后依次是附件、审批、动态（`ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts:1064-1080`）。\n- 每一项只能是子对象名或「对象.字段」。`sys_`、`cloud_`、`ai_` 开头的名字构建时不判断是否存在，留给运行时，所以今天写 `'sys_attachment'` 不会被拒绝，只是页面不认它。\n\n## 要做的\n\n1. **没声明 `relatedLists`**：和现在完全一样，全部子表自动显示（主从在前、查找在后），然后附件、审批、动态。\n2. **声明了 `relatedLists`**：记录页的页签只显示列出来的，按列的顺序。从列表里拿掉一项就是不显示。\n3. **三个内置页签用对象名列进来**：\n   - `'sys_attachment'` → 附件页签\n   - `'sys_approval_request'` → 审批页签\n   - `'sys_activity'` → 动态页签（活动、讨论、变更合成的那一条流；三部分各自有没有，仍由对象上的三个开关决定）\n4. 这三个名字映射到**现有的三种专门画法**（文件行、审批步骤、时间流），⛔ 不要把它们当成普通子表去查数据画成表格。\n5. 这三项只能用简写，不能带列。`'sys_comment'`、`'sys_audit_log'` 不作为页签名，写了在校验时提示改用 `'sys_activity'`。\n6. 各自原有的条件照旧叠加：附件要对象上开了 `enable.files` 才显示（没开，列了也不显示）；审批要这条记录有过审批单才显示。\n7. 关系字段上的 `relatedList: false` 继续认：两边任何一边说不显示就不显示。\n8. Studio 的「相关列表」编辑器（`ui/packages/app-shell/src/views/studio-design/RelatedListsEditor.tsx`）跟着改：能加入、拿掉、拖动，三个内置页签和子表列在一起；还没加进来的子表明显列出。\n9. 规范说明、迁移登记、升级说明同步更新：这是 `relatedLists` 含义的变化（从「只排序」到「声明了就以它为准」）。\n\n## 协调席加的（维护者没有逐条表态，有异议以维护者为准）\n\n- **审批、动态即使没列也出现**，排在列出的各项之后；只能通过列进去来调位置，不能拿掉。理由：避免有人把审批藏掉。附件可以拿掉。\n- 声明了之后，同一个包里后来新建的子表不自动出现，要列进去才显示。\n- 来自**扩展包**的子表例外，自动出现（见父单子卡 4）。\n\n## 影响面\n\n仓库示例和 HotCRM 里没有对象声明 `relatedLists`，所以现有页面都走「没声明」那一条，不会变。已经声明了的第三方对象会从「没列的也显示」变成「只显示列出来的」，升级说明里要写。\n\n## 不做的\n\n- 不带列和标题（子卡 2）。\n- 不做扩展包的位置声明（子卡 4）。\n- 不动字段区里由分组放进去的子表。\n\n## 验收\n\n- 没声明 `relatedLists` 的对象：页签和改之前逐项相同。\n- 声明 `['task', 'sys_attachment', 'contact']` 且对象开了附件：页签依次是任务、附件、联系人，然后（未列出的）审批在有审批单时出现、动态在最后；其他子表不出现。\n- 把 `'sys_attachment'` 从列表里拿掉：没有附件页签。\n- 列了 `'sys_attachment'` 但对象没开附件：没有附件页签，校验给出一句提示而不是报错。\n- 写 `'sys_comment'`：校验提示改用 `'sys_activity'`。\n- 写一个带列的内置项（`{ list: 'sys_attachment', columns: [...] }`）：校验拒绝。\n- 附件页签仍然是文件行的样子，不是表格。\n- Studio 里拖动、加入、拿掉后保存，记录页页签随之变化。\n\nReader: `domain:spec` 牵头，`domain:ui` 配合。`packages/spec/src/data/object.zod.ts`、`ui/packages/app-shell/src/utils/deriveRelatedLists.ts`、`ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts`、`RelatedListsEditor.tsx`。\n\nDedupe: 见父单。"

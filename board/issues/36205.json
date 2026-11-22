@@ -1,0 +1,32 @@
+{
+  "number": 36205,
+  "kind": "pull_request",
+  "title": "fix(pm-dispatch): a hold is a Blocked-by line on the card, every patrol picks per card, and a card thread confirms CI started (#36203)",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-21T22:57:58Z",
+  "updated_at": "2026-11-21T23:05:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36205",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4Uu6w5evzMUfxv4RcRXpJou7e)_\n\nrepo:objectstack#1 · os-sales · session_01L6bhgXU3aQQzivgaDDU82c\n\nPart of #36203 (items 1-5, the skill text; items 6-7, the scripts, stay on the card)\n\nClause-②: no\nMetadata-protocol: none\nRule-change: yes\n\n## 维护者速读\n\n- 以后席位决定\"这张卡等 #N 之后再做\"时，要在卡上写 `Blocked-by: #N` 并挂 `pm:blocked`，不能只记在记忆里。#N 一合入，现有的解锁扫描就会把卡放回可派。\n- 每轮巡查都要把手上车道和专题的卡逐张过一遍（`card-pick --why`），不再只在\"报队列空\"时才做。没有挡路理由的子卡当轮派出。\n- 卡线程每次推送后 10 分钟内要核对 CI 真的开跑了、PR 没冲突；冲突的 PR 根本不跑 CI，所以先合 main 再推。等 CI 必须设兜底提醒。席位每轮读每个在飞卡 PR 的状态，遇到 0 检查、冲突、2 小时无动静就叫醒线程。\n- 技能文件的字节上限已满，放宽上限要引用你的裁决；裁决到手前，check-skill-line-ratchet 这一项是红的，这是预期的。\n\n## What changes\n\n- `references/filing-gate.md`: the order between same-epic fleet cards is the later card's `Blocked-by:` line, not a preference listed on the epic card. This removes the contradiction with `seat-lifecycle.md` 56.\n- `references/execution-duties.md`: deciding \"this waits for #N\" writes `Blocked-by: #N` + `pm:blocked` on the card in the same stroke, never only in memory or a comment. The ③ status probe covers card threads as well as devs.\n- `references/seat-lifecycle.md`: `card-pick.mjs --order <序> --why` runs every patrol round over the lanes and epics the seat holds, not only when the seat reports an empty queue. A card with no hold reason is dispatched that round.\n- `references/dispatch-runbook.md` (card-thread section), two lines: (1) within 10 min after a push, the thread confirms that Actions started and the PR is not `dirty` (a conflicting PR starts no `pull_request` workflow), else it merges `origin/main` and pushes again; a CI wait sets a `send_later` fallback of at most 30 min. (2) Each round, the seat reads `pr-state.mjs` for every in-flight card PR and wakes the thread that round on zero Actions 30 min after the push, `dirty`, or 2 h with no push and no report.\n\n## Why\n\nThe two misses on 2026-11-21, read in #36203: #35890 / #35892 sat undispatched for 3 h and 8 h after their blockers closed, because the hold lived only in memory. PR #35923 waited 15.5 h on a head with zero Actions runs (it was already `dirty`), and its thread and the seat each waited for the other.\n\n## Verification\n\n- `node scripts/pm/check-skill-line-ratchet.mjs`: RED until the ruling. The four files are 0-3 bytes under their ceilings on `main`, and this adds dispatch-runbook +284, execution-duties +123, seat-lifecycle +6, filing-gate +5 bytes (measured with `wc -c`). The `CEILINGS` rows move by exactly those deltas in the commit that quotes the ruling id; until then, no row moves.\n- No script, workflow or published file changes. No changeset (nothing publishes).\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (No `packages/spec` change.)\n- [x] 2. Every name I added uses the casing for its kind. (None added.)\n- [x] 3. No formatter ran; `pnpm lint` passes. (Markdown only.)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset. (Nothing publishes.)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (Not touched.)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English. (The 维护者速读 section is the maintainer's Chinese summary.)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgXU3aQQzivgaDDU82c\n"
+}

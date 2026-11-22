@@ -2,8 +2,8 @@
   "number": 36075,
   "kind": "issue",
   "title": "评论（一）电脑：评论从「动态」页签拿出来，做成记录页和抽屉右侧的独立评论栏；对一条评论的操作收到一处",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-21T12:21:36Z",
-  "updated_at": "2026-11-21T17:59:51Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T22:16:04Z",
+  "closed_at": "2026-11-21T20:58:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36075",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#36062（专题：评论重做，维护者直派）。第一阶段。⛔ 不是认领。优先级 p2（协调席定的，维护者未指定）。\n\n## 维护者说过的（2026-11-21）\n\n- 「列专题卡，分阶段处理」\n- 「这个专题第一阶段你建议处理哪些功能」\n- 协调席建议第一阶段拆 4 张（电脑评论栏、已解决、手机整页两层、几处小修），并问回复通知要不要提前一起做，维护者：「同意」\n\n## 现状（主干 `c00be39b74`，本机环境浏览器实测，1312 宽）\n\n评论在记录页「动态」页签里，和系统记录混在一条流里，靠「全部、活动、讨论」三个按钮筛；看字段或子表时看不到讨论。抽屉里同样。页签上的数字把系统记录、评论、回复都算进去。鼠标移到评论上，改和删两个图标跟在文字后面，表情和回复在最右边，分成两处。\n\n![现状：评论在「动态」页签里](https://github.com/objectstack-ai/objectstack/blob/c74fdb3edc7d145c3a656861c48a94e740301bc0/comments/ours-timeline.jpg?raw=true)\n\n## 参照（Attio，实测，只参照行为）\n\n![Attio：记录页右侧的评论栏](https://github.com/objectstack-ai/objectstack/blob/c74fdb3edc7d145c3a656861c48a94e740301bc0/comments/attio-record-panel.jpg?raw=true)\n\n![Attio：筛选](https://github.com/objectstack-ai/objectstack/blob/c74fdb3edc7d145c3a656861c48a94e740301bc0/comments/attio-filter.jpg?raw=true)\n\n## 效果图（维护者已同意）\n\n维护者 2026-11-21 看过效果图后：「同意你的效果图，更新issue」。图在设计板图 44，下面是导出的图。图里的操作图标是文字符号代替的，不是最终图标；配色是设计板的深色，实现时跟产品主题走。\n\n![效果图一：电脑记录页，右侧评论栏打开](https://github.com/objectstack-ai/objectstack/blob/2e96b896002169f4e6ee706545587d90eaf0a670/comments/mock-1-record.png?raw=true)\n\n![效果图二：评论栏的三种状态（回复收起和更多菜单；显示已解决；没有评论）](https://github.com/objectstack-ai/objectstack/blob/2e96b896002169f4e6ee706545587d90eaf0a670/comments/mock-2-states.png?raw=true)\n\n\n## 要做的\n\n1. **评论做成独立组件**，记录页和记录抽屉共用（第二阶段列表也要用它，组件不要绑死在记录页里）。\n2. **入口**：记录页头部、抽屉头部各加一个评论图标，带数字。点一下在右侧打开评论栏，再点一下或点栏上的关闭收起。开合状态记在浏览器里。\n3. **评论栏的内容**：标题「评论」；右上角筛选；下面是评论列表，旧的在上新的在下；最下面是输入框，固定在栏底。回复就地展开在原评论下面，不进单独的视图。\n4. **宽度**：栏宽 380。打开时记录内容区让出这 380；窗口宽度小于 1280 时不让位，改成盖在内容上面的抽屉。记录抽屉里打开评论栏时，评论栏占满抽屉右半或整个抽屉（开发按抽屉实际宽度定，在 PR 里写明）。\n5. **「动态」页签只留系统记录**，去掉「全部、活动、讨论」三个按钮和页签里的评论输入框。页签上的数字只数系统记录。\n6. **对一条评论的操作收到右上角一处**，鼠标移上去出现：回复、表情、已解决、更多。更多里是编辑、删除（只对自己的评论，或有权限的人）。\n7. **已解决**的界面在本卡做：对勾按钮标记这一串已解决，默认不显示已解决的串；筛选里「显示已解决」「只看我参与的」；显示出来的已解决串标明谁解决的，可以点对勾恢复。后端字段在 objectstack-ai/objectstack 的「评论（二）」卡；那张没合并前，对勾按钮和筛选先不显示。\n8. **图标上的数字**：未解决的串数（一条第一层评论连同它的回复算一串）。「评论（二）」没合并前，数第一层评论数。\n9. 评论关闭的对象（对象上关了评论开关）不显示图标。\n\n## 不做的\n\n- 不做手机（「评论（三）」卡）。\n- 不做列表里的评论入口（第二阶段）。\n- 不改输入框的格式工具条、提到人、表情的现有行为。\n- 不改评论的权限。\n\n## 验收\n\n- 记录页点头部评论图标：右侧出现评论栏，字段和页签还在原处、可以操作；再点收起。刷新后保持上次的开合状态。\n- 把窗口缩到 1280 以下再打开：评论栏盖在内容上面。\n- 从列表在侧边打开一条记录：抽屉头部有评论图标，能打开评论栏。\n- 「动态」页签里没有评论、没有输入框、没有三个筛选按钮；数字不随发评论变化。\n- 在评论栏里发评论、回复、加表情、编辑、删除，都成功，刷新后还在。\n- 鼠标移到一条评论上：操作都在右上角一处。\n- 「评论（二）」合并后：点对勾，这一串消失，图标数字减一；筛选「显示已解决」后它出现并标着解决人；再点对勾恢复。\n- PR 正文附评论栏打开和收起、窄窗口、抽屉里的截图。\n\n## 协调席自己加的（不是维护者原话）\n\n- 第 2 项开合状态记在浏览器里。\n- 第 4 项的宽度 380、1280 以下改成盖在上面、抽屉里的处理。没有画效果图。\n- 第 8 项里后端没合并前的数法；第 9 项。\n- 回复就地展开，不跟 Attio 进单独视图。\n\n## 没有核对的\n\n- 效果图按 objectstack-ai/objectstack#35890 的结构画：1280 宽时三栏是 300 + 600 + 380，中间的页签区只剩 600，子表列多了会挤。协调席给了三种处理（评论栏打开时字段栏自动收起；保持三栏并排；评论栏盖在内容上面），维护者还没选。没定之前按第 4 项做（三栏并排，1280 以下盖在上面）。\n\n- 评论栏和记录页宽屏布局（objectstack-ai/objectstack#35890，字段钉在左栏）同时出现时的效果，没有画图。#35890 先合并的话，本卡按它的布局让位；有冲突在卡上说。\n\nReader: `domain:ui` 车道。`ui/packages/plugin-detail/src/RecordActivityTimeline.tsx`、`ThreadedReplies.tsx`、`RecordChatterPanel.tsx`、`CommentAuthorControls.tsx`、`ui/packages/app-shell/src/views/RecordDetailView.tsx`（`:3476` 取评论、`:3848` 发回复、`:5716` 把回复交给时间线）。\n\nDedupe: `评论 侧栏`、`评论 重做`（objectstack，open）→ 只有父单 objectstack-ai/objectstack#36062 和暂停的 objectstack-ai/objectstack#35947。\n\n效果图加于 2026-11-21T12:34Z。\n"

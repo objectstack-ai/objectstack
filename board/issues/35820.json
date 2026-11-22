@@ -12,18 +12,20 @@
   },
   "labels": [
     "area:fleet",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-20T09:47:51Z",
-  "updated_at": "2026-11-20T09:56:00Z",
+  "updated_at": "2026-11-21T23:14:04Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35820",
   "body": "repo:objectstack#1 · os-sales · session_01L6bhgWecYFDaW5zEE7pxqo\n\nFiling gate: ③ maintainer-directed (Source: maintainer). Found-in #35819 (the PR for #35760). Ordered by seat repo:objectstack#1 after the os-dev report on #35760 flagged the two routes. ⛔ Not a claim.\n\nGrade line: area:fleet · Task · p2 · reach: every landing seat that merges a PR creating a package whose name differs from an ADR's proposal reads AGENTS.md first and files a separate card · evidence: read (AGENTS.md line 729 at `origin/main` 1a21ce93).\n\n## 维护者速读\n- 要改什么：AGENTS.md 里「新包名与 ADR 写的不一致时，落地席合并后单独立一张 ADR 状态行修订卡」改成「追加到本周 ADR 修订清单卡」。\n- 为什么：#35760 按你的「adr接受你的建议」把技能里的同类做法改成了周卡，AGENTS.md 这一行还是旧做法；AGENTS.md 优先于技能，落地席会照旧单独立卡，周卡省下的卡和批准又回来了。\n- 不改会怎样：同一种 ADR 修订有两条路，席位照 AGENTS.md 走单卡。\n- 要你做什么：PR 好了以后批一次（AGENTS.md 改动需你亲手批，Tier H）。\n\n## Change\n- `AGENTS.md`, Context Routing table, the `packages/services/**` row (line 729 at 1a21ce93) ends: \"the landing seat files that ADR's status-line amendment as its own `domain:skills` card after the merge, citing the merge commit (ruling record 6797014134)\".\n- Replace that clause so the landing seat appends one row to the open \"ADR revisions, week of …\" card (ADR, section, what it says, what is true now, the landing PR, citing the merge commit), opening next week's card if none is open. Keep the rest of the row, and keep ruling record 6797014134 as the provenance of \"the PR follows the precedent and leaves `docs/adr/**` untouched\".\n- Governing rulings (verbatim, maintainer Sales): 6797014134 for the precedent rule itself; 「adr接受你的建议」 (card #35732, folded into #35760 as row 2, 2026-11-20) for the weekly ADR card route, which #35819 writes into `.claude/skills/pm-dispatch/references/execution-duties.md` and `triage-duties.md`.\n- Tier H: `AGENTS.md` is a governed surface outside Tier S. One row; no other file.\n\n## Filing answers\n- Category ③; business reason above; reader: the seat that lands the next package-creating PR (the Context Routing row is what it reads); after this lands, `domain:skills`.\n- Dedupe: `repo:objectstack-ai/objectstack is:issue \"status-line amendment\"` → 74 hits, none open on this row (#32519, closed, is the card that wrote the current clause); `is:issue is:open AGENTS.md \"Context Routing\"` → 2 hits (#35760, #34153), neither on this row; `is:issue 6797014134` → 8 hits, the only open ones #35760 and #34153, neither on this row.\n- Order: after #35819 merges (the weekly ADR card route must be on `main` first)."

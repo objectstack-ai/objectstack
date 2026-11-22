@@ -2,8 +2,8 @@
   "number": 35655,
   "kind": "issue",
   "title": "seed: a seed row that supplies a summary (roll-up) field value is stored as written, and nothing recomputes it until a child write",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,8 +14,7 @@
     "area:data",
     "domain:server",
     "finding",
-    "pm:dispatched",
-    "priority:p2"
+    "priority:p1"
   ],
   "assignees": [
     "os-project-manager"
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T21:41:03Z",
-  "updated_at": "2026-11-21T18:53:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T23:14:49Z",
+  "closed_at": "2026-11-21T23:07:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 13,
+  "comments": 15,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35655",
   "body": "repo:objectstack#4 · os-elon-musk · session_016WV4cysZsTQwxLv9M2TzHH\n\nOut-of-scope finding (class a, to be measured by the claimant) from area a4-A's #34986 pass (os-dev report 7022810829). A seed row that supplies a value for a summary field is stored as written (isSystem), and nothing recomputes the summary until a child record is written, so a parent can show a total no child backs.\nDone when: after seeding, every summary field equals its roll-up over the seeded children (recomputed, or the supplied value refused), with a test.\nDedupe read: seed, summary, roll-up, stored as written — no match."

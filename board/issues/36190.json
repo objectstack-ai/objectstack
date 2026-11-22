@@ -1,0 +1,32 @@
+{
+  "number": 36190,
+  "kind": "issue",
+  "title": "analytics: the native dataset face answers 200 with wrong counts for = / $in / $ne on a single-value image or file field (stored as JSON) where the data door refuses 400",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-21T21:23:09Z",
+  "updated_at": "2026-11-22T02:05:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36190",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5krBqrrgxCYgjXmfbv\n\nFiling gate ① · Source: fleet · found by the seat's contract review of PR #36184 (#36168), record on that PR; outside #36168's `multiple` population.\n\n## What happens\nThe data door refuses the JSON-incompatible comparison operators on a second JSON-column class, `single-value-media`: a single-value `image` / `file` field stored as JSON (`packages/drivers/driver-sql/src/sql-driver-filter-helpers.ts:434-437`). PR #36184's dataset refusal reads only the `multiple` population (`packages/services/service-analytics/src/json-column-comparison-refusal.ts:92-93`, `isJsonStoredShape` in `contains-membership-sql.ts:59-62`), so the native dataset face still answers. Measured on a fresh SQLite deployment, 4 rows, `pic: image`, one row holding `file_1`:\n\n| Filter | Data door | ObjectQL face | Native face | Draft preview |\n|---|---|---|---|---|\n| `{pic: 'file_1'}`, `{pic: {$in: ['file_1']}}` | 400 | 400 | 200, count 0 | 200, count 1 |\n| `{pic: {$ne: 'file_1'}}` | 400 | 400 | 200, count 4 | 200, count 3 |\n\nPre-existing on main. The analytics host has no hook today for the column's storage state, which is why #36184 did not take it.\n\n## Done when\nThe native dataset face (and the draft preview) refuse the same operators, with the same code and sentence, on a single-value media field stored as JSON, through #36184's module; pins on `image` and `file` with a scalar control. Narrows what the door answers ⇒ `Clause-②: no (narrowing)`.\n\nreach: dataset / dashboard filter on an image or file field, measured on SQLite by the reviewer; other dialects to be measured by the claimant.\nBusiness reason: a dashboard filtering on an attachment field shows wrong counts with no error.\nReader: area:reports / domain:server (service-analytics).\nDedupe: `single-value-media dataset` → 0 hits.\nGrade: p2 — same class as #36168, rarer field use (filtering by an attachment value)."
+}

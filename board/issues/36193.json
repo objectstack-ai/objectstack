@@ -1,0 +1,32 @@
+{
+  "number": 36193,
+  "kind": "issue",
+  "title": "评论（六）记录页概览的「最近动态」卡片不再列评论：评论只在评论栏里，卡片标题不再写「讨论」，数字只算系统记录",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-21T22:19:32Z",
+  "updated_at": "2026-11-22T02:17:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36193",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#36062（专题：评论重做，维护者直派）。第一阶段的收尾。⛔ 不是认领。优先级 p2（协调席定的，维护者未指定）。\n\n## 维护者说过的（2026-11-22）\n\n- 协调席验收 #36075 后报告：概览里「最近动态」卡片还列着评论，问要不要立卡去掉。维护者：「立卡去掉」\n\n## 现状（主干 `6c7c6db250`，本机环境浏览器实测，1440 宽，HotCRM 6.5.0 客户记录页）\n\n![概览的最近动态卡片和右侧评论栏同时列出同一条评论](https://github.com/objectstack-ai/objectstack/blob/bcf9c3987a271142951782c599ccdf554efacd13/accept/2026-11-22-overview-activity-card-lists-comments.jpg?raw=true)\n\n- 记录页「概览」页签右边一栏最上面是「最近动态」卡片（objectstack#35596 加的）。卡片里的小标题写「讨论 (3)」，3 = 2 条系统记录 + 1 条评论。\n- 发一条评论、再回一条之后，卡片里列出这条评论，下面还有「1 条回复」。\n- #36075 的评论栏打开时，同一条评论在屏幕上出现两次：中间卡片里一次，右边评论栏里一次。\n- 把这一串标成已解决后，评论栏里它消失了，卡片里它还在。\n\n## 要做的\n\n1. 「最近动态」卡片只列系统记录（创建、字段改动、负责人变更这类），不列评论和回复。\n2. 卡片里的小标题不再写「讨论」，改成和卡片内容相符的叫法（建议就不要这行小标题，卡片标题「最近动态」已经够了）；数字只算系统记录，或者不显示数字。\n3. 没有系统记录时，卡片显示原来的空状态，不因为有评论而显示内容。\n\n## 不做的\n\n- 不改评论栏本身（#36075、#36178 已合并）。\n- 不改「动态」页签。「动态」页签里是否还列评论，按 #36075 的约定走，本卡不重新规定。\n- 不改 HotCRM 的页面配置。\n\n## 验收\n\n- 在一条没有评论的记录上发一条评论并回复一条：概览的「最近动态」卡片内容不变，里面没有这条评论，数字不变。\n- 卡片里看不到「讨论」两个字。\n- 评论栏打开时，同一条评论在屏幕上只出现一次。\n- PR 正文附改动前后的截图（概览页签，评论栏打开）。\n\n## 协调席自己加的（不是维护者原话）\n\n- 第 2 项去掉小标题的建议，第 3 项。维护者只说了「去掉」。\n\n## 没有核对的\n\n- 「动态」页签里现在还列不列评论，这次没有点开看。\n- 抽屉和手机上没有这张卡片（代码注释说抽屉不画右边一栏），没有实测。\n- 卡片的内容来自哪一段代码只看到了开关：`ui/packages/app-shell/src/views/RecordDetailView.tsx:2792` 在评论栏可用时仍把 `discussion` 打开；具体怎么改由车道定。\n\nReader: `domain:ui` 车道。`ui/packages/app-shell/src/views/RecordDetailView.tsx`（`:2792` 起）、`ui/packages/plugin-detail/src/RecordActivityTimeline.tsx`（`:210` 小标题文案 `detail.streamDiscussion`）。\n\nDedupe: `最近动态 评论`、`概览 动态 讨论 评论栏`（objectstack，open）→ 0。\n\nBlocked-by: #36136\n"
+}

@@ -2,8 +2,8 @@
   "number": 36015,
   "kind": "issue",
   "title": "列表格子里单击只选中：去掉邮箱、电话格里的复制按钮；链接和人员标签不在单击时跳转；关联记录标签单击在侧边打开（名称列除外）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-21T07:04:13Z",
-  "updated_at": "2026-11-21T11:23:13Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T23:17:41Z",
+  "closed_at": "2026-11-21T23:17:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

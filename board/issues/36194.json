@@ -1,0 +1,38 @@
+{
+  "number": 36194,
+  "kind": "issue",
+  "title": "列表底部的统计也是草稿：选了统计立即生效但不保存，出现「放弃」和「保存」（现在点了就直接写进视图）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-21T22:26:16Z",
+  "updated_at": "2026-11-22T01:00:57Z",
+  "closed_at": "2026-11-22T01:00:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36194",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35547（列表专题，维护者直派）。补 objectstack-ai/objectstack#35955 漏掉的一项。⛔ 不是认领。优先级 p1（协调席定的，和 #35955 一致）。\n\n## 维护者说过的（2026-11-22）\n\n- 维护者在自己的浏览器里发现：「右侧表格，最下面的统计点击就保存，你真的完整仔细测试过了吗」\n- 协调席复现后建议「统计也改成草稿，和排序筛选一致」，维护者：「按这两条立卡」（另一条是只读视图不显示入口，单独一张卡）\n\n## 为什么漏了\n\n#35955 是协调席写的，第 1 项列了排序、筛选、分组、显示哪些列、列顺序，例外列了列宽、行高、标签页顺序，两边都没有提底部统计。开发照卡做，统计就留在了原来「点了就存」的路上。这是卡的缺口，不是开发做错。\n\n## 现状（主干 `6c7c6db250`，本机环境浏览器实测，1440 宽）\n\n- 自建应用的「客户」列表：点底部「添加统计」选「去重」，页面立刻发出 `PUT /api/v1/meta/view/nb57_customer.list?mode=draft`，没有出现「放弃」「保存」。\n- 同一个页面加一个筛选：不发请求，出现「放弃」「保存」（下图）。两种改动在同一行工具栏上表现不一样。\n\n![同一个列表上加筛选是草稿，有放弃和保存](https://github.com/objectstack-ai/objectstack/blob/e93bc8d1a681fc555359432ce42de71549487051/accept/2026-11-22-filter-draft.jpg?raw=true)\n\n## 参照\n\nAttio 上给一列加底部统计是立即保存（#35955 正文里的实测表）。维护者这次定的是和我们自己的规则一致：列表上的改动都是临时的。所以这一项和 Attio 不同，是有意的。\n\n## 要做的\n\n1. 在列表底部选、换、去掉一列的统计：立即生效（底部马上显示结果），不写进视图，也不写进个人偏好；算进 #35955 的草稿，标签行右边出现「放弃」「保存」。\n2. 「放弃」把统计还原成视图本来的样子。「保存」的两项（保存到这个视图、另存为我的视图）把统计一起存进去，规则照 #35955 和它的 PR 2（objectstack-ai/objectstack#36123）。\n3. 「保存」菜单里列出未保存改动的那一行，把统计也算一项。\n4. 草稿留到什么时候，和 #35955 第 4 项一样：开记录再返回还在；切视图、切对象、刷新就丢。\n\n## 不做的\n\n- 不改统计的种类和算法（objectstack-ai/objectstack#35702 定的不变）。\n- 只读视图上入口显不显示，是另一张卡（和本卡同时立）。\n\n## 验收\n\n- 自建应用的列表上给一列选「去重」：底部显示结果，出现「放弃」「保存」，浏览器网络里没有对视图的写请求。\n- 点「放弃」：统计消失，回到视图原样。\n- 不保存就刷新：统计没了。另一个用户打开同一个视图看不到这个统计。\n- 点「保存 → 保存到这个视图」：刷新后统计还在，另一个用户也能看到。\n- 点「保存 → 另存为我的视图」：新视图带着这个统计，原视图没有。\n- PR 正文附选了统计后工具栏的截图。\n\n## 协调席自己加的（不是维护者原话）\n\n- 第 3、4 项。维护者只同意了「统计也改成草稿」。\n\n## 没有核对的\n\n- 看板、日历等别的视图类型有没有类似的「点了就存」的入口，没有逐个试。\n- 隐藏列、拖列顺序、分组这几项草稿这次也没有实测，只测了筛选。\n\nReader: `domain:ui` 车道，最好是做 #35955 的同一个席位。草稿的写入在 `ui/apps/console` 的 `objectViewListRenderer.tsx`（#36026 的说明里写的），底部统计的入口是 #35702 加的。\n\nDedupe: `添加统计 草稿`、`底部统计 草稿`、`footer calculation draft`（objectstack，open）→ 都是 0。相关：#35955（开着，PR 2 #36123、PR 3 #36133 在途）。"
+}

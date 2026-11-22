@@ -1,0 +1,36 @@
+{
+  "number": 36209,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): an area hands a security card to the seat only under disclosure discipline",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-21T23:09:54Z",
+  "updated_at": "2026-11-21T23:52:35Z",
+  "closed_at": "2026-11-21T23:52:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-21T23:52:33Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36209",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbCxiFE11rsKwyNffJZKYqJs)_\n\nFixes #35792\n\nClause-②: no\nMetadata-protocol: none\nRule-change: ruled\nRuling-ref: 7033659866 — the maintainer's choice on a decision card in the project's cost-review thread, 2026-11-20T07:44:37Z, verbatim and untranslated: option 「只看大小,p1 只管先后」, whose stated consequence reads 「S 卡用子代理,M 卡有区进区,大卡才一卡一线程;有披露纪律的安全卡仍留座位。要立卡改技能这一行。」 (ruling record comment 7033659866 on the routing card it names).\n\n## 维护者速读\n\n- 用户无感:车队调度技能里,分区原先把所有安全卡一律交回席位,现在只交回带披露纪律的那一类,其余安全卡按大小照常分流。\n- 落实维护者「只看大小,p1 只管先后」的裁决,与上一轮已改好的卡线程规则对齐,补上那次没改到的分区规则。\n- 只影响调度代理怎么分流卡片,不碰产品代码;出错可直接撤回。\n- 无\n\n## What changes\n\n- `.claude/skills/pm-dispatch/references/area-lease.md`, the 留道 line: the hand-out closed set `交出闭集` now reads `他道在线席已认领、cloud 路由、披露纪律卡、ADR` instead of `…、安全、ADR`. The term `披露纪律卡` is the one the card-thread section of `references/dispatch-runbook.md` defines (private detail may not leave the seat session), so the two files now agree; a security card without that discipline is routed by size like any other card, because the set is closed.\n- Byte ratchet at headroom 0, no ceiling raise: the +9 bytes are paid for by joining three wrapped list continuations in the same file (the 留道 item's two continuations and the 同系列卡 item's one), which deletes their newline-plus-indent and changes no word. File stays 6586 bytes, ceiling 6586.\n\nRead first (by risk): the 留道 hunk (the one meaning change); the 同系列卡 hunk (whitespace-only join).\n\n## Acceptance notes\n\nSweep of `area-lease.md` for any other line that hands a card out of an area for being `security` alone — none found, nothing else changed:\n- the 不入区 line (big cards, queue watch): size and lane, not security;\n- the 认领前三查 line (遇大卡 ⇒ 交席位): size;\n- the 取卡 line (p0/p1 插队): order only;\n- the 席信箱 line (`安全照 security-findings.md`): routes security FINDINGS to the private-report path, it does not hand a card out of an area.\n\n## Tests\n\nText-only change to a governed skill reference; no tested behaviour moved, so no ablation.\n\n## Verification\n\nTwo-minute check: `grep -n 交出闭集 .claude/skills/pm-dispatch/references/area-lease.md` prints the line ending `cloud 路由、披露纪律卡、ADR。`; `pnpm check:pm-skill-ratchet` prints `area-lease.md is 6586 bytes (ceiling 6586; headroom 0)`.\n\n<details><summary>Local gates at 26f9502d (dispatch-gates --commands, 20 families, --ran reconciled 20/20)</summary>\n\nAll exit 0: check-closing-keyword-parity (+ --self-test), check-comment-mask-corpus, check-harness-current --self-test, lint check:doc-formula-expressions (first run exit 3 PREREQUISITE NOT MET, re-run exit 0 after building formula + lint), check:adr-anchors, check:agent-test-spelling, check:cross-package-test-inputs, check:doc-authoring, check:driver-memory-census, check:gitlink-declared, check:nul-bytes, check:pm-governed-merges, check:pm-record-recognisers, check:pm-settings-deny-roster, check:pm-skill-id-lint (131 files clean), check:pm-skill-ratchet (6586/6586, headroom 0), check:refd-timer-probe, check:skill-frame-sync, check:watch-hint-literal. overlap-check: VERDICT clean exit 0.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n<!-- signed: repo:objectstack#7 · zhuangjianguo · session_01QsR2jTeURPvEm465RcoYEC -->\n"
+}

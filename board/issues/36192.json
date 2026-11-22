@@ -1,0 +1,31 @@
+{
+  "number": 36192,
+  "kind": "issue",
+  "title": "docs site: measure and shrink the Vercel deploy output (~920 MB, ~12.8k files per deploy) — server chunks, prebuilt OG images, per-page payloads",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-21T22:11:15Z",
+  "updated_at": "2026-11-21T22:45:37Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36192",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ③ maintainer-directed · Source: maintainer. Ruling-ref: the maintainer, 2026-11-21 ~22:0xZ, verbatim: 「文档站优化立卡」, after asking 「是哪个网站，一次要上传约 920 MB、1.2 万多个文件，体量不小，如何优化？」. Dedupe: `docs deploy size`, `vercel output size`, `OG image prebuilt` (no open card). ⛔ Not a claim.\n\n## 维护者速读\n- 是什么：公开文档站（`apps/docs`，内容在 `content/docs`，约 500 篇、源文件 13 MB）每 6 小时在 GitHub 上构建、整体上传 Vercel。每次上传约 920 MB、约 1.28 万个文件。\n- 为什么：体积越大，上传越容易断（11-21 两次失败都断在上传中途，见已关的 #36022），构建也越慢。\n- 要做：先量清楚各部分占多少，再把大头砍掉（文档页做成纯静态、预览图按需生成）。\n- 要你做的：无。\n\n## Facts (read on `main`)\n- `.github/workflows/docs-deploy.yml` builds with `vercel build --prod` on the runner and uploads `.vercel/output` with `vercel deploy --prebuilt` (CLI 60.1.3).\n- Seat 4's reading 7065138531 on #36022: green run 44795716824 uploaded 918.3 MB / 12,847 files; the failing runs stopped after the 75% line on `fetch failed` / `Upload aborted`.\n- `apps/docs/next.config.mjs` notes \"589 MB of server chunks against 5.8 MB of client\" (a build-memory measurement), which points at server-side bundles as the largest share.\n- `apps/docs/app/og/docs/[...slug]/route.tsx` prerenders a 1200×630 OG image for every page through `generateStaticParams`.\n- One language (`en`), ~494 docs pages plus blog, `llms.mdx` per page.\n\n## Ask\n1. **Measure.** Add a step after the build that prints the size of `.vercel/output` by top-level part (`static/`, each `functions/*.func`, prerendered pages, OG images), and record one reading on this card.\n2. **Cut the largest share.** Expected: serve the docs pages fully static (no per-page server function), or trim what each function bundles (output file tracing excludes); keep search and any route that truly needs a server.\n3. **OG images.** Generate on request with caching instead of prerendering ~500 at build, unless the reading shows they are small.\n4. Keep every reader-facing behaviour: page URLs, search, `llms.txt` / `llms.mdx`, redirects, headers.\n\n## Done when\n- A before/after reading is on the card, and the deploy output is materially smaller (target: well under half).\n- Docs Deploy stays green on two consecutive scheduled runs after the change.\n\nGrade line: area:build · Task · p2 · size M · reach: every docs deploy (reliability and build time); not urgent, deploys are green today."
+}

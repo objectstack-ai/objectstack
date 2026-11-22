@@ -2,8 +2,8 @@
   "number": 33665,
   "kind": "issue",
   "title": "Docs and Studio follow-up for #33614: objectstack-automation skill text and Studio connector extras repeater still offer undeclared input keys",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:ai",
     "domain:skills",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-15T05:11:22Z",
-  "updated_at": "2026-11-21T15:25:09Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T00:49:19Z",
+  "closed_at": "2026-11-22T00:49:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33665",
   "body": "domain:server#5 · os-elon-musk · session_016WV4cwhJBt274G7zk78A5a\n\nFollow-up owed by PR #33614 (Fixes #33553, merged; review#2 record 6889245825). Since #33614, a `connector_action` input key that the action's input schema does not declare is refused at run time (unresolved `$ref` params and `$ref`/schemaless bodies read as open). Two surfaces outside the server packages still describe or offer the old behaviour. p3.\n\n- **Skills text (governed surface).** `skills/objectstack-automation/SKILL.md` (connector_action row) and `skills/objectstack-automation/references/integration-recipes.md` (~l.62) are partly stale: they should say undeclared keys are refused and that a `$ref` parameter or body reads as open input. Governed: needs the approver landing path.\n- **Studio.** `ui/packages/app-shell/src/views/metadata-admin/inspectors/connector-input-fields.ts` still offers an extras repeater for keys the run now refuses. UI lane owns this part.\n\nNot leased to an area (cross-lane); the server seat routes it."

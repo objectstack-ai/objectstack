@@ -1,0 +1,37 @@
+{
+  "number": 36197,
+  "kind": "pull_request",
+  "title": "docs(spec): the page and action describes say an authored record page is drawn on the desktop full page only (#36180)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:ui",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-21T22:34:53Z",
+  "updated_at": "2026-11-21T23:52:35Z",
+  "closed_at": "2026-11-21T23:52:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-21T23:52:33Z",
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36197",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuWwVEv5jDtmLFK7uQng8UqN)_\n\nrepo:objectstack#1 · os-sales · session_01L6bhgXoCkuUMPfxTyCaYUM\n\nFixes #36180\n\nClause-②: no\nMetadata-protocol: semantic\nSkills-docs: follow-up #36179 — the skills wording for the same rule rides its own domain:skills PR; no skills edit here\n\n## Premise (3 lines, for the claim)\n\nThe seat's claim on the card: comment 7070293547.\n\n1. Since #36150 (PR #36174, main 1208cc87), an object's assigned non-slotted (`full`, `html`, `react`) record page is drawn on the desktop full record page only; a phone and the side preview draw the standard page; a page named in the URL, `sys_approval_request` / `sys_user` (rulings 7066490078, 7066506909) and slotted pages apply on every surface.\n2. The published describes of `kind`, `isDefault`, `apps`, the `page.slots.tabs` tombstone remedy and the action `locations` still read as if the page applies wherever the record opens, and say nothing about `record_section` not being drawn by the standard page.\n3. Describe text and TSDoc only, no shape change: `Metadata-protocol: semantic`, `@objectstack/spec` minor, regenerated `content/docs/references/**`.\n\n## 维护者速读\n\n- 只改规范里的说明文字，不改任何字段、取值或校验。作者在文档和编辑器提示里读到的话，现在和 #36150 上线后的实际表现一致：手写整页（`kind: 'full'`）只在电脑整页生效，手机和右侧预览里画标准页。\n- 动作位置 `record_section` 的说明补了一句：标准页不画它，想让动作在每个地方都能点到，再加 `record_more`。\n- 网址点名的页面、审批请求页和用户页、插槽页三种例外也写进了 `kind` 的说明。\n\n## What changes\n\n- `packages/spec/src/ui/page.zod.ts`\n  - `kind` describe: a new closing paragraph, \"Where it is drawn\", stating the surface rule for an assigned record page of kind `full`, `html` or `react` (`usePageAssignment` hands every non-slotted match to the view as its page; L1-d S1, taken at 1beb27dc), what does not appear off the full page (the page's own blocks, tabs, sections and `record_section` actions; the `record_more` remedy), and the three exceptions (a page named in the URL, the platform's approval request and user pages, `kind: 'slotted'`).\n  - `isDefault` describe: \"the page the record view opens\" becomes \"the page its records open on, on the desktop full record page; on a phone and in the side preview the standard record page is drawn instead (see `kind`)\".\n  - `apps` describe: the app's record view opens this page \"on the desktop full record page (on a phone and in the side preview the standard record page is drawn, see `kind`)\". The pinned opening (\"The apps whose routes open this record page \", `stack-app-record-page.test.ts`) is unchanged.\n  - `page.slots.tabs` tombstone remedy (`PAGE_SLOTS_TABS_REMEDY`, the runtime refusal text): \"`kind: 'full'`, drawn as authored on the desktop full record page (a phone and the side preview draw the standard record page, with the composed strip)\".\n  - The matching TSDoc on the remedy constant, `isDefault`, `apps` and `slots`.\n- `packages/spec/src/ui/action.zod.ts`: the `record_section` line of the location TSDoc and the `locations` describe say the standard record page (phone, side preview, an object with no authored page) does not draw it, and an action that must reach every surface adds `record_more`.\n- Regenerated (`check:generated --fix`, only `check:docs` was stale): `content/docs/references/ui/page.mdx`, `ui/action.mdx`, `data/object.mdx`, `kernel/metadata-plugin.mdx` (the last two embed the action schema's `locations` row).\n- Changeset `36180-authored-record-page-surface-describes.md`: `@objectstack/spec` minor, both declaration lines.\n\nSmall calls made here (no card): the `record_section` note went on the `locations` describe, which is the only describe an author reads for a location (the enum has none); the platform pages are named by what they are (\"the approval request and user pages\"), not by object name, in the describe.\n\n## Why\n\nCard #36180, S1 (should-fix) of the seat's contract review on PR #36174: that PR changed the console only, and the spec text is a governed surface with its own schema-face review.\n\n## Verification\n\n- `pnpm --filter @objectstack/spec build` then `check:generated`: 13 of 14 current, `check:docs` stale → `--fix` → re-check green.\n- `vitest run src/ui/ src/stack-app-record-page` in `packages/spec`: 184 files, 6,587 tests pass.\n- `pnpm --filter @objectstack/spec typecheck`: OK. `check-doc-authoring`: clean (no tracker ids in the new strings).\n- Review: L1-d ACCEPT 7070350000 (S1 taken); Fable schema-face L2 PASS 7070380222 at d23ee9bd, N1/N2 left as accepted deviations; delta at 1beb27dc. The `18.page-slots-tabs-retired.ts` migration text is out of this diff (seat cards it).\n- No `ui/` reader pins the changed strings (`git grep` outside `packages/spec/src` and `content/docs`).\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (describe text only)\n- [x] 2. Every name I added uses the casing for its kind. (no names added)\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English (the 维护者速读 block is the maintainer's summary, in the maintainer's language).\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\nBranch name is the harness-assigned `claude/project-thread-35li9y`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgXoCkuUMPfxTyCaYUM)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgXoCkuUMPfxTyCaYUM\n<!-- signed: repo:objectstack#1 · os-sales · session_01L6bhgXoCkuUMPfxTyCaYUM -->\n"
+}

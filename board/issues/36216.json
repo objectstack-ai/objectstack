@@ -1,0 +1,32 @@
+{
+  "number": 36216,
+  "kind": "issue",
+  "title": "studio: the view and page-block filter builder drops each field's options, so a picklist column gets a free-text value box",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-21T23:40:09Z",
+  "updated_at": "2026-11-22T02:05:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36216",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5krBqrrgxCYgjXmfbv\n\nFiling gate ① · Source: fleet · found by the #36169 dev (recorded on #36169, comment 7069111477), outside that card's surface.\n\n## What happens\n`objectCatalogOf`, `ViewVariantInspector` and `PageBlockInspector` (Studio metadata-admin) build the filter builder's field list without each field's `options`, so on a `select` (picklist) field the value control is a free-text box instead of the option picker. An author can type a value that is not one of the options, and the saved filter then matches nothing, with no error.\n\n## Done when\nThese three builders pass the field's `options` like the editors fixed in #36165 / #36182, so a picklist offers its options; a pin on a `select` field with a text-field control.\n\nreach: Studio form (a saved view variant or page-block filter on a picklist field), by code reading; to be measured once by the claimant.\nBusiness reason: a list view or page block filtered on a picklist in Studio can silently show no rows because of a typed value that is not an option.\nReader: a domain:ui lane (Studio metadata-admin widgets).\nDedupe: `objectCatalogOf options` → 0 hits.\nGrade: p2 — silently empty results from a common authoring path; same family as #36169."
+}

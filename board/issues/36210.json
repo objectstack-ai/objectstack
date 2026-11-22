@@ -1,0 +1,33 @@
+{
+  "number": 36210,
+  "kind": "pull_request",
+  "title": "docs(agents): packages/services row sends a precedent-differing package name to the weekly ADR revisions card",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-21T23:12:43Z",
+  "updated_at": "2026-11-22T01:46:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36210",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbCxiFE11rsKwyNffJZKYqJs)_\n\nFixes #35820\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 用户能看到什么变化:用户无感;落地席读到的规则变了——新包名与设计记录写的不一致时,合并后改为在本周设计记录修订清单卡上追加一行,不再单独立卡。\n- 为什么做:属于车队规则精简;你已同意设计记录修订按周汇总,技能文件已改,这份总规则还写着旧做法,而总规则优先于技能。\n- 出错会怎样:最坏是落地席照新文字走周卡、漏记一行,修订会晚一周;这一行文字可直接撤回。\n- 要你做什么:批准这个改动(总规则文件需你亲手批)。\n\n## What changes\n- `AGENTS.md`, Context Routing table, the `packages/services/**` row, one row only. The clause that sent a precedent-differing package name's ADR status-line amendment to its own `domain:skills` card now sends it to the open \"ADR revisions, week of …\" card as one row (ADR, section, what it says, what is true now, landing PR, merge commit), opening next week's card if none is open.\n- Ruling record 6797014134 stays, now attached to the clause it decided (the PR follows the precedent and leaves `docs/adr/**` untouched). The weekly-card route cites ruling record 7031931263, the comment that folded the weekly-ADR-card row (maintainer: 「adr接受你的建议」) into the card that landed it in `.claude/skills/pm-dispatch/references/execution-duties.md`. No dedicated `Ruling:` record exists for that word; 7031931263 is the earliest comment id carrying it with the row it decides (the first carrier is an issue body, which has no comment id).\n- Byte budget: the first wording put `AGENTS.md` 38 bytes over the `check:pm-skill-ratchet` ceiling; the row was compressed until `AGENTS.md` is 78401 bytes, ceiling 78401, headroom 0. No ceiling moved.\n\n## Tests\nNo code changed; nothing to test or ablate. Gate readings below.\n\n## Acceptance notes\n- Read first: the single changed row in `AGENTS.md` (the `packages/services/**` Context Routing row). Risk hunk: the citation `ruling record 7031931263` (a Ruling-ref comment carrying the maintainer's word as its row 2, not a `Ruling:` record).\n- Two-minute check: `pnpm check:pm-skill-ratchet` prints `AGENTS.md is 78401 bytes (ceiling 78401; headroom 0)` and exits 0.\n- Tier H: `AGENTS.md` lands by the maintainer's approval.\n\n## Verification\n<details><summary>Derived gate families at head 7c337540 (16 of 16, exit 0)</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`, each run with exit captured before any pipe, all `exit 0`: check-closing-keyword-parity (+ `--self-test`), check-comment-mask-corpus, check:adr-anchors, check:agent-test-spelling, check:docs-audit-scope, check:driver-memory-census, check:gitlink-declared, check:nul-bytes, check:pm-governed-merges, check:pm-governed-prose, check:pm-skill-id-lint, check:pm-skill-ratchet, check:refd-timer-probe, check:required-contexts, check:watch-hint-literal.\n\n`--ran` reconciliation: \"16 derived famil(ies) accounted for — 16 run, 0 NOT-MEASURED (a DERIVED zero — all 16 recorded an exit code and none of them is 3).\"\n\n`overlap-check --branch=claude/issue-35820-agents-services-adr-row`: VERDICT clean exit 0.\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QsR2jTeURPvEm465RcoYEC\n\n<!-- signed: repo:objectstack#7 · zhuangjianguo · session_01QsR2jTeURPvEm465RcoYEC -->\n"
+}

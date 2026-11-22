@@ -1,0 +1,38 @@
+{
+  "number": 36195,
+  "kind": "issue",
+  "title": "只读视图的列表底部不显示「添加统计」：现在包里带的视图上照样显示，点了保存失败并弹出英文工程报错",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-21T22:26:43Z",
+  "updated_at": "2026-11-22T01:00:59Z",
+  "closed_at": "2026-11-22T01:00:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36195",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35547（列表专题，维护者直派）。objectstack-ai/objectstack#36048 的一条验收项没有做到。⛔ 不是认领。优先级 p1（协调席定的：装了应用包的环境里每个列表都会碰到）。\n\n## 维护者说过的（2026-11-22）\n\n- 「右侧表格，最下面的统计点击就保存，你真的完整仔细测试过了吗」\n- 协调席复现后报告两个问题并建议「只读视图不显示入口按 #36048 原验收项补上」，维护者：「按这两条立卡」\n\n## 现状（主干 `6c7c6db250`，本机环境浏览器实测，1440 宽，HotCRM 6.5.0）\n\n![在包里带的视图上点底部统计，弹出英文报错](https://github.com/objectstack-ai/objectstack/blob/e93bc8d1a681fc555359432ce42de71549487051/accept/2026-11-22-footer-calc-error.jpg?raw=true)\n\n- HotCRM 销售应用「全部客户」是应用包里带的视图。底部每一列照样显示「+ 添加统计」。\n- 点一列选「去重」：页面发出 `PUT /api/v1/meta/view/crm_account.all_accounts?mode=draft`，失败，右上弹出「保存失败」，下面是一整段英文：`'view/crm_account.all_accounts' ships in 'app.objectstack.hotcrm': save it into 'app.objectstack.hotcrm.custom' …`，里面有包名、ADR 编号和命令行。\n- 同一个视图上加筛选是好的：进草稿，「保存」菜单里只有「另存为我的视图」。说明别的入口知道这个视图不能原地改，只有底部统计不知道。\n- #36048 的验收项写了「只读视图（比如包里带的视图、没有权限的人）：底部没有『+ 添加统计』」。#36048 已关闭，协调席当时报了已验收，这一条其实没有试。\n\n## 要做的\n\n1. 当前用户不能原地改的视图（包里带的、没有权限的），底部不显示「+ 添加统计」，只显示视图已有的统计结果。判断用和筛选、「保存」菜单同一个依据，不另写一套。\n2. 如果「列表底部的统计也是草稿」那张卡（和本卡同时立）先做完：只读视图上可以选统计、进草稿，「保存」里只有「另存为我的视图」。两张卡谁先做，按那时的规则走；最低要求是任何情况下都不出现上面那段报错。\n3. 视图保存被服务端拒绝时，界面不直接显示服务端的英文原文。显示一句中文说明（这个视图来自应用包，不能直接修改，可以另存为我的视图）。\n\n## 不做的\n\n- 不改服务端的拒绝规则（包里带的视图不能原地写，这是对的）。\n- 不改统计的种类。\n\n## 验收\n\n- HotCRM「全部客户」列表：底部没有「+ 添加统计」（或者按第 2 项可以选但进草稿），已有的「平均值」照常显示。\n- 在这个视图上做任何列表操作，都不出现英文的保存失败提示。\n- 自建应用里自己能改的视图：底部入口照常。\n- 没有改视图权限的账号打开自建应用的共享视图：底部没有入口。\n- PR 正文附 HotCRM 视图底部一行的改动前后截图。\n\n## 协调席自己加的（不是维护者原话）\n\n- 第 2 项两张卡的衔接，第 3 项的中文提示。\n\n## 没有核对的\n\n- 没有权限的账号实际看到什么，本机只有一个管理员账号，没有试。\n- 那段报错是哪一层拼出来的，没有读代码。\n\nReader: `domain:ui` 车道。底部统计入口是 objectstack-ai/objectstack#35702 加的，常显是 #36069（#36048）改的。\n\nDedupe: `添加统计 只读视图`、`统计 包 视图 保存失败`（objectstack，open）→ 都是 0。相关：#36048（已关闭）、#35955。"
+}

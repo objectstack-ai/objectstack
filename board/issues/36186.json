@@ -1,0 +1,38 @@
+{
+  "number": 36186,
+  "kind": "issue",
+  "title": "comments: an ordinary member cannot mark another member's thread resolved; the row floor refuses the resolution-only write that ruling 7063285032 allows",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-21T20:36:53Z",
+  "updated_at": "2026-11-22T01:48:18Z",
+  "closed_at": "2026-11-22T01:48:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36186",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\n## 维护者速读\n\n你 11-21 13:26 定了「能看记录的人都能把讨论标成已解决」（7063285032，#36071）。#36104 已合并，但普通成员给**别人**发起的讨论点已解决时，服务器仍然拒绝；只有管理员和发起人自己能标。原因是平台的默认底线规则：普通成员只能改自己创建的数据。#36178 的评论栏已改成只在服务器会答应时才显示 ✓，所以现在没人会看到点了被拒的按钮，但你定的规则对普通成员还没生效。这张卡把它在服务端落实。做法取决于你在座位里那张「能编辑记录的同事，可以改别人评论的文字吗？」卡的答案，所以等那张卡有答案再开工。\n\n## Facts\n\n- Found by the L1-c review on PR #36178 (HOLD 7068026256) and confirmed on the dev rig with the security service on, plain `org_member` principals. A read-only member resolving another member's or an admin's thread gets 403 `PERMISSION_DENIED` on `sys_comment`; resolving their own gets 200.\n- Cause: `owner_only_writes` in `packages/plugins/plugin-security/src/objects/default-permission-sets.ts` (`object: '*'`, `operation: 'update'`, `created_by == current_user.id`, positions `org_member`). The pre-image check refuses the update before plugin-audit's resolution-only limb in `comment-access-hooks.ts` runs. `sys_comment_moderation` widens `delete` only, and its comment says widening the update limb is a separate decision.\n- #36104's acceptance tests ran on a rig with no security service, so they did not see the floor.\n- RLS predicates choose rows, not columns, so a plain `update` twin of `sys_comment_moderation` would also let members edit others' comment bodies (through the hook's dormant author-or-parent-editor limb). That is the open Sales question.\n- Seat-requested review with options, test list and risks: `build-seat1/36075/pr2/fable-decisions.md` in the project folder (问题一).\n\n## What to do (after the Sales answer)\n\n- If record editors may NOT edit others' comments (recommended): add a dedicated resolve door that does only the resolution write (`is_resolved`, `resolved_by`, `resolved_at`): it checks the caller can read the parent record, then writes for the caller. Leave the floor unchanged.\n- If record editors MAY edit others' comments: the one-line `sys_comment` update twin of `sys_comment_moderation` is enough.\n- Either way, test on an org-bound rig with the security service on: a member resolves and reopens another member's thread (200, `resolved_by` is the caller), a member's body edit of another's comment is still refused (unless Sales widens it), and an admin is unchanged.\n- Correct #36104's unreleased changeset wording, which says anyone who can read the record may resolve.\n- The console needs no change: PR #36178's explain probe offers ✓ on others' threads as soon as the server admits it. Fix the leftover jsdoc on `handleResolveComment` in `RecordDetailView.tsx` (still \"whoever may comment on the record\"), flagged S-D1 by the L2 delta on #36178.\n\nRelated: #36075, #36071, #36104, #36178."
+}

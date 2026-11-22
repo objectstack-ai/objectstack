@@ -11,7 +11,6 @@
     "type": "Bot"
   },
   "labels": [
-    "area:data",
     "area:ux",
     "bug",
     "domain:ui",
@@ -22,7 +21,7 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-21T12:33:10Z",
-  "updated_at": "2026-11-21T12:51:39Z",
+  "updated_at": "2026-11-22T02:05:34Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

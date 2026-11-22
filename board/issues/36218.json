@@ -1,0 +1,32 @@
+{
+  "number": 36218,
+  "kind": "issue",
+  "title": "review follow-ups of PR #36207",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T01:12:52Z",
+  "updated_at": "2026-11-22T01:46:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36218",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5miLqNucRZevceHwNh\n\nFiling gate ① (L1/L2 follow-ups of one PR) · Source: fleet · residuals of PR #36207 (validator half of #36167), named by L1-a's record 7072044449 (R2).\n\n## Items\n- [ ] `registerFlow`'s advisory schema pass (`packages/services/service-automation/src/flow-registration-checks.ts`, the `validateExpression('predicate', raw, schemaHint)` call under `advisory && useSchemaHint`) passes the validator no `flowVariables`. A declared flow variable that shares a trigger-object field's name is therefore judged as that field: after #36207 a list field's name draws a logged `list-equality` advisory, and today any field's name can draw a logged `type-mismatch` advisory, for a condition that reads the variable correctly. Logged, never thrown: the flow still registers and runs. Done when: the advisory pass hands the flow's declared variables to the validator the way `os validate` and the MCP `flow_condition` site do (#29959 / #33176 shadowing), with a pin of a variable named like a list field and a scalar field drawing no advisory, and a control with no such variable.\n\nreach: logged advisory on flow registration, read from code (mechanism named above), not measured. Real producer: any flow whose declared variable shares a field name of its trigger object.\nBusiness reason: an operator reading the registration log sees a refusal-shaped advisory for a correct condition and may \"fix\" it into a wrong one.\nReader: a domain:server lane (service-automation flow registration).\nDedupe: `registerFlow advisory flowVariables` → 1 hit (#36167, open, the parent card); `registerFlow type-mismatch advisory variable` → 4 hits, none open on this mechanism.\nGrade: p3 · area:workflow · Bug · logged advisory only, no wrong behaviour · reach read · evidence read.\n"
+}

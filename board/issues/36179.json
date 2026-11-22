@@ -2,8 +2,8 @@
   "number": 36179,
   "kind": "issue",
   "title": "skills/objectstack-ui record-page rules: an authored kind full record page applies only on the desktop full page (#36150); record_section actions need record_more to show on phone and in the preview",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,24 @@
     "bug",
     "documentation",
     "domain:skills",
-    "pm:queue",
-    "priority:p2"
+    "pm:dispatched",
+    "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-21T18:41:00Z",
-  "updated_at": "2026-11-21T18:48:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T23:07:55Z",
+  "closed_at": "2026-11-21T23:07:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36179",
   "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nThe `Skills-docs:` follow-up for #36150 (PR #36174, `Metadata-protocol: semantic`). The skill lives in `skills/**`, and `skills/**` edits ride only on `domain:skills` PRs, so this is its own card. L1-c flagged it on PR #36174 (record 7067418640).\n\n## What changed in the platform (#36150, rulings 7066490078 and 7066506909)\n\n- An authored `kind: 'full'` record page assigned to an object applies only on the desktop full page. On phone and in the side preview (drawer), every object takes the standard record page. There is no switch. Named-page URLs (print and other named routes) keep drawing that page on every surface. Slotted pages are unchanged.\n- Two platform pages are exceptions and keep their own page everywhere: the approval request page and the user page.\n- The standard page does not draw `record_section` actions. An author who wants an action on phone and in the preview adds `record_more` to its locations.\n\n## What the skill teaches today (`skills/objectstack-ui/rules/record-page.md` on `main`)\n\n- Rule 4 says `kind: 'full'` is drawn as authored, with no mention that this is desktop full page only.\n- Rule 5 says a clicked row opens the record in the drawer. Since #36150, the drawer never shows an authored full page, so an author testing a full page through a row click sees the standard page.\n\n## What to do\n\n1. Rule 4: one sentence on where a full page applies, plus the `record_more` advice for actions that must show on phone and in the preview.\n2. Rule 5: note that the drawer always draws the standard page.\n3. Check `skills/objectstack-ui/rules/pages.md` and the skill's evals for the same claim. Update an eval only if it asserts the old behaviour.\n\n`domain:skills` PR, after PR #36174 merges."

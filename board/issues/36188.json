@@ -1,0 +1,32 @@
+{
+  "number": 36188,
+  "kind": "issue",
+  "title": "record page: skills rule and QA checklist items still describe the right summary rail and its shortcut retired by #35890",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "documentation",
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-21T21:05:02Z",
+  "updated_at": "2026-11-22T02:16:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36188",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nCompanion to #35890 (PR #36136). Raised as S2 by the seat's declaration review on PR #36136 (record 7069204397). PR #36136 retires the record page's right summary rail, its ⊟ switch and the `⌘⇧,` shortcut, and deletes `RecordSummaryRail.tsx`. Text outside that PR still describes them.\n\n## The gap\n\n- `skills/objectstack-ui/rules/record-page.md` still teaches the ⊟ right-column switch and `⌘⇧,`.\n- Six platform checklist items still point at the right rail or the deleted file: five in `docs/qa/platform-checklist/` `records-forms.json` and one in `attachments-storage.json`. A run of them would fail a working product.\n\n## What to do\n\n1. Reword the skills rule to today's layout (fields pinned in the left column when 320 + 400 fit, ruling 7064066204 on #35890; no right rail). Skills edits ride a `domain:skills` PR.\n2. Update or retire the six checklist items so they test the pinned left column instead.\n3. Start after PR #36136 merges.\n\nBlocked-by: #36136\n"
+}

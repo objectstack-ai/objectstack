@@ -11,7 +11,6 @@
     "type": "Bot"
   },
   "labels": [
-    "area:automation",
     "area:workflow",
     "domain:spec",
     "pm:on-hold",
@@ -21,7 +20,7 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-12T07:34:43Z",
-  "updated_at": "2026-11-19T13:53:00Z",
+  "updated_at": "2026-11-22T02:08:51Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

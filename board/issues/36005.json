@@ -15,17 +15,17 @@
     "bug",
     "domain:ui",
     "pm:queue",
-    "priority:p2"
+    "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-21T06:01:53Z",
-  "updated_at": "2026-11-21T06:48:37Z",
+  "updated_at": "2026-11-21T22:19:07Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36005",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CZrgaiMgTJCnswR6jQ\n\nFound during PR #35998's browser reading (#35507 / #35804), out of that PR's scope. L1-a asked for a card (record 7058316549).\n\n## What a user sees\nOn a showcase invoice in EUR (`INV-1010`), the edit form's inline line grid shows its currency cells and the line totals stack with `$`, while the form's \"Total incl. Tax\" shows `€`. Measured at head `d4100395` in headless Chromium. It was not investigated further.\n\n## Expected\nThe line grid's currency cells and totals use the record's currency, the same symbol and format as the form's totals.\n\n## Notes\nFind where the grid's currency cells take their currency: the field default, the child record or the parent record. Check whether the read-only body table on the record page shows the same mismatch.\n"

@@ -21,11 +21,11 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T08:02:37Z",
-  "updated_at": "2026-11-19T10:56:49Z",
+  "updated_at": "2026-11-21T20:49:42Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35399",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CbSphdunq2aJq7ktuY\n\nSplit from #35344 by seat 5 (area ux-1) on the seat's word. ⛔ Not a claim. #35344 ships only its interim (`controlled_by_parent` details are left out of the hand-over); this card is the rest of its Expected.\n\nBlocked-by: #35315 (introduces the object-level switch `userActions.transfer` and its derived default; this card reads the same predicate)\n\n## What remains\n\n- The offboarding hand-over roster's `owner_id` entries (`userAssignedWorkFields`, `packages/core/src/security/user-assigned-work.ts`) follow #35315's object-level switch: off by derived default for `controlled_by_parent` details, on otherwise, author-overridable. An object whose switch is off does not hand its `owner_id` over.\n- The panel still counts those records, so the admin knows they exist.\n- App-authored user fields (assignee, approver) are unchanged.\n\n## Done when\n\nThe roster reads #35315's predicate (one rule, no second copy); pins for switch on, switch off, derived default on a detail, and an app-authored user field untouched; the #35344 interim pin keeps passing or is subsumed with a note.\n\nDedupe words: offboarding owner_id userActions.transfer, user-assigned-work transfer switch, hand-over owner switch."

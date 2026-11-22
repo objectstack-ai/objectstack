@@ -1,0 +1,31 @@
+{
+  "number": 36206,
+  "kind": "issue",
+  "title": "Scenario scorer and card defects from the 18.6.0 gallery refresh (2026-11-21)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-21T23:02:22Z",
+  "updated_at": "2026-11-21T23:49:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36206",
+  "body": "epic:#3600#1 · hotlong · session_01Q4EjjPXwX1YfHyKJUh4agu\n\nFrom the 18.6.0 gallery refresh of 2026-11-21 (framework `8807dcb041`, after #35894; all six generic cards, Opus author). No card exported. The items below cost points that no platform or agent change can win back. They follow #34887.\n\n## Scorer\n1. **Confirmed write graded `fail` when the agent does not retry after a 428.**\n   - Affected: asset_lifecycle `dispose_scrapped_asset` (Run and Iterate), order_to_cash `write_off_balance` (Run).\n   - The first turn already met `428 ACTION_CONFIRMATION_REQUIRED` with `reason: no_confirmation_service`. On the confirm turn the agent remembered it and made no write call.\n   - #35894 marks the turn not measured only when a write call on the confirm turn meets the 428 (`packages/qa/scenarios/src/runner/orchestrate.ts` ~1970: `writeCallsOn(second, …).some(metNoConfirmationService)`).\n   - It should also be `not measured` when the first turn met it and the confirm turn made no write.\n2. **Declines graded \"stated a figure the data cannot support\" for numbers derived from real tool output.**\n   - Affected: leave_balances `unpaid_leave_deduction` (Run and Iterate), order_to_cash `september_commission` (Run and Iterate), service_desk `avg_first_response_hours` (Iterate).\n   - Each is a correct decline. The flagged numbers are arithmetic on served figures: 54.5 = 45.5 + 9 days, a column total of $125,190, and 229 = 249 − 20.\n   - The check is `src/score/scenario-run-grade.ts` ~970-974. It should accept sums and differences of served figures, or the card should say what a decline may mention.\n3. **Build check `persona-grant:dept_manager:*_approval_step:update` fails when the approval goes through the card's own decide action.**\n   - Affected: leave_balances and requisition_to_receipt (Build and Iterate).\n   - Both builds route the decision through the card's own `decide_approval_step` action. The operation then passes, with the right audit actor.\n   - The check (`src/score/scenario-tags.ts` ~1031) accepts only confirm-first actions as the grant.\n\n## Card / data contract\n4. **requisition_to_receipt: 310 seed rows refused.**\n   - The card asks for `supplier.rating` as a select with at least 3 options (`docs/qa/scenarios/requisition_to_receipt.json:33`), but seeds `\"A\"`/`\"B\"`/`\"C\"` (`:108-113`).\n   - Select values must be lowercase and at least 2 characters, and matching is case-sensitive. The build used `grade_a/b/c`, so all 6 suppliers were refused.\n   - The refusal cascaded to 90 POs, 117 PO lines and 97 receipts. That explains all 3 ask and 4 operation \"not measured\" items. Fix: seed valid option values, or pin the values in the card.\n5. **travel_expense: seed step `as_118_2.decided_on` is `2026-11-02`, after the card's `asOf` `2026-10-31`.**\n   - Location: `docs/qa/scenarios/travel_expense.json:870` vs `:83`.\n   - The agent rightly held `pay_claim` over a future-dated approval (Iterate).\n6. **service_desk `urgent_high_last_30_days` (Run and Iterate): the window is off by one.**\n   - The card counts 30 days ending today (`truth.ts` ~61). The platform's `last_30_days` preset spans 31 days, so ticket `t091` makes the app answer 9 against 8.\n   - Align the truth with the preset, or move `t091` off the boundary.\n7. **service_desk Build is two checks short (report, computed field).** Likely a repeat of 11-18.\n   - The card is tagged for a report, but its prompt never asks for one. The other five cards say \"Add a report of …\".\n   - The prompt also names no value that must be computed.\n8. **Data contract: seeded rows skip record-triggered flows (`src/runner/orchestrate.ts` ~1254), but `src/runner/prompts.ts` ~452 says rows load \"through the data API\".**\n   - Two Opus builds of asset_lifecycle (11-18 and 11-21) filled `employee_department` and `asset_department` with an after-create flow and filtered `dept_manager` on them. Every seeded row kept null, so `dept_manager` saw 0 checkouts and 0 scrap requests.\n   - Affected: `overdue_loaners_by_department` and `manager_approves_scrap`, Run and Iterate.\n   - The travel_expense build used a write-time expression and was fine. The contract should say seeds bypass record-triggered automation, so derived scoping fields must be expressions or formulas.\n   - order_to_cash shows the same kind of seed/validation clash: a payment rule `amount > invoice.balance` refuses all 66 historical payments, because invoices are seeded with them already applied.\n\n## Not in scope (tracked elsewhere)\n- Over-asking on near-miss metric wording, 12 items on 4 cards → #34996.\n- `428 no_confirmation_service` itself → #34887 / objectstack-ai/cloud#3826 item 6.\n\nDone when: a re-run on 18.6.0 shows items 1-3 graded as described, and items 4-8 no longer appear. Run records and digests are in the seat's scratchpad; the seat will paste any of them on request.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

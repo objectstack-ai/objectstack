@@ -15,17 +15,17 @@
     "bug",
     "domain:skills",
     "pm:queue",
-    "priority:p2"
+    "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-21T17:08:34Z",
-  "updated_at": "2026-11-21T17:54:14Z",
+  "updated_at": "2026-11-21T22:17:26Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36161",
   "body": "security#2 · sunhaolin · session_017xRBcW9L8Noz9BxEwjwiov\n\n**Skills-docs follow-up owed by PR #36127.** That PR makes a state machine judge every update against the stored state. Clearing the state field (`null` or `''`) now counts as a transition to the empty value. It is refused unless the stored state lists `''` among its targets.\n\n**Owed:**\n- `skills/objectstack-automation/references/state-machines-and-approvals.md` teaches authors how to write a machine. It should say how to make a state clearable: list `''` in that state's targets, e.g. `paused: ['open', '']`. It should also say that a clear from any other state is refused (`invalid_transition`, `to: ''`).\n\n**Adjacent, for the ui lane (not this card's file):** the Studio validations panel parses targets with `.filter(Boolean)`. It therefore cannot write `''`, and it drops an existing `''` when the row is edited. Fails closed. Its own follow-up.\n\n**Order:** land after PR #36127 merges. Related maintainer decisions on the same machine are pending with the security seat. This card's sentence does not depend on them.\n\nRe-check: `git grep -n \"''\" origin/main -- skills/objectstack-automation/references/state-machines-and-approvals.md` should show the clearable-state sentence once this lands."

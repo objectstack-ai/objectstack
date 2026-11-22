@@ -1,0 +1,31 @@
+{
+  "number": 36220,
+  "kind": "issue",
+  "title": "first-touch-sweep: flag a public card whose area:* is not one of the eight North Star areas, or that carries two",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-22T02:15:55Z",
+  "updated_at": "2026-11-22T02:16:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36220",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate ① · Source: fleet · found by the maintainer on the board on 2026-11-22 (「我们规定的 area 没这么多啊」).\n\n## What happens\n`docs/NORTH-STAR.md` (since #35223, 2026-11-18) says every public card carries **exactly one** `area:*`, from eight: ai, build, data, workflow, ux, package, fleet and cloud. The repo still has the older labels (access, api, auth, automation, devpath, files, formula, i18n, identity, records, reports and studio). Filers kept using them, and some cards carried two areas.\n\n`scripts/pm/first-touch-sweep.mjs` checks only whether a card has *an* `area:*` (disjuncts ② and ③, plus the daily area backfill). So a card with `area:studio`, or with `area:data,area:ux`, passes as touched. On 2026-11-22, 46 open cards were in that state, and triage's own first-touch audits had accepted `area:studio` on #36216 and #36219. All 46 were relabelled by hand on 2026-11-22.\n\n## Done when\n- The sweep, or its daily backstop, lists every open public card whose `area:*` set is not exactly one of the eight North Star areas, and counts it in the verdict.\n- The eight names are read from `docs/NORTH-STAR.md`'s area table rather than copied.\n- A pin covers one card with a legacy area, one with two areas, and a clean control.\n- Optional, and the maintainer's call: retire the legacy labels in the repo, so no filer can pick one.\n\nreach: every triage first touch and every filer that picks a label. Read from code; the 46 cards were measured.\nBusiness reason: area statistics and seat routing read `area:*`. Off-list labels split one product area into several rows, and they hide cards from the seat that takes the area.\nReader: domain:devx lane (`scripts/pm`).\nGrade: p2. It is an instrument that would have caught this at first touch. The board and routing read wrong until it lands, but nothing on the product side is wrong."
+}

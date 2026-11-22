@@ -2,8 +2,8 @@
   "number": 35890,
   "kind": "issue",
   "title": "记录页宽屏整页：第一个页签（字段）钉到左栏，右边直接是其余页签；没有其他页签时字段撑满；取消右栏摘要卡（图 41）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-20T16:58:48Z",
-  "updated_at": "2026-11-21T16:40:58Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T02:14:16Z",
+  "closed_at": "2026-11-22T02:14:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35890",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35590（专题：记录详情页重做，维护者直派）。⛔ 不是认领。\n\n维护者 2026-11-20 至 21 原话：\n\n- （看 Twenty 的记录页）「你看一下另外一套软件，和我们类似，没有概览，右侧打开的时候显示的是记录详情，全屏的时候，记录详情移到左侧」\n- 「如果按照新的设计效果，概览右侧也没有子表区域了。」\n- 「一个子表都没有，动态也可能没有，那就是相当于表单撑满，没有右侧的选项卡」\n- 「手机记录页和电脑端右侧的 drawer 一样吧，第一个选项卡是详情，后续的选项卡就是子表。」\n- 「记录页图 41 的方向定了，立卡」\n\n参照产品是 Twenty（只参照行为：它的规则是「第一个页签在宽屏整页时钉到左边，在侧边面板和手机上是普通的第一个页签」；⛔ 不抄代码，AGPL）。\n\n## 现状（本机环境实测于 `7878cf0557`，代码位置核对于主干 `8c18a362a2`）\n\n- 宽屏整页：第一个页签「概览」占左边大部分宽度，里面是字段分组（两列）；右边一栏是摘要卡（审批、附件、最近动态、各子表的摘要），由 objectstack-ai/objectstack#35596 做成。看子表要切到别的页签，切过去就看不到主记录的字段了。\n- 抽屉和窄屏：只有页签，没有右栏。\n- 宽度分档在 `ui/packages/plugin-detail/src/synth/recordPageColumns.ts:86-123`；右栏在 `ui/packages/plugin-detail/src/RecordSummaryRail.tsx`。\n\n## 要做的\n\n效果图（图 41）：\n\n![报价单 宽屏整页](https://github.com/objectstack-ai/objectstack/blob/dff6c75cdb7b7548dd600935e007da2f0d59bc61/record-redo/41-split-1.png?raw=true)\n\n![客户 宽屏整页（字段多）](https://github.com/objectstack-ai/objectstack/blob/dff6c75cdb7b7548dd600935e007da2f0d59bc61/record-redo/41-split-2.png?raw=true)\n\n![抽屉](https://github.com/objectstack-ai/objectstack/blob/dff6c75cdb7b7548dd600935e007da2f0d59bc61/record-redo/41-split-3.png?raw=true)\n\n![没有其他页签时撑满](https://github.com/objectstack-ai/objectstack/blob/dff6c75cdb7b7548dd600935e007da2f0d59bc61/record-redo/41-split-5.png?raw=true)\n\n1. **一条规则**：记录页的第一个页签是字段。宽屏整页时它钉到左栏，不再是一个页签；右边是从第二个开始的页签，默认停在其中第一个。抽屉、窄屏整页、手机上，它仍是普通的第一个页签。同一份页签配置，只是第一个页签摆在哪不同。\n2. **左栏**：字段单列，分组和顺序就是对象上配的那一套（分组标题、收起状态照旧）；长文本占整行、完整显示。左栏和右边各自滚动，互不带动。\n3. **右边默认停在哪**：其余页签里的第一个。有子表时是第一张子表，一张子表都没有但有动态时是「动态」。\n4. **没有其他页签时**（没有子表，附件、审批、动态也都没有）：不分左右，也不画页签条，字段撑满整页按宽度排多列，和现在的整页一样。抽屉里同理，只有一个页签时不画页签条。\n5. **取消右栏摘要卡**：三种宽度下都不再画。它原来给的信息由页签上的条数承担。\n6. **这条记录正在审批时**：记录名旁边显示一个「审批中 · 当前步骤」的标签，点它跳到「审批」页签。轮到自己审批时仍是现有的「待你审批」加通过、拒绝按钮（objectstack-ai/objectstack#35593）。\n\n## 协调席加的（图上标了「待定」，维护者说「方向定了」，没有逐条说过；有异议以维护者为准）\n\n- 左栏宽 400，可以拖宽，拖过的宽度按人记住。\n- 第一个页签的名字从「概览」改成「详情」（里面只剩字段，不再有摘要）。\n- 第 6 条的「审批中」标签。\n- 对象用字段分组把子表放进字段之间时（见 objectstack-ai/objectstack#35889），表格放不进左栏：这种对象宽屏时不钉左栏，第一个页签保持占满宽度。\n- 「宽屏」沿用现在分档里出现右栏的那个宽度，不新定数字。\n\n## 取代和影响\n\n- 取代已合并的 objectstack-ai/objectstack#35596（右栏摘要卡）。\n- objectstack-ai/objectstack#35835（去掉右栏里「其他相关」小标题，未做）：右栏整个取消，那张卡不用做了。\n- objectstack-ai/objectstack#35853（头部两行，开发中）：不冲突，本卡的左右两栏在它的两行头部下面。\n- objectstack-ai/objectstack#35854（抽屉改悬浮卡片，开发中）：不冲突，抽屉里的结构本卡不改。\n- 主干上已合并的「页签可以由使用者挪动和隐藏」（PR #35818）：继续有效，作用在右边的页签上；被钉到左栏的第一个页签不能挪、不能隐藏。\n\n## 不做的\n\n- 不改手写记录页（自己声明页面结构的对象），只改自动生成的默认页。\n- 不做「概览」摘要页（参照 Attio 的那种指标卡片概览没有采用）。\n- 页签显示哪些、什么顺序的配置方式（对象上的 `relatedLists`）另行讨论，本卡沿用现在的页签。\n\n## 验收\n\n- 1440 宽整页打开一条有子表的记录：左边是字段，右边是页签且停在第一张子表；页签条里没有「概览」或「详情」这一项；没有右栏摘要卡。\n- 滚动左栏，右边不动；切换右边的页签，左栏的滚动位置不变。\n- 同一条记录在抽屉里打开：第一个页签是字段，其后是子表页签，和现在一致。\n- 把窗口从 1440 拖窄到出现右栏的档位以下：左栏变回第一个页签，当前选中的页签不丢。\n- 一个没有子表、关闭了附件和动态的对象：整页字段撑满多列，没有页签条。\n- 字段 30 个以上的对象：左栏可以滚到底，收起的分组保持收起。\n- 正在审批、当前人不是审批人：记录名旁有「审批中」标签，点它右边切到「审批」页签。\n- 刷新、从链接直接打开，都是同样的结果；带页签参数的链接仍然打开对应页签。\n\nReader: `domain:ui` 车道。`ui/packages/plugin-detail/src/RecordPageColumns.tsx`、`ui/packages/plugin-detail/src/synth/recordPageColumns.ts`、`ui/packages/plugin-detail/src/RecordSummaryRail.tsx`、`ui/packages/app-shell/src/views/RecordDetailView.tsx`。\n\nDedupe: `记录页 左栏 钉 页签`、`记录页 右栏 取消`（objectstack，open）→ 0。相邻：#35835、#35853、#35854（关系见上）。"

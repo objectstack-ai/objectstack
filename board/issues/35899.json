@@ -2,8 +2,8 @@
   "number": 35899,
   "kind": "issue",
   "title": "relatedLists 的一项可以带标题和列：在父对象上配子表显示哪几列，不用去改子对象",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -11,7 +11,7 @@
     "type": "Bot"
   },
   "labels": [
-    "area:records",
+    "area:build",
     "domain:spec",
     "enhancement",
     "pm:dispatched",
@@ -21,9 +21,13 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-20T17:28:23Z",
-  "updated_at": "2026-11-20T18:47:55Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T02:14:17Z",
+  "closed_at": "2026-11-22T02:14:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

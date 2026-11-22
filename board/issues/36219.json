@@ -1,0 +1,32 @@
+{
+  "number": 36219,
+  "kind": "issue",
+  "title": "studio: the CEL editor's as-you-type check is given no list fields, so it never flags == / != on a multi-value field that the save then refuses",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T01:17:52Z",
+  "updated_at": "2026-11-22T02:05:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36219",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5krBqrrgxCYgjXmfbv\n\nFiling gate ① · Source: fleet · found by the seat's contract review of PR #36207 (Part of #36167), record 7072103543, finding S2. The PR named #36185 as its carrier, but #36185 has merged without these files, and #36169 is closed.\n\n## What happens\nAfter #36207, `validateExpression` refuses `==` / `!=` on a list-valued field when its schema hint carries the field types or `multiValueFields`. Studio's as-you-type CEL check (`ui/packages/app-shell/src/views/metadata-admin/CelPredicateField.tsx:303` → `celAuthoring.ts:679-683`) gets neither: no `inspectors/**` mount supplies `multiValueFields`, and this path never passes `fieldTypes`. The editor flags nothing while the author types, and the save is then refused by the object draft check or the server.\n\n## Done when\nEach `CelPredicateField` mount in the metadata-admin inspectors passes the object's list fields (types and `multiple`), so the editor shows the `list-equality` refusal while typing. Pin one inspector mount on a `multiple: true` field, with a scalar control.\n\nreach: Studio form (any CEL predicate field on an object with a list field), by code reading in the contract review; to be measured once by the claimant.\nBusiness reason: authors see the error only on save, not while writing the condition.\nReader: a domain:ui lane (Studio metadata-admin).\nDedupe: `CelPredicateField multiValueFields` → 0 hits.\nGrade: p2. The save already refuses, so nothing is stored wrong; this is the editor's early warning."
+}

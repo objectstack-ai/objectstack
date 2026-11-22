@@ -2,8 +2,8 @@
   "number": 36047,
   "kind": "issue",
   "title": "控制台整体观感收齐：字号收成两档、不再用加粗到 600 的字重，控件圆角统一成 8，内容区改白底",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-21T11:16:36Z",
-  "updated_at": "2026-11-21T13:52:09Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T21:50:32Z",
+  "closed_at": "2026-11-21T21:50:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

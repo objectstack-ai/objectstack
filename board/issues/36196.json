@@ -1,0 +1,36 @@
+{
+  "number": 36196,
+  "kind": "pull_request",
+  "title": "docs(skills): objectstack-ui record page says a full page is drawn on the desktop full page only; record_section actions also list record_more (#36179)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-21T22:27:35Z",
+  "updated_at": "2026-11-21T23:07:55Z",
+  "closed_at": "2026-11-21T23:07:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-21T23:07:53Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36196",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4Uu1C9rnKF5jTysPLEXARCWqC)_\n\nrepo:objectstack#1 · os-sales · session_01L6bhgViqXNX3ru3BVxMD1k\n\nFixes #36179\n\nClaim: issuecomment 7070212796 on #36179 (branch `claude/project-thread-g1rp28`).\n\n**Premise (3 lines).** (1) Since #36150 (PR #36174, merged 1208cc87) an authored `kind: 'full'` record page is drawn on the desktop full page only; a phone and the drawer draw the standard page, which draws no `record_section` action (`ui/packages/app-shell/src/views/recordPageSurface.ts`, `authoredRecordPageApplies`). (2) `skills/objectstack-ui/rules/record-page.md` steps 4 and 5 still teach the full page as drawn wherever the record opens, with no `record_more` advice. (3) This PR fixes those two steps only, skills wording only, paid for inside the same file; no other skills file or eval asserts the old behaviour.\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户/开发者能看到什么变化：照着界面技能写自定义记录页（`kind: 'full'`）的 AI 和开发者，现在会被告知这种页只在电脑整页生效，手机和右侧抽屉显示平台标准页；放在页面区块里的动作（`record_section`）要在手机和抽屉里出现，必须同时放进「⋯」（`record_more`）。以前照技能写，动作在手机和抽屉里会消失。\n- 风险：只改对外技能的文字和一个 changeset，不动运行时。写错的话作者拿到的仍是不准的说明，回退这个 PR 即可。\n- 代价：技能文件不变长（同文件里删了几处重复和快捷键说明来付），token 上限不动。\n- 要你做什么：无。\n\n## What changes\n\n`skills/objectstack-ui/rules/record-page.md` (published catalog), 3944 → 3954 bytes, 989 tokens against its ceiling of 991:\n\n- **Step 4** title: \"`kind: 'full'` is the escape hatch, on the desktop full page.\" Body adds: a phone and the drawer draw the standard page (steps 1–3); no key keeps a full page there; only a page named in the URL (a print page) draws everywhere; the standard page draws no `record_section` action, so one that must show there also lists `record_more`.\n- **Step 5**: the drawer is \"always the standard page\", so an author testing a full page through a row click knows why they see the standard page.\n- **Paid for in the same file** (deletion, not re-wrap): the inline `relatedListFilter` example in step 2 (the `os:check` snippet below shows the same filter), \"(no deep merge)\" beside \"each whole\" in step 3, \"reached for only when steps 1–3 cannot express the page\" in step 4 (the file's opening line and \"escape hatch\" say it), step 6's restated \"— the default —\" and \"the split beside the list is retired\" (step 5 says both), step 6's keyboard shortcuts (`⌘⇧,`, ⠿ drag, ⌥↑ / ⌥↓: reader controls, nothing an author writes), and \"They live in the console's preference store, never in the object\" (step 6's title says it).\n\nChangeset `.changeset/36179-ui-record-page-full-desktop-only.md`, `@objectstack/skills` patch, both declaration lines.\n\n**Small calls made in this thread** (dev threads decide small things themselves, Sales 2026-11-21 22:19:27Z):\n\n- The two platform pages that keep their own page everywhere (approval request, user) are not named in the skill: an author does not author those pages, and the budget has 2 tokens left.\n- `skills/objectstack-ui/rules/pages.md`, `actions.md`, `navigation.md` and `evals/record-page.json` were read: none says a full page applies on the phone or in the drawer, and the one eval with a `kind: 'full'` page (`placedActions: true` on its header) is a desktop full-page behaviour, unchanged. No eval edit.\n- The token ceiling row is left at 991 rather than lowered to 989: a ratchet-script edit is outside the low-risk skills arm and would make this PR Tier H. A later skills PR can lower it.\n\n## Why\n\nL1-c's REWORK on PR #36174 (record 7067418640) flagged the skill as owing this; `skills/**` rides only a `domain:skills` PR (pm-dispatch SKILL.md:320), so it is its own card, regraded p1 (ruling-ref 7070084648). #36180 (spec describes) is the separate twin and lands on its own.\n\n## Verification\n\n- `node scripts/check-skills-token-ratchet.mjs --self-test && node scripts/check-skills-token-ratchet.mjs`: green; `record-page.md` 989 / 991.\n- `check-skill-links`, `check-skill-identifier-liveness`, `check-skill-frame-sync`, `check-skill-frame-freshness`, `check-skill-top-level-keys`, `check-skill-compatibility-version`: green.\n- `npm run check:pm-skill-ratchet`, `npm run check:pm-skill-id-lint`: green.\n- `node scripts/pm/check-governed-merges.mjs --branch claude/project-thread-g1rp28`: skills/** ×1 (published catalog), Tier H on a path-only read; changed paths are one catalog Markdown file and one changeset, both declarations bare `no` / `none`, no `security` label or security-named path, 26 changed lines. So the low-risk skills arm (#33501, maintainer ruling 2026-11-14) should read it Tier S on `--pr`; the `--pr` reading follows on the PR.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no names)\n- [x] 3. No formatter ran; `pnpm lint` passes. (skills gates above)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English. (the 维护者速读 block is the seat's Chinese summary for the maintainer)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgViqXNX3ru3BVxMD1k\n\n<!-- signed: repo:objectstack#1 · os-sales · session_01L6bhgViqXNX3ru3BVxMD1k -->\n"
+}

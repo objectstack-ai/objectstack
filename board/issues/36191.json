@@ -1,0 +1,38 @@
+{
+  "number": 36191,
+  "kind": "issue",
+  "title": "comments: an ordinary member cannot delete their own comment; add an own-row delete door (maintainer ruling 7069889899)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-21T22:02:59Z",
+  "updated_at": "2026-11-22T01:48:20Z",
+  "closed_at": "2026-11-22T01:48:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36191",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\n## 维护者速读\n\n你 11-21 21:59 定了「普通成员能删自己的评论」（只能删自己的，删不了别人的）。现在默认权限里成员没有删评论的权限，所以连自己的评论也删不了，评论栏里自己的评论「更多」只有「编辑」。这张卡在服务端加一个「只删自己的评论」的入口，做法照搬表情和个人视图已经用过的那一套；做好后评论栏给自己的评论加上「删除」。\n\n## Facts\n\n- Found on the dev rig by the #36075 PR 2 thread (security service on, plain `org_member`): a member deleting their own comment gets 403; explain shows the `object_crud` layer refuses, because `member_default` grants no `sys_comment` delete. Raw data in `build-seat1/36075/pr2/floor/` (`owndelete-report.json`) in the project folder.\n- `member_default` cannot carry a delete bit (ADR-0090 D5). The reaction door (`comment-reaction-routes.ts`, ruling 6422861164) and the personal-view door (`plugin-auth` `personal-view-routes.ts`) solved the same shape with the shared kit `packages/core/src/security/own-row-delete-routes.ts`.\n- Seat-requested Fable review: `build-seat1/36075/pr2/fable-decisions.md`, 问题三.\n- The console already gates Delete on the grant (PR #36178), so members see no refused button today, only no Delete.\n\n## What to do\n\n1. Add an own-row delete door for `sys_comment` on the shared kit: the caller may delete a comment they authored, checked on the server; anyone else's comment is refused unless an existing grant already allows it (administrators, and the delete bit plus record edit path that #36104 / `sys_comment_moderation` already define).\n2. Decide and state in the PR what deleting a top-level comment with replies does (the review did not check it).\n3. Console: offer Delete on one's own comments through the door; keep others' rows as PR #36178 left them.\n4. Tests on an org-bound rig with the security service on: a member deletes their own comment (2xx), another member's is refused, an admin is unchanged.\n5. Fix `content/docs/.../plugin-detail.mdx` wording on Delete (L1-c nit on #36178) to the new behaviour.\n\nRelated: #36075, #36186 (the resolve door, same ruling comment), #36178."
+}

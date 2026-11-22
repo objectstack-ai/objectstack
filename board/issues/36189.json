@@ -1,0 +1,32 @@
+{
+  "number": 36189,
+  "kind": "issue",
+  "title": "analytics: the draft preview answers $contains on a multi-value field as a substring of the stringified array, not membership",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-21T21:18:07Z",
+  "updated_at": "2026-11-22T02:05:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36189",
+  "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5miLqNucRZevceHwNh\n\nFiling gate ① · Source: fleet · found by seat 4 area a4-C's dev on #36168 (os-dev report 7068861732), raised to a card by L1-a's record 7069360733 on PR #36184.\n\n## What happens\nThe analytics draft preview (`POST /api/v1/analytics/dataset/query?preview=draft`, the face Studio's preview mode reads) evaluates `$contains` as a case-folded substring of `String(value)`. On a multi-value field (`multiple: true`, or an inherently multi-value type) the stored array is stringified, so `$contains: 'a'` matches a row holding `['ab']`, `$contains: 'end'` matches `['frontend']`, `$contains: 'A'` matches `['a']`, and `$contains: 'a,b'` matches `['a','b']`. The data door, the native SQL strategy and the ObjectQL strategy answer `$contains` on such a column as membership (#20987), so the preview counts rows the published dataset does not.\n\n## Where\n`packages/services/service-analytics/src/preview-evaluator.ts`, the `$contains` entry of the operator table (`String(value ?? '').toLowerCase().includes(...)`); after PR #36184 the same file already refuses the JSON-column comparison set through `json-column-comparison-refusal.ts`, which holds the declared-column resolver this fix needs.\n\n## Done when\nOn the draft preview, `$contains` (and `$notContains`) on a declared multi-value field is membership, matching the native strategy's answer for the same filter; a pin covers a substring-only value, a case-only difference and a comma-joined value, with a scalar text control. Whether the preview's case fold on a scalar text `$contains` is also a mismatch (the case-exact family, #4706 Q2 = A) is read, not measured: the dev checks it and either fixes it here or names why it differs.\n\nreach: public HTTP door `POST /api/v1/analytics/dataset/query?preview=draft`, read from code (mechanism named above), not measured; real producer: Studio's preview mode (`MetadataProvider` preview reads).\nBusiness reason: an author previewing a dashboard or dataset filtered on a multi-value field sees counts that change after publish, with no error; they tune the filter against wrong numbers.\nReader: a domain:server lane (analytics draft preview).\nDedupe: `preview contains multi-value` → 3 hits, `preview-evaluator` → 33 hits, `draft preview contains substring` → 19 hits; open: #36168 (comparison set, not `$contains`) and #35873 (share-grant leaf, different mechanism); the rest closed.\nGrade: p2 · area:reports · Bug · silent wrong count on a preview face only (the published door answers right) · reach read · evidence read.\n"
+}

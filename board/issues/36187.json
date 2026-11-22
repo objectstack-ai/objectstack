@@ -1,0 +1,37 @@
+{
+  "number": 36187,
+  "kind": "pull_request",
+  "title": "feat(console): from 768 px up an app draws no top bar; the app menu, search, bell and account move to the sidebar (#36112 PR A)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-21T20:39:24Z",
+  "updated_at": "2026-11-21T22:53:09Z",
+  "closed_at": "2026-11-21T22:53:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-21T22:53:07Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36187",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuRPbvLUvEMeWbp9r3931xQ9)_\n\nrepo:objectstack#1 · os-sales · session_01L6bhgVKUaox9fRxbdYMLvf\n\nPart of #36112 (PR A of two: everything leaves the desktop top bar; the sidebar's docking model is PR B, after the maintainer's ruling on the fold)\n\nClause-②: no\nMetadata-protocol: none\n\nSeat claim: [#36112 claim](https://github.com/objectstack-ai/objectstack/issues/36112#issuecomment-7066545494) (split A/B; F3–F6 as proposed).\n\n## 维护者速读\n\n- **电脑宽度（768 px 起）应用页不再有顶栏**，页面从窗口最上沿开始。手机照旧有顶栏和底栏。\n- 顶栏上的东西各自搬家：\n  - **侧边栏第一行**：应用图标和名字，点开是「切换应用」菜单（当前应用打勾；服务器给这个人 Setup 时 Setup 也在里面；超过 8 个应用出现搜索框；工作区管理员且有建模权限的人在最下面看到「添加应用」：用 AI 搭建或在 Studio 新建、从模板开始、应用市场）。旁边是收起按钮。菜单里没有「回首页」「所有应用」「在 Studio 中编辑」（「编辑应用」在页面右上角的按钮组里，#36111）。\n  - **侧边栏第二行**：搜索（⌘K）和通知铃铛。\n  - **侧边栏底部**：账户菜单（头像、名字；封闭组织下第二行是组织名），里面的项目和原来头像菜单完全一样；预览版/测试版部署多一行阶段标记。\n  - **内容区顶部**：模拟登录、读取频率、存储用量这些常驻横幅，以及「连接断开」提示，宽度跟内容一样。\n  - **页面头部**：侧边栏收起时，页面头部最左边出现展开按钮；没有页面头部的页面（比如搜索结果）展开按钮在内容左上角。\n- 右上角按钮组（#36111）现在**一直打开**，`os:shell:page-actions` 开关删掉了。\n- ⌘⇧H 回首页照旧，在任何宽度都有效（由应用布局装，不再依赖顶栏）。电脑上没有点击回首页的入口（F3，席位已认可）。\n- **不变**：侧边栏 1416 px 以下自动收起、「保持展开」的选择都照旧（这部分归 PR B，等裁定）。`/home`、组织页、Studio 落地页的顶栏不动。\n- **文档页按现状保留顶栏**：应用的文档页（`/apps/<app>/docs…`）本来就不挂侧边栏（#35424），本 PR 不动它，所有宽度照旧有顶栏。卡上「不做的」写了「不接入文档页（第三阶段）」，所以这在本卡范围内，到第三阶段接文档页时一起定。\n- **新手引导**：`chrome/OnboardingWalkthrough.tsx` 在 main 上是关掉的空组件（直接返回 null），没有任何一步指向顶栏，所以没有要改的引导步骤。\n\n## What changes\n\n**New modules** (`@object-ui/app-shell`)\n\n- `layout/SidebarAppMenu.tsx` — the sidebar's first row from 768 px up: `AppMark` + name opening a menu that only switches apps. Rows are `useLauncherApps`' list (the one Home's tiles and the phone sheet draw), the current one checked; a search field past `APP_MENU_SEARCH_FROM = 8`; 「Add app」 (sub-menu) only for a workspace admin who may author metadata, on a deployment with AI authoring or a marketplace. The sub-menu is a separate component, so nobody else pays the agent-catalog read behind 「Build with AI」.\n- `layout/AccountMenu.tsx` — the avatar menu's body lifted out of `AppHeader` verbatim, with two triggers: `avatar` (the phone's and `/home`'s bar) and `sidebar` (the sidebar foot: avatar, name, walled organization; stage chip row on preview/beta).\n- `layout/InboxBell.tsx` — the bell and its popover, shared by the bar and the sidebar head.\n- `layout/chromeBannerHost.tsx` — `ChromeBannerSlot` / `ChromeBannerHost`: the shell's standing banners (`ConsoleShell`) portal into the content area's banner box from 768 px up; inline otherwise.\n- `layout/ConnectionBanner.tsx` — the lost-connection notice (offline / reconnecting / disconnected / error; silent when connected).\n- `chrome/goHomeShortcut.ts` — `useGoHomeShortcut`, moved out of `AppHeader`; `ConsoleLayout` installs it at every width.\n\n**Changed**\n\n- `ConsoleLayout`: `showHeader` only on a phone or an app docs page (docs pages stay as today; they are the epic's phase 3); banner host + connection notice at the top of `console-banners`; `ShellSidebarExpandFallback` at the top of the route slot.\n- `UnifiedSidebar`: desktop head (app menu + collapse; search + bell), foot (keep-open + account menu); the hidden-sidebar edge zone spans the full height (no bar above it). The app switch goes through `confirmUnsavedLeave`.\n- `ShellPageActions` / `shellPageActionsSlot`: the group is always on (switch removed); a new expand-button slot that `PageHeader`, `RecordDetailView`'s navigation row read while the sidebar is collapsed, and a corner fallback for routes with no shell header.\n- `consoleSidebarRail.sidebarTrigger()` skips triggers inside `[inert]` (the hidden panel's own collapse button).\n- `AppHeader`: uses `AccountMenu` / `InboxBell`; drops the go-home listener (now the layout's).\n- i18n, 11 locales: `sidebar.collapse`, `sidebar.expand`, `layout.appSwitcher.addApp` (zh-Hant regenerated).\n- Docs: `frontend/app-shell.mdx` (when the Console draws the bar), `ai/connect-mcp.mdx` (where the account menu is).\n\n**Tests**\n\n- New: `ConsoleLayout.noTopBar-36112` (no `header` at 768/1024/1280/1440, phone keeps it, docs page keeps it, banners drawn once in the content area, connection notice, expand button in the page header and the corner fallback), `SidebarAppMenu-36112` (rows, checked app, Setup only when served, no home/All apps/Studio entry, switch, search past 8, 「Add app」 gates).\n- Rewritten for the bar's absence on a desktop: `AppHeader.homeMark-12605` and `AppHeader.unsavedEditsLeave-13231` (the chord is the layout's; a CONTROL pins that the bar alone installs nothing), `AppHeader.phoneTargets-29075` (the account menu's own module), `ConsoleLayout.appBrandingLogo-10827` (the logo is on the sidebar's app menu row on a desktop, the pill on a phone), `ConsoleLayout.skipToContent-13130`, `ConsoleLayout.robotTogglesDrawer-34608`, `ConsoleLayout.previewFrameDock-26470`, `ConsoleLayout.phoneRecordOneBar-28483`, `UnifiedSidebar.hiddenCollapse-35062`, `consoleTopBar.height-12639`, `ShellPageActions-36111` (switch test removed), `RecordDetailView.topBar-27524`, `KeyboardShortcutsDialog.wiredOnly-11674` (go-home row now listed inside an app, with its probe), `unsavedEditsLeave.census-13253`.\n\n## Verification\n\n- `tsc --noEmit` (app-shell) clean; `eslint --quiet` on every changed file clean.\n- Vitest: the whole `layout/` folder, the 145 app-shell test files that reach the changed modules, the tests of #36113/#36150 merged since, and `@object-ui/i18n` (key parity, zh-Hant generated) — all green locally. The full app-shell suite runs in CI.\n- Screenshots: in the project's evidence folder `build-seat1/36112/` (posted as a comment once taken).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgVKUaox9fRxbdYMLvf)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgVKUaox9fRxbdYMLvf\n\n<!-- signed: repo:objectstack#1 · os-sales · session_01L6bhgVKUaox9fRxbdYMLvf -->"
+}

@@ -16,17 +16,17 @@
     "domain:ui",
     "enhancement",
     "pm:queue",
-    "priority:p2"
+    "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-20T10:26:59Z",
-  "updated_at": "2026-11-20T10:49:29Z",
+  "updated_at": "2026-11-21T22:38:47Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35831",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CZrgaiMgTJCnswR6jQ\n\nFollow-up of #35742 (PR #35824). L1-a R1 is in record 7037129863.\n\n## Problem\nOn the record page Overview, a master-detail body table now draws only the leading columns that fit whole. The other columns sit behind the ⤢ \"All columns\" button. When an omitted column is summed, its total leaves the body table's totals line too. A summed amount (for example a line amount) can vanish from Overview only because its column did not fit. It is still one click away under \"All columns\".\n\n## Done when\nOne of these is true on the Overview body table, at any width that omits a summed column:\n- (a) the totals line keeps the total of every omitted summed column, labelled with the column's name; or\n- (b) the totals line says how many more totals sit in \"All columns\", for example \"+2 totals in All columns\", and that text opens the enlarged view.\n\nThe visible columns' totals are unchanged. A table that omits no column shows no added text.\n\n## Where\n- `ui/packages/plugin-detail/src/RelatedList.tsx`: the body-table face (`bodyTableColumnsThatFit`, the column cap, and the totals row).\n- Pins next to `RelatedList.bodyTable-27055.test.tsx`.\n\n## Not in scope\n- The placement order and the 33/32 density (#35742).\n- The non-body-table related list.\n"
