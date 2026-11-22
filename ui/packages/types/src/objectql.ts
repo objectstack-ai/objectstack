@@ -1384,9 +1384,12 @@ export interface ObjectGridSchema extends BaseSchema {
    *
    * `ObjectGrid` reads it as `schema.keyboardNavigation ?? inlineEditable`, where
    * `inlineEditable` is the authored `editable` AND the viewer's write verdict on
-   * the object — the one value the grid's inline editing itself obeys. So a grid
-   * that renders editable has it on, a grid that renders read-only keeps its Tab
-   * behaviour unless this is `true`, and `false` turns it off on an editable grid.
+   * the object — the one value the grid's inline editing itself obeys. A grid
+   * that renders read-only keeps its Tab behaviour unless this is `true`. A grid
+   * that renders editable is select-first by default (objectstack#36270), and
+   * the select-first model always keeps navigation on, so `false` has no effect
+   * there. Only a host that keeps the staged model (`cellSelection={false}` on
+   * `ObjectGrid`) lets `false` turn it off on an editable grid.
    * @default true when the grid renders editable
    */
   keyboardNavigation?: boolean;

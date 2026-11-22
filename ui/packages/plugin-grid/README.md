@@ -1038,8 +1038,9 @@ WAI-ARIA grid pattern (objectui#11068):
   `editable` *and* the viewer's permission to update the object, the same value
   inline editing obeys — because that grid selects a cell first and moves the
   selection with these keys; `false` does not turn it off there
-  (objectstack#36270). A read-only grid keeps every cell its own Tab stop unless
-  you write `true`.
+  (objectstack#36270), except where a React host keeps the staged model with
+  `cellSelection={false}` (see Batch Editing below). A read-only grid keeps every
+  cell its own Tab stop unless you write `true`.
 - While it is on, the table is exposed to assistive technology as a `grid`. A
   grouped grid navigates within each group's table; the mobile card layout has
   no cells and is unaffected.
@@ -1113,7 +1114,9 @@ const persistence = (
   - "Cancel All" button to discard all pending changes
 - **Flexible callbacks** — all three are `ObjectGridComponentProps`, never schema keys:
   - `onRowSave`: called when saving a single row
-  - `onBatchSave`: called when saving multiple rows at once
+  - `onBatchSave`: called when saving multiple rows at once — `@deprecated`: only
+    this staged model calls it; on a select-first grid each cell saves through
+    `onRowSave` (or the grid's own write) and `onBatchSave` is never called
   - `onCellChange`: called for each staged cell edit
 - **A concurrent write is refused, not overwritten**: the default saves send each
   row's `updated_at` as `If-Match`, and an editable grid asks for that column even

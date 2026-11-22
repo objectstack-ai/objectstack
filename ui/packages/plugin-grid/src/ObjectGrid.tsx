@@ -457,6 +457,17 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
   onBulkDelete?: (records: any[]) => void;
   onCellChange?: (rowIndex: number, columnKey: string, newValue: any, row: any) => void;
   onRowSave?: (rowIndex: number, changes: Record<string, any>, row: any) => void | Promise<void>;
+  /**
+   * Called by "Save All" with every staged row — the staged model only.
+   *
+   * @deprecated objectstack#36270 — a grid that renders editable is
+   * select-first by default, and there each edited cell saves on its own
+   * through {@link ObjectGridComponentProps.onRowSave} (or, when the host
+   * passes none, the grid's own write through `dataSource.update`). No
+   * "Save All" is drawn, so this handler is never called and nothing says so.
+   * Pass `onRowSave` to own the write per cell, or pass `cellSelection={false}`
+   * to keep the staged model, where this handler is still called.
+   */
   onBatchSave?: (changes: Array<{ rowIndex: number; changes: Record<string, any>; row: any }>) => void | Promise<void>;
   onRowSelect?: (selectedRows: any[]) => void;
   onAddRecord?: () => void;
@@ -587,7 +598,9 @@ function getDataConfig(schema: ObjectGridSchema): ViewData | null {
  *   - the card's speculative list (`pagination`, `manualPagination`, `rowCount`,
  *     `frozenColumns`, `singleClickEdit`, `selectionResetKey`,
  *     `disableInnerScroll`, `borderless`) was already declared then, and is
- *     still declared now;
+ *     still declared now (`singleClickEdit` here is the TABLE's own key, which
+ *     `ObjectGrid` now always passes as `true`; the `object-grid` key of that
+ *     name is retired, objectstack#36270);
  *   - the two keys that survived that diff, `renderCellEditor` and
  *     `cellClassName`, were DECLARED by `bf97b98c8` (maintainer ruling
  *     2026-08-30) on three surfaces:
@@ -3714,8 +3727,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // is the one this grid renders — `inlineEditable`, the authored key AND the
     // viewer's write verdict (#5143), the same value handed down above. So a
     // grid that renders read-only keeps every cell its own Tab stop unless the
-    // author writes `true`, and an explicit `false` turns it off on an editable
-    // grid. Not an alias fallback: the right side is the key's own default.
+    // author writes `true`. On an editable grid the select-first model is the
+    // default (objectstack#36270) and data-table keeps navigation on under it
+    // (`keyboardNavigationProp || selectFirst`), so an explicit `false` only
+    // turns it off where the host keeps the staged model (`cellSelection={false}`).
+    // Not an alias fallback: the right side is the key's own default.
     keyboardNavigation: schema.keyboardNavigation ?? inlineEditable,
     // The save bar sits on the grid's own inset, as its cells do (`px-3`),
     // never flush against the view's edge (objectstack-ai/objectstack#27520).
