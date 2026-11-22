@@ -2323,6 +2323,16 @@ export type ProvenanceWaiver = z.input<typeof ProvenanceWaiverSchema>;
  */
 export const PROVENANCE_WAIVERS: readonly ProvenanceWaiver[] = [
   {
+    package: '@objectstack/core',
+    code: 'PROJECT_MEMBERSHIP_REQUIRED',
+    registeredUnder: '@objectstack/runtime',
+    reason: 'Shared verdict one package over: core\'s `environment-membership.ts` defines the code ' +
+      'beside `judgeEnvironmentMembership` so every door of a multi-environment host applies one ' +
+      'judgment, but core has no HTTP door. The refusal ships on the wire from the runtime ' +
+      'dispatcher (`HttpDispatcher`, the runtime row\'s emitter) and from the REST server, both ' +
+      'of which ask that function and write its code; neither spells the string itself.',
+  },
+  {
     package: '@objectstack/metadata-core',
     code: 'SCHEMA_UPGRADE_CONFIRMATION_REQUIRED',
     registeredUnder: '@objectstack/cloud-connection',

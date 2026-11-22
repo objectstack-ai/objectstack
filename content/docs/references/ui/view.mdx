@@ -1096,7 +1096,7 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 | **sort** | `boolean` | optional (default: `true`) | Allow users to sort records |
 | **search** | `boolean` | optional (default: `true`) | Allow users to search records |
 | **filter** | `boolean` | optional (default: `true`) | Allow users to filter records |
-| **refresh** | `boolean` | optional (default: `true`) | Allow users to reload the view data from the backend without a full page reload |
+| **refresh** | `boolean` | optional (default: `true`) | Allow users to reload the view data from the backend without a full page reload. Governs only the wide toolbar's Refresh button (`compactToolbar: false`): the default toolbar has no Refresh, so the toggle changes nothing there. |
 | **rowHeight** | `boolean` | optional (default: `true`) | Allow users to toggle row height/density |
 | **group** | `boolean` | optional (default: `true`) | Allow users to change record grouping from the toolbar. Toggle only — the grouping itself is configured in the view-level `grouping` block. |
 | **addRecordForm** | `boolean` | optional (default: `false`) | Add records through a form instead of inline |
@@ -1484,7 +1484,7 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 | **sort** | `boolean` | optional (default: `true`) | Allow users to sort records |
 | **search** | `boolean` | optional (default: `true`) | Allow users to search records |
 | **filter** | `boolean` | optional (default: `true`) | Allow users to filter records |
-| **refresh** | `boolean` | optional (default: `true`) | Allow users to reload the view data from the backend without a full page reload |
+| **refresh** | `boolean` | optional (default: `true`) | Allow users to reload the view data from the backend without a full page reload. Governs only the wide toolbar's Refresh button (`compactToolbar: false`): the default toolbar has no Refresh, so the toggle changes nothing there. |
 | **rowHeight** | `boolean` | optional (default: `true`) | Allow users to toggle row height/density |
 | **group** | `boolean` | optional (default: `true`) | Allow users to change record grouping from the toolbar. Toggle only — the grouping itself is configured in the view-level `grouping` block. |
 | **addRecordForm** | `boolean` | optional (default: `false`) | Add records through a form instead of inline |
@@ -1669,7 +1669,7 @@ User action toggles for the view toolbar
 | **sort** | `boolean` | optional (default: `true`) | Allow users to sort records |
 | **search** | `boolean` | optional (default: `true`) | Allow users to search records |
 | **filter** | `boolean` | optional (default: `true`) | Allow users to filter records |
-| **refresh** | `boolean` | optional (default: `true`) | Allow users to reload the view data from the backend without a full page reload |
+| **refresh** | `boolean` | optional (default: `true`) | Allow users to reload the view data from the backend without a full page reload. Governs only the wide toolbar's Refresh button (`compactToolbar: false`): the default toolbar has no Refresh, so the toggle changes nothing there. |
 | **rowHeight** | `boolean` | optional (default: `true`) | Allow users to toggle row height/density |
 | **group** | `boolean` | optional (default: `true`) | Allow users to change record grouping from the toolbar. Toggle only — the grouping itself is configured in the view-level `grouping` block. |
 | **addRecordForm** | `boolean` | optional (default: `false`) | Add records through a form instead of inline |

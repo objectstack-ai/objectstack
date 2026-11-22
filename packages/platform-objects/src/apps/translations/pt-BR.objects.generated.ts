@@ -176,7 +176,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "Banir usuário",
-        description: "Banir este usuário? Ele será desconectado, não poderá entrar e suas chaves de API serão recusadas até o desbanimento, assim como seus tokens de acesso OAuth e as renovações de token. As chaves voltam a funcionar após o desbanimento.",
+        description: "Banir este usuário? Ele será desconectado, não poderá entrar e suas chaves de API serão recusadas até o desbanimento, assim como seus tokens de acesso OAuth e as renovações de token. As chaves voltam a funcionar após o desbanimento. O banimento também suspende as contas de serviço de IA pelas quais ele é responsável, desativa os aplicativos OAuth que ele registrou e revoga as credenciais SCIM que ele emitiu; o desbanimento não restaura nada disso.",
         successMessage: "Usuário banido",
         params: {
           banReason: {
@@ -496,6 +496,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       revoke_reason: {
         label: "Motivo da revogação",
         help: "Por que a sessão foi revogada (idle_timeout, absolute_max, concurrent_cap, ip_not_allowed, user_revoked, admin, organization_membership_ended, admin_password_reset, password_reset, …)."
+      },
+      sso_provider_id: {
+        label: "Provedor de SSO",
+        help: "O provedor de SSO pelo qual esta sessão foi iniciada, se houver. Excluir esse provedor encerra a sessão. Gerenciado pelo sistema."
       },
       active_organization_id: {
         label: "Organização ativa"

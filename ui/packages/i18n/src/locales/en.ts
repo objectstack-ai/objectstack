@@ -1577,6 +1577,9 @@ const en = {
     dragToReorder: 'Drag to reorder',
     defaultView: 'Default view',
     defaultBadge: 'default',
+    customizedBadge: 'customized',
+    customizedTitle: 'Changed here: everyone sees this copy instead of the version its package ships.',
+    restoreFactory: 'Restore factory version',
     tabActionsFor: 'View actions for {{name}}',
     readonlyAriaLabel: 'Read-only view',
     readonlyTooltip: 'System view — defined in code, read-only.',
@@ -1903,6 +1906,7 @@ const en = {
     updatedTime: 'Updated on',
     recordNumber: 'Record ID',
     clickToEdit: 'Click to edit',
+    setField: 'Set {{field}}',
     // Attachments
     dropFilesToUpload: 'Drop files here or click to upload',
     attachmentCount: '{{count}} attachment',
@@ -3364,6 +3368,10 @@ const en = {
       delete: 'Delete',
       deleteViewTitle: 'Delete view',
       deleteViewConfirm: 'Are you sure you want to delete the view "{{name}}"? This cannot be undone.',
+      restoreFactory: 'Restore',
+      restoreFactoryTitle: 'Restore factory version',
+      restoreFactoryConfirm: 'Restore the view "{{name}}" to the version its package ships? Everyone who uses this view will see the factory version again, and the name, pin and default changed here are removed.',
+      restoreFactoryDone: 'Restored the factory version of "{{name}}"',
       bulkDeleteConfirm: 'Delete {{count}} selected records? This cannot be undone.',
       bulkDeleteConfirm_one: 'Delete {{count}} selected record? This cannot be undone.',
       bulkDeleteConfirm_other: 'Delete {{count}} selected records? This cannot be undone.',
@@ -4106,6 +4114,11 @@ const en = {
     collapse: 'Collapse sidebar',
     expand: 'Expand sidebar',
   },
+  designMode: {
+    title: 'Design mode',
+    leaveUnsaved: 'Leave design mode? Your unsaved changes will be lost.',
+    saveFailed: 'Some changes were not saved: {{reason}}',
+  },
   topbar: {
     aiAssistant: 'AI Assistant',
     designInStudio: 'Design in Studio',
@@ -4727,6 +4740,7 @@ const en = {
   objectViewActions: {
     renameFailed: 'Failed to rename view',
     deleteFailed: 'Failed to delete view',
+    restoreFactoryFailed: 'Failed to restore the factory version',
   },
   dashboardActions: {
     printDialogOpening: 'Opening your browser’s print dialog (not a PDF export)',
@@ -6484,9 +6498,7 @@ const en = {
     digestNone: "No digest",
     digestDaily: "Daily",
     digestWeekly: "Weekly",
-    digestNoOff: "\"No digest\" is not offered: saving it does not turn off a digest your organization sets, so it might not take effect.",
     quietHours: "Quiet hours",
-    quietHoursNoClear: "An empty window cannot be saved: it does not turn off quiet hours your organization sets, so it might not take effect. Set a start and an end time instead.",
     save: "Save",
     matrix: "Topics and channels",
     topic: "Topic",

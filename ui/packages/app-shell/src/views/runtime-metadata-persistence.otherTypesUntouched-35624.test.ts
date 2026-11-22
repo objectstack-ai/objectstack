@@ -31,7 +31,7 @@ describe('report, dashboard and page creates are untouched by the app destinatio
     });
 
     expect(metadataClient.save).toHaveBeenCalledTimes(1);
-    expect(metadataClient.save).toHaveBeenCalledWith(type, `crm_${type}`, { label: type }, { mode: 'draft' });
+    expect(metadataClient.save).toHaveBeenCalledWith(type, `crm_${type}`, { label: type }, { mode: 'draft', ifNoneMatch: '*' });
     expect(pageFetch).not.toHaveBeenCalled();
     expect(onSavedOutsideApp).not.toHaveBeenCalled();
   });

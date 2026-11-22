@@ -593,7 +593,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       console.log(`dates: the card's ${loaded.card.asOf} is run as ${scenario.card.asOf}, every card date moved by the same days`);
     }
     publishedVersions = new Set();
-    const cardRun = await runCard(scenario, driver, ops, { modes: args.modes, iterateRun: args.iterateRun, admin: ADMIN, ...(template ? { templateArtifact: template } : {}), ...(args.askRepeats !== undefined ? { askRepeats: args.askRepeats } : {}), ...(promptChoice ? { promptChoice } : {}) });
+    const cardRun = await runCard(scenario, driver, ops, { modes: args.modes, iterateRun: args.iterateRun, admin: ADMIN, ...(template ? { templateArtifact: template } : {}), ...(args.askRepeats !== undefined ? { askRepeats: args.askRepeats } : {}), ...(promptChoice ? { promptChoice } : {}), ...(schemaMasking === 'off' ? { schemaMasking } : {}) });
     const packages: PackageSource = workspace ? workspace.source : { source: 'published', versions: [...publishedVersions].sort() };
     // The card file the run graded, as it was loaded (`CardStamp`): the record and the scorecard name its hash.
     const card = loadedCardStamp(loaded);

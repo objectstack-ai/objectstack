@@ -11,17 +11,26 @@ export const entry: SemanticMigration = {
   id: 'cel-list-equality-refused',
   surface:
     'Any CEL predicate or formula the shared validator types against an object (a validation rule, a field rule, a '
-    + 'formula, an action\'s visible / disabled, a hook or flow condition): `==` or `!=` '
-    + 'between a read of a list-valued field (`multiselect`, `checkboxes`, `tags`, or a `select` / `radio` / '
-    + '`lookup` / `user` / `file` / `image` field declared `multiple: true`) on `record` / `previous` — or, at a '
+    + 'formula, an action\'s visible / disabled, a hook condition, a sharing rule condition, and the condition of a '
+    + 'flow whose run binds a row of that object: a record-triggered flow, or a time-relative sweep of it): `==` or '
+    + '`!=` between a read of a list-valued field (`multiselect`, `checkboxes`, `tags`, or a `select` / `radio` / '
+    + '`lookup` / `user` / `file` / `image` field declared `multiple: true`) on `record` / `previous` — or, at such a '
     + 'flow condition, its bare name, which the run binds to the trigger record\'s field — and a non-null '
     + 'string, number or boolean literal, in either operand order. Not the shape: a name a comprehension macro '
-    + 'binds (`record.items.exists(labels, labels == \'a\')`, where `labels` is one item), nor a bare name a '
-    + 'declared flow variable holds',
+    + 'binds (`record.items.exists(labels, labels == \'a\')`, where `labels` is one item), a bare name a '
+    + 'declared flow variable holds, nor any read in a flow no record write or sweep starts (an API, scheduled or '
+    + 'trigger-less flow), whose run holds what its entrance handed it',
   replacement:
-    'Test membership with `in`, null-guarded because `\'a\' in null` faults: `record.labels != null && '
-    + '\'frontend\' in record.labels` for `==`, and `record.labels == null || !(\'frontend\' in record.labels)` for '
-    + '`!=`. Compare the list with `null` to test whether it is set, and with a list literal for a whole-list match. '
+    'Test membership, parenthesised whole so it stands where the comparison stood, in the spelling the site reads. '
+    + 'A `record.` / `previous.` read evaluated as CEL: `(has(record.labels) && record.labels != null && \'frontend\' '
+    + 'in record.labels)` for `==`, `(!has(record.labels) || record.labels == null || !(\'frontend\' in '
+    + 'record.labels))` for `!=` (`has()` answers on a sparse row or a null `previous`, where `\'a\' in null` and an '
+    + 'absent key fault). A bare name at a flow condition: `(labels != null && \'frontend\' in labels)` / `(labels == '
+    + 'null || !(\'frontend\' in labels))`. A sharing rule condition, which compiles to a query filter where `in` '
+    + 'needs a field on its left: `(record.labels != null && record.labels.contains(\'frontend\'))` / '
+    + '`(record.labels == null || !record.labels.contains(\'frontend\'))`, a membership filter (`$contains`). The '
+    + 'refusal names the rewrite for its site. Compare the list with `null` to test whether it is set, and with a list '
+    + 'literal for a whole-list match. '
     + '`os validate`, `os build`, the MCP `validate_expression` tool and the Studio object editor\'s draft check '
     + 'refuse the shape as `list-equality`, an error; the flow registration pass logs it.',
   reason:
