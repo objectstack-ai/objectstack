@@ -532,9 +532,7 @@ describe('the menu under the design mode (objectstack#36363)', () => {
 
     // A plain click afterwards is a click again: it opens the entry's page.
     const before = screen.getByTestId('where').textContent;
-    act(() => {
-      linkOf('leads').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
-    });
+    fireEvent.click(linkOf('leads'));
     expect(screen.getByTestId('where').textContent).not.toBe(before);
     expect(screen.getByTestId('design-mode-bar')).toBeInTheDocument();
   });
@@ -552,15 +550,11 @@ describe('the menu under the design mode (objectstack#36363)', () => {
     fireEvent.click(screen.getByText('enter'));
     await flush();
     act(() => dragStart.current!({ active: { id: 'leads' } })); // started, and no end reported
-    act(() => {
-      window.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
-    });
+    fireEvent.pointerUp(window);
     await act(async () => {
       await new Promise((r) => setTimeout(r, 350));
     });
-    act(() => {
-      linkOf('home').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
-    });
+    fireEvent.click(linkOf('home'));
     expect(screen.getByTestId('where').textContent).not.toBe('/apps/crm');
   });
 
