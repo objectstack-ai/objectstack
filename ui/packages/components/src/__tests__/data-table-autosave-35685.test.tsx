@@ -82,7 +82,7 @@ function schemaOf(onRowSave: Save, extra: Record<string, unknown> = {}) {
 
 function renderTable(onRowSave: Save, extra: Record<string, unknown> = {}, withProvider = true, language?: string) {
   const DataTable = ComponentRegistry.get('data-table')!;
-  const table = (schema: any) => (withProvider
+  const table = (schema: Record<string, unknown>) => (withProvider
     ? <GridCellSelectionProvider value={{}}><DataTable schema={schema} /></GridCellSelectionProvider>
     : <DataTable schema={schema} />);
   const tree = (schema: any) => (language

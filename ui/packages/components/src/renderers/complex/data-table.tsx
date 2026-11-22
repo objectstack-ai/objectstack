@@ -3736,13 +3736,15 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   // was waiting on arrived). Never asked per render; every render reads this.
   const selectedRow = selectedPos ? paginatedData[selectedPos.rowIndex] : undefined;
   const selectedColumnKey = selectedPos ? columns[selectedPos.colIndex].accessorKey : undefined;
-  const [selectedHostReadOnly, setSelectedHostReadOnly] = useState<{ row: any; columnKey: string } | null>(null);
+  const [selectedHostReadOnly, setSelectedHostReadOnly] = useState<{ row: unknown; columnKey: string } | null>(null);
   useLayoutEffect(() => {
     const readOnly = selectedRow !== undefined && selectedColumnKey !== undefined
       && !!cellSelection?.describeCell?.(selectedRow, selectedColumnKey)?.readOnlyReason;
     setSelectedHostReadOnly((prev) => {
-      if (!readOnly) return null;
-      return prev?.row === selectedRow && prev.columnKey === selectedColumnKey ? prev : { row: selectedRow, columnKey: selectedColumnKey! };
+      if (!readOnly || selectedColumnKey === undefined) return null;
+      return prev !== null && prev.row === selectedRow && prev.columnKey === selectedColumnKey
+        ? prev
+        : { row: selectedRow, columnKey: selectedColumnKey };
     });
   }, [selectedRow, selectedColumnKey, cellSelection]);
   const setSelectedCell = (pos: { rowIndex: number; colIndex: number } | null) =>
@@ -5218,8 +5220,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         // reader moves to) adds the host's, asked when it became selected
                         // (`selectedHostReadOnly`: `describeCell` is never asked per render).
                         const cellReadOnly = keyboardNavigation
-                          && (!isEditable || (isSelectedCell && selectedHostReadOnly?.row === row
-                            && selectedHostReadOnly.columnKey === col.accessorKey));
+                          && (!isEditable || (isSelectedCell && selectedHostReadOnly !== null
+                            && selectedHostReadOnly.row === row && selectedHostReadOnly.columnKey === col.accessorKey));
                         // What the cell draws; the preview layer draws the same, unclipped.
                         const drawCell = (): React.ReactNode => (typeof col.cell === 'function'
                           ? col.cell(cellValue, row)

@@ -1379,7 +1379,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // what this render holds through `latestCellHooks`.
   const gridEditable = schema.editable ?? false;
   const latestCellHooks = React.useRef({ requiredPrompt, askStateMove, openReferencedRecord });
-  latestCellHooks.current = { requiredPrompt, askStateMove, openReferencedRecord };
+  React.useLayoutEffect(() => {
+    latestCellHooks.current = { requiredPrompt, askStateMove, openReferencedRecord };
+  });
   const opensReferencedRecords = !!openReferencedRecord;
   const gridCellSelection = useMemo((): GridCellSelection | null => (hostCellSelection
     ? {
