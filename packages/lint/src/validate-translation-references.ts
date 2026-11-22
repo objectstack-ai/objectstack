@@ -482,6 +482,18 @@ interface ObjectFacts {
    * for why that is the only carrier and how the object binding is resolved.
    */
   tabs: Set<string>;
+  /**
+   * `_relatedLists` names — the `list` of every object-form `relatedLists`
+   * entry this object declares WITH a `label`, the only entries
+   * `translateObject` overlays `objects.<obj>._relatedLists.<list>.label` onto.
+   */
+  relatedListLabels: Set<string>;
+  /**
+   * Every list this object's `relatedLists` names, labelled or not (a bare
+   * string, an object entry, a built-in tab) — read only to say WHY a
+   * `_relatedLists` key over a named but unlabelled entry resolves nothing.
+   */
+  relatedListNames: Set<string>;
 }
 
 /** Everything a `flows.<name>.screens.<node_id>` key may legally name. */
@@ -642,6 +654,8 @@ function emptyFacts(): ObjectFacts {
     sectionEntries: new Map(),
     validations: new Set(),
     tabs: new Set(),
+    relatedListLabels: new Set(),
+    relatedListNames: new Set(),
   };
 }
 
@@ -1298,6 +1312,16 @@ function buildUniverse(stack: AnyRec): Universe {
     // deliberately so the bundle mirrors the declared rule set 1:1.
     for (const rule of recordsOf(obj.validations)) {
       collectValidationRuleNames(rule, facts.validations);
+    }
+    // `_relatedLists.<list>` is keyed by an object-form `relatedLists` entry's
+    // literal `list` (`object.field` is one key), and resolves only over an
+    // entry that authors a `label`: `translateObject` overlays that label and
+    // swaps nothing in for an entry without one.
+    for (const entry of Array.isArray(obj.relatedLists) ? obj.relatedLists : []) {
+      const list = typeof entry === 'string' ? entry : isRec(entry) ? strName(entry.list) : undefined;
+      if (!list) continue;
+      facts.relatedListNames.add(list);
+      if (isRec(entry) && typeof entry.label === 'string' && entry.label.length > 0) facts.relatedListLabels.add(list);
     }
   };
 
@@ -2058,6 +2082,33 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
                 `renamed or removed.`
               : `Declare the tab in a page's \`interfaceConfig.userFilters.tabs\` (a list view's own ` +
                 `\`tabs\` has no renderer), or drop the key.`,
+          );
+        }
+
+        // _relatedLists.<list>
+        //
+        // A record-page related-list title the parent declares on an
+        // object-form `relatedLists` entry. A key over a list the object names
+        // without a `label` translates nothing: that tab's title is the child
+        // FK's `relatedListTitle`, keyed on the child.
+        for (const listName of Object.keys(asRecord(rawNode._relatedLists))) {
+          if (facts.relatedListLabels.has(listName)) continue;
+          const named = facts.relatedListNames.has(listName);
+          orphan(
+            `${inLocale} · object "${objectName}" · related list "${listName}"`,
+            `${objPath}._relatedLists.${listName}`,
+            named
+              ? `Translations are keyed to related list "${listName}", which object "${objectName}" ` +
+                `names in \`relatedLists\` without a \`label\`, so nothing reads this key: the tab ` +
+                `shows the child's own related-list title or plural label.`
+              : `Translations are keyed to related list "${listName}", which no \`relatedLists\` entry ` +
+                `of object "${objectName}" names, so nothing reads this key.` +
+                suggest(listName, facts.relatedListLabels),
+            named
+              ? `Give the entry a \`label\` ({ list, label }) to title it here, or translate the ` +
+                `child lookup field's \`relatedListTitle\` instead, and drop this key.`
+              : `Match the key to the entry's \`list\` (a dotted object.field is one key), or drop ` +
+                `it if the entry was renamed or removed.`,
           );
         }
 
