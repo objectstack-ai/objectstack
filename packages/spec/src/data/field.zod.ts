@@ -2886,6 +2886,23 @@ export const FieldSchema = lazySchema(() => {
   hidden: z.boolean().default(false).describe('Hidden from default UI'),
 
   /**
+   * Whether the field is asked for when a record is created (ADR-0085 §2: a
+   * creation-time intent of the field — which fields this business asks for
+   * when a record is born, not inferable from the schema — that binds every
+   * create surface and names none of them). Absent, as `true`: the field is
+   * asked for. `false`: every create surface leaves it out; editing, the
+   * record page and lists still show it.
+   *
+   * A `required: true` field cannot be switched off: the create would be
+   * refused for the value it never asked for, so the pair is refused here, at
+   * every door that parses a field (this schema's superRefine). A
+   * `requiredWhen` field is not refused: its gate is a predicate the parse
+   * cannot judge, and the write door still refuses a create born inside it.
+   * `liveness/field.json` carries its row.
+   */
+  showOnCreate: z.boolean().optional().describe('Ask for this field when a record is created. Absent or `true`: the field is on every create surface (the create dialog, the full-page create, an action-opened create). `false`: no create surface shows it; editing, the record page and lists still do, so a value is filled in after the record exists. Refused on a `required: true` field, whose create would then be refused for a value it was never asked for: keep the field on create, or drop `required`. A `requiredWhen` field is accepted, and its create is still refused when the predicate holds and the value is empty.'),
+
+  /**
    * [#7728] "The declared value is never returned on the generic data path."
    *
    * Opt-in, and deliberately NOT a synonym for anything already here. `hidden`
@@ -3204,6 +3221,21 @@ export const FieldSchema = lazySchema(() => {
           + 'Delete one of the two.',
       });
     }
+  }
+  // `showOnCreate: false` leaves the field off every create surface, and
+  // `required: true` refuses every insert without it (ADR-0113): together,
+  // no record of the object could be created from the platform's create
+  // surfaces. Refused where the author can fix it, at every door that parses
+  // a field (`defineStack`, `os validate`, the metadata save).
+  if (field.showOnCreate === false && field.required === true) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['showOnCreate'],
+      message:
+        '`showOnCreate: false` leaves this field off every create surface, and it is `required: true`, so every '
+        + 'create would be refused for a value it never asked for. Keep the field on create (delete '
+        + '`showOnCreate`), or drop `required`; a value needed only in some cases can be `requiredWhen` instead.',
+    });
   }
   // [#11339] `referenceVia` declares the id half of a polymorphic pointer
   // pair (ADR-0052 §5) — semantics only a plain `text` column carries. On a

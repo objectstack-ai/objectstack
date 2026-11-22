@@ -189,6 +189,12 @@
       "status": "live",
       "note": "renderer."
     },
+    "showOnCreate": {
+      "status": "planned",
+      "verifiedAt": "2026-11-22",
+      "evidence": "packages/spec/src/data/field.zod.ts#showOnCreate (the parse refuses `showOnCreate: false` beside `required: true`, at every door that parses a field)",
+      "note": "PLANNED, contract-first spec half of the card that retires the internal create and edit forms: the key and its parse-time refusal land first, the readers second. The readers are every create surface of the Console (the create dialog, the full-page create, an action-opened create), which leave a `showOnCreate: false` field out; editing, the record page and lists ignore it by contract. Flip to `live` on the commit that lands those readers, citing them."
+    },
     "internal": {
       "status": "live",
       "verifiedAt": "2026-08-12",
