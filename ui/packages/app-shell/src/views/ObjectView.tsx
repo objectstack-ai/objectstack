@@ -997,7 +997,12 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         if (!activeView) return false;
         // objectstack#35955 — the draft's layout is the new view's type (so
         // the type's own field list is filled as the create card fills it),
-        // and its row colour is laid over the body.
+        // and its row colour is laid over the body; objectstack#36370 — so are
+        // a board's changed settings.
+        const saveAsDisplay = {
+            ...(listDraft.draft.rowColor !== undefined ? { rowColor: listDraft.draft.rowColor } : {}),
+            ...(listDraft.draft.kanban ? { kanban: listDraft.draft.kanban } : {}),
+        };
         const built = buildInPlaceViewConfig(
             objectDef.name,
             activeView,
@@ -1007,7 +1012,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 preference: draftPreferenceOf(activeView.id),
                 panelFilters: viewPanelFilters,
                 summaries: listDraft.draft.summaries,
-                ...(listDraft.draft.rowColor !== undefined ? { display: { rowColor: listDraft.draft.rowColor } } : {}),
+                ...(Object.keys(saveAsDisplay).length > 0 ? { display: saveAsDisplay } : {}),
             },
         );
         if (!built.ok) {
