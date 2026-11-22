@@ -20,7 +20,7 @@ import {
   encodeStorageListCursor,
   resolveStorageListLimit,
 } from '@objectstack/spec/contracts';
-import { contentDispositionValue } from './content-disposition.js';
+import { servedContentDisposition, servedContentType } from './served-bytes-policy.js';
 
 /**
  * Hard ceiling `ListObjectsV2` applies to `MaxKeys`, regardless of what the
@@ -575,13 +575,15 @@ export class S3StorageAdapter implements IStorageService {
     const { getSignedUrl } = await this.presignerMod();
     // S3 bakes these response overrides into the signed URL, so the download
     // carries the real filename + type instead of the object key + octet-stream.
+    // Both are always baked, by the stored-bytes rule (`served-bytes-policy.ts`):
+    // left out, the bucket answers the type the uploader declared at PUT, inline.
+    // A signed `GetObject` URL can set no other response header, so `nosniff`
+    // and the CSP are the bucket's to send; the URL is the bucket's origin.
     const cmd = new s3.GetObjectCommand({
       Bucket: this.bucket,
       Key: this.storageKey(key),
-      ...(options?.contentType ? { ResponseContentType: options.contentType } : {}),
-      ...(options?.filename
-        ? { ResponseContentDisposition: contentDispositionValue(options.filename, options.disposition ?? 'inline') }
-        : {}),
+      ResponseContentType: servedContentType(options?.contentType),
+      ResponseContentDisposition: servedContentDisposition(options?.contentType, options?.filename, options?.disposition),
     });
     const url = await getSignedUrl(client, cmd, { expiresIn });
     return { downloadUrl: url, expiresIn };
