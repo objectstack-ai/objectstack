@@ -26,6 +26,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 import { OrganizationsPlugin } from './organizations-plugin.js';
 
 const TASK = 'eop_task';
@@ -52,6 +53,7 @@ const APP = {
   actions: [
     { name: 'eop_flow_read', label: 'Flow read', objectName: TASK, type: 'flow', target: 'eop_sys_read' },
     { name: 'eop_flow_write', label: 'Flow write', objectName: TASK, type: 'flow', target: 'eop_sys_write' },
+    { name: 'eop_flow_held_read', label: 'Flow held read', objectName: TASK, type: 'flow', target: 'eop_sys_held_read' },
   ],
   flows: [
     {
@@ -76,6 +78,34 @@ const APP = {
         { id: 'e1', source: 'start', target: 'read' },
         { id: 'e2', source: 'read', target: 'report' },
         { id: 'e3', source: 'report', target: 'end' },
+      ],
+    },
+    {
+      // Begins for its caller, pauses on a signal, and is resumed naming a
+      // different user as the decider.
+      name: 'eop_sys_held_read',
+      label: 'System held read',
+      type: 'screen',
+      status: 'active',
+      runAs: 'system',
+      variables: [{ name: 'found', type: 'record_collection', isInput: false, isOutput: false }],
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'hold', type: 'wait', label: 'Hold', waitEventConfig: { eventType: 'signal', signalName: 'eop.decided' } },
+        { id: 'read', type: 'get_record', label: 'Read', config: { objectName: TASK, limit: 100, outputVariable: 'found' } },
+        {
+          id: 'report',
+          type: 'create_record',
+          label: 'Report',
+          config: { objectName: NOTE, fields: { name: 'seen-held', seen: { dialect: 'cel', source: 'string(size(found))' } } },
+        },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'hold' },
+        { id: 'e2', source: 'hold', target: 'read' },
+        { id: 'e3', source: 'read', target: 'report' },
+        { id: 'e4', source: 'report', target: 'end' },
       ],
     },
     {
@@ -256,4 +286,20 @@ describe('group: a system flow run for a member of two organizations reads exact
       expect(await noteSeen('seen-flow')).toBe('2');
     });
   }
+
+  it('after a decision by another user, the run is still judged by the member it began for', async () => {
+    await clearNotes(orgA);
+    expect((await stack.apiAs(alice, 'POST', '/auth/organization/set-active', { organizationId: null })).status).toBe(200);
+    const r = await answer(await stack.apiAs(alice, 'POST', `/actions/${TASK}/eop_flow_held_read`, { params: {} }));
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    const automation: any = await stack.kernel.getServiceAsync('automation');
+    const [held] = await automation.listRuns('eop_sys_held_read', { status: 'paused' });
+    expect(held, 'the run is paused on its signal').toBeDefined();
+    // carol holds a membership in C alone: her wall would read one row, and
+    // alice's reads her two organizations' rows.
+    const [carol] = await ql.find('sys_user', { where: { email: 'eop-carol@verify.test' }, limit: 1 }, SYS);
+    const resumed = await automation.resume(held.id, { [RESUME_AUTHORITY_SERVICE]: true, resumedBy: carol.id });
+    expect(resumed.success, JSON.stringify(resumed)).toBe(true);
+    expect(await noteSeen('seen-held')).toBe('2');
+  });
 });
