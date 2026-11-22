@@ -88,7 +88,7 @@ function editableComment(item: FeedItem, moderates: boolean | undefined, updates
  * Whether the viewer may delete this comment: their own, or anyone's where
  * they moderate. Where the host's Delete is the own-comment delete door
  * (`ownDeletesOnly`, objectstack#36191), only their own, and only one with no
- * reply under it: the door keeps a comment others replied to.
+ * reply under it: the door keeps a comment that has replies.
  */
 function deletableComment(
   item: FeedItem,

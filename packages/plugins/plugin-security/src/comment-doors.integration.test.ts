@@ -49,6 +49,10 @@ const SIGNED_IN_AS = 'x-test-signed-in-as';
 const ALICE = 'usr_alice';
 const BOB = 'usr_bob';
 const CAROL = 'usr_carol';
+/** An external member granted the board and its comments to read, and nothing to post. */
+const DAVE = 'usr_dave';
+/** An external member granted the board to read and its comments to read and post. */
+const ERIN = 'usr_erin';
 
 /** The application's every-member set: it reads the parent; comments come from `member_default`. */
 const APP_EVERYONE_SET = PermissionSetSchema.parse({
@@ -56,6 +60,26 @@ const APP_EVERYONE_SET = PermissionSetSchema.parse({
   label: 'App member (every-member set)',
   objects: {
     [OPEN]: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+  },
+});
+
+/** An explicit external grant that reads the thread and cannot post into it. */
+const READ_ONLY_PORTAL_SET = PermissionSetSchema.parse({
+  name: 'cmd_portal_reader',
+  label: 'Portal reader (explicit external grant)',
+  objects: {
+    [OPEN]: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+    sys_comment: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+  },
+});
+
+/** An explicit external grant that reads the thread and posts into it. */
+const POSTING_PORTAL_SET = PermissionSetSchema.parse({
+  name: 'cmd_portal_commenter',
+  label: 'Portal commenter (explicit external grant)',
+  objects: {
+    [OPEN]: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+    sys_comment: { allowRead: true, allowCreate: true, allowEdit: false, allowDelete: false },
   },
 });
 
@@ -254,7 +278,7 @@ describe('the comment doors — a member resolves any thread they can read, and 
     await kernel.use(new AuditPlugin());
     await kernel.use(
       new SecurityPlugin({
-        defaultPermissionSets: [...defaultPermissionSets, APP_EVERYONE_SET],
+        defaultPermissionSets: [...defaultPermissionSets, APP_EVERYONE_SET, READ_ONLY_PORTAL_SET, POSTING_PORTAL_SET],
         fallbackPermissionSet: APP_EVERYONE_SET.name,
       }),
     );
@@ -262,7 +286,13 @@ describe('the comment doors — a member resolves any thread they can read, and 
     ql = kernel.getService<ObjectQL>('objectql');
 
     await ql.insert('sys_organization', { id: ORG, name: 'Acme', slug: 'acme' }, { context: SYS });
-    const roles: Record<string, string> = { [ALICE]: 'member', [BOB]: 'member', [CAROL]: 'admin' };
+    const roles: Record<string, string> = {
+      [ALICE]: 'member',
+      [BOB]: 'member',
+      [CAROL]: 'admin',
+      [DAVE]: 'external',
+      [ERIN]: 'external',
+    };
     for (const [userId, role] of Object.entries(roles)) {
       await ql.insert(
         'sys_user',
@@ -271,6 +301,8 @@ describe('the comment doors — a member resolves any thread they can read, and 
       );
       await ql.insert('sys_member', { user_id: userId, organization_id: ORG, role }, { context: SYS });
     }
+    await ql.insert('sys_user_permission_set', { user_id: DAVE, permission_set: READ_ONLY_PORTAL_SET.name, organization_id: ORG }, { context: SYS } as never);
+    await ql.insert('sys_user_permission_set', { user_id: ERIN, permission_set: POSTING_PORTAL_SET.name, organization_id: ORG }, { context: SYS } as never);
     for (const userId of Object.keys(roles)) as[userId] = await contextOf(userId);
 
     const board = await ql.insert(OPEN, { name: 'board' }, { context: SYS });
@@ -350,6 +382,26 @@ describe('the comment doors — a member resolves any thread they can read, and 
         expect(answer.body?.error?.code).toBe('VALIDATION_ERROR');
       }
       expect((await rowById(id))?.is_resolved ?? false).toBe(false);
+    });
+
+    it('takes the same gate as posting: an external who reads the thread and may not post is 403, and still reads it', async () => {
+      expect(as[DAVE].positions).toContain('org_external');
+      const id = await commentAs(BOB, boardThread, 'a question the portal can read');
+      const seen = await ql.findOne(COMMENT, { where: { id }, context: as[DAVE] });
+      expect(seen).toMatchObject({ id, body: 'a question the portal can read' });
+      const answer = await resolve(id, DAVE);
+      expect(answer.status, JSON.stringify(answer.body)).toBe(403);
+      expect(answer.body?.error?.code).toBe('PERMISSION_DENIED');
+      expect(await rowById(id)).toMatchObject({ is_resolved: false, resolved_by: null });
+      expect(await ql.findOne(COMMENT, { where: { id }, context: as[DAVE] })).toMatchObject({ id });
+    });
+
+    it('an external who reads the thread and may post into it resolves it, as the ruling reads', async () => {
+      expect(as[ERIN].positions).toContain('org_external');
+      const id = await commentAs(BOB, boardThread, 'a question the portal may answer');
+      const answer = await resolve(id, ERIN);
+      expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+      expect(answer.body?.data).toMatchObject({ id, is_resolved: true, resolved_by: ERIN });
     });
   });
 

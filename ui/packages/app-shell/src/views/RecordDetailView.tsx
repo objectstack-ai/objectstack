@@ -4275,8 +4275,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
    * Resolve or reopen a thread (objectstack#36071, #36075 item 7), by its
    * top-level comment, through the platform's resolution door
    * (`PUT /api/v1/comments/:id/resolution` with `{ resolved }`,
-   * objectstack#36186). The door admits whoever can read the thread
-   * (maintainer ruling record 7063285032) and writes `is_resolved` alone, so a
+   * objectstack#36186). The door admits whoever can read the thread and may
+   * post a comment on it (maintainer ruling record 7063285032: the same gate
+   * as posting) and writes `is_resolved` alone, so a
    * rank-and-file member resolves a colleague's thread too: on the data door
    * the platform's row floor refuses their update of a row they did not
    * create. The platform stamps who and when; the row changes only once the
@@ -6114,10 +6115,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           ownCommentDeletesOnly={!feedGates.commentDelete}
           // objectstack#36071 / #36075 / #36186 — resolve and reopen go
           // through the resolution door, which admits whoever can read the
-          // thread (ruling 7063285032) and asks no grant, so the panel offers
-          // ✓ on every thread, the viewer's and others', wherever the rows say
-          // the deployment stores resolution.
-          onResolveComment={feedsEnabled ? handleResolveComment : undefined}
+          // thread and may post a comment on it (ruling 7063285032: the same
+          // gate as posting), so the panel offers ✓ on every thread, the
+          // viewer's and others', under the comment grant and wherever the
+          // rows say the deployment stores resolution.
+          onResolveComment={feedsEnabled && feedGates.comment ? handleResolveComment : undefined}
           moderatesComments={moderatesComments}
           updatesOthersComments={updatesOthersComments}
           onToggleReaction={

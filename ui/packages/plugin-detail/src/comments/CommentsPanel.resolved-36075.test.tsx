@@ -245,7 +245,7 @@ describe('CommentsPanel — Delete through the own-comment delete door (objectst
     expect(onDeleteComment).toHaveBeenCalledWith('t1');
   });
 
-  it('no Delete on the viewer’s own comment others replied under; Edit stays', async () => {
+  it('no Delete on the viewer’s own comment that has replies; Edit stays', async () => {
     renderPanel({ items: WITH_REPLIED_OWN as any[], ownCommentDeletesOnly: true });
     const items = await menuItems('t6');
     expect(items).toContain('Edit');

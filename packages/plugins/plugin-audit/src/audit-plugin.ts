@@ -68,6 +68,7 @@ import {
   COMMENT_RESOLUTION_ROUTE,
   registerCommentDoorsRoutes,
   type CommentDoorsEngine,
+  type CommentPostingGate,
 } from './comment-routes.js';
 import { admitMentionRecipients } from './mention-recipient-gate.js';
 import { installActivityReadVisibility } from './activity-read-visibility.js';
@@ -1114,6 +1115,7 @@ export class AuditPlugin implements Plugin {
     registerCommentDoorsRoutes(http, {
       getEngine: () => getEngine() as unknown as CommentDoorsEngine | undefined,
       resolveCaller,
+      getSecurity: () => optional<CommentPostingGate>('security'),
     });
     ctx.logger.info(
       `AuditPlugin: comment doors mounted at DELETE ${COMMENT_REACTION_REMOVE_ROUTE}, PUT ${COMMENT_RESOLUTION_ROUTE} ` +

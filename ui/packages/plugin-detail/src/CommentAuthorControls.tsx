@@ -70,8 +70,8 @@ export const CommentBody: React.FC<CommentBodyProps> = ({
   const own = offersAuthorControls(item);
   const edit = own ? onEditComment : undefined;
   // Where the host's Delete is the own-comment delete door
-  // (`ownCommentDeletesOnly`, objectstack#36191), a comment others replied
-  // under is kept by the door, so it offers no Delete.
+  // (`ownCommentDeletesOnly`, objectstack#36191), a comment that has replies
+  // is kept by the door, so it offers no Delete.
   const keptForReplies = useDiscussionContext()?.ownCommentDeletesOnly === true && (item.replyCount ?? 0) > 0;
   const remove = own && !keptForReplies ? onDeleteComment : undefined;
   // `null` while the text is shown; the draft while the editor is open.

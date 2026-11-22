@@ -399,6 +399,21 @@ describe('resolved threads in the record comment panel (objectstack#36075)', () 
     await waitFor(() => expect(thread).not.toHaveAttribute('data-comment-thread-resolved'));
     expect(count(container)).toBe('2');
   });
+
+  it('a viewer who reads comments but may not post one is offered no ✓: the door takes the posting gate (objectstack#36186)', async () => {
+    const readOnly = {
+      ...PERMS,
+      objects: { ...PERMS.objects, sys_comment: { ...FULL, allowCreate: false } },
+    } as MePermissionsAuthenticatedResponse;
+    const mounted = await mount({ perms: readOnly });
+    await waitFor(() => expect(button(mounted.container)).not.toBeNull());
+    fireEvent.click(button(mounted.container)!);
+    await within(panel(mounted.container)!).findByText(ADA_BODY);
+    engage(mounted.container);
+    expect(commentIn(mounted.container, ADA_BODY)!.querySelector('[data-comment-action="resolve"]')).toBeNull();
+    expect(panel(mounted.container)!.querySelector('[data-comment-action="resolve"]')).toBeNull();
+    expect(doorCalls('PUT')).toEqual([]);
+  });
 });
 
 describe("Edit and Delete on another member's comment (objectstack#36075 item 6)", () => {

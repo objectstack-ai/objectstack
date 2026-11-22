@@ -75,10 +75,17 @@ import {
  *  5. **The comment, read AS THE CALLER**: the object grant, the organization
  *     wall, and the comment read gate (a comment is readable exactly when the
  *     record its thread is on is). A comment the caller cannot read and an id
- *     that names none get the same answer, `RECORD_NOT_FOUND` / `404`. This is
- *     the whole of who may: whoever can read the thread may resolve it (ruling
- *     record 7063285032, option A).
- *  6. **A reply** is refused, `VALIDATION_ERROR` / `400`: a thread is resolved
+ *     that names none get the same answer, `RECORD_NOT_FOUND` / `404`.
+ *  6. **The posting gate**: the caller must be one who may post a comment
+ *     here, the security service's own object-level answer for a `sys_comment`
+ *     insert (`canWriteObject`). Ruling record 7063285032 (option A) names both
+ *     "anyone who can see the record" and "the same gate as posting a
+ *     comment"; the door takes the narrower reading, so a principal who reads
+ *     comments but may not post one (a read-only grant on its own) is refused,
+ *     `PERMISSION_DENIED` / `403`. Every stock member posts, so for them the
+ *     two readings agree. A deployment with no security service has no gate
+ *     on posting either, and this step admits there.
+ *  7. **A reply** is refused, `VALIDATION_ERROR` / `400`: a thread is resolved
  *     on its top-level comment (`refuseResolutionOnReply`, the data door's
  *     own sentence).
  *
@@ -96,10 +103,14 @@ import {
  *    "authors govern their own words". Another member's comment is refused,
  *    `PERMISSION_DENIED` / `403`, even on a record the caller can edit: the
  *    moderator's delete stays the data door's, behind an explicit delete grant.
- *  - **A comment others replied under stays** (the door's step 7):
+ *  - **A comment that has replies stays** (the door's step 7), whoever wrote them:
  *    `DELETE_RESTRICTED` / `409`. Removing it would rewrite the replies:
  *    `parent_id` is a lookup that clears on delete, so each reply would become
- *    a thread of its own. The author may still edit its text.
+ *    a thread of its own. The author may still edit its text. A known limit:
+ *    the reply check and the removal are two engine calls, and the data
+ *    engine offers no conditional delete to join them, so a reply posted in
+ *    the one request between them is promoted to a thread of its own, as it
+ *    is under an administrator's data-door delete today.
  *  - **The removal** is a system delete attributed to the caller, so the
  *    comment gates do not run a second time and the audit ledger credits the
  *    caller.
@@ -134,7 +145,7 @@ async function refuseRemovalUnderReplies(
   });
   if (!reply) return;
   const err = new Error(
-    `Comment ${String(row.id)} was not removed: other comments reply to it, and removing it would turn each reply ` +
+    `Comment ${String(row.id)} was not removed: it has replies, and removing it would turn each reply ` +
       'into a thread of its own. Edit its text instead. The comment is unchanged.',
   ) as Error & { code?: string; status?: number };
   err.code = 'DELETE_RESTRICTED';
@@ -162,6 +173,16 @@ export interface CommentDoorsRoutesDeps {
   getEngine(): CommentDoorsEngine | undefined;
   /** Resolve the caller of a request (`ownRowDeleteCallerResolver`); `undefined` names nobody. */
   resolveCaller: OwnRowDeleteRoutesDeps['resolveCaller'];
+  /**
+   * The security service, read per request for the resolution door's posting
+   * gate (step 6); `undefined` when none is registered.
+   */
+  getSecurity?(): CommentPostingGate | undefined;
+}
+
+/** The slice of the security service the posting gate asks (plugin-security's `canWriteObject`). */
+export interface CommentPostingGate {
+  canWriteObject?(object: string, operation: 'insert' | 'update', context?: unknown, data?: unknown): Promise<boolean>;
 }
 
 /** Mount both comment doors on `http`. Nothing on `deps` is called until a request arrives. */
@@ -189,6 +210,7 @@ export async function resolveCommentThread(
   id: string,
   resolved: boolean,
   context: ExecutionContext,
+  security?: CommentPostingGate,
 ): Promise<CommentResolutionAnswer> {
   const callerId = context.userId;
   if (!callerId) throw new Error('resolveCommentThread: the caller context names no user');
@@ -200,7 +222,27 @@ export async function resolveCommentThread(
     | undefined;
   if (!row) throw recordNotFoundError(COMMENT_OBJECT, id, context);
 
-  // Step 6: a thread is resolved on its top-level comment.
+  // Step 6: the posting gate. Asked after the read, so a comment the caller
+  // cannot read still answers as an unknown id. A check that throws refuses.
+  if (typeof security?.canWriteObject === 'function') {
+    let mayPost = false;
+    try {
+      mayPost = (await security.canWriteObject(COMMENT_OBJECT, 'insert', context)) === true;
+    } catch {
+      mayPost = false;
+    }
+    if (!mayPost) {
+      const err = new Error(
+        `The thread of comment ${id} was not changed: resolving and reopening a thread takes the same access as ` +
+          'posting a comment on it, and you can read this thread but not comment on it.',
+      ) as Error & { code?: string; status?: number };
+      err.code = 'PERMISSION_DENIED';
+      err.status = 403;
+      throw err;
+    }
+  }
+
+  // Step 7: a thread is resolved on its top-level comment.
   refuseResolutionOnReply([row]);
 
   const system = {
@@ -292,10 +334,10 @@ async function handleResolution(req: IHttpRequest, res: IHttpResponse, deps: Com
     return;
   }
 
-  // ⑤ ⑥ and the write.
+  // ⑤ ⑥ ⑦ and the write.
   let answer: CommentResolutionAnswer;
   try {
-    answer = await resolveCommentThread(engine, id, resolved, context);
+    answer = await resolveCommentThread(engine, id, resolved, context, deps.getSecurity?.());
   } catch (err) {
     const thrown = resolveThrownHttpError(err, 500);
     if (thrown.status < 500) {

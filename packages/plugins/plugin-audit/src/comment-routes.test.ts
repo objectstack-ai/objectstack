@@ -154,3 +154,62 @@ describe('the resolution door — answers given before the engine is asked', () 
     expect(answer.body?.data).toEqual({ id: 'c1', is_resolved: true, resolved_by: 'u_member', resolved_at: '2026-11-21T00:00:00.000Z' });
   });
 });
+
+describe('the resolution door — the posting gate (step 6)', () => {
+  const readableComment = () => ({
+    findOne: vi.fn(async (o: string, q: any) => {
+      assertEngineFindOnePredicate(o, q);
+      return { id: 'c1' };
+    }),
+    update: vi.fn(async () => ({})),
+    delete: vi.fn(),
+  });
+
+  it('a caller who reads the comment but may not post one is 403 PERMISSION_DENIED, and nothing is written', async () => {
+    const engine = readableComment();
+    const canWriteObject = vi.fn(async () => false);
+    const answer = await resolveCall(
+      { getEngine: () => engine as any, resolveCaller: async () => MEMBER, getSecurity: () => ({ canWriteObject }) },
+      { body: { resolved: true } },
+    );
+    expect(answer.status).toBe(403);
+    expect(answer.body?.error?.code).toBe('PERMISSION_DENIED');
+    expect(canWriteObject).toHaveBeenCalledWith('sys_comment', 'insert', MEMBER);
+    expect(engine.update).not.toHaveBeenCalled();
+  });
+
+  it('a posting check that throws refuses, as the check itself says a throw does', async () => {
+    const engine = readableComment();
+    const answer = await resolveCall(
+      {
+        getEngine: () => engine as any,
+        resolveCaller: async () => MEMBER,
+        getSecurity: () => ({ canWriteObject: async () => { throw new Error('store down'); } }),
+      },
+      { body: { resolved: true } },
+    );
+    expect(answer.status).toBe(403);
+    expect(engine.update).not.toHaveBeenCalled();
+  });
+
+  it('an unreadable comment is still 404, asked before the posting gate', async () => {
+    const engine = { ...readableComment(), findOne: vi.fn(async (o: string, q: any) => { assertEngineFindOnePredicate(o, q); return null; }) };
+    const canWriteObject = vi.fn(async () => false);
+    const answer = await resolveCall(
+      { getEngine: () => engine as any, resolveCaller: async () => MEMBER, getSecurity: () => ({ canWriteObject }) },
+      { body: { resolved: true } },
+    );
+    expect(answer.status).toBe(404);
+    expect(canWriteObject).not.toHaveBeenCalled();
+  });
+
+  it('a caller who may post resolves', async () => {
+    const engine = readableComment();
+    const answer = await resolveCall(
+      { getEngine: () => engine as any, resolveCaller: async () => MEMBER, getSecurity: () => ({ canWriteObject: async () => true }) },
+      { body: { resolved: true } },
+    );
+    expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+    expect(engine.update).toHaveBeenCalledTimes(1);
+  });
+});
