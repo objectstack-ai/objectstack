@@ -75,7 +75,7 @@ import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLoc
 // (objectui#5134).
 import { resolveI18nLabel as resolveInlineI18nLabel, normalizeFilterOperator, PaginationConfigSchema } from '@objectstack/spec/ui';
 import type { ColumnSummary, GroupingConfig } from '@objectstack/spec/ui';
-import { canonicalAstOperator, isVirtualSearchField, platformProvisionsStorage, resolveInjectedSystemColumns, resolveSearchFieldResolution, type SearchFieldMeta } from '@objectstack/spec/data';
+import { canonicalAstOperator, isAggregateCompatibleWithFieldType, isVirtualSearchField, platformProvisionsStorage, resolveInjectedSystemColumns, resolveSearchFieldResolution, type SearchFieldMeta } from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { usePermissions } from '@object-ui/permissions';
 import { RecordDetailPanel } from '@object-ui/plugin-detail';
@@ -1726,10 +1726,15 @@ function kanbanLaneFieldOf(schema: ListViewSchema, objectDef: unknown): string |
 }
 
 /**
- * objectstack#36370 — the field types a board's lane statistic totals or
- * averages: numbers, as the list footer offers `sum` and `avg` on them.
+ * objectstack#36370 — may a board's lane statistic total a field of `type`?
+ * The aggregate × field-type table's `sum` row, the verdict `@objectstack/lint`
+ * gives `kanban.summary` (a percent does not add, a formula stores no value),
+ * less the true / false class: a board totals numbers, not yes / no counts.
  */
-const LANE_STATISTIC_FIELD_TYPES: ReadonlySet<string> = new Set(['number', 'currency', 'percent', 'integer']);
+function laneStatisticSums(type: unknown): boolean {
+  return typeof type === 'string' && type !== 'boolean' && type !== 'toggle'
+    && isAggregateCompatibleWithFieldType('sum', type);
+}
 
 /**
  * How many of the view's columns a card carries when the kanban block names
@@ -7404,9 +7409,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // The fields a lane may total: the object's number fields the
   // caller may read.
   const boardNumberFields: Array<{ value: string; label: string }> = kanbanBlock
-    ? Object.entries((objectDef?.fields ?? {}) as Record<string, { type?: unknown; label?: string; hidden?: unknown } | undefined>)
+    ? Object.entries((objectDef?.fields ?? {}) as Record<string, { type?: unknown; label?: string; hidden?: unknown; multiple?: unknown } | undefined>)
         .filter(([name, def]) =>
-          !!def && LANE_STATISTIC_FIELD_TYPES.has(String(def.type)) && def.hidden !== true
+          !!def && laneStatisticSums(def.type) && def.multiple !== true && def.hidden !== true
           && canReadField(perms, schema.objectName, name))
         .map(([name, def]) => ({ value: name, label: tFieldLabel(name, def?.label || name) }))
     : [];

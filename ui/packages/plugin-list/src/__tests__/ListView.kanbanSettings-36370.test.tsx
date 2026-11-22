@@ -13,6 +13,9 @@
  * Pinned here:
  *   - the lane field picker offers the option-backed fields only (a select or
  *     a radio): a lookup, a user or a boolean draws no sensible lanes yet;
+ *   - the lane statistic sums what the aggregate table's `sum` row accepts
+ *     (a number, a currency), never a percent, a formula or a boolean — the
+ *     verdict `@objectstack/lint` gives `kanban.summary`;
  *   - the lane collapse key is the reader's own: `<user>:<object>:<view>`, the
  *     view named by the host's `laneCollapseKey`, else the schema's id, else
  *     its name; without a signed-in user it reads `-`.
@@ -38,6 +41,10 @@ const objectDef = {
     account: { name: 'account', type: 'lookup', label: 'Account', reference: 'account' },
     owner: { name: 'owner', type: 'user', label: 'Owner' },
     closed: { name: 'closed', type: 'boolean', label: 'Closed' },
+    amount: { name: 'amount', type: 'currency', label: 'Amount' },
+    seats: { name: 'seats', type: 'number', label: 'Seats' },
+    rate: { name: 'rate', type: 'percent', label: 'Rate' },
+    score: { name: 'score', type: 'formula', label: 'Score' },
   },
 };
 
@@ -104,8 +111,20 @@ describe('ListView on a board: the settings it offers (objectstack#36370)', () =
     fireEvent.click(await screen.findByTestId('options-row-lane-field'));
     expect(screen.getByTestId('options-lane-field-stage')).toBeTruthy();
     expect(screen.getByTestId('options-lane-field-tier')).toBeTruthy();
-    for (const out of ['account', 'owner', 'closed', 'name']) {
+    for (const out of ['account', 'owner', 'closed', 'name', 'amount']) {
       expect(screen.queryByTestId(`options-lane-field-${out}`)).toBeNull();
+    }
+  });
+
+  it('offers a sum over the fields the aggregate table adds, and no percent, formula or boolean', async () => {
+    mount();
+    await waitFor(() => expect(screen.getByTestId('object-kanban-spy')).toBeTruthy());
+    fireEvent.click(await screen.findByTestId('toolbar-display-trigger'));
+    fireEvent.click(await screen.findByTestId('options-row-lane-summary'));
+    expect(screen.getByTestId('options-lane-summary-sum:amount')).toBeTruthy();
+    expect(screen.getByTestId('options-lane-summary-sum:seats')).toBeTruthy();
+    for (const out of ['rate', 'score', 'closed', 'name']) {
+      expect(screen.queryByTestId(`options-lane-summary-sum:${out}`)).toBeNull();
     }
   });
 
