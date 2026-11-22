@@ -19,7 +19,9 @@
  *      the dropdown without a pick writes nothing;
  *   2. the dropdown offers single select, radio, tick, person and linked
  *      record fields holding one value each: the view's columns first, then
- *      the object's other business fields of those types. Text, numbers,
+ *      the object's other business fields of those types, then its system
+ *      ones such as the owner (created by and updated by only as a column).
+ *      Text, numbers,
  *      dates and many-valued fields are not offered;
  *   3. with none to offer, the button is disabled and says why; while the
  *      definition is still being read it is disabled without a reason;
@@ -54,6 +56,7 @@ const FIELDS: Record<string, Record<string, unknown>> = {
   vip: { type: 'boolean', label: 'VIP' },
   parent: { type: 'lookup', label: 'Parent account', reference: OBJECT },
   internal_code: { type: 'select', label: 'Internal code', hidden: true, options: [{ value: 'x', label: 'X' }] },
+  owner_id: { type: 'lookup', label: 'Record owner', reference: 'sys_user', system: true },
   created_by: { type: 'lookup', label: 'Created by', reference: 'sys_user', system: true },
 };
 
@@ -115,8 +118,6 @@ const level = (field: string) => ({ field, order: 'asc', collapsed: false });
 
 afterEach(() => cleanup());
 
-afterEach(() => cleanup());
-
 describe('"Add group field" opens the field dropdown and groups only on a pick (objectstack#36204)', () => {
   const columns = ['name', 'industry', 'owner', 'notes', 'signed', 'revenue', 'tags'];
 
@@ -129,9 +130,11 @@ describe('"Add group field" opens the field dropdown and groups only on a pick (
       expect(onGroupingChange).not.toHaveBeenCalled();
       expect(within(panel).queryByTestId('grouping-field-0')).toBeNull();
       expect(within(panel).getByTestId('grouping-field-pending')).toBeInTheDocument();
-      // The view's select-like columns, then the object's other ones; no
-      // name, text, date, number or many-valued select.
-      expect(await listboxLabels()).toEqual(['Industry', 'Owner', 'Stage', 'VIP', 'Parent account']);
+      // The view's select-like columns, then the object's other business
+      // ones, then its system ones (the record owner), as the Filter panel
+      // orders them; no name, text, date, number, many-valued select, hidden
+      // field, or created-by provenance the view does not show.
+      expect(await listboxLabels()).toEqual(['Industry', 'Owner', 'Stage', 'VIP', 'Parent account', 'Record owner']);
       fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name: 'Industry' }));
       expect(onGroupingChange).toHaveBeenCalledTimes(1);
       expect(onGroupingChange).toHaveBeenLastCalledWith({ fields: [level('industry')] });
@@ -171,7 +174,7 @@ describe('"Add group field" opens the field dropdown and groups only on a pick (
     const panel = await openToolbarGroup();
     fireEvent.click(within(panel).getByTestId('grouping-add'));
     expect(onGroupingChange).not.toHaveBeenCalled();
-    expect(await listboxLabels()).toEqual(['Owner', 'Stage', 'VIP', 'Parent account']);
+    expect(await listboxLabels()).toEqual(['Owner', 'Stage', 'VIP', 'Parent account', 'Record owner']);
     fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name: 'Owner' }));
     expect(onGroupingChange).toHaveBeenLastCalledWith({ fields: [level('industry'), level('owner')] });
   });
@@ -183,6 +186,13 @@ describe('"Add group field" opens the field dropdown and groups only on a pick (
     expect((await listboxLabels()).slice(0, 2)).toEqual(['Owner', 'Industry']);
   });
 
+  it('created-by provenance is offered when the view shows it as a column', async () => {
+    const { dataSource } = mount({ columns: ['name', 'created_by'] });
+    await definitionRead(dataSource);
+    fireEvent.click(within(await openToolbarGroup()).getByTestId('grouping-add'));
+    expect((await listboxLabels())[0]).toBe('Created by');
+  });
+
   it('a view grouped by a field of another type keeps it, under its label, and can change it', async () => {
     const { dataSource, onGroupingChange } = mount({ columns, grouping: { fields: [level('name')] } });
     await definitionRead(dataSource);
@@ -190,7 +200,7 @@ describe('"Add group field" opens the field dropdown and groups only on a pick (
     const trigger = within(panel).getByTestId('grouping-field-0');
     expect(trigger).toHaveTextContent('Customer name');
     fireEvent.keyDown(trigger, { key: 'ArrowDown' });
-    expect(await listboxLabels()).toEqual(['Customer name', 'Industry', 'Owner', 'Stage', 'VIP', 'Parent account']);
+    expect(await listboxLabels()).toEqual(['Customer name', 'Industry', 'Owner', 'Stage', 'VIP', 'Parent account', 'Record owner']);
     fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name: 'Industry' }));
     expect(onGroupingChange).toHaveBeenLastCalledWith({ fields: [level('industry')] });
   });

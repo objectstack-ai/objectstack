@@ -60,7 +60,7 @@ import { SchemaRenderer, useNavigationOverlay, classifyLoadError, answeredLoadFa
 import type { LoadErrorKind, AnsweredLoadFailure } from '@object-ui/react';
 import { useDensityMode, resolveInlineAriaProps } from '@object-ui/react';
 import type { DataTableSchema, DependsOnInput, ListViewSchema, ObjectMapConfig } from '@object-ui/types';
-import { detectStatusField, isSystemManagedField } from '@object-ui/types';
+import { AUDIT_FIELD_NAMES, detectStatusField, isSystemManagedField } from '@object-ui/types';
 import { usePullToRefresh } from '@object-ui/mobile';
 import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, isObjectExportOffered, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, toFilterNodeSafely, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING, kanbanDeclaredLanes, csvBlob, readWithheldFieldNames, refersToWithheldField, withHeaderSortPick } from '@object-ui/core';
 import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLocale, pickLocalized, recordCurrencyField, recordCurrencyReadField } from '@object-ui/i18n';
@@ -6567,8 +6567,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // objectstack#36204 — what both Group editors offer: the fields of a type a
   // list can be grouped by (`isGroupableField`: single select, radio, tick,
   // person, linked record; one value each), the view's columns first in the
-  // reader's column order, then the object's other business fields of those
-  // types that the caller may read and the definition does not hide, in the
+  // reader's column order, then the object's other fields of those types
+  // that the caller may read and the definition does not hide: business
+  // fields, then system ones such as the owner (not the created-by and
+  // updated-by provenance), as the Filter panel orders them, each in the
   // definition's order. Until the definition's read answers nothing is
   // offered and "Add group field" waits, disabled (`groupOptionsLoading`), so
   // it never says "nothing to group by" before the types are known. A host
@@ -6583,18 +6585,27 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     ? []
     : !definedFields
       ? groupFieldOptions(allFields, gridColumnOrder, false)
-      : [
-          ...groupFieldOptions(allFields, gridColumnOrder),
-          ...Object.entries(definedFields).flatMap(([name, def]) => {
+      : (() => {
+          const extra = Object.entries(definedFields).flatMap(([name, def]) => {
             if (!def || allFields.some((f) => f.name === name)) return [];
-            if (def.hidden === true || def.system === true) return [];
+            // Record provenance (created by, updated by) is offered only as a
+            // column the view shows: on every object, it would otherwise
+            // leave no object without a field to group by.
+            if (def.hidden === true || AUDIT_FIELD_NAMES.has(name)) return [];
             if (!canReadField(perms, schema.objectName, name)) return [];
             if (isVirtualSearchField(def as SearchFieldMeta)) return [];
             if (!isGroupableField({ type: typeof def.type === 'string' ? def.type : undefined, multiple: def.multiple === true })) return [];
             const label = typeof def.label === 'string' && def.label ? def.label : name;
-            return [{ value: name, label: tFieldLabel(name, label) }];
-          }),
-        ];
+            return [{ value: name, label: tFieldLabel(name, label), system: isSystemManagedField(name, def as { system?: boolean }) }];
+          });
+          // The Filter panel's tiers: business fields, then the system ones
+          // (the owner, created by …), each in the definition's order.
+          return [
+            ...groupFieldOptions(allFields, gridColumnOrder),
+            ...extra.filter((f) => !f.system).map(({ value, label }) => ({ value, label })),
+            ...extra.filter((f) => f.system).map(({ value, label }) => ({ value, label })),
+          ];
+        })();
   // The label a level shows for a field the editor does not offer (a view
   // grouped by a text or number field keeps showing it, under its label).
   const groupFieldLabel = (field: string): string | undefined => {
