@@ -824,3 +824,8 @@ ComponentRegistry.register('line_items', LineItemsPanelRenderer, {
     },
   ],
 });
+// objectstack#35403 — the read-only owner line on an edit form, and the host's opt-in.
+export { FormOwnerLine } from './formOwnerLine';
+export type { FormOwnerLineProps } from './formOwnerLine';
+export { FormOwnerLineContext } from './formOwnerLineContext';
+export type { FormOwnerActionTarget, FormOwnerLineHost } from './formOwnerLineContext';

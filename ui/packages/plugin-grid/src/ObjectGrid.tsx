@@ -126,6 +126,7 @@ import { resolveObjectGridPersistedColumns } from './objectGridPersistedColumns'
 import { resolveObjectGridActionsColumn } from './objectGridActionsColumn';
 import { useInlineRowActionFold } from './objectGridInlineActionFold';
 import { BULK_SELECT_ALL_MATCHING_CAP } from './bulkSelectAllMatchingCap';
+import { CHANGE_OWNER_BULK_ACTION } from './components/BulkActionBar';
 import { useIsListPageGrid, useListSelectionRequest, usePublishListSelectable, usePublishListSelecting } from './listPageScope';
 import { useInfiniteRowLoad } from './objectGridInfiniteLoad';
 export type { RetiredListColumnKey, ObjectGridColumnHolds, ObjectGridColumnDraft, ObjectGridColumn } from './objectGridColumns';
@@ -464,6 +465,25 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
   onEdit?: (record: any) => void;
   onDelete?: (record: any) => void;
   onBulkDelete?: (records: any[]) => void;
+  /**
+   * objectstack#35403 — the built-in bulk Change Owner. A host wires it where
+   * the object offers the action; the rows then take a selection (as a bulk
+   * action does), and the selection bar offers 「Change Owner」 among its bulk
+   * actions unless {@link bulkChangeOwnerOffered} is `false` — at any count,
+   * except on a list page, where one selected record shows that record's own
+   * actions instead and the bulk entries start at two. It is handed the
+   * selected rows (the expanded set when 「select all matching」 is on). The host owns the dialog and its per-row report, as
+   * `onBulkDelete`'s host owns the delete confirmation.
+   */
+  onBulkChangeOwner?: (records: any[]) => void;
+  /**
+   * objectstack#35403 — whether the selection bar draws 「Change Owner」 now.
+   * `false` keeps the entry off while {@link onBulkChangeOwner} still makes the
+   * rows selectable: a host that asks the caller's transfer verdict only once
+   * a selection is open needs the selection before it has the answer. Omitted,
+   * the entry is drawn wherever `onBulkChangeOwner` is wired.
+   */
+  bulkChangeOwnerOffered?: boolean;
   onCellChange?: (rowIndex: number, columnKey: string, newValue: any, row: any) => void;
   onRowSave?: (rowIndex: number, changes: Record<string, any>, row: any) => void | Promise<void>;
   onBatchSave?: (changes: Array<{ rowIndex: number; changes: Record<string, any>; row: any }>) => void | Promise<void>;
@@ -866,6 +886,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   onColumnHide: hostOnColumnHide,
   openReferencedRecord,
   onBulkDelete,
+  onBulkChangeOwner,
+  bulkChangeOwnerOffered,
   onRowSelect,
   onRowClick,
   onNavigate,
@@ -1384,7 +1406,19 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         }
       : undefined,
   });
-  const gridCellSelection: GridCellSelection | null = hostCellSelection
+  // objectstack#35689 — the value is new only when what `describeCell`
+  // answers from changed (the object, its fields, the reader's permissions,
+  // a verdict or an approval lock landing, the language): the table asks the
+  // selected cell's facts again on a new value, so one new on every render
+  // would ask on every render. The commit question and the chip opener read
+  // what this render holds through `latestCellHooks`.
+  const gridEditable = schema.editable ?? false;
+  const latestCellHooks = React.useRef({ requiredPrompt, askStateMove, openReferencedRecord });
+  React.useLayoutEffect(() => {
+    latestCellHooks.current = { requiredPrompt, askStateMove, openReferencedRecord };
+  });
+  const opensReferencedRecords = !!openReferencedRecord;
+  const gridCellSelection = useMemo((): GridCellSelection | null => (hostCellSelection
     ? {
         describeCell: (row, columnKey) => {
           const fieldDef = objectFields?.[columnKey];
@@ -1396,9 +1430,13 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
           const kind = cellReadOnlyKind({
             fieldDef,
             fieldWritable: !objectName || resolveFieldAffordance('listInlineEdit', perms, objectName, columnKey),
-            gridEditable: schema.editable ?? false,
+            gridEditable,
             objectEditable: objectInlineEditable,
-            canUpdate: resolveAffordanceGrant('listInlineEdit', affordanceSource),
+            canUpdate: resolveAffordanceGrant('listInlineEdit', {
+              objectSchema: objectSchema as SchemaLike | null | undefined,
+              objectName,
+              perms,
+            }),
             approvalLocked: approvalLocks.isLocked(recordId, row),
             recordUpdate,
           });
@@ -1435,19 +1473,25 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         // before anything is written (`./objectGridStateConfirm`). A move that
         // needs fields filled asks for them first; that dialog is the
         // confirmation, so a state-machine move does not ask twice.
-        confirmCommit: (row, columnKey, value) =>
-          requiredPrompt.ask(row, columnKey, value, () => askStateMove(row, columnKey, value)),
+        confirmCommit: (row, columnKey, value) => {
+          const { requiredPrompt: prompt, askStateMove: askMove } = latestCellHooks.current;
+          return prompt.ask(row, columnKey, value, () => askMove(row, columnKey, value));
+        },
         // objectstack#36015 — a lookup cell's chip opens its record in place.
-        ...(openReferencedRecord
+        ...(opensReferencedRecords
           ? {
               referenceCells: {
                 isReferenceColumn: (columnKey: string) => opensReferenceInPlace(objectFields?.[columnKey]),
-                openRecord: openReferencedRecord,
+                openRecord: (target: string, recordId: string) =>
+                  latestCellHooks.current.openReferencedRecord?.(target, recordId),
               },
             }
           : {}),
       }
-    : null;
+    : null), [
+    hostCellSelection, opensReferencedRecords, objectFields, objectSchema, objectName, perms,
+    gridEditable, objectInlineEditable, approvalLocks, recordVerdict, pageRecordIds, t,
+  ]);
   // objectstack#35685 — the state-machine confirm, the grid's next question
   // when the required-fields prompt has nothing to ask.
   function askStateMove(row: any, columnKey: string, value: unknown): Promise<boolean> | null {
@@ -1703,12 +1747,18 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const keptDeleteAction = (explicitBulkActions ?? []).filter(
     (a: unknown) => String(a).toLowerCase() === 'delete',
   );
-  const effectiveBulkActions: string[] =
-    explicitBulkActions && explicitBulkActions.length > 0
+  const changeOwnerDrawn = !!onBulkChangeOwner && bulkChangeOwnerOffered !== false;
+  const effectiveBulkActions: string[] = [
+    ...(explicitBulkActions && explicitBulkActions.length > 0
       ? keptDeleteAction
       : canDelete && onBulkDelete && bulkActionDefs.length === 0
         ? ['delete']
-        : [];
+        : []),
+    // objectstack#35403 — the built-in bulk Change Owner, offered wherever its
+    // host wires it and has not held it back (the host judges the object and
+    // the grant).
+    ...(changeOwnerDrawn ? [CHANGE_OWNER_BULK_ACTION] : []),
+  ];
   const hasBulkActions = effectiveBulkActions.length > 0 || bulkActionDefs.length > 0;
   // The names the two folds above did not draw, said once in development, and
   // only once there is nothing left to wait for. Keyed on the RESOLVED
@@ -1754,8 +1804,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   } else if (schema.selectable !== undefined) {
     // Legacy support — read only when `selection` is absent.
     selectionMode = schema.selectable;
-  } else if (hasBulkActions) {
-    // Auto-enable multi-select when bulk actions exist
+  } else if (hasBulkActions || onBulkChangeOwner) {
+    // Auto-enable multi-select when bulk actions exist — and where the host
+    // wires the bulk Change Owner whose grant it reads only once a selection
+    // is open (objectstack#35403): without the selection it never gets asked.
     selectionMode = 'multiple';
   }
   // `selection.type: 'single'` caps the selection at one row (the data-table
@@ -2571,6 +2623,13 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const dispatchBulkAction = (action: string, rows: any[]) => {
     void (async () => {
       const expanded = await resolveBulkRows(rows);
+      if (action === CHANGE_OWNER_BULK_ACTION && onBulkChangeOwner) {
+        // objectstack#35403 — the host's dialog takes the rows; the server
+        // judges each one and reports every row it did not move.
+        onBulkChangeOwner(expanded);
+        resetSelection();
+        return;
+      }
       if (action === 'delete' && onBulkDelete) {
         // [objectui#4420] `userActions.delete.visibleWhen` gates the built-in
         // Delete PER RECORD — the same key, the same fail-closed fold and the

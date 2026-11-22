@@ -43,6 +43,7 @@ import { Loader2, Maximize2, Minimize2 } from 'lucide-react';
 import { MasterDetailForm } from './MasterDetailForm';
 import { MasterDetailFrameContext, type MasterDetailFrame } from './masterDetailFrame';
 import { SchemaRenderer, useSafeFieldLabel, usePreviewMode } from '@object-ui/react';
+import { FormOwnerLine } from './formOwnerLine';
 import { createSafeTranslation, useLocalization } from '@object-ui/i18n';
 import { buildSectionFields as buildSectionFieldsShared } from './sectionFields';
 import { buildFlatFields } from './flatFields';
@@ -1534,6 +1535,15 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
               a section, a tab, a subform row (objectui#10166). */}
           <UploadGateProvider gate={uploadGate}>
             {closedAffordanceNotice}
+            {/* objectstack#35403 — the record's owner, read-only, with the
+                host's Change Owner action beside it. */}
+            <FormOwnerLine
+              mode={schema.mode}
+              objectName={schema.objectName}
+              recordId={schema.recordId}
+              record={loading ? null : formData}
+              objectSchema={objectSchema}
+            />
             {/* The dialog owns its body's wait (objectui#12559) — see
                 `ModalFormBodyPending`. */}
             <Suspense fallback={<ModalFormBodyPending />}>

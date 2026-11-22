@@ -58,7 +58,7 @@ import '@testing-library/jest-dom';
 import { formatDateTime } from '@object-ui/core';
 import { I18nProvider, LocalizationProvider } from '@object-ui/i18n';
 import { DateTimeField } from '../widgets/DateTimeField';
-import { GridField } from '../widgets/GridField';
+import { GridFieldWidget as GridField } from '../widgets/grid-field/GridFieldWidget';
 
 /** The five locales this change was measured in (objectui#8194's set). */
 const LOCALES = ['en', 'de', 'zh', 'ja', 'ar'] as const;

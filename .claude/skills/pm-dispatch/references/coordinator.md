@@ -34,6 +34,7 @@
 ## 四、档位与 effort 照派发令(coordinator 开线程时读;席位请线程时读)
 
 - 档位与 effort 的取值只住 `execution-duties.md` 定档节;coordinator 照派发令所写开线程,⛔ 不另定。
+- 开卡线程前查令:`model:` 写上限而同行既无 `--tier` MANDATORY 行、又无点名裁决的 `reason:`(评论 id,或常设档位令的 id 与时刻)⇒ 退回席位,⛔ 不开线程。
 - 隔离子代理照 `--brief-template` L2 审核。
 
 ## 五、卡线程的 `needs_decision`(coordinator 收到时读;席位请裁时读)
