@@ -67,6 +67,24 @@ export interface QuietHours {
 export type DigestCadence = 'daily' | 'weekly';
 
 /**
+ * [ruling 7073270426 on #35123] The stored `quiet_hours` value that means "no
+ * quiet hours, by this row's choice": an object whose `off` is `true`. Empty
+ * (`null`) stays "not set". See {@link parseQuietHours} for the three states.
+ *
+ * A MARKED value rather than an empty object: `{}` and `null` are what a
+ * cleared widget or an API caller writes for each other, and one written for
+ * the other would turn "off" back into "follow the next row" without anyone
+ * noticing. `{ off: true }` cannot be produced by clearing anything.
+ */
+export const QUIET_HOURS_OFF: Readonly<{ off: true }> = Object.freeze({ off: true });
+
+/** A row's quiet-hours answer: a window, or `'off'` ({@link QUIET_HOURS_OFF} as stored). */
+type QuietHoursAnswer = QuietHours | 'off';
+
+/** A row's digest answer: a cadence, or `'none'` (send each one right away). */
+type DigestAnswer = DigestCadence | 'none';
+
+/**
  * [rulings 6968686390 and 6969143776] The context
  * {@link PreferenceResolver.effectiveFor} reads the preference rows under: the
  * explicit system opt-in. Kept apart from {@link FAN_OUT_SYSTEM_CONTEXT} on
@@ -204,12 +222,12 @@ export class PreferenceResolver {
             let digest: { window: string } | undefined;
             if (!critical) {
                 const cadence = this.resolveDigest(index, recipient, ctx.topic)?.digest;
-                if (cadence) {
-                    const d = digestDeferral(cadence, nowMs, this.resolveQuietHours(index, recipient, ctx.topic)?.quietHours?.tz);
+                const qh = windowOf(this.resolveQuietHours(index, recipient, ctx.topic));
+                if (cadence === 'daily' || cadence === 'weekly') {
+                    const d = digestDeferral(cadence, nowMs, qh?.tz);
                     notBefore = d.notBefore;
                     digest = { window: d.window };
                 } else {
-                    const qh = this.resolveQuietHours(index, recipient, ctx.topic)?.quietHours;
                     notBefore = qh ? quietHoursDeferral(qh, nowMs) : undefined;
                 }
             }
@@ -261,7 +279,9 @@ export class PreferenceResolver {
         for (const u of [user, GLOBAL_USER]) {
             for (const t of [topic, WILDCARD]) {
                 const hit = index.get(`${u}|${t}|${WILDCARD}`);
-                if (hit?.quietHours) return hit;
+                // A row that leaves the field unset decides nothing for it
+                // (ruling 7073270426): only a window or the explicit off stops.
+                if (hit?.quietHours !== undefined) return hit;
             }
         }
         return undefined;
@@ -276,7 +296,8 @@ export class PreferenceResolver {
         for (const u of [user, GLOBAL_USER]) {
             for (const t of [topic, WILDCARD]) {
                 const hit = index.get(`${u}|${t}|${WILDCARD}`);
-                if (hit?.digest) return hit;
+                // Only a cadence or the explicit `none` stops; unset walks on.
+                if (hit?.digest !== undefined) return hit;
             }
         }
         return undefined;
@@ -385,7 +406,7 @@ export class PreferenceResolver {
                 ...own(WILDCARD, WILDCARD),
                 enabled: { value: general?.enabled ?? true, source: sourceOf(general) },
                 digest: { value: digest?.digest ?? 'none', source: sourceOf(digest) },
-                quietHours: { value: quietHours?.quietHours ?? null, source: sourceOf(quietHours) },
+                quietHours: { value: windowOf(quietHours) ?? null, source: sourceOf(quietHours) },
             },
         };
     }
@@ -449,8 +470,16 @@ interface PrefRowLite {
     topic: string;
     channel: string;
     enabled: boolean;
-    quietHours?: QuietHours;
-    digest?: DigestCadence;
+    /** Absent ⇒ the row leaves quiet hours unset (see {@link parseQuietHours}). */
+    quietHours?: QuietHoursAnswer;
+    /** Absent ⇒ the row leaves the digest unset (see {@link parseDigest}). */
+    digest?: DigestAnswer;
+}
+
+/** The window a row's quiet-hours answer holds — none for the explicit off, or for no row. */
+function windowOf(row: PrefRowLite | undefined): QuietHours | undefined {
+    const qh = row?.quietHours;
+    return qh === undefined || qh === 'off' ? undefined : qh;
 }
 
 /**
@@ -481,19 +510,40 @@ function asBool(v: unknown): boolean {
     return v === true || v === 1 || v === '1' || v === 'true';
 }
 
-function parseQuietHours(v: unknown): QuietHours | undefined {
+/**
+ * [ruling 7073270426 on #35123] Each of a row's `digest` and `quiet_hours` is
+ * one of THREE states, and the resolution rule is one sentence: the most
+ * specific row that SETS the field decides it, and a row that leaves it unset
+ * decides nothing for it, so the walk goes on (to the organization's default,
+ * then the built-in default: no digest, no quiet hours).
+ *
+ *  - not set (empty, or a value that is not one of the two below) → `undefined`;
+ *  - explicitly off: `{ off: true }` ({@link QUIET_HOURS_OFF}) → `'off'`. An
+ *    `off: true` wins over any other key the object carries;
+ *  - a window with both a `start` and an `end` → that window.
+ *
+ * So a member's own "no quiet hours" beats the organization's window, and an
+ * organization default row that is explicitly off is the same as no default.
+ */
+function parseQuietHours(v: unknown): QuietHoursAnswer | undefined {
     let o: any = v;
     if (typeof o === 'string') {
         try { o = JSON.parse(o); } catch { return undefined; }
     }
     if (!o || typeof o !== 'object') return undefined;
+    if (o.off === true) return 'off';
     if (o.start == null || o.end == null) return undefined;
     return { tz: o.tz, start: String(o.start), end: String(o.end) };
 }
 
-/** Parse the `digest` preference column; only `daily`/`weekly` enable batching. */
-function parseDigest(v: unknown): DigestCadence | undefined {
-    return v === 'daily' || v === 'weekly' ? v : undefined;
+/**
+ * Parse the `digest` preference column into its three states (see
+ * {@link parseQuietHours} for the rule): `daily` / `weekly` batch; `none` is
+ * the explicit "send each one right away" and stops the walk; empty (the field
+ * declares no default) is not set and walks on.
+ */
+function parseDigest(v: unknown): DigestAnswer | undefined {
+    return v === 'daily' || v === 'weekly' || v === 'none' ? v : undefined;
 }
 
 /**
