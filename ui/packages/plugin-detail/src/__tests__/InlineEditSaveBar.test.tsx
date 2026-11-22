@@ -422,6 +422,33 @@ describe('InlineEditSaveBar — Esc inside the record\'s side preview (objectsta
     expect(pane()).not.toBeNull();
   });
 
+  it('a layer open when Esc was pressed owns it, even when it is gone by the time the session hears the key', () => {
+    render(<Preview />);
+    fireEvent.click(screen.getByText('edit-enter'));
+    // A floating layer that closes on the key before it bubbles: its node is
+    // removed in the capture phase, as a layer whose close the browser flushes
+    // between listeners is.
+    const popper = document.createElement('div');
+    popper.setAttribute('data-radix-popper-content-wrapper', '');
+    document.body.appendChild(popper);
+    const closeOnEsc = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      popper.remove();
+    };
+    document.addEventListener('keydown', closeOnEsc, true);
+    try {
+      escape(field());
+      expect(document.body.contains(popper)).toBe(false);
+      expect(editing()).toBe(true);
+      expect(pane()).not.toBeNull();
+    } finally {
+      document.removeEventListener('keydown', closeOnEsc, true);
+    }
+    escape(field());
+    expect(editing()).toBe(false);
+  });
+
   it('CONTROL: not editing, Esc closes the preview as before', () => {
     render(<Preview />);
     escape(field());
