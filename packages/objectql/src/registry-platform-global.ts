@@ -75,6 +75,7 @@ export interface PlatformGlobalHost {
   readonly multiTenant: SchemaRegistry['multiTenant'];
   readonly objectContributors: SchemaRegistry['objectContributors'];
   readonly objectKeysByShortName: SchemaRegistry['objectKeysByShortName'];
+  noteObjectEntry: SchemaRegistry['noteObjectEntry'];
   packagedRules: SchemaRegistry['packagedRules'];
   registerObject: SchemaRegistry['registerObject'];
   resolveObject: SchemaRegistry['resolveObject'];
@@ -624,12 +625,15 @@ export class PlatformGlobalFacet {
   }
 
   /** The body of `SchemaRegistry#withdrawObjectExtension`; the method's docblock there is its contract. */
-  static withdrawObjectExtension(this: Pick<PlatformGlobalHost, '_objectRevision' | 'closeObjectEntry' | 'log' | 'mergedObjectCache' | 'objectContributors' | 'resolveObjectKey'>, name: string, packageId: string): boolean {
+  static withdrawObjectExtension(this: Pick<PlatformGlobalHost, '_objectRevision' | 'closeObjectEntry' | 'log' | 'mergedObjectCache' | 'noteObjectEntry' | 'objectContributors' | 'resolveObjectKey'>, name: string, packageId: string): boolean {
     const fqn = this.resolveObjectKey(name) ?? name;
     const contributors = this.objectContributors.get(fqn);
     if (!contributors) return false;
     const idx = contributors.findIndex(c => c.ownership === 'extend' && c.packageId === packageId);
     if (idx === -1) return false;
+    // [#35609] Recorded for an open registration run before the removal, so a
+    // refusal later in the run puts the layer back (no-op outside a run).
+    this.noteObjectEntry(fqn);
     contributors.splice(idx, 1);
     if (contributors.length === 0) this.closeObjectEntry(fqn);
     // The same two invalidations every other contributor mutation performs.

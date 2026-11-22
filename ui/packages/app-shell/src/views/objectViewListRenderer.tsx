@@ -114,6 +114,8 @@ export function useObjectViewListRenderer({
     handleUserFilterSelectionsChange,
     viewPanelFilters,
     listViewActions,
+    onBulkChangeOwner,
+    bulkChangeOwnerOffered,
 }: {
     objectName: string | undefined;
     t: ReturnType<typeof useObjectTranslation>['t'];
@@ -197,11 +199,29 @@ export function useObjectViewListRenderer({
          */
         draftsSummaries?: boolean;
     };
+    /**
+     * objectstack#35403 — the bulk Change Owner the grid's selection bar
+     * offers, wired where the object offers the action (it makes the rows
+     * selectable). It opens the page's Change Owner dialog over the selected
+     * rows.
+     */
+    onBulkChangeOwner?: (records: any[]) => void;
+    /**
+     * objectstack#35403 — whether the bar draws the entry now: the caller's
+     * object-level transfer verdict (`useListChangeOwnerOffered`), asked once
+     * a selection is open.
+     */
+    bulkChangeOwnerOffered?: boolean;
 }) {
     // objectstack#35551 — the host hands fresh closures every render; the list
     // reads the latest through a ref, and re-renders only when one appears or goes.
     const listViewActionsRef = useRef(listViewActions);
     listViewActionsRef.current = listViewActions;
+    // objectstack#35403 — read through a ref like the view's acts above: the
+    // list re-renders only when the offer appears or goes.
+    const bulkChangeOwnerRef = useRef(onBulkChangeOwner);
+    bulkChangeOwnerRef.current = onBulkChangeOwner;
+    const offersBulkChangeOwner = !!onBulkChangeOwner;
     const offersRename = !!listViewActions?.rename;
     const offersSave = !!listViewActions?.save;
     const offersReset = !!listViewActions?.reset;
@@ -1146,6 +1166,10 @@ export function useObjectViewListRenderer({
                     // batch-aware delete handler handles refresh + toast.
                     actionsRef.current.deleteRecords(valid);
                 }}
+                onBulkChangeOwner={offersBulkChangeOwner
+                    ? (records: any[]) => bulkChangeOwnerRef.current?.(records)
+                    : undefined}
+                bulkChangeOwnerOffered={offersBulkChangeOwner ? bulkChangeOwnerOffered === true : undefined}
                 onRowClick={(record: any, event?: any) => {
                     handleRowClick(record, event);
                 }}
@@ -1232,7 +1256,7 @@ export function useObjectViewListRenderer({
                 dataSource={ds}
             />
         );
-    }, [hasViewBarTrailing, trailStore, rowEndStore, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listLayout.layout, listLayout.patchView, listDraft.draft, listDraft.patch, managedUsers, managedUserMarker, openInPanel, openReferencedRecord, rowOpensRecord, handleListRowsChange, handleListTotalChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, offersRename, offersSave, offersReset, offersSummaryPick, previewDrafts, previewDataSource, unpublishedObjects]);
+    }, [hasViewBarTrailing, trailStore, rowEndStore, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listLayout.layout, listLayout.patchView, listDraft.draft, listDraft.patch, managedUsers, managedUserMarker, openInPanel, openReferencedRecord, rowOpensRecord, handleListRowsChange, handleListTotalChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, offersRename, offersSave, offersReset, offersSummaryPick, offersBulkChangeOwner, bulkChangeOwnerOffered, previewDrafts, previewDataSource, unpublishedObjects]);
 
     return { renderListView };
 }

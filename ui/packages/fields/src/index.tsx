@@ -440,7 +440,14 @@ export interface CellRendererProps {
   alwaysShowYear?: boolean;
   /**
    * The cell is one of a grid COLUMN's cells, read against the cells above
-   * and below it (objectstack#25884). Read by the `date` cell only.
+   * and below it (objectstack#25884). Read by the `date` cell and the
+   * `markdown` cell.
+   *
+   * The `markdown` cell then draws its value in the cell face
+   * (objectstack#36344): a heading is a bold line at the cell's own text size
+   * instead of a heading element, so a value that starts with `# Heading`
+   * keeps the row's height. The record page does not pass it and keeps the
+   * heading sizes.
    *
    * A `date` field that declares no `format` then paints `formatDate`'s
    * absolute default face instead of `'relative'`, and the relative phrase

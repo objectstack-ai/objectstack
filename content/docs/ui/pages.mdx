@@ -296,8 +296,10 @@ deep merge. There is no `tabs` slot: the page's panels are composed from the obj
 and relationship flags. To choose which related lists and built-in tabs appear and in what
 order, list them in the object's `relatedLists` (the built-ins by object name: `sys_attachment`,
 `sys_approval_request`, `sys_activity`); `relatedList: false` on the child's reference field
-still hides a list. A page that needs its own strip is `kind: 'full'`, drawn as authored. `slots.tabs`, `slots.related` and `slots.relatedLists` are
-refused by name, and `os migrate meta --from 17` drops a stored `slots.tabs`.
+still hides a list. A page that needs its own strip is `kind: 'full'`, drawn as authored on
+the desktop full record page (a phone and the side preview draw the standard record page, with
+the composed strip). `slots.tabs`, `slots.related` and `slots.relatedLists` are refused by name,
+and `os migrate meta --from 17` drops a stored `slots.tabs`.
 
 {/* os:check */}
 ```typescript
