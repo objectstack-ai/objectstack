@@ -44,6 +44,17 @@ export interface CelSchemaHint {
   /** Known field names of {@link objectName}, so `<field>` refs can be checked. */
   fields?: string[];
   /**
+   * The fields of {@link objectName} whose stored value is a LIST — read
+   * through `isMultiValueField` (`@objectstack/spec/data`): `multiselect` /
+   * `checkboxes` / `tags`, or a `select` / `lookup` / `user` declared
+   * `multiple: true`. Handed to the engine as `ExprSchemaHint.multiValueFields`,
+   * so `record.<field> == 'a'` on one is refused (`list-equality`: the list
+   * compared with a scalar answers a constant) with the `in` rewrite. Omitted
+   * by a surface whose field catalog does not carry `multiple`: the hint is
+   * then exactly what it was before this key.
+   */
+  multiValueFields?: string[];
+  /**
    * Which RLS clause is being edited: `USING` (read filter) or `CHECK` (write
    * filter). Naming one turns on `@objectstack/lint`'s RLS rule — a clause it
    * refuses, lowerable or not, is an `error` (see {@link lintCelPredicate}).
@@ -668,6 +679,8 @@ export async function lintCelPredicate(
     const res = mod.validateExpression(hint.role ?? 'predicate', source, {
       objectName: hint.objectName,
       fields: hint.fields,
+      // Spread only when given, so every other surface's hint is unchanged.
+      ...(hint.multiValueFields ? { multiValueFields: hint.multiValueFields } : {}),
       scope: hint.scope ?? 'flattened',
     });
     const issues: CelLintIssue[] = [];
