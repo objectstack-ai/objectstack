@@ -19,6 +19,7 @@ import {
   ViewSettingsPopover,
   ViewSettingsContent,
   groupFieldOptions,
+  pickGroupAddField,
   type ViewSettingsField,
   PHONE_TOUCH_TARGET,
   useBelowSm,
@@ -6529,8 +6530,16 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       const label = objectDef?.fields?.[name]?.label;
       return typeof label === 'string' && label ? label : undefined;
     };
-    const groupability = (name: string): Pick<ViewSettingsField, 'groupable'> =>
-      isVirtualSearchField(objectDef?.fields?.[name] as SearchFieldMeta | undefined) ? { groupable: false } : {};
+    // objectstack#36204 — and the declared type, which the Group editors rank
+    // and pick by (`groupFieldOptions`, `pickGroupAddField`).
+    const groupability = (name: string): Pick<ViewSettingsField, 'groupable' | 'type' | 'multiple'> => {
+      const def = objectDef?.fields?.[name] as (SearchFieldMeta & { type?: unknown; multiple?: unknown }) | undefined;
+      return {
+        ...(isVirtualSearchField(def) ? { groupable: false } : {}),
+        ...(typeof def?.type === 'string' ? { type: def.type } : {}),
+        ...(def?.multiple === true ? { multiple: true } : {}),
+      };
+    };
     return (Array.isArray(schema.columns) ? (schema.columns as any[]) : []).flatMap((f: any) => {
       if (typeof f === 'string') {
         if (!canReadField(perms, schema.objectName, f)) return [];
@@ -6546,6 +6555,14 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       return [{ name, label: tFieldLabel(name, f.label || definitionLabel(name) || name), ...groupability(name) }];
     });
   }, [schema.columns, tFieldLabel, perms, schema.objectName, objectDef]);
+
+  // The order the reader's grid columns are drawn in (the column state the
+  // header drag keeps), handed to the View settings menu's Fields level and,
+  // objectstack#36204, to both Group editors, which list and pick fields in
+  // the column order. Another visualization has no column order of its own.
+  const gridColumnOrder = currentView === 'grid'
+    ? (schema.columnState as { order?: string[]; widths?: Record<string, number> } | undefined)?.order
+    : undefined;
 
   // objectui#11984 — what the two hide-fields lists (the toolbar popover and
   // the View settings section) are handed of `hiddenFields`. An entry naming a
@@ -7257,7 +7274,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       viewName={typeof schema.label === 'string' && schema.label && (onRenameView || onPersonalizationChange)
         ? { label: schema.label, onRename: onRenameView }
         : undefined}
-      fieldOrder={currentView === 'grid' ? (schema.columnState as { order?: string[]; widths?: Record<string, number> } | undefined)?.order : undefined}
+      fieldOrder={gridColumnOrder}
       onFieldOrderChange={currentView === 'grid' && onColumnStateChange
         ? (order) => onColumnStateChange({ ...(schema.columnState as { order?: string[]; widths?: Record<string, number> } | undefined), order })
         : undefined}
@@ -7628,7 +7645,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 <div data-testid="group-field-list">
                   <GroupingEditor
                     value={chosenGroupingConfig as any}
-                    fieldOptions={groupFieldOptions(allFields)}
+                    fieldOptions={groupFieldOptions(allFields, gridColumnOrder)}
+                    pickAddField={pickGroupAddField(allFields, offeredHiddenFields)}
                     maxLevels={3}
                     labels={{
                       addGroup: t('list.addGroup', { defaultValue: 'Add group field' }),

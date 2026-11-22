@@ -98,6 +98,35 @@ export interface ViewSettingsField {
    * Absent means groupable.
    */
   groupable?: boolean;
+  /**
+   * The field's type in the object's declaration, and whether it holds many
+   * values (`multiple: true`). The Group editors rank and pick by them
+   * (objectstack#36204); absent ⇒ ranked with the fields that suit grouping
+   * least, and never added by "Add group field" on its own.
+   */
+  type?: string;
+  multiple?: boolean;
+}
+
+/**
+ * objectstack#36204 — the types whose values many records share, so grouping
+ * by one gives a few groups worth reading: single select and radio (a status
+ * is one), a person, a linked record, a tick, a date. A field holding many
+ * values (`multiple: true`) is not among them. The Group editors list these
+ * fields first; the rest (a name, a free text, a number: nearly one value per
+ * record) follow, still offered.
+ */
+const GROUP_FRIENDLY_TYPES = new Set([
+  'select', 'radio',
+  'user', 'lookup', 'master_detail', 'tree',
+  'boolean', 'toggle',
+  'date', 'datetime',
+]);
+/** The single-choice types "Add group field" groups by on its own. */
+const GROUP_DEFAULT_TYPES = new Set(['select', 'radio']);
+
+function suitsGrouping(f: ViewSettingsField): boolean {
+  return !!f.type && GROUP_FRIENDLY_TYPES.has(f.type) && f.multiple !== true;
 }
 
 /**
@@ -106,11 +135,41 @@ export interface ViewSettingsField {
  * wide toolbar's, read it, so the two forms offer the same fields. A level that
  * already names a withheld field still shows: `GroupingEditor` mounts a value
  * its options do not carry, so the level can be removed.
+ *
+ * objectstack#36204 — in the reader's column order (`order`, as
+ * `orderFields` reads it), the fields that suit grouping first
+ * (`GROUP_FRIENDLY_TYPES`), then the rest, each part in that order.
  */
-export function groupFieldOptions(fields: readonly ViewSettingsField[]): Array<{ value: string; label: string }> {
-  return fields
-    .filter((f) => f.groupable !== false)
+export function groupFieldOptions(
+  fields: readonly ViewSettingsField[],
+  order?: readonly string[],
+): Array<{ value: string; label: string }> {
+  const offered = orderFields(fields, order).filter((f) => f.groupable !== false);
+  return [...offered.filter(suitsGrouping), ...offered.filter((f) => !suitsGrouping(f))]
     .map((f) => ({ value: f.name, label: f.label || f.name }));
+}
+
+/**
+ * objectstack#36204 — the field "Add group field" adds, as `GroupingEditor`'s
+ * `pickAddField`: of the fields no level uses yet, the first single select or
+ * radio (`GROUP_DEFAULT_TYPES`, single-valued) in the order the editor lists
+ * them, a shown column before a hidden one. None ⇒ `undefined`: the editor
+ * opens its field dropdown and groups by nothing until a field is picked,
+ * where it used to group by the first column, a name as a rule, one group per
+ * record.
+ */
+export function pickGroupAddField(
+  fields: readonly ViewSettingsField[],
+  hidden?: ReadonlySet<string>,
+): (remaining: ReadonlyArray<{ value: string }>) => string | undefined {
+  const byName = new Map(fields.map((f) => [f.name, f]));
+  return (remaining) => {
+    const candidates = remaining.filter((option) => {
+      const f = byName.get(option.value);
+      return !!f && !!f.type && GROUP_DEFAULT_TYPES.has(f.type) && f.multiple !== true;
+    });
+    return (candidates.find((option) => !hidden?.has(option.value)) ?? candidates[0])?.value;
+  };
 }
 
 export type ViewSettingsDensityMode = 'compact' | 'comfortable' | 'spacious';
@@ -703,7 +762,8 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
         <div className="p-3">
           <GroupingEditor
             value={groupingConfig as any}
-            fieldOptions={groupFieldOptions(allFields)}
+            fieldOptions={groupFieldOptions(allFields, fieldOrder)}
+            pickAddField={pickGroupAddField(allFields, hiddenFields)}
             maxLevels={3}
             labels={{
               addGroup: t('list.addGroup', 'Add group field'),

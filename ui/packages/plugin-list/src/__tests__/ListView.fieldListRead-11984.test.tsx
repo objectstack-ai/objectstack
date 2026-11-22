@@ -500,9 +500,10 @@ describe('each field list, one pin per position (objectui#11984)', () => {
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
     await waitFor(async () => expect(await hideFields()).toEqual(FIELD_LABELS));
     expect(chips()).toEqual(['Status', 'Secret Status']);
-    // The level's own field is offered in its own dropdown, so all five are.
+    // The level's own field is offered in its own dropdown, so all five are:
+    // the select fields first, as the Group editors rank them (objectstack#36204).
     const group = await inPopover(toolbarButton(/^group/i), (c) => comboboxOptions(within(c).getByTestId('grouping-field-0')));
-    expect(group).toEqual(FIELD_LABELS);
+    expect(group).toEqual(['Status', 'Secret Status', 'Title', 'Priority', 'Secret Note']);
   });
 });
 
@@ -520,20 +521,22 @@ describe('a stored configuration on an unreadable field is kept as stored (objec
     const content = await openPopover(toolbarButton(/^group/i));
     const level = within(content).getByTestId('grouping-field-0');
     expect(level).toHaveTextContent('secret_note');
-    expect(await comboboxOptions(level)).toEqual(['secret_note', 'Title', 'Status', 'Priority']);
+    // The select field first, as the Group editors rank them (objectstack#36204).
+    expect(await comboboxOptions(level)).toEqual(['secret_note', 'Status', 'Title', 'Priority']);
     expect(onGroupingChange).not.toHaveBeenCalled();
-    // "Add group field" seeds a readable field, and the new level does not offer it.
+    // "Add group field" seeds a readable field (the first readable select,
+    // objectstack#36204), and the new level does not offer the unreadable one.
     fireEvent.click(within(content).getByTestId('grouping-add'));
     expect(onGroupingChange).toHaveBeenLastCalledWith({
       fields: [
         { field: 'secret_note', order: 'asc', collapsed: false },
-        { field: 'title', order: 'asc', collapsed: false },
+        { field: 'status', order: 'asc', collapsed: false },
       ],
     });
-    expect(await comboboxOptions(within(content).getByTestId('grouping-field-1'))).toEqual(['Title', 'Status', 'Priority']);
+    expect(await comboboxOptions(within(content).getByTestId('grouping-field-1'))).toEqual(['Status', 'Title', 'Priority']);
     // Its own level can be removed.
     fireEvent.click(within(content).getByTestId('grouping-remove-0'));
-    expect(onGroupingChange).toHaveBeenLastCalledWith({ fields: [{ field: 'title', order: 'asc', collapsed: false }] });
+    expect(onGroupingChange).toHaveBeenLastCalledWith({ fields: [{ field: 'status', order: 'asc', collapsed: false }] });
   });
 
   it('a hidden-field entry on it is not listed, counted or cleared, and every write keeps it', async () => {

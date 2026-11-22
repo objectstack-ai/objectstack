@@ -3509,12 +3509,23 @@ describe('ListView.groupPickerUnstored-32631', () => {
   });
 
   describe('the Group editors do not offer a formula field (objectstack#32631)', () => {
-    it('the toolbar Group panel: "Add group field" seeds the first stored field, and the level lists stored fields only', async () => {
+    // objectstack#36204 — no field here is a select, so "Add group field"
+    // groups by nothing yet: it opens the field dropdown, and that list is
+    // the one these pins read.
+    async function addAndRead(scope: { getByTestId: (id: string) => HTMLElement }): Promise<string[]> {
+      fireEvent.click(scope.getByTestId('grouping-add'));
+      const listbox = await screen.findByRole('listbox');
+      return within(listbox).getAllByRole('option').map((o) => o.textContent ?? '');
+    }
+
+    it('the toolbar Group panel: "Add group field" lists stored fields only, and the pick is the level', async () => {
       const { onGroupingChange } = mount();
       await screen.findByTestId('grid-stub');
       fireEvent.click(screen.getByRole('button', { name: /group/i }));
       await screen.findByTestId('group-field-list');
-      fireEvent.click(screen.getByTestId('grouping-add'));
+      expect(await addAndRead(screen)).toEqual(['Subject', 'Status']);
+      expect(onGroupingChange).not.toHaveBeenCalled();
+      fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name: 'Subject' }));
       expect(onGroupingChange).toHaveBeenLastCalledWith({ fields: [{ field: 'subject', order: 'asc', collapsed: false }] });
       expect(await openOptions(screen.getByTestId('grouping-field-0'))).toEqual(['Subject', 'Status']);
     });
@@ -3525,9 +3536,9 @@ describe('ListView.groupPickerUnstored-32631', () => {
       fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
       const content = await screen.findByTestId('view-settings-content');
       fireEvent.click(within(content).getByTestId('options-row-group'));
-      fireEvent.click(await within(content).findByTestId('grouping-add'));
-      expect(onGroupingChange).toHaveBeenLastCalledWith({ fields: [{ field: 'subject', order: 'asc', collapsed: false }] });
-      expect(await openOptions(within(content).getByTestId('grouping-field-0'))).toEqual(['Subject', 'Status']);
+      await within(content).findByTestId('grouping-add');
+      expect(await addAndRead(within(content))).toEqual(['Subject', 'Status']);
+      expect(onGroupingChange).not.toHaveBeenCalled();
     });
 
     it('CONTROL — the same field stored (`text`) is offered first, in both editors', async () => {
@@ -3535,9 +3546,9 @@ describe('ListView.groupPickerUnstored-32631', () => {
       await screen.findByTestId('grid-stub');
       fireEvent.click(screen.getByRole('button', { name: /group/i }));
       await screen.findByTestId('group-field-list');
-      fireEvent.click(screen.getByTestId('grouping-add'));
+      expect(await addAndRead(screen)).toEqual(['Title', 'Subject', 'Status']);
+      fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name: 'Title' }));
       expect(onGroupingChange).toHaveBeenLastCalledWith({ fields: [TITLE] });
-      expect(await openOptions(screen.getByTestId('grouping-field-0'))).toEqual(['Title', 'Subject', 'Status']);
     });
   });
 

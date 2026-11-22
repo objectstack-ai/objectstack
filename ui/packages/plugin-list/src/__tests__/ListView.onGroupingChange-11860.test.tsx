@@ -37,6 +37,16 @@ import { ListView } from '../ListView';
 /** A partial stub: only the members the list's mount path calls. */
 const dataSource = {
   find: vi.fn().mockResolvedValue([]),
+  // objectstack#36204 — the declared types "Add group field" picks by: it
+  // adds the first single select (`status`) at once.
+  getObjectSchema: vi.fn().mockResolvedValue({
+    name: 'contacts',
+    fields: {
+      name: { type: 'text', label: 'Name' },
+      email: { type: 'email', label: 'Email' },
+      status: { type: 'select', label: 'Status', options: [{ value: 'open', label: 'Open' }] },
+    },
+  }),
   findOne: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
@@ -56,10 +66,16 @@ function schemaWith(extra: Partial<ListViewSchema> = {}): ListViewSchema {
   } as ListViewSchema;
 }
 
+/** Wait until the object's declaration is read: the Group editors pick by its types. */
+async function definitionRead() {
+  await vi.waitFor(() => expect(dataSource.getObjectSchema).toHaveBeenCalled());
+  await act(async () => {});
+}
+
 function mount(schema: ListViewSchema, onGroupingChange: (g: GroupingConfig | undefined) => void) {
   const view = (s: ListViewSchema) => (
     <SchemaRendererProvider dataSource={dataSource}>
-      <ListView schema={s} onGroupingChange={onGroupingChange} />
+      <ListView schema={s} dataSource={dataSource} onGroupingChange={onGroupingChange} />
     </SchemaRendererProvider>
   );
   const result = render(view(schema));
@@ -85,12 +101,13 @@ describe('ListView reports a user grouping change to its host (objectui#11860)',
     mount(schemaWith(), onGroupingChange);
     fireEvent.click(screen.getByRole('button', { name: /group/i }));
     await vi.waitFor(() => expect(screen.getByTestId('group-field-list')).toBeInTheDocument());
+    await definitionRead();
 
     fireEvent.click(screen.getByTestId('grouping-add'));
     expect(onGroupingChange).toHaveBeenCalledTimes(1);
     const added = onGroupingChange.mock.calls[0][0] as GroupingConfig;
     expectSpecShape(added);
-    expect(added.fields).toHaveLength(1);
+    expect(added.fields).toEqual([{ field: 'status', order: 'asc', collapsed: false }]);
 
     fireEvent.click(screen.getByTestId('grouping-order-0'));
     expect(onGroupingChange).toHaveBeenCalledTimes(2);
@@ -125,9 +142,11 @@ describe('ListView reports a user grouping change to its host (objectui#11860)',
     const content = screen.getByTestId('view-settings-content');
     // Grouping is a level of the Display menu.
     fireEvent.click(within(content).getByTestId('options-row-group'));
+    await definitionRead();
     fireEvent.click(await within(content).findByTestId('grouping-add'));
     expect(onGroupingChange).toHaveBeenCalledTimes(1);
     expectSpecShape(onGroupingChange.mock.calls[0][0]);
+    expect(onGroupingChange.mock.calls[0][0].fields[0].field).toBe('status');
 
     const clear = Array.from(content.querySelectorAll('button')).find((b) => b.textContent === 'Clear');
     expect(clear).toBeDefined();

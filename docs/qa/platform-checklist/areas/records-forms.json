@@ -3604,7 +3604,7 @@
       "title": "Grid personalization persists across reload: column resize/reorder/pin, row-height, group-by (with API-true totals), row-color",
       "since": "v16",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3631,7 +3631,7 @@
         "open showcase_task grid; screenshot",
         "resize a column (reorder two columns only on a grid that sets reorderableColumns; there is no runtime pin control — acceptance[0]), and set a row height on the Row height level of the list's options menu (the toolbar's options trigger, then 行高 / Row height: three choices, 紧凑 / 标准 / 宽松 — Compact / Standard / Spacious, ui/packages/plugin-list/src/components/ViewSettingsPopover.tsx; a gallery's Row height level picks its card size the same way) — three modes, stored as rowHeight compact / medium / tall (the spec's five row heights compact/short/medium/tall/extra_tall narrow onto these three: objectui core normalize-list-view.ts DENSITY_MODE_TO_ROW_HEIGHT / ROW_HEIGHT_TO_DENSITY_MODE)",
         "reload; confirm the column widths and row-height restored — they persist in the signed-in user's own list preference, sys_user_preference ui.list.showcase_task (perView.<view>.columnState.widths / rowHeight, objectui#12418). A column ORDER is not: since objectstack#35955 it is the list's unsaved draft, so a reload reopens on the view's own order unless it was saved into a view, with localStorage grid-columns-showcase_task[-<viewId>] as the component's cache; the old per-view override through dataSource.updateViewConfig is retired (objectui#12504). Also reload in a FRESH browser context as the same user: the layout follows the user",
-        "group-by status ('Add group field' pre-selects the first field, Title, and groups at once, so switch it to Status). A runtime grouping lives in the list's URL (uf__group, ui/packages/app-shell/src/views/objectViewListUrlState.ts), not in sys_user_preference: reloading that URL keeps it, a reload of the bare list URL reopens on the view's own grouping by design, and steps[6] reads it that way (QA run #33861). Confirm per-group headers appear and each group shows its record count — summarizeField (estimate_hours) is declared on the KANBAN config of task.view.ts, not on the grid, so grid groups carry counts; clear grouping and confirm the headers are removed cleanly",
+        "group-by status ('Add group field' groups at once by the grid's first single select in column order, Status here, objectstack#36204; the field dropdown lists the fields that suit grouping first, and on a grid with no single select it opens with nothing grouped until a field is picked). A runtime grouping lives in the list's URL (uf__group, ui/packages/app-shell/src/views/objectViewListUrlState.ts), not in sys_user_preference: reloading that URL keeps it, a reload of the bare list URL reopens on the view's own grouping by design, and steps[6] reads it that way (QA run #33861). Confirm per-group headers appear and each group shows its record count — summarizeField (estimate_hours) is declared on the KANBAN config of task.view.ts, not on the grid, so grid groups carry counts; clear grouping and confirm the headers are removed cleanly",
         "cross-check each group's count against a direct per-group server count (GET /api/v1/data/showcase_task filtered to that status, read its total)",
         "read the row-color rule the stock Grid view declares — rowColor on priority with the colors map low slate / medium blue / high amber / urgent red (examples/app-showcase/src/ui/views/task.view.ts); there is no runtime row-color authoring control — and confirm rows paint by it (useRowColor, the -100 tint of each name)",
         "reload once more; confirm every personalization this item stores survives (column widths, row height); capture a screenshot per variant"
@@ -3737,6 +3737,12 @@
           "date": "2026-11-21",
           "change": "steps[2], steps[6] and acceptance[0] (clause, verify) re-pointed to the list draft (objectstack#35955): a column order is the list's unsaved draft, kept only by Save into a view, so it no longer comes back after a reload; the widths and the row height still persist in the user's ui.list.<object> row. Not loosened: widths and row height must still survive a reload and follow the user to a fresh browser",
           "ref": "#35955"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-22",
+          "change": "steps[3] re-pointed (objectstack#36204): 'Add group field' no longer pre-selects the first column; it groups at once by the first single select or radio in the reader's column order (Status on this grid), lists the fields that suit grouping first, and on a grid with none opens the field dropdown without grouping. No clause changed.",
+          "ref": "#36204"
         }
       ]
     },

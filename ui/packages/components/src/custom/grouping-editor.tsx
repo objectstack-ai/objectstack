@@ -30,6 +30,15 @@ export interface GroupingEditorProps {
   onChange: (next: GroupingConfigValue | undefined) => void;
   /** Available fields to group by. */
   fieldOptions: Array<{ value: string; label: string }>;
+  /**
+   * The field "Add group field" adds, chosen from the fields no level uses
+   * yet (`remaining`, in `fieldOptions` order). Returning `undefined` adds no
+   * level: a row with an open field dropdown appears instead, and the level is
+   * written only once a field is picked there; closing the dropdown without a
+   * pick drops the row and writes nothing (objectstack#36204). Absent, the
+   * first remaining field is added at once.
+   */
+  pickAddField?: (remaining: Array<{ value: string; label: string }>) => string | undefined;
   /** Maximum nesting depth. Airtable defaults to 3. */
   maxLevels?: number;
   className?: string;
@@ -70,6 +79,7 @@ export function GroupingEditor({
   value,
   onChange,
   fieldOptions,
+  pickAddField,
   maxLevels = 3,
   className,
   labels,
@@ -77,6 +87,11 @@ export function GroupingEditor({
   const L = { ...DEFAULT_LABELS, ...(labels || {}) };
   const current = value?.fields ?? [];
   const usedFields = new Set(current.map((g) => g.field));
+  // objectstack#36204 — "Add group field" found no field to add by itself
+  // (`pickAddField` answered `undefined`): a row asking for one is open, and
+  // nothing is written until a field is picked in it.
+  const [askingField, setAskingField] = React.useState(false);
+  const remaining = fieldOptions.filter((f) => !usedFields.has(f.value));
 
   const writeFields = (next: GroupingFieldEntry[]) => {
     onChange(next.length ? { fields: next } : undefined);
@@ -173,27 +188,53 @@ export function GroupingEditor({
           </div>
         );
       })}
-      {current.length < maxLevels && (() => {
-        const remaining = fieldOptions.filter((f) => !usedFields.has(f.value));
-        if (remaining.length === 0) return null;
-        return (
-          <button
-            type="button"
-            data-testid="grouping-add"
-            className="flex h-7 items-center gap-1 self-start rounded-md border border-dashed border-input bg-background px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground max-sm:h-11"
-            onClick={() => {
-              const next: GroupingFieldEntry[] = [
-                ...current,
-                { field: remaining[0].value, order: 'asc', collapsed: false },
-              ];
-              writeFields(next);
+      {askingField && current.length < maxLevels && remaining.length > 0 && (
+        <div className="flex items-center gap-1.5">
+          <Select
+            defaultOpen
+            value=""
+            onOpenChange={(open) => {
+              if (!open) setAskingField(false);
+            }}
+            onValueChange={(field) => {
+              setAskingField(false);
+              writeFields([...current, { field, order: 'asc', collapsed: false }]);
             }}
           >
-            <Plus className="h-3 w-3" />
-            {L.addGroup}
-          </button>
-        );
-      })()}
+            <SelectTrigger
+              data-testid="grouping-field-pending"
+              className="h-7 min-w-0 flex-1 px-2 py-0 text-xs max-sm:h-11"
+            >
+              <SelectValue placeholder={L.addGroup} />
+            </SelectTrigger>
+            <SelectContent>
+              {remaining.map((f) => (
+                <SelectItem key={f.value} value={f.value}>
+                  {f.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+      {!askingField && current.length < maxLevels && remaining.length > 0 && (
+        <button
+          type="button"
+          data-testid="grouping-add"
+          className="flex h-7 items-center gap-1 self-start rounded-md border border-dashed border-input bg-background px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground max-sm:h-11"
+          onClick={() => {
+            const field = pickAddField ? pickAddField(remaining) : remaining[0].value;
+            if (field === undefined) {
+              setAskingField(true);
+              return;
+            }
+            writeFields([...current, { field, order: 'asc', collapsed: false }]);
+          }}
+        >
+          <Plus className="h-3 w-3" />
+          {L.addGroup}
+        </button>
+      )}
     </div>
   );
 }

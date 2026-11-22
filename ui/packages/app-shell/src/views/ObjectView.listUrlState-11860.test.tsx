@@ -760,6 +760,19 @@ async function openGroupPanel() {
   await settle();
 }
 
+/**
+ * "Add group field", then the field. This harness's data source answers no
+ * `getObjectSchema`, so the list knows no field's type and the button opens
+ * the field dropdown instead of adding a level (objectstack#36204): the level
+ * is written once a field is picked there.
+ */
+async function addGroupLevel(name: string) {
+  fireEvent.click(screen.getByTestId('grouping-add'));
+  const listbox = await screen.findByRole('listbox');
+  // No definition either for the labels: the options are the field names.
+  fireEvent.click(within(listbox).getByRole('option', { name }));
+}
+
 /** The Group level's own Clear, inside the Display menu. */
 function clearGrouping() {
   const panel = screen.getByTestId('view-settings-content');
@@ -789,7 +802,7 @@ describe('the toolbar grouping is in the URL too (objectui#11860)', () => {
     const host = await mountHost(['/elsewhere', `${VIEW}/all`]);
     expect(groupedBy()).toBeUndefined();
     await openGroupPanel();
-    fireEvent.click(screen.getByTestId('grouping-add'));
+    await addGroupLevel('priority');
     await settle();
     const written = groupParamOf(host);
     expect(written?.fields).toHaveLength(1);
@@ -810,7 +823,7 @@ describe('the toolbar grouping is in the URL too (objectui#11860)', () => {
   it('the grouping a user set on a link survives a reload of that link', async () => {
     const host = await mountHost([`${VIEW}/all`]);
     await openGroupPanel();
-    fireEvent.click(screen.getByTestId('grouping-add'));
+    await addGroupLevel('priority');
     await settle();
     const url = `${host.pathname()}${host.search()}`;
     const field = groupParamOf(host).fields[0].field;
