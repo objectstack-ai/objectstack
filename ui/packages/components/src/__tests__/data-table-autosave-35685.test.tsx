@@ -40,6 +40,7 @@ import '../renderers';
 // at collection, never inside a case's clocked window (`check:test-source-alias`).
 import '@object-ui/react-runtime';
 import { GridCellSelectionProvider } from '../context/gridCellSelection';
+import { I18nProvider } from '@object-ui/i18n';
 
 afterEach(cleanup);
 
@@ -79,11 +80,14 @@ function schemaOf(onRowSave: Save, extra: Record<string, unknown> = {}) {
   };
 }
 
-function renderTable(onRowSave: Save, extra: Record<string, unknown> = {}, withProvider = true) {
+function renderTable(onRowSave: Save, extra: Record<string, unknown> = {}, withProvider = true, language?: string) {
   const DataTable = ComponentRegistry.get('data-table')!;
-  const tree = (schema: any) => (withProvider
+  const table = (schema: any) => (withProvider
     ? <GridCellSelectionProvider value={{}}><DataTable schema={schema} /></GridCellSelectionProvider>
     : <DataTable schema={schema} />);
+  const tree = (schema: any) => (language
+    ? <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false }} persistLanguage={false}>{table(schema)}</I18nProvider>
+    : table(schema));
   const utils = render(tree(schemaOf(onRowSave, extra)));
   const cell = (row: number, col: number) =>
     utils.container.querySelectorAll('tbody tr')[row].querySelectorAll('td[data-grid-cell]')[col] as HTMLElement;
@@ -447,6 +451,29 @@ describe('data-table autosave — the result is said to assistive tech (objectst
     expect(screen.getByTestId('cell-save-failure')).toHaveAttribute('role', 'alert');
     expect(screen.getByTestId('cell-save-failure')).toHaveTextContent('Stage cannot move to won');
     expect(region(t.container)!.textContent).toBe('');
+  });
+
+  it("cells saved together are named in the locale's list punctuation", async () => {
+    const { onRowSave, calls } = deferredSave();
+    const t = renderTable(onRowSave, {}, true, 'zh');
+    // A refused cell stays pending and travels with the next commit on its row.
+    t.typeAndEnter(0, 1, 'won');
+    await waitFor(() => expect(onRowSave).toHaveBeenCalledTimes(1));
+    await act(async () => { calls[0].reject(fieldRefusal([{ field: 'stage', message: 'Stage cannot move to won' }])); });
+    t.typeAndEnter(0, 0, 'Alpha 2');
+    await waitFor(() => expect(onRowSave).toHaveBeenCalledTimes(2));
+    expect(Object.keys(calls[1].changes)).toEqual(['stage', 'name']);
+    await act(async () => { calls[1].resolve(); });
+    expect(region(t.container)!.textContent).toBe('已保存：Stage、Name');
+  });
+
+  it('a column with no header is not named by its key', async () => {
+    const { onRowSave, calls } = deferredSave();
+    const t = renderTable(onRowSave, { columns: [{ header: '', accessorKey: 'name' }] });
+    t.typeAndEnter(0, 0, 'Alpha 2');
+    await waitFor(() => expect(onRowSave).toHaveBeenCalledTimes(1));
+    await act(async () => { calls[0].resolve(); });
+    expect(region(t.container)!.textContent).toBe('Saved');
   });
 
   it('CONTROL: a table that does not save per cell draws no region', () => {

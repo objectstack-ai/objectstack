@@ -376,6 +376,9 @@ const TABLE_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'table.cellSaved': 'Saved',
   // objectstack#35689 — what the table's live region says when cells saved.
   'table.cellSavedAnnouncement': 'Saved: {{fields}}',
+  // The pack's list punctuation the announcement joins column names with
+  // (`、` in ja and zh), the key the form's field lists use.
+  'validation.formInvalidJoiner': ', ',
   'table.openRecordToFinish': 'Open the record to finish this change',
   'common.actions': 'Actions',
   // objectui#10625 — the inline date editors' notice for a stored value
@@ -1491,9 +1494,10 @@ function CellEditButton({
   editableRef.current = editable;
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
-  // objectstack#35689 — the pointer that pressed the button last. A touch never
-  // selects the cell, so on a cell not selected the button is never drawn for
-  // it, and one it lands on anyway (drawn for a mouse before) edits nothing.
+  // objectstack#35689 — the pointer that pressed the button for the click that
+  // follows, cleared by that click. A touch never selects the cell, so on a
+  // cell not selected the button is never drawn for it, and one it lands on
+  // anyway (drawn for a mouse before) edits nothing.
   const pressedByRef = useRef('');
   const [allowed, setAllowed] = useState(false);
   useLayoutEffect(() => {
@@ -1524,9 +1528,14 @@ function CellEditButton({
       onMouseDown={(e) => e.preventDefault()}
       onDoubleClick={(e) => e.stopPropagation()}
       onClick={(e) => {
-        // objectstack#35689 — a tap on an unselected cell is the row's: it opens
-        // the record and edits nothing in place, wherever on the cell it lands.
-        const pointer = (e.nativeEvent as PointerEvent).pointerType || pressedByRef.current;
+        // objectstack#35689 — a tap on an unselected cell edits nothing in
+        // place. On the button it does nothing at all: the row's click ignores
+        // a click on a button, so the tap opens no record either (a tap beside
+        // the button opens it). The press is read once: a later click with no
+        // pointer of its own (assistive tech) is not taken for this touch.
+        const pressedBy = pressedByRef.current;
+        pressedByRef.current = '';
+        const pointer = (e.nativeEvent as PointerEvent).pointerType || pressedBy;
         if (!selected && pointer === 'touch') return;
         e.stopPropagation();
         onEdit();
@@ -3438,11 +3447,16 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       });
       setFailureNotice((prev) => (prev?.rowKey === rowKey ? null : prev));
       flashSaved(rowKey, sentKeys);
-      const fields = sentKeys.map((key) => {
+      // Each saved cell by its column's header, in the locale's list
+      // punctuation; a column with no header is never named by its key.
+      const fields = sentKeys.flatMap((key) => {
         const header = columns.find((c) => c.accessorKey === key)?.header;
-        return typeof header === 'string' && header !== '' ? header : key;
+        return typeof header === 'string' && header !== '' ? [header] : [];
       });
-      setSaveAnnouncement((prev) => ({ seq: prev.seq + 1, text: t('table.cellSavedAnnouncement', { fields: fields.join(', ') }) }));
+      const said = fields.length > 0
+        ? t('table.cellSavedAnnouncement', { fields: fields.join(t('validation.formInvalidJoiner')) })
+        : t('table.cellSaved');
+      setSaveAnnouncement((prev) => ({ seq: prev.seq + 1, text: said }));
     } catch (error) {
       // The edits stay pending and the cells keep what was typed. Each cell the
       // refusal names shows its own reason; a cell it does not name shows them
@@ -3715,6 +3729,22 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   const selectedPos = selectedRowIndex >= 0 && selectedColIndex >= 0
     ? { rowIndex: selectedRowIndex, colIndex: selectedColIndex }
     : null;
+  // objectstack#35689 — whether the host holds the selected cell read-only
+  // (`GridCellSelection.describeCell`), for its `aria-readonly`. Asked as a
+  // cell becomes selected, and again only when what the answer reads changes:
+  // the row is re-read, or the host hands the grid a new value (an answer it
+  // was waiting on arrived). Never asked per render; every render reads this.
+  const selectedRow = selectedPos ? paginatedData[selectedPos.rowIndex] : undefined;
+  const selectedColumnKey = selectedPos ? columns[selectedPos.colIndex].accessorKey : undefined;
+  const [selectedHostReadOnly, setSelectedHostReadOnly] = useState<{ row: any; columnKey: string } | null>(null);
+  useLayoutEffect(() => {
+    const readOnly = selectedRow !== undefined && selectedColumnKey !== undefined
+      && !!cellSelection?.describeCell?.(selectedRow, selectedColumnKey)?.readOnlyReason;
+    setSelectedHostReadOnly((prev) => {
+      if (!readOnly) return null;
+      return prev?.row === selectedRow && prev.columnKey === selectedColumnKey ? prev : { row: selectedRow, columnKey: selectedColumnKey! };
+    });
+  }, [selectedRow, selectedColumnKey, cellSelection]);
   const setSelectedCell = (pos: { rowIndex: number; colIndex: number } | null) =>
     setSelectedCellKey(pos ? { rowKey: pendingRowKeyOf(paginatedData[pos.rowIndex]), columnKey: columns[pos.colIndex].accessorKey } : null);
   // objectstack#35688 — a selected cell whose content is cut off shows it in
@@ -5184,11 +5214,12 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         const isSelectedCell = selectFirst && selectedPos?.rowIndex === rowIndex && selectedPos.colIndex === colIndex;
                         const showsPreview = isSelectedCell && !isEditing && previewKey === `${rowIndex}:${colIndex}`;
                         // objectstack#35689 — a read-only cell says so to assistive tech, in the
-                        // grid only. The host's facts are asked of the selected cell alone (the
-                        // `describeCell` contract: never per render); the cell a reader moves to
-                        // is the selected one, and every other cell reads the table's own facts.
+                        // grid only, from the table's own facts. The selected cell (the one a
+                        // reader moves to) adds the host's, asked when it became selected
+                        // (`selectedHostReadOnly`: `describeCell` is never asked per render).
                         const cellReadOnly = keyboardNavigation
-                          && (isSelectedCell ? readOnlyReasonOf(row, col) !== null : !isEditable);
+                          && (!isEditable || (isSelectedCell && selectedHostReadOnly?.row === row
+                            && selectedHostReadOnly.columnKey === col.accessorKey));
                         // What the cell draws; the preview layer draws the same, unclipped.
                         const drawCell = (): React.ReactNode => (typeof col.cell === 'function'
                           ? col.cell(cellValue, row)

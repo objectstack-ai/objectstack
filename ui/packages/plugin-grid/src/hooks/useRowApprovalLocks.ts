@@ -19,6 +19,11 @@
  * page cannot disagree about a lock; while no read has answered, the row's
  * `approval_status` column stands in, as it does there.
  *
+ * An answer that lands re-renders the host (objectstack#35689), so what the
+ * grid already says of the selected cell (its `aria-readonly`) follows the
+ * lock without waiting for the reader to move: `isLocked` and the value this
+ * hook returns are new exactly when an answer changed.
+ *
  * Fail open: a read in flight, refused or failing leaves the column fallback,
  * and the server refuses a locked write whatever this says. A 501 (no
  * approvals service in this deployment) is latched and the read is not sent
@@ -49,8 +54,12 @@ export function useRowApprovalLocks(objectName: string | undefined): RowApproval
   // A change to the object (a submit, a recall, a decision) drops every answer.
   const invalidation = useDataInvalidation(objectName);
   const answersRef = React.useRef(new Map<string, LockAnswer>());
+  // Counts the answers that changed what `isLocked` reads.
+  const [answered, setAnswered] = React.useState(0);
   React.useEffect(() => {
+    const dropped = answersRef.current.size > 0;
     answersRef.current = new Map();
+    if (dropped) setAnswered((n) => n + 1);
   }, [objectName, invalidation]);
 
   const probe = React.useCallback((recordId: unknown) => {
@@ -73,13 +82,18 @@ export function useRowApprovalLocks(objectName: string | undefined): RowApproval
         // `{ success: true, data: { locked } }`, the declared envelope.
         const data = body && typeof body.success === 'boolean' && 'data' in body ? body.data : body;
         answers.set(id, { locked: data?.locked === true });
+        // An answer for answers since dropped (the object changed) reads nowhere.
+        if (answers === answersRef.current) setAnswered((n) => n + 1);
       } catch {
         answers.set(id, 'unanswered');
       }
     })();
   }, [objectName, apiFetch]);
 
+  // `answered` is read so this callback, and the value below, are new when an
+  // answer lands: the host's cell facts depend on it.
   const isLocked = React.useCallback((recordId: unknown, row: any) => {
+    void answered;
     const answer = recordId == null ? undefined : answersRef.current.get(String(recordId));
     const readAnswered = typeof answer === 'object';
     return resolveApprovalLock({
@@ -87,7 +101,7 @@ export function useRowApprovalLocks(objectName: string | undefined): RowApproval
       openApproval: readAnswered && answer.locked ? { locked: true } : null,
       recordStatus: row?.approval_status,
     }).locked;
-  }, []);
+  }, [answered]);
 
   return React.useMemo(() => ({ probe, isLocked }), [probe, isLocked]);
 }

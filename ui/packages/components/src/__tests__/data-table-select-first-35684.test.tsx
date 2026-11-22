@@ -543,6 +543,19 @@ describe('data-table select-first — a touch never edits in place (objectstack#
   });
 });
 
+describe('data-table select-first — a touch press is read by its own click only (objectstack#35689)', () => {
+  it('after a tap on the edit button, a click with no pointer of its own (assistive tech) edits', () => {
+    const t = renderTable({ selection: { referenceCells: { isReferenceColumn: (key) => key === 'site', openRecord: vi.fn() } } });
+    const button = () => t.cell(0, 3).querySelector<HTMLButtonElement>('[data-testid="cell-edit-button"]')!;
+    fireEvent.pointerEnter(t.cell(0, 3), { pointerType: 'mouse' });
+    fireEvent.pointerDown(button(), { pointerType: 'touch' });
+    fireEvent.click(button());
+    expect(t.editor()).toBeNull();
+    fireEvent.click(button());
+    expect(t.editor()).not.toBeNull();
+  });
+});
+
 describe('data-table select-first — a read-only cell says so in the grid (objectstack#35689)', () => {
   it("the selected cell reads the host's facts: aria-readonly on the cell and on its focus; an editable one carries none", () => {
     const t = renderTable({
@@ -556,6 +569,41 @@ describe('data-table select-first — a read-only cell says so in the grid (obje
     fireEvent.keyDown(t.catcher()!, { key: 'ArrowLeft' });
     expect(t.cell(0, 0)).not.toHaveAttribute('aria-readonly');
     expect(t.catcher()).not.toHaveAttribute('aria-readonly');
+  });
+
+  it("the host's facts are asked as the cell becomes selected, never per render; a new host value is asked again", () => {
+    const DataTable = ComponentRegistry.get('data-table')!;
+    let locked = false;
+    const describeCell = vi.fn((_row: unknown, key: string) => (key === 'amount' && locked ? { readOnlyReason: 'Locked.' } : null));
+    const schemaOf = () => ({
+      type: 'data-table',
+      columns: [{ header: 'Name', accessorKey: 'name' }, { header: 'Amount', accessorKey: 'amount', type: 'number' }],
+      data: ROWS,
+      editable: true,
+      searchable: false,
+      pagination: false,
+    });
+    const Host = ({ value, schema }: { value: GridCellSelection; schema: Record<string, unknown> }) => (
+      <GridCellSelectionProvider value={value}><DataTable schema={schema} /></GridCellSelectionProvider>
+    );
+    const value = { describeCell };
+    const utils = render(<Host value={value} schema={schemaOf()} />);
+    const amount = () => utils.container.querySelectorAll('tbody tr')[0].querySelectorAll('td[data-grid-cell]')[1];
+    fireEvent.click(amount());
+    expect(amount()).toHaveAttribute('data-selected-cell');
+    expect(amount()).not.toHaveAttribute('aria-readonly');
+    const asked = describeCell.mock.calls.length;
+    expect(asked).toBeGreaterThan(0);
+    // The table renders again, three times, with nothing the answer reads changed.
+    for (let i = 0; i < 3; i++) utils.rerender(<Host value={value} schema={schemaOf()} />);
+    expect(describeCell).toHaveBeenCalledTimes(asked);
+    // The host's answer changed and it hands a new value: the cell says so
+    // where it is, without the reader moving.
+    locked = true;
+    utils.rerender(<Host value={{ describeCell }} schema={schemaOf()} />);
+    expect(amount()).toHaveAttribute('data-selected-cell');
+    expect(amount()).toHaveAttribute('aria-readonly', 'true');
+    expect(utils.container.querySelector('[data-slot="cell-type-catcher"]')).toHaveAttribute('aria-readonly', 'true');
   });
 
   it("every cell of a table that edits nothing is read-only, by the table's own facts", () => {
