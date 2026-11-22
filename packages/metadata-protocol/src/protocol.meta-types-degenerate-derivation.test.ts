@@ -399,8 +399,10 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
     // that a text field holds a unit code (ADR-0158 U4, Open item 8).
     // [#35985] `object` 50 → 51: `color`, the palette name the console draws
     // the object's icon tile in.
+    // [#36290] `field` 84 → 85: `fieldHistory`, the field's own switch for
+    // old → new values on the record activity timeline (false turns them off).
     const CARD_PROPERTY_COUNTS: Record<string, number> = {
-        agent: 24, app: 24, dashboard: 21, dataset: 17, field: 84, flow: 24,
+        agent: 24, app: 24, dashboard: 21, dataset: 17, field: 85, flow: 24,
         hook: 24, object: 51, page: 28, position: 14, report: 24, skill: 17, tool: 14,
     };
 
