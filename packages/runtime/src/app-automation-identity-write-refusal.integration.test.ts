@@ -69,8 +69,15 @@ const MEMBER = PermissionSetSchema.parse({
   objects: { qa_note: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
 });
 
-/** An ordinary user, unelevated. */
-const PLAIN = { userId: 'usr_plain', tenantId: 'org_default', positions: [], permissions: ['qa_member'], isSystem: false };
+/** An ordinary user, unelevated. Its membership set rides the envelope as every transport's does (`assembleExecutionContext`). */
+const PLAIN = {
+  userId: 'usr_plain',
+  tenantId: 'org_default',
+  accessible_org_ids: ['org_default'],
+  positions: [],
+  permissions: ['qa_member'],
+  isSystem: false,
+};
 
 /** A platform writer's own system context: no run, no mark (the single-tenancy posture wants its organization). */
 const PLATFORM = { isSystem: true, tenantId: 'org_default' };
