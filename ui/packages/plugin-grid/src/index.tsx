@@ -187,7 +187,20 @@ export const ObjectGridRenderer: React.FC<{ schema: any; [key: string]: any }> =
       requiresDataSource={gridNeedsDataSource(schema, (rest as { data?: unknown }).data)}
       noDataSourceMessage={noDataSourceMessage('object-grid', schema?.objectName)}
     >
-      {(bound) => <ObjectGrid schema={bound} {...rest} dataSource={dataSource} />}
+      {(bound) => (
+        <ObjectGrid
+          schema={bound}
+          // objectstack#36270 — an authored grid that edits (`editable: true`)
+          // edits as the list page's grid does: a click selects a cell,
+          // double-click, Enter or typing opens its editor, and each committed
+          // cell saves on its own, with no pending-changes bar and no "Save
+          // All". A host's own `cellSelection` (`ListView`, the related tab)
+          // wins, and a read-only grid keeps click-to-open.
+          {...(bound?.editable === true ? { cellSelection: true } : {})}
+          {...rest}
+          dataSource={dataSource}
+        />
+      )}
     </ElementDataSourceGate>
   );
 });
