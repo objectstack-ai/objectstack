@@ -5423,6 +5423,7 @@ export * from './FieldEditWidget.js';
 export {
   collectRequiredWhenPromptFields,
   requiredWhenPromptReads,
+  requiredWhenPromptAsksOn,
   type RequiredWhenPromptField,
   type RequiredWhenPromptOptions,
 } from './requiredWhenPrompt.js';
