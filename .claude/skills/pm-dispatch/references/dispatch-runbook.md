@@ -119,11 +119,11 @@
 
 - 席位会话是项目线程(载 coordinator 通道工具)⇒ M 卡有合适区进区,无则一卡一线程;p1、`security` 只定先后,⛔ 单凭它们不开线程。
 - 大卡同上,先于下行,分区亦然,修复轮随卡;大卡 = L/XL,或欠全量验证(`!` 标题或 narrowing 臂),
-  或改契约:`Clause-②: yes`、`Metadata-protocol` 非 `none`、非测试的 `packages/spec/src/**` 路径。
+  或改契约:`Clause-②: yes`、`Metadata-protocol` 非 `none`、非测试的 `packages/spec/src/**` 路径;三者只定开不开线程,⛔ 不定档位。
 - S 级机械卡留席内或进区 `mode:subagent`:开线程要重新克隆、重读 `os-dev.md`,起步成本不值。
 - 披露纪律卡(私密细节不得离开席位会话)也留席内,认领写明。
 - coordinator 调度卡线程(即 dev),候选与槽位照 `coordinator.md` 三;交回即告知它,REWORK 再占槽。
-- 档位与 effort 席位照 `execution-duties.md` 定档节自推导 ⛔ 不等维护者原话;大卡判据只定开不开线程,⛔ 不定档位。
+- 档位与 effort 席位照 `execution-duties.md` 定档节自推导 ⛔ 不等维护者原话。
 - 派发令写两者与推导(档位引 `--tier` 行,effort 引难度读数),协调者照令开线程;常设原话有则作 `reason:`。
 - 席位留认领/派发令/ACCEPT/落地/L2 采纳或补缺;线程自己实施、开 draft PR、驱动 CI 与可合并,⛔ 不起 `os-dev` 子代理。
 - p1 卡交回且欠 L2 ⇒ L1 线程并行起 L1 与隔离 L2(`contract-review.md`),两份意见同回席。

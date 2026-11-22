@@ -105,7 +105,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 - 席位及其子代理 ⛔ 永不打印环境变量的值;判存在只用不印值的形式 `[ -n "${X+x}" ]`。
 - GitHub 上一切新内容用英文;中文只留三通道(维护者速读、轮报、裁决引文)。
 - 四维分析写英文、归分析段,只管新记录;存量中文 ⛔ 不追溯改写。
-- 档位与 effort 的取值只住 `references/execution-duties.md` 定档节,⛔ 他处不写。
+- 档位与 effort 只住 `references/execution-duties.md` 定档节,⛔ 他处不写。
 
 ## 状态模型
 
@@ -277,7 +277,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 - 卡先于弹窗:需裁决先落 `needs-user-decision` 卡;列选项等答的聊天即弹窗;⛔ 不 assign 推送。
 - 决策卡带选项、推荐、证据、四棱块与工作量列;受阻执行卡同笔挂 `pm:blocked`+`Blocked-by:`。
 - 需人工裁先过决策线程:卡入决策箱、放认领,席位请协调者开线程,裁决由席位录卡。
-- ⛔ 席位、分诊与 dev 不在自己会话直接问维护者,简单问题的例外与细则见 `references/decision-analysis.md`。
+- ⛔ 席位、分诊与 dev 不在自己会话直接问维护者;简单问题例外(免卡直问)与细则见 `references/decision-analysis.md`。
 - 推送维护者:受管 PR 待批合、决策卡待字、发版、仅其可解之阻 ⇒ 另发 `PushNotification`。
 - 一行 ≤200 字,先写动作与编号;每项恰一次,例行进展、刚问刚答与在场即见的不推。
 - 总监席档位每场记入摘要台账。
@@ -316,7 +316,7 @@ Worktree: `<repo>-issue-<n>`
 Domain: `domain:<x>`
 Seat: `domain:<x>#<n>` (the seat number this PM sits on; absent = seat 1)
 File surface: `<预期触碰的目录>` (stop on breach; explain in the report)
-Container & model: `<S 级机械卡 / M / L>`, `mode:subagent | mode:cloud | mode:thread`, `model: <档位词,引当次 --tier 输出;天花板拼 CONTRACT_REVIEW_TIER,同行引其 MANDATORY 路径行或 reason:(逐卡裁决,或常设档位令的 id 与时刻);⛔ 不抄模型 id>`, `effort: <medium | high,按卡难度定;xhigh 仅 ADR 修订;安全修复写 high,其对抗复核的值只传子代理>`
+Container & model: `<S 级机械卡 / M / L>`, `mode:subagent | mode:cloud | mode:thread`, `model: <档位词,引当次 --tier 输出;天花板拼 CONTRACT_REVIEW_TIER,同行引其 MANDATORY 路径行或 reason:(逐卡裁决,或常设档位令的 id 与时刻);⛔ 不抄模型 id>`, `effort: <medium | high,按卡难度定;xhigh 仅 ADR 修订;安全修复写 high,对抗复核的值只传子代理>`
 Clause-②: yes | no
 Metadata-protocol: added | narrowed | semantic | none (the kind of change to what a metadata author can write; levels: AGENTS.md's Post-Task Checklist step 3; the dev copies it beside `Clause-②:` into the PR body and each changeset body; a kind other than `none` or a `(narrowing)` arm owes the PR body a third line, from the diff: `Skills-docs: updated here | follow-up owed — FILES | follow-up #N | none — REASON`; `updated here` = the diff teaches it in the docs (in `skills/**` only on `domain:skills` PRs, else `follow-up #N`) and its evals exercise it; the seat files the owed card, rewriting `owed — FILES` to `#N` before ACCEPT via `references/seat-post-protocol.md`'s PR-body line)
 Responsibility: `<whose code produces the risk, and the repo it lives in (objectstack ⇒ a platform card carries the fix, references/cross-repo-coordination.md rule 1) | the platform path that already covers it, or none | who reaches it, and whether anyone uses it today>` (defect cards and cards whose premise is a failing behaviour, else `n/a — not a defect card`; the dispatch prompt's ruling section repeats the three answers)
