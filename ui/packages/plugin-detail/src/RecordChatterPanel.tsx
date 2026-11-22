@@ -8,7 +8,7 @@
 
 import * as React from 'react';
 import { cn, Button } from '@object-ui/components';
-import { MessageSquare, PanelRightOpen, PanelRightClose, X } from 'lucide-react';
+import { Activity, MessageSquare, PanelRightOpen, PanelRightClose, X } from 'lucide-react';
 import type { RecordChatterComponentProps, FeedItem, RecordSubscription } from '@object-ui/types';
 import { RecordActivityTimeline } from './RecordActivityTimeline';
 import type { FeedFilterMode } from './RecordActivityTimeline';
@@ -149,6 +149,8 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
 
   const { t } = useDetailTranslation();
   const title = titleLabel ?? t('detail.discussion');
+  // A heading named by the caller (动态, objectstack#36193) takes the stream's icon.
+  const TitleIcon = titleLabel ? Activity : MessageSquare;
   const empty = emptyLabel ?? t('detail.noCommentsYet');
   const [collapsed, setCollapsed] = React.useState(defaultCollapsed);
   /**
@@ -215,7 +217,7 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b">
           <div className="flex items-center gap-2">
-            <MessageSquare className="h-4 w-4" />
+            <TitleIcon className="h-4 w-4" />
             <span className="text-sm font-medium">{title}</span>
           </div>
           {collapsible && (
@@ -287,7 +289,7 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
           {collapsible && (
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2 text-sm font-medium">
-                <MessageSquare className="h-4 w-4" />
+                <TitleIcon className="h-4 w-4" />
                 {title}
               </div>
               <Button
