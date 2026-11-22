@@ -13,7 +13,7 @@ On a phone the record page's bottom bar used to always draw Edit first, then the
 
 - The bottom bar draws the object's actions only: the primary and the next one (the default budget of 2 is unchanged), filling the row. The record's edit state keeps its Cancel and Save there.
 - With no action to draw, no bottom bar is drawn and the page body runs to the foot of the screen.
-- The `⋯` moves to the right end of the top bar. It holds Edit (on or off, with the reason when it is off), the actions that did not fit, Refresh, Favorites, Share and Delete. Edit there does what the bar's Edit did.
+- The `⋯` moves to the right end of the top bar. It holds Edit (on or off, with the reason when it is off), the actions that did not fit, Refresh, Share and Delete. (Favorites is not in it: the favorite star sits beside the record's name.) Edit there does what the bar's Edit did.
 - A record pending the reader's approval is unchanged: the bar is the approval's decisions and its own `⋯`.
 - The desktop header is unchanged.
 
