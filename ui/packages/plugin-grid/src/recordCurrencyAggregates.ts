@@ -80,11 +80,18 @@ export function requiredAggregateGrouping(
 }
 
 /**
- * The group-header aggregations the grid may draw: every configured one,
- * minus each measure aggregate over a `record`-mode amount or quantity whose
- * unit field is not among the grouping fields. Dropped before the rows are
+ * The group-header aggregations a set of groups may draw: every configured
+ * one, minus each measure aggregate over a `record`-mode amount or quantity
+ * whose unit field is not among `groupingFields`. Dropped before the rows are
  * bucketed and before the server is asked, so neither path adds amounts in
  * different currencies or quantities in different units.
+ *
+ * `groupingFields` are the fields ONE set of groups is bucketed by — one
+ * header query's own `groupBy`. A nested group stands inside every level
+ * above it and none below it, so with several levels each depth is judged on
+ * its own prefix ({@link honestGroupAggregationsByDepth}); judged on every
+ * level at once, a depth-1 header over `region` would keep a sum that only the
+ * `unit_code` level beneath it makes one unit (objectstack#36276).
  */
 export function honestGroupAggregations(
   aggregations: GroupAggregationConfig[] | undefined,
@@ -97,4 +104,21 @@ export function honestGroupAggregations(
     return unit === undefined || groupingFields.includes(unit);
   });
   return kept.length === aggregations.length ? aggregations : kept;
+}
+
+/**
+ * {@link honestGroupAggregations} per grouping depth (objectstack#36276):
+ * index `d` holds what a group at depth `d + 1` may draw, judged on the first
+ * `d + 1` of `groupingFields` — the levels that group stands inside, and the
+ * `groupBy` its header query is compiled with. A measure aggregate over a
+ * `record`-mode amount or quantity is kept from the depth that groups by its
+ * unit or currency field down, and left out above it, the way a whole-set
+ * summary leaves it out.
+ */
+export function honestGroupAggregationsByDepth(
+  aggregations: GroupAggregationConfig[] | undefined,
+  objectFields: Readonly<Record<string, MeasureFieldLike>> | undefined,
+  groupingFields: readonly string[],
+): Array<GroupAggregationConfig[] | undefined> {
+  return groupingFields.map((_, d) => honestGroupAggregations(aggregations, objectFields, groupingFields.slice(0, d + 1)));
 }

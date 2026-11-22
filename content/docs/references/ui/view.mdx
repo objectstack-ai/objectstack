@@ -1096,7 +1096,7 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 | **sort** | `boolean` | optional (default: `true`) | Allow users to sort records |
 | **search** | `boolean` | optional (default: `true`) | Allow users to search records |
 | **filter** | `boolean` | optional (default: `true`) | Allow users to filter records |
-| **refresh** | `boolean` | optional (default: `true`) | Allow users to reload the view data from the backend without a full page reload |
+| **refresh** | `boolean` | optional (default: `true`) | Allow users to reload the view data from the backend without a full page reload. Governs only the wide toolbar's Refresh button (`compactToolbar: false`): the default toolbar has no Refresh, so the toggle changes nothing there. |
 | **rowHeight** | `boolean` | optional (default: `true`) | Allow users to toggle row height/density |
 | **group** | `boolean` | optional (default: `true`) | Allow users to change record grouping from the toolbar. Toggle only — the grouping itself is configured in the view-level `grouping` block. |
 | **addRecordForm** | `boolean` | optional (default: `false`) | Add records through a form instead of inline |
@@ -1484,7 +1484,7 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 | **sort** | `boolean` | optional (default: `true`) | Allow users to sort records |
 | **search** | `boolean` | optional (default: `true`) | Allow users to search records |
 | **filter** | `boolean` | optional (default: `true`) | Allow users to filter records |
-| **refresh** | `boolean` | optional (default: `true`) | Allow users to reload the view data from the backend without a full page reload |
+| **refresh** | `boolean` | optional (default: `true`) | Allow users to reload the view data from the backend without a full page reload. Governs only the wide toolbar's Refresh button (`compactToolbar: false`): the default toolbar has no Refresh, so the toggle changes nothing there. |
 | **rowHeight** | `boolean` | optional (default: `true`) | Allow users to toggle row height/density |
 | **group** | `boolean` | optional (default: `true`) | Allow users to change record grouping from the toolbar. Toggle only — the grouping itself is configured in the view-level `grouping` block. |
 | **addRecordForm** | `boolean` | optional (default: `false`) | Add records through a form instead of inline |
@@ -1669,7 +1669,7 @@ User action toggles for the view toolbar
 | **sort** | `boolean` | optional (default: `true`) | Allow users to sort records |
 | **search** | `boolean` | optional (default: `true`) | Allow users to search records |
 | **filter** | `boolean` | optional (default: `true`) | Allow users to filter records |
-| **refresh** | `boolean` | optional (default: `true`) | Allow users to reload the view data from the backend without a full page reload |
+| **refresh** | `boolean` | optional (default: `true`) | Allow users to reload the view data from the backend without a full page reload. Governs only the wide toolbar's Refresh button (`compactToolbar: false`): the default toolbar has no Refresh, so the toggle changes nothing there. |
 | **rowHeight** | `boolean` | optional (default: `true`) | Allow users to toggle row height/density |
 | **group** | `boolean` | optional (default: `true`) | Allow users to change record grouping from the toolbar. Toggle only — the grouping itself is configured in the view-level `grouping` block. |
 | **addRecordForm** | `boolean` | optional (default: `false`) | Add records through a form instead of inline |
@@ -2338,7 +2338,7 @@ This schema accepts one of the following structures:
 | **isPinned** | `boolean` | optional | Console round-trip: the view is pinned in the object's view switcher. Written by the console's pin toggle through the `view` metadata API and read back to draw the pinned group. Stored on the view's row, which has no per-user scope. Not authored. |
 | **sortOrder** | `integer` | optional | Console round-trip: the view's position among the object's saved views in the switcher, 0-based and counted over saved views only (a code-defined view carries none). Written by the console's drag-reorder and read back to order the tabs. Not authored: `order` is the authored default position. |
 | **visibility** | `Enum<'private' \| 'team' \| 'organization' \| 'public'>` | optional | Console round-trip: the group the switcher files this view's tab under (private, team, organization or public). Display grouping only, NOT access control: nothing restricts who can list or open the view by this value. No console control sets it; the console carries a stored value forward when it re-saves the row. Not authored. |
-| **columnState** | `{ order?: string[]; widths?: Record<string, number> }` | optional | Studio round-trip: column order/widths (runtime-only state, written by the console grid and stored on the view's row, which has no per-user scope — not authored) |
+| **columnState** | `never` | optional | [REMOVED] `view.columnState` was removed in @objectstack/spec 18.7.0 (ADR-0049 enforce-or-remove) — it held one column order and set of widths on a shared view row; nothing writes it any more, and a stored layout is no longer applied, so every reader sees the view's own column order and widths. The console keeps column widths in each reader's browser and saves a column order into the view itself. Delete the key. To ship a column order, list `columns` in that order (or set `fieldOrder`); to ship a width, set `width` on the column. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **options** | `never` | optional | Refused: a view item record carries no top-level `options` bag. Its per-kind blocks live under `config` (`config.kanban`, `config.timeline`, …); the legacy `options.KIND` bag belongs to the flattened list overlay only. |
 
 ### Nested Shape: `ViewItemWire[viewKind='list'].config`
@@ -2408,13 +2408,6 @@ This schema accepts one of the following structures:
 | **package** | `string` | ✅ | The base package id whose same-named item this item replaces whole (e.g. "com.acme.crm"). Only an item of the base's paired "`<base>`.custom" package declares an override. |
 | **basedOn** | `string` | ✅ | Recorded, never a gate: the base package's `manifest.version` this override was taken from (e.g. "3.2.0"), not a history version of the item. Nothing is refused, merged or rebased on it; it tells a person re-basing the override where it started. One reader, as advice: a base's upgrade plan lists an override whose `basedOn` is not the installed base version as stale, beside each override whose base item the upgrade changes (ADR-0146 D2, as amended). |
 
-### Nested Shape: `ViewItemWire[viewKind='list'].columnState`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **order** | `string[]` | optional | Column order as field names, leftmost first (runtime-only state — written by the console grid, never authored). |
-| **widths** | `Record<string, number>` | optional | Column widths in pixels, keyed by field name (runtime-only state — written by the console grid, never authored). |
-
 ---
 
 #### Option 2
@@ -2445,7 +2438,7 @@ This schema accepts one of the following structures:
 | **isPinned** | `boolean` | optional | Console round-trip: the view is pinned in the object's view switcher. Written by the console's pin toggle through the `view` metadata API and read back to draw the pinned group. Stored on the view's row, which has no per-user scope. Not authored. |
 | **sortOrder** | `integer` | optional | Console round-trip: the view's position among the object's saved views in the switcher, 0-based and counted over saved views only (a code-defined view carries none). Written by the console's drag-reorder and read back to order the tabs. Not authored: `order` is the authored default position. |
 | **visibility** | `Enum<'private' \| 'team' \| 'organization' \| 'public'>` | optional | Console round-trip: the group the switcher files this view's tab under (private, team, organization or public). Display grouping only, NOT access control: nothing restricts who can list or open the view by this value. No console control sets it; the console carries a stored value forward when it re-saves the row. Not authored. |
-| **columnState** | `{ order?: string[]; widths?: Record<string, number> }` | optional | Studio round-trip: column order/widths (runtime-only state, written by the console grid and stored on the view's row, which has no per-user scope — not authored) |
+| **columnState** | `never` | optional | [REMOVED] `view.columnState` was removed in @objectstack/spec 18.7.0 (ADR-0049 enforce-or-remove) — it held one column order and set of widths on a shared view row; nothing writes it any more, and a stored layout is no longer applied, so every reader sees the view's own column order and widths. The console keeps column widths in each reader's browser and saves a column order into the view itself. Delete the key. To ship a column order, list `columns` in that order (or set `fieldOrder`); to ship a width, set `width` on the column. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **options** | `never` | optional | Refused: a view item record carries no top-level `options` bag. Its per-kind blocks live under `config` (`config.kanban`, `config.timeline`, …); the legacy `options.KIND` bag belongs to the flattened list overlay only. |
 
 ### Nested Shape: `ViewItemWire[viewKind='form'].config`
@@ -2490,13 +2483,6 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **package** | `string` | ✅ | The base package id whose same-named item this item replaces whole (e.g. "com.acme.crm"). Only an item of the base's paired "`<base>`.custom" package declares an override. |
 | **basedOn** | `string` | ✅ | Recorded, never a gate: the base package's `manifest.version` this override was taken from (e.g. "3.2.0"), not a history version of the item. Nothing is refused, merged or rebased on it; it tells a person re-basing the override where it started. One reader, as advice: a base's upgrade plan lists an override whose `basedOn` is not the installed base version as stale, beside each override whose base item the upgrade changes (ADR-0146 D2, as amended). |
-
-### Nested Shape: `ViewItemWire[viewKind='form'].columnState`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **order** | `string[]` | optional | Column order as field names, leftmost first (runtime-only state — written by the console grid, never authored). |
-| **widths** | `Record<string, number>` | optional | Column widths in pixels, keyed by field name (runtime-only state — written by the console grid, never authored). |
 
 ---
 

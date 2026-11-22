@@ -98,5 +98,8 @@ export * from './flow-text-slot-template';
 // option-collision parse refusal, `translateFlow`, the reference lint and the
 // i18n extractor alike.
 export * from './flow-screen-option-key';
+// [#35928] The record-change trigger's token grammar — the one reading of a
+// `triggerType` the trigger binds by and the record-update preview asks.
+export * from './record-change-trigger-events';
 export * from './bpmn-interop.zod';
 export * from './bpmn-mapping';

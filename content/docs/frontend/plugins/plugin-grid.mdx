@@ -365,6 +365,14 @@ through the host's data source (`dataSource.update`) with no callback to wire.
   definition**, not by a column key — a field marked `readonly`, and
   computed/binary field types (formula, autonumber, file, …), never open an
   editor. There is no `editable` key on `ListColumn`.
+- **Rich text edits in a panel** (objectstack#36023): on a select-first grid
+  (`cellSelection`), a `markdown`, `html` or `richtext` cell opens the record
+  form's text box over the stored source in a panel under the cell, at least as
+  wide as the column, while the cell keeps showing its value. Enter there is a
+  new line, Ctrl/Cmd+Enter saves, Esc discards and a click outside saves. A grid
+  without `cellSelection` opens the text box over the cell on one click: Enter
+  is a new line, Ctrl/Cmd+Enter does nothing, Esc discards and a click outside
+  keeps the text as a pending change for the grid's save buttons.
 - **Visual feedback**: editable cells show a hover state, and the input is
   focused and selected when editing begins
 - **The editor floats over its cell** (objectstack#35688): it opens on a layer
@@ -455,6 +463,12 @@ value a server hook rewrote shows as stored); the list is not read again, so a
 row whose new value would sort it elsewhere stays in place until the next load
 (a refresh, a sort, a filter or a page change).
 
+- **Groups and totals follow the save** (objectstack#35689). A save that
+  changes the grouping field leaves the row in its group while the user is on
+  it; once a cell of another row is selected, the row shows in its new group
+  and both groups' counts and subtotals are correct (a server-grouped grid
+  reads its group headers and open groups' rows again then). Any other save is
+  in its group's subtotals at once, and in the footer total of a flat grid.
 - **A refused save** keeps the typed value and shows the server's reason on the
   cell. Escape puts the stored value back. A later edit on the same row is sent
   together with the refused one, as one update. When the reason names a field
@@ -479,8 +493,14 @@ row whose new value would sort it elsewhere stays in place until the next load
   confirm that names the field and both values and says saving may trigger
   related automation ("Status changes from On Hold to Active. Saving may
   trigger related automation."). Cancel writes nothing and the cell keeps the
-  value it had; Change saves it as any commit is saved. The confirm does not
-  list the flows. A host asks this through `GridCellSelection.confirmCommit`.
+  value it had; Change saves it as any commit is saved. Under that sentence the
+  confirm names the flows the move would start, each by its label in the
+  reader's language and a flow that starts an approval marked so, as the
+  server's `POST /api/v1/automation/_record-starts` answers them (the record
+  page's stage confirm reads the same answer, through `@object-ui/plugin-detail`'s
+  `useRecordUpdateStarts`). A read that fails or names no flow leaves the
+  sentence alone (objectstack#35928). A host asks this through
+  `GridCellSelection.confirmCommit`.
 - **A change that makes other fields required asks for them** (objectstack#35956).
   When the new value makes a field's `requiredWhen` true while that field is
   still empty (a win reason on "Won", say), nothing is written yet: a dialog

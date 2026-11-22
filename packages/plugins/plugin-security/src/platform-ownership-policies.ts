@@ -317,10 +317,14 @@ export function owdOpenWritesCoversOperation(operation: string): boolean {
  *
  * So the caller must vouch for coverage separately
  * (`RlsFilterOptions.masterGateCoversThisWrite`), and the floor comes off only
- * where BOTH hold. The path that makes the distinction load-bearing rather than
- * ceremonial is the BULK write: `assertControlledByParentWrite` returns early
- * when the operation addresses no single id, so nothing replaces the floor
- * there and the floor stays — on an object this predicate answers `true` for.
+ * where BOTH hold. The paths that make the distinction load-bearing rather than
+ * ceremonial are the writes the gate does not judge: a delegated write keeps
+ * both principals' floors, and a write the engine does not route to the gate's
+ * by-id or predicate leg has nothing replacing the floor, so the floor stays —
+ * on an object this predicate answers `true` for. An addressed predicate write
+ * used to be among them; the gate judges every master it reaches, and since
+ * ruling record 7073030861 (ADR-0055 §3 as amended 2026-11-22) the caller
+ * vouches for it there too, for the rows the gate judged.
  *
  * An unresolvable schema yields `false` and the floor stays (fail closed).
  */

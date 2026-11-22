@@ -511,13 +511,6 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     kind: 'omit',
     type: 'view',
     path: ROOT_PATH,
-    key: 'columnState',
-    why: "platform-written, never authored — `Studio round-trip: column order/widths (runtime-only state, written by the console grid and stored on the view's row, which has no per-user scope — not authored)`. Declared on the wire members only so the console's own write parses; the authoring door (`ViewItemSchema`) rejects the key by name",
-  },
-  {
-    kind: 'omit',
-    type: 'view',
-    path: ROOT_PATH,
     key: 'isPinned',
     why: "platform-written, never authored — `Console round-trip: the view is pinned in the object's view switcher. … Not authored.`; the authoring door (`ViewItemSchema`) rejects the key by name",
   },
@@ -727,6 +720,13 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     path: ROOT_PATH,
     key: 'externalId',
     why: "graded `dead` (`liveness/field.json`): no upsert, import or seed matches on a field's `externalId`, so a control would invite an author to rely on a flag nothing reads, and `os lint` then warns on the value the form offered. The schema still parses the key, so a stored value stays valid. A seed dataset names its match field in its own `externalId`, an import mapping in its `upsertKey`",
+  },
+  {
+    kind: 'omit',
+    type: 'field',
+    path: ROOT_PATH,
+    key: 'showOnCreate',
+    why: "graded `planned` (`liveness/field.json`): no create surface reads it yet, so a switch offered now would be honoured nowhere (declared = enforced = shown). The row is offered, and this entry deleted, in the change that lands the create surfaces' readers",
   },
 
   // Measured, and deliberately NOT recorded: seven `view` keys with no

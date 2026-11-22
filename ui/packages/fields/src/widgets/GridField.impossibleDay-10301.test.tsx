@@ -39,7 +39,7 @@ import React from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { formatDate, formatDateTime } from '@object-ui/core';
-import { GridField } from './GridField';
+import { GridFieldWidget as GridField } from './grid-field/GridFieldWidget';
 
 afterEach(() => cleanup());
 

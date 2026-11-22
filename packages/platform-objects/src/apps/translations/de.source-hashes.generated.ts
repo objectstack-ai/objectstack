@@ -75,7 +75,6 @@ export const deGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "metadataForms.view.fields.kanban.label": "dd95c452aa71459e",
   "metadataForms.view.fields.name.label": "5274417ff1ccaf01",
   "metadataForms.view.fields.navigation.label": "51cd9fc784a9643f",
-  "metadataForms.view.fields.navigation.mode.helpText": "3a34d1e59dc81b9f",
   "metadataForms.view.fields.userActions.filter.label": "802895ec427fc6af",
   "metadataForms.view.fields.userFilters.element.label": "e480e4fe57239c98",
   "metadataForms.view.sections.gantt.label": "57ffc6ef520edfc5",

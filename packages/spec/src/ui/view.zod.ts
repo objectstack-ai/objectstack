@@ -1968,7 +1968,7 @@ export const UserActionsConfigSchema = lazySchema(() => strictObject({
   sort: z.boolean().default(true).describe('Allow users to sort records'),
   search: z.boolean().default(true).describe('Allow users to search records'),
   filter: z.boolean().default(true).describe('Allow users to filter records'),
-  refresh: z.boolean().default(true).describe('Allow users to reload the view data from the backend without a full page reload'),
+  refresh: z.boolean().default(true).describe('Allow users to reload the view data from the backend without a full page reload. Governs only the wide toolbar\'s Refresh button (`compactToolbar: false`): the default toolbar has no Refresh, so the toggle changes nothing there.'),
   rowHeight: z.boolean().default(true).describe('Allow users to toggle row height/density'),
   group: z.boolean().default(true).describe('Allow users to change record grouping from the toolbar. Toggle only — the grouping itself is configured in the view-level `grouping` block.'),
   addRecordForm: z.boolean().default(false).describe('Add records through a form instead of inline'),
@@ -3369,6 +3369,19 @@ export function checkListViewTimesheetBinding(
 }
 
 /**
+ * [#36403] The list view body's refusal of `columnState`. The key was never
+ * declared on this authoring shape; it was a wire key of the stored `view`
+ * row (see `VIEW_COLUMN_STATE_RETIRED`, further down, for the retirement and
+ * its census). No conversion reaches a list view body, so this text names no
+ * migration command — the author deletes the key by hand.
+ */
+const VIEW_LIST_COLUMN_STATE_RETIRED =
+  '`listView.columnState` was removed in @objectstack/spec 18.7.0 (ADR-0049 enforce-or-remove) — it was '
+  + 'never a list view key: it held one column order and set of widths the console once stored on a view '
+  + 'row, and that layout is no longer applied. Delete the key. To ship a column order, list `columns` in that '
+  + 'order (or set `fieldOrder`); to ship a width, set `width` on the column.';
+
+/**
  * List View Schema (Expanded)
  * Defines how a collection of records is displayed to the user.
  *
@@ -3417,13 +3430,10 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
   surface: 'this list view',
   history: VIEW_HISTORY,
   guidance: {
-    // [commit d5552ca13] Runtime-only overlay key, deliberately NOT declared here: this
-    // is the AUTHORING shape, and column order/widths are per-user state the
-    // console grid writes through the `view` metadata API (objectui's
-    // `gridNonAuthorKeys` disposition). The overlay-validation face declares
-    // it (`flattenedViewOverlayFields` / `viewItemWireFields`); an author who
-    // writes it here gets this prescription instead of a bare typo suggestion.
-    columnState: 'Column order/widths are per-user runtime personalization the console grid writes through the `view` metadata API — not authored metadata. Remove it from authored metadata.',
+    // [#36403] Never declared on this AUTHORING shape, and now retired from
+    // the wire members too (`flattenedViewOverlayFields` / `viewItemWireFields`
+    // tombstone it); an author who writes it here gets the retirement text.
+    columnState: VIEW_LIST_COLUMN_STATE_RETIRED,
   },
 }, {
   name: SnakeCaseIdentifierSchema.optional().describe('Internal view name (lowercase snake_case)'),
@@ -6177,36 +6187,33 @@ type ViewItemWireArmShape<K extends 'list' | 'form', C extends z.ZodTypeAny> = {
 };
 
 /**
- * [commit d5552ca13] The per-user column layout the console's grid persists through the
- * `view` metadata door — an **explicitly runtime-only overlay key**, admitted
- * where overlays are validated and deliberately NOT authorable.
+ * [#36403] `columnState` RETIRED — ADR-0049 enforce-or-remove, the spec half
+ * of #35955 (maintainer: 「只记在浏览器里」 for column widths, and the
+ * server-side per-user list preference layer 「整个退掉」, 2026-11-21).
  *
- * Modeled on what the write actually sends (measured on objectui#5233's
- * os-dev-report and `ObjectGridColumnState` in objectui's
- * `plugin-grid/src/ObjectGrid.tsx`): `onColumnStateChange` emits
- * `{ order?: string[]; widths?: Record<string, number> }` — the merged result
- * of a column reorder and a resize — and `persistViewPatch` PUTs it as the
- * `columnState` key of a personalization overlay. Until this key was declared,
- * a `columnState`-only patch carried no key any {@link ViewMetadataSchema}
- * member declared, so {@link assertViewIdentity} refused the body ("no
- * recognized `view` key") and the write 422'd — the ruled patch-only write
- * (objectstack#7494 comment 5261754173) could not land. It survived only
- * inside the fat write's copied base, i.e. laundered past validation.
+ * [commit d5552ca13] had admitted it as a runtime-only overlay key: the
+ * console grid's column order and widths, PUT onto a stored `view` row (a
+ * personalization overlay, or a view item record through `updateView`) and
+ * applied on read. The writer is gone. The overlay writer retired with
+ * objectui#12504, and since #35955 a column drag goes to the list's draft
+ * (saved into the view's own `columns` / `fieldOrder`) while column widths
+ * live only in the reader's browser. Writer census before removal, at `main`
+ * 97b9d1e6: none in this framework, its examples or its console
+ * (`ui/packages/**`), none in the HotCRM app or the gallery; cloud was not
+ * reachable. The reader was not gone: until this release the console
+ * applied a stored layout (a record's key rode `listViews()`, an overlay's
+ * survived its narrowing, and the list renderer seeded the grid from it for a
+ * reader with no layout of their own in the browser). The D2 conversion
+ * strips the key on every read, so from this release no stored layout is
+ * applied and every reader sees the view's own column order and widths — the
+ * maintainer's ruling that a stored layout is not migrated (#35955).
  *
- * Posture decisions, both deliberate:
- *  - **Not `.strict()`**: the console owns the internals of this per-user
- *    state (objectui's `gridNonAuthorKeys` ruling, 2026-08-18), so a future
- *    console key here must not 422 against an older server. The two known
- *    keys are typed; unknown inner keys parse. [#20051] They are not stored:
- *    the save keeps only the keys the schema declares, so a new console key
- *    is declared here before the console relies on reading it back.
- *  - **Not exported, not on {@link ListViewSchema}**: exporting would mint a
- *    protocol def / authorable-surface entries, and declaring it on the
- *    authoring shape would bless hand-authoring a payload the product writes
- *    on the user's behalf. Author-writability is a DIFFERENT spec change,
- *    explicitly out of commit d5552ca13's scope; the authoring doors keep rejecting the
- *    key by name (see `VIEW_ITEM_SURFACE.guidance` and `ListViewSchema`'s
- *    `guidance`).
+ * Tombstoned on BOTH wire doors that declared it ({@link viewItemWireFields}
+ * and {@link flattenedViewOverlayFields}), never deleted: a bare deletion on
+ * a closed member reports only "unrecognized key", and the prescription is
+ * the payload. The authoring doors never declared it; their `guidance`
+ * entries carry the same retirement text. Stored rows and sources are
+ * stripped by the D2 conversion `view-column-state-removed`.
  *
  * Declared ABOVE the ViewItem section on purpose: `viewItemWireFields()` reads
  * it, and under `OS_EAGER_SCHEMAS=1` every `lazySchema` factory runs at module
@@ -6214,15 +6221,14 @@ type ViewItemWireArmShape<K extends 'list' | 'form', C extends z.ZodTypeAny> = {
  * TDZ `ReferenceError` at import time (the `strict-object.ts` docblock carries
  * the measured incident).
  */
-const ViewColumnStateSchema = z.object({
-  order: z.array(z.string()).optional()
-    .describe('Column order as field names, leftmost first (runtime-only state — written by the console grid, never authored).'),
-  widths: z.record(z.string(), z.number()).optional()
-    .describe('Column widths in pixels, keyed by field name (runtime-only state — written by the console grid, never authored).'),
-}).describe(
-  'Runtime-only personalization overlay key: the column layout (order/widths) the console grid '
-  + 'persists through the `view` metadata API. NOT authorable — authoring doors reject it by name; do not write it in metadata source.',
-);
+const VIEW_COLUMN_STATE_RETIRED =
+  '`view.columnState` was removed in @objectstack/spec 18.7.0 (ADR-0049 enforce-or-remove) — it held one '
+  + 'column order and set of widths on a shared view row; nothing writes it any more, and a stored layout is '
+  + 'no longer applied, so every reader sees the view\'s own column order and widths. The console keeps '
+  + 'column widths in each reader\'s browser and saves a column order into the view itself. '
+  + 'Delete the key. To ship a column order, list `columns` in that order (or set `fieldOrder`); to ship a '
+  + 'width, set `width` on the column. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /** The authoring surface `defineViewItem` and Studio's create form are judged by. */
 const VIEW_ITEM_SURFACE = {
@@ -6236,8 +6242,9 @@ const VIEW_ITEM_SURFACE = {
     // instead of leaving them to guess.
     isPinned: 'Pinning is per-user Studio state, not authored metadata — the console writes it through the `view` metadata API. Remove it from authored metadata.',
     sortOrder: 'Switcher position is per-user Studio state, not authored metadata — use `order` for the authored default. Remove it from authored metadata.',
-    // [commit d5552ca13] Runtime-only overlay key — same disposition as the two above.
-    columnState: 'Column order/widths are per-user runtime personalization the console grid writes through the `view` metadata API — not authored metadata. Remove it from authored metadata.',
+    // [#36403] Retired — tombstoned on the wire members; an author gets the
+    // same prescription here ({@link VIEW_COLUMN_STATE_RETIRED}).
+    columnState: VIEW_COLUMN_STATE_RETIRED,
     // [#20456] Declared on the wire members with the switcher's other row
     // state; named here so an author who reaches for it as access control is
     // told what it is.
@@ -6376,14 +6383,11 @@ const VIEW_ITEM_OPTIONS_REFUSED =
 function viewItemWireFields() {
   return {
     ...viewSwitcherRowStateFields(),
-    // Same disposition as the switcher keys: console state written through
-    // the `view` metadata API ({@link ViewColumnStateSchema} carries the
-    // key's own ruling). `updateView` PUTs
-    // `{ ...current, ...partial }`, so on a standalone ViewItem record the
-    // key arrives at THIS member's top level; declaring it validates the
-    // shape where `.strip()` used to let it ride through unchecked.
-    columnState: ViewColumnStateSchema.optional()
-      .describe('Studio round-trip: column order/widths (runtime-only state, written by the console grid and stored on the view\'s row, which has no per-user scope — not authored)'),
+    // [#36403] RETIRED — see {@link VIEW_COLUMN_STATE_RETIRED}. `updateView`
+    // PUT `{ ...current, ...partial }`, so on a standalone ViewItem record the
+    // key arrived at THIS member's top level; a stored record is stripped by
+    // the D2 conversion `view-column-state-removed`.
+    columnState: retiredKey(VIEW_COLUMN_STATE_RETIRED),
     // [#20051] Pinned ABSENT, refused by name — see
     // {@link VIEW_ITEM_OPTIONS_REFUSED}. `z.never()` rather than the form
     // overlay's `z.undefined()` ({@link FORM_OVERLAY_OPTIONS_REFUSED}): this
@@ -6442,7 +6446,7 @@ const FORM_OVERLAY_WIRE_SURFACE: StrictObjectOptions = {
  * The flattened overlays are built by extending an authoring shape, and an
  * extension inherits that shape's refusal: the surface named in it, and the
  * candidate list a typo is pointed at, which would miss every key the overlay
- * adds (`isPinned`, `columnState`, …). So the member is closed with a refusal
+ * adds (`isPinned`, `sortOrder`, …). So the member is closed with a refusal
  * built from its OWN shape — the same `strictObjectError` map
  * {@link strictObject} attaches — and re-declared as a `closedObject`, so the
  * refusal is terminal on this surface and the union keeps its envelope.
@@ -6724,13 +6728,11 @@ function flattenedViewOverlayFields<K extends 'list' | 'form'>(kind: K) {
         + 'personalization PUTs.',
       ),
     label: I18nLabelSchema.optional().describe('Display label (inherited from the shadowed entry —).'),
-    // [commit d5552ca13] Runtime-only overlay key — declared HERE (the overlay-validation
-    // face) and on `viewItemWireFields()`, never on an authoring shape. This is
-    // what lets a `columnState`-only personalization patch through the
-    // identity precondition (the vocabulary is derived from the members' keys)
-    // AND gets its inner shape genuinely validated instead of ridden past
-    // `.strip()` unchecked.
-    columnState: ViewColumnStateSchema.optional(),
+    // [#36403] RETIRED — see {@link VIEW_COLUMN_STATE_RETIRED}. It was the
+    // overlay's per-user column order and widths; no writer is left, and a
+    // stored overlay row is stripped by the D2 conversion
+    // `view-column-state-removed`.
+    columnState: retiredKey(VIEW_COLUMN_STATE_RETIRED),
     // [#20456] A console round-trip key (the switcher's set-default writes it
     // and reads it back), declared here since before that census; now it
     // carries its meaning too.
@@ -7065,7 +7067,7 @@ const LIST_OVERLAY_DEFAULT_TYPE = 'grid';
 const LIST_OVERLAY_TYPE_NEEDS_COLUMNS =
   'This list view overlay sets `type` but lists no `columns`. A body that sets `type` is a full inline list '
   + 'config, and a full config lists its columns: add `columns: ["field_a", "field_b"]`. A patch on the view '
-  + 'it shadows (`sort`, `hiddenFields`, `columnState`, `inlineEdit`, …) sets no `type` and needs no `columns`: '
+  + 'it shadows (`sort`, `hiddenFields`, `rowHeight`, `inlineEdit`, …) sets no `type` and needs no `columns`: '
   + 'remove `type` to save this body as a patch on the view it shadows.';
 
 /**
@@ -7385,7 +7387,6 @@ export const VIEW_CONSOLE_ROUND_TRIP_KEYS = {
   isPinned: ['viewItem', 'listOverlay'],
   sortOrder: ['viewItem', 'listOverlay'],
   visibility: ['viewItem', 'listOverlay'],
-  columnState: ['viewItem', 'listOverlay'],
   _isOverride: ['listOverlay'],
 } as const satisfies Record<string, readonly ViewMetadataBranch[]>;
 
