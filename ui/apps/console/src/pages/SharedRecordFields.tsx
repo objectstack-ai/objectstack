@@ -41,7 +41,10 @@
  * never listed, and — when the answer carries the `fields` projection — only
  * a key the object declares is, as the record page lists only the object's
  * declared fields. A key with no projection entry (the record's `id`, an
- * injected column the schema does not declare) therefore stays off the page.
+ * injected column the schema does not declare) therefore stays off the page,
+ * and so does a field the projection marks `hidden` (objectstack#33552) —
+ * the record panel's own rule (`RecordDetailPanel`, `@object-ui/plugin-detail`),
+ * which leaves off every field its schema declares hidden.
  * An answer with no projection (a server that predates it) or an empty one
  * (the server could not read the schema) keeps every non-system key,
  * labelled from the key.
@@ -175,7 +178,8 @@ export function SharedRecordFields({ record, fields }: SharedRecordFieldsProps) 
     (key) =>
       !FIELD_GROUP_SYSTEM_FIELDS.has(key) &&
       !AUDIT_FIELD_NAMES.has(key) &&
-      (!declaredOnly || Object.prototype.hasOwnProperty.call(fields, key)),
+      (!declaredOnly || Object.prototype.hasOwnProperty.call(fields, key)) &&
+      fields?.[key]?.hidden !== true,
   );
 
   if (keys.length === 0) {

@@ -65,7 +65,7 @@ describe('[#26991] buildShareLinkResolveAnswer', () => {
     expect(fields.account).toEqual({ label: 'Account', type: 'lookup', reference: 'account', displayField: 'name' });
   });
 
-  it('serves the nine link columns and never the hash, the allowlist or the creator', () => {
+  it('serves the nine link columns and never the hash, the allowlist or the creator (an unlabelled object adds no object_label)', () => {
     const { link, redactFields } = buildShareLinkResolveAnswer(RECORD, RESOLVED, SCHEMA);
     expect(Object.keys(link).sort()).toEqual(
       ['audience', 'created_at', 'expires_at', 'id', 'label', 'object_name', 'permission', 'record_id', 'token'],
@@ -120,5 +120,58 @@ describe('[#27188] a record-mode amount (ADR-0144 D2)', () => {
     expect(answer.record).toEqual({ amount: 5 });
     expect(answer.fields.amount.currencyConfig).toEqual({ currencyMode: 'record' });
     expect(answer.fields.currency_code).toBeUndefined();
+  });
+});
+
+describe('the object label and the hidden flag', () => {
+  const LABELLED = {
+    name: 'deal',
+    label: 'Deal',
+    fields: {
+      title: { name: 'title', label: 'Deal Name', type: 'text' },
+      score: { name: 'score', label: 'Score', type: 'number', hidden: true },
+      queue: { name: 'queue', label: 'Queue', type: 'text', hidden: true, system: true },
+      shown: { name: 'shown', label: 'Shown', type: 'text', hidden: false },
+    },
+  };
+  const ROW = { title: 'T', score: 7, queue: 'q', shown: 's' };
+  const I18N = {
+    getLocales: () => ['en', 'zh-CN'],
+    getTranslations: (locale: string) =>
+      locale === 'zh-CN' ? { objects: { deal: { label: '商机' } } } : { objects: {} },
+    getDefaultLocale: () => 'en',
+  };
+
+  it('a field the object declares hidden reports hidden; any other field carries no flag', () => {
+    const { fields } = buildShareLinkResolveAnswer(ROW, { ...RESOLVED, redactFields: [] } as ResolveShareLinkResult, LABELLED);
+    expect(fields.score).toEqual({ label: 'Score', type: 'number', hidden: true });
+    expect(fields.queue.hidden).toBe(true);
+    expect(fields.title).not.toHaveProperty('hidden');
+    expect(fields.shown).not.toHaveProperty('hidden');
+  });
+
+  it('link.object_label is the object label translated into the request locale', () => {
+    const answer = buildShareLinkResolveAnswer(ROW, RESOLVED, LABELLED, {
+      acceptLanguage: 'zh-CN,zh;q=0.9,en;q=0.8',
+      i18n: I18N,
+    });
+    expect(answer.link.object_label).toBe('商机');
+  });
+
+  it('the declared label stands with no i18n service, a locale the bundle does not cover, or a throwing service', () => {
+    expect(buildShareLinkResolveAnswer(ROW, RESOLVED, LABELLED).link.object_label).toBe('Deal');
+    expect(buildShareLinkResolveAnswer(ROW, RESOLVED, LABELLED, { acceptLanguage: 'ja-JP', i18n: I18N }).link.object_label).toBe('Deal');
+    const throwing = { ...I18N, getTranslations: () => { throw new Error('boom'); } };
+    expect(buildShareLinkResolveAnswer(ROW, RESOLVED, LABELLED, { acceptLanguage: 'zh-CN', i18n: throwing }).link.object_label).toBe('Deal');
+  });
+
+  it('with no Accept-Language the label is read in the i18n default locale, as the meta door reads it', () => {
+    const zhDefault = { ...I18N, getDefaultLocale: () => 'zh-CN' };
+    expect(buildShareLinkResolveAnswer(ROW, RESOLVED, LABELLED, { i18n: zhDefault }).link.object_label).toBe('商机');
+  });
+
+  it('an object that declares no label carries no object_label', () => {
+    const answer = buildShareLinkResolveAnswer(ROW, RESOLVED, { name: 'deal', fields: LABELLED.fields }, { acceptLanguage: 'zh-CN', i18n: I18N });
+    expect(answer.link).not.toHaveProperty('object_label');
   });
 });
