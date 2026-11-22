@@ -156,6 +156,12 @@ export function openTrioCommitQueue(handle: unknown): void {
   if (handle !== null && (typeof handle === 'object' || typeof handle === 'function')) trioQueues.set(handle, newUnitCommitQueue());
 }
 
+/** The queue of the unit the trio opened on `handle`, while it is open; `undefined` for any other handle. */
+export function trioCommitQueueOf(handle: unknown): UnitCommitQueue | undefined {
+  if (handle === null || (typeof handle !== 'object' && typeof handle !== 'function')) return undefined;
+  return trioQueues.get(handle);
+}
+
 /** The trio committed (`committed`) or rolled back the unit on `handle`. */
 export function settleTrioCommitQueue(handle: unknown, committed: boolean): void {
   if (handle === null || (typeof handle !== 'object' && typeof handle !== 'function')) return;
