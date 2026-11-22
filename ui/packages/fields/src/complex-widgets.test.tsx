@@ -5,7 +5,7 @@ import { LookupField } from './widgets/LookupField';
 import { ActionProvider } from '@object-ui/react';
 import { FieldEditWidget } from './FieldEditWidget';
 import { MasterDetailField } from './widgets/MasterDetailField';
-import { GridField } from './widgets/GridField';
+import { GridFieldWidget as GridField } from './widgets/grid-field/GridFieldWidget';
 import { FileField, FileCell } from './widgets/FileField';
 import { UploadProvider } from './widgets/UploadProvider';
 import type { UploadAdapter, UploadResult } from '@object-ui/types';

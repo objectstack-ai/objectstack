@@ -779,8 +779,8 @@ export const PageHeaderProps = strictObject({
    *
    * ON (the default) the header carries the **record chrome**: the title
    * renders as a record chip with the copy-record-id button beside it (the
-   * follow star draws there only where a host wires a favorites toggle; the
-   * reference console's favorites entry is the header's ⋯ menu). OFF it falls back to a bare heading — one title line and
+   * follow star draws there only where a host wires a favorites toggle, as the
+   * reference console does on its record pages). OFF it falls back to a bare heading — one title line and
    * nothing record-shaped — which is what a dashboard or a landing page wants,
    * since there is no record for the chip to describe.
    *
@@ -801,11 +801,12 @@ export const PageHeaderProps = strictObject({
    * the way `breadcrumb` above left this row; ruling record 6203775759,
    * letter A).
    *
-   * A switch for a star the reference console no longer draws. Since
-   * objectui#12427 the record chip draws the follow star only where the HOST
-   * wires a favorites toggle into the record context (`onToggleFavorite`),
-   * and no reference host does: the record's favorites entry is the header's
-   * ⋯ overflow menu. So `showStar: true` (the default) drew nothing and
+   * A switch metadata never had a say in. Since objectui#12427 the record chip
+   * draws the follow star only where the HOST wires a favorites toggle into
+   * the record context (`onToggleFavorite`); when the key was retired no
+   * reference host did, and since #36246 the reference console wires it on
+   * its record pages, beside the record's name. Either way the star follows
+   * the host's toggle, so `showStar: true` (the default) drew nothing and
    * `showStar: false` hid nothing. No example app, skill or doc authored it.
    *
    * The host hook stays: objectui's `RecordContextValue.onToggleFavorite` is a
@@ -817,9 +818,8 @@ export const PageHeaderProps = strictObject({
    */
   showStar: retiredKey(
     '`page:header` property `showStar` was removed in @objectstack/spec 18 (ADR-0087 D2) — '
-    + 'the reference console draws no star beside the record title, so the key switched nothing: '
-    + 'the record\'s favorites entry is the header\'s ⋯ menu, and metadata does not control it. '
-    + 'Delete the key, whether it was `true` or `false`; the ⋯ menu\'s favorites entry is unchanged. '
+    + 'the console draws the record\'s star from the host\'s favorites toggle, never from metadata, so the key switched nothing. '
+    + 'Delete the key, whether it was `true` or `false`; the page draws the same star without it. '
     + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   /**

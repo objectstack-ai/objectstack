@@ -441,6 +441,24 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   // #26677: value-level retirements — each retired member is refused by the
   // enum's own error map with its prescription, so the refusal is the parse.
   'list-view-options-bag-folded': [tombstone(VIEW_METADATA_MEMBERS.listOverlay, 'view (list overlay)', 'options')],
+  // #36403: one family on both wire doors — the two flattened overlays carry the
+  // tombstone in their own shape; the record is a discriminated union, so its
+  // refusal is read off a parse.
+  'view-column-state-removed': [
+    tombstone(VIEW_METADATA_MEMBERS.listOverlay, 'view (list overlay)', 'columnState'),
+    tombstone(VIEW_METADATA_MEMBERS.formOverlay, 'view (form overlay)', 'columnState'),
+    refusal(
+      'a view item record carrying columnState',
+      () => VIEW_METADATA_MEMBERS.viewItem.safeParse({
+        name: 'crm_case.mine',
+        object: 'crm_case',
+        viewKind: 'list',
+        columnState: { order: ['subject'] },
+        config: { type: 'grid', columns: ['subject'] },
+      }),
+      'columnState',
+    ),
+  ],
   'navigation-mode-overlay-values-removed': [
     ...(['modal', 'split', 'popover'] as const).map((mode) =>
       refusal(`navigation.mode '${mode}'`, () => NavigationModeSchema.safeParse(mode)),

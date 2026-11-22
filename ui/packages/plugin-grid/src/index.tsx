@@ -47,7 +47,7 @@ export type { ListScrollState } from './objectGridInfiniteLoad';
 // capability check, the switch-off and the per-record `visible`), for the one
 // other surface that draws a selection bar of its own: plugin-list's ListView
 // over a non-grid view (objectstack#30394, objectstack#30535). One rule, one copy.
-export { useBulkActionItems } from './components/BulkActionBar';
+export { useBulkActionItems, CHANGE_OWNER_BULK_ACTION } from './components/BulkActionBar';
 export { resolveBulkActions } from './resolveBulkActions';
 export { useUndeclaredActionNamesWarning } from './undeclaredActionNames';
 export { useCellClipboard } from './useCellClipboard';

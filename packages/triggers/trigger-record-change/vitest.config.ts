@@ -39,6 +39,9 @@ export default defineConfig({
     alias: [
       { find: /^@objectstack\/formula$/, replacement: path.resolve(__dirname, '../../formula/src/index.ts') },
       { find: /^@objectstack\/spec\/data$/, replacement: path.resolve(__dirname, '../../spec/src/data/index.ts') },
+      // `@objectstack/spec/automation` carries `recordChangeTriggerHookEvents`, the
+      // token grammar `triggerTypeToHookEvents` delegates to (#35928).
+      { find: /^@objectstack\/spec\/automation$/, replacement: path.resolve(__dirname, '../../spec/src/automation/index.ts') },
       // `@objectstack/core` carries `omitInternalFieldsFromWriteResponse`, the
       // ADR-0100 mask helper `record-change-trigger.ts` applies, so the mask
       // pins read it from source rather than from core's `dist/`.

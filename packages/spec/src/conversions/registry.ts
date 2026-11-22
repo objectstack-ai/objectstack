@@ -121,6 +121,7 @@ import { actionAriaRemoved } from './entries/18/action-aria-removed.js';
 import { dashboardWidgetChartConfigStructureRemoved } from './entries/18/dashboard-widget-chart-config-structure-removed.js';
 import { objectMasterDetailFormDetailSortFieldRemoved } from './entries/18/object-master-detail-form-detail-sort-field-removed.js';
 import { objectTenancyOrganizationFieldRemoved } from './entries/18/object-tenancy-organization-field-removed.js';
+import { viewColumnStateRemoved } from './entries/18/view-column-state-removed.js';
 import { viewItemOwnerHiddenRemoved } from './entries/18/view-item-owner-hidden-removed.js';
 import { viewOverlayOwnerHiddenRemoved } from './entries/18/view-overlay-owner-hidden-removed.js';
 import { viewListFilterableFieldsRemoved } from './entries/18/view-list-filterable-fields-removed.js';
@@ -290,6 +291,7 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: translationWidgetSubCaptionRemoved, order: 55 },
   { conversion: tursoConfigEncryptionKeyRemoved, order: 74 },
   { conversion: tursoConfigTimeoutToTimeoutMs, order: 28 },
+  { conversion: viewColumnStateRemoved, order: 83 },
   { conversion: viewItemOwnerHiddenRemoved, order: 37 },
   { conversion: viewListFilterableFieldsRemoved, order: 71 },
   { conversion: viewListTabsRemoved, order: 46 },

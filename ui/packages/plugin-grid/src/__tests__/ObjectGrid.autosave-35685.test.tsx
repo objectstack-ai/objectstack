@@ -33,9 +33,13 @@
  *      field and both values and saying automation may run; Cancel writes
  *      nothing, Change writes the move. A field no active machine governs
  *      saves without asking.
+ *   8. objectstack#35928: under its sentence that confirm names the flows the
+ *      move would start (`POST /api/v1/automation/_record-starts`, read
+ *      through `@object-ui/plugin-detail`'s `useRecordUpdateStarts`), an
+ *      approval flow marked; no flows or a refused read leave the sentence alone.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent, cleanup, act } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, cleanup, act, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 
@@ -53,6 +57,7 @@ import { ActionProvider, notifyDataChanged, createOwnWrites, OwnWritesContext } 
 import { __clearRecordCrudVerdictCache } from '../hooks/useRecordCrudVerdicts';
 import { __resetApprovalsServiceLatch } from '../hooks/useRowApprovalLocks';
 import { installExplainDouble } from './explainDouble';
+import { withinBand } from './groupBandScope';
 
 beforeEach(() => {
   __clearRecordCrudVerdictCache();
@@ -568,6 +573,235 @@ describe("ObjectGrid — a grid without cellSelection re-reads on the host list'
   });
 });
 
+describe('ObjectGrid — groups, subtotals and the footer total after a cell save (objectstack#35689)', () => {
+  /**
+   * Deals by stage (Prospect / Won) with an amount: Prospect holds Acme 100
+   * and Bolt 50, Won holds Cord 30. One store serves every read the grid
+   * makes: the group header query (grouped, or ungrouped for the footer's
+   * whole-set figure), each group's row page, a flat window, and the write,
+   * which is announced on the data-invalidation bus as the console's
+   * mutation bridge announces it.
+   */
+  type Deal = { id: string; name: string; stage: string; amount: number; updated_at: string };
+  type Agg = { function: string; field?: string; alias: string };
+  function matchesWhere(row: Record<string, unknown>, cond: unknown): boolean {
+    if (cond === undefined || cond === null) return true;
+    return Object.entries(cond as Record<string, unknown>).every(([key, value]) => {
+      if (key === '$and') return (value as unknown[]).every((c) => matchesWhere(row, c));
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        const op = value as Record<string, unknown>;
+        if ('$eq' in op) return row[key] === op.$eq;
+        if ('$null' in op) return op.$null ? row[key] == null : row[key] != null;
+        throw new Error(`double: unsupported operator ${JSON.stringify(op)}`);
+      }
+      return row[key] === value;
+    });
+  }
+  function makeDealSource() {
+    const store: Record<string, Deal> = {
+      o1: { id: 'o1', name: 'Acme', stage: 'prospect', amount: 100, updated_at: '2026-11-20T10:00:00.000Z' },
+      o2: { id: 'o2', name: 'Bolt', stage: 'prospect', amount: 50, updated_at: '2026-11-20T10:00:00.000Z' },
+      o3: { id: 'o3', name: 'Cord', stage: 'won', amount: 30, updated_at: '2026-11-20T10:00:00.000Z' },
+    };
+    let clock = 0;
+    const rows = () => Object.values(store);
+    const ds = {
+      store,
+      queryGroupHeaders: vi.fn(async (_object: string, query: { where?: unknown; groupBy?: string[]; aggregations?: Agg[] }) => {
+        const groupBy = query.groupBy ?? [];
+        const buckets = new Map<string, Deal[]>();
+        for (const row of rows().filter((r) => matchesWhere(r, query.where))) {
+          const key = JSON.stringify(groupBy.map((f) => (row as any)[f] ?? null));
+          if (!buckets.has(key)) buckets.set(key, []);
+          buckets.get(key)!.push(row);
+        }
+        return [...buckets.entries()].map(([key, members]) => {
+          const values = JSON.parse(key) as unknown[];
+          const out: Record<string, unknown> = Object.fromEntries(groupBy.map((f, i) => [f, values[i]]));
+          for (const agg of query.aggregations ?? []) {
+            out[agg.alias] = agg.function === 'count'
+              ? members.length
+              : agg.function === 'sum'
+                ? members.reduce((a, m) => a + Number((m as any)[agg.field!]), 0)
+                : null;
+          }
+          return out as { count: number };
+        });
+      }),
+      find: vi.fn(async (_object: string, params: Record<string, unknown> = {}) => {
+        const where = Array.isArray(params.$filter) ? undefined : params.$filter;
+        const matching = rows().filter((r) => matchesWhere(r, where)).sort((a, b) => a.name.localeCompare(b.name));
+        const skip = (params.$skip as number | undefined) ?? 0;
+        const top = (params.$top as number | undefined) ?? matching.length;
+        return { data: matching.slice(skip, skip + top).map((r) => ({ ...r })), total: matching.length };
+      }),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      delete: vi.fn(),
+      update: vi.fn(async (_object: string, id: string, changes: Record<string, any>) => {
+        store[id] = { ...store[id], ...changes, updated_at: `2026-11-20T11:00:0${++clock}.000Z` };
+        notifyDataChanged({ objectName: OBJECT, recordId: id });
+        return { ...store[id] };
+      }),
+      getObjectSchema: vi.fn(async (name: string) => ({
+        name,
+        fields: {
+          id: { type: 'text' },
+          name: { type: 'text', label: 'Name' },
+          stage: { type: 'select', label: 'Stage', options: [{ value: 'prospect', label: 'Prospect' }, { value: 'won', label: 'Won' }] },
+          amount: { type: 'number', label: 'Amount' },
+          updated_at: { type: 'datetime' },
+        },
+      })),
+    };
+    return ds;
+  }
+  type DealSource = ReturnType<typeof makeDealSource>;
+
+  const COLUMNS = [
+    { field: 'name', label: 'Name' },
+    { field: 'stage', label: 'Stage' },
+    { field: 'amount', label: 'Amount', type: 'number' },
+  ];
+  /**
+   * The grid grouped by stage with an amount subtotal: on the server
+   * (`server`, the grid reads its own groups) or bucketed in the browser over
+   * the rows a host hands it (`browser`).
+   */
+  function renderGrouped(ds: DealSource, path: 'server' | 'browser', cellSelection = true) {
+    const schema: any = {
+      type: 'object-grid',
+      objectName: OBJECT,
+      editable: true,
+      columns: COLUMNS,
+      grouping: { fields: [{ field: 'stage' }] },
+      aggregations: [{ field: 'amount', type: 'sum' }],
+      pagination: { pageSize: 50 },
+    };
+    return render(
+      <ActionProvider>
+        <ObjectGrid
+          schema={schema}
+          dataSource={ds as any}
+          cellSelection={cellSelection || undefined}
+          {...(path === 'browser' ? { data: Object.values(ds.store).map((r) => ({ ...r })) } : {})}
+        />
+      </ActionProvider>,
+    );
+  }
+  const bands = () => [...document.querySelectorAll('[data-testid^="group-row-"]')];
+  const bandOf = (label: string) => bands().find((b) => b.querySelector('.group-label')?.textContent === label)!;
+  /** Each group as 「count · sum」, by its label. */
+  const groupFigures = () => Object.fromEntries(bands().map((b) => [
+    b.querySelector('.group-label')?.textContent ?? '',
+    `${b.querySelector('.group-count')?.textContent} · ${b.querySelector('.group-aggregations')?.textContent?.replace(/^\s*sum:\s*/, '')}`,
+  ]));
+  const namesIn = (label: string) => withinBand(bandOf(label)).queryAllByText(/^(Acme|Bolt|Cord)$/).map((n) => n.textContent);
+  const cellOf = (container: HTMLElement, text: string) =>
+    Array.from(container.querySelectorAll<HTMLElement>('tbody td')).find((td) => td.textContent === text)!;
+  const cellIn = (container: HTMLElement, rowName: string, text: string) => {
+    const row = cellOf(container, rowName).closest('tr')!;
+    return Array.from(row.querySelectorAll<HTMLElement>('td')).find((td) => td.textContent === text)!;
+  };
+  function pasteInto(container: HTMLElement, cell: HTMLElement, text: string) {
+    fireEvent.click(cell);
+    const catcher = container.querySelector<HTMLInputElement>('[data-slot="cell-type-catcher"]')!;
+    fireEvent.paste(catcher, { clipboardData: { getData: () => text } });
+  }
+
+  describe.each(['server', 'browser'] as const)('%s grouping', (path) => {
+    it("a row whose stage changed stays in its group until another row is selected, then counts and sums in its new one", async () => {
+      const ds = makeDealSource();
+      const { container } = renderGrouped(ds, path);
+      await waitFor(() => expect(namesIn('Won')).toEqual(['Cord']));
+      expect(groupFigures()).toEqual({ Prospect: '2 · 150', Won: '1 · 30' });
+      pasteInto(container, cellIn(container, 'Bolt', 'Prospect'), 'Won');
+      await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+      expect(ds.update.mock.calls[0][2]).toEqual({ stage: 'won' });
+      // Still on the row: it keeps its place, and the groups their figures.
+      await waitFor(() => expect(cellIn(container, 'Bolt', 'Won')).toBeTruthy());
+      expect(namesIn('Prospect')).toEqual(['Acme', 'Bolt']);
+      expect(groupFigures()).toEqual({ Prospect: '2 · 150', Won: '1 · 30' });
+      // Another cell of the same row is not leaving it.
+      fireEvent.click(cellOf(container, 'Bolt'));
+      expect(namesIn('Prospect')).toEqual(['Acme', 'Bolt']);
+      expect(groupFigures()).toEqual({ Prospect: '2 · 150', Won: '1 · 30' });
+      // Leaving it: a cell of another row is selected.
+      fireEvent.click(cellOf(container, 'Acme'));
+      await waitFor(() => expect(namesIn('Won')).toEqual(['Bolt', 'Cord']));
+      expect(namesIn('Prospect')).toEqual(['Acme']);
+      await waitFor(() => expect(groupFigures()).toEqual({ Prospect: '1 · 100', Won: '2 · 80' }));
+    });
+
+    it('an amount saved is in its group subtotal at once', async () => {
+      const ds = makeDealSource();
+      const { container } = renderGrouped(ds, path);
+      await waitFor(() => expect(namesIn('Won')).toEqual(['Cord']));
+      const reads = ds.find.mock.calls.length;
+      const headerReads = ds.queryGroupHeaders.mock.calls.length;
+      await editSelectFirst(container, cellIn(container, 'Bolt', '50'), '70');
+      await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(groupFigures()).toEqual({ Prospect: '2 · 170', Won: '1 · 30' }));
+      expect(namesIn('Prospect')).toEqual(['Acme', 'Bolt']);
+      // The figures, and no row, are read again: a server-grouped grid asks
+      // its headers once more; a grid bucketing in the browser asks nothing.
+      expect(ds.find.mock.calls.length).toBe(reads);
+      expect(ds.queryGroupHeaders.mock.calls.length).toBe(headerReads + (path === 'server' ? 1 : 0));
+    });
+  });
+
+  it('control: without cellSelection a write announced on the bus re-reads the grouped grid at once', async () => {
+    const ds = makeDealSource();
+    renderGrouped(ds, 'server', false);
+    await waitFor(() => expect(namesIn('Won')).toEqual(['Cord']));
+    ds.store.o2 = { ...ds.store.o2, stage: 'won' };
+    notifyDataChanged({ objectName: OBJECT, recordId: 'o2' });
+    await waitFor(() => expect(namesIn('Won')).toEqual(['Bolt', 'Cord']));
+    expect(groupFigures()).toEqual({ Prospect: '1 · 100', Won: '2 · 80' });
+  });
+
+  /** A column's footer figure (the table's own summary row). */
+  const footerOf = (field: string) => screen.queryByTestId(`data-table-summary-${field}`)?.textContent ?? null;
+  const FOOTER_COLUMNS = [
+    { field: 'name', label: 'Name' },
+    { field: 'amount', label: 'Amount', type: 'number', summary: 'sum' },
+  ];
+
+  it('the footer total of a grid whose rows are the set follows an amount saved', async () => {
+    const ds = makeDealSource();
+    const { container } = render(
+      <ActionProvider>
+        <ObjectGrid
+          schema={{ type: 'object-grid', objectName: OBJECT, editable: true, columns: FOOTER_COLUMNS, pagination: { pageSize: 50 } } as any}
+          dataSource={ds as any}
+          cellSelection
+        />
+      </ActionProvider>,
+    );
+    await waitFor(() => expect(footerOf('amount')).toMatch(/180/));
+    await editSelectFirst(container, cellIn(container, 'Bolt', '50'), '70');
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(footerOf('amount')).toMatch(/200/));
+  });
+
+  it('the footer total read from the server for a paged grid is read again after an amount saved', async () => {
+    const ds = makeDealSource();
+    const { container } = render(
+      <ActionProvider>
+        <ObjectGrid
+          schema={{ type: 'object-grid', objectName: OBJECT, editable: true, columns: FOOTER_COLUMNS, pagination: { pageSize: 2 } } as any}
+          dataSource={ds as any}
+          cellSelection
+        />
+      </ActionProvider>,
+    );
+    await waitFor(() => expect(footerOf('amount')).toMatch(/180/));
+    await editSelectFirst(container, cellIn(container, 'Bolt', '50'), '70');
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(footerOf('amount')).toMatch(/200/));
+  });
+});
+
 describe('ObjectGrid — a state-machine field is confirmed before a list cell saves it (objectstack#35685)', () => {
   /** Deals whose `stage` a state machine governs, and whose `priority` none does. */
   function makeMachineDataSource(rule: Record<string, unknown> = {}) {
@@ -686,5 +920,159 @@ describe('ObjectGrid — a state-machine field is confirmed before a list cell s
     const dialog = await screen.findByRole('alertdialog');
     expect(dialog).toHaveTextContent('Stage changes from New to Won.');
     expect(ds.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('ObjectGrid — the state-machine confirm names the flows the move starts (objectstack#35928)', () => {
+  const SENTENCE = 'Stage changes from New to Won. Saving may trigger related automation.';
+  const CLOSURE = { name: 'deal_won', label: 'Deal Won Sign-off', startsApproval: true };
+  const NOTIFY = { name: 'deal_notify', label: 'Notify Owner', startsApproval: false };
+
+  type StartsAnswer = { status: number; body: unknown };
+
+  /**
+   * The global `fetch`: the explain probe answers permissively (as
+   * `explainDouble` does), `_record-starts` answers `starts`; every call is
+   * recorded so the request the confirm sends can be read back.
+   */
+  function installFetch(starts: StartsAnswer) {
+    const calls: Array<{ url: string; body: any }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      calls.push({ url: String(url), body });
+      if (String(url).endsWith('/automation/_record-starts')) {
+        return { ok: starts.status < 400, status: starts.status, json: async () => starts.body };
+      }
+      const recordIds = Array.isArray(body?.recordIds) ? body.recordIds : undefined;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          allowed: true,
+          layers: [],
+          ...(recordIds ? { records: recordIds.map((id: string) => ({ recordId: id, visible: true })) } : {}),
+          ...(typeof body?.recordId === 'string' ? { record: { visible: true } } : {}),
+        }),
+      };
+    }));
+    return calls;
+  }
+
+  function makeStartsDataSource() {
+    const store: Record<string, any> = {
+      d1: { id: 'd1', name: 'alpha', stage: 'new', updated_at: '2026-11-20T10:00:00.000Z' },
+      d2: { id: 'd2', name: 'beta', stage: 'qualified', updated_at: '2026-11-20T10:00:00.000Z' },
+    };
+    return {
+      store,
+      find: vi.fn(async () => {
+        const data = Object.values(store).map((r) => ({ ...r }));
+        return { data, total: data.length, hasMore: false, pageSize: 50 };
+      }),
+      update: vi.fn(async (_object: string, id: string, changes: Record<string, any>) => {
+        store[id] = { ...store[id], ...changes, updated_at: '2026-11-20T11:00:00.000Z' };
+        return { ...store[id] };
+      }),
+      getObjectSchema: async (name: string) => ({
+        name,
+        fields: {
+          id: { type: 'text' },
+          name: { type: 'text', label: 'Name' },
+          stage: {
+            type: 'select',
+            label: 'Stage',
+            options: [
+              { value: 'new', label: 'New' },
+              { value: 'qualified', label: 'Qualified' },
+              { value: 'won', label: 'Won' },
+            ],
+          },
+          updated_at: { type: 'datetime' },
+        },
+        validations: [{
+          name: 'stage_flow',
+          type: 'state_machine',
+          field: 'stage',
+          transitions: { new: ['qualified', 'won'], qualified: ['won'] },
+        }],
+      }),
+    } as any;
+  }
+
+  function renderStartsGrid(ds: any) {
+    const schema: any = {
+      type: 'object-grid',
+      objectName: OBJECT,
+      editable: true,
+      columns: [
+        { field: 'name', label: 'Name' },
+        { field: 'stage', label: 'Stage' },
+      ],
+      pagination: { pageSize: 50 },
+    };
+    return render(
+      <ActionProvider>
+        <ObjectGrid schema={schema} dataSource={ds} cellSelection />
+      </ActionProvider>,
+    );
+  }
+
+  /** Paste `Won` into the first row's stage cell and wait for the confirm. */
+  async function moveFirstRowToWon(container: HTMLElement): Promise<HTMLElement> {
+    fireEvent.click(dataCell(container, 0, 'New'));
+    const catcher = container.querySelector<HTMLInputElement>('[data-slot="cell-type-catcher"]')!;
+    fireEvent.paste(catcher, { clipboardData: { getData: () => 'Won' } });
+    return screen.findByRole('alertdialog');
+  }
+
+  const startsCalls = (calls: Array<{ url: string; body: any }>) =>
+    calls.filter((c) => c.url.endsWith('/automation/_record-starts'));
+
+  it('list: asks for the row and the move, and names each flow under the sentence, approval marked', async () => {
+    const calls = installFetch({ status: 200, body: { success: true, data: { flows: [CLOSURE, NOTIFY] } } });
+    const ds = makeStartsDataSource();
+    const { container } = renderStartsGrid(ds);
+    await screen.findByText('beta');
+    const dialog = await moveFirstRowToWon(container);
+
+    const list = await within(dialog).findByTestId('stage-change-starts');
+    expect(dialog).toHaveTextContent(SENTENCE);
+    expect(list).toHaveTextContent('Saving this change starts these flows:');
+    const closure = list.querySelector('[data-stage-change-start="deal_won"]')!;
+    const notify = list.querySelector('[data-stage-change-start="deal_notify"]')!;
+    expect(closure).toHaveTextContent('Deal Won Sign-off');
+    expect(closure.querySelector('[data-stage-change-start-approval]')).toHaveTextContent('starts an approval');
+    expect(notify).toHaveTextContent('Notify Owner');
+    expect(notify.querySelector('[data-stage-change-start-approval]')).toBeNull();
+    expect(startsCalls(calls).map((c) => c.body)).toEqual([
+      { object: OBJECT, recordId: 'd1', changes: { stage: 'won' } },
+    ]);
+  });
+
+  it('empty: no flows answered draws no list, and the sentence stands alone', async () => {
+    const calls = installFetch({ status: 200, body: { success: true, data: { flows: [] } } });
+    const { container } = renderStartsGrid(makeStartsDataSource());
+    await screen.findByText('beta');
+    const dialog = await moveFirstRowToWon(container);
+    await waitFor(() => expect(startsCalls(calls)).toHaveLength(1));
+    // Let the answer land before reading that nothing was drawn for it.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(within(dialog).queryByTestId('stage-change-starts')).toBeNull();
+    expect(dialog).toHaveTextContent(SENTENCE);
+  });
+
+  it('failure: a refused read draws no list, the sentence stands, and Change still saves the move', async () => {
+    const calls = installFetch({ status: 500, body: { success: false, error: { code: 'INTERNAL_ERROR', message: 'boom' } } });
+    const ds = makeStartsDataSource();
+    const { container } = renderStartsGrid(ds);
+    await screen.findByText('beta');
+    const dialog = await moveFirstRowToWon(container);
+    await waitFor(() => expect(startsCalls(calls)).toHaveLength(1));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(within(dialog).queryByTestId('stage-change-starts')).toBeNull();
+    expect(dialog).toHaveTextContent(SENTENCE);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Change' }));
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+    expect(ds.update.mock.calls[0][2]).toEqual({ stage: 'won' });
   });
 });

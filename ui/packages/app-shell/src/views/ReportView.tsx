@@ -28,6 +28,40 @@ import { DrillDownDrawer } from '@object-ui/plugin-dashboard';
 import { DrillNavigationProvider } from '@object-ui/react';
 import { useRecordListDrillNavigation } from './useOpenRecordList.js';
 import { metadataText } from '../hooks/useNavTargetLabel.js';
+import {
+  ServedReportTextContext,
+  servedReportTextOf,
+  type ServedReportText,
+} from './studio-design/servedReportText.js';
+
+/**
+ * The report keys whose text the server translates where it serves the report
+ * (`translateReport`: the name, the description, a joined report's block
+ * labels) plus the `title` the page header reads first.
+ */
+const SERVED_TEXT_KEYS = ['title', 'label', 'description', 'blocks'] as const;
+
+/**
+ * objectstack#36373 — the report the page DRAWS while the editor is open: the
+ * edited buffer, except that each translated key the edit has not touched is
+ * the served copy's. The buffer is the untranslated authored document
+ * (objectstack#35008), so drawing it whole flipped the page heading and the
+ * subtitle to the source language the moment the editor opened; a key the
+ * author did change is drawn as edited.
+ */
+export function previewWithServedText(
+  served: Record<string, any> | null | undefined,
+  authoredAtOpen: Record<string, any> | null | undefined,
+  edited: Record<string, any>,
+): Record<string, any> {
+  if (!served || !authoredAtOpen) return edited;
+  const out: Record<string, any> = { ...edited };
+  for (const key of SERVED_TEXT_KEYS) {
+    if (JSON.stringify(edited[key]) !== JSON.stringify(authoredAtOpen[key])) continue;
+    if (key in served) out[key] = served[key];
+  }
+  return out;
+}
 
 // Fallback fields when no schema is available
 const FALLBACK_FIELDS = [
@@ -251,11 +285,19 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
   // no display copy for this locale.
   const savedSinceOpenRef = useRef(false);
   const [openingEditor, setOpeningEditor] = useState(false);
+  // The authored buffer as the editor opened on it, and the served text of
+  // the report's name and description paired with the published layer — the
+  // page draws the served text for every key the edit leaves alone
+  // (`previewWithServedText`), and the editor's Name box reads it
+  // (`ServedReportTextContext`).
+  const [authoredAtOpen, setAuthoredAtOpen] = useState<Record<string, any> | null>(null);
+  const [servedText, setServedText] = useState<ServedReportText | null>(null);
   const handleOpenConfigPanel = useCallback(async () => {
     if (!metadataClient || !reportName) return;
     const packageId = servedPackageId(reportData);
     setOpeningEditor(true);
     let body: Record<string, unknown> | null = null;
+    let published: Record<string, unknown> | null = null;
     let failure: string | null = null;
     try {
       const at = packageId ? { packageId } : {};
@@ -264,6 +306,8 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
         metadataClient.getDraft('report', reportName, at),
       ]);
       const authored = authoredBuffer('report', layers as AuthoredLayers, extractDraftBody(servedDraft));
+      const lay = layers as { effective?: unknown; code?: unknown } | null;
+      published = (lay?.effective ?? lay?.code ?? null) as Record<string, unknown> | null;
       if (authored.kind === 'unserved') failure = tStudio('engine.studio.refusal.draftUnreadable', metadataLocale);
       else if (Object.keys(authored.body).length > 0) body = authored.body;
       else failure = tStudio('engine.form.notFound', metadataLocale);
@@ -283,6 +327,8 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
       return;
     }
     savedSinceOpenRef.current = false;
+    setAuthoredAtOpen(body);
+    setServedText(servedReportTextOf(published, reportData));
     setEditSchema(body);
     setConfigPanelOpen(true);
     setConfigVersion((v) => v + 1);
@@ -468,8 +514,12 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
     );
   }
 
-  // Use live-edited schema for preview (persists after closing panel until metadata refreshes)
-  const previewReport = editSchema || reportData;
+  // Use live-edited schema for preview (persists after closing panel until
+  // metadata refreshes), with the served text of every translated key the
+  // edit has not touched (objectstack#36373).
+  const previewReport = editSchema
+    ? previewWithServedText(reportData, authoredAtOpen, editSchema)
+    : reportData;
   // `label` and `description` are the spec's `string | I18nLabel`, so an
   // inline locale map (`{ en, 'zh-CN' }`) is valid metadata and is served
   // unchanged. Drawn raw, React refused the object and the page went blank
@@ -531,6 +581,7 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
 
          {/* Right-side config panel — studio's spec-driven report inspector,
              hosted locally in app-shell (see ReportConfigPanel). */}
+         <ServedReportTextContext.Provider value={servedText}>
          <ReportConfigPanel
            open={configPanelOpen && isAdmin}
            onClose={handleCloseConfigPanel}
@@ -543,6 +594,7 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
            metadataClient={metadataClient}
            onAfterChange={() => refresh().catch(() => {})}
          />
+         </ServedReportTextContext.Provider>
 
          <MetadataPanel
             open={showDebug}

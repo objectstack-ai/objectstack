@@ -746,6 +746,10 @@ const en = {
     // one key, read by both its `aria-label` and its `title`. The chooser's
     // button reads `table.columns`, the footer `form.masterDetail.total` and
     // the drag handle `view.dragToReorder`.
+    //
+    // objectstack#36004 — `columnHelp` names a column header's info button
+    // with one short word; the help itself is the button's description, so it
+    // stays out of the column name a screen reader reads with every cell.
     grid: {
       addLine: 'Add line',
       noItems: 'No items',
@@ -755,6 +759,7 @@ const en = {
       openRow: 'Open row',
       duplicateRow: 'Duplicate row',
       removeRow: 'Remove row',
+      columnHelp: 'Help',
     },
   },
   table: {
@@ -832,6 +837,7 @@ const en = {
     actions: 'Actions',
     edit: 'Edit',
     delete: 'Delete',
+    changeOwner: 'Change Owner',
     export: 'Export',
     exportAs: 'Export as {{format}}',
     loading: 'Loading grid…',
@@ -1574,6 +1580,9 @@ const en = {
       includeCurrent: 'Include the current filters and sort',
       scopeShared: 'Shared',
       scopeHint: 'Shared views are seen by everyone who can see this list',
+      // objectstack#36409 — a shared view's name already taken, and a view that is gone.
+      shareNameTaken: 'An unpublished draft already uses this view’s name, so nothing was shared. Give the view another name and try again.',
+      viewGone: 'The view you opened is no longer available, so the list shows its default view.',
       create: 'Create',
     },
     dragToReorder: 'Drag to reorder',
@@ -1651,6 +1660,8 @@ const en = {
     pathStageChangeConflict: 'Someone else changed this record, and the latest version is now shown. Press the stage again if the move still applies.',
     pathStageChangeDenied: "You don't have permission to change this record's stage.",
     pathStageChangeFailed: 'The stage could not be changed.',
+    stageChangeStartsHeading: 'Saving this change starts these flows:',
+    stageChangeStartsApproval: 'starts an approval',
     inlineEditRecordChanged: 'This record was changed elsewhere while you were editing. Your unsaved changes are kept, and Save writes them over the latest version.',
     stageMenuTrigger: 'Stage: {{stage}}. Change stage',
     stageMenuCurrent: 'current stage',
@@ -1924,6 +1935,10 @@ const en = {
     deleteAttachment: 'Delete attachment',
     deleteAttachmentConfirm: 'Are you sure you want to delete the attachment "{{name}}"?',
     attachmentDeleteDenied: 'Only the uploader or someone who can edit this record may delete this attachment.',
+    renameAttachment: 'Rename',
+    renameAttachmentTitle: 'Rename attachment',
+    attachmentNameLabel: 'File name',
+    attachmentRenameDenied: 'Only the uploader or someone who can edit this record may rename this attachment.',
     attachmentParentAccessDenied: "You don't have access to attach files to this record.",
     attachmentDownloadDenied: "You don't have access to download this attachment.",
     attachmentAuthRequired: 'Please sign in to download this attachment.',
@@ -2258,6 +2273,26 @@ const en = {
       vsThisMonth: 'vs this month',
       vsThisQuarter: 'vs this quarter',
     },
+    inPageEdit: {
+      edit: 'Edit',
+      editLabel: 'Edit this dashboard',
+      editing: 'Editing',
+      hint: 'Saved changes apply to everyone at once',
+      addCard: 'Add card',
+      discard: 'Discard',
+      save: 'Save',
+      saving: 'Saving…',
+      saved: 'Dashboard saved',
+      saveFailed: 'The dashboard could not be saved',
+      loading: 'Opening the dashboard for editing…',
+      loadFailed: 'The dashboard could not be opened for editing',
+      pendingDraft: 'This dashboard has unpublished changes in Studio. Publish or discard them there, then edit it here.',
+      noPackage: 'This dashboard cannot be saved here: its app has no package this account can customize.',
+      walled: "On this deployment, only the platform operator can customize an installed app's dashboard.",
+      noVersion: 'The package list does not say which version of this app is installed, so its dashboard cannot be customized here.',
+      resizeCard: 'Resize card',
+      panelTitle: 'Properties',
+    },
     filters: {
       label: 'Dashboard filters',
       dateRange: 'Date range',
@@ -2265,6 +2300,8 @@ const en = {
       custom: 'Custom…',
       all: 'All',
       reset: 'Reset',
+      notApplied: 'Not filtered by {{filters}}',
+      addFilter: 'Add filter',
       range: {
         today: 'Today',
         yesterday: 'Yesterday',
@@ -3288,6 +3325,36 @@ const en = {
       transferRefused: 'The hand-over was refused: {{message}}',
       report: 'Handed over {{updated}}, {{failed}} could not be moved, {{remaining}} still held.',
       failure: '{{object}} {{id}}: {{message}}',
+    },
+    // objectstack#35403 — the Change Owner action, its dialog and its bulk report.
+    changeOwner: {
+      title: 'Change Owner',
+      descriptionRecord: 'Hand this record to a new owner.',
+      descriptionBulk: 'Hand {{count}} records to a new owner.',
+      descriptionBulk_one: 'Hand {{count}} record to a new owner.',
+      descriptionBulk_other: 'Hand {{count}} records to a new owner.',
+      ownerFallback: 'Owner',
+      targetPerson: 'A person',
+      targetQueue: 'A queue',
+      queue: 'Queue',
+      queuePlaceholder: 'Pick a queue',
+      queuesLoading: 'Loading queues…',
+      queuesFailed: 'The queues could not be read: {{message}}',
+      noQueues: 'No queue is set up.',
+      notify: 'Notify the new owner',
+      alreadyOwner: 'This person already owns this record.',
+      submit: 'Change Owner',
+      submitting: 'Changing owner…',
+      cancel: 'Cancel',
+      close: 'Close',
+      refused: 'The owner could not be changed: {{message}}',
+      changed: 'Owner changed.',
+      report: 'Moved {{moved}}, {{unchanged}} already had this owner, {{failed}} could not be moved.',
+      failure: '{{id}}: {{message}}',
+      skipped: '{{count}} selected records do not offer Change Owner and are left out.',
+      skipped_one: '{{count}} selected record does not offer Change Owner and is left out.',
+      skipped_other: '{{count}} selected records do not offer Change Owner and are left out.',
+      noClient: 'The owner cannot be changed here.',
     },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.
@@ -6464,6 +6531,12 @@ const en = {
       object: 'Object',
       unknownType: 'Unknown metadata view type. Expected {{a}}, {{b}} or {{c}}.',
       unknownTypeNamed: 'Unknown metadata view type “{{type}}”. Expected {{a}}, {{b}} or {{c}}.',
+      condition: 'condition',
+      otherwise: 'otherwise',
+      conditionAnd: 'and',
+      conditionOr: 'or',
+      conditionMore: 'other conditions',
+      runsWhen: 'Runs when {{condition}}',
     },
   },
   // `kind:'react'` page renderer's notices (`react-page.tsx`, #25916). A
