@@ -1336,6 +1336,7 @@ const pt = {
     updatedTime: "Atualizado em",
     recordNumber: "ID do registro",
     clickToEdit: "Clique para editar",
+    setField: "Definir {{field}}",
     back: "Voltar",
     edit: "Editar",
     editInline: "Editar",
@@ -3513,6 +3514,11 @@ const pt = {
     allReports: "Todos os relatórios",
     collapse: 'Recolher a barra lateral',
     expand: 'Expandir a barra lateral',
+  },
+  designMode: {
+    title: 'Modo de design',
+    leaveUnsaved: 'Sair do modo de design? As alterações não salvas serão perdidas.',
+    saveFailed: 'Algumas alterações não foram salvas: {{reason}}',
   },
   topbar: {
     openAssistant: "Abrir o assistente {{name}}",

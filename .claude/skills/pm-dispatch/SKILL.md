@@ -79,7 +79,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 - 项目席唤醒 = PR 订阅 + 自建自绑巡查 routine(总监席与按需席除外);⛔ 无 `send_later` 链。
 - 探针先行:fire 的第一动作是一次最便宜的车道盘点查询,⛔ 在它之前不读任何长文本。
 - 队列空(逐卡表见 `references/seat-lifecycle.md`)+ 无在飞 + 无待 L1/L2 + 决策箱无新答复 ⇒ 自退。
-- 分诊席与车道席常驻(按需席除外),断粮换号重开席与信箱;分诊默认判断档;裁决归总监。
+- 分诊席与车道席常驻(按需席除外),断粮换号重开席与信箱;裁决归总监。
 - 子代理裁决逐份过转录核验采信。
 
 ## 阶段细则索引
@@ -105,6 +105,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 - 席位及其子代理 ⛔ 永不打印环境变量的值;判存在只用不印值的形式 `[ -n "${X+x}" ]`。
 - GitHub 上一切新内容用英文;中文只留三通道(维护者速读、轮报、裁决引文)。
 - 四维分析写英文、归分析段,只管新记录;存量中文 ⛔ 不追溯改写。
+- 档位与 effort 只住 `references/execution-duties.md` 定档节。
 
 ## 状态模型
 
@@ -273,14 +274,14 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 - 长远合理性权重恒 ≥50%:推荐以长远的读数领起,四轴冲突时其余各轴合起来投不翻它。
 - 权重只排推荐不授权:读缩小特例与契约增生,⛔ 不背书投机扩张、不放行人工地板事。
 - 四维分析从业务角度写;四棱是四轴的卡面序列化,一一对应,是人工裁决的输入。
-- 卡先于弹窗:需裁决先落 `needs-user-decision` 卡;列选项等答的聊天即弹窗;⛔ 不 assign 推送。
+- 卡先于弹窗:需裁决(简单问题除外)先落 `needs-user-decision` 卡;列选项等答的聊天即弹窗;⛔ 不 assign 推送。
 - 决策卡带选项、推荐、证据、四棱块与工作量列;受阻执行卡同笔挂 `pm:blocked`+`Blocked-by:`。
-- 需人工裁先过天花板档:卡入决策箱、放认领,席位请协调者开决策线程,裁决由席位录卡。
-- ⛔ 席位、分诊与 dev 不在自己会话直接问维护者;细则见 `references/decision-analysis.md`。
+- 需人工裁先过决策线程:卡入决策箱、放认领,席位请协调者开线程,裁决由席位录卡。
+- ⛔ 席位、分诊与 dev 不在自己会话直接问维护者;简单问题可免卡直问,细则见 `references/decision-analysis.md`。
 - 推送维护者:受管 PR 待批合、决策卡待字、发版、仅其可解之阻 ⇒ 另发 `PushNotification`。
 - 一行 ≤200 字,先写动作与编号;每项恰一次,例行进展、刚问刚答与在场即见的不推。
-- 总监席档位由维护者按项目人工定,每场记入摘要台账;⛔ 无档位硬门、无免档整理态。
-- 呈裁只经总监席与天花板档决策线程,恒由维护者人工裁;⛔ 无代裁无自裁无子代理。
+- 总监席档位每场记入摘要台账。
+- 呈裁(简单问题除外)只经总监席与决策线程,恒由维护者人工裁;⛔ 无代裁无自裁无子代理。
 
 ## 报告契约
 
@@ -315,7 +316,7 @@ Worktree: `<repo>-issue-<n>`
 Domain: `domain:<x>`
 Seat: `domain:<x>#<n>` (the seat number this PM sits on; absent = seat 1)
 File surface: `<预期触碰的目录>` (stop on breach; explain in the report)
-Container & model: `<S 级机械卡 / M / L>`, `mode:subagent | mode:cloud | mode:thread`, `model: <档位词,引当次 --tier 输出;天花板拼 CONTRACT_REVIEW_TIER,同行引其 MANDATORY 路径行或 reason:(逐卡裁决,或常设档位令的 id 与时刻);⛔ 不抄模型 id>`, `effort: <medium | high | xhigh | max,按卡难度定;xhigh 同行引其时长读数、实测记录或常设令的 id 与时刻>`
+Container & model: `<S 级机械卡 / M / L>`, `mode:subagent | mode:cloud | mode:thread`, `model: <档位词,引当次 --tier 输出;天花板拼 CONTRACT_REVIEW_TIER,同行引其 MANDATORY 路径行或 reason:(逐卡裁决,或常设档位令的 id 与时刻);⛔ 不抄模型 id>`, `effort: <medium | high,按卡难度定;xhigh 仅 ADR 修订;安全修复写 high,对抗复核的值只传子代理>`
 Clause-②: yes | no
 Metadata-protocol: added | narrowed | semantic | none (the kind of change to what a metadata author can write; levels: AGENTS.md's Post-Task Checklist step 3; the dev copies it beside `Clause-②:` into the PR body and each changeset body; a kind other than `none` or a `(narrowing)` arm owes the PR body a third line, from the diff: `Skills-docs: updated here | follow-up owed — FILES | follow-up #N | none — REASON`; `updated here` = the diff teaches it in the docs (in `skills/**` only on `domain:skills` PRs, else `follow-up #N`) and its evals exercise it; the seat files the owed card, rewriting `owed — FILES` to `#N` before ACCEPT via `references/seat-post-protocol.md`'s PR-body line)
 Responsibility: `<whose code produces the risk, and the repo it lives in (objectstack ⇒ a platform card carries the fix, references/cross-repo-coordination.md rule 1) | the platform path that already covers it, or none | who reaches it, and whether anyone uses it today>` (defect cards and cards whose premise is a failing behaviour, else `n/a — not a defect card`; the dispatch prompt's ruling section repeats the three answers)
