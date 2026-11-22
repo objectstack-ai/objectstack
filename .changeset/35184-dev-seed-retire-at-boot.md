@@ -7,6 +7,8 @@ fix(auth)!: a boot outside development mode retires what the development seed is
 Clause-②: no (narrowing)
 Metadata-protocol: none
 
+<!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is what a boot outside development mode does to the credentials the development seed's accounts were issued: no metadata, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+
 **BREAKING** for a deployment that serves a database `os dev` seeded. At every boot outside development mode (`NODE_ENV` is not `development`), before the server serves a request, the platform retires what each account the development seed created (its admin and the stack's `demoStaff`) was issued, while that account still has the password it was seeded with: its sessions, its API keys, the apps authorized to it and its device sign-ins, its outstanding password-reset links, any sign-in account linked to it, the OAuth applications it registered (disabled) and the SCIM credentials it minted (revoked). It is the revocation `os user set-password` performs, without setting a password, and with a host `secondaryStorage` it also ends the sessions held there.
 
 - FROM: a session, an API key or an authorized app the seed's admin or a demo account was issued under `os dev` kept working on a server outside development mode, until an operator ran `os user set-password` on that account.
