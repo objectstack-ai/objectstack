@@ -510,14 +510,17 @@ In the Console's object pages, a record that opens in the drawer opens in a
 drawer **over the list**, and the list keeps its full width. The drawer is
 460 px wide, and the reader can drag its edge from 380 px to 900 px. The
 dragged width is remembered in the browser and applies to every object's
-drawer, except an object whose `navigation` authors a `size` (other than
-`auto`) or a `width` (pixel or percent). That object keeps its own remembered
-width, shared with its calendar, gantt, kanban, tree and grid overlays: its
-drawer opens at the authored width until a width is dragged in it or in one
-of them. A record page's drawer opens the same way, and a drawer next opened
-for another object's record opens at that object's width. The drawer draws no
-dimming overlay and is non-modal, so the list behind it stays readable and
-clickable:
+drawer, except one whose `navigation` authors a `size` (other than `auto`) or a
+`width` (pixel or percent). The list's drawer reads the view's `navigation`,
+then the object's; a record page's drawer reads its root record's object's.
+Such a drawer keeps that object's own remembered width, shared with its
+calendar, gantt, kanban, tree and grid overlays and a resizable
+`RecordDetailDrawer`: it opens at the authored width until a width is dragged
+in it or in one of them. The width belongs to the drawer's root. A child level
+keeps the root's width, and in the list a record a lookup chip opens as the
+root takes the list's width and remembered width, not those of the opened
+record's object. The drawer draws no dimming overlay and is non-modal, so the
+list behind it stays readable and clickable:
 
 - the open record's row is highlighted and follows the drawer's ↑ ↓;
 - clicking another row swaps the record.
