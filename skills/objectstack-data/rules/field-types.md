@@ -115,12 +115,12 @@ only; in a grid a declared target leaves the same-named `autofill` copy.
 
 ## Embedded (JSON sub-objects)
 
-Stored as JSON on the parent row — no separate table / FK:
+Stored as JSON on the parent row, no separate table/FK:
 
 | Type | When to Use |
 |:-----|:------------|
-| `composite` | Single embedded JSON object, **untyped** — a field declares no sub-fields (`fields` / `subFields` are refused) |
-| `repeater` | Embedded JSON **array**, **untyped** — no sub-fields or `columns`; a typed list is a child object (`master_detail`, `inlineEdit: 'grid'`) |
+| `composite` | Single embedded JSON object, **untyped**: a field declares no sub-fields (`fields`/`subFields` are refused) |
+| `repeater` | Embedded JSON **array**, **untyped**: no sub-fields or `columns`; a typed list is a `master_detail` child a parent `fieldGroups[].relatedList` names |
 | `record` | Name-keyed **map** of embedded sub-objects (insertion order = display order; ADR-0007) |
 
 ## Calculated
