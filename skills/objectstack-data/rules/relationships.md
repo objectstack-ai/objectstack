@@ -247,7 +247,7 @@ which clients are meant to see, acknowledged — a note:
 
 ## Inline Editing (Master-Detail Entry)
 
-The parent's **standard** create/edit form enters a child's rows where **a
+The parent's standard create/edit form enters a child's rows where **a
 field group of the parent names that child** (`relatedList`): the group draws
 the child's table at its place in the record's details and in the parent's
 entry form (below the form's fields when its sections name no field group),
