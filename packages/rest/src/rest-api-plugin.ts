@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { Plugin, PluginContext, IHttpServer, isServiceNotRegisteredError } from '@objectstack/core';
+import { Plugin, PluginContext, IHttpServer, isServiceNotRegisteredError, resolveEnvironmentMembershipEnforcement } from '@objectstack/core';
 import { RestServer, RestKernelManager, RestProtocol, RestRequestEnvResolver, RestEnvRegistry } from './rest-server.js';
 import { RestServerConfig } from '@objectstack/spec/api';
 import { mountAndRecordDirectRoutes } from './direct-mount-composition.js';
@@ -101,6 +101,14 @@ export interface RestApiPluginConfig {
      */
     kernelManagerServiceName?: string;
     api?: RestServerConfig;
+    /**
+     * The stack's `api.enforceProjectMembership` — the host's
+     * environment-membership switch (ADR-0135 D9: `false` opts a host whose
+     * environment-native auth IS the membership out). Pass the value the
+     * runtime dispatcher's plugin is given, so both doors of the host judge
+     * alike. Undefined ⇒ on exactly when `api.api.enableProjectScoping` is.
+     */
+    enforceProjectMembership?: boolean;
 }
 
 /**
@@ -598,7 +606,16 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             // `RouteManager` in the first place.
             let restServer: RestServer | undefined;
             try {
-                restServer = new RestServer(server, protocol, config.api as any, kernelManager, envRegistry, defaultEnvironmentIdProvider, authServiceProvider, objectQLProvider, emailServiceProvider, sharingServiceProvider, /* retired saved-report slot (#20102) */ undefined, approvalsServiceProvider, sharingRulesServiceProvider, i18nServiceProvider, analyticsServiceProvider, settingsServiceProvider, serviceExistsProvider, securityServiceProvider, requestEnvResolver, metadataServiceProvider, tenancyServiceProvider, auditServiceProvider, kernelServiceProvider);
+                restServer = new RestServer(server, protocol, config.api as any, kernelManager, envRegistry, defaultEnvironmentIdProvider, authServiceProvider, objectQLProvider, emailServiceProvider, sharingServiceProvider, /* retired saved-report slot (#20102) */ undefined, approvalsServiceProvider, sharingRulesServiceProvider, i18nServiceProvider, analyticsServiceProvider, settingsServiceProvider, serviceExistsProvider, securityServiceProvider, requestEnvResolver, metadataServiceProvider, tenancyServiceProvider, auditServiceProvider, kernelServiceProvider, {
+                    // The host's environment-membership switch, read through the
+                    // ONE function the runtime dispatcher's plugin reads it
+                    // through: explicit `enforceProjectMembership` wins, else on
+                    // exactly when environment scoping is on.
+                    enforced: resolveEnvironmentMembershipEnforcement({
+                        enforceProjectMembership: config.enforceProjectMembership,
+                        enableProjectScoping: config.api?.api?.enableProjectScoping,
+                    }),
+                });
                 restServer.registerRoutes();
 
                 ctx.logger.info('REST API successfully registered');

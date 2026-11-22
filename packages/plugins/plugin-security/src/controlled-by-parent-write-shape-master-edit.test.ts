@@ -394,8 +394,11 @@ describe("ADR-0055 §3 — a controlled_by_parent detail is written only under m
 
   describe('a write whose rows all sit under masters the caller may edit lands as it did', () => {
     const WRITES: Record<Caller, 'own' | 'all'> = {
-      // The platform ownership floor binds a member, on its own write and an agent's alike.
-      'a member': 'own',
+      // The master gate judged every master the write reaches, so the member's
+      // own write hands the platform ownership floor to it (ADR-0055 §3 as
+      // amended 2026-11-22, ruling record 7073030861). A delegated write keeps
+      // both principals' floors.
+      'a member': 'all',
       'an agent acting for a member': 'own',
       'an org admin': 'all',
     };
