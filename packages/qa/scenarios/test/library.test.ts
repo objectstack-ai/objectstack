@@ -230,6 +230,15 @@ describe('the open scenario library (docs/qa/scenarios)', () => {
     expect(ambiguous).toEqual(['order_to_cash/collected_by_team_last_30_days']);
   });
 
+  it('every card tagged for a report asks for one in its detailed prompt, in both languages', () => {
+    // The Build check `dashboards.report` grades a report the prompt never asked for otherwise.
+    const silent = result.cards
+      .filter(({ card }) => card.capabilities.includes('dashboards.report'))
+      .filter(({ card }) => !/\breport\b/i.test(card.prompt.detailed.en ?? '') || !/报表/.test(card.prompt.detailed.zh ?? ''))
+      .map(({ card }) => card.id);
+    expect(silent).toEqual([]);
+  });
+
   it('reads the capability areas from the checklist tree', () => {
     // A closed set read from disk, not a list kept here: the assertion is only
     // that it is non-trivial and holds an area every seed card uses.
