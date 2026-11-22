@@ -34,6 +34,7 @@ import '@testing-library/jest-dom';
 import React from 'react';
 
 import { ObjectGrid } from '../ObjectGrid';
+import { honestGroupAggregations, honestGroupAggregationsByDepth } from '../recordCurrencyAggregates';
 import { ActionProvider } from '@object-ui/react';
 import { registerAllFields } from '@object-ui/fields';
 
@@ -121,6 +122,7 @@ function makeServerDataSource() {
           out[node.alias] = node.function === 'count'
             ? (node.field ? cells.length : members.length)
             : node.function === 'sum' ? (cells as number[]).reduce((a, b) => a + b, 0)
+            : node.function === 'count_distinct' ? new Set(cells).size
             : null;
         }
         return out as { count: number };
@@ -158,9 +160,10 @@ function grid(c: (typeof CASES)[number], dataSource: unknown, extra: Record<stri
           grouping: { fields: [{ field: 'region' }, { field: c.unitField }] },
           aggregations: [
             { field: c.measure, type: 'sum' },
-            // Unit-free: it stands at every depth, so a depth-1 header with
-            // no chip at all would not read as the sum being left out.
-            { field: c.measure, type: 'count' },
+            // Unit-free and read off the field: it stands at every depth, so a
+            // depth-1 header with no chip at all would not read as the sum
+            // being left out.
+            { field: c.measure, type: 'count_distinct' },
           ],
           pagination: { pageSize: 50 },
           ...extra,
@@ -200,15 +203,15 @@ describe('server grouping on two levels: each depth asks only what its own group
     const sumsOver = (q: HeaderQuery) => (q.aggregations ?? []).filter((n) => n.function === 'sum' && n.field === c.measure);
     for (const q of depth1) {
       expect(sumsOver(q)).toEqual([]);
-      // The unit-free count still rides on the depth-1 query.
-      expect((q.aggregations ?? []).some((n) => n.function === 'count' && n.field === c.measure)).toBe(true);
+      // The unit-free distinct count still rides on the depth-1 query.
+      expect((q.aggregations ?? []).some((n) => n.function === 'count_distinct' && n.field === c.measure)).toBe(true);
     }
     for (const q of depth2) expect(sumsOver(q)).toHaveLength(1);
 
     // The headers drawn: the region bands carry the count and no sum, the
     // unit bands carry their one-unit sum.
     expect(sumChips(chipsOf('0:North'))).toEqual([]);
-    expect(chipsOf('0:North')).toContain('count: 3');
+    expect(chipsOf('0:North')).toContain('count_distinct: 3');
     expect(sumChips(chipsOf(`0:North__1:${c.inner[0]}`))).toHaveLength(1);
     expect(sumChips(chipsOf(`0:North__1:${c.inner[0]}`))[0]).toContain(String(c.northInner[c.inner[0] as keyof typeof c.northInner]));
     expect(sumChips(chipsOf(`0:North__1:${c.inner[1]}`))[0]).toContain(String(c.northInner[c.inner[1] as keyof typeof c.northInner]));
@@ -236,7 +239,34 @@ describe('rows handed in whole, bucketed in the browser: the same per-depth rule
 
     await waitFor(() => expect(sumChips(chipsOf(`0:North__1:${c.inner[0]}`))).toHaveLength(1));
     expect(sumChips(chipsOf('0:North'))).toEqual([]);
-    expect(chipsOf('0:North')).toContain('count: 3');
+    expect(chipsOf('0:North')).toContain('count_distinct: 3');
     expect(sumChips(chipsOf(`0:North__1:${c.inner[0]}`))[0]).toContain(String(c.northInner[c.inner[0] as keyof typeof c.northInner]));
+  });
+});
+
+describe('honestGroupAggregationsByDepth: each depth judged on its own prefix of the levels (objectstack#36276)', () => {
+  const AGGS = [
+    { field: 'qty', type: 'sum' as const },
+    { field: 'amount', type: 'max' as const },
+    { field: 'qty', type: 'count_distinct' as const },
+  ];
+
+  it('region → unit_code → currency_code: the quantity sum from depth 2, the amount max from depth 3', () => {
+    expect(honestGroupAggregationsByDepth(AGGS, OBJECT_FIELDS, ['region', 'unit_code', 'currency_code'])).toEqual([
+      [AGGS[2]],
+      [AGGS[0], AGGS[2]],
+      AGGS,
+    ]);
+  });
+
+  it('the deepest depth answers what the all-levels judgment answers', () => {
+    const levels = ['region', 'currency_code'];
+    const byDepth = honestGroupAggregationsByDepth(AGGS, OBJECT_FIELDS, levels);
+    expect(byDepth[byDepth.length - 1]).toEqual(honestGroupAggregations(AGGS, OBJECT_FIELDS, levels));
+    expect(byDepth[0]).toEqual([AGGS[2]]);
+  });
+
+  it('no grouping levels, no depths', () => {
+    expect(honestGroupAggregationsByDepth(AGGS, OBJECT_FIELDS, [])).toEqual([]);
   });
 });
