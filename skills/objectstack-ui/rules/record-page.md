@@ -11,7 +11,8 @@ related-list columns). `fieldGroups` are the Details sections in array order,
 each listing its members in `fields` (absent: the fields whose `group` names it);
 `editMode` (`'modal'` | `'page'`) is how Edit opens. Layout follows the surface's
 width, never a key: a full page fitting 320 px of details beside 400 px of tabs
-pins the details left of the tabs; else one column, Details first.
+pins the details left of the tabs, unless they hold a child table or no other
+tab exists; else one column, Details first.
 
 **2 · The parent's `relatedLists` is the tab list.** Without it nothing changes:
 every related list is a tab, then `sys_attachment` (with `enable.files`),
@@ -25,7 +26,7 @@ CHILD's reference field `relatedList: false` hides the list and
 `relatedListFilter` (Query-DSL) is AND-composed with the parent condition;
 rows follow the child's default list view `sort`. Only when asked for a child
 table among the fields, a parent group `{ key, label, relatedList: 'quote_line' }`
-(no `fields`) places it there.
+(no `fields`) places it there; its tab stays unless a declared `relatedLists` omits it.
 
 **3 · A slotted page overrides one slot.** `kind: 'slotted'` replaces only the
 slots it names — `header`, `actions`, `alerts`, `highlights`, `details`,
@@ -34,17 +35,15 @@ is no `tabs` slot: `slots.tabs`, `slots.related` and `slots.relatedLists` are
 refused by name. `isDefault: true` makes it the object's default record page.
 
 **4 · `kind: 'full'` is the escape hatch, on the desktop full page.** A record page
-that looks nothing like the default — a filtered split (Open vs Closed), a chart tab, a
-bespoke strip — is `kind: 'full'`: `regions` drawn as authored ([Pages](./pages.md)).
+that looks nothing like the default — a chart tab, a bespoke strip — is `kind: 'full'`: `regions` drawn as authored ([Pages](./pages.md)).
 A phone and the drawer draw the standard page (steps 1–3); no key keeps a full page
 there, only a page named in the URL (a print page) draws everywhere. The standard page
 draws no `record_section` action: one that must show there also lists `record_more`.
 
 **5 · The drawer, unless the object declares `page`.** A clicked row opens the
 record in the drawer (always the standard page), which expands to the full page;
-`navigation: { mode: 'page' }` on the object's list view opens it as the full page
-(`new_window`, `none` are the other members); `modal` / `split` / `popover` are
-refused with their fix. Field count never decides; a phone always pages.
+`navigation: { mode: 'page' }` on the object's list view opens it as the full page;
+`modal` / `split` / `popover` are refused with their fix. A phone always pages.
 
 **6 · The reader's own choices are not metadata.** ⛔ Never author these: the
 Display menu's **Open records**, the

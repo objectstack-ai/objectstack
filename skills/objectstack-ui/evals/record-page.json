@@ -13,7 +13,8 @@
           "relatedListFilter"
         ],
         "must_not_contain": [
-          "relatedLists: ['task']",
+          "relatedLists: ['task'],",
+          "relatedLists: ['task'] }",
           "relatedList: 'task'",
           "inlineEdit:",
           "definePage(",
@@ -67,7 +68,8 @@
           "'sys_activity'"
         ],
         "must_not_contain": [
-          "'sys_attachment'",
+          "'sys_attachment',",
+          "'sys_attachment']",
           "definePage(",
           "kind: 'full'"
         ]
@@ -84,7 +86,8 @@
           "'industry', 'tax_id'"
         ],
         "must_not_contain": [
-          "group: 'basic'",
+          "group: 'basic',",
+          "group: 'basic' }",
           "definePage(",
           "sections:"
         ]
@@ -92,18 +95,21 @@
     },
     {
       "id": 6,
-      "prompt": "On the quote record page, show the line items table above the Amount section instead of as a tab. The quote declares `fieldGroups: [{ key: 'basic', label: 'Basic', fields: ['name', 'account'] }, { key: 'amount', label: 'Amount', fields: ['subtotal', 'total'] }]`, and `quote_line` has a `quote` master_detail field.",
-      "expected_output": "A field group that names the child list, placed between the two sections: `fieldGroups: [{ key: 'basic', ... }, { key: 'lines', label: 'Line items', relatedList: 'quote_line' }, { key: 'amount', ... }]`. Such a group carries no `fields`. The line table is then drawn at that position in the Details, and the quote's create and edit forms inline the lines; the master_detail field needs no `relatedList` value. No page file and no full page.",
+      "prompt": "On the quote record page, show the line items table above the Amount section instead of as a tab. The quote declares `fieldGroups: [{ key: 'basic', label: 'Basic', fields: ['name', 'account'] }, { key: 'amount', label: 'Amount', fields: ['subtotal', 'total'] }]` and no `relatedLists`; `quote_line` has a `quote` master_detail field, and the page's tabs today are Line items, Tasks (`task.quote`), Attachments, Approvals and Activity.",
+      "expected_output": "Two declarations on `quote`. A field group that names the child list, placed between the two sections: `fieldGroups: [{ key: 'basic', ... }, { key: 'lines', label: 'Line items', relatedList: 'quote_line' }, { key: 'amount', ... }]`; such a group carries no `fields`, and the line table is then drawn at that position in the Details, with the quote's create and edit forms inlining the lines. And a tab list that leaves the lines out, because a group-placed table keeps its tab while the parent declares no `relatedLists`: `relatedLists: ['task', 'sys_attachment', 'sys_approval_request', 'sys_activity']`. The master_detail field needs no `relatedList` value. No page file and no full page.",
       "files": [],
       "assertions": {
         "must_contain": [
           "relatedList: 'quote_line'",
-          "fieldGroups"
+          "fieldGroups",
+          "relatedLists: ['task'"
         ],
         "must_not_contain": [
-          "relatedList: 'primary'",
+          "relatedList: 'primary',",
+          "relatedList: 'primary' }",
           "definePage(",
-          "kind: 'full'"
+          "kind: 'full'",
+          "relatedLists: ['quote_line'"
         ]
       }
     }

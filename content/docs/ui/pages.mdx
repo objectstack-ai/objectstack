@@ -222,8 +222,9 @@ keys nothing changes.
   whose `group` names it, the older spelling, still read.
 - **A group can place a child table among the fields.** A group that names a child list
   (`relatedList: 'quote_line'`, with no `fields`) draws that list's table at its position in the
-  details, and the record's create and edit forms enter the child rows with the record. Write
-  one only where the table belongs among the fields; otherwise the list is a tab.
+  details, and the record's create and edit forms enter the child rows with the record. The
+  list keeps its tab as well unless a declared `relatedLists` leaves it out. Write such a group
+  only where the table belongs among the fields; without one the list is only a tab.
 
 {/* os:check */}
 ```typescript
@@ -249,6 +250,7 @@ export const Quote = ObjectSchema.create({
     { key: 'terms', label: 'Terms', fields: ['terms'] },
   ],
   relatedLists: [
+    // Named here as well, so the line items also keep a tab, with these columns.
     { list: 'quote_line', label: 'Line Items', columns: ['product', 'quantity', 'unit_price', 'amount'] },
     'task',
     'sys_attachment',

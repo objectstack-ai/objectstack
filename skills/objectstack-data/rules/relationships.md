@@ -359,19 +359,19 @@ audit_ref: { type: 'master_detail', reference: 'invoice', relatedList: false },
 ```
 
 - `relatedList: false` — the child object is not shown on the parent record page.
-- `'primary'` — a full-width table in the record's details; so is a `master_detail`
-  child that a parent field group names (`relatedList: 'quote_line'`), written only when asked.
+- `'primary'` — a full-width table in the record's details, with no tab. A parent field
+  group naming a `master_detail` child (`relatedList: 'quote_line'`, written only when asked)
+  places its table there too; its tab stays unless a declared `relatedLists` omits it.
 - The parent's `relatedLists` is the tab list (objectstack-ui Record Page): absent,
   nothing changes; declared, only the named lists show, in order, built-ins by name
   (`sys_attachment`, `sys_approval_request`, `sys_activity`). An entry is the child,
   `object.field` or `{ list, label, columns }`. A child in the stack with no inbound FK
   is refused everywhere; one that exists nowhere is refused by `os validate` /
-  `os build` (which leave a `sys_` / `cloud_` / `ai_` or sibling-artifact name
-  to the runtime) and by a metadata write naming no package — a write into a
-  package stores it, and the page places nothing.
+  `os build` (bar a platform or sibling-artifact name) and by a metadata
+  write naming no package (one into a package is stored, placing nothing).
 
 `relatedListTitle` / `relatedListColumns` override the derived title / columns
-(an entry's `label` / `columns` win over both); otherwise columns auto-derive from
+(an entry's `label` / `columns` win); otherwise columns auto-derive from
 the child object's `highlightFields`. Audit FKs
 (`created_by`/`updated_by`/`owner_id`) never become related lists. A child that
 references the parent through several FKs (e.g. `primary_account` +
