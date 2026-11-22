@@ -1379,12 +1379,13 @@ function renderFieldDescription(
 
 /**
  * Widget keys whose DISPLAY reads a sibling field's value: a `record`-mode
- * amount (ADR-0144 D2) shows the currency its record's code field holds, and a
- * `formula` declaring `returnType: 'currency'` is drawn by the same widget.
- * They get the live record (`dependentValues`) and nothing else from the
- * data-source family — they query nothing.
+ * amount (ADR-0144 D2) shows the currency its record's code field holds, a
+ * `formula` declaring `returnType: 'currency'` is drawn by the same widget, and
+ * a roll-up `summary` declaring its currency (D6 as amended) reads the same code
+ * off the record. They get the live record (`dependentValues`) and nothing else
+ * from the data-source family — they query nothing.
  */
-const RECORD_CURRENCY_WIDGET_TYPES = new Set(['currency', 'formula']);
+const RECORD_CURRENCY_WIDGET_TYPES = new Set(['currency', 'formula', 'summary']);
 
 function stripRegisteredFieldProps(type: string, props: RenderFieldProps): RenderFieldProps {
   const {

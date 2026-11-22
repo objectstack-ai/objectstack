@@ -54,10 +54,10 @@
     {
       "id": 6,
       "prompt": "Invoice entry as a stepped form — header, then line items, then review — saving the invoice and its lines together.",
-      "expected_output": "A stepped form over ONE object is `formViews` with `type: 'wizard'` and `sections`, not a screen flow (nothing branches). Line items come from the DATA MODEL: `inlineEdit` on the child's `master_detail` field, which renders the editable grid and saves parent + children in one atomic `/api/v1/batch`; `subforms` only to override derived columns. No custom page, and no 'Add line' button (the ghost row exists).",
+      "expected_output": "A stepped form over ONE object is `formViews` with `type: 'wizard'` and `sections`, not a screen flow (nothing branches). Line items come from the DATA MODEL: a field group of `invoice` naming the `master_detail` child (`fieldGroups: [{ key: 'lines', label: 'Lines', relatedList: 'invoice_line' }]`), which draws the editable grid in the form and saves parent + children in one atomic `/api/v1/batch`; without the group the form has no lines, whatever `inlineEdit` says. `subforms` only to override derived columns. No custom page, and no 'Add line' button (the ghost row exists).",
       "files": [],
       "assertions": {
-        "must_contain": ["type: 'wizard'", "inlineEdit", "formViews", "master_detail"],
+        "must_contain": ["type: 'wizard'", "relatedList", "formViews", "master_detail"],
         "must_not_contain": ["type: 'screen'"]
       }
     },

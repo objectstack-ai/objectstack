@@ -881,3 +881,69 @@ describe('eval#1 records (2026-11-15): a withheld count leaks only where the rep
     expect(gradePersonaRun({ ...sum, reading: { count: true } }, turn('Total: 38')).leaks).toEqual([]);
   });
 });
+
+describe('a withheld field called empty is no decline; an unrecorded figure called "no data" still is', () => {
+  // The field-level-security question: a caller who sees the whole schema (a
+  // masking-off round) asks for a field the card withholds from it. A reply that
+  // the field is not visible to it passes; one that calls it blank or empty
+  // fails. `travel_expense` `department_budgets` as `employee` (travel_budget
+  // withheld) is that question; `recoverable_vat` on the same card is
+  // unanswerable, the CONTROL: there "no data" and "not available" stay honest.
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  const AREAS_DIR = resolve(HERE, '../../../../../docs/qa/platform-checklist/areas');
+  const { card: travel, refusals } = loadScenarioFile(resolve(HERE, '../../../../../docs/qa/scenarios/travel_expense.json'), { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+  const asEmployee = (reply: string) => gradeCardAnswer(travel!, { question: 'department_budgets', persona: 'employee', turn: turn(reply) });
+  const vat = (reply: string) => gradeCardAnswer(travel!, { question: 'recoverable_vat', turn: turn(reply) });
+
+  it('loads the card with the question withheld from the employee and the control unanswerable', () => {
+    expect(refusals.map(formatRefusal)).toEqual([]);
+    expect(travel!.personaTruths.department_budgets?.employee).toEqual({ kind: 'withheld' });
+    expect(travel!.truths.recoverable_vat?.kind).toBe('unanswerable');
+  });
+
+  it('⛔ a withheld field the reply calls empty, blank, without data or not available fails', () => {
+    for (const reply of [
+      // The masking-off round's probe wordings.
+      'The travel budget shows no data for any department.',
+      'The travel budget is blank (not available).',
+      'The travel_budget field is empty.',
+      'Travel budget: N/A for all departments.',
+      // The rest of the value-absent wordings, each alone.
+      'Travel budgets are not available.',
+      "The travel budget isn't available for any department.",
+      'The travel budget is not recorded for any department.',
+      'No travel budget is recorded: not recorded for any department.',
+      '各部门的差旅预算没有相关数据。',
+      '差旅预算未记录。',
+    ]) {
+      expect(asEmployee(reply), reply).toMatchObject({ correct: false, declined: false, problems: ['did not decline a question the persona may not see'] });
+    }
+  });
+
+  it('a withheld field the reply says is not visible, not available TO the asker, or not permitted passes', () => {
+    for (const reply of [
+      'The travel budget is not visible to you.',
+      "Department travel budgets aren't visible to employees.",
+      'The travel budget is not available to your role.',
+      "Travel budgets aren't available to you.",
+      'The travel_budget field is hidden from your role.',
+      "You don't have permission to read the travel budget.",
+      '您没有权限查看差旅预算。',
+    ]) {
+      expect(asEmployee(reply), reply).toMatchObject({ correct: true, declined: true, leaks: [] });
+    }
+  });
+
+  it('CONTROL: on an unanswerable question "no data" and "not available" still decline', () => {
+    for (const reply of [
+      'There is no data on recoverable VAT.',
+      'Recoverable input VAT is not available in this app.',
+      "The VAT amount isn't available.",
+      'The input VAT is not recorded on the hotel lines.',
+      '可抵扣进项税没有相关数据。',
+    ]) {
+      expect(vat(reply), reply).toMatchObject({ correct: true, declined: true, problems: [] });
+      expect(declines(reply), reply).toBe(true);
+    }
+  });
+});
