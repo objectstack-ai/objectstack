@@ -4258,6 +4258,9 @@ importers:
 
   ui/packages/auth:
     dependencies:
+      '@object-ui/types':
+        specifier: workspace:*
+        version: link:../types
       '@objectstack/spec':
         specifier: workspace:^
         version: link:../../../packages/spec

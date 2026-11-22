@@ -47,14 +47,3 @@ export function resolveCardOwner(
   const image = typeof person.image === 'string' && person.image ? person.image : undefined;
   return image ? { name, image } : { name };
 }
-
-/** Up to two initials of a name, for the avatar with no picture. */
-export function ownerInitials(name: string): string {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((part) => part[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2);
-}
