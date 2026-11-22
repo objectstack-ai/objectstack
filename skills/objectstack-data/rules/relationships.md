@@ -85,10 +85,11 @@ sharing: { controlledByParent: { writeRequiresMasterRead: true } },  // or owner
   other write, on-behalf-of included, still needs master edit.
 - `writeRequiresMasterRead: true`: whoever reads the master inserts, updates and
   deletes the detail under its own object permissions, RLS and FLS (re-points and
-  each opted-in chain hop too; on-behalf-of, both users must read the master). The
-  ownership floor (rows you created) still binds predicate and, for both users, on-behalf-of
-  updates and deletes. Refused beside `ownerMayEdit: true`, which it covers. Lint
-  `security-controlled-by-parent-owner-policy-without-opt-in` is silent here.
+  each opted-in chain hop too; on-behalf-of, both users must read the master). A
+  predicate (`multi: true`) update or delete writes the rows a by-id write of each would,
+  all matched rows or none. The ownership floor (rows you created) still binds, for both
+  users, on-behalf-of updates and deletes. Refused beside `ownerMayEdit: true`, which it
+  covers. Lint `security-controlled-by-parent-owner-policy-without-opt-in` is silent here.
 
 The detail's own row policies AND in under both. Each is refused at parse under any
 other `sharingModel` and one level up (`sharing.KEY`).
