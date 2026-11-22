@@ -4626,8 +4626,7 @@ export function h16StuckMergeConflict(pr, nowMs = Date.now()) {
 
 /**
  * H82 threshold, in MINUTES — the wait the card-thread rule allows before the
- * seat wakes the thread (the self-test pins the rule's phrase and this number
- * together, so neither moves alone).
+ * seat wakes the thread (`推后 30 分钟零 Actions`; the self-test pins the number).
  *
  * Aged by the PR's `updated_at`, H16's proxy and for H16's reason: neither a
  * conflict nor a missing suite carries a timestamp of its own, a push bumps
@@ -26662,6 +26661,10 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // Registered with the unowned-PR row, pin just under the count: the firing, the assignee/mailbox/closed
   // exemptions, the unread-label UNJUDGED leg, the text, the band and the wiring.
   'H76 unowned open PR': 11,
+  // Registered with the claimed-card-PR row, pin AT the count: each leg's firing case beside the control that
+  // silences it, H16's blind spot read both ways, the unread suite that must stay silent, the gate, the band,
+  // the summary pair and the wiring.
+  'H82 claimed card PR CI cannot see': 24,
   // Registered with the ruled-card-in-the-box row (#29386), pin just under the
   // count: the firing case, the label / fence / anchoring / id controls each
   // beside its positive twin, the threshold boundary, the governing stamp, the
@@ -29900,6 +29903,43 @@ async function selfTest() {
   b(BATTERY76, 'H76 band: registered as `state` (H1\'s), and the sweep really pushes it', `${familyBand('H76')}/${familyRegistryCoverage().emitted.includes('H76')}`, 'state/true');
   b(BATTERY76, 'H76 wiring: every listed open PR is judged with the label taken LAZILY from mailbox-open.mjs, never spelled in the sweep', (() => { const src = readFileSync(fileURLToPath(import.meta.url), 'utf8'); return src.includes("({ MAILBOX_LABEL: mailboxLabel } = await import('./mailbox-open.mjs'));") && src.includes('const unowned = h76OpenPrWithoutAssignee(pr, mailboxLabel);'); })(), true);
   b(BATTERY76, 'floor: this battery is DECLARED on the frozen roster with a positive pin', Object.hasOwn(SELF_TEST_BATTERIES, BATTERY76) && SELF_TEST_BATTERIES[BATTERY76] > 0 && Object.isFrozen(SELF_TEST_BATTERIES), true);
+
+  // -- H82: a claimed card's PR that CI cannot see. Offline fixtures in the single-PR payload's shape, the head
+  //    the measured incident had (zero Actions suites, five from other apps), never a live read.
+  const BATTERY82 = 'H82 claimed card PR CI cannot see';
+  const NOW82 = Date.parse('2026-11-22T12:00:00Z');
+  const minsAgo82 = (m) => new Date(NOW82 - m * 60_000).toISOString();
+  const SHA82 = '473c7ff4aa0000000000000000000000000000aa';
+  const pr82 = (extra = {}) => ({ number: 35923, draft: true, merged_at: null, mergeable_state: 'clean', updated_at: minsAgo82(120), head: { ref: 'claude/project-thread-x', sha: SHA82 }, body: 'Fixes #35897\nFixes #35899', ...extra });
+  const claimed82 = h82ClaimedCards(pr82(), [35897, 35899, 1]);
+  const row82 = (extra = {}, suites = 5, claimed = claimed82, now = NOW82) => String(h82ClaimedPrBlind(pr82(extra), claimed, { actionsSuites: suites }, now) ?? '');
+  b(BATTERY82, 'H82 claimed: the bound cards the sweep holds under `pm:dispatched`, ascending', claimed82.join(), '35897,35899');
+  b(BATTERY82, '⛔ H82 claimed: a bound card NOT under `pm:dispatched` is not claimed, and its dispatched twin is', [h82ClaimedCards(pr82({ body: 'Fixes #7' }), [35897]).length, h82ClaimedCards(pr82({ body: 'Fixes #35897' }), [35897]).length].join(), '0,1');
+  b(BATTERY82, 'H82 claimed: `Part of #N` binds as H16 reads it; a backticked `Fixes #N` binds nothing', [h82ClaimedCards(pr82({ body: 'Part of #35897' }), [35897]).join(), h82ClaimedCards(pr82({ body: 'quoting `Fixes #35897`' }), [35897]).length].join('/'), '35897/0');
+  b(BATTERY82, 'H82 claimed: an absent body or an absent dispatched list claims nothing, never a crash', [h82ClaimedCards({}, [1]).length, h82ClaimedCards(pr82(), undefined).length].join(), '0,0');
+  const dirty82 = row82({ mergeable_state: 'dirty' });
+  b(BATTERY82, '⭐ H82 fires: a claimed DRAFT in merge conflict past the threshold, naming the state, both cards and the wake', ['MERGE CONFLICT', '`mergeable_state: dirty`', 'cards #35897, #35899', 'wakes the card thread', 'confirms Actions started'].every((x) => dirty82.includes(x)), true);
+  b(BATTERY82, '⛔ H82 control: the same draft CLEAN with Actions suites on its head is silent', row82(), '');
+  b(BATTERY82, '⭐ H82: H16 is silent on the dirty draft H82 fires on — the blind spot this row closes', `${h16StuckMergeConflict(pr82({ mergeable_state: 'dirty', updated_at: minsAgo82(600) }), NOW82)}/${row82({ mergeable_state: 'dirty', updated_at: minsAgo82(600) }).length > 0}`, 'null/true');
+  const none82 = row82({}, 0);
+  b(BATTERY82, '⭐ H82 fires: a claimed draft, not in conflict, whose head carries ZERO Actions suites — naming the head', ['ZERO GitHub Actions check suites', '`473c7ff4aa`', 'DRAFT PR', 'no CI ever ran on this head'].every((x) => none82.includes(x)), true);
+  b(BATTERY82, '⭐ H82: a claimed READY PR with zero Actions suites fires too — the no-Actions leg reads draft or not', row82({ draft: false }, 0).includes('ready PR'), true);
+  b(BATTERY82, '⛔ H82: a claimed non-draft DIRTY PR is H16\'s row alone, never reported twice — and H16 does fire on it', `${row82({ draft: false, mergeable_state: 'dirty', updated_at: minsAgo82(300) }, 0) === ''}/${typeof h16StuckMergeConflict(pr82({ draft: false, mergeable_state: 'dirty', updated_at: minsAgo82(300) }), NOW82)}`, 'true/string');
+  b(BATTERY82, '⛔ H82: an UNREAD suite reading (null) is silent — never a zero — while its read zero twin fires', `${row82({}, null) === ''}/${row82({}, 0).length > 0}`, 'true/true');
+  b(BATTERY82, 'H82: `unknown` mergeable state is not a conflict — silent with suites, still firing on zero suites', `${row82({ mergeable_state: 'unknown' }, 3) === ''}/${row82({ mergeable_state: 'unknown' }, 0).length > 0}`, 'true/true');
+  b(BATTERY82, 'H82: exactly at the threshold is silent, a minute past it fires', `${row82({ updated_at: minsAgo82(CLAIMED_PR_BLIND_STALE_MINUTES) }, 0) === ''}/${row82({ updated_at: minsAgo82(CLAIMED_PR_BLIND_STALE_MINUTES + 1) }, 0).length > 0}`, 'true/true');
+  b(BATTERY82, 'H82: an unreadable `updated_at` FIRES and says so, never reads as fresh', row82({ updated_at: 'not-a-date' }, 0).includes('unreadable `updated_at`'), true);
+  b(BATTERY82, '⛔ H82: an UNCLAIMED dirty draft is silent (no bound dispatched card), its claimed twin fires', `${row82({ mergeable_state: 'dirty' }, 5, []) === ''}/${dirty82.length > 0}`, 'true/true');
+  b(BATTERY82, '⛔ H82: the release bot\'s head, a merged row and a row without a `draft` field are out of scope', [row82({ head: { ref: 'changeset-release/main', sha: SHA82 } }, 0), row82({ merged_at: '2026-11-22T10:00:00Z' }, 0), String(h82ClaimedPrBlind({ mergeable_state: 'dirty', updated_at: minsAgo82(600), body: 'Fixes #35897' }, [35897], { actionsSuites: 0 }, NOW82) ?? '')].join('|'), '||');
+  const fixtures82 = [{}, { mergeable_state: 'dirty' }, { draft: false }, { updated_at: 'not-a-date' }, { updated_at: minsAgo82(31) }, { updated_at: minsAgo82(5) }, { mergeable_state: 'unknown' }, { merged_at: '2026-11-22T10:00:00Z' }];
+  b(BATTERY82, 'H82 gate: never NARROWER than the predicate — every fixture that fires was a candidate', fixtures82.every((x) => [0, 5, null].every((s) => row82(x, s) === '' || h82NeedsDetail(pr82(x), claimed82, NOW82))), true);
+  b(BATTERY82, 'H82 gate: a fresh PR buys no read, an unreadable timestamp does, an unclaimed PR does not', [h82NeedsDetail(pr82({ updated_at: minsAgo82(5) }), claimed82, NOW82), h82NeedsDetail(pr82({ updated_at: 'x' }), claimed82, NOW82), h82NeedsDetail(pr82(), [], NOW82)].join(), 'false,true,false');
+  b(BATTERY82, 'H82 constants: the card-thread wake rule\'s 30 minutes, and the GitHub Actions app id the suite read filters on', `${CLAIMED_PR_BLIND_STALE_MINUTES}/${GITHUB_ACTIONS_APP_ID}`, '30/15368');
+  b(BATTERY82, 'H82 band: a `stall`, registered, and the sweep really pushes it; not a loud finding', `${familyBand('H82')}/${familyRegistryCoverage().emitted.includes('H82')}/${isLoudFinding(none82)}`, 'stall/true/false');
+  b(BATTERY82, 'H82 summary: a partial suite read says how much and that an unread head is UNJUDGED; a full one does not', (() => { const part = saidBy('h82ClaimedPrs', summaryLine({ claimedPrCandidates: 3, claimedPrProbed: 3, claimedPrSuitesOwed: 2, claimedPrSuitesRead: 1 }, 0)); const full = saidBy('h82ClaimedPrs', summaryLine({ claimedPrCandidates: 3, claimedPrProbed: 3, claimedPrSuitesOwed: 2, claimedPrSuitesRead: 2 }, 0)); return part.includes('PR row read on 3 of 3') && part.includes('read on 1 of 2 head(s)') && part.includes('UNJUDGED') && !full.includes('UNJUDGED'); })(), true);
+  b(BATTERY82, 'H82 summary: the four count keys ride the enumerated contract', ['claimedPrCandidates', 'claimedPrProbed', 'claimedPrSuitesOwed', 'claimedPrSuitesRead'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  b(BATTERY82, 'H82 wiring: after H16\'s rethrow, the PR row reused from H16, the suites read filtered to the Actions app, a failed suite read left UNJUDGED and not rethrown', (() => { const src = readFileSync(fileURLToPath(import.meta.url), 'utf8'); const at = src.indexOf('const blind = h82ClaimedPrBlind(detail, claimed, { actionsSuites });'); return at > src.indexOf('throw lastDetailError;') && src.includes('let detail = prDetails.get(pr.number);') && src.includes('/check-suites?app_id=${GITHUB_ACTIONS_APP_ID}&per_page=1') && /\} catch \{\n\s+actionsSuites = null;\n/u.test(src) && src.includes('throw lastClaimedError;'); })(), true);
+  b(BATTERY82, 'floor: this battery is DECLARED on the frozen roster with a positive pin', Object.hasOwn(SELF_TEST_BATTERIES, BATTERY82) && SELF_TEST_BATTERIES[BATTERY82] > 0, true);
 
   // -- H73 (#29386): a RULED decision card still sitting in the decision box.
   //    Positive controls beside every negative one: the label, the fence, the
