@@ -67,6 +67,7 @@ import type { ExprValidationCode } from '@objectstack/formula';
 import { readPartialSteps } from './partial-steps.js';
 import { isRegionSuspensionRefusal, refuseRegionSuspension } from './region-suspension-refusal.js';
 import { stampFlowRunSlot } from './flow-slots.js';
+import { isSkippedScopeKey, scopeContainer } from './scope-key-segments.js';
 
 /**
  * The value the flow CEL scope binds as `current_user` for a run (#19939 —
@@ -1048,14 +1049,18 @@ export function celScope(
     variables: Map<string, unknown>,
     context?: AutomationContext,
 ): { extra: Record<string, unknown> } {
-    const vars: Record<string, unknown> = {};
+    // No variable key writes outside the run's own scope object
+    // (`./scope-key-segments.ts`): prototype-free containers, and a key with a
+    // skipped segment binds nothing.
+    const vars = scopeContainer();
     for (const [key, value] of variables) {
         // Convert "step.result" keys into nested object paths.
         const segs = key.split('.');
+        if (isSkippedScopeKey(segs)) continue;
         let cursor = vars;
         for (let i = 0; i < segs.length - 1; i++) {
             if (typeof cursor[segs[i]] !== 'object' || cursor[segs[i]] === null) {
-                cursor[segs[i]] = {};
+                cursor[segs[i]] = scopeContainer();
             }
             cursor = cursor[segs[i]] as Record<string, unknown>;
         }
