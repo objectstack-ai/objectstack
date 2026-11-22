@@ -93,12 +93,13 @@ describe('a column-less list PATCH is judged by the list member', () => {
 
   // The objectui producer: `buildPersistedViewBody` stores `{ ...patch,
   // viewKind }`, and `updateViewConfig` stamps `object`, `name` and the overlay
-  // marker. One body per toolbar path the console persists.
+  // marker. One body per toolbar path the console persists. [#36403] The
+  // column drag's `columnState` body is gone: the key is retired
+  // (`view-column-state-retirement.test.ts`).
   it.each([
     ['sort', { sort: [{ field: 'name', order: 'desc' }] }],
     ['hiddenFields', { hiddenFields: ['email'] }],
     ['inlineEdit', { inlineEdit: true }],
-    ['columnState', { columnState: { widths: { name: 120 } } }],
     ['rowHeight', { rowHeight: 'compact' }],
   ])('the console %s toggle (a patch-only write, as ruled) is ACCEPTED on listOverlay', (_label, patch) => {
     const { branch, data } = acceptance({ ...patch, viewKind: 'list', ...ID, _isOverride: true });

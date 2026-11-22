@@ -191,7 +191,9 @@ export const RECORD_RELATED_ARRANGEMENT_PREFERENCE = defineWorkspacePreference<R
  * when the address names none. Stored as `{"view":"VIEW_ID","v":1}`, and an
  * unpin as `{"view":null,"v":1}` (`null`: none pinned). With none pinned, or a
  * pinned view the list no longer offers, the list opens the view it declares
- * as default (`isDefault`), else its first.
+ * as default (`isDefault`), else its first. The list page keeps it per
+ * organization too (`usePinnedListView`, objectstack#36244), since the pin can
+ * name a personal view of one organization.
  */
 export const LIST_PINNED_VIEW_PREFERENCE = defineWorkspacePreference<string | null>({
   name: 'list.view.pinned',

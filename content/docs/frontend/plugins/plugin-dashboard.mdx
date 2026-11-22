@@ -143,6 +143,37 @@ request draws it, and a widget re-reads on its own when a write invalidates the
 object it reads. A query asked alone, and every query of an adapter without
 `queryDatasetBatch`, takes `queryDataset` unchanged.
 
+## Filters a widget does not follow
+
+Every widget, in every mode, carries a small mark naming the dashboard
+filters that do not reach it, for example "Not filtered by Region": a filter
+it opts out of (`filterBindings[name]: false`) or one whose `targetWidgets`
+leaves it out. An explicit string binding (`filterBindings[name]: 'field'`)
+wins over `targetWidgets`, so a widget that names its field is reached even
+when the list leaves it out. A widget every filter reaches carries none. The list is
+`dashboardFiltersNotApplied(widget, defs)` from `@object-ui/core`, which asks
+`resolveBoundField`, the binding the widget's query is built from, so the
+mark and the data cannot disagree.
+
+## Design mode: resizing and "Add filter"
+
+In `designMode` two more affordances are drawn when the host hands their
+handler:
+
+- `onWidgetResize(widgetId, { w, h })`: a corner handle on each widget
+  resizes it by whole grid tracks (it snaps as the pointer crosses half a
+  track; the arrow keys on the handle grow or shrink it by one). Width stays
+  within the grid's columns. The host writes the span into the widget's
+  `layout`. Not drawn below the phone breakpoint.
+- `onAddFilter()`: an "Add filter" button at the end of the filter bar, which
+  is drawn for it even before any filter is declared.
+
+The console's dashboard page uses both in its in-page edit state: an admin
+who may design the dashboard's package opens it with **Edit**, changes it with
+Studio's own dashboard panels at the right, and **Save** publishes that one
+dashboard (into the package, or into the app's customization package for an
+installed app), so everyone sees it at once.
+
 ## TypeScript Support
 
 ```ts

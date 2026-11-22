@@ -27,9 +27,12 @@
  * test that mounts a page bare) the group is never drawn, and on a phone
  * neither: the phone has its own bar.
  *
- * The parts are the top bar's own: 「Edit app」 reads the same gate and opens
- * the same target as the top bar's pencil (`useAppStudioEntry`), the AI button
- * IS `AssistantTopBarButton`, and the help menu IS `HelpMenu`.
+ * The parts are the top bar's own: 「Edit app」 reads the same gate as the top
+ * bar's pencil (`useAppStudioEntry`), the AI button IS `AssistantTopBarButton`,
+ * and the help menu IS `HelpMenu`. Where the shell holds the design mode
+ * (`designMode.tsx`, objectstack#36362), 「Edit app」 turns it on instead of
+ * opening Studio, and is not drawn while it is on; elsewhere it opens what the
+ * pencil opens.
  */
 
 import * as React from 'react';
@@ -52,6 +55,7 @@ import {
 import { LocalizedSidebarTrigger } from './LocalizedSidebarTrigger.js';
 import { AssistantTopBarButton } from './AssistantTopBarButton.js';
 import { HelpMenu } from './HelpMenu.js';
+import { useDesignMode, type DesignModeValue } from './designMode.js';
 
 /**
  * Counts the headers under a scope that place the expand button, so the
@@ -204,8 +208,19 @@ export function useAppStudioEntry(enabled: boolean, activeAppName?: string): {
  * (the record's 「Edit」 carries the pencil), the words dropped below `lg` with
  * the tooltip keeping them. A read-only package's app gets the top bar's eye
  * and 「Open {app} in Studio」 (ADR-0146 D5) at the same place.
+ *
+ * objectstack#36362 — under a shell that holds the design mode, 「Edit app」
+ * turns the mode on, in place, and opens no Studio.
  */
-function EditAppButton({ entry, appText }: { entry: StudioEntry; appText: string }) {
+function EditAppButton({
+  entry,
+  appText,
+  designMode,
+}: {
+  entry: StudioEntry;
+  appText: string;
+  designMode: DesignModeValue | null;
+}) {
   const { t } = useObjectTranslation();
   if (entry.posture === 'view') {
     const viewText = t('topbar.openAppInStudio', { defaultValue: 'Open {{app}} in Studio', app: appText });
@@ -226,6 +241,23 @@ function EditAppButton({ entry, appText }: { entry: StudioEntry; appText: string
     );
   }
   const label = t('topbar.editApp', { defaultValue: 'Edit app' });
+  if (designMode) {
+    return (
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="h-8 shrink-0 gap-1.5 px-2"
+        data-testid="shell-page-actions-edit-app"
+        title={label}
+        aria-label={label}
+        onClick={designMode.enter}
+      >
+        <Blocks className="h-4 w-4 shrink-0" aria-hidden="true" />
+        <span className="hidden lg:inline text-xs font-medium">{label}</span>
+      </Button>
+    );
+  }
   return (
     <Button
       variant="ghost"
@@ -261,10 +293,13 @@ function ShellPageActionsGroup({ comments }: ShellPageActionsProps) {
   const { appLabel } = useServedAppLabel();
   const { enabled: aiEnabled } = useAiSurfaceEnabled();
   const appPackageId = (currentApp as { _packageId?: string } | undefined)?._packageId;
+  const designMode = useDesignMode();
   return (
     <div className="flex shrink-0 items-center gap-0.5" data-testid="shell-page-actions">
       {comments}
-      {entry && <EditAppButton entry={entry} appText={currentApp ? appLabel(currentApp as any) : ''} />}
+      {entry && !designMode?.active && (
+        <EditAppButton entry={entry} appText={currentApp ? appLabel(currentApp as any) : ''} designMode={designMode} />
+      )}
       {aiEnabled && <AssistantTopBarButton className="max-md:size-8" />}
       <HelpMenu inApp appPackageId={appPackageId} triggerClassName="h-8 w-8 shrink-0" triggerTestId="shell-page-actions-help" />
     </div>

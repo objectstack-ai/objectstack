@@ -749,7 +749,7 @@ describe.concurrent('[#22049] the password header declares its encoding', () => 
 describe.concurrent('[#21839] the public routes are never cached', () => {
   function expectNoStore(res: { headers: Record<string, string | string[]> }, label: string) {
     expect(res.headers['Cache-Control'], label).toBe('no-store');
-    expect(res.headers.Vary, label).toBe('X-Share-Password, X-Share-Password-Encoding');
+    expect(res.headers.Vary, label).toBe('X-Share-Password, X-Share-Password-Encoding, Accept-Language');
   }
 
   it.each(['resolve', 'messages'] as const)('/%s sends no-store + Vary on success and on every refusal', async (route) => {

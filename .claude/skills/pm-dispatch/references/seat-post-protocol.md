@@ -61,7 +61,7 @@
 - `create_trigger` 开新会话的 Routine 拿不到 GitHub 工具、零产出;⛔ 不把它当座位 Routine 在跑。
 - 创建后先手动 fire 一轮烟测,判据取 GitHub 产出:标签写入、审计评论、座位贴编辑。
 - 回滚 = `delete_trigger` + 清空座位登记 + 失败注记。
-- 档位按职责挑,⛔ 不按重要性挑;Routine 席的档位与 cron 由维护者在 UI 调。
+- 档位照 `execution-duties.md` 定档节;Routine 席的档位与 cron 由维护者在 UI 调。
 - 项目席巡查照收集节②(总监席无);存根记 `Patrol: TRIGGER_ID · CRON`、`Mailbox: PR #n`,放宽注由。
 
 ## Epic 收尾与集中例外
