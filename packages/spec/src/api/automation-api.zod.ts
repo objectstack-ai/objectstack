@@ -907,8 +907,8 @@ export type GetRunResponseParsed = z.infer<typeof GetRunResponseSchema>;
  *
  * What the preview binds of the caller: their user id and tenant only. A live
  * run also binds the writer's positions, request params and expand, so a
- * start condition that reads those is judged without them here and the
- * preview can under-list (it never runs a flow).
+ * start condition that reads those is judged without them here, and the
+ * preview can differ from the save in either direction (it never runs a flow).
  *
  * @example POST /api/v1/automation/_record-starts
  * { object: 'showcase_project', recordId: 'p_1', changes: { status: 'completed' } }

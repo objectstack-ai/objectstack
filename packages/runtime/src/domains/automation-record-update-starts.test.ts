@@ -104,6 +104,7 @@ describe('POST /automation/_record-starts (#35928)', () => {
         const result = await dispatcher.handleAutomation('/_record-starts', 'POST', BODY, ANONYMOUS());
 
         expect(result.response?.status).toBe(401);
+        expect(result.response?.body?.error?.code).toBe('UNAUTHENTICATED');
         expect(getData).not.toHaveBeenCalled();
         expect(listRecordUpdateStarts).not.toHaveBeenCalled();
     });
@@ -138,6 +139,7 @@ describe('POST /automation/_record-starts (#35928)', () => {
         const result = await dispatcher.handleAutomation('/_record-starts', 'POST', BODY, MEMBER());
 
         expect(result.response?.status).toBe(501);
+        expect(result.response?.body?.error?.code).toBe('NOT_IMPLEMENTED');
     });
 
     it('is not read as a flow name: a GET of the literal is not this door', async () => {

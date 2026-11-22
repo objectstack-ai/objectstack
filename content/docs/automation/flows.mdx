@@ -2626,7 +2626,9 @@ happens, and a condition that reads a field the caller cannot see is judged
 here on what the caller sees. Of the caller, the preview binds the user id and
 the tenant only. A live save also binds the writer's positions, the request's
 params and its expand, so a condition that reads those is judged here without
-them and the preview can list fewer flows than the save starts.
+them, and the preview can differ from the save in either direction: it can miss
+a flow the save starts, or list one the save does not (a negated test of the
+writer reads true here).
 
 ## Expressions in flows
 

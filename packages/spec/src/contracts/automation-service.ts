@@ -956,8 +956,8 @@ export interface ResumeSignal {
  *
  * Of the writer it carries the user id and tenant only. A live save also
  * binds the writer's positions, request params and expand into the run, so a
- * start condition reading those is judged here without them and the preview
- * can under-list.
+ * start condition reading those is judged here without them, and the preview
+ * can differ from the save in either direction.
  */
 export interface RecordUpdateStartsInput {
     /** Machine name of the record's object. */
