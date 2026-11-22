@@ -465,10 +465,40 @@ describe('UnifiedSidebar: no Favorites while the design mode is on (objectstack#
 
     fireEvent.click(screen.getByText('enter design'));
     expect(favoritesSection()).toBeNull();
-    // The app's own entries stay, the pinned one included, in the menu.
-    expect(menuRows().map((row) => row.textContent)).toEqual(expect.arrayContaining([expect.stringContaining('Accounts')]));
+    // The app's own entries stay, the pinned one included, in the menu, which
+    // the mode's editor draws (objectstack#36363).
+    const editor = await screen.findByTestId('design-mode-menu');
+    expect(within(editor).getByTestId('design-menu-entry-nav_accounts')).toHaveTextContent('Accounts');
 
     fireEvent.click(screen.getByText('leave design'));
     expect(favoriteLabels()).toEqual(['Accounts', 'Acme']);
+  });
+
+  it('outside the mode the menu offers no 「Add menu item」 and no 「⋮」 of the editor (objectstack#36363)', async () => {
+    metadataState = {
+      apps: [{ name: 'crm', label: 'CRM', active: true, _packageId: 'com.acme.crm', navigation: NAVIGATION }],
+      objects: [],
+    };
+    render(
+      <MemoryRouter initialEntries={['/apps/crm']}>
+        <FavoritesProvider>
+          <Shell>
+            <Switch />
+            <SidebarProvider>
+              <UnifiedSidebar activeAppName="crm" />
+            </SidebarProvider>
+          </Shell>
+        </FavoritesProvider>
+      </MemoryRouter>,
+    );
+    await tick();
+    const editorParts = () => document.querySelectorAll('[data-testid^="design-menu-"], [data-testid="design-mode-menu"]');
+    expect(menuRows().length).toBeGreaterThan(0);
+    expect(editorParts()).toHaveLength(0);
+    fireEvent.click(screen.getByText('enter design'));
+    await screen.findByTestId('design-mode-menu');
+    expect(editorParts().length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByText('leave design'));
+    expect(editorParts()).toHaveLength(0);
   });
 });
