@@ -3591,3 +3591,123 @@ describe('ListView.groupPickerUnstored-32631', () => {
     });
   });
 });
+
+// ── ListView.headerMenuHide-35955 ───────────────────────────────────────────────
+
+/**
+ * objectstack#35955 — "Hide column" in the grid's column menu is the same
+ * choice as the eye in the hide-fields lists. The grid hands the column's
+ * field back (`onColumnHide`, pinned through the real grid and table in
+ * plugin-grid's `ObjectGrid.headerMenuHide-35955.test.tsx`); here: the list
+ * writes it through the eye's own writer, so its host hears it on
+ * `onHiddenFieldsChange` (the console holds it in the list's draft, which is
+ * what draws Discard and Save) and the grid is handed the columns without it.
+ * An added column leaves the reader's added fields, as unticking it does. A
+ * key naming no column the list draws reports nothing.
+ *
+ * plugin-grid is not a dependency of plugin-list, so a stub `object-grid`
+ * captures what ListView hands it.
+ */
+describe('ListView.headerMenuHide-35955', () => {
+  restoreAfterBlock();
+
+  const OBJECT = 'meeting_35955';
+  const DEFINITION = {
+    name: OBJECT,
+    label: 'Meeting',
+    fields: {
+      name: { type: 'text', label: 'Name' },
+      meeting_date: { type: 'date', label: 'Date' },
+      location: { type: 'text', label: 'Location' },
+      room: { type: 'text', label: 'Room' },
+    },
+  };
+
+  let gridProps: any = null;
+  let previousGrid: ReturnType<typeof ComponentRegistry.get>;
+  beforeAll(() => {
+    previousGrid = ComponentRegistry.get('object-grid');
+    ComponentRegistry.register('object-grid', (props: any) => {
+      gridProps = props;
+      return <div data-testid="grid-stub" />;
+    });
+  });
+  afterAll(() => {
+    if (previousGrid) ComponentRegistry.register('object-grid', previousGrid);
+  });
+  beforeEach(() => { gridProps = null; });
+
+  const drawn = () => (gridProps?.columns ?? []).map((c: any) => (typeof c === 'string' ? c : c.field));
+
+  function mount(opts: { hiddenFields?: string[]; added?: string[] } = {}) {
+    const onHiddenFieldsChange = vi.fn();
+    const onAddedFieldsChange = vi.fn();
+    const dataSource = {
+      find: vi.fn().mockResolvedValue({ data: [{ id: '1', name: 'A' }], total: 1 }),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async () => structuredClone(DEFINITION)),
+    };
+    const schema = {
+      type: 'list-view',
+      objectName: OBJECT,
+      viewType: 'grid',
+      columns: ['name', 'meeting_date', 'location', ...(opts.added ?? [])],
+      ...(opts.hiddenFields ? { hiddenFields: opts.hiddenFields } : {}),
+    } as unknown as ListViewSchema;
+    render(
+      <SchemaRendererProvider dataSource={dataSource as never}>
+        <ListView
+          schema={schema}
+          dataSource={dataSource as never}
+          onHiddenFieldsChange={onHiddenFieldsChange}
+          onAddedFieldsChange={onAddedFieldsChange}
+          addedFields={opts.added ?? []}
+        />
+      </SchemaRendererProvider>,
+    );
+    return { onHiddenFieldsChange, onAddedFieldsChange, dataSource };
+  }
+
+  async function hideFromMenu(field: string) {
+    await waitFor(() => expect(typeof gridProps?.onColumnHide).toBe('function'));
+    await act(async () => { gridProps.onColumnHide(field); });
+  }
+
+  it('hands the grid the column menu\'s hide, and reports it as the eye does: the hidden list, the column gone', async () => {
+    const { onHiddenFieldsChange } = mount();
+    await waitFor(() => expect(drawn()).toEqual(['name', 'meeting_date', 'location']));
+    await hideFromMenu('location');
+    expect(onHiddenFieldsChange.mock.calls.at(-1)![0]).toEqual(['location']);
+    await waitFor(() => expect(drawn()).toEqual(['name', 'meeting_date']));
+  });
+
+  it('adds to the columns already hidden, and hiding a hidden one again reports nothing', async () => {
+    const { onHiddenFieldsChange } = mount({ hiddenFields: ['meeting_date'] });
+    await waitFor(() => expect(drawn()).toEqual(['name', 'location']));
+    await hideFromMenu('location');
+    expect(onHiddenFieldsChange).toHaveBeenCalledTimes(1);
+    expect([...onHiddenFieldsChange.mock.calls[0][0]].sort()).toEqual(['location', 'meeting_date']);
+    await hideFromMenu('meeting_date');
+    expect(onHiddenFieldsChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('a column the reader added leaves their added fields instead of being hidden', async () => {
+    const { onHiddenFieldsChange, onAddedFieldsChange } = mount({ added: ['room'] });
+    await waitFor(() => expect(drawn()).toContain('room'));
+    await hideFromMenu('room');
+    expect(onAddedFieldsChange.mock.calls.at(-1)![0]).toEqual([]);
+    expect(onHiddenFieldsChange).not.toHaveBeenCalled();
+  });
+
+  it('a key that names no column the list draws reports nothing', async () => {
+    const { onHiddenFieldsChange, onAddedFieldsChange } = mount();
+    await waitFor(() => expect(drawn()).toEqual(['name', 'meeting_date', 'location']));
+    await hideFromMenu('_row_number');
+    expect(onHiddenFieldsChange).not.toHaveBeenCalled();
+    expect(onAddedFieldsChange).not.toHaveBeenCalled();
+    expect(drawn()).toEqual(['name', 'meeting_date', 'location']);
+  });
+});

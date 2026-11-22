@@ -407,6 +407,17 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    */
   headerMenu?: boolean;
   /**
+   * [objectstack#35955] Hears the column menu's "Hide column" with the
+   * column's field, as the HOST that keeps the columns shown asks for it (the
+   * list page holds the hidden fields in its draft, as its hide-fields eye
+   * does). The table hides the column either way. Absent ⇒ the hide lives in
+   * the table's own state alone, as before this prop existed.
+   *
+   * A RUNTIME prop, never authored metadata: the host decides it, and no node
+   * key reaches it.
+   */
+  onColumnHide?: (field: string) => void;
+  /**
    * [objectstack#36015] Opens a record that a lookup cell's chip names, in
    * place, as the HOST that owns the page does it (the list page opens it in
    * its side drawer). With {@link cellSelection}, a single click on such a
@@ -851,6 +862,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   rowOpensRecord,
   cellSelection: hostCellSelection,
   headerMenu: hostHeaderMenu,
+  onColumnHide: hostOnColumnHide,
   openReferencedRecord,
   onBulkDelete,
   onRowSelect,
@@ -3774,6 +3786,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // on `DataTableSchema` and stays unwired, exactly as the RuntimeOnlyDeclared
     // ledger records it. Which of the two declared spellings survives is still an
     // open ruling and is deliberately NOT settled here.
+    // objectstack#35955 — the column menu's "Hide column", to the host that
+    // keeps the columns shown.
+    ...(hostOnColumnHide ? { onColumnHide: hostOnColumnHide } : {}),
     onColumnsReorder: (newColumns: any[]) => {
       const order = newColumns
         .map((c) => c?.accessorKey)
