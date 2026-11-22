@@ -47,7 +47,7 @@ import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 
 vi.mock('@object-ui/plugin-designer', async (importOriginal) => ({
@@ -85,11 +85,14 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
 
 /** The verdict AND its resolution — the axis this suite exists for. */
 const viewer = vi.hoisted(() => ({ isAdmin: false, isResolved: true }));
+// One function for every render, as `AuthProvider`'s `useCallback` gives
+// (objectstack#35981: the chrome waits for its answer, asked once).
+const getAuthConfig = vi.hoisted(() => async () => ({ features: {} }));
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useAuth: () => ({
     user: { id: 'u_owner', name: 'Owner', email: 'owner@example.com', role: 'user' },
-    getAuthConfig: async () => ({ features: {} }),
+    getAuthConfig,
     activeOrganization: { id: 'org_1', name: 'Acme' },
   }),
   useWorkspaceAdminStatus: () => ({ isAdmin: viewer.isAdmin, isResolved: viewer.isResolved }),
@@ -242,13 +245,15 @@ describe('AppContent holds every admin-dependent decision until the verdict land
     // The cost boundary: resolution gates the surface, it does not delay a
     // viewer whose verdict is already in hand. objectstack#35981 — the chrome
     // also waits for the deployment flags (`/auth/config`), which its
-    // navigation gates read; the mock answers them at once, so the only wait
-    // left is that answer's promise, never the admin verdict.
+    // navigation gates read; the mock answers them at once, so the one wait
+    // admitted is that answer's promise: a single flush, then the chrome must
+    // be there.
     metadataApps = [{ name: 'crm', label: 'CRM', navigation: [] }];
     viewer.isAdmin = true;
     viewer.isResolved = true;
     renderConsoleAt('/apps/crm');
+    await act(async () => {});
 
-    expect(await screen.findByTestId('console-layout')).toHaveAttribute('data-active-app', 'crm');
+    expect(screen.getByTestId('console-layout')).toHaveAttribute('data-active-app', 'crm');
   });
 });
