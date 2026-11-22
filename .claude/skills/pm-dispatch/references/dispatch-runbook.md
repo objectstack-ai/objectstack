@@ -34,7 +34,7 @@
 - >24h 无产出 ⇒ 兄弟席(无则总监)一笔降级:`⏳ vacant`+摘 assignee+证据评论;分诊只敲门记录。
 - L2 欠审:每席巡查跑 `check-owed-reviews.mjs`,只接 take 点名本席的行。
 - L2 前落 `Contract-review-claim:` 行,形、失效、双认照 `contract-review.md`;有活认领 ⛔ 不双做。
-- L2 审核照 `contract-review.md`;PASS 同笔摘标记、FAIL 不摘;总监席巡查列等候逾 24h 的 PR。
+- L2 审核照 `contract-review.md`;总监席巡查列等候逾 24h 的 PR。
 - 车道巡查同跑:hold/closed 解锁重验回队;本仓无卡 fork PR 按 `external-contributions.md` 立卡。
 
 ## 分诊席读数成本三则
@@ -121,16 +121,17 @@
 - 大卡同上,先于下行,分区亦然,修复轮随卡;大卡 = L/XL,或欠全量验证(`!` 标题或 narrowing 臂),
   或改契约:`Clause-②: yes`、`Metadata-protocol` 非 `none`、非测试的 `packages/spec/src/**` 路径。
 - S 级机械卡留席内或进区 `mode:subagent`:开线程要重新克隆、重读 `os-dev.md`,起步成本不值。
-- 披露纪律卡(私密细节不得离开席位会话)也留席内,认领写明;卡线程照计 `batch`。
+- 披露纪律卡(私密细节不得离开席位会话)也留席内,认领写明。
 - coordinator 调度卡线程(即 dev),候选与槽位照 `coordinator.md` 三;交回即告知它,REWORK 再占槽。
-- 档位与 effort 席位自推导 ⛔ 不等维护者原话:`--tier` 过路径,MANDATORY 即绑;effort 按难度。
+- 档位与 effort 席位自推导 ⛔ 不等维护者原话。
 - 派发令写两者与推导(`--tier` 行或难度读数),协调者照令开线程;常设原话有则作 `reason:`。
-- 席位留认领/派发令/ACCEPT/落地/L2 采纳或补缺;线程实施、开 draft PR、驱动 CI 与可合并。
+- 线程或区见令缺推导 ⇒ 不开工,退回席位;⛔ 不凭记忆补档位。
+- 席位留认领/派发令/ACCEPT/落地/L2 采纳或补缺;线程自己实施、开 draft PR、驱动 CI 与可合并,⛔ 不起 `os-dev` 子代理。
+- p1 卡交回且欠 L2 ⇒ L1 线程并行起 L1 与隔离 L2(`contract-review.md`),两份意见同回席。
 - 线程 ⛔ 不做 harness 开 PR 后指派/请审。
 - 派发令由 coordinator 写进线程开场消息,`Writes:` 行逐字在内,⛔ 不落共享目录;卡上留指针。
 - coordinator 开线程即读线程分支交席位(读不到则线程自报);⛔ 线程不认领、不写卡 assignee。
-- 席位写 assignee+`pm:dispatched`+带该 `Branch:` 的认领;线程核对最新认领指向本分支方开工。
-- 线程只能推指定分支是实测平台例外,认领如实写。
+- 席位写 assignee+`pm:dispatched`+带该 `Branch:` 的认领。
 - worktree 照建;线程读 `os-dev.md`、派发令、卡与全部评论,⛔ 不读 `SKILL.md`;references 按需读。
 - 交回:PR 与报告落地后给席位线程发一条消息(PR、head、报告要点);L1/L2 期线程不关,接 FAIL。
 - PR 正文由线程自改(中继 `issue_patch`)再报要点,⛔ 不请席或区代发;线程已关才代改。

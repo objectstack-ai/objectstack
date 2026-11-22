@@ -20,7 +20,7 @@
  * | key | consumed by |
  * |---|---|
  * | `security.rateLimit` | `createDispatcherPlugin` → the inbound token bucket (`@objectstack/runtime` `security/inbound-rate-limit.ts`) — an over-budget caller gets `429` + `Retry-After` |
- * | `trustProxy` | the same limiter's IP resolution — see below |
+ * | `trustProxy` | the same limiter's IP resolution — see below; `true` or the trusted-network form {@link TrustedProxyNetworksSchema} |
  *
  * The other seven `HttpServerConfigSchema` keys were RETIRED with the shape
  * that carried them (#4938, ADR-0049 enforce-or-remove): unreachable *and*
@@ -161,6 +161,67 @@ export type StackServerSecurity = z.input<typeof StackServerSecuritySchema>;
 export type StackServerSecurityParsed = z.infer<typeof StackServerSecuritySchema>;
 
 /**
+ * One `server.trustProxy.networks` entry: an IP address or a CIDR range, IPv4
+ * or IPv6 — the spelling an ADR-0069 D5 `allowed_ip_ranges` entry takes — and
+ * never a range of prefix length 0, which would stand in for `true`. This is
+ * the authoring-time SHAPE check; the runtime's own reading of a range
+ * (`readTrustProxy` in `@objectstack/plugin-auth/client-address`) refuses at
+ * boot what passes the shape but names no range (an address with a port, an
+ * IPv4-mapped prefix wider than the mapping), so an entry is never silently
+ * dropped.
+ */
+const IPV4_OCTET = '(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])';
+const TRUSTED_NETWORK_ENTRY = new RegExp(
+  `^(?:${IPV4_OCTET}(?:\\.${IPV4_OCTET}){3}(?:/(?:3[0-2]|[12][0-9]|[1-9]))?`
+  + '|[0-9A-Fa-f.]*:[0-9A-Fa-f:.]*(?:/(?:12[0-8]|1[01][0-9]|[1-9][0-9]|[1-9]))?)$',
+);
+
+/**
+ * `server.trustProxy`'s trusted-network form: the proxies this deployment
+ * runs, and the one header they set. A forwarded header is believed only from
+ * a transport peer inside `networks`; `X-Forwarded-For` is then read from the
+ * RIGHT, past every hop inside `networks`, and the first entry outside them is
+ * the client. Unlike `true`, it stays sound behind a proxy that appends to
+ * `X-Forwarded-For` rather than overwriting it.
+ */
+export const TrustedProxyNetworksSchema = lazySchema(() => strictObject(
+  {
+    surface: 'the `server.trustProxy` trusted-network form',
+    history: 'This form is new and strict from birth — an unknown key here was never accepted.',
+    guidance: {
+      hops:
+        'Not authorable. A count of trusted hops is not a form `server.trustProxy` takes: list the proxies '
+        + 'themselves in `networks`, so a hop is trusted for what it is, not for where it stands in the header.',
+      trustedProxies: 'Not authorable — write the proxies\' addresses or ranges as `networks`.',
+    },
+  },
+  {
+    networks: z.array(
+      z.string().regex(TRUSTED_NETWORK_ENTRY, {
+        message:
+          'is not an IP address or a CIDR range. Each entry is an address, or an address, "/" and a prefix length: '
+          + '1 to 32 for IPv4, 1 to 128 for IPv6 (e.g. "10.20.0.0/28", "192.0.2.7", "2001:db8::10"). A prefix '
+          + 'length of 0 would trust every connection as a proxy: name the proxies. (`true` believes the leftmost entry '
+          + 'from any connection, so it is sound only behind a proxy that overwrites the header.)',
+      }),
+    ).min(1, { message: 'lists at least one proxy address or range' }).describe(
+      'The addresses or CIDR ranges (IPv4 or IPv6) of the reverse proxies this deployment runs, and nothing else. A '
+      + 'forwarded header is believed only when the connection comes from inside these networks, and the walk of '
+      + '`X-Forwarded-For` skips every hop inside them: EVERY address inside them is taken for a proxy, so a range '
+      + 'clients connect from does not belong here. A prefix length of 0 is refused.',
+    ),
+    header: z.enum(['x-forwarded-for', 'x-real-ip']).default('x-forwarded-for').describe(
+      'The one header those proxies set. `x-forwarded-for` (the default) is read right to left past the trusted '
+      + 'hops; `x-real-ip` is read only when named here. The other header is never believed under this form.',
+    ),
+  },
+));
+
+export type TrustedProxyNetworks = z.input<typeof TrustedProxyNetworksSchema>;
+/** Post-parse shape of {@link TrustedProxyNetworks} — defaults applied, transforms run (ADR-0122). */
+export type TrustedProxyNetworksParsed = z.infer<typeof TrustedProxyNetworksSchema>;
+
+/**
  * The `server:` block of a stack definition.
  */
 export const StackServerConfigSchema = lazySchema(() => strictObject(
@@ -200,7 +261,9 @@ export const StackServerConfigSchema = lazySchema(() => strictObject(
     ),
 
     /**
-     * Whether an `X-Forwarded-For` / `X-Real-IP` header may be believed.
+     * Whether, and from whom, an `X-Forwarded-For` / `X-Real-IP` header may be
+     * believed: `false` (never), `true` (from any peer), or the trusted-network
+     * form {@link TrustedProxyNetworksSchema} (only from the proxies it names).
      *
      * This is a SECURITY declaration, not a convenience toggle. Anything a
      * client can send, a client can forge: an attacker who can pick their own
@@ -208,7 +271,9 @@ export const StackServerConfigSchema = lazySchema(() => strictObject(
      * (limit bypassed) AND can spend another caller's budget by claiming their
      * address (limit weaponised). Trusting the header therefore has to be an act
      * of authorship — the operator asserting "a proxy I control rewrites this
-     * header on every request" — and never a default.
+     * header on every request" (`true`), or naming the proxies it comes from
+     * (the trusted-network form) — and never a default. `true` is sound only
+     * behind a proxy that overwrites the header, never one that appends to it.
      *
      * Three consumers apply one rule, `resolveClientAddress` from
      * `@objectstack/plugin-auth/client-address`: the runtime's inbound rate
@@ -220,10 +285,15 @@ export const StackServerConfigSchema = lazySchema(() => strictObject(
      * believed without such a proxy is an allow-list bypass as well as a
      * rate-limit one.
      */
-    trustProxy: z.boolean().default(false).describe(
-      'Believe `X-Forwarded-For` / `X-Real-IP` when identifying a caller. Declare `true` ONLY when a reverse proxy '
-      + 'you control overwrites those headers on every inbound request. Left `false` (the default) the caller IP is '
-      + "the transport's own peer address, which a client cannot forge. One client-address rule, three consumers: the "
+    trustProxy: z.union([z.boolean(), TrustedProxyNetworksSchema]).default(false).describe(
+      'Believe `X-Forwarded-For` / `X-Real-IP` when identifying a caller. Prefer the trusted-network form, '
+      + "`{ networks: ['10.20.0.0/28'], header: 'x-forwarded-for' }`: the header is believed only from a connection "
+      + 'inside `networks` — your proxies\' own addresses, never a range clients connect from, since every address '
+      + 'inside it is taken for a proxy — and `X-Forwarded-For` is read from the right, past them, so it stays sound '
+      + 'behind a proxy that appends to the header. `true` believes the header from any connection and is sound ONLY '
+      + 'when a reverse proxy you control OVERWRITES those headers on every inbound request, never appends to them. '
+      + "Left `false` (the default) the caller IP is the transport's own peer address, which a client cannot forge. "
+      + 'One client-address rule, three consumers: the '
       + 'inbound rate limiter when `server.security.rateLimit.enabled` is set; the per-endpoint rate limiter of every '
       + 'declared endpoint (`apis:`) whose own `rateLimit` is enabled, whether or not the server-level one is; and the '
       + 'authentication plugin, whose IP allow-list (`allowed_ip_ranges`) judges and whose login audit stamps '

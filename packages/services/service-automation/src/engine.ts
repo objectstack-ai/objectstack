@@ -832,7 +832,12 @@ export type FlowFunctionResolver = (
  */
 export type FlowObjectSchemaResolver = (
   objectName: string,
-) => { fields?: readonly string[]; fieldTypes?: Record<string, string> } | undefined;
+) => {
+    fields?: readonly string[];
+    fieldTypes?: Record<string, string>;
+    /** [#36167] The list-valued fields (`ExprSchemaHint.multiValueFields`, `@objectstack/formula`). */
+    multiValueFields?: readonly string[];
+} | undefined;
 
 /**
  * The authorization envelope a `runAs:'user'` run needs to enforce its data

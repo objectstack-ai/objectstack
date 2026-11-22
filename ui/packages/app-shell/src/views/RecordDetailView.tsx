@@ -10,7 +10,8 @@
 
 import { useState, useEffect, useLayoutEffect, useCallback, useContext, useMemo, useRef, type ReactElement } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
-import { activityRowToFeedItem, buildCommentThreads, CommentsButton, RecordCommentsInPanelContext, composeImpersonatedActor, IMPERSONATED_ACTOR_FALLBACK, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RECORD_PAGE_TIMELINE_PANEL, RECORD_TIMELINE_PANEL_MAX_ENTRIES, RecordFieldChangesContext, RecordFieldHistoryContext, RecordTimelineTotalContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RECORD_PAGE_DETAILS_WIDTH, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
+import { activityRowToFeedItem, buildCommentThreads, CommentsButton, CommentsPage, RecordCommentsInPanelContext, composeImpersonatedActor, IMPERSONATED_ACTOR_FALLBACK, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RECORD_PAGE_TIMELINE_PANEL, RECORD_TIMELINE_PANEL_MAX_ENTRIES, RecordFieldChangesContext, RecordFieldHistoryContext, RecordTimelineTotalContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RECORD_PAGE_DETAILS_WIDTH, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
+import { isRefusedFeedRead } from '@object-ui/plugin-detail/core';
 // objectstack#36075 — the comment panel's unresolved count and the moderator's verdict.
 import { unresolvedThreadCount, useRecordVerdict } from '@object-ui/plugin-detail';
 import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderPhoneContext, PageHeaderTrailingContext, PanelToggles, ObjectIconTile, RecordHeaderBarContext, RecordHeaderStateContext, RecordTopBar, RecordTopBarButton, cn, useRecordStepKeys, type PanelToggleItem, type RecordHeaderBar, type RecordHeaderGroupParts, type RecordHeaderState, type RecordTopBarStepper } from '@object-ui/components';
@@ -62,7 +63,7 @@ import {
 import { applySavedRecordEcho } from './recordSaveEcho.js';
 import { authoredRecordPageApplies } from './recordPageSurface.js';
 import { withPageTabsUrlSync } from '../utils/pageTabsUrlSync.js';
-import { RECORD_DETAIL_TAB_PARAM, RECORD_DRAWER_PARAM, RECORD_RELATED_ENLARGE_PARAM, RECORD_RELATED_ENLARGE_PUSHED_STATE as RELATED_ENLARGE_PUSHED, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
+import { RECORD_COMMENTS_PARAM, RECORD_COMMENTS_PUSHED_STATE as COMMENTS_PUSHED, RECORD_DETAIL_TAB_PARAM, RECORD_DRAWER_PARAM, RECORD_RELATED_ENLARGE_PARAM, RECORD_RELATED_ENLARGE_PUSHED_STATE as RELATED_ENLARGE_PUSHED, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
 import { resolveActionParams } from '@object-ui/fields';
 import { createConsoleServerActionHandler } from '../utils/consoleServerAction.js';
 import { withNewTabUrlFastPath } from '../utils/newTabUrlFastPath.js';
@@ -1313,6 +1314,45 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const commentsPhone = usePhoneViewport();
   const commentsPanelOffered =
     !!objectDef && objectDef.enable?.feeds !== false && pageColumnsEligible && !commentsPhone && !!pureRecordId;
+  // objectstack#36076 — the phone's comment page, on the same pages: a page
+  // over the record page, addressed by `?comments=` (empty: the threads; a
+  // top-level comment's id: that thread). A phone draws no drawer or pane.
+  const commentsPageOffered =
+    !!objectDef && objectDef.enable?.feeds !== false && pageColumnsEligible && commentsPhone && !embedded && !!pureRecordId;
+  // Either surface holds the record's comments, so the 动态 stream gives
+  // them up and names its system entries alone.
+  const commentsSurfaceOffered = commentsPanelOffered || commentsPageOffered;
+  const commentsParam = commentsPageOffered ? tabSearchParams.get(RECORD_COMMENTS_PARAM) : null;
+  const commentsPageOpen = commentsParam !== null;
+  const commentsPageThread = commentsParam ? commentsParam : null;
+  // Opening pushes an entry (Back and 「‹」 return to the record where it was
+  // scrolled: the record stays mounted under the page), a thread pushes one
+  // over the list, and 「‹」 pops the entry this view pushed or, on an entry a
+  // reload or a link reached, replaces the URL one level up.
+  const openCommentsPage = useCallback((thread?: string) => {
+    const sp = new URLSearchParams(location.search);
+    sp.set(RECORD_COMMENTS_PARAM, thread ?? '');
+    const state = location.state && typeof location.state === 'object' ? location.state : {};
+    setTabSearchParams(sp, { state: { ...(state as object), [COMMENTS_PUSHED]: true } });
+  }, [setTabSearchParams, location.search, location.state]);
+  const leaveCommentsPage = useCallback(() => {
+    if ((location.state as Record<string, unknown> | null)?.[COMMENTS_PUSHED]) {
+      navigate(-1);
+      return;
+    }
+    const sp = new URLSearchParams(location.search);
+    if (sp.get(RECORD_COMMENTS_PARAM)) sp.set(RECORD_COMMENTS_PARAM, '');
+    else sp.delete(RECORD_COMMENTS_PARAM);
+    setTabSearchParams(sp, { replace: true, state: location.state });
+  }, [setTabSearchParams, location.search, location.state, navigate]);
+  // Closed, the focus goes back to the comments icon that opened the page.
+  const commentsPageWasOpen = useRef(false);
+  useEffect(() => {
+    if (commentsPageWasOpen.current && !commentsPageOpen) {
+      document.querySelector<HTMLElement>('[data-record-top-bar] [data-comments-button]')?.focus({ preventScroll: true });
+    }
+    commentsPageWasOpen.current = commentsPageOpen;
+  }, [commentsPageOpen]);
   const [commentsOpenChosen, setCommentsOpen] = useCommentsPanelOpen(embedded ? 'drawer' : 'page');
   const commentsOpen = commentsPanelOffered && commentsOpenChosen;
   const commentsWindowWidth = useWindowWidth();
@@ -2731,7 +2771,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // it opens later (the window effect below).
   const timelineDrawnOnOpen = feedOnOpen && pageColumnsEligible && !!feedPageOnOpen && buildDefaultPageColumns(feedPageOnOpen) !== null;
   const timelinePeekOnOpen = timelineDrawnOnOpen && enlargedRelatedParam !== RECORD_PAGE_TIMELINE_PANEL;
-  const streamDiscussion = (feedOnOpen || commentsPanelOffered) && objectDef?.enable?.feeds !== false;
+  const streamDiscussion = (feedOnOpen || commentsSurfaceOffered) && objectDef?.enable?.feeds !== false;
   const streamActivity = feedOnOpen && objectDef?.enable?.activities !== false;
   const recordPageStreams = {
     ...(streamDiscussion ? { discussion: true } : {}),
@@ -3013,10 +3053,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // render: no effect, and no render that reads the latch unset.
   if (feedConsumerOnScreen && !feedConsumerShown) setFeedConsumerShown(true);
   // The activity is read for a block that draws it; the discussion also for
-  // the comment panel (objectstack#36075), whose icon counts the threads at
-  // open, panel closed — so the discussion rides the open's payload.
+  // the comment panel (objectstack#36075) and the phone's comment page
+  // (objectstack#36076), whose icon counts the threads at open, closed — so
+  // the discussion rides the open's payload.
   const activityFeedWanted = feedConsumerOnScreen || feedConsumerShown;
-  const feedWanted = activityFeedWanted || commentsPanelOffered;
+  const feedWanted = activityFeedWanted || commentsSurfaceOffered;
 
   // The host's own Attachments panel, appended at the page foot for a page
   // that places none (below), is mounted on every open but drawn below the
@@ -3868,10 +3909,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // comment writes. `null` (no count answered): the stream counts its rows.
   const timelineServed = feedRecordKey ? timelineCountByRecord[feedRecordKey] ?? null : null;
   const heldCommentCount = useMemo(() => feedItems.filter((item) => item.type === 'comment').length, [feedItems]);
-  // objectstack#36075 — where the comment panel holds the comments, the 动态
-  // stream names its system entries alone.
+  // objectstack#36075, objectstack#36076 — where the comment panel or the
+  // phone's comment page holds the comments, the 动态 stream names its system
+  // entries alone.
   const timelineTotal = timelineServed
-    ? Math.max(0, timelineServed.total - timelineServed.comments + (commentsPanelOffered ? 0 : heldCommentCount))
+    ? Math.max(0, timelineServed.total - timelineServed.comments + (commentsSurfaceOffered ? 0 : heldCommentCount))
     : null;
   // The comments icon's number: the record's unresolved threads (#36075 item
   // 8; every thread where the deployment stores no resolution), unknown while
@@ -3881,6 +3923,15 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     feedVerdict?.comments === 'refused' || feedVerdict?.comments === 'failed' ? null : commentThreadCount;
   const commentsButton = commentsPanelOffered ? (
     <CommentsButton count={commentsCount} pressed={commentsOpen} onPressedChange={setCommentsOpen} />
+  ) : null;
+  // The phone's icon opens the comment page; at touch size.
+  const phoneCommentsButton = commentsPageOffered ? (
+    <CommentsButton
+      count={commentsCount}
+      pressed={commentsPageOpen}
+      onPressedChange={() => openCommentsPage()}
+      className="h-11 min-w-11 px-2 text-sm"
+    />
   ) : null;
 
   /**
@@ -4283,7 +4334,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     objectDef?.name,
     pureRecordId,
     'update',
-    commentsOpen,
+    commentsOpen || commentsPageOpen,
   ) === true;
 
   // objectstack#36075 — may the viewer update a comment they did NOT write?
@@ -4314,7 +4365,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     COMMENT_OBJECT,
     foreignRootCommentId,
     'update',
-    commentsOpen && commentsEngaged && foreignRootCommentId != null,
+    (commentsOpen || commentsPageOpen) && commentsEngaged && foreignRootCommentId != null,
   ) === true;
 
   /**
@@ -5734,6 +5785,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         leading={phoneBack}
         stepper={pageStepper}
         toggles={approvalQueueSwitch ?? undefined}
+        comments={phoneCommentsButton}
       />
       {phonePathRow}
     </>
@@ -6071,7 +6123,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         {/* objectstack#27055 — the field changes of the timeline stream,
             for the synthesized page's `record:activity`; on an assigned page,
             for its feed blocks (objectstack#33996). */}
-        <RecordCommentsInPanelContext.Provider value={commentsPanelOffered}>
+        <RecordCommentsInPanelContext.Provider value={commentsSurfaceOffered}>
         <RecordFieldChangesContext.Provider value={timelineFieldChanges}>
         {/* objectstack#30074 — whether this record shows its field history
             (objectstack#30344: to this reader, whose audit read answered):
@@ -6351,6 +6403,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             </div>
             {/* objectstack#36075 — the record's comment panel: beside the
                 record (which gives it the width), or over it. */}
+            {/* objectstack#36076 — the phone's comment page, over the record. */}
+            {commentsPageOpen && (
+              <CommentsPage
+                threadId={commentsPageThread}
+                onOpenThread={openCommentsPage}
+                onBack={leaveCommentsPage}
+                backLabel={recordCrumbName}
+                onEngage={engageComments}
+              />
+            )}
             {commentsOpen && (
               <RecordCommentsAside
                 placement={commentsPlacement}

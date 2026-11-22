@@ -19,6 +19,7 @@ import {
   ViewSettingsPopover,
   ViewSettingsContent,
   groupFieldOptions,
+  isGroupableField,
   type ViewSettingsField,
   PHONE_TOUCH_TARGET,
   useBelowSm,
@@ -59,7 +60,7 @@ import { SchemaRenderer, useNavigationOverlay, classifyLoadError, answeredLoadFa
 import type { LoadErrorKind, AnsweredLoadFailure } from '@object-ui/react';
 import { useDensityMode, resolveInlineAriaProps } from '@object-ui/react';
 import type { DataTableSchema, DependsOnInput, ListViewSchema, ObjectMapConfig } from '@object-ui/types';
-import { detectStatusField, isSystemManagedField } from '@object-ui/types';
+import { AUDIT_FIELD_NAMES, detectStatusField, isSystemManagedField } from '@object-ui/types';
 import { usePullToRefresh } from '@object-ui/mobile';
 import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, isObjectExportOffered, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, toFilterNodeSafely, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING, kanbanDeclaredLanes, csvBlob, readWithheldFieldNames, refersToWithheldField, withHeaderSortPick } from '@object-ui/core';
 import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLocale, pickLocalized, recordCurrencyField, recordCurrencyReadField } from '@object-ui/i18n';
@@ -6535,8 +6536,16 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       const label = objectDef?.fields?.[name]?.label;
       return typeof label === 'string' && label ? label : undefined;
     };
-    const groupability = (name: string): Pick<ViewSettingsField, 'groupable'> =>
-      isVirtualSearchField(objectDef?.fields?.[name] as SearchFieldMeta | undefined) ? { groupable: false } : {};
+    // objectstack#36204 — and the declared type, which the Group editors
+    // offer a field by (`groupFieldOptions`).
+    const groupability = (name: string): Pick<ViewSettingsField, 'groupable' | 'type' | 'multiple'> => {
+      const def = objectDef?.fields?.[name] as (SearchFieldMeta & { type?: unknown; multiple?: unknown }) | undefined;
+      return {
+        ...(isVirtualSearchField(def) ? { groupable: false } : {}),
+        ...(typeof def?.type === 'string' ? { type: def.type } : {}),
+        ...(def?.multiple === true ? { multiple: true } : {}),
+      };
+    };
     return (Array.isArray(schema.columns) ? (schema.columns as any[]) : []).flatMap((f: any) => {
       if (typeof f === 'string') {
         if (!canReadField(perms, schema.objectName, f)) return [];
@@ -6552,6 +6561,67 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       return [{ name, label: tFieldLabel(name, f.label || definitionLabel(name) || name), ...groupability(name) }];
     });
   }, [schema.columns, tFieldLabel, perms, schema.objectName, objectDef]);
+
+  // The order the reader's grid columns are drawn in (the column state the
+  // header drag keeps), handed to the View settings menu's Fields level and,
+  // objectstack#36204, to both Group editors, which list and pick fields in
+  // the column order. Another visualization has no column order of its own.
+  const gridColumnOrder = currentView === 'grid'
+    ? (schema.columnState as { order?: string[]; widths?: Record<string, number> } | undefined)?.order
+    : undefined;
+
+  // objectstack#36204 — what both Group editors offer: the fields of a type a
+  // list can be grouped by (`isGroupableField`: single select, radio, tick,
+  // person, linked record; one value each), the view's columns first in the
+  // reader's column order, then the object's other fields of those types
+  // that the caller may read and the definition does not hide: business
+  // fields, then system ones such as the owner (not the created-by and
+  // updated-by provenance), as the Filter panel orders them, each in the
+  // definition's order. Until the definition's read answers nothing is
+  // offered and "Add group field" waits, disabled (`groupOptionsLoading`), so
+  // it never says "nothing to group by" before the types are known. A host
+  // with no definition to read (no `getObjectSchema`, or the read failed)
+  // knows no type: every column is offered then, as before. Plain per-render
+  // values, not memos (AGENTS.md #10).
+  const groupOptionsLoading = !objectDefLoaded;
+  const definedFields = objectDef?.fields as
+    | Record<string, { type?: unknown; multiple?: unknown; label?: unknown; hidden?: unknown; system?: unknown } | undefined>
+    | undefined;
+  const groupOptions: Array<{ value: string; label: string }> = groupOptionsLoading
+    ? []
+    : !definedFields
+      ? groupFieldOptions(allFields, gridColumnOrder, false)
+      : (() => {
+          const extra = Object.entries(definedFields).flatMap(([name, def]) => {
+            if (!def || allFields.some((f) => f.name === name)) return [];
+            // Record provenance (created by, updated by) is offered only as a
+            // column the view shows: on every object, it would otherwise
+            // leave no object without a field to group by.
+            if (def.hidden === true || AUDIT_FIELD_NAMES.has(name)) return [];
+            if (!canReadField(perms, schema.objectName, name)) return [];
+            if (isVirtualSearchField(def as SearchFieldMeta)) return [];
+            if (!isGroupableField({ type: typeof def.type === 'string' ? def.type : undefined, multiple: def.multiple === true })) return [];
+            const label = typeof def.label === 'string' && def.label ? def.label : name;
+            return [{ value: name, label: tFieldLabel(name, label), system: isSystemManagedField(name, def as { system?: boolean }) }];
+          });
+          // The Filter panel's tiers: business fields, then the system ones
+          // (the owner, created by …), each in the definition's order.
+          return [
+            ...groupFieldOptions(allFields, gridColumnOrder),
+            ...extra.filter((f) => !f.system).map(({ value, label }) => ({ value, label })),
+            ...extra.filter((f) => f.system).map(({ value, label }) => ({ value, label })),
+          ];
+        })();
+  // The label a level shows for a field the editor does not offer (a view
+  // grouped by a text or number field keeps showing it, under its label).
+  const groupFieldLabel = (field: string): string | undefined => {
+    const column = allFields.find((f) => f.name === field);
+    if (column?.label) return column.label;
+    // A field the caller may not read keeps showing its name (objectui#11984).
+    if (!canReadField(perms, schema.objectName, field)) return undefined;
+    const label = definedFields?.[field]?.label;
+    return typeof label === 'string' && label ? tFieldLabel(field, label) : undefined;
+  };
 
   // objectui#11984 — what the two hide-fields lists (the toolbar popover and
   // the View settings section) are handed of `hiddenFields`. An entry naming a
@@ -7240,6 +7310,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       showGroup={toolbarFlags.showGroup}
       groupingConfig={chosenGroupingConfig}
       setGroupingConfig={changeGrouping}
+      groupOptions={groupOptions}
+      groupOptionsLoading={groupOptionsLoading}
+      groupFieldLabel={groupFieldLabel}
       showColor={toolbarFlags.showColor}
       rowColorConfig={offeredRowColorConfig}
       setRowColorConfig={setRowColorConfig}
@@ -7263,7 +7336,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       viewName={typeof schema.label === 'string' && schema.label && (onRenameView || onPersonalizationChange)
         ? { label: schema.label, onRename: onRenameView }
         : undefined}
-      fieldOrder={currentView === 'grid' ? (schema.columnState as { order?: string[]; widths?: Record<string, number> } | undefined)?.order : undefined}
+      fieldOrder={gridColumnOrder}
       onFieldOrderChange={currentView === 'grid' && onColumnStateChange
         ? (order) => onColumnStateChange({ ...(schema.columnState as { order?: string[]; widths?: Record<string, number> } | undefined), order })
         : undefined}
@@ -7634,12 +7707,16 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 <div data-testid="group-field-list">
                   <GroupingEditor
                     value={chosenGroupingConfig as any}
-                    fieldOptions={groupFieldOptions(allFields)}
+                    fieldOptions={groupOptions}
+                    askFieldOnAdd
+                    fieldOptionsLoading={groupOptionsLoading}
+                    fieldLabel={groupFieldLabel}
                     maxLevels={3}
                     labels={{
                       addGroup: t('list.addGroup', { defaultValue: 'Add group field' }),
                       collapseTitle: t('list.collapsedByDefault', { defaultValue: 'Collapsed by default' }),
                       removeTitle: t('list.removeGroup', { defaultValue: 'Remove' }),
+                      noFields: t('list.noGroupableFields', { defaultValue: 'No field here can group the list' }),
                     }}
                     onChange={changeGrouping}
                   />

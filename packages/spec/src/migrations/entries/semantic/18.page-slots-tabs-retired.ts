@@ -18,7 +18,8 @@ export const entry: SemanticMigration = {
     + 'their order, set `relatedList` / `relatedList: \'primary\'` on the child\'s reference field; to '
     + 'replace the Details body, author `slots.details`. A page that needs its own strip — a curated '
     + 'tab set, a tab the object does not produce — is a `kind: \'full\'` page whose regions carry the '
-    + 'header, the highlights, the `page:tabs` strip and the discussion, drawn as authored.',
+    + 'header, the highlights, the `page:tabs` strip and the discussion, drawn as authored on the desktop '
+    + 'full record page (a phone and the side preview draw the standard record page, with the composed strip).',
   reason:
     'An authored `tabs` slot replaced the whole synthesized strip, so the related lists, approvals, '
     + 'attachments and history the platform composes from the object were dropped unless the author '
@@ -44,6 +45,6 @@ export const entry: SemanticMigration = {
     + 'highlights, the same `page:tabs` strip and the discussion. Then `objectstack validate` reports '
     + 'nothing at `pages.N.slots.tabs`, saving each formerly affected page through the metadata API '
     + 'succeeds, and each record page shows either the synthesized strip (and the columns at wider '
-    + 'widths) or, for a `kind: \'full\'` page, the same tabs it showed before.',
+    + 'widths) or, for a `kind: \'full\'` page on the desktop full record page, the same tabs it showed before.',
   conversionIds: ['page-slots-tabs-removed'],
 };

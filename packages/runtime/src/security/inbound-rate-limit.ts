@@ -37,7 +37,7 @@
 
 import type { Middleware, IHttpRequest, IHttpResponse } from '@objectstack/core';
 import { createLazyCounterStore, type CounterStore } from '@objectstack/plugin-auth/rate-limit-storage';
-import { resolveClientAddress } from '@objectstack/plugin-auth/client-address';
+import { readTrustProxy, resolveClientAddress, type ClientAddressTrust } from '@objectstack/plugin-auth/client-address';
 
 import { buildApiError } from '../error-envelope.js';
 import { serializePerKey } from './per-key-serial.js';
@@ -122,8 +122,10 @@ export interface RateLimitKeyInput {
     headers?: Record<string, string | string[] | undefined>;
     /** The transport's peer address (`IHttpRequest.remoteAddress`). */
     remoteAddress?: string;
-    /** `server.trustProxy` — believe forwarded headers. */
-    trustProxy: boolean;
+    /** `server.trustProxy`, as `readTrustProxy` reads it — whose forwarded headers to believe. */
+    trustProxy: ClientAddressTrust;
+    /** Where the client-address rule's one operator warning goes (`resolveClientAddress`). */
+    warn?: (message: string) => void;
 }
 
 /**
@@ -158,6 +160,7 @@ export function resolveRateLimitKey(input: RateLimitKeyInput): { key: string; ki
         ...(input.headers ? { headers: input.headers } : {}),
         ...(input.remoteAddress ? { remoteAddress: input.remoteAddress } : {}),
         trustProxy: input.trustProxy,
+        ...(input.warn ? { warn: input.warn } : {}),
     });
 
     if (address) return { key: `ip:${address}`, kind: 'ip' };
@@ -245,8 +248,12 @@ export interface RateLimitLogger {
 export interface InboundRateLimitOptions {
     /** The authored `server.security.rateLimit` budget. */
     budget?: InboundRateLimitBudget;
-    /** The authored `server.trustProxy`. */
-    trustProxy?: boolean;
+    /**
+     * The authored `server.trustProxy`, either form. Read by `readTrustProxy`
+     * when the middleware is built, so a malformed trusted-network form fails
+     * the boot instead of trusting nobody.
+     */
+    trustProxy?: unknown;
     /**
      * Resolve the caller's principal id from request headers. Returning
      * `undefined` means anonymous, which is a normal outcome and keys by IP.
@@ -282,7 +289,8 @@ export function createInboundRateLimitMiddleware(opts: InboundRateLimitOptions):
     const config = deriveBucketConfig(opts.budget);
     if (!config) return null;
 
-    const trustProxy = opts.trustProxy === true;
+    const trustProxy = readTrustProxy(opts.trustProxy);
+    const warn = opts.logger?.warn ? (message: string) => opts.logger?.warn?.(message) : undefined;
     const resolveStore = createLazyCounterStore({
         resolveCache: opts.resolveCache,
         ...(opts.logger ? { logger: opts.logger as { info?(m: string): void; warn?(m: string): void } } : {}),
@@ -319,6 +327,7 @@ export function createInboundRateLimitMiddleware(opts: InboundRateLimitOptions):
             headers: req.headers ?? {},
             ...(req.remoteAddress ? { remoteAddress: req.remoteAddress } : {}),
             trustProxy,
+            ...(warn ? { warn } : {}),
         });
 
         if (kind === 'unknown' && !unknownKeyWarned) {
@@ -328,8 +337,10 @@ export function createInboundRateLimitMiddleware(opts: InboundRateLimitOptions):
             opts.logger?.warn?.(
                 '[dispatcher] inbound rate limit cannot identify anonymous callers: this transport exposes no peer '
                 + 'address and no trusted forwarded header, so ALL anonymous traffic shares ONE bucket and will '
-                + 'throttle each other. Fix by terminating on a proxy that sets X-Forwarded-For and declaring '
-                + '`server.trustProxy: true`, or by serving through an adapter that reports the socket address.',
+                + 'throttle each other. Fix by terminating on a proxy you control and declaring it in '
+                + '`server.trustProxy` (`{ networks: [...] }` naming the proxy, or `true` only when it OVERWRITES '
+                + 'X-Forwarded-For on every request, never appends to it), or by serving through an adapter that '
+                + 'reports the socket address.',
             );
         }
 

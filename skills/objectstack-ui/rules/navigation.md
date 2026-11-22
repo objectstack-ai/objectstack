@@ -167,8 +167,8 @@ at runtime from the client viewport, because an author
 (especially an AI) cannot know the client's screen. **Write the data (fields,
 `fieldGroups`); let the platform lay it out.**
 
-- **Surface.** A clicked record opens in the **drawer**, which expands to the full
-  page; `page` only by declaration ([Record Page](./record-page.md) §5–6). Create /
+- **Surface.** On an object's list the record's name opens the **page**, the
+  hover icon beside it the **drawer** ([Record Page](./record-page.md) §5–6). Create /
   edit opens in a **modal**, or the full-page route when the object declares `editMode: 'page'`.
 - **Field width.** **Omit it** (`auto` sizes by widget type × current columns —
   textarea / rich-text / file take the row). Both keys are valid: `colSpan`
@@ -178,9 +178,9 @@ at runtime from the client viewport, because an author
   in a modal).
 - **Column count.** Not authored. The form grid follows its **real rendered width**
   via container queries — the same form is 1 column in a narrow drawer and up to 4
-  on a wide page. Author *grouping* with `fieldGroups` + `Field.group`.
+  on a wide page. Author *grouping* with `fieldGroups`.
 - **`sections` are the escape hatch — reach for them last.** The ladder, in
-  order: (1) **derive** — declare `fieldGroups` + `Field.group` and author no
+  order: (1) **derive** — declare `fieldGroups` and author no
   `sections` at all; (2) **reference** — when one surface needs a local
   arrangement, a section may name a declared group, `{ group: 'contact_info' }`,
   and inherits its members, label and presentation (restating a key the group

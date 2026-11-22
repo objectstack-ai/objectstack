@@ -627,6 +627,7 @@ const workspaceAliases: Record<string, string> = {
   // `@object-ui/types/zod` above (objectui#13410).
   '@object-ui/plugin-chatbot/core': path.resolve(import.meta.dirname, '../../packages/plugin-chatbot/src/core.ts'),
   '@object-ui/plugin-chatbot': path.resolve(import.meta.dirname, '../../packages/plugin-chatbot/src'),
+  '@object-ui/plugin-detail/core': path.resolve(import.meta.dirname, '../../packages/plugin-detail/src/core.ts'),
   '@object-ui/plugin-detail': path.resolve(import.meta.dirname, '../../packages/plugin-detail/src'),
   '@object-ui/plugin-editor': path.resolve(import.meta.dirname, '../../packages/plugin-editor/src'),
   '@object-ui/plugin-gantt': path.resolve(import.meta.dirname, '../../packages/plugin-gantt/src'),
@@ -1529,7 +1530,8 @@ export default defineConfig({
             // ## The form and view helpers stay out of their plugin chunks
             //
             // The console shell is eager and imports pure helpers through
-            // `@object-ui/plugin-form/core` and `@object-ui/plugin-view/core`.
+            // `@object-ui/plugin-form/core`, `@object-ui/plugin-view/core` and
+            // `@object-ui/plugin-detail/core`.
             // Left to the `plugin-form` / `plugin-view` groups above, those
             // modules would be co-tenants of the renderers and pull each whole
             // chunk back into every first load, the mechanism the chatbot group
@@ -1546,6 +1548,12 @@ export default defineConfig({
             {
               name: 'plugin-view-core',
               test: /[\\/]packages[\\/]plugin-view[\\/]src[\\/](core|recordSurface|config[\\/]view-config-utils)\.tsx?$/,
+              priority: 71,
+              includeDependenciesRecursively: false,
+            },
+            {
+              name: 'plugin-detail-core',
+              test: /[\\/]packages[\\/]plugin-detail[\\/]src[\\/](core|autoLayout|relatedListCompact|relatedListSort|queueClaim|ConcurrentUpdateDialog|useDetailTranslation|recordFieldAccess|useRecordEditable|useRelatedCounts|renderers[\\/]recordActivityFeed|synth[\\/](relatedListEntry|relatedArrangement|buildDefaultPageSchema))\.tsx?$/,
               priority: 71,
               includeDependenciesRecursively: false,
             },

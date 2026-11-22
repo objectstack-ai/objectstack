@@ -52,7 +52,7 @@ import { installedSpecVersion, packagesLine } from '../../src/runner/packages.js
 import { citationLabels, namespaceOfConfig, namespacedScenario, permissionSetName, templateHostName } from '../../src/runner/namespace.js';
 import { authorNotMeasured, changeSize, hiddenValues, installableManifest, probeValues, seedDependence, seedOrder, withoutItems } from '../../src/runner/orchestrate.js';
 import { referenceCycles, requiredLookups, seedPlan, type SeedPlan } from '../../src/runner/seed.js';
-import { buildPrompt, dataContract, iteratePrompt, personaHandles, personaRecords, questionPrompt, rowOwner, templateIteratePrompt, unheldHandles, userHandleFields, verifyArgs, verifyFlags } from '../../src/runner/prompts.js';
+import { buildPrompt, dataContract, iteratePrompt, SEED_POSTURE, personaHandles, personaRecords, questionPrompt, rowOwner, templateIteratePrompt, unheldHandles, userHandleFields, verifyArgs, verifyFlags } from '../../src/runner/prompts.js';
 import { parseStreamJson, refusalCodeOf, toolNameOf, type ParsedTurn } from '../../src/runner/transcript.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -677,6 +677,15 @@ describe('prompts, seed order, template manifest and change size', () => {
     expect(contract).toContain('- `democrm_delete_contact` on `democrm_contact`');
     expect(contract).toContain('`democrm_partner_user` for `partner_user`');
     expect(contract).not.toMatch(/named exactly by the id/);
+  });
+
+  it('the data contract says how the seed loads: the platform seed path, with no record-triggered flow, never the data API a person writes through', () => {
+    // A build that derives a scoping field with an after-save flow leaves it empty on every
+    // seeded row (seedApp writes through the seed path, `loadSeedRows`), so the contract says so.
+    const contract = dataContract(namespacedScenario(crm).card);
+    expect(contract).toContain(SEED_POSTURE);
+    expect(contract).not.toContain('through the data API');
+    expect(SEED_POSTURE).toMatch(/no record-triggered flow fires/);
   });
 
   it('both authoring loops name the verify invocation the runner scores with, next to validate and build', () => {

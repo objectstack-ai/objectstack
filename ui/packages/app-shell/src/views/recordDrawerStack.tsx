@@ -67,7 +67,7 @@ import { overlayWidthFor } from '@object-ui/plugin-view/core';
 import type { FieldContainerLike } from '@object-ui/core';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
-import { prefetchRelatedCounts, relatedCountTargetsIn } from '@object-ui/plugin-detail';
+import { prefetchRelatedCounts, relatedCountTargetsIn } from '@object-ui/plugin-detail/core';
 import { useFilterScope } from '@object-ui/react';
 import {
   RECORD_DETAIL_TAB_PARAM,

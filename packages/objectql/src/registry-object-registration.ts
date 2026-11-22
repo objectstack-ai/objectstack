@@ -51,6 +51,8 @@ import { QUEUE_FIELD_DEF, applyAuditFieldGovernance, fieldPatchTargetMisses, isC
 import type { FieldPatchTargetMiss } from '@objectstack/metadata-core';
 import { scalarOverridesPackagedBase } from '@objectstack/spec/system';
 import { SEARCH_COMPANION_FIELD, provisionSearchCompanion } from './search-companion.js';
+import { applyExtensionPlacements, fieldGroupKeysOf, placementContributorsOf } from './registry-extension-placement.js';
+import type { ExtensionPlacementNote } from './registry-extension-placement.js';
 import { applyProtection } from '@objectstack/spec/shared';
 import { isObjectLessActionKey, standaloneActionOwnerKey } from './action-governance.js';
 import { recordCurrencyFollowRefusal, recordCurrencySummaryRefusal } from './record-currency-aggregate-door.js';
@@ -95,6 +97,7 @@ export interface ObjectRegistrationHost {
   declinedBaseLayerStamps: SchemaRegistry['declinedBaseLayerStamps'];
   readonly deploymentPlatformGlobalObjects: SchemaRegistry['deploymentPlatformGlobalObjects'];
   extensionTargetKey: SchemaRegistry['extensionTargetKey'];
+  readonly extensionPlacementNotesWarned: SchemaRegistry['extensionPlacementNotesWarned'];
   readonly fieldPatchMissesWarned: SchemaRegistry['fieldPatchMissesWarned'];
   finishServedObject: SchemaRegistry['finishServedObject'];
   foldExtenders: SchemaRegistry['foldExtenders'];
@@ -123,6 +126,7 @@ export interface ObjectRegistrationHost {
   refusePicklistItemArrival: SchemaRegistry['refusePicklistItemArrival'];
   registerNamespace: SchemaRegistry['registerNamespace'];
   reportChangedRuleCopies: SchemaRegistry['reportChangedRuleCopies'];
+  reportExtensionPlacements: SchemaRegistry['reportExtensionPlacements'];
   reportFieldPatchMisses: SchemaRegistry['reportFieldPatchMisses'];
   reportRedeclaredFields: SchemaRegistry['reportRedeclaredFields'];
   readonly reportedRuleCopyChanges: SchemaRegistry['reportedRuleCopyChanges'];
@@ -861,7 +865,7 @@ export class ObjectRegistrationFacet {
    * {@link foldObjectExtendersOnto} can apply it to a body that never came
    * from this registry without growing a second copy of the merge.
    */
-  static foldExtendersOntoDefinition(this: Pick<ObjectRegistrationHost, 'finishServedObject' | 'reportChangedRuleCopies' | 'reportFieldPatchMisses' | 'reportRedeclaredFields' | 'tenantAuthoredScalars' | 'tenantPatchedDisplayKeys' | 'tenantRuleSettings' | 'withPackagedOwnerRules' | 'withoutExtensionQueueField'>, contributors: ObjectContributor[], baseDefinition: ServiceObject, layer: ServedObjectLayer = 'served'): ServiceObject {
+  static foldExtendersOntoDefinition(this: Pick<ObjectRegistrationHost, 'finishServedObject' | 'getObjectOwner' | 'reportChangedRuleCopies' | 'reportExtensionPlacements' | 'reportFieldPatchMisses' | 'reportRedeclaredFields' | 'resolveObjectKey' | 'tenantAuthoredScalars' | 'tenantPatchedDisplayKeys' | 'tenantRuleSettings' | 'withPackagedOwnerRules' | 'withoutExtensionQueueField'>, contributors: ObjectContributor[], baseDefinition: ServiceObject, layer: ServedObjectLayer = 'served'): ServiceObject {
     // [ADR-0029 D9.2a] Computed ONCE, over the base the fold starts from — never
     // re-derived from the running `merged`, which would make an extender's own
     // scalar look "authored" to the next extender and silently invert
@@ -938,6 +942,24 @@ export class ObjectRegistrationFacet {
       }
     }
     this.reportRedeclaredFields(String(merged.name ?? baseDefinition.name ?? ''), contributors, ownFields, folded);
+    // [#35901] Where each extension's own fields, groups and child lists go:
+    // applied once, here, after every contributor's fields are merged, so the
+    // anchors an extension names are the object's as served.
+    const placing = placementContributorsOf(contributors, ownFields);
+    if (placing.length > 0) {
+      const placed = applyExtensionPlacements(merged, placing, {
+        objectName: String(merged.name ?? baseDefinition.name ?? ''),
+        ownerGroupKeys: fieldGroupKeysOf(owner),
+        childPackageOf: (child) => {
+          const fqn = this.resolveObjectKey(child);
+          const childOwner = fqn === undefined ? undefined : this.getObjectOwner(fqn);
+          if (childOwner === undefined) return undefined;
+          return childOwner.packageId ?? null;
+        },
+      });
+      merged = placed.object;
+      this.reportExtensionPlacements(placed.notes);
+    }
     if (tenantRules) this.reportChangedRuleCopies(contributors, baseDefinition);
     // A picklist-bound field is served with its list's options resolved onto
     // it — here, in the fold every object read and the write door share, so
@@ -1023,6 +1045,14 @@ export class ObjectRegistrationFacet {
    * reads*). At `warn`: the object is visibly unpatched, and nothing durable
    * is lost.
    */
+  static reportExtensionPlacements(this: Pick<ObjectRegistrationHost, 'extensionPlacementNotesWarned'>, notes: readonly ExtensionPlacementNote[]): void {
+    for (const placementNote of notes) {
+      if (this.extensionPlacementNotesWarned.has(placementNote.key)) continue;
+      this.extensionPlacementNotesWarned.add(placementNote.key);
+      console.warn(placementNote.message);
+    }
+  }
+
   static reportFieldPatchMisses(this: Pick<ObjectRegistrationHost, 'fieldPatchMissesWarned'>, misses: readonly FieldPatchTargetMiss[], packageId: string | undefined): void {
     for (const miss of misses) {
       const object = miss.object;

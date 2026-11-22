@@ -63,7 +63,7 @@ import {
   seedQueueClaimDecision,
   seedRecordFieldAccess,
   seedRecordVerdict,
-} from '@object-ui/plugin-detail';
+} from '@object-ui/plugin-detail/core';
 import type {
   RecordFieldAccess,
   RecordPageOperation,

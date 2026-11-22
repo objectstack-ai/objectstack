@@ -47,8 +47,10 @@ const EXPECTED_TRUTHS: Record<string, Truth> = {
   // k 1-4 / 5-7 / 8-9 of each block of 12, over ten blocks; the fourth has 10: no tie at the cut-off.
   top_customers: ranking(['cus_01', 40], ['cus_02', 30], ['cus_03', 20]),
   // last_days 30 ending 2026-10-31 starts on 10-02, so i 92-120: i mod 10 in
-  // 1-3 gives 92, 93, 101, 102, 103, 111, 112, 113. TK-0091 (10-01, urgent) falls outside.
-  urgent_high_last_30_days: scalar(8),
+  // 1-3 gives 92, 93, 101, 102, 103, 111, 112, 113, and TK-0091 (urgent), opened
+  // 10-02 off the seed rule so that the platform's 31-day last_30_days preset
+  // (from 10-01) counts the same 9.
+  urgent_high_last_30_days: scalar(9),
   // Breached = escalated and resolved: 3, 11, 23, 31, 43, 51, 63, 71, 83 (91, 103, 111 are
   // still open, so not yet judged). Customers: cus_01 (3, 51, 63) and cus_02 (31, 43) are
   // enterprise, cus_05 (11, 23, 71, 83) standard.
