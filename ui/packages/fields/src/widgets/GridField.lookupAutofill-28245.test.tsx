@@ -223,7 +223,7 @@ describe('a pick does not copy an amount across currencies (objectstack#36249)',
   const productFields = { unit_price: { type: 'currency' }, list_price: { type: 'currency' }, description: { type: 'text' } };
   const homeContext = (lineCurrency: string | undefined | null) => ({
     home: 'USD',
-    sourceCurrency: (source: string, v: unknown) => pickedAmountCurrencyOf((productFields as Record<string, never>)[source], v, widget),
+    sourceCurrency: (source: string, v: unknown) => pickedAmountCurrencyOf((productFields as Record<string, { type: string }>)[source], v, widget),
     targetCurrency: (target: string) =>
       target !== 'unit_price' ? undefined : lineCurrency === null ? HOME : lineCurrency ? { kind: 'code' as const, code: lineCurrency } : { kind: 'unset' as const },
   });

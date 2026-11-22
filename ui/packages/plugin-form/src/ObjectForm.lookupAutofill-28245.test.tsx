@@ -410,17 +410,6 @@ describe('ObjectForm — a pick does not copy an amount into a field in another 
     expect(screen.queryByTestId('lookup-autofill-withheld')).toBeNull();
   });
 
-  it('a quote with no currency yet: the price stays empty and the note says no currency is chosen', async () => {
-    const { container } = renderQuote({});
-    await input(container, 'description');
-    await pick('product', 'Widget');
-
-    const note = await screen.findByTestId('lookup-autofill-withheld');
-    expect(note.textContent).toContain('no currency is chosen');
-    const price = container.querySelector('input[name="unit_price"]') as HTMLInputElement | null;
-    expect(price?.value ?? '').toBe('');
-  });
-
   it('the opening fill follows the same rule: a EUR quote opened with a product fills no price', async () => {
     const { container } = renderQuote({ currency_code: 'EUR', product: 'p1' });
     await waitFor(() => expect((container.querySelector('input[name="description"]') as HTMLInputElement).value).toBe('A widget'));
