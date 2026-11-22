@@ -540,6 +540,51 @@ describe('#35891 who sees the plain tag', () => {
   });
 });
 
+describe('#36309 a host with only refresh still re-reads; reread wins where both are given', () => {
+  const conflict = () => Object.assign(new Error('CONCURRENT_UPDATE'), { code: 'CONCURRENT_UPDATE', status: 409 });
+
+  function mountWith(members: { refresh?: () => Promise<void>; reread?: () => Promise<void> }) {
+    const dataSource = makeDataSource(async () => { throw conflict(); });
+    render(
+      <RecordContextProvider
+        objectName="crm_opportunity"
+        recordId="o1"
+        data={{ id: 'o1', name: 'Wayne deal', stage: 'prospecting', loss_reason: null, updated_at: VERSION }}
+        objectSchema={OPPORTUNITY}
+        dataSource={dataSource as any}
+        {...members}
+      >
+        <InlineEditProvider canEdit>
+          <RecordStageMenu field="stage" label="Prospecting" tag={<span>Prospecting</span>} />
+        </InlineEditProvider>
+      </RecordContextProvider>,
+    );
+    return { dataSource };
+  }
+
+  it('a provider with only refresh: a 409 on Move calls refresh', async () => {
+    const refresh = vi.fn(async () => {});
+    const { dataSource } = mountWith({ refresh });
+    fireEvent.click(item(openMenu(), 'Negotiation'));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+  });
+
+  it('CONTROL — a provider with both: a 409 on Move calls reread, not refresh', async () => {
+    const refresh = vi.fn(async () => {});
+    const reread = vi.fn(async () => {});
+    const { dataSource } = mountWith({ refresh, reread });
+    fireEvent.click(item(openMenu(), 'Negotiation'));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(reread).toHaveBeenCalledTimes(1));
+    expect(refresh).not.toHaveBeenCalled();
+  });
+});
+
 describe('#35891 the keyboard', () => {
   it('Enter opens the menu; Escape closes it without a write', async () => {
     const { dataSource } = mount();
@@ -593,50 +638,5 @@ describe('#35891 the keyboard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'go' }));
     const dialog = await screen.findByRole('alertdialog');
     await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus());
-  });
-});
-
-describe('#36309 a host with only refresh still re-reads; reread wins where both are given', () => {
-  const conflict = () => Object.assign(new Error('CONCURRENT_UPDATE'), { code: 'CONCURRENT_UPDATE', status: 409 });
-
-  function mountWith(members: { refresh?: () => Promise<void>; reread?: () => Promise<void> }) {
-    const dataSource = makeDataSource(async () => { throw conflict(); });
-    render(
-      <RecordContextProvider
-        objectName="crm_opportunity"
-        recordId="o1"
-        data={{ id: 'o1', name: 'Wayne deal', stage: 'prospecting', loss_reason: null, updated_at: VERSION }}
-        objectSchema={OPPORTUNITY}
-        dataSource={dataSource as any}
-        {...members}
-      >
-        <InlineEditProvider canEdit>
-          <RecordStageMenu field="stage" label="Prospecting" tag={<span>Prospecting</span>} />
-        </InlineEditProvider>
-      </RecordContextProvider>,
-    );
-    return { dataSource };
-  }
-
-  it('a provider with only refresh: a 409 on Move calls refresh', async () => {
-    const refresh = vi.fn(async () => {});
-    const { dataSource } = mountWith({ refresh });
-    fireEvent.click(item(openMenu(), 'Negotiation'));
-    const dialog = await screen.findByRole('dialog');
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
-    await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
-  });
-
-  it('CONTROL — a provider with both: a 409 on Move calls reread, not refresh', async () => {
-    const refresh = vi.fn(async () => {});
-    const reread = vi.fn(async () => {});
-    const { dataSource } = mountWith({ refresh, reread });
-    fireEvent.click(item(openMenu(), 'Negotiation'));
-    const dialog = await screen.findByRole('dialog');
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
-    await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(reread).toHaveBeenCalledTimes(1));
-    expect(refresh).not.toHaveBeenCalled();
   });
 });
