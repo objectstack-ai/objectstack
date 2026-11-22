@@ -278,6 +278,15 @@ function recordPagePlacesNoComponent(page: Parameters<typeof checkPageRecordPlac
 }
 
 /**
+ * Whether a record page is a print page (objectui#11958): it declares `print`
+ * as an object. Only an assigned page can; the default page never does.
+ */
+function pageDeclaresPrintOf(page: unknown): boolean {
+  const print = (page as { print?: unknown } | null | undefined)?.print;
+  return typeof print === 'object' && print !== null && !Array.isArray(print);
+}
+
+/**
  * The fields the highlight strip of a synthesized record page draws: the
  * `fields` of the `record:highlights` blocks among the page's top-level blocks,
  * where a slotted page's own `highlights` slot lands. The default page places
@@ -4822,6 +4831,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // read where the page is assigned, above.)
   const phonePage = phone && !embedded;
   const [phoneActionBarEl, setPhoneActionBarEl] = useState<HTMLDivElement | null>(null);
+  // objectstack#36151 — the top bar's right end, where the record's `⋯` is
+  // drawn on a phone (Edit among its entries).
+  const [phoneMoreEl, setPhoneMoreEl] = useState<HTMLSpanElement | null>(null);
   const [pageScrollerEl, setPageScrollerEl] = useState<HTMLDivElement | null>(null);
   useRecordPageScrollMemory(phonePage ? pageScrollerEl : null, pageRecordStatus === 'loaded');
 
@@ -5243,7 +5255,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // in the header row whether or not the record has app actions
         // (objectstack#36049; before, it drew filled when it had none);
         // `page:header` decides that — no `variant` is declared here for it
-        // to read. The phone's bottom bar still draws it filled.
+        // to read.
         icon: 'pencil',
         type: 'script',
         locations: ['record_header'],
@@ -5285,15 +5297,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // button's tooltip and accessible description, and as the second
         // line of its `⋯` entry (the phone bar's, where an off Edit goes).
         ...(editReason ? { disabledReason: editReason } : null),
-        // objectstack#35016, objectstack#35099 — on a phone the bottom bar's
-        // first slot is its primary place, and an action that cannot be
-        // pressed never holds it: whichever of the three reasons above turns
-        // this Edit off, it moves into the bar's `⋯` (still drawn, still
-        // off), and the first usable action takes the slot. The approval band
-        // states the lock, and the `editLockedByState` badge the state lock.
-        // The desktop row keeps it greyed in place for every reason, and an
-        // Edit that is on is untouched.
-        ...(phonePage && editOff ? { component: 'action:menu' } : {}),
+        // objectstack#36151 — on a phone Edit is an entry of the `⋯` at the
+        // top bar's right end, on or off: a field's value is edited by a tap
+        // on it, and the bottom bar holds the object's own actions, or is not
+        // drawn when it has none. An Edit that is off is still drawn there,
+        // off, with its reason (objectstack#35099, objectstack#35135). The
+        // desktop row keeps it a button, greyed in place when it is off.
+        ...(phonePage ? { component: 'action:menu' } : {}),
         // objectstack#35599 — a page drawing body tables enters its edit state;
         // every other page opens the record form, as before.
         onClick: () => (recordEditEligible
@@ -5301,11 +5311,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           : onEdit({ id: pureRecordId }, objectName)),
       } as any);
     }
-    // The record's favorites entry (objectui#12427), in the `⋯` overflow ahead
-    // of Share. A record is never a navigation entry, so this toggles the
-    // `record:` favorite, which the sidebar draws in its Favorites section at
-    // the top.
-    if (favoriteRecord) {
+    // The record's favorites control is the star beside the record's name
+    // (objectstack#36246), drawn by `page:header` from the record context
+    // below, so the `⋯` holds no second entry. A print page draws no
+    // `page:header`, so no name and no star: there the favorites entry stays
+    // in the `⋯` of its chrome row, ahead of Share. A record is never a
+    // navigation entry, so both toggle the `record:` favorite, which the
+    // sidebar draws in its Favorites section at the top.
+    if (favoriteRecord && pageDeclaresPrintOf(assignedPage)) {
       items.push({
         name: 'sys_favorite',
         label: isRecordFavorite
@@ -5794,6 +5807,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         stepper={pageStepper}
         toggles={approvalQueueSwitch ?? undefined}
         comments={phoneCommentsButton}
+        // objectstack#36151 — the record's `⋯`, at the bar's right end.
+        frame={<span ref={setPhoneMoreEl} className="flex items-center empty:hidden" data-record-phone-more="" />}
       />
       {phonePathRow}
     </>
@@ -5818,8 +5833,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // what it hides). The action is the browser's print preview of it, and it is
   // offered only where the page declares `print`, so every other record page
   // is unchanged.
-  const pagePrint = (renderedPage as { print?: unknown } | null | undefined)?.print;
-  const pageDeclaresPrint = typeof pagePrint === 'object' && pagePrint !== null && !Array.isArray(pagePrint);
+  const pageDeclaresPrint = pageDeclaresPrintOf(renderedPage);
   const printHint = t('common.printDialogHint');
 
   // Shared cross-cutting chrome: lifecycle badge + presence avatars —
@@ -6000,11 +6014,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         reread={headerReread}
         headerSystemActions={synthSystemActions}
         objectLabelNote={inSetupApp ? managedByNote ?? undefined : undefined}
+        // objectstack#36246 — the record's favorite star beside its name, in
+        // every face `page:header` draws (the page's bar, a drawer or pane,
+        // a phone's header): hollow until the record is a favorite, filled
+        // once it is, one press to toggle.
+        isFavorite={isRecordFavorite}
+        onToggleFavorite={favoriteRecord ? handleToggleRecordFavorite : undefined}
       >
-        {/* No `isFavorite` / `onToggleFavorite` here (objectui#12427): the
-            record's favorites entry is the `sys_favorite` item in the header's
-            `⋯` overflow, and the `page:header` chrome draws its star only for
-            a host that wires `onToggleFavorite`, so this page draws none. */}
         {/* objectui#2407 P2 — ONE record-level inline-edit session spanning
             the highlights strip AND the details body (both descend from this
             provider), committed together by the single <InlineEditSaveBar>
@@ -6245,7 +6261,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   into the bottom bar below, and the default page's header
                   takes its subtitle from the declared text highlights. */}
               <PageHeaderPhoneContext.Provider
-                value={phonePage ? { actionBar: phoneActionBarEl, subtitle: phoneHeader?.subtitle || undefined } : null}
+                value={phonePage ? { actionBar: phoneActionBarEl, more: phoneMoreEl, subtitle: phoneHeader?.subtitle || undefined } : null}
               >
               <RelatedRecordActionsBridge
                 appName={appName}
@@ -6434,13 +6450,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             />
           </div>
           {/* objectstack#27058, Target 7 — the phone's bottom action bar: the
-              header's action row in its bar face (the primary action, one more
-              and the `⋯`), at the foot of the page above the safe area, so
-              the body ends where the bar starts. Empty, it is not drawn. */}
+              header's action row in its bar face (the primary action and one
+              more; the `⋯` is in the top bar, objectstack#36151), at the foot
+              of the page above the safe area, so the body ends where the bar
+              starts. Empty, it is not drawn, and the body runs to the foot. */}
           {phonePage && (
             <div
               ref={setPhoneActionBarEl}
-              className="shrink-0 border-t bg-background px-4 pt-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] empty:hidden"
+              className="shrink-0 border-t bg-background px-4 pt-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] empty:hidden [&:has(>[role=toolbar]:empty)]:hidden"
               data-record-action-bar=""
             />
           )}

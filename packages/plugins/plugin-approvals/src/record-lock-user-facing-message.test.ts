@@ -46,6 +46,22 @@ import { bindApprovalLockHook, APPROVALS_HOOK_PACKAGE } from './lifecycle-hooks.
 import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
+/**
+ * [#35384] A flat `a.b.c` pack as the nested data `II18nService.getTranslations()`
+ * hands over: the object label is read off it by `translateObject`, as `/meta`
+ * reads it, never through `t()`.
+ */
+function nestedPack(flat: Record<string, string> = {}): Record<string, unknown> {
+  const out: Record<string, any> = {};
+  for (const [key, value] of Object.entries(flat)) {
+    const parts = key.split('.');
+    let cur = out;
+    for (const part of parts.slice(0, -1)) cur = cur[part] ??= {};
+    cur[parts[parts.length - 1]] = value;
+  }
+  return out;
+}
+
 const OPPORTUNITY = {
   name: 'opportunity',
   label: 'Opportunity',
@@ -296,6 +312,7 @@ describe('[#34060] the per-row refusal is worded in the writer\'s locale', () =>
   };
   const i18n = {
     getLocales: () => Object.keys(PACKS),
+    getTranslations: (locale: string) => nestedPack(PACKS[locale]),
     t: (key: string, locale: string) => PACKS[locale]?.[key] ?? key,
   };
 
@@ -405,6 +422,7 @@ describe('[#34060] the per-row refusal is worded in the writer\'s locale', () =>
   it('a deployment translation of `errors.record_locked` wins, interpolated', async () => {
     const override = {
       getLocales: () => ['zh-CN'],
+      getTranslations: i18n.getTranslations,
       t: (key: string, locale: string) =>
         key === 'errors.record_locked' && locale === 'zh-CN' ? '{{object}}《{{title}}》审批中，暂不可改' : i18n.t(key, locale),
     };
@@ -446,6 +464,7 @@ describe('[#34454] the record-lock override is asked with the negotiated locale'
   /** `FileI18nAdapter`-shaped: exact tag match, `{{name}}` interpolation of `params`, the key echoed on a miss. */
   const exactMatchI18n = {
     getLocales: () => Object.keys(PACKS),
+    getTranslations: (locale: string) => nestedPack(PACKS[locale]),
     t: (key: string, locale: string, params?: Record<string, unknown>) => {
       const value = PACKS[locale]?.[key];
       if (value === undefined) return key;

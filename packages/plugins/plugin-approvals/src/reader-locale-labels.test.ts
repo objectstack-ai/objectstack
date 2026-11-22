@@ -184,3 +184,99 @@ describe('[#24863] the overlay on a served row', () => {
     expect(row).toMatchObject({ process_label: 'Account Approval', step_label: 'Manager Review', object_label: '客户' });
   });
 });
+
+/**
+ * [#35384] The object's label is resolved the way the metadata route serves
+ * it — `translateObject` over every locale the service holds, with `/meta`'s
+ * `ResolveOptions` (the reader's locale, the declared fallback chain, and the
+ * authored language: the declared `sourceLocale`, else `defaultLocale`) — and
+ * never through `t()`.
+ *
+ * The scenario: an app authored in English (`sourceLocale: 'en'`) that
+ * defaults its users to Chinese (`defaultLocale: 'zh-CN'`) and ships a
+ * `zh-CN` pack only, so `t('objects.account.label', 'en')` falls to the
+ * `zh-CN` row. `/meta` answers an `en` request with the authored label
+ * (`packages/rest/src/meta-i18n-declared-fallback-chain.test.ts` §6 pins that
+ * half); this reader must say the same, which here means picking nothing so
+ * the declared label stands. CONTROLS: a `zh-CN` reader still reads the
+ * `zh-CN` row, and with no `sourceLocale` declared an `en` reader walks the
+ * declared fallback to it, as `/meta` does.
+ */
+describe('[#35384] the object label in the declared sourceLocale reads as authored', () => {
+  /** The real in-memory service, declared as `AppPlugin.loadTranslations` declares it. */
+  const declaredMemory = () => {
+    const i18n = i18nWith({ 'zh-CN': ZH });
+    i18n.setDefaultLocale('zh-CN');
+    i18n.setFallbackLocale('zh-CN');
+    i18n.setSourceLocale('en');
+    return i18n;
+  };
+  /** The served adapter's shape (`FileI18nAdapter`): requested locale, then the declared fallback, then the key. */
+  const servedI18n = (declared: { defaultLocale: string; sourceLocale?: string }): ReaderLabelI18n => {
+    const packs: Record<string, Record<string, unknown>> = { 'zh-CN': packOf(ZH) };
+    const fallback = declared.defaultLocale;
+    const read = (data: unknown, key: string): string | undefined => {
+      let cur: unknown = data;
+      for (const part of key.split('.')) {
+        if (!cur || typeof cur !== 'object') return undefined;
+        cur = (cur as Record<string, unknown>)[part];
+      }
+      return typeof cur === 'string' ? cur : undefined;
+    };
+    return {
+      t: (key, locale) => read(packs[locale], key) ?? (fallback !== locale ? read(packs[fallback], key) : undefined) ?? key,
+      getLocales: () => Object.keys(packs),
+      getTranslations: (locale) => packs[locale] ?? {},
+      getDefaultLocale: () => declared.defaultLocale,
+      getFallbackLocale: () => fallback,
+      getSourceLocale: () => declared.sourceLocale,
+    };
+  };
+
+  it('an en reader picks no defaultLocale row: the declared label stands (real in-memory service)', () => {
+    const i18n = declaredMemory();
+    // The defect's precondition, read at the same service: `t()` falls to the zh-CN row.
+    expect(i18n.t(objectLabelKey('account'), 'en')).toBe('客户');
+    expect(readerLabelsFor(i18n, 'en')!.objectLabel('account')).toBeUndefined();
+  });
+
+  it('an en reader picks no defaultLocale row (served adapter shape)', () => {
+    const i18n = servedI18n({ defaultLocale: 'zh-CN', sourceLocale: 'en' });
+    expect(i18n.t(objectLabelKey('account'), 'en')).toBe('客户');
+    expect(readerLabelsFor(i18n, 'en')!.objectLabel('account')).toBeUndefined();
+  });
+
+  it('the inbox row keeps its authored object label for an en reader', () => {
+    const row = {
+      process_name: 'flow:account_approval', current_step: 'manager_review', object_name: 'account',
+      process_label: 'Account Approval', step_label: 'Manager Review', current_step_label: 'Manager Review',
+      object_label: 'Account',
+    };
+    localizeRequestLabels(row, readerLabelsFor(servedI18n({ defaultLocale: 'zh-CN', sourceLocale: 'en' }), 'en')!);
+    expect(row.object_label).toBe('Account');
+  });
+
+  it('CONTROL: a zh-CN reader still reads the zh-CN row', () => {
+    expect(readerLabelsFor(declaredMemory(), 'zh-CN')!.objectLabel('account')).toBe('客户');
+    expect(readerLabelsFor(servedI18n({ defaultLocale: 'zh-CN', sourceLocale: 'en' }), 'zh-CN')!.objectLabel('account'))
+      .toBe('客户');
+  });
+
+  it('CONTROL: with no sourceLocale declared, an en reader walks the declared fallback to the zh-CN row', () => {
+    expect(readerLabelsFor(servedI18n({ defaultLocale: 'zh-CN' }), 'en')!.objectLabel('account')).toBe('客户');
+  });
+
+  it('reads no object label through t(): a service that cannot hand its translations over picks none', () => {
+    const tOnly: ReaderLabelI18n = { t: (key) => (key === objectLabelKey('account') ? '客户' : key) };
+    expect(readerLabelsFor(tOnly, 'zh-CN')!.objectLabel('account')).toBeUndefined();
+  });
+
+  it('picks nothing from a service whose translations throw, and does not throw itself', () => {
+    const throwing: ReaderLabelI18n = {
+      t: (key) => key,
+      getLocales: () => ['zh-CN'],
+      getTranslations: () => { throw new Error('translations exploded'); },
+    };
+    expect(readerLabelsFor(throwing, 'zh-CN')!.objectLabel('account')).toBeUndefined();
+  });
+});

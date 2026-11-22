@@ -509,6 +509,7 @@ const ar = {
       openRow: "فتح الصف",
       duplicateRow: "تكرار الصف",
       removeRow: "إزالة الصف",
+      columnHelp: "المساعدة",
     },
   },
   table: {
