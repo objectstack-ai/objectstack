@@ -2,9 +2,10 @@
  * ObjectUI
  * Copyright (c) 2024-present ObjectStack Inc.
  *
- * Verifies the drill chain completes through DrillDownDrawer: the filtered
- * record list it renders (for pivot / dataset / chart drill-through) is itself
- * drill-to-record, so clicking a row opens that record.
+ * The drill list stacks no record panel over the drill
+ * (objectstack-ai/objectstack#36256 item 6): a record opens as its page from
+ * the standard list's record name. Without the standard list registered, the
+ * data-table fallback lists the records and its rows open nothing.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -31,8 +32,8 @@ function makeDataSource() {
   };
 }
 
-describe('DrillDownDrawer — completes the drill chain to a record', () => {
-  it('wires record drill on the filtered drill list (chain completion)', async () => {
+describe('DrillDownDrawer — no record panel stacked over the drill', () => {
+  it('the data-table fallback rows open no record drawer', async () => {
     render(
       <DrillDownDrawer
         open
@@ -47,11 +48,10 @@ describe('DrillDownDrawer — completes the drill chain to a record', () => {
     // The drill-through list renders the underlying records.
     await waitFor(() => expect(screen.getByText('Acme Renewal')).toBeInTheDocument());
 
-    // Its rows are drill-to-record: the data-table marks clickable rows with
-    // `cursor-pointer` only when an onRowClick is wired, which ObjectDataTable
-    // does only when record drill is enabled. (The record drawer opening on
-    // click is covered by ObjectDataTable.drill.test.)
+    // The data-table marks clickable rows with `cursor-pointer` only when an
+    // onRowClick is wired, which ObjectDataTable does only when record drill
+    // is enabled — and the drill list no longer enables it.
     const row = screen.getByText('Acme Renewal').closest('tr') as HTMLElement;
-    expect(row.className).toContain('cursor-pointer');
+    expect(row.className).not.toContain('cursor-pointer');
   });
 });

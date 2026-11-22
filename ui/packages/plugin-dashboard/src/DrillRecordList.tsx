@@ -34,9 +34,9 @@ import { drillListConditions } from './drillConditions';
 /** The registry key of the standard list (`@object-ui/plugin-list`). */
 export const DRILL_LIST_COMPONENT = 'list-view';
 
-/** Whether the standard list is registered in this renderer. */
+/** Whether the standard list is registered in this renderer, loaded or lazily (the Console registers it lazily). */
 export function drillListAvailable(): boolean {
-  return !!ComponentRegistry.get(DRILL_LIST_COMPONENT);
+  return ComponentRegistry.has(DRILL_LIST_COMPONENT) || ComponentRegistry.hasLazy(DRILL_LIST_COMPONENT);
 }
 
 export interface DrillRecordListProps {
@@ -118,8 +118,9 @@ export const DrillRecordList: React.FC<DrillRecordListProps> = ({
   );
   const schema = {
     type: DRILL_LIST_COMPONENT,
-    objectName,
-    viewType: 'grid',
+    // The page node's binding (`PageComponentSchema.dataSource`): the block
+    // lands its `object` on the list's `objectName`. The default kind is the grid.
+    dataSource: { object: objectName },
     ...(conditions.rest ? { filter: conditions.rest } : {}),
     // An empty list lets the list pick its own columns (no name field known).
     ...(listColumns.length > 0 ? { columns: listColumns } : {}),
