@@ -18,7 +18,7 @@ test('requiredWhen blocks submit with a field error, and relaxes when FALSE', as
   });
 
   await page.goto('/apps/showcase_app/showcase_invoice');
-  await page.getByRole('button', { name: /^(New|新建)$/i }).first().click();
+  await page.getByTestId('object-view-new-button').first().click();
 
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByTestId('md-form-submit')).toBeVisible();

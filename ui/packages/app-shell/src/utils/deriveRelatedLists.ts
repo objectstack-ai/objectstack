@@ -68,7 +68,12 @@
  *     `isUnlisted`). A body table (`isPrimary`) is the field groups' to place
  *     and is kept, after the listed ones, with no tab of its own (no
  *     `keepsTab`) unless an entry names it. Undeclared or empty: every list, as
- *     before. The three built-in tab names (`RECORD_PAGE_BUILTIN_TABS` in
+ *     before. A side list ANOTHER package brings (the child and the parent
+ *     belong to different packages, objectstack#35901) is the exception: the
+ *     declared list does not hide it; that package places it (the server
+ *     splices its `place` into `relatedLists`), and an unplaced one is kept
+ *     after the listed ones, so the page draws it at the end of the tabs.
+ *     The three built-in tab names (`RECORD_PAGE_BUILTIN_TABS` in
  *     `@objectstack/spec/data`) name the page's own tabs, never a child list;
  *     the synthesized page places those (`buildDefaultTabs`).
  *   - An entry's own TITLE and COLUMNS (objectstack#35899): the object form
@@ -197,9 +202,19 @@ export interface DerivedRelatedList {
    * True when the parent DECLARES `relatedLists` and no entry names this side
    * list (objectstack#35897), so the record page shows no tab for it — present
    * only when the caller asked for hidden relationships
-   * ({@link DeriveRelatedListsOptions.includeHidden}), as `isHidden` is.
+   * ({@link DeriveRelatedListsOptions.includeHidden}), as `isHidden` is. Never
+   * on a list another package brings (objectstack#35901): that one shows.
    */
   isUnlisted?: true;
+  /**
+   * The package the child object belongs to, when it is another package than
+   * the parent's (objectstack#35901): a list that package brings, which the
+   * parent's `relatedLists` does not hide and the package places itself.
+   * Present only for the authoring surface
+   * ({@link DeriveRelatedListsOptions.includeHidden}), which shows it read-only
+   * with its source.
+   */
+  fromPackage?: string;
 }
 
 /**
@@ -261,6 +276,34 @@ interface MergedObjectLike {
    * records can never be read on any record page.
    */
   enable?: { apiEnabled?: boolean };
+  /**
+   * The package that owns the object, as the server serves it (the registry
+   * stamps its owner's package id; `'sys_metadata'` marks a definition bound
+   * to no package). Read to tell a child list another package brings
+   * (objectstack#35901).
+   */
+  _packageId?: unknown;
+}
+
+/** The package an object belongs to, or `undefined` for none (absent, empty, or bound to no package). */
+function packageOf(object: MergedObjectLike | null | undefined): string | undefined {
+  const id = object?._packageId;
+  return typeof id === 'string' && id !== '' && id !== NO_PACKAGE ? id : undefined;
+}
+
+/** The `_packageId` the server stamps on a definition bound to no package. */
+const NO_PACKAGE = 'sys_metadata';
+
+/**
+ * objectstack#35901 — does `child` come from another package than `parent`?
+ * Both must belong to a package, and the two differ. A child of the parent's
+ * own package, or one no package owns, is not: those stay the parent's to
+ * list (objectstack#35897).
+ */
+function isOtherPackageChild(child: MergedObjectLike, parent: MergedObjectLike): boolean {
+  const childPackage = packageOf(child);
+  const parentPackage = packageOf(parent);
+  return childPackage !== undefined && parentPackage !== undefined && childPackage !== parentPackage;
 }
 
 /**
@@ -429,7 +472,7 @@ export function deriveRelatedLists(
   // Working entries carry the FK label and the list's name so we can
   // disambiguate multi-FK children after the full sweep; both are stripped
   // from the returned descriptors.
-  type Working = DerivedRelatedList & { _fkLabel: string; _listLabel: string };
+  type Working = DerivedRelatedList & { _fkLabel: string; _listLabel: string; _otherPackage: boolean };
   const owned: Working[] = [];
   const referenced: Working[] = [];
 
@@ -454,6 +497,8 @@ export function deriveRelatedLists(
     // rather than once per FK.
     const inheritedSort = inheritedListViewSort(child.list);
     const childLabel = child.label || child.name;
+    // objectstack#35901 — a list another package brings is not the parent's to hide.
+    const otherPackage = isOtherPackageChild(child, objectDef);
     const childListLabel = (listLabel && listLabel(child as MergedObjectLike & { name: string })) || childLabel;
     for (const [fieldName, fieldDef] of fieldEntries(child.fields)) {
       if (!fieldDef) continue;
@@ -492,6 +537,8 @@ export function deriveRelatedLists(
         ...(hidden ? { isHidden: true as const } : {}),
         _fkLabel: (typeof fieldDef.label === 'string' && fieldDef.label) || fieldName,
         _listLabel: childListLabel,
+        _otherPackage: otherPackage,
+        ...(otherPackage && options?.includeHidden ? { fromPackage: packageOf(child) } : {}),
         ...(typeof fieldDef.relatedListTitle === 'string' && fieldDef.relatedListTitle
           ? { title: fieldDef.relatedListTitle }
           : {}),
@@ -537,6 +584,14 @@ export function deriveRelatedLists(
       if (list.isPrimary) {
         const { keepsTab: _unlistedTab, ...bodyOnly } = list;
         all.push(bodyOnly);
+      } else if (list._otherPackage) {
+        // objectstack#35901 — a side list another package brings is not
+        // hidden by the parent's list: that package places it with its object
+        // extension's `place` (which the server splices into `relatedLists`,
+        // so a placed one is named above); unplaced, it shows at the end of
+        // the tabs (`arrangeDeclaredTabs`). Sales ruling 7073014077 flips the
+        // hiding objectstack#35897 shipped (ruling 7072511859).
+        all.push(list);
       } else if (options?.includeHidden) all.push({ ...list, isUnlisted: true });
       continue;
     }
@@ -557,7 +612,7 @@ export function deriveRelatedLists(
   const counts: Record<string, number> = {};
   for (const r of all) counts[r.childObject] = (counts[r.childObject] || 0) + 1;
 
-  return all.map(({ _fkLabel, _listLabel, ...rest }) => {
+  return all.map(({ _fkLabel, _listLabel, _otherPackage, ...rest }) => {
     if (!rest.title && counts[rest.childObject] > 1) {
       return { ...rest, title: `${_listLabel} · ${_fkLabel}` };
     }

@@ -1051,4 +1051,15 @@ describe('declared relatedLists arranges the tabs (objectstack#35897)', () => {
   it('a related tab the host passed but no entry names follows the listed tabs, in the order passed', () => {
     expect(values(def(['contact']))).toEqual(['details', 'related:contact.account_id', 'related:task.account_id', 'approvals', 'timeline']);
   });
+
+  // objectstack#35901 — an unplaced list another package brings sits at the end of the tabs.
+  it('…and before a trailing run of listed approvals / stream tabs, which close the strip', () => {
+    expect(values(def(['contact', 'sys_approval_request', 'sys_activity']))).toEqual([
+      'details', 'related:contact.account_id', 'related:task.account_id', 'approvals', 'timeline',
+    ]);
+    // Control: a stream listed before a related entry is no trailing run.
+    expect(values(def(['sys_activity', 'contact']))).toEqual([
+      'details', 'timeline', 'related:contact.account_id', 'related:task.account_id', 'approvals',
+    ]);
+  });
 });
