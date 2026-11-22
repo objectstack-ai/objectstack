@@ -170,7 +170,7 @@ describe('POST /automation/_record-starts (#35928)', () => {
 
     it('refuses a change on an object the registry does not declare, and never asks the engine', async () => {
         const { dispatcher, listRecordUpdateStarts, getData } = makeDispatcher();
-        getData.mockImplementationOnce(async ({ object, id }: any) => ({ object, id, record: { id } }));
+        getData.mockImplementationOnce(async ({ object, id }: any) => ({ object, id, record: { ...STORED } }));
 
         const result = await dispatcher.handleAutomation('/_record-starts', 'POST', { ...BODY, object: 'unregistered' }, MEMBER());
 
