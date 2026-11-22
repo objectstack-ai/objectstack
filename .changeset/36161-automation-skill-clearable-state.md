@@ -12,3 +12,5 @@ The state-machine notes in `references/state-machines-and-approvals.md` gain one
 This is the behaviour `@objectstack/objectql` already ships; the skill only teaches it.
 
 Paid for by deletion in the same file, with the token ceiling unchanged (5936): the wording of the section's intro and of six neighbouring notes was shortened, each keeping its fact — one rule per field, `initialStates` gating insert, guards and reactions living outside the machine, the introspection route, the unguarded unlisted `from` state, and the `record.<field>` scope of sibling predicates.
+
+Ride-along, same theme: in the `objectstack-data` eval `objects-fields-relationships.json`, the `employee` lifecycle case's expected answer declared a `state_machine` with `transitions` only, which publish refuses for a machine that runs on insert (`state-machine-no-initial-states`). It now declares `initialStates: ['draft']` with the reason, and the case's `must_contain` requires `initialStates`.
