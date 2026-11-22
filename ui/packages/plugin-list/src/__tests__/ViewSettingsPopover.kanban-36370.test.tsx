@@ -18,8 +18,9 @@
  *   - the lanes level hides a lane, shows a hidden one at the end, and keeps
  *     the last lane (no eye on it);
  *   - the card fields hide in place, and 「+ Add field」 adds one at the end;
- *   - each toggle writes its next value; the statistic level writes the pick
- *     (`null` for None);
+ *   - each toggle writes its next value; the statistic level offers none,
+ *     count and a number field's sum (no average) and writes the pick (`null`
+ *     for None);
  *   - the zh pack names every row.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -163,8 +164,10 @@ describe('视图设置 on a board (objectstack#36370)', () => {
     fireEvent.click(screen.getByTestId('options-lane-summary-count'));
     expect(kanban.summary!.onChange).toHaveBeenLastCalledWith({ type: 'count' });
     fireEvent.click(screen.getByTestId('options-row-lane-summary'));
-    fireEvent.click(screen.getByTestId('options-lane-summary-avg:amount'));
-    expect(kanban.summary!.onChange).toHaveBeenLastCalledWith({ type: 'avg', field: 'amount' });
+    // The board computes a count or a sum (`KanbanLaneSummarySchema`): no average.
+    expect(screen.queryByTestId('options-lane-summary-avg:amount')).toBeNull();
+    fireEvent.click(screen.getByTestId('options-lane-summary-sum:amount'));
+    expect(kanban.summary!.onChange).toHaveBeenLastCalledWith({ type: 'sum', field: 'amount' });
     fireEvent.click(screen.getByTestId('options-row-lane-summary'));
     fireEvent.click(screen.getByTestId('options-lane-summary-none'));
     expect(kanban.summary!.onChange).toHaveBeenLastCalledWith(null);

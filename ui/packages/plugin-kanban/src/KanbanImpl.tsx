@@ -83,8 +83,10 @@ const useKanbanT = createSafeTranslation(
     'kanban.laneMenu.collapse': 'Collapse column',
     'kanban.laneMenu.expand': 'Expand column',
     'kanban.laneMenu.hide': 'Hide column',
+    'kanban.laneMenu.hideHint': 'Its cards move to Uncategorized',
     'kanban.laneMenu.createIn': 'New record in {{column}}',
     'kanban.laneMenu.create': 'New',
+    'kanban.laneStatistic.loadedOnly': 'loaded cards',
   },
   'kanban.noCards',
 )
@@ -783,9 +785,11 @@ function LaneTotal({
  * objectstack#36370 — the view's lane statistic (`kanban.summary`), at the
  * lane's foot: its calculation's name and its figure, 「Sum · Amount
  * ¥1,200」. A count over a lane the board pages for itself is the server's
- * count of the lane; every other figure covers the cards the lane holds and,
- * over a lane that holds more than it drew, carries the windowed `+`. Renders
- * nothing without the statistic, or while the figure is unknowable.
+ * count of the lane, and carries the windowed `+` where that is a floor. A sum
+ * covers the cards the lane holds: over a lane that holds more than it drew it
+ * is no bound (a value may be negative), so it says so in words, 「Sum ·
+ * Amount · loaded cards」, rather than with a `+`. Renders nothing without
+ * the statistic, or while the figure is unknowable.
  */
 function LaneFootStatistic({
   cards,
@@ -797,21 +801,26 @@ function LaneFootStatistic({
   count: { count: number; atLeast: boolean }
   partial: boolean
 }) {
+  const { t } = useKanbanT()
   const summary = useKanbanColumnSummary()
   if (!summary || summary.placement !== 'foot' || !summary.type) return null
   const isCount = summary.type === 'count'
   const value = isCount ? count.count : laneStatistic(cards, summary.field, summary.type)
   if (value === null) return null
-  const name = isCount ? summary.typeLabel : `${summary.typeLabel} · ${summary.label}`
+  const partialSum = !isCount && partial
+  const name = isCount
+    ? summary.typeLabel
+    : `${summary.typeLabel} · ${summary.label}${partialSum ? ` · ${t('kanban.laneStatistic.loadedOnly')}` : ''}`
   return (
     <div
       className="flex items-center justify-between gap-2 border-t border-border/40 px-3 sm:px-4 py-1.5 text-xs text-muted-foreground tabular-nums"
       data-kanban-lane-statistic=""
+      {...(partialSum ? { 'data-kanban-lane-statistic-partial': '' } : {})}
     >
-      <span className="truncate">{name}</span>
+      <span className="truncate" title={name}>{name}</span>
       <span className="shrink-0 font-medium text-foreground/85">
         {summary.renderTotal(value)}
-        {(isCount ? count.atLeast : partial) ? '+' : null}
+        {isCount && count.atLeast ? '+' : null}
       </span>
     </div>
   )
@@ -881,9 +890,15 @@ function LaneHeaderActions({
             </DropdownMenuItem>
           )}
           {hide && (
-            <DropdownMenuItem onSelect={() => hide(laneId)} data-kanban-lane-menu-hide="">
-              <EyeOff className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
-              {t('kanban.laneMenu.hide')}
+            <DropdownMenuItem onSelect={() => hide(laneId)} data-kanban-lane-menu-hide="" className="items-start">
+              <EyeOff className="mr-2 mt-0.5 h-3.5 w-3.5" aria-hidden="true" />
+              {/* objectstack#36370 — the view's lanes pick lanes, not records
+                  (#28211): a hidden lane's cards show under Uncategorized,
+                  and the item says so. */}
+              <span className="flex flex-col">
+                <span>{t('kanban.laneMenu.hide')}</span>
+                <span className="text-xs text-muted-foreground" data-kanban-lane-menu-hide-hint="">{t('kanban.laneMenu.hideHint')}</span>
+              </span>
             </DropdownMenuItem>
           )}
         </DropdownMenuContent>

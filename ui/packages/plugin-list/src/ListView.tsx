@@ -455,6 +455,15 @@ export interface ListViewProps {
    * settings are shown and not changed.
    */
   onKanbanChange?: (patch: Record<string, unknown>) => void;
+  /**
+   * objectstack#36370 — the open view's identity for the board's lane
+   * collapse, which each reader keeps in their own browser. The key is this
+   * reader's id, the object and this view key, so it is each person's own
+   * and each view's own. Absent ⇒ `schema.id`, then `schema.name`; a host
+   * whose views carry neither passes its own (the Console passes the view's
+   * id).
+   */
+  laneCollapseKey?: string;
   /** Called with a non-delete bulk action key and the currently selected rows. */
   onBulkAction?: (action: string, records: any[]) => void;
   /** Called when the user picks a different page size in the pager. */
@@ -7379,7 +7388,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       ? { type: 'sum', field: kanbanBlock.summarizeField }
       : null;
   })();
-  // The fields a lane may total or average: the object's number fields the
+  // The fields a lane may total: the object's number fields the
   // caller may read.
   const boardNumberFields: Array<{ value: string; label: string }> = kanbanBlock
     ? Object.entries((objectDef?.fields ?? {}) as Record<string, { type?: unknown; label?: string; hidden?: unknown } | undefined>)
@@ -7391,7 +7400,15 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   const kanbanSettings: ViewSettingsKanban | undefined = kanbanBlock
     ? {
         laneField: boardLaneField,
-        laneFieldOptions: groupOptions,
+        // objectstack#36370 — the fields the board can lane on: a select or a
+        // radio, whose options are the lanes. A lookup, user, master-detail or
+        // tree field draws no sensible lanes yet (the board keys a lane on the
+        // stored value, and an expanded reference is an object), and a boolean
+        // has no options to title its lanes, so the picker leaves them out.
+        laneFieldOptions: groupOptions.filter((option) => {
+          const type = (objectDef?.fields as Record<string, { type?: unknown } | undefined> | undefined)?.[option.value]?.type;
+          return type === 'select' || type === 'radio';
+        }),
         // A new lane field draws every lane it offers: the lanes chosen on the
         // old field name none of its values.
         onLaneFieldChange: writeKanban ? (field) => writeKanban({ groupByField: field, lanes: undefined }) : undefined,
@@ -7439,7 +7456,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   };
   const boardLaneMenu = kanbanBlock
     ? {
-        collapseKey: schema.objectName ? `${schema.objectName}:${schema.id ?? ''}` : undefined,
+        // objectstack#36370 — each reader's own, per object and view.
+        collapseKey: schema.objectName
+          ? [filterScope.currentUserId || '-', schema.objectName, props.laneCollapseKey || schema.id || (schema as { name?: string }).name || '-'].join(':')
+          : undefined,
         onHideLane: writeShownLanes && boardLaneOptions.length > 0
           ? (laneId: string) => {
               if (!boardShownLanes.includes(laneId) || boardShownLanes.length <= 1) return;

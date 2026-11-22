@@ -1119,9 +1119,11 @@ export function useObjectViewListRenderer({
                 onViewChange={(view: string) => listDraft.patch({ viewType: view === listSchema.viewType ? undefined : view })}
                 // objectstack#36370 — a board's settings are the list's draft
                 // too: each changed key of the view's kanban block, dropped
-                // again once it is the view's own.
+                // again once it is the view's own as the board draws it (an
+                // auto-detected lane field picked back is no change).
+                laneCollapseKey={activeView.id}
                 onKanbanChange={(patch: Record<string, unknown>) => listDraft.patch({
-                    kanban: nextKanbanDraft(listDraft.draft.kanban, patch, viewDef.kanban),
+                    kanban: nextKanbanDraft(listDraft.draft.kanban, patch, kanbanViewOptions(viewDef, objectDef)),
                 })}
                 onRowColorChange={(rowColor: { field: string; colors?: Record<string, string> } | null) => listDraft.patch({
                     rowColor: (rowColor?.field ?? '') === (viewOwnRowColor?.field ?? '') ? undefined : rowColor,

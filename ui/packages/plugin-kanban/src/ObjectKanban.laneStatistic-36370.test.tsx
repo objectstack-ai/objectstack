@@ -14,7 +14,10 @@
  * Rows:
  *   (a) `{ type: 'count' }` draws each lane's count at its foot;
  *   (b) `{ type: 'sum', field }` totals the field at the foot, in place of the
- *       header's `summarizeField` total; `avg` averages it;
+ *       header's `summarizeField` total; over a lane that holds more than it
+ *       drew, the sum says so in words (no `+`: a sum over part of a lane is
+ *       no bound); a type the board does not compute (`avg`, refused by the
+ *       spec) draws no foot and keeps the `summarizeField` total;
  *   (c) `{ type: 'none' }` draws neither the foot nor the header total;
  *   (d) without the keys a card names its fields and leaves out an empty one;
  *       `showFieldLabels: false` draws the values alone; `hideEmptyFields:
@@ -91,7 +94,7 @@ describe('the lane statistic and card toggles (objectstack#36370)', () => {
     expect(footOf(laneNamed(container, 'Won'))!.textContent).toBe('Count1');
   });
 
-  it('(b) totals and averages a field at the foot, in place of the summarizeField header total', async () => {
+  it('(b) totals a field at the foot, in place of the summarizeField header total; an uncomputed type keeps the total', async () => {
     const { container } = await renderBoard({ summary: { type: 'sum', field: 'amount' }, summarizeField: 'amount' });
     await waitFor(() => expect(footOf(laneNamed(container, 'Open'))).not.toBeNull());
     expect(footOf(laneNamed(container, 'Open'))!.textContent).toContain('Sum · Amount');
@@ -99,9 +102,27 @@ describe('the lane statistic and card toggles (objectstack#36370)', () => {
     expect(container.querySelector('[data-kanban-lane-total]')).toBeNull();
     cleanup();
 
-    const avg = await renderBoard({ summary: { type: 'avg', field: 'amount' } });
-    await waitFor(() => expect(footOf(laneNamed(avg.container, 'Open'))).not.toBeNull());
-    expect(footOf(laneNamed(avg.container, 'Open'))!.textContent).toContain('20');
+    const avg = await renderBoard({ summary: { type: 'avg', field: 'amount' }, summarizeField: 'amount' });
+    await waitFor(() => expect(avg.container.querySelector('[data-kanban-lane-total]')).not.toBeNull());
+    expect(avg.container.querySelector('[data-kanban-lane-statistic]')).toBeNull();
+  });
+
+  it('(b) marks a sum over a lane that holds more than it drew in words, not with a +', async () => {
+    // A windowed board (objectui#4025): as many rows came back as the window
+    // asked for, so every lane may hold more than it drew.
+    const { container } = await renderBoard({ summary: { type: 'sum', field: 'amount' }, limit: ROWS.length });
+    await waitFor(() => expect(footOf(laneNamed(container, 'Open'))).not.toBeNull());
+    const foot = footOf(laneNamed(container, 'Open'))!;
+    expect(foot).toHaveAttribute('data-kanban-lane-statistic-partial');
+    expect(foot.textContent).toContain('Sum · Amount · loaded cards');
+    expect(foot.textContent).not.toContain('+');
+    cleanup();
+
+    // CONTROL: a board that drew everything says nothing of the kind.
+    const whole = await renderBoard({ summary: { type: 'sum', field: 'amount' } });
+    await waitFor(() => expect(footOf(laneNamed(whole.container, 'Open'))).not.toBeNull());
+    expect(footOf(laneNamed(whole.container, 'Open'))).not.toHaveAttribute('data-kanban-lane-statistic-partial');
+    expect(footOf(laneNamed(whole.container, 'Open'))!.textContent).not.toContain('loaded cards');
   });
 
   it('(c) draws no statistic for none, also over a summarizeField', async () => {
@@ -128,15 +149,11 @@ describe('the lane statistic and card toggles (objectstack#36370)', () => {
 
 describe('laneStatistic (objectstack#36370)', () => {
   const cards = [{ v: 1 }, { v: 2.5 }, { v: null }, { v: '4' }];
-  it('counts the cards, and sums, averages, takes the least and the most of the values', () => {
+  it('counts the cards and sums the values', () => {
     expect(laneStatistic(cards, 'v', 'count')).toBe(4);
     expect(laneStatistic(cards, 'v', 'sum')).toBe(7.5);
-    expect(laneStatistic(cards, 'v', 'avg')).toBe(2.5);
-    expect(laneStatistic(cards, 'v', 'min')).toBe(1);
-    expect(laneStatistic(cards, 'v', 'max')).toBe(4);
   });
-  it('answers null over no value, and over a value that is not a number', () => {
-    expect(laneStatistic([{ v: null }], 'v', 'avg')).toBeNull();
-    expect(laneStatistic([{ v: 'x' }], 'v', 'max')).toBeNull();
+  it('answers null for a sum over a value that is not a number', () => {
+    expect(laneStatistic([{ v: 'x' }], 'v', 'sum')).toBeNull();
   });
 });

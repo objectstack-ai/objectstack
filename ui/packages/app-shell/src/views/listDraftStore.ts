@@ -136,7 +136,8 @@ export function layKanbanDraft(
 /**
  * The board's draft after `patch` (objectstack#36370): the keys changed so
  * far with `patch` laid on, each key that is the view's own again (`own`, the
- * view's stored block) left out. `undefined` once nothing differs.
+ * view's block as the board draws it, `kanbanViewOptions`) left out.
+ * `undefined` once nothing differs.
  */
 export function nextKanbanDraft(
   current: KanbanDraft | undefined,

@@ -41,7 +41,13 @@ import { isEmptyValue } from '@object-ui/core';
  * the list footer's that read the lane's own cards (`ColumnSummary` in the
  * spec), `count` and a number field's `sum`, `avg`, `min` and `max`.
  */
-export type KanbanLaneStatisticType = 'count' | 'sum' | 'avg' | 'min' | 'max';
+/**
+ * objectstack#36370 — the lane statistics the board computes, the closed set
+ * the spec's `KanbanLaneSummarySchema` publishes (with `none`). An average, a
+ * minimum or a maximum over a lane that has loaded part of its cards is not
+ * even a bound, so those wait for a server-side lane read.
+ */
+export type KanbanLaneStatisticType = 'count' | 'sum';
 
 export interface KanbanColumnSummary {
   /** The record field each lane totals — the view's `summarizeField`. Empty for a count. */
@@ -122,31 +128,13 @@ export function sumLaneField(
 
 /**
  * objectstack#36370 — a lane's statistic over its cards: the count of cards,
- * or `type` over `field`'s values. The values are read as {@link sumLaneField}
- * reads them (an empty value is no value; a non-number makes the result
- * unknowable, `null`). `avg`, `min` and `max` over a lane with no value are
- * `null`: there is nothing to average.
+ * or the sum of `field` as {@link sumLaneField} reads it (`null` when a value
+ * is not a number).
  */
 export function laneStatistic(
   cards: ReadonlyArray<Record<string, unknown>>,
   field: string,
   type: KanbanLaneStatisticType,
 ): number | null {
-  if (type === 'count') return cards.length;
-  if (type === 'sum') return sumLaneField(cards, field);
-  const values: number[] = [];
-  for (const card of cards) {
-    const raw = card[field];
-    if (isEmptyValue(raw)) continue;
-    const value = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : Number.NaN;
-    if (!Number.isFinite(value)) return null;
-    values.push(value);
-  }
-  if (values.length === 0) return null;
-  if (type === 'min') return Math.min(...values);
-  if (type === 'max') return Math.max(...values);
-  const total = sumLaneField(cards, field);
-  if (total === null) return null;
-  const widest = Math.max(...values.map(fractionDigitsOf));
-  return Number((total / values.length).toFixed(Math.min(widest + 2, 20)));
+  return type === 'count' ? cards.length : sumLaneField(cards, field);
 }

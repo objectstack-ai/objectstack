@@ -700,9 +700,7 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
       ? t('grid.summary.count', { defaultValue: 'Count' })
       : type === 'sum'
         ? t('grid.summary.sum', { defaultValue: 'Sum' })
-        : type === 'avg'
-          ? t('grid.summary.avg', { defaultValue: 'Avg' })
-          : type;
+        : type;
   const summaryText = (value: ViewSettingsKanbanSummaryValue | null): string => {
     if (!value || value.type === 'none') return none;
     if (!value.field || value.type === 'count') return summaryWord(value.type);
@@ -971,6 +969,13 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
           onShow={write ? (value) => write([...shown.filter((v) => v !== value), value]) : undefined}
           searchable={kanban.lanes.length > 8}
           hiddenTitle={t('list.optionsMenu.kanbanHiddenLanes', { defaultValue: 'Hidden columns' })}
+          // The view's lanes pick lanes, not records (#28211): say where a
+          // hidden lane's cards go.
+          footer={(
+            <p className="px-3 pb-2 text-xs text-muted-foreground" data-testid="options-lanes-hidden-hint">
+              {t('list.optionsMenu.kanbanHiddenLanesHint', { defaultValue: 'Cards of a hidden column show under Uncategorized.' })}
+            </p>
+          )}
           typeIcons={false}
           testId="options-lanes"
           className="w-full"
@@ -999,11 +1004,13 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
     const options: Array<{ value: string; label: string; pick: ViewSettingsKanbanSummaryValue | null }> = [
       { value: 'none', label: none, pick: null },
       { value: 'count', label: summaryWord('count'), pick: { type: 'count' } },
-      ...summary.numberFields.flatMap((f) => (['sum', 'avg'] as const).map((type) => ({
-        value: `${type}:${f.value}`,
-        label: `${summaryWord(type)} · ${f.label}`,
-        pick: { type, field: f.value },
-      }))),
+      // objectstack#36370 — what the board computes (`KanbanLaneSummarySchema`):
+      // a count, or a number field's sum.
+      ...summary.numberFields.map((f) => ({
+        value: `sum:${f.value}`,
+        label: `${summaryWord('sum')} · ${f.label}`,
+        pick: { type: 'sum', field: f.value },
+      })),
     ];
     const current = !summary.value || summary.value.type === 'none'
       ? 'none'

@@ -1612,8 +1612,9 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
       : undefined;
   // objectstack#36370 — the view's lane statistic (`kanban.summary`), drawn at
   // each lane's foot; it takes the place of the `summarizeField` total, and
-  // `{ type: 'none' }` (or a calculation the board does not compute) draws
-  // neither. Read as primitives, so a host's new object of equal content
+  // `{ type: 'none' }` draws neither. The spec publishes only what the board
+  // computes (`KanbanLaneSummarySchema`: none, count, sum); a type outside it
+  // (an older draft) draws no statistic and keeps the `summarizeField` total. Read as primitives, so a host's new object of equal content
   // builds nothing anew.
   const statisticType = typeof schema.summary?.type === 'string' ? schema.summary.type : undefined;
   const statisticField = typeof schema.summary?.field === 'string' && schema.summary.field !== '' ? schema.summary.field : undefined;
@@ -1621,12 +1622,9 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
     const words: Record<KanbanLaneStatisticType, string> = {
       count: tt('grid.summary.count', 'Count'),
       sum: tt('grid.summary.sum', 'Sum'),
-      avg: tt('grid.summary.avg', 'Avg'),
-      min: tt('grid.summary.min', 'Min'),
-      max: tt('grid.summary.max', 'Max'),
     };
-    if (statisticType !== undefined) {
-      if (!(statisticType in words)) return null;
+    if (statisticType === 'none') return null;
+    if (statisticType === 'count' || statisticType === 'sum') {
       const type = statisticType as KanbanLaneStatisticType;
       if (type === 'count') {
         return {
