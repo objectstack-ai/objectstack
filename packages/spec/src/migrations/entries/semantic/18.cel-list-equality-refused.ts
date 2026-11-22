@@ -15,7 +15,9 @@ export const entry: SemanticMigration = {
     + 'between a read of a list-valued field (`multiselect`, `checkboxes`, `tags`, or a `select` / `radio` / '
     + '`lookup` / `user` / `file` / `image` field declared `multiple: true`) on `record` / `previous` — or, at a '
     + 'flow condition, its bare name, which the run binds to the trigger record\'s field — and a non-null '
-    + 'string, number or boolean literal, in either operand order',
+    + 'string, number or boolean literal, in either operand order. Not the shape: a name a comprehension macro '
+    + 'binds (`record.items.exists(labels, labels == \'a\')`, where `labels` is one item), nor a bare name a '
+    + 'declared flow variable holds',
   replacement:
     'Test membership with `in`, null-guarded because `\'a\' in null` faults: `record.labels != null && '
     + '\'frontend\' in record.labels` for `==`, and `record.labels == null || !(\'frontend\' in record.labels)` for '
@@ -26,7 +28,9 @@ export const entry: SemanticMigration = {
     'CEL compares the whole list with the scalar, so `[\'frontend\', \'qa\'] == \'frontend\'` is `false`, and so '
     + 'is `null == \'frontend\'`: the expression answers `false` (`true` for `!=`) on every row whatever the list '
     + 'holds, with no fault and no log line. A condition written that way never fires (or always does), and the '
-    + 'validator accepted it. Which test the author meant is not recorded, so no mechanical rewrite is lossless. '
+    + 'validator accepted it. Only a read that is the list field is refused: a name a comprehension macro binds '
+    + 'holds one item, and its comparison answers per row, so it is not. Which test the author meant is not '
+    + 'recorded, so no mechanical rewrite is lossless. '
     + 'Measured at the change: no producer of the shape in this repository\'s examples, its QA fixtures or HotCRM. '
     + 'ADR-0032 / ADR-0087.',
   acceptanceCriteria:

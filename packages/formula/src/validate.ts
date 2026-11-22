@@ -29,6 +29,7 @@ import {
   parseCelToAst,
   parseCelToAstWithReason,
   printCelAst,
+  COMPREHENSION_MACRO_NAMES,
   type CelAstNode,
   type FieldCelType,
 } from './cel-engine';
@@ -1485,14 +1486,20 @@ function scalarLiteralOf(node: unknown): string | undefined {
  * another list subject, which is a real whole-list comparison; and an operand
  * that is not a literal ({@link scalarLiteralOf}).
  *
- * The operand is read through `rootMemberOf`, the field-existence pass's own
- * member reader, so `record.f`, `record.?f`, `record['f']` and `record[?'f']`
- * are judged alike; the refusal renders the read as `<root>.<field>`. At a
- * `'flattened'` (flow) site a bare `f` is the trigger record's field too, as
- * the type pass reads it, and is rendered bare — except a name a flow
- * variable holds ({@link ExprSchemaHint.flowVariables}) or any bare name in a
- * flow whose nodes can bind names no reader sees
- * ({@link ExprSchemaHint.bareNamesUnproven}).
+ * The subject is read through `rootMemberOf`, the field-existence pass's own
+ * member reader, so `record.f` and `record['f']` (and `previous.…`) are
+ * judged alike, and the refusal renders the read as `<root>.<field>`. The
+ * optional spellings `record.?f` / `record[?'f']` never reach this pass
+ * against a scalar: CEL types them as an optional, and the comparison is
+ * refused as `invalid-cel` first. At a `'flattened'` (flow) site a bare `f`
+ * is the trigger record's field too, as the type pass reads it, and is
+ * rendered bare — except a name a flow variable holds
+ * ({@link ExprSchemaHint.flowVariables}), any bare name in a flow whose nodes
+ * can bind names no reader sees ({@link ExprSchemaHint.bareNamesUnproven}),
+ * and, at any site, a name a comprehension macro binds (`list.exists(f, …)`,
+ * {@link COMPREHENSION_MACRO_NAMES}) inside that macro's body, where it holds
+ * an item of the list and not the field (nor is `record.f` the field where a
+ * macro binds `record`).
  */
 function checkListEquality(
   ast: () => CelAstNode | null,
@@ -1514,33 +1521,49 @@ function checkListEquality(
   const bareSubjects = schema?.scope === 'flattened' && !schema.bareNamesUnproven
     ? new Set([...subjects].filter((name) => !(schema.flowVariables ?? []).includes(name)))
     : undefined;
-  const subjectOf = (node: unknown): { reference: string } | undefined => {
+  // `bound`: the names the enclosing comprehension macros bind here.
+  const subjectOf = (node: unknown, bound: ReadonlySet<string>): { reference: string } | undefined => {
     const read = rootMemberOf(node, FIELD_EXISTENCE_ROOTS);
-    if (read) return subjects.has(read.field) ? { reference: `${read.root}.${read.field}` } : undefined;
+    if (read) {
+      return subjects.has(read.field) && !bound.has(read.root) ? { reference: `${read.root}.${read.field}` } : undefined;
+    }
     const { op, args } = (node ?? {}) as { op?: unknown; args?: unknown };
-    return op === 'id' && typeof args === 'string' && bareSubjects?.has(args) ? { reference: args } : undefined;
+    return op === 'id' && typeof args === 'string' && bareSubjects?.has(args) && !bound.has(args)
+      ? { reference: args }
+      : undefined;
   };
-  const visited = new Set<object>();
-  const walk = (node: unknown): void => {
-    if (!node || typeof node !== 'object' || visited.has(node)) return;
-    visited.add(node);
+  const walk = (node: unknown, bound: ReadonlySet<string>): void => {
+    if (!node || typeof node !== 'object') return;
     if (Array.isArray(node)) {
-      for (const child of node) walk(child);
+      for (const child of node) walk(child, bound);
       return;
     }
     const { op, args } = node as { op?: unknown; args?: unknown };
+    // A comprehension macro (`list.exists(x, …)`): `rcall` [name, receiver,
+    // [variable, …body]]. The receiver is read outside the binding, the body
+    // inside it — the same reading the engine's date-text pass takes.
+    if (
+      op === 'rcall' && Array.isArray(args) && args.length === 3 && Array.isArray(args[2])
+      && COMPREHENSION_MACRO_NAMES.has(String(args[0]))
+    ) {
+      const [variable, ...body] = args[2] as unknown[];
+      const { op: vop, args: name } = (variable ?? {}) as { op?: unknown; args?: unknown };
+      walk(args[1], bound);
+      walk(body, vop === 'id' && typeof name === 'string' ? new Set([...bound, name]) : bound);
+      return;
+    }
     if ((op === '==' || op === '!=') && Array.isArray(args) && args.length === 2) {
       for (const side of [0, 1] as const) {
-        const read = subjectOf(args[side]);
+        const read = subjectOf(args[side], bound);
         const operand = read ? scalarLiteralOf(args[1 - side]) : undefined;
         if (!read || operand === undefined) continue;
         errors.push(listEqualityRefusal(source, read.reference, op, operand));
         break;
       }
     }
-    for (const value of Object.values(node as Record<string, unknown>)) walk(value);
+    for (const value of Object.values(node as Record<string, unknown>)) walk(value, bound);
   };
-  walk(tree);
+  walk(tree, new Set());
 }
 
 /** The `list-equality` refusal for `<reference> <operator> <operand>`. */

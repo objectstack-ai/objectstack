@@ -211,3 +211,55 @@ describe('list-equality — a bare name at a flattened (flow) site is the trigge
     for (const type of ['select', 'user']) expect(listEquality("f == 'a'", hintFor(type, false, 'flattened'))).toEqual([]);
   });
 });
+
+describe('list-equality — a name a comprehension macro binds is an item of the list, not the field', () => {
+  /** `labels` / `items` are list fields by type, `owners` by `multiple`. */
+  const hint = (scope: 'record' | 'flattened'): ExprSchemaHint => ({
+    objectName: 'probe',
+    fields: ['items', 'labels', 'owners'],
+    fieldTypes: { items: 'tags', labels: 'multiselect', owners: 'user' },
+    multiValueFields: ['owners'],
+    scope,
+  });
+  const refusedReferences = (source: string, scope: 'record' | 'flattened') =>
+    refusalsOf(source, hint(scope)).filter((e) => e.code === 'list-equality').map((e) => e.params.reference);
+
+  it('the premise: the bound name holds one item, so the comparison answers per row', () => {
+    const run = (items: unknown) =>
+      celEngine.evaluate({ dialect: 'cel', source: "record.items.exists(labels, labels == 'a')" }, { record: { items } });
+    expect(run(['a', 'b'])).toEqual({ ok: true, value: true });
+    expect(run(['b'])).toEqual({ ok: true, value: false });
+  });
+
+  for (const source of [
+    "record.items.exists(labels, labels == 'a')",
+    "record.items.all(owners, owners != 'a')",
+    "record.items.exists_one(labels, 'a' == labels)",
+    "record.items.filter(owners, owners == 'a').size() > 0",
+    "record.items.map(labels, labels == 'a').size() > 0",
+    "record.items.exists(x, record.items.exists(labels, labels == x))",
+  ]) {
+    it(`flattened: accepts \`${source}\``, () => {
+      expect(refusedReferences(source, 'flattened')).toEqual([]);
+    });
+  }
+
+  it('flattened: the same name read outside the macro is still the field, and refused', () => {
+    expect(refusedReferences("record.items.exists(labels, labels == 'a') && labels == 'b'", 'flattened')).toEqual(['labels']);
+    expect(refusedReferences("labels != 'b' || record.items.all(labels, labels != 'a')", 'flattened')).toEqual(['labels']);
+  });
+
+  it('flattened: a body reading a name the macro does not bind still judges it', () => {
+    expect(refusedReferences("record.items.exists(x, labels == 'a')", 'flattened')).toEqual(['labels']);
+  });
+
+  it('a record. read inside a macro body is still the field, at either scope', () => {
+    for (const scope of ['record', 'flattened'] as const) {
+      expect(refusedReferences("record.items.exists(labels, record.labels == 'a')", scope)).toEqual(['record.labels']);
+    }
+  });
+
+  it('record scope: a bound name named like a field is accepted (bare names are no field there)', () => {
+    expect(refusedReferences("record.items.exists(labels, labels == 'a')", 'record')).toEqual([]);
+  });
+});
