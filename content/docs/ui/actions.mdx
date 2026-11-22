@@ -661,17 +661,16 @@ default for a row-scoped action on a `private` object is to refuse.
 
 **A selection is read the same way.** A record-less call that carries
 `params._selectedIds` (an aggregate bulk dispatch) has every id in it read in
-the caller's own scope before the action runs, as a row of the object the
-action is called on, with the same read the per-record door makes for its
-`recordId`.
+the caller's own scope before the action runs, as a row of the object the call
+names, with the same read the per-record door makes for its `recordId`.
 If any id does not come back, the **whole call** is refused with
 `404 RECORD_NOT_FOUND`, the per-record door's own answer; no id is dropped, the
 body or flow never starts, and nothing is written. The selection must be a list
 of record ids (strings or numbers), at most 5000 of them, on an action called on
 an object; anything else is refused `400 VALIDATION_FAILED`. So
-`ctx.params._selectedIds` only ever holds ids of rows **of the action's object**
-that this caller can read. Nothing is said about those ids as rows of any other
-object, and your body still decides what it may *do* to them.
+`ctx.params._selectedIds` only ever holds ids of rows of the object the call
+names (`ctx.params.objectName`) that this caller can read — your body still
+decides what it may *do* to them.
 
 Three kinds of call are not read, because none of them builds an elevated
 context on the ids: a declarative `operation: 'update'` action (it writes as the

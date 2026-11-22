@@ -9,7 +9,7 @@ Metadata-protocol: none
 
 <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is the answer the action doors (REST `POST /api/v1/actions/...`, MCP `run_action`, a host's `dispatchAction`) give a call whose `params._selectedIds` or whose param bag a param-less action does not accept: no stored row, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
 
-The rule: a call names records by id only when the caller can read them. The per-record door already reads its `recordId` in the caller's own scope; a record-less call that carries a selection (`params._selectedIds`, the aggregate bulk dispatch) now has every id read the same way — with the per-record door's own read, as a row of the object the action is called on — before a script body or a flow starts.
+The rule: a call names records by id only when the caller can read them. The per-record door already reads its `recordId` in the caller's own scope; a record-less call that carries a selection (`params._selectedIds`, the aggregate bulk dispatch) now has every id read the same way — with the per-record door's own read, as a row of the object the call names — before a script body or a flow starts.
 
 **BREAKING** for a caller of a `type: 'script'` or `type: 'flow'` action whose call carries `params._selectedIds`, and for a caller of a param-less handler action that sends a near-miss spelling of a built-in param.
 
