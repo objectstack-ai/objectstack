@@ -11,7 +11,7 @@
 import type { ColumnSummary } from '@objectstack/spec/ui';
 import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore, lazy, Suspense, type ReactNode } from 'react';
 import { DENSITY_MODE_TO_ROW_HEIGHT, columnIdentity, normalizeListViewSchema, servedPackageId, type FilterTokenScope } from '@object-ui/core';
-import { listDraftPreference, type useListDraft } from './listDraftStore.js';
+import { layKanbanDraft, listDraftPreference, nextKanbanDraft, type useListDraft } from './listDraftStore.js';
 import { columnSummaryOf, columnsWithSummaries, declaredColumnFields } from './columnSummaryWrite.js';
 import type { useObjectListLayout } from './listLayoutStore.js';
 import type { ListViewPreference } from './listDraftStore.js';
@@ -990,7 +990,11 @@ export function useObjectViewListRenderer({
             // outranks what this page relays (it never did through the bag).
             // The lane key is the spec's `groupByField`, not the legacy
             // `groupField` this used to write. See `kanbanViewOptions`.
-            kanban: holdBlock('kanban', kanbanViewOptions(viewDef, objectDef)),
+            //
+            // objectstack#36370 — with the board's settings the list's draft
+            // holds laid over it (`layKanbanDraft`): a change in 视图设置 or in
+            // a lane's menu draws at once and is kept by Save alone.
+            kanban: holdBlock('kanban', layKanbanDraft(kanbanViewOptions(viewDef, objectDef), listDraft.draft.kanban)),
             // The calendar config the view DECLARED, or `undefined` — never
             // an invented field name (objectui#7029). With no block,
             // ListView's capability gate stops offering the
@@ -1113,6 +1117,12 @@ export function useObjectViewListRenderer({
                 // picks are the list's draft; picking the view's own again
                 // drops that part.
                 onViewChange={(view: string) => listDraft.patch({ viewType: view === listSchema.viewType ? undefined : view })}
+                // objectstack#36370 — a board's settings are the list's draft
+                // too: each changed key of the view's kanban block, dropped
+                // again once it is the view's own.
+                onKanbanChange={(patch: Record<string, unknown>) => listDraft.patch({
+                    kanban: nextKanbanDraft(listDraft.draft.kanban, patch, viewDef.kanban),
+                })}
                 onRowColorChange={(rowColor: { field: string; colors?: Record<string, string> } | null) => listDraft.patch({
                     rowColor: (rowColor?.field ?? '') === (viewOwnRowColor?.field ?? '') ? undefined : rowColor,
                 })}

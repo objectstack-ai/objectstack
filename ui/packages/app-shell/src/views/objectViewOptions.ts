@@ -341,6 +341,12 @@ export function kanbanViewOptions(viewDef: any, objectDef: any): Record<string, 
         detectStatusField(objectDef as any) ||
         undefined;
     const summarizeField = viewDef?.kanban?.summarizeField;
+    // objectstack#36370 — the lanes the view draws, in its order (objectstack#28211's
+    // `kanban.lanes`). `ListView`'s board branch has read them since that card;
+    // this relay did not carry them, so a Console board drew every option.
+    const lanes = Array.isArray(viewDef?.kanban?.lanes) && viewDef.kanban.lanes.length > 0
+        ? viewDef.kanban.lanes
+        : undefined;
     return {
         ...(lane ? { groupByField: lane } : {}),
         titleField: viewDef?.kanban?.titleField || 'name',
@@ -348,7 +354,13 @@ export function kanbanViewOptions(viewDef: any, objectDef: any): Record<string, 
         // bag refuses the legacy `cardFields` this used to write, and `ListView`
         // reads `columns` for the cards, so the board is unchanged.
         columns: viewDef?.kanban?.columns,
+        ...(lanes ? { lanes } : {}),
         ...(summarizeField ? { summarizeField } : {}),
+        // objectstack#36370 — the lane statistic and the two card toggles,
+        // each only when the view declares it (absent keeps the board as it was).
+        ...(viewDef?.kanban?.summary && typeof viewDef.kanban.summary === 'object' ? { summary: viewDef.kanban.summary } : {}),
+        ...(typeof viewDef?.kanban?.showFieldLabels === 'boolean' ? { showFieldLabels: viewDef.kanban.showFieldLabels } : {}),
+        ...(typeof viewDef?.kanban?.hideEmptyFields === 'boolean' ? { hideEmptyFields: viewDef.kanban.hideEmptyFields } : {}),
     };
 }
 

@@ -39,7 +39,7 @@ import { foldFilterGroupToSpecRules, type FilterFoldRefusal } from './viewFilter
 import { buildViewConfigSaveBody } from './objectViewTabs.js';
 import { columnsWithSummaries, type DraftColumnSummaries } from './columnSummaryWrite.js';
 import type { ListSortRule, ListUrlState } from './userFilterUrlState.js';
-import type { ListViewPreference } from './listDraftStore.js';
+import { layKanbanDraft, type KanbanDraft, type ListViewPreference } from './listDraftStore.js';
 
 /** The object a personal view is a row of. */
 export const PERSONAL_VIEW_OBJECT = 'sys_personal_view';
@@ -182,8 +182,15 @@ export interface PersonalViewListState {
    * draft holds (`ListDraft.viewType` / `rowColor`). `viewType` retypes the
    * body; `rowColor: null` is "none" over a view that colours its rows. An
    * absent part is the view's own.
+   *
+   * objectstack#36370 — and a board's changed `kanban` keys
+   * (`ListDraft.kanban`), laid over the view's block.
    */
-  display?: { viewType?: string; rowColor?: { field: string; colors?: Record<string, string> } | null };
+  display?: {
+    viewType?: string;
+    rowColor?: { field: string; colors?: Record<string, string> } | null;
+    kanban?: KanbanDraft;
+  };
 }
 
 /** The column a `columns` entry names: a bare name, or an entry's `field`. */
@@ -301,6 +308,10 @@ export function layListStateOverView(
       const names = (columns ?? []).map(columnName).filter((n): n is string => !!n);
       if (names.length > 0) draft[display.viewType] = { ...block, [mirrorKey]: names };
     }
+  }
+  if (display?.kanban) {
+    const base = isRecord(draft.kanban) ? (draft.kanban as Record<string, unknown>) : undefined;
+    draft.kanban = layKanbanDraft(base, display.kanban);
   }
   return { ok: true, view: draft };
 }

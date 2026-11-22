@@ -738,6 +738,8 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     const draftDisplay = {
         ...(listDraft.draft.viewType ? { viewType: listDraft.draft.viewType } : {}),
         ...(listDraft.draft.rowColor !== undefined ? { rowColor: listDraft.draft.rowColor } : {}),
+        // objectstack#36370 — and a board's changed settings.
+        ...(listDraft.draft.kanban ? { kanban: listDraft.draft.kanban } : {}),
     };
     // objectstack#25992 slice 8: the list's toolbar state in the URL (seed, write-back,
     // "Reset view") moved to `./objectViewListUrlState.ts`.

@@ -8,8 +8,9 @@
  *
  * What a draft holds: the sort, the Filter panel's group, the grouping, the
  * search term, the columns shown (hidden ones, added ones), the column order,
- * the footer's calculations (objectstack#36194) and the Display panel's layout
- * and row colour. What it never holds: the column widths, the row height and
+ * the footer's calculations (objectstack#36194), the Display panel's layout
+ * and row colour, and a board's settings (objectstack#36370: its lane field,
+ * lanes, card fields, card toggles and lane statistic). What it never holds: the column widths, the row height and
  * the view tab order, which are the reader's layout in this browser
  * (`./listLayoutStore.ts`).
  *
@@ -107,6 +108,50 @@ export interface ListDraft {
    * from the view are held; picking the view's own again drops the column.
    */
   summaries?: DraftColumnSummaries;
+  /**
+   * objectstack#36370 — the keys of the view's `kanban` block the reader
+   * changed, each differing from the view's own; `null` = the key leaves the
+   * block (a lane field picked anew draws every lane: `lanes: null`). Laid
+   * over a block by {@link layKanbanDraft}.
+   */
+  kanban?: KanbanDraft;
+}
+
+/** objectstack#36370 — a board's changed `kanban` keys (`null` = the key is dropped). */
+export type KanbanDraft = Readonly<Record<string, unknown>>;
+
+/** A `kanban` block with the draft's changed keys laid over it (`null` drops a key). */
+export function layKanbanDraft(
+  block: Readonly<Record<string, unknown>> | undefined,
+  draft: KanbanDraft | undefined,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...(block ?? {}) };
+  for (const [key, value] of Object.entries(draft ?? {})) {
+    if (value === null || value === undefined) delete out[key];
+    else out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * The board's draft after `patch` (objectstack#36370): the keys changed so
+ * far with `patch` laid on, each key that is the view's own again (`own`, the
+ * view's stored block) left out. `undefined` once nothing differs.
+ */
+export function nextKanbanDraft(
+  current: KanbanDraft | undefined,
+  patch: Readonly<Record<string, unknown>>,
+  own: Readonly<Record<string, unknown>> | undefined,
+): KanbanDraft | undefined {
+  const merged: Record<string, unknown> = { ...(current ?? {}), ...patch };
+  for (const [key, value] of Object.entries(merged)) {
+    const ownValue = own?.[key];
+    const sameAsOwn = value === null || value === undefined
+      ? ownValue === undefined
+      : JSON.stringify(value) === JSON.stringify(ownValue);
+    if (sameAsOwn) delete merged[key];
+  }
+  return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
 /** A patch: a part set to `undefined` is dropped back to the view's own. */
@@ -164,7 +209,7 @@ function normalizePart(key: string, value: unknown): unknown {
     const conditions = (value as { conditions?: unknown } | null | undefined)?.conditions;
     return Array.isArray(conditions) && conditions.length > 0 ? value : undefined;
   }
-  if (key === 'summaries') {
+  if (key === 'summaries' || key === 'kanban') {
     return value && typeof value === 'object' && Object.keys(value).length > 0 ? value : undefined;
   }
   return value;
