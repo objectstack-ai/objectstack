@@ -40,15 +40,15 @@ A phone and the drawer draw the standard page (steps 1–3); no key keeps a full
 there, only a page named in the URL (a print page) draws everywhere. The standard page
 draws no `record_section` action: one that must show there also lists `record_more`.
 
-**5 · The drawer, unless the object declares `page`.** A clicked row opens the
-record in the drawer (always the standard page), which expands to the full page;
-`navigation: { mode: 'page' }` on the object's list view opens it as the full page;
+**5 · On an object's list the name opens the page, its hover icon the drawer.**
+`navigation.mode` is deprecated there: `drawer`, `page`, `new_window` change
+nothing, so omit it; `none` still means rows open nothing (prefer
+`preventNavigation: true`); a page block's `navigation` honours every value;
 `modal` / `split` / `popover` are refused with their fix. A phone always pages.
 
 **6 · The reader's own choices are not metadata.** ⛔ Never author these: the
-Display menu's **Open records**, the
-tabs' order and hidden set (per user × object), the details column's dragged width,
-the drawer's dragged width and ⤢. On `navigation` only the `size`
+tabs' order and hidden set (per user × object), the details column's and the
+drawer's dragged widths. On `navigation` only the `size`
 bucket (`sm`…`full`) nudges the drawer's starting width.
 
 <!-- os:check -->

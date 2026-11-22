@@ -669,7 +669,8 @@ export type {
 // which runs no `defineStack`. [#27478] A field group's `relatedList` must
 // name body tables only (`related-list-group-not-body`). [#35897 · #35899] A
 // `relatedLists` object entry's columns must be child fields
-// (`related-list-column-unknown`, error); a built-in tab entry that draws
+// (`related-list-column-unknown`, error), and since #35901 an object
+// extension's list placement's columns too; a built-in tab entry that draws
 // nothing warns (`related-list-attachments-off`, `related-list-stream-part`).
 export {
   validateRelatedListRefs,
@@ -679,6 +680,18 @@ export {
   RELATED_LIST_ATTACHMENTS_OFF,
   RELATED_LIST_STREAM_PART,
 } from './validate-related-list-refs.js';
+
+// [#35901] Where an object extension's `place` will not land as written:
+// the extended object declares no `relatedLists` / `fieldGroups`
+// (`extension-placement-not-applied`), or an anchor it does not have
+// (`extension-placement-anchor-missing`). Warnings; the boot log names the
+// same placements, and is the channel for a target in another package.
+export {
+  validateExtensionPlacement,
+  EXTENSION_PLACEMENT_NOT_APPLIED,
+  EXTENSION_PLACEMENT_ANCHOR_MISSING,
+} from './validate-extension-placement.js';
+export type { ExtensionPlacementFinding } from './validate-extension-placement.js';
 export type {
   RelatedListRefFinding,
   RelatedListRefOptions,

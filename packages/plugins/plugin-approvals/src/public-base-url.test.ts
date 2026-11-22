@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { resolvePublicBaseUrl } from './public-base-url.js';
+import { consolePageLink, resolvePublicBaseUrl } from './public-base-url.js';
 
 /**
  * [#30509] The origin approval links are built under: the option, else
@@ -40,5 +40,44 @@ describe('resolvePublicBaseUrl', () => {
       expect(got).toMatchObject({ url: '', source: 'none' });
       expect(got.problem).toMatch(/OS_BASE_URL .* not an absolute http\(s\) URL/);
     }
+  });
+});
+
+/**
+ * [#34862] A Console page's link: the approval links' base, the Console's mount
+ * read from the auth service's composer, then the page.
+ */
+describe('consolePageLink', () => {
+  const at = (base: string, uiBasePath: string) => (path: string) => `${base}${uiBasePath.replace(/\/$/, '')}${path}`;
+
+  it('takes the mount from the composer and keeps its own origin', () => {
+    expect(consolePageLink('https://app.example.test', at('https://app.example.test', '/_console'), '/system/approvals'))
+      .toBe('https://app.example.test/_console/system/approvals');
+    // The composer's origin is not taken: only its path is.
+    expect(consolePageLink('https://mail.example.test', at('http://localhost:3000', '/_console'), '/system/approvals'))
+      .toBe('https://mail.example.test/_console/system/approvals');
+  });
+
+  it('a Console served at the root has no mount', () => {
+    expect(consolePageLink('https://app.example.test', at('https://app.example.test', '/'), '/system/approvals'))
+      .toBe('https://app.example.test/system/approvals');
+  });
+
+  it('a base path the two share is not prefixed twice', () => {
+    expect(consolePageLink('https://app.example.test/crm', at('https://app.example.test/crm', '/_console'), '/system/approvals'))
+      .toBe('https://app.example.test/crm/_console/system/approvals');
+  });
+
+  it('with no base the link is relative, still under the mount', () => {
+    expect(consolePageLink('', at('http://localhost:3000', '/_console'), '/system/approvals'))
+      .toBe('/_console/system/approvals');
+  });
+
+  it('no composer, one that answers nothing, one that throws, or one that answers no URL: no mount', () => {
+    const page = '/system/approvals';
+    expect(consolePageLink('https://app.example.test', undefined, page)).toBe(`https://app.example.test${page}`);
+    expect(consolePageLink('https://app.example.test', () => undefined, page)).toBe(`https://app.example.test${page}`);
+    expect(consolePageLink('https://app.example.test', () => { throw new Error('no auth'); }, page)).toBe(`https://app.example.test${page}`);
+    expect(consolePageLink('https://app.example.test', () => '/_console/', page)).toBe(`https://app.example.test${page}`);
   });
 });

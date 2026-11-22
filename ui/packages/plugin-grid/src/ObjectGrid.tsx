@@ -1381,6 +1381,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         describeCell: (row, columnKey) => {
           const fieldDef = objectFields?.[columnKey];
           const recordId = rowRecordId(row);
+          // objectstack#35795 — read at call time, not from this render: an
+          // edit that waited for the verdict is re-asked before the render
+          // that publishes it.
+          const recordUpdate = recordVerdict.current(recordId, 'update');
           const kind = cellReadOnlyKind({
             fieldDef,
             fieldWritable: !objectName || resolveFieldAffordance('listInlineEdit', perms, objectName, columnKey),
@@ -1388,12 +1392,20 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
             objectEditable: objectInlineEditable,
             canUpdate: resolveAffordanceGrant('listInlineEdit', affordanceSource),
             approvalLocked: approvalLocks.isLocked(recordId, row),
-            recordUpdate: recordVerdict(recordId, 'update'),
+            recordUpdate,
           });
+          // objectstack#35795 — while the row's lock or `update` verdict is on
+          // its way, an edit waits for it rather than opening an editor the
+          // answer may refuse.
+          const reads = kind ? [] : [
+            approvalLocks.settling(recordId),
+            recordUpdate === undefined ? recordVerdict.settling() : null,
+          ].filter((read): read is Promise<void> => read !== null);
           const fromText = choiceFromText(fieldDef);
           const type = fieldDef?.type;
           return {
             readOnlyReason: kind ? readOnlyReasonText(kind, t) : null,
+            ...(reads.length > 0 ? { checking: { text: t('grid.readOnlyReason.checking'), settled: Promise.all(reads) } } : {}),
             typing: inlineTyping(type),
             ...(type === 'boolean' || type === 'toggle' ? { toggles: true } : {}),
             // objectstack#36023 — a rating is set in place: digits, or a click on a star.
@@ -1408,7 +1420,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         },
         onCellSelect: (row) => {
           recordVerdict.requestVerdicts();
-          approvalLocks.probe(rowRecordId(row));
+          // objectstack#35795 — one lock read for the page, not one per row selected.
+          approvalLocks.probe([rowRecordId(row), ...pageRecordIds]);
         },
         // objectstack#35685 — a move of a state-machine field is confirmed
         // before anything is written (`./objectGridStateConfirm`). A move that
@@ -4222,6 +4235,32 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
             (rowOpensRecord !== false || cardSelecting) && 'cursor-pointer hover:bg-accent/50',
             cardSelected && 'border-primary bg-primary/5',
           )}
+          // objectstack#36044 — while a selection is open the card owns every tap
+          // inside it: a tap on a link, a referenced record's chip, an image or
+          // a button the card draws ticks or unticks the card and opens nothing,
+          // as phone apps do in selection mode. The cells stop their own clicks
+          // from reaching the card, so the card takes them first, in the capture
+          // phase. The row's 「⋮」 opens on pointer-down, which the card cancels
+          // first. The click that ends the long press that started the selection
+          // is swallowed here too, whatever it landed on. A node a portal draws
+          // (an open menu) is not the card's.
+          onPointerDownCapture={(event) => {
+            if (!cardSelecting || event.target === event.currentTarget) return;
+            if (!event.currentTarget.contains(event.target as Node)) return;
+            event.preventDefault();
+          }}
+          onClickCapture={(event) => {
+            const press = longPress.current;
+            if (!cardSelecting && !press.fired) return;
+            if (!event.currentTarget.contains(event.target as Node)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            if (press.fired) {
+              press.fired = false;
+              return;
+            }
+            toggleCardRow(row);
+          }}
           onPointerDown={(event) => {
             const press = longPress.current;
             // A fresh press never inherits the last one's flag: a long press
