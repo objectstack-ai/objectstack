@@ -42,7 +42,13 @@ import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { emitMetadataRefresh } from '../assistant/assistantBus.js';
 import { slugify } from './metadata-admin/createDerive.js';
 import { isDraftVersionConflict } from './metadata-admin/DraftConflictDialog.js';
-import { ensureCustomizationPackage, fetchListedPackageManifests } from './studio-design/packages-io.js';
+import {
+  ensureCustomizationPackage,
+  fetchListedPackageManifests,
+  listedPackageVersion,
+  type ListedPackageManifest,
+} from './studio-design/packages-io.js';
+import { overrideDraftBody } from './studio-design/StudioCustomizeControls.js';
 
 /** The runtime-editable artifact types ADR-0034 unifies. `page` (a record
  *  `PageSchema`) joins the original three (#1541): a record page is edited in
@@ -536,9 +542,16 @@ export async function saveAndPublishRuntimeMetadata(
   name: string,
   body: any,
   ctx: RuntimePersistCtx,
+  /**
+   * objectstack#36372 — the package the draft is written into and published
+   * from (`?package=` on all three writes). Omitted, every write names no
+   * package and addresses the name's one holding package, as before.
+   */
+  options: { packageId?: string } = {},
 ): Promise<SaveAndPublishOutcome> {
+  const bound = options.packageId ? { packageId: options.packageId } : {};
   try {
-    await ctx.metadataClient.save(type, name, body, { mode: 'draft', ifNoneMatch: '*' });
+    await ctx.metadataClient.save(type, name, body, { mode: 'draft', ifNoneMatch: '*', ...bound });
   } catch (err) {
     if (isDraftVersionConflict(err)) {
       return 'pending-draft';
@@ -546,10 +559,12 @@ export async function saveAndPublishRuntimeMetadata(
     throw err;
   }
   try {
-    await ctx.metadataClient.publish(type, name);
+    await (options.packageId
+      ? ctx.metadataClient.publish(type, name, bound)
+      : ctx.metadataClient.publish(type, name));
   } catch (err) {
     try {
-      await ctx.metadataClient.reset(type, name, { state: 'draft' });
+      await ctx.metadataClient.reset(type, name, { state: 'draft', ...bound });
     } catch (discardErr) {
       // The draft this call wrote stays pending: the view settings' draft
       // bar shows it, and its Discard removes it.
@@ -562,4 +577,104 @@ export async function saveAndPublishRuntimeMetadata(
   invalidateViewCaches(type, name, ctx);
   announceDraftLedgerWrite();
   return 'published';
+}
+
+/**
+ * objectstack#36372 — where a dashboard edited on its own page is saved: the
+ * package that owns it when that package is writable, else the app's
+ * customization package `<base>.custom` (ADR-0146 D2/D3), asked of the ensure
+ * door, the layer Studio's Customize writes. `refused` when neither can be
+ * had (the owner is not listed, the ensure door refuses, or the pair it
+ * answers is not writable): the editor then offers no save.
+ *
+ * `unbound` is a dashboard that names no package: it is saved where it lives,
+ * naming none.
+ */
+export type DashboardSaveTarget =
+  | { kind: 'unbound' }
+  | { kind: 'package'; packageId: string }
+  | { kind: 'customization'; packageId: string; base: string; basedOn: string | null }
+  | { kind: 'refused'; reason: string };
+
+/** The two package doors {@link resolveDashboardSaveTarget} asks. */
+export interface DashboardSaveTargetDoors {
+  listPackages: () => Promise<ReadonlyMap<string, Pick<ListedPackageManifest, 'writable' | 'manifest'>>>;
+  ensureCustomization: (basePackageId: string) => Promise<{ packageId: string; writable: boolean }>;
+}
+
+const DASHBOARD_TARGET_DOORS: DashboardSaveTargetDoors = {
+  listPackages: fetchListedPackageManifests,
+  ensureCustomization: ensureCustomizationPackage,
+};
+
+/** {@link DashboardSaveTarget} for a dashboard `ownerPackageId` owns. */
+export async function resolveDashboardSaveTarget(
+  ownerPackageId: string | null | undefined,
+  doors: DashboardSaveTargetDoors = DASHBOARD_TARGET_DOORS,
+): Promise<DashboardSaveTarget> {
+  if (!ownerPackageId) return { kind: 'unbound' };
+  let listed: ReadonlyMap<string, Pick<ListedPackageManifest, 'writable' | 'manifest'>>;
+  try {
+    listed = await doors.listPackages();
+  } catch (err) {
+    return { kind: 'refused', reason: err instanceof Error ? err.message : String(err) };
+  }
+  const owner = listed.get(ownerPackageId);
+  if (!owner) return { kind: 'refused', reason: `The package '${ownerPackageId}' is not listed.` };
+  if (owner.writable) return { kind: 'package', packageId: ownerPackageId };
+  try {
+    const pair = await doors.ensureCustomization(ownerPackageId);
+    if (!pair.writable) return { kind: 'refused', reason: `The customization package '${pair.packageId}' is not writable.` };
+    return {
+      kind: 'customization',
+      packageId: pair.packageId,
+      base: ownerPackageId,
+      basedOn: listedPackageVersion(listed as ReadonlyMap<string, ListedPackageManifest>, ownerPackageId),
+    };
+  } catch (err) {
+    return { kind: 'refused', reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * The body an in-page dashboard save writes: `doc` without its top-level `_`
+ * keys (the read's decorations belong to the served item), and, into a
+ * customization package, declaring the override of its base
+ * (`overrideDraftBody`, the body Studio's Customize writes). `null` when an
+ * override is owed and there is no version to declare it at.
+ */
+export function dashboardSaveBody(
+  doc: Record<string, unknown>,
+  target: Exclude<DashboardSaveTarget, { kind: 'refused' }>,
+): Record<string, unknown> | null {
+  if (target.kind === 'customization') return overrideDraftBody(doc, target.base, target.basedOn);
+  const body: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(doc)) {
+    if (!key.startsWith('_')) body[key] = value;
+  }
+  return body;
+}
+
+/**
+ * objectstack#36372 — save a dashboard edited on its page so everyone sees it
+ * at once: staged as its draft in `target`'s package and published from it in
+ * the same act ({@link saveAndPublishRuntimeMetadata}, the confirmed-save door
+ * of ruling record 7058616478). One item's publish: no package-wide
+ * publish-drafts. Over a draft already pending there nothing is written
+ * (`'pending-draft'`), so a Studio draft is never published on its saver's
+ * behalf.
+ */
+export async function saveDashboardInPlace(
+  name: string,
+  body: Record<string, unknown>,
+  target: Exclude<DashboardSaveTarget, { kind: 'refused' }>,
+  ctx: RuntimePersistCtx,
+): Promise<SaveAndPublishOutcome> {
+  return saveAndPublishRuntimeMetadata(
+    'dashboard',
+    name,
+    body,
+    ctx,
+    target.kind === 'unbound' ? {} : { packageId: target.packageId },
+  );
 }

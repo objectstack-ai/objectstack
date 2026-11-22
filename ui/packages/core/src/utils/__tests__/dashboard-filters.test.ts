@@ -865,9 +865,9 @@ describe('dashboardFiltersNotApplied agrees with buildWidgetScopedFilter', () =>
   const ownerDef: DashboardFilterDef = { name: 'owner', field: 'owner', type: 'text' };
   const stageDef: DashboardFilterDef = { name: 'stage', field: 'stage', type: 'text', targetWidgets: ['w_listed'] };
   const defs = [ownerDef, stageDef];
-  const widgets = [
+  const widgets: Array<Parameters<typeof dashboardFiltersNotApplied>[0]> = [
     { id: 'w_default' },
-    { id: 'w_opt_out', filterBindings: { owner: false as const } },
+    { id: 'w_opt_out', filterBindings: { owner: false } },
     { id: 'w_rebound', filterBindings: { owner: 'account_owner' } },
     { id: 'w_listed' },
     { id: 'w_explicit_over_list', filterBindings: { stage: 'pipeline_stage' } },
