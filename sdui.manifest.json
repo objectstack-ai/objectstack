@@ -141,17 +141,12 @@
         {
           "name": "editable",
           "type": "boolean",
-          "description": "Enable inline cell editing (double-click or Enter opens a cell)."
-        },
-        {
-          "name": "singleClickEdit",
-          "type": "boolean",
-          "description": "With `editable`, a single click opens the cell instead of a double-click. Has no effect on a non-editable grid."
+          "description": "Enable inline cell editing where the viewer may edit. A click selects a cell; double-click, Enter, F2 or typing opens its editor, Esc cancels, and each committed cell is saved on its own. A grid that renders read-only keeps click-to-open."
         },
         {
           "name": "keyboardNavigation",
           "type": "boolean",
-          "description": "Arrow-key cell navigation on the WAI-ARIA grid pattern: the grid's data cells take one place in the Tab order instead of one each (a link or button inside a cell keeps its own), and the arrow keys move focus between them (Home / End to the ends of the row, Ctrl+Home / Ctrl+End to the ends of the page). Enter still opens an editable cell, and an edit ended with Enter or Escape returns focus to its cell. Defaults to on when the grid renders editable; a read-only grid keeps every cell its own Tab stop unless this is `true`, and `false` turns it off on an editable grid."
+          "description": "Arrow-key cell navigation on the WAI-ARIA grid pattern: the grid's data cells take one place in the Tab order instead of one each (a link or button inside a cell keeps its own), and the arrow keys move focus between them (Home / End to the ends of the row, Ctrl+Home / Ctrl+End to the ends of the page). Enter still opens an editable cell, and an edit ended with Enter or Escape returns focus to its cell. Always on when the grid renders editable, because that grid selects a cell first and moves the selection with these keys; a read-only grid keeps every cell its own Tab stop unless this is `true`."
         },
         {
           "name": "navigation",
