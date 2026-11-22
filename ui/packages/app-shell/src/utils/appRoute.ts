@@ -195,6 +195,51 @@ export function resolveHostAppSegment(
 }
 
 /**
+ * Which app hosts the Approvals Inbox, and an approval request, opened with no
+ * source app: Home's 我的工作, the bell outside an app, a notification, the
+ * server's e-mail link (`/system/approvals?request=ID`, forwarded through
+ * `/apps/setup/system/approvals`). objectstack#35505, ruling option A: such an
+ * open stays inside an app and no longer lands in Setup by default.
+ *
+ * The ruling's order is the object's own app, then the current app, then the
+ * last used app, then the first app. The first step needs the request's record,
+ * so the request page asks it (`objectHostAppSegment`, the inbox's deep link);
+ * this answers the other three, the app the inbox opens in and the request
+ * falls back to:
+ *   1. `current` — the app the user is in (`currentAppName`, the route's
+ *      segment) — when it is still one they can open;
+ *   2. `last` — the app they last had open (`LastAppProvider`'s `ui.app.last`,
+ *      kept per person across sessions), when it still is;
+ *   3. the first app they can open, then `resolveHostAppSegment`'s own last
+ *      resorts.
+ * Setup is never skipped: when it is the current or the last app, the request
+ * stays there (the ruling's agreed default).
+ */
+export function resolveApprovalsHostSegment(
+  apps: readonly AppRouteLike[] | null | undefined,
+  current: string | null | undefined,
+  last: string | null | undefined,
+): string {
+  const active = filterActiveApps(apps);
+  const preferred = matchAppBySegment(active, current)
+    ? current
+    : matchAppBySegment(active, last)
+      ? last
+      : (current ?? last);
+  return resolveHostAppSegment(apps, preferred);
+}
+
+/**
+ * Whether a notification's app-relative `action_url` opens the Approvals Inbox
+ * (`/system/approvals`, with or without `?request=ID`): the link the approvals
+ * service writes on every request notice. Such a link is hosted by
+ * {@link resolveApprovalsHostSegment}, not by the generic host.
+ */
+export function isApprovalsInboxLink(actionUrl: string | null | undefined): boolean {
+  return /^\/?system\/approvals(?:[?#]|\/?$)/.test((actionUrl ?? '').trim());
+}
+
+/**
  * App → Studio reverse bridge (ADR-0080). Resolves a running app to its owning
  * package's design surface (`/studio/:packageId/data`), or `null` when there is
  * nothing to open:

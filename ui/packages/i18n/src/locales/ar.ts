@@ -69,6 +69,9 @@ const ar = {
     loading: 'جارٍ التحميل…',
     noOptions: 'لا توجد خيارات',
     noRecords: 'لا توجد سجلات',
+    autofillCurrencyDiffers: 'لم يُملأ {{field}}: المبلغ المختار هو {{amount}} بعملة {{from}}، لكن {{field}} هنا بعملة {{to}}. أدخله بعملة {{to}}.',
+    autofillSourceNoCurrency: 'لم يُملأ {{field}}: المبلغ المختار {{amount}} لا يذكر عملة، لكن {{field}} هنا بعملة {{to}}. أدخله بعملة {{to}}.',
+    autofillNoCurrency: 'لم يُملأ {{field}}: المبلغ المختار هو {{amount}}، لكن لم تُختر عملة هنا بعد. اختر العملة، ثم أدخل {{field}}.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).

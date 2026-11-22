@@ -68,6 +68,11 @@ const en = {
     nextPage: 'Next page',
     jumpToPage: 'Jump to page',
     retry: 'Retry',
+    // objectstack#36249 — why a pick left an amount empty: the picked amount is
+    // in another currency than the field it would fill (nothing is converted).
+    autofillCurrencyDiffers: '{{field}} was not filled: the picked amount is {{amount}} in {{from}}, but {{field}} here is in {{to}}. Enter it in {{to}}.',
+    autofillSourceNoCurrency: '{{field}} was not filled: the picked amount {{amount}} names no currency, but {{field}} here is in {{to}}. Enter it in {{to}}.',
+    autofillNoCurrency: '{{field}} was not filled: the picked amount is {{amount}}, but no currency is chosen here yet. Choose the currency, then enter {{field}}.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
