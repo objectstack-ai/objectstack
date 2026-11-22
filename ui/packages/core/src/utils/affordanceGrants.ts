@@ -200,6 +200,15 @@ export const AFFORDANCE_GRANTS = {
   /** The record Attachments panel's per-row delete, asked of `sys_attachment`. */
   attachmentDelete: { crud: null, grant: 'delete' },
   /**
+   * The same panel's per-row Rename on ANOTHER user's upload, asked of
+   * `sys_attachment` (objectstack#35724). The rename door
+   * (`PATCH /api/v1/attachments/:id`, the storage service, not the data door)
+   * writes such a rename through the engine as the caller, which needs the edit
+   * grant; the uploader's own rename needs none, so the panel asks this row
+   * only for rows the caller did not upload, behind `attachmentDelete`.
+   */
+  attachmentRename: { crud: null, grant: 'update' },
+  /**
    * The record feed's comment composer and its reply composer, asked of
    * `sys_comment`: each creates a comment row.
    */

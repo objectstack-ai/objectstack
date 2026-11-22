@@ -240,10 +240,13 @@ export const CommentsPage: React.FC<CommentsPageProps> = ({
       data-owns-escape=""
     >
       <header className="grid shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 border-b border-border px-1 pt-[env(safe-area-inset-top)]">
+        {/* `max-w-full` holds the button inside its column: a start-aligned grid
+            item is otherwise as wide as its unbroken label, and a long record
+            name runs under the centred title instead of truncating. */}
         <button
           ref={backRef}
           type="button"
-          className={cn(HEADER_BUTTON, 'justify-start gap-0.5 justify-self-start pr-2 text-sm font-medium')}
+          className={cn(HEADER_BUTTON, 'max-w-full justify-start gap-0.5 justify-self-start pr-2 text-sm font-medium')}
           onClick={onBack}
           title={t('detail.goBack')}
           data-comments-page-back=""

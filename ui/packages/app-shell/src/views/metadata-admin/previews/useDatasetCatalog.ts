@@ -58,6 +58,12 @@ export interface DatasetDimensionInfo {
   label?: string;
   /** Raw field type id when declared (e.g. 'text', 'date'). */
   type?: string;
+  /**
+   * The object field the dimension reads (`owner_id` for `owner`), when
+   * declared — how a dashboard filter's default field finds the dimension
+   * label a panel names it by.
+   */
+  field?: string;
 }
 
 export interface DatasetMeasureInfo {
@@ -154,6 +160,7 @@ export function toCatalogEntry(doc: Record<string, unknown>, locale: string): Da
           name: d.name as string,
           label: authoredText(d.label, locale),
           type: typeof d.type === 'string' ? (d.type as string) : undefined,
+          ...(typeof d.field === 'string' && d.field ? { field: d.field } : {}),
         }))
     : [];
   const measures: DatasetMeasureInfo[] = Array.isArray(doc.measures)

@@ -46,6 +46,18 @@ export function datasetSelectOptions(
 }
 
 /**
+ * The options of the report and dashboard-widget "data source" pickers: the
+ * author's label alone (the machine name when none is declared). Those panels
+ * speak business wording — a builder reads which data the chart counts, never
+ * its machine name, which stays the option's VALUE.
+ */
+export function datasetLabelOptions(
+  datasets: DatasetCatalogEntry[],
+): Array<{ value: string; label: string }> {
+  return datasets.map((d) => ({ value: d.name, label: d.label || d.name }));
+}
+
+/**
  * objectstack#27518 — the catalog with `packageId`'s own datasets first, each
  * group in the order served. With no package, the catalog as it is.
  */

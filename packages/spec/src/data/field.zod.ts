@@ -2723,18 +2723,33 @@ export const FieldSchema = lazySchema(() => {
   dimensions: z.number().int().min(1).max(10000).optional().describe('Vector dimensionality (e.g., 1536 for OpenAI embeddings)'),
 
   /**
-   * Track this field's value changes on the record **activity timeline**. When
-   * TRUE, the platform's activity writer renders each change as a human-readable
-   * entry ("<label>: <old> → <new>") instead of a generic "Updated <object>"
-   * row — no app code required. Opt-in per field (cf. Salesforce Feed Tracking,
-   * ServiceNow field auditing, Dataverse column auditing). The writer already
-   * captures the field diff; this flag controls whether it is surfaced legibly.
+   * Opt a no-line field into old → new values on the record **activity
+   * timeline** (ADR-0052 §5b). Since #36290 values show by default for every
+   * field, so `true` matters only for a media or structured-JSON type (image,
+   * file, json, …), which shows them only when asked. `false` and absent read
+   * the same — values show. ⛔ `false` is NOT an off switch: the field
+   * designer wrote it on every save while it meant nothing, so a stored
+   * `false` cannot be told from a choice. The off switch is
+   * {@link FieldSchema.fieldHistory} `false`.
    *
    * Unlike the pruned `auditTrail` below, this flag HAS a runtime consumer
    * (`@objectstack/plugin-audit` audit-writers), satisfying enforce-or-remove
-   * (ADR-0049). See ADR-0052 §5b.
+   * (ADR-0049).
    */
-  trackHistory: z.boolean().optional().describe("Render this field's value changes as human-readable entries on the record activity timeline (ADR-0052 §5b). Opt-in per field."),
+  trackHistory: z.boolean().optional().describe("Opt a media or structured-JSON field into old → new values on the record activity timeline (ADR-0052 §5b). Every other field shows them already, so true changes nothing there. false and absent read the same: values show. false is not an off switch; turn a field's values off with fieldHistory: false."),
+
+  /**
+   * [#36290, ruling 7076513167 point 1] This field's off switch for old → new
+   * values on the record activity timeline. No default on purpose: a parsed
+   * field never carries the key, so only an author who wrote it turns values
+   * off. Absent: values show (a media or structured-JSON type only with an
+   * explicit `true`). `false`: the change is named by the field's label only.
+   * `true`: values show, a no-line type included. Under an object that writes
+   * `enable.fieldHistory: false`, values stay off whatever the field says. A
+   * credential field never shows values. Who reads a value is the field's read
+   * rule.
+   */
+  fieldHistory: z.boolean().optional().describe("This field's old → new values on the record activity timeline. Absent: they show (a media or structured-JSON type only with true). false: off, the change names the field's label only. true: on, a media or JSON type included. Off whatever this says when the object sets enable.fieldHistory: false; a credential field never shows values. Who reads a value is this field's read rule."),
 
   // Pruned 2026-06 (dead in both layers — aspirational governance with no runtime
   // consumer; encryption/masking implied at-rest protection that never happened —
@@ -2884,6 +2899,24 @@ export const FieldSchema = lazySchema(() => {
 
   /** Security & Visibility */
   hidden: z.boolean().default(false).describe('Hidden from default UI'),
+
+  /**
+   * Whether the field is asked for when a record is created (ADR-0085 §2: a
+   * creation-time intent of the field — which fields this business asks for
+   * when a record is born, not inferable from the schema — that binds every
+   * create surface and names none of them). Absent, as `true`: the field is
+   * asked for. `false`: every create surface leaves it out; editing, the
+   * record page and lists still show it.
+   *
+   * A `required: true` field cannot be switched off: a required field is
+   * always asked for on create, with or without a `defaultValue`, so the pair
+   * is refused here, at every door that parses a field (this schema's
+   * superRefine). A
+   * `requiredWhen` field is not refused: its gate is a predicate the parse
+   * cannot judge, and the write door still refuses a create born inside it.
+   * `liveness/field.json` carries its row.
+   */
+  showOnCreate: z.boolean().optional().describe('Ask for this field when a record is created. Absent or `true`: the field is on every create surface (the create dialog, the full-page create, an action-opened create). `false`: no create surface shows it; editing, the record page and lists still do, so a value is filled in after the record exists. Refused on a `required: true` field, with or without a `defaultValue`: a required field is always asked for on create. Keep the field on create, or drop `required`. A `requiredWhen` field is accepted, and its create is still refused when the predicate holds and the value is empty.'),
 
   /**
    * [#7728] "The declared value is never returned on the generic data path."
@@ -3204,6 +3237,25 @@ export const FieldSchema = lazySchema(() => {
           + 'Delete one of the two.',
       });
     }
+  }
+  // A required field is always asked for when a record is created: the
+  // person creating the record sees every value the record must have, so
+  // `showOnCreate: false` beside `required: true` is refused (#36425 item 6,
+  // which makes no exception). That holds with a `defaultValue` too, which
+  // the insert would resolve: the field is still asked for, its default
+  // filled in. Refused where the author can fix it, at every door that
+  // parses a field (`defineStack`, `os validate`, the metadata save).
+  if (field.showOnCreate === false && field.required === true) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['showOnCreate'],
+      message:
+        '`showOnCreate: false` would leave this field off every create surface, and it is `required: true`: a '
+        + 'required field is always asked for when a record is created, so the person creating it sees every value '
+        + 'the record must have. Keep the field on create (delete `showOnCreate`), or drop `required`; a value '
+        + 'needed only in some cases can be `requiredWhen` instead. A `defaultValue` makes no exception: the field '
+        + 'is still asked for, with its default filled in.',
+    });
   }
   // [#11339] `referenceVia` declares the id half of a polymorphic pointer
   // pair (ADR-0052 §5) — semantics only a plain `text` column carries. On a

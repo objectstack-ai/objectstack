@@ -480,7 +480,12 @@
         },
         "trackHistory": {
           "status": "live",
-          "evidence": "objectui app-shell RecordDetailView gates the record's field changes on enable.trackHistory === true (historyEnabled memo): on the synthesized record page they join the one timeline stream (RecordFieldChangesContext, its Changes filter), with no History tab; pairs with per-field trackHistory (plugin-audit renderTrackedChangeSummary, packages/plugins/plugin-audit/src/audit-writers.ts) which selects the field diffs. Audit CAPTURE into sys_audit_log is deliberately unconditional (compliance ledger) — the flag gates the UI surface, not the ledger (#2707)."
+          "evidence": "objectui app-shell RecordDetailView gates the record's field changes on enable.trackHistory === true (historyEnabled memo): on the synthesized record page they join the one timeline stream (RecordFieldChangesContext, its Changes filter), with no History tab; pairs with per-field trackHistory (plugin-audit renderTrackedChangeSummary, packages/plugins/plugin-audit/src/audit-writers.ts) which selects the field diffs. Audit CAPTURE into sys_audit_log is deliberately unconditional (compliance ledger) — the flag gates the UI surface, not the ledger (#2707). Since #36290 it does NOT select which field diffs show values: that is enable.fieldHistory and the per-field trackHistory."
+        },
+        "fieldHistory": {
+          "status": "live",
+          "evidence": "packages/plugins/plugin-audit/src/audit-writers.ts#changeValuesShownFor",
+          "note": "#36290 (ruling 7076513167): old → new values of changed fields on the record activity stream are on unless turned off. The writer reads `enable.fieldHistory === false` (object off) and the field's own `fieldHistory === false` (field off); absent is on. No .default() on purpose: a parsed body that materialized one would persist it into built artifacts and stored definitions. Who reads a value is the per-reader field redaction (packages/plugins/plugin-audit/src/activity-field-redaction.ts)."
         },
         "searchable": {
           "status": "live",

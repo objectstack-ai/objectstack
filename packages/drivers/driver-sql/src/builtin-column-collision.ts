@@ -114,9 +114,11 @@ export const FIELD_KEY_STORAGE_CLASS: Readonly<Record<string, FieldKeyClass>> = 
   searchable: 'presentation',
   sortable: 'presentation',
   trackHistory: 'presentation', // history rows live in their own object
+  fieldHistory: 'presentation', // whether this field's old → new values show on the activity timeline (#36290) — read by the audit writer, never by `createColumn`
   group: 'presentation',
   widget: 'presentation',
   hidden: 'presentation',
+  showOnCreate: 'presentation', // whether a create surface asks for the field; the DDL never reads it
   internal: 'presentation',
   readonly: 'presentation',
   visibleWhen: 'presentation',
