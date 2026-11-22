@@ -124,7 +124,7 @@ function renderLines(keys: readonly string[]) {
   return { aggregate };
 }
 
-const text = (el: Element | null | undefined) => (el?.textContent ?? '').replace(/ /g, ' ');
+const text = (el: Element | null | undefined) => (el?.textContent ?? '').replace(/\u00a0/g, ' ');
 const host = () => document.querySelector('[data-body-table-overflow]') as HTMLElement | null;
 const headerKeys = () => Array.from(document.querySelectorAll('thead th')).map((th) => th.getAttribute('data-column-key'));
 const summaryRow = () => document.querySelector('[data-testid="data-table-summary-row"]');
@@ -165,7 +165,7 @@ describe('RelatedList — the totals of body-table columns left out for width (o
   it('a left-out total reads the same as the one the table draws in its column when it fits (same currency, same figure)', async () => {
     await drawAt(WIDE_PX);
     await waitFor(() => expect(summaryOf('line_amount')).not.toBeNull());
-    const wide = { line_amount: text(document.querySelector('[data-testid="data-table-summary-line_amount"]')), tax: summaryOf('tax')!.replace(/ /g, ' ') };
+    const wide = { line_amount: text(document.querySelector('[data-testid="data-table-summary-line_amount"]')), tax: summaryOf('tax')!.replace(/\u00a0/g, ' ') };
     cleanup();
     await drawAt(680);
     await waitFor(() => expect(omittedTotal('tax')).not.toBeNull());
