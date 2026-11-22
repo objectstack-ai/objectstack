@@ -9,6 +9,9 @@
  * entry's stored form.
  */
 
+// The source under test reaches these through dynamic imports: their first load is paid at collection.
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { objectForm } from '@objectstack/spec/data';
