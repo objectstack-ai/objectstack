@@ -65,7 +65,7 @@ import { useObjectActions } from '../hooks/useObjectActions.js';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
 import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
-import { ActionProvider, useActionTextLocalizer, RelatedRecordActionsProvider, notifyDataChanged } from '@object-ui/react';
+import { ActionProvider, useActionTextLocalizer, RelatedRecordActionsProvider, notifyDataChanged, usePredicateScope } from '@object-ui/react';
 import { toast } from 'sonner';
 import { useConsoleActionRuntime } from '../hooks/useConsoleActionRuntime.js';
 import {
@@ -111,6 +111,8 @@ import {
     usePersonalViews,
 } from './personalViews.js';
 import { PersonalViewNameDialog } from './PersonalViewNameDialog.js';
+import { ChangeOwnerDialog } from './ChangeOwnerDialog.js';
+import { changeOwnerEligibleRows, useListChangeOwnerOffered } from './changeOwner.js';
 import { parseListStateParams } from './userFilterUrlState.js';
 import { FILTER_FOLD_REFUSAL_KEYS } from './viewFilterFold.js';
 
@@ -284,6 +286,18 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // missing-object case, so this always resolves while this component is
     // mounted — every hook below can therefore run unconditionally.
     const objectDef = objects.find((o: any) => o.name === objectName);
+
+    // objectstack#35403 — the list's bulk Change Owner: offered where the
+    // object offers the action and the caller holds the object's transfer
+    // grant; the rows the switch's `visibleWhen` excludes are left out and
+    // counted, and the server judges and reports every row it is sent.
+    const bulkChangeOwnerOffered = useListChangeOwnerOffered(objectDef as any);
+    const changeOwnerScope = usePredicateScope();
+    const [bulkChangeOwner, setBulkChangeOwner] = useState<{ rows: Record<string, unknown>[]; skipped: number } | null>(null);
+    const openBulkChangeOwner = useCallback((records: any[]) => {
+        const { eligible, skipped } = changeOwnerEligibleRows(objectDef as any, records ?? [], changeOwnerScope);
+        setBulkChangeOwner({ rows: eligible, skipped });
+    }, [objectDef, changeOwnerScope]);
 
     // The page's favorites entry, in the header's overflow menu (objectui#12427):
     // it pins the app's own navigation entry for this list when the app has one,
@@ -1277,6 +1291,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
             // 「Save as my view」 alone).
             draftsSummaries: !isEnvironmentList && !!activeView,
         },
+        onBulkChangeOwner: bulkChangeOwnerOffered ? openBulkChangeOwner : undefined,
     });
 
     // objectstack#25992 slice 9: the merged views and the plugin's `ObjectViewSchema`
@@ -1626,6 +1641,15 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                             : Promise.resolve(false))}
                     t={t}
                 />
+                {bulkChangeOwner && objectDef && (
+                    <ChangeOwnerDialog
+                        open
+                        onOpenChange={(open) => { if (!open) setBulkChangeOwner(null); }}
+                        objectDef={objectDef as any}
+                        records={bulkChangeOwner.rows}
+                        skipped={bulkChangeOwner.skipped}
+                    />
+                )}
              </div>
         </div>
         </ListViewBarHostContext.Provider>

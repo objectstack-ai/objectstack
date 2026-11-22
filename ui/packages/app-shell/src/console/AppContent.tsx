@@ -12,6 +12,7 @@ import { Routes, Route, Navigate, matchRoutes, useNavigate, useLocation, usePara
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, lazy, Suspense, useMemo, createElement, type ComponentType, type ReactNode } from 'react';
 import { useAssistant } from '../assistant/assistantBus.js';
 import { LazyModalForm } from '../views/lazyFormSurfaces.js';
+import { ConsoleFormOwnerLine } from '../views/consoleFormOwnerLine.js';
 import { Empty, EmptyTitle, EmptyDescription, Button, DataErrorState } from '@object-ui/components';
 import { toast } from 'sonner';
 import { useActionRunner, useGlobalUndo, useMutationInvalidationBridge, notifyDataChanged, FilterScopeProvider, resolveApprovalLock, claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim, type AnsweredLoadFailure, type RecordSaveFeedback } from '@object-ui/react';
@@ -1698,6 +1699,9 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
             </Suspense>
           </ErrorBoundary>
           {formObjectDef && (
+            // objectstack#35403 — an edit draws the record's owner read-only,
+            // with Change Owner beside it where the caller may transfer it.
+            <ConsoleFormOwnerLine>
             <LazyModalForm
               key={`${formObjectDef.name}:${editingRecord?.id || 'new'}`}
               lockedBy={formApprovalLocked ? 'approval' : undefined}
@@ -1800,6 +1804,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
               }}
               dataSource={formDataSource ?? undefined}
             />
+            </ConsoleFormOwnerLine>
           )}
       </ConsoleLayout>
       </RecordPageDrawerOpenProvider>

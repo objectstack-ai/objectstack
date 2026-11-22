@@ -126,6 +126,7 @@ import { resolveObjectGridPersistedColumns } from './objectGridPersistedColumns'
 import { resolveObjectGridActionsColumn } from './objectGridActionsColumn';
 import { useInlineRowActionFold } from './objectGridInlineActionFold';
 import { BULK_SELECT_ALL_MATCHING_CAP } from './bulkSelectAllMatchingCap';
+import { CHANGE_OWNER_BULK_ACTION } from './components/BulkActionBar';
 import { useIsListPageGrid, useListSelectionRequest, usePublishListSelectable, usePublishListSelecting } from './listPageScope';
 import { useInfiniteRowLoad } from './objectGridInfiniteLoad';
 export type { RetiredListColumnKey, ObjectGridColumnHolds, ObjectGridColumnDraft, ObjectGridColumn } from './objectGridColumns';
@@ -453,6 +454,15 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
   onEdit?: (record: any) => void;
   onDelete?: (record: any) => void;
   onBulkDelete?: (records: any[]) => void;
+  /**
+   * objectstack#35403 — the built-in bulk Change Owner. A host that wires it
+   * has already decided the object offers the action and the caller holds the
+   * transfer grant; the selection bar then offers 「Change Owner」 for two or
+   * more records and hands this the selected rows (the expanded set when
+   * 「select all matching」 is on). The host owns the dialog and its per-row
+   * report, as `onBulkDelete`'s host owns the delete confirmation.
+   */
+  onBulkChangeOwner?: (records: any[]) => void;
   onCellChange?: (rowIndex: number, columnKey: string, newValue: any, row: any) => void;
   onRowSave?: (rowIndex: number, changes: Record<string, any>, row: any) => void | Promise<void>;
   onBatchSave?: (changes: Array<{ rowIndex: number; changes: Record<string, any>; row: any }>) => void | Promise<void>;
@@ -853,6 +863,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   headerMenu: hostHeaderMenu,
   openReferencedRecord,
   onBulkDelete,
+  onBulkChangeOwner,
   onRowSelect,
   onRowClick,
   onNavigate,
@@ -1677,12 +1688,16 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const keptDeleteAction = (explicitBulkActions ?? []).filter(
     (a: unknown) => String(a).toLowerCase() === 'delete',
   );
-  const effectiveBulkActions: string[] =
-    explicitBulkActions && explicitBulkActions.length > 0
+  const effectiveBulkActions: string[] = [
+    ...(explicitBulkActions && explicitBulkActions.length > 0
       ? keptDeleteAction
       : canDelete && onBulkDelete && bulkActionDefs.length === 0
         ? ['delete']
-        : [];
+        : []),
+    // objectstack#35403 — the built-in bulk Change Owner, offered wherever its
+    // host wires it (the host has judged the object and the grant).
+    ...(onBulkChangeOwner ? [CHANGE_OWNER_BULK_ACTION] : []),
+  ];
   const hasBulkActions = effectiveBulkActions.length > 0 || bulkActionDefs.length > 0;
   // The names the two folds above did not draw, said once in development, and
   // only once there is nothing left to wait for. Keyed on the RESOLVED
@@ -2545,6 +2560,13 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const dispatchBulkAction = (action: string, rows: any[]) => {
     void (async () => {
       const expanded = await resolveBulkRows(rows);
+      if (action === CHANGE_OWNER_BULK_ACTION && onBulkChangeOwner) {
+        // objectstack#35403 — the host's dialog takes the rows; the server
+        // judges each one and reports every row it did not move.
+        onBulkChangeOwner(expanded);
+        resetSelection();
+        return;
+      }
       if (action === 'delete' && onBulkDelete) {
         // [objectui#4420] `userActions.delete.visibleWhen` gates the built-in
         // Delete PER RECORD — the same key, the same fail-closed fold and the
