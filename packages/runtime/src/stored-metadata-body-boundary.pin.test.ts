@@ -261,7 +261,7 @@ beforeAll(async () => {
   app = httpServer.getRawApp();
   adminToken = await signIn(ADMIN);
   memberToken = await signUpMember();
-  // The member is a member: an organization row and a membership in it. A
+  // The member is a member: a membership in an organization. A
   // person outside every organization reads and writes no tenant-scoped row,
   // at the plain door and through an elevation run for them alike (ADR-0093
   // D8.1, as amended; ADR-0095 D1), so the member controls below need one.
@@ -270,8 +270,12 @@ beforeAll(async () => {
     const ql = await engine();
     const member = await ql.findOne('sys_user', { where: { email: MEMBER.email }, ...sys });
     if (!member?.id) throw new Error('pin precondition: the member was not provisioned');
-    await ql.insert('sys_organization', { id: 'org_pin_audience_gate', name: 'org_pin_audience_gate', slug: 'org-pin-audience-gate' }, sys);
-    await ql.insert('sys_member', { organization_id: 'org_pin_audience_gate', user_id: member.id, role: 'member' }, sys);
+    // The install's own organization when it has one, so a system write still
+    // derives its owner from the one organization (ADR-0131 D9).
+    const [existing] = await ql.find('sys_organization', { where: {}, limit: 1, ...sys });
+    const organizationId = existing?.id ?? 'org_pin_audience_gate';
+    if (!existing) await ql.insert('sys_organization', { id: organizationId, name: organizationId, slug: 'org-pin-audience-gate' }, sys);
+    await ql.insert('sys_member', { organization_id: organizationId, user_id: member.id, role: 'member' }, sys);
   }
 }, BOOT_TIMEOUT);
 
