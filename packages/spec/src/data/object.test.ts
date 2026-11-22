@@ -20,11 +20,7 @@ describe('ObjectCapabilities', () => {
   it('should apply default values correctly', () => {
     const result = ObjectCapabilities.parse({});
     
-    // [#36290] No default: absent (values on in the activity stream) and
-    // `true` (also the ledger view and the `history` verb) read differently,
-    // and an explicit `false` turns the object off.
-    expect(result.trackHistory).toBeUndefined();
-    expect('trackHistory' in result).toBe(false);
+    expect(result.trackHistory).toBe(false);
     expect(result.searchable).toBe(true);
     expect(result.apiEnabled).toBe(true);
     expect(result.files).toBe(false);
@@ -36,6 +32,11 @@ describe('ObjectCapabilities', () => {
     // The record-reader approval tier is opt-IN (#8652: default OFF, the
     // downstream project opts in): an absent flag grants nothing.
     expect(result.approvalsVisibleToReaders).toBe(false);
+    // [#36290] Field-change values are on unless turned off, and the flag has
+    // NO default: a parsed body never materializes it, so a built artifact or
+    // a stored definition can always tell an authored `false` from silence.
+    expect('fieldHistory' in result).toBe(false);
+    expect(ObjectCapabilities.parse({ fieldHistory: false }).fieldHistory).toBe(false);
   });
 
   it('should accept custom capability values', () => {

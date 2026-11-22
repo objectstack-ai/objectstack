@@ -579,7 +579,7 @@
     "trackHistory": {
       "status": "live",
       "evidence": "packages/plugins/plugin-audit/src/audit-writers.ts",
-      "note": "ADR-0052 §5b — the audit-writer renders tracked-field diffs as human-readable activity summaries (renderTrackedChangeSummary + getFieldDefs read field.trackHistory). Reintroduces the pruned auditTrail concept WITH a runtime consumer, satisfying enforce-or-remove (ADR-0049)."
+      "note": "ADR-0052 §5b — the audit-writer renders changed-field diffs as human-readable activity summaries (renderTrackedChangeSummary + changeValuesShownFor read field.trackHistory). Since #36290 values are on unless turned off: false names the change by label only; true also opts a media or structured-JSON field in. Reintroduces the pruned auditTrail concept WITH a runtime consumer, satisfying enforce-or-remove (ADR-0049)."
     },
     "accept": {
       "status": "live",

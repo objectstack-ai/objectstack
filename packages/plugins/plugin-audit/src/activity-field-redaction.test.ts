@@ -482,7 +482,7 @@ const refObjects = [
   {
     // [#36290] Values off, so its update is summarized by the record label —
     // the text this scene judges — not by a field change.
-    name: REF_TITLED, label: 'Reference Titled', nameField: 'target', enable: { trackHistory: false },
+    name: REF_TITLED, label: 'Reference Titled', nameField: 'target', enable: { fieldHistory: false },
     fields: { name: { name: 'name', label: 'Name', type: 'text' as const }, target: refLookup(REF_TARGET) },
   },
   {

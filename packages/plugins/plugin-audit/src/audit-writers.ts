@@ -1116,8 +1116,11 @@ const NO_LINE_VALUE_TYPES: ReadonlySet<string> = new Set([
 /**
  * [#36290, ruling 7076513167] ADR-0052 §5b.1 with its default reversed: a
  * changed field's old → new values render on the record's activity stream
- * unless the object turns it off (`enable.trackHistory: false`) or the field
- * does (`trackHistory: false`). An absent flag is on. Two classes never render
+ * unless the object turns it off (`enable.fieldHistory: false`) or the field
+ * does (`trackHistory: false`). An absent flag is on, and the object's
+ * `enable.trackHistory` is not read here: it keeps its own meaning (the ledger
+ * view and the `history` verb), and a parsed body materializes it as `false`
+ * on every object with an `enable` block. Two classes never render
  * values, whatever the flags say:
  *
  *  - a credential field (`collectMaskedReadFields`): both sides are the same
@@ -1129,7 +1132,7 @@ const NO_LINE_VALUE_TYPES: ReadonlySet<string> = new Set([
  * field by field (`activity-field-redaction.ts`).
  */
 function changeValuesShownFor(objectDef: any): ChangeValuesShown {
-  if (objectDef?.enable?.trackHistory === false) return () => false;
+  if (objectDef?.enable?.fieldHistory === false) return () => false;
   const credentials = new Set(collectMaskedReadFields(objectDef));
   return (key, field) => {
     if (!field || field.trackHistory === false || credentials.has(key)) return false;

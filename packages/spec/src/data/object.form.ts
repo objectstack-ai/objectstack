@@ -462,6 +462,7 @@ export const objectForm = defineForm({
           helpText: 'Enable/disable system features',
           fields: [
             { field: 'trackHistory', type: 'boolean' },
+            { field: 'fieldHistory', type: 'boolean' },
             { field: 'searchable', type: 'boolean' },
             { field: 'apiEnabled', type: 'boolean' },
             { field: 'files', type: 'boolean' },

@@ -716,10 +716,16 @@ describe('[#36290] a changed field shows old → new unless the object or the fi
     });
   });
 
-  it('an object that sets enable.trackHistory: false names the field, never its values', async () => {
-    const { summary, metadata } = await updateDeal({ amount: 100 }, { amount: 200 }, { objectDef: { enable: { trackHistory: false } } });
+  it('an object that sets enable.fieldHistory: false names the field, never its values', async () => {
+    const { summary, metadata } = await updateDeal({ amount: 100 }, { amount: 200 }, { objectDef: { enable: { fieldHistory: false } } });
     expect(summary).toBe('Updated Deal "D-1": Amount');
     expect(metadata.summary_message.key).toBe('activityUpdatedFields');
+  });
+
+  it('enable.trackHistory: false alone no longer turns the values off', async () => {
+    // A parsed body writes it on every object with an `enable` block.
+    const { summary } = await updateDeal({ amount: 100 }, { amount: 200 }, { objectDef: { enable: { trackHistory: false } } });
+    expect(summary).toBe('Amount: 100 → 200');
   });
 
   it('a field that sets trackHistory: false is named by label only, beside a field that shows its values', async () => {
