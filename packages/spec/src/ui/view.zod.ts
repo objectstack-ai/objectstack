@@ -2431,6 +2431,41 @@ export const KanbanConfigSchema = lazySchema(() => strictObject({
     ),
   summarizeField: z.string().optional().describe('Field to sum at top of column (e.g. amount)'),
   /**
+   * objectstack#36370 — the statistic each lane shows at its foot, one of the
+   * list footer's calculations (`ColumnSummaryConfigSchema`, the same object a
+   * list column's `summary` takes): `{ type: 'count' }` counts the lane's
+   * records; `{ type: 'sum' | 'avg' | …, field }` aggregates a field over
+   * them; `{ type: 'none' }` shows nothing, also over a `summarizeField`.
+   * Without it a lane shows the sum of `summarizeField` where that is set, as
+   * before this key, and nothing otherwise.
+   *
+   * ⛔ No spec-side default: absence keeps every board stored before this key
+   * exactly as it was.
+   */
+  summary: ColumnSummaryConfigSchema.optional().describe(
+    'The statistic each lane shows at its foot: one of the list footer calculations, `{ type, field }` '
+    + '(the same object a list column `summary` takes). `{ type: \'count\' }` counts the lane records; '
+    + '`{ type: \'sum\', field: \'amount\' }` totals a field; `{ type: \'none\' }` shows nothing. Takes '
+    + 'precedence over summarizeField. Omit to keep summarizeField\'s sum, or no statistic without it.',
+  ),
+  /**
+   * objectstack#36370 — whether a card names each field beside its value.
+   * Absent means `true`, the card as boards drew it before this key; `false`
+   * leaves the values alone.
+   */
+  showFieldLabels: z.boolean().optional().describe(
+    'Whether each card names its fields beside their values. Omit for true (names shown); false shows the values alone.',
+  ),
+  /**
+   * objectstack#36370 — whether a card leaves out a field that holds nothing.
+   * Absent means `true`, the card as boards drew it before this key; `false`
+   * keeps the field's row with an empty value, so every card of the lane
+   * lines up.
+   */
+  hideEmptyFields: z.boolean().optional().describe(
+    'Whether a card leaves out a field that holds no value. Omit for true (left out); false keeps the field with an empty value.',
+  ),
+  /**
    * [#16894] The one item-titled view config of the family that omitted this
    * key. `GalleryConfigSchema`, `TimelineConfigSchema`, `CalendarConfigSchema`,
    * `GanttConfigSchema` and `ListMapConfigSchema` all declare `titleField`
