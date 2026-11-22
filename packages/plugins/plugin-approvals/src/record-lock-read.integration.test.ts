@@ -49,6 +49,8 @@ import { installDefaultOrganization } from './default-organization.testkit.js';
 const HELD = 'held_sheet';
 /** Its approval node opts out of the lock. */
 const OPEN = 'open_sheet';
+/** A master-detail line object under each sheet: its rows are held with their master. */
+const lineOf = (master: string) => `${master}_line`;
 const PKG = 'approvals-record-lock-read-test';
 const READ_OPS = new Set(['find', 'findOne', 'count', 'aggregate']);
 
@@ -73,6 +75,19 @@ function sheet(name: string) {
     fields: {
       id: { name: 'id', label: 'Id', type: 'text' as const, primaryKey: true },
       title: { name: 'title', label: 'Title', type: 'text' as const },
+    },
+  };
+}
+
+/** A detail object of `master`: one required `master_detail` FK, `sheet`. */
+function line(master: string) {
+  return {
+    name: lineOf(master),
+    label: `${master} line`,
+    fields: {
+      id: { name: 'id', label: 'Id', type: 'text' as const, primaryKey: true },
+      title: { name: 'title', label: 'Title', type: 'text' as const },
+      sheet: { name: 'sheet', label: 'Sheet', type: 'master_detail' as const, reference: master },
     },
   };
 }
@@ -130,14 +145,14 @@ async function boot(): Promise<Rig> {
   }), true);
   await engine.init();
   for (const def of [
-    sheet(HELD), sheet(OPEN),
+    sheet(HELD), sheet(OPEN), line(HELD), line(OPEN),
     SysApprovalRequest, SysApprovalAction, SysApprovalApprover, SysApprovalDelegation,
   ]) {
     engine.registry.registerObject(def as any, PKG, PKG);
   }
   await engine.syncSchemas();
   await installDefaultOrganization(engine);
-  for (const object of [HELD, OPEN]) guardReads(engine, object);
+  for (const object of [HELD, OPEN, lineOf(HELD), lineOf(OPEN)]) guardReads(engine, object);
 
   const services: Record<string, unknown> = { objectql: engine };
   const ctx: any = {
@@ -156,6 +171,10 @@ async function boot(): Promise<Rig> {
   for (const [object, lockRecord] of [[HELD, true], [OPEN, false]] as const) {
     for (const recordId of [recordA(object), recordB(object)]) {
       await engine.insert(object, { id: recordId, title: recordId }, { context: SYSTEM } as any);
+    }
+    // One line under each record: line `_a` under record `_a`, line `_b` under `_b`.
+    for (const [lineId, masterId] of [[recordA(lineOf(object)), recordA(object)], [recordB(lineOf(object)), recordB(object)]]) {
+      await engine.insert(lineOf(object), { id: lineId, title: lineId, sheet: masterId }, { context: SYSTEM } as any);
     }
     // Only record `_a` is under approval; `_b` carries none.
     const opened = await svc.openNodeRequest({
@@ -286,5 +305,44 @@ describe('[#26314] ApprovalService.getRecordLock', () => {
       expect(row?.lock_record, object).toBe(object === HELD);
       expect(read, object).toEqual({ locked: row?.lock_record });
     }
+  });
+});
+
+describe('a locked record\'s lines are locked with it — the record-lock read answers for a detail row too', () => {
+  const LINE = lineOf(HELD);
+
+  it('tells a reader a line of a locked record is locked, as its write is refused', async () => {
+    const rig = await boot();
+    expect(await rig.svc.getRecordLock(LINE, recordA(LINE), asUser(READER))).toEqual({ locked: true });
+    expect(await writeAs(rig, READER, LINE, recordA(LINE))).toBe('RECORD_LOCKED');
+    expect(await rig.svc.getRecordLock(LINE, recordA(LINE), asUser(SUBMITTER))).toEqual({ locked: true });
+    expect(await rig.svc.getRecordLock(LINE, recordA(LINE), asUser(APPROVER))).toEqual({ locked: true });
+  });
+
+  it('CONTROL — a line under a record with no pending request, or under a `lockRecord: false` node, is unlocked and writes', async () => {
+    const rig = await boot();
+    expect(await rig.svc.getRecordLock(LINE, recordB(LINE), asUser(SUBMITTER))).toEqual({ locked: false });
+    expect(await writeAs(rig, SUBMITTER, LINE, recordB(LINE))).toBe('written');
+    const openLine = lineOf(OPEN);
+    expect(await rig.svc.getRecordLock(openLine, recordA(openLine), asUser(READER))).toEqual({ locked: false });
+    expect(await writeAs(rig, READER, openLine, recordA(openLine))).toBe('written');
+  });
+
+  it('CONTROL — once the request is decided the line unlocks for the read as for the hook', async () => {
+    const rig = await boot();
+    await rig.svc.decide(rig.requests.get(HELD)!, { decision: 'approve', actorId: APPROVER }, asUser(APPROVER));
+    expect(await rig.svc.getRecordLock(LINE, recordA(LINE), asUser(READER))).toEqual({ locked: false });
+    expect(await writeAs(rig, READER, LINE, recordA(LINE))).toBe('written');
+  });
+
+  it('answers a line the caller cannot read exactly as one that does not exist', async () => {
+    const rig = await boot();
+    await rig.svc.openNodeRequest({
+      object: HELD, recordId: recordB(HELD), runId: 'run_b', nodeId: 'review', flowName: 'sheet_review',
+      config: nodeConfig(true) as any, submitterId: SUBMITTER, record: { id: recordB(HELD), title: recordB(HELD) },
+    }, asUser(SUBMITTER));
+    expect(await rig.svc.getRecordLock(LINE, recordB(LINE), asUser(SUBMITTER))).toEqual({ locked: true });
+    expect(await rig.svc.getRecordLock(LINE, recordB(LINE), asUser(READER))).toBeNull();
+    expect(await rig.svc.getRecordLock(LINE, MISSING, asUser(READER))).toBeNull();
   });
 });

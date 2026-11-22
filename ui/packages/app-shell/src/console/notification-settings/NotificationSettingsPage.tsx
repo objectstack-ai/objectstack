@@ -13,11 +13,12 @@
  * data door, as them, and then reads the door again, so what the page shows is
  * always what is in force. See `myPreferences.ts`.
  *
- * Digest and quiet hours offer only values that take effect when saved
- * (`digestChoices`, `quietHoursSaveable`): the resolver reads a stored
- * `'none'` or an empty window as "no opinion" and falls through to the
- * organization's default, so neither is ever offered as a way to turn
- * something off.
+ * Digest and quiet hours offer every choice, and each takes effect when saved
+ * (`digestChoices`, `quietHoursSaveable`): "No digest" saves the explicit
+ * `'none'`, and a cleared quiet-hours window saves the explicit "no quiet
+ * hours" (`QUIET_HOURS_OFF`), so a person can turn off what their
+ * organization's default sets (objectstack ruling 7073270426). The field they
+ * do not change keeps following the organization.
  *
  * Channels are columns as the door lists them, so a channel the deployment
  * adds later (Slack, …) appears without a change here; a channel the
@@ -64,6 +65,7 @@ import {
   cellWrite,
   digestChoices,
   quietHoursSaveable,
+  quietHoursStored,
   generalWrite,
   loadMyPreferences,
   PREFERENCE_OBJECT,
@@ -230,11 +232,10 @@ export function NotificationSettingsPage() {
                 aria-describedby={readOnlyDescribedBy}
                 onChange={(e) => {
                   const digest = e.target.value as DigestCadence;
-                  // `none` is offered only while it is already the value, so it never reaches a write.
-                  if (digest !== 'none') void apply(generalWrite(userId!, prefs.general, { digest }));
+                  void apply(generalWrite(userId!, prefs.general, { digest }));
                 }}
               >
-                {digestChoices(prefs.general).map((d) => (
+                {digestChoices().map((d) => (
                   <option key={d} value={d}>
                     {t(DIGEST_KEY[d])}
                   </option>
@@ -243,11 +244,6 @@ export function NotificationSettingsPage() {
               <p className="text-xs text-muted-foreground" data-testid="notification-settings-digest-source">
                 {t(SOURCE_KEY[prefs.general.digest.source])}
               </p>
-              {prefs.general.digest.value !== 'none' && (
-                <p className="text-xs text-muted-foreground" data-testid="notification-settings-digest-no-off">
-                  {t('notificationSettings.digestNoOff')}
-                </p>
-              )}
             </div>
             <div className="space-y-1" data-testid="notification-settings-quiet-hours">
               <Label>{t('notificationSettings.quietHours')}</Label>
@@ -266,7 +262,10 @@ export function NotificationSettingsPage() {
                   disabled={!canWrite || !quietHoursSaveable(quietDraft)}
                   aria-describedby={readOnlyDescribedBy}
                   onClick={() => {
-                    if (quietHoursSaveable(quietDraft)) void apply(generalWrite(userId!, prefs.general, { quiet_hours: quietDraft }));
+                    // A cleared window saves the explicit "no quiet hours", never empty.
+                    if (quietHoursSaveable(quietDraft)) {
+                      void apply(generalWrite(userId!, prefs.general, { quiet_hours: quietHoursStored(quietDraft) }));
+                    }
                   }}
                 >
                   {t('notificationSettings.save')}
@@ -275,11 +274,6 @@ export function NotificationSettingsPage() {
                   {t(SOURCE_KEY[prefs.general.quietHours.source])}
                 </span>
               </div>
-              {quietDraft === null && prefs.general.quietHours.value !== null && (
-                <p className="text-xs text-muted-foreground" data-testid="notification-settings-quiet-hours-no-clear">
-                  {t('notificationSettings.quietHoursNoClear')}
-                </p>
-              )}
             </div>
           </CardContent>
         </Card>

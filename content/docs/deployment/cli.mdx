@@ -1546,6 +1546,7 @@ where the data lives.
 | `os migrate audit-mail-bodies` | Mask the mail bodies (`body_text`, `body_html`) that `sys_audit_log` and `sys_activity` copies of `sys_email` / `sys_identity_email` rows still hold in clear, written before the audit writer masked them. Covers the `archive` datasource `sys_audit_log` archives to as well. Reports counts only. No flag; idempotent. See [below](#os-migrate-audit-mail-bodies) |
 | `os migrate audit-key-material` | Remove the encrypted key-material columns from the `sys_audit_log` and `sys_activity` copies written before the audit writer omitted them. Covers the `archive` datasource `sys_audit_log` archives to as well. Reports counts only. No flag; idempotent. See [below](#os-migrate-audit-key-material) |
 | `os migrate audit-side-copies` | Remove the side-copy columns (another record's field values, such as an approval request's `payload_json`) from the `sys_audit_log` and `sys_activity` copies written before the audit writer omitted them. Covers the `archive` datasource `sys_audit_log` archives to as well. `--object` narrows it to one copy table. Reports counts only, per table and store. No flag; idempotent. See [below](#os-migrate-audit-side-copies) |
+| `os migrate list-preferences` | Delete the per-reader list preference rows an earlier Console stored in `sys_user_preference` under `ui.list.<object>`, which the Console no longer reads. Dry run by default (counts per key, writes no row); `--apply` deletes, only with an owner-only `--export` written and read back first. Run it once after upgrading. See [below](#os-migrate-list-preferences) |
 | `os migrate comment-parent-pair` | Stamp the parent pair (`object_name`, `record_id`) on the `sys_comment` rows written before it existed. Until it runs, a broad comment read past 2,000 candidate rows omits comments the reader may see, and its total agrees with the short list, so run it at once after upgrading. No flag; idempotent |
 | `os migrate meta --stored` | Replay the metadata conversion chain over this deployment's `sys_metadata` rows and rewrite the ones still carrying a pre-protocol shape. Hygiene, not a gate — nothing depends on it having run |
 | `os migrate security-catalog-overlays` | List the environment-wide permission-set and position rows (the legacy plurals `permissions` / `positions` included) stored over a name a configured package holds — the rows a v18 cold boot refuses — each with the package that holds its name; `--apply` deletes them, one history tombstone per row. Run it before the first v18 boot, with the flags and environment the deployment boots with: the platform security plugin's sets are held only where `os serve` composes it (an auth secret set, and the `auth` tier on), and the step takes `serve`'s `--preset` and `--dev` with `serve`'s meaning. Adopts nothing; exits 1 while it lists a row |
@@ -2389,6 +2390,50 @@ and re-running is how an interrupted run is finished. The columns arrive with
 the upgraded deployment's schema sync, which an `--apply` run performs itself:
 a dry run against a database no upgraded process has opened cannot read them,
 reports the failed read and exits `1`. A failed read or write exits `1`.
+
+#### `os migrate list-preferences`
+
+An earlier Console remembered each reader's list state on the server: one
+`sys_user_preference` row per reader and object, keyed `ui.list.<object>`. It
+held the column widths, the row height and the view tabs' order, and before
+that the reader's sorts, filters and columns too. The Console no longer reads
+or writes those rows: a change on a list is an unsaved draft until the reader
+saves it into a view, and the widths, row height and tab order are kept in the
+reader's own browser. The stored rows are not carried anywhere; every reader's
+lists open as their views declare them. This command deletes the rows.
+
+```bash
+os migrate list-preferences                          # Dry run: counts per key, writes no rows
+os migrate list-preferences --json                   # the same report, machine-readable
+os migrate list-preferences --apply --export ./list-preferences-backup.json
+os migrate list-preferences --apply --export ./list-preferences-backup.json --yes --json
+```
+
+The report counts the rows, the readers and the organizations, and per key
+(`ui.list.account`, …) the rows and the readers holding it. It never prints a
+value. It reads every organization's rows. A row belongs to the family only when
+its key starts with `ui.list.`, compared exactly, dot and case included:
+`ui.record.<object>` (the record page's "show empty fields" choice, still read),
+`ui.recent` and every other preference key are never touched.
+
+**Options:**
+- `--apply` — delete the listed rows (default off: a read-only dry run)
+- `--export <path>` — **mandatory with `--apply`**: every row the run deletes, as stored, written
+  owner-only (`0600`) and read back before the first delete; refuses to overwrite an existing file
+- `-y, --yes` — skip the confirmation prompt; without it, a run whose stdin is not a terminal (or `--json`) reads
+  nothing, deletes nothing and exits `1`
+- `--force` — apply even when another process is using the SQLite file
+- `--database-url <url>`, `--json`
+
+Each delete is the engine's by-id delete in the system context. After the
+deletes the family is read again, and the run exits `1` when any row is still
+there: one whose delete was refused, or one a Console that still writes the
+family stored after the export. **Re-runnable**: a second run finds nothing,
+writes no export and exits `0`. It is never run for you; nothing on any boot,
+upgrade, migrate or lifecycle path invokes it. Run it once after the upgraded
+Console is serving (an older Console would write the rows again), and keep the
+export until you are certain the sweep was right: it is the only copy, and
+nothing reads it back into the platform.
 
 #### A database created by this version needs no migration
 

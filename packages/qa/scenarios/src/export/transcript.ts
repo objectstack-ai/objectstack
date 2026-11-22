@@ -85,6 +85,8 @@ export function buildTranscript(original: LoadedScenario, record: ScenarioRunRec
   const labels = citationLabels(original);
   const card = original.card;
   const halves: TranscriptHalf[] = [];
+  /** The round ran with object-schema masking off (`runner/scorecard.ts` `RunRecordMeta.schemaMasking`). */
+  const maskingOff = (record.env as { schemaMasking?: unknown }).schemaMasking === 'off';
   const notShown: NonNullable<Transcript['notShown']> = [];
   for (const mode of record.cardRun.modes) {
     if (mode.mode === 'ask') {
@@ -113,6 +115,9 @@ export function buildTranscript(original: LoadedScenario, record: ScenarioRunRec
             question: q.question,
             ...(q.persona ? { persona: q.persona, hidden: { values: hiddenValues(scenario, q.persona) } } : {}),
             objectLabels: labels,
+            // Graded as the run graded it: under the masking the record states (`env.schemaMasking`), never the
+            // exporter's environment. Only `off` is a masking-off round; absent is the default, masked.
+            ...(maskingOff ? { schemaMasking: 'off' as const } : {}),
             turn: recorded,
           });
           if (!same(regrade, q.grade)) throw new TranscriptRefusal(`the recorded reply for \`${key}\` grades differently from the run record: the recording is not this run's`);

@@ -292,3 +292,102 @@ describe('PreferenceResolver — digest', () => {
         expect(out).toEqual([{ recipient: 'u1', channels: ['inbox'] }]); // no notBefore, no digest
     });
 });
+
+/**
+ * [ruling 7073270426 on #35123] Each of digest and quiet hours is three states:
+ * not set (the walk goes on), explicitly off (decides: off), a value (decides).
+ * A row that exists but leaves a field unset decides nothing for that field.
+ */
+describe('PreferenceResolver — a member’s explicit off beats the organization default', () => {
+    // 2026-01-01 23:00 UTC: a Thursday, inside a 22:00–08:00 window.
+    const now = Date.UTC(2026, 0, 1, 23, 0);
+    const ORG_WINDOW = { tz: 'UTC', start: '22:00', end: '08:00' };
+    const row = (over: Record<string, unknown>) => ({ ...pref({}), organization_id: 'org_a', ...over });
+    const run = async (rows: any[], ctx: Partial<{ topic: string; organizationId: string }> = {}) =>
+        (await resolver(() => fakeData(rows).engine).filter(['u1'], ['inbox'], { topic: 'task.assigned', organizationId: 'org_a', now, ...ctx }))[0];
+
+    it.each(['daily', 'weekly'])("a member's digest none beats an organization %s default", async (cadence) => {
+        const out = await run([row({ digest: cadence }), row({ user_id: 'u1', digest: 'none' })]);
+        expect(out).toEqual({ recipient: 'u1', channels: ['inbox'] });
+    });
+
+    it("a member's explicit no-quiet-hours ({ off: true }) beats the organization window", async () => {
+        const out = await run([row({ quiet_hours: ORG_WINDOW }), row({ user_id: 'u1', quiet_hours: { off: true } })]);
+        expect(out).toEqual({ recipient: 'u1', channels: ['inbox'] });
+    });
+
+    it('the explicit off is read from a JSON-string column too', async () => {
+        const out = await run([row({ quiet_hours: ORG_WINDOW }), row({ user_id: 'u1', quiet_hours: JSON.stringify({ off: true }) })]);
+        expect(out.notBefore).toBeUndefined();
+    });
+
+    it('CONTROL: no member row follows the organization default', async () => {
+        expect((await run([row({ digest: 'daily' })])).digest).toEqual({ window: '2026-01-01' });
+        expect((await run([row({ quiet_hours: ORG_WINDOW })])).notBefore).toBe(Date.UTC(2026, 0, 2, 8, 0));
+    });
+
+    it('CONTROL: a member row that leaves the field unset follows the organization default', async () => {
+        for (const unset of [null, undefined, '']) {
+            const digest = await run([row({ digest: 'daily' }), row({ user_id: 'u1', digest: unset })]);
+            expect(digest.digest).toEqual({ window: '2026-01-01' });
+            const quiet = await run([row({ quiet_hours: ORG_WINDOW }), row({ user_id: 'u1', quiet_hours: unset })]);
+            expect(quiet.notBefore).toBe(Date.UTC(2026, 0, 2, 8, 0));
+        }
+        // An empty object is not the declared off: it is not set.
+        expect((await run([row({ quiet_hours: ORG_WINDOW }), row({ user_id: 'u1', quiet_hours: {} })])).notBefore).toBe(Date.UTC(2026, 0, 2, 8, 0));
+    });
+
+    it('a member who sets one field keeps following the organization on the other, and follows a later change of it', async () => {
+        const member = row({ user_id: 'u1', quiet_hours: { off: true } });
+        expect((await run([row({ digest: 'daily', quiet_hours: ORG_WINDOW }), member])).digest).toEqual({ window: '2026-01-01' });
+        const later = await run([row({ digest: 'weekly', quiet_hours: ORG_WINDOW }), member]);
+        expect(later.digest).toEqual({ window: '2025-12-29' });
+        expect(later.notBefore).toBe(Date.UTC(2026, 0, 5, 0, 0));
+    });
+
+    it("a topic row's explicit choice beats the member's own wildcard row", async () => {
+        const rows = [row({ user_id: 'u1', digest: 'daily' }), row({ user_id: 'u1', topic: 'task.assigned', digest: 'none' })];
+        expect(await run(rows)).toEqual({ recipient: 'u1', channels: ['inbox'] });
+        expect((await run(rows, { topic: 'other.topic' })).digest).toEqual({ window: '2026-01-01' });
+    });
+
+    describe("after a member's explicit no-quiet-hours, the digest keeps the organization window's time zone", () => {
+        // 2026-01-01 23:30 UTC is 2026-01-02 00:30 in Berlin (CET), inside its 22:00–07:00 window.
+        const late = Date.UTC(2026, 0, 1, 23, 30);
+        const BERLIN = { tz: 'Europe/Berlin', start: '22:00', end: '07:00' };
+        const member = row({ user_id: 'u1', quiet_hours: { off: true } });
+        const at = async (rows: any[]) =>
+            (await resolver(() => fakeData(rows).engine).filter(['u1'], ['inbox'], { topic: 'task.assigned', organizationId: 'org_a', now: late }))[0];
+
+        it('quiet hours stay off for the member, and the daily digest flushes at Berlin midnight', async () => {
+            // Quiet hours alone: the member's off decides, nothing is deferred (CONTROL: without it, 07:00 Berlin).
+            expect((await at([row({ quiet_hours: BERLIN })])).notBefore).toBe(Date.UTC(2026, 0, 2, 6, 0));
+            expect(await at([row({ quiet_hours: BERLIN }), member])).toEqual({ recipient: 'u1', channels: ['inbox'] });
+            // Digest: the next row holding a window (the organization's) gives the zone.
+            const out = await at([row({ digest: 'daily', quiet_hours: BERLIN }), member]);
+            expect(out.digest).toEqual({ window: '2026-01-02' });
+            expect(out.notBefore).toBe(Date.UTC(2026, 0, 2, 23, 0)); // 2026-01-03 00:00 Berlin, not 00:00 UTC
+        });
+
+        it('CONTROL: with no window on any row, the digest stays on UTC', async () => {
+            const out = await at([row({ digest: 'daily' }), member]);
+            expect(out.digest).toEqual({ window: '2026-01-01' });
+            expect(out.notBefore).toBe(Date.UTC(2026, 0, 2, 0, 0));
+        });
+    });
+
+    it('an organization default row that is explicitly off is no default', async () => {
+        expect(await run([row({ digest: 'none', quiet_hours: { off: true } }), row({ user_id: 'u1' })])).toEqual({ recipient: 'u1', channels: ['inbox'] });
+    });
+
+    it('the same person in two organizations: an opt-out in one leaves the other unchanged', async () => {
+        const rows = [
+            row({ digest: 'daily' }),
+            row({ user_id: 'u1', digest: 'none' }),
+            { ...row({ digest: 'daily' }), organization_id: 'org_b' },
+            { ...row({ user_id: 'u1' }), organization_id: 'org_b' },
+        ];
+        expect(await run(rows, { organizationId: 'org_a' })).toEqual({ recipient: 'u1', channels: ['inbox'] });
+        expect((await run(rows, { organizationId: 'org_b' })).digest).toEqual({ window: '2026-01-01' });
+    });
+});
