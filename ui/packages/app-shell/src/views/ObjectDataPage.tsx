@@ -28,7 +28,7 @@
  */
 
 import * as React from 'react';
-import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useParams, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { ListView } from '@object-ui/plugin-list';
 import { useNavigationOverlay, useRowPredicate } from '@object-ui/react';
 import {
@@ -68,6 +68,9 @@ import {
   defaultGalleryFromObject,
 } from './InterfaceListPage.js';
 import { RecordDetailView } from './RecordDetailView.js';
+import { OpenInSidePanelButton } from './objectViewOpenAsPage.js';
+import { listOriginOf, listShownRowsOf, type ListShownRows } from './objectViewRecordNavigation.js';
+import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 import { PageHeader } from '../layout/PageHeader.js';
 import { useMetadataClient } from './metadata-admin/useMetadata.js';
 import { createRuntimeMetadata, viewEnvelope } from './runtime-metadata-persistence.js';
@@ -88,6 +91,7 @@ import {
   RECORD_FORM_LINK_PARAM,
   RECORD_FORM_OBJECT_PARAM,
   RECORD_FORM_PARAM,
+  RECORD_DRAWER_PARAM,
   RECORD_TRAIL_PARAM,
   buildRecordTrailHref,
   decodeRecordTrail,
@@ -394,11 +398,19 @@ export function ObjectDataPage({ dataSource, objects }: any) {
     return picks.length > 0 ? { element: 'dropdown' as const, fields: picks } : undefined;
   }, [objectDef, canRead]);
 
-  // Record open behavior — URL-driven drawer, same convention as ObjectView
-  // and InterfaceListPage (`?recordId=…` is shareable and refresh-safe). An
-  // object the server does not read one record of (`servesRecordRead`, a
-  // list-only object) has no record surface: its rows open nothing.
+  // Record open behavior — the console's one rule for a list
+  // (objectstack#35854), the same as `ObjectView`'s: the record's name (and a
+  // card, and a touch tap on a row) opens the record's full page, carrying
+  // this page as its origin (`from`: this URL with its conditions, the page's
+  // name, the rows it shows and the count it matched), so the page's ✕ comes
+  // back here and its ↑ ↓ step through these rows. The name cell's hover icon
+  // 「在侧边打开」 opens the side drawer over the list instead, URL-driven
+  // (`?recordId=…` is shareable and refresh-safe). A click on any other cell
+  // selects it and opens nothing (the grid's select-first model). An object
+  // the server does not read one record of (`servesRecordRead`, a list-only
+  // object) has no record surface: its rows open nothing.
   const recordServed = servesRecordRead(objectName, perms);
+  const phone = usePhoneViewport();
   const recordUrl = React.useCallback(
     (id: string | number) =>
       `/apps/${appName}/${objectName}/record/${encodeURIComponent(String(id))}`,
@@ -409,21 +421,72 @@ export function ObjectDataPage({ dataSource, objects }: any) {
     objectName: objectName ?? '',
     onNavigate: (id) => navigate(recordUrl(id)),
   });
-  const drawerRecordId = searchParams.get('recordId');
+  const drawerRecordId = searchParams.get(RECORD_DRAWER_PARAM);
+  // Read when a record opens, never a render input of the list: the list's
+  // URL, its name, the rows it shows and the count it matched.
+  const location = useLocation();
+  const locationRef = React.useRef(location);
+  locationRef.current = location;
+  const listLabel = objectDef ? servedObjectPluralLabel(objectDef, language, objectPluralLabel) : '';
+  const listLabelRef = React.useRef(listLabel);
+  listLabelRef.current = listLabel;
+  const listRowsRef = React.useRef<ListShownRows>(listShownRowsOf([]));
+  const listTotalRef = React.useRef<number | undefined>(undefined);
+  const handleListRowsChange = React.useCallback(
+    (rows: ReadonlyArray<Record<string, unknown>>, groups?: ReadonlyArray<{ label: string; rows: ReadonlyArray<Record<string, unknown>> }>) => {
+      listRowsRef.current = listShownRowsOf(rows, groups);
+    },
+    [],
+  );
+  const handleListTotalChange = React.useCallback((total: number) => {
+    listTotalRef.current = total;
+  }, []);
   const handleRecordClick = React.useCallback(
     (record: any, event?: any) => {
       if (!recordServed) return;
       const id = record?.id ?? record?._id;
+      if (id == null || id === '') return;
       const isMod = !!(event && (event.metaKey || event.ctrlKey || event.button === 1));
-      if (isMod && id != null) { window.open(recordUrl(id), '_blank'); return; }
-      if (id != null) {
-        setSearchParams((prev) => { const n = new URLSearchParams(prev); n.set('recordId', String(id)); return n; });
-      }
+      if (isMod) { window.open(recordUrl(id), '_blank'); return; }
+      const { pathname, search } = locationRef.current;
+      navigate(recordUrl(id), {
+        state: {
+          from: listOriginOf({
+            pathname,
+            search,
+            label: listLabelRef.current,
+            rows: listRowsRef.current,
+            total: listTotalRef.current,
+            recordId: String(id),
+          }),
+        },
+      });
     },
-    [recordServed, recordUrl, setSearchParams],
+    [recordServed, recordUrl, navigate],
+  );
+  // The name cell's 「在侧边打开」: the record in the side drawer over the list,
+  // for a row with a record surface on a desktop. A phone opens every record
+  // as its page, so it draws no icon.
+  const openRowInPanel = React.useCallback(
+    (id: string | number) => {
+      setSearchParams((prev) => { const n = new URLSearchParams(prev); n.set(RECORD_DRAWER_PARAM, String(id)); return n; });
+    },
+    [setSearchParams],
+  );
+  const openInPanelLabel = t('console.objectView.openInSidePanel', { defaultValue: 'Open in side panel' });
+  const recordLinkAdornment = React.useMemo(
+    () => (recordServed && !phone
+      ? (row: Record<string, unknown>) => {
+        const id = row?.id ?? row?._id;
+        return (typeof id === 'string' && id !== '') || typeof id === 'number'
+          ? <OpenInSidePanelButton recordId={id} label={openInPanelLabel} onOpen={openRowInPanel} />
+          : null;
+      }
+      : undefined),
+    [recordServed, phone, openInPanelLabel, openRowInPanel],
   );
   const closeRecordDrawer = React.useCallback(() => {
-    setSearchParams((prev) => { const n = new URLSearchParams(prev); n.delete('recordId'); return n; });
+    setSearchParams((prev) => { const n = new URLSearchParams(prev); n.delete(RECORD_DRAWER_PARAM); return n; });
   }, [setSearchParams]);
   const openedRecordId = recordServed ? drawerRecordId : null;
   React.useEffect(() => {
@@ -840,6 +903,11 @@ export function ObjectDataPage({ dataSource, objects }: any) {
             userFilterSelections={initialUfSelections}
             onUserFilterSelectionsChange={handleUserFilterSelectionsChange}
             onRowClick={handleRecordClick}
+            // objectstack#35854 — the name opens the full page; the icon
+            // beside it, on hover, opens the record in the side drawer.
+            recordLinkAdornment={recordLinkAdornment}
+            onRowsChange={handleListRowsChange}
+            onTotalChange={handleListTotalChange}
             // objectstack#33317 — a list-only object's rows open nothing, so
             // the grid draws them no record link and no Open.
             rowOpensRecord={recordServed}
