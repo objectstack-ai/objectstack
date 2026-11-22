@@ -188,7 +188,7 @@ const KNOWN_LABEL_DICT: Record<string, Record<string, string>> = {
   'zh-CN': {
     Details: '详情',
     Related: '相关',
-    Activity: '活动',
+    Activity: '动态',
     History: '历史',
     Notes: '备注',
     Files: '文件',
@@ -221,7 +221,7 @@ const KNOWN_LABEL_DICT: Record<string, Record<string, string>> = {
     Related: '相關',
     Timeline: '時間線',
     'Activity stream': '動態',
-    Activity: '活動',
+    Activity: '動態',
     History: '歷史',
     Notes: '備註',
     Files: '檔案',

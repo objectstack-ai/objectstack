@@ -116,3 +116,17 @@ describe('field/embedded-sub-fields — one-line verdict, `os explain` carries t
     }
   });
 });
+
+describe('field/embedded-sub-fields — the fix names the field group that inlines the child', () => {
+  // A parent field group whose `relatedList` names the child places it on the
+  // parent's form; the FK's `inlineEdit` only picks grid or form (spec
+  // `EMBEDDED_JSON_TYPED_LIST`). A hint teaching `inlineEdit` as the switch
+  // leaves the author a child that is only a tab.
+  it('routes to `fieldGroups[].relatedList` and gives `inlineEdit` only the form factor', () => {
+    const [issue] = findings(audit({ type: 'repeater', fields: SUB_ROWS }));
+    expect(issue!.fix).toContain('`master_detail`');
+    expect(issue!.fix).toContain('`fieldGroups[].relatedList`');
+    expect(issue!.fix).toContain('`inlineEdit` only picks how rows are edited');
+    expect(issue!.fix).not.toContain("inlineEdit: 'grid'");
+  });
+});

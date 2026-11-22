@@ -15,7 +15,7 @@ import { SysApprovalApprover } from './sys-approval-approver.object.js';
 import { SysApprovalToken } from './sys-approval-token.object.js';
 import { SysApprovalDelegation } from './sys-approval-delegation.object.js';
 import { SysApprovalRequestDetailPage } from './sys-approval-request.page.js';
-import { renderConfirmPage, renderResultPage } from './action-link-pages.js';
+import { APPROVALS_INBOX_PATH, renderConfirmPage, renderResultPage } from './action-link-pages.js';
 import {
   ApprovalService,
   requestVisibilitySourceOf,
@@ -44,7 +44,7 @@ import { backfillActionSlots } from './action-slot-backfill.js';
 import { backfillApprovalDisplayLabels } from './display-label-backfill.js';
 import { backfillProcessPackages, logProcessPackageBackfill, type FlowHolderSource } from './stored-process-package-backfill.js';
 import { APPROVAL_EMAIL_TEMPLATES } from './approval-email-templates.js';
-import { resolvePublicBaseUrl } from './public-base-url.js';
+import { consolePageLink, resolvePublicBaseUrl } from './public-base-url.js';
 
 export interface ApprovalsPluginOptions {
   /** Disable runtime registration (schemas still register). */
@@ -129,6 +129,8 @@ export class ApprovalsServicePlugin implements Plugin {
 
   private readonly options: ApprovalsPluginOptions;
   private service?: ApprovalService;
+  /** [#34862] A Console page's link under the approval links' base and the Console's mount. */
+  private consoleLink?: (pagePath: string) => string;
   private engine?: IObjectQLEngine;
   private escalationJobScheduled = false;
   /**
@@ -251,10 +253,27 @@ export class ApprovalsServicePlugin implements Plugin {
       );
     }
 
+    // [#34862] The Console's mount, for the links that open a Console page:
+    // the auth service's Console page composer (`getConsoleUrl`, which reads
+    // `uiBasePath`), the one composer of Console page links in mail. Read at
+    // link time: the auth service is another plugin's and may start later.
+    // `getService` THROWS on an empty slot; no auth service, no mount.
+    const getConsoleUrl = (path: string): string | undefined => {
+      let auth: { getConsoleUrl?: (path: string) => string } | undefined;
+      try {
+        auth = ctx.getService<{ getConsoleUrl?: (path: string) => string }>('auth');
+      } catch {
+        return undefined;
+      }
+      return typeof auth?.getConsoleUrl === 'function' ? auth.getConsoleUrl(path) : undefined;
+    };
+    this.consoleLink = (pagePath) => consolePageLink(publicBase.url, getConsoleUrl, pagePath);
+
     this.service = new ApprovalService({
       engine: engine as ApprovalEngine,
       logger: ctx.logger,
       publicBaseUrl: publicBase.url,
+      getConsoleUrl,
       // [#8652] Read-only record-reader visibility. Default OFF — an absent
       // option reaches the service as an empty set. This is the host's half
       // only: an object's own `enable.approvalsVisibleToReaders` is read by
@@ -541,10 +560,14 @@ export class ApprovalsServicePlugin implements Plugin {
         const ACT_PATH = '/api/v1/approvals/act';
         const html = (c: any, body: string, status = 200) =>
           c.body(body, status, { 'Content-Type': 'text/html; charset=utf-8' });
+        // [#34862] The inbox link under the Console's mount, as the service's
+        // `handleActionPage` door builds it, so both doors answer one page.
+        const consoleLink = this.consoleLink;
+        const inboxHref = () => (consoleLink ? consoleLink(APPROVALS_INBOX_PATH) : APPROVALS_INBOX_PATH);
         rawApp.get(ACT_PATH, async (c: any) => {
           const token = String(c.req.query('token') ?? '');
           const peek = await svc.peekActionToken(token);
-          if (!peek.ok) return html(c, renderResultPage(peek.reason, peek.request), 200);
+          if (!peek.ok) return html(c, renderResultPage(peek.reason, peek.request, inboxHref()), 200);
           return html(c, renderConfirmPage({
             request: peek.request, action: peek.action, approverId: peek.approverId,
             token, actPath: ACT_PATH,
@@ -557,8 +580,8 @@ export class ApprovalsServicePlugin implements Plugin {
             token = String(body?.token ?? '');
           } catch { /* fall through to invalid */ }
           const out = await svc.redeemActionToken(token);
-          if (!out.ok) return html(c, renderResultPage(out.reason, out.request), 200);
-          return html(c, renderResultPage(out.action === 'approve' ? 'approved' : 'rejected', out.request));
+          if (!out.ok) return html(c, renderResultPage(out.reason, out.request, inboxHref()), 200);
+          return html(c, renderResultPage(out.action === 'approve' ? 'approved' : 'rejected', out.request, inboxHref()));
         });
         ctx.logger.info(`ApprovalsServicePlugin: actionable-link pages mounted at ${ACT_PATH}`);
       } catch { /* http server not installed */ }

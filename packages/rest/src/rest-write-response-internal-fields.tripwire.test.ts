@@ -403,6 +403,7 @@ const DISPOSITIONS: Record<string, Disposition> = {
   'POST /api/v1/approvals/requests/:id/remind': { kind: 'no-record-echo', why: 'Reminder receipt.' },
   'POST /api/v1/approvals/requests/:id/request-info': { kind: 'no-record-echo', why: 'Approval request state.' },
   'POST /api/v1/approvals/requests/:id/comment': { kind: 'no-record-echo', why: 'Approval comment row.' },
+  'POST /api/v1/approvals/records/:object/locks': { kind: 'no-record-echo', why: 'A READ over POST: `{ recordId, locked }` per id, no field of the row.' },
 
   'POST /api/v1/analytics/dataset/query': { kind: 'no-record-echo', why: 'A READ (aggregated dataset) over POST.' },
   'POST /api/v1/analytics/dataset/query/batch': { kind: 'no-record-echo', why: 'A READ (aggregated datasets, one answer entry per query) over POST.' },

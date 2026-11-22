@@ -563,6 +563,7 @@ const zhHant = {
       objectReadOnly: '這些記錄不能在這裡編輯。',
       noPermission: '您沒有編輯這些記錄的權限。',
       approvalLocked: '此記錄正在審批中，已鎖定。',
+      checking: '正在確認這條記錄能否編輯…',
       noRecordPermission: '您沒有編輯此記錄的權限。',
     },
     stateChange: {
@@ -1455,7 +1456,7 @@ const zhHant = {
     viewAll: '檢視全部',
     new: '新建',
     add: '新增',
-    activity: '活動',
+    activity: '動態',
     // objectstack#27524 — 動態 (was 時間線), the record page's stream: its
     // panel, its tab and the strip's label; the right column's ⊟, and the
     // 動態 panel's one-line composer.
@@ -1521,7 +1522,7 @@ const zhHant = {
     recordTabsHidden: '已隱藏',
     bodyTableTotals: '本頁合計',
     streamAll: '全部',
-    streamActivity: '活動',
+    streamActivity: '事件',
     streamDiscussion: '討論',
     streamChanges: '變更',
     viewAllEntries: '檢視全部 {{count}} 條 →',
@@ -1658,10 +1659,10 @@ const zhHant = {
     fieldChangesFilter: '欄位變更',
     tasksOnly: '僅任務',
     leaveCommentPlaceholder: '留下評論… (Ctrl+Enter 提交)',
-    noActivity: '暫無活動記錄',
-    activityAccessDenied: '您沒有檢視此記錄活動的權限。',
+    noActivity: '暫無動態',
+    activityAccessDenied: '您沒有檢視此記錄動態的權限。',
     commentsAccessDenied: '您沒有檢視此記錄評論的權限。',
-    activityLoadFailed: '無法載入此記錄的活動。',
+    activityLoadFailed: '無法載入此記錄的動態。',
     commentsLoadFailed: '無法載入此記錄的評論。',
     retryLoadFeed: '重試',
     // objectui#7149 — the rest of `ActivityTimeline`. The four chip labels the
@@ -1697,7 +1698,7 @@ const zhHant = {
     replyCount_other: '{{count}} 條回覆',
     replyPlaceholder: '回覆…',
     // 無障礙標籤
-    filterActivity: '篩選活動',
+    filterActivity: '篩選動態',
     openDiscussion: '開啟討論面板',
     closeDiscussion: '關閉討論面板',
     subscribeAriaLabel: '訂閱通知',
@@ -3490,7 +3491,9 @@ const zhHant = {
     diagram: '圖示',
     about: '關於',
     aboutTitle: '關於此控制台',
-    aboutDescription: '此控制台編譯所用的構建。',
+    aboutDescription: '此控制台執行的 ObjectStack 版本，以及它編譯所用的構建。',
+    aboutVersion: 'ObjectStack 版本',
+    aboutVersionUnknown: '未知版本（伺服器未報告版本）',
     aboutBuild: '控制台構建',
     aboutBuildUnknown: '未知構建（構建此控制台時未設定版本）',
   },
@@ -3508,7 +3511,6 @@ const zhHant = {
     starred: '已收藏',
     removeFromFavorites: '從收藏中移除 {{name}}',
     allReports: '全部報表',
-    keepOpen: '保持側邊欄展開',
     collapse: '收起側邊欄',
     expand: '展開側邊欄',
   },

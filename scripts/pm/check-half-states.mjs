@@ -10373,7 +10373,11 @@ export function renderDanglingReferences(report, { markdown = false } = {}) {
 // Tier H row in a mixed diff keeps the PR here, and an empty or tier-less slice
 // reads H (fail closed). ⛔ No second copy of which surfaces are which lives in
 // this file — a register that did not load stands nothing down, and the sweep
-// never reaches these rows without it.
+// never reaches these rows without it. The `.claude/**` row is S only as the
+// register's declaration split reads it (`h43RuleChangeSlice`, #35612): the
+// body's `Rule-change:` line off the LIST row, then the PR thread's record on
+// the head — so a pull declaring `yes` or nothing, or touching settings or
+// hooks, is Tier H here and its maintainer request is owed.
 //
 // ## The register is IMPORTED, never restated — and never fatally
 //
@@ -10460,11 +10464,17 @@ export async function loadGovernedRegister(load = (specifier) => import(specifie
     const recordTier = merges?.GOVERNED_TIER_S;
     const approvers = guard?.GOVERNED_APPROVERS;
     const repoIdForSlug = merges?.repoIdForSlug;
+    // The `.claude/**` declaration split (2026-11-19) and its record line reader: the slice H43 and H48 judge is the
+    // one the split has read, never the raw row's tier (#35612).
+    const split = merges?.applyRuleChangeSplit;
+    const readVerified = merges?.readRuleChangeVerified;
     if (
       typeof matcher !== 'function' ||
       typeof tierOf !== 'function' ||
       typeof recordTier !== 'string' ||
       typeof repoIdForSlug !== 'function' ||
+      typeof split !== 'function' ||
+      typeof readVerified !== 'function' ||
       !Array.isArray(approvers) ||
       approvers.length === 0
     ) {
@@ -10477,7 +10487,8 @@ export async function loadGovernedRegister(load = (specifier) => import(specifie
         repo: null,
         reason:
           'the governed register loaded but did not export what this row reads — `governedPathsIn`, ' +
-          '`landingTierOf`, `GOVERNED_TIER_S`, `repoIdForSlug` and a non-empty `GOVERNED_APPROVERS`. A rename ' +
+          '`landingTierOf`, `GOVERNED_TIER_S`, `repoIdForSlug`, `applyRuleChangeSplit`, `readRuleChangeVerified` ' +
+          'and a non-empty `GOVERNED_APPROVERS`. A rename ' +
           'is the likely cause, and this row is the reader that noticed',
       };
     }
@@ -10506,7 +10517,7 @@ export async function loadGovernedRegister(load = (specifier) => import(specifie
     // the register: a guard without it leaves H43's threads UNJUDGED (`h43RecordAuthors`), never the rest unread.
     const authorTrusted = typeof guard?.recordAuthorTrusted === 'function' ? guard.recordAuthorTrusted : null;
     const loadRecognisers = typeof guard?.loadRecordRecognisers === 'function' ? guard.loadRecordRecognisers : null;
-    return { available: true, matcher: (paths) => matcher(paths, repo), tierOf, recordTier, approvers, repo, reason: null, authorTrusted, loadRecognisers };
+    return { available: true, matcher: (paths) => matcher(paths, repo), split: (matched, reading) => split(matched, repo, reading), readVerified, tierOf, recordTier, approvers, repo, reason: null, authorTrusted, loadRecognisers };
   } catch (err) {
     return {
       available: false,
@@ -10545,6 +10556,58 @@ export function governedLandsOnRecord(governed, register = GOVERNED_REGISTER) {
   const list = Array.isArray(governed) ? governed : [];
   if (list.length === 0) return false;
   return register.tierOf(list) === register.recordTier;
+}
+
+/**
+ * The matched slice with the `.claude/**` declaration split READ (2026-11-19; #35612), as the queue guard reads it:
+ * the register's own `applyRuleChangeSplit` on the PR's body off its LIST row and, second, its `record` — so a pull
+ * that declares `Rule-change: yes`, declares nothing, or touches a settings or hooks path is Tier H and stays in
+ * H43's and H48's population, and one declaring `none` (or `ruled` with its `Ruling-ref:`) stands down only on a
+ * record that verifies it (`h43RuleChangeRecord`). `record` null leaves the record stage `pending` — Tier H, and the
+ * sweep reads the thread and asks again (`h43RuleChangePending`). A register that did not load returns the slice
+ * as it came: `governedLandsOnRecord` stands nothing down there anyway. Pure.
+ */
+export function h43RuleChangeSlice(governed, pr, record = null, register = GOVERNED_REGISTER) {
+  const list = Array.isArray(governed) ? governed : [];
+  if (!register?.available || typeof register.split !== 'function') return list;
+  const reading = { measured: true, reason: null, body: typeof pr?.body === 'string' ? pr.body : '', ...(record === null ? {} : { record }) };
+  return register.split(list, reading);
+}
+
+/** Does the split's record stage still wait on the PR thread for this slice? Pure. */
+export function h43RuleChangePending(slice) {
+  return (Array.isArray(slice) ? slice : []).some((s) => s?.ruleChangeVerdict?.recordStage === 'pending');
+}
+
+/**
+ * The split's `record` off the PR's own thread — the record H43's hand-off reads (`latestContractReviewOnHead` over
+ * the comments `authors` admits, the queue guard's binding) with its `Rule-change-verified:` line read by the
+ * register's reader (`readVerified`), and its record leg as this row can read it: `stands` on a PASS, `not-pass`
+ * otherwise. Two bounds, stated, both in the direction of standing down where the queue would not (under-report,
+ * never ask early): only the PR thread is read (a record on the card alone reads `absent`, so Tier H), and the
+ * record's `Served-tier:` line and signature are not read here. An unread thread or an unloaded binding is NOT
+ * MEASURED: Tier H. Pure.
+ */
+export function h43RuleChangeRecord(commentRows, headSha, authors = undefined, register = GOVERNED_REGISTER) {
+  if (!Array.isArray(commentRows) || authors?.available !== true || typeof register?.readVerified !== 'function') {
+    return { measured: false, reason: !Array.isArray(commentRows) ? 'the PR thread was not read' : 'the record-author binding or the line reader did not load' };
+  }
+  const trusted = commentRows.filter((row) => authors.admits(row));
+  const review = latestContractReviewOnHead(trusted, headSha);
+  if (review === null) return { measured: true, reason: null, located: 'absent', where: null, id: null, carried: null, ruleChangeVerified: null };
+  const row = trusted.find((r) => r?.id === review.id) ?? null;
+  const passed = review.verdict === 'PASS';
+  return {
+    measured: true,
+    reason: null,
+    located: 'found',
+    where: 'PR',
+    id: review.id,
+    carried: null,
+    ruleChangeCarried: null,
+    ruleChangeVerified: row === null ? null : register.readVerified(row.body),
+    recordLeg: { state: passed ? 'stands' : 'not-pass', reason: passed ? null : `its one \`VERDICT:\` line reads ${review.verdict ?? 'nothing (none or two)'}` },
+  };
 }
 
 /**
@@ -24837,10 +24900,24 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     for (const pr of seenPrs.values()) {
       const files = filesByPr.get(pr.number);
       if (!files) continue;
-      const governed = GOVERNED_REGISTER.matcher(files.paths ?? []);
+      // The `.claude/**` declaration split, read off the body the LIST row carries (#35612): never the raw row's tier.
+      const governed = h43RuleChangeSlice(GOVERNED_REGISTER.matcher(files.paths ?? []), pr);
       if (governed.length > 0) governedByPr.set(pr.number, governed);
     }
     stats.governedPrs = governedByPr.size;
+
+    // A body that declares a seat value leaves the split's record stage pending: ONE thread read per such PR —
+    // H48's fetch class, cached, and one H48 buys for it anyway while it reads Tier H — then the split asks again.
+    const splitPending = [...seenPrs.values()].filter((pr) => h43RuleChangePending(governedByPr.get(pr.number)));
+    let recordAuthors = null;
+    if (splitPending.length > 0) {
+      recordAuthors = await h43RecordAuthors();
+      if (!recordAuthors.available) stats.governedRecordAuthorsReason = recordAuthors.reason;
+    }
+    for (const pr of splitPending) {
+      const record = h43RuleChangeRecord(await prCommentRowsFor(pr.number), pr.head?.sha, recordAuthors);
+      governedByPr.set(pr.number, h43RuleChangeSlice(GOVERNED_REGISTER.matcher(filesByPr.get(pr.number)?.paths ?? []), pr, record));
+    }
 
     // Oldest-first, because the PR nobody has asked about for longest is the
     // one the cap must not be the reason nobody hears about. The policy reads
@@ -24858,8 +24935,10 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     // are both on the thread, nobody is owed a request, so such a PR buys no
     // review page and fires no row; an unread thread is UNJUDGED.
     // The PASS is read through the queue guard's author binding (card #33705), loaded once, here, at sweep time.
-    const recordAuthors = shortOfCoverage.length > 0 ? await h43RecordAuthors() : null;
-    if (recordAuthors !== null && !recordAuthors.available) stats.governedRecordAuthorsReason = recordAuthors.reason;
+    if (recordAuthors === null && shortOfCoverage.length > 0) {
+      recordAuthors = await h43RecordAuthors();
+      if (!recordAuthors.available) stats.governedRecordAuthorsReason = recordAuthors.reason;
+    }
     const handoffByPr = new Map();
     for (const pr of shortOfCoverage) {
       const rows = await prCommentRowsFor(pr.number);
@@ -26348,7 +26427,9 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // 93 → 94: a code span holding the KEY mentions the line and is unreadable; only the value may sit in one.
   // 94 → 103: the nine verdict-reader rows that landed with no pin of their own — the closed finding that
   // must END, the FAIL spellings, the fail-safe idiom. The battery registers 126 cases beside these rows.
-  'H43 hand-off timing': 103,
+  // 103 → 109 (#35612): the `.claude/**` declaration split on the slice — stood down on a verified `none`, listed on
+  // `yes`, the six Tier H shapes, the pending stage, the thread's record reading, an unloaded register, the loader.
+  'H43 hand-off timing': 109,
   // Registered with the seat-patrol rows (#28642), pin just under the count: two
   // free readings, each with its firing controls and its out-of-scope arms inside;
   // H71's intake readers (seat title, card labels and epic parent) add five.
@@ -33866,6 +33947,36 @@ async function selfTest() {
   t43('H43 tier: the answer is the register\'s, on the slice — S for the record row, H for mixed, H for a tier-less fixture, H for nothing', [governedLandsOnRecord(TIER_S_43), governedLandsOnRecord(MIXED_43), governedLandsOnRecord(GOV43), governedLandsOnRecord([])].join(), 'true,false,false,false');
   t43('H43 tier: ⛔ a register that did not load stands NOTHING down', governedLandsOnRecord(TIER_S_43, { available: false, tierOf: null, recordTier: null }), false);
   t43('H43 tier: …nor does one that loaded without the tier reader', governedLandsOnRecord(TIER_S_43, { available: true, tierOf: null, recordTier: 'S' }), false);
+
+  // ⚖️ The `.claude/**` declaration split (#35612): the slice H43 and H48 judge is the register's split, read off the
+  // body and the PR thread's record — `Rule-change: yes`, no line or a hooks path is Tier H and listed; a declared
+  // `none` stands down only on a record that verifies it. Each with its control one step away.
+  const CL43 = ['.claude/agents/os-dev.md'];
+  const RC43 = (line) => ({ number: 43, body: `Fixes #1\n\n${line}\n`, head: { sha: HEAD43 } });
+  const VERIFIED43 = PASS43.replace('\n\n**VERDICT', '\nRule-change-verified: none\n\n**VERDICT');
+  const rcSlice43 = (line, rows = rows43(ACCEPT43, VERIFIED43), paths = CL43) => {
+    if (!GOVERNED_REGISTER.available) return [];
+    const first = h43RuleChangeSlice(GOVERNED_REGISTER.matcher(paths), RC43(line));
+    return h43RuleChangePending(first) ? h43RuleChangeSlice(GOVERNED_REGISTER.matcher(paths), RC43(line), h43RuleChangeRecord(rows, HEAD43, AUTH43)) : first;
+  };
+  t43('⭐ #35612 H43 split: `Rule-change: none` over a PASS on the head verifying it stands down; the control — `Rule-change: yes` on the same thread — is Tier H and LISTED', [governedLandsOnRecord(rcSlice43('Rule-change: none')), governedLandsOnRecord(rcSlice43('Rule-change: yes')), typeof h43Gap(h43pr(43), rcSlice43('Rule-change: yes'), APP43, []), h43Gap(h43pr(43), rcSlice43('Rule-change: none'), APP43, [])].join(), 'true,false,string,');
+  t43('⛔ #35612 H43 split: no `Rule-change:` line, a hooks path beside the wording, a record verifying `yes`, a FAIL, no record on the head, or an unread thread — each Tier H, never stood down', [
+    rcSlice43('Clause-②: no'),
+    rcSlice43('Rule-change: none', rows43(ACCEPT43, VERIFIED43), [...CL43, '.claude/hooks/guard-main-checkout.sh']),
+    rcSlice43('Rule-change: none', rows43(ACCEPT43, VERIFIED43.replace('Rule-change-verified: none', 'Rule-change-verified: yes'))),
+    rcSlice43('Rule-change: none', rows43(ACCEPT43, VERIFIED43.replace('**VERDICT: PASS**', '**VERDICT: FAIL**'))),
+    rcSlice43('Rule-change: none', rows43(ACCEPT43)),
+    rcSlice43('Rule-change: none', null),
+  ].map((slice) => governedLandsOnRecord(slice)).join(), 'false,false,false,false,false,false');
+  t43('#35612 H43 split: a body declaring a seat value leaves the record stage PENDING until the thread is read; `yes` and a hooks path never wait on it', GOVERNED_REGISTER.available ? [h43RuleChangePending(h43RuleChangeSlice(GOVERNED_REGISTER.matcher(CL43), RC43('Rule-change: none'))), h43RuleChangePending(h43RuleChangeSlice(GOVERNED_REGISTER.matcher(CL43), RC43('Rule-change: yes'))), h43RuleChangePending(h43RuleChangeSlice(GOVERNED_REGISTER.matcher(['.claude/settings.json']), RC43('Rule-change: none')))].join() : 'NOT MEASURED', 'true,false,false');
+  t43('#35612 H43 split record: a trusted PASS on the head with its line reads FOUND, the line and the leg; none on the head is ABSENT; an unread thread or binding is NOT MEASURED', (() => {
+    const found = h43RuleChangeRecord(rows43(ACCEPT43, VERIFIED43), HEAD43, AUTH43);
+    const failed = h43RuleChangeRecord(rows43(VERIFIED43.replace('**VERDICT: PASS**', '**VERDICT: FAIL**')), HEAD43, AUTH43);
+    const stranger = h43RuleChangeRecord([{ ...rows43(VERIFIED43)[0], user: { login: 'drive-by-commenter' } }], HEAD43, AUTH43);
+    return [found.located, found.ruleChangeVerified?.value, found.recordLeg?.state, failed.recordLeg?.state, stranger.located, h43RuleChangeRecord(rows43(OLD_PASS43), HEAD43, AUTH43).located, h43RuleChangeRecord(null, HEAD43, AUTH43).measured, h43RuleChangeRecord(rows43(VERIFIED43), HEAD43, { available: false }).measured].join();
+  })(), 'found,none,stands,not-pass,absent,absent,false,false');
+  t43('#35612 H43 split: a register that did not load returns the slice untouched — and stands nothing down', [h43RuleChangeSlice(GOV43, RC43('Rule-change: none'), null, { available: false }) === GOV43 || JSON.stringify(h43RuleChangeSlice(GOV43, RC43('Rule-change: none'), null, { available: false })) === JSON.stringify(GOV43), governedLandsOnRecord(TIER_S_43, { available: false })].join(), 'true,false');
+  t43('#35612 H43 register: the loader exports the split and its line reader, bound to the swept board', GOVERNED_REGISTER.available && typeof GOVERNED_REGISTER.split === 'function' && typeof GOVERNED_REGISTER.readVerified === 'function' && GOVERNED_REGISTER.readVerified('Rule-change-verified: ruled').value === 'ruled', true);
   t43('H43 summary: the review leg is stated as Tier H only', saidBy('h43GovernedReviews', summaryLine({ governedPrs: 8, governedReviewCandidates: 5, governedReviewProbed: 5 }, 0)).includes('Tier H only'), true);
 
   // The coverage clause, both branches, cut out of the summary line so only

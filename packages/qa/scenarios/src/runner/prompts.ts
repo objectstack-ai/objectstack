@@ -443,16 +443,37 @@ const CONFIRM_FIRST_LOCK =
   'so a plain record update cannot make that change while those people’s other changes to the same fields still land; ' +
   'an action that deletes its row locks nothing, and those people keep their delete right';
 
+/**
+ * How the runner loads the seed, as the build must expect it: through the
+ * platform's own seed path (`seedApp` in `orchestrate.ts`), not the data API a
+ * person writes through. The rows are established facts: the state machine's
+ * entry check is skipped, every other validation rule and hook judges each
+ * row, and no record-triggered flow fires on it. So a field a build derives
+ * with an after-save flow stays empty on every loaded row (asset_lifecycle's
+ * department scoping fields left a manager seeing none of the department's
+ * rows), and a rule that judges a row against a total the loaded rows already
+ * count (a payment against its invoice's balance) refuses the history.
+ */
+export const SEED_POSTURE =
+  'The rows are loaded through the platform’s seed path as established facts, not as new records entering their lifecycle: ' +
+  'each row is still judged by every validation rule and hook except the state machine’s entry check, and no record-triggered flow fires on it. ' +
+  'So a value derived from other fields or rows (a department copied from a related row to scope access, an amount, a flag) must be a formula or a field computed by an expression when written, ' +
+  'never set by a record-triggered flow, or every loaded row keeps it empty. ' +
+  'And a loaded row is already counted in the stored totals of the rows it relates to (a payment in its invoice’s balance), ' +
+  'so a validation rule must not refuse it by comparing it with such a total.';
+
 /** The runner's contract, appended to every build prompt. */
 export function dataContract(card: Card): string {
   const lines: string[] = [];
   lines.push('## What the app will be loaded with and used by');
   lines.push('');
   lines.push(
-    'After you finish, a test runner loads the rows below through the data API and signs each person in. ' +
+    'After you finish, a test runner loads the rows below and signs each person in. ' +
       'Use these object and field machine names exactly (lookup values are the `id` of the referenced row), ' +
       'and make every value shown valid for its field. The object names already carry this app’s namespace prefix.',
   );
+  lines.push('');
+  lines.push(SEED_POSTURE);
   lines.push('');
   lines.push(namingRule(card));
   lines.push('');

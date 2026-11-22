@@ -34,7 +34,7 @@ async function isRequired(dialog: Locator, labelText: string): Promise<boolean> 
 
 test('header fields react to Status via CEL visibleWhen / readonlyWhen / requiredWhen', async ({ page }) => {
   await page.goto('/apps/showcase_app/showcase_invoice');
-  await page.getByRole('button', { name: /^(New|新建)$/i }).first().click();
+  await page.getByTestId('object-view-new-button').first().click();
 
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByTestId('md-form-submit')).toBeVisible();

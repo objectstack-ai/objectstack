@@ -16,9 +16,11 @@
  *   1. With the prop a click selects; without it the same click edits.
  *   2. The field's reason (read-only, calculated), the reader's grant, the
  *      view's opt-out, and the record's approval lock, each in its words.
- *   3. The lock is read from the approvals service's per-record answer when a
- *      cell of the row is selected; with no answer the row's
- *      `approval_status` stands in (`resolveApprovalLock`).
+ *   3. The lock is read from the approvals service's answer for the page when
+ *      a cell is first selected, in one request (objectstack#35795); with no
+ *      answer the row's `approval_status` stands in (`resolveApprovalLock`).
+ *      While the lock or the record verdict is on its way, an edit waits for it
+ *      and says the record is being checked.
  *   4. A single click on a cell's email link or referenced record's chip only
  *      selects it, the title link still opens the record, and the email cell
  *      draws its copy button as the one the table hides (objectstack#36015).
@@ -31,7 +33,7 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
 // The viewer's update grant, switchable per test. Stable stub identity:
@@ -73,9 +75,20 @@ const FIELDS = {
 
 let lockedIds = new Set<string>();
 let lockStatus = 200;
-let lockReads: string[] = [];
-// While set, a lock read answers only once it settles (objectstack#35689).
+/** The ids of each lock read, one entry per request. */
+let lockReads: string[][] = [];
+/** How long the lock read and the explain read take, in ms; 0 answers at once. */
+let lockDelay = 0;
+/** While set, a lock read answers only once it settles (objectstack#35689). */
 let lockGate: Promise<void> | null = null;
+let explainDelay = 0;
+let explainReads = 0;
+/** The rows the explain engine refuses `update` on. */
+let refusedIds = new Set<string>();
+
+const LOCKS_URL = '/api/v1/approvals/records/probe/locks';
+const after = <T,>(ms: number, value: T): Promise<T> =>
+  ms > 0 ? new Promise((resolve) => setTimeout(() => resolve(value), ms)) : Promise.resolve(value);
 
 beforeEach(() => {
   __clearRecordCrudVerdictCache();
@@ -83,19 +96,27 @@ beforeEach(() => {
   lockedIds = new Set();
   lockStatus = 200;
   lockReads = [];
+  lockDelay = 0;
   lockGate = null;
-  // The explain engine permits every row; the approvals service answers the lock.
+  explainDelay = 0;
+  explainReads = 0;
+  refusedIds = new Set();
+  // The explain engine permits every row; the approvals service answers the locks of a page.
   vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
     const href = String(url);
-    const lock = /\/api\/v1\/approvals\/records\/probe\/([^/]+)\/lock$/.exec(href);
-    if (lock) {
-      lockReads.push(decodeURIComponent(lock[1]));
-      if (lockGate) await lockGate;
-      return { ok: lockStatus < 300, status: lockStatus, json: async () => ({ success: true, data: { locked: lockedIds.has(lock[1]) } }) };
-    }
     const body = init?.body ? JSON.parse(String(init.body)) : {};
     const ids: string[] = Array.isArray(body.recordIds) ? body.recordIds : [];
-    return { ok: true, status: 200, json: async () => ({ allowed: true, records: ids.map((id) => ({ recordId: id, visible: true })) }) };
+    if (href.endsWith(LOCKS_URL)) {
+      lockReads.push(ids);
+      if (lockGate) await lockGate;
+      return after(lockDelay, {
+        ok: lockStatus < 300,
+        status: lockStatus,
+        json: async () => ({ success: true, data: { records: ids.map((id) => ({ recordId: id, locked: lockedIds.has(id) })) } }),
+      });
+    }
+    explainReads += 1;
+    return after(explainDelay, { ok: true, status: 200, json: async () => ({ allowed: true, records: ids.map((id) => ({ recordId: id, visible: !refusedIds.has(id) })) }) });
   }));
 });
 afterEach(() => {
@@ -184,50 +205,187 @@ describe('ObjectGrid cellSelection — why a cell opens no editor', () => {
     await waitFor(() => expect(g.container.querySelector('td[data-editing-cell]')).not.toBeNull());
   });
 
-  it("a record the approvals service says is locked, asked when its cell is selected", async () => {
+  it("a record the approvals service says is locked, asked for the page when a cell is first selected", async () => {
     lockedIds = new Set(['3']);
     const g = await renderGrid();
     expect(lockReads).toEqual([]);
     fireEvent.click(g.cell(2, 0));
-    await waitFor(() => expect(lockReads).toEqual(['3']));
+    await waitFor(() => expect(lockReads).toEqual([['3', '1', '2']]));
     // Let the answer land before the edit is asked for.
     await new Promise((r) => setTimeout(r, 0));
     fireEvent.doubleClick(g.cell(2, 0));
     expect((await screen.findByTestId('cell-readonly-reason')).textContent).toBe("This record is locked while it's in approval.");
     expect(g.container.querySelector('td[data-editing-cell]')).toBeNull();
-    // An answer that says unlocked wins over the column: the pending row edits.
+    // An answer that says unlocked wins over the column: the pending row edits,
+    // and selecting it asks nothing again.
     fireEvent.click(g.cell(1, 0));
-    await waitFor(() => expect(lockReads).toEqual(['3', '2']));
-    await new Promise((r) => setTimeout(r, 0));
     fireEvent.doubleClick(g.cell(1, 0));
     await waitFor(() => expect(g.container.querySelector('td[data-editing-cell]')).not.toBeNull());
+    expect(lockReads).toEqual([['3', '1', '2']]);
   });
 });
 
 describe('ObjectGrid cellSelection — the selected cell says a lock that answers after it was selected (objectstack#35689)', () => {
-  it('aria-readonly follows the lock answer where the selection is, both ways', async () => {
-    lockedIds = new Set(['3']);
+  const catcher = (g: { container: HTMLElement }) => g.container.querySelector('[data-slot="cell-type-catcher"]');
+  function holdLockRead(): () => void {
     let answer!: () => void;
     lockGate = new Promise<void>((resolve) => { answer = resolve; });
+    return answer;
+  }
+
+  it('a row the service says is locked turns aria-readonly on where the selection is', async () => {
+    lockedIds = new Set(['3']);
+    const answer = holdLockRead();
     const g = await renderGrid();
-    const catcher = () => g.container.querySelector('[data-slot="cell-type-catcher"]');
-    // Gamma: no approval_status, so editable until the service answers locked.
+    // Gamma has no approval_status: editable until the service answers.
     fireEvent.click(g.cell(2, 0));
-    await waitFor(() => expect(lockReads).toEqual(['3']));
+    await waitFor(() => expect(lockReads).toEqual([['3', '1', '2']]));
     expect(g.cell(2, 0)).not.toHaveAttribute('aria-readonly');
     answer();
     await waitFor(() => expect(g.cell(2, 0)).toHaveAttribute('aria-readonly', 'true'));
-    expect(catcher()).toHaveAttribute('aria-readonly', 'true');
+    expect(catcher(g)).toHaveAttribute('aria-readonly', 'true');
     expect(g.cell(2, 0)).toHaveAttribute('data-selected-cell');
-    // Beta: its approval_status stands in as locked until the service says it is not.
-    lockGate = new Promise<void>((resolve) => { answer = resolve; });
+  });
+
+  it("a row whose approval_status stands in as locked turns it off when the service says it is not", async () => {
+    const answer = holdLockRead();
+    const g = await renderGrid();
     fireEvent.click(g.cell(1, 0));
-    await waitFor(() => expect(lockReads).toEqual(['3', '2']));
+    await waitFor(() => expect(lockReads).toEqual([['2', '1', '3']]));
     expect(g.cell(1, 0)).toHaveAttribute('aria-readonly', 'true');
     answer();
     await waitFor(() => expect(g.cell(1, 0)).not.toHaveAttribute('aria-readonly'));
-    expect(catcher()).not.toHaveAttribute('aria-readonly');
+    expect(catcher(g)).not.toHaveAttribute('aria-readonly');
     expect(g.cell(1, 0)).toHaveAttribute('data-selected-cell');
+  });
+});
+
+describe('ObjectGrid cellSelection — an edit waits for the row\'s lock and verdict (objectstack#35795)', () => {
+  const CHECKING = 'Checking whether this record can be edited…';
+  const LOCKED = "This record is locked while it's in approval.";
+  const NO_PERMISSION = "You don't have permission to edit this record.";
+  const editor = (g: { container: HTMLElement }) => g.container.querySelector('td[data-editing-cell]');
+  const catcher = (g: { container: HTMLElement }) => g.container.querySelector<HTMLInputElement>('[data-slot="cell-type-catcher"]')!;
+
+  // Real timers until the grid has drawn, then fake ones: the reads are slow
+  // and the test says how much time passes.
+  async function renderSlow() {
+    const g = await renderGrid();
+    vi.useFakeTimers();
+    return g;
+  }
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('a slow lock read opens no editor on a locked row: the cell says it is checking, then that it is locked', async () => {
+    lockDelay = 2000;
+    lockedIds = new Set(['3']);
+    const g = await renderSlow();
+    fireEvent.click(g.cell(2, 0));
+    fireEvent.doubleClick(g.cell(2, 0));
+    expect(screen.getByTestId('cell-readonly-reason')).toHaveTextContent(CHECKING);
+    expect(editor(g)).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1999); });
+    expect(editor(g)).toBeNull();
+    expect(screen.getByTestId('cell-readonly-reason')).toHaveTextContent(CHECKING);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(screen.getByTestId('cell-readonly-reason')).toHaveTextContent(LOCKED);
+    expect(editor(g)).toBeNull();
+  });
+
+  it('a slow lock read on an unlocked row opens the editor once it answers, with no second double-click', async () => {
+    lockDelay = 2000;
+    const g = await renderSlow();
+    fireEvent.click(g.cell(0, 0));
+    fireEvent.doubleClick(g.cell(0, 0));
+    expect(editor(g)).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(editor(g)).not.toBeNull();
+    expect(screen.queryByTestId('cell-readonly-reason')).toBeNull();
+  });
+
+  it('a key typed while checking is the value the editor opens with', async () => {
+    lockDelay = 2000;
+    const g = await renderSlow();
+    fireEvent.click(g.cell(0, 0));
+    fireEvent.change(catcher(g), { target: { value: 'Z' } });
+    expect(editor(g)).toBeNull();
+    expect(screen.getByTestId('cell-readonly-reason')).toHaveTextContent(CHECKING);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(g.cell(0, 0).querySelector<HTMLInputElement>('[data-slot="cell-editor-overlay"] input')).toHaveValue('Z');
+  });
+
+  it('a slow record verdict holds the editor the same way', async () => {
+    explainDelay = 2000;
+    const g = await renderSlow();
+    fireEvent.click(g.cell(0, 0));
+    fireEvent.doubleClick(g.cell(0, 0));
+    expect(editor(g)).toBeNull();
+    expect(screen.getByTestId('cell-readonly-reason')).toHaveTextContent(CHECKING);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(editor(g)).not.toBeNull();
+  });
+
+  // The answer that settles the wait is the one the re-asked edit reads, not
+  // the verdict of the render the wait began in.
+  it('a slow record verdict that refuses the row opens no editor: the cell says the reader may not edit it', async () => {
+    explainDelay = 2000;
+    refusedIds = new Set(['1']);
+    const g = await renderSlow();
+    fireEvent.click(g.cell(0, 0));
+    fireEvent.doubleClick(g.cell(0, 0));
+    expect(screen.getByTestId('cell-readonly-reason')).toHaveTextContent(CHECKING);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(editor(g)).toBeNull();
+    expect(screen.getByTestId('cell-readonly-reason')).toHaveTextContent(NO_PERMISSION);
+  });
+
+  it('a key typed while a refusing verdict is read opens nothing and writes nothing', async () => {
+    explainDelay = 2000;
+    refusedIds = new Set(['1']);
+    const g = await renderSlow();
+    fireEvent.click(g.cell(0, 0));
+    fireEvent.change(catcher(g), { target: { value: 'Z' } });
+    expect(screen.getByTestId('cell-readonly-reason')).toHaveTextContent(CHECKING);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(editor(g)).toBeNull();
+    expect(screen.getByTestId('cell-readonly-reason')).toHaveTextContent(NO_PERMISSION);
+    expect(g.cell(0, 0)).toHaveTextContent('Alpha');
+  });
+
+  it('selecting another cell while checking drops the wait: the answer opens nothing', async () => {
+    lockDelay = 2000;
+    const g = await renderSlow();
+    fireEvent.click(g.cell(0, 0));
+    fireEvent.doubleClick(g.cell(0, 0));
+    fireEvent.click(g.cell(2, 0));
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(editor(g)).toBeNull();
+  });
+
+  it('a page of rows sends one lock read, and moving the selection with the arrow keys sends none', async () => {
+    const g = await renderGrid();
+    fireEvent.click(g.cell(0, 0));
+    await waitFor(() => expect(lockReads).toEqual([['1', '2', '3']]));
+    await waitFor(() => expect(explainReads).toBeGreaterThan(0));
+    const explainedOnce = explainReads;
+    fireEvent.keyDown(catcher(g), { key: 'ArrowDown' });
+    fireEvent.keyDown(catcher(g), { key: 'ArrowDown' });
+    fireEvent.keyDown(catcher(g), { key: 'ArrowUp' });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(g.cell(1, 0)).toHaveAttribute('data-selected-cell');
+    expect(lockReads).toEqual([['1', '2', '3']]);
+    expect(explainReads).toBe(explainedOnce);
+  });
+
+  it('a deployment with no approvals service is asked once, and its rows edit', async () => {
+    lockStatus = 501;
+    const g = await renderGrid();
+    fireEvent.click(g.cell(0, 0));
+    fireEvent.doubleClick(g.cell(0, 0));
+    await waitFor(() => expect(editor(g)).not.toBeNull());
+    expect(lockReads).toHaveLength(1);
   });
 });
 
