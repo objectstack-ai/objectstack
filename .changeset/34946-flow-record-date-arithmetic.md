@@ -1,11 +1,12 @@
 ---
-'@objectstack/formula': patch
+'@objectstack/formula': minor
+'@objectstack/spec': minor
 ---
 
 fix(formula)!: a flow condition that does date arithmetic on `record.FIELD` or `previous.FIELD` is now refused, as the bare field name already was
 
 Clause-②: no (narrowing)
-Metadata-protocol: none
+Metadata-protocol: narrowed
 
 <!-- adr-0087: registered flow-condition-record-date-arithmetic-refused -->
 
