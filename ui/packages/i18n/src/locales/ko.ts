@@ -5598,6 +5598,12 @@ const ko = {
       object: "개체",
       unknownType: "알 수 없는 메타데이터 보기 유형입니다. {{a}}, {{b}} 또는 {{c}}이어야 합니다.",
       unknownTypeNamed: "알 수 없는 메타데이터 보기 유형 “{{type}}”입니다. {{a}}, {{b}} 또는 {{c}}이어야 합니다.",
+      condition: "조건",
+      otherwise: "그 외",
+      conditionAnd: "그리고",
+      conditionOr: "또는",
+      conditionMore: "기타 조건",
+      runsWhen: "실행 조건: {{condition}}",
     },
   },
   reactPage: {

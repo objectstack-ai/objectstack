@@ -6251,6 +6251,12 @@ const ar = {
       object: "الكائن",
       unknownType: "نوع عرض بيانات وصفية غير معروف. المتوقع {{a}} أو {{b}} أو {{c}}.",
       unknownTypeNamed: "نوع عرض بيانات وصفية غير معروف «{{type}}». المتوقع {{a}} أو {{b}} أو {{c}}.",
+      condition: "شرط",
+      otherwise: "خلاف ذلك",
+      conditionAnd: "و",
+      conditionOr: "أو",
+      conditionMore: "شروط أخرى",
+      runsWhen: "يعمل عندما {{condition}}",
     },
   },
   reactPage: {

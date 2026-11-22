@@ -5600,6 +5600,12 @@ const de = {
       object: "Objekt",
       unknownType: "Unbekannter Metadaten-Ansichtstyp. Erwartet: {{a}}, {{b}} oder {{c}}.",
       unknownTypeNamed: "Unbekannter Metadaten-Ansichtstyp „{{type}}“. Erwartet: {{a}}, {{b}} oder {{c}}.",
+      condition: "Bedingung",
+      otherwise: "sonst",
+      conditionAnd: "und",
+      conditionOr: "oder",
+      conditionMore: "weitere Bedingungen",
+      runsWhen: "Läuft, wenn {{condition}}",
     },
   },
   reactPage: {

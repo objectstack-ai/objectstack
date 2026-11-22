@@ -5659,6 +5659,12 @@ const zhHant = {
       object: '物件',
       unknownType: '未知的中繼資料檢視型別。應為 {{a}}、{{b}} 或 {{c}}。',
       unknownTypeNamed: '未知的中繼資料檢視型別“{{type}}”。應為 {{a}}、{{b}} 或 {{c}}。',
+      condition: '條件',
+      otherwise: '否則',
+      conditionAnd: '且',
+      conditionOr: '或',
+      conditionMore: '其他條件',
+      runsWhen: '執行條件：{{condition}}',
     },
   },
   reactPage: {

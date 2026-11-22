@@ -6522,6 +6522,12 @@ const en = {
       object: 'Object',
       unknownType: 'Unknown metadata view type. Expected {{a}}, {{b}} or {{c}}.',
       unknownTypeNamed: 'Unknown metadata view type “{{type}}”. Expected {{a}}, {{b}} or {{c}}.',
+      condition: 'condition',
+      otherwise: 'otherwise',
+      conditionAnd: 'and',
+      conditionOr: 'or',
+      conditionMore: 'other conditions',
+      runsWhen: 'Runs when {{condition}}',
     },
   },
   // `kind:'react'` page renderer's notices (`react-page.tsx`, #25916). A

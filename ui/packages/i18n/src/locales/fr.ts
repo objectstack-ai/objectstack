@@ -5758,6 +5758,12 @@ const fr = {
       object: "Objet",
       unknownType: "Type de vue de métadonnées inconnu. Attendu : {{a}}, {{b}} ou {{c}}.",
       unknownTypeNamed: "Type de vue de métadonnées inconnu « {{type}} ». Attendu : {{a}}, {{b}} ou {{c}}.",
+      condition: "condition",
+      otherwise: "sinon",
+      conditionAnd: "et",
+      conditionOr: "ou",
+      conditionMore: "autres conditions",
+      runsWhen: "S’exécute si {{condition}}",
     },
   },
   reactPage: {
