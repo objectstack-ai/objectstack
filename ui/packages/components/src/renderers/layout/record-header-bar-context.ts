@@ -38,8 +38,10 @@ export interface RecordHeaderBar {
    * the name has less than 16 characters' room and is cut. No copy-id icon
    * follows the name: a host that offers the copy does so in its `⋯`. The
    * name's full text is its tooltip. A state's own levers (an approval's
-   * approve / reject) are drawn as the state draws them. Absent: a page's
-   * bar, as before.
+   * approve / reject) are drawn as the state draws them. A child list's tab
+   * under the bar draws one row per record (its title and one summary line),
+   * the phone's card rows, instead of a table. Absent: a page's bar, as
+   * before.
    */
   preview?: boolean;
 }
