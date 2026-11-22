@@ -135,16 +135,6 @@ const STRATEGIES = [
 
 interface Refusal extends Error { code?: string; status?: number; object?: string }
 
-async function rejection(call: () => unknown): Promise<Refusal> {
-  let resolved: unknown;
-  try {
-    resolved = await call();
-  } catch (e) {
-    return e as Refusal;
-  }
-  throw new Error(`expected a refusal, got ${JSON.stringify(resolved)}`);
-}
-
 /** The data route's refusal for the same object (`objectPackageDisabledError`, metadata-protocol). */
 const DATA_ROUTE_REFUSAL = {
   code: 'OBJECT_PACKAGE_DISABLED',
@@ -153,6 +143,16 @@ const DATA_ROUTE_REFUSAL = {
   message: `Object '${BETA}' belongs to a disabled package and is not being served. Re-enable the package to restore access.`,
 };
 const pick = (e: Refusal) => ({ code: e.code, status: e.status, object: e.object, message: e.message });
+
+/** One door's answer: its refusal's envelope, or what it served. */
+async function outcome(call: () => unknown): Promise<unknown> {
+  try {
+    const served: any = await call();
+    return { served: served?.rows ?? served };
+  } catch (e) {
+    return pick(e as Refusal);
+  }
+}
 
 describe.each(STRATEGIES)('[#35525] the analytics door refuses a disabled package\'s object — $label strategy', ({ capabilities }) => {
   let engine: ObjectQL;
@@ -221,9 +221,10 @@ describe.each(STRATEGIES)('[#35525] the analytics door refuses a disabled packag
     it(`THE PIN (${label}): every read of the disabled object answers the data route's 404 OBJECT_PACKAGE_DISABLED`, async () => {
       disable();
       try {
-        for (const [door, call] of betaReads(context)) {
-          expect(pick(await rejection(call)), door).toEqual(DATA_ROUTE_REFUSAL);
-        }
+        // Every door's answer in one map, so a red run reads as the full table.
+        const answers: Record<string, unknown> = {};
+        for (const [door, call] of betaReads(context)) answers[door] = await outcome(call);
+        expect(answers).toEqual(Object.fromEntries(betaReads(context).map(([door]) => [door, DATA_ROUTE_REFUSAL])));
       } finally {
         enable();
       }
@@ -232,13 +233,15 @@ describe.each(STRATEGIES)('[#35525] the analytics door refuses a disabled packag
     it(`CONTROL (${label}): the same package re-enabled serves every read with its values`, async () => {
       enable();
       const counted: any = await service.query({ cube: 'pkg35525_beta_cube', measures: ['cnt', 'total'] }, context);
-      expect(counted.rows).toEqual([{ 'pkg35525_beta_cube.cnt': 1, 'pkg35525_beta_cube.total': 42 }]);
+      expect(counted.rows).toEqual([{ cnt: 1, total: 42 }]);
       const grouped: any = await service.query({ cube: 'pkg35525_beta_cube', measures: ['cnt'], dimensions: ['note'] }, context);
-      expect(grouped.rows).toEqual([{ 'pkg35525_beta_cube.note': SECRET, 'pkg35525_beta_cube.cnt': 1 }]);
+      expect(grouped.rows).toEqual([{ note: SECRET, cnt: 1 }]);
       const hop: any = await service.query({ cube: 'pkg35525_alpha_cube', measures: ['cnt'], dimensions: ['b_note'] }, context);
-      expect(hop.rows).toEqual([{ 'pkg35525_alpha_cube.b_note': SECRET, 'pkg35525_alpha_cube.cnt': 1 }]);
+      expect(hop.rows).toEqual([{ b_note: SECRET, cnt: 1 }]);
+      // Every door the pin refuses serves again: nothing is refused.
       for (const [door, call] of betaReads(context)) {
-        await expect(Promise.resolve().then(call), door).resolves.toBeDefined();
+        const answer: any = await outcome(call);
+        expect(answer?.code, `${door}: ${JSON.stringify(answer)}`).toBeUndefined();
       }
     });
 
@@ -246,7 +249,7 @@ describe.each(STRATEGIES)('[#35525] the analytics door refuses a disabled packag
       disable();
       try {
         const authored: any = await service.query({ cube: 'pkg35525_alpha_cube', measures: ['cnt'], dimensions: ['title'] }, context);
-        expect(authored.rows).toEqual([{ 'pkg35525_alpha_cube.title': 'alpha-1', 'pkg35525_alpha_cube.cnt': 1 }]);
+        expect(authored.rows).toEqual([{ title: 'alpha-1', cnt: 1 }]);
         const inferred: any = await service.query({ cube: ALPHA, measures: [`${ALPHA}.count`], dimensions: [`${ALPHA}.title`] }, context);
         expect(inferred.rows).toEqual([{ [`${ALPHA}.title`]: 'alpha-1', [`${ALPHA}.count`]: 1 }]);
       } finally {
