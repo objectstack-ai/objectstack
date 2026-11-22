@@ -304,8 +304,28 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
       const justDragged = dragging.current || Date.now() - lastDragEnd.current < 300;
       if (justDragged && event.target instanceof Element && event.target.closest('[data-design-menu-link]')) event.preventDefault();
     };
+    // The drag's end is stamped from the pointer itself too: dnd-kit reports a
+    // drag's end only after its start has rendered, so a flick released before
+    // that would leave the flag set and every link of the editor shut. A new
+    // press starts over.
+    const onPress = () => {
+      dragging.current = false;
+    };
+    const onRelease = () => {
+      if (!dragging.current) return;
+      dragging.current = false;
+      lastDragEnd.current = Date.now();
+    };
     window.addEventListener('click', onClick, true);
-    return () => window.removeEventListener('click', onClick, true);
+    window.addEventListener('pointerdown', onPress, true);
+    window.addEventListener('pointerup', onRelease, true);
+    window.addEventListener('pointercancel', onRelease, true);
+    return () => {
+      window.removeEventListener('click', onClick, true);
+      window.removeEventListener('pointerdown', onPress, true);
+      window.removeEventListener('pointerup', onRelease, true);
+      window.removeEventListener('pointercancel', onRelease, true);
+    };
   }, []);
 
   const onDragEnd = (event: DragEndEvent) => {

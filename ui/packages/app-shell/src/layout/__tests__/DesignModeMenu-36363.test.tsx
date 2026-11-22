@@ -490,7 +490,13 @@ describe('the menu under the design mode (objectstack#36363)', () => {
   // sees it and the link's default (a full navigation) would run.
   it('the click a real pointer drag ends with is cancelled before dnd-kit stops it', async () => {
     storedNav.current = ACCOUNTS_CONTRIBUTED();
-    start();
+    render(
+      <MemoryRouter initialEntries={['/apps/crm']}>
+        <Harness />
+        <Where />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByText('enter'));
     await flush();
     const leads = linkOf('leads');
     const pointer = (type: string, target: EventTarget, x: number) => {
@@ -524,12 +530,38 @@ describe('the menu under the design mode (objectstack#36363)', () => {
     expect(stoppedInDocument).toBe(false); // dnd-kit stopped it, as in the browser
     expect(click.defaultPrevented).toBe(true); // and its default is cancelled
 
-    // A plain click afterwards is a click again.
-    const plain = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+    // A plain click afterwards is a click again: it opens the entry's page.
+    const before = screen.getByTestId('where').textContent;
     act(() => {
-      linkOf('leads').dispatchEvent(plain);
+      linkOf('leads').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
     });
-    expect(screen.queryByTestId('design-mode-bar')).toBeInTheDocument();
+    expect(screen.getByTestId('where').textContent).not.toBe(before);
+    expect(screen.getByTestId('design-mode-bar')).toBeInTheDocument();
+  });
+
+  // Review 7085270448 S3: dnd-kit reports a drag's start at 5 px but its end
+  // only after the start has rendered, so a flick released first can end with
+  // no end reported. The release itself ends it: links open again.
+  it('a drag whose end dnd-kit never reports (a fast flick) does not leave the links shut', async () => {
+    render(
+      <MemoryRouter initialEntries={['/apps/crm']}>
+        <Harness />
+        <Where />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByText('enter'));
+    await flush();
+    act(() => dragStart.current!({ active: { id: 'leads' } })); // started, and no end reported
+    act(() => {
+      window.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 350));
+    });
+    act(() => {
+      linkOf('home').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+    });
+    expect(screen.getByTestId('where').textContent).not.toBe('/apps/crm');
   });
 
   it('adding and moving stay open under zh-CN', async () => {
