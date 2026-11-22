@@ -16,7 +16,9 @@
  *    which steps a manual's reader sees;
  *  - the i18n walk (`packages/lint`, `i18n/missing-flow`), which demands a
  *    translated label, `flows.<flow>.nodes.<node_id>.label`, for exactly the
- *    steps that viewer draws at its default altitude (ruling 7076440876).
+ *    steps that viewer names at its default altitude (ruling 7076440876):
+ *    every step it draws, and a folded step only where a drawn decision's
+ *    branch list names it as the step the branch leads to.
  *
  * Display only: nothing here changes how a flow runs.
  */

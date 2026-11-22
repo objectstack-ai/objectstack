@@ -6,10 +6,11 @@
 // The docs viewer's `type: flow` embed (`element:metadata_viewer`) lists a
 // flow's steps by label for a manual's reader, at `detail: business` by
 // default: every top-level node whose type `isFlowTechnicalNodeType` does not
-// fold away. A screen's and an approval's label were keyed already; a start,
+// fold away, and, in a decision's branch list, the step each branch leads to,
+// a folded one included. A screen's and an approval's label were keyed already; a start,
 // decision, notify or end step had no key, so a zh-CN manual named them in
 // English under a green coverage run. These pins are the CLI half: the walker
-// scaffolds `flows.<flow>.nodes.<node_id>.label` for exactly the drawn steps
+// scaffolds `flows.<flow>.nodes.<node_id>.label` for exactly the named steps
 // that have no other key, and the coverage gate demands it.
 //
 // The ledger mock is `i18n-flow-screen-coverage.test.ts`'s, for its reason:
@@ -80,7 +81,7 @@ describe('what the walker harvests for the steps a docs flow embed draws (ruling
     });
   });
 
-  it('asks nothing for a technical step, whichever type the shared table folds away', () => {
+  it('asks nothing for a technical step no branch names, whichever type the shared table folds away', () => {
     const flow = {
       name: 'plumbing',
       label: 'Plumbing',
@@ -88,6 +89,51 @@ describe('what the walker harvests for the steps a docs flow embed draws (ruling
       edges: [],
     };
     expect(nodeKeys({ flows: [flow] })).toEqual([]);
+  });
+
+  it("asks for a folded technical step where a drawn decision's branch list names it, once, and for no other", () => {
+    // Shaped on app-todo's `task.flow.ts`: `check_recurring` branches to the `compute_next_due_date` script.
+    const flow = {
+      name: 'recurring',
+      label: 'Recurring',
+      nodes: [
+        { id: 'check', type: 'decision', label: 'Recurring?' },
+        { id: 'compute', type: 'script', label: 'Compute Next Due Date' },
+        { id: 'save', type: 'update_record', label: 'Save' },
+        {
+          id: 'gate',
+          type: 'decision',
+          label: 'Gate',
+          config: { conditions: [{ label: 'Yes', expression: 'vars.ok' }] },
+        },
+        { id: 'call', type: 'http', label: 'Call Out' },
+        { id: 'stray', type: 'assignment', label: 'Stray' },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [
+        // A decision with no `config.conditions` lists every out-edge.
+        { id: 'e1', source: 'check', target: 'compute', condition: 'vars.recurring == true', label: 'Yes' },
+        { id: 'e2', source: 'check', target: 'end', label: 'No' },
+        // The same folded step named by a second branch is asked once.
+        { id: 'e3', source: 'gate', target: 'compute', label: 'Yes' },
+        // A default branch of a `conditions` decision is listed.
+        { id: 'e4', source: 'gate', target: 'call', isDefault: true },
+        // A labelled edge no condition claims is never a branch, so it names nothing.
+        { id: 'e5', source: 'gate', target: 'stray', label: 'Maybe' },
+        // A folded step that only a non-decision leads to is not named.
+        { id: 'e6', source: 'compute', target: 'save' },
+      ],
+    };
+    expect(nodeKeys({ flows: [flow] })).toEqual([
+      'flows.recurring.nodes.check.label',
+      'flows.recurring.nodes.gate.label',
+      'flows.recurring.nodes.end.label',
+      'flows.recurring.nodes.compute.label',
+      'flows.recurring.nodes.call.label',
+    ]);
+    expect(
+      collectExpectedEntries({ flows: [flow] }).find((e) => e.path.join('.') === 'flows.recurring.nodes.compute.label'),
+    ).toMatchObject({ sourceValue: 'Compute Next Due Date', source: 'flow' });
   });
 
   it('skips a step with no id: nothing could address it', () => {

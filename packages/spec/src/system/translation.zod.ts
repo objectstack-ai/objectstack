@@ -1930,10 +1930,13 @@ const appTranslationDataShape = () => ({
    * - **Grouped by what it overlays, not by node type.** Every other group
    *   addresses one node type; this one addresses the node label of every
    *   node whose label has no key of its own, at any depth (an ADR-0031 region
-   *   included). That excludes two types, each keyed already, so one string
-   *   keeps one key: a `screen` (its `screens.<node_id>.title` covers
-   *   `config.title ?? node.label`) and an `approval` (`approvals.<node_id>.label`).
-   *   `objectstack validate` points a `nodes` key over either at that key.
+   *   included). That excludes two types, each of which has a key of its
+   *   own, so one string keeps one key: an `approval` (`approvals.<node_id>.label`)
+   *   and a `screen`, whose `screens.<node_id>.title` covers
+   *   `config.title ?? node.label`. A screen that authors its own `config.title`
+   *   is titled apart from its label, so its canvas label has no key; a drawing
+   *   names such a screen by its heading instead. `objectstack validate`
+   *   points a `nodes` key over either type at its own key.
    * - **Start and end nodes included.** Their labels are the author's words
    *   like any other step's, and often name an outcome or a trigger
    *   ("Approved", "On Task Created"), so a viewer does not substitute words of
