@@ -1376,7 +1376,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         describeCell: (row, columnKey) => {
           const fieldDef = objectFields?.[columnKey];
           const recordId = rowRecordId(row);
-          const recordUpdate = recordVerdict(recordId, 'update');
+          // objectstack#35795 — read at call time, not from this render: an
+          // edit that waited for the verdict is re-asked before the render
+          // that publishes it.
+          const recordUpdate = recordVerdict.current(recordId, 'update');
           const kind = cellReadOnlyKind({
             fieldDef,
             fieldWritable: !objectName || resolveFieldAffordance('listInlineEdit', perms, objectName, columnKey),

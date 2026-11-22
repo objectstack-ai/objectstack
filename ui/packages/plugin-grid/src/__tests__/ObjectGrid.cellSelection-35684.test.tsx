@@ -81,6 +81,8 @@ let lockReads: string[][] = [];
 let lockDelay = 0;
 let explainDelay = 0;
 let explainReads = 0;
+/** The rows the explain engine refuses `update` on. */
+let refusedIds = new Set<string>();
 
 const LOCKS_URL = '/api/v1/approvals/records/probe/locks';
 const after = <T,>(ms: number, value: T): Promise<T> =>
@@ -95,6 +97,7 @@ beforeEach(() => {
   lockDelay = 0;
   explainDelay = 0;
   explainReads = 0;
+  refusedIds = new Set();
   // The explain engine permits every row; the approvals service answers the locks of a page.
   vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
     const href = String(url);
@@ -109,7 +112,7 @@ beforeEach(() => {
       });
     }
     explainReads += 1;
-    return after(explainDelay, { ok: true, status: 200, json: async () => ({ allowed: true, records: ids.map((id) => ({ recordId: id, visible: true })) }) });
+    return after(explainDelay, { ok: true, status: 200, json: async () => ({ allowed: true, records: ids.map((id) => ({ recordId: id, visible: !refusedIds.has(id) })) }) });
   }));
 });
 afterEach(() => {
@@ -221,6 +224,7 @@ describe('ObjectGrid cellSelection — why a cell opens no editor', () => {
 describe('ObjectGrid cellSelection — an edit waits for the row\'s lock and verdict (objectstack#35795)', () => {
   const CHECKING = 'Checking whether this record can be edited…';
   const LOCKED = "This record is locked while it's in approval.";
+  const NO_PERMISSION = "You don't have permission to edit this record.";
   const editor = (g: { container: HTMLElement }) => g.container.querySelector('td[data-editing-cell]');
   const catcher = (g: { container: HTMLElement }) => g.container.querySelector<HTMLInputElement>('[data-slot="cell-type-catcher"]')!;
 
@@ -282,6 +286,33 @@ describe('ObjectGrid cellSelection — an edit waits for the row\'s lock and ver
     expect(screen.getByTestId('cell-readonly-reason')).toHaveTextContent(CHECKING);
     await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
     expect(editor(g)).not.toBeNull();
+  });
+
+  // The answer that settles the wait is the one the re-asked edit reads, not
+  // the verdict of the render the wait began in.
+  it('a slow record verdict that refuses the row opens no editor: the cell says the reader may not edit it', async () => {
+    explainDelay = 2000;
+    refusedIds = new Set(['1']);
+    const g = await renderSlow();
+    fireEvent.click(g.cell(0, 0));
+    fireEvent.doubleClick(g.cell(0, 0));
+    expect(screen.getByTestId('cell-readonly-reason')).toHaveTextContent(CHECKING);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(editor(g)).toBeNull();
+    expect(screen.getByTestId('cell-readonly-reason')).toHaveTextContent(NO_PERMISSION);
+  });
+
+  it('a key typed while a refusing verdict is read opens nothing and writes nothing', async () => {
+    explainDelay = 2000;
+    refusedIds = new Set(['1']);
+    const g = await renderSlow();
+    fireEvent.click(g.cell(0, 0));
+    fireEvent.change(catcher(g), { target: { value: 'Z' } });
+    expect(screen.getByTestId('cell-readonly-reason')).toHaveTextContent(CHECKING);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(editor(g)).toBeNull();
+    expect(screen.getByTestId('cell-readonly-reason')).toHaveTextContent(NO_PERMISSION);
+    expect(g.cell(0, 0)).toHaveTextContent('Alpha');
   });
 
   it('selecting another cell while checking drops the wait: the answer opens nothing', async () => {

@@ -182,8 +182,16 @@ describe('ObjectGrid autosave — one update, this row only (objectstack#35685)'
 });
 
 describe("ObjectGrid autosave — a write asked while the row's lock is read waits for it (objectstack#35795)", () => {
-  /** The approvals service answers the page's locks after `delay` ms; explain answers at once. */
-  function stubSlowLocks(locked: ReadonlySet<string>, delay: number) {
+  /**
+   * The approvals service answers the page's locks after `delay` ms; explain
+   * answers after `explain.delay` ms (at once by default), refusing `update`
+   * on the rows in `explain.refused`.
+   */
+  function stubSlowLocks(
+    locked: ReadonlySet<string>,
+    delay: number,
+    explain: { delay?: number; refused?: ReadonlySet<string> } = {},
+  ) {
     vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
       const body = init?.body ? JSON.parse(String(init.body)) : {};
       const ids: string[] = Array.isArray(body.recordIds) ? body.recordIds : [];
@@ -194,7 +202,11 @@ describe("ObjectGrid autosave — a write asked while the row's lock is read wai
         };
         return new Promise((resolve) => setTimeout(() => resolve(answer), delay));
       }
-      return { ok: true, status: 200, json: async () => ({ allowed: true, records: ids.map((id) => ({ recordId: id, visible: true })) }) };
+      const verdicts = {
+        ok: true, status: 200,
+        json: async () => ({ allowed: true, records: ids.map((id) => ({ recordId: id, visible: !explain.refused?.has(id) })) }),
+      };
+      return explain.delay ? new Promise((resolve) => setTimeout(() => resolve(verdicts), explain.delay)) : verdicts;
     }));
   }
   function paste(container: HTMLElement, cell: HTMLElement, text: string) {
@@ -231,6 +243,21 @@ describe("ObjectGrid autosave — a write asked while the row's lock is read wai
     paste(container, dataCell(container, 0, 'alpha'), 'zeta');
     await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
     expect(screen.getByTestId('cell-readonly-reason')).toHaveTextContent("This record is locked while it's in approval.");
+    vi.useRealTimers();
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(ds.update).not.toHaveBeenCalled();
+  });
+
+  it('a paste on a row whose slow record verdict refuses it is never written, and the cell says why', async () => {
+    stubSlowLocks(new Set(), 0, { delay: 2000, refused: new Set(['d1']) });
+    const ds = makeDataSource();
+    const { container } = renderGrid(ds, true);
+    await screen.findByText('beta');
+    vi.useFakeTimers();
+    paste(container, dataCell(container, 0, 'alpha'), 'zeta');
+    expect(screen.getByTestId('cell-readonly-reason')).toHaveTextContent('Checking whether this record can be edited…');
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(screen.getByTestId('cell-readonly-reason')).toHaveTextContent("You don't have permission to edit this record.");
     vi.useRealTimers();
     await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
     expect(ds.update).not.toHaveBeenCalled();

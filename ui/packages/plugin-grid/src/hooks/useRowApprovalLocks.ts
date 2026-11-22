@@ -42,6 +42,12 @@ export function __resetApprovalsServiceLatch(): void {
   approvalsServiceAbsent = false;
 }
 
+/**
+ * `'unanswered'` is a read that failed or answered nothing usable. It is not
+ * asked again until the object's data is invalidated; until then the row falls
+ * back to its `approval_status` column (fail open: the server still refuses a
+ * write to a locked record).
+ */
 type LockAnswer = { locked: boolean } | 'asking' | 'unanswered';
 
 export interface RowApprovalLocks {
