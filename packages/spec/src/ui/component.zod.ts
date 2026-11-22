@@ -2582,7 +2582,7 @@ const RECORD_LINE_ITEMS_HISTORY =
  * field's `inlineColumns`, a form view's `subforms[].columns` and an
  * `object-master-detail-form` detail entry's `columns` take, not a copy: the
  * panel hands its columns to the same objectui grid (`GridField`, whose
- * `GridColumn` declares exactly that schema's twenty keys and IS the spec's
+ * `GridColumn` declares exactly that schema's twenty-one keys and IS the spec's
  * type by reference). The column also means here what it means on those
  * carriers (#24140, route B), because the column schema's own `label` describe
  * — "defaults to the child field's label via hydration" — governs every
