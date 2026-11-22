@@ -29,6 +29,16 @@
  *  - the text is `II18nService.t(key, locale)`; a miss is the key echoed back,
  *    and then the authored text stands.
  *
+ * [#35384] Except the OBJECT's label, which is metadata `/meta` serves: it is
+ * resolved as `/meta` resolves it — `translateObject`
+ * (`@objectstack/spec/system`) over every locale the service holds, with the
+ * metadata route's `ResolveOptions` ({@link objectLabelTranslation}: the
+ * reader's locale, the DECLARED fallback chain, and the authored language,
+ * the declared `sourceLocale` else `defaultLocale`). So a reader in a
+ * deployment's declared `sourceLocale` reads the object's label as authored,
+ * never the `defaultLocale` row `t()` falls back to; `t()` carries the
+ * catalog sentences.
+ *
  * objectql names a refused write's object this way (`objectDisplayLabel`,
  * through `objectLabelKey`), the REST door names a NOT NULL field this way
  * (`not-null-refusal-label.ts`), and the automation engine picks a refusal's
@@ -41,7 +51,8 @@
  *  - the flow: `flows.<flow>.label`, the `flows` face's own `label`;
  *  - the step: `flows.<flow>.approvals.<node_id>.label`, the face's key for an
  *    `approval` node's step label (`translation.zod.ts`, `approvals`);
- *  - the object: `objects.<object>.label` (`objectLabelKey`);
+ *  - the object: `objects.<object>.label`, read by `translateObject` (no key
+ *    is spelled for it here);
  *  - [#35418] a position: `positions.<name>.label`, the security catalog face's
  *    own `label` (`translation.zod.ts`, `positions`), which `translatePosition`
  *    overlays on every served `position` document.
@@ -70,10 +81,24 @@
  */
 
 import type { II18nService } from '@objectstack/spec/contracts';
-import { objectLabelKey, resolveBundleLocale } from '@objectstack/spec/system';
+import {
+  resolveBundleLocale,
+  translateObject,
+  type ResolveOptions,
+  type TranslationBundle,
+} from '@objectstack/spec/system';
 
-/** The slice of `II18nService` this read asks: `t()`, and `getLocales()` to negotiate when offered. */
-export type ReaderLabelI18n = Pick<II18nService, 't'> & Partial<Pick<II18nService, 'getLocales'>>;
+/**
+ * The slice of `II18nService` this read asks: `t()`, `getLocales()` to
+ * negotiate when offered, and [#35384] the members an object label is
+ * resolved by, as the metadata route reads them: `getTranslations()` per
+ * locale, and the declared `getFallbackLocale()` / `getSourceLocale()` /
+ * `getDefaultLocale()`.
+ */
+export type ReaderLabelI18n = Pick<II18nService, 't'> &
+  Partial<
+    Pick<II18nService, 'getLocales' | 'getTranslations' | 'getFallbackLocale' | 'getSourceLocale' | 'getDefaultLocale'>
+  >;
 
 /** The `flows` face's flow label, `flows.<flow>.label`. */
 export function flowLabelKey(flowName: string): string {
@@ -157,6 +182,50 @@ export function negotiatedReaderLocale(
   return resolveBundleLocale(offered, requested) ?? requested;
 }
 
+/** What an object label is translated with: the bundle and the metadata route's `ResolveOptions`. */
+interface ObjectLabelTranslation {
+  bundle: TranslationBundle | undefined;
+  options: ResolveOptions;
+}
+
+/**
+ * [#35384] What the metadata route (`GET /meta/object/:name`) translates an
+ * object document with, for a request in `locale`: the bundle — every locale
+ * `service` holds, keyed by locale (`translationBundleOf` in rest) — and the
+ * `ResolveOptions` that route builds (`metaTranslateOptions` in rest): the
+ * request's locale, the DECLARED fallback chain (`getFallbackLocale()`), and
+ * the authored language — the declared `sourceLocale` (`getSourceLocale()`),
+ * else `defaultLocale` (`getDefaultLocale()`). Each getter is
+ * feature-detected; a service that declares none gets none.
+ *
+ * The locale is the reader's as REQUESTED, the one `/meta` hands its
+ * translator for the same request (`translateObject` negotiates the bundle
+ * key itself), so the two answer one label.
+ *
+ * `undefined` — the declared label stands — for a service that cannot hand
+ * its translations over (no `getLocales` / `getTranslations`). A throwing
+ * service is the caller's to survive.
+ */
+function objectLabelTranslation(service: ReaderLabelI18n, locale: string): ObjectLabelTranslation | undefined {
+  if (typeof service.getLocales !== 'function' || typeof service.getTranslations !== 'function') return undefined;
+  const bundle: Record<string, unknown> = {};
+  for (const code of service.getLocales()) {
+    const data = service.getTranslations(code);
+    if (data && typeof data === 'object') bundle[code] = data;
+  }
+  const fallback = typeof service.getFallbackLocale === 'function' ? service.getFallbackLocale() : undefined;
+  const source = typeof service.getSourceLocale === 'function' ? service.getSourceLocale() : undefined;
+  const authored = typeof source === 'string' && source.length > 0
+    ? source
+    : typeof service.getDefaultLocale === 'function' ? service.getDefaultLocale() : undefined;
+  const options: ResolveOptions = {
+    locale,
+    ...(typeof fallback === 'string' && fallback.length > 0 ? { fallbackChain: [fallback] } : {}),
+    ...(typeof authored === 'string' && authored.length > 0 ? { defaultLocale: authored } : {}),
+  };
+  return { bundle: Object.keys(bundle).length > 0 ? (bundle as TranslationBundle) : undefined, options };
+}
+
 /**
  * The labels for a reader whose `ExecutionContext.locale` is `requested`, or
  * `undefined` when this read can pick nothing: no locale, or no service with a
@@ -180,17 +249,37 @@ export function readerLabelsFor(
     }
     return undefined;
   };
-  const picked = new Map<string, string | undefined>();
-  const pick = (key: string): string | undefined => {
-    if (picked.has(key)) return picked.get(key);
-    const answer = render(key);
-    picked.set(key, answer);
-    return answer;
+  const memo = (
+    seen: Map<string, string | undefined>,
+    key: string,
+    answer: () => string | undefined,
+  ): string | undefined => {
+    if (seen.has(key)) return seen.get(key);
+    const value = answer();
+    seen.set(key, value);
+    return value;
   };
+  const picked = new Map<string, string | undefined>();
+  const pick = (key: string): string | undefined => memo(picked, key, () => render(key));
+  // [#35384] Built on the first object label this read asks, once.
+  let translation: { value: ObjectLabelTranslation | undefined } | undefined;
+  const objectLabels = new Map<string, string | undefined>();
+  const objectLabel = (objectName: string): string | undefined =>
+    memo(objectLabels, objectName, () => {
+      try {
+        translation ??= { value: objectLabelTranslation(service, requested) };
+        if (!translation.value) return undefined;
+        const label = translateObject({ name: objectName }, translation.value.bundle, translation.value.options).label;
+        return typeof label === 'string' && label.trim().length > 0 ? label : undefined;
+      } catch {
+        // A misbehaving i18n service must not fail the read: the stored label stands.
+        return undefined;
+      }
+    });
   return {
     flowLabel: (flowName) => pick(flowLabelKey(flowName)),
     stepLabel: (flowName, nodeId) => pick(approvalStepLabelKey(flowName, nodeId)),
-    objectLabel: (objectName) => pick(objectLabelKey(objectName)),
+    objectLabel,
     positionLabel: (positionName) => pick(positionLabelKey(positionName)),
     sentence: (key, params) => render(key, params),
   };
