@@ -7,17 +7,11 @@
  */
 
 import * as React from 'react';
-import {
-  Button,
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-  cn,
-} from '@object-ui/components';
-import { ListFilter, Loader2, MessageSquare, X } from 'lucide-react';
+import { Button, cn } from '@object-ui/components';
+import { Loader2, MessageSquare, X } from 'lucide-react';
 import { useDetailTranslation } from '../useDetailTranslation';
 import { CommentComposer } from './CommentComposer';
+import { CommentsFilterMenu } from './CommentsFilterMenu';
 import { CommentHoverActions } from './CommentHoverActions';
 import { CommentThread } from './CommentThread';
 import { DEFAULT_COMMENT_THREAD_FILTER, filterCommentThreads, type CommentThreadFilter } from './commentThreads';
@@ -50,7 +44,6 @@ export const CommentsPanel: React.FC<CommentsPanelProps> = ({ onClose, className
     () => (resolvable ? filterCommentThreads(threads, filter) : threads),
     [resolvable, threads, filter],
   );
-  const filtering = resolvable && (filter.onlyMine || !filter.showResolved);
 
   // The newest comment is at the foot: the list opens scrolled to it, and
   // follows a thread the reader (or anyone) adds.
@@ -155,41 +148,7 @@ export const CommentsPanel: React.FC<CommentsPanelProps> = ({ onClose, className
       <header className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
         <h2 className="text-sm font-medium text-foreground">{title}</h2>
         <div className="flex items-center gap-0.5">
-        {resolvable && !denied && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className={cn(
-                  'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  filter.onlyMine && 'text-primary hover:text-primary',
-                )}
-                aria-label={t('detail.filterComments')}
-                title={t('detail.filterComments')}
-                data-comments-filter=""
-                data-comments-filtering={filtering ? 'true' : 'false'}
-              >
-                <ListFilter className="h-4 w-4" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-40">
-              <DropdownMenuCheckboxItem
-                checked={filter.showResolved}
-                onCheckedChange={(checked) => setFilter((f) => ({ ...f, showResolved: checked === true }))}
-                data-comments-filter-option="show-resolved"
-              >
-                {t('detail.showResolvedComments')}
-              </DropdownMenuCheckboxItem>
-              <DropdownMenuCheckboxItem
-                checked={filter.onlyMine}
-                onCheckedChange={(checked) => setFilter((f) => ({ ...f, onlyMine: checked === true }))}
-                data-comments-filter-option="only-mine"
-              >
-                {t('detail.commentsInvolvingMe')}
-              </DropdownMenuCheckboxItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
+        {resolvable && !denied && <CommentsFilterMenu filter={filter} onFilterChange={setFilter} />}
         {onClose && (
           <button
             type="button"
