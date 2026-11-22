@@ -8,9 +8,9 @@
 
 feat(spec): every step a flow drawing shows can be translated, under `flows.<flow>.nodes.<node_id>.label`
 
-Clause-②: yes (widening: a new translation key `flows.<flow>.nodes.<node_id>.label`, and the new exports `FLOW_TECHNICAL_NODE_TYPES` and `isFlowTechnicalNodeType` from `@objectstack/spec/automation`)
+Clause-②: yes (widening: a new translation key `flows.<flow>.nodes.<node_id>.label`; the new exports `FLOW_TECHNICAL_NODE_TYPES` and `isFlowTechnicalNodeType` from `@objectstack/spec/automation`; and `@object-ui/i18n`'s exported `FlowLabelTranslations` type gains the member `screenTitle`, and its `stepLabel` parameter accepts a `config`)
 Metadata-protocol: added
-Skills-docs: follow-up owed — skills/objectstack-i18n/SKILL.md (#36401)
+Skills-docs: follow-up #36401
 
 A package can now translate the label of any flow step, not only a screen's heading and an approval step's label. A manual that embeds a flow (a `type: flow` metadata embed) lists its steps by label, and until now a start, decision, notify or end step had nowhere to put a translation, so a zh-CN reader saw those steps in English beside translated approval steps.
 
