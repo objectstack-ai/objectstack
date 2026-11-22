@@ -16,6 +16,7 @@ import type { IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spe
 import {
   INLINE_CONTENT_TYPES,
   STORED_BYTES_CONTENT_SECURITY_POLICY,
+  STORED_MEDIA_CONTENT_SECURITY_POLICY,
   servedBytesHeaders,
   servedContentType,
   servedDisposition,
@@ -85,6 +86,30 @@ describe('the inline allow-list', () => {
     }
     expect(servedBytesHeaders({ contentType: 'text/html', filename: undefined, disposition: undefined })['content-disposition']).toBe(
       'attachment',
+    );
+  });
+
+  it('allow-listed audio or video answered inline carries the media policy: still a sandbox, no script, media from its own origin', async () => {
+    for (const contentType of ['audio/mpeg', 'audio/wav', 'video/mp4', 'VIDEO/WEBM; codecs=vp8']) {
+      expect(servedBytesHeaders({ contentType, filename: 'f', disposition: undefined })['content-security-policy'], contentType).toBe(
+        STORED_MEDIA_CONTENT_SECURITY_POLICY,
+      );
+    }
+    const directives = STORED_MEDIA_CONTENT_SECURITY_POLICY.split(';').map((d) => d.trim());
+    expect(directives[0]).toBe('sandbox allow-same-origin');
+    expect(STORED_MEDIA_CONTENT_SECURITY_POLICY).not.toMatch(/allow-scripts|script-src/);
+    expect(directives).toContain("default-src 'none'");
+    expect(directives).toContain("media-src 'self'");
+  });
+
+  it('every other answer carries the opaque-origin policy, audio asked for as an attachment included', async () => {
+    for (const contentType of ['image/png', 'application/pdf', 'text/plain', 'text/html', 'image/svg+xml', 'audio/x-mpegurl', undefined]) {
+      expect(servedBytesHeaders({ contentType, filename: 'f', disposition: undefined })['content-security-policy'], String(contentType)).toBe(
+        STORED_BYTES_CONTENT_SECURITY_POLICY,
+      );
+    }
+    expect(servedBytesHeaders({ contentType: 'audio/mpeg', filename: 'f', disposition: 'attachment' })['content-security-policy']).toBe(
+      STORED_BYTES_CONTENT_SECURITY_POLICY,
     );
   });
 });
@@ -172,6 +197,13 @@ describe('the local raw byte route answers stored bytes by the allow-list rule',
       expect(res.headers['content-type'], type).toBe(type);
       expect(res.headers['content-disposition'], type).toMatch(/^inline;/);
     }
+  });
+
+  it('an allow-listed WAV is inline with nosniff and the media policy', async () => {
+    const res = await fetchRaw('audio/wav', 'tone.wav');
+    expect(res.headers['content-disposition']).toMatch(/^inline;/);
+    expect(res.headers['x-content-type-options']).toBe('nosniff');
+    expect(res.headers['content-security-policy']).toBe(STORED_MEDIA_CONTENT_SECURITY_POLICY);
   });
 
   it('an allow-listed PNG or PDF is inline with nosniff and the sandbox CSP', async () => {

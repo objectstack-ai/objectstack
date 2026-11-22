@@ -330,9 +330,11 @@ AVIF, BMP), PDF, plain text, and common audio and video types. Every other type,
 SVG and HTML included, and a file with no type, is answered as an
 `attachment`, so the browser saves it under its name instead of opening it. The
 local adapter's byte route sends `X-Content-Type-Options: nosniff` and a sandbox
-`Content-Security-Policy` on every answer. The S3 adapter's signed URL carries
-the same type and disposition; the other response headers are the bucket's to
-send.
+`Content-Security-Policy` that lets no script run on every answer; audio and video
+shown in place carry a media variant of it, so the browser's player can load the
+file. This was measured in Chromium. The S3 adapter's signed URL carries the same
+type and disposition; the other response headers are the bucket's to send, so a
+host that fronts the bucket with its own proxy sends them there.
 
 The upload entry points (presigned / chunked) likewise require a session when
 an auth service is wired, and stamp `owner_id` on the new `sys_file`. A stored

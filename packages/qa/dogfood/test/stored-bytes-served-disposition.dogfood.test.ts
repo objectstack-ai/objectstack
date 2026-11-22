@@ -25,6 +25,25 @@ const SVG = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1" heigh
 const TEXT = Buffer.from('plain words\n');
 
 const SANDBOX_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'";
+const MEDIA_CSP = "sandbox allow-same-origin; default-src 'none'; media-src 'self'; style-src 'unsafe-inline'";
+/** A WAV of `samples` silent 8 kHz mono 8-bit PCM samples. */
+function wav(samples: number): Buffer {
+  const out = Buffer.alloc(44 + samples, 0x80);
+  out.write('RIFF', 0, 'ascii');
+  out.writeUInt32LE(36 + samples, 4);
+  out.write('WAVEfmt ', 8, 'ascii');
+  out.writeUInt32LE(16, 16);
+  out.writeUInt16LE(1, 20); // PCM
+  out.writeUInt16LE(1, 22); // mono
+  out.writeUInt32LE(8000, 24);
+  out.writeUInt32LE(8000, 28);
+  out.writeUInt16LE(1, 32);
+  out.writeUInt16LE(8, 34);
+  out.write('data', 36, 'ascii');
+  out.writeUInt32LE(samples, 40);
+  return out;
+}
+const WAV = wav(800);
 
 describe('stored bytes are served by the inline allow-list rule on a real boot', () => {
   let stack: VerifyStack;
@@ -109,6 +128,14 @@ describe('stored bytes are served by the inline allow-list rule on a real boot',
     expect(res.headers.get('content-type')).toBe('image/png');
     expect(res.headers.get('content-disposition')).toMatch(/^inline;/);
     expect(Buffer.from(await res.arrayBuffer()).equals(PNG), 'the stored bytes, unchanged').toBe(true);
+  });
+
+  it('an allow-listed audio file is served inline, with nosniff and the media policy', async () => {
+    const res = await uploadAndFetch('tone.wav', 'audio/wav', WAV);
+    expect(res.headers.get('content-type')).toBe('audio/wav');
+    expect(res.headers.get('content-disposition')).toMatch(/^inline;/);
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(res.headers.get('content-security-policy')).toBe(MEDIA_CSP);
   });
 
   it('an allow-listed PNG, PDF or plain text is served inline, with nosniff and the sandbox CSP', async () => {
