@@ -1,8 +1,9 @@
 /**
  * Object Data Page — the parameterized bare data surface (ADR-0055, #2251).
  *
- * Route: `/apps/:appName/:objectName/data` (± `filter[<field>]=<value>` and
- * `uf_<field>` search params).
+ * Route: `/apps/:appName/:objectName/data` (± `filter[<field>]=<value>`,
+ * `uf_<field>` and the list-state `uf__search` / `uf__sort` / `uf__group` /
+ * `uf__filter` search params).
  *
  * Where ObjectView anchors to a saved list view (default or `/view/:viewId`),
  * this surface is deliberately UNANCHORED — "the URL is the view":
@@ -15,6 +16,10 @@
  *   • no saved-view tab bar — switching to a saved view is an explicit
  *     navigation to `/view/:viewId` ("Save as view" is the exit);
  *   • nothing here writes back to any saved view;
+ *   • the list's own state — its search, sort, grouping and Filter panel —
+ *     lives in the address too (objectstack#36408), under the keys ObjectView
+ *     uses, so opening a record and closing it, or a reload, returns the list
+ *     as the reader left it (see `listSeedRef`);
  *   • the visualization switcher (grid/kanban/...) is ListView-internal, so
  *     switching presentation never touches the URL — filter state survives;
  *   • the common filter bar (ADR-0047 `userFilters` + `uf_*` persistence) is
@@ -52,7 +57,16 @@ import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
 import { resolveAffordance, resolveFilterPlaceholders, type SchemaLike } from '@object-ui/core';
 import { normalizeFilterOperator, ViewFilterRuleSchema } from '@objectstack/spec/ui';
 import type { ViewFilterRule } from '@objectstack/spec/ui';
-import { parseUserFilterParams, applyUserFilterParams } from './userFilterUrlState.js';
+import {
+  parseUserFilterParams,
+  applyUserFilterParams,
+  parseListStateParams,
+  applyListStateParams,
+  LIST_FILTER_PARAM,
+  type ListStatePatch,
+  type ListUrlFieldGate,
+  type ListUrlState,
+} from './userFilterUrlState.js';
 import {
   parseUrlFilterTriples,
   groupFilterChips,
@@ -274,6 +288,37 @@ export function buildSaveAsViewSpec(
   });
 }
 
+/**
+ * objectstack#36408 — this page's own list defaults, for `ListView`'s
+ * `viewDefaults`: no sort and no grouping (the page has no view to declare
+ * either), the hidden fields and row height its `schema` never sets. The
+ * sort and grouping `schema` carries are the address's, so the list's
+ * 「Reset to default」 returns to these rather than to the address's.
+ */
+const DATA_PAGE_LIST_DEFAULTS = { hiddenFields: undefined, rowHeight: undefined, sort: undefined, grouping: undefined };
+
+/**
+ * How many conditions the address's `uf__filter` carries, read from the
+ * envelope itself before any check: `0` for no param, or for a value that is
+ * not the `{ logic, conditions }` envelope at all (the address then carries no
+ * panel filter to refuse). The same count `ObjectView` judges a link's filter
+ * by (objectstack#31869), so a filter is refused whole on both lists.
+ */
+function addressPanelFilterConditionCount(searchParams: URLSearchParams): number {
+  const raw = searchParams.get(LIST_FILTER_PARAM);
+  if (!raw) return 0;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return 0;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return 0;
+  const { logic, conditions } = parsed as { logic?: unknown; conditions?: unknown };
+  if (logic !== 'and' && logic !== 'or') return 0;
+  return Array.isArray(conditions) ? conditions.length : 0;
+}
+
 export function ObjectDataPage({ dataSource, objects }: any) {
   const { appName, objectName } = useParams();
   const { t, language } = useObjectTranslation();
@@ -317,6 +362,84 @@ export function ObjectDataPage({ dataSource, objects }: any) {
     },
     [setSearchParams],
   );
+
+  /**
+   * objectstack#36408 — the list's own state in the address: the search term,
+   * the sort, the grouping and the Filter panel's conditions, under the keys
+   * `ObjectView` keeps them in (`uf__search`, `uf__sort`, `uf__group`,
+   * `uf__filter`; `userFilterUrlState` owns their names and shapes). Opening a
+   * record carries this address as the record page's origin, so its close —
+   * and a reload, and a copied link — open the list as the reader left it.
+   *
+   * Two layers, never one rewriting the other: `filter[...]` stays this page's
+   * own address conditions (the 「Filtered by」 tags, what 「Reset」 puts back
+   * to the source, what "Save as view" saves), and `uf__filter` is the Filter
+   * panel on top of them, exactly as `ObjectView` keeps the panel on top of its
+   * view's filter. The list applies both (the conditions AND the panel).
+   *
+   * The SEED — what the list opens with — is read from the address once per
+   * object and list generation (`ListView` takes its search and panel once, at
+   * mount). Unlike `ObjectView`, a reload is not a reset here: this page has
+   * no view to return to, and its address is the list ("the URL is the view").
+   * Each piece passes `ObjectView`'s field gate: a field the object does not
+   * declare, or one this user cannot read once permissions are loaded, is
+   * dropped; a panel filter that loses any condition to the checks is refused
+   * whole, with `ObjectView`'s notice (objectstack#31869). The seed is then
+   * written back (replace), so the address shows what the list shows.
+   *
+   * 「Reset」 to the source (`resetToSource`) clears every `uf_` param, these
+   * included, and moves the generation: the list remounts on an empty seed, so
+   * it no longer searches, sorts, groups or filters by what the address lost.
+   */
+  const [listGeneration, setListGeneration] = React.useState(0);
+  const listResetPendingRef = React.useRef(false);
+  const listSeedRef = React.useRef<{ key: string; state: ListUrlState; refusedPanelFilter?: boolean } | undefined>(undefined);
+  const listSeedKey = objectDef ? `${objectDef.name}~${listGeneration}` : undefined;
+  if (objectDef && listSeedKey && listSeedRef.current?.key !== listSeedKey) {
+    const reset = listResetPendingRef.current;
+    listResetPendingRef.current = false;
+    if (reset) {
+      listSeedRef.current = { key: listSeedKey, state: {} };
+    } else {
+      const acceptField: ListUrlFieldGate = (field: string) =>
+        !!objectDef.fields?.[field]
+        && (!perms.isLoaded || perms.checkField(objectDef.name, field, 'read'));
+      const state = parseListStateParams(searchParams, acceptField);
+      const carried = addressPanelFilterConditionCount(searchParams);
+      const refusedPanelFilter = carried > 0 && (state.filters?.conditions.length ?? 0) < carried;
+      if (refusedPanelFilter) delete state.filters;
+      listSeedRef.current = { key: listSeedKey, state, refusedPanelFilter };
+    }
+  }
+  const listSeed = listSeedRef.current?.key === listSeedKey ? listSeedRef.current?.state : undefined;
+  React.useEffect(() => {
+    const seed = listSeedRef.current;
+    if (!seed || seed.key !== listSeedKey) return;
+    const next = applyListStateParams(searchParams, {
+      filters: seed.state.filters ?? null,
+      search: seed.state.search ?? null,
+      sort: seed.state.sort ?? null,
+      grouping: seed.state.grouping ?? null,
+    });
+    if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true });
+    if (seed.refusedPanelFilter) {
+      seed.refusedPanelFilter = false;
+      toast.warning(t('console.objectView.linkFilterRefused'));
+    }
+    // Once per seed, by design: later writes are the list's own changes,
+    // already on screen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
+  }, [listSeedKey]);
+  /** Write the list's own change into the address — replace, never a history entry per keystroke. */
+  const writeListUrlState = React.useCallback(
+    (patch: ListStatePatch) => {
+      setSearchParams((prev) => applyListStateParams(prev, patch), { replace: true });
+    },
+    [setSearchParams],
+  );
+  // The chips' selections the list remounts with: the address's at mount; none
+  // after a 「Reset」, which cleared their params.
+  const listUserFilterSelections = listGeneration === 0 ? initialUfSelections : undefined;
 
   // URL filter triples, trimmed to readable fields. Predicates on unreadable
   // fields are dropped here for UX honesty; the SERVER is the actual
@@ -379,6 +502,10 @@ export function ObjectDataPage({ dataSource, objects }: any) {
       next.set(sourceFilterKey, source.i);
       return next;
     });
+    // objectstack#36408 — the list's own state left with its `uf_` params:
+    // the list remounts on an empty seed (see `listSeedRef`).
+    listResetPendingRef.current = true;
+    setListGeneration((g) => g + 1);
   }, [source, sourceFilterKey, setSearchParams]);
 
   const removeUrlFilter = React.useCallback(
@@ -540,6 +667,10 @@ export function ObjectDataPage({ dataSource, objects }: any) {
       viewType: 'grid' as const,
       columns,
       ...(urlFilters.length ? { filter: urlFilters } : {}),
+      // objectstack#36408 — the sort and the grouping the address carries
+      // (`uf__sort`, `uf__group`), read once per seed (see `listSeedRef`).
+      ...(listSeed?.sort ? { sort: listSeed.sort } : {}),
+      ...(listSeed?.grouping ? { grouping: listSeed.grouping } : {}),
       kanban,
       calendar,
       gallery,
@@ -564,10 +695,12 @@ export function ObjectDataPage({ dataSource, objects }: any) {
         hideFields: true,
       },
       showRecordCount: true,
-      // Deliberately NO onSortChange/onFilterChange persistence hooks: this
-      // surface never writes back to any saved view (#2251).
+      // Deliberately NO `onSortChange` / `onFilterChange` persistence hooks in
+      // the schema: this surface never writes back to any saved view (#2251).
+      // The list's own changes go to the ADDRESS only, through `ListView`'s
+      // host callbacks below (objectstack#36408).
     };
-  }, [objectDef, columns, urlFilters, kanban, calendar, gallery, userFilters, allowedVisualizations]);
+  }, [objectDef, columns, urlFilters, listSeed, kanban, calendar, gallery, userFilters, allowedVisualizations]);
 
   // "Save as view" — the one exit into the workspace: materialize the current
   // URL conditions as a new saved view, then navigate to it. Resolves whether
@@ -920,10 +1053,24 @@ export function ObjectDataPage({ dataSource, objects }: any) {
       <div className="flex-1 min-h-0 overflow-auto">
         {schema && (
           <ListView
+            key={listGeneration}
             schema={schema as any}
             dataSource={listDataSource}
-            userFilterSelections={initialUfSelections}
+            userFilterSelections={listUserFilterSelections}
             onUserFilterSelectionsChange={handleUserFilterSelectionsChange}
+            // objectstack#36408 — the list's search, Filter panel, sort and
+            // grouping: opened from the address, and every change written
+            // back to it (replace). `schema` carries the address's sort and
+            // grouping, so this page's own defaults — no sort, no grouping —
+            // are handed apart, for the list's 「Reset to default」.
+            initialSearchTerm={listSeed?.search}
+            initialFilters={listSeed?.filters}
+            viewDefaults={DATA_PAGE_LIST_DEFAULTS}
+            onSearchChange={(search: string) => writeListUrlState({ search })}
+            onFilterChange={(filters) => writeListUrlState({ filters })}
+            // No sort is this page's own default, so a cleared sort leaves the address.
+            onSortChange={(sort) => writeListUrlState({ sort: sort.length > 0 ? sort : null })}
+            onGroupingChange={(grouping) => writeListUrlState({ grouping: grouping ?? null })}
             onRowClick={handleRecordClick}
             // objectstack#35854 — the name opens the full page; the icon
             // beside it, on hover, opens the record in the side drawer.
