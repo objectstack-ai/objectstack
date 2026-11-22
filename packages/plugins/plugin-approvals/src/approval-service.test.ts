@@ -7294,7 +7294,7 @@ describe('ApprovalService — Console page links carry the Console mount (#34862
     expect(await inboxHref('/')).toBe(`${ORIGIN}/system/approvals`);
   });
 
-  it('with no auth service there is no mount to read, and the links are the ones built before', async () => {
+  it('with no auth service there is no mount to read: the e-mail link is the one built before, and the inbox link carries the base', async () => {
     const { id, payload } = await requestedLink(undefined);
     expect(payload.approvalUrl).toBe(`${ORIGIN}/system/approvals?request=${id}`);
     expect(await inboxHref(undefined)).toBe(`${ORIGIN}/system/approvals`);
