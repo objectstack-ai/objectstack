@@ -29,7 +29,8 @@
  * `navigationContributions`, appended when the app is served) is not in the
  * app's stored menu, so it is not moved, renamed or removed here: its
  * 「⋮」 says it is changed in that package, and it is not dragged. Adding an
- * item before or after it stays open.
+ * item before or after it stays open; no other entry is moved past it (a
+ * move up, a move down or a drop onto it), since its place is that package's.
  *
  * Every edit is staged with the mode (`useDesignModeChange`), under one key
  * for the app's menu: the mode's 「Save」 writes it (`saveAppMenu`), its
@@ -129,6 +130,7 @@ import {
   patchEntry,
   placeOf,
   removeEntry,
+  siblingsAt,
   storedEntriesById,
   targetKeyFor,
   withEntryIds,
@@ -236,6 +238,12 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
   );
   /** Whether the entry `id` is another package's (served, and not in the stored menu). */
   const contributed = (id: string): boolean => !!storedById && !storedById.has(id) && !!entryOf(served, id);
+  /** Whether the entry beside `id`, `by` places away in its group, is another package's. */
+  const besideContributed = (id: string, by: -1 | 1): boolean => {
+    const place = placeOf(menu, id);
+    const beside = place ? (siblingsAt(menu, place.parentId) ?? [])[place.index + by] : undefined;
+    return typeof beside?.id === 'string' && contributed(beside.id);
+  };
 
   const labelOf = React.useCallback(
     (entry: MenuEntry) =>
@@ -272,7 +280,7 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
     }
     const from = placeOf(menu, id);
     const to = placeOf(menu, overId);
-    if (!from || !to) return;
+    if (!from || !to || contributed(overId)) return;
     // `to.index` read after the entry leaves: below its old place in the same
     // group it lands after the entry dropped on, elsewhere before it.
     update(moveEntry(menu, id, to.parentId, to.index));
@@ -304,8 +312,8 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
           <EntryActions
             label={labelOf(entry)}
             fixed={contributed(id)}
-            canUp={canMoveBy(menu, id, -1)}
-            canDown={canMoveBy(menu, id, 1)}
+            canUp={canMoveBy(menu, id, -1) && !besideContributed(id, -1)}
+            canDown={canMoveBy(menu, id, 1) && !besideContributed(id, 1)}
             groups={groups
               .filter((g) => g.id !== place?.parentId)
               .map((g) => ({ id: g.id, label: labelOf(g.entry), depth: g.depth }))}
@@ -385,7 +393,7 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
           packageId={packageId}
           inMenu={menuTargets(menu)}
           onClose={() => setAddAt(null)}
-          onPick={(kind, name, link) => pick(entryFor(kind, name, newEntryId(menu), link))}
+          onPick={(kind, name, link) => pick(entryFor(kind, name, newEntryId([...menu, ...(storedMenu ?? [])]), link))}
           language={language}
         />
       )}

@@ -64,10 +64,14 @@ const listed = vi.hoisted(() => ({
   ],
 }) as Record<string, Array<Record<string, unknown>>>);
 /** The app's menu as stored (`null`: as served). */
-const storedNav = vi.hoisted(() => ({ current: null as unknown[] | null }));
+const storedNav = vi.hoisted(() => ({ current: null as unknown[] | null, failReads: 0 }));
 const client = vi.hoisted(() => ({
   list: async (type: string) => listed[type] ?? [],
   layered: async () => {
+    if (storedNav.failReads > 0) {
+      storedNav.failReads -= 1;
+      throw new Error('layered read failed');
+    }
     const code = { name: 'crm', label: 'CRM', navigation: storedNav.current ?? NAVIGATION };
     return { code, effective: code };
   },
@@ -189,6 +193,7 @@ beforeEach(() => {
   session.language = 'en';
   session.defaultLocale = 'en';
   storedNav.current = null;
+  storedNav.failReads = 0;
   __resetDefaultLocale();
   vi.stubGlobal(
     'fetch',
@@ -355,6 +360,38 @@ describe('the menu under the design mode (objectstack#36363)', () => {
       expect(screen.getByRole('menuitem', { name })).toHaveAttribute('aria-disabled', 'true');
     }
     expect(screen.getByRole('menuitem', { name: 'Add an item after' })).not.toHaveAttribute('aria-disabled');
+  });
+
+  it("no entry is moved past another package's entry: 「Move down」 above it is off, and a drop on it does nothing", async () => {
+    storedNav.current = NAVIGATION.map((e) =>
+      e.id === 'sales' ? { ...e, children: (e.children ?? []).filter((c) => c.id !== 'accounts') } : e,
+    );
+    start();
+    await flush();
+    const trigger = within(entry('leads')).getByTestId('design-menu-actions');
+    fireEvent.pointerDown(trigger, { button: 0, pointerType: 'mouse' });
+    await flush();
+    expect(await screen.findByRole('menuitem', { name: 'Move down' })).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    await flush();
+    act(() => dragEnd.current!({ active: { id: 'home' }, over: { id: 'accounts' } }));
+    expect(order()).toEqual(['home', ['sales', ['leads', 'accounts']], ['insights', []]]);
+  });
+
+  it("when the stored menu could not be read on entry, a move of another package's entry still writes none of it", async () => {
+    storedNav.current = NAVIGATION.map((e) =>
+      e.id === 'sales' ? { ...e, children: (e.children ?? []).filter((c) => c.id !== 'accounts') } : e,
+    );
+    storedNav.failReads = 1; // the editor's read on entry; the save's read answers
+    start();
+    await flush();
+    await act_on('accounts', 'Move up');
+    expect(order()).toEqual(['home', ['sales', ['accounts', 'leads']], ['insights', []]]);
+    fireEvent.click(screen.getByTestId('design-mode-save'));
+    await flush();
+    await flush();
+    const nav = (written[0][3] as { navigation: Array<{ id: string; children?: Array<{ id: string }> }> }).navigation;
+    expect(nav[1].children!.map((c) => c.id)).toEqual(['leads']);
   });
 
   it('adding and moving stay open under zh-CN', async () => {

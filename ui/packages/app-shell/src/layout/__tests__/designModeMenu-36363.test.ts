@@ -174,4 +174,52 @@ describe('the edits replayed on the stored menu (objectstack#36363, review 70812
     expect(byId.get(String(served[0].id))).toBe(stored[0]);
     expect(byId.size).toBe(1);
   });
+
+  // M1 on review 7082970423: another package's entry is never written from its served copy.
+  it("a move beside another package's entry writes no entry of that package's", () => {
+    const stored: Menu = [
+      { id: 'lead', type: 'object', objectName: 'crm_lead', label: 'Leads' },
+      { id: 'account', type: 'object', objectName: 'crm_account', label: 'Accounts' },
+    ];
+    const served: Menu = [
+      { id: 'lead', type: 'object', objectName: 'crm_lead', label: '线索' },
+      { id: 'account', type: 'object', objectName: 'crm_account', label: '客户' },
+      { id: 'quote', type: 'object', objectName: 'crm_quote', label: '报价' },
+    ];
+    expect(rebaseMenuEdits(served, moveBy(served, 'account', 1), stored)).toBe(stored);
+    expect(rebaseMenuEdits(served, moveBy(served, 'quote', -1), stored)).toBe(stored);
+    const swapped = rebaseMenuEdits(served, moveEntry(served, 'quote', null, 0), stored);
+    expect(swapped).toBe(stored);
+  });
+
+  it('an entry moved after it left the stored menu is not written back', () => {
+    const stored: Menu = [{ id: 'a', type: 'object', objectName: 'a', label: 'A' }];
+    const served: Menu = [
+      { id: 'a', type: 'object', objectName: 'a', label: 'α' },
+      { id: 'b', type: 'object', objectName: 'b', label: 'β' },
+    ];
+    expect(rebaseMenuEdits(served, moveBy(served, 'b', -1), stored)).toEqual(stored);
+  });
+
+  // S2 on review 7082970423: ids the reader was shown are not ids the stored menu holds.
+  it('an added entry whose id a hidden stored entry holds is written under a fresh id', () => {
+    const hidden = { id: 'nav_item_1', type: 'object', objectName: 'hr_payroll', label: 'Payroll' };
+    const stored: Menu = [{ id: 'lead', type: 'object', objectName: 'crm_lead', label: 'Leads' }, hidden];
+    const served: Menu = [{ id: 'lead', type: 'object', objectName: 'crm_lead', label: '线索' }];
+    const added = entryFor('object', 'crm_case', newEntryId(served));
+    expect(added.id).toBe('nav_item_1');
+    const out = rebaseMenuEdits(served, insertEntry(served, null, 1, added), stored);
+    expect(out).toEqual([stored[0], { ...added, id: 'nav_item_2' }, hidden]);
+    expect(out[2]).toBe(hidden);
+  });
+
+  it('a served entry given the id a hidden stored entry holds is matched by its target, not that id', () => {
+    const hidden = { id: 'nav_item_1', type: 'object', objectName: 'hr_payroll', label: 'Payroll' };
+    const lead = { type: 'object', objectName: 'crm_lead', label: 'Leads' };
+    const stored: Menu = [lead, hidden];
+    const served = withEntryIds([{ type: 'object', objectName: 'crm_lead', label: '线索' }]);
+    expect(served[0].id).toBe('nav_item_1');
+    expect(rebaseMenuEdits(served, removeEntry(served, 'nav_item_1'), stored)).toEqual([hidden]);
+    expect(storedEntriesById(served, stored).get('nav_item_1')).toBe(lead);
+  });
 });

@@ -335,40 +335,64 @@ function locate(menu: Menu, keyOf: (entry: MenuEntry) => string | null): Map<str
 }
 
 /**
- * The key of each stored entry: its id, else the id `withEntryIds` gave its
- * served copy, matched by its group, type and target, in order. `null` for a
+ * The key of each stored entry: the id of its served copy, or `null` for a
  * stored entry the reader was never shown.
+ *
+ * A stored entry with an id is keyed by it only when the served entry of that
+ * id is the same thing (the same type and target): the editor gives served
+ * entries without an id the first free `nav_item_<n>` of what the reader was
+ * shown (`withEntryIds`), which a stored entry pruned from the reader can
+ * already hold. A stored entry without an id is matched to an unmatched served
+ * entry by its group, type and target, in order.
  */
 interface StoredKeyer {
   (entry: MenuEntry): string | null;
-  /** Give `copy`, a rebuilt copy of a stored entry, that entry's key. */
+  /** Give `copy`, a rebuilt or inserted entry, the key `key`. */
   alias(copy: MenuEntry, key: string | null): MenuEntry;
 }
 
+function sameThing(a: MenuEntry, b: MenuEntry): boolean {
+  return a.type === b.type && targetKeyOf(a) === targetKeyOf(b);
+}
+
 function storedKeyer(served: Menu, stored: Menu): StoredKeyer {
-  const storedIds = new Set<string>();
-  locate(stored, idOf).forEach((_v, id) => storedIds.add(id));
-  const unclaimed = [...locate(served, idOf).entries()].filter(([id]) => !storedIds.has(id));
-  const adopted = new Map<MenuEntry, string>();
+  const servedAt = locate(served, idOf);
+  const keys = new Map<MenuEntry, string>();
+  const matched = new Set<string>();
+  const byId = (entries: Menu) => {
+    for (const entry of entries) {
+      const id = idOf(entry);
+      const copy = id ? servedAt.get(id) : undefined;
+      if (id && copy && !matched.has(id) && sameThing(copy.entry, entry)) {
+        keys.set(entry, id);
+        matched.add(id);
+      }
+      if (isGroup(entry)) byId(childrenOf(entry));
+    }
+  };
+  byId(stored);
+  const unclaimed = [...servedAt.entries()].filter(([id]) => !matched.has(id));
   const claim = (entry: MenuEntry, parentId: string | null): string | null => {
-    const at = unclaimed.findIndex(
-      ([, s]) => s.parentId === parentId && s.entry.type === entry.type && targetKeyOf(s.entry) === targetKeyOf(entry),
-    );
+    const at = unclaimed.findIndex(([, s]) => s.parentId === parentId && sameThing(s.entry, entry));
     if (at < 0) return null;
     const [[id]] = unclaimed.splice(at, 1);
     return id;
   };
-  const adopt = (entries: Menu, parentId: string | null) => {
+  // `undefined`: the group was never shown, so nothing in it can be claimed.
+  const adopt = (entries: Menu, parentId: string | null | undefined) => {
     for (const entry of entries) {
-      const id = idOf(entry) ?? claim(entry, parentId);
-      if (id && !idOf(entry)) adopted.set(entry, id);
-      if (isGroup(entry)) adopt(childrenOf(entry), id);
+      let key = keys.get(entry) ?? null;
+      if (!key && !idOf(entry) && parentId !== undefined) {
+        key = claim(entry, parentId);
+        if (key) keys.set(entry, key);
+      }
+      if (isGroup(entry)) adopt(childrenOf(entry), key ?? undefined);
     }
   };
   adopt(stored, null);
-  const keyOf = ((entry: MenuEntry) => idOf(entry) ?? adopted.get(entry) ?? null) as StoredKeyer;
+  const keyOf = ((entry: MenuEntry) => keys.get(entry) ?? null) as StoredKeyer;
   keyOf.alias = (copy, key) => {
-    if (key && !idOf(copy)) adopted.set(copy, key);
+    if (key) keys.set(copy, key);
     return copy;
   };
   return keyOf;
@@ -386,9 +410,11 @@ export function storedEntriesById(served: Menu, stored: Menu): Map<string, MenuE
  * The served entries that keep their place: in the same group, and in the
  * longest run of that group's entries whose order the edits kept (so a
  * removal or an addition beside an entry does not move it, and of two
- * entries swapped one is moved, the later one in the served order).
+ * entries swapped one is moved, the later one in the served order). Only
+ * the entries `counted` holds take part: an entry of another package's is
+ * neither moved nor a reason to move one.
  */
-function staysInOrder(served: Map<string, Located>, edited: Map<string, Located>): Set<string> {
+function staysInOrder(served: Map<string, Located>, edited: Map<string, Located>, counted: (id: string) => boolean): Set<string> {
   const groups = new Map<string | null, { was: string[]; now: string[] }>();
   const groupOf = (parentId: string | null) => {
     let g = groups.get(parentId);
@@ -396,10 +422,10 @@ function staysInOrder(served: Map<string, Located>, edited: Map<string, Located>
     return g;
   };
   served.forEach((was, id) => {
-    if (edited.get(id)?.parentId === was.parentId) groupOf(was.parentId).was.push(id);
+    if (counted(id) && edited.get(id)?.parentId === was.parentId) groupOf(was.parentId).was.push(id);
   });
   edited.forEach((now, id) => {
-    if (served.get(id)?.parentId === now.parentId) groupOf(now.parentId).now.push(id);
+    if (counted(id) && served.get(id)?.parentId === now.parentId) groupOf(now.parentId).now.push(id);
   });
   const out = new Set<string>();
   groups.forEach(({ was, now }) => {
@@ -443,16 +469,26 @@ function staysInOrder(served: Map<string, Located>, edited: Map<string, Located>
  *   written, and only those: a key it did not change keeps its stored value.
  *
  * Every other stored entry, one the reader was never shown included, stays
- * where it was and is the same object. A stored entry without an id is
- * matched to the id `withEntryIds` gave its served copy by its group, type
- * and target, in order.
+ * where it was and is the same object. Stored entries are matched to their
+ * served copies by `storedKeyer`.
+ *
+ * Nothing the stored menu does not hold is ever written from its served
+ * copy: an entry another package puts into the menu (`navigationContributions`,
+ * appended when the app is served), or one that has left the stored menu
+ * since the editor read it, is not moved, patched or written, and takes no
+ * part in the order comparison. Only an entry `served` does not hold is an
+ * addition; one whose id a stored entry already holds is written under a
+ * fresh `nav_item_<n>` that neither menu holds.
  */
 export function rebaseMenuEdits(served: Menu, edited: Menu, stored: Menu): Menu {
   const keyOf = storedKeyer(served, stored);
   const s = locate(served, idOf);
   const e = locate(edited, idOf);
+  const storedKeys = new Set(locate(stored, keyOf).keys());
+  /** A served entry the stored menu does not hold: never written from its served copy. */
+  const foreign = (id: string) => s.has(id) && !storedKeys.has(id);
   const removed = new Set([...s.keys()].filter((id) => !e.has(id)));
-  const stays = staysInOrder(s, e);
+  const stays = staysInOrder(s, e, (id) => !foreign(id));
   const placed: string[] = [];
   const patches = new Map<string, Record<string, unknown>>();
   e.forEach((now, id) => {
@@ -461,6 +497,7 @@ export function rebaseMenuEdits(served: Menu, edited: Menu, stored: Menu): Menu 
       placed.push(id);
       return;
     }
+    if (foreign(id)) return;
     if (!stays.has(id)) placed.push(id);
     const before = ownKeys(was.entry);
     const after = ownKeys(now.entry);
@@ -543,9 +580,22 @@ export function rebaseMenuEdits(served: Menu, edited: Menu, stored: Menu): Menu 
     const group = parentId === null ? edited : siblingsAt(edited, parentId) ?? [];
     return group.map((x) => idOf(x)).filter((x): x is string => !!x);
   };
+  // The ids a written entry may not take: every id either menu holds.
+  const heldIds = new Set<string>([...locate(stored, idOf).keys(), ...s.keys(), ...e.keys()]);
+  let fresh = 1;
+  const freshId = () => {
+    while (heldIds.has(`nav_item_${fresh}`)) fresh += 1;
+    const id = `nav_item_${fresh}`;
+    heldIds.add(id);
+    return id;
+  };
+  const storedIds = new Set(locate(stored, idOf).keys());
   for (const id of placed) {
     const now = e.get(id)!;
-    const entry = taken.get(id) ?? now.entry;
+    let entry: MenuEntry;
+    if (taken.has(id)) entry = taken.get(id)!;
+    else if (!s.has(id)) entry = keyOf.alias(storedIds.has(id) ? { ...now.entry, id: freshId() } : now.entry, id);
+    else continue;
     // A group the stored menu lacks: the entry goes to the end of the top level.
     const lost = now.parentId !== null && !groupEntries(result, now.parentId);
     const parentId = lost ? null : now.parentId;

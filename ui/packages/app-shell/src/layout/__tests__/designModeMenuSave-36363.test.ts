@@ -198,6 +198,19 @@ describe('the save writes the stored menu with the edits, never the served one (
     expect(savedNav(calls)).toEqual([idless[2], idless[0], idless[1]]);
   });
 
+  it("a move beside another package's entry writes none of that package's entries (M1)", async () => {
+    // The revenue module's Quotes, appended to Sales when the app is served; not stored.
+    const served: Menu = SERVED.map((e) =>
+      e.id === 'sales'
+        ? { ...e, children: [...(e.children as Menu), { id: 'quote', type: 'object', objectName: 'crm_quote', label: '报价' }] }
+        : e,
+    );
+    const { d, calls } = doors({ writable: true, stored: STORED });
+    await saveAppMenu({ appName: 'crm', packageId: 'com.acme.crm', served, navigation: moveBy(served, 'quote', -1) }, TEXTS, d);
+    expect(savedNav(calls)).toEqual(STORED);
+    expect(JSON.stringify(savedNav(calls))).not.toMatch(/quote|报价/);
+  });
+
   it('an entry naming no target is left out of the save (N3)', async () => {
     const { d, calls } = doors({ writable: true, stored: STORED });
     const edited = insertEntry(SERVED, null, 0, { id: 'blank', type: 'object' });
