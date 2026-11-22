@@ -1083,10 +1083,33 @@ describe('validateTranslationReferences — objectExtensions-injected surfaces (
   });
 
   /**
-   * ⛔ The fold reaches `fields.*` and `_validations.*` and no other rung,
-   * because `ObjectExtensionSchema` reaches no further: an author cannot
-   * contribute a view, a section, a filter-preset tab or an action through an
-   * extension at all, so a key for one is an orphan exactly as it was.
+   * [ADR-0146 D10] The third rung an extension reaches: the base's paired
+   * `.custom` package declares the target's whole field arrangement
+   * (`fieldGroups`), and `fieldGroups[].key` is the `_sections` anchor
+   * (ADR-0085), so a group that arrangement brings is addressable. A section
+   * no group of the object or of an extension declares is still an orphan.
+   */
+  it('accepts a `_sections` key for a group an extension\'s `fieldGroups` brings, and still reports one nobody declares', () => {
+    const stack = (sections: Record<string, unknown>) => ({
+      objects: [{ name: 'crm_lead', label: 'Lead', fields: { name: { type: 'text', label: 'Name' } } }],
+      objectExtensions: [
+        { extend: 'crm_lead', fieldGroups: [{ key: 'reach', label: 'Reach', fields: ['name'] }] },
+      ],
+      translations: [{ 'zh-CN': { objects: { crm_lead: { _sections: sections } } } }],
+    });
+    expect(validateTranslationReferences(stack({ reach: { label: '联系方式' } }))).toEqual([]);
+    expect(validateTranslationReferences(stack({ zzz_gone: { label: 'x' } })).map((f) => f.path)).toEqual([
+      'translations[0]["zh-CN"].objects.crm_lead._sections.zzz_gone',
+    ]);
+  });
+
+  /**
+   * ⛔ The fold reaches `fields.*`, `_validations.*` and the `_sections` of a
+   * `fieldGroups` arrangement, and no other rung, because
+   * `ObjectExtensionSchema` reaches no further: an author cannot contribute a
+   * view, a filter-preset tab or an action through an extension at all, and a
+   * section its `fieldGroups` does not declare is not one either, so a key
+   * for one is an orphan exactly as it was.
    */
   it('folds no other rung — an extended object still reports its ghost view, section, tab and action', () => {
     const findings = validateTranslationReferences(
@@ -1110,7 +1133,7 @@ describe('validateTranslationReferences — objectExtensions-injected surfaces (
    * the SCHEMA, so if `ObjectExtensionSchema` ever accepts one of these keys,
    * this fails here rather than leaving the rule reporting correct keys for a
    * surface that has started to exist. Both arms are asserted, so the refusal
-   * reading is not a dead instrument: the two keys the fold DOES read parse.
+   * reading is not a dead instrument: the keys the fold DOES read parse.
    */
   it('pins the extension key surface the fold is sized against', () => {
     const refusedByName = (key: string): boolean => {
@@ -1125,7 +1148,9 @@ describe('validateTranslationReferences — objectExtensions-injected surfaces (
       'views:refused',
       'listViews:refused',
       'actions:refused',
-      'fieldGroups:refused',
+      // [ADR-0146 D10] The paired `.custom` package's arrangement: accepted by
+      // the schema, and its group keys are folded into `_sections` (above).
+      'fieldGroups:accepted',
       'sections:refused',
       'tabs:refused',
       'hooks:refused',
