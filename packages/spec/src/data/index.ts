@@ -217,6 +217,14 @@ export * from './object.zod';
 // [#35985] The object colour palette, named once so a renderer draws exactly
 // the names the spec accepts. The `icon` / `color` leaves stay unexported.
 export { OBJECT_COLORS, type ObjectColor } from './object-icon';
+// [#36366] The header buttons per page type: the limit, the pages and their built-ins.
+export {
+  OBJECT_PINNED_ACTION_LIMIT,
+  OBJECT_PINNED_ACTION_PAGES,
+  OBJECT_PINNED_BUILTIN_ACTIONS,
+  type ObjectPinnedActionPage,
+  type ObjectPinnedActions,
+} from './object-pinned-actions';
 // API-method derivation — the single source of truth turning an object's
 // `enable.apiMethods` whitelist into its effective operation set (#3391).
 export * from './api-derivation';

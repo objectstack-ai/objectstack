@@ -461,6 +461,18 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Change Owner",
         helpText: "The Change Owner action, single and bulk: on offers it, off hides it. Unset: on, except off on a controlled_by_parent detail. Offered only on an object whose records have a reassignable owner (ownership user or unset, no managedBy, not a sys_ object, owner_id not readonly and, on an external object, declared or mapped); turning it on anywhere else is refused. It gates the action only, not a plain edit of owner_id. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate the action on each record."
       },
+      pinnedActions: {
+        label: "Pinned Actions",
+        helpText: "Which actions each page header shows as buttons, in order, at most 3 per page; every other action the header places goes to its More menu. Unset: each header picks its buttons by the actions' order, as before."
+      },
+      "pinnedActions.list": {
+        label: "List page",
+        helpText: "Action names placed on the list toolbar, or $import / $export, in the order they are drawn. At most 3. os validate refuses a name that is no action of this object or is not placed on the list toolbar; such a name draws no button."
+      },
+      "pinnedActions.record": {
+        label: "Record page",
+        helpText: "Action names placed in the record header or its More menu, in the order they are drawn. At most 3. os validate refuses a name that is no action of this object or is not placed on the record page; such a name draws no button."
+      },
       editMode: {
         label: "Edit Mode",
         helpText: "Edit-interaction intent for records of this object. Absent, the renderer picks its own default. Cross-renderer intent, not styling."

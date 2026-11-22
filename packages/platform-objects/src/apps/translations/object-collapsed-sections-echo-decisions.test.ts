@@ -956,10 +956,14 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     // switch (ruling 7000907189 point 1) — a label and a help text, two leaves,
     // all translated leaves authored by the same card. `advanced` reads
     // 104 → 106; `capabilities` is untouched.
-    expect(PANEL_LEAVES.length).toBe(117);
+    // 123 since #36366 gave `advanced` the `pinnedActions` composite (the
+    // header buttons per page type) and its `list` / `record` rows — a label
+    // and a help text each, three rows and six leaves, all translated leaves
+    // authored by that card. `advanced` reads 106 → 112.
+    expect(PANEL_LEAVES.length).toBe(123);
     expect(PANEL_LEAVES.every((l) => l.prop === 'label' || l.prop === 'helpText')).toBe(true);
     expect(PANEL_LEAVES.filter((l) => l.section === 'capabilities').length).toBe(11);
-    expect(PANEL_LEAVES.filter((l) => l.section === 'advanced').length).toBe(106);
+    expect(PANEL_LEAVES.filter((l) => l.section === 'advanced').length).toBe(112);
   });
 
   it('⭐ DARK, OUTWARD — the open sections are excluded, and `fields.placeholder` is the one that proves it', () => {
