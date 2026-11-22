@@ -549,6 +549,8 @@ export const INLINE_COLUMN_POSITIONS: Readonly<Record<string, Scrub>> = {
     name: keep, label: keep, type: keep, options: keep, prefix: keep, step: keep,
     reference: keep, displayField: keep, idField: keep, multiple: keep, accept: keep,
     defaultHidden: keep, computed: keep, scale: keep, autofill: keep, width: keep, required: keep,
+    // A `rating` cell's star count (#36043): a number, never a field name.
+    max: keep,
     // Judged by `inlineColumn` before the table runs: a denied one drops the column.
     expr: keep,
     readonlyWhen: expression,

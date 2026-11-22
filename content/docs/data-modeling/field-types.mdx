@@ -599,16 +599,22 @@ the parent's form edits the children as rows of a table:
 
 - **Columns.** Without `inlineColumns` the columns are derived from the child object. An
   explicit column (`InlineGridColumn`) names the child field in `name` and may set `label`,
-  `width` (pixels), `required` and `type`. A column's `type` is one of nine cell controls:
-  `text`, `number`, `currency`, `date`, `datetime`, `time`, `select`, `lookup` and `file`.
-  Declaring `type` opts the column out of derivation, so supply what the control needs
-  (`options` for a select, `reference` and `displayField` for a lookup).
+  `width` (pixels), `required` and `type`. A column's `type` is one of fourteen cell controls:
+  `text`, `number`, `currency`, `date`, `datetime`, `time`, `select`, `lookup`, `file`, `user`,
+  `multiselect`, `tags`, `boolean` and `rating`. Declaring `type` opts the column out of
+  derivation, so supply what the control needs (`options` for a select or multi-select,
+  `reference` and `displayField` for a lookup, `max` for a rating).
 - **File cells.** A `file` column is an upload control in the cell, with removable chips and
   thumbnails for images; `accept` and `multiple` restrict it. Derived columns map `file`,
   `image` and `avatar` child fields to `file` cells, an image field accepting `image/*`. Shown as
   text, a file cell reads the file's name, or a count when it holds several.
-- **Booleans.** A derived `boolean` or `toggle` child field becomes a `select` cell storing
-  `'true'` / `'false'`, labelled in the session language.
+- **Booleans.** A derived `boolean` or `toggle` child field becomes a checkbox cell storing
+  `true` / `false`; read-only, it shows the session language's yes / no word. A column authored
+  as `type: 'select'` over a boolean field keeps the select.
+- **People, multi-select, tags and rating.** A derived `user` field becomes the person picker
+  (several people when the field is `multiple`), `multiselect` and `checkboxes` fields a list
+  holding several options, `tags` a free-form tag list, and `rating` a row of stars (`max`
+  from the field, default 5). Each edits as the same cell does in the list view.
 - **Currency.** A `currency` cell shows the resolved currency's symbol, and decimals of that
   currency's CLDR fraction digits; `prefix` replaces the symbol only.
 - **Order.** When the columns are derived and the child object has a field named `position`, `sort_order`, `sequence`,

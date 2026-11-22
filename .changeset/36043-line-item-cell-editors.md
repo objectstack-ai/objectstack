@@ -2,6 +2,8 @@
 '@objectstack/spec': minor
 '@object-ui/fields': minor
 '@object-ui/plugin-form': minor
+'@objectstack/metadata-core': patch
+'@object-ui/types': patch
 ---
 
 feat: the form's line-item table edits people, multi-select, tags, check and rating cells the way the main list does
@@ -20,3 +22,5 @@ In the line-item table:
 - Read-only and list-mode cells show people by name, a rating as its stars, a multi-select's option labels, and a check cell as the session's yes/no word.
 
 Visible change on existing forms: a column the table derives from a child field (no `type` written) now follows that field. A `boolean` / `toggle` field becomes a checkbox instead of the yes/no select, and it writes `true` / `false` instead of the strings `'true'` / `'false'` (the server reads both the same). A `rating` field becomes stars instead of a number box. `user`, `multiselect`, `checkboxes` and `tags` fields get their own cells instead of a plain text box that took a typed user id or a single option. A column that writes its `type` is unchanged, a `type: 'select'` column over a boolean field included. Which derived columns are visible by default is unchanged.
+
+The field-level security scrubber classifies the column's new `max` key as kept (a number, never a field name).
