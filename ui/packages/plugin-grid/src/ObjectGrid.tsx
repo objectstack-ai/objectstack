@@ -267,6 +267,14 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    */
   residentSummaryRow?: boolean;
   /**
+   * [objectstack#36149] Draw the phone's card rows (the record's title, one
+   * summary line and its status chip) at any window width: a host whose box
+   * is a phone's width on a desktop window, the side preview's child tab.
+   * Absent: card rows below the 768 px app breakpoint only, as before. A HOST
+   * prop, never authored metadata.
+   */
+  cardFace?: boolean;
+  /**
    * [objectstack#35702] The host's own wording of the record count that leads
    * the footer row (the list's 「42 records」, plural forms included). Absent ⇒
    * the grid's 「Count 42」.
@@ -926,6 +934,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   showRowNumbers: hostShowRowNumbers,
   onColumnSummaryChange,
   residentSummaryRow,
+  cardFace: hostCardFace,
   summaryRowLead,
   onColumnSummaryPick,
   summaryPickFields,
@@ -952,7 +961,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // `error`). Read only by the undeclared-name warning's readiness below, so a
   // failed read reports the names instead of dropping them silently.
   const [objectSchemaReadFailed, setObjectSchemaReadFailed] = useState(false);
-  const [useCardView, setUseCardView] = useState(false);
+  const [windowCardView, setUseCardView] = useState(false);
+  // The card rows: a phone's window, or a host that asks for them
+  // (`cardFace`, objectstack#36149).
+  const useCardView = windowCardView || !!hostCardFace;
   // objectstack#28434 — the record URL a row links to, for its context menu's
   // "Open in new tab": the host's own builder, the one `LinkCell` draws the
   // row's anchor from.
