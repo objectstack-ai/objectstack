@@ -54,9 +54,13 @@ export function fieldTypeToColumnType(type: string | undefined): GridColumn['typ
   switch (type) {
     case 'number':
     case 'percent':
-    case 'rating':
     case 'slider':
       return 'number';
+    // objectstack#36043 — a rating, a check, a person and a list of options
+    // or tags each get the cell the main list edits them with, not a number
+    // box, a yes/no select or a plain text box.
+    case 'rating':
+      return 'rating';
     case 'currency':
       return 'currency';
     // Three distinct controls, NOT one (objectui#3569). Collapsing `datetime`
@@ -74,12 +78,20 @@ export function fieldTypeToColumnType(type: string | undefined): GridColumn['typ
     case 'select':
     case 'picklist':
     case 'radio':
+      return 'select';
     case 'boolean':
     case 'toggle':
-      return 'select';
+      return 'boolean';
+    case 'multiselect':
+    case 'checkboxes':
+      return 'multiselect';
+    case 'tags':
+      return 'tags';
     case 'lookup':
     case 'master_detail':
       return 'lookup';
+    case 'user':
+      return 'user';
     case 'file':
     case 'image':
     case 'avatar':
@@ -179,6 +191,21 @@ function optionsFor(def: any, booleanLabel: BooleanValueLabel): GridColumn['opti
   );
 }
 
+/** The column types whose cell offers the child field's options (objectstack#36043). */
+function takesOptions(type: GridColumn['type']): boolean {
+  return type === 'select' || type === 'multiselect' || type === 'tags';
+}
+
+/**
+ * The extras a `user` or `rating` cell reads from its child field
+ * (objectstack#36043): whether a person cell holds several people, and how
+ * many stars a rating cell draws. A key the column already carries is kept.
+ */
+function applyPickerColumnProps(col: GridColumn, d: any): void {
+  if (col.type === 'user' && col.multiple == null && d?.multiple === true) col.multiple = true;
+  if (col.type === 'rating' && col.max == null && Number.isInteger(d?.max) && d.max > 0) col.max = d.max;
+}
+
 /**
  * Find the field on the child object that points back to the parent — the
  * master_detail/lookup field whose `reference` is the parent object. Prefer
@@ -252,7 +279,8 @@ function deriveColumn(name: string, d: any, booleanLabel: BooleanValueLabel): Gr
     required: !!d?.required,
   };
   const options = optionsFor(d, booleanLabel);
-  if (col.type === 'select' && options) col.options = options;
+  if (takesOptions(col.type) && options) col.options = options;
+  applyPickerColumnProps(col, d);
   if (col.type === 'lookup') {
     col.reference = d?.reference;
     // The display pointer is read in `@objectstack/spec`'s spelling,
@@ -388,7 +416,8 @@ export function hydrateColumns(
     if (next.label == null) next.label = d?.label || col.name;
     if (next.required == null) next.required = !!d?.required;
     const options = optionsFor(d, opts.booleanLabel);
-    if (type === 'select' && options && !next.options) next.options = options;
+    if (takesOptions(type) && options && !next.options) next.options = options;
+    applyPickerColumnProps(next, d);
     if (type === 'lookup') {
       if (next.reference == null) next.reference = d?.reference;
       // The same read as `deriveColumns` above (objectui#11070 round 6).
