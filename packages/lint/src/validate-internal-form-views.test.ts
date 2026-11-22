@@ -23,6 +23,11 @@ describe('form-view-internal-not-loaded', () => {
         formViews: { create: { type: 'simple', sections }, default: { type: 'tabbed', sections } },
       }],
     });
+    expect(findings.map((f) => f.where)).toEqual([
+      'view "account" · form',
+      'view "account" · formViews.create',
+      'view "account" · formViews.default',
+    ]);
     expect(findings.map((f) => f.path)).toEqual([
       'views[0].form',
       'views[0].formViews.create',
@@ -62,6 +67,17 @@ describe('form-view-internal-not-loaded', () => {
         { name: 'lead.qualify', object: 'lead', viewKind: 'form', config: { sections } },
       ],
     })).toEqual([]);
+  });
+
+  it('a nameless container is named by the object its form binds, not by its index', () => {
+    const findings = validateInternalFormViews({
+      views: [
+        { list: { type: 'grid', data: { provider: 'object', object: 'deal' } }, form: { data: { provider: 'object', object: 'deal' }, sections } },
+        { list: { type: 'grid', data: { provider: 'object', object: 'lead' } }, form: { sections } },
+      ],
+    });
+    expect(findings.map((f) => f.where)).toEqual(['view "deal" · form', 'view "lead" · form']);
+    expect(findings.map((f) => f.path)).toEqual(['views[0].form', 'views[1].form']);
   });
 
   it('a form with sharing turned off is internal and reported', () => {

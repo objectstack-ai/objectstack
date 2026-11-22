@@ -151,6 +151,41 @@ describe('ScreenPreview — object-form mode', () => {
     expect(schema.subforms).toBeUndefined();
   });
 
+  it('a create leaves out a showOnCreate: false field, as every other create surface does (objectstack-ai/objectstack#36425)', async () => {
+    objectsRef.current = [
+      {
+        name: 'showcase_case',
+        fields: {
+          subject: { type: 'text', label: 'Subject' },
+          status: { type: 'select', label: 'Status' },
+          internal_note: { type: 'textarea', label: 'Internal note', showOnCreate: false },
+        },
+      },
+    ];
+    render(<ScreenPreview node={{ id: 's1', config: { objectName: 'showcase_case', mode: 'create' } }} />);
+    await screen.findByTestId('object-form');
+    const schema = objectFormSpy.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(schema.mode).toBe('create');
+    expect(schema.fields).toEqual(['subject', 'status']);
+  });
+
+  it('CONTROL: an edit keeps the form\'s own field list, so the showOnCreate: false field is drawn (objectstack-ai/objectstack#36425)', async () => {
+    objectsRef.current = [
+      {
+        name: 'showcase_case',
+        fields: {
+          subject: { type: 'text', label: 'Subject' },
+          internal_note: { type: 'textarea', label: 'Internal note', showOnCreate: false },
+        },
+      },
+    ];
+    render(<ScreenPreview node={{ id: 's1', config: { objectName: 'showcase_case', mode: 'edit', recordId: 'r1' } }} />);
+    await screen.findByTestId('object-form');
+    const schema = objectFormSpy.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(schema.mode).toBe('edit');
+    expect(schema.fields).toBeUndefined();
+  });
+
   it('falls back to a hint when no data source is available', () => {
     adapterRef.current = null;
     render(<ScreenPreview node={{ id: 's1', config: { objectName: 'crm_account' } }} />);

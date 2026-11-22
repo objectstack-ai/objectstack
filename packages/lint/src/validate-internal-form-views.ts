@@ -77,7 +77,15 @@ export function validateInternalFormViews(stack: AnyRec): InternalFormViewFindin
   const findings: InternalFormViewFinding[] = [];
 
   for (const { rec: view, path: viewPath } of collectionEntries(stack.views, 'views')) {
-    const viewName = strName(view.name) ?? strName(view.object) ?? viewPath;
+    // A container carries no name of its own: it is named by the object its
+    // default form or list binds, so a finding reads the same wherever the
+    // container sits in `views[]`.
+    const viewName =
+      strName(view.name)
+      ?? viewObjectName(view)
+      ?? (isRec(view.form) ? viewObjectName(view.form) : undefined)
+      ?? (isRec(view.list) ? viewObjectName(view.list) : undefined)
+      ?? viewPath;
     const sites: Array<{ form: AnyRec; path: string; surface: string }> = [];
 
     for (const site of formViewSites(view, viewPath)) {
