@@ -102,7 +102,9 @@ const CLS = {
   composerRow: g('composer', /<div className=\{cn\('(flex flex-wrap items-center gap-0\.5[^']*)'/, ['flex-wrap']),
   composerButton: g('composer', /className="(h-11 w-11 sm:h-7 sm:w-7)"/, ['h-11', 'sm:h-7']),
   barButton: g('header', /barFace && '(h-11 min-w-0 flex-1)'/, ['h-11', 'flex-1']),
-  barMore: g('header', /barFace \? '(h-11 w-11 shrink-0 px-0)'/, ['h-11', 'w-11']),
+  // objectstack#36151 — the record page hands the `⋯` a slot at the top bar's
+  // right end on a phone; the bar holds the page's actions alone.
+  topMore: g('header', /moreInTopBar\s*\? '(h-11 w-11 shrink-0 px-0 [^']*)'/, ['h-11', 'w-11']),
   back: g('page', /const phoneBackClass =\s*'([^']+)'/, ['min-h-[44px]']),
   topBar: g('topBar', /'(flex min-h-11 sm:h-11 [^']*)'/, ['min-h-11', 'sm:h-11']),
   topBarButton: g('topBar', /const RECORD_TOP_BAR_BUTTON_CLASS =\s*'([^']+)'/, ['h-11', 'w-11', 'sm:h-7']),
@@ -122,7 +124,7 @@ const CLS = {
   })(),
 };
 
-/** The record page, transcribed: the back link, the tabs, a section field with its pencil, a related card, the inline save bar and the bottom action bar. */
+/** The record page, transcribed: the back link and the top bar's `⋯`, the tabs, a section field with its pencil, a related card, the inline save bar and the bottom action bar. */
 const fixture = () => {
   const b = (cls: string, label: string, extra = '') =>
     `<button type="button" class="${CLS.buttonBase} px-3 ${cls}" data-t="${label}" ${extra}>${label.length > 2 ? label : '<svg width="16" height="16"></svg>'}</button>`;
@@ -133,6 +135,7 @@ const fixture = () => {
     <div class="flex shrink-0 items-center gap-0.5"><span class="mr-1">3 / 21</span>
       <button type="button" class="${CLS.topBarButton}" data-t="next record"><svg width="14" height="14"></svg></button>
       <button type="button" class="${CLS.topBarButton}" data-t="previous record"><svg width="14" height="14"></svg></button>
+      ${b(CLS.topMore, 'TM')}
     </div>
   </div>
   <div class="px-4">
@@ -174,7 +177,7 @@ const fixture = () => {
     </div>
   </div>
   <div class="shrink-0 border-t px-4 pt-3 pb-3"><div class="flex items-center gap-2">
-    ${b(`gap-2 ${CLS.barButton}`, 'Edit')}${b(`gap-2 ${CLS.barButton}`, 'Convert Lead')}${b(CLS.barMore, 'MA')}
+    ${b(`gap-2 ${CLS.barButton}`, 'Convert Lead')}${b(`gap-2 ${CLS.barButton}`, 'Assign')}
   </div></div>
 </div>`;
 };
