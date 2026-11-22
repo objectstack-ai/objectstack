@@ -20,7 +20,8 @@
  * the object's inline-edit verdict (ADR-0103 bucket, `userActions.edit`, the
  * server's effective operations) AND the principal's `update` grant. So these
  * cases mount the REAL `ObjectGrid` and read the user-visible outcome: does a
- * click on a cell open an in-cell editor.
+ * selected cell open an in-cell editor on Enter (the select-first model,
+ * objectstack#36270).
  */
 
 import React from 'react';
@@ -98,12 +99,18 @@ async function clickCell(named: Record<string, unknown>, userActions?: Record<st
   await waitFor(() => expect(screen.getByText('Alpha')).toBeInTheDocument());
   const td = screen.getByText('Alpha').closest('td') as HTMLElement;
   fireEvent.click(td);
-  // The editor mounts on click; one tick lets React flush it, so `false` means
-  // "never opened", not "not opened yet".
+  // objectstack#36270 — an editable grid selects the cell on that click (the
+  // list page's select-first model) and Enter asks for its editor; a
+  // read-only grid has no selected cell to ask, and the click opens the row.
+  const catcher = document.querySelector<HTMLInputElement>('[data-slot="cell-type-catcher"]');
+  if (catcher) fireEvent.keyDown(catcher, { key: 'Enter' });
+  // One tick lets React flush the editor, so `false` means "never opened",
+  // not "not opened yet".
   await new Promise((r) => setTimeout(r, 50));
   return {
-    editor: td.querySelector('input') != null,
+    editor: document.querySelector('td[data-editing-cell] input') != null,
     recordForm: screen.queryByTestId('object-form') != null,
+    readOnlyReason: screen.queryByTestId('cell-readonly-reason'),
   };
 }
 
@@ -117,8 +124,10 @@ describe('objectui#10885 — route 2 hands `ObjectGrid` the named view\'s `inlin
   it('THE GRANT STILL WINS: a named `inlineEdit: true` opens no editor when the object refuses inline edit', async () => {
     const r = await clickCell({ inlineEdit: true }, { edit: false });
     expect(r.editor).toBe(false);
-    // The click landed: it went through to the row, as on a read-only grid.
-    expect(r.recordForm).toBe(true);
+    // The click landed: it selected the cell, which says why it opens no
+    // editor, and opened no record (objectstack#36270).
+    expect(r.readOnlyReason).not.toBeNull();
+    expect(r.recordForm).toBe(false);
   });
 
   it('CONTROL: a named view that declares no `inlineEdit` stays read-only, as before', async () => {

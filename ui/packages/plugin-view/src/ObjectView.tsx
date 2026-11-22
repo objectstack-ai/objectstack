@@ -3271,10 +3271,17 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
 
     // Default: use ObjectGrid — keyed on identity alone; it refetches in place
     // on the data-invalidation bus (see `identityKey` above).
+    //
+    // objectstack#36270 — a grid this view makes editable (the named view's
+    // `inlineEdit`, else `table.editable`) edits as the list page's grid does:
+    // a click selects a cell, double-click, Enter or typing opens its editor,
+    // and each committed cell saves on its own, with no pending-changes bar
+    // and no "Save All". A read-only grid keeps click-to-open.
     return (
       <ObjectGrid
         key={identityKey}
         schema={gridSchema}
+        {...(gridSchema.editable === true ? { cellSelection: true } : {})}
         dataSource={dataSource}
         onRowClick={handleRowClick}
         onEdit={operations.update !== false ? handleEdit : undefined}
