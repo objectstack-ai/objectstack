@@ -1020,6 +1020,7 @@ const zh = {
     layout: '布局',
     resetToViewDefault: '恢复视图默认设置',
     addGroup: '添加分组字段',
+    noGroupableFields: '没有可以用来分组的字段',
     collapsedByDefault: '默认折叠',
     removeGroup: '删除',
     groupingUnstoredNotice: '无法按 {{fields}} 分组：它的值在显示时计算，并未存储。列表已暂不按它分组显示。',

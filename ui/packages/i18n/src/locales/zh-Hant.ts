@@ -1020,6 +1020,7 @@ const zhHant = {
     layout: '佈局',
     resetToViewDefault: '恢復檢視預設設定',
     addGroup: '新增分組欄位',
+    noGroupableFields: '沒有可以用來分組的欄位',
     collapsedByDefault: '預設摺疊',
     removeGroup: '刪除',
     groupingUnstoredNotice: '無法按 {{fields}} 分組：它的值在顯示時計算，並未儲存。列表已暫不按它分組顯示。',

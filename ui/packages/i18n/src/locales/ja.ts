@@ -993,6 +993,7 @@ const ja = {
     layout: "レイアウト",
     resetToViewDefault: "ビューの既定に戻す",
     addGroup: "グループフィールドを追加",
+    noGroupableFields: "グループ化に使えるフィールドがありません",
     collapsedByDefault: "デフォルトで折りたたむ",
     removeGroup: "削除",
     groupingUnstoredNotice: "{{fields}} ではこの一覧をグループ化できません。値は表示時に計算され、保存されていません。このグループ化を除いて一覧を表示しています。",

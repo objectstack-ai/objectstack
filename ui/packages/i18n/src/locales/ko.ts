@@ -993,6 +993,7 @@ const ko = {
     layout: "레이아웃",
     resetToViewDefault: "보기 기본값으로 재설정",
     addGroup: "그룹 필드 추가",
+    noGroupableFields: "그룹화에 사용할 수 있는 필드가 없습니다",
     collapsedByDefault: "기본적으로 접힘",
     removeGroup: "제거",
     groupingUnstoredNotice: "{{fields}} 기준으로 이 목록을 그룹화할 수 없습니다. 값이 표시될 때 계산되며 저장되지 않습니다. 해당 그룹화 없이 목록을 표시합니다.",
