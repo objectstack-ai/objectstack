@@ -226,7 +226,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       digest: {
         label: "Zusammenfassung",
-        help: "Fasst diese Benachrichtigungen zu einer Zusammenfassung zusammen, statt jede beim Eintreffen zu senden: daily sendet um Mitternacht, weekly montags um Mitternacht, none sendet jede sofort. Kritische Benachrichtigungen werden immer sofort gesendet. Wirkt bei einer Einstellung mit dem Kanal * (alle Kanäle).",
+        help: "Fasst diese Benachrichtigungen zu einer Zusammenfassung zusammen, statt jede beim Eintreffen zu senden: daily sendet um Mitternacht, weekly montags um Mitternacht, none sendet jede sofort. Kritische Benachrichtigungen werden immer sofort gesendet. Wirkt bei einer Einstellung mit dem Kanal * (alle Kanäle). Leer gelassen entscheidet die nächste Einstellung: die Vorgabe für alle Benutzer, dann none.",
         options: {
           none: "keiner",
           daily: "täglich",
@@ -235,7 +235,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       quiet_hours: {
         label: "Ruhezeiten",
-        help: "Ein tägliches Zeitfenster, in dem Benachrichtigungen zurückgehalten und an seinem Ende zugestellt werden, zum Beispiel { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }. Zeiten sind HH:MM in dieser Zeitzone (UTC, wenn tz fehlt), und das Fenster darf über Mitternacht reichen. Kritische Benachrichtigungen werden nicht zurückgehalten. Wirkt bei einer Einstellung mit dem Kanal * (alle Kanäle)."
+        help: "Ein tägliches Zeitfenster, in dem Benachrichtigungen zurückgehalten und an seinem Ende zugestellt werden, zum Beispiel { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }. Zeiten sind HH:MM in dieser Zeitzone (UTC, wenn tz fehlt), und das Fenster darf über Mitternacht reichen. Kritische Benachrichtigungen werden nicht zurückgehalten. Wirkt bei einer Einstellung mit dem Kanal * (alle Kanäle). { \"off\": true } bedeutet keine Ruhezeiten; leer gelassen entscheidet die nächste Einstellung: die Vorgabe für alle Benutzer, dann keine."
       },
       created_at: {
         label: "Erstellt am"
