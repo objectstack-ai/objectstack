@@ -199,6 +199,7 @@ const FieldInPlaceSession: React.FC<FieldInPlaceEditorProps> = ({
         onCommit={commit}
         autoFocus
         error={reason}
+        dataSource={writer.dataSource}
         dependentValues={record}
       />
     ) : (
