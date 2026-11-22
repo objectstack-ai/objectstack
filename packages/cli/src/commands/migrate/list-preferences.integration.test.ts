@@ -48,6 +48,8 @@ import MigrateListPreferences from './list-preferences.js';
 import '@objectstack/service-datasource';
 import '@objectstack/driver-turso';
 import '@objectstack/runtime';
+import '@objectstack/platform-objects/plugin';
+import '@objectstack/plugin-security';
 import '@objectstack/rest';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
