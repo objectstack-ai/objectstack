@@ -23,8 +23,8 @@
  * plain input standing in for the lazy `user` widget.
  */
 import * as React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, renderHook, screen, fireEvent, waitFor, within, act, cleanup } from '@testing-library/react';
 
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@object-ui/i18n')>()),
@@ -54,7 +54,7 @@ import { FormOwnerLine } from '@object-ui/plugin-form';
 import { FormOwnerChangeAction } from './FormOwnerChangeAction';
 import { ConsoleFormOwnerLine } from './consoleFormOwnerLine';
 import { ChangeOwnerDialog } from './ChangeOwnerDialog';
-import { readChangeOwnerReport } from './changeOwner';
+import { readChangeOwnerReport, useListChangeOwnerOffered, __clearObjectTransferVerdicts } from './changeOwner';
 import { seedRecordPageReaders } from './recordPagePayload';
 
 const ALLOW = { allowed: true, record: { recordId: 'x', visible: true } };
@@ -369,6 +369,56 @@ describe('the Change Owner dialog sends the chosen target (objectstack#35403)', 
     mountDialog([{ id: 'd1' }, { id: 'd2' }]);
     await screen.findByTestId('widget-change_owner_target');
     expect(screen.queryByTestId('change-owner-kind')).toBeNull();
+  });
+});
+
+describe("a list asks the explain engine's transfer verdict for the object, once (objectstack#35403)", () => {
+  let asked: Array<{ url: string; body: unknown }>;
+  function stubExplain(allowed: unknown, ok = true) {
+    asked = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { body?: string }) => {
+      asked.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) });
+      return { ok, status: ok ? 200 : 403, json: async () => ({ allowed }) };
+    }));
+  }
+  beforeEach(() => __clearObjectTransferVerdicts());
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it('an allow offers the bulk entry, asked once at object grain (no recordId)', async () => {
+    stubExplain(true);
+    const def = { name: 'crm_deal', fields: {} };
+    const first = renderHook(() => useListChangeOwnerOffered(def));
+    await waitFor(() => expect(first.result.current).toBe(true));
+    const second = renderHook(() => useListChangeOwnerOffered(def));
+    await waitFor(() => expect(second.result.current).toBe(true));
+    expect(asked).toEqual([{ url: '/api/v1/security/explain', body: { object: 'crm_deal', operation: 'transfer' } }]);
+  });
+
+  it('a refusal offers nothing', async () => {
+    stubExplain(false);
+    const { result } = renderHook(() => useListChangeOwnerOffered({ name: 'crm_deal', fields: {} }));
+    await waitFor(() => expect(asked.length).toBe(1));
+    await act(async () => {});
+    expect(result.current).toBe(false);
+  });
+
+  it('no answer (a refused read) offers nothing', async () => {
+    stubExplain(true, false);
+    const { result } = renderHook(() => useListChangeOwnerOffered({ name: 'crm_deal', fields: {} }));
+    await waitFor(() => expect(asked.length).toBe(1));
+    await act(async () => {});
+    expect(result.current).toBe(false);
+  });
+
+  it('an object that does not offer Change Owner asks nothing and offers nothing', async () => {
+    stubExplain(true);
+    const { result } = renderHook(() => useListChangeOwnerOffered({ name: 'crm_tag', ownership: 'none', fields: {} }));
+    await act(async () => {});
+    expect(result.current).toBe(false);
+    expect(asked).toEqual([]);
   });
 });
 

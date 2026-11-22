@@ -12,9 +12,10 @@
  *     `controlled_by_parent` detail) — both answered by the spec's ONE
  *     resolution, `resolveUserActionTransfer` (`@objectstack/spec/data`), the
  *     same one the server's Change Owner endpoint refuses by; and
- *  3. the caller holds the transfer verdict: on a record, the explain engine's
- *     `transfer` operation for that record (`useRecordVerdict(..., 'transfer')`
- *     in `@object-ui/plugin-detail`, joined to the record page's one read).
+ *  3. the caller holds the transfer verdict: the explain engine's `transfer`
+ *     operation — on a record, for that record (`useRecordVerdict(...,
+ *     'transfer')` in `@object-ui/plugin-detail`, joined to the record page's
+ *     one read); on a list, for the object, asked once.
  *
  * ⛔ No permission arithmetic here: the switch is the spec's, the record
  * verdict the server's, and every row of a bulk change is judged by the server
@@ -25,7 +26,7 @@ import * as React from 'react';
 import { resolveUserActionTransfer, type UserActionTransferResolution } from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { partitionRowsByPredicate } from '@object-ui/core';
-import { useRowPredicate } from '@object-ui/react';
+import { SchemaRendererContext, useRowPredicate } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { useRecordVerdict } from '@object-ui/plugin-detail';
 
@@ -149,18 +150,78 @@ export function useRecordChangeOwnerOffer(
 }
 
 /**
- * A list's bulk Change Owner gate: facts 1 and 2, and the caller's
- * object-level transfer grant as `/me/permissions` reports it — the server's
- * own update rule for the owner field (edit and `allowTransfer`, or
- * `modifyAllRecords`; `checkField(…, 'write')` on `owner_id`, objectui#12103).
- * A list asks no record verdict: each selected row is judged by the endpoint,
- * which reports every row it did not move.
+ * The object-level `transfer` verdicts a list asks, keyed by principal and
+ * object. One question per object per principal, shared by every list that
+ * asks it; an unanswered question is not kept, so the next list asks again.
+ */
+const objectTransferVerdicts = new Map<string, Promise<boolean | undefined>>();
+let objectTransferPrincipal: string | null | undefined;
+
+function askObjectTransfer(
+  principal: string | null,
+  objectName: string,
+  apiFetch: typeof fetch | undefined,
+): Promise<boolean | undefined> {
+  if (objectTransferPrincipal !== principal) {
+    objectTransferVerdicts.clear();
+    objectTransferPrincipal = principal;
+  }
+  const key = JSON.stringify([principal, objectName]);
+  const known = objectTransferVerdicts.get(key);
+  if (known) return known;
+  const answer = (async (): Promise<boolean | undefined> => {
+    try {
+      const res = await (apiFetch ?? fetch)('/api/v1/security/explain', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ object: objectName, operation: 'transfer' }),
+      });
+      if (!res.ok) return undefined;
+      const allowed = ((await res.json()) as { allowed?: unknown } | null)?.allowed;
+      return typeof allowed === 'boolean' ? allowed : undefined;
+    } catch {
+      return undefined;
+    }
+  })();
+  objectTransferVerdicts.set(key, answer);
+  void answer.then((verdict) => {
+    if (verdict === undefined && objectTransferVerdicts.get(key) === answer) objectTransferVerdicts.delete(key);
+  });
+  return answer;
+}
+
+/** Test seam: forget every object-level verdict and the principal they were for. */
+export function __clearObjectTransferVerdicts(): void {
+  objectTransferVerdicts.clear();
+  objectTransferPrincipal = undefined;
+}
+
+/**
+ * A list's bulk Change Owner gate: facts 1 and 2, and the explain engine's
+ * `transfer` verdict for the OBJECT (`POST /security/explain` with no
+ * `recordId`), asked once per object — the same engine and operation the
+ * record page reads, at the grain a list has. Drawn on a definite allow only,
+ * as on the record page. A list asks no record verdict: each selected row is
+ * judged by the endpoint, which reports every row it did not move.
  */
 export function useListChangeOwnerOffered(objectDef: ChangeOwnerObjectDef | null | undefined): boolean {
-  const perms = usePermissions();
+  const principal = usePermissions().userId;
+  const apiFetch = React.useContext(SchemaRendererContext)?.apiFetch;
   const enabled = React.useMemo(() => changeOwnerObjectOffer(objectDef).enabled, [objectDef]);
   const name = objectDef?.name;
-  return enabled && !!name && perms.checkField(name, CHANGE_OWNER_FIELD, 'write');
+  const asks = enabled && !!name;
+  const [verdict, setVerdict] = React.useState<{ key: string; allowed: boolean | undefined } | null>(null);
+  const key = asks ? JSON.stringify([principal, name]) : '';
+  React.useEffect(() => {
+    if (!asks || !name) return;
+    let live = true;
+    void askObjectTransfer(principal, name, apiFetch).then((allowed) => {
+      if (live) setVerdict({ key, allowed });
+    });
+    return () => { live = false; };
+  }, [asks, name, principal, apiFetch, key]);
+  return asks && verdict?.key === key && verdict.allowed === true;
 }
 
 /**
