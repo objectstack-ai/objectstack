@@ -511,9 +511,11 @@ drawer **over the list**, and the list keeps its full width. The drawer is
 460 px wide, and the reader can drag its edge from 380 px to 900 px. The
 dragged width is remembered in the browser and applies to every object's
 drawer, except an object whose `navigation` authors a `size` (other than
-`auto`) or a `width`: that drawer opens at the authored width and remembers
-only a width dragged in its own drawer. The drawer draws no dimming overlay
-and is non-modal, so the list behind it stays readable and clickable:
+`auto`) or a `width` (pixel or percent). That object keeps its own remembered
+width, shared with its calendar, gantt, kanban, tree and grid overlays: its
+drawer opens at the authored width until a width is dragged in it or in one
+of them. The drawer draws no dimming overlay and is non-modal, so the list
+behind it stays readable and clickable:
 
 - the open record's row is highlighted and follows the drawer's ↑ ↓;
 - clicking another row swaps the record.

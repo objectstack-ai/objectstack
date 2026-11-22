@@ -108,10 +108,12 @@ export const RECORD_PREVIEW_WIDTH_KEY = 'drawer-width:record-preview';
  * Where a record pane remembers its dragged width (objectstack#36149): the
  * one shared key ({@link RECORD_PREVIEW_WIDTH_KEY}), unless the object (or
  * the view that opens it) authors the pane's width — a `navigation.size`
- * other than `auto`, or a pixel `navigation.width`. Such an object keeps its
- * own per-object key (`recordOverlayWidthStorageKey`), so a width dragged in
- * another object's preview never takes the place of the author's: it opens at
- * the authored width until the reader drags this object's own pane.
+ * other than `auto`, or a `navigation.width` (pixel or percent). Such an
+ * object keeps its per-object key (`recordOverlayWidthStorageKey`), which it
+ * shares with its calendar, gantt, kanban, tree and grid overlays, so a width
+ * dragged in another object's preview never takes the place of the author's:
+ * it opens at the authored width until a width is dragged in its own pane or
+ * in one of those overlays.
  */
 export function recordPreviewWidthKey(objectName: string, navigation: unknown): string {
   const nav = navigation as { size?: unknown; width?: unknown } | null | undefined;
