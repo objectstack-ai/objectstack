@@ -2697,6 +2697,11 @@ const de = {
         saveAsMyView: "Als meine Ansicht speichern",
         copyName: "{{name}} (Kopie)",
         saved: "Gespeichert",
+        saveToViewConfirmTitle: "In dieser Ansicht speichern?",
+        saveToViewConfirm: "Alle, die „{{name}}“ verwenden, sehen diese Änderungen.",
+        saveToViewConfirmButton: "Für alle speichern",
+        savedForEveryone: "Gespeichert, für alle sichtbar",
+        pendingDraft: "Diese Ansicht hat unveröffentlichte Änderungen. Veröffentliche oder verwirf sie zuerst in den Ansichtseinstellungen.",
       },
       linkFilterRefused: 'Der Filter dieses Links wurde nicht angewendet. Er nennt ein Feld, nach dem Sie hier nicht filtern können, daher zeigt die Liste die Ansicht ohne ihn.',
       personalizedParts: {

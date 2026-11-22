@@ -20,8 +20,8 @@ import type { usePreviewDrafts } from '../preview/PreviewModeContext.js';
 import { isSavedViewId } from '../utils/viewIdentity.js';
 import type { useConsoleActionRuntime } from '../hooks/useConsoleActionRuntime.js';
 import type { useMetadataClient } from './metadata-admin/useMetadata.js';
-import { persistRuntimeMetadata, createRuntimeMetadata, viewEnvelope } from './runtime-metadata-persistence.js';
-import type { RuntimeCreateApp } from './runtime-metadata-persistence.js';
+import { persistRuntimeMetadata, createRuntimeMetadata, saveAndPublishRuntimeMetadata, viewEnvelope } from './runtime-metadata-persistence.js';
+import type { RuntimeCreateApp, SaveAndPublishOutcome } from './runtime-metadata-persistence.js';
 import { draftBarPackageOf } from '../preview/DraftPreviewBar.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { buildAddViewSpec, setDefaultViewPatches, buildViewConfigSaveBody } from './objectViewTabs.js';
@@ -190,6 +190,42 @@ export function useObjectViewViewCrud({
         dropViewDraftOnRead.current = false;
         setViewDraft(null);
     }, [savedViews, setViewDraft]);
+
+    /**
+     * objectstack#35955 — 「Save to this view」 on a shared view, after its
+     * confirm: the body is saved and published at once (ruling record
+     * 7058616478), so everyone sees it on their next read. Over a pending
+     * draft nothing is written (`'pending-draft'`, the caller says so); a
+     * refusal is said with the door's own message (`'failed'`). On
+     * `'published'` the list shows the saved body at once and keeps it until
+     * the saved views have been read again ({@link handleDraftBarChange}).
+     */
+    const handleViewSaveAndPublish = useCallback(async (view: Record<string, any>): Promise<SaveAndPublishOutcome | 'failed'> => {
+        const vid = view.id;
+        if (!metadataClient || !vid) {
+            console.warn('[ObjectView] Cannot save the view: missing metadataClient or viewId.');
+            return 'failed';
+        }
+        try {
+            const outcome = await saveAndPublishRuntimeMetadata('view', vid, buildViewConfigSaveBody(objectName, view), {
+                metadataClient,
+                dataSource,
+                objectName,
+            });
+            if (outcome === 'published') {
+                setViewDraft(view);
+                handleDraftBarChange();
+            }
+            return outcome;
+        } catch (err) {
+            console.error('[ObjectView] Failed to save and publish a view:', err);
+            toast.error(t('form.saveError'), {
+                description: formatMetadataError(err),
+                classNames: { description: 'whitespace-pre-line' },
+            });
+            return 'failed';
+        }
+    }, [metadataClient, dataSource, objectName, t, setViewDraft, handleDraftBarChange]);
 
     /**
      * Create a new view: the Create View dialog's door and the view-config
@@ -469,6 +505,7 @@ export function useObjectViewViewCrud({
     return {
         handleViewConfigSave,
         handleDraftBarChange,
+        handleViewSaveAndPublish,
         handleViewCreate,
         handleViewUpdate,
         handleViewChange,

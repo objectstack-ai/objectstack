@@ -2767,6 +2767,11 @@ const fr = {
         saveAsMyView: "Enregistrer comme ma vue",
         copyName: "{{name}} (copie)",
         saved: "Enregistré",
+        saveToViewConfirmTitle: "Enregistrer dans cette vue ?",
+        saveToViewConfirm: "Toutes les personnes qui utilisent « {{name}} » verront ces modifications.",
+        saveToViewConfirmButton: "Enregistrer pour tous",
+        savedForEveryone: "Enregistré, visible par tous",
+        pendingDraft: "Cette vue contient des modifications non publiées. Publiez-les ou abandonnez-les d’abord dans les paramètres de la vue.",
       },
       linkFilterRefused: 'Le filtre de ce lien n’a pas été appliqué. Il cite un champ sur lequel vous ne pouvez pas filtrer ici, la liste affiche donc la vue sans ce filtre.',
       personalizedParts: {

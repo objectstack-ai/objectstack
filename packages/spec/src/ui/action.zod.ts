@@ -779,6 +779,10 @@ const GLOBAL_NAV_RETIRED =
  *                       never surfaces on the object's own list views.
  * - `record_section`  — actions surfaced inside a body section/tab of a record
  *                       (e.g. a Security tab grouping change-password, 2FA, etc.).
+ *                       Drawn only by an authored record page block that renders
+ *                       it; the standard record page (a phone, the side preview,
+ *                       and an object with no authored page) does not draw it, so
+ *                       an action that must reach every surface adds `record_more`.
  *
  * `global_nav` was REMOVED in 17 (#6888, maintainer ruling 2026-08-09). It had
  * been declared here since the vocabulary was written and no product surface
@@ -1361,7 +1365,7 @@ const actionObject = () => strictObject({
   icon: z.string().optional().describe('Icon name'),
 
   /** Where does this action appear? */
-  locations: z.array(ActionLocationSchema).optional().describe('Locations where this action is visible'),
+  locations: z.array(ActionLocationSchema).optional().describe('Locations where this action is visible. `record_section` is drawn only by an authored record page block that renders it; the standard record page (on a phone, in the side preview, and for an object with no authored page) does not draw it, so an action that must reach every surface adds `record_more` as well.'),
 
   /** 
    * Visual Component Type

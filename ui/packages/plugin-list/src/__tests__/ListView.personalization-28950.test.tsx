@@ -277,3 +277,55 @@ describe('the view\'s own conditions as panel rows (`viewDefaults.filters`, obje
     await waitFor(() => expect(reported()).toEqual(['filters']));
   });
 });
+
+describe('the host\'s unsaved layout and row colour (objectstack#35955)', () => {
+  const COLOR_ACTIONS = { ...BASE.userActions, rowColor: true };
+
+  it('a row colour the host laid over the view\'s is `rowColor`, judged against `viewDefaults.rowColor`', async () => {
+    const { reported } = mount(
+      { compactToolbar: false, userActions: COLOR_ACTIONS, rowColor: { field: 'stage', colors: {} } } as Partial<ListViewSchema>,
+      { viewDefaults: { ...VIEW_DEFAULTS, rowColor: undefined } },
+    );
+    await screen.findByTestId('grid-stub');
+    await waitFor(() => expect(reported()).toEqual(['rowColor']));
+  });
+
+  it('CONTROL: the view\'s own row colour, handed in both places, is no part', async () => {
+    const rowColor = { field: 'stage', colors: {} };
+    const { reported } = mount(
+      { compactToolbar: false, userActions: COLOR_ACTIONS, rowColor } as Partial<ListViewSchema>,
+      { viewDefaults: { ...VIEW_DEFAULTS, rowColor } },
+    );
+    await screen.findByTestId('grid-stub');
+    await waitFor(() => expect(reported()).toEqual([]));
+  });
+
+  it('a pick in the row colour panel is told to `onRowColorChange`, and Clear as `null`', async () => {
+    const onRowColorChange = vi.fn();
+    mount(
+      { compactToolbar: false, userActions: COLOR_ACTIONS } as Partial<ListViewSchema>,
+      { onRowColorChange },
+    );
+    await screen.findByTestId('grid-stub');
+    fireEvent.click(screen.getByRole('button', { name: /^color/i }));
+    const trigger = await screen.findByTestId('color-field-select');
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    const listbox = await screen.findByRole('listbox');
+    fireEvent.click(within(listbox).getByRole('option', { name: 'Stage' }));
+    await waitFor(() => expect(onRowColorChange).toHaveBeenLastCalledWith({ field: 'stage', colors: {} }));
+    fireEvent.click(await screen.findByTestId('clear-row-color'));
+    await waitFor(() => expect(onRowColorChange).toHaveBeenLastCalledWith(null));
+    expect(onRowColorChange).toHaveBeenCalledTimes(2);
+  });
+
+  it('CONTROL: a mount and a prop change tell `onRowColorChange` nothing', async () => {
+    const onRowColorChange = vi.fn();
+    mount(
+      { compactToolbar: false, userActions: COLOR_ACTIONS, rowColor: { field: 'stage', colors: {} } } as Partial<ListViewSchema>,
+      { onRowColorChange },
+    );
+    await screen.findByTestId('grid-stub');
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(onRowColorChange).not.toHaveBeenCalled();
+  });
+});

@@ -39,16 +39,13 @@
 - 认领后回读(SKILL.md 标签写四步)只查 `pm:dispatched` 与 assignee,缺即重挂;首推即开 draft PR。
 - 认领前照 `dispatch-runbook.md` 派发前置核前提;开线程请求交席位攒批(`coordinator.md` 三)。
 - 写码与开发期读码全经 `os-dev` 等子代理(一卡或一组耦合卡,文件面不相交)。
-- 同系列卡可从前卡分支起步(AGENTS.md §2 主干形,⛔ 不叠 PR);新测试建按卡命名的新文件,
-  AGENTS.md 共享 harness 规则适用时除外,由重叠检查定排队。
+- 同系列卡可从前卡分支起步(AGENTS.md §2 主干形,⛔ 不叠 PR);新测试建按卡命名的新文件,AGENTS.md 共享 harness 规则适用时除外,由重叠检查定排队。
 - 席线程只协调,⛔ 不读 diff 与日志;ACCEPT 欠的自读(`contract-review.md`、〈路径分叉〉)除外。
   所落 PR 欠的红检查读日志(`readings-ci.md`)派子代理读,一读兼守本条与该文。
 - 每区 dev 位空即补;逐位上张 PR 入合并队列才领下张,此前跑修复轮;Tier H 或待裁 PR 让位。
 - 席每轮逐区查;取卡照点名范围次序,p0/p1 插队;p3 留收口或搭同文件 PR 成批(每 PR ≤5 卡)。
 - 认领必答:同区卡过 `execution-duties.md` 折叠五门即默认合一 PR,否则串行;额度墙亦照该文。
-- 留道:修法已清的卡碰 `ui/**`、`packages/spec/**` 仍在本道开发、本席 L1/L2;他道席在线只通知;
-  本条先于条款②行(`execution-duties.md`)、移道的 `lanes/spec.md` 与 `--tier` 提示;
-  交出闭集:他道在线席已认领、cloud 路由、安全、ADR。
+- 留道:修法已清的卡碰 `ui/**`、`packages/spec/**` 仍在本道开发、本席 L1/L2;他道席在线只通知;本条先于条款②行(`execution-duties.md`)、移道的 `lanes/spec.md` 与 `--tier` 提示;交出闭集:他道在线席已认领、cloud 路由、披露纪律卡、ADR。
 - 送审:≤50 行、只改文本或测试、`Clause-②: no` 且无他契约面 PR 由区照 `l1-review-checklist.md`
   自审落地,ACCEPT 点名自审;余者由 L1 线程 ACCEPT 读,先于 `contract-review.md` 不起第二个 agent。
 - 契约记录只欠 `contract-review.md` 四面,head 移动照其例外;同 patch-id 干净合 main 只保 ACCEPT。

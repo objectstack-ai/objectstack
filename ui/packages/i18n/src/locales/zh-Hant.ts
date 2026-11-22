@@ -2784,6 +2784,11 @@ const zhHant = {
         saveAsMyView: '另存為我的檢視',
         copyName: '{{name}} 副本',
         saved: '已儲存',
+        saveToViewConfirmTitle: '儲存到這個檢視？',
+        saveToViewConfirm: '所有用「{{name}}」的人都會看到這些改動。',
+        saveToViewConfirmButton: '儲存，所有人可見',
+        savedForEveryone: '已儲存，所有人可見',
+        pendingDraft: '這個檢視有未釋出的修改，請先在檢視設定裡釋出或放棄。',
       },
       linkFilterRefused: '此連結的篩選條件未應用：其中包含你在此處無法篩選的欄位，因此列表按檢視本身顯示。',
       personalizedParts: {
