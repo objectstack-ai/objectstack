@@ -400,7 +400,7 @@ describe('an app-authored elevation sees through the organization wall what its 
       for (const operation of ['update', 'delete']) {
         const e = await refusalOf(() =>
           applyAppAutomationOrganizationWall(
-            { object: 'task', operation, context: member(), options: { tenantIds: ['org_a', 'org_b'] }, ast: { object: 'task' } },
+            { object: 'task', operation, context: member(), options: { tenantIds: ['org_a', 'org_b'] }, ast: {} },
             depsFor(ORG_A),
           ),
         );
