@@ -324,6 +324,22 @@ export interface ExpressionRefusalParams {
    * fault sentence for that call.
    */
   'label-field-no-options': { readonly field: string };
+  /**
+   * [#36167] `==` / `!=` between a list-valued field read (`ExprSchemaHint.multiValueFields`,
+   * or a `fieldTypes` type that is inherently multi) and a non-null scalar
+   * literal: CEL compares the whole list with the scalar, so the expression
+   * answers the same constant on every row. `reference` is the read as
+   * `<root>.<field>`, `operand` the literal as CEL prints it, `answer` the
+   * constant (`false` for `==`, `true` for `!=`), and `rewrite` the
+   * null-guarded membership test that replaces the comparison.
+   */
+  'list-equality': {
+    readonly reference: string;
+    readonly operator: '==' | '!=';
+    readonly operand: string;
+    readonly answer: 'false' | 'true';
+    readonly rewrite: string;
+  };
   /** `collectCelRootIdentifiers` was handed no expression. */
   'empty-expression': Readonly<Record<string, never>>;
   /** `collectCelRootIdentifiers` could not parse the source; `detail` is the parser's reason. */
@@ -395,6 +411,7 @@ const CODE_TABLE = {
   'traversal-bare-and-traversed': true,
   'traversal-multi-hop': true,
   'label-field-no-options': true,
+  'list-equality': true,
   'empty-expression': true,
   'cel-parse-failed': true,
 } as const satisfies Record<ExpressionRefusalCode, true>;

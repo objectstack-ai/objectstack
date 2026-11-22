@@ -993,6 +993,7 @@ const de = {
     layout: "Layout",
     resetToViewDefault: "Auf Standard der Ansicht zurücksetzen",
     addGroup: "Gruppenfeld hinzufügen",
+    noGroupableFields: "Kein Feld eignet sich zum Gruppieren",
     collapsedByDefault: "Standardmäßig eingeklappt",
     removeGroup: "Entfernen",
     groupingUnstoredNotice: "Diese Liste kann nicht nach {{fields}} gruppiert werden: Der Wert wird bei der Anzeige berechnet und nicht gespeichert. Die Liste wird ohne diese Gruppierung angezeigt.",
@@ -1651,6 +1652,12 @@ const de = {
     updatedBy: "Aktualisiert von",
     created: "Erstellt",
     updated: "Aktualisiert",
+    // Record page field list (objectstack#36147).
+    systemInfo: "Systeminformationen",
+    createdTime: "Erstellt am",
+    updatedTime: "Geändert am",
+    recordNumber: "Datensatz-ID",
+    clickToEdit: "Zum Bearbeiten klicken",
     // objectui#3863 — base key. de's categories are exactly `one`/`other`, so this
     // slot is unreachable here and equals `_other` for key-set parity.
     showEmptyRelated: "+ {{count}} leer",

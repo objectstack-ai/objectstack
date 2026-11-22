@@ -1987,7 +1987,8 @@ export interface PageHeaderActionsProps {
    * actions fold into the `⋯` one at a time, down to the primary. The record
    * header's bar passes it, so a narrow drawer shows fewer than 3. The budget
    * comes back when the host's bar (`[data-record-top-bar]`, else the row's
-   * parent) changes width. The host's buttons (Edit) still never fold.
+   * parent) changes width, or when the row draws another record or another
+   * action set (objectstack#35997). The host's buttons (Edit) still never fold.
    */
   fitWidth?: boolean;
 }
@@ -2027,18 +2028,19 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
 }) => {
   const ctx = useRecordContext();
   // objectstack#35853 — the width fold ({@link PageHeaderActionsProps.fitWidth}):
-  // the cap the row's wrapping has lowered the budget to, the row itself, and
-  // the budget the last render drew (read after it lays out).
-  const [widthCap, setWidthCap] = React.useState<number | null>(null);
+  // the cap the row's wrapping has lowered the budget to, keyed by the record
+  // and the action set it was measured on; the row itself; and the budget the
+  // last render drew with its key (read after it lays out).
+  const [widthCap, setWidthCap] = React.useState<{ key: string; cap: number } | null>(null);
   const [fitRow, setFitRow] = React.useState<HTMLDivElement | null>(null);
-  const fitDrawn = React.useRef({ inline: 0, floor: 0 });
+  const fitDrawn = React.useRef({ inline: 0, floor: 0, key: '' });
   React.useLayoutEffect(() => {
     if (!fitWidth || !fitRow) return;
     const items = Array.from(fitRow.children) as HTMLElement[];
     if (items.length < 2) return;
     const wrapped = items[items.length - 1].offsetTop > items[0].offsetTop + 1;
-    const { inline, floor } = fitDrawn.current;
-    if (wrapped && inline > floor) setWidthCap(inline - 1);
+    const { inline, floor, key } = fitDrawn.current;
+    if (wrapped && inline > floor) setWidthCap({ key, cap: inline - 1 });
   });
   React.useEffect(() => {
     if (!fitWidth || !fitRow || typeof ResizeObserver === 'undefined') return;
@@ -2723,10 +2725,16 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
           .filter((a, i, all) => all.indexOf(a) === i)
       : [];
     // The width fold lowers the desktop row's budget, never below the primary.
+    // A cap holds only for the record and action set it was measured on: the
+    // host steps between records without remounting this row, so another
+    // record (objectstack#35997) draws the full budget and the next layout
+    // measures again. A string key, so an equal set never re-arms the fold.
     const fitsWidth = fitWidth && !barFace && !isMobile;
-    const rowBudget = fitsWidth && widthCap != null ? Math.min(maxVisible, widthCap) : maxVisible;
+    const fitKey = JSON.stringify([ctx?.recordId, authoredButtons.map((a: any) => a?.name || a?.id)]);
+    const rowCap = widthCap?.key === fitKey ? widthCap.cap : null;
+    const rowBudget = fitsWidth && rowCap != null ? Math.min(maxVisible, rowCap) : maxVisible;
     if (fitsWidth) {
-      fitDrawn.current = { inline: Math.min(rowBudget, authoredButtons.length), floor: authoredButtons.length > 0 ? 1 : 0 };
+      fitDrawn.current = { inline: Math.min(rowBudget, authoredButtons.length), floor: authoredButtons.length > 0 ? 1 : 0, key: fitKey };
     }
     const inlineAuthored = new Set<unknown>(authoredButtons.slice(0, rowBudget));
     const inlineActions = barFace

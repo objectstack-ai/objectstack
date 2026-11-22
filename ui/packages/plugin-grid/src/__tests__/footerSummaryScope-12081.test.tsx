@@ -40,6 +40,7 @@
  *   - ADR-0144 D6: a money aggregate over a `record`-mode amount is left out
  *     of the whole-set query (the double refuses it as the engine does), so
  *     the other columns keep their whole-set figures.
+ *   - ADR-0158 U7 R1: the same for a `record`-mode quantity.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
@@ -74,12 +75,13 @@ afterEach(() => {
 const OBJECT = 'plan_line';
 const PAGE = 25;
 
-type Row = { id: string; name: string; stage: string; amount: number; note: string | null; closed_at: string; qty: number; currency_code: string; approved: boolean | null } & Record<string, unknown>;
+type Row = { id: string; name: string; stage: string; amount: number; note: string | null; closed_at: string; qty: number; currency_code: string; unit_code: string; approved: boolean | null } & Record<string, unknown>;
 /**
  * 300 rows; every fifth `note` is empty, every third row is `won`, and
  * `closed_at` is one day later per row, so the last row is the latest.
  * `currency_code` alternates USD / EUR, for the `record`-mode amount cases
- * (ADR-0144 D6); `qty` is a plain number beside it.
+ * (ADR-0144 D6); `qty` is a plain number beside it. `unit_code` alternates
+ * KGM / LBR, for the `record`-mode quantity cases (ADR-0158 U7 R1).
  */
 const ROWS: Row[] = Array.from({ length: 300 }, (_, i) => ({
   id: `r${i}`,
@@ -90,6 +92,7 @@ const ROWS: Row[] = Array.from({ length: 300 }, (_, i) => ({
   closed_at: new Date(Date.UTC(2025, 0, 1, 9, 30) + i * 86_400_000).toISOString(),
   qty: (i % 7) + 1,
   currency_code: i % 2 === 0 ? 'USD' : 'EUR',
+  unit_code: i % 2 === 0 ? 'KGM' : 'LBR',
   // objectstack#35702 — a boolean: every fourth unset, then true / false alternating (75 / 75 / 150).
   approved: i % 4 === 0 ? null : i % 2 === 0,
 }));
@@ -162,6 +165,14 @@ const recordPointerOf = (def: unknown): string | undefined => {
   return config?.currencyMode === 'record' && typeof config.currencyField === 'string' ? config.currencyField : undefined;
 };
 
+/** A field def's `record`-mode unit pointer, as the engine's ADR-0158 U7 R1 door reads it. */
+const recordUnitOf = (def: unknown): string | undefined => {
+  const { type, unitConfig } = (def ?? {}) as { type?: unknown; unitConfig?: { unitMode?: unknown; unitField?: unknown } };
+  return type === 'number' && unitConfig?.unitMode === 'record' && typeof unitConfig.unitField === 'string' && unitConfig.unitField !== ''
+    ? unitConfig.unitField
+    : undefined;
+};
+
 function makeDataSource(opts: {
   door?: 'answers' | 'absent' | 'refuses' | 'no-row' | 'strings';
   /** The object definition's fields `getObjectSchema` answers (default `OBJECT_FIELDS`). */
@@ -195,10 +206,12 @@ function makeDataSource(opts: {
       if (door === 'refuses') throw Object.assign(new Error('refused'), { code: 'UNSUPPORTED_QUERY_PARAM' });
       const groupBy = query.groupBy ?? [];
       if (groupBy.length > 0) throw new Error('double: this suite asks no grouped query');
-      // [ADR-0144 D6] The engine refuses a raw sum / avg / min / max over a
-      // `record`-mode amount in an ungrouped query, and runs none of it.
+      // [ADR-0144 D6, ADR-0158 U7 R1] The engine refuses a raw sum / avg /
+      // min / max over a `record`-mode amount or quantity in an ungrouped
+      // query, and runs none of it.
       const raw = (query.aggregations ?? []).filter((node) => ['sum', 'avg', 'min', 'max'].includes(node.function)
-        && node.field !== undefined && recordPointerOf(fields[node.field]) !== undefined);
+        && node.field !== undefined
+        && (recordPointerOf(fields[node.field]) ?? recordUnitOf(fields[node.field])) !== undefined);
       if (raw.length > 0) {
         refusals.push(...raw.map((node) => `${node.function}(${node.field})`));
         throw Object.assign(new Error('refused: a raw aggregate across currencies'), { code: 'INVALID_FIELD', status: 400 });
@@ -749,5 +762,50 @@ describe('a money aggregate over a `record`-mode amount is left out of the whole
       { function: 'count', alias: 'count' },
       { function: 'sum', field: 'amount', alias: 'sum_amount' },
     ]);
+  });
+});
+
+describe('a raw aggregate over a `record`-mode quantity is left out of the whole-set query (ADR-0158 U7 R1)', () => {
+  /** `qty` in each row's own unit, the code in the sibling `unit_code`; `amount` a plain number beside it. */
+  const recordQty = (unitConfig: Record<string, unknown>) => ({
+    ...OBJECT_FIELDS,
+    qty: { type: 'number', label: 'Qty', unitConfig },
+    unit_code: { type: 'text', label: 'Unit' },
+  });
+  const RECORD_QTY = recordQty({ unitMode: 'record', unitField: 'unit_code' });
+  const COLUMNS = [
+    { field: 'name', label: 'Name' },
+    { field: 'qty', label: 'Qty', type: 'number', summary: 'sum' },
+    { field: 'amount', label: 'Amount', type: 'number', summary: 'sum' },
+  ];
+  const amountWhole = `Amount: Sum: ${fmt(sumOf(ROWS))}`;
+  const qtyNodes = (ds: TestDataSource) => ds.queryGroupHeaders.mock.calls
+    .flatMap(([, query]) => (query as AggregateQuery).aggregations ?? [])
+    .filter((node) => node.field === 'qty');
+
+  it('the plain-number sum keeps its whole-set figure, and no refused request is sent', async () => {
+    const ds = makeDataSource({ fields: RECORD_QTY });
+    render(hostGrid(ds, { rows: ROWS, columns: COLUMNS }));
+
+    await waitFor(() => expect(footerText('amount')).toBe(amountWhole));
+    // The record-mode quantity draws nothing: no whole-set figure, and no page sum over KGM and LBR.
+    expect(footerText('qty')).toBeNull();
+    expect(ds.refusals).toEqual([]);
+    expect(qtyNodes(ds)).toEqual([]);
+    expect(ds.queryGroupHeaders).toHaveBeenCalledTimes(1);
+    expect((ds.queryGroupHeaders.mock.calls[0][1] as AggregateQuery).aggregations).toEqual([
+      { function: 'count', alias: 'count' },
+      { function: 'sum', field: 'amount', alias: 'sum_amount' },
+    ]);
+  });
+
+  it('CONTROL: a fixed-mode quantity is asked and totals over the whole set', async () => {
+    const ds = makeDataSource({ fields: recordQty({ unitMode: 'fixed', unit: 'KGM' }) });
+    render(hostGrid(ds, { rows: ROWS, columns: COLUMNS }));
+
+    await waitFor(() => expect(footerText('qty')).toBe(`Qty: Sum: ${fmt(ROWS.reduce((a, r) => a + r.qty, 0))}`));
+    expect(footerText('amount')).toBe(amountWhole);
+    expect(ds.refusals).toEqual([]);
+    expect(qtyNodes(ds)).toEqual([{ function: 'sum', field: 'qty', alias: 'sum_qty' }]);
   });
 });

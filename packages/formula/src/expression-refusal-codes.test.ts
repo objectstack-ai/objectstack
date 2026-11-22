@@ -840,6 +840,50 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         "label() reads a select field's option label; read any other field directly (record.first).",
     },
   ],
+  // [#36167] A list-valued field compared with a scalar answers a constant.
+  'list-equality': [
+    {
+      produce: () =>
+        onlyError('predicate', "record.labels == 'frontend'", {
+          scope: 'record',
+          fields: ['labels'],
+          fieldTypes: { labels: 'multiselect' },
+        }),
+      params: {
+        reference: 'record.labels',
+        operator: '==',
+        operand: '"frontend"',
+        answer: 'false',
+        rewrite: 'record.labels != null && "frontend" in record.labels',
+      },
+      message:
+        'list compared with a scalar — `record.labels` holds a list (a multi-value field), and `==` compares the whole ' +
+        'list with `"frontend"`, so the expression answers `false` on every row whatever the list holds: the condition ' +
+        'never changes. Test membership with `in`: write `record.labels != null && "frontend" in record.labels`. ' +
+        'To test whether the list is set, compare it with `null`.',
+    },
+    {
+      produce: () =>
+        onlyError('predicate', "'u1' != previous.owners", {
+          scope: 'record',
+          fields: ['owners'],
+          fieldTypes: { owners: 'user' },
+          multiValueFields: ['owners'],
+        }),
+      params: {
+        reference: 'previous.owners',
+        operator: '!=',
+        operand: '"u1"',
+        answer: 'true',
+        rewrite: 'previous.owners == null || !("u1" in previous.owners)',
+      },
+      message:
+        'list compared with a scalar — `previous.owners` holds a list (a multi-value field), and `!=` compares the whole ' +
+        'list with `"u1"`, so the expression answers `true` on every row whatever the list holds: the condition ' +
+        'never changes. Test membership with `in`: write `previous.owners == null || !("u1" in previous.owners)`. ' +
+        'To test whether the list is set, compare it with `null`.',
+    },
+  ],
   'empty-expression': [
     {
       produce: () => rootsRefusal('   '),
@@ -926,6 +970,8 @@ const SWEEP_SOURCES: readonly string[] = [
   'has(status) && other == 1',
   'daysBetween(record.a, record.b) > 3',
   "label(record.name) + label(record.status)",
+  // [#36167] A list-valued field compared with a scalar.
+  "record.tags == 'frontend'",
 ];
 
 const SWEEP_INPUTS: readonly ExprInput[] = [
@@ -950,7 +996,7 @@ const SWEEP_SCHEMAS: readonly (ExprSchemaHint | undefined)[] = [
     scope: 'record',
     objectName: 'deal',
     fields: ['amount', 'close_date', 'name', 'active', 'account', 'status'],
-    fieldTypes: { close_date: 'date', name: 'text', active: 'boolean', account: 'lookup' },
+    fieldTypes: { close_date: 'date', name: 'text', active: 'boolean', account: 'lookup', tags: 'multiselect' },
     roleCatalog: ['org_admin', 'sales'],
     optionFields: ['status'],
   },

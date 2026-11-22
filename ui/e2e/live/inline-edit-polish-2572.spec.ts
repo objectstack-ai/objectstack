@@ -56,7 +56,9 @@ const REPO_ROOT = decodeURIComponent(new URL(import.meta.url).pathname)
   .slice(0, -SELF_DEPTH_BELOW_REPO_ROOT)
   .join('/');
 
-const EDIT_HINT = 'Double-click to edit';
+// The record page's field list enters edit on a click of the value
+// (objectstack#36147); the value carries this title.
+const EDIT_HINT = 'Click to edit';
 
 function authToken(): string {
   const state = JSON.parse(readFileSync(join(REPO_ROOT, 'e2e/live/.auth/state.json'), 'utf8'));
@@ -117,12 +119,12 @@ test('record inline-edit polish (#2572) — showcase Project end-to-end', async 
     if (/\/api\/v1\/data\/showcase_account\/[^/?]+/.test(r.url())) accountHydrations.push(r.url());
   });
 
-  // ── Enter the shared inline-edit session (double-click a details-body field). ──
+  // ── Enter the shared inline-edit session (click a details-body field). ──
   const spentGroup = page
     .locator('div.group')
     .filter({ has: page.getByText('Spent', { exact: true }) })
     .last();
-  await spentGroup.locator(`[title="${EDIT_HINT}"]`).dblclick();
+  await spentGroup.locator(`[title="${EDIT_HINT}"]`).click();
 
   const saveBtn = page.getByRole('button', { name: 'Save', exact: true });
   await expect(saveBtn, 'save bar appears once the session is live').toBeVisible();
@@ -149,7 +151,7 @@ test('record inline-edit polish (#2572) — showcase Project end-to-end', async 
     .locator('div.group')
     .filter({ has: page.getByText('Budget', { exact: true }) })
     .last();
-  await budgetGroup.locator(`[title="${EDIT_HINT}"]`).dblclick();
+  await budgetGroup.locator(`[title="${EDIT_HINT}"]`).click();
   await expect(saveBtn).toBeVisible();
   const budgetInput2 = page.locator('input[type="number"][min="0"][step="0.01"]').first();
   // Above the flow's 500k decision edge, so approving `manager_review` routes
@@ -220,7 +222,7 @@ test('record inline-edit polish (#2572) — showcase Project end-to-end', async 
   await expect(approvalTag, 'the header names the pending approval').toBeVisible();
   await expect(approvalTag, 'an unlocked approval step does not lock the tag').not.toHaveAttribute('data-record-approval-locked');
   // A double-click on the budget still opens an inline-edit session.
-  await budgetGroupOnPage().locator(`[title="${EDIT_HINT}"]`).dblclick();
+  await budgetGroupOnPage().locator(`[title="${EDIT_HINT}"]`).click();
   await expect(saveBtn, 'inline editing stays live during an unlocked approval').toBeVisible();
   await page.keyboard.press('Escape');
   await expect(saveBtn).toBeHidden();
@@ -261,7 +263,7 @@ test('record inline-edit polish (#2572) — showcase Project end-to-end', async 
   await expect(approvalTag, 'the header names the locking approval').toBeVisible();
   await expect(approvalTag, 'the approval tag carries the lock').toHaveAttribute('data-record-approval-locked', '');
 
-  // …and a double-click on the (former) budget field must NOT open a session.
-  await budgetGroupOnPage().dblclick();
+  // …and a click on the (former) budget field must NOT open a session.
+  await budgetGroupOnPage().click();
   await expect(saveBtn).toBeHidden();
 });

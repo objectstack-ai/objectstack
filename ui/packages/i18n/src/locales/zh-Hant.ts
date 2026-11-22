@@ -1020,6 +1020,7 @@ const zhHant = {
     layout: '佈局',
     resetToViewDefault: '恢復檢視預設設定',
     addGroup: '新增分組欄位',
+    noGroupableFields: '沒有可以用來分組的欄位',
     collapsedByDefault: '預設摺疊',
     removeGroup: '刪除',
     groupingUnstoredNotice: '無法按 {{fields}} 分組：它的值在顯示時計算，並未儲存。列表已暫不按它分組顯示。',
@@ -1598,6 +1599,12 @@ const zhHant = {
     updatedBy: '更新人',
     created: '創建於',
     updated: '更新於',
+    // Record page field list (objectstack#36147).
+    systemInfo: '系統資訊',
+    createdTime: '建立時間',
+    updatedTime: '修改時間',
+    recordNumber: '記錄編號',
+    clickToEdit: '點選編輯',
     // Attachments
     dropFilesToUpload: '拖拽檔案到此處或點選上傳',
     attachmentCount: '{{count}} 個附件',

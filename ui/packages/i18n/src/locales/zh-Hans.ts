@@ -1020,6 +1020,7 @@ const zh = {
     layout: '布局',
     resetToViewDefault: '恢复视图默认设置',
     addGroup: '添加分组字段',
+    noGroupableFields: '没有可以用来分组的字段',
     collapsedByDefault: '默认折叠',
     removeGroup: '删除',
     groupingUnstoredNotice: '无法按 {{fields}} 分组：它的值在显示时计算，并未存储。列表已暂不按它分组显示。',
@@ -1598,6 +1599,12 @@ const zh = {
     updatedBy: '更新人',
     created: '创建于',
     updated: '更新于',
+    // Record page field list (objectstack#36147).
+    systemInfo: '系统信息',
+    createdTime: '创建时间',
+    updatedTime: '修改时间',
+    recordNumber: '记录编号',
+    clickToEdit: '点击编辑',
     // Attachments
     dropFilesToUpload: '拖拽文件到此处或点击上传',
     attachmentCount: '{{count}} 个附件',
