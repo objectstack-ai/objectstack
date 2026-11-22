@@ -79,7 +79,7 @@ export interface RecordTabsCatalog {
 
 /** The arrangement the editor holds. */
 export interface RecordTabsDraft {
-  /** The shown related tabs, in order. */
+  /** The shown related tabs the editor arranges, in order (another package's lists are not among them). */
   readonly order: readonly RecordTabId[];
   /** The hidden related tabs (the 「Hidden」 area), in the order they were hidden. */
   readonly hidden: readonly RecordTabId[];
@@ -151,7 +151,10 @@ export function initialRecordTabsDraft(
   const shown = deriveRelatedLists(objectDef as never, objects as never[], {
     ...(options.canRead ? { canRead: options.canRead } : {}),
   });
-  const offered = new Set(catalog.candidates.map((c) => c.id));
+  // Another package's list is placed by that package: drawn fixed after the
+  // arranged tabs, never in the draft.
+  const arranged = catalog.candidates.filter((c) => c.fromPackage === undefined);
+  const offered = new Set(arranged.map((c) => c.id));
   const order: RecordTabId[] = [];
   for (const list of shown) {
     const id = recordTabId(list);
@@ -159,10 +162,10 @@ export function initialRecordTabsDraft(
     if (list.isPrimary && list.keepsTab !== true) continue;
     if (offered.has(id) && !order.includes(id)) order.push(id);
   }
-  const hidden = catalog.candidates.map((c) => c.id).filter((id) => !order.includes(id));
+  const hidden = arranged.map((c) => c.id).filter((id) => !order.includes(id));
   const declared = Array.isArray(objectDef.relatedLists) ? (objectDef.relatedLists as unknown[]) : [];
   const labels: Record<RecordTabId, string> = {};
-  for (const candidate of catalog.candidates) {
+  for (const candidate of arranged) {
     const { label } = entryDetails(namingEntry(declared, candidate.list));
     if (label?.trim()) labels[candidate.id] = label;
   }
@@ -238,9 +241,10 @@ export function editRecordTabsDraft(draft: RecordTabsDraft, edit: RecordTabsEdit
  *    entry that named it and the draft's name for it.
  *  - The attachments tab where the object enables files and it is shown:
  *    at the base entry's place, else after the related tabs.
- *  - Every other base entry, kept after the base entry it followed: the
- *    built-in 审批 / 动态 names, and an entry naming no list the editor
- *    arranges. A base entry naming a list the editor arranges (shown or
+ *  - Every other base entry: the built-in 审批 / 动态 names, and an entry
+ *    naming no list the editor arranges. One that came after every arranged
+ *    entry stays at the end; any other is kept after the base entry it
+ *    followed. A base entry naming a list the editor arranges (shown or
  *    hidden) is replaced by the above.
  *  - Where that leaves nothing although a tab is hidden, 审批 and 动态 are
  *    named, so the list is a declared one: an empty `relatedLists` reads as
@@ -278,14 +282,25 @@ export function recordTabsEntries(
     const name = relationshipEntry(candidate.list, catalog.relationships);
     out.push({ entry: entryWithDetails(name, { label: draft.labels[id], columns }), baseIndex: at });
   }
-  // Each base entry kept, after the entry that followed the base entry before it.
+  // Each base entry kept: one past the last related entry the editor
+  // arranges stays at the end; any other after the entry that followed the
+  // base entry before it.
   const attachmentsAt = baseEntries.findIndex((entry) => relatedListEntryName(entry) === RECORD_TABS_ATTACHMENTS);
   const showsAttachments = catalog.files && !draft.attachmentsHidden;
+  let lastArranged = -1;
+  baseEntries.forEach((entry, index) => {
+    if (handled(entry) && index !== attachmentsAt) lastArranged = index;
+  });
   baseEntries.forEach((entry, index) => {
     const keep = index === attachmentsAt ? showsAttachments : !handled(entry);
     if (!keep) return;
     const name = relatedListEntryName(entry);
     if (name === undefined) return;
+    const kept = { entry: isRecordPageBuiltinTab(name) ? name : (entry as RelatedListEntryInput), baseIndex: index };
+    if (index > lastArranged) {
+      out.push(kept);
+      return;
+    }
     let at = 0;
     for (let back = index - 1; back >= 0; back -= 1) {
       let last = -1;
@@ -297,7 +312,7 @@ export function recordTabsEntries(
         break;
       }
     }
-    out.splice(at, 0, { entry: isRecordPageBuiltinTab(name) ? name : (entry as RelatedListEntryInput), baseIndex: index });
+    out.splice(at, 0, kept);
   });
   if (showsAttachments && attachmentsAt < 0 && (out.length > 0 || draft.hidden.length > 0)) {
     // After the related tabs, ahead of a trailing 审批 / 动态.
