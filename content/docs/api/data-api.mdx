@@ -532,6 +532,59 @@ with the code and sentence its own update was refused with. None is skipped.
 With `notify`, the new owner gets one notification for all the records that
 moved, and none when nothing moved.
 
+### Cascade to related records
+
+A relationship opts in on the child's reference field, beside
+`deleteBehavior`:
+
+```ts
+// on opportunity
+account: { type: 'lookup', reference: 'account', transferBehavior: 'cascade' }
+```
+
+Both routes above then take an optional `cascade` list naming the
+relationships to move along, and only with an `ownerId` target:
+
+```json
+{ "ownerId": "usr_123", "cascade": [{ "object": "opportunity", "field": "account" }] }
+```
+
+For each record that moved, the child records that point at it **and are
+owned by its previous owner** move to the new owner too; no other child record
+moves. Each is updated by id as the caller, so each needs the caller's own
+transfer grant on the child object. A relationship that does not declare
+`transferBehavior: 'cascade'`, or whose child object does not offer Change
+Owner itself (not eligible, a `controlled_by_parent` detail, or its
+`userActions.transfer` off), is refused `400 VALIDATION_ERROR` before anything
+is written.
+
+The answer gains one outcome per named relationship. Every child record that
+did not move is listed; one call moves at most **500** child records, and
+`remaining` counts those the limit left with the previous owner:
+
+```json
+"cascade": [
+  { "object": "opportunity", "field": "account", "updated": 3, "failed": 1, "remaining": 0,
+    "failures": [{ "id": "opp_9", "code": "PERMISSION_DENIED", "message": "…" }] }
+]
+```
+
+### `GET /data/:object/change-owner/cascades`
+
+The relationships a Change Owner of `object` may cascade along: each child
+reference field to it that declares `transferBehavior: 'cascade'`, on a child
+that offers Change Owner itself. Whether the caller may transfer on each child
+is the explain engine's `transfer` operation (`POST /security/explain`), which
+the Console's dialog asks before it offers a tick. Takes no query parameter;
+an object that does not offer Change Owner is refused `403
+CHANGE_OWNER_DISABLED`.
+
+```json
+{ "success": true, "data": { "object": "account", "cascades": [
+  { "object": "opportunity", "field": "account", "label": "Opportunity", "fieldLabel": "Account" }
+] } }
+```
+
 ---
 
 ## Analytics
