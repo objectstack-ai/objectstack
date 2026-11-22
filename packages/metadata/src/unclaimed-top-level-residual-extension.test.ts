@@ -18,6 +18,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
+// Paid at collection, not inside a case's clocked window: `plugin.ts` loads it lazily.
+import '@objectstack/metadata-fs';
 import { composeStacks, defineStack } from '@objectstack/spec';
 import { unclaimedTopLevel } from './plugin.js';
 
