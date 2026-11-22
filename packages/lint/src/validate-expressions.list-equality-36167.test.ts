@@ -17,6 +17,10 @@ import { describe, it, expect } from 'vitest';
 import { ObjectStackSchema } from '@objectstack/spec';
 
 import { validateStackExpressions } from './validate-expressions.js';
+import {
+  validateSharingRuleEnforceability,
+  SHARING_RULE_UNLOWERABLE_CONDITION,
+} from './validate-sharing-rule-enforceability.js';
 
 const MANIFEST = { id: 'com.example.list-equality', name: 'list_equality_probe', version: '1.0.0', type: 'app' } as const;
 
@@ -60,14 +64,16 @@ function visibleErrors(visible: string) {
 
 describe('publish lint — list-equality at a CEL site', () => {
   it.each([
-    ["record.labels == 'frontend'", 'record.labels', 'record.labels != null && "frontend" in record.labels'],
-    ["record.labels != 'frontend'", 'record.labels', 'record.labels == null || !("frontend" in record.labels)'],
-    ["'u1' == record.watchers", 'record.watchers', 'record.watchers != null && "u1" in record.watchers'],
+    ["record.labels == 'frontend'", 'record.labels', '(has(record.labels) && record.labels != null && "frontend" in record.labels)'],
+    ["record.labels != 'frontend'", 'record.labels', '(!has(record.labels) || record.labels == null || !("frontend" in record.labels))'],
+    ["'u1' == record.watchers", 'record.watchers', '(has(record.watchers) && record.watchers != null && "u1" in record.watchers)'],
   ])('refuses %s, naming the field and the `in` rewrite', (source, reference, rewrite) => {
     const errors = visibleErrors(source);
     expect(errors).toHaveLength(1);
     expect(errors[0].message).toContain(`\`${reference}\` holds a list`);
-    expect(errors[0].message).toContain(rewrite);
+    expect(errors[0].message).toContain(`write \`${rewrite}\``);
+    // The prescribed text is itself accepted where it was prescribed.
+    expect(visibleErrors(rewrite)).toEqual([]);
   });
 
   it.each([
@@ -109,7 +115,11 @@ describe('publish lint — list-equality at a CEL site', () => {
 
   // A record-triggered flow's condition reads the trigger record flattened:
   // a bare `labels` is `record.labels`, as the type pass reads it.
-  function flowErrors(condition: string, variables?: Array<Record<string, unknown>>) {
+  function flowErrors(
+    condition: string,
+    variables?: Array<Record<string, unknown>>,
+    entrance: { type: string; triggerType?: string } = { type: 'autolaunched', triggerType: 'record-after-update' },
+  ) {
     return validateStackExpressions(
       specValid({
         objects: [ticket],
@@ -117,10 +127,19 @@ describe('publish lint — list-equality at a CEL site', () => {
           {
             name: 'ticket_flow',
             label: 'Ticket flow',
-            type: 'autolaunched',
+            type: entrance.type,
             ...(variables ? { variables } : {}),
             nodes: [
-              { id: 'start', type: 'start', label: 'Start', config: { objectName: 'ticket_probe', triggerType: 'record-after-update', condition } },
+              {
+                id: 'start',
+                type: 'start',
+                label: 'Start',
+                config: {
+                  objectName: 'ticket_probe',
+                  ...(entrance.triggerType ? { triggerType: entrance.triggerType } : {}),
+                  condition,
+                },
+              },
               { id: 'end', type: 'end', label: 'End' },
             ],
             edges: [{ id: 'e1', source: 'start', target: 'end' }],
@@ -153,9 +172,66 @@ describe('publish lint — list-equality at a CEL site', () => {
     },
   );
 
+  it('the prescribed bare-name rewrite is parenthesised whole and accepted at the flow condition', () => {
+    const [refusal] = flowErrors("stage == 'qa' && labels != 'frontend'");
+    expect(refusal.message).toContain('write `(labels == null || !("frontend" in labels))`');
+    expect(flowErrors("stage == 'qa' && (labels == null || !(\"frontend\" in labels))")).toEqual([]);
+  });
+
+  // A flow no record write fires runs on what its entrance handed it (an API
+  // body, nothing): `labels` there is not proven to be the list field, and
+  // `labels == 'frontend'` can be correct code. No verdict.
+  it.each([
+    ['an API flow', { type: 'api' }],
+    ['a trigger-less autolaunched flow', { type: 'autolaunched' }],
+    ['a scheduled flow', { type: 'schedule' }],
+  ])('CONTROL — %s: no list-equality, bare or record.', (_label, entrance) => {
+    expect(flowErrors("labels == 'frontend'", undefined, entrance)).toEqual([]);
+    expect(flowErrors("record.labels == 'frontend'", undefined, entrance)).toEqual([]);
+  });
+
   it('CONTROL — a bare name a declared flow variable holds is not the field', () => {
     const variables = [{ name: 'labels', type: 'text', isInput: true, isOutput: false }];
     expect(flowErrors("labels == 'frontend'", variables)).toEqual([]);
     expect(flowErrors("record.labels == 'frontend'", variables)).toHaveLength(1);
+  });
+});
+
+// A sharing rule's `condition` is compiled to a query filter, not evaluated as
+// CEL: the CEL `in` rewrite does not lower there (`in` needs a field on its
+// left), so the prescription is `contains`, which lowers to `$contains`.
+describe('publish lint — list-equality at a sharing rule condition', () => {
+  const stackWith = (condition: string) =>
+    specValid({
+      objects: [ticket],
+      sharingRules: [
+        { name: 'sr', type: 'criteria', object: 'ticket_probe', condition, sharedWith: { type: 'team', value: 't' }, accessLevel: 'read' },
+      ],
+    });
+  /** The expression lint's findings and the enforceability pass's (which lowers the condition) together. */
+  function sharingIssues(condition: string) {
+    const stack = stackWith(condition);
+    return [
+      ...validateStackExpressions(stack).map((i) => ({ rule: 'expression', severity: i.severity, message: i.message })),
+      ...validateSharingRuleEnforceability(stack).map((f) => ({ rule: f.rule, severity: 'error', message: f.message })),
+    ];
+  }
+
+  it.each([
+    ["record.labels == 'frontend'", '(record.labels != null && record.labels.contains("frontend"))'],
+    ["record.watchers != 'u1'", '(record.watchers == null || !record.watchers.contains("u1"))'],
+  ])('refuses %s, prescribing the `contains` rewrite that lowers', (condition, rewrite) => {
+    const errors = sharingIssues(condition).filter((i) => i.severity === 'error' && i.message.includes('holds a list'));
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain(`write \`${rewrite}\``);
+    // The prescribed text draws no finding at the same site: it lowers.
+    expect(sharingIssues(rewrite)).toEqual([]);
+  });
+
+  it('CONTROL — the CEL `in` rewrite the other sites get does not lower here', () => {
+    const issues = sharingIssues('(has(record.labels) && record.labels != null && "frontend" in record.labels)');
+    expect(issues.map((i) => i.rule)).toContain(SHARING_RULE_UNLOWERABLE_CONDITION);
+    expect(sharingIssues('record.labels != null && "frontend" in record.labels').map((i) => i.rule))
+      .toContain(SHARING_RULE_UNLOWERABLE_CONDITION);
   });
 });
