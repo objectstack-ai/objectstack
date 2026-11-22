@@ -327,7 +327,8 @@ interface CellText {
  *  `currency` is the column's resolved currency, read only by the currency
  *  branch. The component binds `fileText` once, as its `displayText`. */
 function cellDisplayText(c: GridColumn, value: any, locale: string, fileText: CellText, currency?: string): string {
-  if (value === null || value === undefined || value === '') return '—';
+  // An emptied multi-value cell (a tags list) reads as empty too, like multi-select.
+  if (value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) return '—';
   if (isTemporal(c.type)) return temporalText(c.type, value, locale);
   if (c.type === 'file') {
     const files = Array.isArray(value) ? value : [value];

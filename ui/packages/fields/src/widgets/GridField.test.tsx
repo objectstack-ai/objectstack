@@ -1458,6 +1458,8 @@ describe('the cells that edit as in the main list: people, multi-select, tags, c
       fireEvent.keyDown(panel.querySelector('input')!, { key: 'Tab' });
       await waitFor(() => expect(screen.queryByTestId('line-items-tags-panel')).toBeNull());
       expect(onChange.mock.calls.at(-1)![0][0].labels).toBeNull();
+      // It reads as an empty cell, as an emptied multi-select does.
+      expect(screen.getByRole('button', { name: 'Labels' }).textContent).toBe('—');
     });
   });
 
