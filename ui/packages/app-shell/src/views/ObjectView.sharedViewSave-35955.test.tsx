@@ -399,7 +399,7 @@ describe('objectstack#35955 — the layout and the row colour the reader picks a
 
 describe('objectstack#36194 + objectstack#36195 — a shared view\'s Save to this view carries the footer calculations, and waits for the package list', () => {
   it('a footer calculation picked is a part of the draft, saved into the view with no write of its own; the reader\'s row height stays theirs', async () => {
-    localStorage.setItem(`list-state:u1:${OBJECT}`, JSON.stringify({ perView: { [SHARED.name]: { rowHeight: 'tall' } } }));
+    localStorage.setItem(listLayoutStorageKey('u1', OBJECT)!, JSON.stringify({ perView: { [SHARED.name]: { rowHeight: 'tall' } } }));
     mount(SHARED.name);
     await settle();
     await waitFor(() => expect(typeof listProps.current?.onColumnSummaryPick).toBe('function'));
