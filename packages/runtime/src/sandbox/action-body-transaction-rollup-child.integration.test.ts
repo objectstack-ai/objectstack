@@ -51,6 +51,8 @@ const LINE = {
   },
 };
 const AUDIT = { name: 'sys_audit_log', lifecycle: { class: 'audit', retention: { maxAge: '90d' } }, fields: { action: { type: 'text', name: 'action' }, record_id: { type: 'text', name: 'record_id' } } };
+/** A settings row an after-hook reads through the engine, as an automation run's setup reads localization. */
+const SETTING = { name: 'rux_setting', fields: { key: { type: 'text', name: 'key' }, value: { type: 'text', name: 'value' } } };
 const ACTIVITY = { name: 'sys_activity', lifecycle: { class: 'telemetry', retention: { maxAge: '14d' } }, fields: { action: { type: 'text', name: 'action' }, record_id: { type: 'text', name: 'record_id' } } };
 
 /** The body: a claim, then two lines inside one transaction — the travel-expense shape. */
@@ -189,6 +191,38 @@ describe('an action body transaction inserting a roll-up child completes on SQLi
       expect(audit.map((a) => a.record_id).sort()).toEqual([claimId, ...lines.map((l) => String(l.id))].sort());
     }, 30_000);
   }
+
+  // The first call of a script action stalled to the wall clock and answered
+  // `500`, its transaction rolled back, and an identical retry succeeded: the
+  // roll-up's update of the parent fired a record-triggered flow whose run
+  // setup read the organization's localization through the engine with no
+  // handle of its own. That read waited for SQLite's one connection, held by
+  // the body's transaction; the retry found the read cached. The hook below
+  // issues that read: an engine read under a system context and no handle.
+  it('on one datasource: a read the roll-up update\'s after-hook issues with no handle rides the body\'s transaction, and the first call answers 200 inside the bound', async () => {
+    const { e, ledger } = await boot(false);
+    e.registry.registerObject(SETTING as any);
+    await e.insert('rux_setting', { key: 'currency', value: 'USD' }, SYS);
+    const reads: string[] = [];
+    e.registerHook('afterUpdate', async (ctx: any) => {
+      if (ctx.object !== 'rux_claim') return;
+      const rows = (await e.find('rux_setting', SYS)) as any[];
+      reads.push(String(rows[0]?.value));
+    }, { packageId: 'rux' } as any);
+
+    const { response, elapsed } = await throughActionsDoor(e);
+
+    expect(response.status, JSON.stringify(response.body)).toBe(200);
+    expect(elapsed).toBeLessThan(WALL_CLOCK_BOUND_MS);
+    // Precondition: the roll-up's update fired the hook inside the body's transaction.
+    expect(reads.length).toBeGreaterThan(0);
+    expect(new Set(reads)).toEqual(new Set(['USD']));
+    const claimId = String(response.body?.data?.claim ?? response.body?.claim);
+    const lines = (await e.find('rux_line', { where: { claim: claimId }, ...SYS })) as any[];
+    expect(lines.map((l) => Number(l.amount)).sort((a, b) => a - b)).toEqual([345, 860]);
+    expect(Number(((await e.findOne('rux_claim', { where: { id: claimId }, ...SYS })) as any)?.total_amount)).toBe(1205);
+    expect(ledger).toEqual(['ok', 'ok', 'ok']);
+  }, 45_000);
 
   // [#35028] The Postgres face of the same defect, measured in-process by the
   // reading: the ledger statement the trio's handle carried onto the primary
