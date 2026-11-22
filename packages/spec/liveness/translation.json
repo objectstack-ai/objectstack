@@ -256,14 +256,19 @@
           }
         },
         "nodes": {
-          "status": "planned",
+          "status": "live",
           "verifiedAt": "2026-11-22",
-          "note": "PLANNED RECORD (ruling 7076440876 on objectstack#35979, option A): a flow node's display label, `flows.<flow>.nodes.<node_id>.label`, for every node but a `screen` (keyed `screens.<node_id>.title`) and an `approval` (keyed `approvals.<node_id>.label`). Declared by the face, refused by `objectstack validate` over an unknown node or a screen/approval node (packages/lint/src/validate-translation-references.ts#validateTranslationReferences), and demanded by the i18n walk for every step the docs flow embed draws at `detail: business` (packages/lint/src/i18n-walk.ts#walkScreenFlows). The reader is the docs viewer's `FlowView` (`element:metadata_viewer`) through the shared flow-label resolution in `@object-ui/i18n`, built in the same change once that resolution is on `main`. Flip to `live` on the commit that lands the reader, citing it. DRILLED to its one key, `label`: the entry's face is closed (`.strict()`).",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/i18n/src/flowLabels.ts#flowLabelTranslations (the one resolution of a flow drawing's step names: `stepLabel` reads each `nodes.<node_id>` entry for its `label`, the drilled child below)",
+          "note": "FLIPPED planned → live 2026-11-22 on the commit that lands the reader, as this row's planned note prescribed (ruling 7076440876 on objectstack#35979, option A). A flow node's display label, `flows.<flow>.nodes.<node_id>.label`, for every node but a `screen` (keyed `screens.<node_id>.title`) and an `approval` (keyed `approvals.<node_id>.label`). Refused by `objectstack validate` over an unknown node or a screen/approval node (packages/lint/src/validate-translation-references.ts#validateTranslationReferences), and demanded by the i18n walk for every step the docs flow embed draws at `detail: business` (packages/lint/src/i18n-walk.ts#walkScreenFlows). DRILLED to its one key, `label`: the entry's face is closed (`.strict()`).",
           "children": {
             "label": {
-              "status": "planned",
+              "status": "live",
               "verifiedAt": "2026-11-22",
-              "note": "Planned with its container `flows.nodes` (see that row). Overlays the node's own `FlowNode.label`, plain text, the step name a drawing of the flow shows. Display only: no run, no stored row and no engine-rendered copy reads it."
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/i18n/src/flowLabels.ts#flowLabelTranslations (`stepLabel` spells `flows.<flow>.nodes.<node_id>.label` for any node that is not an `approval` or a `screen`, out of the reader's language in the loaded resource tree); ui/packages/components/src/renderers/basic/metadata-viewer.tsx#flowStepName (the docs viewer's `type: flow` embed names each drawn step, and each step a decision branch leads to, by it, else the authored label); ui/packages/app-shell/src/views/metadata-admin/previews/FlowCanvas.tsx#FlowCanvas and ui/packages/app-shell/src/views/metadata-admin/previews/flow-region-view.tsx#RegionNode (the Studio flow designer's canvas, nested region nodes included, by the same `stepLabel`)",
+              "producer": "ui/packages/i18n/src/flowsBundle.ts#activeFlowsBundle (the app's `flows` group in the reader's language, out of the bundle the host loaded)",
+              "note": "Overlays the node's own `FlowNode.label`, plain text, the step name a drawing of the flow shows. FLIPPED planned → live 2026-11-22 with its container `flows.nodes` (see that row). Display only: no run, no stored row and no engine-rendered copy reads it. Pinned by ui/packages/components/src/__tests__/metadata-viewer.test.tsx (the docs embed) and ui/packages/app-shell/src/views/metadata-admin/previews/FlowCanvas.test.tsx (the designer); the key spelling is held to `TranslationDataSchema` by packages/cli/test/i18n-flow-node-coverage.test.ts."
             }
           }
         }
