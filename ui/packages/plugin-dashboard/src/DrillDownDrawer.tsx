@@ -11,8 +11,9 @@
  * click outside it closes it. A phone keeps the side drawer. Either way the
  * body is the standard list (`DrillRecordList`) when the renderer has one
  * registered; a renderer without `@object-ui/plugin-list` lists the records
- * in `ObjectDataTable`. No record panel is ever stacked over the drill: a
- * record's name opens its page.
+ * in `ObjectDataTable`. A record's name opens its page through the host
+ * (`DrillNavigationContext.openRecord`); a host that offers no page (a
+ * page block's metric or pivot) opens the record in a dialog, as before.
  */
 
 import React from 'react';
@@ -164,7 +165,7 @@ export const DrillDownDrawer: React.FC<DrillDownDrawerProps> = ({
   notice,
 }) => {
   const phone = useIsMobile();
-  const { openRecordList, canOpenRecordList } = useDrillNavigation();
+  const { openRecordList, canOpenRecordList, openRecord } = useDrillNavigation();
   const tt = useSafeTranslate();
   const isReportDrill = isDatasetBoundReport(report);
 
@@ -262,6 +263,8 @@ export const DrillDownDrawer: React.FC<DrillDownDrawerProps> = ({
               pagination: true,
               searchable: false,
               pageSize: maxRows,
+              // A host with no record page: the row opens its record in a dialog.
+              ...(openRecord ? {} : { drillDown: { enabled: true, mode: 'record', target: 'dialog' } }),
             }}
             dataSource={dataSource}
             failureMessage={tt(DRILL_NOTICE_COPY.failed.key, DRILL_NOTICE_COPY.failed.fallback)}

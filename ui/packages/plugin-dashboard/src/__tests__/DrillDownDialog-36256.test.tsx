@@ -19,6 +19,14 @@ import { DrillNavigationProvider } from '@object-ui/react';
 import '@object-ui/components';
 import { DrillDownDrawer } from '../DrillDownDrawer';
 
+// The phone flag the drawer reads, flipped per test; the rest of the
+// components package is the real one.
+const viewport = vi.hoisted(() => ({ phone: false }));
+vi.mock('@object-ui/components', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@object-ui/components')>()),
+  useIsMobile: () => viewport.phone,
+}));
+
 // The props each render handed the stub, read back through the spy: a
 // component writes nothing outside itself during render.
 const seenProps = vi.fn();
@@ -113,6 +121,18 @@ describe('drill dialog over the standard list (#36256)', () => {
     fireEvent.click(await screen.findByTestId('stub-row'));
     expect(openRecord).toHaveBeenCalledWith('opportunity', 'o2', { siblings: ['o1', 'o2', 'o3'], total: 3 });
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('keeps the side drawer on a phone, with the same list', async () => {
+    viewport.phone = true;
+    try {
+      renderDialog();
+      await waitFor(() => expect(lastProps()).not.toBeNull());
+      expect(screen.queryByTestId('drill-down-dialog')).toBeNull();
+      expect(document.querySelector('[role="dialog"]')?.className).toContain('right-0');
+    } finally {
+      viewport.phone = false;
+    }
   });
 
   it('keeps the side drawer and the same list when target is drawer', async () => {

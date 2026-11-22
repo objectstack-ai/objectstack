@@ -65,6 +65,29 @@ describe('a report chart mark drills like its table line (#36256)', () => {
     expect(line.fields).toEqual(bar.fields);
   });
 
+  it("a relationship-path bucket drills on the nested condition with its lookup field as the column", async () => {
+    const onDrill = vi.fn();
+    const pathSource = {
+      queryDataset: vi.fn(async () => ({
+        rows: [{ industry: 'Technology', total_amount: 30 }],
+        object: 'opportunity',
+        dimensionFields: { industry: 'crm_account.industry' },
+        drillRawRows: [{ industry: 'technology' }],
+        drillScopes: { total_amount: { amount: { $null: false } } },
+      })),
+      find: vi.fn(async () => ({ data: [] })),
+      getObjectSchema: vi.fn(async (object: string) => (object === 'opportunity'
+        ? { fields: { crm_account: { type: 'lookup', reference: 'crm_account' }, amount: { type: 'currency' } } }
+        : { fields: { industry: { type: 'select' } } })),
+    };
+    render(<DatasetReportRenderer report={{ ...report, rows: ['industry'], chart: { type: 'bar', xAxis: 'industry', yAxis: 'total_amount' } }} dataSource={pathSource} onDrill={onDrill} />);
+    fireEvent.click(await screen.findByTestId('dataset-drill-row'));
+    await waitFor(() => expect(onDrill).toHaveBeenCalled());
+    const [args] = onDrill.mock.calls[0];
+    expect(JSON.stringify(args.objectFilter)).toContain('{"crm_account":{"industry":"technology"}}');
+    expect(args.fields).toEqual(['crm_account', 'amount']);
+  });
+
   it('offers no click when the report turns drill off', async () => {
     render(<DatasetReportRenderer report={{ ...report, drilldown: false }} dataSource={makeSource()} onDrill={vi.fn()} />);
     await waitFor(() => expect(chartProps).not.toBeNull());

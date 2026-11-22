@@ -962,7 +962,8 @@ function emitBucketDrill({
 }): void {
   const hasRange = !!rowRanges && Object.keys(rowRanges).length > 0;
   const fields = Array.from(new Set([
-    ...drillDims.map((d) => state.dimensionFields?.[d]).filter((f): f is string => !!f && !f.includes('.')),
+    // A relationship path shows its lookup field: the list draws no dotted column.
+    ...drillDims.map((d) => state.dimensionFields?.[d]).filter((f): f is string => !!f).map((f) => f.split('.')[0]),
     ...Object.values(rowRanges ?? {}).map((range) => range.field),
     ...measuredFieldsOf(scope),
   ]));

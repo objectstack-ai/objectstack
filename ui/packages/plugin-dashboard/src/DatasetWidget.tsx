@@ -1497,11 +1497,12 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
     if (!scope) return;
     const drillTitle = title || String(widget?.title ?? '');
     // objectstack-ai/objectstack#36256 item 4 — the list shows the record's
-    // name, the fields this bucket is grouped by (a base-object field; a
-    // relationship path has no column on the base list) and the fields the
-    // measure aggregates; the reader adds the rest.
+    // name, the fields this bucket is grouped by and the fields the measure
+    // aggregates; the reader adds the rest. A relationship path
+    // (`crm_account.industry`) shows its lookup field (`crm_account`): the
+    // list draws no dotted column.
     const columns = Array.from(new Set([
-      ...drillDims.map((d) => dimensionFields?.[d]).filter((f): f is string => !!f && !f.includes('.')),
+      ...drillDims.map((d) => dimensionFields?.[d]).filter((f): f is string => !!f).map((f) => f.split('.')[0]),
       ...Object.values(drillRanges?.[index] ?? {}).map((range) => range.field),
       ...measuredFieldsOf(scope),
     ]));

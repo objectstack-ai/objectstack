@@ -22,7 +22,8 @@
  * The record's name opens its full page through the host
  * (`DrillNavigationContext.openRecord`, item 6), with the rows the list shows
  * as the page's ↑ ↓ set and the count it matched; no record panel is stacked
- * over the drill.
+ * over the drill. A host with no record page (a page block's metric or pivot
+ * mounts no navigation) opens the record in a dialog, as it did before.
  */
 
 import React from 'react';
@@ -30,6 +31,7 @@ import { ComponentRegistry, resolveFilterPlaceholders, resolveNameField } from '
 import { SchemaRenderer, SchemaRendererContext, useDrillNavigation, useFilterScope } from '@object-ui/react';
 import { FILTER_DATE_LIKE_TYPES } from '@object-ui/types';
 import { Loader2 } from 'lucide-react';
+import { RecordDetailDrawer } from './RecordDetailDrawer';
 import { drillListConditions } from './drillConditions';
 
 /** The registry key of the standard list (`@object-ui/plugin-list`). */
@@ -109,6 +111,7 @@ export const DrillRecordList: React.FC<DrillRecordListProps> = ({
   const [added, setAdded] = React.useState<string[]>([]);
   const [summaries, setSummaries] = React.useState<Record<string, Summary>>({});
   const shown = React.useRef<{ ids: string[]; total?: number }>({ ids: [] });
+  const [opened, setOpened] = React.useState<Record<string, unknown> | null>(null);
 
   const baseColumns = React.useMemo(() => {
     if (columns?.length) return columns;
@@ -140,6 +143,7 @@ export const DrillRecordList: React.FC<DrillRecordListProps> = ({
   };
 
   return (
+    <>
     <SchemaRenderer
       schema={schema as any}
       dataSource={dataSource}
@@ -159,14 +163,25 @@ export const DrillRecordList: React.FC<DrillRecordListProps> = ({
         shown.current = { ...shown.current, ids: rows.map(rowId).filter((id): id is string => !!id) };
       }}
       onTotalChange={(total: number) => { shown.current = { ...shown.current, total }; }}
-      rowOpensRecord={!!openRecord}
-      onRowClick={openRecord ? (record: Record<string, unknown>) => {
+      rowOpensRecord
+      onRowClick={(record: Record<string, unknown>) => {
+        if (!openRecord) return setOpened(record);
         const id = rowId(record);
         if (!id) return;
         const { ids, total } = shown.current;
         openRecord(objectName, id, { siblings: ids.includes(id) ? ids : [id], ...(total != null ? { total } : {}) });
         onNavigate?.();
-      } : undefined}
+      }}
     />
+    {!openRecord && (
+      <RecordDetailDrawer
+        record={opened}
+        objectName={objectName}
+        objectSchema={definition ?? undefined}
+        target="dialog"
+        onClose={() => setOpened(null)}
+      />
+    )}
+    </>
   );
 };
