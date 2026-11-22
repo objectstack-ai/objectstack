@@ -51,7 +51,7 @@
  * miss, and is unchanged.
  */
 
-import { rlsOperationForVerb } from '@objectstack/core';
+import { isOutsideEveryOrganization, rlsOperationForVerb } from '@objectstack/core';
 import type { TenantLayer0Verdict } from '@objectstack/spec/security';
 
 import { PermissionDeniedError } from './errors.js';
@@ -104,9 +104,10 @@ export function appAutomationOrganizationWallRefusal(
   operation: string,
   callerContext: Record<string, unknown>,
 ): PermissionDeniedError {
-  const tenantId = callerContext.tenantId;
-  const hasActive = tenantId !== undefined && tenantId !== null && tenantId !== '';
-  const missing = hasActive
+  // [ADR-0123 D4] The sentence names what is missing: a person outside every
+  // organization lacks a membership (ADR-0093 D8.1, as amended), every other
+  // denied caller an active organization.
+  const missing = isOutsideEveryOrganization(callerContext)
     ? 'holds no current membership in any organization'
     : 'has no active organization';
   return new PermissionDeniedError(

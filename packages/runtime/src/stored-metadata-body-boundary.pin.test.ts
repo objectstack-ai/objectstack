@@ -261,6 +261,18 @@ beforeAll(async () => {
   app = httpServer.getRawApp();
   adminToken = await signIn(ADMIN);
   memberToken = await signUpMember();
+  // The member is a member: an organization row and a membership in it. A
+  // person outside every organization reads and writes no tenant-scoped row,
+  // at the plain door and through an elevation run for them alike (ADR-0093
+  // D8.1, as amended; ADR-0095 D1), so the member controls below need one.
+  {
+    const sys = { context: { isSystem: true } };
+    const ql = await engine();
+    const member = await ql.findOne('sys_user', { where: { email: MEMBER.email }, ...sys });
+    if (!member?.id) throw new Error('pin precondition: the member was not provisioned');
+    await ql.insert('sys_organization', { id: 'org_pin_audience_gate', name: 'org_pin_audience_gate', slug: 'org-pin-audience-gate' }, sys);
+    await ql.insert('sys_member', { organization_id: 'org_pin_audience_gate', user_id: member.id, role: 'member' }, sys);
+  }
 }, BOOT_TIMEOUT);
 
 afterAll(async () => {
