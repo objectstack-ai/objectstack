@@ -1530,6 +1530,13 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.report.namePlaceholder': 'e.g. pipeline_by_stage',
   'engine.inspector.report.label': 'Label',
   'engine.inspector.report.labelPlaceholder': 'e.g. Pipeline by Stage',
+  // objectstack#36481 — the note under a report's name box and a dashboard
+  // card's title box when readers in the session language are served a
+  // translation instead of the text saved there (`servedLabel.ts`).
+  'engine.inspector.servedLabel.kept':
+    'Readers in this language see “{served}”: a translation of this name comes ahead of the text saved here. To change what they see, edit that translation in Studio › All metadata › Translation.',
+  'engine.inspector.servedLabel.ifKept':
+    'Readers in this language now see the translation “{served}”. If it is kept in this environment’s own translations or in its customization package, they keep seeing it after you save. To change it, edit that translation in Studio › All metadata › Translation.',
   'engine.inspector.report.type': 'Report type',
   'engine.inspector.report.type.tabular': 'Tabular',
   'engine.inspector.report.type.summary': 'Summary',
