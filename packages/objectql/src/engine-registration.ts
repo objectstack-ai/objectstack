@@ -442,7 +442,7 @@ export class RegistrationFacet {
               // ({@link objectExtensionContribution}).
               const { definition: extDef, priority } = objectExtensionContribution(ext);
               // Register as extension (namespace is undefined since we're targeting by FQN)
-              this._registry.registerObject(stampPackage(extDef, id, version), id, undefined, 'extend', priority);
+              this._registry.registerObject(stampPackage(extDef as any, id, version), id, undefined, 'extend', priority);
               this.logger.debug('Registered Object Extension', { target: extDef.name, priority, from: id });
           }
       }
