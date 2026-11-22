@@ -660,10 +660,19 @@ describe('record header — the approval is the ONE button group (objectstack#35
 
     await waitFor(() => expect(screen.getByTestId('stub-record-row')).toBeTruthy());
     const tag = await screen.findByTestId('record-approval-tag');
-    expect(tag.textContent).toMatch(/in approval|审批中/i);
+    // objectstack#35890 (item 6) — 「审批中 · 当前步骤」: the step the request
+    // waits at, drawn by the approvals panel's rule (its machine name, prettified).
+    expect(tag.textContent).toBe('In approval · Qc Director Review');
     for (const name of [...APPROVER_DECISIONS, 'approval_recall', 'approval_remind']) {
       expect(decisionButton(name), `${name} must stay hidden`).toBeNull();
     }
+  });
+
+  it('the 审批中 tag names the step by its label when the request has one (objectstack#35890)', async () => {
+    stubApprovalsApi({ ...pendingRequest({ can_act: false, is_submitter: false, can_override: false }), step_label: 'QC director' });
+    renderRecordPage();
+    const tag = await screen.findByTestId('record-approval-tag');
+    await waitFor(() => expect(tag.textContent).toBe('In approval · QC director'));
   });
 
   it('an override-only admin keeps the record row and the marked override menu', async () => {

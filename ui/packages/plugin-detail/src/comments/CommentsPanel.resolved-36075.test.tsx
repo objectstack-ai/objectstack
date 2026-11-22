@@ -18,8 +18,13 @@
  *   replied in or is mentioned in.
  * - Edit and Delete on OTHER people's comments only where the host says the
  *   viewer may moderate this record's comments.
- * - ✓ and Edit on a row the viewer did not write only where the host says the
- *   server admits their update of such a row (the platform's row floor).
+ * - Edit on a row the viewer did not write only where the host says the
+ *   server admits their update of such a row (the platform's row floor); ✓
+ *   on every thread wherever the host hands the resolve write, which goes
+ *   through the resolution door any reader may use (objectstack#36186).
+ * - Where the host's Delete is the own-comment delete door
+ *   (`ownCommentDeletesOnly`, objectstack#36191), Delete only on the viewer's
+ *   own comments that nobody replied under.
  */
 
 import * as React from 'react';
@@ -95,7 +100,6 @@ describe('CommentsPanel — resolved threads (objectstack#36075)', () => {
   it('✓ on a top-level comment resolves its thread; a reply has none', () => {
     const { onResolveComment } = renderPanel({ updatesOthersComments: true });
     fireEvent.click(screen.getByRole('button', { name: /1 reply/ }));
-    expect(actionIn('r3', 'resolve')).toBeNull();
     fireEvent.click(actionIn('t5', 'resolve')!);
     expect(onResolveComment).toHaveBeenCalledWith('t5', true);
   });
@@ -165,15 +169,15 @@ describe('CommentsPanel — resolved threads (objectstack#36075)', () => {
     expect(shownRoots()).toEqual(['t1', 't2', 't3', 't4', 't5']);
   });
 
-  it('without the host’s word that others’ rows take the viewer’s update, ✓ only on the viewer’s own threads', async () => {
-    const { onResolveComment } = renderPanel();
+  it('✓ is on every thread, the viewer’s and others’, without the host’s word that others’ rows take the viewer’s update (objectstack#36186)', async () => {
+    const { onResolveComment } = renderPanel({ updatesOthersComments: false });
     expect(actionIn('t1', 'resolve')).not.toBeNull();
-    expect(actionIn('t3', 'resolve')).toBeNull();
-    expect(actionIn('t5', 'resolve')).toBeNull();
+    expect(actionIn('t3', 'resolve')).not.toBeNull();
+    expect(actionIn('t5', 'resolve')).not.toBeNull();
     await toggleFilter('Show resolved');
-    expect(actionIn('t2', 'reopen')).toBeNull();
-    fireEvent.click(actionIn('t1', 'resolve')!);
-    expect(onResolveComment).toHaveBeenCalledWith('t1', true);
+    expect(actionIn('t2', 'reopen')).not.toBeNull();
+    fireEvent.click(actionIn('t5', 'resolve')!);
+    expect(onResolveComment).toHaveBeenCalledWith('t5', true);
   });
 
   it('offers no ✓ where the host hands no resolve write', () => {
@@ -218,6 +222,44 @@ describe('CommentsPanel — Edit and Delete for people with permission (objectst
   it('moderating needs the host’s write too', () => {
     renderPanel({ moderatesComments: true, updatesOthersComments: true, onEditComment: undefined, onDeleteComment: undefined });
     expect(actionIn('t5', 'more')).toBeNull();
+  });
+});
+
+describe('CommentsPanel — Delete through the own-comment delete door (objectstack#36191)', () => {
+  // t6: the viewer's, with Linus's reply r6 under it.
+  const WITH_REPLIED_OWN: FeedItem[] = [
+    ...ITEMS,
+    { id: 't6', type: 'comment', actor: 'Me', body: 'mine, answered', createdAt: at(7), authoredByViewer: true, resolved: false, replyCount: 1 },
+    { id: 'r6', type: 'comment', actor: 'Linus', body: 'an answer', createdAt: at(8), parentId: 't6' },
+  ];
+  const menuItems = async (id: string) => {
+    fireEvent.pointerDown(actionIn(id, 'more')!, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    await screen.findByRole('menuitem', { name: 'Edit' });
+    return screen.queryAllByRole('menuitem').map((el) => el.textContent);
+  };
+
+  it('Delete on the viewer’s own comment with no reply under it, and it hands that comment over', async () => {
+    const { onDeleteComment } = renderPanel({ items: WITH_REPLIED_OWN as any[], ownCommentDeletesOnly: true });
+    expect(await menuItems('t1')).toContain('Delete');
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+    expect(onDeleteComment).toHaveBeenCalledWith('t1');
+  });
+
+  it('no Delete on the viewer’s own comment that has replies; Edit stays', async () => {
+    renderPanel({ items: WITH_REPLIED_OWN as any[], ownCommentDeletesOnly: true });
+    const items = await menuItems('t6');
+    expect(items).toContain('Edit');
+    expect(items).not.toContain('Delete');
+  });
+
+  it('nothing on others’ comments, whatever the moderation verdict says', () => {
+    renderPanel({ items: WITH_REPLIED_OWN as any[], ownCommentDeletesOnly: true, moderatesComments: true, updatesOthersComments: false });
+    expect(actionIn('t5', 'more')).toBeNull();
+  });
+
+  it('CONTROL: without it (the delete grant), the viewer’s own replied-under comment keeps Delete', async () => {
+    renderPanel({ items: WITH_REPLIED_OWN as any[] });
+    expect(await menuItems('t6')).toContain('Delete');
   });
 });
 

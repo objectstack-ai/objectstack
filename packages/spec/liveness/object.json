@@ -58,8 +58,31 @@
       "status": "live",
       "verifiedAt": "2026-10-28",
       "evidenceScope": "in-repo",
-      "evidence": "ui/packages/app-shell/src/utils/deriveRelatedLists.ts#resolveRelatedListOrder (the one resolution: the parent's declared entries first, in order — a child object takes all of its lists, `object.field` one FK — then every unlisted list in the derived owned → lookup order); ui/packages/app-shell/src/utils/deriveRelatedLists.ts#deriveRelatedLists (hands `objectDef.relatedLists` to it); packages/spec/src/stack.zod.ts#collectRelatedListNameErrors (the AUTHORING judgement: an entry that matches no inbound lookup / master_detail field is refused at defineStack, naming the entry and the relationships that exist); packages/lint/src/validate-related-list-refs.ts#validateRelatedListRefs (the same judgement at the runtime object publish door, `related-list-ref-unknown` at error, against the children the live registry and stored rows hold)",
-      "note": "#27069, maintainer ruling A (an ordered list on the parent object). The record page reads it through deriveRelatedLists, whose output RecordDetailView renders in order (the tabbed page's own tabs and its Related tab keep this order within each). `relatedList: false` on the FK still hides a listed relationship, and `relatedList: 'primary'` places a list rather than ordering it. The cross-object strict-name check runs where the children's fields are known: `defineStack` (so `os validate` / `os build`), and the object publish door, whose snapshot carries the registry's objects and the stored rows. `fieldGroups[].relatedList` has its own row under the drilled `fieldGroups` (live since the record page v3 body layout, #27055, draws it; it names body tables only, #27478)."
+      "evidence": "ui/packages/app-shell/src/utils/deriveRelatedLists.ts#resolveRelatedListOrder (the one resolution: the parent's declared entries first, in order — a child object takes all of its lists, `object.field` one FK — then every unlisted list in the derived owned → lookup order); ui/packages/app-shell/src/utils/deriveRelatedLists.ts#deriveRelatedLists (hands `objectDef.relatedLists` to it); packages/spec/src/stack.zod.ts#collectRelatedListNameErrors (the AUTHORING judgement: an entry that matches no inbound lookup / master_detail field is refused at defineStack, naming the entry and the relationships that exist); packages/lint/src/validate-related-list-refs.ts#validateRelatedListRefs (the same judgement at the runtime object publish door, `related-list-ref-unknown` at error, against the children the live registry and stored rows hold); ui/packages/app-shell/src/utils/deriveRelatedLists.ts#deriveRelatedLists (#35897: a declared non-empty list derives only the side lists it names, body tables kept; #35899: an object entry's label / columns win over the FK's relatedListTitle / relatedListColumns); ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts#arrangeDeclaredTabs (#35897: the tabs sit at their entries, the built-ins sys_attachment / sys_approval_request / sys_activity by name); packages/lint/src/validate-related-list-refs.ts#validateRelatedListRefs (#35899: related-list-column-unknown at error; related-list-attachments-off and related-list-stream-part at warning)",
+      "note": "#27069, maintainer ruling A (an ordered list on the parent object). The record page reads it through deriveRelatedLists, whose output RecordDetailView renders in order (the tabbed page's own tabs and its Related tab keep this order within each). `relatedList: false` on the FK still hides a listed relationship, and `relatedList: 'primary'` places a list rather than ordering it. The cross-object strict-name check runs where the children's fields are known: `defineStack` (so `os validate` / `os build`), and the object publish door, whose snapshot carries the registry's objects and the stored rows. `fieldGroups[].relatedList` has its own row under the drilled `fieldGroups` (live since the record page v3 body layout, #27055, draws it; it names body tables only, #27478). #35897 / #35899 (epic #35896, maintainer's 「三个内置项，是不是可以直接用对应的对象名」): a DECLARED non-empty relatedLists is the record page's tab list — unlisted side lists show no tab; the built-in tabs are entries by object name (attachments only when listed and enable.files; approvals unlisted follow the listed tabs; the stream unlisted closes the strip); an entry may be { list, label, columns }, whose columns are judged against the child's fields. D3 entry `related-lists-declared-is-tab-list`.",
+      "children": {
+        "list": {
+          "status": "live",
+          "verifiedAt": "2026-11-20",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/spec/src/data/related-list-entry.ts#relatedListEntryName (the one reading of an entry's name, bare or object form); ui/packages/app-shell/src/utils/deriveRelatedLists.ts#deriveRelatedLists (places and shows the lists the entry names); packages/spec/src/stack.zod.ts#collectRelatedListNameErrors (judged as a bare entry is)",
+          "note": "#35899. The relationship an object entry names, spelled as a bare entry; a built-in tab name is refused here at parse (written bare only)."
+        },
+        "label": {
+          "status": "live",
+          "verifiedAt": "2026-11-20",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/app-shell/src/utils/deriveRelatedLists.ts#deriveRelatedLists (an object entry's label becomes the list's title, over the FK's relatedListTitle); ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts#buildDefaultTabs (the tab label and the table title read that title)",
+          "note": "#35899. The list's title on the record page: its tab and its table heading."
+        },
+        "columns": {
+          "status": "live",
+          "verifiedAt": "2026-11-20",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/app-shell/src/utils/deriveRelatedLists.ts#deriveRelatedLists (an object entry's columns become the list's columns, over the FK's relatedListColumns); packages/lint/src/validate-related-list-refs.ts#validateRelatedListRefs (related-list-column-unknown at error, against the child's fields)",
+          "note": "#35899. Child field names; one set for every place the list is drawn (its tab, and the body table a field group places)."
+        }
+      }
     },
     "stageField": {
       "status": "live",

@@ -26,7 +26,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, waitFor, screen, cleanup, within } from '@testing-library/react';
+import { render, waitFor, screen, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import { MemoryRouter } from 'react-router-dom';
@@ -173,14 +173,13 @@ afterEach(() => {
 });
 
 describe('objectui#12625 — the record page names its regions, header actions and section headers', () => {
-  it('the right column and its cards are named by their labels; the 动态 tab by its label', async () => {
+  it('the record\'s tabs are named by their labels: 详情, the related lists, 动态 (objectstack#35890: no right column)', async () => {
     await mountLeadPage();
-    const right = screen.getByRole('complementary', { name: 'Right column' });
-    expect(right).toBeInTheDocument();
-    // objectstack#35595 / #35596 — the stream is the Activity tab; the rail's
-    // cards are regions named by their titles.
+    // objectstack#35890 — the right rail is retired: no complementary region.
+    expect(screen.queryByRole('complementary', { name: 'Right column' })).toBeNull();
+    expect(screen.getByRole('tab', { name: /^Details/ })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /^Activity/ })).toBeInTheDocument();
-    expect(await within(right).findByRole('region', { name: 'Task' })).toBeInTheDocument();
+    expect(await screen.findByRole('tab', { name: /^Task/ })).toBeInTheDocument();
   });
 
   it('the header actions are named by their labels', async () => {

@@ -45,10 +45,12 @@ Two more: [List Views](#list-views), [Actions](#actions).
    with `columns` and `modalSize`. `tabbed` flags a required field only on its
    own tab and overflows on a phone
    ([Form Views](./rules/list-views.md#form-views)).
-2. **A record entered with its line items is `inlineEdit` on the child's
-   `master_detail` field**, before any custom page, and its grid needs no "Add
-   line" button. A parent or child declaring `enable.apiMethods` must list
-   `'bulk'`, or the save is refused `405`
+2. **A record entered with its line items is a parent field group naming the
+   child** (`fieldGroups: [{ key: 'lines', label: 'Lines', relatedList:
+   'invoice_line' }]`), before any custom page; without it nothing changes:
+   the child is a tab and the form has no lines, whatever `inlineEdit` says.
+   Its grid needs no "Add line" button. A parent or child declaring
+   `enable.apiMethods` must list `'bulk'`, or the save is refused `405`
    ([Master-Detail Forms](./rules/list-views.md#master-detail-forms-parent--child-line-items)).
 3. **A persisted chart binds a declared dataset.** A widget or report names a
    `defineDataset` and selects its `dimensions` / `values` by name; an object

@@ -132,6 +132,10 @@ const EXPECTED_GRANT: Record<string, Grant> = {
   // asked of `sys_comment`.
   feedCommentEdit: 'update',
   feedCommentDelete: 'delete',
+  // objectstack#36191: the same Delete through the own-comment delete door,
+  // which needs no delete grant, so it asks the grant the comment was posted
+  // under (as `feedReactionRemove` does for a reaction).
+  feedCommentDeleteOwn: 'create',
   // objectui#12982: Setup's Clone of a declared sharing rule, asked of
   // `sys_sharing_rule`: it creates an organization rule.
   declarationClone: 'create',
@@ -708,10 +712,6 @@ const WRITE_SITES: Record<string, WriteSite> = {
   'packages/app-shell/src/views/RecordDetailView.tsx :: RecordDetailView > handleAddReply :: create':
     mapped(['feedComment'], RECORD_PAGE),
   'packages/app-shell/src/views/RecordDetailView.tsx :: RecordDetailView > handleEditComment :: update':
-    mapped(['feedCommentEdit'], RECORD_PAGE),
-  // Resolve / reopen a thread (objectstack#36075) is a by-id update of the
-  // root `sys_comment` row, offered behind the same row as Edit.
-  'packages/app-shell/src/views/RecordDetailView.tsx :: RecordDetailView > handleResolveComment :: update':
     mapped(['feedCommentEdit'], RECORD_PAGE),
   'packages/app-shell/src/views/RecordDetailView.tsx :: RecordDetailView > handleDeleteComment :: delete':
     mapped(['feedCommentDelete'], RECORD_PAGE),

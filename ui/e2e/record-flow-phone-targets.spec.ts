@@ -22,6 +22,12 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  * `min-h-[44px] sm:min-h-0` spellings) and shows the pencil on a coarse
  * pointer. Above `sm` every control keeps its desktop size.
  *
+ * On the synthesized record page's field list (objectstack#36147) a phone
+ * enters edit by tapping the value, and no pencil is drawn there: the pencil
+ * measured here is the one every other face of a section still draws
+ * (`PENCIL_CLASS`), and the field list's own button (`FIELD_LIST_PENCIL_CLASS`)
+ * is the keyboard's way in, `sr-only` until focused.
+ *
  * ⚠️ A Playwright spec and not a vitest test for the reason
  * `record-path-phone-row.spec.ts` gives: jsdom has no layout engine, so a
  * size read there is 0 and an assertion on it is vacuous.
@@ -86,7 +92,8 @@ const CLS = {
   cardRowName: g('related', /className="(min-h-11 [^"]*text-primary hover:underline[^"]*)"/, ['min-h-11', 'sm:min-h-0']),
   cardMenu: g('cardMenu', /className="([^"]+)"\s*aria-label=\{t\('detail\.relatedCardMenu'/, ['h-11', 'w-11', 'sm:h-6']),
   cardHandle: g('cardMenu', /'(inline-flex h-11 w-11 [^']*)'/, ['h-11', 'w-11', 'sm:h-6']),
-  pencil: g('section', /className="([^"]+)"\s*aria-label=\{t\('detail\.editInlineHint'\)\}/, ['min-h-[44px]', 'pointer-coarse:opacity-100', 'opacity-0']),
+  pencil: g('section', /const PENCIL_CLASS =\s*'([^']+)'/, ['min-h-[44px]', 'pointer-coarse:opacity-100', 'opacity-0']),
+  fieldListPencil: g('section', /const FIELD_LIST_PENCIL_CLASS = '([^']+)'/, ['sr-only', 'focus-visible:not-sr-only']),
   stripPencil: g('strip', /className="([^"]+)"\s*aria-label=\{t\('detail\.editInlineHint'\)\}/, ['min-h-[44px]', 'pointer-coarse:opacity-100', 'opacity-0']),
   saveCancel: g('saveBar', /disabled=\{inline\.saving\}\s*className="([^"]+)"/, ['h-11', 'sm:h-9']),
   saveSave: g('saveBar', /disabled=\{inline\.saving \|\| locked\}\s*className="([^"]+)"/, ['h-11', 'sm:h-9']),
@@ -261,6 +268,20 @@ test.describe('the record flow at phone width (objectstack#29071)', () => {
       await page.context().close();
     });
   }
+
+  test('on the field list a phone taps the value: its pencil takes no room and is no target until focused (objectstack#36147)', async ({ browser }) => {
+    const page = await open(browser, 375, 812, true);
+    await measure(page, `<div class="group flex items-start justify-between gap-2"><div class="text-sm flex-1 min-w-0 py-1">Acme Corp</div><button type="button" class="${CLS.buttonBase} ${CLS.fieldListPencil}" id="list-pencil"><svg width="12" height="12"></svg></button></div>`);
+    const before = await page.evaluate(() => document.getElementById('list-pencil')!.getBoundingClientRect());
+    expect(before.width).toBeLessThanOrEqual(1);
+    expect(before.height).toBeLessThanOrEqual(1);
+    // The keyboard's way in: focused, it is drawn at its own size.
+    // A keyboard focus (Tab), so `:focus-visible` holds.
+    await page.keyboard.press('Tab');
+    const focused = await page.evaluate(() => document.getElementById('list-pencil')!.getBoundingClientRect());
+    expect(focused.width).toBeGreaterThan(1);
+    await page.context().close();
+  });
 
   test('above `sm`, with a mouse, the controls keep their desktop size and the pencil waits for hover', async ({ browser }) => {
     const page = await open(browser, 1280, 800, false);

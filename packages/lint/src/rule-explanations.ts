@@ -3641,6 +3641,52 @@ const TITLE_UNRESOLVABLE_EXPLANATION: RuleExplanation = {
   ],
 };
 
+/** What `validate-record-page-header.ts` cannot read (both of its entries write it out). */
+const RECORD_PAGE_HEADER_LIMITS =
+  'What it cannot see: an action\'s `visible` / `enabled` predicates and the user\'s permissions, which can ' +
+  'hide the first action on one record and not another; actions another installed package attaches to the ' +
+  'object, which the standard page draws and this stack does not declare; and the served declaration order ' +
+  'itself, estimated as the object\'s own `actions` and then the stack\'s `actions` bound to it by ' +
+  '`objectName`, in source order. So it can miss a disagreement, and can name one the runtime would hide. A ' +
+  'header naming an action this stack does not declare on the object is not judged. Print pages, slotted ' +
+  'pages, html and react pages, and record pages bound to no declared object are not judged either.';
+
+const RECORD_PAGE_HEADER_TITLE_DIFFERS_EXPLANATION: RuleExplanation = {
+  rule: 'record-page-header-title-differs',
+  covers: 'why one record shows two titles',
+  paragraphs: [
+    'An object\'s hand-written full record page (`type: \'record\'`, `kind: \'full\'`) is drawn on the ' +
+      'desktop full page only. On a phone, in the side drawer a list opens, in a split pane and in an ' +
+      'interface page\'s preview the record draws the platform\'s standard page, built from the object, and ' +
+      'that page titles the record by the object\'s name field (`nameField`, else the derived title field), ' +
+      'the name every list, search result and lookup shows too. A `page:header` `title` that is anything but ' +
+      'exactly that field\'s `{field}` token titles the same record differently on the full page.',
+    'The title has one declaration point, the object. Delete the header\'s `title` (it then derives from ' +
+      'the record), or change `nameField` to rename the record everywhere. A header that should read ' +
+      'differently on every surface belongs in a `kind: \'slotted\'` page\'s `header` slot, which the ' +
+      'standard page draws everywhere. A warning: the page renders as written.',
+    RECORD_PAGE_HEADER_LIMITS,
+  ],
+};
+
+const RECORD_PAGE_HEADER_ACTIONS_DIFFER_EXPLANATION: RuleExplanation = {
+  rule: 'record-page-header-actions-differ',
+  covers: 'why one record shows two primary buttons',
+  paragraphs: [
+    'Both record headers sort their actions with one rule: `order` ascending (unset is 0), then ' +
+      '`variant: \'primary\'`, then their incoming order; the primary button is the first action declaring ' +
+      '`variant: \'primary\'`, else the first button. The incoming order is where the two pages differ: the ' +
+      'full page takes it from the header\'s `actions` list, the standard page (phone, drawer, preview) from ' +
+      'the object\'s action declaration order, and the standard page draws every action placed at ' +
+      '`record_header` or `record_more`, listed or not. This finding means the two give a different primary ' +
+      'button, or the listed actions in a different order.',
+    'The order has one declaration point, the actions. Give each an `order` (lower first) and the main one ' +
+      '`variant: \'primary\'`, and both pages sort alike; the header\'s list then only chooses which actions ' +
+      'the full page draws. A warning: the page renders as written.',
+    RECORD_PAGE_HEADER_LIMITS,
+  ],
+};
+
 // ── Data-model rules (`data-model-rules.ts`) ───────────────────────────────
 // The three ADR-0120 uniqueness ids run on `os validate` and `os build` as
 // registry entries and on `os lint` through `lintDataModel`; the sweep ids
@@ -4742,6 +4788,45 @@ const RELATED_LIST_GROUP_NOT_BODY_EXPLANATION: RuleExplanation = {
       '`relatedList`.',
     'Judged on the children this rule can see, the same ones `related-list-ref-unknown` judges: a ' +
       'child outside the stack (another package\'s object) is not judged here.',
+  ],
+};
+
+const RELATED_LIST_COLUMN_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'related-list-column-unknown',
+  covers: "the columns a relatedLists entry may name",
+  paragraphs: [
+    'A `relatedLists` entry may be written `{ list, label, columns }` to give that related list its own ' +
+      'title and columns on the parent object. The columns are field names of the CHILD object, the one ' +
+      'whose rows the list shows, exactly as the child FK\'s `relatedListColumns` names them; they win over ' +
+      'that key wherever the list is drawn.',
+    'A column that is no field of the child draws an empty column, silently, so it is an error on ' +
+      '`os validate`, `os build` and at the runtime publish gate. Judged against every child the entry ' +
+      'names whose fields this rule can see (the authored fields and the registry-injected columns); a ' +
+      'child outside the stack is not judged here.',
+  ],
+};
+
+const RELATED_LIST_ATTACHMENTS_OFF_EXPLANATION: RuleExplanation = {
+  rule: 'related-list-attachments-off',
+  covers: "'sys_attachment' in relatedLists without files enabled",
+  paragraphs: [
+    "`'sys_attachment'` in `relatedLists` places the record page's attachments tab. The tab is drawn only " +
+      'for an object that enables files (`enable.files: true`), the same gate the server enforces on ' +
+      'attachment rows, so on an object without files the entry places nothing.',
+    'A warning, not an error: the entry is not wrong in itself and becomes live the moment the object ' +
+      "turns files on. Enable files to show the tab, or remove `'sys_attachment'`.",
+  ],
+};
+
+const RELATED_LIST_STREAM_PART_EXPLANATION: RuleExplanation = {
+  rule: 'related-list-stream-part',
+  covers: 'a relatedLists entry naming a part of the activity stream',
+  paragraphs: [
+    "The record page draws activities, the discussion and field changes as ONE stream, whose tab " +
+      "`relatedLists` names `'sys_activity'`. `'sys_comment'` and `'sys_audit_log'` are parts of that " +
+      'stream, not tabs of their own, so an entry naming one places nothing.',
+    "A warning, prescribing `'sys_activity'`. Which parts the stream shows is still the object's own " +
+      'switches (`enable.feeds`, `enable.activities`, `trackHistory`).',
   ],
 };
 
@@ -6565,6 +6650,8 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [APPROVAL_EXPRESSION_NO_EMPTY_POLICY_EXPLANATION.rule]: APPROVAL_EXPRESSION_NO_EMPTY_POLICY_EXPLANATION,
   [TITLE_FORMAT_RETIRED_EXPLANATION.rule]: TITLE_FORMAT_RETIRED_EXPLANATION,
   [TITLE_UNRESOLVABLE_EXPLANATION.rule]: TITLE_UNRESOLVABLE_EXPLANATION,
+  [RECORD_PAGE_HEADER_TITLE_DIFFERS_EXPLANATION.rule]: RECORD_PAGE_HEADER_TITLE_DIFFERS_EXPLANATION,
+  [RECORD_PAGE_HEADER_ACTIONS_DIFFER_EXPLANATION.rule]: RECORD_PAGE_HEADER_ACTIONS_DIFFER_EXPLANATION,
   [UNIQUE_LEGACY_ORGANIZATION_COMPOSITE_EXPLANATION.rule]: UNIQUE_LEGACY_ORGANIZATION_COMPOSITE_EXPLANATION,
   [UNIQUE_UNSCOPED_DECLARED_INDEX_EXPLANATION.rule]: UNIQUE_UNSCOPED_DECLARED_INDEX_EXPLANATION,
   [UNIQUE_DOUBLE_DECLARATION_EXPLANATION.rule]: UNIQUE_DOUBLE_DECLARATION_EXPLANATION,
@@ -6602,6 +6689,9 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [OBJECT_FIELD_REF_UNKNOWN_EXPLANATION.rule]: OBJECT_FIELD_REF_UNKNOWN_EXPLANATION,
   [RELATED_LIST_REF_UNKNOWN_EXPLANATION.rule]: RELATED_LIST_REF_UNKNOWN_EXPLANATION,
   [RELATED_LIST_GROUP_NOT_BODY_EXPLANATION.rule]: RELATED_LIST_GROUP_NOT_BODY_EXPLANATION,
+  [RELATED_LIST_COLUMN_UNKNOWN_EXPLANATION.rule]: RELATED_LIST_COLUMN_UNKNOWN_EXPLANATION,
+  [RELATED_LIST_ATTACHMENTS_OFF_EXPLANATION.rule]: RELATED_LIST_ATTACHMENTS_OFF_EXPLANATION,
+  [RELATED_LIST_STREAM_PART_EXPLANATION.rule]: RELATED_LIST_STREAM_PART_EXPLANATION,
   [OBJECT_REFERENCE_UNKNOWN_EXPLANATION.rule]: OBJECT_REFERENCE_UNKNOWN_EXPLANATION,
   [OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION.rule]: OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION,
   [CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION.rule]: CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION,

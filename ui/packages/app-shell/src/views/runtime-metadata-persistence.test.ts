@@ -12,6 +12,7 @@ import {
   recordPageEnvelope,
   viewEnvelope,
   deriveViewKey,
+  saveAndPublishRuntimeMetadata,
 } from './runtime-metadata-persistence';
 
 /**
@@ -334,5 +335,43 @@ describe('runtime-metadata-persistence seam (ADR-0034)', () => {
       metadataClient.get.mockResolvedValue({});
       expect(await readRuntimeDraft('page', 'p', { metadataClient })).toBeNull();
     });
+  });
+});
+
+describe('saveAndPublishRuntimeMetadata — a confirmed save everyone sees at once (objectstack#35955)', () => {
+  const conflict = () => Object.assign(new Error('pending'), { status: 409, code: 'METADATA_CONFLICT' });
+
+  it('stages the draft under the first-write pin, then publishes it', async () => {
+    const metadataClient = makeMetadataClient();
+    const body = { name: 'task.all', config: { sort: [{ field: 'name', order: 'asc' }] } };
+    await expect(saveAndPublishRuntimeMetadata('view', 'task.all', body, { metadataClient })).resolves.toBe('published');
+    expect(metadataClient.save).toHaveBeenCalledWith('view', 'task.all', body, { mode: 'draft', ifNoneMatch: '*' });
+    expect(metadataClient.publish).toHaveBeenCalledWith('view', 'task.all');
+    expect(metadataClient.save.mock.invocationCallOrder[0]).toBeLessThan(metadataClient.publish.mock.invocationCallOrder[0]);
+    expect(metadataClient.reset).not.toHaveBeenCalled();
+  });
+
+  it('over a pending draft (the pin\'s 409 METADATA_CONFLICT) nothing is published or discarded', async () => {
+    const metadataClient = makeMetadataClient();
+    metadataClient.save.mockRejectedValue(conflict());
+    await expect(saveAndPublishRuntimeMetadata('view', 'task.all', {}, { metadataClient })).resolves.toBe('pending-draft');
+    expect(metadataClient.publish).not.toHaveBeenCalled();
+    expect(metadataClient.reset).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: the door\'s other 409 (DESTRUCTIVE_CHANGE) is a refusal, not a pending draft', async () => {
+    const metadataClient = makeMetadataClient();
+    const destructive = Object.assign(new Error('destructive'), { status: 409, code: 'DESTRUCTIVE_CHANGE' });
+    metadataClient.save.mockRejectedValue(destructive);
+    await expect(saveAndPublishRuntimeMetadata('view', 'task.all', {}, { metadataClient })).rejects.toBe(destructive);
+    expect(metadataClient.publish).not.toHaveBeenCalled();
+  });
+
+  it('a refused publish discards the draft this call wrote, and the refusal is rethrown', async () => {
+    const metadataClient = makeMetadataClient();
+    const refused = Object.assign(new Error('refused'), { status: 400, code: 'VALIDATION_ERROR' });
+    metadataClient.publish.mockRejectedValue(refused);
+    await expect(saveAndPublishRuntimeMetadata('view', 'task.all', {}, { metadataClient })).rejects.toBe(refused);
+    expect(metadataClient.reset).toHaveBeenCalledWith('view', 'task.all', { state: 'draft' });
   });
 });

@@ -1,7 +1,7 @@
 ---
 title: Object schema — Data Protocol reference
 navTitle: Object
-description: "Object schemas of the ObjectStack Data Protocol: ApiMethod, ApiOperation, Index and 13 more — each property with its type, default and a TypeScript example."
+description: "Object schemas of the ObjectStack Data Protocol: ApiMethod, ApiOperation, Index and 15 more — each property with its type, default and a TypeScript example."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -13,8 +13,8 @@ description: "Object schemas of the ObjectStack Data Protocol: ApiMethod, ApiOpe
 ## TypeScript Usage
 
 ```typescript
-import { ApiMethod, ApiOperationSchema, IndexSchema, LifecycleSchema, LifecycleClassSchema, ObjectSchema, ObjectAccessConfigSchema, ObjectCapabilities, ObjectExtensionSchema, ObjectExternalBindingSchema, ObjectFieldGroupSchema, ObjectOwnershipEnum, ObjectRequiredPermissionsSchema, PerOperationRequiredPermissionsSchema, RowCrudActionOverrideSchema, TenancyConfigSchema } from '@objectstack/spec/data';
-import type { ApiMethod, ApiOperation, Lifecycle, LifecycleClass, ObjectAccessConfig, ObjectCapabilities, ObjectExtension, ObjectExternalBinding, ObjectFieldGroup, ObjectRequiredPermissions, PerOperationRequiredPermissions, RowCrudActionOverride, TenancyConfig } from '@objectstack/spec/data';
+import { ApiMethod, ApiOperationSchema, IndexSchema, LifecycleSchema, LifecycleClassSchema, ObjectSchema, ObjectAccessConfigSchema, ObjectCapabilities, ObjectExtensionSchema, ObjectExternalBindingSchema, ObjectFieldGroupSchema, ObjectOwnershipEnum, ObjectRequiredPermissionsSchema, PerOperationRequiredPermissionsSchema, RelatedListEntrySchema, RelatedListEntryObjectSchema, RowCrudActionOverrideSchema, TenancyConfigSchema } from '@objectstack/spec/data';
+import type { ApiMethod, ApiOperation, Lifecycle, LifecycleClass, ObjectAccessConfig, ObjectCapabilities, ObjectExtension, ObjectExternalBinding, ObjectFieldGroup, ObjectRequiredPermissions, PerOperationRequiredPermissions, RelatedListEntry, RelatedListEntryObject, RowCrudActionOverride, TenancyConfig } from '@objectstack/spec/data';
 
 // Validate data
 const result = ApiMethod.parse(data);
@@ -175,7 +175,7 @@ const result = ApiMethod.parse(data);
 | **titleFormat** | `string \| { dialect: 'template'; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → nameField (ADR-0079)] Render-only title template; the server cannot return or query it, and an explicit nameField now takes precedence. An object definition that declares it is refused at the metadata save gate and by os validate; a stored object that carries it still parses and reads. Migrate a single-field title to nameField; a composite title that import, sort or search must match to a stored computed field (a non-formula field with an expression, computed and stored on every write) designated as nameField — a text formula designated as nameField stays legal for a title shown for display only. Placeholders may be written `{{field}}` or `{field}` — the title renderers treat the two as equivalent, normalizing `{{field}}` to `{field}` before substituting; neither spelling is judged at parse time. |
 | **imageField** | `string` | optional | The record's picture: names the field the record page header (record chrome) draws beside the title — one object-level declaration every record detail page reads, not a per-page header prop. Must name a field of this object whose type is `image` or `avatar`; any other name is refused. A record whose field is empty shows no picture (no initials or placeholder). |
 | **highlightFields** | `string[]` | optional | [ADR-0085] Ordered most-important fields; first entry wins where only one fits. Drives default list and related-list columns, cards, hover cards, previews and the record picker; the default record page draws no strip from it. Renamed from compactLayout. |
-| **relatedLists** | `string[]` | optional | Business order of this object's related lists on its record page, most important first. Each entry is a child object name (e.g. "task"), or object.field when that child has more than one relationship to this object (e.g. "event.related_to"). Listed relationships come first in this order; unlisted ones follow in the derived order (owned master_detail children, then lookup children). An entry whose child is in the stack but has no inbound lookup / master_detail field to this object is refused everywhere. An entry whose child exists nowhere is refused by os validate / os build (which leave a sys_ / cloud_ / ai_ name to the runtime) and by a metadata write that names no package; a write into a package stores it, since a child outside the package may be a downstream package's object that points here, and the record page places nothing for it. It orders only: relatedList: false on the relationship still hides a list, and relatedList: 'primary' still places a list in the record's body, so the order applies among the body tables and among the side cards. |
+| **relatedLists** | `(string \| { list: string; label?: string; columns?: string[] })[]` | optional | The record page's tabs beside the overview, in order. Absent: every related list shows (owned master_detail children, then lookup children), then attachments, approvals and the activity stream, as before. Declared: only the lists named here show, in this order; leaving one out hides its tab. That includes a child list another package adds: it is hidden until this object names it, which a build accepts only when that package is in the stack (letting a package place its own list is a later change). Each entry is a child object name (e.g. "task"), object.field when that child has more than one relationship to this object (e.g. "event.related_to"), or a built-in tab: "sys_attachment" (attachments, still only when enable.files is on; not shown when unlisted), "sys_approval_request" (approvals, still only when the record has requests; when unlisted it follows the listed tabs), "sys_activity" (the activity stream of activities, discussion and changes; when unlisted it comes last). An entry may instead be `{ list, label?, columns? }` to give that list its own title and child-field columns (wins over the child FK's relatedListTitle / relatedListColumns, used wherever the list is drawn); a built-in tab is written only as its bare name. relatedList: false on the FK still hides a list; body tables placed by fieldGroups are not hidden by this list. A name whose child is in the stack but has no inbound lookup / master_detail field to this object is refused everywhere; one whose child exists nowhere is refused by os validate / os build (which leave a sys_ / cloud_ / ai_ name to the runtime) and by a metadata write that names no package; a write into a package stores it and the record page places nothing for it. A columns name that resolves to no field of the child (a dotted name is walked through the child's relationships, as relatedListColumns is) is refused. |
 | **stageField** | `string \| false` | optional | [ADR-0085] Lifecycle stage field (linear/ordered), or false to declare the status field non-linear and suppress stage heuristics. Absent = heuristic detection allowed. When the named field carries options, it must be a single-value `select` / `radio` with inline `options`, each declaring its `kind` ('open' / 'won' / 'lost'); a picklist-backed or multi-value stage field is refused. A name that resolves to no declared field, or a field with no options, is not judged at parse. |
 | **editMode** | `Enum<'modal' \| 'page'>` | optional | Edit-interaction intent for records of this object: 'modal' opens the edit form as a dialog over the current view; 'page' navigates to a dedicated full-page edit route. Absent = the renderer picks its own default (objectui defaults to modal). Cross-renderer intent, not pixel styling (family). |
 | **listViews** | `Record<string, { name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| …>; data?: object \| object \| object; … }>` | optional | Built-in named list views (segmented tabs) shipped with the object schema — "views" mode, dropdown userFilters allowed, no page-only tabs (ADR-0047) |
@@ -383,6 +383,14 @@ const result = ApiMethod.parse(data);
 | **summary** | `string` | ✅ | Activity summary template; `{field}` tokens interpolate the record value. e.g. "Deal won: `{name}`". |
 | **type** | `string` | optional | Activity type for the emitted row — left unset, it keeps the update row's kind, "updated" (a milestone only fires on an update). |
 
+### Nested Shape: `Object.relatedLists[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **list** | `string` | ✅ | The relationship this entry names: a child object name (e.g. "quote_line"), or object.field when that child has more than one relationship to this object. |
+| **label** | `string` | optional | This list's title on the record page (its tab and its table heading). Wins over the child FK's relatedListTitle; absent = that key, else the child object's plural label. |
+| **columns** | `string[]` | optional | This list's columns, as field names of the child object (e.g. ['product', 'quantity', 'amount']). Wins over the child FK's relatedListColumns; absent = that key, else the child object's derived columns. Used wherever this list is drawn: its tab, and the body table a field group places. A name that is no field of the child is refused where the child is known. |
+
 ### Nested Shape: `Object.listViews[string]`
 
 | Property | Type | Required | Description |
@@ -499,7 +507,7 @@ const result = ApiMethod.parse(data);
 | **description** | `string \| { dialect: 'template'; source?: string; ast?: any; meta?: object } \| string \| Record<string, string>` | optional | Explanatory line shown under the title in the action's param dialog. Carries the confirm question for an action that collects params (one dialog, not two). Not the LLM-facing `ai.description`. It is a `template` slot (ADR-0032): a bare string is shorthand for `{ dialect: 'template', source }`, and text with no hole is shown as written. Holes are `{{ path }}` or `{{ path \| formatter[:arg] }}` over `record`, the record the action runs against (the clicked row on a list, else the page's record); the values the dialog collects are not bound, since the line shows before they exist. Formatters come from the template engine's whitelist (`TEMPLATE_FORMATTERS`, `@objectstack/formula`); a hole holds no logic (no CEL, no arithmetic). Example: 'Choose the new role for `{{ record.name }}`.'. A hole over any other root, a `${…}` or single-brace `{x}` token (each named with its `{{ }}` spelling), a hole holding logic or an unknown formatter, and a blank sentence are named and refused at `objectstack validate`, `compile` and the publish gate; the text still parses, so a stored one loads until its next save. An inline locale map (`{ en, "zh-CN" }`) is accepted too, each value such a sentence. |
 | **objectName** | `string` | optional | Target object this action belongs to. When set, the action is auto-merged into the object's actions array by defineStack(). |
 | **icon** | `string` | optional | Icon name |
-| **locations** | `Enum<'list_toolbar' \| 'list_item' \| 'record_header' \| 'record_more' \| …>[]` | optional | Locations where this action is visible |
+| **locations** | `Enum<'list_toolbar' \| 'list_item' \| 'record_header' \| 'record_more' \| …>[]` | optional | Locations where this action is visible. `record_section` is drawn only by an authored record page block that renders it; the standard record page (on a phone, in the side preview, and for an object with no authored page) does not draw it, so an action that must reach every surface adds `record_more` as well. |
 | **component** | `Enum<'action:button' \| 'action:icon' \| 'action:menu' \| 'action:group'>` | optional | Visual component override |
 | **type** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>` | optional (default: `"script"`) | Action functionality type — the dispatch route. The declarative single-record field write is not a type: it is `operation: 'update'` + `patch` on the default `script` route. |
 | **target** | `string` | optional | URL, Script Name, Flow ID, or API Endpoint. Supports $`{param.X}` and $`{ctx.X}` interpolation. For type:'url': an http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ (a console route; a record is /apps/APP/OBJECT/record/ID, APP being the app's route segment — see onSuccess.navigate) — every other scheme and a protocol-relative //host are refused. |
@@ -825,6 +833,46 @@ Type: `string[]`
 | **create** | `string[]` | optional | Capabilities required to create (insert). |
 | **update** | `string[]` | optional | Capabilities required to update (update/transfer/restore). |
 | **delete** | `string[]` | optional | Capabilities required to delete (delete/purge). |
+
+
+---
+
+## RelatedListEntry
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+Type: `string`
+
+---
+
+#### Option 2
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **list** | `string` | ✅ | The relationship this entry names: a child object name (e.g. "quote_line"), or object.field when that child has more than one relationship to this object. |
+| **label** | `string` | optional | This list's title on the record page (its tab and its table heading). Wins over the child FK's relatedListTitle; absent = that key, else the child object's plural label. |
+| **columns** | `string[]` | optional | This list's columns, as field names of the child object (e.g. ['product', 'quantity', 'amount']). Wins over the child FK's relatedListColumns; absent = that key, else the child object's derived columns. Used wherever this list is drawn: its tab, and the body table a field group places. A name that is no field of the child is refused where the child is known. |
+
+---
+
+
+---
+
+## RelatedListEntryObject
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **list** | `string` | ✅ | The relationship this entry names: a child object name (e.g. "quote_line"), or object.field when that child has more than one relationship to this object. |
+| **label** | `string` | optional | This list's title on the record page (its tab and its table heading). Wins over the child FK's relatedListTitle; absent = that key, else the child object's plural label. |
+| **columns** | `string[]` | optional | This list's columns, as field names of the child object (e.g. ['product', 'quantity', 'amount']). Wins over the child FK's relatedListColumns; absent = that key, else the child object's derived columns. Used wherever this list is drawn: its tab, and the body table a field group places. A name that is no field of the child is refused where the child is known. |
 
 
 ---

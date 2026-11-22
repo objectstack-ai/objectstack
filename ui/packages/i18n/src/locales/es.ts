@@ -1026,6 +1026,7 @@ const es = {
     layout: "Diseño",
     resetToViewDefault: "Restablecer los valores predeterminados de la vista",
     addGroup: "Agregar campo de grupo",
+    noGroupableFields: "Ningún campo sirve para agrupar",
     collapsedByDefault: "Contraído por defecto",
     removeGroup: "Eliminar",
     groupingUnstoredNotice: "Esta lista no se puede agrupar por {{fields}}: su valor se calcula al mostrarse y no se almacena. La lista se muestra sin esa agrupación.",
@@ -1403,6 +1404,10 @@ const es = {
     threadResolved: "Resuelto",
     threadResolvedBy: "Resuelto por {{name}}",
     filterComments: "Filtrar comentarios",
+    addReactionEmoji: "Reaccionar con {{emoji}}",
+    commentThread: "Conversación",
+    formatBold: "Negrita",
+    formatItalic: "Cursiva",
     showResolvedComments: "Mostrar resueltos",
     commentsInvolvingMe: "Solo en los que participo",
     noUnresolvedComments: "No hay comentarios sin resolver",
@@ -1533,6 +1538,7 @@ const es = {
     approvalPendingEditable: "En aprobación · editable",
     approvalPendingTooltip: "Este registro tiene una solicitud de aprobación pendiente; este paso todavía permite la edición",
     approvalPending: "En aprobación",
+    approvalPendingStep: "En aprobación · {{step}}",
     approvalPendingNotEditableTooltip: "Este registro tiene una solicitud de aprobación pendiente",
     approvalProgress: "Aprobaciones — {{got}} de {{need}}",
     approvalProgressGroups: "Firmas — {{got}} de {{need}} grupos",
@@ -1639,7 +1645,8 @@ const es = {
     relatedHiddenCount_other: "{{count}} ocultas",
     relatedShowHidden: "Mostrar",
     recordTabs: "Pestañas del registro",
-    recordTabOverview: "Resumen",
+    recordTabOverview: "Detalles",
+    detailsColumnResize: "Cambiar el ancho de la columna de detalles",
     recordTabMoveBefore: "Mover a la izquierda",
     recordTabMoveAfter: "Mover a la derecha",
     recordTabsMore: "{{count}} pestañas más",
@@ -1651,7 +1658,9 @@ const es = {
     recordTabsMoreTrigger_one: "Más {{count}}",
     recordTabsMoreTrigger_many: "Más {{count}}",
     recordTabsMoreTrigger_other: "Más {{count}}",
-    // objectstack#35596 — the 概览 tab's summary rail.
+    // objectstack#35596 — the 概览 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
     summaryApprovalDone: "Aprobado",
     summaryApprovalMine: "Pendiente de usted",
     summaryApprovalWaitingOn: "Esperando a {{name}}",
@@ -1694,6 +1703,12 @@ const es = {
     updatedBy: "Actualizado por",
     created: "Creado",
     updated: "Actualizado",
+    // Record page field list (objectstack#36147).
+    systemInfo: "Información del sistema",
+    createdTime: "Fecha de creación",
+    updatedTime: "Fecha de modificación",
+    recordNumber: "ID del registro",
+    clickToEdit: "Haga clic para editar",
     // objectui#3863 — base key, answering only a call made without a count. es's
     // `many` (exact millions) has its own slot since objectui#11432; it repeats
     // `_other` here because the count governs no noun complement.
@@ -2771,6 +2786,11 @@ const es = {
         saveAsMyView: "Guardar como mi vista",
         copyName: "{{name}} (copia)",
         saved: "Guardado",
+        saveToViewConfirmTitle: "¿Guardar en esta vista?",
+        saveToViewConfirm: "Todas las personas que usan «{{name}}» verán estos cambios.",
+        saveToViewConfirmButton: "Guardar para todos",
+        savedForEveryone: "Guardado, visible para todos",
+        pendingDraft: "Esta vista tiene cambios sin publicar. Publícalos o descártalos primero en la configuración de la vista.",
       },
       linkFilterRefused: 'No se aplicó el filtro de este enlace. Incluye un campo por el que no puede filtrar aquí, así que la lista muestra la vista sin él.',
       personalizedParts: {
@@ -2780,10 +2800,14 @@ const es = {
         grouping: "Agrupación",
         columns: "Disposición de columnas",
         hiddenFields: "Campos ocultos",
+        summaries: "Cálculos",
         density: "Densidad",
         layout: "Diseño",
         rowColor: "Color de fila",
         inlineEdit: "Edición en línea",
+      },
+      saveRefused: {
+        packaged: "Esta vista viene con un paquete de aplicación y no se puede cambiar directamente. Puedes guardarla como tu propia vista.",
       },
       cannotDeleteMetaView: "Esta vista está integrada y definida en el código: no se puede eliminar.",
       expandToPage: "Abrir como página completa",

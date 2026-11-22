@@ -55,6 +55,13 @@ export interface RichTextCommentInputProps {
    * extra slot. Focus opens it in full. The record timeline's composer.
    */
   compact?: boolean;
+  /**
+   * `phone` (objectstack#36076 item 3): the editor first, then one row under
+   * it — mention, bold, italic, list, code, and send at the right end — with
+   * no preview and no keyboard-shortcut hint; the text at 16 px, so a phone
+   * does not zoom the page into the box. `default`: the toolbar above.
+   */
+  layout?: 'default' | 'phone';
 }
 
 /** The mention menu's width (`w-56`) and its tallest height (`max-h-40`), in px. */
@@ -137,6 +144,7 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
   autoFocus = false,
   onMentionSuggestionsWanted,
   compact = false,
+  layout = 'default',
 }) => {
   const { t } = useDetailTranslation();
   const [isPreview, setIsPreview] = React.useState(false);
@@ -322,20 +330,9 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
     [showMentions, filteredMentions, mentionIndex, handleSelectMention, onSubmit],
   );
 
-  return (
-    <div
-      className={cn('border rounded-md', className)}
-      data-composer-collapsed={compact ? String(collapsed) : undefined}
-      onFocus={compact ? () => setFocused(true) : undefined}
-      onBlur={
-        compact
-          ? (e) => {
-              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false);
-            }
-          : undefined
-      }
-    >
-      {/* Toolbar */}
+  const phone = layout === 'phone';
+  // The desktop's toolbar, above the editor.
+  const toolbar = (
       <div className={cn('flex flex-wrap items-center gap-0.5 px-2 py-1.5 border-b bg-muted/30', collapsed && 'hidden')}>
         <Button
           variant="ghost"
@@ -417,6 +414,62 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
           </Button>
         )}
       </div>
+  );
+  // objectstack#36076 — the phone's row, under the editor: the same commands
+  // at touch size, mention first, send at the right end.
+  const phoneToolButton = 'h-11 w-11 shrink-0';
+  const phoneToolbar = (
+    <div
+      className={cn('flex items-center gap-0.5 border-t px-1 py-1', collapsed && 'hidden')}
+      // A press here keeps the caret (and the phone's keyboard) in the box.
+      onMouseDown={(e) => e.preventDefault()}
+      data-composer-toolbar="phone"
+    >
+      <Button variant="ghost" size="icon" className={phoneToolButton} onClick={handleMentionTrigger} disabled={disabled} aria-label={t('detail.mentionSomeone')}>
+        <AtSign className="h-4 w-4" />
+      </Button>
+      <Button variant="ghost" size="icon" className={phoneToolButton} onClick={handleBold} disabled={disabled} aria-label={t('detail.formatBold')}>
+        <Bold className="h-4 w-4" />
+      </Button>
+      <Button variant="ghost" size="icon" className={phoneToolButton} onClick={handleItalic} disabled={disabled} aria-label={t('detail.formatItalic')}>
+        <Italic className="h-4 w-4" />
+      </Button>
+      <Button variant="ghost" size="icon" className={phoneToolButton} onClick={handleList} disabled={disabled} aria-label={t('detail.listFormat')}>
+        <List className="h-4 w-4" />
+      </Button>
+      <Button variant="ghost" size="icon" className={phoneToolButton} onClick={handleCode} disabled={disabled} aria-label={t('detail.inlineCode')}>
+        <Code className="h-4 w-4" />
+      </Button>
+      <div className="flex-1" />
+      {onSubmit && (
+        <Button
+          size="icon"
+          className="h-11 w-11 shrink-0 rounded-full"
+          onClick={onSubmit}
+          disabled={disabled || (!canSubmitEmpty && !value.trim())}
+          aria-label={t('detail.sendComment')}
+          data-composer-send=""
+        >
+          <Send className="h-4 w-4" />
+        </Button>
+      )}
+    </div>
+  );
+
+  return (
+    <div
+      className={cn('border rounded-md', className)}
+      data-composer-collapsed={compact ? String(collapsed) : undefined}
+      onFocus={compact ? () => setFocused(true) : undefined}
+      onBlur={
+        compact
+          ? (e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false);
+            }
+          : undefined
+      }
+    >
+      {!phone && toolbar}
 
       {/* Editor / Preview */}
       <div className="relative" ref={editorBoxRef}>
@@ -432,6 +485,7 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
               className={cn(
                 'w-full px-3 text-sm bg-transparent resize-none focus:outline-none placeholder:text-muted-foreground',
                 collapsed ? 'block h-8 min-h-0 py-1.5 text-sm leading-5' : 'min-h-[80px] py-2',
+                phone && (collapsed ? 'h-10 py-2 text-base leading-6' : 'min-h-[72px] text-base'),
               )}
               rows={collapsed ? 1 : undefined}
               placeholder={placeholder ?? t('detail.writeComment')}
@@ -516,6 +570,7 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
           {extraSlot}
         </div>
       )}
+      {phone && phoneToolbar}
     </div>
   );
 };
