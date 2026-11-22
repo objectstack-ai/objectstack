@@ -323,8 +323,10 @@ describe('the drawer\'s per-field callback mode asks for the fields a change mak
           onFieldSave={onFieldSave}
         />,
       );
-      fireEvent.doubleClick(screen.getByText('open'));
-      fireEvent.change(screen.getByDisplayValue('open'), { target: { value: 'done' } });
+      // The status reads in more than one place (the header's highlights, the
+      // body); the body's value is the one a double-click edits.
+      for (const el of screen.getAllByText('open')) fireEvent.doubleClick(el);
+      fireEvent.change(screen.getAllByDisplayValue('open')[0], { target: { value: 'done' } });
       fireEvent.click(screen.getByRole('button', { name: 'Save' }));
       const dialog = await screen.findByTestId('required-fields-dialog');
       const outcome = dialog.querySelector<HTMLInputElement>('[data-required-fields-field="outcome"] input')!;
