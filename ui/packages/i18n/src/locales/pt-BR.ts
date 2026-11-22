@@ -1325,6 +1325,12 @@ const pt = {
     unknownUser: "Desconhecido",
     created: "Criado",
     updated: "Atualizado",
+    // Record page field list (objectstack#36147).
+    systemInfo: "Informações do sistema",
+    createdTime: "Criado em",
+    updatedTime: "Atualizado em",
+    recordNumber: "ID do registro",
+    clickToEdit: "Clique para editar",
     back: "Voltar",
     edit: "Editar",
     editInline: "Editar",

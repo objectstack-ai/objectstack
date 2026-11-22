@@ -1430,6 +1430,12 @@ const ar = {
     unknownUser: "غير معروف",
     created: "أُنشئ",
     updated: "حُدِّث",
+    // Record page field list (objectstack#36147).
+    systemInfo: "معلومات النظام",
+    createdTime: "تاريخ الإنشاء",
+    updatedTime: "تاريخ التعديل",
+    recordNumber: "معرّف السجل",
+    clickToEdit: "انقر للتحرير",
     back: "رجوع",
     edit: "تحرير",
     editInline: "تحرير",

@@ -1648,6 +1648,12 @@ const de = {
     updatedBy: "Aktualisiert von",
     created: "Erstellt",
     updated: "Aktualisiert",
+    // Record page field list (objectstack#36147).
+    systemInfo: "Systeminformationen",
+    createdTime: "Erstellt am",
+    updatedTime: "Geändert am",
+    recordNumber: "Datensatz-ID",
+    clickToEdit: "Zum Bearbeiten klicken",
     // objectui#3863 — base key. de's categories are exactly `one`/`other`, so this
     // slot is unreachable here and equals `_other` for key-set parity.
     showEmptyRelated: "+ {{count}} leer",

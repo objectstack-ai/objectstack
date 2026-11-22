@@ -1648,6 +1648,12 @@ const ko = {
     updatedBy: "업데이트한 사람",
     created: "작성됨",
     updated: "업데이트됨",
+    // Record page field list (objectstack#36147).
+    systemInfo: "시스템 정보",
+    createdTime: "생성 일시",
+    updatedTime: "수정 일시",
+    recordNumber: "레코드 ID",
+    clickToEdit: "클릭하여 편집",
     // objectui#3863 — base key. ko has a single plural category (`other`), so this
     // slot is unreachable here and equals `_other` for key-set parity.
     showEmptyRelated: "+ {{count}}개 비어 있음",

@@ -1895,6 +1895,12 @@ const en = {
     updatedBy: 'Updated by',
     created: 'Created',
     updated: 'Updated',
+    // Record page field list (objectstack#36147).
+    systemInfo: 'System information',
+    createdTime: 'Created on',
+    updatedTime: 'Updated on',
+    recordNumber: 'Record ID',
+    clickToEdit: 'Click to edit',
     // Attachments
     dropFilesToUpload: 'Drop files here or click to upload',
     attachmentCount: '{{count}} attachment',
