@@ -59,8 +59,8 @@ nothing. The one item-name grammar itself lives in
 ## TypeScript Usage
 
 ```typescript
-import { AddRecordConfigSchema, AppearanceConfigSchema, CalendarConfigSchema, ColumnPrefixSchema, ColumnSummarySchema, ColumnSummaryConfigSchema, EmptyStateSchema, FormButtonConfigSchema, FormFieldSchema, FormSectionSchema, FormSelectOptionSchema, FormViewSchema, GalleryConfigSchema, GanttConfigSchema, GanttQuickFilterSchema, GroupingConfigSchema, GroupingFieldSchema, HttpMethodSubsetSchema, HttpRequestSchema, KanbanConfigSchema, ListChartConfigSchema, ListColumnSchema, ListMapConfigSchema, ListViewSchema, NavigationConfigSchema, NavigationModeSchema, ObjectListViewSchema, ObjectUserFiltersSchema, PaginationConfigSchema, RowColorConfigSchema, RowHeightSchema, SelectionConfigSchema, TimelineConfigSchema, TimesheetConfigSchema, TreeConfigSchema, UserActionsConfigSchema, UserFilterFieldSchema, UserFiltersSchema, ViewSchema, ViewDataSchema, ViewFilterElementSchema, ViewFilterOrGroupSchema, ViewFilterRuleSchema, ViewItemSchema, ViewItemNameSchema, ViewItemWireSchema, ViewKindSchema, ViewScopeSchema, ViewSharingSchema, ViewTabSchema, VisualizationTypeSchema } from '@objectstack/spec/ui';
-import type { AddRecordConfig, AppearanceConfig, CalendarConfig, ColumnPrefix, ColumnSummary, ColumnSummaryConfig, EmptyState, FormButtonConfig, FormField, FormSection, FormSelectOption, FormView, GalleryConfig, GanttConfig, GanttQuickFilter, GroupingConfig, HttpMethodSubset, HttpRequest, KanbanConfig, ListChartConfig, ListColumn, ListMapConfig, ListView, NavigationConfig, NavigationMode, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, TimesheetConfig, TreeConfig, UserActionsConfig, UserFilterField, UserFilters, View, ViewData, ViewFilterElement, ViewFilterOrGroup, ViewFilterRule, ViewItem, ViewItemName, ViewItemWire, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
+import { AddRecordConfigSchema, AppearanceConfigSchema, CalendarConfigSchema, ColumnPrefixSchema, ColumnSummarySchema, ColumnSummaryConfigSchema, EmptyStateSchema, FormButtonConfigSchema, FormFieldSchema, FormSectionSchema, FormSelectOptionSchema, FormViewSchema, GalleryConfigSchema, GanttConfigSchema, GanttQuickFilterSchema, GroupingConfigSchema, GroupingFieldSchema, HttpMethodSubsetSchema, HttpRequestSchema, KanbanConfigSchema, KanbanLaneSummarySchema, ListChartConfigSchema, ListColumnSchema, ListMapConfigSchema, ListViewSchema, NavigationConfigSchema, NavigationModeSchema, ObjectListViewSchema, ObjectUserFiltersSchema, PaginationConfigSchema, RowColorConfigSchema, RowHeightSchema, SelectionConfigSchema, TimelineConfigSchema, TimesheetConfigSchema, TreeConfigSchema, UserActionsConfigSchema, UserFilterFieldSchema, UserFiltersSchema, ViewSchema, ViewDataSchema, ViewFilterElementSchema, ViewFilterOrGroupSchema, ViewFilterRuleSchema, ViewItemSchema, ViewItemNameSchema, ViewItemWireSchema, ViewKindSchema, ViewScopeSchema, ViewSharingSchema, ViewTabSchema, VisualizationTypeSchema } from '@objectstack/spec/ui';
+import type { AddRecordConfig, AppearanceConfig, CalendarConfig, ColumnPrefix, ColumnSummary, ColumnSummaryConfig, EmptyState, FormButtonConfig, FormField, FormSection, FormSelectOption, FormView, GalleryConfig, GanttConfig, GanttQuickFilter, GroupingConfig, HttpMethodSubset, HttpRequest, KanbanConfig, KanbanLaneSummary, ListChartConfig, ListColumn, ListMapConfig, ListView, NavigationConfig, NavigationMode, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, TimesheetConfig, TreeConfig, UserActionsConfig, UserFilterField, UserFilters, View, ViewData, ViewFilterElement, ViewFilterOrGroup, ViewFilterRule, ViewItem, ViewItemName, ViewItemWire, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
 
 // Validate data
 const result = AddRecordConfigSchema.parse(data);
@@ -689,18 +689,66 @@ HTTP methods a view data source may request — the subset of `HttpMethod` witho
 | **groupByField** | `string` | ✅ | Field to group columns by (usually status/select). NO leading or trailing whitespace: the board reads this name off every card verbatim, so a padded spelling collapses the whole board into one `Uncategorized` lane. |
 | **lanes** | `string[]` | optional | The lanes the board draws, in this order: stored option values of the groupByField field (the option `value`, not its label). Omit to draw one lane per option in the options' own order. A record whose value is not listed is not hidden: it lands in the `Uncategorized` lane, as a record whose value matches no lane does. To keep records off the board, filter the view. List each value once. |
 | **summarizeField** | `string` | optional | Field to sum at top of column (e.g. amount) |
-| **summary** | `{ type: Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| …>; field?: string }` | optional | The statistic each lane shows at its foot: one of the list footer calculations, `{ type, field }` (the same object a list column `summary` takes). `{ type: 'count' }` counts the lane records; `{ type: 'sum', field: 'amount' }` totals a field; `{ type: 'none' }` shows nothing. Takes precedence over summarizeField. Omit to keep summarizeField's sum, or no statistic without it. |
+| **summary** | `{ type: 'none' } \| { type: 'count' } \| { type: 'sum'; field: string }` | optional | The statistic each lane shows at its foot. `{ type: 'count' }` counts the lane records; `{ type: 'sum', field: 'amount' }` totals a number field; `{ type: 'none' }` shows nothing. Takes precedence over summarizeField. Omit to keep summarizeField's sum, or no statistic without it. |
 | **showFieldLabels** | `boolean` | optional | Whether each card names its fields beside their values. Omit for true (names shown); false shows the values alone. |
 | **hideEmptyFields** | `boolean` | optional | Whether a card leaves out a field that holds no value. Omit for true (left out); false keeps the field with an empty value. |
 | **titleField** | `string` | optional | Field displayed as the card title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
 | **columns** | `string[]` | ✅ | Fields to show on cards |
 
-### Nested Shape: `KanbanConfig.summary`
+### Nested Shape: `KanbanConfig.summary[type='sum']`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| …>` | ✅ | Aggregation function |
-| **field** | `string` | optional | Field to aggregate (defaults to the column field) |
+| **type** | `'sum'` | ✅ |  |
+| **field** | `string` | ✅ | The number field the lane totals (e.g. amount) |
+
+
+---
+
+## KanbanLaneSummary
+
+Lane foot statistic: none, count, or the sum of a number field
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+**Type:** `none`
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'none'` | ✅ |  |
+
+---
+
+#### Option 2
+
+**Type:** `count`
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'count'` | ✅ |  |
+
+---
+
+#### Option 3
+
+**Type:** `sum`
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'sum'` | ✅ |  |
+| **field** | `string` | ✅ | The number field the lane totals (e.g. amount) |
+
+---
 
 
 ---
@@ -802,7 +850,7 @@ Map view configuration
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation: the drawer size, and `preventNavigation` for a list whose rows open nothing (`mode` is deprecated — the record name opens the page, the hover icon the side panel) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| object \| object; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -935,7 +983,7 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 | **groupByField** | `string` | ✅ | Field to group columns by (usually status/select). NO leading or trailing whitespace: the board reads this name off every card verbatim, so a padded spelling collapses the whole board into one `Uncategorized` lane. |
 | **lanes** | `string[]` | optional | The lanes the board draws, in this order: stored option values of the groupByField field (the option `value`, not its label). Omit to draw one lane per option in the options' own order. A record whose value is not listed is not hidden: it lands in the `Uncategorized` lane, as a record whose value matches no lane does. To keep records off the board, filter the view. List each value once. |
 | **summarizeField** | `string` | optional | Field to sum at top of column (e.g. amount) |
-| **summary** | `{ type: Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| …>; field?: string }` | optional | The statistic each lane shows at its foot: one of the list footer calculations, `{ type, field }` (the same object a list column `summary` takes). `{ type: 'count' }` counts the lane records; `{ type: 'sum', field: 'amount' }` totals a field; `{ type: 'none' }` shows nothing. Takes precedence over summarizeField. Omit to keep summarizeField's sum, or no statistic without it. |
+| **summary** | `{ type: 'none' } \| { type: 'count' } \| { type: 'sum'; field: string }` | optional | The statistic each lane shows at its foot. `{ type: 'count' }` counts the lane records; `{ type: 'sum', field: 'amount' }` totals a number field; `{ type: 'none' }` shows nothing. Takes precedence over summarizeField. Omit to keep summarizeField's sum, or no statistic without it. |
 | **showFieldLabels** | `boolean` | optional | Whether each card names its fields beside their values. Omit for true (names shown); false shows the values alone. |
 | **hideEmptyFields** | `boolean` | optional | Whether a card leaves out a field that holds no value. Omit for true (left out); false keeps the field with an empty value. |
 | **titleField** | `string` | optional | Field displayed as the card title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
@@ -1202,7 +1250,7 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation: the drawer size, and `preventNavigation` for a list whose rows open nothing (`mode` is deprecated — the record name opens the page, the hover icon the side panel) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| object \| object; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -1326,7 +1374,7 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 | **groupByField** | `string` | ✅ | Field to group columns by (usually status/select). NO leading or trailing whitespace: the board reads this name off every card verbatim, so a padded spelling collapses the whole board into one `Uncategorized` lane. |
 | **lanes** | `string[]` | optional | The lanes the board draws, in this order: stored option values of the groupByField field (the option `value`, not its label). Omit to draw one lane per option in the options' own order. A record whose value is not listed is not hidden: it lands in the `Uncategorized` lane, as a record whose value matches no lane does. To keep records off the board, filter the view. List each value once. |
 | **summarizeField** | `string` | optional | Field to sum at top of column (e.g. amount) |
-| **summary** | `{ type: Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| …>; field?: string }` | optional | The statistic each lane shows at its foot: one of the list footer calculations, `{ type, field }` (the same object a list column `summary` takes). `{ type: 'count' }` counts the lane records; `{ type: 'sum', field: 'amount' }` totals a field; `{ type: 'none' }` shows nothing. Takes precedence over summarizeField. Omit to keep summarizeField's sum, or no statistic without it. |
+| **summary** | `{ type: 'none' } \| { type: 'count' } \| { type: 'sum'; field: string }` | optional | The statistic each lane shows at its foot. `{ type: 'count' }` counts the lane records; `{ type: 'sum', field: 'amount' }` totals a number field; `{ type: 'none' }` shows nothing. Takes precedence over summarizeField. Omit to keep summarizeField's sum, or no statistic without it. |
 | **showFieldLabels** | `boolean` | optional | Whether each card names its fields beside their values. Omit for true (names shown); false shows the values alone. |
 | **hideEmptyFields** | `boolean` | optional | Whether a card leaves out a field that holds no value. Omit for true (left out); false keeps the field with an empty value. |
 | **titleField** | `string` | optional | Field displayed as the card title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
@@ -1809,7 +1857,7 @@ Tab configuration for multi-tab view interface
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation: the drawer size, and `preventNavigation` for a list whose rows open nothing (`mode` is deprecated — the record name opens the page, the hover icon the side panel) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| object \| object; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -1889,7 +1937,7 @@ Tab configuration for multi-tab view interface
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation: the drawer size, and `preventNavigation` for a list whose rows open nothing (`mode` is deprecated — the record name opens the page, the hover icon the side panel) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| object \| object; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -2187,7 +2235,7 @@ This schema accepts one of the following structures:
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation: the drawer size, and `preventNavigation` for a list whose rows open nothing (`mode` is deprecated — the record name opens the page, the hover icon the side panel) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| object \| object; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -2376,7 +2424,7 @@ This schema accepts one of the following structures:
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation: the drawer size, and `preventNavigation` for a list whose rows open nothing (`mode` is deprecated — the record name opens the page, the hover icon the side panel) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| object \| object; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |

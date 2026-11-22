@@ -2368,6 +2368,38 @@ export const EmptyStateSchema = lazySchema(() => strictObject({
 }));
 
 /**
+ * objectstack#36370 — a board lane's foot statistic (`kanban.summary`).
+ *
+ * Its own closed set, not the list footer's `ColumnSummaryConfigSchema`: the
+ * board computes these over the cards a lane holds, so the set is exactly what
+ * a reader computes. `count` counts the lane's records; `sum` totals a number
+ * field (`field` required); `none` shows nothing, also over `summarizeField`.
+ * An average, a minimum or a maximum waits for a server-side lane read: over a
+ * lane that has loaded only part of its cards none of them is even a bound.
+ */
+export const KanbanLaneSummarySchema = lazySchema(() => z.discriminatedUnion('type', [
+  strictObject({
+    surface: 'this `none` lane statistic',
+    history: VIEW_HISTORY,
+  }, {
+    type: z.literal('none'),
+  }),
+  strictObject({
+    surface: 'this `count` lane statistic',
+    history: VIEW_HISTORY,
+  }, {
+    type: z.literal('count'),
+  }),
+  strictObject({
+    surface: 'this `sum` lane statistic',
+    history: VIEW_HISTORY,
+  }, {
+    type: z.literal('sum'),
+    field: z.string().min(1).describe('The number field the lane totals (e.g. amount)'),
+  }),
+]).describe('Lane foot statistic: none, count, or the sum of a number field'));
+
+/**
  * Kanban Settings
  */
 export const KanbanConfigSchema = lazySchema(() => strictObject({
@@ -2431,22 +2463,20 @@ export const KanbanConfigSchema = lazySchema(() => strictObject({
     ),
   summarizeField: z.string().optional().describe('Field to sum at top of column (e.g. amount)'),
   /**
-   * objectstack#36370 — the statistic each lane shows at its foot, one of the
-   * list footer's calculations (`ColumnSummaryConfigSchema`, the same object a
-   * list column's `summary` takes): `{ type: 'count' }` counts the lane's
-   * records; `{ type: 'sum' | 'avg' | …, field }` aggregates a field over
-   * them; `{ type: 'none' }` shows nothing, also over a `summarizeField`.
-   * Without it a lane shows the sum of `summarizeField` where that is set, as
-   * before this key, and nothing otherwise.
+   * objectstack#36370 — the statistic each lane shows at its foot
+   * ({@link KanbanLaneSummarySchema}): `{ type: 'count' }` counts the lane's
+   * records; `{ type: 'sum', field }` totals a number field over them;
+   * `{ type: 'none' }` shows nothing, also over a `summarizeField`. Without
+   * it a lane shows the sum of `summarizeField` where that is set, as before
+   * this key, and nothing otherwise.
    *
-   * ⛔ No spec-side default: absence keeps every board stored before this key
+   * ⛔ No spec-side default: absence keeps a board stored before this key
    * exactly as it was.
    */
-  summary: ColumnSummaryConfigSchema.optional().describe(
-    'The statistic each lane shows at its foot: one of the list footer calculations, `{ type, field }` '
-    + '(the same object a list column `summary` takes). `{ type: \'count\' }` counts the lane records; '
-    + '`{ type: \'sum\', field: \'amount\' }` totals a field; `{ type: \'none\' }` shows nothing. Takes '
-    + 'precedence over summarizeField. Omit to keep summarizeField\'s sum, or no statistic without it.',
+  summary: KanbanLaneSummarySchema.optional().describe(
+    'The statistic each lane shows at its foot. `{ type: \'count\' }` counts the lane records; '
+    + '`{ type: \'sum\', field: \'amount\' }` totals a number field; `{ type: \'none\' }` shows nothing. '
+    + 'Takes precedence over summarizeField. Omit to keep summarizeField\'s sum, or no statistic without it.',
   ),
   /**
    * objectstack#36370 — whether a card names each field beside its value.
@@ -8364,6 +8394,7 @@ export type CalendarConfig = z.input<typeof CalendarConfigSchema>;
 export type GanttConfig = z.input<typeof GanttConfigSchema>;
 export type GanttQuickFilter = z.input<typeof GanttQuickFilterSchema>;
 export type KanbanConfig = z.input<typeof KanbanConfigSchema>;
+export type KanbanLaneSummary = z.input<typeof KanbanLaneSummarySchema>;
 export type ListMapConfig = z.input<typeof ListMapConfigSchema>;
 export type NavigationMode = z.input<typeof NavigationModeSchema>;
 export type TreeConfig = z.input<typeof TreeConfigSchema>;

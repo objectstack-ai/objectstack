@@ -272,6 +272,8 @@
     "KNOWN_COMPONENT_TYPE_CANDIDATES (const)",
     "KanbanConfig (type)",
     "KanbanConfigSchema (const)",
+    "KanbanLaneSummary (type)",
+    "KanbanLaneSummarySchema (const)",
     "LIST_VIEW_GROUP_COUNT_ALIAS (const)",
     "ListChartConfig (type)",
     "ListChartConfigParsed (type)",
