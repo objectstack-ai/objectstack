@@ -343,8 +343,12 @@ describe('objectstack#36286 — the empty palette leads with the current page\'s
   let listFavorite: { isFavorite: boolean } | null = null;
   let favorites: FavoriteItem[] = [];
   function PageProbe({ objectName }: { objectName?: string }) {
-    listFavorite = useObjectListFavorite({ appSegment: 'crm', objectName, label: 'Customers' });
-    favorites = useFavorites().favorites;
+    const list = useObjectListFavorite({ appSegment: 'crm', objectName, label: 'Customers' });
+    const stored = useFavorites().favorites;
+    React.useEffect(() => {
+      listFavorite = list;
+      favorites = stored;
+    });
     return null;
   }
   /** The visit the record page records once its title is known. */
