@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from 'react';
 import { useParams, type useNavigate } from 'react-router-dom';
 import { formatMetadataError } from '@object-ui/data-objectstack';
+import { viewSaveRefusalText } from './viewSaveRefusal.js';
 import { toast } from 'sonner';
 import type { useObjectTranslation } from '@object-ui/i18n';
 import type { useObjectListPreferences } from '../context/ListPreferencesProvider.js';
@@ -159,10 +160,12 @@ export function useObjectViewViewCrud({
             return true;
         } catch (err) {
             console.error('[ViewConfigPanel] Failed to persist view config:', err);
-            // objectui#11583: a refused save is SAID, with the door's own
-            // message, as the Create View doors do (objectui#11578).
+            // objectui#11583: a refused save is SAID, as the Create View doors
+            // do (objectui#11578), with the door's own message;
+            // objectstack#36195: a package's view in the reader's words
+            // (`viewSaveRefusalText`).
             toast.error(t('form.saveError'), {
-                description: formatMetadataError(err),
+                description: viewSaveRefusalText(err, t),
                 classNames: { description: 'whitespace-pre-line' },
             });
             return false;
@@ -294,7 +297,7 @@ export function useObjectViewViewCrud({
             // message (the field-anchored issues of a 422, or the refusal's
             // text), and reported to the dialog as unsaved so it stays open.
             toast.error(t('form.saveError'), {
-                description: formatMetadataError(err),
+                description: viewSaveRefusalText(err, t),
                 classNames: { description: 'whitespace-pre-line' },
             });
             return false;
@@ -366,7 +369,7 @@ export function useObjectViewViewCrud({
             // message, through the channel objectui#11583 gave the view saves
             // and objectui#12398 gave Delete view.
             toast.error(t('objectViewActions.renameFailed'), {
-                description: formatMetadataError(err),
+                description: viewSaveRefusalText(err, t),
                 classNames: { description: 'whitespace-pre-line' },
             });
         }
@@ -426,7 +429,7 @@ export function useObjectViewViewCrud({
             console.error('[ViewTabBar] Failed to pin view:', err);
             // objectui#11583: a refused pin is said, with the door's message.
             toast.error(t('form.saveError'), {
-                description: formatMetadataError(err),
+                description: viewSaveRefusalText(err, t),
                 classNames: { description: 'whitespace-pre-line' },
             });
         }
@@ -460,7 +463,7 @@ export function useObjectViewViewCrud({
             console.error('[ViewTabBar] Failed to set default view:', err);
             // objectui#11583: said like its siblings, with the door's message.
             toast.error(t('form.saveError'), {
-                description: formatMetadataError(err),
+                description: viewSaveRefusalText(err, t),
                 classNames: { description: 'whitespace-pre-line' },
             });
         }
@@ -590,7 +593,7 @@ export function useCreateViewInPlace({
         } catch (err) {
             console.error('[ObjectView] Failed to create a personal view:', err);
             toast.error(t('form.saveError'), {
-                description: err instanceof Error ? err.message : String(err),
+                description: viewSaveRefusalText(err, t),
                 classNames: { description: 'whitespace-pre-line' },
             });
             return false;

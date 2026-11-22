@@ -394,3 +394,52 @@ describe('objectstack#35955 — the layout and the row colour the reader picks a
     expect(body.config.rowColor).toEqual({ field: 'status', colors: {} });
   });
 });
+
+describe('objectstack#36194 + objectstack#36195 — a shared view\'s Save to this view carries the footer calculations, and waits for the package list', () => {
+  it('a footer calculation picked is a part of the draft, saved into the view with no write of its own; the reader\'s row height stays theirs', async () => {
+    localStorage.setItem(`list-state:u1:${OBJECT}`, JSON.stringify({ perView: { [SHARED.name]: { rowHeight: 'tall' } } }));
+    mount(SHARED.name);
+    await settle();
+    await waitFor(() => expect(typeof listProps.current?.onColumnSummaryPick).toBe('function'));
+    let kept: unknown;
+    await act(async () => {
+      kept = listProps.current?.onColumnSummaryPick?.('amount', 'sum');
+    });
+    await settle();
+    expect(await kept).toBe(true);
+    // The pick writes nothing: it is the draft's, and the list draws it.
+    expect(meta.client.save).not.toHaveBeenCalled();
+    expect(listProps.current?.schema.columns).toEqual([{ field: 'name' }, { field: 'amount', summary: 'sum' }]);
+    expect(typeof listProps.current?.onSaveView).toBe('function');
+
+    await pressSave();
+    await confirmSave();
+    await waitFor(() => expect(meta.client.publish).toHaveBeenCalledWith('view', SHARED.name));
+    const body = (meta.client.save.mock.calls[0] as any[])[2];
+    expect(body.config.columns).toEqual([{ field: 'name' }, { field: 'amount', summary: 'sum' }]);
+    expect(body.config.rowHeight).toBe('short');
+  });
+
+  it('while the package list is unread, Save to this view is not offered; it is once the list says the package takes saves', async () => {
+    // Every reader of the package list waits on the same answer.
+    const waiting: Array<(list: any[]) => void> = [];
+    packageList.answer = () => new Promise<any[]>((resolve) => { waiting.push(resolve); });
+    mount(SHARED.name);
+    await settle();
+    await sortByAmount();
+    expect(listProps.current?.onSaveView).toBeUndefined();
+    await act(async () => {
+      for (const resolve of waiting) resolve(PACKAGES);
+    });
+    await settle();
+    await waitFor(() => expect(typeof listProps.current?.onSaveView).toBe('function'));
+  });
+
+  it('a failed package read still offers it, as before: the server\'s gate refuses what it refuses', async () => {
+    packageList.answer = () => Promise.reject(new Error('network'));
+    mount(SHARED.name);
+    await settle();
+    await sortByAmount();
+    await waitFor(() => expect(typeof listProps.current?.onSaveView).toBe('function'));
+  });
+});
