@@ -2807,6 +2807,7 @@ const ru = {
       enterSwitchApp: "Переключить приложение",
       enterApplyTheme: "Применить тему",
       enterOpen: "Открыть",
+      currentPage: "Текущая страница",
       searching: "Поиск…",
       records: "Записи",
       recentRecords: "Недавно просмотренные",

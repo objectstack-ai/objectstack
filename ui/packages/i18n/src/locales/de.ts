@@ -2657,6 +2657,7 @@ const de = {
       enterSwitchApp: "App wechseln",
       enterApplyTheme: "Design anwenden",
       enterOpen: "Öffnen",
+      currentPage: "Aktuelle Seite",
       searching: "Suche…",
       records: "Datensätze",
       recentRecords: "Zuletzt angesehen",

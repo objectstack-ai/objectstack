@@ -2659,6 +2659,7 @@ const ja = {
       enterSwitchApp: "アプリを切り替え",
       enterApplyTheme: "テーマを適用",
       enterOpen: "開く",
+      currentPage: "現在のページ",
       searching: "検索中…",
       records: "レコード",
       recentRecords: "最近閲覧",

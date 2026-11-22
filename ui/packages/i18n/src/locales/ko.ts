@@ -2657,6 +2657,7 @@ const ko = {
       enterSwitchApp: "앱 전환",
       enterApplyTheme: "테마 적용",
       enterOpen: "열기",
+      currentPage: "현재 페이지",
       searching: "검색 중…",
       records: "레코드",
       recentRecords: "최근 본 항목",

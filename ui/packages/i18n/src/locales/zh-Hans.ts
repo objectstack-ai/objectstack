@@ -2400,6 +2400,7 @@ const zh = {
       enterSwitchApp: '切换应用',
       enterApplyTheme: '应用主题',
       enterOpen: '打开',
+      currentPage: '当前页面',
     },
     ai: {
       pendingDrafts: {

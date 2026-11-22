@@ -2726,6 +2726,7 @@ const pt = {
       enterSwitchApp: "Trocar aplicativo",
       enterApplyTheme: "Aplicar tema",
       enterOpen: "Abrir",
+      currentPage: "Página atual",
       searching: "Pesquisando…",
       records: "Registros",
       recentRecords: "Vistos recentemente",

@@ -2727,6 +2727,7 @@ const fr = {
       enterSwitchApp: "Changer d'application",
       enterApplyTheme: "Appliquer le thème",
       enterOpen: "Ouvrir",
+      currentPage: "Page actuelle",
       searching: "Recherche…",
       records: "Enregistrements",
       recentRecords: "Récemment consultés",
