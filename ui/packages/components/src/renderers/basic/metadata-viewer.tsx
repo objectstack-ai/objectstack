@@ -52,7 +52,7 @@ import {
   subjectFieldOf,
   type BranchGuard,
   type ConditionContext,
-  type ConditionField,
+  type FlowConditionField,
   type FlowSubjects,
 } from './flow-branches';
 
@@ -409,7 +409,7 @@ function useConditionContext(object: any, subjects: FlowSubjects): ConditionCont
   const locale = useDisplayLocale();
   const { currency: tenantCurrency } = useLocalization();
   return {
-    field(path): ConditionField | undefined {
+    field(path): FlowConditionField | undefined {
       const name = subjectFieldOf(path, subjects);
       const def = getField(object, name);
       if (!name || !def || typeof def !== 'object') return undefined;

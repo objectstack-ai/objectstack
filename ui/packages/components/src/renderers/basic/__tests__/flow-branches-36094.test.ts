@@ -12,10 +12,10 @@ import {
   readCondition,
   subjectFieldOf,
   type ConditionContext,
-  type ConditionField,
+  type FlowConditionField,
 } from '../flow-branches';
 
-const FIELDS: Record<string, ConditionField> = {
+const FIELDS: Record<string, FlowConditionField> = {
   amount: { label: 'Amount', type: 'currency' },
   stage: { label: 'Stage', type: 'select', options: [{ value: 'closed_won', label: 'Closed Won' }] },
   name: { label: 'Name', type: 'text' },

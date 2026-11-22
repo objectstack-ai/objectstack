@@ -345,7 +345,7 @@ function parse(src: string): Expr | null {
 }
 
 /** One field as the reader needs it, resolved by the caller from the object definition. */
-export interface ConditionField {
+export interface FlowConditionField {
   label: string;
   type?: string;
   options?: ReadonlyArray<{ value?: unknown; label?: unknown }>;
@@ -355,9 +355,9 @@ export interface ConditionField {
 
 export interface ConditionContext {
   /** The field a CEL path reads, or `undefined` when it is not a field of the subject object. */
-  field(path: readonly string[]): ConditionField | undefined;
+  field(path: readonly string[]): FlowConditionField | undefined;
   /** A number literal compared with `field`, formatted for the reader. */
-  formatNumber(value: number, field: ConditionField): string;
+  formatNumber(value: number, field: FlowConditionField): string;
   /** The reader's words for the junctions. `more` stands for terms of a conjunction left unread. */
   words: { and: string; or: string; more: string };
 }
