@@ -413,7 +413,9 @@ function coerce(type: string | undefined, raw: string): any {
  *   reads it (`amountCurrencyOf`): a `fixed` code, the code a sibling field on
  *   the line holds, or the home currency. A `currency` column the host named
  *   nothing for is in the home currency. A column of any other type holds no
- *   amount of money.
+ *   amount of money. A declared target that is not a drawn column is judged
+ *   by its child field the same way, and holds no amount when the host names
+ *   none.
  */
 function gridAutofillCurrency(
   columns: readonly GridColumn[],
@@ -429,15 +431,17 @@ function gridAutofillCurrency(
     sourceCurrency: (source, value) =>
       pickedAmountCurrencyOf(sourceFields?.[source] as never, value, picked),
     targetCurrency: (target): AmountCurrency | undefined => {
+      // A declared target need not be a drawn column: one that is not is
+      // judged by its child field all the same, as the record form judges it.
       const c = columns.find((x) => x.name === target);
-      if (!c || c.type !== 'currency') return undefined;
-      if (columnCurrencies && Object.prototype.hasOwnProperty.call(columnCurrencies, c.name)) {
-        const code = columnCurrencies[c.name];
+      if (c && c.type !== 'currency') return undefined;
+      if (columnCurrencies && Object.prototype.hasOwnProperty.call(columnCurrencies, target)) {
+        const code = columnCurrencies[target];
         return code ? { kind: 'code', code } : { kind: 'unset' };
       }
-      const def = columnFields?.[c.name];
-      if (def && typeof def === 'object') return amountCurrencyOf(def as never, line) ?? { kind: 'home' };
-      return { kind: 'home' };
+      const def = columnFields?.[target];
+      if (def && typeof def === 'object') return amountCurrencyOf(def as never, line) ?? (c ? { kind: 'home' } : undefined);
+      return c ? { kind: 'home' } : undefined;
     },
   };
 }

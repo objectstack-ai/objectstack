@@ -287,11 +287,13 @@ describe('a pick does not copy an amount across currencies (objectstack#36249)',
       columnFields,
       home = 'USD',
       line,
+      lookupAutofill,
     }: {
       currency?: Record<string, string | undefined>;
       columnFields?: Record<string, unknown>;
       home?: string;
       line?: Record<string, unknown>;
+      lookupAutofill?: Record<string, { target: string; source: string }[]>;
     }) {
       const [rows, setRows] = React.useState<Record<string, unknown>[]>([{ product: null, description: null, unit_price: null, ...line }]);
       return (
@@ -303,6 +305,7 @@ describe('a pick does not copy an amount across currencies (objectstack#36249)',
               field={{ columns: lineColumns } as never}
               columnCurrencies={currency}
               columnFields={columnFields}
+              lookupAutofill={lookupAutofill}
             />
             <output data-testid="rows">{JSON.stringify(rows)}</output>
           </SchemaRendererContext.Provider>
@@ -377,6 +380,20 @@ describe('a pick does not copy an amount across currencies (objectstack#36249)',
       const note = await screen.findByTestId('line-items-autofill-withheld-0');
       expect(note.textContent).toContain('$100.00');
       expect(note.textContent).toContain('EUR');
+    });
+
+    it('a declared target that is not a drawn column is judged by its child field: a home price into a fixed EUR field is withheld', async () => {
+      render(
+        <Line
+          columnFields={{ net_price: { type: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'EUR' } } }}
+          lookupAutofill={{ product: [{ target: 'net_price', source: 'unit_price' }] }}
+        />,
+      );
+      await pickWidget();
+      await waitFor(() => expect(rowsNow()[0]).toMatchObject({ product: 'p1', description: 'Standard widget' }));
+      expect(rowsNow()[0].net_price ?? null).toBeNull();
+      const note = await screen.findByTestId('line-items-autofill-withheld-0');
+      expect(note.querySelector('[data-withheld-target="net_price"]')).not.toBeNull();
     });
 
     it("a home-currency price onto a line whose own code is JPY is withheld", async () => {
