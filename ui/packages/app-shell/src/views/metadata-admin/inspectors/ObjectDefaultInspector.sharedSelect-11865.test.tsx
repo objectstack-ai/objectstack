@@ -41,8 +41,8 @@ import { ObjectDefaultInspector } from './ObjectDefaultInspector';
 
 afterEach(() => cleanup());
 
-const PUBLIC = 'Public — covered by wildcard grants (default)';
-const PRIVATE = 'Private — needs an explicit grant';
+const PUBLIC = 'Standard — anyone with access to all objects (default)';
+const PRIVATE = 'Restricted — only people granted this object by name';
 
 /** A patch as text, with a key that holds `undefined` named rather than dropped. */
 const asText = (patch: unknown) => JSON.stringify(patch, (_k, v) => (v === undefined ? '(undefined)' : v));

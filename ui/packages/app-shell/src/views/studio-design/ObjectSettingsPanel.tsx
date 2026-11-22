@@ -9,11 +9,13 @@
 /**
  * Data pillar — object Settings view (builder-ui Phase B).
  *
- * Two stacked cards:
+ * Stacked cards, the business ones first and the developer options last
+ * (objectstack#36512). Every setting's title speaks the author's language and
+ * the metadata key it writes is small print beside it (`SettingKey`).
  *  1. Basics — hosts the SAME default inspector metadata-admin uses
- *     (`getMetadataDefaultInspector('object')` → ObjectDefaultInspector):
- *     label / pluralLabel / icon / description, one implementation for both
- *     surfaces.
+ *     (`getMetadataDefaultInspector('object')` → ObjectDefaultInspector), in
+ *     its business half: label / pluralLabel / icon / description, one
+ *     implementation for both surfaces.
  *  2. Record sharing (ADR-0056) — the object-level Org-Wide Default (OWD)
  *     `sharingModel` (private | public_read | public_read_write |
  *     controlled_by_parent). This is the baseline record-level visibility the
@@ -41,10 +43,14 @@
  *     (spec default true, explicit false disables). `trash`/`mru` were
  *     REMOVED from the spec (framework#2377 — ObjectCapabilities is now
  *     .strict(), authoring them is a parse error).
+ *  5. Developer options — the same inspector's developer half: the internal
+ *     name (read-only once created), the access posture and the required
+ *     permissions. Expanded, with no switch: nothing here is hidden. Drawn only
+ *     when an object inspector is registered; Basics names the missing one.
  */
 
 import React from 'react';
-import { Settings2, ShieldCheck, Sparkles, ToggleRight } from 'lucide-react';
+import { Code2, Settings2, ShieldCheck, Sparkles, ToggleRight } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -211,6 +217,7 @@ export function ObjectSettingsPanel({
   // mounted replaces the "not registered" note below without a remount.
   const DefaultInspector = useRegisteredMetadataDefaultInspector('object');
   const idBase = React.useId();
+  const renderKey = React.useCallback((key: string) => <SettingKey name={key} />, []);
   const controlId = (key: string) => `${idBase}-${key}`;
 
   const fields = React.useMemo(() => readFields(draft.fields).entries, [draft.fields]);
@@ -308,6 +315,7 @@ export function ObjectSettingsPanel({
               readOnly={!!disabled}
               locale={locale}
               onBlockingIssuesChange={onBlockingIssuesChange}
+              split={{ part: 'business', renderKey }}
             />
           ) : (
             <p className="text-[12px] text-muted-foreground">{t('engine.studio.settings.noInspector', locale)}</p>
@@ -508,6 +516,30 @@ export function ObjectSettingsPanel({
           })}
         </div>
       </section>
+
+      {DefaultInspector && (
+        <section className="rounded-lg border" data-testid="developer-options-section">
+          <header className="flex items-center gap-2 border-b px-3 py-2">
+            <Code2 className="h-3.5 w-3.5" />
+            <span className="text-[13px] font-medium">{t('engine.studio.settings.developer', locale)}</span>
+            <span className="text-[11px] text-muted-foreground">
+              {t('engine.studio.settings.developerHint', locale)}
+            </span>
+          </header>
+          <div className="max-w-xl p-3">
+            {/* eslint-disable-next-line react-hooks/static-components -- useRegisteredMetadataDefaultInspector returns a registered component (stable), not one created during render */}
+            <DefaultInspector
+              type="object"
+              name={name}
+              draft={draft}
+              onPatch={onPatch}
+              readOnly={!!disabled}
+              locale={locale}
+              split={{ part: 'developer', renderKey }}
+            />
+          </div>
+        </section>
+      )}
     </div>
   );
 }
