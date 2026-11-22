@@ -83,7 +83,7 @@ describe('[ADR-0093 D8.1] a runAs:\'user\' run carries the acting user\'s member
         const h = host({ ...MEMBER_GRANTS, accessible_org_ids: ['org_1', 'org_2'], posture: 'MEMBER' });
         await seedRunGrants.call(h, 'lead_triage', run, 'triggering');
         expect(h.userGrantsResolver).toHaveBeenCalledTimes(1);
-        const data = resolveRunDataContext(run) as Record<string, unknown>;
+        const data = resolveRunDataContext(run) as unknown as Record<string, unknown>;
         expect(data).toMatchObject({ isSystem: true, userId: 'u_mia', accessible_org_ids: ['org_1', 'org_2'], posture: 'MEMBER' });
         expect(data.permissions).toBeUndefined();
         expect(data.positions).toBeUndefined();

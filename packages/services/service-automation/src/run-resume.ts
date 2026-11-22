@@ -259,10 +259,8 @@ export async function seedRunGrants(
         if (needsMembership || needsRung) {
             try {
                 const grants = await this.userGrantsResolver(runContext.userId, runContext.tenantId);
-                if (needsMembership) {
-                    (runContext as SeededRunContext).accessible_org_ids = Array.isArray(grants?.accessible_org_ids)
-                        ? grants.accessible_org_ids
-                        : [];
+                if (needsMembership && Array.isArray(grants?.accessible_org_ids)) {
+                    (runContext as SeededRunContext).accessible_org_ids = grants.accessible_org_ids;
                 }
                 if (needsRung && grants?.posture) (runContext as SeededRunContext).posture = grants.posture;
             } catch (err) {
