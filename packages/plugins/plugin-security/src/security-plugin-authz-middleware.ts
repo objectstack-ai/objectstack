@@ -923,7 +923,9 @@ export function registerAuthzMiddleware(
     // never reaches 2.7, so its per-row check (step 3.6, [#19950]) keeps the
     // floor on exactly the terms its `where` scope does: step 3 decides the
     // floor per matched row ({@link predicateFloorDropIds}), and the check
-    // reads that decision for each row it judges.
+    // reads that decision for each row it judges; on a `controlled_by_parent`
+    // detail the master gate vouched for, both carry no floor
+    // ({@link predicateMasterGateRowIds}).
     let preImageFloorOpts: RlsFilterOptions | null = null;
     // [#35802] The predicate write's per-row floor decision: the matched rows
     // whose platform ownership floor step 3 replaced, because a by-id write of
@@ -1461,7 +1463,8 @@ export function registerAuthzMiddleware(
         // pass, and 2.8's condition is a strict SUPERSET of this one: the same
         // `permissionSets.length > 0 && userId && this.ql` triple, the same
         // single target id (`extractSingleId`; with none, 2.8 judges every
-        // master the write reaches instead), and one
+        // master the write reaches instead, and vouches for that write
+        // itself: `predicateMasterGateRowIds`), and one
         // additional operation (`insert`, which has no pre-image and so no
         // floor to drop). Reaching this line therefore PROVES the master gate
         // will answer the same write — the maintainer's precondition, held
