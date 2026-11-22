@@ -453,6 +453,53 @@ describe('[#25573] excludeSubmitter keeps the submitter from approving their own
       );
     });
 
+    // [#36308] The refusal names the position as the timeline note does,
+    // through the same resolver: the decider's pack label, else the declared
+    // label, else the name (the pin above, on a service that knows no label).
+    // The sentence stays the English the note stores.
+    it('the refusal names a labelled position by the decider\'s pack label, else its declared label', async () => {
+      const i18n = createMemoryI18n();
+      for (const [locale, data] of Object.entries(ApprovalsTranslations)) {
+        i18n.loadTranslations(locale, data as Record<string, unknown>);
+      }
+      i18n.loadTranslations('zh-CN', { positions: { legal: { label: '法务' } } });
+      const labelled = new ApprovalService({
+        engine: engine as any,
+        clock: { now: () => new Date(now += 1000) },
+        logger: { warn: () => {}, info: () => {}, error: () => {}, debug: () => {} } as any,
+        i18nServiceSource: () => i18n,
+        positionLabelSource: async (name) => (name === 'legal' ? 'Legal Counsel' : undefined),
+      });
+      const row = await open('solo_labelled', FIELD_STEP, {}, { org: SOLO_ORG });
+      await engine.update('sys_approval_request', { id: row.id, pending_approvers: 'position:legal,team:ops' },
+        { context: SYSTEM } as any);
+      const remedy = (who: string) => 'No one else can approve this request yet. An organization administrator must '
+        + `add a member who holds ${who}; that member can then decide it. To withdraw it instead, reject it or recall it.`;
+      await expect(labelled.decide(row.id, { decision: 'approve', actorId: 'u_sub' } as any, { ...soloAdmin, locale: 'zh-CN' }))
+        .rejects.toThrow(remedy("position '法务', team 'ops'"));
+      await expect(labelled.decide(row.id, { decision: 'approve', actorId: 'u_sub' } as any, { ...soloAdmin, locale: 'ja-JP' }))
+        .rejects.toThrow(remedy("position 'Legal Counsel', team 'ops'"));
+      await expect(labelled.decide(row.id, { decision: 'approve', actorId: 'u_sub' } as any, soloAdmin))
+        .rejects.toThrow(remedy("position 'Legal Counsel', team 'ops'"));
+    });
+
+    it('the excludeSubmitter refusal names a labelled position the same way', async () => {
+      const labelled = new ApprovalService({
+        engine: engine as any,
+        clock: { now: () => new Date(now += 1000) },
+        logger: { warn: () => {}, info: () => {}, error: () => {}, debug: () => {} } as any,
+        positionLabelSource: async (name) => (name === 'legal' ? 'Legal Counsel' : undefined),
+      });
+      const row = await open('solo_excluded_labelled', FIELD_STEP, ON, { org: SOLO_ORG });
+      await engine.update('sys_approval_request', { id: row.id, pending_approvers: 'position:legal' },
+        { context: SYSTEM } as any);
+      await expect(labelled.decide(row.id, { decision: 'approve', actorId: 'u_sub' } as any, soloAdmin)).rejects.toThrow(
+        "FORBIDDEN: 'u_sub' submitted this request, and its approval step sets excludeSubmitter, so they cannot "
+          + 'approve it. No one else can approve this request yet. An organization administrator must add a member '
+          + "who holds position 'Legal Counsel'; that member can then decide it.",
+      );
+    });
+
     it('CONTROL: with another approver on the slate, both refusals keep naming that approver', async () => {
       const excluded = await open('ctl_excluded', [{ type: 'user', value: 'u_bob' }], ON);
       await engine.update('sys_approval_request', { id: excluded.id, pending_approvers: 'u_sub,u_bob' },

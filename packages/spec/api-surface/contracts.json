@@ -323,6 +323,7 @@
     "RealtimeSubscriptionOptions (interface)",
     "RecordShare (interface)",
     "RecordShareRecipientType (type)",
+    "RecordUpdateStartsInput (interface)",
     "RemoteTable (interface)",
     "RenderTemplateInput (interface)",
     "RenderTemplateResult (interface)",

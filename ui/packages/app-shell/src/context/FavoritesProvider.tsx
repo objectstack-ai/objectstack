@@ -12,7 +12,9 @@
  * - localStorage stays in sync so offline / pre-auth sessions still work and
  *   gives an instant first paint after sign-in.
  * - The local key is scoped per `user.id` so different accounts on the same
- *   browser don't cross-contaminate.
+ *   browser don't cross-contaminate, and per active organization, like the
+ *   server row it mirrors, so one person's organizations don't either
+ *   (objectstack#36244).
  *
  * @module
  */
@@ -30,7 +32,9 @@ import {
 import { useAuth } from '@object-ui/auth';
 import {
   createDebouncedFlush,
+  readScopedCopy,
   scopedKey,
+  useOrganizationScope,
   useStorageSync,
   useUserStateAdapter,
 } from './UserStateAdapters.js';
@@ -240,18 +244,18 @@ function withNamedOrder(
   return changed ? next : items;
 }
 
-function loadFavorites(userId?: string | null): FavoriteItem[] {
+function loadFavorites(userId?: string | null, orgId?: string | null): FavoriteItem[] {
   try {
-    const raw = localStorage.getItem(scopedKey(STORAGE_BASE_KEY, userId));
+    const raw = readScopedCopy(STORAGE_BASE_KEY, userId, orgId);
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
   }
 }
 
-function saveFavorites(items: FavoriteItem[], userId?: string | null) {
+function saveFavorites(items: FavoriteItem[], userId?: string | null, orgId?: string | null) {
   try {
-    localStorage.setItem(scopedKey(STORAGE_BASE_KEY, userId), JSON.stringify(items));
+    localStorage.setItem(scopedKey(STORAGE_BASE_KEY, userId, orgId), JSON.stringify(items));
   } catch {
     // Storage full — silently ignore
   }
@@ -340,20 +344,22 @@ interface FavoritesProviderProps {
 export function FavoritesProvider({ children }: FavoritesProviderProps) {
   const { user } = useAuth();
   const userId = user?.id ?? null;
+  const orgId = useOrganizationScope();
   const adapter = useUserStateAdapter<FavoriteItem>('favorites');
 
-  const [favorites, setFavorites] = useState<FavoriteItem[]>(() => loadFavorites(userId));
+  const [favorites, setFavorites] = useState<FavoriteItem[]>(() => loadFavorites(userId, orgId));
 
-  // Re-load from localStorage whenever the active user changes (sign-in /
-  // account switch). Prevents one account from seeing another's favorites.
+  // Re-load from localStorage whenever the active user or organization
+  // changes (sign-in / account switch / the organization becoming known).
+  // Prevents one account, or one organization, from seeing another's favorites.
   useEffect(() => {
-    setFavorites(loadFavorites(userId));
-  }, [userId]);
+    setFavorites(loadFavorites(userId, orgId));
+  }, [userId, orgId]);
 
   // Cross-tab sync: when another tab writes the same scoped key, mirror the
   // change locally. `storage` events do not fire in the tab that wrote them,
   // so this never echoes our own mutations.
-  useStorageSync<FavoriteItem[]>(scopedKey(STORAGE_BASE_KEY, userId), value => {
+  useStorageSync<FavoriteItem[]>(scopedKey(STORAGE_BASE_KEY, userId, orgId), value => {
     setFavorites(
       Array.isArray(value)
         ? capByBucket(value.filter(it => it && typeof (it as any).id === 'string'))
@@ -383,8 +389,10 @@ export function FavoritesProvider({ children }: FavoritesProviderProps) {
 
         // Re-read the local snapshot — it may contain nav-pin favorites that
         // were added (or migrated) before the adapter arrived. Without this
-        // merge, signing in would silently wipe a user's offline pins.
-        const local = loadFavorites(userId);
+        // merge, signing in would silently wipe a user's offline pins. It is
+        // THIS organization's copy, so the push-back below can only carry this
+        // organization's own extras into its row (objectstack#36244).
+        const local = loadFavorites(userId, orgId);
         const remoteNavIds = new Set(
           sane.filter(f => f.type === 'nav' && f.navId).map(f => f.navId!),
         );
@@ -406,7 +414,7 @@ export function FavoritesProvider({ children }: FavoritesProviderProps) {
         }
 
         setFavorites(merged);
-        saveFavorites(merged, userId);
+        saveFavorites(merged, userId, orgId);
         if (pushBack) flusher.schedule(merged);
       } catch {
         // Keep localStorage state — adapter degrade-to-noop is acceptable.
@@ -415,7 +423,7 @@ export function FavoritesProvider({ children }: FavoritesProviderProps) {
     return () => {
       cancelled = true;
     };
-  }, [adapter, userId]);
+  }, [adapter, userId, orgId]);
 
   // Offline / pre-auth migration: when there is no adapter to push to, fold
   // legacy nav-pins into the localStorage baseline immediately so the very
@@ -427,10 +435,10 @@ export function FavoritesProvider({ children }: FavoritesProviderProps) {
       const { migrated, didMigrate } = migrateLegacyNavPins(prev);
       if (!didMigrate) return prev;
       const next = capByBucket(migrated);
-      saveFavorites(next, userId);
+      saveFavorites(next, userId, orgId);
       return next;
     });
-  }, [adapter, userId]);
+  }, [adapter, userId, orgId]);
 
   // Debounced write-through to backend.
   const flusher = useMemo(
@@ -444,10 +452,10 @@ export function FavoritesProvider({ children }: FavoritesProviderProps) {
 
   const commit = useCallback(
     (next: FavoriteItem[]) => {
-      saveFavorites(next, userId);
+      saveFavorites(next, userId, orgId);
       if (adapter) flusher.schedule(next);
     },
-    [userId, adapter, flusher],
+    [userId, orgId, adapter, flusher],
   );
 
   const addFavorite = useCallback(

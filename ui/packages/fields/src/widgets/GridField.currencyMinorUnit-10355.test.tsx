@@ -28,7 +28,8 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import * as React from 'react';
 import { LocalizationProvider } from '@object-ui/i18n';
-import { GridField, computeRow, type GridColumn } from './GridField';
+import { GridFieldWidget as GridField } from './grid-field/GridFieldWidget';
+import { computeRow, type GridColumn } from './GridField';
 
 afterEach(() => cleanup());
 
