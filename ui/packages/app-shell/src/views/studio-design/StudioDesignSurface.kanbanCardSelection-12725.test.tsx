@@ -46,6 +46,7 @@ const NAV = [
   { id: 'nav_board', type: 'object', label: 'Board', objectName: 'showcase_task', viewName: 'board' },
   { id: 'nav_tasks', type: 'object', label: 'Tasks', objectName: 'showcase_task' },
   { id: 'nav_bare', type: 'object', label: 'Bare board', objectName: 'showcase_task', viewName: 'bare' },
+  { id: 'nav_legacy', type: 'object', label: 'Legacy board', objectName: 'showcase_task', viewName: 'legacy' },
 ];
 
 const OBJECT_DEF = {
@@ -84,6 +85,15 @@ const BARE_VIEW = {
     data: { provider: 'object', object: 'showcase_task' },
     columns: ['title', 'status'],
   },
+};
+
+/** A kanban view that stores a click-to-open mode an object's list ignores (objectstack#35854). */
+const LEGACY_VIEW = {
+  name: 'showcase_task.legacy',
+  object: 'showcase_task',
+  viewKind: 'list',
+  label: 'Legacy board',
+  config: { ...BOARD_VIEW.config, navigation: { mode: 'drawer' } },
 };
 
 /** The object's default list view: a grid. */
@@ -137,6 +147,9 @@ const mockClient = {
     }
     if (type === 'view' && name === BARE_VIEW.name) {
       return { code: null, overlay: BARE_VIEW, overlayScope: 'env', effective: BARE_VIEW };
+    }
+    if (type === 'view' && name === LEGACY_VIEW.name) {
+      return { code: null, overlay: LEGACY_VIEW, overlayScope: 'env', effective: LEGACY_VIEW };
     }
     if (type === 'view' && name === DEFAULT_VIEW.name) {
       return { code: null, overlay: DEFAULT_VIEW, overlayScope: 'env', effective: DEFAULT_VIEW };
@@ -305,8 +318,11 @@ function outlinedCard(): string | null {
   return /data-kanban-card="([^"]+)"/.exec(rule)?.[1] ?? null;
 }
 
-/** Open the rail's nth `object · showcase_task` entry (0: the board, 1: the default grid, 2: the bare board). */
-async function openLeaf(index: 0 | 1 | 2) {
+/**
+ * Open the rail's nth `object · showcase_task` entry (0: the board, 1: the
+ * default grid, 2: the bare board, 3: the legacy board).
+ */
+async function openLeaf(index: 0 | 1 | 2 | 3) {
   renderSurface();
   const leaves = await screen.findAllByTitle('object · showcase_task', undefined, { timeout: 4000 });
   fireEvent.click(leaves[index]);
@@ -508,12 +524,12 @@ describe('the kanban card section writes only its spec keys (objectui#12725)', (
     expectSpecValid(lastSavedBoardBody()!);
   });
 
-  it('click to open writes navigation.mode, over the spec modes', async () => {
+  it('click to open writes navigation.mode: none', async () => {
     await openCardProps();
     const open = within(cardSection() as HTMLElement).getByLabelText(t('engine.studio.inspector.listView.kanbanCard.open', 'en'));
-    await pick(open, t('engine.studio.inspector.listView.kanbanCard.mode.drawer', 'en'));
+    await pick(open, t('engine.studio.inspector.listView.kanbanCard.mode.none', 'en'));
 
-    await waitFor(() => expect(lastSavedBoardBody()?.navigation).toEqual({ mode: 'drawer' }), { timeout: 4000 });
+    await waitFor(() => expect(lastSavedBoardBody()?.navigation).toEqual({ mode: 'none' }), { timeout: 4000 });
     unchangedApart(lastSavedBoardBody()!, ['navigation']);
     expectSpecValid(lastSavedBoardBody()!);
   });
@@ -529,6 +545,52 @@ describe('the kanban card section writes only its spec keys (objectui#12725)', (
     );
     unchangedApart(lastSavedBoardBody()!, [], ['groupByField']);
     expectSpecValid(lastSavedBoardBody()!);
+  });
+});
+
+describe("click to open offers only the default and none on an object's list (objectstack#35936)", () => {
+  /** Open the nth board leaf, select a card, and return the click-to-open trigger. */
+  async function openTrigger(index: 0 | 3): Promise<HTMLElement> {
+    await openLeaf(index);
+    await waitFor(() => expect(cardSection()).not.toBeNull(), { timeout: 4000 });
+    fireEvent.click(await card('Bob'));
+    await waitFor(() => expect(slot()).toHaveAttribute('data-mode', 'props'));
+    return within(cardSection() as HTMLElement).getByLabelText(t('engine.studio.inspector.listView.kanbanCard.open', 'en'));
+  }
+
+  /** The names of the options the open select lists. */
+  async function optionNames(trigger: HTMLElement): Promise<string[]> {
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    await screen.findByRole('listbox');
+    return screen.getAllByRole('option').map((o) => o.textContent ?? '');
+  }
+
+  const DEFAULT = t('engine.studio.inspector.listView.kanbanCard.openDefault', 'en');
+  const NONE = t('engine.studio.inspector.listView.kanbanCard.mode.none', 'en');
+  const STORED_DRAWER = tFormat('engine.form.flaggedValue', 'en', { value: 'drawer', flag: t('engine.form.deprecated', 'en') });
+
+  it('a view with no stored mode is offered exactly the default and none', async () => {
+    const open = await openTrigger(0);
+    expect(await optionNames(open)).toEqual([DEFAULT, NONE]);
+  });
+
+  it('a stored drawer shows flagged deprecated, beside the default and none, and opening writes nothing', async () => {
+    const open = await openTrigger(3);
+    expect(open).toHaveTextContent(STORED_DRAWER);
+    expect(await optionNames(open)).toEqual([STORED_DRAWER, DEFAULT, NONE]);
+    // Past the pillar's autosave debounce (`useDraftAutoSave`): a write would have been sent by now.
+    await new Promise((resolve) => setTimeout(resolve, 1700));
+    expect(lastSavedBoardBody(LEGACY_VIEW.name)).toBeNull();
+  });
+
+  it('the default clears a stored drawer, and the rest of the body is untouched', async () => {
+    const open = await openTrigger(3);
+    await pick(open, DEFAULT);
+
+    await waitFor(() => expect(lastSavedBoardBody(LEGACY_VIEW.name)).not.toBeNull(), { timeout: 4000 });
+    const body = lastSavedBoardBody(LEGACY_VIEW.name)!;
+    expect(body).toEqual(BOARD_VIEW.config);
+    expectSpecValid(body);
   });
 });
 
