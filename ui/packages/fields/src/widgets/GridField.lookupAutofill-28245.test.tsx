@@ -21,13 +21,21 @@
  */
 
 import * as React from 'react';
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, waitFor, act, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { SchemaRendererContext } from '@object-ui/react';
+import { LocalizationProvider } from '@object-ui/i18n';
 import { GridFieldWidget as GridField } from './grid-field/GridFieldWidget';
-import { lookupAutofillPatch } from './GridField';
-import { declaredLookupAutofillPatch, lookupAutofillByField } from './lookupAutofill';
+import { lookupAutofillPatch, planLookupAutofill } from './GridField';
+import {
+  amountCurrencyOf,
+  crossCurrencyRefusal,
+  declaredLookupAutofillPatch,
+  lookupAutofillByField,
+  pickedAmountCurrencyOf,
+  planDeclaredLookupAutofill,
+} from './lookupAutofill';
 
 afterEach(cleanup);
 
@@ -179,5 +187,227 @@ describe('GridField — a lookup cell pick fills the declared targets (objectsta
     await pickInFirstRow('Gadget');
     await waitFor(() => expect(rowsNow()[0]).toMatchObject({ product: 'p2' }));
     expect(rowsNow()[0].unit_price).toBe(19);
+  });
+});
+
+describe('a pick does not copy an amount across currencies (objectstack#36249)', () => {
+  const HOME = { kind: 'home' } as const;
+  const eur = { kind: 'code', code: 'EUR' } as const;
+  const usd = { kind: 'code', code: 'USD' } as const;
+
+  it('the rule: same currency copies, another currency or none is withheld, a number copies', () => {
+    expect(crossCurrencyRefusal(HOME, HOME, 'USD')).toBeUndefined();
+    expect(crossCurrencyRefusal(HOME, HOME, undefined)).toBeUndefined();
+    expect(crossCurrencyRefusal(undefined, eur, 'USD')).toBeUndefined();
+    expect(crossCurrencyRefusal(HOME, undefined, 'USD')).toBeUndefined();
+    expect(crossCurrencyRefusal(usd, HOME, 'USD')).toBeUndefined();
+    expect(crossCurrencyRefusal(HOME, eur, 'EUR')).toBeUndefined();
+    expect(crossCurrencyRefusal({ kind: 'unknown' }, HOME, 'USD')).toBeUndefined();
+    expect(crossCurrencyRefusal(HOME, eur, 'USD')).toEqual({ reason: 'differs', from: 'USD', to: 'EUR' });
+    expect(crossCurrencyRefusal(eur, HOME, 'USD')).toEqual({ reason: 'differs', from: 'EUR', to: 'USD' });
+    expect(crossCurrencyRefusal(HOME, { kind: 'unset' }, 'USD')).toEqual({ reason: 'noTargetCurrency', from: 'USD' });
+    expect(crossCurrencyRefusal({ kind: 'unknown' }, eur, 'USD')).toEqual({ reason: 'noSourceCurrency', to: 'EUR' });
+    expect(crossCurrencyRefusal(HOME, eur, undefined)).toEqual({ reason: 'noSourceCurrency', to: 'EUR' });
+  });
+
+  it("an amount's currency is its field's: home, fixed, the record's code, or none for a number", () => {
+    expect(amountCurrencyOf({ type: 'currency' })).toEqual(HOME);
+    expect(amountCurrencyOf({ type: 'currency', currencyConfig: { currencyMode: 'dynamic' } })).toEqual(HOME);
+    expect(amountCurrencyOf({ type: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'JPY' } })).toEqual({ kind: 'code', code: 'JPY' });
+    const record = { type: 'currency', currencyConfig: { currencyMode: 'record' as const, currencyField: 'currency_code' } };
+    expect(amountCurrencyOf(record, { currency_code: 'EUR' })).toEqual(eur);
+    expect(amountCurrencyOf(record, {})).toEqual({ kind: 'unset' });
+    expect(amountCurrencyOf({ type: 'number' })).toBeUndefined();
+    expect(amountCurrencyOf({ type: 'formula', returnType: 'currency' })).toEqual(HOME);
+  });
+
+  const productFields = { unit_price: { type: 'currency' }, list_price: { type: 'currency' }, description: { type: 'text' } };
+  const homeContext = (lineCurrency: string | undefined | null) => ({
+    home: 'USD',
+    sourceCurrency: (source: string, v: unknown) => pickedAmountCurrencyOf((productFields as Record<string, { type: string }>)[source], v, widget),
+    targetCurrency: (target: string) =>
+      target !== 'unit_price' ? undefined : lineCurrency === null ? HOME : lineCurrency ? { kind: 'code' as const, code: lineCurrency } : { kind: 'unset' as const },
+  });
+
+  it('the same-named copy: a EUR line keeps its price empty and lists why; a USD line fills', () => {
+    const eurPlan = planLookupAutofill(cols, cols[0], widget, undefined, homeContext('EUR'));
+    expect(eurPlan.patch).toEqual({ product: 'p1', description: 'Standard widget' });
+    expect(eurPlan.withheld).toEqual([
+      { target: 'unit_price', source: 'unit_price', amount: 29.99, reason: 'differs', from: 'USD', to: 'EUR' },
+    ]);
+    const usdPlan = planLookupAutofill(cols, cols[0], widget, undefined, homeContext(null));
+    expect(usdPlan.patch).toEqual({ product: 'p1', description: 'Standard widget', unit_price: 29.99 });
+    expect(usdPlan.withheld).toEqual([]);
+  });
+
+  it('a declared pair: a EUR line keeps its price empty and lists why; a USD line fills', () => {
+    const eurPlan = planLookupAutofill(cols, cols[0], widget, { pairs, row: { unit_price: null } }, homeContext('EUR'));
+    expect(eurPlan.patch).toEqual({ product: 'p1', description: 'Standard widget' });
+    expect(eurPlan.withheld).toEqual([
+      { target: 'unit_price', source: 'list_price', amount: 25, reason: 'differs', from: 'USD', to: 'EUR' },
+    ]);
+    const usdPlan = planLookupAutofill(cols, cols[0], widget, { pairs, row: { unit_price: null } }, homeContext(null));
+    expect(usdPlan.patch).toEqual({ product: 'p1', description: 'Standard widget', unit_price: 25 });
+    expect(planDeclaredLookupAutofill(pairs, widget, { unit_price: null }, null, homeContext('EUR')).patch).toEqual({});
+  });
+
+  it('a line whose header holds no currency yet fills no price', () => {
+    const plan = planLookupAutofill(cols, cols[0], widget, undefined, homeContext(undefined));
+    expect(plan.patch).not.toHaveProperty('unit_price');
+    expect(plan.withheld[0]).toMatchObject({ target: 'unit_price', reason: 'noTargetCurrency', from: 'USD' });
+  });
+
+  describe('through the grid', () => {
+    const ROWS = [{ id: 'p1', name: 'Widget', description: 'Standard widget', unit_price: 100 }];
+    // The product's price field; a test may give it a `fixed` code.
+    let productPrice: Record<string, unknown> = { type: 'currency', label: 'Unit Price' };
+    beforeEach(() => {
+      productPrice = { type: 'currency', label: 'Unit Price' };
+    });
+    const ds = {
+      getObjectSchema: vi.fn(async () => ({ name: 'product', fields: { name: { type: 'text' }, description: { type: 'text' }, unit_price: productPrice } })),
+      find: vi.fn(async (_o: string, params?: { $filter?: { id?: { $in?: unknown[] } } }) => {
+        const wanted = params?.$filter?.id?.$in;
+        const rows = ROWS.filter((r) => !wanted || wanted.includes(r.id));
+        return { data: rows.map((r) => ({ ...r })), total: rows.length };
+      }),
+      findOne: vi.fn(async (_o: string, id: string) => {
+        const row = ROWS.find((r) => r.id === id);
+        return row ? { ...row } : null;
+      }),
+    };
+    const lineColumns = [
+      { name: 'product', type: 'lookup' as const, reference: 'product' },
+      { name: 'description', type: 'text' as const },
+      { name: 'unit_price', type: 'currency' as const, label: 'Unit Price' },
+    ];
+
+    function Line({
+      currency,
+      columnFields,
+      home = 'USD',
+      line,
+      lookupAutofill,
+    }: {
+      currency?: Record<string, string | undefined>;
+      columnFields?: Record<string, unknown>;
+      home?: string;
+      line?: Record<string, unknown>;
+      lookupAutofill?: Record<string, { target: string; source: string }[]>;
+    }) {
+      const [rows, setRows] = React.useState<Record<string, unknown>[]>([{ product: null, description: null, unit_price: null, ...line }]);
+      return (
+        <LocalizationProvider value={{ currency: home || undefined }}>
+          <SchemaRendererContext.Provider value={{ dataSource: ds } as never}>
+            <GridField
+              value={rows}
+              onChange={(next: Record<string, unknown>[]) => setRows(next)}
+              field={{ columns: lineColumns } as never}
+              columnCurrencies={currency}
+              columnFields={columnFields}
+              lookupAutofill={lookupAutofill}
+            />
+            <output data-testid="rows">{JSON.stringify(rows)}</output>
+          </SchemaRendererContext.Provider>
+        </LocalizationProvider>
+      );
+    }
+
+    const rowsNow = () => JSON.parse(screen.getByTestId('rows').textContent || '[]');
+
+    async function pickWidget(): Promise<void> {
+      // The cell's lookup reads the product schema first: the pick judges the
+      // price by its field.
+      await waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalled());
+      await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      await act(async () => {
+        fireEvent.click(screen.getAllByTestId('lookup-trigger')[0]);
+      });
+      const option = await waitFor(() => {
+        const el = screen.getAllByRole('option').find((o) => (o.getAttribute('title') ?? o.textContent ?? '').includes('Widget'));
+        if (!el) throw new Error('Widget not offered');
+        return el;
+      }, { timeout: 3000 });
+      await act(async () => {
+        fireEvent.click(option);
+      });
+    }
+
+    it('a EUR line: the price stays empty and the line says why, naming both currencies and the price', async () => {
+      render(<Line currency={{ unit_price: 'EUR' }} />);
+      await pickWidget();
+      await waitFor(() => expect(rowsNow()[0]).toMatchObject({ product: 'p1', description: 'Standard widget' }));
+      expect(rowsNow()[0].unit_price).toBeNull();
+      const note = await screen.findByTestId('line-items-autofill-withheld-0');
+      expect(note.textContent).toContain('Unit Price was not filled');
+      expect(note.textContent).toContain('$100.00');
+      expect(note.textContent).toContain('EUR');
+    });
+
+    it('a USD line: the price fills as before, with no note', async () => {
+      render(<Line />);
+      await pickWidget();
+      await waitFor(() => expect(rowsNow()[0]).toMatchObject({ product: 'p1', description: 'Standard widget', unit_price: 100 }));
+      expect(screen.queryByTestId('line-items-autofill-withheld-0')).toBeNull();
+    });
+
+    // A line column carries no `currencyConfig`: the host hands the grid the
+    // child field behind it (`columnFields`), and the column is in that
+    // field's currency, as on the record form.
+    const FIXED_EUR = { unit_price: { type: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'EUR' } } };
+
+    it('a fixed EUR price into a fixed EUR column fills, under a USD home currency', async () => {
+      productPrice = { type: 'currency', label: 'Unit Price', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'EUR' } };
+      render(<Line columnFields={FIXED_EUR} />);
+      await pickWidget();
+      await waitFor(() => expect(rowsNow()[0]).toMatchObject({ product: 'p1', unit_price: 100 }));
+      expect(screen.queryByTestId('line-items-autofill-withheld-0')).toBeNull();
+    });
+
+    it('a fixed EUR price into a fixed EUR column fills with no home currency configured', async () => {
+      productPrice = { type: 'currency', label: 'Unit Price', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'EUR' } };
+      render(<Line columnFields={FIXED_EUR} home="" />);
+      await pickWidget();
+      await waitFor(() => expect(rowsNow()[0]).toMatchObject({ product: 'p1', unit_price: 100 }));
+      expect(screen.queryByTestId('line-items-autofill-withheld-0')).toBeNull();
+    });
+
+    it('a home-currency price into a fixed EUR column is withheld, and the line says why', async () => {
+      render(<Line columnFields={FIXED_EUR} />);
+      await pickWidget();
+      await waitFor(() => expect(rowsNow()[0]).toMatchObject({ product: 'p1', description: 'Standard widget' }));
+      expect(rowsNow()[0].unit_price).toBeNull();
+      const note = await screen.findByTestId('line-items-autofill-withheld-0');
+      expect(note.textContent).toContain('$100.00');
+      expect(note.textContent).toContain('EUR');
+    });
+
+    it('a declared target that is not a drawn column is judged by its child field: a home price into a fixed EUR field is withheld', async () => {
+      render(
+        <Line
+          columnFields={{ net_price: { type: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'EUR' } } }}
+          lookupAutofill={{ product: [{ target: 'net_price', source: 'unit_price' }] }}
+        />,
+      );
+      await pickWidget();
+      await waitFor(() => expect(rowsNow()[0]).toMatchObject({ product: 'p1', description: 'Standard widget' }));
+      expect(rowsNow()[0].net_price ?? null).toBeNull();
+      const note = await screen.findByTestId('line-items-autofill-withheld-0');
+      expect(note.querySelector('[data-withheld-target="net_price"]')).not.toBeNull();
+    });
+
+    it("a home-currency price onto a line whose own code is JPY is withheld", async () => {
+      render(
+        <Line
+          columnFields={{ unit_price: { type: 'currency', currencyConfig: { currencyMode: 'record', currencyField: 'line_currency' } } }}
+          line={{ line_currency: 'JPY' }}
+        />,
+      );
+      await pickWidget();
+      await waitFor(() => expect(rowsNow()[0]).toMatchObject({ product: 'p1', description: 'Standard widget' }));
+      expect(rowsNow()[0].unit_price).toBeNull();
+      const note = await screen.findByTestId('line-items-autofill-withheld-0');
+      expect(note.textContent).toContain('JPY');
+    });
   });
 });

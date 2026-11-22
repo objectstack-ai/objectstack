@@ -4,9 +4,9 @@
  *
  * The REAL surface on its Data tab, with the REAL `fetchPackages` and the REAL
  * `usePendingDrafts`, over a stubbed `fetch` that counts requests on the wire.
- * Three readers of `GET /api/v1/packages` mount here at once — the package
- * switcher, the writability courtesy gate and `DataPillar`'s namespace lookup
- * — and the top bar reads the drafts ledger both from the hook and from its
+ * Two readers of `GET /api/v1/packages` mount here at once — the
+ * writability courtesy gate and `DataPillar`'s namespace lookup (the package
+ * switcher was a third until objectstack#36501 removed it) — and the top bar reads the drafts ledger both from the hook and from its
  * own publish/draft-nonce effect. Each of those used to send its own request.
  *
  * The package list is HELD until every mount effect has run, so the count
@@ -109,7 +109,7 @@ beforeEach(() => {
               resolve(
                 answer({
                   success: true,
-                  data: { packages: [{ manifest: { id: PACKAGE_ID, name: 'Field Ops' }, writable: true }] },
+                  data: { packages: [{ manifest: { id: PACKAGE_ID, name: 'Field Ops' }, writable: false }] },
                 }),
               ),
           });
@@ -156,9 +156,9 @@ describe('StudioDesignSurface — entry reads each question once (objectui#11797
       for (const h of held) h.release();
       await drain();
     });
-    await waitFor(() =>
-      expect(screen.getByTestId('studio-pkg-chip')).toHaveAttribute('data-pkg-list-state', 'loaded'),
-    );
-    expect(screen.getByTestId('studio-pkg-chip')).toHaveTextContent('Field Ops');
+    // The writability gate's answer reaches the top bar: the package is served
+    // read-only, so Create app turns disabled. (The package switcher, the
+    // third reader, was removed by objectstack#36501.)
+    await waitFor(() => expect(screen.getByRole('button', { name: /Create app/ })).toBeDisabled());
   });
 });

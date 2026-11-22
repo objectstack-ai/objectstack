@@ -27,6 +27,7 @@ import { PhoneAppNavBar, isPhoneTabRoute } from './PhoneAppNavBar.js';
 import { PhoneAppHomeSlotProvider } from './PhoneAppHome.js';
 import { PhonePageBarProvider } from './PhonePageBar.js';
 import { useLastApp } from '../context/LastAppProvider.js';
+import { rememberAppReturnPage } from '../utils/appReturnPage.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { appAddressSegment } from '../utils/appRoute.js';
 import { ShellPageActionsScope, ShellSidebarExpandFallback } from './ShellPageActions.js';
@@ -202,6 +203,16 @@ export function ConsoleLayout({
   useEffect(() => {
     if (activeAppName) rememberApp(activeAppName);
   }, [activeAppName, rememberApp]);
+  // objectstack#36501 — and the app page in view, where Studio's 「‹ Back to
+  // app」 returns: an app → Studio entry leaves from the page recorded last.
+  useEffect(() => {
+    if (!activeAppName) return;
+    rememberAppReturnPage({
+      path: `${location.pathname}${location.search}${location.hash}`,
+      app: activeAppName,
+      label: appLabel,
+    });
+  }, [activeAppName, appLabel, location.pathname, location.search, location.hash]);
   const { apps: metadataApps } = useMetadata();
   const appBasePath = `/apps/${appAddressSegment(metadataApps, activeApp) ?? activeAppName}`;
   // objectstack#36362 — the app's design mode, held here so it stays on from
