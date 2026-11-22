@@ -9,7 +9,7 @@
 import * as React from 'react';
 import { cn } from '@object-ui/components';
 import type { FieldContainerLike } from '@object-ui/core';
-import { SchemaRenderer, toRenderableSchema, useRecordContext } from '@object-ui/react';
+import { SchemaRenderer, toRenderableSchema, useRecordContext, useRecordPagePreferences } from '@object-ui/react';
 import {
   RECORD_PAGE_DETAILS_MIN_WIDTH,
   RECORD_PAGE_PINNED_GAP,
@@ -23,7 +23,7 @@ import {
 } from './synth/recordPageColumns';
 import { useDetailTranslation } from './useDetailTranslation';
 import { RecordBodyTablesContext, RelatedEnlargeContext, RelatedListEnlargedContext } from './relatedListCompact';
-import { ApprovalBandContext, DefaultRecordPageContext, DetailsColumnCapContext } from './defaultRecordPage';
+import { ApprovalBandOnceScope, DefaultRecordPageContext, DetailsColumnCapContext } from './defaultRecordPage';
 import { RECORD_TAB_OVERVIEW, RecordTabRow, type RecordTab, type RecordTabArrangeEdit } from './RecordTabRow';
 import {
   RECORD_TAB_APPROVALS,
@@ -33,6 +33,8 @@ import {
 } from './recordTabBadges';
 import { RecordTimelineCountContext } from './recordTimelineStream';
 import { createRecordBodyFields, RecordBodyFieldsContext } from './recordBodyFields';
+import { createEmptyFieldTally, RecordFieldListContext, type RecordFieldList } from './recordFieldList';
+import { EmptyFieldsRow } from './EmptySectionsFold';
 import { RecordTimelineCountProbe } from './renderers/record-activity';
 import {
   editRelatedArrangement,
@@ -243,22 +245,16 @@ function drawNodes(nodes: any[]): React.ReactNode {
 /**
  * The details column's nodes (objectstack#35253): the synthesized page splits
  * its details around a body table, one `record:details` per run of sections,
- * and the record's approval band is drawn by the FIRST part alone — above the
- * table — so the page shows one band, not one per part. A context provider
- * adds no DOM, so the column's siblings stay siblings (`drawNodes`).
+ * and the record's approval band is drawn once per page — by the first details
+ * body that reaches the band's place (`ApprovalBandOnceScope`), above the
+ * table. objectstack#35483 / objectstack#35484 — the same rule as a page drawn
+ * as written: a first `record:details` that draws no body (withheld by its
+ * `requiredPermissions`, or drawing its own header) leaves the band to the next
+ * part instead of taking it off the page. A context provider adds no DOM, so
+ * the column's siblings stay siblings (`drawNodes`).
  */
 function drawDetailsNodes(nodes: any[]): React.ReactNode {
-  const firstDetails = nodes.findIndex((node) => node?.type === 'record:details');
-  return nodes.map((node, index) => {
-    const key = (node && typeof node === 'object' && node.id) || index;
-    const drawn = <SchemaRenderer key={key} schema={toRenderableSchema(node)} />;
-    if (node?.type !== 'record:details' || index === firstDetails) return drawn;
-    return (
-      <ApprovalBandContext.Provider key={key} value={false}>
-        {drawn}
-      </ApprovalBandContext.Provider>
-    );
-  });
+  return <ApprovalBandOnceScope>{drawNodes(nodes)}</ApprovalBandOnceScope>;
 }
 
 const LINE_BUTTON =
@@ -484,6 +480,31 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   const ctx = useRecordContext();
   const bodyTableIds = React.useMemo(() => new Set(relatedListIdsIn(columns.details)), [columns.details]);
   const [bodyFields] = React.useState(createRecordBodyFields);
+  // objectstack#36147 — the field area is one list: its groups fold every
+  // empty row into the list's last row, shown or not by the reader's one
+  // per-object choice (objectstack#25883), or this view's own without a store.
+  const [emptyFields] = React.useState(createEmptyFieldTally);
+  const recordPagePreferences = useRecordPagePreferences();
+  const preferenceObject = typeof ctx?.objectName === 'string' && ctx.objectName ? ctx.objectName : undefined;
+  const [localShowEmpty, setLocalShowEmpty] = React.useState(false);
+  const showEmpty =
+    recordPagePreferences && preferenceObject
+      ? recordPagePreferences.get(preferenceObject).showEmptyFields === true
+      : localShowEmpty;
+  const fieldList = React.useMemo<RecordFieldList>(
+    () => ({
+      showEmpty,
+      toggleShowEmpty: () => {
+        if (recordPagePreferences && preferenceObject) {
+          recordPagePreferences.update(preferenceObject, { showEmptyFields: !showEmpty });
+        } else {
+          setLocalShowEmpty((shown) => !shown);
+        }
+      },
+      emptyFields,
+    }),
+    [showEmpty, recordPagePreferences, preferenceObject, emptyFields],
+  );
   const hasTimeline = columns.timeline.length > 0;
 
   const approvalsNode = columns.related.find((node) => node?.type === 'record:approvals');
@@ -564,6 +585,11 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   const contentWidth = useContentWidth(contentEl);
   const pinned = recordPagePinsDetails(contentWidth, columns, fullPage) && otherTabs.length > 0;
   const pinnedHeight = usePinnedHeight(pinned ? gridEl : null, frameEl);
+  // objectstack#36147 — the field area is one column wherever it is drawn
+  // beside other tabs or as one of them: a drawer, a phone, a narrow page and
+  // the pinned left column. Only a full page whose details are its only face
+  // (no other tab, objectstack#35890 item 4) keeps laying them out by width.
+  const detailsFillPage = fullPage && otherTabs.length === 0 && resolved.hidden.length === 0;
 
   // The open tab: the address's when it names one this page has; pinned, the
   // first of the row otherwise (it is implied, never written, until the page
@@ -676,6 +702,7 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
       )}
       {drawDetailsNodes(columns.details)}
       {footer}
+      <EmptyFieldsRow />
     </>
   );
 
@@ -745,7 +772,8 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
     <DefaultRecordPageContext.Provider value>
     <RecordBodyTablesContext.Provider value={bodyTableIds}>
     <RelatedEnlargeContext.Provider value={onEnlargeRelated ?? null}>
-    <DetailsColumnCapContext.Provider value={pinned ? 1 : 3}>
+    <RecordFieldListContext.Provider value={fieldList}>
+    <DetailsColumnCapContext.Provider value={detailsFillPage ? 3 : 1}>
       <div
         ref={setFrameEl}
         // objectstack#35745 — the top is 12px at every width: the header sits
@@ -763,6 +791,7 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
         </div>
       </div>
     </DetailsColumnCapContext.Provider>
+    </RecordFieldListContext.Provider>
     </RelatedEnlargeContext.Provider>
     </RecordBodyTablesContext.Provider>
     </DefaultRecordPageContext.Provider>

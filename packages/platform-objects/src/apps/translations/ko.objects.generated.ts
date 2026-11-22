@@ -176,7 +176,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "사용자 차단",
-        description: "이 사용자를 차단하시겠습니까? 차단이 해제될 때까지 로그아웃되고 로그인할 수 없으며, API 키와 OAuth 액세스 토큰 및 토큰 갱신도 거부됩니다. 차단을 해제하면 키가 다시 작동합니다.",
+        description: "이 사용자를 차단하시겠습니까? 차단이 해제될 때까지 로그아웃되고 로그인할 수 없으며, API 키와 OAuth 액세스 토큰 및 토큰 갱신도 거부됩니다. 차단을 해제하면 키가 다시 작동합니다. 차단하면 이 사용자가 책임자인 AI 서비스 계정도 일시 중지되고, 등록한 OAuth 애플리케이션은 비활성화되며, 발급한 SCIM 자격 증명은 폐기됩니다. 차단을 해제해도 이들은 복원되지 않습니다.",
         successMessage: "사용자 차단됨",
         params: {
           banReason: {
@@ -496,6 +496,10 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       revoke_reason: {
         label: "취소 사유",
         help: "세션이 취소된 이유입니다(idle_timeout, absolute_max, concurrent_cap, ip_not_allowed, user_revoked, admin, organization_membership_ended, admin_password_reset, password_reset, …)."
+      },
+      sso_provider_id: {
+        label: "SSO 공급자",
+        help: "이 세션이 로그인할 때 거친 SSO 공급자(있는 경우)입니다. 해당 공급자를 삭제하면 세션이 종료됩니다. 시스템에서 관리합니다."
       },
       active_organization_id: {
         label: "활성 조직"

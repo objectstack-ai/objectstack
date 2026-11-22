@@ -35,6 +35,7 @@ import {
 import { resolveTenancyPosture, resolveSearchPinyinEnabled } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { provisionSearchCompanion } from './search-companion.js';
+import type { ExtensionPlacementNote } from './registry-extension-placement.js';
 import { ObjectStackManifest, InstalledPackage, type InstalledPackageSource, customizationBasePackageId, type NamespaceObjectNameClash } from '@objectstack/spec/kernel';
 import { applyProtection } from '@objectstack/spec/shared';
 // [ADR-0130 D1] The ONE derivation of the key a package is installed under
@@ -215,6 +216,10 @@ export {
  *     tenant authored it — the same D9.2a rule as the scalars. A patch reaches
  *     the owner's own fields only (`ownFields`): one naming any other field,
  *     a field an extension adds included, is skipped here; the fold names it.
+ *   - `place` [#35901] is not read here: the fold applies every extension's
+ *     placements once, after this merge has run for all of them
+ *     (`applyExtensionPlacements`, registry-extension-placement.ts), so an
+ *     anchor names the object as served.
  *
  * **Every other top-level prop on `extension` is silently discarded.**
  * `merged` starts as `{ ...base }` and nothing outside the list above is ever
@@ -227,7 +232,7 @@ export {
  * Declarative authors never reach that silence, though: `ObjectExtensionSchema`
  * (`packages/spec/src/data/object.zod.ts`) is `.strict()` — its shape is
  * exactly `extend` / `fields` / `fieldPatches` / `label` / `pluralLabel` /
- * `description` / `validations` / `indexes` / `priority`, so an `objectExtensions` entry
+ * `description` / `validations` / `indexes` / `place` / `priority`, so an `objectExtensions` entry
  * naming `tenancy`, `permissions`, or any other key outside that list fails
  * LOUDLY at authoring time with a prescription (#4001; the same rule is
  * documented at `content/docs/data-modeling/object-extensions.mdx`). This
@@ -2985,6 +2990,19 @@ export class SchemaRegistry {
    * {@link shadowedExtensionQueueWarned} gives.
    */
   private fieldPatchMissesWarned = new Set<string>();
+
+  /**
+   * [#35901] Placement notes already named (a placement not applied, an
+   * anchor missing, an item that is not the extension's own), keyed by the
+   * note. Per registry, for the reason {@link shadowedExtensionQueueWarned}
+   * gives.
+   */
+  private extensionPlacementNotesWarned = new Set<string>();
+
+  private reportExtensionPlacements(notes: readonly ExtensionPlacementNote[]): void {
+    // The body lives in `registry-object-registration.ts` (see `ObjectRegistrationHost`).
+    return ObjectRegistrationFacet.reportExtensionPlacements.call(objectRegistrationHost.of(this), notes);
+  }
 
   /**
    * [#28835] Field names already named as declared by more than one
@@ -6147,6 +6165,7 @@ export class SchemaRegistry {
       declinedBaseLayerStamps: (...a) => registry.declinedBaseLayerStamps(...a),
       get deploymentPlatformGlobalObjects() { return registry.deploymentPlatformGlobalObjects; },
       extensionTargetKey: (...a) => registry.extensionTargetKey(...a),
+      get extensionPlacementNotesWarned() { return registry.extensionPlacementNotesWarned; },
       get fieldPatchMissesWarned() { return registry.fieldPatchMissesWarned; },
       finishServedObject: (...a) => registry.finishServedObject(...a),
       foldExtenders: (...a) => registry.foldExtenders(...a),
@@ -6175,6 +6194,7 @@ export class SchemaRegistry {
       refusePicklistItemArrival: (...a) => registry.refusePicklistItemArrival(...a),
       registerNamespace: (...a) => registry.registerNamespace(...a),
       reportChangedRuleCopies: (...a) => registry.reportChangedRuleCopies(...a),
+      reportExtensionPlacements: (...a) => registry.reportExtensionPlacements(...a),
       reportFieldPatchMisses: (...a) => registry.reportFieldPatchMisses(...a),
       reportRedeclaredFields: (...a) => registry.reportRedeclaredFields(...a),
       get reportedRuleCopyChanges() { return registry.reportedRuleCopyChanges; },

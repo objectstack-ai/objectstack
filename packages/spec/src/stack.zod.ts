@@ -1086,7 +1086,11 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
     enableProjectScoping: z.boolean().optional(),
     /** Environment id resolution strategy when scoping is on. */
     projectResolution: z.enum(['required', 'optional', 'auto']).optional(),
-    /** Per-environment membership 403 gate (dispatcher). Undefined → default. */
+    /**
+     * The environment-membership 403 gate on every data door — the runtime
+     * dispatcher and the REST server alike. `false` turns it off at every door
+     * (ADR-0135 D9). Undefined → on exactly when `enableProjectScoping` is.
+     */
     enforceProjectMembership: z.boolean().optional(),
   }).optional().describe('Server-facing API config consumed by objectstack serve/dev'),
 
@@ -4628,6 +4632,147 @@ function collectRelatedListNameErrors(
 }
 
 /**
+ * [#35901] An object extension places only what its own package brings
+ * (`ObjectExtensionSchema.place`). The parse judges fields and the entry's
+ * shape; the two questions that need the package's OBJECTS are judged here,
+ * per package body (the top level is one package, each
+ * `packages[i].manifest` another, ADR-0130 D4):
+ *
+ *  - a list placement (`{ list }`), and a placed group's `relatedList`, must
+ *    name a child object THIS body defines that points at the extended
+ *    object (a `lookup` / `master_detail` field whose `reference` is it, or
+ *    the one `object.field`). A child the body does not define belongs to the
+ *    extended object's package or to another one, and is that owner's to
+ *    arrange;
+ *  - a placed group's `key` must not be one of the extended object's own
+ *    group keys, where this stack defines that object: the group would be
+ *    the owner's, which an extension does not arrange.
+ *  - a placed field (and a placed group's `fields`) must not be a field the
+ *    extended object declares, where this stack defines that object: an
+ *    extension may redeclare an owner field for its display properties
+ *    (ADR-0146 D10), which does not make the field the extension's to move.
+ *
+ * Anchors are not judged here: a missing anchor puts the item at the end and
+ * is a `@objectstack/lint` warning, never a refusal, so removing a field from
+ * the extended object never makes its extensions unbuildable.
+ */
+function collectExtensionPlacementErrors(config: ObjectStackDefinition): string[] {
+  const asRecord = (value: unknown): Record<string, unknown> | undefined =>
+    isRecord(value) ? value : undefined;
+  const top = config as { objects?: unknown; objectExtensions?: unknown; packages?: unknown };
+  const bodies: Array<{ body: { objects?: unknown; objectExtensions?: unknown }; at: string }> = [
+    { body: top, at: '' },
+    ...(Array.isArray(top.packages)
+      ? (top.packages as unknown[]).map((entry, i) => ({
+        body: (asRecord(asRecord(entry)?.manifest) ?? {}) as { objects?: unknown; objectExtensions?: unknown },
+        at: `packages[${i}].manifest.`,
+      }))
+      : []),
+  ];
+  // Every object this stack defines, by name: the extended object's own group keys are read here.
+  const definedAnywhere = new Map<string, Record<string, unknown>>();
+  for (const { body } of bodies) {
+    if (!Array.isArray(body.objects)) continue;
+    for (const obj of body.objects) {
+      const record = asRecord(obj);
+      if (record && typeof record.name === 'string' && !definedAnywhere.has(record.name)) {
+        definedAnywhere.set(record.name, record);
+      }
+    }
+  }
+
+  const errors: string[] = [];
+  for (const { body, at } of bodies) {
+    if (!Array.isArray(body.objectExtensions)) continue;
+    // This body's own objects, with the fields its own extensions add to them.
+    const own = new Map<string, Record<string, unknown>>();
+    if (Array.isArray(body.objects)) {
+      for (const obj of body.objects) {
+        const record = asRecord(obj);
+        if (record && typeof record.name === 'string') {
+          own.set(record.name, { ...own.get(record.name), ...asRecord(record.fields) });
+        }
+      }
+    }
+    for (const ext of body.objectExtensions) {
+      const record = asRecord(ext);
+      if (!record || typeof record.extend !== 'string' || !own.has(record.extend)) continue;
+      own.set(record.extend, { ...own.get(record.extend), ...asRecord(record.fields) });
+    }
+
+    body.objectExtensions.forEach((ext: unknown, j: number) => {
+      const record = asRecord(ext);
+      if (!record || typeof record.extend !== 'string' || !Array.isArray(record.place)) return;
+      const target = record.extend;
+      const targetGroups = new Set(
+        (Array.isArray(definedAnywhere.get(target)?.fieldGroups) ? definedAnywhere.get(target)!.fieldGroups as unknown[] : [])
+          .map((g) => asRecord(g)?.key)
+          .filter((key): key is string => typeof key === 'string'),
+      );
+      const judgeList = (name: string, where: string): void => {
+        const dot = name.indexOf('.');
+        const child = dot === -1 ? name : name.slice(0, dot);
+        const field = dot === -1 ? undefined : name.slice(dot + 1);
+        const fields = own.get(child);
+        if (!fields) {
+          errors.push(
+            `${at}objectExtensions[${j}] (extending '${target}') ${where} names '${name}', which is not a child ` +
+              'object this package defines: an extension places only a child list its own package brings. The ' +
+              `lists of '${target}' and of other packages are arranged by their owners. Define '${child}' in this ` +
+              'package, or remove the placement.',
+          );
+          return;
+        }
+        const points = Object.entries(fields).some(([fieldName, def]) => {
+          const fieldDef = asRecord(def);
+          return (field === undefined || fieldName === field) && fieldDef !== undefined
+            && (fieldDef.type === 'lookup' || fieldDef.type === 'master_detail') && fieldDef.reference === target;
+        });
+        if (!points) {
+          errors.push(
+            `${at}objectExtensions[${j}] (extending '${target}') ${where} names '${name}', but ` +
+              `${field === undefined ? `'${child}' has no` : `'${child}.${field}' is not a`} lookup / master_detail ` +
+              `field whose reference is '${target}', so it is no child list of '${target}'. Point a field of ` +
+              `'${child}' at '${target}', or remove the placement.`,
+          );
+        }
+      };
+      const targetFields = asRecord(definedAnywhere.get(target)?.fields) ?? {};
+      const judgeOwnerField = (name: unknown, where: string): void => {
+        if (typeof name !== 'string' || !Object.prototype.hasOwnProperty.call(targetFields, name)) return;
+        errors.push(
+          `${at}objectExtensions[${j}] (extending '${target}') ${where} places field '${name}', which ` +
+            `'${target}' declares itself: an extension places only a field it adds, and redeclaring an owner ` +
+            'field (for its display properties) does not make it the extension\'s. The owner arranges it; ' +
+            'remove the placement.',
+        );
+      };
+      (record.place as unknown[]).forEach((entry: unknown, k: number) => {
+        const placement = asRecord(entry);
+        if (!placement) return;
+        if (typeof placement.list === 'string') judgeList(placement.list, `place[${k}].list`);
+        judgeOwnerField(placement.field, `place[${k}]`);
+        const group = asRecord(placement.group);
+        if (!group) return;
+        if (Array.isArray(group.fields)) {
+          group.fields.forEach((name: unknown, f: number) => judgeOwnerField(name, `place[${k}].group.fields[${f}]`));
+        }
+        if (typeof group.relatedList === 'string') judgeList(group.relatedList, `place[${k}].group.relatedList`);
+        if (typeof group.key === 'string' && targetGroups.has(group.key)) {
+          errors.push(
+            `${at}objectExtensions[${j}] (extending '${target}') place[${k}] adds group '${group.key}', which is ` +
+              `a group '${target}' declares itself: an extension adds a group of its own and never rearranges the ` +
+              `owner's. Give the group another key, or place the fields into '${group.key}' with ` +
+              `{ field, group: '${group.key}' } entries.`,
+          );
+        }
+      });
+    });
+  }
+  return errors;
+}
+
+/**
  * [#20901] Inline grid columns whose TYPE comes from the child field, judged by
  * the column contract's own rules against the type they will render as.
  *
@@ -6019,6 +6164,9 @@ function validateCrossReferences(
     config,
     artifactObjects && artifactObjects.size > 0 ? new Set([...objectNames, ...artifactObjects]) : objectNames,
   ));
+  // Same placement: an extension's `place` resolves against its own package
+  // body's objects, whether or not the stack defines the extended object (#35901).
+  errors.push(...collectExtensionPlacementErrors(config));
 
   if (objectNames.size === 0) return errors;
 

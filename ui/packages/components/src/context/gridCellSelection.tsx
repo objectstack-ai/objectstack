@@ -35,6 +35,17 @@ export interface GridCellFacts {
    */
   readOnlyReason?: string | null;
   /**
+   * The host is still reading what decides whether this cell edits (the
+   * record's lock, the reader's verdict on the record). An attempt to edit it
+   * meanwhile opens no editor: the cell shows `text`, and once `settled`
+   * settles (resolved or rejected) the same attempt, with the same typed key,
+   * is asked again — unless the reader selected another cell, asked something
+   * newer of it or opened an editor in the meantime. A toggle, a paste or a
+   * clear asked meanwhile waits the same way: nothing is written before the
+   * read settles. Absent ⇒ nothing is being read.
+   */
+  checking?: { text: string; settled: Promise<unknown> } | null;
+  /**
    * What a printable key typed on the selected cell does: `replace` opens the
    * editor with the typed text in place of the value (text, numbers); `open`
    * opens the editor over the value and the key is not written (a picker, a

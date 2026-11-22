@@ -176,7 +176,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "Bloquear usuario",
-        description: "¿Bloquear a este usuario? Cerrará sesión, no podrá volver a iniciarla y sus claves de API se rechazarán hasta que se desbloquee, al igual que sus tokens de acceso OAuth y sus renovaciones de token. Las claves vuelven a funcionar tras el desbloqueo.",
+        description: "¿Bloquear a este usuario? Cerrará sesión, no podrá volver a iniciarla y sus claves de API se rechazarán hasta que se desbloquee, al igual que sus tokens de acceso OAuth y sus renovaciones de token. Las claves vuelven a funcionar tras el desbloqueo. El bloqueo también suspende las cuentas de servicio de IA de las que es responsable, desactiva las aplicaciones OAuth que registró y revoca las credenciales SCIM que emitió; el desbloqueo no restaura nada de esto.",
         successMessage: "Usuario bloqueado",
         params: {
           banReason: {
@@ -496,6 +496,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       revoke_reason: {
         label: "Motivo de la revocación",
         help: "Por qué se revocó la sesión (idle_timeout, absolute_max, concurrent_cap, ip_not_allowed, user_revoked, admin, organization_membership_ended, admin_password_reset, password_reset, …)."
+      },
+      sso_provider_id: {
+        label: "Proveedor SSO",
+        help: "El proveedor SSO a través del cual se inició esta sesión, si lo hay. Eliminar ese proveedor finaliza la sesión. Gestionado por el sistema."
       },
       active_organization_id: {
         label: "Organización activa"

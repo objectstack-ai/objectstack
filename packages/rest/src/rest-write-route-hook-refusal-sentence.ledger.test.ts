@@ -427,6 +427,8 @@ const ANSWERS_THE_SENTENCE: Record<string, Driver> = {
         answer: (res) => res.body?.data?.results?.[0]?.error?.message,
     },
     'POST /api/v1/security/explain': { called: 'security.explain', body: { object: OBJECT, operation: 'read' } },
+    // A read over POST, like explain: the caller's read of the ids is the one awaited.
+    'POST /api/v1/approvals/records/:object/locks': { called: 'approvals.getRecordLocks', body: { recordIds: ['r1'] } },
     // [#30205] The hand-over answers per row, inside its `200`: a refused row's
     // entry in `failures` carries the `/data` door's sentence for that throw.
     'POST /api/v1/security/users/:id/assigned-work/transfer': {

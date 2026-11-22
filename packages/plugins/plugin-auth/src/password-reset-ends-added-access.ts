@@ -228,8 +228,21 @@ export type RegistrationStore = Parameters<typeof revokeScimConnectionCredential
  * is reported once to `warn`.
  */
 export interface CredentialRevokeTrail {
-  /** The account that reset its own password, or the administrator who forced the reset. */
+  /**
+   * Who acted: the account that reset its own password, the administrator who
+   * forced the reset, banned the account or removed it, or the service
+   * principal of the directory connection that deactivated it
+   * (`svc:scim:CONNECTION_ID`, {@link servicePrincipal}).
+   */
   actorId: string;
+  /**
+   * `actorId` is a service principal, not a person: the row names it as its
+   * `actor` and leaves `user_id` empty, as every write such a principal makes
+   * does (`authSystemWriteContext`).
+   */
+  servicePrincipal?: boolean;
+  /** What revoked the credential, as the warning names it; absent ⇒ a password reset. */
+  act?: string;
   warn?: (message: string) => void;
 }
 
@@ -643,20 +656,18 @@ async function recordCredentialRevoke(
 ): Promise<void> {
   if (typeof engine.insert !== 'function') return;
   if (typeof engine.getSchema === 'function' && !engine.getSchema(AUDIT_LOG_OBJECT)) return;
+  const row = scimCredentialAuditRow({
+    action: 'update',
+    actorId: trail.actorId,
+    credentialId: revoked.credentialId,
+    metadata: { event: 'scim_credential_revoked', connectionId: revoked.connectionId },
+  });
+  if (trail.servicePrincipal) row.user_id = null;
   try {
-    await engine.insert(
-      AUDIT_LOG_OBJECT,
-      scimCredentialAuditRow({
-        action: 'update',
-        actorId: trail.actorId,
-        credentialId: revoked.credentialId,
-        metadata: { event: 'scim_credential_revoked', connectionId: revoked.connectionId },
-      }),
-      { context: SYSTEM_CTX },
-    );
+    await engine.insert(AUDIT_LOG_OBJECT, row, { context: SYSTEM_CTX });
   } catch (error) {
     trail.warn?.(
-      `[AuthPlugin] a password reset revoked SCIM credential ${revoked.credentialId} (connection `
+      `[AuthPlugin] ${trail.act ?? 'a password reset'} revoked SCIM credential ${revoked.credentialId} (connection `
         + `'${revoked.connectionId}'), but its sys_audit_log row was NOT written: the credential stays revoked, `
         + 'and nothing retries the row. Remedy: restore write access to sys_audit_log, then treat this line as '
         + `the audit record. Cause: ${(error as Error)?.message ?? String(error)}`,

@@ -138,6 +138,7 @@ import { EvaluatedExpressionInputSchema, EVALUATED_EXPRESSION_SOURCE_REQUIRED } 
 import {
   injectedSystemColumnDefs,
   isInjectedColumnDefinition,
+  isMultiValueField,
   platformProvisionsStorage,
   referenceCarrierOf,
   referenceTargetOf,
@@ -482,6 +483,30 @@ function buildFieldTypeIndex(objects: AnyRec[]): Map<string, Record<string, stri
       }
     }
     idx.set(name, types);
+  }
+  return idx;
+}
+
+/**
+ * [#36167] object name → the fields whose stored value is a list, read
+ * through `isMultiValueField` (`@objectstack/spec/data`): an inherently-multi
+ * option type, or a multi-capable type declared `multiple: true`. Handed to
+ * the shared validator as `ExprSchemaHint.multiValueFields` beside the field
+ * types, so a `==` / `!=` between such a field and a scalar is refused there
+ * (`list-equality`) — the type alone cannot say a `select` / `lookup` /
+ * `user` is multiple. Built from the same objects as {@link buildFieldTypeIndex}
+ * (a field two packages tie on has no definition here either).
+ */
+function buildMultiValueFieldIndex(objects: AnyRec[]): Map<string, string[]> {
+  const idx = new Map<string, string[]>();
+  for (const obj of objects) {
+    const name = typeof obj.name === 'string' ? obj.name : undefined;
+    if (!name) continue;
+    const out: string[] = [];
+    for (const [fn, def] of fieldEntries(obj)) {
+      if (typeof def.type === 'string' && isMultiValueField({ type: def.type, multiple: def.multiple === true })) out.push(fn);
+    }
+    idx.set(name, out);
   }
   return idx;
 }
@@ -2644,6 +2669,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   const fieldIndex = buildFieldIndex(servedObjects);
   const attachedOnReadIndex = buildAttachedOnReadIndex(objects);
   const fieldTypeIndex = buildFieldTypeIndex(typedObjects);
+  const multiValueFieldIndex = buildMultiValueFieldIndex(typedObjects);
   const nullableIndex = buildNullableFieldIndex(typedObjects);
   // [#33435] The flow and hook condition sites also judge the injected
   // columns a stored row can hold `null` in, and a `beforeInsert` hook the two
@@ -2980,6 +3006,14 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
      * for byte what it was.
      */
     flowBare?: FlowBareNames,
+    /**
+     * [#36167] The source compiles to a query filter rather than being
+     * evaluated as CEL (a sharing rule's `condition`), handed to the shared
+     * validator as `ExprSchemaHint.filterCompiled`, so the `list-equality`
+     * prescription is the membership spelling that lowers there
+     * (`record.<field>.contains(…)`). Absent, the call is byte for byte what it was.
+     */
+    filterCompiled?: boolean,
   ): void => {
     if (raw == null) return;
     // Absent unless this is a served-row site on an object that declares a
@@ -2990,16 +3024,20 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // `record.<field>` read at a `record` site; the bare name and its
     // `record.<field>` / `previous.<field>` read at a flattened one (#29959).
     const fieldTypes = objectName ? fieldTypeIndex.get(objectName) : undefined;
+    // [#36167] The list-valued fields, so a list compared with a scalar is refused.
+    const multiValueFields = objectName ? multiValueFieldIndex.get(objectName) : undefined;
     // Spread only when given, so every other site's hint is unchanged.
     const roots = extraRoots ? { roots: extraRoots } : {};
     const res = validatorRunByCaller ? VALIDATOR_RUN_BY_CALLER : validateExpression('predicate', raw as string | { dialect?: string; source?: string },
       objectName
         ? {
           objectName, fields, attachedOnRead, fieldTypes, scope, traversalHydration, ...roots,
+          ...(multiValueFields ? { multiValueFields } : {}),
           ...(faultOutcome ? { faultOutcome } : {}),
           ...(flowBare ? { flowVariables: flowBare.variables } : {}),
           ...(flowBare?.unproven ? { bareNamesUnproven: true } : {}),
           ...(flowBare?.timeRelativeSweep ? { timeRelativeSweep: true } : {}),
+          ...(filterCompiled ? { filterCompiled: true } : {}),
         }
         : { scope, ...roots });
     for (const e of res.errors) {
@@ -3890,6 +3928,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
               objectName,
               fields: fieldIndex.get(objectName),
               fieldTypes: fieldTypeIndex.get(objectName),
+              multiValueFields: multiValueFieldIndex.get(objectName),
               scope: 'record',
               traversalHydration: true,
               optionFields,
@@ -4698,7 +4737,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // `sharing.zod.ts` maps it back to `condition` in its rejection message;
     // `predicate` is refused with no rename at all. #4984 removed exactly this
     // pair one file over; this was the same read left behind (#5017).
-    check(where, sharingRule.condition, ruleObj, 'record');
+    // [#36167] Compiled to a query filter (`compileCelToFilter`), never
+    // evaluated as CEL: the list-equality prescription is spelled to lower.
+    check(where, sharingRule.condition, ruleObj, 'record', undefined, undefined, undefined, undefined, undefined, undefined, true);
   }
 
   // ── Hook `condition` predicates (record-scoped gate) ───────────────

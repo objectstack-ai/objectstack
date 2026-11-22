@@ -14,7 +14,8 @@
  *  3. 「Keyboard shortcuts」 — inside an app, the dialog the `?` key opens
  *     (C2/C3: the `?shortcuts=1` URL param);
  *  4. 「Online documentation」 — the public docs site;
- *  5. 「About」 — the console's own build (objectui#12970).
+ *  5. 「About」 — the ObjectStack version and the console's own build
+ *     (objectui#12970, objectstack#35280).
  */
 
 import { useCallback, useState } from 'react';
@@ -149,8 +150,8 @@ export function HelpMenu({ inApp, appPackageId, triggerClassName, triggerTestId 
               {t('help.onlineDocs', { defaultValue: 'Online documentation' })}
             </a>
           </DropdownMenuItem>
-          {/* About — names the console's own build, on every variant
-              (objectui#12970). */}
+          {/* About — names the ObjectStack version and the console's own
+              build, on every variant (objectui#12970). */}
           <DropdownMenuItem
             className="cursor-pointer"
             data-testid="action:about:open"

@@ -23,7 +23,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { collectRequiredWhenPromptFields, requiredWhenPromptReads } from './requiredWhenPrompt';
+import { collectRequiredWhenPromptFields, requiredWhenPromptAsksOn, requiredWhenPromptReads } from './requiredWhenPrompt';
 
 /** The card's own predicate: `has()` + `==` + `&&`. */
 const WHEN_WON = 'has(record.stage) && record.stage == "closed_won"';
@@ -284,5 +284,81 @@ describe('requiredWhenPromptReads — the keys the judgment reads (objectstack#3
   it('reads nothing for an object with nothing to ask', () => {
     expect(requiredWhenPromptReads({ name: { type: 'text' } })).toEqual([]);
     expect(requiredWhenPromptReads(undefined)).toEqual([]);
+  });
+});
+
+describe('requiredWhenPromptAsksOn — whether a write can ask at all, before any read (objectstack#36025)', () => {
+  const objectFields = (winReason: Record<string, unknown>) => ({
+    name: { type: 'text' },
+    stage: { type: 'select' },
+    segment: { type: 'text' },
+    win_reason: { type: 'text', ...winReason },
+  });
+  const stored = { id: 'o1', name: 'alpha', stage: 'new', segment: 'enterprise', win_reason: null };
+
+  it('a write to a key no askable predicate reads cannot ask: no read, and the collector agrees', () => {
+    const defs = objectFields({ requiredWhen: 'record.segment == "enterprise" && record.stage == "won"' });
+    expect(requiredWhenPromptAsksOn(defs, ['name'])).toBe(false);
+    // The premise the skipped read rests on: whatever the record holds, the
+    // collector asks for nothing on such a write.
+    for (const segment of ['enterprise', 'smb']) {
+      for (const stage of ['new', 'won']) {
+        expect(collectRequiredWhenPromptFields(defs, { ...stored, segment, stage }, { name: 'beta' })).toEqual([]);
+      }
+    }
+  });
+
+  it('a write to an operand can ask, as record. and previous. alike', () => {
+    expect(requiredWhenPromptAsksOn(objectFields({ requiredWhen: 'record.stage == "won"' }), ['stage'])).toBe(true);
+    expect(requiredWhenPromptAsksOn(objectFields({ requiredWhen: 'previous.segment != record.stage' }), ['segment'])).toBe(true);
+    expect(requiredWhenPromptAsksOn(objectFields({ requiredWhen: { dialect: 'cel', source: 'record.?stage.orValue("") == "won"' } }), ['stage']))
+      .toBe(true);
+  });
+
+  it('a predicate that reads the clock or the acting user keeps the read for every key', () => {
+    for (const requiredWhen of [
+      'record.stage == "won" && now() > timestamp("2000-01-01T00:00:00Z")',
+      'today() > daysAgo(1)',
+      'record.stage == "won" && daysFromNow(1) > today()',
+      'current_user.id != ""',
+      'user.id != ""',
+      'os.user.id != ""',
+      'ctx.user.id != ""',
+    ]) {
+      expect(requiredWhenPromptAsksOn(objectFields({ requiredWhen }), ['name']), requiredWhen).toBe(true);
+    }
+  });
+
+  it('a predicate whose operands cannot all be named keeps the read: the record as a whole, a parse failure, another dialect', () => {
+    for (const requiredWhen of [
+      'record["stage"] == "won"',
+      'size(record) > 3',
+      'record.stage ==',
+      { dialect: 'formula', source: 'stage = "won"' },
+    ]) {
+      expect(requiredWhenPromptAsksOn(objectFields({ requiredWhen }), ['name']), JSON.stringify(requiredWhen)).toBe(true);
+    }
+  });
+
+  it('a statically required field asks on any write while it is empty, so the read stays', () => {
+    const defs = objectFields({ required: true, requiredWhen: 'record.stage == "won"' });
+    expect(requiredWhenPromptAsksOn(defs, ['name'])).toBe(true);
+    expect(collectRequiredWhenPromptFields(defs, stored, { name: 'beta' }).map((f) => f.name)).toEqual(['win_reason']);
+  });
+
+  it('only askable fields count: no in-place editor, not fillable, or the field being written itself', () => {
+    expect(requiredWhenPromptAsksOn(objectFields({ type: 'richtext', requiredWhen: 'now() > today()' }), ['name'])).toBe(false);
+    expect(requiredWhenPromptAsksOn(objectFields({ requiredWhen: 'now() > today()' }), ['name'], {
+      fillable: (name) => name !== 'win_reason',
+    })).toBe(false);
+    expect(requiredWhenPromptAsksOn(objectFields({ requiredWhen: 'record.win_reason == ""' }), ['win_reason'])).toBe(false);
+    expect(requiredWhenPromptAsksOn(objectFields({}), ['stage'])).toBe(false);
+    expect(requiredWhenPromptAsksOn(undefined, ['stage'])).toBe(false);
+  });
+
+  it('a record field named like a session root is an operand, not the acting user', () => {
+    const defs = { ...objectFields({ requiredWhen: 'record.user == "x"' }), user: { type: 'text' } };
+    expect(requiredWhenPromptAsksOn(defs, ['name'])).toBe(false);
+    expect(requiredWhenPromptAsksOn(defs, ['user'])).toBe(true);
   });
 });

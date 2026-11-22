@@ -1932,6 +1932,74 @@ describe('ApprovalService (node era)', () => {
     await expect(svc.reassign(req.id, { actorId: 'u9', to: 'u2' }, asUser('u9'))).rejects.toThrow(/VALIDATION_FAILED/);
   });
 
+  describe('reassign: an approver hands over only their own slot', () => {
+    const PLATFORM_ADMIN_CTX = { userId: 'root', tenantId: 't1', positions: [], permissions: ['admin_full_access'] } as any;
+    const openUnanimous = async () => {
+      const req = await svc.openNodeRequest(openInput(['u9', 'u2'], {}, { behavior: 'unanimous' }), CTX);
+      staffDirectory(engine, 'u7');
+      return (req as { id: string }).id;
+    };
+    const slate = (id: string) => (engine._tables['sys_approval_request'] ?? []).find(r => r.id === id)?.pending_approvers;
+    const moves = (id: string) =>
+      (engine._tables['sys_approval_action'] ?? []).filter(r => r.request_id === id && r.action === 'reassign');
+
+    it('refuses a slot holder naming another approver\'s slot, and moves nothing', async () => {
+      const id = await openUnanimous();
+      await expect(svc.reassign(id, { actorId: 'u9', from: 'u2', to: 'u7' }, asUser('u9')))
+        .rejects.toThrow(/^FORBIDDEN: actor 'u9' may move only a slot it holds/);
+      expect(slate(id)).toBe('u9,u2');
+      expect(moves(id)).toEqual([]);
+    });
+
+    it('CONTROL: the same holder naming their own slot moves it', async () => {
+      const id = await openUnanimous();
+      const out = await svc.reassign(id, { actorId: 'u9', from: 'u9', to: 'u7' }, asUser('u9'));
+      expect(out.request.pending_approvers).toEqual(['u7', 'u2']);
+      expect(moves(id)).toHaveLength(1);
+    });
+
+    it('the administrator override still moves another approver\'s slot', async () => {
+      const id = await openUnanimous();
+      const out = await svc.reassign(id, { actorId: 'root', from: 'u2', to: 'u7' }, PLATFORM_ADMIN_CTX);
+      expect(out.request.pending_approvers).toEqual(['u9', 'u7']);
+    });
+
+    describe('a position slot', () => {
+      const FIN = { userId: 'u_fin', tenantId: 't1', positions: ['finance'], permissions: [] } as any;
+      const openOnPosition = async () => {
+        const req = await svc.openNodeRequest(openInput(['u2'], {}, {
+          approvers: [{ type: 'position' as const, value: 'finance' }, { type: 'user' as const, value: 'u2' }],
+          behavior: 'unanimous',
+        }), CTX);
+        staffDirectory(engine, 'u7');
+        const id = (req as { id: string }).id;
+        expect(slate(id), 'precondition: the slate holds the position slot and a user slot').toBe('position:finance,u2');
+        return id;
+      };
+
+      it('its holder moves it', async () => {
+        const id = await openOnPosition();
+        const out = await svc.reassign(id, { actorId: 'u_fin', from: 'position:finance', to: 'u7' }, FIN);
+        expect(out.request.pending_approvers).toEqual(['u7', 'u2']);
+        expect(moves(id)).toHaveLength(1);
+      });
+
+      it('its holder cannot move another approver\'s slot, and nothing moves', async () => {
+        const id = await openOnPosition();
+        await expect(svc.reassign(id, { actorId: 'u_fin', from: 'u2', to: 'u7' }, FIN))
+          .rejects.toThrow(/^FORBIDDEN: actor 'u_fin' may move only a slot it holds/);
+        expect(slate(id)).toBe('position:finance,u2');
+        expect(moves(id)).toEqual([]);
+      });
+    });
+
+    it('the system still moves another approver\'s slot', async () => {
+      const id = await openUnanimous();
+      const out = await svc.reassign(id, { actorId: 'system', from: 'u2', to: 'u7' }, SYS);
+      expect(out.request.pending_approvers).toEqual(['u9', 'u7']);
+    });
+  });
+
   // ── reassign target resolution (#25485) ─────────────────────────
   //
   // A `to` that resolves to no one used to be written onto the slate, so the
@@ -7230,5 +7298,73 @@ describe('ApprovalService — one spec names each resolved person once (#28684)'
     } as any, CTX) as any;
     expect(req.pending_approvers).toEqual(['l1', 'l1']);
     expect(snapshotGroups()).toEqual({ l1: ['legal', 'finance'] });
+  });
+});
+
+/**
+ * [#34862] A link that opens a Console page carries the Console's mount.
+ *
+ * `os serve` serves the Console at `/_console/` and nothing at `/system/*`, so
+ * the approval e-mail's link and the action-link pages' inbox link open a page
+ * only under that mount. The mount is read from the auth service's Console page
+ * composer (`getConsoleUrl`, which reads `AuthConfig.uiBasePath`); the double
+ * below composes exactly as `AuthManager.getConsolePageUrl` does, so the two
+ * mounts pinned here are the two values that setting takes: its `/_console`
+ * default, and `/` for a deployment that serves the Console at the root.
+ */
+describe('ApprovalService — Console page links carry the Console mount (#34862)', () => {
+  const ORIGIN = 'https://app.example.test';
+  /** `AuthManager.getConsolePageUrl`'s composition: `${origin}${uiBasePath}${path}`. */
+  const authComposer = (uiBasePath: string) => (path: string) =>
+    `${ORIGIN}${uiBasePath.replace(/\/$/, '')}${path.startsWith('/') ? path : `/${path}`}`;
+
+  function serviceUnder(uiBasePath: string | undefined) {
+    let n = 0;
+    const engine = makeFakeEngine();
+    const svc = new ApprovalService({
+      engine: engine as any,
+      clock: { now: () => new Date(Date.UTC(2026, 0, 15, 10, 0, n++)) },
+      publicBaseUrl: ORIGIN,
+      ...(uiBasePath === undefined ? {} : { getConsoleUrl: authComposer(uiBasePath) }),
+    });
+    const emitted: any[] = [];
+    svc.attachMessaging({ async emit(input) { emitted.push(input); } });
+    return { svc, emitted };
+  }
+
+  async function requestedLink(uiBasePath: string | undefined) {
+    const { svc, emitted } = serviceUnder(uiBasePath);
+    const { id } = (await svc.openNodeRequest(openInput(['u9']), CTX)) as unknown as { id: string };
+    const [requested] = emitted.filter(e => e.topic === 'approval.requested');
+    return { id, payload: requested.payload };
+  }
+
+  async function inboxHref(uiBasePath: string | undefined) {
+    const { svc } = serviceUnder(uiBasePath);
+    const res = await svc.handleActionPage(new Request(`${ORIGIN}/api/v1/approvals/act?token=not-a-token`));
+    return /<a href="([^"]*)">Open the Approvals Inbox/.exec(await res.text())?.[1];
+  }
+
+  it('under the default /_console mount the e-mail link opens the request in the Console', async () => {
+    const { id, payload } = await requestedLink('/_console');
+    expect(payload.approvalUrl).toBe(`${ORIGIN}/_console/system/approvals?request=${id}`);
+    // The inbox notice's own link stays the Console's route: the Console routes on it.
+    expect(payload.actionUrl).toBe(`/system/approvals?request=${id}`);
+  });
+
+  it('under a root mount the e-mail link stays at the root', async () => {
+    const { id, payload } = await requestedLink('/');
+    expect(payload.approvalUrl).toBe(`${ORIGIN}/system/approvals?request=${id}`);
+  });
+
+  it('the action-link page links the Console inbox under the same mount', async () => {
+    expect(await inboxHref('/_console')).toBe(`${ORIGIN}/_console/system/approvals`);
+    expect(await inboxHref('/')).toBe(`${ORIGIN}/system/approvals`);
+  });
+
+  it('with no auth service there is no mount to read: the e-mail link is the one built before, and the inbox link carries the base', async () => {
+    const { id, payload } = await requestedLink(undefined);
+    expect(payload.approvalUrl).toBe(`${ORIGIN}/system/approvals?request=${id}`);
+    expect(await inboxHref(undefined)).toBe(`${ORIGIN}/system/approvals`);
   });
 });

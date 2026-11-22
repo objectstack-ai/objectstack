@@ -176,7 +176,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "Bannir l’utilisateur",
-        description: "Bannir cet utilisateur ? Il sera déconnecté, ne pourra plus se connecter et ses clés API seront refusées jusqu’à la levée du bannissement, tout comme ses jetons d’accès OAuth et leurs renouvellements. Les clés fonctionnent de nouveau après la levée du bannissement.",
+        description: "Bannir cet utilisateur ? Il sera déconnecté, ne pourra plus se connecter et ses clés API seront refusées jusqu’à la levée du bannissement, tout comme ses jetons d’accès OAuth et leurs renouvellements. Les clés fonctionnent de nouveau après la levée du bannissement. Le bannissement suspend aussi les comptes de service IA dont il est responsable, désactive les applications OAuth qu'il a enregistrées et révoque les identifiants SCIM qu'il a émis ; la levée du bannissement ne rétablit rien de tout cela.",
         successMessage: "Utilisateur banni",
         params: {
           banReason: {
@@ -496,6 +496,10 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       revoke_reason: {
         label: "Motif de la révocation",
         help: "Pourquoi la session a été révoquée (idle_timeout, absolute_max, concurrent_cap, user_revoked, admin, organization_membership_ended, admin_password_reset, password_reset, …)."
+      },
+      sso_provider_id: {
+        label: "Fournisseur SSO",
+        help: "Le fournisseur SSO par lequel cette session a été ouverte, le cas échéant. Supprimer ce fournisseur met fin à la session. Géré par le système."
       },
       active_organization_id: {
         label: "Organisation active"

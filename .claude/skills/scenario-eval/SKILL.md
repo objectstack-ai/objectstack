@@ -153,9 +153,9 @@ nohup pnpm --filter @objectstack/scenarios run-scenarios \
 | **评分误判**:评分器把对的判错、错的判对(含泄露标记误报) | 跑分器主人:`packages/qa/scenarios` 归 `domain:devx`,有开着的评分专题卡就作它的一行 / 子卡(卡号见座位贴),否则走立卡门 |
 | **产品缺陷**:平台拒收合法写、probe 失败、能力缺失 | 立卡门(pm-dispatch `references/filing-gate.md`)交对应车道;probe 失败算平台,不算 agent |
 | **技能文本**:agent 照着已发布技能搭错 | 以 `finding` 报 `domain:skills`;本席 ⛔ 不自改技能 |
-| **泄露 / 任何安全线索** | 只照 pm-dispatch `references/security-findings.md`;Results 只写泄露标记数,Findings 只写该文 §4 的固定一句,⛔ 不写内容、不立公开卡 |
+| **泄露 / 任何安全线索** | 只照 pm-dispatch `references/security-findings.md`;Results、Findings 照 §5,⛔ 不写内容、不立公开卡 |
 
-泄露标记先分清是评分误判还是真泄露;真泄露只走最后一行。
+泄露标记先分清评分误判与真泄露;真泄露只走末行。立出的卡 ⛔ 不挂 `eval-run`,照常进首触。
 
 ## Guardrails
 

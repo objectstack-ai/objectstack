@@ -128,6 +128,7 @@ import { resolveKernelCache } from './kernel-cache.js';
 import { authIdentityManifest } from './manifest.js';
 import { scheduleLegacySsoSecretMigration } from './sso-client-secret.js';
 import { reportSsoProvidersWithNonBareDomainEntries } from './sso-stored-domain-entries.js';
+import { reportSsoProviderAccessSweep } from './sso-provider-lifecycle.js';
 import {
   directSignInNetworkRefusal,
   isDirectSignInDoorNavigation,
@@ -1324,6 +1325,21 @@ export class AuthPlugin implements Plugin {
         try { ql = ctx.getService<IDataEngine>('data'); } catch { ql = undefined; }
       }
       await reportSsoProvidersWithNonBareDomainEntries(ql, ctx.logger);
+    });
+
+    // Deleting an SSO provider ends the sessions its sign-ins opened and its projected grants: what a provider
+    // that no longer exists left behind (the grants its sign-ins projected,
+    // the live sessions signed in through it) is removed once per boot
+    // (`sso-provider-lifecycle.ts` `sweepDeletedSsoProviderAccess`). Registered
+    // unconditionally: the grants grant wherever they are read. Never throws
+    // into boot.
+    ctx.hook('kernel:ready', async () => {
+      let ql: IDataEngine | undefined;
+      try { ql = ctx.getService<IDataEngine>('objectql'); } catch { ql = undefined; }
+      if (!ql) {
+        try { ql = ctx.getService<IDataEngine>('data'); } catch { ql = undefined; }
+      }
+      await reportSsoProviderAccessSweep(ql, ctx.logger);
     });
 
     // [#23367, ruling A] Record when this deployment started enforcing the
@@ -3733,13 +3749,15 @@ export class AuthPlugin implements Plugin {
         '[auth] auth request refused (403 IP_NOT_ALLOWED): the `allowed_ip_ranges` setting (ADR-0069 D5) is set, '
           + 'but the server could not establish this request\'s client address. '
           + (trustProxy
-            ? '`server.trustProxy` is declared, yet the request carried no X-Forwarded-For / X-Real-IP header '
-              + 'and the transport reported no peer address. '
+            ? '`server.trustProxy` is declared, yet no forwarded header it believes and no peer address the '
+              + 'transport reported established one. '
             : 'The transport reported no peer address, and forwarded headers are not believed because '
               + '`server.trustProxy` is not declared. ')
           + 'While the allow-list is set, every request whose address cannot be established is refused. Fix: '
           + 'serve through a transport that reports the socket address, or terminate on a reverse proxy you '
-          + 'control that sets X-Forwarded-For and declare `server.trustProxy: true`; or clear `allowed_ip_ranges`.',
+          + 'control and declare it: `server.trustProxy: { networks: [...] }` naming that proxy\'s address or '
+          + 'range, or `server.trustProxy: true` only when that proxy OVERWRITES X-Forwarded-For on every request, '
+          + 'never appends to it; or clear `allowed_ip_ranges`.',
       );
       return;
     }
@@ -3750,8 +3768,9 @@ export class AuthPlugin implements Plugin {
       '[auth] auth request refused (403 IP_NOT_ALLOWED) by the `allowed_ip_ranges` setting (ADR-0069 D5): the '
         + 'allow-list judged the connection\'s peer address, because `server.trustProxy` is not declared and so the '
         + 'request\'s X-Forwarded-For / X-Real-IP header was not believed. If this deployment sits behind a reverse '
-        + 'proxy you control, declare `server.trustProxy: true`; until then the allow-list judges the proxy\'s own '
-        + 'address.',
+        + 'proxy you control, declare it: `server.trustProxy: { networks: [...] }` naming that proxy\'s address or '
+        + 'range, or `server.trustProxy: true` only when that proxy OVERWRITES X-Forwarded-For on every request, '
+        + 'never appends to it. Until then the allow-list judges the proxy\'s own address.',
       { judgedAddress: ip },
     );
   }

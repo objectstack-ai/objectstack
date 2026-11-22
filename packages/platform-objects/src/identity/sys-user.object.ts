@@ -264,7 +264,7 @@ export const SysUser = ObjectSchema.create({
       // and nothing is POSTed until that one dialog's own Confirm.
       // NB: the top-level `description` (#7367), never `ai.description` — that
       // one is the LLM-facing tool contract and is shown to no user.
-      description: 'Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned, as are their OAuth access tokens and token refreshes. The keys work again after the unban.',
+      description: 'Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned, as are their OAuth access tokens and token refreshes. The keys work again after the unban. The ban also suspends the AI service accounts they are accountable for, disables the OAuth applications they registered and revokes the SCIM credentials they minted; the unban restores none of these.',
       params: [
         { name: 'banReason', label: 'Ban Reason', type: 'text', required: false },
       ],
@@ -273,7 +273,7 @@ export const SysUser = ObjectSchema.create({
       ai: {
         exposed: true,
         description:
-          'Ban a user (the record; optionally banReason): they are signed out, cannot sign in, and their API keys, OAuth access tokens and token refreshes are refused until unbanned; the keys work again after the unban. Platform administrators only. Ask the human to confirm before calling.',
+          'Ban a user (the record; optionally banReason): they are signed out, cannot sign in, and their API keys, OAuth access tokens and token refreshes are refused until unbanned; the keys work again after the unban. The ban also suspends the AI service accounts the user is accountable for, disables the OAuth applications they registered and revokes the SCIM credentials they minted, and the unban restores none of these. Platform administrators only. Ask the human to confirm before calling.',
         requiresConfirmation: true,
       },
     },
@@ -298,7 +298,7 @@ export const SysUser = ObjectSchema.create({
       ai: {
         exposed: true,
         description:
-          'Lift the ban on a banned user (the record), so they can sign in again. Platform administrators only. Ask the human to confirm before calling.',
+          'Lift the ban on a banned user (the record), so they can sign in again. It resumes no AI service account, enables no OAuth application and restores no SCIM credential the ban ended. Platform administrators only. Ask the human to confirm before calling.',
         requiresConfirmation: true,
       },
     },

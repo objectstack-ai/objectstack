@@ -32,7 +32,7 @@ import { SchemaRenderer, isPermissionError, useDataScope, useNavigationOverlay, 
 // what stops a seventh site picking a convention of its own.
 import { resolveGridCellRendering } from './cellRendererResolution';
 import { isMaskedGridColumn } from './maskedColumn';
-import { formatCurrency, formatDate, getBadgeColorClasses, getBadgeHexAppearance, FieldEditWidget, hasFieldEditWidget, DISCRETE_EDIT_TYPES, coerceToSafeValue, MaskedCellRenderer, withKnownObjects, RICH_TEXT_FIELD_TYPES } from '@object-ui/fields';
+import { formatCurrency, formatDate, getBadgeColorClasses, getBadgeHexAppearance, FieldEditWidget, hasFieldEditWidget, hasInCellPanelEditWidget, DISCRETE_EDIT_TYPES, coerceToSafeValue, MaskedCellRenderer, withKnownObjects, RICH_TEXT_FIELD_TYPES } from '@object-ui/fields';
 import { useLocalization, useDisplayLocale } from '@object-ui/i18n';
 // Two resolvers, two vocabularies — the repo spells the distinction into the
 // NAMES (objectui#4167). `resolveInlineI18nLabel` is the spec's own
@@ -803,12 +803,13 @@ function opensReferenceInPlace(fieldDef: { type?: unknown; reference?: unknown }
  * is never narrower than its cell and grows to fit this; the editor fills it.
  */
 function cellEditorWidthClass(type: string): string {
+  // objectstack#36023 — a rich-content field's text box, as wide as a textarea's.
+  if ((RICH_TEXT_FIELD_TYPES as readonly string[]).includes(type)) return 'w-full min-w-80';
   switch (type) {
     case 'address':
     case 'location':
       return 'w-full min-w-[22rem]';
     case 'textarea':
-    case 'markdown':
     case 'code':
     case 'json':
       return 'w-full min-w-80';
@@ -1376,6 +1377,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         describeCell: (row, columnKey) => {
           const fieldDef = objectFields?.[columnKey];
           const recordId = rowRecordId(row);
+          // objectstack#35795 — read at call time, not from this render: an
+          // edit that waited for the verdict is re-asked before the render
+          // that publishes it.
+          const recordUpdate = recordVerdict.current(recordId, 'update');
           const kind = cellReadOnlyKind({
             fieldDef,
             fieldWritable: !objectName || resolveFieldAffordance('listInlineEdit', perms, objectName, columnKey),
@@ -1383,12 +1388,20 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
             objectEditable: objectInlineEditable,
             canUpdate: resolveAffordanceGrant('listInlineEdit', affordanceSource),
             approvalLocked: approvalLocks.isLocked(recordId, row),
-            recordUpdate: recordVerdict(recordId, 'update'),
+            recordUpdate,
           });
+          // objectstack#35795 — while the row's lock or `update` verdict is on
+          // its way, an edit waits for it rather than opening an editor the
+          // answer may refuse.
+          const reads = kind ? [] : [
+            approvalLocks.settling(recordId),
+            recordUpdate === undefined ? recordVerdict.settling() : null,
+          ].filter((read): read is Promise<void> => read !== null);
           const fromText = choiceFromText(fieldDef);
           const type = fieldDef?.type;
           return {
             readOnlyReason: kind ? readOnlyReasonText(kind, t) : null,
+            ...(reads.length > 0 ? { checking: { text: t('grid.readOnlyReason.checking'), settled: Promise.all(reads) } } : {}),
             typing: inlineTyping(type),
             ...(type === 'boolean' || type === 'toggle' ? { toggles: true } : {}),
             // objectstack#36023 — a rating is set in place: digits, or a click on a star.
@@ -1403,7 +1416,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         },
         onCellSelect: (row) => {
           recordVerdict.requestVerdicts();
-          approvalLocks.probe(rowRecordId(row));
+          // objectstack#35795 — one lock read for the page, not one per row selected.
+          approvalLocks.probe([rowRecordId(row), ...pageRecordIds]);
         },
         // objectstack#35685 — a move of a state-machine field is confirmed
         // before anything is written (`./objectGridStateConfirm`). A move that
@@ -3614,7 +3628,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     renderCellEditor: inlineEditable
       ? (ctx: { column: any; row: any; pendingRow: any; value: any; stage: (v: any) => void; commit: (v?: any) => void }) => {
           const fieldDef = (objectSchema as any)?.fields?.[ctx.column?.accessorKey];
-          if (!fieldDef || !hasFieldEditWidget(fieldDef.type)) return null;
+          // objectstack#36023 — a rich-content field edits in a panel under the cell.
+          if (!fieldDef || !(hasFieldEditWidget(fieldDef.type) || hasInCellPanelEditWidget(fieldDef.type))) return null;
           // objectstack#35688 — a `select` declared `multiple` draws the multi-select
           // check list (`SelectField` hands it to `MultiSelectField`): each check
           // stages, and the edit is saved when the user moves on.
@@ -4213,6 +4228,32 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
             (rowOpensRecord !== false || cardSelecting) && 'cursor-pointer hover:bg-accent/50',
             cardSelected && 'border-primary bg-primary/5',
           )}
+          // objectstack#36044 — while a selection is open the card owns every tap
+          // inside it: a tap on a link, a referenced record's chip, an image or
+          // a button the card draws ticks or unticks the card and opens nothing,
+          // as phone apps do in selection mode. The cells stop their own clicks
+          // from reaching the card, so the card takes them first, in the capture
+          // phase. The row's 「⋮」 opens on pointer-down, which the card cancels
+          // first. The click that ends the long press that started the selection
+          // is swallowed here too, whatever it landed on. A node a portal draws
+          // (an open menu) is not the card's.
+          onPointerDownCapture={(event) => {
+            if (!cardSelecting || event.target === event.currentTarget) return;
+            if (!event.currentTarget.contains(event.target as Node)) return;
+            event.preventDefault();
+          }}
+          onClickCapture={(event) => {
+            const press = longPress.current;
+            if (!cardSelecting && !press.fired) return;
+            if (!event.currentTarget.contains(event.target as Node)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            if (press.fired) {
+              press.fired = false;
+              return;
+            }
+            toggleCardRow(row);
+          }}
           onPointerDown={(event) => {
             const press = longPress.current;
             // A fresh press never inherits the last one's flag: a long press
