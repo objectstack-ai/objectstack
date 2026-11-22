@@ -23,7 +23,7 @@ import {
 } from './synth/recordPageColumns';
 import { useDetailTranslation } from './useDetailTranslation';
 import { RecordBodyTablesContext, RelatedEnlargeContext, RelatedListEnlargedContext } from './relatedListCompact';
-import { ApprovalBandContext, DefaultRecordPageContext, DetailsColumnCapContext } from './defaultRecordPage';
+import { ApprovalBandOnceScope, DefaultRecordPageContext, DetailsColumnCapContext } from './defaultRecordPage';
 import { RECORD_TAB_OVERVIEW, RecordTabRow, type RecordTab, type RecordTabArrangeEdit } from './RecordTabRow';
 import {
   RECORD_TAB_APPROVALS,
@@ -243,22 +243,16 @@ function drawNodes(nodes: any[]): React.ReactNode {
 /**
  * The details column's nodes (objectstack#35253): the synthesized page splits
  * its details around a body table, one `record:details` per run of sections,
- * and the record's approval band is drawn by the FIRST part alone — above the
- * table — so the page shows one band, not one per part. A context provider
- * adds no DOM, so the column's siblings stay siblings (`drawNodes`).
+ * and the record's approval band is drawn once per page — by the first details
+ * body that reaches the band's place (`ApprovalBandOnceScope`), above the
+ * table. objectstack#35483 / objectstack#35484 — the same rule as a page drawn
+ * as written: a first `record:details` that draws no body (withheld by its
+ * `requiredPermissions`, or drawing its own header) leaves the band to the next
+ * part instead of taking it off the page. A context provider adds no DOM, so
+ * the column's siblings stay siblings (`drawNodes`).
  */
 function drawDetailsNodes(nodes: any[]): React.ReactNode {
-  const firstDetails = nodes.findIndex((node) => node?.type === 'record:details');
-  return nodes.map((node, index) => {
-    const key = (node && typeof node === 'object' && node.id) || index;
-    const drawn = <SchemaRenderer key={key} schema={toRenderableSchema(node)} />;
-    if (node?.type !== 'record:details' || index === firstDetails) return drawn;
-    return (
-      <ApprovalBandContext.Provider key={key} value={false}>
-        {drawn}
-      </ApprovalBandContext.Provider>
-    );
-  });
+  return <ApprovalBandOnceScope>{drawNodes(nodes)}</ApprovalBandOnceScope>;
 }
 
 const LINE_BUTTON =

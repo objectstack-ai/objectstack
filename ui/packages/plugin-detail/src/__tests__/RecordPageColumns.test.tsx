@@ -15,10 +15,10 @@
  * column beside the other tabs on a wide full page (objectstack#35890), and
  * that no width draws the right rail of summary cards any more.
  *
- * One describe (objectstack#35253) opts each `record:details` stub into
- * mounting the `DetailView` the real block mounts (`showHeader: false`,
- * inline edit on), so the approval band it draws is measured on the laid-out
- * page; every other describe keeps the bare stub.
+ * Two describes (objectstack#35253, objectstack#35483) opt each
+ * `record:details` stub into mounting the `DetailView` the real block mounts
+ * (`showHeader: false`, inline edit on), so the approval band it draws is
+ * measured on the laid-out page; every other describe keeps the bare stub.
  */
 
 import * as React from 'react';
@@ -30,7 +30,7 @@ import { RecordContextProvider } from '@object-ui/react';
 const harness = vi.hoisted(() => ({
   /** Set by the objectstack#35253 describe: a `record:details` stub mounts `body`. */
   detailBodies: false,
-  body: null as React.ComponentType | null,
+  body: null as React.ComponentType<{ schema: any }> | null,
   /** The content width every element reports (jsdom lays nothing out). */
   width: 0,
 }));
@@ -42,7 +42,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
     return (
       <div data-node={schema?.type} data-cap={React.useContext(DetailsColumnCapContext)}>
         {schema?.properties?.objectName ?? schema?.type}
-        {Body && <Body />}
+        {Body && <Body schema={schema} />}
       </div>
     );
   };
@@ -426,5 +426,100 @@ describe('RecordPageColumns — the approval band is drawn once per page (object
     );
     expect(screen.queryByText('Locked for approval')).toBeNull();
     expect(screen.getAllByText('In approval · editable')).toHaveLength(1);
+  });
+});
+
+/**
+ * objectstack#35483 / objectstack#35484 — the band is not dropped when the
+ * FIRST details part draws no body. A slotted page's `details` slot places the
+ * author's own `record:details` nodes in the laid-out details column; the first
+ * may draw no band of its own: its `requiredPermissions` withheld (the real
+ * block draws its insufficient-permissions notice in place of the body,
+ * `record-blocks.requiredPermissions-gate.test.tsx`) or `showHeader: true`
+ * (the body draws its own header, and no band). The column draws the band once
+ * by the first body that reaches its place (`ApprovalBandOnceScope`), so the
+ * next part draws it. Before, every part after the first was told not to draw
+ * it and such a page showed no band at all, on a locked record.
+ */
+describe('RecordPageColumns — a first details part that draws no band leaves it to the next (objectstack#35483, objectstack#35484)', () => {
+  /** What `record:details` mounts for its node: the notice when withheld, else its body. */
+  const PartBody = ({ schema }: { schema: any }) => {
+    const p = { ...schema, ...(schema?.properties ?? {}) };
+    if (Array.isArray(p.requiredPermissions) && p.requiredPermissions.length > 0) {
+      return <p role="status">Insufficient permissions to view details.</p>;
+    }
+    return (
+      <DetailView
+        schema={{ type: 'detail-view', objectName: 'quote', showHeader: p.showHeader ?? false, data: { id: 'Q1', name: 'Q-1' }, sections: [] } as any}
+        inlineEdit
+        recordFromHost
+      />
+    );
+  };
+  beforeEach(() => {
+    harness.detailBodies = true;
+    harness.body = PartBody;
+  });
+  afterEach(() => {
+    harness.detailBodies = false;
+    harness.body = null;
+  });
+
+  const quote = { name: 'quote', fields: { name: { type: 'text', label: 'Name' }, terms: { type: 'textarea', label: 'Terms' } } };
+  const part = (id: string, props: Record<string, unknown> = {}) => ({
+    type: 'record:details',
+    id,
+    properties: { sections: [{ name: id, label: id, fields: [id === 'first' ? 'name' : 'terms'] }], ...props },
+  });
+  const slotted = (details: any[]) => buildDefaultPageColumns(buildDefaultPageSchema(quote, { slots: { details } } as any))!;
+  const drawPage = (columns: ReturnType<typeof slotted>, approval: { locked?: boolean; approvalPending?: boolean; canEdit?: boolean }) =>
+    render(
+      <InlineEditProvider canEdit={approval.canEdit ?? false} locked={approval.locked} approvalPending={approval.approvalPending}>
+        <RecordPageColumns tier="wide" columns={columns} />
+      </InlineEditProvider>,
+    );
+  /** The details parts (by node id) whose subtree shows `text`. */
+  const partsShowing = (container: HTMLElement, text: string) =>
+    Array.from(column(container, 'details')!.querySelectorAll('[data-node="record:details"]'))
+      .map((node, index) => ({ node, index }))
+      .filter(({ node }) => node.textContent?.includes(text))
+      .map(({ index }) => index);
+
+  it('the slotted page lays its two details nodes out in the details column', () => {
+    expect(slotted([part('first'), part('second')]).details.map((n: any) => n.id)).toEqual(['first', 'second']);
+  });
+
+  for (const [why, props] of [
+    ['withheld by its requiredPermissions', { requiredPermissions: ['quote.audit'] }],
+    ['drawing its own header', { showHeader: true }],
+  ] as const) {
+    it(`a first part ${why}: "Locked for approval" once, on the second part`, () => {
+      const { container } = drawPage(slotted([part('first', props), part('second')]), { locked: true });
+      expect(screen.getAllByText('Locked for approval')).toHaveLength(1);
+      expect(partsShowing(container, 'Locked for approval')).toEqual([1]);
+    });
+  }
+
+  it('a `lockRecord: false` approval behind a withheld first part reads editable, once — never locked', () => {
+    drawPage(slotted([part('first', { requiredPermissions: ['quote.audit'] }), part('second')]), { approvalPending: true, locked: false, canEdit: true });
+    expect(screen.queryByText('Locked for approval')).toBeNull();
+    expect(screen.getAllByText('In approval · editable')).toHaveLength(1);
+  });
+
+  it('CONTROL: two drawing parts keep the band on the first, once', () => {
+    const { container } = drawPage(slotted([part('first'), part('second')]), { locked: true });
+    expect(screen.getAllByText('Locked for approval')).toHaveLength(1);
+    expect(partsShowing(container, 'Locked for approval')).toEqual([0]);
+  });
+
+  it('CONTROL: a single slotted details part draws its one band', () => {
+    drawPage(slotted([part('first')]), { locked: true });
+    expect(screen.getAllByText('Locked for approval')).toHaveLength(1);
+  });
+
+  it('CONTROL: a single withheld part draws no band and no body (nothing on the page reaches its place)', () => {
+    drawPage(slotted([part('first', { requiredPermissions: ['quote.audit'] })]), { locked: true });
+    expect(screen.queryByText('Locked for approval')).toBeNull();
+    expect(screen.getByText('Insufficient permissions to view details.')).toBeTruthy();
   });
 });
